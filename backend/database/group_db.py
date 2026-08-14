@@ -6,6 +6,11 @@ from typing import Any, Dict, List, Optional, Union
 from database.client import as_dict, get_db_session
 from database.db_models import TenantGroupInfo, TenantGroupUser
 from utils.str_utils import convert_string_to_list
+from consts.exceptions import TenantResourceLimitError
+from consts.const import MAX_GROUPS_PER_TENANT
+from sqlalchemy import text
+
+_GROUP_LIMIT = MAX_GROUPS_PER_TENANT if isinstance(MAX_GROUPS_PER_TENANT, int) else 1_000
 
 
 def query_groups(group_id: Union[int, str, List[int]]) -> Union[Optional[Dict[str, Any]], List[Dict[str, Any]]]:
@@ -113,6 +118,19 @@ def add_group(tenant_id: str, group_name: str, group_description: Optional[str] 
         int: Created group ID
     """
     with get_db_session() as session:
+        session.execute(
+            text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
+            {"lock_key": f"tenant-group-limit:{tenant_id}"},
+        )
+        group_count = session.query(TenantGroupInfo).filter(
+            getattr(TenantGroupInfo, "tenant_id", None) == tenant_id,
+            getattr(TenantGroupInfo, "delete_flag", None) == "N",
+        ).count()
+        group_count = group_count if isinstance(group_count, int) else 0
+        if group_count >= _GROUP_LIMIT:
+            raise TenantResourceLimitError(
+                f"Tenant group limit reached: maximum {_GROUP_LIMIT} groups per tenant"
+            )
         group = TenantGroupInfo(
             tenant_id=tenant_id,
             group_name=group_name,

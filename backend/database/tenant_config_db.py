@@ -2,10 +2,13 @@ import logging
 from typing import Any, Dict
 
 from sqlalchemy import func
+from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from database.client import get_db_session
 from database.db_models import TenantConfig
+from consts.const import MAX_TENANT_COUNT, TENANT_ID
+from consts.exceptions import TenantResourceLimitError
 
 
 logger = logging.getLogger("tenant_config_db")
@@ -68,6 +71,19 @@ def get_single_config_info(tenant_id: str, select_key: str):
 def insert_config(insert_data: Dict[str, Any]):
     with get_db_session() as session:
         try:
+            if insert_data.get("config_key") == TENANT_ID:
+                session.execute(
+                    text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
+                    {"lock_key": "tenant-count-limit"},
+                )
+                tenant_count = session.query(TenantConfig.tenant_id).filter(
+                    TenantConfig.config_key == TENANT_ID,
+                    TenantConfig.delete_flag == "N",
+                ).distinct().count()
+                if tenant_count >= MAX_TENANT_COUNT:
+                    raise TenantResourceLimitError(
+                        f"Tenant limit reached: maximum {MAX_TENANT_COUNT} tenants"
+                    )
             session.add(TenantConfig(**insert_data))
             session.commit()
             return True

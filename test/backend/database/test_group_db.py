@@ -1567,3 +1567,23 @@ def test_filter_tenant_group_ids_excludes_soft_deleted(monkeypatch, mock_session
 
     assert result == [1]
     mock_query_obj.filter.assert_called_once()
+
+
+def test_create_group_rejects_tenant_group_limit(monkeypatch, mock_session):
+    """A tenant cannot create more groups than its hard limit."""
+    import backend.database.group_db as module
+
+    class ResourceLimitError(Exception):
+        pass
+
+    session, query = mock_session
+    query.filter.return_value.count.return_value = 1
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr(module, "get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr(module, "TenantResourceLimitError", ResourceLimitError)
+    monkeypatch.setattr(module, "_GROUP_LIMIT", 1)
+
+    with pytest.raises(ResourceLimitError, match="group limit"):
+        module.add_group("tenant-1", "group-2")

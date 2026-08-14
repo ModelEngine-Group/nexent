@@ -57,10 +57,15 @@ class _UnauthorizedError(Exception):
     pass
 
 
+class _TenantResourceLimitError(Exception):
+    pass
+
+
 exceptions_mock = MagicMock()
 exceptions_mock.OAuthProviderError = _OAuthProviderError
 exceptions_mock.OAuthLinkError = _OAuthLinkError
 exceptions_mock.UnauthorizedError = _UnauthorizedError
+exceptions_mock.TenantResourceLimitError = _TenantResourceLimitError
 sys.modules["consts.exceptions"] = exceptions_mock
 
 sys.modules["database"] = MagicMock()

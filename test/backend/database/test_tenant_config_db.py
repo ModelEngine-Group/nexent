@@ -537,3 +537,24 @@ def test_database_error_handling(monkeypatch, mock_session):
 
     with pytest.raises(MockSQLAlchemyError, match="Database error"):
         get_all_configs_by_tenant_id("test_tenant")
+
+
+def test_insert_tenant_id_config_rejects_platform_tenant_limit(monkeypatch, mock_session):
+    """Writing a new tenant identity is rejected at the platform tenant limit."""
+    import backend.database.tenant_config_db as module
+
+    class ResourceLimitError(Exception):
+        pass
+
+    session, query = mock_session
+    query.filter.return_value.distinct.return_value.count.return_value = 1
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr(module, "get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr(module, "TenantResourceLimitError", ResourceLimitError)
+    monkeypatch.setattr(module, "TENANT_ID", "TENANT_ID")
+    monkeypatch.setattr(module, "MAX_TENANT_COUNT", 1)
+
+    with pytest.raises(ResourceLimitError, match="Tenant limit"):
+        module.insert_config({"tenant_id": "tenant-101", "config_key": "TENANT_ID"})
