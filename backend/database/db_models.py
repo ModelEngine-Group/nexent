@@ -1151,7 +1151,7 @@ class MemoryDreamingDecision(TableBase):
     noise = Column(Boolean, nullable=False, default=False)
     signal_count = Column(Integer, nullable=False, default=0)
     context_diversity = Column(Integer, nullable=False, default=0)
-    evidence_ids = Column(JSONB, nullable=False, default=list)
+    evidence_ids = Column(ARRAY(String(100)), nullable=False, default=list)
     event = Column(String(20), nullable=False)
     reason = Column(String(100), nullable=False)
     archive_suggested = Column(Boolean, nullable=False, default=False)

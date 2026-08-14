@@ -75,6 +75,16 @@ def test_ac010_real_postgres_audit_schema_matches_orm_contract():
                 """
             )
             indexes = {row[0] for row in cursor.fetchall()}
+            cursor.execute(
+                """
+                SELECT data_type, udt_name
+                FROM information_schema.columns
+                WHERE table_schema = 'nexent'
+                  AND table_name = 'memory_dreaming_decision_t'
+                  AND column_name = 'evidence_ids'
+                """
+            )
+            decision_evidence_type = cursor.fetchone()
         assert {
             "run_id",
             "tenant_id",
@@ -88,6 +98,7 @@ def test_ac010_real_postgres_audit_schema_matches_orm_contract():
         } <= columns
         assert "decisions" not in columns
         assert "idx_memory_dreaming_audit_scope" in indexes
+        assert decision_evidence_type == ("ARRAY", "_varchar")
     finally:
         connection.close()
 

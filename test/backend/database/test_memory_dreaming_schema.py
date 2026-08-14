@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from sqlalchemy.dialects.postgresql import ARRAY
+
 from database.db_models import (
     MemoryDreamingAudit,
     MemoryDreamingDecision,
@@ -24,6 +26,9 @@ def test_final_orm_contract_has_only_shared_long_term_versions():
         "signal_count", "context_diversity", "evidence_ids", "event",
         "reason", "archive_suggested",
     } <= set(MemoryDreamingDecision.__table__.columns.keys())
+    evidence_ids = MemoryDreamingDecision.__table__.columns["evidence_ids"]
+    assert isinstance(evidence_ids.type, ARRAY)
+    assert evidence_ids.type.item_type.length == 100
 
 
 def test_final_migration_is_the_only_dreaming_schema_source():
