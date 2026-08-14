@@ -503,6 +503,70 @@ def _extract_url_from_card(raw_card: Optional[dict]) -> str:
     return raw_card.get("url", "")
 
 
+def _resolve_scheme_field(scheme: dict, wrapper_key: str) -> Optional[dict]:
+    """Get a security scheme field from wrapper or flat format."""
+    field = scheme.get(wrapper_key)
+    if isinstance(field, dict) and field:
+        return field
+    # Flat format fallback: scheme itself has the fields
+    if wrapper_key == "httpAuthSecurityScheme" and isinstance(scheme.get("scheme"), str):
+        return scheme if scheme["scheme"].strip() else None
+    if wrapper_key == "apiKeySecurityScheme" and scheme.get("name") and scheme.get("location"):
+        return scheme
+    return None
+
+
+def _build_auth_header_for_scheme(scheme: dict, credential: str) -> Optional[tuple]:
+    """Build a single (header_name, header_value) pair from a security scheme.
+
+    Supports httpAuth (Bearer/basic) and apiKey (header location).
+    """
+    # HTTP auth (bearer, basic)
+    http_auth = _resolve_scheme_field(scheme, "httpAuthSecurityScheme")
+    if http_auth:
+        auth_scheme = http_auth.get("scheme", "")
+        if http_auth.get("bearerFormat", "").lower() == "jwt":
+            auth_scheme = "Bearer"
+        return ("Authorization", f"{auth_scheme} {credential}") if auth_scheme else None
+
+    # API key in header
+    api_key = _resolve_scheme_field(scheme, "apiKeySecurityScheme")
+    if api_key:
+        location = (api_key.get("location") or "").lower()
+        name = api_key.get("name")
+        if location == "header" and name:
+            return (name, credential)
+
+    return None
+
+
+def _collect_auth_headers(requirements, schemes, credentials):
+    """Collect (header_name, value) pairs from security requirements."""
+    pairs = []
+    for req in requirements:
+        if not isinstance(req, dict):
+            continue
+        for scheme_id in req.get("schemes", {}):
+            credential = credentials.get(scheme_id)
+            scheme = schemes.get(scheme_id)
+            if credential and isinstance(scheme, dict):
+                pair = _build_auth_header_for_scheme(scheme, credential)
+                if pair:
+                    pairs.append(pair)
+    return pairs
+
+
+def _build_security_headers(agent: dict) -> dict:
+    """Build auth headers from securitySchemes + security_credentials."""
+    schemes = agent.get("security_schemes") or {}
+    requirements = agent.get("security_requirements") or []
+    credentials = agent.get("security_credentials") or {}
+    if not requirements or not credentials:
+        return {}
+    return dict(_collect_auth_headers(requirements, schemes, credentials))
+
+
+
 def _build_external_agent_config(agent: dict, agent_url: str) -> ExternalA2AAgentConfig:
     """Build an ExternalA2AAgentConfig from agent data."""
     return ExternalA2AAgentConfig(
@@ -516,6 +580,7 @@ def _build_external_agent_config(agent: dict, agent_url: str) -> ExternalA2AAgen
         protocol_type=agent.get("protocol_type", PROTOCOL_JSONRPC),
         timeout=300.0,
         raw_card=agent.get("raw_card"),
+        custom_headers=_build_security_headers(agent) or None,
     )
 
 
