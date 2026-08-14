@@ -2,10 +2,15 @@
 
 import os
 from pathlib import Path
+from uuid import uuid4
 
 import psycopg2
 import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.engine import URL
+from sqlalchemy.orm import Session
 
+from database.db_models import MemoryDreamingAudit, MemoryDreamingDecision, MemoryLongTermVersion
 from database.memory_dreaming_db import advisory_lock_key
 
 pytestmark = pytest.mark.skipif(
@@ -85,6 +90,16 @@ def test_ac010_real_postgres_audit_schema_matches_orm_contract():
                 """
             )
             decision_evidence_type = cursor.fetchone()
+            cursor.execute(
+                """
+                SELECT data_type, udt_name
+                FROM information_schema.columns
+                WHERE table_schema = 'nexent'
+                  AND table_name = 'memory_long_term_version_t'
+                  AND column_name = 'evidence_ids'
+                """
+            )
+            long_term_evidence_type = cursor.fetchone()
         assert {
             "run_id",
             "tenant_id",
@@ -99,8 +114,69 @@ def test_ac010_real_postgres_audit_schema_matches_orm_contract():
         assert "decisions" not in columns
         assert "idx_memory_dreaming_audit_scope" in indexes
         assert decision_evidence_type == ("ARRAY", "_varchar")
+        assert long_term_evidence_type == ("jsonb", "jsonb")
     finally:
         connection.close()
+
+
+def test_ac010_real_postgres_evidence_types_round_trip_through_orm():
+    engine = create_engine(
+        URL.create(
+            "postgresql+psycopg2",
+            username=os.getenv("DREAMING_TEST_POSTGRES_USER", os.environ["POSTGRES_USER"]),
+            password=os.getenv(
+                "DREAMING_TEST_POSTGRES_PASSWORD",
+                os.environ["NEXENT_POSTGRES_PASSWORD"],
+            ),
+            host=os.getenv("DREAMING_TEST_POSTGRES_HOST", os.environ["POSTGRES_HOST"]),
+            port=int(os.getenv("DREAMING_TEST_POSTGRES_PORT", os.environ["POSTGRES_PORT"])),
+            database=os.getenv("DREAMING_TEST_POSTGRES_DB", os.environ["POSTGRES_DB"]),
+        )
+    )
+    subject_id = f"schema-test-{uuid4()}"
+    with engine.connect() as connection:
+        transaction = connection.begin()
+        try:
+            with Session(bind=connection) as session:
+                audit = MemoryDreamingAudit(
+                    tenant_id="schema-test",
+                    user_id="schema-test",
+                    agent_id="__user__",
+                    status="completed",
+                )
+                session.add(audit)
+                session.flush()
+                decision = MemoryDreamingDecision(
+                    run_id=audit.run_id,
+                    decision_order=0,
+                    memory_id=64,
+                    score=0.91,
+                    evidence_ids=["64", "65"],
+                    event="SELECT",
+                    reason="eligible",
+                )
+                session.add(decision)
+                version = MemoryLongTermVersion(
+                    tenant_id="schema-test",
+                    scope="user",
+                    subject_id=subject_id,
+                    version_no=1,
+                    is_active=True,
+                    content="## Schema test",
+                    source="manual",
+                    author_user_id="schema-test",
+                    editor_user_id="schema-test",
+                    character_count=14,
+                    evidence_ids=["64", "65"],
+                )
+                session.add(version)
+                session.flush()
+                session.expire_all()
+                assert decision.evidence_ids == ["64", "65"]
+                assert version.evidence_ids == ["64", "65"]
+        finally:
+            transaction.rollback()
+            engine.dispose()
 
 
 def test_ac075_real_postgres_upgrades_json_decisions_and_is_repeatable():
