@@ -139,7 +139,7 @@ RUN --mount=type=cache,id=nexent-data-process-uv-${TARGETARCH},target=/root/.cac
     fi && \
     uv venv .venv && \
     uv pip install --python .venv/bin/python --link-mode copy $mirror_index_args $torch_args ".[data-process]" && \
-    uv pip install --python .venv/bin/python --link-mode copy $mirror_index_args $torch_args "/opt/sdk[data-process]" && \
+    uv pip install --python .venv/bin/python --link-mode copy $mirror_index_args $torch_args "/opt/sdk[data-process,performance]" && \
     if [ "$DATA_PROCESS_DEPENDENCY_VARIANT" = "cpu" ]; then \
         .venv/bin/python -c 'import importlib.metadata as metadata, importlib.util, sys; blocked = sorted(name for name in ((dist.metadata.get("Name") or "").lower() for dist in metadata.distributions()) if name == "triton" or name.startswith("nvidia-") or name.startswith("cuda-")); blocked and sys.exit("CPU data-process image must not install CUDA packages: " + ", ".join(blocked)); spec = importlib.util.find_spec("torch"); torch = __import__("torch") if spec else None; torch is not None and torch.cuda.is_available() and sys.exit("CPU data-process image unexpectedly reports CUDA availability"); print(f"Using CPU PyTorch {torch.__version__}") if torch else None'; \
     fi

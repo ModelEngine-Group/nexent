@@ -20,6 +20,7 @@ from celery.exceptions import Retry
 from celery.result import allow_join_result
 
 from utils.file_management_utils import get_file_size
+from utils.knowledge_telemetry import knowledge_span, set_span_attributes, trace_knowledge_operation
 from database.attachment_db import get_file_stream
 from database.knowledge_db import get_knowledge_record
 from services.redis_service import get_redis_service
@@ -32,13 +33,14 @@ from consts.const import (
     FORWARD_REDIS_RETRY_MAX,
     DP_REDIS_CHUNKS_WAIT_TIMEOUT_S,
     DP_REDIS_CHUNKS_POLL_INTERVAL_MS,
+    DP_FILE_SPLIT_SIZE_MB,
+    DP_PART_PROCESSOR_COUNT,
     RAY_ACTOR_NUM_CPUS,
     RAY_NUM_CPUS,
     DISABLE_RAY_DASHBOARD,
     ROOT_DIR,
     PER_WAVE_TIMEOUT,
     MAX_TIMEOUT,
-    RAY_GLOBAL_ACTOR_POOL_SIZE,
     RAY_ACTOR_WARM_TIMEOUT_S,
     RAY_GLOBAL_ACTOR_POOL_NAME,
     RAY_GLOBAL_ACTOR_POOL_NAMESPACE
@@ -50,6 +52,16 @@ ASYNC_SPLIT_RETRY_MAX = max(
     FORWARD_REDIS_RETRY_MAX * 5, FORWARD_REDIS_RETRY_MAX)
 FORWARD_ES_CHUNK_BATCH_SIZE = 64
 IMAGE_METADATA_PROCESS_SOURCE = "UniversalImageExtractor"
+
+
+@trace_knowledge_operation("knowledge.minio.fetch", "minio.fetch")
+def _fetch_minio_source(source: str) -> bytes:
+    file_stream = get_file_stream(source)
+    if file_stream is None:
+        raise FileNotFoundError(f"Unable to fetch file from URL: {source}")
+    data = file_stream.read()
+    set_span_attributes(file_size_bytes=len(data), stage="minio.fetch")
+    return data
 
 
 def _wait_for_split_ready(redis_key: str, timeout_s: int, poll_interval_ms: int) -> int:
@@ -90,7 +102,8 @@ def _estimate_parallel_parts() -> int:
     except Exception:
         total_cpus = os.cpu_count() or 1
     actor_cpus = max(1, int(RAY_ACTOR_NUM_CPUS))
-    return max(1, total_cpus // actor_cpus)
+    cpu_capacity = max(1, total_cpus // actor_cpus)
+    return min(DP_PART_PROCESSOR_COUNT, cpu_capacity)
 
 
 def _compute_split_wait_timeout(parts_count: int) -> int:
@@ -453,6 +466,7 @@ def _build_forward_cancelled_result(ctx: _ForwardContext) -> Dict[str, Any]:
     }
 
 
+@trace_knowledge_operation("knowledge.forward.redis_read", "forward.redis_read")
 def _load_forward_chunks(
     self: Task,
     *,
@@ -618,6 +632,7 @@ def _extract_error_code_from_es_response(
         return None
 
 
+@trace_knowledge_operation("knowledge.forward.elasticsearch", "forward.elasticsearch")
 def _send_chunks_to_es(
     chunks: List[Dict[str, Any]],
     index_name: str,
@@ -740,6 +755,19 @@ class GlobalRayActorPoolManager:
         desired = max(0, int(desired))
         max_allowed = max(1, int(max_allowed))
         desired = min(desired, max_allowed)
+        while len(self.actors) > desired:
+            actor = self.actors.pop()
+            try:
+                ray.kill(actor, no_restart=True)
+            except Exception:
+                logger.warning(
+                    "[GlobalRayActorPoolManager] Failed to stop excess actor",
+                    exc_info=True,
+                )
+        if self.actors:
+            self.rr_index %= len(self.actors)
+        else:
+            self.rr_index = 0
         missing = max(0, desired - len(self.actors))
         for _ in range(missing):
             actor = self._create_and_warm_actor()
@@ -796,7 +824,7 @@ def prewarm_ray_actors(target_size: Optional[int] = None) -> int:
     """
     Ensure a global shared pool of warm Ray actors exists for low-latency task execution.
     """
-    desired = RAY_GLOBAL_ACTOR_POOL_SIZE if target_size is None else max(
+    desired = DP_PART_PROCESSOR_COUNT if target_size is None else max(
         0, int(target_size))
     manager = _get_or_create_global_pool_manager()
     current_after = ray.get(
@@ -851,6 +879,7 @@ class LoggingTask(Task):
 
 
 @app.task(bind=True, base=LoggingTask, name='data_process.tasks.process_part', queue='process_part_q')
+@trace_knowledge_operation("knowledge.process.part", "process.ray_part")
 def process_part(
         self,
         part_bytes: bytes,
@@ -924,6 +953,7 @@ def aggregate_parts(
 
 
 @app.task(bind=True, base=LoggingTask, name='data_process.tasks.aggregate_store_chunks', queue='process_part_q')
+@trace_knowledge_operation("knowledge.process.redis_aggregate", "process.redis")
 def aggregate_store_chunks(
         self,
         parts_results: List[Dict[str, Any]],
@@ -996,6 +1026,7 @@ def aggregate_store_chunks(
 
 
 @app.task(bind=True, base=LoggingTask, name='data_process.tasks.forward_part', queue='forward_q')
+@trace_knowledge_operation("knowledge.forward.batch", "forward.batch")
 def forward_part(
         self,
         chunks: List[Dict[str, Any]],
@@ -1081,6 +1112,7 @@ def forward_part(
 
 
 @app.task(bind=True, base=LoggingTask, name='data_process.tasks.aggregate_forward_parts', queue='forward_q')
+@trace_knowledge_operation("knowledge.forward.aggregate", "forward.aggregate")
 def aggregate_forward_parts(
         self,
         parts_results: List[Dict[str, Any]],
@@ -1115,15 +1147,24 @@ def _split_file_for_processing(
     source_type: str,
     task_id: str,
     params: Dict[str, Any],
+    file_size_bytes: int,
     file_data: Optional[bytes] = None,
 ) -> List[bytes]:
-    max_size = 5 * 1024 * 1024
     params.pop("max_size", None)
+    params.pop("target_parts", None)
     logger.info(
-        f"[{request_id}] PROCESS TASK: Splitting file before processing (max_size={max_size})")
+        f"[{request_id}] PROCESS TASK: Splitting file before processing "
+        f"(file_size={file_size_bytes}, target_parts={DP_PART_PROCESSOR_COUNT})")
 
     split_actor_get_start = time.perf_counter()
-    split_actor = _get_split_actor()
+    with knowledge_span(
+        "knowledge.process.split_actor_acquire",
+        "process.split_actor_acquire",
+        task_id=task_id,
+        source_type=source_type,
+        processor_count=DP_PART_PROCESSOR_COUNT,
+    ):
+        split_actor = _get_split_actor()
     split_actor_get_elapsed = time.perf_counter() - split_actor_get_start
     logger.info(
         f"[{request_id}] PROCESS TASK: split actor ready in {split_actor_get_elapsed:.3f}s")
@@ -1133,14 +1174,24 @@ def _split_file_for_processing(
         "source": source,
         "destination": source_type,
         "task_id": task_id,
-        "max_size": max_size,
+        "target_parts": DP_PART_PROCESSOR_COUNT,
         **params,
     }
     if file_data is not None:
         split_kwargs["file_data"] = file_data
 
-    parts_ref = split_actor.split_file.remote(**split_kwargs)
-    parts = ray.get(parts_ref)
+    with knowledge_span(
+        "knowledge.process.file_split_rpc",
+        "process.file_split_rpc",
+        task_id=task_id,
+        source_type=source_type,
+        file_size_bytes=file_size_bytes,
+        processor_count=DP_PART_PROCESSOR_COUNT,
+    ) as span:
+        parts_ref = split_actor.split_file.remote(**split_kwargs)
+        parts = ray.get(parts_ref)
+        if span is not None:
+            span.set_attribute("file.parts_count", len(parts or []))
     split_call_elapsed = time.perf_counter() - split_call_start
     logger.info(
         f"[{request_id}] PROCESS TASK: split_file RPC done in {split_call_elapsed:.3f}s "
@@ -1228,20 +1279,38 @@ def _run_processing_for_parts(
     ).set(queue='process_part_q')
     logger.info(
         f"[{request_id}] PROCESS TASK: Dispatching {len(parts)} part tasks...")
-    chord(group_tasks)(callback)
+    with knowledge_span(
+        "knowledge.process.part_dispatch",
+        "process.part_dispatch",
+        task_id=task_id,
+        part_count=len(parts),
+        parallel_parts=_estimate_parallel_parts(),
+        queue_name="process_part_q",
+    ):
+        chord(group_tasks)(callback)
 
     split_wait_timeout = _compute_split_wait_timeout(len(parts))
     logger.info(
         f"[{request_id}] PROCESS TASK: Waiting split aggregation, timeout={split_wait_timeout}s, "
         f"parts={len(parts)}, est_parallel={_estimate_parallel_parts()}")
-    split_chunk_count = _wait_for_split_ready(
-        redis_key=redis_key,
-        timeout_s=split_wait_timeout,
+    with knowledge_span(
+        "knowledge.process.part_wait",
+        "process.part_wait",
+        task_id=task_id,
+        part_count=len(parts),
+        parallel_parts=_estimate_parallel_parts(),
+        timeout_seconds=split_wait_timeout,
         poll_interval_ms=DP_REDIS_CHUNKS_POLL_INTERVAL_MS,
-    )
+    ):
+        split_chunk_count = _wait_for_split_ready(
+            redis_key=redis_key,
+            timeout_s=split_wait_timeout,
+            poll_interval_ms=DP_REDIS_CHUNKS_POLL_INTERVAL_MS,
+        )
     return True, None, split_chunk_count
 
 
+@trace_knowledge_operation("knowledge.process.split_and_ray", "process.split_and_ray")
 def _process_source_with_split(
     request_id: str,
     source: str,
@@ -1255,12 +1324,53 @@ def _process_source_with_split(
     params: Dict[str, Any],
     file_data: Optional[bytes] = None,
 ) -> Tuple[bool, Optional[List[Dict[str, Any]]], Optional[int]]:
+    file_size_bytes = (
+        len(file_data)
+        if file_data is not None
+        else os.path.getsize(source)
+    )
+    split_threshold_bytes = DP_FILE_SPLIT_SIZE_MB * 1024 * 1024
+    if file_size_bytes <= split_threshold_bytes:
+        logger.info(
+            f"[{request_id}] PROCESS TASK: File size {file_size_bytes} does not exceed "
+            f"split threshold {split_threshold_bytes}; processing without FileSplitter")
+        process_actor = get_ray_actor()
+        if file_data is not None:
+            chunks_ref = process_actor.process_bytes.remote(
+                file_data,
+                original_filename or os.path.basename(source),
+                chunking_strategy,
+                task_id=task_id,
+                model_id=embedding_model_id,
+                tenant_id=tenant_id,
+                **params,
+            )
+        else:
+            chunks_ref = process_actor.process_file.remote(
+                source,
+                chunking_strategy,
+                destination=source_type,
+                task_id=task_id,
+                model_id=embedding_model_id,
+                tenant_id=tenant_id,
+                **params,
+            )
+        chunks = ray.get(chunks_ref)
+        if chunks:
+            redis_key = f"dp:{task_id}:chunks"
+            stored = ray.get(
+                process_actor.store_chunks_in_redis.remote(redis_key, chunks))
+            if not stored:
+                raise RuntimeError("Failed to persist processed chunks in Redis")
+        return False, chunks, None
+
     parts = _split_file_for_processing(
         request_id=request_id,
         source=source,
         source_type=source_type,
         task_id=task_id,
         params=params,
+        file_size_bytes=file_size_bytes,
         file_data=file_data,
     )
     filename_for_processing = original_filename or os.path.basename(source)
@@ -1289,7 +1399,10 @@ def _process_source_with_split(
     if not split_async:
         redis_key = f"dp:{task_id}:chunks"
         process_actor = get_ray_actor()
-        process_actor.store_chunks_in_redis.remote(redis_key, chunks)
+        store_ref = process_actor.store_chunks_in_redis.remote(redis_key, chunks)
+        stored = ray.get(store_ref)
+        if not stored:
+            raise RuntimeError("Failed to persist processed chunks in Redis")
         logger.info(
             f"[{request_id}] PROCESS TASK: Stored chunks in Redis at key '{redis_key}'")
 
@@ -1318,6 +1431,7 @@ def _build_no_valid_chunks_error(
 
 
 @app.task(bind=True, base=LoggingTask, name='data_process.tasks.process', queue='process_q')
+@trace_knowledge_operation("knowledge.process", "process")
 def process(
         self,
         source: str,
@@ -1376,7 +1490,7 @@ def process(
                 raise FileNotFoundError(f"File does not exist: {source}")
 
             file_size = os.path.getsize(source)
-            file_size_mb = file_size / (5 * 1024 * 1024)
+            file_size_mb = file_size / (1024 * 1024)
 
             logger.info(
                 f"[{self.request.id}] PROCESS TASK: File size: {file_size_mb:.2f}MB")
@@ -1405,11 +1519,7 @@ def process(
 
             # Measure MinIO fetch time in process worker logs for observability
             fetch_start = time.perf_counter()
-            file_stream = get_file_stream(source)
-            if file_stream is None:
-                raise FileNotFoundError(
-                    f"Unable to fetch file from URL: {source}")
-            file_data = file_stream.read()
+            file_data = _fetch_minio_source(source)
             fetch_elapsed = time.perf_counter() - fetch_start
             logger.info(
                 f"[{self.request.id}] PROCESS TASK: MinIO fetch done in {fetch_elapsed:.3f}s, "
@@ -1476,6 +1586,7 @@ def process(
         logger.info(
             f"[{self.request.id}] PROCESS TASK: Chunk composition: total={chunk_count}, "
             f"image_metadata={image_metadata_chunk_count}, text={max(0, chunk_count - image_metadata_chunk_count)}")
+        set_span_attributes(chunk_count=chunk_count, stage="process.complete")
 
         # Update task state to SUCCESS after Ray processing completes
         # This transitions from STARTED (PROCESSING) to SUCCESS (WAIT_FOR_FORWARDING)
@@ -1627,6 +1738,7 @@ def process(
 
 
 @app.task(bind=True, base=LoggingTask, name='data_process.tasks.forward', queue='forward_q')
+@trace_knowledge_operation("knowledge.forward", "forward")
 def forward(
         self,
         processed_data: Dict,
@@ -1634,7 +1746,8 @@ def forward(
         source: str,
         source_type: str = 'minio',
         original_filename: Optional[str] = None,
-        authorization: Optional[str] = None
+        authorization: Optional[str] = None,
+        telemetry_context: Optional[Dict[str, str]] = None,
 ) -> Dict:
     """
     Vectorize and store processed chunks in Elasticsearch
@@ -1686,6 +1799,7 @@ def forward(
 
         # Calculate total chunks for progress tracking
         total_chunks = len(chunks) if chunks else 0
+        set_span_attributes(chunk_count=total_chunks, stage="forward.format")
         formatted_chunks = []
         # Compute once per file to avoid repeated IO/MinIO calls inside loop
         file_size = get_file_size(source_type, original_source) if isinstance(
@@ -1965,10 +2079,12 @@ def forward(
     name="data_process.tasks.cleanup_source",
     queue="forward_q",
 )
+@trace_knowledge_operation("knowledge.cleanup", "cleanup")
 def cleanup_source(
     self,
     forward_result: Dict[str, Any],
     authorization: Optional[str] = None,
+    telemetry_context: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     """
     Conditionally delete the MinIO source file after successful indexing.
@@ -2065,6 +2181,7 @@ def cleanup_source(
     return forward_result
 
 
+@trace_knowledge_operation("knowledge.chain.submit", "chain.submit")
 def submit_process_forward_chain(
         *,
         source: str,
@@ -2075,6 +2192,7 @@ def submit_process_forward_chain(
         authorization: Optional[str] = None,
         embedding_model_id: Optional[int] = None,
         tenant_id: Optional[str] = None,
+        telemetry_context: Optional[Dict[str, str]] = None,
 ) -> str:
     """
     Build and enqueue a Celery chain: process -> forward.
@@ -2090,16 +2208,21 @@ def submit_process_forward_chain(
             index_name=index_name,
             original_filename=original_filename,
             embedding_model_id=embedding_model_id,
-            tenant_id=tenant_id
+            tenant_id=tenant_id,
+            telemetry_context=telemetry_context or {},
         ).set(queue='process_q'),
         forward.s(
             index_name=index_name,
             source=source,
             source_type=source_type,
             original_filename=original_filename,
-            authorization=authorization
+            authorization=authorization,
+            telemetry_context=telemetry_context or {},
         ).set(queue='forward_q'),
-        cleanup_source.s(authorization=authorization).set(queue='forward_q'),
+        cleanup_source.s(
+            authorization=authorization,
+            telemetry_context=telemetry_context or {},
+        ).set(queue='forward_q'),
     )
 
     result = task_chain.apply_async()
@@ -2120,7 +2243,8 @@ def process_and_forward(
         original_filename: Optional[str] = None,
         authorization: Optional[str] = None,
         embedding_model_id: Optional[int] = None,
-        tenant_id: Optional[str] = None
+        tenant_id: Optional[str] = None,
+        telemetry_context: Optional[Dict[str, str]] = None,
 ) -> str:
     """
     Combined task that chains processing and forwarding
@@ -2152,6 +2276,7 @@ def process_and_forward(
         authorization=authorization,
         embedding_model_id=embedding_model_id,
         tenant_id=tenant_id,
+        telemetry_context=telemetry_context or {},
     )
     if chain_id:
         logger.info(f"Created task chain ID: {chain_id}")

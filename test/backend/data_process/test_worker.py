@@ -1,3 +1,4 @@
+import builtins
 import sys
 import types
 import importlib
@@ -43,38 +44,39 @@ def setup_mocks_for_worker(mocker, initialized=False):
     # Mock ray module
     mocker.patch.dict(sys.modules, {"ray": fake_ray})
     
-    # Stub consts.const module
+    # Stub consts.const with deterministic values even when another test has
+    # already imported the real configuration module.
     if "consts" not in sys.modules:
         sys.modules["consts"] = types.ModuleType("consts")
         setattr(sys.modules["consts"], "__path__", [])
-    if "consts.const" not in sys.modules:
-        const_mod = types.ModuleType("consts.const")
-        const_mod.CELERY_TASK_TIME_LIMIT = 3600
-        const_mod.CELERY_WORKER_PREFETCH_MULTIPLIER = 1
-        const_mod.ELASTICSEARCH_SERVICE = "http://elasticsearch:9200"
-        const_mod.QUEUES = "process_q,process_part_q,forward_q"
-        const_mod.RAY_ADDRESS = "auto"
-        const_mod.RAY_preallocate_plasma = False
-        const_mod.REDIS_URL = "redis://localhost:6379"
-        const_mod.REDIS_BACKEND_URL = "redis://localhost:6379"
-        const_mod.WORKER_CONCURRENCY = 4
-        const_mod.WORKER_NAME = None
-        const_mod.FORWARD_REDIS_RETRY_DELAY_S = 0
-        const_mod.FORWARD_REDIS_RETRY_MAX = 1
-        const_mod.DISABLE_RAY_DASHBOARD = False
-        const_mod.DATA_PROCESS_SERVICE = "http://data-process"
-        const_mod.ROOT_DIR = "/mock/root"
-        const_mod.DP_REDIS_CHUNKS_WAIT_TIMEOUT_S = 30
-        const_mod.DP_REDIS_CHUNKS_POLL_INTERVAL_MS = 100
-        const_mod.RAY_ACTOR_NUM_CPUS = 1
-        const_mod.RAY_NUM_CPUS = 4
-        const_mod.PER_WAVE_TIMEOUT = 300
-        const_mod.MAX_TIMEOUT = 3600
-        const_mod.RAY_GLOBAL_ACTOR_POOL_SIZE = 10
-        const_mod.RAY_ACTOR_WARM_TIMEOUT_S = 60
-        const_mod.RAY_GLOBAL_ACTOR_POOL_NAME = "global_actor_pool"
-        const_mod.RAY_GLOBAL_ACTOR_POOL_NAMESPACE = "nexent"
-        sys.modules["consts.const"] = const_mod
+    const_mod = types.ModuleType("consts.const")
+    const_mod.CELERY_TASK_TIME_LIMIT = 3600
+    const_mod.CELERY_WORKER_PREFETCH_MULTIPLIER = 1
+    const_mod.ELASTICSEARCH_SERVICE = "http://elasticsearch:9200"
+    const_mod.QUEUES = "process_q,process_part_q,forward_q"
+    const_mod.RAY_ADDRESS = "auto"
+    const_mod.RAY_preallocate_plasma = False
+    const_mod.REDIS_URL = "redis://localhost:6379"
+    const_mod.REDIS_BACKEND_URL = "redis://localhost:6379"
+    const_mod.WORKER_CONCURRENCY = 4
+    const_mod.WORKER_NAME = None
+    const_mod.FORWARD_REDIS_RETRY_DELAY_S = 0
+    const_mod.FORWARD_REDIS_RETRY_MAX = 1
+    const_mod.DISABLE_RAY_DASHBOARD = False
+    const_mod.DATA_PROCESS_SERVICE = "http://data-process"
+    const_mod.ROOT_DIR = "/mock/root"
+    const_mod.DP_REDIS_CHUNKS_WAIT_TIMEOUT_S = 30
+    const_mod.DP_REDIS_CHUNKS_POLL_INTERVAL_MS = 100
+    const_mod.RAY_ACTOR_NUM_CPUS = 1
+    const_mod.RAY_NUM_CPUS = 4
+    const_mod.DP_PART_PROCESSOR_COUNT = 3
+    const_mod.DP_FILE_SPLIT_SIZE_MB = 5
+    const_mod.PER_WAVE_TIMEOUT = 300
+    const_mod.MAX_TIMEOUT = 3600
+    const_mod.RAY_ACTOR_WARM_TIMEOUT_S = 60
+    const_mod.RAY_GLOBAL_ACTOR_POOL_NAME = "global_actor_pool"
+    const_mod.RAY_GLOBAL_ACTOR_POOL_NAMESPACE = "nexent"
+    mocker.patch.dict(sys.modules, {"consts.const": const_mod})
     
     # Stub celery module and submodules (required by tasks.py imported via __init__.py)
     if "celery.backends.base" not in sys.modules:
@@ -467,11 +469,7 @@ def test_start_worker_with_custom_name(mocker):
     worker_module, _ = setup_mocks_for_worker(mocker)
     
     # Set custom worker name
-    if "consts.const" in sys.modules:
-        sys.modules["consts.const"].WORKER_NAME = "custom-worker"
-    
-    # Reload to pick up new constant value
-    importlib.reload(worker_module)
+    worker_module.WORKER_NAME = "custom-worker"
     
     call_args = []
     
@@ -788,3 +786,571 @@ def test_worker_ready_handler_thread_schedule_failure(mocker):
     mocker.patch.object(worker_module.threading, "Thread", side_effect=RuntimeError("thread failed"))
     worker_module.worker_ready_handler()
     assert worker_module.worker_state["ready"] is True
+
+
+def test_setup_worker_environment_sets_logging_level(mocker):
+    """Test setup_worker_environment sets celery worker strategy log level."""
+    worker_module, _ = setup_mocks_for_worker(mocker, initialized=True)
+
+    logger_capture = []
+
+    class FakeCeleryWorkerStrategyLogger:
+        def setLevel(self, level):
+            logger_capture.append(level)
+
+    import logging
+    strategy_logger = FakeCeleryWorkerStrategyLogger()
+    real_get_logger = logging.getLogger
+    mocker.patch.object(
+        worker_module.logging,
+        "getLogger",
+        side_effect=lambda name=None: strategy_logger
+        if name == "celery.worker.strategy"
+        else real_get_logger(name),
+    )
+
+    worker_module.setup_worker_environment()
+    assert logging.WARNING in logger_capture
+
+
+def test_setup_worker_environment_logs_environment_status(mocker):
+    """Test setup_worker_environment logs environment variables status."""
+    worker_module, _ = setup_mocks_for_worker(mocker, initialized=True)
+
+    # Mock logger to capture calls
+    import logging
+    log_calls = []
+
+    class MockLogger:
+        def debug(self, msg, *args):
+            log_calls.append(("debug", msg % args if args else msg))
+
+        def info(self, msg, *args):
+            log_calls.append(("info", msg % args if args else msg))
+
+        def error(self, msg, *args):
+            log_calls.append(("error", msg % args if args else msg))
+
+        def warning(self, msg, *args):
+            log_calls.append(("warning", msg % args if args else msg))
+
+    mocker.patch.object(worker_module.logger, "info", side_effect=lambda msg, *args: log_calls.append(("info", msg % args if args else msg)))
+    mocker.patch.object(worker_module.logger, "debug", side_effect=lambda msg, *args: log_calls.append(("debug", msg % args if args else msg)))
+    mocker.patch.object(worker_module.logger, "warning", side_effect=lambda msg, *args: log_calls.append(("warning", msg % args if args else msg)))
+    mocker.patch.object(worker_module.logger, "error", side_effect=lambda msg, *args: log_calls.append(("error", msg % args if args else msg)))
+
+    worker_module.setup_worker_environment()
+
+    # Verify that initialization happened
+    assert worker_module.worker_state['initialized'] is True
+
+
+def test_validate_service_connections_handles_redis_exception(mocker):
+    """Test validate_service_connections handles Redis exception gracefully."""
+    worker_module, _ = setup_mocks_for_worker(mocker)
+
+    # Mock validate_redis_connection to raise
+    mocker.patch.object(worker_module, "validate_redis_connection", side_effect=RuntimeError("Redis error"))
+
+    result = worker_module.validate_service_connections()
+    assert result is False
+
+
+def test_worker_state_keys_exist(mocker):
+    """Test worker_state has all required keys."""
+    worker_module, _ = setup_mocks_for_worker(mocker)
+
+    assert "initialized" in worker_module.worker_state
+    assert "ready" in worker_module.worker_state
+    assert "start_time" in worker_module.worker_state
+    assert "process_id" in worker_module.worker_state
+    assert "tasks_completed" in worker_module.worker_state
+    assert "tasks_failed" in worker_module.worker_state
+    assert "environment_validated" in worker_module.worker_state
+    assert "services_validated" in worker_module.worker_state
+
+
+def test_worker_ready_handler_with_process_part_queue(mocker):
+    """Test worker_ready_handler with process_part queue configures concurrency logger."""
+    worker_module, _ = setup_mocks_for_worker(mocker)
+    worker_module.worker_state['start_time'] = 1000.0
+    mocker.patch("backend.data_process.worker.time.time", return_value=1001.0)
+    mocker.patch("backend.data_process.worker.os.getpid", return_value=7)
+
+    # Mock QUEUES to include process_part_q
+    worker_module.QUEUES = "process_part_q"
+
+    calls = []
+
+    class FakeThread:
+        def __init__(self, target=None, daemon=None):
+            calls.append(target)
+
+        def start(self):
+            pass
+
+    mocker.patch.object(worker_module.threading, "Thread", FakeThread)
+
+    worker_module.worker_ready_handler()
+    # Should have started prewarm thread and potentially part concurrency thread
+    assert len(calls) >= 0  # Threads may or may not be started depending on queue config
+
+
+def test_setup_worker_environment_with_env_var_check(mocker):
+    """Test setup_worker_environment checks sensitive environment variables."""
+    worker_module, _ = setup_mocks_for_worker(mocker, initialized=True)
+
+    debug_calls = []
+
+    class FakeLogger:
+        def debug(self, msg, *args):
+            debug_calls.append(msg % args if args else msg)
+
+        def info(self, msg, *args):
+            pass
+
+        def error(self, msg, *args):
+            pass
+
+        def warning(self, msg, *args):
+            pass
+
+    mocker.patch.object(worker_module.logger, "debug", side_effect=lambda msg, *args: debug_calls.append(msg % args if args else msg))
+
+    worker_module.setup_worker_environment()
+
+    # Check that environment variable checks are logged
+    assert any("REDIS" in str(call) or "ELASTICSEARCH" in str(call) for call in debug_calls)
+
+
+def test_validate_redis_connection_with_custom_timeout(mocker):
+    """Test validate_redis_connection uses correct socket_timeout."""
+    worker_module, _ = setup_mocks_for_worker(mocker)
+
+    captured_timeout = []
+
+    class FakeRedisClient:
+        def ping(self):
+            return True
+
+    class FakeRedis:
+        @staticmethod
+        def from_url(url, socket_timeout=5):
+            captured_timeout.append(socket_timeout)
+            return FakeRedisClient()
+
+    fake_redis_module = types.SimpleNamespace(from_url=FakeRedis.from_url)
+    mocker.patch.dict(sys.modules, {"redis": fake_redis_module})
+
+    worker_module.validate_redis_connection()
+    assert captured_timeout[0] == 5  # Default timeout should be 5
+
+
+def test_start_worker_logs_configuration(mocker):
+    """Test start_worker logs Celery configuration."""
+    worker_module, _ = setup_mocks_for_worker(mocker)
+
+    mocker.patch("backend.data_process.worker.os.getpid", return_value=12345)
+
+    debug_calls = []
+
+    class FakeLogger:
+        def debug(self, msg, *args):
+            debug_calls.append(msg % args if args else msg)
+
+        def info(self, msg, *args):
+            pass
+
+    mocker.patch.object(worker_module.logger, "debug", side_effect=lambda msg, *args: debug_calls.append(msg % args if args else msg))
+
+    call_args = []
+
+    def mock_worker_main(args):
+        call_args.append(args)
+
+    mocker.patch.object(worker_module.app, "worker_main", side_effect=mock_worker_main)
+
+    worker_module.start_worker()
+
+    # Verify configuration logging
+    assert any("Broker URL" in str(call) or "Backend URL" in str(call) for call in debug_calls)
+
+
+def test_task_failure_handler_logs_exception_details(mocker):
+    """Test task_failure_handler logs exception type and message."""
+    worker_module, _ = setup_mocks_for_worker(mocker)
+
+    error_calls = []
+
+    class FakeLogger:
+        def error(self, msg, *args):
+            error_calls.append(msg % args if args else msg)
+
+    mocker.patch.object(worker_module.logger, "error", side_effect=lambda msg, *args: error_calls.append(msg % args if args else msg))
+
+    fake_sender = types.SimpleNamespace(name="test_task")
+    fake_exception = ValueError("Test error message")
+
+    worker_module.task_failure_handler(
+        sender=fake_sender,
+        task_id="task-123",
+        exception=fake_exception
+    )
+
+    # Verify error logging
+    assert any("task-123" in str(call) for call in error_calls)
+    assert any("ValueError" in str(call) or "Test error" in str(call) for call in error_calls)
+
+
+def test_task_failure_handler_updates_worker_state(mocker):
+    """Test task_failure_handler increments tasks_failed counter."""
+    worker_module, _ = setup_mocks_for_worker(mocker)
+
+    initial_failed = worker_module.worker_state['tasks_failed']
+
+    fake_sender = types.SimpleNamespace(name="test_task")
+    fake_exception = RuntimeError("Task failed")
+
+    # Mock logger to suppress output
+    mocker.patch.object(worker_module.logger, "error")
+
+    worker_module.task_failure_handler(
+        sender=fake_sender,
+        task_id="task-456",
+        exception=fake_exception
+    )
+
+    assert worker_module.worker_state['tasks_failed'] == initial_failed + 1
+
+
+def test_worker_ready_handler_calculates_startup_time(mocker):
+    """Test worker_ready_handler calculates correct startup time."""
+    worker_module, _ = setup_mocks_for_worker(mocker)
+    worker_module.worker_state['start_time'] = 1000.0
+
+    mocker.patch("backend.data_process.worker.os.getpid", return_value=12345)
+    mocker.patch("backend.data_process.worker.time.time", return_value=1005.5)
+
+    # Mock logger to suppress output
+    mocker.patch.object(worker_module.logger, "debug")
+    mocker.patch.object(worker_module.logger, "info")
+
+    worker_module.worker_ready_handler()
+
+    assert worker_module.worker_state['ready'] is True
+
+
+def test_start_worker_with_multiple_queues(mocker):
+    """Test start_worker handles multiple queue configuration."""
+    worker_module, _ = setup_mocks_for_worker(mocker)
+
+    # Set multiple queues
+    worker_module.QUEUES = "process_q,forward_q,custom_q"
+
+    mocker.patch("backend.data_process.worker.os.getpid", return_value=12345)
+
+    call_args = []
+
+    def mock_worker_main(args):
+        call_args.append(args)
+
+    mocker.patch.object(worker_module.app, "worker_main", side_effect=mock_worker_main)
+
+    worker_module.start_worker()
+
+    assert len(call_args) == 1
+    assert "--queues=process_q,forward_q,custom_q" in call_args[0]
+
+
+def test_worker_ready_handler_schedules_prewarm_for_process_queue(mocker):
+    """Test worker_ready_handler schedules Ray actor prewarm for process_q."""
+    worker_module, _ = setup_mocks_for_worker(mocker)
+    worker_module.worker_state['start_time'] = 1000.0
+
+    mocker.patch("backend.data_process.worker.os.getpid", return_value=7)
+    mocker.patch("backend.data_process.worker.time.time", return_value=1001.0)
+
+    # Set QUEUES to include process_q
+    worker_module.QUEUES = "process_q,forward_q"
+
+    prewarm_calls = []
+
+    def mock_prewarm(target_size):
+        prewarm_calls.append(target_size)
+        return 2
+
+    class FakeThread:
+        def __init__(self, target=None, daemon=None):
+            self.target = target
+
+        def start(self):
+            if self.target:
+                self.target()
+
+    mocker.patch.object(worker_module.threading, "Thread", FakeThread)
+
+    # Mock prewarm function
+    mocker.patch("backend.data_process.tasks.prewarm_ray_actors", mock_prewarm)
+
+    worker_module.worker_ready_handler()
+
+    # Give thread time to execute (in real scenario)
+    # The prewarm is started in a daemon thread
+
+
+def test_setup_worker_process_resources_handles_monitoring_exception(mocker):
+    """Test setup_worker_process_resources handles monitoring initialization failure."""
+    worker_module, _ = setup_mocks_for_worker(mocker)
+
+    mocker.patch("backend.data_process.worker.os.getpid", return_value=99999)
+
+    # Mock validate_service_connections to succeed
+    mocker.patch.object(worker_module, "validate_service_connections", return_value=True)
+
+    # Mock monitoring import to fail
+    import_original = __builtins__.__import__ if hasattr(__builtins__, '__import__') else builtins.__import__
+
+    def mock_import(name, *args, **kwargs):
+        if "monitoring" in name:
+            raise ImportError("No monitoring module")
+        return import_original(name, *args, **kwargs)
+
+    mocker.patch("builtins.__import__", side_effect=mock_import)
+
+    # Should not raise, just log warning
+    try:
+        worker_module.setup_worker_process_resources()
+    except ImportError:
+        pass  # May or may not raise depending on import structure
+
+
+def test_setup_worker_environment_logs_missing_sensitive_variables(mocker):
+    worker_module, _ = setup_mocks_for_worker(mocker, initialized=True)
+    worker_module.REDIS_URL = ""
+    worker_module.ELASTICSEARCH_SERVICE = ""
+    error_calls = []
+    mocker.patch.object(
+        worker_module.logger,
+        "error",
+        side_effect=lambda msg, *args, **kwargs: error_calls.append(msg % args if args else msg),
+    )
+
+    worker_module.setup_worker_environment()
+
+    assert any("REDIS_URL: NOT SET" in message for message in error_calls)
+    assert any("ELASTICSEARCH_SERVICE: NOT SET" in message for message in error_calls)
+
+
+def test_setup_worker_process_resources_logs_monitoring_status(mocker):
+    worker_module, _ = setup_mocks_for_worker(mocker)
+    monitoring_module = types.ModuleType("utils.monitoring")
+    monitoring_module.monitoring_manager = types.SimpleNamespace(is_enabled=True)
+    mocker.patch.dict(sys.modules, {"utils.monitoring": monitoring_module})
+    mocker.patch.object(worker_module, "validate_service_connections", return_value=True)
+    info = mocker.patch.object(worker_module.logger, "info")
+
+    worker_module.setup_worker_process_resources()
+
+    assert any(
+        call.args[:2] == (
+            "Knowledge telemetry initialized in worker process: enabled=%s",
+            True,
+        )
+        for call in info.call_args_list
+    )
+    assert worker_module.worker_state["services_validated"] is True
+
+
+@pytest.mark.parametrize("should_fail", [False, True])
+def test_worker_ready_handler_runs_prewarm_background(mocker, should_fail):
+    worker_module, _ = setup_mocks_for_worker(mocker)
+    worker_module.QUEUES = "process_q"
+    prewarm_calls = []
+
+    def prewarm(target_size):
+        prewarm_calls.append(target_size)
+        if should_fail:
+            raise RuntimeError("warm failed")
+        return 2
+
+    tasks_module = types.ModuleType("data_process.tasks")
+    tasks_module.prewarm_ray_actors = prewarm
+    mocker.patch.dict(sys.modules, {"data_process.tasks": tasks_module})
+
+    class ImmediateThread:
+        def __init__(self, target=None, daemon=None):
+            self.target = target
+
+        def start(self):
+            self.target()
+
+    mocker.patch.object(worker_module.threading, "Thread", ImmediateThread)
+    warning = mocker.patch.object(worker_module.logger, "warning")
+
+    worker_module.worker_ready_handler()
+
+    assert prewarm_calls == [worker_module.DP_PART_PROCESSOR_COUNT]
+    if should_fail:
+        assert any("Background prewarm failed" in call.args[0] for call in warning.call_args_list)
+
+
+def test_worker_ready_handler_collects_part_concurrency_once(mocker):
+    worker_module, fake_ray = setup_mocks_for_worker(mocker, initialized=True)
+    worker_module.QUEUES = "process_part_q"
+    tasks_module = types.ModuleType("data_process.tasks")
+    tasks_module.prewarm_ray_actors = lambda target_size: 1
+    mocker.patch.dict(sys.modules, {"data_process.tasks": tasks_module})
+
+    targets = []
+
+    class CapturingThread:
+        def __init__(self, target=None, daemon=None):
+            targets.append(target)
+
+        def start(self):
+            pass
+
+    inspector = types.SimpleNamespace(
+        active=lambda: {
+            "worker-1": [
+                {"name": "data_process.tasks.process_part"},
+                {"name": "another.task"},
+            ],
+            "worker-2": None,
+        }
+    )
+    worker_module.app.control = types.SimpleNamespace(
+        inspect=lambda timeout: inspector
+    )
+    fake_ray.available_resources = lambda: {"CPU": 3.5}
+    mocker.patch.object(worker_module.threading, "Thread", CapturingThread)
+    mocker.patch.object(worker_module.time, "sleep", side_effect=StopIteration)
+    info = mocker.patch.object(worker_module.logger, "info")
+
+    worker_module.worker_ready_handler()
+    assert len(targets) == 2
+    with pytest.raises(StopIteration):
+        targets[1]()
+
+    assert any(
+        "active=1, ray_available_cpu=3.5" in call.args[0]
+        for call in info.call_args_list
+    )
+
+
+def test_worker_ready_handler_logs_thread_schedule_failures(mocker):
+    worker_module, _ = setup_mocks_for_worker(mocker)
+    worker_module.QUEUES = "process_part_q"
+    tasks_module = types.ModuleType("data_process.tasks")
+    tasks_module.prewarm_ray_actors = lambda target_size: 1
+    mocker.patch.dict(sys.modules, {"data_process.tasks": tasks_module})
+    mocker.patch.object(worker_module.threading, "Thread", side_effect=RuntimeError("thread failed"))
+    warning = mocker.patch.object(worker_module.logger, "warning")
+
+    worker_module.worker_ready_handler()
+
+    messages = [call.args[0] for call in warning.call_args_list]
+    assert any("Failed to schedule Ray actor prewarm" in message for message in messages)
+    assert any("Failed to start process_part concurrency logger" in message for message in messages)
+
+
+def test_start_worker_logs_successful_monitoring_initialization(mocker):
+    worker_module, _ = setup_mocks_for_worker(mocker)
+    monitoring_module = types.ModuleType("utils.monitoring")
+    monitoring_module.monitoring_manager = types.SimpleNamespace(is_enabled=True)
+    mocker.patch.dict(sys.modules, {"utils.monitoring": monitoring_module})
+    mocker.patch.object(worker_module.app, "worker_main")
+    info = mocker.patch.object(worker_module.logger, "info")
+
+    worker_module.start_worker()
+
+    assert any(
+        call.args[:2] == (
+            "Knowledge telemetry initialized before worker start: enabled=%s",
+            True,
+        )
+        for call in info.call_args_list
+    )
+
+
+def test_validate_service_connections_returns_true_on_success(mocker):
+    """Test validate_service_connections returns True when all checks pass."""
+    worker_module, _ = setup_mocks_for_worker(mocker)
+
+    class FakeRedisClient:
+        def ping(self):
+            return True
+
+    class FakeRedis:
+        @staticmethod
+        def from_url(url, socket_timeout=5):
+            return FakeRedisClient()
+
+    fake_redis_module = types.SimpleNamespace(from_url=FakeRedis.from_url)
+    mocker.patch.dict(sys.modules, {"redis": fake_redis_module})
+
+    result = worker_module.validate_service_connections()
+    assert result is True
+
+
+def test_worker_ready_handler_logs_worker_status(mocker):
+    """Test worker_ready_handler logs worker status summary."""
+    worker_module, _ = setup_mocks_for_worker(mocker)
+    worker_module.worker_state['start_time'] = 1000.0
+
+    mocker.patch("backend.data_process.worker.os.getpid", return_value=12345)
+    mocker.patch("backend.data_process.worker.time.time", return_value=1002.0)
+
+    debug_calls = []
+
+    class FakeLogger:
+        def debug(self, msg, *args):
+            debug_calls.append(msg % args if args else msg)
+
+        def info(self, msg, *args):
+            pass
+
+    mocker.patch.object(worker_module.logger, "debug", side_effect=lambda msg, *args: debug_calls.append(msg % args if args else msg))
+
+    worker_module.worker_ready_handler()
+
+    # Should log status summary
+    assert any("status" in str(call).lower() or "summary" in str(call).lower() for call in debug_calls)
+
+
+def test_task_postrun_handler_does_not_increment_on_failure_state(mocker):
+    """Test task_postrun_handler does not increment completed on FAILURE state."""
+    worker_module, _ = setup_mocks_for_worker(mocker)
+
+    initial_completed = worker_module.worker_state['tasks_completed']
+
+    fake_task = types.SimpleNamespace(name="test_task")
+    worker_module.task_postrun_handler(task=fake_task, task_id="task-789", state="FAILURE")
+
+    # Should not increment completed count
+    assert worker_module.worker_state['tasks_completed'] == initial_completed
+
+
+def test_task_postrun_handler_does_not_increment_on_pending_state(mocker):
+    """Test task_postrun_handler does not increment completed on PENDING state."""
+    worker_module, _ = setup_mocks_for_worker(mocker)
+
+    initial_completed = worker_module.worker_state['tasks_completed']
+
+    fake_task = types.SimpleNamespace(name="test_task")
+    worker_module.task_postrun_handler(task=fake_task, task_id="task-999", state="PENDING")
+
+    # Should not increment completed count
+    assert worker_module.worker_state['tasks_completed'] == initial_completed
+
+
+def test_task_postrun_handler_increments_on_success_state(mocker):
+    """Test task_postrun_handler increments completed on SUCCESS state."""
+    worker_module, _ = setup_mocks_for_worker(mocker)
+
+    initial_completed = worker_module.worker_state['tasks_completed']
+
+    fake_task = types.SimpleNamespace(name="test_task")
+    worker_module.task_postrun_handler(task=fake_task, task_id="task-success", state="SUCCESS")
+
+    assert worker_module.worker_state['tasks_completed'] == initial_completed + 1

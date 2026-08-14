@@ -37,6 +37,7 @@ from database.model_management_db import get_model_by_model_id
 from services.vectordatabase_service import ElasticSearchService, get_vector_db_core
 from utils.config_utils import tenant_config_manager, get_model_name_from_config
 from utils.file_management_utils import save_upload_file
+from utils.knowledge_telemetry import trace_knowledge_operation
 
 from nexent import MessageObserver
 from nexent.multi_modal.utils import parse_s3_url
@@ -416,6 +417,7 @@ async def upload_files_impl(
         errors, uploaded_file_paths, uploaded_filenames, quota_status)
 
 
+@trace_knowledge_operation("knowledge.upload.batch", "upload")
 async def upload_to_minio(
     files: List[UploadFile],
     folder: str,
