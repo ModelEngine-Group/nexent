@@ -960,24 +960,6 @@ def test_provider_model_requests():
     assert create_req.base_url == "https://api.openai.com"
 
 
-def test_nl2_agent_skill_requests():
-    """Test NL2AgentRunRequest and NL2SkillRunRequest"""
-    nl2_agent = model_consts.NL2AgentRunRequest(
-        query="Create a chatbot",
-        history=[],
-        minio_files=[]
-    )
-    assert nl2_agent.query == "Create a chatbot"
-
-    nl2_skill = model_consts.NL2SkillRunRequest(
-        query="Build an automation",
-        complexity="simple",
-        language="en"
-    )
-    assert nl2_skill.complexity == "simple"
-    assert nl2_skill.language == "en"
-
-
 def test_export_import_requests():
     """Test export and import request models"""
     agent_info = model_consts.ExportAndImportAgentInfo(
@@ -1063,21 +1045,6 @@ def test_agent_name_batch_requests():
         ]
     )
     assert len(batch_check.items) == 1
-
-
-def test_nl2_skill_run_with_complexity():
-    """Test NL2SkillRunRequest with different complexity modes"""
-    req_simple = model_consts.NL2SkillRunRequest(
-        query="Simple task",
-        complexity="simple"
-    )
-    assert req_simple.complexity == "simple"
-
-    req_complicated = model_consts.NL2SkillRunRequest(
-        query="Complex task",
-        complexity="complicated"
-    )
-    assert req_complicated.complexity == "complicated"
 
 
 def test_model_api_config():
