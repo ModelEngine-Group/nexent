@@ -94,7 +94,7 @@ import {
 import { VerificationPanel } from "../ui/verification-panel";
 import { A2UIChatMessage } from "../../chat/a2ui/A2UIRenderer";
 import type { A2UISurface } from "@/types/chat";
-import { A2UIRenderer as A2UITextRenderer, mightContainA2UI } from "@/lib/a2ui";
+import { A2UIRenderer as A2UITextRenderer, mightContainA2UI, type A2UIAction } from "@/lib/a2ui";
 import { cn } from "@/lib/utils";
 import { AuthenticatedImage } from "../ui/authenticated-image";
 import { copyToClipboard } from "@/lib/clipboard";
@@ -517,6 +517,7 @@ const ThreadView: FC<ThreadViewProps> = ({
               selectedShareMessageIds={selectedShareMessageIds}
               backendMessageIdsByAuiId={backendMessageIdsByAuiId}
               onToggleShareMessage={onToggleShareMessage}
+              conversationId={conversationId}
             />
           ) : (
             <ThreadWelcomeContent agent={agent} />
@@ -579,7 +580,7 @@ export const ReadOnlyConversation: FC<{
             </p>
           </header>
           <ThreadPrimitive.Viewport className="mx-auto flex w-full max-w-4xl flex-1 flex-col overflow-y-auto px-8 py-6">
-            <ThreadMessages agent={agent} readOnly />
+            <ThreadMessages agent={agent} readOnly conversationId={conversationId} />
           </ThreadPrimitive.Viewport>
         </main>
         <SourcesPanel
@@ -662,6 +663,7 @@ export const ThreadMessages: FC<{
   selectedShareMessageIds?: Set<number>;
   backendMessageIdsByAuiId?: Map<string, number>;
   onToggleShareMessage?: (messageId: number) => void;
+  conversationId?: number;
 }> = ({
   agent,
   readOnly = false,
@@ -669,6 +671,7 @@ export const ThreadMessages: FC<{
   selectedShareMessageIds,
   backendMessageIdsByAuiId,
   onToggleShareMessage,
+  conversationId,
 }) => {
   const { t } = useTranslation();
   const messages = useAuiState((s) => s.thread.messages);
@@ -696,9 +699,9 @@ export const ThreadMessages: FC<{
   const messageComponents = useMemo(
     () => ({
       UserMessage: () => <UserMessage readOnly={readOnly} />,
-      AssistantMessage: () => <AssistantMessage agent={agent} readOnly={readOnly} />,
+      AssistantMessage: () => <AssistantMessage agent={agent} readOnly={readOnly} conversationId={conversationId} />,
     }),
-    [agent, readOnly],
+    [agent, readOnly, conversationId],
   );
 
   if (shareMode) {
@@ -748,7 +751,7 @@ export const ThreadMessages: FC<{
             />
           );
         }
-        return <AssistantMessage agent={agent} readOnly={readOnly} />;
+        return <AssistantMessage agent={agent} readOnly={readOnly} conversationId={conversationId} />;
       }}
     </ThreadPrimitive.Messages>
   );
@@ -827,8 +830,42 @@ const AssistantCompletionIndicator: FC = () => {
 const AssistantMessage: FC<{
   agent: Agent | PublishedAgent;
   readOnly?: boolean;
-}> = ({ agent, readOnly = false }) => {
+  conversationId?: number;
+}> = ({ agent, readOnly = false, conversationId }) => {
   const { t } = useTranslation();
+  const aui = useAui();
+
+  const handleA2UIAction = useCallback((action: A2UIAction) => {
+    if (action.type === 'submit' || action.type === 'click') {
+      const formData = action.path ? (() => {
+        try { return JSON.parse(action.path); } catch { return {}; }
+      })() : {};
+      // Format form data as human-readable text with Chinese labels
+      const formEntries = Object.entries(formData as Record<string, unknown>);
+      const formLines = formEntries.length > 0
+        ? formEntries.map(([label, value]) => `${label}: ${value}`)
+        : [];
+      const messageText = [action.value as string, ...formLines].join('\n');
+      try {
+        const runConfig: Record<string, unknown> = {
+          custom: {
+            agentId: agent.id,
+          },
+        };
+        if (conversationId) {
+          (runConfig.custom as Record<string, unknown>).threadId = conversationId;
+        }
+        aui.thread.append({
+          role: 'user',
+          content: [{ type: 'text', text: messageText }],
+          runConfig,
+        });
+      } catch (err) {
+        console.error('[A2UI] Failed to send action:', err);
+      }
+    }
+  }, [aui]);
+
   // Reserves space for the action bar; `-mb` compensates so the action bar's
   // hover-revealed position does not shift the message spacing. For pt-[n]
   // use `-mb-[n + 6]` and `min-h-[n + 6]` to preserve the compensation.
@@ -1012,7 +1049,7 @@ const AssistantMessage: FC<{
                 const textContent = textPart.text || "";
                 if (mightContainA2UI(textContent)) {
                   console.log("[A2UI_DEBUG] Rendering text part with A2UI protocol, content length:", textContent.length);
-                  return <A2UITextRenderer content={textContent} className="a2ui-chat-message" />;
+                  return <A2UITextRenderer content={textContent} className="a2ui-chat-message" onAction={handleA2UIAction} />;
                 }
                 return <MarkdownText />;
               }

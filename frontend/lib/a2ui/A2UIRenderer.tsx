@@ -1,7 +1,68 @@
 'use client';
 
-import React, { useMemo, useState, useCallback } from 'react';
+import React, { useMemo, useState, useCallback, createContext, useContext, useRef, useEffect } from 'react';
+import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { parseA2UIMessage, type A2UIParseResult, type A2UIBlock } from './parser';
+import { A2UI_OPEN_TAG, A2UI_CLOSE_TAG } from './constants';
+
+// ---------------------------------------------------------------------------
+// A2UI Form Context - shared state for interactive form components
+// ---------------------------------------------------------------------------
+interface A2UIFormState {
+  values: Record<string, unknown>;
+  registerField: (path: string, value: unknown) => void;
+  unregisterField: (path: string) => void;
+  updateField: (path: string, value: unknown) => void;
+  getFormValues: () => Record<string, unknown>;
+}
+
+const A2UIFormContext = createContext<A2UIFormState | null>(null);
+
+function useA2UIFormContext(): A2UIFormState | null {
+  return useContext(A2UIFormContext);
+}
+
+function A2UIFormProvider({ children }: { children: React.ReactNode }) {
+  const valuesRef = useRef<Record<string, unknown>>({});
+  const [, forceUpdate] = useState(0);
+
+  const registerField = useCallback((path: string, value: unknown) => {
+    if (path && !(path in valuesRef.current)) {
+      valuesRef.current[path] = value;
+    }
+  }, []);
+
+  const unregisterField = useCallback((path: string) => {
+    if (path && path in valuesRef.current) {
+      delete valuesRef.current[path];
+    }
+  }, []);
+
+  const updateField = useCallback((path: string, value: unknown) => {
+    if (path) {
+      valuesRef.current[path] = value;
+      forceUpdate((n) => n + 1);
+    }
+  }, []);
+
+  const getFormValues = useCallback(() => {
+    return { ...valuesRef.current };
+  }, []);
+
+  const state = useMemo(() => ({
+    values: valuesRef.current,
+    registerField,
+    unregisterField,
+    updateField,
+    getFormValues,
+  }), [registerField, unregisterField, updateField, getFormValues]);
+
+  return (
+    <A2UIFormContext.Provider value={state}>
+      {children}
+    </A2UIFormContext.Provider>
+  );
+}
 
 // A2UI message type keys (matching backend constants)
 const A2UI_MSG_KEYS = new Set([
@@ -159,39 +220,54 @@ function buildDataMap(blocks: A2UIBlock[]): Map<string, unknown> {
 }
 
 /**
+ * Strip verbose reasoning text outside <a2ui-json> tags, keeping only the A2UI content.
+ */
+function stripVerboseText(content: string): string {
+  const openIdx = content.indexOf(A2UI_OPEN_TAG);
+  const closeIdx = content.lastIndexOf(A2UI_CLOSE_TAG);
+  if (openIdx !== -1 && closeIdx !== -1) {
+    return content.slice(openIdx, closeIdx + A2UI_CLOSE_TAG.length);
+  }
+  return content;
+}
+
+/**
  * Main A2UI Renderer component
  *
  * Renders structured A2UI JSON content as interactive React components.
  * Falls back to plain text rendering when A2UI content is not detected.
  */
 export function A2UIRenderer({ content, onAction, className = '' }: A2UIRendererProps) {
-  const parsed = useMemo(() => parseA2UIMessage(content), [content]);
+  const cleanContent = useMemo(() => stripVerboseText(content), [content]);
+  const parsed = useMemo(() => parseA2UIMessage(cleanContent), [cleanContent]);
   const dataMap = useMemo(() => buildDataMap(parsed.blocks), [parsed.blocks]);
 
   if (!parsed.isA2UI) {
-    return <div className={className}>{content}</div>;
+    return <div className={className}>{cleanContent}</div>;
   }
 
   return (
-    <div className={`a2ui-container ${className}`}>
-      {parsed.blocks.length === 0 ? (
-        <A2UISchemaRenderer
-          schema={parsed.schema}
-          onAction={onAction}
-          dataMap={dataMap}
-        />
-      ) : (
-        parsed.blocks.map((block, idx) => (
-          <A2UIBlockRenderer
-            key={`a2ui-block-${idx}`}
-            block={block}
+    <A2UIFormProvider>
+      <div className={`a2ui-container ${className}`}>
+        {parsed.blocks.length === 0 ? (
+          <A2UISchemaRenderer
+            schema={parsed.schema}
             onAction={onAction}
-            defaultSchema={parsed.schema}
             dataMap={dataMap}
           />
-        ))
-      )}
-    </div>
+        ) : (
+          parsed.blocks.map((block, idx) => (
+            <A2UIBlockRenderer
+              key={`a2ui-block-${idx}`}
+              block={block}
+              onAction={onAction}
+              defaultSchema={parsed.schema}
+              dataMap={dataMap}
+            />
+          ))
+        )}
+      </div>
+    </A2UIFormProvider>
   );
 }
 
@@ -311,6 +387,9 @@ function A2UIComponentsRenderer({ components, onAction, defaultSchema, dataMap }
       const template = props.template as string | undefined;
       if (template) childIds.push(template);
       const children = props.children as Record<string, unknown> | undefined;
+      if (children?.template && typeof children.template === 'string') {
+        childIds.push(children.template as string);
+      }
       if (children?.explicitList && Array.isArray(children.explicitList)) {
         childIds.push(...(children.explicitList as string[]));
       }
@@ -362,18 +441,49 @@ function A2UIComponentNodeRenderer({ nodeId, nodeMap, onAction, defaultSchema, d
 
   const { type, props } = node;
 
+  /** Extract the data model path from component props for form field binding. */
+  const extractFieldPath = (p: Record<string, unknown>): string => {
+    // Use label as the primary display key (Chinese-friendly)
+    if (p.label) {
+      const label = resolveText(p.label);
+      if (label) return label;
+    }
+    // Try props.path (explicit path object)
+    if (p.path && typeof p.path === 'object') {
+      const path = (p.path as Record<string, unknown>).path;
+      if (typeof path === 'string' && path) return path;
+    }
+    // Try props.text.path (TextField binding)
+    if (p.text && typeof p.text === 'object') {
+      const path = (p.text as Record<string, unknown>).path;
+      if (typeof path === 'string' && path) return path;
+    }
+    // Try props.value.path (CheckBox, ChoicePicker, Slider, DateTimeInput)
+    if (p.value && typeof p.value === 'object') {
+      const path = (p.value as Record<string, unknown>).path;
+      if (typeof path === 'string' && path) return path;
+    }
+    // Try props.name as fallback
+    if (typeof p.name === 'string' && p.name) return p.name;
+    return '';
+  };
+
   // Resolve text from literalString, path, or direct string value
   const resolveText = (textValue: unknown): string => {
-    if (typeof textValue === 'string') return textValue;
+    // Clean up backtick-wrapped values from agent output
+    const cleanValue = (val: string): string => {
+      return val.replace(/^\s*`+|`+\s*$/g, '').trim();
+    };
+    if (typeof textValue === 'string') return cleanValue(textValue);
     if (typeof textValue === 'number' || typeof textValue === 'boolean') return String(textValue);
     if (textValue && typeof textValue === 'object') {
       const obj = textValue as Record<string, unknown>;
-      if (typeof obj.literalString === 'string') return obj.literalString;
-      if (typeof obj.literal === 'string') return obj.literal;
+      if (typeof obj.literalString === 'string') return cleanValue(obj.literalString);
+      if (typeof obj.literal === 'string') return cleanValue(obj.literal);
       if (typeof obj.path === 'string') {
         const path = obj.path as string;
         const value = dataMap.get(path);
-        if (value !== undefined) return String(value);
+        if (value !== undefined) return cleanValue(String(value));
         return '';
       }
     }
@@ -439,29 +549,177 @@ function A2UIComponentNodeRenderer({ nodeId, nodeMap, onAction, defaultSchema, d
     }
 
     case 'Button': {
+      const formCtx = useA2UIFormContext();
       const actionName = (props.action as Record<string, unknown> | undefined)?.name as string;
+      const isSubmit = actionName === 'submit' || (props.primary as boolean) === true;
+      const handleClick = useCallback(() => {
+        const formValues = formCtx?.getFormValues() || {};
+        onAction?.({
+          type: isSubmit ? 'submit' : 'click',
+          value: actionName,
+          messageType: 'button',
+          path: JSON.stringify(formValues),
+        });
+      }, [onAction, actionName, formCtx, isSubmit]);
       return (
         <button
-          className="a2ui-button inline-flex items-center px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors"
-          onClick={() => onAction?.({ type: 'click', value: actionName })}
+          type="button"
+          className="a2ui-button inline-flex items-center px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors cursor-pointer"
+          onClick={handleClick}
         >
           {renderChildren() || text || label || 'Button'}
         </button>
       );
     }
 
-    case 'TextField':
+    case 'TextField': {
+      const formCtx = useA2UIFormContext();
+      const initialValue = resolveText(props.text) || resolveText(props.value) || '';
+      const [fieldValue, setFieldValue] = useState(initialValue);
+      const fieldPath = extractFieldPath(props);
+      useEffect(() => {
+        formCtx?.registerField(fieldPath, initialValue);
+      }, [fieldPath]); // eslint-disable-line react-hooks/exhaustive-deps
+      const handleChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+        setFieldValue(e.target.value);
+        formCtx?.updateField(fieldPath, e.target.value);
+        onAction?.({ type: 'input', path: fieldPath, value: e.target.value });
+      }, [onAction, fieldPath, formCtx]);
       return (
         <div className="a2ui-textfield flex flex-col gap-1">
           {label && <label className="text-sm font-medium">{label}</label>}
           <input
             type="text"
-            className="border border-border rounded-md px-3 py-2 text-sm bg-background"
+            className="border border-border rounded-md px-3 py-2 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary/20"
             placeholder={text}
-            readOnly
+            value={fieldValue}
+            onChange={handleChange}
           />
         </div>
       );
+    }
+
+    case 'CheckBox': {
+      const formCtx = useA2UIFormContext();
+      const initialChecked = props.checked === true || props.value === true;
+      const [checked, setChecked] = useState(initialChecked);
+      const fieldPath = extractFieldPath(props);
+      useEffect(() => {
+        formCtx?.registerField(fieldPath, initialChecked);
+      }, [fieldPath]); // eslint-disable-line react-hooks/exhaustive-deps
+      const handleChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+        setChecked(e.target.checked);
+        formCtx?.updateField(fieldPath, e.target.checked);
+        onAction?.({ type: 'input', path: fieldPath, value: e.target.checked });
+      }, [onAction, fieldPath, formCtx]);
+      return (
+        <div className="a2ui-checkbox flex items-center gap-2">
+          <input
+            type="checkbox"
+            className="h-4 w-4 rounded border-border cursor-pointer"
+            checked={checked}
+            onChange={handleChange}
+          />
+          {label && <label className="text-sm cursor-pointer">{label}</label>}
+        </div>
+      );
+    }
+
+    case 'ChoicePicker': {
+      const formCtx = useA2UIFormContext();
+      const initialValue = resolveText(props.value) || '';
+      const [selectedValue, setSelectedValue] = useState(initialValue);
+      const options = (props.options as Array<{ label: string; value: string }>) || [];
+      const fieldPath = extractFieldPath(props);
+      useEffect(() => {
+        formCtx?.registerField(fieldPath, initialValue);
+      }, [fieldPath]); // eslint-disable-line react-hooks/exhaustive-deps
+      const handleChange = useCallback((value: string) => {
+        setSelectedValue(value);
+        formCtx?.updateField(fieldPath, value);
+        onAction?.({ type: 'select', path: fieldPath, value });
+      }, [onAction, fieldPath, formCtx]);
+      return (
+        <div className="a2ui-choice-picker flex flex-col gap-1">
+          {label && <label className="text-sm font-medium">{label}</label>}
+          <div className="flex flex-wrap gap-2">
+            {options.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                className={`px-3 py-1.5 rounded-md text-sm border transition-colors cursor-pointer ${
+                  selectedValue === opt.value
+                    ? 'bg-primary text-primary-foreground border-primary'
+                    : 'bg-background border-border hover:bg-accent'
+                }`}
+                onClick={() => handleChange(opt.value)}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    case 'Slider': {
+      const formCtx = useA2UIFormContext();
+      const min = (props.min as number) || 0;
+      const max = (props.max as number) || 100;
+      const step = (props.step as number) || 1;
+      const initialValue = (props.value as number) || min;
+      const [sliderValue, setSliderValue] = useState(initialValue);
+      const fieldPath = extractFieldPath(props);
+      useEffect(() => {
+        formCtx?.registerField(fieldPath, initialValue);
+      }, [fieldPath]); // eslint-disable-line react-hooks/exhaustive-deps
+      const handleChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+        const val = Number(e.target.value);
+        setSliderValue(val);
+        formCtx?.updateField(fieldPath, val);
+        onAction?.({ type: 'input', path: fieldPath, value: val });
+      }, [onAction, fieldPath, formCtx]);
+      return (
+        <div className="a2ui-slider flex flex-col gap-1">
+          {label && <label className="text-sm font-medium">{label} ({sliderValue})</label>}
+          <input
+            type="range"
+            min={min}
+            max={max}
+            step={step}
+            value={sliderValue}
+            onChange={handleChange}
+            className="w-full h-2 bg-muted rounded-lg appearance-none cursor-pointer accent-primary"
+          />
+        </div>
+      );
+    }
+
+    case 'DateTimeInput': {
+      const formCtx = useA2UIFormContext();
+      const initialValue = resolveText(props.value) || '';
+      const [dateValue, setDateValue] = useState(initialValue);
+      const fieldPath = extractFieldPath(props);
+      useEffect(() => {
+        formCtx?.registerField(fieldPath, initialValue);
+      }, [fieldPath]); // eslint-disable-line react-hooks/exhaustive-deps
+      const handleChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+        setDateValue(e.target.value);
+        formCtx?.updateField(fieldPath, e.target.value);
+        onAction?.({ type: 'input', path: fieldPath, value: e.target.value });
+      }, [onAction, fieldPath, formCtx]);
+      return (
+        <div className="a2ui-datetime flex flex-col gap-1">
+          {label && <label className="text-sm font-medium">{label}</label>}
+          <input
+            type="datetime-local"
+            className="border border-border rounded-md px-3 py-2 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary/20"
+            value={dateValue}
+            onChange={handleChange}
+          />
+        </div>
+      );
+    }
 
     case 'Image':
       return url ? (
@@ -472,16 +730,22 @@ function A2UIComponentNodeRenderer({ nodeId, nodeMap, onAction, defaultSchema, d
       return <hr className="my-2 border-border" />;
 
     case 'Chart':
-      return <A2UIChart {...props} />;
+      return <A2UIChart {...props} dataMap={dataMap} />;
 
     case 'LineChart':
     case 'BarChart':
     case 'PieChart':
-      return <A2UIChart {...props} chartType={type.replace('Chart', '').toLowerCase()} />;
+      return <A2UIChart {...props} chartType={type.replace('Chart', '').toLowerCase()} dataMap={dataMap} />;
 
     case 'List': {
       // Get the items data from the dataMap
-      const itemsPath = (props.items as Record<string, unknown> | undefined)?.path as string | undefined;
+      // items can be a string path "/users" or an object {path: "/users"}
+      let itemsPath: string | undefined;
+      if (typeof props.items === 'string') {
+        itemsPath = props.items;
+      } else if (props.items && typeof props.items === 'object') {
+        itemsPath = (props.items as Record<string, unknown>).path as string | undefined;
+      }
       let items: unknown[] | null = null;
       if (itemsPath) {
         const raw = dataMap.get(itemsPath);
@@ -555,7 +819,58 @@ interface A2UIChartProps {
   xAxis?: string;
   series?: unknown;
   data?: unknown;
+  dataMap?: Map<string, unknown>;
   [key: string]: unknown;
+}
+
+/**
+ * Extract chart data from dataMap using series key configuration.
+ * Looks for valueList entries in the dataMap and groups flat key-value
+ * items into object arrays suitable for recharts.
+ */
+function extractChartData(
+  dataMap: Map<string, unknown>,
+  xAxis: string,
+  series: Array<Record<string, unknown>>
+): Array<Record<string, unknown>> {
+  // Collect all configured keys (xAxis + series data keys)
+  const configuredKeys = new Set<string>();
+  configuredKeys.add(xAxis);
+  for (const s of series) {
+    const key = (s.key as string) || (s.name as string) || '';
+    if (key) configuredKeys.add(key);
+  }
+
+  // Look for a valueList in the dataMap under common paths
+  const candidatePaths = ['/data', '/chartData', '/items'];
+  for (const path of candidatePaths) {
+    const raw = dataMap.get(path);
+    if (Array.isArray(raw) && raw.length > 0) {
+      const grouped = groupFlatListItems(raw);
+      return grouped as Array<Record<string, unknown>>;
+    }
+  }
+
+  // Fallback: iterate through dataMap to find any array values that
+  // contain key-value pairs matching chart data structure
+  for (const [, value] of dataMap) {
+    if (Array.isArray(value) && value.length > 0) {
+      const first = value[0];
+      if (first && typeof first === 'object' && ('key' in first || 'valueMap' in first)) {
+        const grouped = groupFlatListItems(value);
+        if (grouped.length > 0 && grouped[0] && typeof grouped[0] === 'object') {
+          // Check that at least some configured keys are present
+          const objKeys = Object.keys(grouped[0] as Record<string, unknown>);
+          const hasMatch = objKeys.some((k) => configuredKeys.has(k));
+          if (hasMatch) {
+            return grouped as Array<Record<string, unknown>>;
+          }
+        }
+      }
+    }
+  }
+
+  return [];
 }
 
 function A2UIChart(props: A2UIChartProps) {
@@ -564,22 +879,18 @@ function A2UIChart(props: A2UIChartProps) {
   const chartType = (props.chartType as string) || 'line';
   const xAxis = (props.xAxis as string) || 'date';
   const series = (props.series as Array<Record<string, unknown>>) || [];
+  const dataMap = props.dataMap;
 
-  // Collect data from props.data or render a placeholder
-  const hasData = series.length > 0;
+  // Extract chart data from dataMap using series key configuration
+  const chartData = useMemo(() => {
+    if (!dataMap || dataMap.size === 0) return [];
+    return extractChartData(dataMap, xAxis, series);
+  }, [dataMap, xAxis, series]);
 
   return (
     <div className="a2ui-chart rounded-lg border border-border bg-card p-4">
       {title && <h4 className="text-sm font-semibold mb-3">{title}</h4>}
-      {hasData ? (
-        <div className="a2ui-chart-svg">
-          <A2UISimpleChart chartType={chartType} series={series} xAxis={xAxis} />
-        </div>
-      ) : (
-        <div className="text-sm text-muted-foreground text-center py-8">
-          Chart data not available
-        </div>
-      )}
+      <A2UISimpleChart chartType={chartType} series={series} xAxis={xAxis} chartData={chartData} />
     </div>
   );
 }
@@ -588,11 +899,21 @@ interface A2UISimpleChartProps {
   chartType: string;
   series: Array<Record<string, unknown>>;
   xAxis: string;
+  chartData: Array<Record<string, unknown>>;
 }
 
-function A2UISimpleChart({ chartType, series }: A2UISimpleChartProps) {
+function A2UISimpleChart({ chartType, series, xAxis, chartData }: A2UISimpleChartProps) {
   const colors = series.map((s) => (s.color as string) || '#3b82f6');
   const names = series.map((s) => (s.name as string) || (s.key as string) || 'Value');
+  const dataKeys = series.map((s) => (s.key as string) || (s.name as string) || 'value');
+
+  if (chartData.length === 0) {
+    return (
+      <div className="text-sm text-muted-foreground text-center py-8">
+        Chart data not available
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-2">
@@ -608,11 +929,50 @@ function A2UISimpleChart({ chartType, series }: A2UISimpleChartProps) {
           </div>
         ))}
       </div>
-      {/* Chart type indicator */}
-      <div className="text-xs text-muted-foreground text-center py-4 border border-dashed border-border rounded-md">
-        {chartType === 'bar' ? 'Bar Chart' : chartType === 'pie' ? 'Pie Chart' : 'Line Chart'}
-        {' — '}{series.length} series
-      </div>
+      {/* Chart */}
+      <ResponsiveContainer width="100%" height={300}>
+        {chartType === 'bar' ? (
+          <BarChart data={chartData}>
+            <CartesianGrid strokeDasharray="3 3" />
+            <XAxis dataKey={xAxis} />
+            <YAxis />
+            <Tooltip />
+            <Legend />
+            {dataKeys.map((key, i) => (
+              <Bar key={key} dataKey={key} fill={colors[i % colors.length]} />
+            ))}
+          </BarChart>
+        ) : chartType === 'pie' ? (
+          <PieChart>
+            <Pie
+              data={chartData}
+              dataKey={dataKeys[0]}
+              nameKey={xAxis}
+              cx="50%"
+              cy="50%"
+              outerRadius={100}
+              label
+            >
+              {chartData.map((_entry, index) => (
+                <Cell key={`cell-${index}`} fill={colors[index % colors.length]} />
+              ))}
+            </Pie>
+            <Tooltip />
+            <Legend />
+          </PieChart>
+        ) : (
+          <LineChart data={chartData}>
+            <CartesianGrid strokeDasharray="3 3" />
+            <XAxis dataKey={xAxis} />
+            <YAxis />
+            <Tooltip />
+            <Legend />
+            {dataKeys.map((key, i) => (
+              <Line key={key} type="monotone" dataKey={key} stroke={colors[i % colors.length]} />
+            ))}
+          </LineChart>
+        )}
+      </ResponsiveContainer>
     </div>
   );
 }
