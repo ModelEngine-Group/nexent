@@ -9,6 +9,8 @@ from consts.const import S3_URL_PREFIX
 from consts.const import NORTHBOUND_EXTERNAL_URL
 from urllib.parse import quote
 
+from utils.knowledge_telemetry import set_span_attributes, trace_knowledge_operation
+
 
 def _normalize_object_and_bucket(object_name: str, bucket: Optional[str] = None) -> Tuple[str, Optional[str]]:
     """
@@ -147,6 +149,7 @@ def upload_file(
     return response
 
 
+@trace_knowledge_operation("knowledge.minio.upload", "minio.upload")
 def upload_fileobj(
         file_obj: BinaryIO,
         file_name: str,
@@ -188,6 +191,7 @@ def upload_fileobj(
     # Upload file
     success, result = minio_client.upload_fileobj(
         file_obj, object_name, bucket)
+    set_span_attributes(file_size_bytes=file_size, stage="minio.upload")
 
     # Restore original position (if file is still open)
     try:

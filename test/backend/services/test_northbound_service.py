@@ -733,6 +733,7 @@ class TestStartStreamingChat:
         assert response.headers["conversation_id"] == "123"
         assert response.headers["X-Request-Id"] == ctx.request_id
         assert response.headers["x-existing"] == "1"
+        assert response.headers["X-Accel-Buffering"] == "no"
 
 
 @pytest.mark.asyncio

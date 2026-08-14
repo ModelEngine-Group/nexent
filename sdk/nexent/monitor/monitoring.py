@@ -964,6 +964,8 @@ class MonitoringManager:
                 span.set_attribute("error.type", type(e).__name__)
                 span.set_attribute("error.message", str(e))
                 raise
+            else:
+                span.set_status(Status(StatusCode.OK))
 
     def set_openinference_output(
         self,

@@ -259,18 +259,18 @@ FORWARD_REDIS_RETRY_MAX = int(os.getenv("FORWARD_REDIS_RETRY_MAX", "12"))
 
 
 # Ray Configuration
+DP_PART_PROCESSOR_COUNT = int(os.getenv("DP_PART_PROCESSOR_COUNT", "3"))
+DP_FILE_SPLIT_SIZE_MB = int(os.getenv("DP_FILE_SPLIT_SIZE_MB", "5"))
 RAY_ACTOR_NUM_CPUS = int(os.getenv("RAY_ACTOR_NUM_CPUS", "2"))
 RAY_DASHBOARD_PORT = int(os.getenv("RAY_DASHBOARD_PORT", "8265"))
 RAY_DASHBOARD_HOST = os.getenv("RAY_DASHBOARD_HOST", "0.0.0.0")
-RAY_NUM_CPUS = int(os.getenv("RAY_NUM_CPUS", "4"))
-RAY_OBJECT_STORE_MEMORY_GB = float(
-    os.getenv("RAY_OBJECT_STORE_MEMORY_GB", "0.25"))
+RAY_NUM_CPUS = DP_PART_PROCESSOR_COUNT * RAY_ACTOR_NUM_CPUS
+RAY_OBJECT_STORE_MEMORY_GB = float(os.getenv("RAY_OBJECT_STORE_MEMORY_GB", "0.25"))
 RAY_TEMP_DIR = os.getenv("RAY_TEMP_DIR", "/tmp/ray")
 RAY_LOG_LEVEL = os.getenv("RAY_LOG_LEVEL", "INFO").upper()
 # Disable plasma preallocation to reduce idle memory usage
 # When set to false, Ray will allocate object store memory on-demand instead of preallocating
-RAY_preallocate_plasma = os.getenv(
-    "RAY_preallocate_plasma", "false").lower() == "true"
+RAY_preallocate_plasma = os.getenv("RAY_preallocate_plasma", "false").lower() == "true"
 
 
 # Service Control Flags
@@ -299,13 +299,11 @@ RAY_ADDRESS = os.getenv("RAY_ADDRESS", "auto")
 QUEUES = os.getenv("QUEUES", "process_q,process_part_q,forward_q")
 # Will be dynamically set based on PID if not provided
 WORKER_NAME = os.getenv("WORKER_NAME")
-WORKER_CONCURRENCY = int(os.getenv("WORKER_CONCURRENCY", "4"))
+WORKER_CONCURRENCY = DP_PART_PROCESSOR_COUNT + 1
 RAY_WARM_ACTOR_POOL_SIZE_PART = int(
     os.getenv("RAY_WARM_ACTOR_POOL_SIZE_PART", "2"))
 RAY_WARM_ACTOR_POOL_SIZE_PROCESS = int(
     os.getenv("RAY_WARM_ACTOR_POOL_SIZE_PROCESS", "1"))
-# Global Ray actor pool (shared by process_q/process_part_q workers)
-RAY_GLOBAL_ACTOR_POOL_SIZE = int(os.getenv("RAY_GLOBAL_ACTOR_POOL_SIZE", "3"))
 RAY_ACTOR_WARM_TIMEOUT_S = float(os.getenv("RAY_ACTOR_WARM_TIMEOUT_S", "60"))
 RAY_GLOBAL_ACTOR_POOL_NAME = os.getenv(
     "RAY_GLOBAL_ACTOR_POOL_NAME", "nexent_global_data_processor_pool")

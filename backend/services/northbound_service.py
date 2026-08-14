@@ -453,6 +453,7 @@ async def start_streaming_chat(
     # Attach request id header and conversation_id (internal id)
     response.headers["X-Request-Id"] = ctx.request_id
     response.headers["conversation_id"] = str(conversation_id)
+    response.headers["X-Accel-Buffering"] = "no"
     return response
 
 
