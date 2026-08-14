@@ -121,6 +121,24 @@ async def test_save_upload_file_error(tmp_path, fmu, monkeypatch):
     assert ok is False
 
 
+@pytest.mark.asyncio
+async def test_trigger_data_process_continues_when_tenant_lookup_fails(fmu, monkeypatch):
+    fake_client = _FakeAsyncClient(_Resp(201, {"task_id": "t1"}))
+    fake_httpx = types.SimpleNamespace(AsyncClient=lambda: fake_client, RequestError=_FakeRequestError)
+    monkeypatch.setattr(fmu, "httpx", fake_httpx)
+    monkeypatch.setattr(fmu, "get_current_user_id", lambda authorization: (_ for _ in ()).throw(ValueError("bad token")))
+    monkeypatch.setattr(fmu, "inject_trace_context", lambda: {"traceparent": "00-test"})
+
+    result = await fmu.trigger_data_process(
+        [{"path_or_url": "/data/a.txt", "filename": "a.txt"}],
+        _ProcessParams("tok", "local", "basic", "idx"),
+    )
+
+    assert result == {"task_id": "t1"}
+    assert fake_client.last_post["headers"]["traceparent"] == "00-test"
+    assert fake_client.last_post["json"]["tenant_id"] is None
+
+
 # -------------------- trigger_data_process --------------------
 
 

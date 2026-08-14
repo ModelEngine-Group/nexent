@@ -14,10 +14,17 @@ fake_logger = types.ModuleType("unstructured_inference.logger")
 fake_logger.logger = types.SimpleNamespace(info=lambda *a, **k: None, warning=lambda *a, **k: None, error=lambda *a, **k: None)
 fake_models.tables = fake_tables
 fake_unstructured.models = fake_models
+fake_partition = types.ModuleType("unstructured.partition")
+fake_partition_auto = types.ModuleType("unstructured.partition.auto")
+fake_partition_auto.partition = lambda *args, **kwargs: []
+fake_partition.auto = fake_partition_auto
 sys.modules.setdefault("unstructured_inference", fake_unstructured)
 sys.modules.setdefault("unstructured_inference.models", fake_models)
 sys.modules.setdefault("unstructured_inference.models.tables", fake_tables)
 sys.modules.setdefault("unstructured_inference.logger", fake_logger)
+sys.modules.setdefault("unstructured", types.ModuleType("unstructured"))
+sys.modules.setdefault("unstructured.partition", fake_partition)
+sys.modules.setdefault("unstructured.partition.auto", fake_partition_auto)
 
 from sdk.nexent.data_process.core import DataProcessCore
 
@@ -448,6 +455,15 @@ class TestDataProcessCore:
 
         data = b"hello"
         parts = core.file_split(data, "data.txt", max_size=10)
+
+        assert len(parts) == 1
+        assert parts[0].getvalue() == data
+
+    def test_file_split_unknown_splitter_falls_back(self, core):
+        """A requested splitter that is unavailable should retain the input bytes."""
+        data = b"hello"
+
+        parts = core.file_split(data, "data.txt", splitter="MissingSplitter")
 
         assert len(parts) == 1
         assert parts[0].getvalue() == data

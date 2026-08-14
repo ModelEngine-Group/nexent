@@ -17,10 +17,17 @@ fake_logger = types.ModuleType("unstructured_inference.logger")
 fake_logger.logger = types.SimpleNamespace(info=lambda *a, **k: None, warning=lambda *a, **k: None, error=lambda *a, **k: None)
 fake_models.tables = fake_tables
 fake_unstructured.models = fake_models
+fake_partition = types.ModuleType("unstructured.partition")
+fake_partition_auto = types.ModuleType("unstructured.partition.auto")
+fake_partition_auto.partition = lambda *args, **kwargs: []
+fake_partition.auto = fake_partition_auto
 sys.modules.setdefault("unstructured_inference", fake_unstructured)
 sys.modules.setdefault("unstructured_inference.models", fake_models)
 sys.modules.setdefault("unstructured_inference.models.tables", fake_tables)
 sys.modules.setdefault("unstructured_inference.logger", fake_logger)
+sys.modules.setdefault("unstructured", types.ModuleType("unstructured"))
+sys.modules.setdefault("unstructured.partition", fake_partition)
+sys.modules.setdefault("unstructured.partition.auto", fake_partition_auto)
 
 from sdk.nexent.data_process.file_splitter import FileSplitter
 
@@ -381,4 +388,89 @@ def test_convert_bytes_with_libreoffice_no_output_raises(monkeypatch, tmp_path):
     monkeypatch.setattr("sdk.nexent.data_process.file_splitter.tempfile.TemporaryDirectory", lambda: TDir())
     monkeypatch.setattr("sdk.nexent.data_process.file_splitter.subprocess.run", lambda *a, **k: None)
     with pytest.raises(RuntimeError, match="produced no output"):
+        splitter._convert_bytes_with_libreoffice(b"doc", ".docx", ".pdf")
+
+
+@pytest.mark.parametrize(
+    ("filename", "method_name"),
+    [
+        ("book.epub", "split_epub_by_size"),
+        ("book.xlsx", "split_excel"),
+        ("items.json", "split_json_stream"),
+        ("notes.md", "split_markdown"),
+        ("report.pdf", "split_pdf_by_size"),
+        ("notes.txt", "split_txt_by_size"),
+        ("data.xml", "split_xml_by_size"),
+    ],
+)
+def test_file_process_routes_supported_extensions(monkeypatch, filename, method_name):
+    splitter = FileSplitter()
+    expected = [BytesIO(b"part")]
+    captured = {}
+
+    def route(file_data, *args, **kwargs):
+        captured["file_data"] = file_data
+        captured["kwargs"] = kwargs
+        return expected
+
+    monkeypatch.setattr(splitter, method_name, route)
+
+    result = splitter.file_process(b"source", filename, max_size=8, encoding="latin-1")
+
+    assert result == expected
+    assert captured["file_data"] == b"source"
+
+
+def test_resolve_max_size_uses_target_parts_and_default():
+    splitter = FileSplitter()
+
+    assert splitter._resolve_max_size(b"123456789", target_parts=4) == 3
+    assert splitter._resolve_max_size(b"x", max_size=0) == 5 * 1024 * 1024
+
+
+def test_copy_images_safe_handles_missing_images_and_anchor_copy_failure(monkeypatch):
+    splitter = FileSplitter()
+    added = []
+
+    class Source:
+        _images = []
+
+    class ImageSource:
+        anchor = object()
+
+        def _data(self):
+            return b"image"
+
+    class Destination:
+        def add_image(self, image, anchor):
+            added.append((image, anchor))
+
+    monkeypatch.setattr("openpyxl.drawing.image.Image", lambda _bio: object())
+    monkeypatch.setattr("sdk.nexent.data_process.file_splitter.copy", lambda _anchor: (_ for _ in ()).throw(ValueError()))
+
+    splitter.copy_images_safe(Source(), Destination())
+    splitter.copy_images_safe(type("WithImage", (), {"_images": [ImageSource()]})(), Destination())
+
+    assert added[0][1] is ImageSource.anchor
+
+
+def test_convert_bytes_with_libreoffice_wraps_command_failure(monkeypatch, tmp_path):
+    splitter = FileSplitter()
+    work = tmp_path / "w3"
+    work.mkdir()
+
+    class TDir:
+        def __enter__(self):
+            return str(work)
+
+        def __exit__(self, *args):
+            return False
+
+    monkeypatch.setattr("sdk.nexent.data_process.file_splitter.tempfile.TemporaryDirectory", lambda: TDir())
+    monkeypatch.setattr(
+        "sdk.nexent.data_process.file_splitter.subprocess.run",
+        lambda *args, **kwargs: (_ for _ in ()).throw(OSError("missing soffice")),
+    )
+
+    with pytest.raises(RuntimeError, match="LibreOffice conversion failed"):
         splitter._convert_bytes_with_libreoffice(b"doc", ".docx", ".pdf")

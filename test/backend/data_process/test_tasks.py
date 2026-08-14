@@ -3129,3 +3129,599 @@ def test_get_all_task_ids_uses_scan_instead_of_keys(monkeypatch):
         "task-1",
         "task-2",
     ]
+
+
+def test_extract_error_code_various_formats(monkeypatch):
+    """Test extract_error_code handles different error formats."""
+    import_tasks_with_fake_ray(monkeypatch)
+    from backend.data_process import tasks
+
+    # From parsed_error dict
+    result = tasks.extract_error_code(
+        "Some error message",
+        parsed_error={"error_code": "ERR_001"}
+    )
+    assert result == "ERR_001"
+
+    # From JSON string in reason
+    result = tasks.extract_error_code(
+        '{"error_code": "ERR_002"}',
+        parsed_error=None
+    )
+    assert result == "ERR_002"
+
+    # From nested detail
+    result = tasks.extract_error_code(
+        '{"detail": {"error_code": "ERR_003"}}',
+        parsed_error=None
+    )
+    assert result == "ERR_003"
+
+    # From regex pattern in raw string
+    result = tasks.extract_error_code(
+        'Some error with "error_code": "ERR_004"',
+        parsed_error=None
+    )
+    assert result == "ERR_004"
+
+    # No error code found
+    result = tasks.extract_error_code("Plain error message", parsed_error=None)
+    assert result == "unknown_error"
+
+
+def test_build_balanced_batches_various_sizes(monkeypatch):
+    """Test _build_balanced_batches with various input sizes."""
+    import_tasks_with_fake_ray(monkeypatch)
+    from backend.data_process import tasks
+
+    # Empty input
+    result = tasks._build_balanced_batches([])
+    assert result == []
+
+    # Single batch (below batch size)
+    chunks = [{"content": f"chunk_{i}"} for i in range(10)]
+    result = tasks._build_balanced_batches(chunks)
+    assert len(result) == 1
+
+    # Multiple batches
+    chunks = [{"content": f"chunk_{i}"} for i in range(200)]
+    result = tasks._build_balanced_batches(chunks)
+    assert len(result) > 1
+
+    # With image metadata chunks
+    chunks = [
+        {"content": "text1", "process_source": "UniversalImageExtractor"},
+        {"content": "text2"},
+        {"content": "text3", "process_source": "UniversalImageExtractor"},
+        {"content": "text4"},
+    ]
+    result = tasks._build_balanced_batches(chunks, batch_size=2)
+    # Should distribute evenly
+    assert len(result) == 2
+
+
+def test_count_image_metadata_chunks(monkeypatch):
+    """Test _count_image_metadata_chunks counting."""
+    import_tasks_with_fake_ray(monkeypatch)
+    from backend.data_process import tasks
+
+    # None input
+    result = tasks._count_image_metadata_chunks(None)
+    assert result == 0
+
+    # Empty list
+    result = tasks._count_image_metadata_chunks([])
+    assert result == 0
+
+    # Mixed chunks
+    chunks = [
+        {"content": "text1", "process_source": "UniversalImageExtractor"},
+        {"content": "text2"},
+        {"content": "text3", "metadata": {"process_source": "UniversalImageExtractor"}},
+        {"content": "text4", "metadata": {"process_source": "Other"}},
+    ]
+    result = tasks._count_image_metadata_chunks(chunks)
+    assert result == 2
+
+
+def test_compute_split_wait_timeout(monkeypatch):
+    """Test _compute_split_wait_timeout calculation."""
+    import_tasks_with_fake_ray(monkeypatch)
+    from backend.data_process import tasks
+
+    monkeypatch.setattr(tasks, "DP_REDIS_CHUNKS_WAIT_TIMEOUT_S", 30)
+    monkeypatch.setattr(tasks, "PER_WAVE_TIMEOUT", 60)
+    monkeypatch.setattr(tasks, "MAX_TIMEOUT", 300)
+    monkeypatch.setattr(tasks, "_estimate_parallel_parts", lambda: 2)
+
+    # Single part (no waves)
+    result = tasks._compute_split_wait_timeout(1)
+    assert result == 30
+
+    # Multiple parts
+    result = tasks._compute_split_wait_timeout(10)
+    waves = math.ceil(10 / 2)
+    expected = min(300, 30 + max(0, waves - 1) * 60)
+    assert result == expected
+
+
+def test_forward_context_creation(monkeypatch):
+    """Test _init_forward_context creates context correctly."""
+    import_tasks_with_fake_ray(monkeypatch)
+    from backend.data_process import tasks
+
+    ctx = tasks._init_forward_context(
+        task_id="task-1",
+        request_id="req-1",
+        start_time=1000.0,
+        source="/path/to/file.pdf",
+        index_name="test-index",
+        source_type="local",
+        original_filename="file.pdf",
+    )
+    assert ctx.task_id == "task-1"
+    assert ctx.request_id == "req-1"
+    assert ctx.source == "/path/to/file.pdf"
+    assert ctx.index_name == "test-index"
+    assert ctx.original_filename == "file.pdf"
+
+
+def test_is_forward_task_cancelled(monkeypatch):
+    """Test _is_forward_task_cancelled checks Redis flag."""
+    import_tasks_with_fake_ray(monkeypatch)
+    from backend.data_process import tasks
+
+    class MockRedisService:
+        def is_task_cancelled(self, task_id):
+            return task_id == "cancelled-task"
+
+    monkeypatch.setattr(tasks, "get_redis_service", lambda: MockRedisService())
+
+    ctx = tasks._init_forward_context(
+        task_id="cancelled-task",
+        request_id="req",
+        start_time=1000.0,
+        source="s",
+        index_name="i",
+        source_type="local",
+        original_filename=None,
+    )
+
+    assert tasks._is_forward_task_cancelled(ctx) is True
+
+    ctx2 = tasks._init_forward_context(
+        task_id="active-task",
+        request_id="req",
+        start_time=1000.0,
+        source="s",
+        index_name="i",
+        source_type="local",
+        original_filename=None,
+    )
+    assert tasks._is_forward_task_cancelled(ctx2) is False
+
+
+def test_build_forward_cancelled_result(monkeypatch):
+    """Test _build_forward_cancelled_result creates correct response."""
+    import_tasks_with_fake_ray(monkeypatch)
+    from backend.data_process import tasks
+
+    ctx = tasks._init_forward_context(
+        task_id="task-cancel",
+        request_id="req",
+        start_time=1000.0,
+        source="/path/to/file.pdf",
+        index_name="test-index",
+        source_type="local",
+        original_filename="file.pdf",
+    )
+
+    result = tasks._build_forward_cancelled_result(ctx)
+    assert result["task_id"] == "task-cancel"
+    assert result["source"] == "/path/to/file.pdf"
+    assert result["index_name"] == "test-index"
+    assert result["es_result"]["success"] is False
+    assert "cancelled" in result["es_result"]["message"]
+
+
+def test_build_forward_error(monkeypatch):
+    """Test _build_forward_error creates exception with correct structure."""
+    import_tasks_with_fake_ray(monkeypatch)
+    from backend.data_process import tasks
+
+    exc = tasks._build_forward_error(
+        message="Test error",
+        index_name="test-index",
+        source="/path/to/file.pdf",
+        original_filename="file.pdf",
+    )
+
+    import json
+    error_dict = json.loads(str(exc))
+    assert error_dict["message"] == "Test error"
+    assert error_dict["index_name"] == "test-index"
+    assert error_dict["source"] == "/path/to/file.pdf"
+    assert error_dict["original_filename"] == "file.pdf"
+
+
+def test_parse_json_or_none(monkeypatch):
+    """Test _parse_json_or_none parses or returns None."""
+    import_tasks_with_fake_ray(monkeypatch)
+    from backend.data_process import tasks
+
+    # Valid JSON dict
+    result = tasks._parse_json_or_none('{"key": "value"}')
+    assert result == {"key": "value"}
+
+    # Valid JSON array (returns None)
+    result = tasks._parse_json_or_none('[1, 2, 3]')
+    assert result is None
+
+    # Invalid JSON
+    result = tasks._parse_json_or_none("not json")
+    assert result is None
+
+    # Empty string
+    result = tasks._parse_json_or_none("")
+    assert result is None
+
+
+def test_global_ray_actor_pool_manager_ensure_pool(monkeypatch):
+    """Test GlobalRayActorPoolManager.ensure_pool logic."""
+    import_tasks_with_fake_ray(monkeypatch)
+    from backend.data_process import tasks
+
+    manager = tasks.GlobalRayActorPoolManager(warm_timeout_s=10.0)
+    assert manager.warm_timeout_s == 10.0
+    assert len(manager.actors) == 0
+
+    # Note: _create_and_warm_actor requires a real Ray actor,
+    # so we just test the pool size calculation logic
+    result = manager.ensure_pool(desired=0, max_allowed=5)
+    assert result == 0
+
+
+def test_delete_source_file_via_http_sync(monkeypatch):
+    """Test _delete_source_file_via_http_sync makes correct HTTP call."""
+    import_tasks_with_fake_ray(monkeypatch)
+    from backend.data_process import tasks
+
+    captured = {}
+
+    class FakeResponse:
+        status_code = 200
+        text = '{"deleted": true}'
+
+        def json(self):
+            return {"deleted": True}
+
+    def mock_delete(url, params, headers, timeout):
+        captured["url"] = url
+        captured["params"] = params
+        captured["headers"] = headers
+        captured["timeout"] = timeout
+        return FakeResponse()
+
+    monkeypatch.setattr(tasks.requests, "delete", mock_delete)
+
+    result = tasks._delete_source_file_via_http_sync(
+        base_url="http://api",
+        index_name="test-index",
+        path_or_url="/path/to/file.pdf",
+        scope="source_only",
+        authorization="Bearer token123",
+        timeout_s=30.0,
+    )
+
+    assert result["http_status"] == 200
+    assert result["response_json"] == {"deleted": True}
+    assert captured["url"] == "http://api/indices/test-index/documents"
+    assert captured["params"]["path_or_url"] == "/path/to/file.pdf"
+    assert captured["params"]["scope"] == "source_only"
+    assert captured["headers"]["Authorization"] == "Bearer token123"
+
+
+def test_delete_source_file_via_http_sync_empty_base_url(monkeypatch):
+    """Test _delete_source_file_via_http_sync raises when base_url is empty."""
+    import_tasks_with_fake_ray(monkeypatch)
+    from backend.data_process import tasks
+
+    with pytest.raises(RuntimeError, match="not configured"):
+        tasks._delete_source_file_via_http_sync(
+            base_url="",
+            index_name="test-index",
+            path_or_url="/path/to/file.pdf",
+            scope="source_only",
+        )
+
+
+def test_submit_process_forward_chain(monkeypatch):
+    """Test submit_process_forward_chain creates correct chain."""
+    import_tasks_with_fake_ray(monkeypatch)
+    from backend.data_process import tasks
+
+    captured_chain = []
+
+    class MockChain:
+        def __init__(self, *steps):
+            self.steps = steps
+
+        def set(self, queue=None):
+            return self
+
+        def apply_async(self):
+            class Result:
+                id = "chain-id-123"
+            return Result()
+
+    monkeypatch.setattr(tasks, "chain", lambda *args: MockChain(*args))
+
+    chain_id = tasks.submit_process_forward_chain(
+        source="/path/to/file.pdf",
+        source_type="local",
+        chunking_strategy="basic",
+        index_name="test-index",
+        original_filename="file.pdf",
+        authorization="Bearer token",
+        embedding_model_id=1,
+        tenant_id="tenant-1",
+    )
+
+    assert chain_id == "chain-id-123"
+
+
+def test_aggregate_parts_empty_results(monkeypatch):
+    """Test aggregate_parts handles empty results."""
+    import_tasks_with_fake_ray(monkeypatch)
+    from backend.data_process import tasks
+
+    self = FakeSelf("agg-1")
+    result = tasks.aggregate_parts(self, parts_results=None)
+    assert result["chunks"] == []
+
+    result = tasks.aggregate_parts(self, parts_results=[])
+    assert result["chunks"] == []
+
+    result = tasks.aggregate_parts(self, parts_results=[[], None, [{"content": "x"}]])
+    assert result["chunks"] == [{"content": "x"}]
+
+
+def test_process_sync_with_celery_context(monkeypatch, tmp_path):
+    """Test process_sync with Celery task context."""
+    import_tasks_with_fake_ray(monkeypatch, initialized=True)
+    from backend.data_process import tasks
+
+    f = tmp_path / "test.txt"
+    f.write_text("hello world")
+
+    class FakeActor:
+        def __init__(self):
+            pass
+
+        def process_file(self, *args, **kwargs):
+            class Ref:
+                pass
+            return Ref()
+
+    fake_ray = sys.modules.get("ray")
+    fake_ray.get_returns = [{"content": "hello world", "metadata": {}}]
+
+    monkeypatch.setattr(tasks, "get_ray_actor", lambda: FakeActor())
+
+    self = FakeSelf("sync-1")
+    result = tasks.process_sync(
+        self,
+        source=str(f),
+        source_type="local",
+        chunking_strategy="basic",
+    )
+
+    assert result["text"] == "hello world"
+    assert result["chunks_count"] == 1
+    assert len(self.states) >= 1
+
+
+def test_process_and_forward_delegates_to_chain(monkeypatch):
+    """Test process_and_forward creates chain and returns ID."""
+    import_tasks_with_fake_ray(monkeypatch)
+    from backend.data_process import tasks
+
+    class MockResult:
+        id = "chain-456"
+
+    captured = {}
+
+    class MockChain:
+        def __init__(self, *steps):
+            captured["steps"] = len(steps)
+
+        def set(self, queue=None):
+            return self
+
+        def apply_async(self):
+            return MockResult()
+
+    monkeypatch.setattr(tasks, "chain", lambda *args: MockChain(*args))
+
+    self = FakeSelf("paf-1")
+    result = tasks.process_and_forward(
+        self,
+        source="/path/to/file.pdf",
+        source_type="local",
+        chunking_strategy="basic",
+        index_name="test-index",
+    )
+
+    assert result == "chain-456"
+    assert captured["steps"] == 3  # process, forward, cleanup_source
+
+
+def test_estimate_parallel_parts_edge_cases(monkeypatch):
+    """Test _estimate_parallel_parts handles edge cases."""
+    import_tasks_with_fake_ray(monkeypatch)
+    from backend.data_process import tasks
+
+    monkeypatch.setattr(tasks, "RAY_NUM_CPUS", 4)
+    monkeypatch.setattr(tasks, "RAY_ACTOR_NUM_CPUS", 2)
+    monkeypatch.setattr(tasks, "DP_PART_PROCESSOR_COUNT", 10)
+
+    # Should respect MAX constraint
+    result = tasks._estimate_parallel_parts()
+    assert result <= 10
+
+    # With more reasonable settings
+    monkeypatch.setattr(tasks, "DP_PART_PROCESSOR_COUNT", 2)
+    result = tasks._estimate_parallel_parts()
+    assert result == 2
+
+
+def test_run_async_fallback_thread_executor(monkeypatch):
+    """Test run_async falls back to thread executor when nest_asyncio unavailable."""
+    import_tasks_with_fake_ray(monkeypatch)
+
+    class FakeLoop:
+        def is_running(self):
+            return True
+
+        def run_until_complete(self, coro):
+            return "thread-result"
+
+    async def sample_coro():
+        return "async-result"
+
+    # Remove nest_asyncio if present
+    if "nest_asyncio" in sys.modules:
+        del sys.modules["nest_asyncio"]
+
+    monkeypatch.setattr(asyncio, "get_running_loop", lambda: FakeLoop())
+
+    from backend.data_process import tasks
+    result = tasks.run_async(sample_coro())
+    assert result == "thread-result"
+
+
+def test_extract_error_code_from_es_response(monkeypatch):
+    """Test _extract_error_code_from_es_response handles various ES responses."""
+    import_tasks_with_fake_ray(monkeypatch)
+    from backend.data_process import tasks
+
+    # From parsed body with error_code
+    result = tasks._extract_error_code_from_es_response(
+        parsed_body={"error_code": "ES_ERR_001"},
+        text='{"error": "some error"}',
+    )
+    assert result == "ES_ERR_001"
+
+    # From nested detail
+    result = tasks._extract_error_code_from_es_response(
+        parsed_body={"detail": {"error_code": "ES_ERR_002"}},
+        text='{"detail": {"error_code": "ES_ERR_002"}}',
+    )
+    assert result == "ES_ERR_002"
+
+    # From regex in text
+    result = tasks._extract_error_code_from_es_response(
+        parsed_body={"error": "Some error"},
+        text='{"error_code": "ES_ERR_003"}',
+    )
+    assert result == "ES_ERR_003"
+
+    # None when no error code
+    result = tasks._extract_error_code_from_es_response(
+        parsed_body={"error": "Generic error"},
+        text='{"error": "no code here"}',
+    )
+    assert result is None
+
+
+def test_save_error_to_redis_empty_task_id(monkeypatch):
+    """Test save_error_to_redis handles empty task_id."""
+    import_tasks_with_fake_ray(monkeypatch)
+    from backend.data_process import tasks
+
+    # Should not raise, just log warning
+    tasks.save_error_to_redis("", "Some error", 1000.0)
+    tasks.save_error_to_redis(None, "Some error", 1000.0)
+
+
+def test_save_error_to_redis_empty_reason(monkeypatch):
+    """Test save_error_to_redis handles empty error_reason."""
+    import_tasks_with_fake_ray(monkeypatch)
+    from backend.data_process import tasks
+
+    # Should not raise, just log warning
+    tasks.save_error_to_redis("task-1", "", 1000.0)
+    tasks.save_error_to_redis("task-1", None, 1000.0)
+
+
+def test_distribute_chunks_round_robin(monkeypatch):
+    """Test _distribute_chunks_round_robin distributes evenly."""
+    import_tasks_with_fake_ray(monkeypatch)
+    from backend.data_process import tasks
+
+    # Create empty batches
+    batches = [[], [], []]
+
+    # Distribute 10 chunks
+    chunks = [{"content": f"chunk_{i}"} for i in range(10)]
+
+    tasks._distribute_chunks_round_robin(
+        batches=batches,
+        chunks=chunks,
+        batch_size=10,
+        error_context="test",
+    )
+
+    # Each batch should have some chunks
+    total = sum(len(b) for b in batches)
+    assert total == 10
+
+
+def test_prewarm_ray_actors(monkeypatch):
+    """Test prewarm_ray_actors calls pool manager."""
+    import_tasks_with_fake_ray(monkeypatch)
+    from backend.data_process import tasks
+
+    captured = {}
+
+    class MockManager:
+        def __init__(self, warm_timeout_s):
+            pass
+
+        def ensure_pool(self, desired, max_allowed):
+            captured["desired"] = desired
+            captured["max_allowed"] = max_allowed
+            return 3
+
+    monkeypatch.setattr(tasks, "_get_or_create_global_pool_manager", lambda: MockManager(60))
+    monkeypatch.setattr(tasks, "_estimate_parallel_parts", lambda: 2)
+
+    result = tasks.prewarm_ray_actors(target_size=5)
+    assert result == 3
+    assert captured["desired"] == 5
+
+
+def test_get_split_actor(monkeypatch):
+    """Test _get_split_actor returns actor from pool."""
+    import_tasks_with_fake_ray(monkeypatch, initialized=True)
+    from backend.data_process import tasks
+
+    class MockActor:
+        pass
+
+    class MockManager:
+        def get_actor(self):
+            return MockActor()
+
+    captured_manager = []
+
+    def mock_get_manager():
+        manager = MockManager()
+        captured_manager.append(manager)
+        return manager
+
+    monkeypatch.setattr(tasks, "_get_or_create_global_pool_manager", mock_get_manager)
+
+    actor = tasks._get_split_actor()
+    assert actor is MockActor
+    assert len(captured_manager) == 1
