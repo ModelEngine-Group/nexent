@@ -348,12 +348,14 @@ def _critical_literals(content: str) -> set[str]:
     )
     literals = {match.group(0) for pattern in patterns for match in re.finditer(pattern, content)}
     for match in re.finditer(r"(?<![\w])([A-Za-z0-9][A-Za-z0-9._:/-]*)(?![\w])", content):
-        token = match.group(1)
-        has_alpha = any(character.isalpha() for character in token)
-        has_digit = any(character.isdigit() for character in token)
-        has_identifier_shape = bool(re.search(r"[._:/-]", token)) or any(character.isupper() for character in token)
+        literal = match.group(1)
+        has_alpha = any(character.isalpha() for character in literal)
+        has_digit = any(character.isdigit() for character in literal)
+        has_identifier_shape = bool(re.search(r"[._:/-]", literal)) or any(
+            character.isupper() for character in literal
+        )
         if has_alpha and has_digit and has_identifier_shape:
-            literals.add(token)
+            literals.add(literal)
     return literals
 
 
