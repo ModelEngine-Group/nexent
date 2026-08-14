@@ -1,0 +1,222 @@
+"""Backend bridge: DB model config → :class:`ModelContext` → :class:`MultimodalGateway`.
+
+This is the *thin* Phase 2 bridge. Existing service factory functions keep
+their public signatures; they fetch the model config dict (unchanged) and
+delegate construction to the gateway via :func:`get_adapter_from_config`::
+
+    cfg = tenant_config_manager.get_model_config(...)
+    model = get_adapter_from_config(cfg, "llm", "llm", tenant_id,
+                                    temperature=0.3, top_p=0.95)
+
+The vendor ``if model_factory == ...`` dispatch is replaced by registry
+resolution keyed on the normalized factory, so adding a vendor becomes one
+``@register_adapter`` decorator + one ``_FACTORY_NORMALIZE`` entry — the
+service layer is untouched.
+
+This is the **base branch** skeleton: only the modality-agnostic machinery
+lives here. ``_config_to_context`` keeps the common-kwargs construction but
+no per-modality subclass branch yet, so any call raises — no consumer calls
+it in this branch. Each feature branch (``feat/gw-vlm``, ``-llm``, …) appends
+its ``if modality == ...: return SubClass(**common, ...)`` branch and the
+modality-specific ``get_*_adapter`` wrappers that consume it.
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import Any, Dict, Optional
+
+from nexent import MessageObserver
+from nexent.core.gateway import (
+    EmbeddingContext,
+    LLMContext,
+    LongContextLLMContext,
+    ModelContext,
+    STTContext,
+    TTSContext,
+    VLMContext,
+    get_gateway,
+)
+from nexent.core.gateway.registry import get_registry
+from consts.const import MODEL_CONFIG_MAPPING, TEST_PCM_PATH
+from database.model_management_db import get_model_by_model_id, get_model_records
+from utils.config_utils import get_model_name_from_config, tenant_config_manager
+
+logger = logging.getLogger("model_gateway_service")
+
+# Normalize vendor aliases to canonical registry factory names.
+_FACTORY_NORMALIZE: Dict[str, str] = {
+    "volc": "volc",
+    "volcano": "volc",
+    "volcengine": "volc",
+    "火山引擎": "volc",
+    "dashscope": "dashscope",
+    "ali": "ali",
+    "alibaba": "ali",
+    "阿里云": "ali",
+    "silicon": "siliconflow",
+    "siliconflow": "siliconflow",
+    "openai": "openai",
+    "tokenpony": "tokenpony",
+    "jina": "jina",
+    "cohere": "cohere",
+    "modelengine": "modelengine",
+}
+
+# Modality-specific default factory when the raw factory is empty/unknown.
+_MODALITY_DEFAULT_FACTORY: Dict[str, str] = {
+    "llm": "openai",
+    "llm_long_context": "openai",
+    "vlm": "openai",
+    "embedding": "openai",
+    "rerank": "openai",
+    "stt": "ali",
+    "tts": "ali",
+    "multi_embedding": "jina",
+}
+
+
+def _normalize_factory(raw: Optional[str], modality: str) -> str:
+    """Return the canonical registry factory for ``raw`` under ``modality``."""
+    cleaned = (raw or "").strip().lower()
+    factory = _FACTORY_NORMALIZE.get(cleaned, cleaned)
+    # STT/TTS historically route DashScope through the Ali client.
+    if modality in ("stt", "tts") and factory in ("dashscope", "ali", "alibaba"):
+        factory = "ali"
+    if get_registry().has(factory, modality):
+        return factory
+    default = _MODALITY_DEFAULT_FACTORY.get(modality, "openai")
+    if factory:
+        logger.debug(
+            "factory %r has no %s adapter; falling back to %r", factory, modality, default
+        )
+    return default
+
+
+def _coalesce(*vals: Any) -> Any:
+    """Return the first non-``None`` value, or ``None`` if all are ``None``.
+
+    Unlike ``a or b``, this preserves falsy-but-valid values such as
+    ``temperature=0`` or ``top_p=0`` — an explicit ``0`` must reach the
+    adapter rather than being silently replaced by the cfg/default fallback.
+    """
+    for v in vals:
+        if v is not None:
+            return v
+    return None
+
+
+def _config_to_context(
+    cfg: Optional[dict],
+    modality: str,
+    slot: str,
+    tenant_id: Optional[str],
+    **construct_extras: Any,
+) -> ModelContext:
+    """Build a modality-specific :class:`ModelContext` from a DB config + per-call extras.
+
+    ``construct_extras`` carries per-call-site tuning (temperature, top_p,
+    max_output_tokens, stream, observer, display_name, timeout_seconds,
+    language, speed_ratio, ...) so construction is behavior-preserving. Known
+    keys are mapped to subclass fields directly.
+
+    Base branch: the common kwargs are constructed but no per-modality
+    subclass branch is present yet, so this raises. Feature branches append
+    ``if modality == "vlm": return VLMContext(**common, ...)`` etc.
+    """
+    cfg = cfg or {}
+    factory = _normalize_factory(cfg.get("model_factory"), modality)
+    needs_observer = modality in ("vlm", "llm", "llm_long_context")
+    observer = construct_extras.pop("observer", None)
+    if needs_observer and observer is None:
+        observer = MessageObserver()
+
+    # ---- common kwargs (base class fields) ----
+    common: Dict[str, Any] = dict(
+        model_name=construct_extras.pop("model_name", None) or get_model_name_from_config(cfg) or "",
+        base_url=cfg.get("base_url", ""),
+        api_key=cfg.get("api_key", ""),
+        modality=modality,
+        factory=factory,
+        tenant_id=tenant_id,
+        slot=slot,
+        ssl_verify=cfg.get("ssl_verify", True),
+        observer=observer,
+        display_name=_coalesce(construct_extras.pop("display_name", None), cfg.get("display_name")),
+        timeout_seconds=_coalesce(construct_extras.pop("timeout_seconds", None), cfg.get("timeout_seconds")),
+    )
+
+    # ---- modality-specific subclass construction (added per feature branch) ----
+    # e.g. `if modality == "vlm": return VLMContext(**common, ...)` in feat/gw-vlm.
+    raise ValueError(f"Unknown modality: {modality}")
+
+
+def get_adapter_from_config(
+    cfg: Optional[dict],
+    modality: str,
+    slot: str,
+    tenant_id: Optional[str] = None,
+    **construct_extras: Any,
+):
+    """Resolve and return the adapter for ``cfg`` (cached by the gateway)."""
+    context = _config_to_context(cfg, modality, slot, tenant_id, **construct_extras)
+    return get_gateway().get_adapter(context)
+
+
+def build_adapter_fresh(
+    cfg: Optional[dict],
+    modality: str,
+    slot: str,
+    tenant_id: Optional[str] = None,
+    **construct_extras: Any,
+):
+    """Build a fresh adapter for ``cfg`` WITHOUT the gateway instance cache.
+
+    Used by per-call construction sites (e.g. voice streaming sessions) where
+    vendor config carries per-request params (api_key, ws_url, voice, …) that
+    must not collide across tenants under a shared cache key.
+    """
+    context = _config_to_context(cfg, modality, slot, tenant_id, **construct_extras)
+    cls = get_registry().resolve(context.factory, modality)
+    return cls(context)
+
+
+# ---- Generic config-fetch helpers (consumed by per-modality wrappers in feature branches) ---
+
+def _fetch_slot_config(tenant_id, model_id, expected_type, slot_key):
+    """Fetch a model config by model_id (with type check) or by slot key."""
+    if model_id:
+        cfg = get_model_by_model_id(int(model_id), tenant_id)
+        if not cfg:
+            raise ValueError(f"Model not found: {model_id}")
+        if cfg.get("model_type") != expected_type:
+            raise ValueError(
+                f"Selected model {model_id} is not a {expected_type} model"
+            )
+        return cfg
+    return tenant_config_manager.get_model_config(
+        key=MODEL_CONFIG_MAPPING.get(slot_key, slot_key), tenant_id=tenant_id
+    )
+
+
+def _fetch_voice_config(tenant_id, model_type):
+    """Fetch an STT/TTS config from tenant_config or model_records (voice fallback)."""
+    try:
+        cfg = tenant_config_manager.get_model_config(tenant_id, model_type)
+        if cfg and isinstance(cfg, dict):
+            return cfg
+    except Exception:
+        pass
+    try:
+        records = get_model_records({"model_type": model_type}, tenant_id)
+        if records:
+            return records[0]
+    except Exception:
+        pass
+    return None
+
+
+# Per-modality convenience wrappers (get_llm_adapter / get_vlm_adapter /
+# get_stt_adapter_* / get_tts_adapter_* / get_embedding_adapter_from_config /
+# get_rerank_adapter_from_config) are added by their respective feature
+# branches alongside the matching ``_config_to_context`` subclass branch.
