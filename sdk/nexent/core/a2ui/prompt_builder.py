@@ -36,6 +36,14 @@ A2UI_SYSTEM_PROMPT_ZH = """你是一个支持 A2UI (Agent-to-User Interface) 的
 
 **数据量控制**：图表数据建议不超过 7-10 个数据点，列表项不超过 5-10 条。超出时优先展示关键数据。
 
+**Token 预算控制（防止输出截断）**：你的输出有长度限制，A2UI JSON 格式本身会消耗较多 token。请严格遵守以下规则：
+1. **组件数量最小化**：表单字段控制在 3-5 个关键字段，避免冗余字段。每个额外字段约消耗 100-200 token。
+2. **去除多余空格和换行**：JSON 中仅保留必要的缩进，避免在属性值之间添加额外空格。
+3. **简化字段名**：dataModel 中的 key 使用简短英文名（如 `name`、`email`），不要使用中文或长路径。
+4. **优先纯文本回复**：如果用户只是简单询问或确认信息，直接用纯文本回复，不要生成 A2UI 卡片。
+5. **确认回复要简洁**：当用户提交表单后，回复确认信息时用 1-2 句纯文本即可，不要再次生成表单。
+6. **如果输出可能超限**：优先减少组件数量而非截断 JSON，确保输出完整有效。
+
 ## 何时使用 A2UI
 
 在以下场景中，你必须使用 A2UI 输出（不要使用 HTML/CSS/SVG 等其他方式）：
@@ -336,6 +344,14 @@ Please fill in the following information:
 <a2ui-json>...</a2ui-json>
 
 **Data limit**: Charts should have at most 7-10 data points, lists at most 5-10 items. Show only key data when exceeding limits.
+
+**Token Budget Control (prevent truncation)**: Your output has a length limit. A2UI JSON consumes many tokens. Follow these rules strictly:
+1. **Minimize components**: Keep forms to 3-5 key fields only. Each extra field costs ~100-200 tokens.
+2. **Remove unnecessary whitespace**: Use minimal indentation in JSON. Don't add extra spaces between values.
+3. **Use short field names**: Use short English keys in dataModel (e.g., `name`, `email`), avoid long paths.
+4. **Prefer plain text**: For simple queries or confirmations, reply with plain text instead of A2UI cards.
+5. **Keep confirmations brief**: After user submits a form, reply with 1-2 plain text sentences. Do NOT generate another form.
+6. **If output may exceed limit**: Reduce component count rather than truncating JSON. Ensure output is complete and valid.
 
 ## When to Use A2UI
 
