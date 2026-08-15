@@ -842,21 +842,21 @@ const AssistantMessage: FC<{
         try { return JSON.parse(action.path); } catch { return {}; }
       })() : {};
       console.log('[A2UI_ACTION] formData:', formData);
-      // Format form data as human-readable text with Chinese labels
       const formEntries = Object.entries(formData as Record<string, unknown>);
-      const actionLabel = action.label || action.value || '提交';
+      const actionLabel = action.label || '';
+      const actionValue = typeof action.value === 'string' ? action.value : '';
+
+      const lines = [`[用户操作: ${actionLabel}]`];
+      if (actionValue) {
+        lines.push(`操作名称: ${actionValue}`);
+      }
+      if (formEntries.length > 0) {
+        lines.push('表单数据:');
+        formEntries.forEach(([k, v]) => lines.push(`  ${k}: ${v}`));
+      }
+      const messageText = lines.join('\n');
+
       try {
-        // Build a context-aware message so the model treats this as a form submission result
-        const actionDesc = `用户已${actionLabel}`;
-        const formLines = formEntries.length > 0
-          ? formEntries.map(([label, value]) => `- ${label}: ${value}`)
-          : [];
-        const messageText = [
-          actionDesc,
-          ...formLines,
-          formLines.length > 0 ? '' : '',
-          formLines.length > 0 ? '请确认以上信息，不要再次生成表单。' : '',
-        ].filter(Boolean).join('\n');
         console.log('[A2UI_ACTION] messageText:', messageText);
         const runConfig: Record<string, unknown> = {
           custom: {
