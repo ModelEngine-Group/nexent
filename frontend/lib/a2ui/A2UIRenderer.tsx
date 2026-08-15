@@ -64,6 +64,32 @@ function A2UIFormProvider({ children }: { children: React.ReactNode }) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Global A2UI action handler - ultimate fallback when neither onAction prop nor Context is available
+// ---------------------------------------------------------------------------
+let globalA2UIActionHandler: ((action: A2UIAction) => void) | null = null;
+
+export function setGlobalA2UIActionHandler(handler: ((action: A2UIAction) => void) | null) {
+  globalA2UIActionHandler = handler;
+}
+
+// ---------------------------------------------------------------------------
+// A2UI Action Context - provides a default action handler when onAction prop is not passed
+// ---------------------------------------------------------------------------
+const A2UIActionContext = createContext<((action: A2UIAction) => void) | null>(null);
+
+export function A2UIActionProvider({ onAction, children }: { onAction: (action: A2UIAction) => void; children: React.ReactNode }) {
+  return (
+    <A2UIActionContext.Provider value={onAction}>
+      {children}
+    </A2UIActionContext.Provider>
+  );
+}
+
+function useA2UIActionContext(): ((action: A2UIAction) => void) | null {
+  return useContext(A2UIActionContext);
+}
+
 // A2UI message type keys (matching backend constants)
 const A2UI_MSG_KEYS = new Set([
   'beginRendering',
@@ -163,6 +189,7 @@ export interface A2UIAction {
   type: 'submit' | 'click' | 'input' | 'select';
   path?: string;
   value?: unknown;
+  label?: string;
   messageType?: string;
 }
 
@@ -238,9 +265,18 @@ function stripVerboseText(content: string): string {
  * Falls back to plain text rendering when A2UI content is not detected.
  */
 export function A2UIRenderer({ content, onAction, className = '' }: A2UIRendererProps) {
+  const actionFromContext = useA2UIActionContext();
+  const effectiveOnAction = onAction ?? actionFromContext ?? globalA2UIActionHandler ?? undefined;
+
   const cleanContent = useMemo(() => stripVerboseText(content), [content]);
   const parsed = useMemo(() => parseA2UIMessage(cleanContent), [cleanContent]);
   const dataMap = useMemo(() => buildDataMap(parsed.blocks), [parsed.blocks]);
+
+  const renderId = useMemo(() => Math.random().toString(36).slice(2, 8), []);
+  console.log(`[A2UI_RENDERER:${renderId}] entry: onAction type:`, typeof effectiveOnAction, 'isA2UI:', parsed.isA2UI, 'blocks:', parsed.blocks.length);
+  if (typeof effectiveOnAction !== 'function') {
+    console.log(`[A2UI_RENDERER:${renderId}] onAction is NOT a function! Call stack:\n`, new Error('A2UI_RENDERER no onAction').stack);
+  }
 
   if (!parsed.isA2UI) {
     return <div className={className}>{cleanContent}</div>;
@@ -252,7 +288,7 @@ export function A2UIRenderer({ content, onAction, className = '' }: A2UIRenderer
         {parsed.blocks.length === 0 ? (
           <A2UISchemaRenderer
             schema={parsed.schema}
-            onAction={onAction}
+            onAction={effectiveOnAction}
             dataMap={dataMap}
           />
         ) : (
@@ -260,7 +296,7 @@ export function A2UIRenderer({ content, onAction, className = '' }: A2UIRenderer
             <A2UIBlockRenderer
               key={`a2ui-block-${idx}`}
               block={block}
-              onAction={onAction}
+              onAction={effectiveOnAction}
               defaultSchema={parsed.schema}
               dataMap={dataMap}
             />
@@ -435,60 +471,74 @@ interface A2UIComponentNodeRendererProps {
   dataMap: Map<string, unknown>;
 }
 
+// ---------------------------------------------------------------------------
+// Module-level utility functions (no Hooks, safe to call from any context)
+// ---------------------------------------------------------------------------
+
+/** Extract the data model path from component props for form field binding. */
+function extractFieldPath(p: Record<string, unknown>, dataMap: Map<string, unknown>): string {
+  // Use label as the primary display key (Chinese-friendly)
+  if (p.label) {
+    const label = resolveTextValue(p.label, dataMap);
+    if (label) return label;
+  }
+  // Try props.path (explicit path object)
+  if (p.path && typeof p.path === 'object') {
+    const path = (p.path as Record<string, unknown>).path;
+    if (typeof path === 'string' && path) return path;
+  }
+  // Try props.text.path (TextField binding)
+  if (p.text && typeof p.text === 'object') {
+    const path = (p.text as Record<string, unknown>).path;
+    if (typeof path === 'string' && path) return path;
+  }
+  // Try props.value.path (CheckBox, ChoicePicker, Slider, DateTimeInput)
+  if (p.value && typeof p.value === 'object') {
+    const path = (p.value as Record<string, unknown>).path;
+    if (typeof path === 'string' && path) return path;
+  }
+  // Try props.name as fallback
+  if (typeof p.name === 'string' && p.name) return p.name;
+  return '';
+}
+
+/** Resolve text from literalString, path, or direct string value. */
+function resolveTextValue(textValue: unknown, dataMap: Map<string, unknown>): string {
+  // Clean up backtick-wrapped values from agent output
+  const cleanValue = (val: string): string => {
+    return val.replace(/^\s*`+|`+\s*$/g, '').trim();
+  };
+  if (typeof textValue === 'string') return cleanValue(textValue);
+  if (typeof textValue === 'number' || typeof textValue === 'boolean') return String(textValue);
+  if (textValue && typeof textValue === 'object') {
+    const obj = textValue as Record<string, unknown>;
+    if (typeof obj.literalString === 'string') return cleanValue(obj.literalString);
+    if (typeof obj.literal === 'string') return cleanValue(obj.literal);
+    if (typeof obj.path === 'string') {
+      const path = obj.path as string;
+      const value = dataMap.get(path);
+      if (value !== undefined) return cleanValue(String(value));
+      return '';
+    }
+  }
+  return '';
+}
+
+/** Shared props for interactive form components */
+interface A2UIInteractiveProps {
+  node: A2UIComponentNode;
+  nodeMap: Map<string, A2UIComponentNode>;
+  onAction?: (action: A2UIAction) => void;
+  defaultSchema: Record<string, unknown> | null;
+  dataMap: Map<string, unknown>;
+  renderChildren: () => React.ReactNode;
+}
+
 function A2UIComponentNodeRenderer({ nodeId, nodeMap, onAction, defaultSchema, dataMap }: A2UIComponentNodeRendererProps) {
   const node = nodeMap.get(nodeId);
   if (!node) return null;
 
   const { type, props } = node;
-
-  /** Extract the data model path from component props for form field binding. */
-  const extractFieldPath = (p: Record<string, unknown>): string => {
-    // Use label as the primary display key (Chinese-friendly)
-    if (p.label) {
-      const label = resolveText(p.label);
-      if (label) return label;
-    }
-    // Try props.path (explicit path object)
-    if (p.path && typeof p.path === 'object') {
-      const path = (p.path as Record<string, unknown>).path;
-      if (typeof path === 'string' && path) return path;
-    }
-    // Try props.text.path (TextField binding)
-    if (p.text && typeof p.text === 'object') {
-      const path = (p.text as Record<string, unknown>).path;
-      if (typeof path === 'string' && path) return path;
-    }
-    // Try props.value.path (CheckBox, ChoicePicker, Slider, DateTimeInput)
-    if (p.value && typeof p.value === 'object') {
-      const path = (p.value as Record<string, unknown>).path;
-      if (typeof path === 'string' && path) return path;
-    }
-    // Try props.name as fallback
-    if (typeof p.name === 'string' && p.name) return p.name;
-    return '';
-  };
-
-  // Resolve text from literalString, path, or direct string value
-  const resolveText = (textValue: unknown): string => {
-    // Clean up backtick-wrapped values from agent output
-    const cleanValue = (val: string): string => {
-      return val.replace(/^\s*`+|`+\s*$/g, '').trim();
-    };
-    if (typeof textValue === 'string') return cleanValue(textValue);
-    if (typeof textValue === 'number' || typeof textValue === 'boolean') return String(textValue);
-    if (textValue && typeof textValue === 'object') {
-      const obj = textValue as Record<string, unknown>;
-      if (typeof obj.literalString === 'string') return cleanValue(obj.literalString);
-      if (typeof obj.literal === 'string') return cleanValue(obj.literal);
-      if (typeof obj.path === 'string') {
-        const path = obj.path as string;
-        const value = dataMap.get(path);
-        if (value !== undefined) return cleanValue(String(value));
-        return '';
-      }
-    }
-    return '';
-  };
 
   const renderChildren = () => {
     if (node.childIds.length === 0) return null;
@@ -504,12 +554,14 @@ function A2UIComponentNodeRenderer({ nodeId, nodeMap, onAction, defaultSchema, d
     ));
   };
 
-  const title = resolveText(props.title);
-  const subtitle = props.subtitle ? resolveText(props.subtitle) : '';
-  const text = resolveText(props.text);
-  const url = resolveText(props.url);
-  const label = resolveText(props.label);
+  const title = resolveTextValue(props.title, dataMap);
+  const subtitle = props.subtitle ? resolveTextValue(props.subtitle, dataMap) : '';
+  const text = resolveTextValue(props.text, dataMap);
+  const url = resolveTextValue(props.url, dataMap);
+  const label = resolveTextValue(props.label, dataMap);
   const gap = (props.gap as number) || 8;
+
+  const interactiveProps: A2UIInteractiveProps = { node, nodeMap, onAction, defaultSchema, dataMap, renderChildren };
 
   switch (type) {
     case 'Card':
@@ -548,178 +600,23 @@ function A2UIComponentNodeRenderer({ nodeId, nodeMap, onAction, defaultSchema, d
       return <span className="text-sm">{text}</span>;
     }
 
-    case 'Button': {
-      const formCtx = useA2UIFormContext();
-      const actionName = (props.action as Record<string, unknown> | undefined)?.name as string;
-      const isSubmit = actionName === 'submit' || (props.primary as boolean) === true;
-      const handleClick = useCallback(() => {
-        const formValues = formCtx?.getFormValues() || {};
-        onAction?.({
-          type: isSubmit ? 'submit' : 'click',
-          value: actionName,
-          messageType: 'button',
-          path: JSON.stringify(formValues),
-        });
-      }, [onAction, actionName, formCtx, isSubmit]);
-      return (
-        <button
-          type="button"
-          className="a2ui-button inline-flex items-center px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors cursor-pointer"
-          onClick={handleClick}
-        >
-          {renderChildren() || text || label || 'Button'}
-        </button>
-      );
-    }
+    case 'Button':
+      return <A2UIButtonComponent {...interactiveProps} />;
 
-    case 'TextField': {
-      const formCtx = useA2UIFormContext();
-      const initialValue = resolveText(props.text) || resolveText(props.value) || '';
-      const [fieldValue, setFieldValue] = useState(initialValue);
-      const fieldPath = extractFieldPath(props);
-      useEffect(() => {
-        formCtx?.registerField(fieldPath, initialValue);
-      }, [fieldPath]); // eslint-disable-line react-hooks/exhaustive-deps
-      const handleChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-        setFieldValue(e.target.value);
-        formCtx?.updateField(fieldPath, e.target.value);
-        onAction?.({ type: 'input', path: fieldPath, value: e.target.value });
-      }, [onAction, fieldPath, formCtx]);
-      return (
-        <div className="a2ui-textfield flex flex-col gap-1">
-          {label && <label className="text-sm font-medium">{label}</label>}
-          <input
-            type="text"
-            className="border border-border rounded-md px-3 py-2 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary/20"
-            placeholder={text}
-            value={fieldValue}
-            onChange={handleChange}
-          />
-        </div>
-      );
-    }
+    case 'TextField':
+      return <A2UITextFieldComponent {...interactiveProps} />;
 
-    case 'CheckBox': {
-      const formCtx = useA2UIFormContext();
-      const initialChecked = props.checked === true || props.value === true;
-      const [checked, setChecked] = useState(initialChecked);
-      const fieldPath = extractFieldPath(props);
-      useEffect(() => {
-        formCtx?.registerField(fieldPath, initialChecked);
-      }, [fieldPath]); // eslint-disable-line react-hooks/exhaustive-deps
-      const handleChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-        setChecked(e.target.checked);
-        formCtx?.updateField(fieldPath, e.target.checked);
-        onAction?.({ type: 'input', path: fieldPath, value: e.target.checked });
-      }, [onAction, fieldPath, formCtx]);
-      return (
-        <div className="a2ui-checkbox flex items-center gap-2">
-          <input
-            type="checkbox"
-            className="h-4 w-4 rounded border-border cursor-pointer"
-            checked={checked}
-            onChange={handleChange}
-          />
-          {label && <label className="text-sm cursor-pointer">{label}</label>}
-        </div>
-      );
-    }
+    case 'CheckBox':
+      return <A2UICheckBoxComponent {...interactiveProps} />;
 
-    case 'ChoicePicker': {
-      const formCtx = useA2UIFormContext();
-      const initialValue = resolveText(props.value) || '';
-      const [selectedValue, setSelectedValue] = useState(initialValue);
-      const options = (props.options as Array<{ label: string; value: string }>) || [];
-      const fieldPath = extractFieldPath(props);
-      useEffect(() => {
-        formCtx?.registerField(fieldPath, initialValue);
-      }, [fieldPath]); // eslint-disable-line react-hooks/exhaustive-deps
-      const handleChange = useCallback((value: string) => {
-        setSelectedValue(value);
-        formCtx?.updateField(fieldPath, value);
-        onAction?.({ type: 'select', path: fieldPath, value });
-      }, [onAction, fieldPath, formCtx]);
-      return (
-        <div className="a2ui-choice-picker flex flex-col gap-1">
-          {label && <label className="text-sm font-medium">{label}</label>}
-          <div className="flex flex-wrap gap-2">
-            {options.map((opt) => (
-              <button
-                key={opt.value}
-                type="button"
-                className={`px-3 py-1.5 rounded-md text-sm border transition-colors cursor-pointer ${
-                  selectedValue === opt.value
-                    ? 'bg-primary text-primary-foreground border-primary'
-                    : 'bg-background border-border hover:bg-accent'
-                }`}
-                onClick={() => handleChange(opt.value)}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </div>
-        </div>
-      );
-    }
+    case 'ChoicePicker':
+      return <A2UIChoicePickerComponent {...interactiveProps} />;
 
-    case 'Slider': {
-      const formCtx = useA2UIFormContext();
-      const min = (props.min as number) || 0;
-      const max = (props.max as number) || 100;
-      const step = (props.step as number) || 1;
-      const initialValue = (props.value as number) || min;
-      const [sliderValue, setSliderValue] = useState(initialValue);
-      const fieldPath = extractFieldPath(props);
-      useEffect(() => {
-        formCtx?.registerField(fieldPath, initialValue);
-      }, [fieldPath]); // eslint-disable-line react-hooks/exhaustive-deps
-      const handleChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-        const val = Number(e.target.value);
-        setSliderValue(val);
-        formCtx?.updateField(fieldPath, val);
-        onAction?.({ type: 'input', path: fieldPath, value: val });
-      }, [onAction, fieldPath, formCtx]);
-      return (
-        <div className="a2ui-slider flex flex-col gap-1">
-          {label && <label className="text-sm font-medium">{label} ({sliderValue})</label>}
-          <input
-            type="range"
-            min={min}
-            max={max}
-            step={step}
-            value={sliderValue}
-            onChange={handleChange}
-            className="w-full h-2 bg-muted rounded-lg appearance-none cursor-pointer accent-primary"
-          />
-        </div>
-      );
-    }
+    case 'Slider':
+      return <A2UISliderComponent {...interactiveProps} />;
 
-    case 'DateTimeInput': {
-      const formCtx = useA2UIFormContext();
-      const initialValue = resolveText(props.value) || '';
-      const [dateValue, setDateValue] = useState(initialValue);
-      const fieldPath = extractFieldPath(props);
-      useEffect(() => {
-        formCtx?.registerField(fieldPath, initialValue);
-      }, [fieldPath]); // eslint-disable-line react-hooks/exhaustive-deps
-      const handleChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-        setDateValue(e.target.value);
-        formCtx?.updateField(fieldPath, e.target.value);
-        onAction?.({ type: 'input', path: fieldPath, value: e.target.value });
-      }, [onAction, fieldPath, formCtx]);
-      return (
-        <div className="a2ui-datetime flex flex-col gap-1">
-          {label && <label className="text-sm font-medium">{label}</label>}
-          <input
-            type="datetime-local"
-            className="border border-border rounded-md px-3 py-2 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary/20"
-            value={dateValue}
-            onChange={handleChange}
-          />
-        </div>
-      );
-    }
+    case 'DateTimeInput':
+      return <A2UIDateTimeInputComponent {...interactiveProps} />;
 
     case 'Image':
       return url ? (
@@ -803,6 +700,230 @@ function A2UIComponentNodeRenderer({ nodeId, nodeMap, onAction, defaultSchema, d
         </div>
       );
   }
+}
+
+// ---------------------------------------------------------------------------
+// Interactive form sub-components (each calls Hooks at top level, no switch/case violation)
+// ---------------------------------------------------------------------------
+
+function A2UIButtonComponent({ node, nodeMap, onAction, defaultSchema, dataMap, renderChildren }: A2UIInteractiveProps) {
+  const { props } = node;
+  const formCtx = useA2UIFormContext();
+  const actionFromContext = useA2UIActionContext();
+  const effectiveOnAction = onAction ?? actionFromContext ?? globalA2UIActionHandler ?? undefined;
+  const actionName = (props.action as Record<string, unknown> | undefined)?.name as string;
+  const actionLabel = (props.action as Record<string, unknown> | undefined)?.label as string || '';
+  const isSubmit = actionName === 'submit' || (actionName && actionName.startsWith('submit')) || (props.primary as boolean) === true;
+  const text = resolveTextValue(props.text, dataMap);
+  const label = resolveTextValue(props.label, dataMap);
+
+  const handleClick = useCallback(() => {
+    const formValues = formCtx?.getFormValues() || {};
+    const handler = onAction ?? actionFromContext ?? globalA2UIActionHandler ?? undefined;
+    console.log('[A2UI_BUTTON] handleClick called, actionName:', actionName, 'formValues:', formValues, 'onAction defined:', typeof handler === 'function');
+    handler?.({
+      type: isSubmit ? 'submit' : 'click',
+      value: actionName,
+      label: actionLabel,
+      messageType: 'button',
+      path: JSON.stringify(formValues),
+    });
+  }, [effectiveOnAction, actionName, formCtx, isSubmit]);
+
+  return (
+    <button
+      type="button"
+      className="a2ui-button inline-flex items-center px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors cursor-pointer"
+      onClick={handleClick}
+    >
+      {renderChildren() || text || label || 'Button'}
+    </button>
+  );
+}
+
+function A2UITextFieldComponent({ node, nodeMap, onAction, defaultSchema, dataMap, renderChildren }: A2UIInteractiveProps) {
+  const { props } = node;
+  const formCtx = useA2UIFormContext();
+  const actionFromContext = useA2UIActionContext();
+  const effectiveOnAction = onAction ?? actionFromContext ?? undefined;
+  const initialValue = resolveTextValue(props.text, dataMap) || resolveTextValue(props.value, dataMap) || '';
+  const [fieldValue, setFieldValue] = useState(initialValue);
+  const fieldPath = extractFieldPath(props, dataMap);
+  const label = resolveTextValue(props.label, dataMap);
+  const placeholder = resolveTextValue(props.text, dataMap);
+
+  useEffect(() => {
+    formCtx?.registerField(fieldPath, initialValue);
+  }, [fieldPath]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    setFieldValue(e.target.value);
+    formCtx?.updateField(fieldPath, e.target.value);
+    effectiveOnAction?.({ type: 'input', path: fieldPath, value: e.target.value });
+  }, [effectiveOnAction, fieldPath, formCtx]);
+
+  return (
+    <div className="a2ui-textfield flex flex-col gap-1">
+      {label && <label className="text-sm font-medium">{label}</label>}
+      <input
+        type="text"
+        className="border border-border rounded-md px-3 py-2 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary/20"
+        placeholder={placeholder}
+        value={fieldValue}
+        onChange={handleChange}
+      />
+    </div>
+  );
+}
+
+function A2UICheckBoxComponent({ node, nodeMap, onAction, defaultSchema, dataMap, renderChildren }: A2UIInteractiveProps) {
+  const { props } = node;
+  const formCtx = useA2UIFormContext();
+  const actionFromContext = useA2UIActionContext();
+  const effectiveOnAction = onAction ?? actionFromContext ?? undefined;
+  const initialChecked = props.checked === true || props.value === true;
+  const [checked, setChecked] = useState(initialChecked);
+  const fieldPath = extractFieldPath(props, dataMap);
+  const label = resolveTextValue(props.label, dataMap);
+
+  useEffect(() => {
+    formCtx?.registerField(fieldPath, initialChecked);
+  }, [fieldPath]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    setChecked(e.target.checked);
+    formCtx?.updateField(fieldPath, e.target.checked);
+    effectiveOnAction?.({ type: 'input', path: fieldPath, value: e.target.checked });
+  }, [effectiveOnAction, fieldPath, formCtx]);
+
+  return (
+    <div className="a2ui-checkbox flex items-center gap-2">
+      <input
+        type="checkbox"
+        className="h-4 w-4 rounded border-border cursor-pointer"
+        checked={checked}
+        onChange={handleChange}
+      />
+      {label && <label className="text-sm cursor-pointer">{label}</label>}
+    </div>
+  );
+}
+
+function A2UIChoicePickerComponent({ node, nodeMap, onAction, defaultSchema, dataMap, renderChildren }: A2UIInteractiveProps) {
+  const { props } = node;
+  const formCtx = useA2UIFormContext();
+  const actionFromContext = useA2UIActionContext();
+  const effectiveOnAction = onAction ?? actionFromContext ?? undefined;
+  const initialValue = resolveTextValue(props.value, dataMap) || '';
+  const [selectedValue, setSelectedValue] = useState(initialValue);
+  const options = (props.options as Array<{ label: string; value: string }>) || [];
+  const fieldPath = extractFieldPath(props, dataMap);
+  const label = resolveTextValue(props.label, dataMap);
+
+  useEffect(() => {
+    formCtx?.registerField(fieldPath, initialValue);
+  }, [fieldPath]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleChange = useCallback((value: string) => {
+    setSelectedValue(value);
+    formCtx?.updateField(fieldPath, value);
+    effectiveOnAction?.({ type: 'select', path: fieldPath, value });
+  }, [effectiveOnAction, fieldPath, formCtx]);
+
+  return (
+    <div className="a2ui-choice-picker flex flex-col gap-1">
+      {label && <label className="text-sm font-medium">{label}</label>}
+      <div className="flex flex-wrap gap-2">
+        {options.map((opt) => (
+          <button
+            key={opt.value}
+            type="button"
+            className={`px-3 py-1.5 rounded-md text-sm border transition-colors cursor-pointer ${
+              selectedValue === opt.value
+                ? 'bg-primary text-primary-foreground border-primary'
+                : 'bg-background border-border hover:bg-accent'
+            }`}
+            onClick={() => handleChange(opt.value)}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function A2UISliderComponent({ node, nodeMap, onAction, defaultSchema, dataMap, renderChildren }: A2UIInteractiveProps) {
+  const { props } = node;
+  const formCtx = useA2UIFormContext();
+  const actionFromContext = useA2UIActionContext();
+  const effectiveOnAction = onAction ?? actionFromContext ?? undefined;
+  const min = (props.min as number) || 0;
+  const max = (props.max as number) || 100;
+  const step = (props.step as number) || 1;
+  const initialValue = (props.value as number) || min;
+  const [sliderValue, setSliderValue] = useState(initialValue);
+  const fieldPath = extractFieldPath(props, dataMap);
+  const label = resolveTextValue(props.label, dataMap);
+
+  useEffect(() => {
+    formCtx?.registerField(fieldPath, initialValue);
+  }, [fieldPath]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = Number(e.target.value);
+    setSliderValue(val);
+    formCtx?.updateField(fieldPath, val);
+    effectiveOnAction?.({ type: 'input', path: fieldPath, value: val });
+  }, [effectiveOnAction, fieldPath, formCtx]);
+
+  return (
+    <div className="a2ui-slider flex flex-col gap-1">
+      {label && <label className="text-sm font-medium">{label} ({sliderValue})</label>}
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={sliderValue}
+        onChange={handleChange}
+        className="w-full h-2 bg-muted rounded-lg appearance-none cursor-pointer accent-primary"
+      />
+    </div>
+  );
+}
+
+function A2UIDateTimeInputComponent({ node, nodeMap, onAction, defaultSchema, dataMap, renderChildren }: A2UIInteractiveProps) {
+  const { props } = node;
+  const formCtx = useA2UIFormContext();
+  const actionFromContext = useA2UIActionContext();
+  const effectiveOnAction = onAction ?? actionFromContext ?? undefined;
+  const initialValue = resolveTextValue(props.value, dataMap) || '';
+  const [dateValue, setDateValue] = useState(initialValue);
+  const fieldPath = extractFieldPath(props, dataMap);
+  const label = resolveTextValue(props.label, dataMap);
+
+  useEffect(() => {
+    formCtx?.registerField(fieldPath, initialValue);
+  }, [fieldPath]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    setDateValue(e.target.value);
+    formCtx?.updateField(fieldPath, e.target.value);
+    effectiveOnAction?.({ type: 'input', path: fieldPath, value: e.target.value });
+  }, [effectiveOnAction, fieldPath, formCtx]);
+
+  return (
+    <div className="a2ui-datetime flex flex-col gap-1">
+      {label && <label className="text-sm font-medium">{label}</label>}
+      <input
+        type="datetime-local"
+        className="border border-border rounded-md px-3 py-2 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary/20"
+        value={dateValue}
+        onChange={handleChange}
+      />
+    </div>
+  );
 }
 
 function A2UIEndRenderingBlock() {

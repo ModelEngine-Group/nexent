@@ -94,7 +94,7 @@ import {
 import { VerificationPanel } from "../ui/verification-panel";
 import { A2UIChatMessage } from "../../chat/a2ui/A2UIRenderer";
 import type { A2UISurface } from "@/types/chat";
-import { A2UIRenderer as A2UITextRenderer, mightContainA2UI, type A2UIAction } from "@/lib/a2ui";
+import { A2UIRenderer as A2UITextRenderer, A2UIActionProvider, setGlobalA2UIActionHandler, mightContainA2UI, type A2UIAction } from "@/lib/a2ui";
 import { cn } from "@/lib/utils";
 import { AuthenticatedImage } from "../ui/authenticated-image";
 import { copyToClipboard } from "@/lib/clipboard";
@@ -836,17 +836,28 @@ const AssistantMessage: FC<{
   const aui = useAui();
 
   const handleA2UIAction = useCallback((action: A2UIAction) => {
+    console.log('[A2UI_ACTION] handleA2UIAction called:', action.type, action.value);
     if (action.type === 'submit' || action.type === 'click') {
       const formData = action.path ? (() => {
         try { return JSON.parse(action.path); } catch { return {}; }
       })() : {};
+      console.log('[A2UI_ACTION] formData:', formData);
       // Format form data as human-readable text with Chinese labels
       const formEntries = Object.entries(formData as Record<string, unknown>);
-      const formLines = formEntries.length > 0
-        ? formEntries.map(([label, value]) => `${label}: ${value}`)
-        : [];
-      const messageText = [action.value as string, ...formLines].join('\n');
+      const actionLabel = action.label || action.value || '提交';
       try {
+        // Build a context-aware message so the model treats this as a form submission result
+        const actionDesc = `用户已${actionLabel}`;
+        const formLines = formEntries.length > 0
+          ? formEntries.map(([label, value]) => `- ${label}: ${value}`)
+          : [];
+        const messageText = [
+          actionDesc,
+          ...formLines,
+          formLines.length > 0 ? '' : '',
+          formLines.length > 0 ? '请确认以上信息，不要再次生成表单。' : '',
+        ].filter(Boolean).join('\n');
+        console.log('[A2UI_ACTION] messageText:', messageText);
         const runConfig: Record<string, unknown> = {
           custom: {
             agentId: agent.id,
@@ -855,6 +866,7 @@ const AssistantMessage: FC<{
         if (conversationId) {
           (runConfig.custom as Record<string, unknown>).threadId = conversationId;
         }
+        console.log('[A2UI_ACTION] appending message with runConfig:', runConfig);
         aui.thread.append({
           role: 'user',
           content: [{ type: 'text', text: messageText }],
@@ -864,7 +876,13 @@ const AssistantMessage: FC<{
         console.error('[A2UI] Failed to send action:', err);
       }
     }
-  }, [aui]);
+  }, [aui, agent, conversationId]);
+
+  // Set global A2UI action handler as fallback for any A2UIRenderer instance
+  useEffect(() => {
+    setGlobalA2UIActionHandler(handleA2UIAction);
+    return () => setGlobalA2UIActionHandler(null);
+  }, [handleA2UIAction]);
 
   // Reserves space for the action bar; `-mb` compensates so the action bar's
   // hover-revealed position does not shift the message spacing. For pt-[n]
@@ -1048,8 +1066,8 @@ const AssistantMessage: FC<{
                 }
                 const textContent = textPart.text || "";
                 if (mightContainA2UI(textContent)) {
-                  console.log("[A2UI_DEBUG] Rendering text part with A2UI protocol, content length:", textContent.length);
-                  return <A2UITextRenderer content={textContent} className="a2ui-chat-message" onAction={handleA2UIAction} />;
+                  console.log("[A2UI_DEBUG] Rendering text part with A2UI protocol, content length:", textContent.length, 'handleA2UIAction type:', typeof handleA2UIAction);
+                  return <A2UIActionProvider onAction={handleA2UIAction}><A2UITextRenderer content={textContent} className="a2ui-chat-message" onAction={handleA2UIAction} /></A2UIActionProvider>;
                 }
                 return <MarkdownText />;
               }

@@ -32,6 +32,7 @@ import { useModelList } from "@/hooks/model/useModelList";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import { useAgentInfo } from "@/hooks/agent/useAgentInfo";
 import DebugMessageList from "./DebugMessageList";
+import { setGlobalA2UIActionHandler, type A2UIAction } from "@/lib/a2ui";
 import DebugOptimizeModal from "./DebugOptimizeModal";
 import { useCompareStream } from "./useCompareStream";
 
@@ -300,6 +301,7 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
   const [messages, setMessages] = useState<ChatMessageType[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [inputQuestion, setInputQuestion] = useState("");
+  const handleSendRef = useRef<() => void>(() => {});
   const [selectedModelId, setSelectedModelId] = useState<number | null>(null);
   const { availableLlmModels } = useModelList();
   const { agentInfo } = useAgentInfo(parsedAgentId);
@@ -965,6 +967,27 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
       setInputQuestion("");
     }
   };
+
+  handleSendRef.current = handleSend;
+
+  // Set global A2UI action handler for form submission from A2UI cards
+  useEffect(() => {
+    setGlobalA2UIActionHandler((action: A2UIAction) => {
+      if (action.type === 'submit' || action.type === 'click') {
+        const formData = action.path ? (() => { try { return JSON.parse(action.path); } catch { return {}; } })() : {};
+        const formEntries = Object.entries(formData as Record<string, unknown>);
+        const actionLabel = action.label || action.value || '提交';
+        const messageText = [
+          `用户已${actionLabel}`,
+          ...formEntries.map(([k, v]) => `- ${k}: ${v}`),
+          '请确认以上信息，不要再次生成表单。',
+        ].join('\n');
+        setInputQuestion(messageText);
+        setTimeout(() => handleSendRef.current(), 100);
+      }
+    });
+    return () => setGlobalA2UIActionHandler(null);
+  }, []);
 
   const handleOpenOptimize = (params: {
     userQuestion: string;

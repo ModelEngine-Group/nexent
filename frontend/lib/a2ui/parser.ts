@@ -86,7 +86,7 @@ export function parseA2UIMessage(rawContent: string): A2UIParseResult {
     }
   }
 
-  // Try JSONL format (one JSON per line)
+  // Try JSONL format (one JSON per line, or multiple JSON objects on one line)
   const lines = trimmed.split('\n');
   if (lines.length > 1) {
     const jsonLines: string[] = [];
@@ -101,6 +101,22 @@ export function parseA2UIMessage(rawContent: string): A2UIParseResult {
             content: trimmedLine,
             parsed,
           });
+        } else {
+          // Single JSON parse failed - try splitting into multiple JSON objects
+          // (handles concatenated JSON objects like {...}{...}{...} on one line)
+          const subMessages = splitJsonObjects(trimmedLine);
+          console.log('[A2UI_PARSER] JSONL fallback: splitJsonObjects found', subMessages.length, 'sub-messages on one line');
+          for (const msgStr of subMessages) {
+            const subParsed = safeParseJSON(msgStr);
+            if (subParsed && isValidA2UIObject(subParsed)) {
+              jsonLines.push(msgStr);
+              result.blocks.push({
+                type: classifyBlock(msgStr),
+                content: msgStr,
+                parsed: subParsed,
+              });
+            }
+          }
         }
       }
     }
@@ -394,5 +410,7 @@ export function getDefaultSchema(): Record<string, unknown> {
  */
 export function mightContainA2UI(content: string): boolean {
   if (!content) return false;
-  return content.includes(A2UI_OPEN_TAG) || /\{[\s\S]*?"type"[\s\S]*?"properties"/.test(content.slice(0, 500));
+  return content.includes(A2UI_OPEN_TAG)
+    || /\{[\s\S]*?"type"[\s\S]*?"properties"/.test(content.slice(0, 500))
+    || /\b(beginRendering|surfaceUpdate|dataModelUpdate)\b/.test(content.slice(0, 500));
 }

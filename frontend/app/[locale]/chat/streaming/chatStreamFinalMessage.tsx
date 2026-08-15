@@ -10,7 +10,7 @@ import {
   ThumbsUp,
 } from "lucide-react";
 
-import { A2UIRenderer, mightContainA2UI } from '@/lib/a2ui';
+import { A2UIRenderer, mightContainA2UI, type A2UIAction } from '@/lib/a2ui';
 
 import { MarkdownRenderer } from "@/components/common/markdownRenderer";
 

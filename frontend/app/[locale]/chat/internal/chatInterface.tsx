@@ -37,6 +37,7 @@ import { FilePreview } from "@/types/chat";
 import { ChatHeader } from "../components/chatHeader";
 import { ChatRightPanel } from "../components/chatRightPanel";
 import { ChatStreamMain } from "../streaming/chatStreamMain";
+import { setGlobalA2UIActionHandler, type A2UIAction } from "@/lib/a2ui";
 
 import {
   preprocessAttachments,
@@ -137,6 +138,7 @@ const getI18nKeyByType = (type: string): string => {
 
 export function ChatInterface() {
   const [input, setInput] = useState("");
+  const handleSendRef = useRef<() => Promise<void>>(async () => {});
   // Replace the original messages state
   const [sessionMessages, setSessionMessages] = useState<{
     [conversationId: number]: ChatMessageType[];
@@ -1085,6 +1087,27 @@ export function ChatInterface() {
       }
     }
   };
+
+  handleSendRef.current = handleSend;
+
+  // Set global A2UI action handler for form submission from A2UI cards
+  useEffect(() => {
+    setGlobalA2UIActionHandler((action: A2UIAction) => {
+      if (action.type === 'submit' || action.type === 'click') {
+        const formData = action.path ? (() => { try { return JSON.parse(action.path); } catch { return {}; } })() : {};
+        const formEntries = Object.entries(formData as Record<string, unknown>);
+        const actionLabel = action.label || action.value || '提交';
+        const messageText = [
+          `用户已${actionLabel}`,
+          ...formEntries.map(([k, v]) => `- ${k}: ${v}`),
+          '请确认以上信息，不要再次生成表单。',
+        ].join('\n');
+        setInput(messageText);
+        setTimeout(() => handleSendRef.current(), 100);
+      }
+    });
+    return () => setGlobalA2UIActionHandler(null);
+  }, []);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
