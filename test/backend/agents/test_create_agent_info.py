@@ -250,6 +250,11 @@ sys.modules['services.image_service'] = _create_stub_module(
     get_vlm_model=MagicMock(return_value="stub_vlm"),
     get_video_understanding_model=MagicMock(return_value="stub_video_vlm"),
 )
+sys.modules['services.model_gateway_service'] = _create_stub_module(
+    "services.model_gateway_service",
+    get_llm_adapter=MagicMock(return_value="stub_llm_adapter"),
+    get_vlm_adapter=MagicMock(return_value="stub_vlm_adapter"),
+)
 sys.modules['services.memory_config_service'] = MagicMock()
 # Extend services hierarchy with additional stubs
 sys.modules['services.file_management_service'] = _create_stub_module(
@@ -1124,7 +1129,7 @@ class TestCreateToolConfigList:
 
         with patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
                 patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
-                patch('backend.agents.create_agent_info.get_vlm_model') as mock_get_vlm_model, \
+                patch('backend.agents.create_agent_info.get_vlm_adapter') as mock_get_vlm_model, \
                 patch('backend.agents.create_agent_info.minio_client', new_callable=MagicMock) as mock_minio_client:
 
             mock_search_tools.return_value = [
@@ -1145,7 +1150,7 @@ class TestCreateToolConfigList:
 
             assert len(result) == 1
             assert result[0] is mock_tool_instance
-            mock_get_vlm_model.assert_called_once_with(tenant_id="tenant_1", model_id=None)
+            mock_get_vlm_model.assert_called_once_with("tenant_1", None, slot="vlm")
             # Verify metadata includes validate_url_access lambda
             assert "vlm_model" in mock_tool_instance.metadata
             assert "storage_client" in mock_tool_instance.metadata
@@ -1168,7 +1173,7 @@ class TestCreateToolConfigList:
 
         with patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
                 patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
-                patch('backend.agents.create_agent_info.get_video_understanding_model') as mock_get_video_model, \
+                patch('backend.agents.create_agent_info.get_vlm_adapter') as mock_get_video_model, \
                 patch('backend.agents.create_agent_info.minio_client', new_callable=MagicMock):
 
             mock_search_tools.return_value = [
@@ -1189,7 +1194,7 @@ class TestCreateToolConfigList:
 
             assert len(result) == 1
             assert result[0] is mock_tool_instance
-            mock_get_video_model.assert_called_once_with(tenant_id="tenant_1", model_id=None)
+            mock_get_video_model.assert_called_once_with("tenant_1", None, slot="vlm3")
             assert mock_tool_instance.metadata["vlm_model"] == "mock_video_model"
             assert "storage_client" in mock_tool_instance.metadata
             assert callable(mock_tool_instance.metadata["validate_url_access"])
@@ -1854,7 +1859,7 @@ class TestCreateToolConfigList:
         with patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config, \
                 patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
                 patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
-                patch('backend.agents.create_agent_info.get_vlm_model') as mock_get_vlm_model, \
+                patch('backend.agents.create_agent_info.get_vlm_adapter') as mock_get_vlm_model, \
                 patch('backend.agents.create_agent_info.minio_client', new_callable=MagicMock), \
                 patch('backend.agents.create_agent_info.validate_urls_access') as mock_validate:
 
@@ -2207,7 +2212,7 @@ class TestCreateAgentConfig:
     @pytest.mark.asyncio
     async def test_create_agent_config_basic(self):
         """Test case for basic agent configuration creation"""
-        # Reset module-level mock — parallel_executor appends an extra
+        # Reset module-level mock - parallel_executor appends an extra
         # ToolConfig call after create_tool_config_list returns.  Both
         # call history and side_effect must be cleared because prior
         # tests may have left an exhausted iterator on the shared mock.
@@ -6834,7 +6839,7 @@ class TestCreateAgentConfigMemoryBuildFailure:
             )
             mock_search_tool.return_value.forward = MagicMock(return_value="")
 
-            # Should NOT raise — the exception is caught and warning logged
+            # Should NOT raise - the exception is caught and warning logged
             result = await create_agent_config("a1", "t1", "u1", "en", "query")
             assert result is not None
             tool_names = [
@@ -6898,7 +6903,7 @@ class TestCreateAgentConfigMemoryContextServiceFailure:
             )
             mock_search_tool.return_value.forward = MagicMock(return_value="")
 
-            # Should NOT raise — the error is caught
+            # Should NOT raise - the error is caught
             result = await create_agent_config("a1", "t1", "u1", "en", "query")
             assert result is not None
             mock_search_tool.assert_not_called()
@@ -7102,10 +7107,11 @@ class TestCreateToolConfigListAidpSearch:
             )
 
             assert len(result) == 1
-            # Verify env creds are in the params (overriding stale DB values)
-            assert mock_tc_instance.params["server_url"] == "https://aidp.test"
-            assert mock_tc_instance.params["api_key"] == "key-123"
-            assert mock_tc_instance.params["tenant_id"] == "aidp-tenant"
+            # Verify env creds were injected then removed from params
+            # (runtime params are handled by nexent_agent.py at tool creation time)
+            assert "server_url" not in mock_tc_instance.params
+            assert "api_key" not in mock_tc_instance.params
+            assert "tenant_id" not in mock_tc_instance.params
 
     @pytest.mark.asyncio
     async def test_aidp_search_permission_whitelist_success(self):
@@ -7158,7 +7164,7 @@ class TestCreateToolConfigListAidpSearch:
             assert len(result) == 1
             assert mock_tc_instance.metadata is not None
             assert "allowed_kds_set" in mock_tc_instance.metadata
-            assert mock_tc_instance.metadata["allowed_kds_set"] == {"kb_allowed_1", "kb_allowed_2"}
+            assert set(mock_tc_instance.metadata["allowed_kds_set"]) == {"kb_allowed_1", "kb_allowed_2"}
 
     @pytest.mark.asyncio
     async def test_aidp_search_permission_whitelist_failure_fallback(self):
@@ -7211,7 +7217,7 @@ class TestCreateToolConfigListAidpSearch:
             assert len(result) == 1
             # allowed_kds_set should be empty set on failure
             assert mock_tc_instance.metadata is not None
-            assert mock_tc_instance.metadata["allowed_kds_set"] == set()
+            assert mock_tc_instance.metadata["allowed_kds_set"] == []
 
     @pytest.mark.asyncio
     async def test_aidp_search_metadata_merges_langchain_tool(self):
