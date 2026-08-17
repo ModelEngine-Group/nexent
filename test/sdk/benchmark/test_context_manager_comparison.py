@@ -76,6 +76,25 @@ def test_runner_command_contains_owned_group_configuration():
     assert "--experiment-time" in command
 
 
+def test_runner_command_omits_item_limit_when_formal_run_is_unbounded():
+    group = GroupSpec("C", "adaptive-compact", ("--context-processing-mode", "adaptive_compact"))
+
+    command = build_runner_command(
+        dataset="gaia",
+        run_name="comparison-formal-r01-c",
+        group=group,
+        runner_args=["--language", "en"],
+        item_limit=None,
+        experiment_time="2026-08-17T00:00:00+00:00",
+    )
+
+    assert "--item-limit" not in command
+
+
+def test_validate_runner_args_accepts_uncontrolled_options():
+    validate_runner_args(["--language", "en", "--evaluators", "exact_match"])
+
+
 @pytest.mark.parametrize(
     "argument",
     [
@@ -113,6 +132,18 @@ def test_paired_outcomes_builds_matrix_for_identical_item_ids():
 
     assert result["paired_item_count"] == 2
     assert result["outcome_matrix"] == {"PF": 2}
+
+
+@pytest.mark.parametrize(
+    ("results", "message"),
+    [
+        ({}, "must all be non-empty"),
+        ({"P": {}, "C": {}}, "must all be non-empty"),
+    ],
+)
+def test_paired_outcomes_rejects_incomplete_inputs(results, message):
+    with pytest.raises(ValueError, match=message):
+        paired_outcomes(results)
 
 
 def _write_comparison_manifest(
@@ -227,6 +258,75 @@ def test_validate_manifest_parity_rejects_other_policy_difference(
     )
 
     with pytest.raises(RuntimeError, match="parity_snapshot_except_processing_mode"):
+        validate_manifest_parity({"P": "run-p", "C": "run-c"})
+
+
+def _prepare_valid_pc_manifests(tmp_path, monkeypatch):
+    manifest_dir = tmp_path / "manifests"
+    manifest_dir.mkdir()
+    monkeypatch.setattr(comparison_module, "ARTIFACT_ROOT", tmp_path)
+    _write_comparison_manifest(
+        manifest_dir,
+        "run-p",
+        mode="passthrough",
+        policy=_comparison_policy("passthrough"),
+    )
+    _write_comparison_manifest(
+        manifest_dir,
+        "run-c",
+        mode="adaptive_compact",
+        policy=_comparison_policy("adaptive_compact"),
+    )
+    return manifest_dir
+
+
+def _update_manifest(manifest_dir, run_name, **changes):
+    path = manifest_dir / f"{run_name}.manifest.json"
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    manifest.update(changes)
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+
+
+def test_validate_manifest_parity_warns_for_commit_only_difference(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    manifest_dir = _prepare_valid_pc_manifests(tmp_path, monkeypatch)
+    for run_name, commit in (("run-p", "commit-p"), ("run-c", "commit-c")):
+        _update_manifest(
+            manifest_dir,
+            run_name,
+            code_commit=commit,
+            source_tree_hash="same-tree",
+        )
+
+    result = validate_manifest_parity({"P": "run-p", "C": "run-c"})
+
+    assert result["status"] == "passed"
+    assert "code_commit differs" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("run_name", "changes", "message"),
+    [
+        ("run-c", {"context_processing_mode": "passthrough"}, "processing modes are invalid"),
+        ("run-p", {"context_runtime": "legacy"}, "unified ContextItems runtime"),
+        ("run-p", {"context_manager": {}}, "resolved hard input budget"),
+        ("run-p", {"context_policy_fingerprint": ""}, "context policy fingerprint"),
+    ],
+)
+def test_validate_manifest_parity_rejects_invalid_runtime_contract(
+    tmp_path,
+    monkeypatch,
+    run_name,
+    changes,
+    message,
+):
+    manifest_dir = _prepare_valid_pc_manifests(tmp_path, monkeypatch)
+    _update_manifest(manifest_dir, run_name, **changes)
+
+    with pytest.raises(RuntimeError, match=message):
         validate_manifest_parity({"P": "run-p", "C": "run-c"})
 
 
@@ -387,6 +487,13 @@ def test_provider_cache_aggregate_preserves_unavailable_status():
     assert result["provider_cached_input_ratio"] is None
 
 
+def test_provider_cache_aggregate_reports_fully_unsupported_provider():
+    result = aggregate_provider_cache({"one": {"status": "unsupported"}})
+
+    assert result["status"] == "unsupported"
+    assert result["available_calls"] == 0
+
+
 def test_summary_cache_aggregate_remains_separate():
     result = aggregate_summary_cache({
         "one": {
@@ -502,7 +609,7 @@ def test_main_runs_both_groups_and_writes_paired_report(
         run_prefix="pc-test",
         repeat=1,
         smoke_items=1,
-        skip_smoke=True,
+        skip_smoke=False,
         formal_items=1,
         compression_threshold=None,
         soft_input_budget=100,
@@ -588,7 +695,7 @@ def test_main_runs_both_groups_and_writes_paired_report(
         lambda run_names: {"status": "matched"},
     )
     integrity_report = SimpleNamespace(
-        run_complete=True,
+        run_complete=False,
         to_dict=lambda: {"status": "complete"},
         summary=lambda: "complete",
     )
@@ -610,15 +717,24 @@ def test_main_runs_both_groups_and_writes_paired_report(
         fake_write_report,
     )
 
+    manifest_dir = tmp_path / "manifests"
+    manifest_dir.mkdir()
+    for phase in ("smoke", "formal"):
+        for suffix in ("p-passthrough", "c-adaptive-compact"):
+            (manifest_dir / f"pc-test-{phase}-r01-{suffix}.manifest.json").write_text(
+                json.dumps({"dataset_name": "dataset"}),
+                encoding="utf-8",
+            )
+
     comparison_module.main()
 
-    assert len(commands) == 2
+    assert len(commands) == 4
     processing_modes = {
         command[0][command[0].index("--context-processing-mode") + 1]
         for command in commands
     }
     assert processing_modes == {"passthrough", "adaptive_compact"}
-    result = written["report"]["results"][0]
+    result = written["report"]["results"][-1]
     assert result["phase"] == "formal"
     assert result["paired"]["outcome_matrix"] == {"PF": 1}
     assert result["integrity"] == {
@@ -856,3 +972,219 @@ def test_write_report_exclusive_renders_cache_and_budget_sections(
     assert "## Budget & overflow" in markdown
     assert "50.00%" in markdown
     assert "100.00%" in markdown
+
+
+def _install_provenance_aliases(monkeypatch):
+    from sdk.benchmark.generic import provenance
+    from sdk.benchmark.generic.provenance import experiment_manifest
+
+    monkeypatch.setitem(sys.modules, "provenance", provenance)
+    monkeypatch.setitem(
+        sys.modules,
+        "provenance.experiment_manifest",
+        experiment_manifest,
+    )
+
+
+@pytest.mark.parametrize(
+    ("auth_ok", "items", "remote_error", "expected_error"),
+    [
+        (False, ["one"], None, RuntimeError),
+        (True, [], None, ValueError),
+        (True, ["one", "one"], None, ValueError),
+        (True, ["one"], RuntimeError("transport"), RuntimeError),
+        (True, ["one"], None, FileExistsError),
+    ],
+)
+def test_preflight_rejects_invalid_langfuse_state(
+    monkeypatch,
+    tmp_path,
+    auth_ok,
+    items,
+    remote_error,
+    expected_error,
+):
+    _install_provenance_aliases(monkeypatch)
+
+    def get_dataset_run(dataset_name, run_name):
+        if remote_error is not None:
+            raise remote_error
+        return SimpleNamespace()
+
+    langfuse = SimpleNamespace(
+        auth_check=lambda: auth_ok,
+        get_dataset=lambda name: SimpleNamespace(
+            items=[SimpleNamespace(id=item_id) for item_id in items]
+        ),
+        get_dataset_run=get_dataset_run,
+    )
+    monkeypatch.setattr("langfuse.Langfuse", lambda: langfuse)
+    monkeypatch.setattr(comparison_module, "ARTIFACT_ROOT", tmp_path)
+
+    with pytest.raises(expected_error):
+        comparison_module.preflight(
+            dataset_name="dataset",
+            required_urls=[],
+            planned_run_names=["planned-run"],
+        )
+
+
+def test_preflight_rejects_local_manifest_collision(monkeypatch, tmp_path):
+    _install_provenance_aliases(monkeypatch)
+    manifest_dir = tmp_path / "manifests"
+    manifest_dir.mkdir()
+    (manifest_dir / "planned-run.manifest.json").write_text("{}", encoding="utf-8")
+    langfuse = SimpleNamespace(
+        auth_check=lambda: True,
+        get_dataset=lambda name: SimpleNamespace(items=[SimpleNamespace(id="one")]),
+    )
+    monkeypatch.setattr("langfuse.Langfuse", lambda: langfuse)
+    monkeypatch.setattr(comparison_module, "ARTIFACT_ROOT", tmp_path)
+
+    with pytest.raises(FileExistsError, match="existing local runs"):
+        comparison_module.preflight(
+            dataset_name="dataset",
+            required_urls=[],
+            planned_run_names=["planned-run"],
+        )
+
+
+def test_fetch_complete_dataset_run_raises_last_langfuse_error(monkeypatch):
+    langfuse = SimpleNamespace(
+        get_dataset_run=lambda *args: (_ for _ in ()).throw(RuntimeError("temporarily unavailable"))
+    )
+    monkeypatch.setattr(comparison_module.time, "sleep", lambda _: None)
+
+    with pytest.raises(RuntimeError, match="temporarily unavailable"):
+        fetch_complete_dataset_run(
+            langfuse,
+            "dataset",
+            "run",
+            expected_item_ids=["one"],
+            attempts=2,
+        )
+
+
+@pytest.mark.parametrize(
+    ("snapshot", "expected"),
+    [
+        (["not", "a", "mapping"], ["not", "a", "mapping"]),
+        ({"policy": "passthrough"}, {"policy": "passthrough"}),
+        (
+            {"policy": {"effective_processing_mode": "passthrough"}},
+            {"policy": {"effective_processing_mode": "<processing_mode>"}},
+        ),
+        (
+            {"policy": {"policy_layers": {"platform": "passthrough"}}},
+            {"policy": {"policy_layers": {"platform": "passthrough"}}},
+        ),
+    ],
+)
+def test_normalize_snapshot_processing_mode_handles_partial_snapshots(snapshot, expected):
+    assert comparison_module._normalize_snapshot_processing_mode(snapshot) == expected
+
+
+def _base_pc_cli():
+    return ["runner", "--dataset", "gaia", "--run-prefix", "pc"]
+
+
+@pytest.mark.parametrize(
+    "extra_args",
+    [
+        ["--repeat", "0"],
+        ["--smoke-items", "0"],
+        ["--formal-items", "0"],
+        [
+            "--compression-threshold",
+            "100",
+            "--soft-input-budget",
+            "10",
+            "--hard-input-budget",
+            "20",
+            "--budget-profile",
+            "synthetic_trigger",
+        ],
+        [
+            "--soft-input-budget",
+            "0",
+            "--hard-input-budget",
+            "20",
+            "--budget-profile",
+            "synthetic_trigger",
+        ],
+        [
+            "--soft-input-budget",
+            "20",
+            "--hard-input-budget",
+            "20",
+            "--budget-profile",
+            "synthetic_trigger",
+        ],
+        ["--soft-input-budget", "10", "--hard-input-budget", "20"],
+        ["--compression-threshold", "-1"],
+        ["--budget-profile", "synthetic_trigger"],
+        ["--runner-args", "--dataset", "other"],
+    ],
+)
+def test_parse_args_rejects_invalid_comparison_configuration(monkeypatch, extra_args):
+    monkeypatch.setattr(sys, "argv", [*_base_pc_cli(), *extra_args])
+
+    with pytest.raises(SystemExit):
+        parse_args()
+
+
+def test_parse_args_applies_legacy_threshold_defaults(monkeypatch):
+    monkeypatch.setattr(sys, "argv", _base_pc_cli())
+
+    args = parse_args()
+
+    assert args.compression_threshold == 10_000
+    assert args.budget_profile == "legacy_threshold"
+
+
+@pytest.mark.parametrize(
+    ("runner_args", "primary", "all_evaluators"),
+    [
+        ([], "exact_match", ["exact_match"]),
+        (
+            ["--evaluators", "exact_match", "f1", "--language", "en"],
+            "exact_match",
+            ["exact_match", "f1"],
+        ),
+    ],
+)
+def test_evaluator_argument_helpers(runner_args, primary, all_evaluators):
+    assert comparison_module._primary_evaluator(runner_args) == primary
+    assert comparison_module._all_evaluators(runner_args) == all_evaluators
+
+
+@pytest.mark.parametrize(
+    "helper",
+    [comparison_module._primary_evaluator, comparison_module._all_evaluators],
+)
+def test_evaluator_argument_helpers_reject_empty_value(helper):
+    with pytest.raises(ValueError, match="requires at least one"):
+        helper(["--evaluators", "--language", "en"])
+
+
+def test_main_rejects_existing_comparison_report(monkeypatch, tmp_path):
+    args = SimpleNamespace(
+        dataset="dataset",
+        run_prefix="existing",
+        repeat=1,
+        smoke_items=1,
+        skip_smoke=True,
+        formal_items=1,
+        compression_threshold=10_000,
+        soft_input_budget=None,
+        hard_input_budget=None,
+        budget_profile="legacy_threshold",
+    )
+    monkeypatch.setattr(comparison_module, "parse_args", lambda: args)
+    monkeypatch.setattr(comparison_module, "ARTIFACT_ROOT", tmp_path)
+    report_path, _ = comparison_module.comparison_report_paths(args.run_prefix)
+    report_path.parent.mkdir(parents=True)
+    report_path.write_text("{}", encoding="utf-8")
+
+    with pytest.raises(FileExistsError, match="comparison reports"):
+        comparison_module.main()

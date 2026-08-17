@@ -98,6 +98,25 @@ def test_runner_command_uses_arm_owned_python_runner_and_cwd(tmp_path):
     assert command[-2:] == ["--item-limit", "1"]
 
 
+def test_runner_command_omits_item_limit_for_unbounded_formal_run(tmp_path):
+    legacy, _ = _arms(tmp_path)
+
+    command = build_runner_command(
+        arm=legacy,
+        dataset="gaia",
+        run_name="comparison-formal-r01-l-legacy",
+        runner_args=["--language", "en"],
+        item_limit=None,
+        experiment_time="2026-08-17T00:00:00+00:00",
+    )
+
+    assert "--item-limit" not in command
+
+
+def test_validate_runner_args_accepts_uncontrolled_options():
+    validate_runner_args(["--language", "en", "--evaluators", "exact_match"])
+
+
 @pytest.mark.parametrize(
     "argument",
     [
@@ -128,6 +147,22 @@ def test_paired_outcomes_uses_legacy_then_passthrough_order():
         "legacy": "P",
         "passthrough": "F",
     }
+
+
+@pytest.mark.parametrize(
+    ("results", "message"),
+    [
+        ({"L": {"one": True}}, "exactly L and P"),
+        ({"L": {}, "P": {}}, "must be non-empty"),
+        (
+            {"L": {"one": True}, "P": {"two": True}},
+            "dataset item IDs do not match",
+        ),
+    ],
+)
+def test_paired_outcomes_rejects_invalid_inputs(results, message):
+    with pytest.raises(ValueError, match=message):
+        paired_outcomes(results)
 
 
 def test_build_run_name_is_separate_from_pc_names(tmp_path):
@@ -181,6 +216,130 @@ def test_parse_args_rejects_partial_candidate_budget(monkeypatch, tmp_path):
 
     with pytest.raises(SystemExit):
         parse_args()
+
+
+def _base_lp_cli(tmp_path):
+    return [
+        "runner",
+        "--dataset",
+        "gaia",
+        "--run-prefix",
+        "lp",
+        "--legacy-root",
+        str(tmp_path),
+    ]
+
+
+@pytest.mark.parametrize(
+    "extra_args",
+    [
+        ["--repeat", "0"],
+        ["--smoke-items", "0"],
+        ["--formal-items", "0"],
+        ["--skip-smoke", "--smoke-only"],
+        [
+            "--candidate-soft-input-budget",
+            "0",
+            "--candidate-hard-input-budget",
+            "20",
+        ],
+        [
+            "--candidate-soft-input-budget",
+            "20",
+            "--candidate-hard-input-budget",
+            "20",
+        ],
+        ["--candidate-context-window-tokens", "0"],
+        ["--runner-args", "--dataset", "other"],
+    ],
+)
+def test_parse_args_rejects_invalid_lp_configuration(monkeypatch, tmp_path, extra_args):
+    from sdk.benchmark.generic.run_legacy_p_comparison import parse_args
+
+    monkeypatch.setattr("sys.argv", [*_base_lp_cli(tmp_path), *extra_args])
+
+    with pytest.raises(SystemExit):
+        parse_args()
+
+
+def test_arm_manifest_dir_uses_shared_artifact_root_for_current_repo(monkeypatch, tmp_path):
+    monkeypatch.setattr(legacy_module, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(legacy_module, "ARTIFACT_ROOT", tmp_path / "artifacts")
+    arm = legacy_module.ArmSpec("P", "passthrough", tmp_path, tmp_path / "python", ())
+
+    assert arm.manifest_dir == tmp_path / "artifacts/manifests"
+
+
+def test_validate_arm_paths_accepts_complete_arm(tmp_path):
+    repo_root = tmp_path / "repo"
+    runner = repo_root / "sdk/benchmark/generic/run_benchmark.py"
+    runner.parent.mkdir(parents=True)
+    runner.touch()
+    python = repo_root / "python"
+    python.touch()
+    arm = legacy_module.ArmSpec("L", "legacy", repo_root, python, ())
+
+    legacy_module.validate_arm_paths((arm,))
+
+
+@pytest.mark.parametrize("missing", ["runner", "python"])
+def test_validate_arm_paths_rejects_missing_executable(tmp_path, missing):
+    repo_root = tmp_path / "repo"
+    runner = repo_root / "sdk/benchmark/generic/run_benchmark.py"
+    runner.parent.mkdir(parents=True)
+    python = repo_root / "python"
+    if missing != "runner":
+        runner.touch()
+    if missing != "python":
+        python.touch()
+    arm = legacy_module.ArmSpec("L", "legacy", repo_root, python, ())
+
+    with pytest.raises(FileNotFoundError, match=missing.capitalize() if missing == "python" else "runner"):
+        legacy_module.validate_arm_paths((arm,))
+
+
+def test_validate_local_collisions_rejects_existing_manifest(tmp_path):
+    legacy, candidate = _arms(tmp_path)
+    legacy.manifest_dir.mkdir(parents=True)
+    legacy_module.manifest_path(legacy.manifest_dir, "existing/run").touch()
+
+    with pytest.raises(FileExistsError, match="existing arm manifests"):
+        legacy_module.validate_local_collisions(
+            (legacy, candidate),
+            {"L": ["existing/run"], "P": ["new-run"]},
+        )
+
+
+def test_validate_local_collisions_accepts_new_run_names(tmp_path):
+    legacy, candidate = _arms(tmp_path)
+
+    legacy_module.validate_local_collisions(
+        (legacy, candidate),
+        {"L": ["legacy-new"], "P": ["candidate-new"]},
+    )
+
+
+def test_parse_args_accepts_complete_candidate_limits(monkeypatch, tmp_path):
+    from sdk.benchmark.generic.run_legacy_p_comparison import parse_args
+
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            *_base_lp_cli(tmp_path),
+            "--candidate-soft-input-budget",
+            "10",
+            "--candidate-hard-input-budget",
+            "20",
+            "--candidate-context-window-tokens",
+            "30",
+        ],
+    )
+
+    args = parse_args()
+
+    assert args.candidate_soft_input_budget == 10
+    assert args.candidate_hard_input_budget == 20
+    assert args.candidate_context_window_tokens == 30
 
 
 def test_manifest_parity_allows_revision_and_runtime_differences(tmp_path):
@@ -272,6 +431,69 @@ def test_manifest_parity_rejects_prompt_drift(tmp_path):
         )
 
 
+def _write_runtime_manifests(tmp_path, *, legacy_changes=None, candidate_changes=None):
+    legacy, candidate = _arms(tmp_path)
+    run_names = {"L": "legacy-run", "P": "candidate-run"}
+    common = {field: None for field in legacy_module.EXECUTION_INVARIANT_FIELDS}
+    common.update({field: None for field in legacy_module.ASSEMBLY_PARITY_FIELDS})
+    manifests = {
+        "L": {
+            **common,
+            "context_runtime": "legacy",
+            "context_manager_enabled": False,
+        },
+        "P": {
+            **common,
+            "context_runtime": "context_items",
+            "context_processing_mode": "passthrough",
+        },
+    }
+    manifests["L"].update(legacy_changes or {})
+    manifests["P"].update(candidate_changes or {})
+    for arm in (legacy, candidate):
+        arm.manifest_dir.mkdir(parents=True)
+        legacy_module.manifest_path(
+            arm.manifest_dir,
+            run_names[arm.key],
+        ).write_text(json.dumps(manifests[arm.key]), encoding="utf-8")
+    return (legacy, candidate), run_names
+
+
+def test_manifest_parity_rejects_execution_setting_drift(tmp_path):
+    arms, run_names = _write_runtime_manifests(
+        tmp_path,
+        candidate_changes={"dataset_name": "other-dataset"},
+    )
+
+    with pytest.raises(RuntimeError, match="execution manifest parity"):
+        validate_manifest_parity(arms, run_names)
+
+
+@pytest.mark.parametrize(
+    ("legacy_changes", "candidate_changes", "message"),
+    [
+        ({"context_runtime": "context_items"}, {}, "legacy context runtime"),
+        ({"context_manager_enabled": True}, {}, "enabled ContextManager"),
+        ({}, {"context_runtime": "legacy"}, "unified ContextItems runtime"),
+        ({}, {"context_processing_mode": "adaptive_compact"}, "passthrough processing"),
+    ],
+)
+def test_manifest_parity_rejects_invalid_arm_runtime(
+    tmp_path,
+    legacy_changes,
+    candidate_changes,
+    message,
+):
+    arms, run_names = _write_runtime_manifests(
+        tmp_path,
+        legacy_changes=legacy_changes,
+        candidate_changes=candidate_changes,
+    )
+
+    with pytest.raises(RuntimeError, match=message):
+        validate_manifest_parity(arms, run_names)
+
+
 def test_main_runs_legacy_and_candidate_arms_and_writes_report(
     monkeypatch,
     tmp_path,
@@ -291,7 +513,7 @@ def test_main_runs_legacy_and_candidate_arms_and_writes_report(
         candidate_budget_profile="synthetic_trigger",
         repeat=1,
         smoke_items=1,
-        skip_smoke=True,
+        skip_smoke=False,
         smoke_only=False,
         formal_items=1,
         seed=0,
@@ -374,7 +596,7 @@ def test_main_runs_legacy_and_candidate_arms_and_writes_report(
 
     legacy_module.main()
 
-    assert len(commands) == 2
+    assert len(commands) == 4
     assert {call[1]["cwd"] for call in commands} == {legacy_root, candidate_root}
     candidate_command = next(
         command for command, kwargs in commands if kwargs["cwd"] == candidate_root
@@ -388,6 +610,37 @@ def test_main_runs_legacy_and_candidate_arms_and_writes_report(
     assert result["paired"]["outcome_matrix"] == {"PF": 1}
     assert result["manifest_parity"] == {"status": "matched"}
     assert written["prefix"] == "lp-test"
+
+
+def test_main_rejects_existing_lp_report(monkeypatch, tmp_path):
+    legacy_root = tmp_path / "legacy"
+    candidate_root = tmp_path / "candidate"
+    args = SimpleNamespace(
+        dataset="dataset",
+        run_prefix="existing",
+        legacy_root=legacy_root,
+        candidate_root=candidate_root,
+        legacy_python=legacy_root / "python",
+        candidate_python=candidate_root / "python",
+        candidate_soft_input_budget=None,
+        candidate_hard_input_budget=None,
+        candidate_context_window_tokens=None,
+        candidate_budget_profile="synthetic_trigger",
+        repeat=1,
+        smoke_items=1,
+        skip_smoke=True,
+        smoke_only=False,
+        formal_items=1,
+    )
+    monkeypatch.setattr(legacy_module, "parse_args", lambda: args)
+    monkeypatch.setattr(legacy_module, "ARTIFACT_ROOT", tmp_path)
+    monkeypatch.setattr(legacy_module, "validate_arm_paths", lambda arms: None)
+    report_path, _ = legacy_module.comparison_report_paths(args.run_prefix)
+    report_path.parent.mkdir(parents=True)
+    report_path.write_text("{}", encoding="utf-8")
+
+    with pytest.raises(FileExistsError, match="L/P reports"):
+        legacy_module.main()
 
 
 def test_write_report_exclusive_renders_cross_revision_summary(

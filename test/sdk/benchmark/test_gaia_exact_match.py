@@ -1,7 +1,10 @@
 from sdk.benchmark.generic.evaluators.gaia_exact_match import (
+    _compare,
     _extract_final_answer,
     _normalize_string,
+    _numeric_match,
     _strip_markdown_formatting,
+    _try_parse_number,
     gaia_exact_match_evaluator,
 )
 
@@ -82,3 +85,50 @@ def test_evaluator_preserves_word_boundary_differences() -> None:
     )
 
     assert result == {"name": "gaia_exact_match", "value": 0.0}
+
+
+def test_extract_final_answer_handles_empty_and_unmarked_output() -> None:
+    assert _extract_final_answer("") == ""
+    assert _extract_final_answer("  plain answer  ") == "plain answer"
+
+
+def test_number_parser_handles_units_fractions_and_invalid_values() -> None:
+    assert _try_parse_number("") is None
+    assert _try_parse_number("$1,250 kg") == 1250.0
+    assert _try_parse_number("3/4") == 0.75
+    assert _try_parse_number("1/0") is None
+    assert _try_parse_number("not a number") is None
+
+
+def test_numeric_match_covers_equality_zero_and_invalid_inputs() -> None:
+    assert _numeric_match("89,706", "89706.00") is True
+    assert _numeric_match("0.0000000001", "0") is True
+    assert _numeric_match("not-a-number", "1") is False
+    assert _numeric_match("1.1", "1") is False
+
+
+def test_compare_handles_empty_numeric_and_list_answers() -> None:
+    assert _compare("", "") is True
+    assert _compare("", "answer") is False
+    assert _compare("3/4", "0.75") is True
+    assert _compare("1, 2", "1.0, 2.0") is True
+    assert _compare("Red, BLUE", "red, blue") is True
+    assert _compare("red", "red, blue") is False
+
+
+def test_evaluator_accepts_output_and_expected_output_variants() -> None:
+    assert gaia_exact_match_evaluator(
+        input={},
+        output={"answer": "FINAL ANSWER: blue"},
+        expected_output=["red", "blue"],
+    )["value"] == 1.0
+    assert gaia_exact_match_evaluator(
+        input={},
+        output="FINAL ANSWER: 42",
+        expected_output="42",
+    )["value"] == 1.0
+    assert gaia_exact_match_evaluator(
+        input={},
+        output=None,
+        expected_output=None,
+    )["value"] == 1.0
