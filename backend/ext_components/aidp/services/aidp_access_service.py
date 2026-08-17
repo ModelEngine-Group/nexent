@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import copy
-import hashlib
 import logging
 import threading
 import time
@@ -23,15 +22,15 @@ _DETAIL_CACHE_TTL_SECONDS = 60.0
 _DETAIL_CACHE_MAX_ENTRIES = 256
 _DOC_COUNT_CACHE_TTL_SECONDS = 30.0
 _DOC_COUNT_CACHE_MAX_ENTRIES = 256
-_catalog_cache: OrderedDict[tuple[str, str, str], tuple[float, list[dict]]] = OrderedDict()
-_detail_cache: OrderedDict[tuple[str, str, str, str], tuple[float, dict]] = OrderedDict()
-_doc_count_cache: OrderedDict[tuple[str, str, str, str], tuple[float, int]] = OrderedDict()
-_catalog_inflight: dict[tuple[str, str, str], Future[Any]] = {}
-_detail_inflight: dict[tuple[str, str, str, str], Future[Any]] = {}
-_doc_count_inflight: dict[tuple[str, str, str, str], Future[Any]] = {}
-_catalog_versions: dict[tuple[str, str, str], int] = {}
-_detail_versions: dict[tuple[str, str, str, str], int] = {}
-_doc_count_versions: dict[tuple[str, str, str, str], int] = {}
+_catalog_cache: OrderedDict[tuple[str, str], tuple[float, list[dict]]] = OrderedDict()
+_detail_cache: OrderedDict[tuple[str, str, str], tuple[float, dict]] = OrderedDict()
+_doc_count_cache: OrderedDict[tuple[str, str, str], tuple[float, int]] = OrderedDict()
+_catalog_inflight: dict[tuple[str, str], Future[Any]] = {}
+_detail_inflight: dict[tuple[str, str, str], Future[Any]] = {}
+_doc_count_inflight: dict[tuple[str, str, str], Future[Any]] = {}
+_catalog_versions: dict[tuple[str, str], int] = {}
+_detail_versions: dict[tuple[str, str, str], int] = {}
+_doc_count_versions: dict[tuple[str, str, str], int] = {}
 _cache_lock = threading.RLock()
 
 _T = TypeVar("_T")
@@ -53,12 +52,18 @@ def _normalize_server_url(server_url: str) -> str:
     return str(server_url or "").strip().rstrip("/").lower()
 
 
-def _cache_key(server_url: str, api_key: str, aidp_tenant_id: str) -> tuple[str, str, str]:
-    api_key_digest = hashlib.sha256(str(api_key or "").encode("utf-8")).hexdigest()
+def _cache_key(server_url: str, aidp_tenant_id: str) -> tuple[str, str]:
+    """Build the in-process cache key for one AIDP deployment.
+
+    ``api_key`` is intentionally excluded: credentials are process-constant
+    (read once from ``consts.const`` at startup and never rewritten at
+    runtime), so the same ``(server_url, aidp_tenant_id)`` always maps to the
+    same remote catalog. Including the key would only force a hashing step
+    over sensitive data for zero distinguishing power.
+    """
     return (
         _normalize_server_url(server_url),
         str(aidp_tenant_id or "aidp").strip().lower(),
-        api_key_digest,
     )
 
 
@@ -130,7 +135,7 @@ def _get_remote_catalog(
     aidp_tenant_id: str,
     force_refresh: bool,
 ) -> list[dict]:
-    key = _cache_key(server_url, api_key, aidp_tenant_id)
+    key = _cache_key(server_url, aidp_tenant_id)
     return _get_or_load_cached(
         cache=_catalog_cache,
         inflight=_catalog_inflight,
@@ -154,7 +159,7 @@ def get_cached_aidp_kb_detail(
     force_refresh: bool = False,
 ) -> dict:
     """Return one credential-scoped KB detail with short-lived caching."""
-    key = (*_cache_key(server_url, api_key, aidp_tenant_id), str(kds_id))
+    key = (*_cache_key(server_url, aidp_tenant_id), str(kds_id))
     return _get_or_load_cached(
         cache=_detail_cache,
         inflight=_detail_inflight,
@@ -176,7 +181,7 @@ def get_cached_aidp_doc_count(
     force_refresh: bool = False,
 ) -> int:
     """Return one credential-scoped document count with short-lived caching."""
-    key = (*_cache_key(server_url, api_key, aidp_tenant_id), str(kds_id))
+    key = (*_cache_key(server_url, aidp_tenant_id), str(kds_id))
     return _get_or_load_cached(
         cache=_doc_count_cache,
         inflight=_doc_count_inflight,
@@ -264,7 +269,7 @@ def invalidate_aidp_catalog_cache(
             for key in set(_catalog_versions) | set(_catalog_inflight):
                 _catalog_versions[key] = _catalog_versions.get(key, 0) + 1
             return
-        key = _cache_key(server_url, api_key, aidp_tenant_id)
+        key = _cache_key(server_url, aidp_tenant_id)
         _catalog_cache.pop(key, None)
         _catalog_versions[key] = _catalog_versions.get(key, 0) + 1
 
@@ -280,11 +285,11 @@ def invalidate_aidp_kb_detail_cache(
         if server_url is None or api_key is None:
             keys = set(_detail_cache) | set(_detail_versions) | set(_detail_inflight)
         else:
-            prefix = _cache_key(server_url, api_key, aidp_tenant_id)
+            prefix = _cache_key(server_url, aidp_tenant_id)
             keys = {
                 key
                 for key in set(_detail_cache) | set(_detail_versions) | set(_detail_inflight)
-                if key[:3] == prefix and (kds_id is None or key[3] == str(kds_id))
+                if key[:2] == prefix and (kds_id is None or key[2] == str(kds_id))
             }
             if kds_id is not None:
                 keys.add((*prefix, str(kds_id)))
@@ -304,11 +309,11 @@ def invalidate_aidp_doc_count_cache(
         if server_url is None or api_key is None:
             keys = set(_doc_count_cache) | set(_doc_count_versions) | set(_doc_count_inflight)
         else:
-            prefix = _cache_key(server_url, api_key, aidp_tenant_id)
+            prefix = _cache_key(server_url, aidp_tenant_id)
             keys = {
                 key
                 for key in set(_doc_count_cache) | set(_doc_count_versions) | set(_doc_count_inflight)
-                if key[:3] == prefix and (kds_id is None or key[3] == str(kds_id))
+                if key[:2] == prefix and (kds_id is None or key[2] == str(kds_id))
             }
             if kds_id is not None:
                 keys.add((*prefix, str(kds_id)))

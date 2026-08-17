@@ -63,7 +63,11 @@ def test_remote_catalog_is_cached_but_user_permissions_are_recomputed():
     assert mock_intersect.call_count == 2
 
 
-def test_api_key_change_misses_catalog_cache():
+def test_catalog_cache_key_scopes_by_url_and_tenant_not_api_key():
+    """Credentials are process-constant, so the cache key tracks only the
+    remote catalog identity (server_url + aidp_tenant_id). A different
+    api_key against the same endpoint reuses the cached catalog, while a
+    different endpoint misses."""
     with patch.object(
         service,
         "fetch_all_aidp_knowledge_bases_impl",
@@ -73,8 +77,11 @@ def test_api_key_change_misses_catalog_cache():
         "intersect_accessible_kbs",
         return_value=[],
     ):
+        # Same endpoint + tenant, different api_key: cache hit.
         service.resolve_current_aidp_access("https://aidp.example", "key-1", "u", "tenant")
         service.resolve_current_aidp_access("https://aidp.example", "key-2", "u", "tenant")
+        # Different endpoint: cache miss.
+        service.resolve_current_aidp_access("https://other.example", "key-2", "u", "tenant")
 
     assert mock_fetch.call_count == 2
 
