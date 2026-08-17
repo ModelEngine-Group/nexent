@@ -740,10 +740,4 @@ STREAM_STATUS_EVENT = "event: stream_status\n"
 
 # External Memory Provider Configuration
 MEMORY_PROVIDER_PLUGINS_DIR = os.getenv("MEMORY_PROVIDER_PLUGINS_DIR", "")
-EXTERNAL_MEMORY_SEARCH_ENABLED = os.getenv(
-    "EXTERNAL_MEMORY_SEARCH_ENABLED", "false"
-).lower() in ("true", "1", "yes")
-EXTERNAL_MEMORY_INGEST_ENABLED = os.getenv(
-    "EXTERNAL_MEMORY_INGEST_ENABLED", "false"
-).lower() in ("true", "1", "yes")
 MMR_CANDIDATE_MAX = int(os.getenv("MMR_CANDIDATE_MAX", "200"))

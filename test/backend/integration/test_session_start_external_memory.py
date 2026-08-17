@@ -107,7 +107,6 @@ def mock_memory_context():
     context = MagicMock()
     context.user_config = MagicMock()
     context.user_config.external_provider_top_k = 20
-    context.user_config.external_provider_timeout = 30
     context.tenant_id = "test-tenant"
     context.user_id = "test-user"
     context.agent_id = "test-agent"
@@ -190,7 +189,6 @@ class TestSessionStartExternalRetrieval:
         external_results = None
         if mock_provider_service is not None:
             top_k = mock_memory_context.user_config.external_provider_top_k
-            timeout = mock_memory_context.user_config.external_provider_timeout
 
             search_request = _MemorySearchRequest(
                 query="test query",
@@ -205,7 +203,6 @@ class TestSessionStartExternalRetrieval:
                 tenant_id=mock_memory_context.tenant_id,
                 request=search_request,
                 limit=top_k,
-                timeout=timeout,
             )
 
             if ext_search_results:
@@ -264,7 +261,6 @@ class TestSessionStartExternalRetrieval:
         external_results = None
         try:
             top_k = mock_memory_context.user_config.external_provider_top_k
-            timeout = mock_memory_context.user_config.external_provider_timeout
 
             search_request = _MemorySearchRequest(
                 query="test query",
@@ -279,7 +275,6 @@ class TestSessionStartExternalRetrieval:
                 tenant_id=mock_memory_context.tenant_id,
                 request=search_request,
                 limit=top_k,
-                timeout=timeout,
             )
 
             if ext_search_results:
@@ -315,7 +310,6 @@ class TestSessionStartExternalRetrieval:
         external_results = None
         try:
             top_k = mock_memory_context.user_config.external_provider_top_k
-            timeout = mock_memory_context.user_config.external_provider_timeout
 
             search_request = _MemorySearchRequest(
                 query="test query",
@@ -330,7 +324,6 @@ class TestSessionStartExternalRetrieval:
                 tenant_id=mock_memory_context.tenant_id,
                 request=search_request,
                 limit=top_k,
-                timeout=timeout,
             )
 
             if ext_search_results:
@@ -422,7 +415,6 @@ class TestSessionStartExternalRetrieval:
         # Execute
         external_results = None
         top_k = mock_memory_context.user_config.external_provider_top_k
-        timeout = mock_memory_context.user_config.external_provider_timeout
 
         search_request = _MemorySearchRequest(
             query="test query",
@@ -437,7 +429,6 @@ class TestSessionStartExternalRetrieval:
             tenant_id=mock_memory_context.tenant_id,
             request=search_request,
             limit=top_k,
-            timeout=timeout,
         )
 
         if ext_search_results:
@@ -506,7 +497,6 @@ class TestSessionStartExternalRetrieval:
         # Execute
         external_results = None
         top_k = mock_memory_context.user_config.external_provider_top_k
-        timeout = mock_memory_context.user_config.external_provider_timeout
 
         search_request = _MemorySearchRequest(
             query="test query",
@@ -521,7 +511,6 @@ class TestSessionStartExternalRetrieval:
             tenant_id=mock_memory_context.tenant_id,
             request=search_request,
             limit=top_k,
-            timeout=timeout,
         )
 
         if ext_search_results:

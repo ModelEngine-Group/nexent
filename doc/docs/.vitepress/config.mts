@@ -86,6 +86,10 @@ export default defineConfig({
                 text: "Environment Preparation",
                 link: "/en/developer-guide/environment-setup",
               },
+              {
+                text: "External Memory Plugins",
+                link: "/en/developer-guide/external-memory-plugin",
+              },
             ],
           },
           {
@@ -302,6 +306,10 @@ export default defineConfig({
               {
                 text: "环境准备",
                 link: "/zh/developer-guide/environment-setup",
+              },
+              {
+                text: "外部记忆插件",
+                link: "/zh/developer-guide/external-memory-plugin",
               },
             ],
           },

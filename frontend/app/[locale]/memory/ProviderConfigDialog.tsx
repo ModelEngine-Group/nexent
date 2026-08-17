@@ -80,12 +80,13 @@ export function ProviderConfigDialog({
       const paramValues: Record<string, string> = {};
       if (matchedPlugin) {
         for (const field of matchedPlugin.config_schema) {
+          const storedValue =
+            editing.params?.[`plugin.${field.key}`] ??
+            editing.params?.[field.key];
           if (field.type === "secret") {
-            paramValues[field.key] = editing.params?.[field.key]
-              ? SECRET_MASK
-              : "";
+            paramValues[field.key] = storedValue ? SECRET_MASK : "";
           } else {
-            paramValues[field.key] = editing.params?.[field.key] ?? "";
+            paramValues[field.key] = storedValue ?? "";
           }
         }
       } else {
@@ -154,17 +155,18 @@ export function ProviderConfigDialog({
 
       for (const field of schemaFields) {
         const rawValue = values.params?.[field.key];
+        const storageKey = `plugin.${field.key}`;
         if (field.type === "secret" && isEditing) {
           if (rawValue === SECRET_MASK && !changedSecrets.has(field.key)) {
             continue;
           }
           if (rawValue !== undefined && rawValue !== "") {
-            params[field.key] = rawValue;
+            params[storageKey] = rawValue;
           }
         } else if (field.type === "boolean") {
-          params[field.key] = rawValue ? "true" : "false";
+          params[storageKey] = rawValue ? "true" : "false";
         } else if (rawValue !== undefined && rawValue !== "") {
-          params[field.key] = String(rawValue);
+          params[storageKey] = String(rawValue);
         }
       }
 

@@ -512,7 +512,35 @@ from backend.agents.create_agent_info import (
     _resolve_runtime_tool_records,
     _resolve_input_budget,
     _resolve_safe_input_budget,
+    _get_external_provider_service_for_search,
 )
+
+
+def test_ac_p3_25_external_search_switch_skips_provider_factory(monkeypatch):
+    factory = MagicMock()
+    provider_module = types.ModuleType("services.memory_external_provider_service")
+    provider_module.get_memory_external_provider_service = factory
+    monkeypatch.setitem(
+        sys.modules, "services.memory_external_provider_service", provider_module
+    )
+    monkeypatch.setattr(create_agent_info_module, "EXTERNAL_MEMORY_SEARCH_ENABLED", False)
+
+    assert _get_external_provider_service_for_search() is None
+    factory.assert_not_called()
+
+
+def test_ac_p3_25_external_search_switch_uses_provider_factory(monkeypatch):
+    service = object()
+    factory = MagicMock(return_value=service)
+    provider_module = types.ModuleType("services.memory_external_provider_service")
+    provider_module.get_memory_external_provider_service = factory
+    monkeypatch.setitem(
+        sys.modules, "services.memory_external_provider_service", provider_module
+    )
+    monkeypatch.setattr(create_agent_info_module, "EXTERNAL_MEMORY_SEARCH_ENABLED", True)
+
+    assert _get_external_provider_service_for_search() is service
+    factory.assert_called_once_with()
 
 # Import HistoryItem for testing (from mocked consts.model)
 HistoryItem = sys.modules["consts.model"].HistoryItem

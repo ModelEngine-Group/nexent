@@ -99,28 +99,29 @@ async def _backend_store_hook(
 
 def _build_ingestion_event_service():
     """Lazily construct a MemoryIngestionEventService for transparent proxy."""
-    from services.memory_provider_plugin_loader import PluginLoader
-    from services.memory_provider_config_service import MemoryProviderConfigService
-    from services.memory_external_provider_service import MemoryExternalProviderService
+    from services.memory_external_provider_service import (
+        get_memory_external_provider_service,
+    )
     from services.memory_ingestion_event_service import MemoryIngestionEventService
 
-    plugin_loader = PluginLoader()
-    config_service = MemoryProviderConfigService(plugin_loader)
-    provider_service = MemoryExternalProviderService(plugin_loader, config_service)
-    return MemoryIngestionEventService(config_service, provider_service)
+    provider_service = get_memory_external_provider_service()
+    return MemoryIngestionEventService(
+        provider_service._config_service,
+        provider_service,
+    )
 
 
 async def _fanout_external_ingest(
     payload: Dict[str, Any], result: Dict[str, Any]
 ) -> None:
     """Fan-out a store event to all enabled external providers."""
-    from services.memory_provider_config_service import MemoryProviderConfigService
-    from services.memory_provider_plugin_loader import PluginLoader
+    from services.memory_external_provider_service import (
+        get_memory_external_provider_service,
+    )
 
     tenant_id = payload["tenant_id"]
-    plugin_loader = PluginLoader()
-    config_service = MemoryProviderConfigService(plugin_loader)
-    enabled = config_service.get_enabled_providers(tenant_id)
+    provider_service = get_memory_external_provider_service()
+    enabled = provider_service._config_service.get_enabled_providers(tenant_id)
     if not enabled:
         return
 

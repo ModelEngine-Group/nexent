@@ -41,7 +41,8 @@ class Mem0Provider:
         self.api_key = config.get("api_key")
         self.org_id = config.get("org_id")
         self.base_url = config.get("base_url", "https://api.mem0.ai").rstrip("/")
-        self.timeout = int(config.get("timeout", 30))
+        # Support both "timeout" (plugin-specific) and "timeout_seconds" (provider-level)
+        self.timeout = int(config.get("timeout_seconds", config.get("timeout", 30)))
 
     @property
     def provider_name(self) -> str:
@@ -72,15 +73,22 @@ class Mem0Provider:
         if filters:
             payload["filters"] = filters
 
-        try:
+        async def _post_search(search_payload: Dict[str, Any]) -> Any:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 response = await client.post(
                     f"{self.base_url}/v1/memories/search/",
-                    json=payload,
+                    json=search_payload,
                     headers=self._build_headers(),
                 )
                 self._check_response(response)
-                data = response.json()
+                return response.json()
+
+        try:
+            data = await _post_search(payload)
+            raw_results = data if isinstance(data, list) else data.get("results", [])
+            if not raw_results and request.agent_id and request.user_id:
+                user_payload = {key: value for key, value in payload.items() if key != "agent_id"}
+                data = await _post_search(user_payload)
         except httpx.TimeoutException as exc:
             error = ProviderError(
                 code=ProviderErrorCode.TIMEOUT,

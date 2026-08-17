@@ -29,7 +29,6 @@ from consts.const import (
     MEMORY_SWITCH_KEY,
     DREAMING_SWITCH_KEY,
     EXTERNAL_PROVIDER_TOP_K_KEY,
-    EXTERNAL_PROVIDER_TIMEOUT_KEY,
     BOOLEAN_TRUE_VALUES,
 )
 from consts.model import MemoryAgentShareMode
@@ -44,7 +43,6 @@ from services.memory_config_service import (
     set_memory_switch,
     set_dreaming_switch,
     set_external_provider_top_k,
-    set_external_provider_timeout,
 )
 from database import memory_dreaming_db
 from services.memory_record_service import (
@@ -130,13 +128,6 @@ def set_single_config(
             raise HTTPException(status_code=HTTPStatus.NOT_ACCEPTABLE,
                                 detail="Invalid value for EXTERNAL_PROVIDER_TOP_K (expected integer)")
         ok = set_external_provider_top_k(user_id, top_k)
-    elif key == EXTERNAL_PROVIDER_TIMEOUT_KEY:
-        try:
-            timeout = int(value)
-        except (ValueError, TypeError):
-            raise HTTPException(status_code=HTTPStatus.NOT_ACCEPTABLE,
-                                detail="Invalid value for EXTERNAL_PROVIDER_TIMEOUT (expected integer)")
-        ok = set_external_provider_timeout(user_id, timeout)
     else:
         raise HTTPException(status_code=HTTPStatus.NOT_ACCEPTABLE,
                             detail="Unsupported configuration key")

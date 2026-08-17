@@ -117,6 +117,16 @@ class MemorySearchResult:
         self.__dict__.update(kwargs)
 
 
+class MemoryIngestUnit:
+    def __init__(self, **kwargs):
+        self.__dict__.update(kwargs)
+
+
+class MemoryIngestRequest:
+    def __init__(self, **kwargs):
+        self.__dict__.update(kwargs)
+
+
 memory_models.MemoryLayer = MemoryLayer
 class MemoryType(_EnumBase):
     pass
@@ -136,6 +146,8 @@ MemoryType._registry = {"short_term": MemoryType.SHORT_TERM, "long_term": Memory
 memory_models.MemoryType = MemoryType
 memory_models.MemorySearchRequest = MemorySearchRequest
 memory_models.MemorySearchResult = MemorySearchResult
+memory_models.MemoryIngestUnit = MemoryIngestUnit
+memory_models.MemoryIngestRequest = MemoryIngestRequest
 
 
 class EmbeddingModelInfo:

@@ -221,7 +221,7 @@ class MemoryContextService:
                     exc_info=True,
                 )
 
-        if self.pipeline_enabled and results:
+        if self.pipeline_enabled and (results or external_results):
             pipeline_result = self.pipeline.run(
                 internal_results=results,
                 query=query or "",
@@ -240,6 +240,7 @@ class MemoryContextService:
                     context.agent_short_term.append(result)
                 else:
                     context.external.append(result)
+            context.external.extend(external_results or [])
 
         return context
 

@@ -67,6 +67,7 @@ from consts.const import (
     AIDP_SERVER_URL,
     AIDP_TENANT_ID,
     DATA_PROCESS_SERVICE,
+    EXTERNAL_MEMORY_SEARCH_ENABLED,
     LANGUAGE,
     LOCAL_MCP_SERVER,
     MINIO_DEFAULT_BUCKET,
@@ -83,6 +84,17 @@ def _create_fixed_search_memory_tool():
     from nexent.core.tools.search_memory_tool import SearchMemoryTool
 
     return SearchMemoryTool()
+
+
+def _get_external_provider_service_for_search():
+    """Resolve the external provider service only when the search kill switch is on."""
+    if not EXTERNAL_MEMORY_SEARCH_ENABLED:
+        return None
+    from services.memory_external_provider_service import (
+        get_memory_external_provider_service,
+    )
+
+    return get_memory_external_provider_service()
 
 
 def _build_long_term_memory_items(search_context: Any) -> list[dict[str, Any]]:
@@ -965,18 +977,14 @@ async def create_agent_config(
                 try:
                     external_results = None
                     try:
-                        from services.memory_external_provider_service import (
-                            get_memory_external_provider_service,
-                        )
                         from nexent.memory.models import (
                             ExternalMemoryItem,
                             MemorySearchRequest,
                         )
 
-                        provider_service = get_memory_external_provider_service()
+                        provider_service = _get_external_provider_service_for_search()
                         if provider_service is not None:
                             top_k = memory_context.user_config.external_provider_top_k
-                            timeout = memory_context.user_config.external_provider_timeout
 
                             search_request = MemorySearchRequest(
                                 query=last_user_query or "",
@@ -993,7 +1001,6 @@ async def create_agent_config(
                                 tenant_id=str(memory_context.tenant_id or ""),
                                 request=search_request,
                                 limit=top_k,
-                                timeout=timeout,
                             )
 
                             if ext_search_results:
@@ -1090,6 +1097,7 @@ async def create_agent_config(
                     str(conversation_id) if conversation_id is not None else ""
                 )
                 fixed_search_tool.embedding_configured = embedding_configured
+                fixed_search_tool.external_results = external_results
                 fixed_search_result = await asyncio.to_thread(
                     fixed_search_tool.forward,
                     last_user_query or "",

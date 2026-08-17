@@ -8,12 +8,10 @@ from consts.const import (
 	DISABLE_AGENT_ID_KEY,
 	DISABLE_USERAGENT_ID_KEY,
 	EXTERNAL_PROVIDER_TOP_K_KEY,
-	EXTERNAL_PROVIDER_TIMEOUT_KEY,
 	DEFAULT_MEMORY_SWITCH_KEY,
 	DEFAULT_DREAMING_SWITCH_KEY,
 	DEFAULT_MEMORY_AGENT_SHARE_KEY,
 	DEFAULT_EXTERNAL_PROVIDER_TOP_K,
-	DEFAULT_EXTERNAL_PROVIDER_TIMEOUT,
 )
 from consts.model import MemoryAgentShareMode
 from database.memory_config_db import (
@@ -229,22 +227,6 @@ def set_external_provider_top_k(user_id: str, top_k: int) -> bool:
 	return _update_single_config(user_id, EXTERNAL_PROVIDER_TOP_K_KEY, str(top_k))
 
 
-def get_external_provider_timeout(user_id: str) -> int:
-	configs = get_user_configs(user_id)
-	value = configs.get(EXTERNAL_PROVIDER_TIMEOUT_KEY, str(DEFAULT_EXTERNAL_PROVIDER_TIMEOUT))
-	try:
-		return int(value)
-	except (ValueError, TypeError):
-		return DEFAULT_EXTERNAL_PROVIDER_TIMEOUT
-
-
-def set_external_provider_timeout(user_id: str, timeout: int) -> bool:
-	if timeout < 1 or timeout > 120:
-		logger.error(f"Invalid timeout value: {timeout}, must be between 1 and 120 seconds")
-		return False
-	return _update_single_config(user_id, EXTERNAL_PROVIDER_TIMEOUT_KEY, str(timeout))
-
-
 def build_memory_context(user_id: str, tenant_id: str, agent_id: str | int, skip_query: bool = False) -> MemoryContext:
 	if skip_query:
 		# When memory is forcibly disabled (e.g., debug mode), return minimum context without database queries
@@ -254,7 +236,6 @@ def build_memory_context(user_id: str, tenant_id: str, agent_id: str | int, skip
 			disable_agent_ids=[],
 			disable_user_agent_ids=[],
 			external_provider_top_k=DEFAULT_EXTERNAL_PROVIDER_TOP_K,
-			external_provider_timeout=DEFAULT_EXTERNAL_PROVIDER_TIMEOUT,
 		)
 		return MemoryContext(
 			user_config=memory_user_config,
@@ -269,7 +250,6 @@ def build_memory_context(user_id: str, tenant_id: str, agent_id: str | int, skip
 		disable_agent_ids=get_disabled_agent_ids(user_id),
 		disable_user_agent_ids=get_disabled_useragent_ids(user_id),
 		external_provider_top_k=get_external_provider_top_k(user_id),
-		external_provider_timeout=get_external_provider_timeout(user_id),
 	)
 	# If user turn off the memory function, return minimum context directly
 	if not memory_user_config.memory_switch:

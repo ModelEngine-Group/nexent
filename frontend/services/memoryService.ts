@@ -64,7 +64,6 @@ export interface MemoryConfig {
   disableAgentIds: string[];
   disableUserAgentIds: string[];
   externalProviderTopK: number;
-  externalProviderTimeout: number;
 }
 
 export interface MemoryEmbeddingStatus {
@@ -159,8 +158,6 @@ export async function loadMemoryConfig(): Promise<MemoryConfig> {
       cfg.DISABLE_USERAGENT_ID ?? cfg.disable_useragent_id ?? [];
     const externalProviderTopK: number =
       parseInt(cfg.EXTERNAL_PROVIDER_TOP_K ?? cfg.external_provider_top_k ?? "20", 10);
-    const externalProviderTimeout: number =
-      parseInt(cfg.EXTERNAL_PROVIDER_TIMEOUT ?? cfg.external_provider_timeout ?? "30", 10);
 
     return {
       memoryEnabled: memorySwitchVal === "Y",
@@ -169,7 +166,6 @@ export async function loadMemoryConfig(): Promise<MemoryConfig> {
       disableAgentIds,
       disableUserAgentIds,
       externalProviderTopK,
-      externalProviderTimeout,
     };
   } catch (e) {
     log.error("loadMemoryConfig error", e);
@@ -180,7 +176,6 @@ export async function loadMemoryConfig(): Promise<MemoryConfig> {
       disableAgentIds: [],
       disableUserAgentIds: [],
       externalProviderTopK: 20,
-      externalProviderTimeout: 30,
     };
   }
 }

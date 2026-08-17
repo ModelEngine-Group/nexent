@@ -462,6 +462,40 @@ async def test_mem0_search_returns_external_results(client, mem0_available):
         f"Expected 'dark mode' in results, got: {contents}"
 
 
+@pytest.mark.asyncio
+async def test_mem0_search_falls_back_to_user_scope(client, mem0_available):
+    """Agent-scoped search can retrieve memories previously stored user-only."""
+    from backend.memory_provider_plugins.mem0.provider import Mem0Provider
+
+    provider = Mem0Provider({
+        "api_key": "test-integration-key",
+        "base_url": MEM0_BASE_URL,
+    })
+    ingest_result = await provider.ingest(_MemoryIngestRequest(
+        tenant_id="test-tenant",
+        user_id="fallback-user",
+        units=[_MemoryIngestUnit(
+            event_id="integ-user-fallback-001",
+            event_type="test",
+            unit_type="user",
+            unit_content="Sister Jules has the external code COMET-913",
+            metadata={},
+        )],
+        idempotency_key="integ-test:user-fallback:001",
+    ))
+    assert ingest_result.status in ("ok", "partial")
+
+    results = await provider.search(_MemorySearchRequest(
+        query="Jules external code",
+        tenant_id="test-tenant",
+        user_id="fallback-user",
+        agent_id="agent-with-no-scoped-memory",
+        top_k=5,
+    ), limit=5)
+
+    assert any("COMET-913" in result.content for result in results)
+
+
 # ---------------------------------------------------------------------------
 # Test 4: Ingest Sends Units
 # ---------------------------------------------------------------------------

@@ -13,6 +13,13 @@ database_pkg.memory_provider_config_db = config_db_mod
 sys.modules["database"] = database_pkg
 sys.modules["database.memory_provider_config_db"] = config_db_mod
 
+consts_pkg = types.ModuleType("consts")
+consts_mod = types.ModuleType("consts.const")
+consts_mod.MEMORY_PROVIDER_PLUGINS_DIR = "/tmp/test-memory-provider-plugins"
+consts_pkg.const = consts_mod
+sys.modules["consts"] = consts_pkg
+sys.modules["consts.const"] = consts_mod
+
 nexent_pkg = types.ModuleType("nexent")
 memory_pkg = types.ModuleType("nexent.memory")
 memory_pkg.__path__ = []
@@ -150,7 +157,8 @@ sys.modules["services"] = services_pkg
 sys.modules["services.memory_provider_config_service"] = config_service_mod
 sys.modules["services.memory_provider_plugin_loader"] = plugin_loader_mod
 
-from backend.services.memory_external_provider_service import MemoryExternalProviderService
+from backend.services import memory_external_provider_service as service_module  # noqa: E402
+from backend.services.memory_external_provider_service import MemoryExternalProviderService  # noqa: E402
 
 
 @pytest.fixture
@@ -172,12 +180,49 @@ def service(mock_loader, mock_config_service):
 
 def test_build_provider_success(service, mock_loader):
     mock_loader.build_provider.return_value = MagicMock()
-    config = {"provider_config_id": 1}
-    params = {"plugin.name": "mem0", "plugin.api_key": "sk-123"}
+    mock_loader.get_plugin.return_value = MagicMock(
+        config_schema=[{"key": "api_key"}, {"key": "org_id"}]
+    )
+    config = {"provider_config_id": 1, "timeout_seconds": 17}
+    params = {
+        "plugin.name": "mem0",
+        "plugin.api_key": "sk-123",
+        "plugin.org_id": "org-1",
+        "unrelated": "ignored",
+    }
 
     provider = service.build_provider(config, params)
-    mock_loader.build_provider.assert_called_once_with("mem0", {"api_key": "sk-123"})
+    mock_loader.build_provider.assert_called_once_with(
+        "mem0",
+        {"api_key": "sk-123", "org_id": "org-1", "timeout_seconds": 17},
+    )
     assert provider is not None
+
+
+def test_build_provider_supports_legacy_unprefixed_schema_params(service, mock_loader):
+    mock_loader.build_provider.return_value = MagicMock()
+    mock_loader.get_plugin.return_value = MagicMock(
+        config_schema=[{"key": "api_key"}, {"key": "org_id"}]
+    )
+
+    service.build_provider(
+        {"provider_config_id": 1, "timeout_seconds": 30},
+        {
+            "plugin.name": "mem0",
+            "api_key": "legacy-key",
+            "org_id": "legacy-org",
+            "unrelated": "ignored",
+        },
+    )
+
+    mock_loader.build_provider.assert_called_once_with(
+        "mem0",
+        {
+            "api_key": "legacy-key",
+            "org_id": "legacy-org",
+            "timeout_seconds": 30,
+        },
+    )
 
 
 def test_build_provider_plugin_not_found(service, mock_loader):
@@ -189,6 +234,182 @@ def test_build_provider_plugin_not_found(service, mock_loader):
 def test_build_provider_missing_plugin_name(service):
     with pytest.raises(ValueError, match="plugin.name"):
         service.build_provider({}, {})
+
+
+def test_runtime_factory_loads_plugins_and_caches_service(monkeypatch):
+    monkeypatch.setattr(
+        sys.modules["consts.const"],
+        "MEMORY_PROVIDER_PLUGINS_DIR",
+        "/tmp/test-memory-provider-plugins",
+        raising=False,
+    )
+    loader = MagicMock()
+    loader_cls = MagicMock(return_value=loader)
+    config_service = MagicMock()
+    config_cls = MagicMock(return_value=config_service)
+    monkeypatch.setattr(service_module, "PluginLoader", loader_cls)
+    monkeypatch.setattr(service_module, "MemoryProviderConfigService", config_cls)
+    monkeypatch.setattr(service_module, "_provider_service", None)
+
+    first = service_module.get_memory_external_provider_service()
+    second = service_module.get_memory_external_provider_service()
+
+    loader_cls.assert_called_once()
+    loader.load_all.assert_called_once_with()
+    config_cls.assert_called_once_with(loader)
+    assert first is second
+    assert first._plugin_loader is loader
+    assert first._config_service is config_service
+
+
+class _SpanContext:
+    def __init__(self, span):
+        self.span = span
+
+    def __enter__(self):
+        return self.span
+
+    def __exit__(self, exc_type, exc, traceback):
+        return False
+
+
+def _mock_telemetry(monkeypatch):
+    span = MagicMock()
+    tracer = MagicMock()
+    tracer.start_as_current_span.return_value = _SpanContext(span)
+    instruments = {
+        "requests": MagicMock(),
+        "duration": MagicMock(),
+        "results": MagicMock(),
+        "accepted": MagicMock(),
+        "rejected": MagicMock(),
+    }
+    monkeypatch.setattr(service_module, "_tracer", tracer)
+    monkeypatch.setattr(service_module, "_provider_requests_total", instruments["requests"])
+    monkeypatch.setattr(service_module, "_provider_duration", instruments["duration"])
+    monkeypatch.setattr(service_module, "_provider_search_results", instruments["results"])
+    monkeypatch.setattr(service_module, "_provider_ingest_accepted", instruments["accepted"])
+    monkeypatch.setattr(service_module, "_provider_ingest_rejected", instruments["rejected"])
+    return tracer, span, instruments
+
+
+@pytest.mark.asyncio
+async def test_ac_p3_23_search_records_low_cardinality_otel(service, mock_loader, monkeypatch):
+    tracer, span, instruments = _mock_telemetry(monkeypatch)
+    provider = MagicMock()
+    provider.search = AsyncMock(return_value=[MemorySearchResult(memory_id=1)])
+    mock_loader.build_provider.return_value = provider
+
+    results = await service.search(
+        {"provider_name": "mem0-primary", "provider_config_id": 8},
+        {"plugin.name": "mem0"},
+        MemorySearchRequest(query="secret query", user_id="user-secret"),
+    )
+
+    assert len(results) == 1
+    span_attributes = tracer.start_as_current_span.call_args.kwargs["attributes"]
+    assert span_attributes == {
+        "memory.operation": "search",
+        "memory.provider.name": "mem0-primary",
+        "memory.provider.config_id": 8,
+    }
+    metric_attributes = instruments["requests"].add.call_args.args[1]
+    assert metric_attributes == {
+        "operation": "search",
+        "provider": "mem0-primary",
+        "outcome": "success",
+        "error_code": "none",
+    }
+    assert "secret" not in str(metric_attributes)
+    instruments["results"].record.assert_called_once()
+    span.set_attribute.assert_any_call("memory.result.count", 1)
+
+
+@pytest.mark.asyncio
+async def test_ac_p3_23_telemetry_failure_does_not_change_result(
+    service, mock_loader, monkeypatch
+):
+    _, _, instruments = _mock_telemetry(monkeypatch)
+    instruments["requests"].add.side_effect = RuntimeError("collector unavailable")
+    provider = MagicMock()
+    provider.search = AsyncMock(return_value=[MemorySearchResult(memory_id=1)])
+    mock_loader.build_provider.return_value = provider
+
+    results = await service.search(
+        {"provider_name": "mem0", "provider_config_id": 8},
+        {"plugin.name": "mem0"},
+        MemorySearchRequest(query="hello"),
+    )
+
+    assert len(results) == 1
+
+
+@pytest.mark.asyncio
+async def test_ac_p3_23_span_creation_failure_does_not_change_result(
+    service, mock_loader, monkeypatch
+):
+    tracer, _, _ = _mock_telemetry(monkeypatch)
+    tracer.start_as_current_span.side_effect = RuntimeError("tracer unavailable")
+    provider = MagicMock()
+    provider.search = AsyncMock(return_value=[MemorySearchResult(memory_id=1)])
+    mock_loader.build_provider.return_value = provider
+
+    results = await service.search(
+        {"provider_name": "mem0", "provider_config_id": 8},
+        {"plugin.name": "mem0"},
+        MemorySearchRequest(query="hello"),
+    )
+
+    assert len(results) == 1
+
+
+@pytest.mark.asyncio
+async def test_ac_p3_23_ingest_records_accepted_and_rejected_units(
+    service, mock_loader, monkeypatch
+):
+    _, span, instruments = _mock_telemetry(monkeypatch)
+    provider = MagicMock()
+    provider.ingest = AsyncMock(return_value=MemoryIngestResult(
+        provider="mem0",
+        status="partial",
+        accepted_count=2,
+        rejected_count=1,
+    ))
+    mock_loader.build_provider.return_value = provider
+
+    result = await service.ingest(
+        {"provider_name": "mem0", "provider_config_id": 8},
+        {"plugin.name": "mem0"},
+        MemoryIngestRequest(units=[]),
+    )
+
+    assert result.status == "partial"
+    instruments["accepted"].add.assert_called_once()
+    assert instruments["accepted"].add.call_args.args[0] == 2
+    instruments["rejected"].add.assert_called_once()
+    assert instruments["rejected"].add.call_args.args[0] == 1
+    span.set_attribute.assert_any_call("memory.unit.accepted_count", 2)
+    span.set_attribute.assert_any_call("memory.unit.rejected_count", 1)
+
+
+@pytest.mark.asyncio
+async def test_ac_p3_23_provider_build_failure_is_observed(
+    service, mock_loader, monkeypatch
+):
+    _, span, instruments = _mock_telemetry(monkeypatch)
+    mock_loader.build_provider.side_effect = ValueError("plugin unavailable")
+
+    results = await service.search(
+        {"provider_name": "missing-plugin", "provider_config_id": 9},
+        {"plugin.name": "missing"},
+        MemorySearchRequest(query="hello"),
+    )
+
+    assert results == []
+    attributes = instruments["requests"].add.call_args.args[1]
+    assert attributes["outcome"] == "error"
+    assert attributes["error_code"] == "configuration"
+    span.set_attribute.assert_any_call("memory.error.code", "configuration")
 
 
 @pytest.mark.asyncio
