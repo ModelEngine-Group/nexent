@@ -1,4 +1,5 @@
 from unittest.mock import patch
+from types import SimpleNamespace
 
 import pytest
 
@@ -70,6 +71,40 @@ def test_override_projects_only_selected_local_indices(mock_local_override, _moc
     assert resolved.local_knowledge_ids == ["12"]
     assert resolved.local_index_names == ["selected-index"]
     assert resolved.aidp_disabled is True
+
+
+@patch("backend.services.knowledge_scope_service._walk_agent_tree", return_value=_agent_tree())
+@patch(
+    "backend.services.knowledge_scope_service._resolve_aidp_access_snapshot",
+    return_value=SimpleNamespace(
+        accessible_id_set={"default-kds", "user-selected-kds"},
+        name_to_id={
+            "Default AIDP": "default-kds",
+            "User selected": "user-selected-kds",
+        },
+    ),
+)
+def test_aidp_override_can_select_accessible_kds_outside_agent_default(
+    _mock_snapshot, _mock_tree
+):
+    scope = ConversationKnowledgeScopeRequest.model_validate({
+        "local": {"mode": "disabled", "knowledge_ids": []},
+        "aidp": {"mode": "override", "kds_ids": ["user-selected-kds"]},
+    })
+
+    resolved = resolve_knowledge_scope(
+        scope=scope,
+        agent_id=7,
+        tenant_id="tenant",
+        user_id="user",
+        version_no=3,
+        is_debug=False,
+    )
+
+    tools = resolved.tool_params.agents["root-agent"].tools
+    assert tools["aidp_search"]["kds_list"] == ["user-selected-kds"]
+    assert resolved.aidp_kds_ids == ["user-selected-kds"]
+    assert resolved.aidp_display_names == ["User selected"]
 
 
 @patch("backend.services.knowledge_scope_service._walk_agent_tree", return_value=_agent_tree())
@@ -257,17 +292,11 @@ def test_local_override_rejects_mixed_embedding_models(_mock_records, _mock_filt
         _resolve_local_override(["1", "2"], "user", "tenant")
 
 
-@patch(
-    "ext_components.aidp.services.aidp_permission_service.get_kds_name_to_id_map",
-    return_value={"Allowed": "kds-a", "Hidden": "kds-b"},
-)
-@patch(
-    "ext_components.aidp.services.aidp_permission_service.filter_accessible_kds",
-    return_value=["kds-a"],
-)
-def test_aidp_override_filters_names_and_reports_removed(_mock_filter, _mock_names):
+def test_aidp_override_filters_names_and_reports_removed():
     ids, names, warnings = _resolve_aidp_override(
-        ["kds-a", "kds-b"], "user", "tenant"
+        ["kds-a", "kds-b"],
+        {"kds-a"},
+        {"Allowed": "kds-a", "Hidden": "kds-b"},
     )
 
     assert ids == ["kds-a"]
@@ -294,12 +323,11 @@ def test_merge_tool_params_preserves_non_scope_parameters():
 
 
 @patch(
-    "ext_components.aidp.services.aidp_permission_service.get_kds_name_to_id_map",
-    return_value={"Default AIDP": "default-kds"},
-)
-@patch(
-    "ext_components.aidp.services.aidp_permission_service.filter_accessible_kds",
-    return_value=["default-kds"],
+    "backend.services.knowledge_scope_service._resolve_aidp_access_snapshot",
+    return_value=SimpleNamespace(
+        accessible_id_set={"default-kds"},
+        name_to_id={"Default AIDP": "default-kds"},
+    ),
 )
 @patch(
     "backend.services.knowledge_scope_service.get_knowledge_name_map_by_index_names",
@@ -314,8 +342,7 @@ def test_inherit_resolves_each_tool_default_and_display_name(
     _mock_tree,
     _mock_local_filter,
     _mock_local_names,
-    _mock_aidp_filter,
-    _mock_aidp_names,
+    _mock_aidp_snapshot,
 ):
     scope = ConversationKnowledgeScopeRequest()
 

@@ -15,10 +15,36 @@ import { showErrorToUser } from "@/const/errorMessageI18n";
 export const knowledgeBaseKeys = {
   all: ["knowledgeBases"] as const,
   lists: () => [...knowledgeBaseKeys.all, "list"] as const,
-  list: (toolType: string, difyServerUrl?: string) =>
-    difyServerUrl
-      ? ([...knowledgeBaseKeys.lists(), toolType, difyServerUrl] as const)
+  list: (toolType: string, connectionScope?: string) =>
+    connectionScope
+      ? ([...knowledgeBaseKeys.lists(), toolType, connectionScope] as const)
       : ([...knowledgeBaseKeys.lists(), toolType] as const),
+};
+
+const fingerprintCredential = (credential?: string): string => {
+  const value = credential || "";
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `${value.length}:${(hash >>> 0).toString(16)}`;
+};
+
+const getKnowledgeBaseConnectionScope = (
+  toolType: string | null,
+  config?: {
+    serverUrl?: string;
+    apiKey?: string;
+    tenantId?: string;
+  }
+): string => {
+  const serverUrl = config?.serverUrl?.trim() || "";
+  if (toolType !== "ind_aidp_search") {
+    return serverUrl;
+  }
+  const tenantId = config?.tenantId?.trim() || "aidp";
+  return [serverUrl, tenantId, fingerprintCredential(config?.apiKey)].join("|");
 };
 
 /**
@@ -52,12 +78,10 @@ export function useKnowledgeBasesForToolConfig(
   const datamateConfig = config;
   const idataConfig = config;
   const aidpConfig = config;
+  const connectionScope = getKnowledgeBaseConnectionScope(toolType, config);
 
   const query = useQuery({
-    queryKey: knowledgeBaseKeys.list(
-      toolType || "default",
-      difyConfig?.serverUrl || ""
-    ),
+    queryKey: knowledgeBaseKeys.list(toolType || "default", connectionScope),
     queryFn: async () => {
       let kbs: KnowledgeBase[] = [];
 
@@ -201,9 +225,9 @@ export function useKnowledgeBasesForToolConfig(
       });
     },
     enabled: !!toolType,
-    staleTime: 30_000, // Cache for 30 seconds to reduce API calls
+    staleTime: toolType === "aidp_search" ? 0 : 30_000,
     gcTime: 5 * 60_000, // Keep in cache for 5 minutes
-    refetchOnMount: false, // Only refetch if data is stale
+    refetchOnMount: toolType === "aidp_search" ? "always" : false,
     refetchOnWindowFocus: false, // Don't refetch on window focus
     retry: 0, // Don't retry on failure - show error immediately
   });
@@ -211,13 +235,10 @@ export function useKnowledgeBasesForToolConfig(
   // Provide a method to clear knowledge bases cache (useful when sync fails)
   const clearKnowledgeBases = useCallback(() => {
     queryClient.setQueryData(
-      knowledgeBaseKeys.list(
-        toolType || "default",
-        difyConfig?.serverUrl || ""
-      ),
+      knowledgeBaseKeys.list(toolType || "default", connectionScope),
       []
     );
-  }, [queryClient, toolType, difyConfig?.serverUrl]);
+  }, [queryClient, toolType, connectionScope]);
 
   return { ...query, clearKnowledgeBases };
 }
@@ -253,7 +274,10 @@ export function usePrefetchKnowledgeBases() {
       if (!toolType) return;
 
       await queryClient.prefetchQuery({
-        queryKey: knowledgeBaseKeys.list(toolType, difyConfig?.serverUrl || ""),
+        queryKey: knowledgeBaseKeys.list(
+          toolType,
+          getKnowledgeBaseConnectionScope(toolType, difyConfig)
+        ),
         queryFn: async () => {
           let kbs: KnowledgeBase[] = [];
 

@@ -20,7 +20,7 @@ from consts.const import (
     LOCAL_MCP_SERVER,
     MCP_MANAGEMENT_API,
 )
-from consts.exceptions import MCPConnectionError, NotFoundException, ToolExecutionException
+from consts.exceptions import MCPConnectionError, NotFoundException, ToolExecutionException, ValidationError
 from consts.model import ToolInstanceInfoRequest, ToolInfo, ToolSourceEnum, ToolValidateRequest
 from consts.tool_labels import SYSTEM_MANAGED_TOOL_NAMES
 from database.outer_api_tool_db import (
@@ -39,6 +39,7 @@ from database.tool_db import (
     create_or_update_tool_by_tool_info,
     query_all_tools,
     query_tools_by_labels,
+    query_tools_by_ids,
     query_tool_instances_by_id,
     search_last_tool_instance_by_tool_id,
     update_tool_table_from_scan_tool_list,
@@ -57,6 +58,39 @@ from utils.langchain_utils import discover_langchain_modules
 from utils.tool_utils import get_local_tools_classes, get_local_tools_description_zh
 
 logger = logging.getLogger("tool_configuration_service")
+
+
+def _parse_kds_list(value: Any) -> list[str]:
+    """Normalize legacy JSON strings and list values into ordered string IDs."""
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError:
+            return []
+    if not isinstance(value, list):
+        return []
+    return list(dict.fromkeys(str(item).strip() for item in value if str(item).strip()))
+
+
+def _is_aidp_search_tool(tool_id: int, tool_name: Any = None) -> bool:
+    if isinstance(tool_name, str):
+        return tool_name == "aidp_search"
+    tools = query_tools_by_ids([tool_id])
+    return bool(tools and tools[0].get("name") == "aidp_search")
+
+
+def _resolve_aidp_snapshot(user_id: str, tenant_id: str):
+    from ext_components.aidp.services.aidp_access_service import (
+        resolve_current_aidp_access,
+    )
+
+    return resolve_current_aidp_access(
+        server_url=AIDP_SERVER_URL,
+        api_key=AIDP_API_KEY,
+        user_id=user_id,
+        tenant_id=tenant_id,
+        aidp_tenant_id=AIDP_TENANT_ID,
+    )
 
 
 def _create_mcp_transport(url: str, authorization_token: Optional[str] = None, custom_headers: Optional[Dict[str, Any]] = None):
@@ -317,7 +351,12 @@ async def get_all_mcp_tools(tenant_id: str) -> List[ToolInfo]:
     return tools_info
 
 
-def search_tool_info_impl(agent_id: int, tool_id: int, tenant_id: str):
+def search_tool_info_impl(
+    agent_id: int,
+    tool_id: int,
+    tenant_id: str,
+    user_id: Optional[str] = None,
+):
     """
     Search for tool configuration information by agent ID and tool ID
 
@@ -336,8 +375,16 @@ def search_tool_info_impl(agent_id: int, tool_id: int, tenant_id: str):
         agent_id, tool_id, tenant_id)
 
     if tool_instance:
+        params = dict(tool_instance["params"] or {})
+        if user_id and _is_aidp_search_tool(tool_id):
+            snapshot = _resolve_aidp_snapshot(user_id, tenant_id)
+            existing_ids = _parse_kds_list(params.get("kds_list"))
+            params["kds_list"] = [
+                kds_id for kds_id in existing_ids
+                if kds_id in snapshot.accessible_id_set
+            ]
         return {
-            "params": tool_instance["params"],
+            "params": params,
             "enabled": tool_instance["enabled"]
         }
     else:
@@ -362,38 +409,54 @@ def update_tool_info_impl(tool_info: ToolInstanceInfoRequest, tenant_id: str, us
     Raises:
         ValueError: If database update fails
     """
-    # v7.1: validate per-KB READ access for aidp_search so a tenant user
-    # cannot stash a forbidden kds_id in their tool config for later abuse.
-    if getattr(tool_info, "name", None) == "aidp_search":
-        params = tool_info.params or {}
-        kds_list = params.get("kds_list") or []
-        # ``kds_list`` may arrive as a JSON-encoded string (the
-        # legacy storage shape); decode it so we can validate each entry.
-        if isinstance(kds_list, str):
-            import json
-            try:
-                kds_list = json.loads(kds_list)
-            except json.JSONDecodeError:
-                kds_list = []
-        if kds_list:
-            try:
-                from ext_components.aidp.services import (
-                    aidp_permission_service as _aidp_perms,
-                )
-                for _kds_id in kds_list:
-                    _aidp_perms.require_permission(
-                        kb_id=_kds_id, user_id=user_id,
-                        tenant_id=tenant_id, required="READ",
-                    )
-            except Exception:
-                # Surface as ValidationError so the app layer returns 400.
-                from consts.exceptions import ValidationError
-                raise ValidationError(
-                    f"aidp_search kds_list contains a KB the user cannot read"
-                ) from None
-
     # Use version_no from request if provided, otherwise default to 0
     version_no = getattr(tool_info, 'version_no', 0)
+    if _is_aidp_search_tool(tool_info.tool_id, getattr(tool_info, "name", None)):
+        existing = query_tool_instances_by_id(
+            tool_info.agent_id,
+            tool_info.tool_id,
+            tenant_id,
+            version_no,
+        )
+        existing_params = dict((existing or {}).get("params") or {})
+        existing_ids = _parse_kds_list(existing_params.get("kds_list"))
+        params = dict(tool_info.params or {})
+
+        # A missing key means the caller did not edit the knowledge scope.
+        if "kds_list" not in params:
+            params["kds_list"] = existing_ids
+        else:
+            submitted_ids = _parse_kds_list(params.get("kds_list"))
+            try:
+                snapshot = _resolve_aidp_snapshot(user_id, tenant_id)
+            except Exception as exc:
+                new_ids = [kds_id for kds_id in submitted_ids if kds_id not in set(existing_ids)]
+                if new_ids:
+                    raise ValidationError(
+                        "AIDP is unavailable; the knowledge base configuration was not changed"
+                    ) from exc
+                params["kds_list"] = existing_ids
+            else:
+                existing_set = set(existing_ids)
+                invalid_ids = [
+                    kds_id for kds_id in submitted_ids
+                    if kds_id not in snapshot.accessible_id_set and kds_id not in existing_set
+                ]
+                if invalid_ids:
+                    raise ValidationError(
+                        "aidp_search kds_list contains a knowledge base the user cannot configure"
+                    )
+                hidden_existing = [
+                    kds_id for kds_id in existing_ids
+                    if kds_id not in snapshot.accessible_id_set
+                ]
+                visible_submitted = [
+                    kds_id for kds_id in submitted_ids
+                    if kds_id in snapshot.accessible_id_set
+                ]
+                params["kds_list"] = list(dict.fromkeys(hidden_existing + visible_submitted))
+        tool_info.params = params
+
     tool_instance = create_or_update_tool_by_tool_info(
         tool_info, tenant_id, user_id, version_no=version_no)
     return {
@@ -896,6 +959,14 @@ def _validate_local_tool(
             filtered_params = {k: v for k, v in instantiation_params.items()
                               if k not in ["observer", "rerank_model", "rerank"]}
             filtered_params["observer"] = None
+            if tool_name == "ind_aidp_search":
+                # Older UI builds incorrectly sent the independent AIDP KDS
+                # selection under the local-search name ``index_names``.
+                # Normalize that alias without ever replacing the independent
+                # connector's own URL or API key.
+                legacy_index_names = filtered_params.pop("index_names", None)
+                if not filtered_params.get("kds_list") and legacy_index_names:
+                    filtered_params["kds_list"] = legacy_index_names
             if tool_name == "aidp_search":
                 # AIDP credentials are sourced from ``consts.const`` (i.e. the
                 # process environment). Inject them here exactly as
@@ -912,6 +983,21 @@ def _validate_local_tool(
                         "AIDP is not configured for this deployment: "
                         "set AIDP_API_KEY before testing aidp_search"
                     )
+                if not tenant_id or not user_id:
+                    raise ToolExecutionException(
+                        "Tenant ID and User ID are required for aidp_search validation"
+                    )
+                snapshot = _resolve_aidp_snapshot(user_id, tenant_id)
+                requested_kds = _parse_kds_list(filtered_params.get("kds_list"))
+                invalid_kds = [
+                    kds_id for kds_id in requested_kds
+                    if kds_id not in snapshot.accessible_id_set
+                ]
+                if invalid_kds:
+                    raise ToolExecutionException(
+                        "aidp_search test selection contains an unavailable knowledge base"
+                    )
+                filtered_params["kds_list"] = requested_kds
                 filtered_params["server_url"] = AIDP_SERVER_URL
                 filtered_params["api_key"] = AIDP_API_KEY
                 filtered_params["tenant_id"] = AIDP_TENANT_ID

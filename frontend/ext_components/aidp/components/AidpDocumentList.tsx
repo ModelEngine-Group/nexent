@@ -74,16 +74,29 @@ const AidpDocumentList: React.FC<AidpDocumentListProps> = ({
             : item.reason_en || item.reason_zh;
           return `${item.file_name}: ${reason || t("aidpKnowledge.uploadFailed")}`;
         });
-        const failureMessage = failureDetails.join("；");
+        const failureLines = failureDetails.map((detail, index) => (
+          <div key={`${index}-${detail}`}>{detail}</div>
+        ));
 
         if (result.summary.failed > 0 && result.summary.success === 0) {
-          message.error(failureMessage || t("aidpKnowledge.uploadFailed"));
+          message.error(
+            failureLines.length > 0 ? (
+              <div className="text-left">{failureLines}</div>
+            ) : (
+              t("aidpKnowledge.uploadFailed")
+            )
+          );
         } else if (result.summary.failed > 0) {
           message.warning(
-            t("aidpKnowledge.uploadPartial", {
-              success: result.summary.success,
-              failed: result.summary.failed,
-            }) + (failureMessage ? `：${failureMessage}` : "")
+            <div className="text-left">
+              <div>
+                {t("aidpKnowledge.uploadPartial", {
+                  success: result.summary.success,
+                  failed: result.summary.failed,
+                })}
+              </div>
+              {failureLines}
+            </div>
           );
           onDocsUploaded();
         } else {
@@ -93,7 +106,11 @@ const AidpDocumentList: React.FC<AidpDocumentListProps> = ({
           onDocsUploaded();
         }
       } catch (error) {
-        message.error(t("aidpKnowledge.uploadFailed"));
+        const reason =
+          error instanceof Error && error.message.trim()
+            ? error.message
+            : t("aidpKnowledge.uploadFailed");
+        message.error(reason);
       } finally {
         setUploading(false);
       }

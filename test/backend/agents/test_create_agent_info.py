@@ -7270,6 +7270,11 @@ class TestCreateToolConfigListAidpSearch:
     @pytest.mark.asyncio
     async def test_aidp_search_permission_whitelist_success(self):
         """When get_allowed_kds_list succeeds, allowed_kds_set is set in metadata."""
+        access_module = MagicMock()
+        access_module.resolve_current_aidp_access.return_value = types.SimpleNamespace(
+            accessible_id_set={"kb_allowed_1", "kb_allowed_2"},
+            name_to_id={"Allowed 1": "kb_allowed_1", "Allowed 2": "kb_allowed_2"},
+        )
         with patch("backend.agents.create_agent_info.discover_langchain_tools",
                    new_callable=AsyncMock, return_value=[]), \
              patch("backend.agents.create_agent_info.search_tools_for_sub_agent") as mock_tools, \
@@ -7280,13 +7285,7 @@ class TestCreateToolConfigListAidpSearch:
              patch("backend.agents.create_agent_info.AIDP_API_KEY", "key"), \
              patch("backend.agents.create_agent_info.AIDP_TENANT_ID", "tenant"), \
              patch.dict(sys.modules, {
-                 "ext_components.aidp.services": MagicMock(
-                     aidp_permission_service=MagicMock(
-                         get_allowed_kds_list=MagicMock(
-                             return_value=["kb_allowed_1", "kb_allowed_2"],
-                         ),
-                     ),
-                 ),
+                 "ext_components.aidp.services.aidp_access_service": access_module,
              }):
 
             mock_tools.return_value = [{
@@ -7323,6 +7322,8 @@ class TestCreateToolConfigListAidpSearch:
     @pytest.mark.asyncio
     async def test_aidp_search_permission_whitelist_failure_fallback(self):
         """When get_allowed_kds_list raises, a warning is logged and allowed_kds_set stays empty."""
+        access_module = MagicMock()
+        access_module.resolve_current_aidp_access.side_effect = Exception("AIDP down")
         with patch("backend.agents.create_agent_info.discover_langchain_tools",
                    new_callable=AsyncMock, return_value=[]), \
              patch("backend.agents.create_agent_info.search_tools_for_sub_agent") as mock_tools, \
@@ -7333,13 +7334,7 @@ class TestCreateToolConfigListAidpSearch:
              patch("backend.agents.create_agent_info.AIDP_API_KEY", "key"), \
              patch("backend.agents.create_agent_info.AIDP_TENANT_ID", "tenant"), \
              patch.dict(sys.modules, {
-                 "ext_components.aidp.services": MagicMock(
-                     aidp_permission_service=MagicMock(
-                         get_allowed_kds_list=MagicMock(
-                             side_effect=Exception("DB down"),
-                         ),
-                     ),
-                 ),
+                 "ext_components.aidp.services.aidp_access_service": access_module,
              }):
 
             mock_tools.return_value = [{

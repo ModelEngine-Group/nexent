@@ -1129,14 +1129,19 @@ def get_aidp_kb_display_names(tool_info_list: List[dict], user_id: str, tenant_i
         return None
 
     try:
-        from ext_components.aidp.services import aidp_permission_service
-        # Get the kds_name_to_id_map from permission service
-        kds_name_to_id_map = aidp_permission_service.get_kds_name_to_id_map(
-            user_id=user_id,
-            tenant_id=tenant_id
+        from consts.const import AIDP_API_KEY, AIDP_SERVER_URL, AIDP_TENANT_ID
+        from ext_components.aidp.services.aidp_access_service import (
+            resolve_current_aidp_access,
         )
-        # Extract the kds_name keys as display names
-        display_names = list(kds_name_to_id_map.keys())
+
+        snapshot = resolve_current_aidp_access(
+            server_url=AIDP_SERVER_URL,
+            api_key=AIDP_API_KEY,
+            user_id=user_id,
+            tenant_id=tenant_id,
+            aidp_tenant_id=AIDP_TENANT_ID,
+        )
+        display_names = list(snapshot.name_to_id.keys())
         logger.debug(f"Retrieved aidp_kb_display_names: {display_names}")
         return display_names if display_names else None
     except Exception as e:

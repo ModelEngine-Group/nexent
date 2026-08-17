@@ -112,7 +112,7 @@ class TestSearchToolInfoAPI:
         assert data["config"]["key"] == "value"
 
         mock_get_user_id.assert_called_once_with(None)
-        mock_search_tool_info.assert_called_once_with(123, 456, "tenant456")
+        mock_search_tool_info.assert_called_once_with(123, 456, "tenant456", "user123")
 
     @patch('apps.tool_config_app.get_current_user_id')
     @patch('apps.tool_config_app.search_tool_info_impl')

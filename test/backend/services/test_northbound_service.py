@@ -1117,7 +1117,7 @@ class TestGetAgentInfoList:
         permission_service = types.ModuleType(
             "ext_components.aidp.services.aidp_permission_service"
         )
-        permission_service.get_accessible_kbs = MagicMock(return_value=[{
+        permission_service.intersect_accessible_kbs = MagicMock(return_value=[{
             "kb_id": "kds-1",
             "kds_name": "Fallback name",
             "resource_status": "ACTIVE",
@@ -1131,6 +1131,23 @@ class TestGetAgentInfoList:
             "chunk_count": 12,
             "caption_enable": 1,
         })
+        aidp_service.fetch_all_aidp_knowledge_bases_impl = MagicMock(return_value={
+            "value": [{"kds_id": "kds-1"}],
+            "total_count": 1,
+            "next_link": None,
+        })
+        aidp_access_service = types.ModuleType(
+            "ext_components.aidp.services.aidp_access_service"
+        )
+        aidp_access_service.resolve_current_aidp_access = MagicMock(
+            return_value=types.SimpleNamespace(
+                accessible_rows=[{
+                    "kb_id": "kds-1",
+                    "kds_name": "Fallback name",
+                    "resource_status": "ACTIVE",
+                }]
+            )
+        )
         services_module = types.ModuleType("ext_components.aidp.services")
         services_module.aidp_permission_service = permission_service
         aidp_module = types.ModuleType("ext_components.aidp")
@@ -1144,6 +1161,7 @@ class TestGetAgentInfoList:
             "ext_components.aidp.services": services_module,
             "ext_components.aidp.services.aidp_permission_service": permission_service,
             "ext_components.aidp.services.aidp_service": aidp_service,
+            "ext_components.aidp.services.aidp_access_service": aidp_access_service,
         }):
             result = await ns.get_agent_knowledge_bases_for_northbound(
                 ctx, "aidp_agent"
@@ -1164,6 +1182,13 @@ class TestGetAgentInfoList:
             "https://aidp.example",
             "test-aidp-api-key",
             "kds-1",
+        )
+        aidp_access_service.resolve_current_aidp_access.assert_called_once_with(
+            server_url="https://aidp.example",
+            api_key="test-aidp-api-key",
+            user_id="user-1",
+            tenant_id="tenant-1",
+            aidp_tenant_id="aidp",
         )
 
 

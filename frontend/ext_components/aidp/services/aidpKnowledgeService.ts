@@ -25,6 +25,15 @@ export interface AidpKbDetail {
   is_multimodal?: boolean;
   created_at?: string;
   updated_at?: string;
+  permission?: "EDIT" | "READ_ONLY" | null;
+  ingroup_permission?: "EDIT" | "READ_ONLY" | "PRIVATE";
+  group_ids?: number[];
+  resource_status?:
+    | "ACTIVE"
+    | "CREATING"
+    | "DELETE_PENDING"
+    | "ORPHANED"
+    | "UNAVAILABLE";
 }
 
 export interface AidpDocumentItem {
@@ -303,9 +312,27 @@ class AidpKnowledgeService {
     if (!response.ok) {
       const errorText = await response.text();
       log.error("AIDP document upload failed:", errorText);
-      throw new Error(
-        `Upload failed (${response.status}): ${errorText || response.statusText}`
-      );
+      let errorMessage = response.statusText || `HTTP ${response.status}`;
+      if (errorText) {
+        try {
+          const payload = JSON.parse(errorText) as {
+            message?: unknown;
+            details?: { upstream_reason?: unknown } | null;
+          };
+          const upstreamReason = payload.details?.upstream_reason;
+          if (typeof upstreamReason === "string" && upstreamReason.trim()) {
+            errorMessage = upstreamReason.trim();
+          } else if (
+            typeof payload.message === "string" &&
+            payload.message.trim()
+          ) {
+            errorMessage = payload.message.trim();
+          }
+        } catch {
+          errorMessage = errorText;
+        }
+      }
+      throw new Error(errorMessage);
     }
 
     const result = (await response.json()) as Partial<AidpUploadResponse>;

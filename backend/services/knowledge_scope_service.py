@@ -100,13 +100,28 @@ def _filter_accessible_aidp_ids(
     user_id: str,
     tenant_id: str,
 ) -> List[str]:
-    """Filter AIDP IDs lazily so the core service remains extension-safe."""
-    from ext_components.aidp.services import aidp_permission_service
+    """Filter AIDP IDs against the current remote catalog and local access."""
+    snapshot = _resolve_aidp_access_snapshot(user_id, tenant_id)
+    return [
+        str(kds_id)
+        for kds_id in kds_ids
+        if str(kds_id) in snapshot.accessible_id_set
+    ]
 
-    return aidp_permission_service.filter_accessible_kds(
-        list(kds_ids),
+
+def _resolve_aidp_access_snapshot(user_id: str, tenant_id: str):
+    """Resolve AIDP access lazily so deployments without the extension still import."""
+    from consts.const import AIDP_API_KEY, AIDP_SERVER_URL, AIDP_TENANT_ID
+    from ext_components.aidp.services.aidp_access_service import (
+        resolve_current_aidp_access,
+    )
+
+    return resolve_current_aidp_access(
+        server_url=AIDP_SERVER_URL,
+        api_key=AIDP_API_KEY,
         user_id=user_id,
         tenant_id=tenant_id,
+        aidp_tenant_id=AIDP_TENANT_ID,
     )
 
 
@@ -302,24 +317,15 @@ def _resolve_local_override(
 
 def _resolve_aidp_override(
     kds_ids: Iterable[str],
-    user_id: str,
-    tenant_id: str,
+    accessible_id_set: set[str],
+    snapshot_name_to_id: Dict[str, str],
 ) -> tuple[List[str], Dict[str, str], List[Dict[str, Any]]]:
-    from ext_components.aidp.services import aidp_permission_service
-
-    requested = list(kds_ids)
-    accessible = aidp_permission_service.filter_accessible_kds(
-        requested,
-        user_id=user_id,
-        tenant_id=tenant_id,
-    )
+    requested = [str(kds_id) for kds_id in kds_ids]
+    accessible = [kds_id for kds_id in requested if kds_id in accessible_id_set]
     accessible_set = set(accessible)
     name_map = {
         name: kds_id
-        for name, kds_id in aidp_permission_service.get_kds_name_to_id_map(
-            user_id=user_id,
-            tenant_id=tenant_id,
-        ).items()
+        for name, kds_id in snapshot_name_to_id.items()
         if kds_id in accessible_set
     }
     warnings = []
@@ -368,6 +374,21 @@ def resolve_knowledge_scope(
     local_records: List[Dict[str, Any]] = []
     aidp_ids: List[str] = []
     aidp_name_map: Dict[str, str] = {}
+    aidp_snapshot = None
+    aidp_capability_present = any(
+        tool.get("class_name") == AIDP_TOOL_CLASS
+        for node in agent_tree
+        for tool in node["tools"]
+    )
+    if scope.aidp.mode != "disabled" and aidp_capability_present:
+        try:
+            aidp_snapshot = _resolve_aidp_access_snapshot(user_id, tenant_id)
+        except Exception:
+            warnings.append({
+                "code": "KNOWLEDGE_SCOPE_SOURCE_UNAVAILABLE",
+                "source": "aidp",
+                "count": 1,
+            })
     if scope.local.mode == "override":
         local_records, local_warnings = _resolve_local_override(
             scope.local.knowledge_ids, user_id, tenant_id
@@ -375,7 +396,9 @@ def resolve_knowledge_scope(
         warnings.extend(local_warnings)
     if scope.aidp.mode == "override":
         aidp_ids, aidp_name_map, aidp_warnings = _resolve_aidp_override(
-            scope.aidp.kds_ids, user_id, tenant_id
+            scope.aidp.kds_ids,
+            aidp_snapshot.accessible_id_set if aidp_snapshot else set(),
+            aidp_snapshot.name_to_id if aidp_snapshot else {},
         )
         warnings.extend(aidp_warnings)
 
@@ -411,12 +434,13 @@ def resolve_knowledge_scope(
             elif class_name == AIDP_TOOL_CLASS:
                 aidp_capable = True
                 if scope.aidp.mode == "inherit":
-                    from ext_components.aidp.services import aidp_permission_service
-
                     defaults = _tool_default(tool, AIDP_RANGE_PARAM)
-                    kds_ids = aidp_permission_service.filter_accessible_kds(
-                        defaults, user_id=user_id, tenant_id=tenant_id
+                    accessible_id_set = (
+                        aidp_snapshot.accessible_id_set if aidp_snapshot else set()
                     )
+                    kds_ids = [
+                        kds_id for kds_id in defaults if kds_id in accessible_id_set
+                    ]
                 elif scope.aidp.mode == "override":
                     kds_ids = list(aidp_ids)
                 else:
@@ -465,15 +489,12 @@ def resolve_knowledge_scope(
         ]
 
     if scope.aidp.mode != "override" and effective_aidp_ids:
-        from ext_components.aidp.services import aidp_permission_service
-
         allowed_ids = set(effective_aidp_ids)
         aidp_name_map = {
             name: kds_id
-            for name, kds_id in aidp_permission_service.get_kds_name_to_id_map(
-                user_id=user_id,
-                tenant_id=tenant_id,
-            ).items()
+            for name, kds_id in (
+                aidp_snapshot.name_to_id.items() if aidp_snapshot else []
+            )
             if kds_id in allowed_ids
         }
     aidp_display_by_id = {kds_id: name for name, kds_id in aidp_name_map.items()}

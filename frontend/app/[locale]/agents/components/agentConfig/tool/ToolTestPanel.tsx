@@ -700,7 +700,7 @@ export default function ToolTestPanel({
         ) {
           // Haotian and iData use dataset_ids as an array
           kbSelectionConfig = { dataset_ids: aidpKbIds };
-        } else if (tool?.name === "aidp_search") {
+        } else if (isAidpRuntimeSelection) {
           // AIDP uses kds_list as an array
           kbSelectionConfig = { kds_list: aidpKbIds };
         } else if (!isKnowledgeBaseSearchTool) {

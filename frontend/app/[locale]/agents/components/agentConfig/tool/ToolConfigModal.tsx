@@ -1417,7 +1417,11 @@ export default function ToolConfigModal({
 
       // Check if knowledge base selector has valid selection (for index_names/dataset_ids fields)
       // Since these fields use custom UI without form control, we need manual validation
-      if (toolRequiresKbSelection && selectedKbIds.length === 0) {
+      if (
+        toolRequiresKbSelection &&
+        toolKbType !== "aidp_search" &&
+        selectedKbIds.length === 0
+      ) {
         const kbParam = currentParams.find(
           (p) =>
             p.required &&
@@ -2272,6 +2276,7 @@ export default function ToolConfigModal({
                   // Since these fields use custom display without form control, we need custom validation
                   if (
                     toolRequiresKbSelection &&
+                    toolKbType !== "aidp_search" &&
                     (param.name === "index_names" ||
                       param.name === "dataset_ids" ||
                       param.name === "kds_list")

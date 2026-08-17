@@ -1475,29 +1475,29 @@ async def create_tool_config_list(
                     "Independent AIDP search requires server_url and api_key in its tool configuration."
                 )
 
-        # v7.1: inject the runtime whitelist for AidpSearchTool. The
-        # permission service recomputes it on every agent call so per-KB
-        # permission changes take effect immediately without re-publishing
-        # the agent. Falls back to the configured ``kds_list`` when the
-        # whitelist lookup fails (defensive path).
+        # Inject the runtime whitelist for AidpSearchTool. ``param_dict``
+        # already contains the resolved per-run range (inherit/override/
+        # disabled). Intersect it with the current remote catalog and local
+        # permissions, but never intersect it with the agent defaults again.
         _allowed_kds_set: set[str] = set()
         _kds_name_to_id_map: dict[str, str] = {}
         if tool.get("class_name") == "AidpSearchTool":
             try:
-                from ext_components.aidp.services import (
-                    aidp_permission_service as _aidp_perms,
+                from ext_components.aidp.services.aidp_access_service import (
+                    resolve_current_aidp_access,
                 )
-                _allowed_kds_set = set(
-                    _aidp_perms.get_allowed_kds_list(
-                        user_id=user_id, tenant_id=tenant_id,
-                    )
+                _snapshot = resolve_current_aidp_access(
+                    server_url=AIDP_SERVER_URL,
+                    api_key=AIDP_API_KEY,
+                    user_id=user_id,
+                    tenant_id=tenant_id,
+                    aidp_tenant_id=AIDP_TENANT_ID,
                 )
-                _kds_name_to_id_map = _aidp_perms.get_kds_name_to_id_map(
-                    user_id=user_id, tenant_id=tenant_id,
-                )
+                _allowed_kds_set = set(_snapshot.accessible_id_set)
+                _kds_name_to_id_map = dict(_snapshot.name_to_id)
             except Exception as exc:  # pragma: no cover - defensive
                 logger.warning(
-                    "Aidp permission lookup failed: %s", exc,
+                    "AIDP access snapshot lookup failed: %s", exc,
                 )
 
             configured_kds = param_dict.get("kds_list") or []

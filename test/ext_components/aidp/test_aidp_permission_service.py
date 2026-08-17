@@ -351,6 +351,83 @@ class TestGetAccessibleKbs:
         assert svc.count_accessible_kbs("u", "t") == 1
 
 
+class TestIntersectAccessibleKbs:
+    def test_intersects_remote_catalog_and_preserves_remote_order(self, monkeypatch):
+        rows = [
+            _record(kb_id="kb-1", owner_user_id="u"),
+            _record(kb_id="kb-2", owner_user_id="u"),
+            _record(kb_id="local-only", owner_user_id="u"),
+        ]
+        monkeypatch.setattr(
+            svc.aidp_permission_db,
+            "list_all_permissions_by_tenant",
+            lambda tenant_id: rows,
+        )
+        monkeypatch.setattr(svc, "_get_user_groups", lambda u, t: [])
+        monkeypatch.setattr(svc, "_get_user_role", lambda u, t: "USER")
+
+        result = svc.intersect_accessible_kbs(
+            [
+                {"kds_id": "kb-2", "kds_name": "Remote two"},
+                {"kds_id": "remote-only", "kds_name": "Remote only"},
+                {"kds_id": "kb-1", "kds_name": "Remote one"},
+            ],
+            user_id="u",
+            tenant_id="t",
+        )
+
+        assert [item["kb_id"] for item in result] == ["kb-2", "kb-1"]
+        assert [item["kds_name"] for item in result] == ["Remote two", "Remote one"]
+        assert all(item["permission"] == "EDIT" for item in result)
+
+    def test_drops_remote_resource_when_user_has_no_local_access(self, monkeypatch):
+        rows = [
+            _record(
+                kb_id="kb-private",
+                owner_user_id="another-user",
+                ingroup_permission="PRIVATE",
+            ),
+        ]
+        monkeypatch.setattr(
+            svc.aidp_permission_db,
+            "list_all_permissions_by_tenant",
+            lambda tenant_id: rows,
+        )
+        monkeypatch.setattr(svc, "_get_user_groups", lambda u, t: [])
+        monkeypatch.setattr(svc, "_get_user_role", lambda u, t: "USER")
+
+        result = svc.intersect_accessible_kbs(
+            [{"kds_id": "kb-private"}],
+            user_id="u",
+            tenant_id="t",
+        )
+
+        assert result == []
+
+    def test_deduplicates_remote_ids_and_protects_local_permission(self, monkeypatch):
+        rows = [_record(kb_id="kb-1", owner_user_id="u")]
+        monkeypatch.setattr(
+            svc.aidp_permission_db,
+            "list_all_permissions_by_tenant",
+            lambda tenant_id: rows,
+        )
+        monkeypatch.setattr(svc, "_get_user_groups", lambda u, t: [])
+        monkeypatch.setattr(svc, "_get_user_role", lambda u, t: "USER")
+
+        result = svc.intersect_accessible_kbs(
+            [
+                {"kds_id": "kb-1", "permission": "REMOTE", "kds_name": "First"},
+                {"kds_id": "kb-1", "kds_name": "Duplicate"},
+            ],
+            user_id="u",
+            tenant_id="t",
+        )
+
+        assert len(result) == 1
+        assert result[0]["permission"] == "EDIT"
+        assert result[0]["kds_name"] == "First"
+
+
 # ---------------------------------------------------------------------------
 # _parse_group_ids gap coverage (lines 100-108)
 # ---------------------------------------------------------------------------

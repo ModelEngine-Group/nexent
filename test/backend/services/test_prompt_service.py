@@ -2989,20 +2989,19 @@ class TestGetAidpKbDisplayNames(unittest.TestCase):
         """When aidp_search tool exists, import and call permission service."""
         from backend.services.prompt_service import get_aidp_kb_display_names
 
-        # Mock the ext_components.aidp.services module
-        mock_aidp_module = MagicMock()
-        mock_aidp_module.aidp_permission_service.get_kds_name_to_id_map.return_value = {
-            "KB-Alpha": 1,
-            "KB-Beta": 2,
-        }
+        mock_access_module = MagicMock()
+        mock_access_module.resolve_current_aidp_access.return_value = types.SimpleNamespace(
+            name_to_id={"KB-Alpha": "1", "KB-Beta": "2"}
+        )
 
         tool_info_list = [
             {"name": "aidp_search", "tool_id": 42},
             {"name": "web_search", "tool_id": 1},
         ]
 
-        # Patch importlib-style: intercept the from-import inside the function
-        with patch.dict(sys.modules, {'ext_components.aidp.services': mock_aidp_module}):
+        with patch.dict(sys.modules, {
+            'ext_components.aidp.services.aidp_access_service': mock_access_module,
+        }):
             result = get_aidp_kb_display_names(tool_info_list, "user1", "tenant1")
 
         self.assertEqual(result, ["KB-Alpha", "KB-Beta"])
@@ -3012,12 +3011,16 @@ class TestGetAidpKbDisplayNames(unittest.TestCase):
         """When kds_name_to_id_map is empty, return None."""
         from backend.services.prompt_service import get_aidp_kb_display_names
 
-        mock_aidp_module = MagicMock()
-        mock_aidp_module.aidp_permission_service.get_kds_name_to_id_map.return_value = {}
+        mock_access_module = MagicMock()
+        mock_access_module.resolve_current_aidp_access.return_value = types.SimpleNamespace(
+            name_to_id={}
+        )
 
         tool_info_list = [{"name": "aidp_search", "tool_id": 42}]
 
-        with patch.dict(sys.modules, {'ext_components.aidp.services': mock_aidp_module}):
+        with patch.dict(sys.modules, {
+            'ext_components.aidp.services.aidp_access_service': mock_access_module,
+        }):
             result = get_aidp_kb_display_names(tool_info_list, "user1", "tenant1")
 
         self.assertIsNone(result)

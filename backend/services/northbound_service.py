@@ -685,21 +685,29 @@ async def get_agent_knowledge_bases_for_northbound(
         tool_name = LOCAL_TOOL_CLASS
         range_parameter = "index_names"
     else:
-        from ext_components.aidp.services import aidp_permission_service
-        from ext_components.aidp.services.aidp_service import get_aidp_kb_impl
+        from ext_components.aidp.services.aidp_access_service import (
+            resolve_current_aidp_access,
+        )
+        from ext_components.aidp.services.aidp_service import (
+            get_aidp_kb_impl,
+        )
 
-        rows = aidp_permission_service.get_accessible_kbs(
+        snapshot = await asyncio.to_thread(
+            resolve_current_aidp_access,
+            server_url=AIDP_SERVER_URL,
+            api_key=AIDP_API_KEY,
             user_id=ctx.user_id,
             tenant_id=agent_tenant_id,
-            page=1,
-            page_size=200,
+            aidp_tenant_id="aidp",
         )
+        rows = snapshot.accessible_rows
         items = []
         for row in rows:
             detail: Dict[str, Any] = {}
             resource_status = str(row.get("resource_status") or "ACTIVE")
             try:
-                detail = get_aidp_kb_impl(
+                detail = await asyncio.to_thread(
+                    get_aidp_kb_impl,
                     AIDP_SERVER_URL,
                     AIDP_API_KEY,
                     str(row["kb_id"]),
@@ -718,11 +726,16 @@ async def get_agent_knowledge_bases_for_northbound(
                     detail.get("kds_name")
                     or detail.get("name")
                     or row.get("kds_name")
+                    or row.get("name")
                     or row["kb_id"]
                 ),
-                "document_count": int(detail.get("document_count") or 0),
-                "chunk_count": int(detail.get("chunk_count") or 0),
-                "is_multimodal": detail.get("caption_enable") in (1, "1", True),
+                "document_count": int(
+                    detail.get("document_count") or row.get("document_count") or 0
+                ),
+                "chunk_count": int(detail.get("chunk_count") or row.get("chunk_count") or 0),
+                "is_multimodal": (
+                    detail.get("caption_enable", row.get("caption_enable")) in (1, "1", True)
+                ),
                 "resource_status": resource_status,
             })
         source = "aidp"

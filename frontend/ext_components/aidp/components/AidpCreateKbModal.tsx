@@ -76,7 +76,7 @@ interface AidpCreateKbModalProps {
   open: boolean;
   existingKbs: AidpKnowledgeBaseItem[];
   onCancel: () => void;
-  onSuccess: (newKdsId: string) => void;
+  onSuccess: (knowledgeBase: AidpKnowledgeBaseItem) => void;
 }
 
 const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
@@ -249,6 +249,9 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
   };
 
   const handleSubmit = async (skipUpload: boolean) => {
+    let knowledgeBaseCreated = false;
+    let createdKdsId = "";
+    let createdKnowledgeBase: AidpKnowledgeBaseItem | null = null;
     try {
       if (!formValues.name?.trim()) {
         message.error(t("aidpKnowledge.kbNameRequired"));
@@ -289,6 +292,22 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
         ingroup_permission: formValues.ingroup_permission,
         group_ids: formValues.group_ids,
       });
+      knowledgeBaseCreated = true;
+      createdKdsId = String(created.kds_id || "");
+      createdKnowledgeBase = {
+        ...created,
+        kds_id: createdKdsId,
+        kds_name: created.kds_name || formValues.name.trim(),
+        description: created.description ?? formValues.description ?? "",
+        permission: "EDIT",
+        ingroup_permission: formValues.ingroup_permission,
+        group_ids:
+          formValues.ingroup_permission === "PRIVATE"
+            ? []
+            : formValues.group_ids,
+        resource_status: "ACTIVE",
+        is_multimodal: formValues.caption_enable === 1,
+      };
 
       // Step 2: Upload files (if any and not skipped)
       if (!skipUpload && fileList.length > 0 && created.kds_id) {
@@ -303,23 +322,33 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
             : item.reason_en || item.reason_zh;
           return `${item.file_name}: ${reason || t("aidpKnowledge.uploadFailed")}`;
         });
-        const failureMessage = failureDetails.join("；");
+        const failureLines = failureDetails.map((detail, index) => (
+          <div key={`${index}-${detail}`}>{detail}</div>
+        ));
 
         if (result.summary.failed > 0 && result.summary.success === 0) {
           message.warning(
-            t("aidpKnowledge.createKbSuccess") +
-              " | " +
-              (failureMessage || t("aidpKnowledge.uploadFailed"))
+            <div className="text-left">
+              <div>{t("aidpKnowledge.createKbSuccess")}</div>
+              {failureLines.length > 0 ? (
+                failureLines
+              ) : (
+                <div>{t("aidpKnowledge.uploadFailed")}</div>
+              )}
+            </div>
           );
         } else if (result.summary.failed > 0) {
           message.info(
-            t("aidpKnowledge.createKbSuccess") +
-              " | " +
-              t("aidpKnowledge.uploadPartial", {
-                success: result.summary.success,
-                failed: result.summary.failed,
-              }) +
-              (failureMessage ? `：${failureMessage}` : "")
+            <div className="text-left">
+              <div>{t("aidpKnowledge.createKbSuccess")}</div>
+              <div>
+                {t("aidpKnowledge.uploadPartial", {
+                  success: result.summary.success,
+                  failed: result.summary.failed,
+                })}
+              </div>
+              {failureLines}
+            </div>
           );
         } else {
           message.success(
@@ -334,11 +363,28 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
         message.success(t("aidpKnowledge.createKbSuccess"));
       }
 
-      const newKdsId = created.kds_id;
       handleReset();
-      onSuccess(newKdsId);
+      if (createdKnowledgeBase) {
+        onSuccess(createdKnowledgeBase);
+      }
     } catch (error) {
-      message.error(t("aidpKnowledge.createKbFailed"));
+      const reason =
+        error instanceof Error && error.message.trim()
+          ? error.message
+          : knowledgeBaseCreated
+            ? t("aidpKnowledge.uploadFailed")
+            : t("aidpKnowledge.createKbFailed");
+      message.error(
+        knowledgeBaseCreated
+          ? `${t("aidpKnowledge.createKbSuccess")} | ${reason}`
+          : reason
+      );
+      if (knowledgeBaseCreated) {
+        handleReset();
+        if (createdKnowledgeBase) {
+          onSuccess(createdKnowledgeBase);
+        }
+      }
     } finally {
       setLoading(false);
     }
