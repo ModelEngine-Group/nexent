@@ -63,6 +63,7 @@ import SkillList from "./resources/SkillList";
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { USER_ROLES } from "@/const/auth";
+import { getTenantResourceLimitMessage } from "@/const/errorMessageI18n";
 import { Can } from "@/components/permission/Can";
 import {
   getPasswordChecks,
@@ -387,7 +388,13 @@ function TenantList({
             if (signupResult.error) {
               // Handle signup error
               const errorMsg = signupResult.error.message || "";
-              if (
+              const resourceLimitMessage = getTenantResourceLimitMessage(
+                signupResult.error,
+                t
+              );
+              if (resourceLimitMessage) {
+                message.error(resourceLimitMessage);
+              } else if (
                 errorMsg.includes("already exists") ||
                 errorMsg.includes("EMAIL_ALREADY_EXISTS")
               ) {
@@ -417,7 +424,13 @@ function TenantList({
             // Handle admin account creation error
             const errorMsg =
               adminError?.response?.data?.message || adminError?.message || "";
-            if (
+            const resourceLimitMessage = getTenantResourceLimitMessage(
+              adminError,
+              t
+            );
+            if (resourceLimitMessage) {
+              message.error(resourceLimitMessage);
+            } else if (
               errorMsg.includes("already exists") ||
               errorMsg.includes("EMAIL_ALREADY_EXISTS")
             ) {
@@ -433,11 +446,14 @@ function TenantList({
       setModalVisible(false);
     } catch (err: any) {
       const errorMessage = err?.response?.data?.message || err?.message || "";
+      const resourceLimitMessage = getTenantResourceLimitMessage(err, t);
       const nameConflictMatch = errorMessage.match(
         /Tenant with name '(.*)' already exists/i
       );
 
-      if (nameConflictMatch && nameConflictMatch[1]) {
+      if (resourceLimitMessage) {
+        message.error(resourceLimitMessage);
+      } else if (nameConflictMatch && nameConflictMatch[1]) {
         // Extract the duplicate name and show translated error
         message.error(
           t("tenantResources.tenants.nameExists", {

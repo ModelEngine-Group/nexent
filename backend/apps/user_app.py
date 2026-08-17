@@ -11,7 +11,7 @@ from starlette.responses import JSONResponse
 from consts.model import (
     UserListRequest, UserUpdateRequest
 )
-from consts.exceptions import ForbiddenError, NotFoundException, UnauthorizedError
+from consts.exceptions import ForbiddenError, NotFoundException, TenantResourceLimitError, UnauthorizedError
 from services.user_service import (
     delete_user_and_cleanup, get_users_for_requester, update_user_for_requester
 )
@@ -128,6 +128,12 @@ async def update_user_endpoint(
         raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(exc))
     except NotFoundException as exc:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(exc))
+    except TenantResourceLimitError as exc:
+        logger.warning(f"User update rejected by resource limit for user {user_id}: {str(exc)}")
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail=exc.to_detail(),
+        )
     except ValueError as exc:
         logger.warning(f"User update validation error for user {user_id}: {str(exc)}")
         raise HTTPException(

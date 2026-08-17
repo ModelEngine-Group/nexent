@@ -43,6 +43,48 @@ export const getI18nErrorMessage = (
   );
 };
 
+const TENANT_RESOURCE_LIMIT_TRANSLATION_KEYS: Record<string, string> = {
+  tenant: "tenantResources.limits.tenant",
+  user: "tenantResources.limits.user",
+  group: "tenantResources.limits.group",
+  admin: "tenantResources.limits.admin",
+  super_admin: "tenantResources.limits.superAdmin",
+};
+
+/**
+ * Translate a structured tenant resource limit error for the active UI locale.
+ * Returns null for all other errors so existing error handling remains unchanged.
+ */
+export const getTenantResourceLimitMessage = (
+  error: unknown,
+  t: (key: string, options?: Record<string, unknown>) => string
+): string | null => {
+  if (!error || typeof error !== "object") {
+    return null;
+  }
+
+  const apiError = error as {
+    code?: unknown;
+    data?: { resource?: unknown; limit?: unknown };
+  };
+  if (apiError.code !== "TENANT_RESOURCE_LIMIT_REACHED") {
+    return null;
+  }
+
+  const resource =
+    typeof apiError.data?.resource === "string" ? apiError.data.resource : "";
+  const limit = apiError.data?.limit;
+  const translationKey = TENANT_RESOURCE_LIMIT_TRANSLATION_KEYS[resource];
+  if (
+    !translationKey ||
+    (typeof limit !== "number" && typeof limit !== "string")
+  ) {
+    return null;
+  }
+
+  return t(translationKey, { limit });
+};
+
 /**
  * Hook to get error message with i18n support.
  *
@@ -206,7 +248,9 @@ export const withErrorHandler = (
  */
 export const requiresSessionRefresh = (code: string | number): boolean => {
   const codeStr = String(code);
-  return codeStr === ErrorCode.TOKEN_EXPIRED || codeStr === ErrorCode.TOKEN_INVALID;
+  return (
+    codeStr === ErrorCode.TOKEN_EXPIRED || codeStr === ErrorCode.TOKEN_INVALID
+  );
 };
 
 /**
@@ -217,7 +261,7 @@ export const requiresSessionRefresh = (code: string | number): boolean => {
  */
 export const isValidationError = (code: string | number): boolean => {
   const codeStr = String(code);
-  return codeStr >= "000101" && codeStr < "000200";  // 00 Common - 01 Parameter & Validation
+  return codeStr >= "000101" && codeStr < "000200"; // 00 Common - 01 Parameter & Validation
 };
 
 /**

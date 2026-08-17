@@ -47,7 +47,9 @@ def _validate_user_tenant_limit(
         ).count())
         if user_count >= _USER_LIMIT:
             raise TenantResourceLimitError(
-                f"Tenant user limit reached: maximum {_USER_LIMIT} users per tenant"
+                f"Tenant user limit reached: maximum {_USER_LIMIT} users per tenant",
+                "user",
+                _USER_LIMIT,
             )
 
     normalized_role = (user_role or "").upper()
@@ -60,7 +62,9 @@ def _validate_user_tenant_limit(
         ).count())
         if admin_count >= _ADMIN_LIMIT:
             raise TenantResourceLimitError(
-                f"Tenant administrator limit reached: maximum {_ADMIN_LIMIT} administrators per tenant"
+                f"Tenant administrator limit reached: maximum {_ADMIN_LIMIT} administrators per tenant",
+                "admin",
+                _ADMIN_LIMIT,
             )
     elif normalized_role == "SU":
         _lock_resource_limit(session, "super-admin-limit")
@@ -70,7 +74,9 @@ def _validate_user_tenant_limit(
         ).count())
         if super_admin_count >= _SUPER_ADMIN_LIMIT:
             raise TenantResourceLimitError(
-                f"Super administrator limit reached: maximum {_SUPER_ADMIN_LIMIT} super administrator"
+                f"Super administrator limit reached: maximum {_SUPER_ADMIN_LIMIT} super administrator",
+                "super_admin",
+                _SUPER_ADMIN_LIMIT,
             )
 
 

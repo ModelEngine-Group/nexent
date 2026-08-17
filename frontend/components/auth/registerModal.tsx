@@ -30,7 +30,12 @@ import { withBasePath, withoutBasePath } from "@/lib/basePath";
 import { authEventUtils } from "@/lib/authEvents";
 import { oauthService } from "@/services/oauthService";
 import log from "@/lib/logger";
-import { getPasswordChecks, getStrengthLevel, validatePassword as validatePasswordUtil } from "@/lib/utils";
+import {
+  getPasswordChecks,
+  getStrengthLevel,
+  validatePassword as validatePasswordUtil,
+} from "@/lib/utils";
+import { getTenantResourceLimitMessage } from "@/const/errorMessageI18n";
 
 const { Text } = Typography;
 
@@ -169,7 +174,9 @@ export function RegisterModal() {
     }
 
     if (!validatePassword(values.password)) {
-      const errorMsg = t("auth.passwordStrengthError") || "Password must contain uppercase, lowercase, and digit";
+      const errorMsg =
+        t("auth.passwordStrengthError") ||
+        "Password must contain uppercase, lowercase, and digit";
       message.error(errorMsg);
       setPasswordError({ target: "password", message: errorMsg });
       form.setFields([
@@ -205,16 +212,13 @@ export function RegisterModal() {
         authEventUtils.emitRegisterSuccess();
         authEventUtils.emitLoginSuccess();
 
-        const locale = withoutBasePath(pathname).split("/").find(Boolean) || "zh";
+        const locale =
+          withoutBasePath(pathname).split("/").find(Boolean) || "zh";
         window.location.href = withBasePath(`/${locale}`);
         return;
       }
 
-      await register(
-        values.email,
-        values.password,
-        values.inviteCode
-      );
+      await register(values.email, values.password, values.inviteCode);
 
       // Reset form and clear error states
       resetForm();
@@ -240,7 +244,9 @@ export function RegisterModal() {
         }
 
         if (validationError.loc && validationError.loc.includes("password")) {
-          const errorMsg = t("auth.passwordStrengthError") || "Password must contain uppercase, lowercase, and digit";
+          const errorMsg =
+            t("auth.passwordStrengthError") ||
+            "Password must contain uppercase, lowercase, and digit";
           message.error(errorMsg);
           setPasswordError({ target: "password", message: errorMsg });
           setIsLoading(false);
@@ -251,6 +257,7 @@ export function RegisterModal() {
       // process the specific error type returned by the backend (based on HTTP status code and error_type)
       const httpStatusCode = error?.code;
       const errorType = error?.message;
+      const resourceLimitMessage = getTenantResourceLimitMessage(error, t);
 
       if (isOAuthCompletion) {
         handleOAuthCompleteError("auth.oauthCompleteFailed", values);
@@ -259,7 +266,12 @@ export function RegisterModal() {
       }
 
       // HTTP 409 Conflict
-      if (httpStatusCode === 409 || errorType === "EMAIL_ALREADY_EXISTS") {
+      if (resourceLimitMessage) {
+        message.error(resourceLimitMessage);
+      } else if (
+        httpStatusCode === 409 ||
+        errorType === "EMAIL_ALREADY_EXISTS"
+      ) {
         const errorMsg = t("auth.emailAlreadyExists");
         message.error(errorMsg);
         setEmailError(errorMsg);
@@ -423,7 +435,9 @@ export function RegisterModal() {
     if (value && !validatePassword(value)) {
       setPasswordError({
         target: "password",
-        message: t("auth.passwordStrengthError") || "Password must contain uppercase, lowercase, and digit",
+        message:
+          t("auth.passwordStrengthError") ||
+          "Password must contain uppercase, lowercase, and digit",
       });
       return; // Exit early if password length is invalid
     }
@@ -450,7 +464,9 @@ export function RegisterModal() {
     if (password && !validatePassword(password)) {
       setPasswordError({
         target: "password",
-        message: t("auth.passwordStrengthError") || "Password must contain uppercase, lowercase, and digit",
+        message:
+          t("auth.passwordStrengthError") ||
+          "Password must contain uppercase, lowercase, and digit",
       });
       return;
     }
@@ -515,7 +531,9 @@ export function RegisterModal() {
               prefix={<UserRound className="text-gray-400" size={16} />}
               placeholder="your@email.com"
               size="large"
-              disabled={isOAuthCompletion && registerModalOptions?.emailReadOnly}
+              disabled={
+                isOAuthCompletion && registerModalOptions?.emailReadOnly
+              }
               onChange={handleEmailInputChange}
             />
           </Form.Item>
@@ -525,7 +543,7 @@ export function RegisterModal() {
             label={t("auth.passwordLabel")}
             validateStatus={
               passwordError.target === "password" &&
-                !form.getFieldError("password").length
+              !form.getFieldError("password").length
                 ? "error"
                 : ""
             }
@@ -544,7 +562,12 @@ export function RegisterModal() {
                 validator: (_, value) => {
                   if (!value) return Promise.resolve();
                   if (!validatePassword(value)) {
-                    return Promise.reject(new Error(t("auth.passwordStrengthError") || "Password must contain uppercase, lowercase, and digit"));
+                    return Promise.reject(
+                      new Error(
+                        t("auth.passwordStrengthError") ||
+                          "Password must contain uppercase, lowercase, and digit"
+                      )
+                    );
                   }
                   return Promise.resolve();
                 },
@@ -562,38 +585,47 @@ export function RegisterModal() {
           </Form.Item>
 
           {/* Password Strength Indicator */}
-          {passwordValue && (() => {
-            const checks = getPasswordChecks(passwordValue);
-            const levelInfo = getStrengthLevel(passwordValue, t);
-            return (
-              <div className="mb-4">
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-xs text-gray-500">{t("auth.passwordStrength") || "Password strength"}</span>
-                  <span className="text-xs font-medium" style={{ color: levelInfo.color }}>
-                    {levelInfo.label}
-                  </span>
+          {passwordValue &&
+            (() => {
+              const checks = getPasswordChecks(passwordValue);
+              const levelInfo = getStrengthLevel(passwordValue, t);
+              return (
+                <div className="mb-4">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs text-gray-500">
+                      {t("auth.passwordStrength") || "Password strength"}
+                    </span>
+                    <span
+                      className="text-xs font-medium"
+                      style={{ color: levelInfo.color }}
+                    >
+                      {levelInfo.label}
+                    </span>
+                  </div>
+                  <div className="flex gap-1">
+                    {[0, 1, 2, 3].map((level) => (
+                      <div
+                        key={level}
+                        className="h-1 flex-1 rounded-full transition-colors"
+                        style={{
+                          backgroundColor:
+                            level <= levelInfo.level
+                              ? levelInfo.color
+                              : "#e5e7eb",
+                        }}
+                      />
+                    ))}
+                  </div>
                 </div>
-                <div className="flex gap-1">
-                  {[0, 1, 2, 3].map((level) => (
-                    <div
-                      key={level}
-                      className="h-1 flex-1 rounded-full transition-colors"
-                      style={{
-                        backgroundColor: level <= levelInfo.level ? levelInfo.color : "#e5e7eb"
-                      }}
-                    />
-                  ))}
-                </div>
-              </div>
-            );
-          })()}
+              );
+            })()}
 
           <Form.Item
             name="confirmPassword"
             label={t("auth.confirmPasswordLabel")}
             validateStatus={
               passwordError.target === "confirmPassword" &&
-                !form.getFieldError("confirmPassword").length
+              !form.getFieldError("confirmPassword").length
                 ? "error"
                 : ""
             }
@@ -617,9 +649,16 @@ export function RegisterModal() {
                   if (password && !validatePassword(password)) {
                     setPasswordError({
                       target: "password",
-                      message: t("auth.passwordStrengthError") || "Password must contain uppercase, lowercase, and digit",
+                      message:
+                        t("auth.passwordStrengthError") ||
+                        "Password must contain uppercase, lowercase, and digit",
                     });
-                    return Promise.reject(new Error(t("auth.passwordStrengthError") || "Password must contain uppercase, lowercase, and digit"));
+                    return Promise.reject(
+                      new Error(
+                        t("auth.passwordStrengthError") ||
+                          "Password must contain uppercase, lowercase, and digit"
+                      )
+                    );
                   }
                   // Then check password match
                   if (!value || getFieldValue("password") === value) {
@@ -630,7 +669,9 @@ export function RegisterModal() {
                     target: "confirmPassword",
                     message: t("auth.passwordsDoNotMatch"),
                   });
-                  return Promise.reject(new Error(t("auth.passwordsDoNotMatch")));
+                  return Promise.reject(
+                    new Error(t("auth.passwordsDoNotMatch"))
+                  );
                 },
               }),
             ]}
@@ -706,7 +747,10 @@ export function RegisterModal() {
                     </div>
                     <div className="space-y-2">
                       <div className="flex items-start">
-                        <Users size={16} className="text-blue-600 dark:text-blue-400 mr-1 mt-0.5" />
+                        <Users
+                          size={16}
+                          className="text-blue-600 dark:text-blue-400 mr-1 mt-0.5"
+                        />
                         <div className="text-sm text-gray-600 dark:text-gray-400">
                           {t("auth.inviteCodeHint.method2.description")}
                         </div>
@@ -726,7 +770,6 @@ export function RegisterModal() {
               </div>
             </Popover>
           </Form.Item>
-
 
           <Form.Item>
             <Button

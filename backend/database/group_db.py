@@ -129,7 +129,9 @@ def add_group(tenant_id: str, group_name: str, group_description: Optional[str] 
         group_count = group_count if isinstance(group_count, int) else 0
         if group_count >= _GROUP_LIMIT:
             raise TenantResourceLimitError(
-                f"Tenant group limit reached: maximum {_GROUP_LIMIT} groups per tenant"
+                f"Tenant group limit reached: maximum {_GROUP_LIMIT} groups per tenant",
+                "group",
+                _GROUP_LIMIT,
             )
         group = TenantGroupInfo(
             tenant_id=tenant_id,

@@ -196,7 +196,23 @@ class ValidationError(Exception):
 class TenantResourceLimitError(ValidationError, ValueError):
     """Raised when a platform or tenant hard resource limit is reached."""
 
-    pass
+    code = "TENANT_RESOURCE_LIMIT_REACHED"
+
+    def __init__(self, message: str, resource: str, limit: int):
+        super().__init__(message)
+        self.resource = resource
+        self.limit = limit
+
+    def to_detail(self) -> dict:
+        """Return the stable HTTP error detail consumed by API clients."""
+        return {
+            "code": self.code,
+            "message": str(self),
+            "data": {
+                "resource": self.resource,
+                "limit": self.limit,
+            },
+        }
 
 
 class NotFoundException(Exception):
