@@ -233,10 +233,12 @@ async def callback(
         return JSONResponse(
             status_code=HTTPStatus.BAD_REQUEST,
             content={
+                "code": e.code,
                 "message": str(e),
                 "data": {
                     "oauth_error": "tenant_resource_limit_exceeded",
                     "oauth_error_description": str(e),
+                    "resource_limit": e.to_detail()["data"],
                 },
             },
         )
@@ -313,7 +315,7 @@ async def complete(
         )
         raise HTTPException(status_code=status_code, detail=str(e))
     except TenantResourceLimitError as e:
-        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=e.to_detail())
     except PydanticValidationError as e:
         raise HTTPException(
             status_code=HTTPStatus.UNPROCESSABLE_ENTITY,

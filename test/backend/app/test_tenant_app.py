@@ -5,7 +5,7 @@ import sys
 import os
 
 # Import exception classes and models
-from consts.exceptions import ForbiddenError, NotFoundException, ValidationError, UnauthorizedError
+from consts.exceptions import ForbiddenError, NotFoundException, TenantResourceLimitError, ValidationError, UnauthorizedError
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -460,6 +460,22 @@ class TestTenantEndpointMappings:
             skill_names=["skill-a"],
             locale="en",
         )
+
+    def test_create_resource_limit_returns_structured_detail(self):
+        tenant_service_module.create_tenant.side_effect = TenantResourceLimitError(
+            "Tenant limit reached: maximum 100 tenants",
+            "tenant",
+            100,
+        )
+
+        response = client.post("/tenants", json={"tenant_name": "Tenant 101"})
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == {
+            "code": "TENANT_RESOURCE_LIMIT_REACHED",
+            "message": "Tenant limit reached: maximum 100 tenants",
+            "data": {"resource": "tenant", "limit": 100},
+        }
 
     @pytest.mark.parametrize(
         ("exception", "status_code"),

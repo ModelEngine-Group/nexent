@@ -58,7 +58,19 @@ class _UnauthorizedError(Exception):
 
 
 class _TenantResourceLimitError(Exception):
-    pass
+    code = "TENANT_RESOURCE_LIMIT_REACHED"
+
+    def __init__(self, message, resource="user", limit=10_000):
+        super().__init__(message)
+        self.resource = resource
+        self.limit = limit
+
+    def to_detail(self):
+        return {
+            "code": self.code,
+            "message": str(self),
+            "data": {"resource": self.resource, "limit": self.limit},
+        }
 
 
 exceptions_mock = MagicMock()
@@ -371,7 +383,9 @@ class TestCallback(unittest.TestCase):
 
         self.assertEqual(response.status_code, HTTPStatus.BAD_REQUEST)
         data = response.json()
+        self.assertEqual(data["code"], "TENANT_RESOURCE_LIMIT_REACHED")
         self.assertEqual(data["data"]["oauth_error"], "tenant_resource_limit_exceeded")
+        self.assertEqual(data["data"]["resource_limit"], {"resource": "user", "limit": 10_000})
         self.assertIn("maximum 10000", data["message"])
 
     def test_new_unbound_oauth_requires_account_completion(self):

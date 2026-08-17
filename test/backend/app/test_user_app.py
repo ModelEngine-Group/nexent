@@ -49,7 +49,7 @@ patch('backend.database.client.MinioClient', return_value=minio_mock).start()
 patch('database.client.MinioClient', return_value=minio_mock).start()
 
 # Import exception classes
-from consts.exceptions import ForbiddenError, NotFoundException, ValidationError, UnauthorizedError
+from consts.exceptions import ForbiddenError, NotFoundException, TenantResourceLimitError, ValidationError, UnauthorizedError
 
 # Import the modules we need
 from fastapi.testclient import TestClient
@@ -383,6 +383,29 @@ class TestUpdateUserEndpoint:
             data = response.json()
             assert "Failed to update user" in data["detail"]
             assert "Database connection failed" in data["detail"]
+
+    def test_update_user_resource_limit_returns_structured_detail(self):
+        with patch('apps.user_app.get_current_user_context') as mock_get_user_id, \
+             patch('apps.user_app.update_user_for_requester') as mock_update_user:
+            mock_get_user_id.return_value = ("updater123", "tenant1", "ADMIN")
+            mock_update_user.side_effect = TenantResourceLimitError(
+                "Tenant administrator limit reached: maximum 1000 administrators per tenant",
+                "admin",
+                1000,
+            )
+
+            response = client.put(
+                "/users/user1",
+                json={"role": "ADMIN"},
+                headers={"Authorization": "Bearer token123"},
+            )
+
+        assert response.status_code == HTTPStatus.BAD_REQUEST
+        assert response.json()["detail"] == {
+            "code": "TENANT_RESOURCE_LIMIT_REACHED",
+            "message": "Tenant administrator limit reached: maximum 1000 administrators per tenant",
+            "data": {"resource": "admin", "limit": 1000},
+        }
 
     def test_update_user_forbidden_scope_returns_403(self):
         with patch(

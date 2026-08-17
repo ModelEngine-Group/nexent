@@ -55,7 +55,7 @@ async def callback(ticket: str = "", redirect: str = "/"):
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="CAS authentication failed")
     except TenantResourceLimitError as exc:
         logger.warning("CAS callback rejected by tenant resource limit: %s", exc)
-        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc))
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=exc.to_detail())
     except Exception as exc:
         logger.error(f"CAS callback failed: {exc}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="CAS login failed")
