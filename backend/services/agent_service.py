@@ -132,6 +132,7 @@ from utils.monitoring import monitoring_manager
 logger = logging.getLogger(__name__)
 SAFE_AGENT_STREAM_ERROR_MESSAGE = "Agent execution failed. Please try again later."
 _channel_cleanup_tasks: set[asyncio.Task[None]] = set()
+_fa_extraction_tasks: set[asyncio.Task] = set()
 
 
 async def _cleanup_channel_later(conversation_id: int, user_id: str, delay: float = 5.0):
@@ -1001,6 +1002,7 @@ async def _stream_agent_chunks(
     next_unit_index: int = resume_from_unit_index
     # Set when the agent run loop finishes successfully.
     stream_completed_normally: bool = False
+    captured_final_answer: Optional[str] = None
 
     # Get or create streaming channel for multi-subscriber support
     if channel is None:
@@ -1169,6 +1171,7 @@ async def _stream_agent_chunks(
 
                     # Special-case: final_answer also updates message_content
                     if chunk_type == "final_answer":
+                        captured_final_answer = chunk_content
                         submit(
                             update_message_content,
                             streaming_message_id,
@@ -1446,6 +1449,79 @@ async def _stream_agent_chunks(
         # its dual-level ``agent``/``user_agent`` semantics no longer map to
         # the new layered architecture (agents may only write to
         # ``agent.short_term``).
+
+        # Post-final-answer memory extraction (fire-and-forget)
+        if (
+            captured_final_answer
+            and memory_ctx is not None
+            and getattr(getattr(memory_ctx, "user_config", None), "memory_switch", False)
+        ):
+            try:
+                from services.fa_memory_extractor import FaMemoryExtractor
+                from services.memory_backend_adapter import build_memory_service_for_fa_extraction
+
+                async def _run_fa_extraction():
+                    try:
+                        from utils.config_utils import tenant_config_manager, get_model_name_from_config
+                        from consts.const import MODEL_CONFIG_MAPPING
+                        from nexent.core.models import OpenAIModel
+
+                        config = tenant_config_manager.get_model_config(
+                            key=MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id
+                        )
+                        if not config:
+                            logger.warning("fa_memory_extraction: no tenant LLM configured, skipping")
+                            return
+
+                        model = OpenAIModel(
+                            model_id=get_model_name_from_config(config),
+                            api_base=config.get("base_url", ""),
+                            api_key=config.get("api_key", ""),
+                            temperature=0.1,
+                            top_p=0.9,
+                            model_factory=config.get("model_factory"),
+                            ssl_verify=config.get("ssl_verify", True),
+                            display_name=config.get("display_name") or None,
+                            timeout_seconds=config.get("timeout_seconds"),
+                        )
+
+                        class _ModelAdapter:
+                            """Adapt synchronous OpenAIModel to async chat interface."""
+                            def __init__(self, model):
+                                self._model = model
+                            async def chat(self, messages):
+                                import asyncio
+                                result = await asyncio.to_thread(self._model.generate, messages)
+                                if hasattr(result, "content"):
+                                    return result.content if isinstance(result.content, str) else str(result.content)
+                                return str(result)
+
+                        memory_service = build_memory_service_for_fa_extraction()
+                        extractor = FaMemoryExtractor(
+                            tenant_id=tenant_id,
+                            user_id=user_id,
+                            agent_id=str(getattr(agent_request, "agent_id", "")),
+                            conversation_id=str(getattr(agent_request, "conversation_id", "")),
+                            memory_service=memory_service,
+                            model_client=_ModelAdapter(model),
+                        )
+                        result = await extractor.extract_and_store(
+                            captured_final_answer,
+                        )
+                        logger.info(
+                            "fa_memory_extraction: tenant=%s user=%s agent=%s items=%d reason=%s",
+                            tenant_id, user_id,
+                            str(getattr(agent_request, "agent_id", "")),
+                            len(result.items), result.reason,
+                        )
+                    except Exception:
+                        logger.exception("fa_memory_extraction: unexpected error")
+
+                extraction_task = asyncio.create_task(_run_fa_extraction())
+                _fa_extraction_tasks.add(extraction_task)
+                extraction_task.add_done_callback(_fa_extraction_tasks.discard)
+            except Exception:
+                logger.exception("fa_memory_extraction: failed to schedule extraction task")
 
 
 def get_enable_tool_id_by_agent_id(agent_id: int, tenant_id: str):

@@ -53,7 +53,7 @@ async def _backend_store_hook(
         layer_value = layer_value.value
 
     memory_type_value = payload.get("memory_type")
-    if isinstance(memory_type_value, MemoryLayer):
+    if hasattr(memory_type_value, "value"):
         memory_type_value = memory_type_value.value
 
     tenant_id = payload["tenant_id"]
@@ -148,6 +148,20 @@ def build_memory_service_for_dreaming() -> MemoryService:
     Dreaming promotes already-stored agent memories to user long-term
     memory and never needs the search hook. The store hook enforces the
     ``actor="dreaming"`` policy via ``MemoryRecordService``.
+    """
+    return MemoryService(
+        embedding_model=None,
+        embedding_model_info=None,
+        backend_store=_backend_store_hook,
+        backend_search=None,
+    )
+
+
+def build_memory_service_for_fa_extraction() -> MemoryService:
+    """Return a facade for final-answer memory extraction.
+
+    Reuses the same backend store hook as StoreMemoryTool. The extraction
+    pipeline writes agent short-term memory with the same policy constraints.
     """
     return MemoryService(
         embedding_model=None,
