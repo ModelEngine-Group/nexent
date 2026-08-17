@@ -40,10 +40,13 @@ import { useTranslation } from "react-i18next";
 import { Can } from "@/components/permission/Can";
 import { DreamingConfigCards } from "./DreamingConfigCards";
 import { LongTermMemoryPanel } from "./LongTermMemoryPanel";
+import { ProviderConfigCard } from "./ProviderConfigCard";
 import {
   loadMemoryConfig,
   setDreamingConfig,
   setMemorySwitch,
+  setExternalProviderTopK,
+  setExternalProviderTimeout,
   type MemoryConfig,
 } from "@/services/memoryService";
 import {
@@ -105,6 +108,8 @@ const defaultConfig: MemoryConfig = {
   shareOption: "always",
   disableAgentIds: [],
   disableUserAgentIds: [],
+  externalProviderTopK: 20,
+  externalProviderTimeout: 30,
 };
 
 const memoryScopes = Object.keys(scopeMeta) as MemoryScope[];
@@ -547,6 +552,70 @@ export function MemoryManager() {
         </Flex>
         {config.dreamingEnabled && <DreamingConfigCards />}
       </Card>
+      <Card className="memory-config-card" loading={configLoading}>
+        <Flex vertical gap={16}>
+          <Flex align="center" gap={12}>
+            <Settings size={20} />
+            <div>
+              <Text strong>外部记忆提供商配置</Text>
+              <Text type="secondary" className="memory-setting-description">
+                配置外部记忆提供商的检索参数
+              </Text>
+            </div>
+          </Flex>
+          <Flex gap={24}>
+            <Flex vertical gap={8} style={{ flex: 1 }}>
+              <Text>每次检索最大结果数 (Top K)</Text>
+              <Input
+                type="number"
+                min={1}
+                max={100}
+                value={config.externalProviderTopK}
+                onChange={(e) => {
+                  const value = parseInt(e.target.value, 10);
+                  if (!isNaN(value) && value >= 1 && value <= 100) {
+                    setConfig({ ...config, externalProviderTopK: value });
+                  }
+                }}
+                onBlur={async () => {
+                  setSavingConfig(true);
+                  await setExternalProviderTopK(config.externalProviderTopK);
+                  setSavingConfig(false);
+                }}
+                disabled={savingConfig}
+              />
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                范围: 1-100，默认: 20
+              </Text>
+            </Flex>
+            <Flex vertical gap={8} style={{ flex: 1 }}>
+              <Text>检索超时时间 (秒)</Text>
+              <Input
+                type="number"
+                min={1}
+                max={120}
+                value={config.externalProviderTimeout}
+                onChange={(e) => {
+                  const value = parseInt(e.target.value, 10);
+                  if (!isNaN(value) && value >= 1 && value <= 120) {
+                    setConfig({ ...config, externalProviderTimeout: value });
+                  }
+                }}
+                onBlur={async () => {
+                  setSavingConfig(true);
+                  await setExternalProviderTimeout(config.externalProviderTimeout);
+                  setSavingConfig(false);
+                }}
+                disabled={savingConfig}
+              />
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                范围: 1-120秒，默认: 30秒
+              </Text>
+            </Flex>
+          </Flex>
+        </Flex>
+      </Card>
+      <ProviderConfigCard />
     </div>
   );
 
