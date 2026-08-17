@@ -5509,3 +5509,158 @@ class TestUpdateToolListMcpErrorExplicit:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+# ---------------------------------------------------------------------------
+# AIDP knowledge-scope helpers and validation branches
+# ---------------------------------------------------------------------------
+
+
+def test_parse_kds_list_invalid_json_returns_empty():
+    assert _tool_cfg_service._parse_kds_list("{not-json") == []
+    assert _tool_cfg_service._parse_kds_list(None) == []
+    assert _tool_cfg_service._parse_kds_list(["a", " a ", "b", "a"]) == ["a", "b"]
+
+
+def test_is_aidp_search_tool_by_explicit_name():
+    assert _tool_cfg_service._is_aidp_search_tool(1, "aidp_search") is True
+    assert _tool_cfg_service._is_aidp_search_tool(1, "knowledge_base_search") is False
+
+
+def test_is_aidp_search_tool_queries_db(mocker):
+    mocker.patch(
+        "backend.services.tool_configuration_service.query_tools_by_ids",
+        return_value=[{"name": "aidp_search"}],
+    )
+    assert _tool_cfg_service._is_aidp_search_tool(7) is True
+
+    mocker.patch(
+        "backend.services.tool_configuration_service.query_tools_by_ids",
+        return_value=[],
+    )
+    assert _tool_cfg_service._is_aidp_search_tool(7) is False
+
+
+def test_resolve_aidp_snapshot_injects_constants(mocker):
+    mock_resolve = mocker.patch(
+        "ext_components.aidp.services.aidp_access_service.resolve_current_aidp_access"
+    )
+    _tool_cfg_service._resolve_aidp_snapshot("user-1", "tenant-1")
+    mock_resolve.assert_called_once_with(
+        server_url=_tool_cfg_service.AIDP_SERVER_URL,
+        api_key=_tool_cfg_service.AIDP_API_KEY,
+        user_id="user-1",
+        tenant_id="tenant-1",
+        aidp_tenant_id=_tool_cfg_service.AIDP_TENANT_ID,
+    )
+
+
+class _AnonymousToolInfo:
+    def __init__(self, params):
+        self.agent_id = 1
+        self.tool_id = 9
+        self.name = "aidp_search"
+        self.params = params
+
+
+def test_update_tool_info_preserves_existing_kds_when_key_missing(mocker):
+    """A missing kds_list key means the scope was not edited; keep existing ids."""
+    mocker.patch(
+        "backend.services.tool_configuration_service._is_aidp_search_tool",
+        return_value=True,
+    )
+    mocker.patch(
+        "backend.services.tool_configuration_service.query_tool_instances_by_id",
+        return_value={"params": {"kds_list": '["existing-kds"]'}},
+    )
+    mock_create = mocker.patch(
+        "backend.services.tool_configuration_service.create_or_update_tool_by_tool_info",
+        return_value={"id": 9},
+    )
+
+    tool_info = _AnonymousToolInfo(params={})
+    result = _tool_cfg_service.update_tool_info_impl(tool_info, "tenant-1", "user-1")
+
+    assert result["tool_instance"] == {"id": 9}
+    saved = mock_create.call_args[0][0]
+    assert saved.params["kds_list"] == ["existing-kds"]
+
+
+def test_update_tool_info_rejects_new_kds_when_aidp_unavailable(mocker):
+    """When AIDP is unreachable and the submission adds ids, the edit must fail."""
+    from consts.exceptions import ValidationError
+
+    mocker.patch(
+        "backend.services.tool_configuration_service._is_aidp_search_tool",
+        return_value=True,
+    )
+    mocker.patch(
+        "backend.services.tool_configuration_service.query_tool_instances_by_id",
+        return_value={"params": {"kds_list": "[]"}},
+    )
+    mocker.patch(
+        "backend.services.tool_configuration_service._resolve_aidp_snapshot",
+        side_effect=RuntimeError("aidp down"),
+    )
+
+    tool_info = _AnonymousToolInfo(params={"kds_list": ["new-kds"]})
+    with pytest.raises(ValidationError, match="not changed"):
+        _tool_cfg_service.update_tool_info_impl(tool_info, "tenant-1", "user-1")
+
+
+class _FakeAidpTool:
+    def __init__(self, **kwargs):
+        pass
+
+    async def forward(self, *args, **kwargs):
+        return {}
+
+
+def test_validate_local_tool_aidp_search_requires_identity(mocker):
+    mocker.patch(
+        "backend.services.tool_configuration_service.AIDP_SERVER_URL", "https://x"
+    )
+    mocker.patch(
+        "backend.services.tool_configuration_service.AIDP_API_KEY", "key"
+    )
+    mocker.patch(
+        "backend.services.tool_configuration_service._get_tool_class_by_name",
+        return_value=_FakeAidpTool,
+    )
+
+    with pytest.raises(
+        _tool_cfg_service.ToolExecutionException, match="Tenant ID and User ID"
+    ):
+        _tool_cfg_service._validate_local_tool(
+            "aidp_search", params={"kds_list": []}
+        )
+
+
+def test_validate_local_tool_aidp_search_rejects_unavailable_kds(mocker):
+    class _FakeSnapshot:
+        accessible_id_set = {"ok-kds"}
+
+    mocker.patch(
+        "backend.services.tool_configuration_service.AIDP_SERVER_URL", "https://x"
+    )
+    mocker.patch(
+        "backend.services.tool_configuration_service.AIDP_API_KEY", "key"
+    )
+    mocker.patch(
+        "backend.services.tool_configuration_service._get_tool_class_by_name",
+        return_value=_FakeAidpTool,
+    )
+    mocker.patch(
+        "ext_components.aidp.services.aidp_access_service.resolve_current_aidp_access",
+        return_value=_FakeSnapshot(),
+    )
+
+    with pytest.raises(
+        _tool_cfg_service.ToolExecutionException, match="unavailable knowledge base"
+    ):
+        _tool_cfg_service._validate_local_tool(
+            "aidp_search",
+            params={"kds_list": ["bad-kds"]},
+            tenant_id="tenant-1",
+            user_id="user-1",
+        )

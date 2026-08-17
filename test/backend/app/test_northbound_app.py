@@ -1081,3 +1081,48 @@ def test_resolve_proxy_download_filename_empty_content_disposition():
         None
     )
     assert result == "file.pdf"
+
+def test_get_agent_knowledge_bases_not_found():
+    """Test 404 when the target agent cannot be found."""
+    with patch('apps.northbound_app._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('apps.northbound_app.get_agent_knowledge_bases_for_northbound', new_callable=AsyncMock) as mock_get:
+        mock_ctx.return_value = MagicMock()
+        mock_get.side_effect = LookupError("agent not found")
+
+        resp = client.get(
+            "/nb/v1/agents/missing/knowledge-bases",
+            headers=_build_headers(),
+        )
+
+        assert resp.status_code == 404
+        assert resp.json()["detail"] == "agent not found"
+
+
+def test_get_agent_knowledge_bases_limit_exceeded():
+    """Test 429 when the northbound quota is exceeded."""
+    with patch('apps.northbound_app._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('apps.northbound_app.get_agent_knowledge_bases_for_northbound', new_callable=AsyncMock) as mock_get:
+        mock_ctx.return_value = MagicMock()
+        mock_get.side_effect = LimitExceededError("Rate limit exceeded")
+
+        resp = client.get(
+            "/nb/v1/agents/agent1/knowledge-bases",
+            headers=_build_headers(),
+        )
+
+        assert resp.status_code == 429
+
+
+def test_get_agent_knowledge_bases_internal_error():
+    """Test 500 when an unexpected error occurs."""
+    with patch('apps.northbound_app._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('apps.northbound_app.get_agent_knowledge_bases_for_northbound', new_callable=AsyncMock) as mock_get:
+        mock_ctx.return_value = MagicMock()
+        mock_get.side_effect = RuntimeError("boom")
+
+        resp = client.get(
+            "/nb/v1/agents/agent1/knowledge-bases",
+            headers=_build_headers(),
+        )
+
+        assert resp.status_code == 500

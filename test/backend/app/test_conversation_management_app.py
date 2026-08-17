@@ -525,3 +525,46 @@ async def test_get_message_id_failure(conversation_mocks):
 
     assert exc_info.value.status_code == 500
     conversation_mocks['logging'].error.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_update_knowledge_scope_maps_not_found_to_404(
+    conversation_mocks,
+):
+    from consts.exceptions import ConversationNotFoundError
+
+    conversation_mocks['get_current_user_id'].return_value = (
+        "user_id", "tenant_id"
+    )
+    conversation_mocks['update_scope_service'].side_effect = ConversationNotFoundError(
+        "conversation missing"
+    )
+    request_obj = MagicMock()
+    request_obj.scope.model_dump.return_value = {"schema_version": 1}
+
+    with pytest.raises(HTTPException) as exc_info:
+        await update_conversation_knowledge_scope_endpoint(
+            404, request_obj, authorization="Bearer test-token"
+        )
+
+    assert exc_info.value.status_code == 404
+    assert exc_info.value.detail == "conversation missing"
+
+
+@pytest.mark.asyncio
+async def test_update_knowledge_scope_maps_internal_error_to_500(
+    conversation_mocks,
+):
+    conversation_mocks['get_current_user_id'].return_value = (
+        "user_id", "tenant_id"
+    )
+    conversation_mocks['update_scope_service'].side_effect = RuntimeError("db down")
+    request_obj = MagicMock()
+    request_obj.scope.model_dump.return_value = {"schema_version": 1}
+
+    with pytest.raises(HTTPException) as exc_info:
+        await update_conversation_knowledge_scope_endpoint(
+            1, request_obj, authorization="Bearer test-token"
+        )
+
+    assert exc_info.value.status_code == 500

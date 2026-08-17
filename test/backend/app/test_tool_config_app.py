@@ -1252,3 +1252,64 @@ class TestUpdateToolLabelsAPI:
 
 if __name__ == "__main__":
     pytest.main([__file__])
+
+
+# ---------------------------------------------------------------------------
+# Exception passthrough coverage for /tool/search and /tool/update
+# ---------------------------------------------------------------------------
+
+
+@patch('apps.tool_config_app.get_current_user_id')
+@patch('apps.tool_config_app.search_tool_info_impl')
+def test_search_tool_info_passthrough_http_exception(mock_search_tool_info, mock_get_user_id):
+    """HTTPException raised by the impl must propagate unchanged."""
+    from fastapi import HTTPException
+
+    mock_get_user_id.return_value = ("user123", "tenant456")
+    mock_search_tool_info.side_effect = HTTPException(
+        status_code=403, detail="forbidden")
+
+    response = client.post(
+        "/tool/search",
+        json={"agent_id": 1, "tool_id": 2},
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "forbidden"
+
+
+@patch('apps.tool_config_app.get_current_user_id')
+@patch('apps.tool_config_app.update_tool_info_impl')
+def test_update_tool_info_validation_error_bad_request(mock_update_tool_info, mock_get_user_id):
+    """ValidationError from the impl maps to HTTP 400."""
+    from consts.exceptions import ValidationError
+
+    mock_get_user_id.return_value = ("user123", "tenant456")
+    mock_update_tool_info.side_effect = ValidationError("invalid params")
+
+    response = client.post(
+        "/tool/update",
+        json={"agent_id": 1, "tool_id": 2, "params": {}, "enabled": True},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "invalid params"
+
+
+@patch('apps.tool_config_app.get_current_user_id')
+@patch('apps.tool_config_app.update_tool_info_impl')
+def test_update_tool_info_passthrough_http_exception(mock_update_tool_info, mock_get_user_id):
+    """HTTPException raised by the impl must propagate unchanged."""
+    from fastapi import HTTPException
+
+    mock_get_user_id.return_value = ("user123", "tenant456")
+    mock_update_tool_info.side_effect = HTTPException(
+        status_code=409, detail="conflict")
+
+    response = client.post(
+        "/tool/update",
+        json={"agent_id": 1, "tool_id": 2, "params": {}, "enabled": True},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "conflict"
