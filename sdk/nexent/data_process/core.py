@@ -9,10 +9,12 @@ from .base import FileProcessor
 from .file_splitter import FileSplitter
 from .openpyxl_processor import OpenPyxlProcessor
 from .unstructured_processor import UnstructuredProcessor
+from nexent.monitor import get_monitoring_manager
 
 
 logger = logging.getLogger("data_process.core")
 logger.setLevel(logging.INFO)
+monitoring_manager = get_monitoring_manager()
 
 
 class DataProcessCore:
@@ -117,9 +119,19 @@ class DataProcessCore:
         if not processor_instance:
             raise ValueError(f"Unsupported processor: {processor_name}")
         
+        extension = os.path.splitext(filename)[1].lower()
         if extract_image_processor_instance:
-            img_info = extract_image_processor_instance.process_file(
-                file_data, chunking_strategy, filename, **params)
+            with monitoring_manager.trace_operation(
+                "knowledge.preprocess.image_extract",
+                **{
+                    "ingestion.stage": "preprocess.image_extract",
+                    "file.extension": extension,
+                    "file.size_bytes": len(file_data),
+                    "processor.name": extractor,
+                },
+            ):
+                img_info = extract_image_processor_instance.process_file(
+                    file_data, chunking_strategy, filename, **params)
         else:
             img_info = []
 
@@ -127,7 +139,20 @@ class DataProcessCore:
         logger.info(
             f"Processing in-memory file: {filename} with {processor_name} processor")
         try:
-            return processor_instance.process_file(file_data, chunking_strategy, filename=filename, **params), img_info
+            with monitoring_manager.trace_operation(
+                "knowledge.preprocess.typed",
+                **{
+                    "ingestion.stage": "preprocess.typed",
+                    "file.extension": extension,
+                    "file.size_bytes": len(file_data),
+                    "processor.name": processor_name,
+                },
+            ):
+                chunks = processor_instance.process_file(
+                    file_data, chunking_strategy, filename=filename, **params
+                )
+                monitoring_manager.set_span_attributes(**{"chunk.count": len(chunks)})
+                return chunks, img_info
         except Exception as e:
             logger.error(f"File processing failed for {filename}: {str(e)}")
             raise
@@ -146,7 +171,7 @@ class DataProcessCore:
             file_data: File content byte data
             filename: Filename
             splitter: Optional splitter name (reserved for future use)
-            **params: Additional splitter parameters (e.g., max_size, encoding, libreoffice_path)
+            **params: Additional splitter parameters (e.g., max_size, target_parts, encoding, libreoffice_path)
 
         Returns:
             List of BytesIO parts
@@ -165,10 +190,27 @@ class DataProcessCore:
             logger.error(f"Splitter not found: {splitter_name}")
             return [BytesIO(file_data)]
 
-        max_size = params.pop("max_size", 5 * 1024 * 1024)
+        max_size = params.pop("max_size", None)
+        target_parts = params.pop("target_parts", None)
 
         try:
-            parts = splitter_instance.file_process(file_data, filename, max_size=max_size, **params)
+            with monitoring_manager.trace_operation(
+                "knowledge.preprocess.split",
+                **{
+                    "ingestion.stage": "preprocess.split",
+                    "file.extension": ext,
+                    "file.size_bytes": len(file_data),
+                    "processor.name": splitter_name,
+                },
+            ):
+                parts = splitter_instance.file_process(
+                    file_data,
+                    filename,
+                    max_size=max_size,
+                    target_parts=target_parts,
+                    **params,
+                )
+                monitoring_manager.set_span_attributes(**{"file.parts_count": len(parts)})
             if not isinstance(parts, list) or not all(isinstance(p, BytesIO) for p in parts):
                 logger.error("Invalid split result format: expected List[BytesIO]")
                 return [BytesIO(file_data)]

@@ -103,7 +103,9 @@ data:
   RAY_DASHBOARD_PORT: {{ .Values.config.dataProcess.rayDashboardPort | quote }}
   RAY_DASHBOARD_HOST: {{ .Values.config.dataProcess.rayDashboardHost | quote }}
   RAY_ACTOR_NUM_CPUS: {{ .Values.config.dataProcess.rayActorNumCpus | quote }}
-  RAY_NUM_CPUS: {{ .Values.config.dataProcess.rayNumCpus | quote }}
+  DP_PART_PROCESSOR_COUNT: {{ .Values.config.dataProcess.partProcessorCount | quote }}
+  DP_FILE_SPLIT_SIZE_MB: {{ .Values.config.dataProcess.fileSplitSizeMb | quote }}
+  RAY_NUM_CPUS: {{ default (mul (int .Values.config.dataProcess.partProcessorCount) (int .Values.config.dataProcess.rayActorNumCpus)) .Values.config.dataProcess.rayNumCpus | quote }}
   RAY_OBJECT_STORE_MEMORY_GB: {{ .Values.config.dataProcess.rayObjectStoreMemoryGb | quote }}
   RAY_TEMP_DIR: {{ .Values.config.dataProcess.rayTempDir | quote }}
   RAY_LOG_LEVEL: {{ .Values.config.dataProcess.rayLogLevel | quote }}
@@ -116,7 +118,7 @@ data:
   ELASTICSEARCH_REQUEST_TIMEOUT: {{ .Values.config.dataProcess.elasticsearchRequestTimeout | quote }}
   QUEUES: {{ .Values.config.dataProcess.queues | quote }}
   WORKER_NAME: {{ .Values.config.dataProcess.workerName | quote }}
-  WORKER_CONCURRENCY: {{ .Values.config.dataProcess.workerConcurrency | quote }}
+  WORKER_CONCURRENCY: {{ default (add (int .Values.config.dataProcess.partProcessorCount) 1) .Values.config.dataProcess.workerConcurrency | quote }}
 
   # Telemetry and Monitoring Configuration
   ENABLE_TELEMETRY: {{ ternary (get $monitoring "enabled") .Values.config.telemetry.enabled (hasKey $monitoring "enabled") | quote }}
@@ -190,10 +192,15 @@ data:
   CAS_USER_ATTRIBUTE: {{ .Values.config.cas.userAttribute | quote }}
   CAS_EMAIL_ATTRIBUTE: {{ .Values.config.cas.emailAttribute | quote }}
   CAS_ROLE_ATTRIBUTE: {{ .Values.config.cas.roleAttribute | quote }}
+  CAS_DEFAULT_ROLE: {{ .Values.config.cas.defaultRole | quote }}
   CAS_TENANT_ATTRIBUTE: {{ .Values.config.cas.tenantAttribute | quote }}
+  CAS_DEFAULT_TENANT_ID: {{ .Values.config.cas.defaultTenantId | quote }}
   CAS_ROLE_MAP_JSON: {{ .Values.config.cas.roleMapJson | quote }}
   CAS_SESSION_MAX_AGE_SECONDS: {{ .Values.config.cas.sessionMaxAgeSeconds | quote }}
   LOCAL_SESSION_MAX_AGE_SECONDS: {{ .Values.config.cas.localSessionMaxAgeSeconds | quote }}
+  CAS_HEARTBEAT_URL: {{ .Values.config.cas.heartbeatUrl | quote }}
+  CAS_HEARTBEAT_INTERVAL_SECONDS: {{ .Values.config.cas.heartbeatIntervalSeconds | quote }}
+  CAS_HEARTBEAT_COOKIE_NAME: {{ .Values.config.cas.heartbeatCookieName | quote }}
   CAS_RENEW_BEFORE_SECONDS: {{ .Values.config.cas.renewBeforeSeconds | quote }}
   CAS_RENEW_TIMEOUT_SECONDS: {{ .Values.config.cas.renewTimeoutSeconds | quote }}
   CAS_SYNTHETIC_EMAIL_DOMAIN: {{ .Values.config.cas.syntheticEmailDomain | quote }}

@@ -508,10 +508,8 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
             style={{
               display: "inline-flex",
               alignItems: "center",
-              padding: "2px 8px",
-              lineHeight: "20px",
-              height: "auto",
               whiteSpace: "nowrap",
+              flexShrink: 0,
             }}
             variant="solid"
           >
@@ -524,10 +522,8 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
               style={{
                 display: "inline-flex",
                 alignItems: "center",
-                padding: "2px 8px",
-                lineHeight: "20px",
-                height: "auto",
                 whiteSpace: "nowrap",
+                flexShrink: 0,
                 cursor: "pointer",
               }}
               variant="solid"
@@ -545,27 +541,26 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
       render: (_: any, record: McpServer) => {
         const isAvailable = record.status;
         const key = `${record.service_name}__${record.mcp_url}`;
+        const statusIcon = healthCheckLoading[key] ? (
+          <LoaderCircle className="w-3 h-3 animate-spin" />
+        ) : isAvailable ? (
+          <CheckCircle className="w-3 h-3" />
+        ) : (
+          <CircleX className="w-3 h-3" />
+        );
         return (
           <Tag
             color={healthCheckLoading[key] ? "#2E4053" : isAvailable ? "#229954" : "#E74C3C"}
             style={{
               display: "inline-flex",
               alignItems: "center",
-              padding: "2px 8px",
-              lineHeight: "20px",
-              height: "auto",
               whiteSpace: "nowrap",
+              flexShrink: 0,
             }}
             variant="solid"
           >
-            {healthCheckLoading[key] ? (
-              <LoaderCircle className="w-3 h-3 animate-spin mr-1" />
-            ) : isAvailable ? (
-              <CheckCircle className="w-3 h-3 mr-1" />
-            ) : (
-              <CircleX className="w-3 h-3 mr-1" />
-            )}
-            <span>{t(isAvailable ? "mcpConfig.status.available" : "mcpConfig.status.unavailable")}</span>
+            <span className="inline-flex items-center mr-1">{statusIcon}</span>
+            {t(isAvailable ? "mcpConfig.status.available" : "mcpConfig.status.unavailable")}
           </Tag>
         );
       },
@@ -676,15 +671,13 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
             style={{
               display: "inline-flex",
               alignItems: "center",
-              padding: "2px 8px",
-              lineHeight: "20px",
-              height: "auto",
               whiteSpace: "nowrap",
+              flexShrink: 0,
             }}
             variant="solid"
           >
-            <span className="mr-1">{config.icon}</span>
-            <span>{status || "unknown"}</span>
+            <span className="inline-flex items-center mr-1">{config.icon}</span>
+            {status || "unknown"}
           </Tag>
         );
       },

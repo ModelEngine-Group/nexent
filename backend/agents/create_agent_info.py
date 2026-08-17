@@ -85,33 +85,21 @@ def _create_fixed_search_memory_tool():
     return SearchMemoryTool()
 
 
-def _format_long_term_memory_prompt(search_context: Any, language: str) -> str:
-    """Render tenant and user long-term memories as a system prompt block."""
-    sections = []
-    section_specs = (
-        (
-            "tenant_long_term",
-            "### 租户长期记忆" if language == "zh" else "### Tenant Long-term Memory",
-        ),
-        (
-            "user_long_term",
-            "### 用户长期记忆" if language == "zh" else "### User Long-term Memory",
-        ),
-    )
-    for attribute, heading in section_specs:
-        entries = []
-        for item in getattr(search_context, attribute, ()) or ():
-            content = (
-                item.get("content", "")
-                if isinstance(item, dict)
-                else getattr(item, "content", "")
-            )
-            normalized = str(content or "").strip()
-            if normalized:
-                entries.append(f"- {normalized}")
-        if entries:
-            sections.append("\n".join((heading, *entries)))
-    return "\n\n".join(sections)
+def _build_long_term_memory_items(search_context: Any) -> list[dict[str, Any]]:
+    """Return at most one structured active document for each long-term scope."""
+    result = []
+    for attribute, scope in (("tenant_long_term", "tenant"), ("user_long_term", "user")):
+        for item in (getattr(search_context, attribute, ()) or ())[:1]:
+            content = item.get("content", "") if isinstance(item, dict) else getattr(item, "content", "")
+            metadata = item.get("metadata", {}) if isinstance(item, dict) else getattr(item, "metadata", {})
+            source = item.get("source") if isinstance(item, dict) else getattr(item, "source", None)
+            if str(content or "").strip():
+                result.append({
+                    "memory": str(content).strip(), "memory_level": scope, "scope": scope,
+                    "version_id": (metadata or {}).get("version_id"), "source": source or "manual",
+                })
+            break
+    return result
 
 
 # Safe fallback for context-manager token_threshold when no capacity is known.
@@ -515,6 +503,70 @@ def _extract_url_from_card(raw_card: Optional[dict]) -> str:
     return raw_card.get("url", "")
 
 
+def _resolve_scheme_field(scheme: dict, wrapper_key: str) -> Optional[dict]:
+    """Get a security scheme field from wrapper or flat format."""
+    field = scheme.get(wrapper_key)
+    if isinstance(field, dict) and field:
+        return field
+    # Flat format fallback: scheme itself has the fields
+    if wrapper_key == "httpAuthSecurityScheme" and isinstance(scheme.get("scheme"), str):
+        return scheme if scheme["scheme"].strip() else None
+    if wrapper_key == "apiKeySecurityScheme" and scheme.get("name") and scheme.get("location"):
+        return scheme
+    return None
+
+
+def _build_auth_header_for_scheme(scheme: dict, credential: str) -> Optional[tuple]:
+    """Build a single (header_name, header_value) pair from a security scheme.
+
+    Supports httpAuth (Bearer/basic) and apiKey (header location).
+    """
+    # HTTP auth (bearer, basic)
+    http_auth = _resolve_scheme_field(scheme, "httpAuthSecurityScheme")
+    if http_auth:
+        auth_scheme = http_auth.get("scheme", "")
+        if http_auth.get("bearerFormat", "").lower() == "jwt":
+            auth_scheme = "Bearer"
+        return ("Authorization", f"{auth_scheme} {credential}") if auth_scheme else None
+
+    # API key in header
+    api_key = _resolve_scheme_field(scheme, "apiKeySecurityScheme")
+    if api_key:
+        location = (api_key.get("location") or "").lower()
+        name = api_key.get("name")
+        if location == "header" and name:
+            return (name, credential)
+
+    return None
+
+
+def _collect_auth_headers(requirements, schemes, credentials):
+    """Collect (header_name, value) pairs from security requirements."""
+    pairs = []
+    for req in requirements:
+        if not isinstance(req, dict):
+            continue
+        for scheme_id in req.get("schemes", {}):
+            credential = credentials.get(scheme_id)
+            scheme = schemes.get(scheme_id)
+            if credential and isinstance(scheme, dict):
+                pair = _build_auth_header_for_scheme(scheme, credential)
+                if pair:
+                    pairs.append(pair)
+    return pairs
+
+
+def _build_security_headers(agent: dict) -> dict:
+    """Build auth headers from securitySchemes + security_credentials."""
+    schemes = agent.get("security_schemes") or {}
+    requirements = agent.get("security_requirements") or []
+    credentials = agent.get("security_credentials") or {}
+    if not requirements or not credentials:
+        return {}
+    return dict(_collect_auth_headers(requirements, schemes, credentials))
+
+
+
 def _build_external_agent_config(agent: dict, agent_url: str) -> ExternalA2AAgentConfig:
     """Build an ExternalA2AAgentConfig from agent data."""
     return ExternalA2AAgentConfig(
@@ -528,6 +580,7 @@ def _build_external_agent_config(agent: dict, agent_url: str) -> ExternalA2AAgen
         protocol_type=agent.get("protocol_type", PROTOCOL_JSONRPC),
         timeout=300.0,
         raw_card=agent.get("raw_card"),
+        custom_headers=_build_security_headers(agent) or None,
     )
 
 
@@ -897,13 +950,13 @@ async def create_agent_config(
     # ``search_memory_in_levels`` multi-level fan-out has been removed; the
     # streaming layer and tool wiring below remain in place.
     memory_list: list = []
-    long_term_memory_prompt = ""
+    long_term_memory_items: list[dict[str, Any]] = []
     pre_run_tool_events: list[dict[str, Any]] = []
     memory_context = build_memory_context(
         user_id, tenant_id, agent_id, skip_query=not allow_memory_search
     )
 
-    # Append active memory tools if memory is enabled
+    # The memory capability switch controls tenant, user, and agent memory.
     if memory_context.user_config.memory_switch:
         try:
             from services.memory_record_service import (
@@ -955,21 +1008,13 @@ async def create_agent_config(
                     type(exc).__name__,
                 )
 
-            # Hand the internal fixed SearchMemoryTool a backend
-            # ``MemoryContextService`` so the pre-run search executes
-            # through the retrieval pipeline (normalize / fusion /
-            # decay / MMR / token-budget selection) instead of
-            # bypassing it. The service is reused for prompt injection,
-            # so a single instance per agent is sufficient.
             memory_context_service = None
             try:
                 from services.memory_context_service import get_memory_context_service
 
                 memory_context_service = get_memory_context_service()
                 if memory_context_service is None:
-                    raise RuntimeError(
-                        "MemoryContextService provider returned no service"
-                    )
+                    raise RuntimeError("MemoryContextService provider returned no service")
                 memory_metadata["memory_context_service"] = memory_context_service
             except Exception as exc:
                 logger.warning(
@@ -987,22 +1032,15 @@ async def create_agent_config(
                         tenant_id=str(memory_context.tenant_id or ""),
                         user_id=str(memory_context.user_id or ""),
                         agent_id=str(memory_context.agent_id or "") or None,
-                        conversation_id=(
-                            str(conversation_id)
-                            if conversation_id is not None
-                            else None
-                        ),
+                        conversation_id=(str(conversation_id) if conversation_id is not None else None),
                         query=None,
                         layers=["tenant", "user"],
                     )
-                    long_term_memory_prompt = _format_long_term_memory_prompt(
-                        long_term_search_context,
-                        language,
-                    )
+                    long_term_memory_items = _build_long_term_memory_items(long_term_search_context)
                 except Exception as exc:
                     logger.warning(
-                        "event=long_term_memory_load_failed tenant_id=%s "
-                        "user_id=%s agent_id=%s error_type=%s",
+                        "event=long_term_memory_load_failed tenant_id=%s user_id=%s "
+                        "agent_id=%s error_type=%s",
                         tenant_id,
                         user_id,
                         agent_id,
@@ -1229,7 +1267,7 @@ async def create_agent_config(
         memory_search_query=last_user_query,
         memory_tool_policy=memory_tool_policy,
         automation_tool_policy=automation_tool_policy,
-        long_term_memory_prompt=long_term_memory_prompt,
+        long_term_memory_items=long_term_memory_items,
         knowledge_base_summary=knowledge_base_summary,
         kb_ids=kb_ids,
         restricted_python_authorized_imports=(

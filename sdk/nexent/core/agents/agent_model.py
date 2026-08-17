@@ -444,6 +444,10 @@ class ExternalA2AAgentConfig(BaseModel):
         description="Raw Agent Card containing skills and capabilities",
         default=None
     )
+    custom_headers: Optional[Dict[str, str]] = Field(
+        description="Pre-built auth headers from securitySchemes + credentials",
+        default=None
+    )
 
     def model_post_init(self, __context) -> None:
         """Auto-enhance description with skills info from raw_card."""
@@ -496,7 +500,8 @@ class ExternalA2AAgentConfig(BaseModel):
             protocol_version=self.protocol_version,
             protocol_type=self.protocol_type,
             timeout=self.timeout,
-            raw_card=self.raw_card
+            raw_card=self.raw_card,
+            custom_headers=self.custom_headers
         )
 
 
