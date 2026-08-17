@@ -1039,52 +1039,138 @@ React 中的 `useEffect` 只用于最终卡出现后的外部状态读取同步�
 
 ---
 
-## 14. 开发计划
+## 14. 开发与合并计划
 
-### Phase 1：冻结协议与数据库草稿路径（P0）
+### 14.1 开发前置约束
+
+最新 `develop` 已隐藏 Agent 管理页中的 NL2Agent 入口，但保留运行 API、SSE 提取、前端 Panel 和旧版两张卡。开发期间采用以下约束：
+
+1. Gate 0 先恢复 Agent 创建页中的 NL2Agent Panel，并在页面加载后默认打开，不等待用户点击入口，也不延后到 PR5 切换。
+2. 新协议采用增量扩展；Gate 0 及后续所有 PR 均保留现有 `/agent/nl2agent/run` 和 `nl2a` SSE 边界的兼容性。
+3. `save_agent_draft_fields` 更新已有 Agent 前必须按 `agent_id + tenant_id + version_no=0` 校验普通草稿及用户权限，不能直接依赖仅按 `agent_id` 更新的数据库函数。
+4. NL2Agent 流程只读状态与 Agent 权限只读状态分离。前者是当前页面内存中的流程锁，不能覆盖数据库返回的 Agent 权限。
+5. 在安装卡和绑定卡开发前，先将前端 `ApiError` 兼容扩展为可携带 `details`，并统一解析现有后端错误形态。
+6. 卡片和流程状态只保存在当前页面的 React Context/`useReducer` 中，不写入持久化 Zustand Store 或数据库。
+
+### 14.2 PR 合并策略
+
+本功能拆为 Gate 0 和五个可独立审查、按顺序合入 `develop` 的功能 PR：
+
+```text
+Gate 0 默认打开 NL2Agent Panel
+→ PR1 协议与 Agent 草稿闭环
+→ PR2 已安装资源搜索与绑定闭环
+→ PR3 未安装资源搜索与安装闭环
+→ PR4 Prompt 写库与最终确认闭环
+→ PR5 完整 E2E 与检索校准
+```
+
+合并规则：
+
+1. 每个 PR 最终都以最新 `develop` 为基线并单独合入。
+2. 可以使用 stacked PR 提前并行审查，但前置 PR 合入后，后续 PR 必须 rebase 到最新 `develop` 并重新设置目标分支。
+3. 严格按照 Gate 0、PR1 至 PR5 的顺序合并，不让多个长期分支重复携带相同前置提交。
+4. 每个 PR 必须保持生产可部署、通过自身范围内的测试，并且不得依赖尚未合入的后续 PR 才能恢复原有功能。
+5. 单元测试、集成测试和必要的 Playwright 验证随对应功能 PR 一起提交；PR5 只补完整流程验收和校准，不承接前四个 PR 遗漏的基础测试。
+6. Gate 0 合入后 NL2Agent Panel 始终默认打开；后续 PR 不再增加入口开关或 Cutover 步骤。
+
+### 14.3 Gate 0：默认打开 NL2Agent Panel（P0）
+
+实现范围：
+
+1. 在 Agent 创建页重新挂载 `Nl2AgentChatPanel`。
+2. 页面加载后默认打开 Panel，不依赖顶部按钮、URL 参数或 feature flag。
+3. 恢复 Panel 与 Agent 配置区、Agent 信息区并列的响应式布局，窄屏下按自然顺序纵向排列。
+4. 保留现有临时会话、旧版推荐卡和 Agent Draft 卡行为，作为 PR1 新协议接入前的可运行基线。
+
+验收门槛：
+
+1. 进入 Agent 创建页后无需额外操作即可看到 NL2Agent Panel。
+2. Panel、Agent 配置区和 Agent 信息区在桌面及移动视口均无重叠或内容溢出。
+3. 现有 `/agent/nl2agent/run` 请求和两种旧 payload 仍可正常执行和渲染。
+4. 使用 Playwright 验证 Panel 默认打开、基础对话发送和响应式布局。
+
+### 14.4 PR1：协议与 Agent 草稿闭环（P0）
+
+实现范围：
 
 1. 冻结五个 MCP Tool 的 Pydantic 入参和返回类型。
 2. 冻结四种 NL2A payload 和统一 action TypeScript 类型。
-3. 实现 `save_agent_draft_fields`，复用普通 Agent 创建/更新。
-4. 实现 Agent 草稿创建后的前端编辑模式同步。
-5. 删除新流程对 Snapshot/revision 的依赖。
+3. 实现需求澄清卡及页面级 NL2Agent 流程状态容器。
+4. 实现租户安全的 `save_agent_draft_fields`，复用普通 Agent 创建能力和名称后缀生成逻辑。
+5. 创建草稿时补齐默认 LLM、默认 Prompt 配置、`max_steps=15`、默认分组和其他普通 Agent 默认字段。
+6. Agent 草稿创建后执行 `searchAgentInfo() → setCurrentAgent()`，从创建模式切换为编辑模式，并施加流程只读锁。
+7. 删除新流程对 Snapshot/revision 的依赖。
 
-### Phase 2：统一资源搜索与推荐（P0）
+验收门槛：
 
-1. 扩展已安装 Tool/Skill 搜索。
-2. 聚合官方 Skill、租户 Skill Repository、租户 MCP Repository。
-3. 接入 MCP 官方 Registry 的 latest active、双页和可安装性过滤。
-4. 实现 `candidate_ref`、统一评分、多需求覆盖和排除列表。
-5. 实现 `recommend_resources` 详情和配置 Schema。
+1. 自然语言输入可以经过澄清后创建真实正整数 `agent_id` 的普通草稿。
+2. 跨租户、非草稿和只读 Agent 更新被拒绝。
+3. 页面无需刷新即可展示数据库草稿，流程期间普通编辑表单不可写。
+4. 修改模块单元测试覆盖率达到 90%，并完成草稿创建/更新 API 验证和需求澄清卡 Playwright 验证。
 
-### Phase 3：安装与绑定卡（P0）
+### 14.5 PR2：已安装资源搜索与绑定闭环（P0）
 
-1. 实现需求澄清卡和建议安装资源卡。
-2. 逐资源复用现有 Skill/MCP 安装 API。
-3. 实现已安装资源统一绑定卡。
-4. 实现全量预校验、错误表单展开和标红。
-5. 使用 `Promise.allSettled` 编排现有 Tool/Skill 绑定 API。
-6. 实现成功锁定、失败重试和继续条件。
+实现范围：
 
-### Phase 4：Prompt 与最终确认（P0）
+1. 实现 `search_installed_resources`，覆盖用户可见的 Local Tool、已安装 MCP Tool 和已安装 Skill。
+2. 实现文本规范化、`candidate_ref`、统一评分、多需求覆盖、推荐/可选标签和最多 12 项绑定候选。
+3. 实现 `recommend_resources` 的已安装资源详情和 `TOOL_CONFIG`/`SKILL_CONFIG` 表单数据。
+4. 实现统一绑定卡、全量前端预校验、错误表单展开和标红。
+5. 使用 `Promise.allSettled` 编排现有 Tool/Skill 绑定 API，支持部分成功、成功项锁定和失败项重试。
+6. 绑定卡继续后由后端重新读取 ToolInstance/SkillInstance 事实，不信任前端提交的 enabled ID 集合。
 
-1. 在 NL2Agent run 构建阶段注入数据库真实绑定资源。
+验收门槛：
+
+1. 仅依赖已安装资源的需求可以完成搜索、配置和绑定闭环。
+2. 无选择、全部成功、部分失败、重试成功和字段错误场景均有测试。
+3. 修改模块单元测试覆盖率达到 90%，并完成绑定 API 验证和绑定卡 Playwright 验证。
+
+### 14.6 PR3：未安装资源搜索与安装闭环（P0）
+
+实现范围：
+
+1. 实现 `search_uninstalled_resources(scope=internal)`，聚合 Nexent 官方 Skill、租户 Skill Repository 和租户 MCP Repository。
+2. 实现 `scope=external_registry`，接入 MCP 官方 Registry 的 latest active、双页和可安装性过滤。
+3. 实现未安装候选的 `candidate_ref`、排除列表、统一评分和多需求覆盖。
+4. 扩展 `recommend_resources`，返回 MCP/Skill 安装方式、`form_kind` 和现有配置 Schema。
+5. 实现逐资源安装卡，复用现有 Skill/MCP 安装 API，并支持安装失败重试、显式跳过和安装后真实资源重搜。
+6. 实现未覆盖需求回到澄清卡的分支，要求用户明确放弃、修改或结束流程。
+
+验收门槛：
+
+1. 平台内优先、Registry 按需补充的两阶段搜索顺序不可被模型绕过。
+2. Registry latest active、两页上限、安装方式选择和不可安装条目过滤均有集成测试。
+3. 修改模块单元测试覆盖率达到 90%，并完成安装 API 验证和安装卡 Playwright 验证。
+
+### 14.7 PR4：Prompt 写库与最终确认闭环（P0）
+
+实现范围：
+
+1. 在 NL2Agent run 构建阶段注入数据库中的 Agent 基本信息和真实绑定资源。
 2. 调整 NL2Agent `max_steps=8`。
-3. 实现五组 Prompt 字段分批写库和一次修正重试。
-4. 实现 final wrapper 数据库校验。
-5. 实现最终确认、修改和结束流程。
-6. 实现最终 `searchAgentInfo() → setCurrentAgent()` 同步。
+3. 实现五组 Prompt 字段分批写库、当前字段一次修正重试和失败后新一轮重试入口。
+4. 实现 final wrapper 的租户、草稿、Prompt 完整性和真实绑定校验。
+5. 实现最终确认卡、明确 `target_fields` 的局部修改以及需求/绑定变化后的全量 Prompt 重建。
+6. 最终卡出现时再次执行 `searchAgentInfo() → setCurrentAgent()`；确认完成后解除编辑表单流程锁并禁用 NL2Agent Composer。
 
-### Phase 5：测试与校准（P1/P2）
+验收门槛：
 
-P1：
+1. Prompt 生成只使用数据库实际绑定资源，前端无法覆盖该事实。
+2. 任一字段二次写入失败时不生成最终卡，已成功字段不回滚。
+3. 确认、局部修改、返回需求阶段、返回绑定阶段和完成后 Composer 禁用均有测试。
+4. 修改模块单元测试覆盖率达到 90%，并完成 Prompt 写库 API 验证和最终确认卡 Playwright 验证。
 
-1. 后端五个 Tool 单元测试，修改模块覆盖率达到 90%。
-2. 搜索来源、分页、可安装性过滤和覆盖算法集成测试。
-3. Agent 草稿、ToolInstance、SkillInstance 和 Prompt 写库 API 验证。
-4. 前端四张卡 Playwright 验证，包括批量绑定部分失败和错误展开。
+### 14.8 PR5：完整 E2E 与检索校准（P1/P2）
 
-P2：
+P1 完整验收：
+
+1. 验证进入流程、草稿创建、编辑区只读、安装、绑定、最终确认和恢复编辑的完整页面生命周期。
+2. 使用 `curl` 验证后端创建、搜索、绑定上下文和 final wrapper 验收路径。
+3. 使用 Playwright 验证默认打开的 Panel、四张卡、批量绑定部分失败、字段错误展开、最终修改和完成后禁用状态。
+4. 回归 Gate 0 的桌面和移动端响应式布局，确认后续卡片没有引入重叠或溢出。
+
+P2 校准：
 
 1. 新增固定中英文检索集。
 2. 校准 RapidFuzz 权重和 `0.50/0.65` 阈值。
@@ -1123,6 +1209,7 @@ P2：
 27. 最终确认后不关闭 NL2Agent 面板，不显示结束界面或新流程入口。
 28. 最终确认后禁用 NL2Agent Composer，后续修改通过普通 Agent 编辑区完成。
 29. 定时任务不参与首版。
+30. Gate 0 恢复并默认打开 Agent 创建页中的 NL2Agent Panel，不在 PR5 增加入口 Cutover 或开关。
 
 ---
 
