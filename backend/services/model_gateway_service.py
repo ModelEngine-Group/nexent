@@ -25,12 +25,14 @@ from nexent.core.gateway import (
     LLMContext,
     LongContextLLMContext,
     ModelContext,
+    STTContext,
+    TTSContext,
     VLMContext,
     get_gateway,
 )
 from nexent.core.gateway.registry import get_registry
-from consts.const import MODEL_CONFIG_MAPPING
-from database.model_management_db import get_model_by_model_id
+from consts.const import MODEL_CONFIG_MAPPING, TEST_PCM_PATH
+from database.model_management_db import get_model_by_model_id, get_model_records
 from utils.config_utils import get_model_name_from_config, tenant_config_manager
 
 logger = logging.getLogger("model_gateway_service")
@@ -61,6 +63,8 @@ _MODALITY_DEFAULT_FACTORY: Dict[str, str] = {
     "vlm": "openai",
     "embedding": "openai",
     "rerank": "openai",
+    "stt": "ali",
+    "tts": "ali",
     "multi_embedding": "jina",
 }
 
@@ -69,6 +73,9 @@ def _normalize_factory(raw: Optional[str], modality: str) -> str:
     """Return the canonical registry factory for ``raw`` under ``modality``."""
     cleaned = (raw or "").strip().lower()
     factory = _FACTORY_NORMALIZE.get(cleaned, cleaned)
+    # STT/TTS historically route DashScope through the Ali client.
+    if modality in ("stt", "tts") and factory in ("dashscope", "ali", "alibaba"):
+        factory = "ali"
     if get_registry().has(factory, modality):
         return factory
     default = _MODALITY_DEFAULT_FACTORY.get(modality, "openai")
@@ -163,6 +170,38 @@ def _config_to_context(
             extra_body=cfg.get("extra_body"),
             max_tokens=cfg.get("max_tokens"),
             capabilities=caps,
+        )
+    elif modality == "stt":
+        ws_url = construct_extras.pop("ws_url", None) or cfg.get("base_url")
+        return STTContext(
+            **common,
+            language=construct_extras.pop("language", "zh") or "zh",
+            audio_file_path=construct_extras.pop("audio_file_path", None) or TEST_PCM_PATH,
+            model_appid=cfg.get("model_appid"),
+            access_token=cfg.get("access_token"),
+            ws_url=ws_url,
+            auth_headers=construct_extras.pop("auth_headers", None),
+            format=construct_extras.pop("format", "pcm"),
+            rate=construct_extras.pop("rate", 16000),
+            resourceid=construct_extras.pop("resourceid", "volc.bigasr.sauc.duration"),
+            enable_vad=construct_extras.pop("enable_vad", True),
+            sample_rate=construct_extras.pop("sample_rate", None),
+            timeout=construct_extras.pop("timeout", 60),
+        )
+    elif modality == "tts":
+        ws_url = construct_extras.pop("ws_url", None) or cfg.get("base_url")
+        return TTSContext(
+            **common,
+            speed_ratio=float(_coalesce(construct_extras.pop("speed_ratio", None), cfg.get("speed_ratio"), 1.0)),
+            voice=construct_extras.pop("voice", None) or cfg.get("voice"),
+            audio_file_path=construct_extras.pop("audio_file_path", None),
+            model_appid=cfg.get("model_appid"),
+            access_token=cfg.get("access_token"),
+            ws_url=ws_url,
+            auth_headers=construct_extras.pop("auth_headers", None),
+            voice_type=construct_extras.pop("voice_type", None),
+            format=construct_extras.pop("format", "mp3"),
+            sample_rate=construct_extras.pop("sample_rate", 16000),
         )
     elif modality in ("embedding", "multi_embedding"):
         return EmbeddingContext(
@@ -275,6 +314,119 @@ def get_llm_adapter(tenant_id: str, model_id: Optional[int] = None, modality: st
     return get_gateway().get_adapter(
         _config_to_context(cfg, modality, "llm", tenant_id, observer=MessageObserver())
     )
+
+
+def _fetch_voice_config(tenant_id, model_type):
+    """Fetch an STT/TTS config from tenant_config or model_records (voice fallback)."""
+    try:
+        cfg = tenant_config_manager.get_model_config(tenant_id, model_type)
+        if cfg and isinstance(cfg, dict):
+            return cfg
+    except Exception:
+        pass
+    try:
+        records = get_model_records({"model_type": model_type}, tenant_id)
+        if records:
+            return records[0]
+    except Exception:
+        pass
+    return None
+
+
+def get_stt_adapter_from_params(
+    model_factory: Optional[str] = None,
+    model_name: Optional[str] = None,
+    api_key: Optional[str] = None,
+    model_appid: Optional[str] = None,
+    access_token: Optional[str] = None,
+    base_url: Optional[str] = None,
+    language: str = "zh",
+):
+    """STT adapter from explicit params. Replaces ``voice_service._get_stt_model_from_config``.
+
+    Signature mirrors the old method (minus ``self``); vendor dispatch (Ali vs Volc)
+    is resolved by the registry; per-vendor Config construction lives in the STT
+    adapters. Built fresh (no gateway cache) since api_key/ws_url are per-request.
+    """
+    cfg = {
+        "model_factory": model_factory,
+        "model_name": model_name,
+        "api_key": api_key,
+        "model_appid": model_appid,
+        "access_token": access_token,
+        "base_url": base_url,
+    }
+    return build_adapter_fresh(
+        cfg, "stt", "stt", None,
+        language=language,
+        model_name=model_name or "qwen3-asr-flash-realtime",
+        timeout=5,
+    )
+
+
+def get_stt_adapter_from_tenant_config(tenant_id: str, language: str = "zh"):
+    """STT adapter from tenant config. Replaces ``voice_service._get_stt_model_from_tenant_config``."""
+    cfg = _fetch_voice_config(tenant_id, "stt")
+    if not cfg:
+        return get_stt_adapter_from_params(language=language)
+    return build_adapter_fresh(
+        cfg, "stt", "stt", tenant_id,
+        language=language,
+        model_name=cfg.get("model_name") or "qwen3-asr-flash-realtime",
+        timeout=5,
+    )
+
+
+def get_tts_adapter_from_params(
+    model_factory: Optional[str] = None,
+    api_key: Optional[str] = None,
+    model_appid: Optional[str] = None,
+    access_token: Optional[str] = None,
+    speed_ratio: float = 1.0,
+    base_url: Optional[str] = None,
+    model: Optional[str] = None,
+):
+    """TTS adapter from explicit params. Replaces ``voice_service._get_tts_model_from_config``."""
+    cfg = {
+        "model_factory": model_factory,
+        "api_key": api_key,
+        "model_appid": model_appid,
+        "access_token": access_token,
+        "base_url": base_url,
+    }
+    return build_adapter_fresh(
+        cfg, "tts", "tts", None,
+        model_name=model or "qwen3-tts-flash",
+        speed_ratio=speed_ratio,
+    )
+
+
+def get_tts_adapter_from_tenant_config(tenant_id: str):
+    """TTS adapter from tenant config. Replaces ``voice_service._get_tts_model_from_tenant_config``."""
+    cfg = _fetch_voice_config(tenant_id, "tts")
+    if not cfg:
+        return get_tts_adapter_from_params()
+    return build_adapter_fresh(
+        cfg, "tts", "tts", tenant_id,
+        model_name=cfg.get("model_name") or "qwen3-tts-flash",
+        speed_ratio=float(cfg.get("speed_ratio", 1.0)),
+    )
+
+
+def get_stt_adapter_from_config(
+    cfg: Optional[dict],
+    tenant_id: Optional[str] = None,
+    **construct_extras: Any,
+):
+    return get_adapter_from_config(cfg, "stt", "stt", tenant_id, **construct_extras)
+
+
+def get_tts_adapter_from_config(
+    cfg: Optional[dict],
+    tenant_id: Optional[str] = None,
+    **construct_extras: Any,
+):
+    return get_adapter_from_config(cfg, "tts", "tts", tenant_id, **construct_extras)
 
 
 def get_embedding_adapter_from_config(
