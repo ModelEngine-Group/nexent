@@ -373,9 +373,9 @@ class NexentAgent:
                     except Exception as exc:
                         logger.warning(
                             "Failed to install Aidp whitelist from metadata: %s; "
-                            "falling back to no-op filtering", exc,
+                            "falling back to an empty whitelist", exc,
                         )
-                        tools_obj.set_allowed_kds(None)
+                        tools_obj.set_allowed_kds([])
                 else:
                     # Whitelist not set by backend → treat as uninstalled.
                     tools_obj.set_allowed_kds(None)

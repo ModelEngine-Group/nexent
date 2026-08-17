@@ -96,7 +96,7 @@ class ValidationError(Exception):
     pass
 
 
-class TenantResourceLimitError(Exception):
+class TenantResourceLimitError(ValidationError, ValueError):
     pass
 
 

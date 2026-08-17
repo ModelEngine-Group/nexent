@@ -7,13 +7,13 @@ Supports video from S3, HTTP, and HTTPS URLs.
 
 import logging
 from io import BytesIO
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from jinja2 import StrictUndefined, Template
 from pydantic import Field
 from smolagents.tools import Tool
 
-from ...core.models import OpenAIVLModel
+from ...core.gateway.modality import VLMRequest
 from ...core.utils.observer import MessageObserver, ProcessType
 from ...core.utils.prompt_template_utils import get_prompt_template
 from ...core.utils.tools_common_message import ToolCategory, ToolSign
@@ -74,7 +74,7 @@ class AnalyzeVideoTool(Tool):
                 description="Message observer",
                 default=None,
                 exclude=True),
-            vlm_model: OpenAIVLModel = Field(
+            vlm_model: Any = Field(
                 description="The video understanding model to use",
                 default=None,
                 exclude=True),
@@ -151,10 +151,13 @@ class AnalyzeVideoTool(Tool):
                     content_type = "video/mp4"
                 video_stream = BytesIO(video_bytes)
                 try:
-                    response = self.vlm_model.analyze_video(
-                        video_input=video_stream,
-                        system_prompt=system_prompt,
-                        content_type=content_type,
+                    response = self.vlm_model.invoke_sync(
+                        VLMRequest(
+                            media_type="video",
+                            media_input=video_stream,
+                            prompt=system_prompt,
+                            kwargs={"content_type": content_type} if content_type else None,
+                        )
                     )
                 except Exception as e:
                     error_msg_zh = f"视频{index}分析失败: {str(e)}。请检查视频理解模型配置是否正确。"

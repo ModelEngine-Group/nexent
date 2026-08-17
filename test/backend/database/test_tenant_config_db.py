@@ -1,5 +1,6 @@
 import sys
 import os
+import types
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 
 import pytest
@@ -43,6 +44,16 @@ consts_exceptions_mock.TenantResourceLimitError = TenantResourceLimitError
 sys.modules['consts'] = consts_mock
 sys.modules['consts.const'] = consts_mock.const
 sys.modules['consts.exceptions'] = consts_exceptions_mock
+
+exceptions_mock = types.ModuleType("consts.exceptions")
+
+
+class MockTenantResourceLimitError(Exception):
+    pass
+
+
+exceptions_mock.TenantResourceLimitError = MockTenantResourceLimitError
+sys.modules['consts.exceptions'] = exceptions_mock
 
 # Mock utils module
 utils_mock = MagicMock()

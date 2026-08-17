@@ -415,6 +415,10 @@ services_modules = {
         'get_vlm_model': MagicMock(),
         'get_video_understanding_model': MagicMock(),
     },
+    'model_gateway_service': {
+        'get_llm_adapter': MagicMock(),
+        'get_vlm_adapter': MagicMock(),
+    },
 }
 for service_name, attrs in services_modules.items():
     service_module = types.ModuleType(f'services.{service_name}')
@@ -446,6 +450,10 @@ services_modules = {
     'image_service': {
         'get_vlm_model': MagicMock(),
         'get_video_understanding_model': MagicMock(),
+    },
+    'model_gateway_service': {
+        'get_llm_adapter': MagicMock(),
+        'get_vlm_adapter': MagicMock(),
     },
 }
 for service_name, attrs in services_modules.items():
@@ -577,8 +585,6 @@ patch('services.vectordatabase_service.get_vector_db_core', MagicMock()).start()
 patch('services.tenant_config_service.get_selected_knowledge_list', MagicMock()).start()
 patch('services.tenant_config_service.build_knowledge_name_mapping',
       MagicMock()).start()
-patch('services.image_service.get_vlm_model', MagicMock()).start()
-patch('services.image_service.get_video_understanding_model', MagicMock()).start()
 patch('backend.database.knowledge_db.get_knowledge_name_map_by_index_names', MagicMock()).start()
 
 # Ensure this module always uses the real consts.model instead of mocks injected by other test files.
@@ -1224,7 +1230,6 @@ class TestGetAllMcpTools:
             mock_tools1, mock_tools2, mock_default_tools]
         mock_urljoin.return_value = "http://default-server.com/sse"
 
-        # 导入函数
         from backend.services.tool_configuration_service import get_all_mcp_tools
 
         result = await get_all_mcp_tools("test_tenant")
@@ -1805,7 +1810,7 @@ class TestUpdateToolList:
     @patch('backend.services.tool_configuration_service.get_langchain_tools')
     @patch('backend.services.tool_configuration_service.update_tool_table_from_scan_tool_list')
     async def test_update_tool_list_mcp_error(self, mock_update_table, mock_get_langchain_tools, mock_get_mcp_tools, mock_get_local_tools):
-        """Test MCP tool retrieval failure scenario — handled gracefully (mcp_tools = []).
+        """Test MCP tool retrieval failure scenario - handled gracefully (mcp_tools = []).
 
         MCP errors should not block local/langchain tool updates. When MCP
         fails, mcp_tools is set to an empty list and the update continues.
@@ -1824,7 +1829,7 @@ class TestUpdateToolList:
 
         from backend.services.tool_configuration_service import update_tool_list
 
-        # Should NOT raise — MCP error is logged but not propagated
+        # Should NOT raise - MCP error is logged but not propagated
         await update_tool_list("test_tenant", "test_user")
 
         # update_tool_table is still called, but with only local + langchain tools
@@ -3292,7 +3297,7 @@ class TestValidateLocalToolAnalyzeImage:
     """Test cases for _validate_local_tool with analyze_image tool."""
 
     @patch('backend.services.tool_configuration_service.minio_client')
-    @patch('backend.services.tool_configuration_service.get_vlm_model')
+    @patch('backend.services.tool_configuration_service.get_vlm_adapter')
     @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
     @patch('backend.services.tool_configuration_service.inspect.signature')
     def test_validate_local_tool_analyze_image_success(self, mock_signature, mock_get_class, mock_get_vlm_model, mock_minio_client):
@@ -3318,7 +3323,7 @@ class TestValidateLocalToolAnalyzeImage:
         )
 
         assert result == "analyze image result"
-        mock_get_vlm_model.assert_called_once_with(tenant_id="tenant1", model_id=None)
+        mock_get_vlm_model.assert_called_once_with("tenant1", None, slot="vlm")
         mock_tool_class.assert_called_once()
         call_kwargs = mock_tool_class.call_args.kwargs
         assert 'vlm_model' in call_kwargs
@@ -3365,7 +3370,7 @@ class TestValidateLocalToolAnalyzeAudioVideo:
 
     @pytest.mark.parametrize("tool_name", ["analyze_audio", "analyze_video"])
     @patch('backend.services.tool_configuration_service.minio_client')
-    @patch('backend.services.tool_configuration_service.get_video_understanding_model')
+    @patch('backend.services.tool_configuration_service.get_vlm_adapter')
     @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
     @patch('backend.services.tool_configuration_service.inspect.signature')
     def test_validate_local_tool_analyze_audio_video_success(
@@ -3392,7 +3397,7 @@ class TestValidateLocalToolAnalyzeAudioVideo:
         )
 
         assert result == f"{tool_name} result"
-        mock_get_video_model.assert_called_once_with(tenant_id="tenant1", model_id=None)
+        mock_get_video_model.assert_called_once_with("tenant1", None, slot="vlm3")
         call_kwargs = mock_tool_class.call_args.kwargs
         assert call_kwargs["vlm_model"] == "mock_video_model"
         assert "storage_client" in call_kwargs
@@ -3651,7 +3656,7 @@ class TestValidateLocalToolRAGFlowSearch:
     @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
     @patch('backend.services.tool_configuration_service.inspect.signature')
     def test_validate_local_tool_ragflow_search_success(self, mock_signature, mock_get_class):
-        """Test successful ragflow_search tool validation — filters out rerank params."""
+        """Test successful ragflow_search tool validation - filters out rerank params."""
         mock_tool_class = Mock()
         mock_tool_instance = Mock()
         mock_tool_instance.forward.return_value = "ragflow search result"
@@ -5128,7 +5133,7 @@ class TestValidateLocalToolMonitoring:
     @patch('backend.services.tool_configuration_service.set_monitoring_operation')
     @patch('backend.services.tool_configuration_service.set_monitoring_context')
     @patch('backend.services.tool_configuration_service.minio_client')
-    @patch('backend.services.tool_configuration_service.get_vlm_model')
+    @patch('backend.services.tool_configuration_service.get_vlm_adapter')
     @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
     @patch('backend.services.tool_configuration_service.inspect.signature')
     def test_analyze_image_sets_monitoring_context(

@@ -5160,7 +5160,7 @@ class TestCreateLocalToolAidpSearchTool:
         mock_tool_instance.set_allowed_kds.assert_called_once_with(None)
 
     def test_aidp_search_tool_set_allowed_kds_raises_exception(self, nexent_agent_instance):
-        """When set_allowed_kds raises, falls back to set_allowed_kds(None)."""
+        """When whitelist installation raises, fall back to a deny-all whitelist."""
         mock_tool_class = MagicMock()
         mock_tool_instance = MagicMock()
         mock_tool_instance.set_allowed_kds.side_effect = [RuntimeError("boom"), None]
@@ -5188,10 +5188,10 @@ class TestCreateLocalToolAidpSearchTool:
                 del nexent_agent.__dict__["AidpSearchTool"]
 
         assert result is mock_tool_instance
-        # First call with ["kb1"] raises, fallback call with None
+        # First call with ["kb1"] raises, fallback call installs an empty whitelist.
         assert mock_tool_instance.set_allowed_kds.call_count == 2
         mock_tool_instance.set_allowed_kds.assert_any_call(["kb1"])
-        mock_tool_instance.set_allowed_kds.assert_any_call(None)
+        mock_tool_instance.set_allowed_kds.assert_any_call([])
 
 
 # ----------------------------------------------------------------------------
