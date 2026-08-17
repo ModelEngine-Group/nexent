@@ -1839,7 +1839,20 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
             # Update agent
             request.prompt_template_id = prompt_template_id
             request.prompt_template_name = prompt_template_name
-            update_agent(agent_id, request, user_id)
+            try:
+                update_agent(
+                    agent_id=agent_id,
+                    agent_info=request,
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                )
+            except ValueError as exc:
+                raise AppException(
+                    ErrorCode.COMMON_RESOURCE_NOT_FOUND,
+                    "Agent not found",
+                ) from exc
+    except AppException:
+        raise
     except Exception as e:
         logger.error(f"Failed to update agent info: {str(e)}")
         raise ValueError(f"Failed to update agent info: {str(e)}")

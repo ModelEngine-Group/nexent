@@ -385,11 +385,16 @@ def generate_and_save_system_prompt_impl(agent_id: int,
 
         # Update agent with greeting (skip in create mode)
         if agent_id != 0:
-            update_agent(agent_id, AgentInfoRequest(
+            update_agent(
                 agent_id=agent_id,
-                greeting_message=greeting_message,
-                example_questions=example_questions,
-            ), user_id)
+                agent_info=AgentInfoRequest(
+                    agent_id=agent_id,
+                    greeting_message=greeting_message,
+                    example_questions=example_questions,
+                ),
+                tenant_id=tenant_id,
+                user_id=user_id,
+            )
     except Exception as e:
         logger.warning(f"Greeting generation failed: {str(e)}, skipping greeting")
 

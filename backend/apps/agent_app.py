@@ -213,6 +213,18 @@ async def update_agent_info_api(request: AgentInfoRequest, authorization: Option
     try:
         result = await update_agent_info_impl(request, authorization)
         return result or {}
+    except AppException:
+        raise
+    except UnauthorizedError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.UNAUTHORIZED,
+            detail=str(exc),
+        ) from exc
+    except ForbiddenError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.FORBIDDEN,
+            detail=str(exc),
+        ) from exc
     except Exception as e:
         logger.error(f"Agent update error: {str(e)}")
         raise HTTPException(

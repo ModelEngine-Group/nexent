@@ -802,7 +802,36 @@ async def test_update_agent_info_impl_success(mock_get_current_user_info, mock_u
 
     # Assert
     mock_update_agent.assert_called_once_with(
-        123, request, "test_user")
+        agent_id=123,
+        agent_info=request,
+        tenant_id="test_tenant",
+        user_id="test_user",
+    )
+
+
+@patch('backend.services.agent_service.update_agent')
+@patch('backend.services.agent_service.get_current_user_info')
+@pytest.mark.asyncio
+async def test_update_agent_info_impl_hides_cross_tenant_agent(
+    mock_get_current_user_info,
+    mock_update_agent,
+):
+    """Map an agent outside the authenticated tenant to a not-found error."""
+    from consts.error_code import ErrorCode
+    from consts.exceptions import AppException
+
+    mock_get_current_user_info.return_value = ("test_user", "test_tenant", "en")
+    mock_update_agent.side_effect = ValueError("agent not found")
+    request = MagicMock()
+    request.agent_id = 123
+    request.enabled_tool_ids = None
+    apply_default_prompt_template_request_fields(request)
+
+    with pytest.raises(AppException) as exc_info:
+        await update_agent_info_impl(request, authorization="Bearer token")
+
+    assert exc_info.value.error_code == ErrorCode.COMMON_RESOURCE_NOT_FOUND
+    assert exc_info.value.http_status == 404
 
 
 @patch('backend.services.agent_service.delete_tools_by_agent_id')
