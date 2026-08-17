@@ -34,6 +34,7 @@ class A2AAgentInfo:
     protocol_type: str = PROTOCOL_JSONRPC
     timeout: float = 300.0
     raw_card: Optional[Dict[str, Any]] = None
+    custom_headers: Optional[Dict[str, str]] = None
 
     def get_protocol_type(self) -> str:
         """Get the protocol type for calling this agent.
@@ -120,6 +121,8 @@ class ExternalA2AAgentProxy:
         }
         if self.agent_info.api_key:
             headers["Authorization"] = f"Bearer {self.agent_info.api_key}"
+        if self.agent_info.custom_headers:
+            headers.update(self.agent_info.custom_headers)
         return headers
 
     def _build_message_payload(

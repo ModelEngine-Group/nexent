@@ -15,7 +15,9 @@ from fastapi import UploadFile
 from consts.const import DATA_PROCESS_SERVICE, LIBREOFFICE_PROFILE_DIR
 from consts.model import ProcessParams
 from database.attachment_db import get_file_size_from_minio
+from database.knowledge_db import get_knowledge_record
 from utils.auth_utils import get_current_user_id
+from utils.knowledge_telemetry import inject_trace_context, set_span_attributes, trace_knowledge_operation
 
 logger = logging.getLogger("file_management_utils")
 
@@ -39,6 +41,7 @@ async def save_upload_file(file: UploadFile, upload_path: Path) -> bool:
         return False
 
 
+@trace_knowledge_operation("knowledge.process.submit", "process.submit")
 async def trigger_data_process(files: List[dict], process_params: ProcessParams):
     """Trigger data processing service to handle uploaded files"""
     try:
@@ -46,17 +49,33 @@ async def trigger_data_process(files: List[dict], process_params: ProcessParams)
             return None
 
         # Get tenant_id from authorization for downstream task processing
-        embedding_model_id = process_params.model_id
         tenant_id = None
         try:
             _, tenant_id = get_current_user_id(process_params.authorization)
         except Exception as e:
             logger.warning(f"Failed to get tenant_id from authorization: {e}")
 
+        # Resolve embedding model from the knowledge base record (not request model_id)
+        embedding_model_id = None
+        try:
+            knowledge_record = get_knowledge_record({
+                "index_name": process_params.index_name,
+                "tenant_id": tenant_id,
+            })
+            embedding_model_id = (
+                knowledge_record.get("embedding_model_id") if knowledge_record else None
+            )
+        except Exception as e:
+            logger.warning(
+                "Failed to resolve embedding_model_id from knowledge_record: %s", e
+            )
+
         # Build headers with authorization
         headers = {
             "Authorization": f"Bearer {process_params.authorization}"
         }
+        telemetry_context = inject_trace_context()
+        headers.update(telemetry_context)
 
         # Build source data list
         if len(files) == 1:
@@ -71,6 +90,7 @@ async def trigger_data_process(files: List[dict], process_params: ProcessParams)
                 "embedding_model_id": embedding_model_id,
                 "tenant_id": tenant_id
             }
+            payload["telemetry_context"] = telemetry_context
 
             try:
                 async with httpx.AsyncClient() as client:
@@ -83,11 +103,11 @@ async def trigger_data_process(files: List[dict], process_params: ProcessParams)
                         "Error from data process service: %s - %s", response,
                         response.text if hasattr(response, 'text') else 'No response text')
                     return {"status": "error", "code": response.status_code,
-                        "message": f"Data process service error: {response.status_code}"}
+                            "message": f"Data process service error: {response.status_code}"}
             except httpx.RequestError as e:
                 logger.error("Failed to connect to data process service: %s", str(e))
                 return {"status": "error", "code": "CONNECTION_ERROR",
-                    "message": f"Failed to connect to data process service: {str(e)}"}
+                        "message": f"Failed to connect to data process service: {str(e)}"}
 
         else:
             # Batch file request
@@ -102,6 +122,7 @@ async def trigger_data_process(files: List[dict], process_params: ProcessParams)
                     "embedding_model_id": embedding_model_id,
                     "tenant_id": tenant_id
                 }
+                source["telemetry_context"] = telemetry_context
                 sources.append(source)
 
             payload = {"sources": sources}
@@ -111,17 +132,18 @@ async def trigger_data_process(files: List[dict], process_params: ProcessParams)
                     response = await client.post(f"{DATA_PROCESS_SERVICE}/tasks/batch", headers=headers, json=payload, timeout=30.0)
 
                 if response.status_code == 201:
+                    set_span_attributes(stage="process.submitted")
                     return response.json()
                 else:
                     logger.error(
                         "Error from data process service: %s - %s", response,
                         response.text if hasattr(response, 'text') else 'No response text')
                     return {"status": "error", "code": response.status_code,
-                        "message": f"Data process service error: {response.status_code}"}
+                            "message": f"Data process service error: {response.status_code}"}
             except httpx.RequestError as e:
                 logger.error("Failed to connect to data process service: %s", str(e))
                 return {"status": "error", "code": "CONNECTION_ERROR",
-                    "message": f"Failed to connect to data process service: {str(e)}"}
+                        "message": f"Failed to connect to data process service: {str(e)}"}
     except Exception as e:
         logger.error("Error triggering data process: %s", str(e))
         return {"status": "error", "code": "INTERNAL_ERROR", "message": f"Internal error: {str(e)}"}
@@ -145,7 +167,7 @@ async def get_all_files_status(index_name: str):
                 response = await client.get(f"{DATA_PROCESS_SERVICE}/tasks/indices/{index_name}", timeout=10.0)
             http_duration = time.time() - start_time
             logger.info(f"[get_all_files_status] HTTP request to {DATA_PROCESS_SERVICE}/tasks/indices/{index_name} "
-                       f"completed in {http_duration:.3f}s, status={response.status_code}")
+                        f"completed in {http_duration:.3f}s, status={response.status_code}")
             if response.status_code == 200:
                 tasks_list = response.json()
             else:
@@ -154,12 +176,12 @@ async def get_all_files_status(index_name: str):
         except Exception as e:
             logger.error(f"Failed to connect to data process service: {str(e)}")
             return {}
-        
+
         logging.debug(f"Found {len(tasks_list)} tasks for index '{index_name}'")
         if not tasks_list:
             logger.warning(f"No tasks found for index '{index_name}'")
             return {}
-        
+
         # Dictionary to store file statuses:
         # {path_or_url: {process_state, forward_state, timestamps, progress fields}}
         file_states = {}
@@ -345,12 +367,12 @@ def get_file_size(source_type: str, path_or_url: str) -> int:
 async def convert_office_to_pdf(input_path: str, output_dir: str, timeout: int = 30) -> str:
     """
     Convert Office document to PDF using LibreOffice.
-    
+
     Args:
         input_path: Path to input Office file
         output_dir: Directory for output PDF file
         timeout: Conversion timeout in seconds (default: 30s)
-        
+
     Returns:
         str: Path to generated PDF file
     """
@@ -382,34 +404,33 @@ async def convert_office_to_pdf(input_path: str, output_dir: str, timeout: int =
             text=True,
             timeout=timeout
         )
-    
+
     try:
         # Run blocking subprocess in thread executor to avoid blocking event loop
         result = await asyncio.to_thread(_run_libreoffice_conversion)
-        
+
         if result.returncode != 0:
             error_msg = result.stderr or result.stdout or "Unknown conversion error"
             logger.error(f"LibreOffice conversion failed: {error_msg}")
             raise RuntimeError(f"Office to PDF conversion failed: {error_msg}")
-        
+
         # Find generated PDF file
         input_filename = os.path.basename(input_path)
         pdf_filename = os.path.splitext(input_filename)[0] + '.pdf'
         pdf_path = os.path.join(output_dir, pdf_filename)
-        
+
         if not os.path.exists(pdf_path):
             raise RuntimeError(f"Converted PDF not found: {pdf_path}")
-        
+
         return pdf_path
-        
+
     except subprocess.TimeoutExpired:
         logger.error(f"Office to PDF conversion timeout after {timeout}s: {input_path}")
         raise TimeoutError(f"Office to PDF conversion timeout (>{timeout}s)")
-        
+
     except FileNotFoundError as e:
         # LibreOffice executable not found in PATH
         logger.error(f"LibreOffice not available: {str(e)}")
         raise FileNotFoundError(
             "LibreOffice is not installed or not available in PATH. "
         ) from e
-

@@ -139,8 +139,7 @@ export const DocumentContext = createContext<{
   ) => Promise<void>;
   uploadDocuments: (
     kbId: string,
-    files: File[],
-    modelId?: number
+    files: File[]
   ) => Promise<{ quota_status?: QuotaStatusResponse } | undefined>;
   deleteDocument: (kbId: string, docId: string) => Promise<void>;
 }>({
@@ -263,15 +262,13 @@ export const DocumentProvider: React.FC<DocumentProviderProps> = ({
 
   // Upload documents to a knowledge base
   const uploadDocuments = useCallback(
-    async (kbId: string, files: File[], modelId?: number) => {
+    async (kbId: string, files: File[]) => {
       dispatch({ type: DOCUMENT_ACTION_TYPES.SET_UPLOADING, payload: true });
 
       try {
         const uploadResult = await knowledgeBaseService.uploadDocuments(
           kbId,
-          files,
-          undefined,
-          modelId
+          files
         );
 
         // Set loading state before fetching latest documents

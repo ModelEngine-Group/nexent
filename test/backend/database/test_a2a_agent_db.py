@@ -1211,6 +1211,24 @@ class TestQueryExternalSubAgents:
             # The join returns tuples; MockJoinQuery.all() returns raw list
             assert isinstance(result, list)
 
+    def test_returns_security_fields(self, external_relation):
+        """query_external_sub_agents returns security_schemes/requirements/credentials."""
+        rel, agent = external_relation
+        agent.security_schemes = {"k": {"apiKeySecurityScheme": {"name": "X-Token", "location": "header"}}}
+        agent.security_requirements = [{"schemes": {"k": {}}}]
+        agent.security_credentials = {"k": "secret"}
+        with patch.object(a2a_db, '_get_db_session') as mk:
+            mk.return_value = MockSession({
+                db_models_mock.A2AExternalAgentRelation: [rel],
+                db_models_mock.A2AExternalAgent: [agent],
+            })
+            result = a2a_db.query_external_sub_agents(100, 'tenant-1')
+            assert len(result) > 0
+            entry = result[0]
+            assert entry["security_schemes"] == {"k": {"apiKeySecurityScheme": {"name": "X-Token", "location": "header"}}}
+            assert entry["security_requirements"] == [{"schemes": {"k": {}}}]
+            assert entry["security_credentials"] == {"k": "secret"}
+
 
 class TestListExternalRelationsByLocalAgent:
     def test_returns_empty_when_no_relations(self):

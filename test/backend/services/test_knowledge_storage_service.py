@@ -16,6 +16,11 @@ resolve_storage_context = storage_service.resolve_storage_context
 resolve_storage_reference = storage_service.resolve_storage_reference
 
 
+@pytest.fixture(autouse=True)
+def default_bucket(monkeypatch):
+    monkeypatch.setattr(storage_service, "MINIO_DEFAULT_BUCKET", "test-bucket")
+
+
 @pytest.fixture
 def storage_context():
     return KnowledgeStorageContext(

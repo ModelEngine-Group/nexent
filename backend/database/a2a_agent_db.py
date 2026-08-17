@@ -957,6 +957,9 @@ def query_external_sub_agents(
                 "streaming": agent.streaming,
                 "supported_interfaces": agent.supported_interfaces,
                 "raw_card": agent.raw_card,
+                "security_schemes": agent.security_schemes,
+                "security_requirements": agent.security_requirements,
+                "security_credentials": agent.security_credentials,
                 "is_enabled": relation.is_enabled,
             }
             for relation, agent in results
