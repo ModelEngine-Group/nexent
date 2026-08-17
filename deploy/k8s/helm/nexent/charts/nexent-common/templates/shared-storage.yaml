@@ -95,6 +95,7 @@ spec:
   {{- if $storageClassName }}
   storageClassName: {{ $storageClassName | quote }}
   {{- end }}
+{{- end }}
 ---
 {{- $memoryPlugins := default dict $shared.memoryPlugins }}
 {{- $memoryPluginsSize := default "5Gi" $memoryPlugins.size }}
