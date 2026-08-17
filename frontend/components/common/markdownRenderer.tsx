@@ -594,80 +594,54 @@ const CitationBadge = ({
 );
 
 /**
- * A citation belongs to the Markdown section immediately before it, rather
- * than to the entire assistant response.  A section can include a paragraph
- * followed by a table.  The preceding citation or heading starts a new
- * section, so separately cited answer sections cannot affect each other.
+ * A citation belongs to the sentence immediately before it. Consecutive
+ * citation badges share that sentence, while another badge, a newline, or a
+ * sentence-ending punctuation mark starts a new citation scope.
  */
 const getCitationScopeText = (citationElement: HTMLElement | null) => {
   if (!citationElement) return "";
-
-  const markdownRoot = citationElement.closest(".markdown-body");
-  if (!markdownRoot) {
-    return citationElement.closest("p, li, td")?.textContent || "";
-  }
-
-  let currentBlock: HTMLElement = citationElement;
-  while (
-    currentBlock.parentElement &&
-    currentBlock.parentElement !== markdownRoot
-  ) {
-    currentBlock = currentBlock.parentElement;
-  }
-
-  if (currentBlock.parentElement !== markdownRoot) {
-    return citationElement.closest("p, li, td")?.textContent || "";
-  }
-
-  const blocks = Array.from(markdownRoot.children) as HTMLElement[];
-  const currentBlockIndex = blocks.indexOf(currentBlock);
-  if (currentBlockIndex < 0) {
-    return citationElement.closest("p, li, td")?.textContent || "";
-  }
-
   const citationBadge = citationElement.querySelector(".ds-markdown-cite");
-  const citationsInCurrentBlock = Array.from(
-    currentBlock.querySelectorAll(".ds-markdown-cite")
+  const sentenceContainer = citationElement.closest(
+    "p, li, td, th, h1, h2, h3, h4, h5, h6"
   );
-  const citationIndex = citationBadge
-    ? citationsInCurrentBlock.indexOf(citationBadge)
-    : -1;
+  if (!citationBadge || !sentenceContainer) return "";
 
-  const currentBlockRange = document.createRange();
-  currentBlockRange.selectNodeContents(currentBlock);
-  if (citationIndex > 0) {
-    // A previous citation in the same paragraph already closed the preceding
-    // fact. Start after it so two cited sentences never share a highlight.
-    currentBlockRange.setStartAfter(citationsInCurrentBlock[citationIndex - 1]);
-  }
-  if (citationBadge) {
-    currentBlockRange.setEndBefore(citationBadge);
-  }
-  const currentBlockText = currentBlockRange.toString().trim();
-
-  if (citationIndex > 0) {
-    return currentBlockText;
+  const citationBadges = Array.from(
+    sentenceContainer.querySelectorAll(".ds-markdown-cite")
+  );
+  let firstBadgeInGroup = citationBadge;
+  let badgeIndex = citationBadges.indexOf(citationBadge);
+  while (badgeIndex > 0) {
+    const previousBadge = citationBadges[badgeIndex - 1];
+    const gap = document.createRange();
+    gap.setStartAfter(previousBadge);
+    gap.setEndBefore(firstBadgeInGroup);
+    if (gap.toString().trim()) break;
+    firstBadgeInGroup = previousBadge;
+    badgeIndex -= 1;
   }
 
-  let sectionStartIndex = 0;
-  for (let index = currentBlockIndex - 1; index >= 0; index -= 1) {
-    const block = blocks[index];
-    const startsNewSection = /^H[1-6]$/.test(block.tagName);
-    const hasEarlierCitation = Boolean(
-      block.querySelector(".ds-markdown-cite")
-    );
-    if (startsNewSection || hasEarlierCitation) {
-      sectionStartIndex = index + 1;
+  const range = document.createRange();
+  range.selectNodeContents(sentenceContainer);
+  range.setEndBefore(firstBadgeInGroup);
+  const textBeforeCitation = range.toString();
+  let sentenceStart = -1;
+  for (let offset = textBeforeCitation.length - 1; offset >= 0; offset -= 1) {
+    const character = textBeforeCitation[offset];
+    if (character === "\n" || character === "|") {
+      sentenceStart = offset;
+      break;
+    }
+    if ("。！？!?".includes(character)) {
+      sentenceStart = offset;
+      break;
+    }
+    if (character === "." && /\s/.test(textBeforeCitation[offset + 1] || "")) {
+      sentenceStart = offset;
       break;
     }
   }
-
-  return blocks
-    .slice(sectionStartIndex, currentBlockIndex)
-    .map((block) => block.textContent?.trim() || "")
-    .filter(Boolean)
-    .concat(currentBlockText ? [currentBlockText] : [])
-    .join("\n");
+  return textBeforeCitation.slice(sentenceStart + 1).trim();
 };
 
 // Modified HoverableText component

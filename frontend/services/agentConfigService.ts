@@ -428,6 +428,7 @@ export interface UpdateAgentInfoPayload {
   requested_output_tokens?: number | null;
   is_main_agent?: boolean;
   provide_run_summary?: boolean;
+  include_citations_in_tool_output?: boolean;
   enable_context_manager?: boolean;
   verification_config?: Record<string, any>;
   enabled?: boolean;
@@ -824,6 +825,7 @@ export const searchAgentInfo = async (
       prompt_template_id: data.prompt_template_id ?? 0,
       prompt_template_name: data.prompt_template_name ?? "system_default",
       provide_run_summary: data.provide_run_summary,
+      include_citations_in_tool_output: data.include_citations_in_tool_output ?? false,
       verification_config: data.verification_config,
       enabled: data.enabled,
       is_available: data.is_available,

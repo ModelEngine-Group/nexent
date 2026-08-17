@@ -34,6 +34,7 @@ export interface Agent {
   tenant_id: string;
   enabled: boolean;
   provide_run_summary: boolean;
+  include_citations_in_tool_output?: boolean;
   verification_config?: Record<string, any>;
   business_description?: string;
   business_logic_model_name?: string;

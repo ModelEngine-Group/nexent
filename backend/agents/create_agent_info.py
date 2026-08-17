@@ -1235,6 +1235,9 @@ async def create_agent_config(
         restricted_python_authorized_imports=(
             get_local_python_authorized_imports() if is_local_python_executor else None
         ),
+        include_citations_in_tool_output=bool(
+            agent_info.get("include_citations_in_tool_output", False)
+        ),
     )
 
     logger.debug(
@@ -1298,6 +1301,11 @@ async def create_agent_config(
         safe_input_budget_snapshot=safe_input_budget_snapshot,
         verification_config=AgentVerificationConfig.model_validate(agent_info.get("verification_config") or {}),
         enable_planning=enable_planning,
+        # Existing UI switch is intentionally reused.  The runtime guard is the
+        # enforcement point; this prompt setting alone is only advisory.
+        citation_write_mode=(
+            "allow" if agent_info.get("include_citations_in_tool_output", False) else "strip"
+        ),
     )
     return agent_config
 

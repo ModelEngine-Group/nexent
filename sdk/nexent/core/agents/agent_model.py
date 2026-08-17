@@ -303,6 +303,13 @@ class AgentConfig(BaseModel):
         description="Whether to enable the planning phase before execution",
         default=False,
     )
+    citation_write_mode: Literal["allow", "strip", "block"] = Field(
+        description=(
+            "Runtime policy for Nexent retrieval citation markers in document-writing "
+            "tool arguments: allow keeps markers, strip removes them, block rejects the call."
+        ),
+        default="strip",
+    )
     sandbox_policy: Optional[Dict[str, Any]] = Field(
         description=(
             "Sandbox policy for LLM-generated Python code execution.  Keys: "

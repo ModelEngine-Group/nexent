@@ -59,7 +59,11 @@ const CiteMarkerImpl = ({
           </button>
         </TooltipTrigger>
         <TooltipContent side="top" className="max-w-sm px-3 py-1.5 text-sm">
-          <span className="block truncate font-medium text-popover-foreground">{loading ? "Source details are loading" : title}</span>
+          <span className="block truncate font-medium text-popover-foreground">
+            {loading
+                ? "Source details are loading"
+                : title}
+          </span>
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>

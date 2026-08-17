@@ -269,6 +269,8 @@ export default function AgentSelectorHeader({
         requested_output_tokens: detail.requested_output_tokens ?? null,
         is_main_agent: detail.is_main_agent ?? true,
         provide_run_summary: detail.provide_run_summary,
+        include_citations_in_tool_output:
+          detail.include_citations_in_tool_output ?? false,
         enabled: detail.enabled,
         business_description: detail.business_description,
         duty_prompt: detail.duty_prompt,

@@ -125,6 +125,7 @@ def _build_execution_flow_text(
     language: str = "zh",
     is_manager: bool = True,
     enable_planning: bool = False,
+    include_citations_in_tool_output: bool = False,
     priority: int = 60,
 ) -> str:
     """Build the execution-flow prompt section.
@@ -185,13 +186,13 @@ def _build_execution_flow_text(
         lines.append("  - 段落之间使用单个空行分隔，避免多个连续空行")
         lines.append("  - 数学公式使用标准Markdown格式：行内公式用 $公式$，块级公式用 $$公式$$")
         lines.append("")
-        lines.append("2. 引用标记规范（仅在使用了检索工具时）：")
+        lines.append("2. 引用标记规范（仅在使用了检索工具时；用于最终回答）：")
         lines.append("  - 引用标记格式必须严格为：`[[字母+数字]]`，例如：`[[a1]]`、`[[b2]]`、`[[c3]]`")
         lines.append("  - 字母部分必须是单个小写字母，数字部分必须是整数")
         lines.append("  - 引用标记的字母和数字必须与检索工具的检索结果一一对应；请直接使用结果中 `reference_mark` 字段提供的标记，原样复制")
-        lines.append("  - 【必须执行】只要最终回答使用了任一检索结果中的事实，就必须在相关事实单元（一个句子、一个自然段或一张表格）末尾紧跟对应引用标记；同一句可标记多个来源")
-        lines.append("  - 不同来源支撑的内容必须分别紧跟各自的引用标记，不能把整篇回答或多个不同证据段落共用一个末尾引用")
-        lines.append("  - 表格中的事实也必须有引用：可将标记写在表格标题/说明末尾，或紧跟在表格下方单独一行")
+        lines.append("  - 【必须执行】只要最终回答使用了任一检索结果中的事实，就必须在该事实所在的**一句话末尾**紧跟对应引用标记；同一句可标记多个来源")
+        lines.append("  - 一个引用标记只对应它紧前的一句话。不同来源支撑的内容必须分别紧跟各自句末的引用，不能把多个句子、整段回答或一张表格共用一个引用")
+        lines.append("  - 表格中的事实也必须逐项引用：把标记写在对应事实所在的单元格末尾；不要只在表格标题、说明或表格下方统一引用")
         lines.append("  - 多个引用标记可以连续使用，例如：`[[a1]][[b2]]`")
         lines.append("  - **重要**：仅添加引用标记，不要添加链接、参考文献列表等多余内容")
         lines.append("  - 如果检索结果中没有匹配的引用，则不显示该引用标记；不得编造标记")
@@ -255,13 +256,13 @@ def _build_execution_flow_text(
         lines.append("   - Use a single blank line between paragraphs, avoid multiple consecutive blank lines")
         lines.append("   - Mathematical formulas use standard Markdown format: inline formulas use $formula$, block formulas use $$formula$$")
         lines.append("")
-        lines.append("2. **Reference Mark Specifications** (only when retrieval tools are used):")
+        lines.append("2. **Reference Mark Specifications** (only when retrieval tools are used; for the final answer):")
         lines.append("   - Reference mark format must strictly be: `[[letter+number]]`, for example: `[[a1]]`, `[[b2]]`, `[[c3]]`")
         lines.append("   - The letter part must be a single lowercase letter, and the number part must be an integer")
         lines.append("   - The letters and numbers of reference marks must correspond one-to-one with the retrieval results of retrieval tools. Copy the marker provided in the result's `reference_mark` field verbatim")
-        lines.append("   - **Mandatory**: whenever the final answer states a fact from a retrieval result, place the matching reference mark immediately at the end of that factual unit (a sentence, paragraph, or table); multiple sources may be marked on one sentence")
-        lines.append("   - Content supported by different sources must carry their own nearby reference marks; never use one end-of-answer reference mark for several separately evidenced sections")
-        lines.append("   - Facts in a table also require a reference mark: place it in the table caption/description or on a separate line immediately below the table")
+        lines.append("   - **Mandatory**: whenever the final answer states a fact from a retrieval result, place the matching reference mark immediately at the end of that **sentence**; multiple sources may be marked on one sentence")
+        lines.append("   - A reference mark applies only to the sentence immediately before it. Content supported by different sources must carry their own sentence-end marks; never use one mark for multiple sentences, an entire paragraph, or a table")
+        lines.append("   - Facts in a table also require a reference mark in the same cell as the fact. Do not place one shared mark in the table caption, description, or a line below the table")
         lines.append("   - Multiple reference marks can be used consecutively, for example: `[[a1]][[b2]]`")
         lines.append("   - **Important**: Only add reference marks, do not add links, reference lists, or other extraneous content")
         lines.append("   - If there is no matching reference in the retrieval results, do not display that reference mark; never invent one")
@@ -435,6 +436,7 @@ def build_context_inputs(
     knowledge_base_summary: Optional[str] = None,
     kb_ids: Optional[List[str]] = None,
     restricted_python_authorized_imports: Optional[List[str]] = None,
+    include_citations_in_tool_output: bool = False,
     include_tools: bool = True,
     include_skills: bool = True,
     include_memory: bool = True,
@@ -505,7 +507,7 @@ def build_context_inputs(
             ))
 
     add_system("execution_flow", _build_execution_flow_text(
-        None, language, is_manager, enable_planning
+        None, language, is_manager, enable_planning, include_citations_in_tool_output
     ), 60, "platform")
     add_system("available_resources_header", _build_available_resources_header_text(
         is_manager, language

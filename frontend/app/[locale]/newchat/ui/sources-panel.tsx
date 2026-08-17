@@ -237,17 +237,20 @@ const extractDomain = (url: string): string => {
 const escapeRegExp = (value: string) =>
   value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
+const normalizeForHighlight = (value: string) =>
+  value.normalize("NFKC").toLocaleLowerCase();
+
 const extractHighlightTerms = (
   answerContext: string,
   sourceText: string,
 ): string[] => {
   if (!answerContext || !sourceText) return [];
 
-  const sourceLower = sourceText.toLowerCase();
+  const sourceLower = normalizeForHighlight(sourceText);
   const candidates = new Set<string>();
   const addIfPresent = (value: string) => {
     const term = value.trim();
-    if (term.length >= 2 && sourceLower.includes(term.toLowerCase())) {
+    if (term.length >= 2 && sourceLower.includes(normalizeForHighlight(term))) {
       candidates.add(term);
     }
   };
@@ -268,7 +271,7 @@ const extractHighlightTerms = (
       let matched = "";
       for (let length = Math.min(12, phrase.length - start); length >= 3; length -= 1) {
         const candidate = phrase.slice(start, start + length);
-        if (sourceText.includes(candidate)) {
+        if (sourceLower.includes(normalizeForHighlight(candidate))) {
           matched = candidate;
           break;
         }
@@ -291,30 +294,38 @@ const extractHighlightTerms = (
     .slice(0, 8);
 };
 
+const splitSourceTextIntoSentences = (text: string): string[] =>
+  text.split(/(\r?\n)/).flatMap((line) => {
+    if (!line || /^\r?\n$/.test(line)) return [line];
+
+    // Retrieval chunks keep Markdown tables as lines. A row is the smallest
+    // readable unit in that format, so highlight the whole row when it matches.
+    if (/^\s*\|.*\|\s*$/.test(line)) return [line];
+
+    return line.match(/[^。！？!?；;]+[。！？!?；;]?/g) || [line];
+  });
+
 const HighlightedChunkText: FC<{
   text: string;
   terms: string[];
-  retrievalTerms?: string[];
-}> = ({ text, terms, retrievalTerms = [] }) => {
+}> = ({ text, terms }) => {
   if (!terms.length) return <>{text}</>;
 
-  const matcher = new RegExp(`(${terms.map(escapeRegExp).join("|")})`, "gi");
+  // One compiled matcher scans each displayed sentence once. This stays local
+  // to the selected card and does not issue an extra search or model request.
+  const matcher = new RegExp(
+    terms.map((term) => escapeRegExp(normalizeForHighlight(term))).join("|"),
+    "i",
+  );
   return (
     <>
-      {text.split(matcher).map((part, index) => {
-        const isMatch = terms.some(
-          (term) => part.toLowerCase() === term.toLowerCase(),
-        );
-        const isRetrievalMatch = retrievalTerms.some(
-          (term) => part.toLowerCase() === term.toLowerCase(),
-        );
+      {splitSourceTextIntoSentences(text).map((part, index) => {
+        const isMatch = matcher.test(normalizeForHighlight(part));
+        matcher.lastIndex = 0;
         return isMatch ? (
           <mark
             key={`${part}-${index}`}
-            className={cn(
-              "rounded-sm px-0.5 text-inherit",
-              isRetrievalMatch ? "bg-blue-200" : "bg-yellow-200",
-            )}
+            className="rounded-sm bg-yellow-100 px-1 py-0.5 text-inherit"
           >
             {part}
           </mark>
@@ -330,8 +341,7 @@ const SourceSummary: FC<{
   text?: string;
   highlighted?: boolean;
   highlightTerms?: string[];
-  retrievalHighlightTerms?: string[];
-}> = ({ text, highlighted = false, highlightTerms = [], retrievalHighlightTerms = [] }) => {
+}> = ({ text, highlighted = false, highlightTerms = [] }) => {
   const textRef = useRef<HTMLParagraphElement>(null);
 
   useEffect(() => {
@@ -354,7 +364,6 @@ const SourceSummary: FC<{
           <HighlightedChunkText
             text={text}
             terms={highlightTerms}
-            retrievalTerms={retrievalHighlightTerms}
           />
         </p>
       </div>
@@ -515,7 +524,6 @@ const SourceListItem: FC<{
                 text={item.text}
                 highlighted={selected}
                 highlightTerms={highlightTerms}
-                retrievalHighlightTerms={retrievalHighlightTerms}
               />
               <SourceFooter item={item} sourceLabel="来源: Nexent" />
             </div>
@@ -569,7 +577,6 @@ const SourceListItem: FC<{
               text={item.text}
               highlighted={selected}
               highlightTerms={highlightTerms}
-              retrievalHighlightTerms={retrievalHighlightTerms}
             />
             <SourceFooter item={item} sourceLabel={`来源: ${domain}`} />
           </div>
@@ -594,7 +601,6 @@ const SourceListItem: FC<{
         text={item.text}
         highlighted={selected}
         highlightTerms={highlightTerms}
-        retrievalHighlightTerms={retrievalHighlightTerms}
       />
       <SourceFooter item={item} sourceLabel="来源: Nexent" />
     </li>

@@ -138,36 +138,24 @@ function toPanelSource(source: SearchSource): PanelSourceItem {
 }
 
 /**
- * Highlight terms are taken from the original Markdown answer instead of the
- * rendered DOM. Markdown tables and code blocks are represented by several
- * nested elements after rendering, so the DOM can lose their association with
- * a citation immediately before them. A marker in a Markdown heading cites
- * that heading's local section, including the following paragraphs or table.
+ * A reference marker belongs to the one sentence immediately before it.
+ * Consecutive markers, such as [[a1]][[b2]], share that sentence.  Newlines
+ * and Markdown table cell separators also stop the scope so a marker never
+ * expands to a following paragraph or table.
  */
-function getHeadingLevelAt(text: string, offset: number): number | undefined {
-  const lineStart = text.lastIndexOf("\n", offset - 1) + 1;
-  const heading = text
-    .slice(lineStart, offset)
-    .match(/^\s{0,3}(#{1,6})\s/);
-  return heading?.[1].length;
-}
-
-function getNextHeadingOffset(
-  text: string,
-  startOffset: number,
-  maxHeadingLevel?: number,
-): number {
-  for (const heading of text
-    .slice(startOffset)
-    .matchAll(/\n\s{0,3}(#{1,6})\s/g)) {
+function getSentenceStartOffset(text: string, endOffset: number): number {
+  for (let offset = endOffset - 1; offset >= 0; offset -= 1) {
+    const character = text[offset];
+    if (character === "\n" || character === "|") return offset + 1;
+    if ("。！？!?".includes(character)) return offset + 1;
     if (
-      maxHeadingLevel === undefined ||
-      heading[1].length <= maxHeadingLevel
+      character === "." &&
+      (offset + 1 === text.length || /\s|\[/.test(text[offset + 1]))
     ) {
-      return startOffset + (heading.index || 0);
+      return offset + 1;
     }
   }
-  return text.length;
+  return 0;
 }
 
 function getCitationScopeText(
@@ -229,37 +217,11 @@ function getCitationScopeText(
   }
 
   const groupStartOffset = markers[groupStart].index || 0;
-  const groupEndOffset =
-    (markers[groupEnd].index || 0) + markers[groupEnd][0].length;
-  const previousParagraphOffset = answerText.lastIndexOf("\n\n", groupStartOffset);
-  let scopeStart = previousParagraphOffset < 0 ? 0 : previousParagraphOffset + 2;
-
-  const precedingHeading = Array.from(
-    answerText.slice(0, groupStartOffset).matchAll(/^#{1,6}\s.*$/gm),
-  ).at(-1);
-  if (precedingHeading?.index !== undefined) {
-    scopeStart = Math.max(scopeStart, precedingHeading.index);
-  }
-
-  const citationTail = answerText.slice(groupEndOffset);
-  const introducesStructuredContent = /^\s*[:\uFF1A]/.test(citationTail);
-  const headingLevel = getHeadingLevelAt(answerText, groupStartOffset);
-  const shouldIncludeFollowingContent =
-    introducesStructuredContent ||
-    headingLevel !== undefined;
-  if (!shouldIncludeFollowingContent) {
-    return answerText.slice(scopeStart, groupStartOffset).trim();
-  }
-
-  const nextMarker = markers[groupEnd + 1];
-  const nextHeadingOffset = getNextHeadingOffset(
-    answerText,
-    groupEndOffset,
-    headingLevel,
-  );
-  const nextMarkerOffset = nextMarker?.index ?? answerText.length;
-  const scopeEnd = Math.min(nextHeadingOffset, nextMarkerOffset);
-  return answerText.slice(scopeStart, scopeEnd).trim();
+  const scopeStart = getSentenceStartOffset(answerText, groupStartOffset);
+  return answerText
+    .slice(scopeStart, groupStartOffset)
+    .replace(/\[\[[^\]]+\]\]/g, "")
+    .trim();
 }
 
 /**

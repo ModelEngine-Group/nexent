@@ -501,6 +501,12 @@ class NexentAgent:
                     setattr(tool_obj, "_nexent_execute_on_host", True)
                 except (AttributeError, TypeError):
                     pass
+            citation_guard = (tool_config.metadata or {}).get("citation_write_guard")
+            if isinstance(citation_guard, dict):
+                try:
+                    setattr(tool_obj, "_nexent_citation_write_guard_config", dict(citation_guard))
+                except (AttributeError, TypeError):
+                    pass
             return tool_obj
         except Exception as e:
             raise ValueError(f"Error in creating tool: {e}")
@@ -709,6 +715,7 @@ class NexentAgent:
                 user_id=self.user_id,
                 executor=python_executor,
                 verification_config=getattr(agent_config, "verification_config", None),
+                citation_write_mode=getattr(agent_config, "citation_write_mode", "strip"),
             )
             agent.stop_event = self.stop_event
 

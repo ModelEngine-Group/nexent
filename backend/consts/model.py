@@ -623,6 +623,7 @@ class AgentInfoRequest(BaseModel):
     requested_output_tokens: Optional[int] = Field(default=None, gt=0)
     is_main_agent: Optional[bool] = None
     provide_run_summary: Optional[bool] = None
+    include_citations_in_tool_output: Optional[bool] = None
     duty_prompt: Optional[str] = None
     constraint_prompt: Optional[str] = None
     few_shots_prompt: Optional[str] = None
@@ -734,6 +735,7 @@ class ExportAndImportAgentInfo(BaseModel):
     requested_output_tokens: Optional[int] = Field(default=None, gt=0)
     is_main_agent: bool = True
     provide_run_summary: bool
+    include_citations_in_tool_output: bool = False
     verification_config: Optional[Dict[str, Any]] = None
     context_policy: Optional[Dict[str, Any]] = None
     duty_prompt: Optional[str] = None
