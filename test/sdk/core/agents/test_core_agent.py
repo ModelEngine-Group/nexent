@@ -2464,6 +2464,53 @@ class TestRunStreamRealExecution:
         max_steps_calls = [c for c in observer_calls if c[1] == TestProcessType.MAX_STEPS_REACHED]
         assert len(max_steps_calls) == 0
 
+    def test_run_stream_retries_empty_final_answer_tool_result(self):
+        """An empty final_answer tool result must not end the run successfully."""
+        module = self._load_core_agent_in_isolation()
+        CoreAgent = module.CoreAgent
+
+        class FakeActionOutput:
+            def __init__(self, output, is_final_answer):
+                self.output = output
+                self.is_final_answer = is_final_answer
+
+        module.ActionOutput = FakeActionOutput
+        module.FinalAnswerStep = lambda output: SimpleNamespace(output=output)
+        module.handle_agent_output_types = lambda output: output
+
+        agent = object.__new__(CoreAgent)
+        agent.agent_name = "test_agent"
+        agent.name = "test_agent"
+        agent.observer = MagicMock()
+        agent.stop_event = MagicMock()
+        agent.stop_event.is_set.return_value = False
+        agent.step_number = 1
+        agent.memory = MagicMock()
+        agent.memory.steps = []
+        agent.logger = MagicMock()
+        agent.model = MagicMock(last_response_diagnostics={"finish_reason": "stop"})
+        agent.final_answer_checks = []
+        agent.enable_planning = False
+        agent.verification_config = SimpleNamespace(
+            enabled=False,
+            final_verification_enabled=False,
+        )
+        agent._finalize_step = MagicMock()
+        agent._collect_step_metrics = MagicMock()
+
+        outputs = iter(["", "valid answer"])
+
+        def mock_step_stream(_action_step):
+            yield FakeActionOutput(next(outputs), True)
+
+        agent._step_stream = mock_step_stream
+
+        results = list(agent._run_stream("test task", max_steps=2))
+
+        assert results[-1].output == "valid answer"
+        assert len(agent.memory.steps) == 2
+        assert agent.memory.steps[0].error is not None
+
 
 # ----------------------------------------------------------------------------
 # Tests for _handle_max_steps_reached method
@@ -3040,3 +3087,43 @@ def test_wrap_visible_tool_events_skips_tools_without_forward():
     agent._wrap_visible_tool_events()
 
     assert not hasattr(agent.tools[0], "_tool_call_observer_wrapped")
+
+
+def _create_minimal_core_agent_for_time_tests():
+    """Create a CoreAgent with minimal mocking for time-prefix tests."""
+    module = TestRunStreamRealExecution()._load_core_agent_in_isolation()
+    agent = module.CoreAgent.__new__(module.CoreAgent)
+    agent.max_steps = 3
+    agent.state = {}
+    agent.memory = MagicMock()
+    agent.monitor = MagicMock()
+    agent.context_runtime = MagicMock()
+    agent.system_prompt = ""
+    agent.logger = MagicMock()
+    agent.model = MagicMock()
+    agent.model.model_id = "test-model"
+    agent.name = "test_agent"
+    agent.observer = MagicMock()
+    agent.python_executor = None
+    agent._run_stream_with_context_evidence = MagicMock(return_value=iter([]))
+    return agent
+
+
+def test_run_preserves_existing_current_time_prefix():
+    """When task already has [Current time: ...] prefix, run() should not re-inject."""
+    agent = _create_minimal_core_agent_for_time_tests()
+
+    prefixed_task = "[Current time: 2026-01-01 20:00:00]\n\nWhat time is it?"
+    list(agent.run(task=prefixed_task, stream=True))
+
+    assert agent.task == prefixed_task
+
+
+def test_run_injects_current_time_when_missing():
+    """When task has no [Current time: ...] prefix, run() should inject server time."""
+    agent = _create_minimal_core_agent_for_time_tests()
+
+    list(agent.run(task="What time is it?", stream=True))
+
+    assert agent.task.startswith("[Current time:")
+    assert "What time is it?" in agent.task

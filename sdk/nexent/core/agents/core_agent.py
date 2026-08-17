@@ -41,6 +41,10 @@ from .verification import (
 from ..utils.token_estimation import msg_token_count
 from .plan_repo import PlanRepo
 
+
+logger = logging.getLogger(__name__)
+
+
 def parse_code_blobs(text: str) -> str:
     """Extract code blocks from the LLM's output for execution.
 
@@ -845,6 +849,15 @@ Additional Args:
                     "or return the actual user-facing final answer.",
                     self.logger,
                 )
+            # Guard: if the model returned empty or whitespace-only content,
+            # treat it as a generation error so the retry loop can recover,
+            # instead of silently terminating the conversation with no output.
+            if not model_output or not str(model_output).strip():
+                raise AgentGenerationError(
+                    "Model returned empty or whitespace-only output; "
+                    "this is likely a transient API issue and the step will be retried.",
+                    self.logger,
+                )
             self.logger.log_markdown(
                 content=model_output, title="AGENT FINAL ANSWER", level=LogLevel.INFO)
             raise FinalAnswerError()
@@ -1179,6 +1192,19 @@ You have been provided with these additional arguments, that you can access usin
 
                 if isinstance(output, ActionOutput) and output.is_final_answer:
                     candidate_answer = output.output
+                    if candidate_answer is None or not str(candidate_answer).strip():
+                        diagnostics = getattr(self.model, "last_response_diagnostics", None)
+                        logger.warning(
+                            "event=empty_final_answer_candidate source=final_answer_tool "
+                            "step_number=%s model_diagnostics=%s",
+                            self.step_number,
+                            diagnostics,
+                        )
+                        raise AgentExecutionError(
+                            "The final_answer tool returned empty content. Call final_answer again "
+                            "with a non-empty user-facing response.",
+                            self.logger,
+                        )
                     self.logger.log(
                         Text(f"Final answer: {candidate_answer}", style=f"bold {YELLOW_HEX}"),
                         level=LogLevel.INFO,
@@ -1218,6 +1244,19 @@ You have been provided with these additional arguments, that you can access usin
                 candidate_answer = action_step.model_output
                 if isinstance(candidate_answer, str):
                     candidate_answer = convert_code_format(candidate_answer)
+                if candidate_answer is None or not str(candidate_answer).strip():
+                    diagnostics = getattr(self.model, "last_response_diagnostics", None)
+                    logger.warning(
+                        "event=empty_final_answer_candidate source=direct_model_output "
+                        "step_number=%s model_diagnostics=%s",
+                        self.step_number,
+                        diagnostics,
+                    )
+                    action_step.error = AgentGenerationError(
+                        "Model returned empty content instead of a final answer; the step will be retried.",
+                        self.logger,
+                    )
+                    continue
 
                 if verification_config.enabled and verification_config.final_verification_enabled:
                     final_verification_round += 1
@@ -1427,6 +1466,17 @@ You have been provided with these additional arguments, that you can access usin
             # Fallback to error message if streaming fails
             model_output = f"Error in generating final LLM output: {e}"
             self.logger.log(f"Error in final answer generation: {e}", level=LogLevel.ERROR)
+
+        # Guard: if the model returned empty content at max-steps, provide a
+        # meaningful fallback instead of an empty final_answer.
+        if not model_output or not str(model_output).strip():
+            model_output = (
+                "The agent was unable to generate a valid response after reaching "
+                "the maximum number of steps. Please try rephrasing your request."
+            )
+            logger.warning(
+                "_handle_max_steps_reached: model returned empty content, using fallback"
+            )
 
         # Finalize the memory step
         final_memory_step.timing.end_time = time.time()

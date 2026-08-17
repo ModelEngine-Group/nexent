@@ -1601,7 +1601,7 @@ def test_agent_run_with_observer_success_with_agent_text(nexent_agent_instance, 
     mock_core_agent.observer.add_message.assert_any_call(
         "", ProcessType.TOKEN_COUNT, ANY)
     mock_core_agent.observer.add_message.assert_any_call(
-        "test_agent", ProcessType.FINAL_ANSWER, " content")
+        "test_agent", ProcessType.FINAL_ANSWER, "Final answer with  content")
 
 
 def test_agent_run_with_observer_emits_model_context_window(nexent_agent_instance, mock_core_agent):
@@ -1707,7 +1707,44 @@ def test_agent_run_with_observer_success_with_string_final_answer(nexent_agent_i
     mock_core_agent.observer.add_message.assert_any_call(
         "", ProcessType.TOKEN_COUNT, ANY)
     mock_core_agent.observer.add_message.assert_any_call(
-        "test_agent", ProcessType.FINAL_ANSWER, "")
+        "test_agent", ProcessType.FINAL_ANSWER, "String final answer with ")
+
+
+@pytest.mark.parametrize(
+    ("raw_final_answer", "lang", "expected"),
+    [
+        (
+            "<think>internal reasoning only</think>",
+            "en",
+            "The agent could not generate a valid final response. Please try again or rephrase your request.",
+        ),
+        (
+            "思考：内部推理内容。\n\n",
+            "zh",
+            "智能体未能生成有效的最终回复，请重试或换一种方式描述需求。",
+        ),
+    ],
+)
+def test_agent_run_with_observer_never_emits_empty_final_answer(
+    nexent_agent_instance, mock_core_agent, raw_final_answer, lang, expected
+):
+    """Reasoning cleanup must not terminate a conversation with an empty final answer."""
+    nexent_agent_instance.agent = mock_core_agent
+    mock_core_agent.observer.lang = lang
+    mock_core_agent.stop_event.is_set.return_value = False
+
+    mock_action_step = MagicMock(spec=ActionStep)
+    mock_action_step.timing = MagicMock(duration=1.0)
+    mock_action_step.step_number = 1
+    mock_action_step.error = None
+    mock_action_step.output = raw_final_answer
+    mock_core_agent.run.return_value = [mock_action_step]
+
+    nexent_agent_instance.agent_run_with_observer("test query")
+
+    mock_core_agent.observer.add_message.assert_any_call(
+        "test_agent", ProcessType.FINAL_ANSWER, expected
+    )
 
 
 def test_agent_run_with_observer_with_error_in_step(nexent_agent_instance, mock_core_agent):

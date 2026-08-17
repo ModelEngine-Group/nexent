@@ -37,6 +37,10 @@ from .message_utils import prepare_messages_for_smolagents_text_flattening
 logger = logging.getLogger("openai_llm")
 
 
+class EmptyModelResponseError(RuntimeError):
+    """Raised when a completed provider stream contains no user-visible content."""
+
+
 class OpenAIModel(OpenAIServerModel):
     def _prepare_completion_kwargs(self, *args, **kwargs) -> Dict[str, Any]:
         """
@@ -105,6 +109,7 @@ class OpenAIModel(OpenAIServerModel):
         self.last_provider_cache_advice = None
         self.last_prompt_cache_usage = None
         self.last_cached_input_token_count = 0
+        self.last_response_diagnostics = None
         self.safe_input_budget_snapshot = safe_input_budget_snapshot
         self.capacity_snapshot = capacity_snapshot
         if max_output_tokens is None and max_tokens is not None:
@@ -195,6 +200,7 @@ class OpenAIModel(OpenAIServerModel):
 
         token_tracker = _token_tracker or self._monitoring.create_token_tracker(
             self.model_id)
+        self.last_response_diagnostics = None
 
         # Normalize incoming messages so we can accept plain dict payloads like
         # {"role": "user", "content": "..."} alongside ChatMessage instances.
@@ -326,6 +332,11 @@ class OpenAIModel(OpenAIServerModel):
         role = None
         finish_reason = None
         self.last_finish_reason = None
+        content_chunk_count = 0
+        reasoning_chunk_count = 0
+        reasoning_char_count = 0
+        empty_choices_chunk_count = 0
+        nonstandard_chunk_count = 0
 
         # Reset output mode
         self.observer.current_mode = ProcessType.MODEL_OUTPUT_THINKING
@@ -344,10 +355,12 @@ class OpenAIModel(OpenAIServerModel):
                         chunk_str = str(chunk)
                         logger.warning(f"Received non-standard chunk (no 'choices'): {chunk_str[:200]}")
                     chunk_list.append(chunk)
+                    nonstandard_chunk_count += 1
                     continue
 
                 if not chunk.choices:
                     chunk_list.append(chunk)
+                    empty_choices_chunk_count += 1
                     continue
 
                 chunk_finish_reason = getattr(chunk.choices[0], "finish_reason", None)
@@ -360,6 +373,8 @@ class OpenAIModel(OpenAIServerModel):
 
                 # Handle reasoning_content if it exists and is not null
                 if reasoning_content is not None:
+                    reasoning_chunk_count += 1
+                    reasoning_char_count += len(str(reasoning_content))
                     self.observer.add_model_reasoning_content(
                         reasoning_content)
                     if token_tracker and not first_token_received:
@@ -367,6 +382,7 @@ class OpenAIModel(OpenAIServerModel):
                         first_token_received = True
 
                 if new_token is not None:
+                    content_chunk_count += 1
                     # Record first token timing
                     if token_tracker and not first_token_received:
                         token_tracker.record_first_token()
@@ -454,6 +470,23 @@ class OpenAIModel(OpenAIServerModel):
                 token_tracker.record_completion(
                     input_tokens, output_tokens)
 
+            response_diagnostics = {
+                "finish_reason": finish_reason,
+                "chunk_count": len(chunk_list),
+                "content_chunk_count": content_chunk_count,
+                "content_char_count": len(model_output),
+                "reasoning_chunk_count": reasoning_chunk_count,
+                "reasoning_char_count": reasoning_char_count,
+                "empty_choices_chunk_count": empty_choices_chunk_count,
+                "nonstandard_chunk_count": nonstandard_chunk_count,
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+            }
+            self.last_response_diagnostics = response_diagnostics
+            self._monitoring.set_span_attributes(
+                **{f"llm.response.{key}": value for key, value in response_diagnostics.items()}
+            )
+
             if token_tracker:
                 total_duration = time.time() - stream_start_time
                 self._monitoring.set_openinference_output(model_output)
@@ -462,6 +495,32 @@ class OpenAIModel(OpenAIServerModel):
                     "output_length": len(model_output),
                     "chunk_count": len(chunk_list)
                 })
+
+            if not model_output.strip():
+                logger.warning(
+                    "event=empty_model_response model_id=%s provider=%s "
+                    "finish_reason=%s chunk_count=%d content_chunk_count=%d "
+                    "reasoning_chunk_count=%d reasoning_char_count=%d "
+                    "empty_choices_chunk_count=%d nonstandard_chunk_count=%d "
+                    "input_tokens=%d output_tokens=%d",
+                    self.model_id,
+                    self.model_factory or "unknown",
+                    finish_reason,
+                    len(chunk_list),
+                    content_chunk_count,
+                    reasoning_chunk_count,
+                    reasoning_char_count,
+                    empty_choices_chunk_count,
+                    nonstandard_chunk_count,
+                    input_tokens,
+                    output_tokens,
+                )
+                self._monitoring.add_span_event("empty_model_response", response_diagnostics)
+                raise EmptyModelResponseError(
+                    "Model stream completed without user-visible content "
+                    f"(finish_reason={finish_reason}, reasoning_chunks={reasoning_chunk_count}, "
+                    f"output_tokens={output_tokens})"
+                )
 
             message = ChatMessage.from_dict(
                 ChatCompletionMessage(role=role if role else "assistant",  # If there is no explicit role, default to "assistant"
