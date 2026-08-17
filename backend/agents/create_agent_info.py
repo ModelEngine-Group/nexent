@@ -963,6 +963,69 @@ async def create_agent_config(
 
             if memory_context_service is not None:
                 try:
+                    external_results = None
+                    try:
+                        from services.memory_external_provider_service import (
+                            get_memory_external_provider_service,
+                        )
+                        from nexent.memory.models import (
+                            ExternalMemoryItem,
+                            MemorySearchRequest,
+                        )
+
+                        provider_service = get_memory_external_provider_service()
+                        if provider_service is not None:
+                            top_k = memory_context.user_config.external_provider_top_k
+                            timeout = memory_context.user_config.external_provider_timeout
+
+                            search_request = MemorySearchRequest(
+                                query=last_user_query or "",
+                                tenant_id=str(memory_context.tenant_id or ""),
+                                user_id=str(memory_context.user_id or ""),
+                                agent_id=str(memory_context.agent_id or "") or None,
+                                conversation_id=(
+                                    str(conversation_id) if conversation_id is not None else None
+                                ),
+                                top_k=top_k,
+                            )
+
+                            ext_search_results = await provider_service.search_all_enabled(
+                                tenant_id=str(memory_context.tenant_id or ""),
+                                request=search_request,
+                                limit=top_k,
+                                timeout=timeout,
+                            )
+
+                            if ext_search_results:
+                                external_results = [
+                                    ExternalMemoryItem(
+                                        id=str(r.memory_id or r.external_id or ""),
+                                        content=r.content,
+                                        score=r.score,
+                                        provider=r.source or "external",
+                                        metadata=r.metadata or {},
+                                        created_at=None,
+                                    )
+                                    for r in ext_search_results
+                                ]
+                                logger.info(
+                                    "event=external_provider_search tenant_id=%s user_id=%s "
+                                    "agent_id=%s results_count=%d",
+                                    tenant_id,
+                                    user_id,
+                                    agent_id,
+                                    len(external_results),
+                                )
+                    except Exception as exc:
+                        logger.warning(
+                            "event=external_provider_search_failed tenant_id=%s user_id=%s "
+                            "agent_id=%s error_type=%s",
+                            tenant_id,
+                            user_id,
+                            agent_id,
+                            type(exc).__name__,
+                        )
+
                     long_term_search_context = await memory_context_service.build_context(
                         tenant_id=str(memory_context.tenant_id or ""),
                         user_id=str(memory_context.user_id or ""),
@@ -970,6 +1033,7 @@ async def create_agent_config(
                         conversation_id=(str(conversation_id) if conversation_id is not None else None),
                         query=None,
                         layers=["tenant", "user"],
+                        external_results=external_results,
                     )
                     long_term_memory_items = _build_long_term_memory_items(long_term_search_context)
                 except Exception as exc:
