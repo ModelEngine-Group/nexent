@@ -10,7 +10,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from elasticsearch import Elasticsearch, exceptions
 
-from ..core.models.embedding_model import BaseEmbedding
+from ..core.gateway.modality import EmbeddingAdapter
 from ..core.nlp.tokenizer import calculate_term_weights
 from .base import VectorDatabaseCore
 from .utils import build_weighted_query, format_size
@@ -336,7 +336,7 @@ class ElasticSearchCore(VectorDatabaseCore):
     def vectorize_documents(
         self,
         index_name: str,
-        embedding_model: BaseEmbedding,
+        embedding_model: EmbeddingAdapter,
         documents: List[Dict[str, Any]],
         batch_size: int = 64,
         content_field: str = "content",
@@ -394,7 +394,7 @@ class ElasticSearchCore(VectorDatabaseCore):
         index_name: str,
         documents: List[Dict[str, Any]],
         content_field: str,
-        embedding_model: BaseEmbedding,
+        embedding_model: EmbeddingAdapter,
         progress_callback: Optional[Callable[[int, int], None]] = None,
     ) -> int:
         """Small batch insertion: real-time"""
@@ -446,7 +446,7 @@ class ElasticSearchCore(VectorDatabaseCore):
         self,
         processed_docs: List[Dict[str, Any]],
         content_field: str,
-        embedding_model: BaseEmbedding,
+        embedding_model: EmbeddingAdapter,
     ):
         if embedding_model.model_type == "multimodal":
             inputs = []
@@ -481,7 +481,7 @@ class ElasticSearchCore(VectorDatabaseCore):
         index_name: str,
         processed_docs: List[Dict[str, Any]],
         embeddings: List[Any],
-        embedding_model: BaseEmbedding,
+        embedding_model: EmbeddingAdapter,
     ) -> List[Dict[str, Any]]:
         operations = []
         for doc, embedding in zip(processed_docs, embeddings):
@@ -503,7 +503,7 @@ class ElasticSearchCore(VectorDatabaseCore):
         documents: List[Dict[str, Any]],
         batch_size: int,
         content_field: str,
-        embedding_model: BaseEmbedding,
+        embedding_model: EmbeddingAdapter,
         embedding_batch_size: int = 10,
         progress_callback: Optional[Callable[[int, int], None]] = None,
     ) -> int:
@@ -1063,7 +1063,7 @@ class ElasticSearchCore(VectorDatabaseCore):
         self,
         index_names: List[str],
         query_text: str,
-        embedding_model: BaseEmbedding,
+        embedding_model: EmbeddingAdapter,
         top_k: int = 5,
         filter: Optional[Any] = None,
     ) -> List[Dict[str, Any]]:
@@ -1134,7 +1134,7 @@ class ElasticSearchCore(VectorDatabaseCore):
         self,
         index_names: List[str],
         query_text: str,
-        embedding_model: BaseEmbedding,
+        embedding_model: EmbeddingAdapter,
         top_k: int = 5,
         weight_accurate: float = 0.3,
         filter: Optional[Any] = None,

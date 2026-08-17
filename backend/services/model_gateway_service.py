@@ -25,14 +25,12 @@ from nexent.core.gateway import (
     LLMContext,
     LongContextLLMContext,
     ModelContext,
-    STTContext,
-    TTSContext,
     VLMContext,
     get_gateway,
 )
 from nexent.core.gateway.registry import get_registry
-from consts.const import MODEL_CONFIG_MAPPING, TEST_PCM_PATH
-from database.model_management_db import get_model_by_model_id, get_model_records
+from consts.const import MODEL_CONFIG_MAPPING
+from database.model_management_db import get_model_by_model_id
 from utils.config_utils import get_model_name_from_config, tenant_config_manager
 
 logger = logging.getLogger("model_gateway_service")
@@ -63,8 +61,6 @@ _MODALITY_DEFAULT_FACTORY: Dict[str, str] = {
     "vlm": "openai",
     "embedding": "openai",
     "rerank": "openai",
-    "stt": "ali",
-    "tts": "ali",
     "multi_embedding": "jina",
 }
 
@@ -73,9 +69,6 @@ def _normalize_factory(raw: Optional[str], modality: str) -> str:
     """Return the canonical registry factory for ``raw`` under ``modality``."""
     cleaned = (raw or "").strip().lower()
     factory = _FACTORY_NORMALIZE.get(cleaned, cleaned)
-    # STT/TTS historically route DashScope through the Ali client.
-    if modality in ("stt", "tts") and factory in ("dashscope", "ali", "alibaba"):
-        factory = "ali"
     if get_registry().has(factory, modality):
         return factory
     default = _MODALITY_DEFAULT_FACTORY.get(modality, "openai")
@@ -170,6 +163,12 @@ def _config_to_context(
             extra_body=cfg.get("extra_body"),
             max_tokens=cfg.get("max_tokens"),
             capabilities=caps,
+        )
+    elif modality in ("embedding", "multi_embedding"):
+        return EmbeddingContext(
+            **common,
+            embedding_dim=cfg.get("max_tokens", 1024),
+            model_type=cfg.get("model_type"),
         )
     else:
         raise ValueError(f"Unknown modality: {modality}")
@@ -278,18 +277,25 @@ def get_llm_adapter(tenant_id: str, model_id: Optional[int] = None, modality: st
     )
 
 
-def _fetch_voice_config(tenant_id, model_type):
-    """Fetch an STT/TTS config from tenant_config or model_records (voice fallback)."""
-    try:
-        cfg = tenant_config_manager.get_model_config(tenant_id, model_type)
-        if cfg and isinstance(cfg, dict):
-            return cfg
-    except Exception:
-        pass
-    try:
-        records = get_model_records({"model_type": model_type}, tenant_id)
-        if records:
-            return records[0]
-    except Exception:
-        pass
-    return None
+def get_embedding_adapter_from_config(
+    cfg: Optional[dict],
+    tenant_id: Optional[str] = None,
+    modality: str = "embedding",
+    slot: str = "embedding",
+    **construct_extras: Any,
+):
+    # modality/slot are "embedding" (text) or "multi_embedding" (multimodal);
+    # normalize from cfg.model_type when caller omits it.
+    mt = (cfg or {}).get("model_type")
+    if mt == "multi_embedding" and modality == "embedding":
+        modality = "multi_embedding"
+        slot = "multiEmbedding"
+    return get_adapter_from_config(cfg, modality, slot, tenant_id, **construct_extras)
+
+
+def get_rerank_adapter_from_config(
+    cfg: Optional[dict],
+    tenant_id: Optional[str] = None,
+    **construct_extras: Any,
+):
+    return get_adapter_from_config(cfg, "rerank", "rerank", tenant_id, **construct_extras)
