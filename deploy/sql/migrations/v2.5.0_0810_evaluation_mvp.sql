@@ -1,5 +1,5 @@
 -- ============================================================
--- v2.4.0_0810: Agent Evaluation MVP
+-- v2.5.0_0810: Agent Evaluation MVP
 --  1. evaluator_t table — store evaluator definitions (incl.
 --     version_group_id / is_current for single-table versioning)
 --  2. 11 built-in evaluators (6 LLM/code + 5 process, bilingual
@@ -9,7 +9,7 @@
 --  4. agent_evaluation_t — evaluator_config / analysis columns
 --  5. agent_evaluation_case_t — score jsonb + multi-turn columns
 --  6. evaluation_set_case_t — multi-turn columns
---  7. LEFT_NAV_MENU permissions for /space/evaluation
+--  7. LEFT_NAV_MENU permissions for /evaluation
 --  8. Annotation tables
 -- ============================================================
 
@@ -265,11 +265,11 @@ ALTER TABLE nexent.evaluation_set_case_t
   ADD COLUMN IF NOT EXISTS turn_order INTEGER DEFAULT 0;
 
 -- ============================================================
--- 7. LEFT_NAV_MENU permissions for /space/evaluation
+-- 7. LEFT_NAV_MENU permissions for /evaluation
 -- ============================================================
--- The frontend side navigation includes /space/evaluation (parent: /agent-dev)
--- but the v2.4.0 MVP bundle didn't insert the corresponding LEFT_NAV_MENU rows.
--- Without these, the backend never returns /space/evaluation in accessibleRoutes
+-- The frontend side navigation includes /evaluation (parent: /agent-dev)
+-- but the v2.5.0 MVP bundle didn't insert the corresponding LEFT_NAV_MENU rows.
+-- Without these, the backend never returns /evaluation in accessibleRoutes
 -- and the sidebar filters it out, making the menu item invisible to all roles.
 -- Recurring enum literals are defined once in the CTE below so each appears
 -- only once (avoids duplicated-literal S1192 warnings on migration DML).
@@ -277,17 +277,17 @@ WITH const AS (
     SELECT
         'VISIBILITY'        AS vis,
         'LEFT_NAV_MENU'     AS nav,
-        '/space/evaluation' AS eval_path,
+        '/evaluation'       AS eval_path,
         '/agent-dev'        AS parent_key
 )
 INSERT INTO nexent.role_permission_t
     (role_permission_id, user_role, permission_category, permission_type, permission_subtype, parent_key)
 SELECT v.role_permission_id, v.user_role, c.vis, c.nav, c.eval_path, c.parent_key
 FROM (VALUES
-    (1701, 'ADMIN'),
-    (1702, 'DEV'),
-    (1703, 'SPEED'),
-    (1704, 'ASSET_OWNER')
+    (1118, 'ADMIN'),
+    (1215, 'DEV'),
+    (1415, 'SPEED'),
+    (1516, 'ASSET_OWNER')
 ) AS v(role_permission_id, user_role)
 CROSS JOIN const c
 ON CONFLICT (role_permission_id) DO NOTHING;

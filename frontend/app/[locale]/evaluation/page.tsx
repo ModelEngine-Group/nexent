@@ -339,7 +339,7 @@ function RunsTab() {
               size="small"
               icon={<Eye className="size-3.5" />}
               onClick={() =>
-                router.push(`/space/evaluation/${r.agent_evaluation_id}`)
+                router.push(`/evaluation/${r.agent_evaluation_id}`)
               }
             />
           </Tooltip>

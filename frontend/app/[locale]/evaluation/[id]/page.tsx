@@ -1068,7 +1068,7 @@ export default function EvaluationDetailPage() {
                   type="button"
                   onClick={() =>
                     router.push(
-                      `/space/evaluation?agent_id=${run?.agent_id || ""}`
+                      `/evaluation?agent_id=${run?.agent_id || ""}`
                     )
                   }
                   style={{ cursor: "pointer" }}
