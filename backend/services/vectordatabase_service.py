@@ -17,6 +17,7 @@ import logging
 import os
 import time
 import uuid
+from contextvars import ContextVar
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -35,6 +36,7 @@ from nexent.vector_database.elasticsearch_core import ElasticSearchCore
 from nexent.vector_database.datamate_core import DataMateCore
 
 from consts.const import (
+    ASSET_OWNER_ATTACHMENTS_PREFIX,
     ASSET_OWNER_TENANT_ID,
     CAN_EDIT_ALL_USER_ROLES,
     DATAMATE_URL,
@@ -58,6 +60,11 @@ from database.knowledge_db import (
     update_last_doc_update_time,
     update_last_summary_time,
     update_embedding_model_by_index_name,
+)
+from database.knowledge_storage_object_db import list_committed_storage_objects
+from services.knowledge_storage_service import (
+    release_storage_charge,
+    resolve_storage_reference,
 )
 from utils.str_utils import convert_list_to_string
 from database.user_tenant_db import get_user_tenant_by_user_id
@@ -243,6 +250,9 @@ ALLOWED_CHUNK_FIELDS = {
 logger = logging.getLogger("vectordatabase_service")
 
 _QUOTA_LIMIT_UNSET = object()
+_SKIP_INDEX_SOURCE_CLEANUP: ContextVar[bool] = ContextVar(
+    "skip_index_source_cleanup", default=False
+)
 
 
 def get_vector_db_core(
@@ -660,59 +670,11 @@ class ElasticSearchService:
         logger.debug(
             f"Starting full deletion process for knowledge base (index): {index_name}")
         try:
-            # 1. Get all files associated with the index from Elasticsearch
-            logger.debug(
-                f"Step 1/4: Retrieving file list for index: {index_name}")
-            try:
-                file_list_result = await ElasticSearchService.list_files(index_name, include_chunks=False,
-                                                                         vdb_core=vdb_core)
-                files_to_delete = file_list_result.get("files", [])
-                logger.debug(
-                    f"Found {len(files_to_delete)} files to delete from MinIO for index '{index_name}'.")
-            except Exception as e:
-                logger.error(
-                    f"Failed to retrieve file list for index '{index_name}': {str(e)}")
-                # We can still proceed to delete the index itself even if listing files fails
-                files_to_delete = []
-
-            # 2. Delete files from MinIO
-            minio_deletion_success_count = 0
-            minio_deletion_failure_count = 0
-            if files_to_delete:
-                logger.debug(
-                    f"Step 2/4: Starting deletion of {len(files_to_delete)} files from MinIO.")
-                for file_info in files_to_delete:
-                    object_name = file_info.get("path_or_url")
-                    if not object_name:
-                        logger.warning(
-                            f"Could not find 'path_or_url' for file entry: {file_info}. Skipping deletion.")
-                        minio_deletion_failure_count += 1
-                        continue
-
-                    try:
-                        logger.debug(
-                            f"Deleting object: '{object_name}' from MinIO for index '{index_name}'")
-                        delete_result = delete_file(object_name=object_name)
-                        if delete_result.get("success"):
-                            logger.debug(
-                                f"Successfully deleted object: '{object_name}' from MinIO.")
-                            minio_deletion_success_count += 1
-                        else:
-                            minio_deletion_failure_count += 1
-                            error_msg = delete_result.get(
-                                "error", "Unknown error")
-                            logger.error(
-                                f"Failed to delete object: '{object_name}' from MinIO. Reason: {error_msg}")
-                    except Exception as e:
-                        minio_deletion_failure_count += 1
-                        logger.error(
-                            f"An exception occurred while deleting object: '{object_name}' from MinIO. Error: {str(e)}")
-
-                logger.info(f"MinIO file deletion summary for index '{index_name}': "
-                            f"{minio_deletion_success_count} succeeded, {minio_deletion_failure_count} failed.")
-            else:
-                logger.debug(
-                    f"Step 2/4: No files found in index '{index_name}', skipping MinIO deletion.")
+            minio_cleanup = await ElasticSearchService._delete_kb_source_objects(
+                index_name=index_name,
+                vdb_core=vdb_core,
+                updated_by=user_id,
+            )
 
             # 3. Mark all related tasks as cancelled and clean up Redis records BEFORE deleting ES index
             # This ensures ongoing indexing tasks will detect cancellation and stop immediately
@@ -735,22 +697,25 @@ class ElasticSearchService:
             # 4. Delete Elasticsearch index and its DB record
             logger.debug(
                 f"Step 4/5: Deleting Elasticsearch index '{index_name}' and its database record.")
-            delete_index_result = await ElasticSearchService.delete_index(index_name, vdb_core, user_id)
+            cleanup_token = _SKIP_INDEX_SOURCE_CLEANUP.set(True)
+            try:
+                delete_index_result = await ElasticSearchService.delete_index(
+                    index_name, vdb_core, user_id
+                )
+            finally:
+                _SKIP_INDEX_SOURCE_CLEANUP.reset(cleanup_token)
 
             # Construct final result
             result = {
                 "status": "success",
                 "message": (
                     f"Index {index_name} deleted successfully. "
-                    f"MinIO: {minio_deletion_success_count} files deleted, {minio_deletion_failure_count} failed. "
+                    f"MinIO: {minio_cleanup['deleted_count']} files deleted, "
+                    f"{minio_cleanup['failed_count']} failed. "
                     f"Redis: Cleaned up {redis_cleanup_result.get('total_deleted', 0)} records."
                 ),
                 "es_delete_result": delete_index_result,
-                "minio_cleanup": {
-                    "total_files_found": len(files_to_delete),
-                    "deleted_count": minio_deletion_success_count,
-                    "failed_count": minio_deletion_failure_count
-                },
+                "minio_cleanup": minio_cleanup,
                 "redis_cleanup": redis_cleanup_result
             }
 
@@ -765,6 +730,153 @@ class ElasticSearchService:
             logger.error(
                 f"Error during full deletion of index '{index_name}': {str(e)}", exc_info=True)
             raise e
+
+    @staticmethod
+    async def _delete_kb_source_objects(
+        index_name: str,
+        vdb_core: VectorDatabaseCore,
+        updated_by: Optional[str] = None,
+    ) -> Dict[str, int]:
+        """Delete the canonical union of ES references and active ledger objects."""
+        try:
+            knowledge = get_knowledge_record({"index_name": index_name}) or {}
+        except Exception:
+            logger.exception(
+                "Failed to retrieve knowledge record for index '%s'",
+                index_name,
+            )
+            knowledge = {}
+        tenant_id = knowledge.get("tenant_id")
+        knowledge_id = knowledge.get("knowledge_id")
+
+        ledger_objects: List[Dict[str, Any]] = []
+        if tenant_id and knowledge_id is not None:
+            try:
+                ledger_objects = list_committed_storage_objects(
+                    tenant_id=tenant_id,
+                    knowledge_id=knowledge_id,
+                ) or []
+            except Exception:
+                logger.exception(
+                    "Failed to retrieve active storage ledger objects for index '%s'",
+                    index_name,
+                )
+
+        try:
+            file_list_result = await ElasticSearchService.list_files(
+                index_name,
+                include_chunks=False,
+                vdb_core=vdb_core,
+            )
+            files_to_delete = file_list_result.get("files", [])
+        except Exception:
+            logger.exception(
+                "Failed to retrieve file list for index '%s'",
+                index_name,
+            )
+            files_to_delete = []
+
+        targets, invalid_entries = ElasticSearchService._collect_kb_source_targets(
+            ledger_objects,
+            files_to_delete,
+        )
+
+        deleted_count = 0
+        failed_count = invalid_entries
+        for target in targets.values():
+            if ElasticSearchService._delete_kb_source_target(
+                target=target,
+                tenant_id=tenant_id,
+                updated_by=updated_by,
+            ):
+                deleted_count += 1
+            else:
+                failed_count += 1
+
+        logger.info(
+            "MinIO file deletion summary for index '%s': %s succeeded, %s failed.",
+            index_name,
+            deleted_count,
+            failed_count,
+        )
+        return {
+            "total_files_found": len(targets) + invalid_entries,
+            "deleted_count": deleted_count,
+            "failed_count": failed_count,
+        }
+
+    @staticmethod
+    def _collect_kb_source_targets(
+        ledger_objects: List[Dict[str, Any]],
+        es_files: List[Dict[str, Any]],
+    ) -> tuple[Dict[tuple, Dict[str, str]], int]:
+        """Build canonical deletion targets and skip ambiguous ES references."""
+        targets: Dict[tuple, Dict[str, str]] = {}
+        ledger_aliases = set()
+        for row in ledger_objects:
+            bucket_name = row.get("bucket_name")
+            object_name = row.get("object_name")
+            if not bucket_name or not object_name:
+                continue
+            identity = (bucket_name, object_name)
+            targets[identity] = {
+                "bucket_name": bucket_name,
+                "object_name": object_name,
+            }
+            ledger_aliases.update({
+                object_name,
+                f"s3://{bucket_name}/{object_name}",
+                f"/{bucket_name}/{object_name}",
+            })
+
+        invalid_entries = 0
+        for file_info in es_files:
+            raw_path = file_info.get("path_or_url")
+            if not raw_path or raw_path in ledger_aliases:
+                invalid_entries += int(not raw_path)
+                continue
+            reference = resolve_storage_reference(raw_path)
+            if reference is None:
+                invalid_entries += 1
+                logger.warning("Skipping non-canonical KB source reference during deletion")
+                continue
+            identity = (reference.bucket_name, reference.object_name)
+            targets.setdefault(identity, {
+                "bucket_name": reference.bucket_name,
+                "object_name": reference.object_name,
+            })
+        return targets, invalid_entries
+
+    @staticmethod
+    def _delete_kb_source_target(
+        *,
+        target: Dict[str, str],
+        tenant_id: Optional[str],
+        updated_by: Optional[str],
+    ) -> bool:
+        """Delete one canonical source target and release its ledger charge."""
+        object_name = target["object_name"]
+        bucket_name = target["bucket_name"]
+        try:
+            delete_result = delete_file(object_name=object_name, bucket=bucket_name)
+            if not delete_result.get("success"):
+                logger.error("Failed to delete a canonical KB source object from MinIO")
+                return False
+        except Exception:
+            logger.exception("Failed to delete a canonical KB source object from MinIO")
+            return False
+
+        if tenant_id:
+            try:
+                release_storage_charge(
+                    tenant_id=tenant_id,
+                    bucket_name=bucket_name,
+                    object_name=object_name,
+                    updated_by=updated_by,
+                )
+            except Exception:
+                logger.exception("Failed to release a deleted KB source object's charge")
+        return True
 
     @staticmethod
     def create_index(
@@ -1043,31 +1155,25 @@ class ElasticSearchService:
                 None, description="ID of the user delete the knowledge base"),
     ):
         try:
-            # 1. Get list of files from the index
-            try:
-                files_to_delete = await ElasticSearchService.list_files(index_name, vdb_core=vdb_core)
-                if files_to_delete and files_to_delete.get("files"):
-                    # 2. Delete files from MinIO storage
-                    for file_info in files_to_delete["files"]:
-                        object_name = file_info.get("path_or_url")
-                        source_type = file_info.get("source_type")
-                        if object_name and source_type == "minio":
-                            logger.info(
-                                f"Deleting file {object_name} from MinIO for index {index_name}")
-                            delete_file(object_name)
-            except Exception as e:
-                # Log the error but don't block the index deletion
-                logger.error(
-                    f"Error deleting associated files from MinIO for index {index_name}: {str(e)}")
+            if not _SKIP_INDEX_SOURCE_CLEANUP.get():
+                try:
+                    await ElasticSearchService._delete_kb_source_objects(
+                        index_name=index_name,
+                        vdb_core=vdb_core,
+                        updated_by=user_id,
+                    )
+                except Exception as e:
+                    logger.error(
+                        f"Error deleting associated files from MinIO for index {index_name}: {str(e)}")
 
-            # 3. Delete the index in Elasticsearch
+            # Delete the index in Elasticsearch
             success = vdb_core.delete_index(index_name)
             if not success:
                 # Even if deletion fails, we proceed to database record cleanup
                 logger.warning(
                     f"Index {index_name} not found in Elasticsearch or could not be deleted, but proceeding with DB cleanup.")
 
-            # 4. Delete the knowledge base record from the database
+            # Delete the knowledge base record from the database
             update_data = {
                 "updated_by": user_id,
                 "index_name": index_name
@@ -1715,15 +1821,38 @@ class ElasticSearchService:
         status = file_data.get("status", "")
         if status != "COMPLETED":
             return True
-        if path_or_url.startswith("knowledge_base/"):
+        if path_or_url.startswith((
+            "knowledge_base/",
+            f"{ASSET_OWNER_ATTACHMENTS_PREFIX}/",
+        )):
             return file_exists(path_or_url)
         return True
 
     @staticmethod
-    def delete_source_file(path_or_url: str) -> Dict[str, Any]:
+    def delete_source_file(
+        path_or_url: str,
+        tenant_id: Optional[str] = None,
+        updated_by: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """Remove MinIO source (and preview cache); does not touch Elasticsearch."""
         minio_result = delete_file(path_or_url)
         deleted_minio = bool(minio_result.get("success"))
+
+        if deleted_minio and tenant_id:
+            reference = resolve_storage_reference(path_or_url)
+            if reference:
+                try:
+                    release_storage_charge(
+                        tenant_id=tenant_id,
+                        bucket_name=reference.bucket_name,
+                        object_name=reference.object_name,
+                        updated_by=updated_by,
+                    )
+                except Exception:
+                    logger.exception(
+                        "Failed to release storage charge after deleting '%s'",
+                        path_or_url,
+                    )
 
         if path_or_url.startswith("knowledge_base/"):
             preview_key = ElasticSearchService._preview_pdf_cache_object_name(
@@ -1773,15 +1902,29 @@ class ElasticSearchService:
             await ElasticSearchService._assert_source_only_deletable(
                 index_name, path_or_url
             )
-            minio_part = ElasticSearchService.delete_source_file(path_or_url)
+            try:
+                knowledge = get_knowledge_record({"index_name": index_name}) or {}
+            except Exception:
+                logger.exception(
+                    "Failed to resolve storage ownership for index '%s'",
+                    index_name,
+                )
+                knowledge = {}
+            minio_part = ElasticSearchService.delete_source_file(
+                path_or_url,
+                tenant_id=knowledge.get("tenant_id"),
+            )
+            deleted_minio = minio_part.get("deleted_minio", False)
             return {
-                "status": "success",
+                "status": "success" if deleted_minio else "failed",
                 "scope": scope,
                 "deleted_es_count": 0,
-                "deleted_minio": minio_part.get("deleted_minio", False),
-                "source_available": False,
+                "deleted_minio": deleted_minio,
+                "source_available": not deleted_minio,
                 "message": (
                     "Source file deleted; index chunks and vectors preserved."
+                    if deleted_minio
+                    else "Source file deletion failed; index chunks and vectors preserved."
                 ),
             }
 
@@ -1789,7 +1932,7 @@ class ElasticSearchService:
             index_name, path_or_url, vdb_core
         )
         result["scope"] = scope
-        result["source_available"] = False
+        result["source_available"] = not result.get("deleted_minio", False)
         return result
 
     @staticmethod
@@ -1804,6 +1947,22 @@ class ElasticSearchService:
             index_name, path_or_url)
         # 2. Delete MinIO file
         minio_result = delete_file(path_or_url)
+        if minio_result.get("success"):
+            try:
+                knowledge = get_knowledge_record({"index_name": index_name}) or {}
+                tenant_id = knowledge.get("tenant_id")
+                reference = resolve_storage_reference(path_or_url)
+                if tenant_id and reference:
+                    release_storage_charge(
+                        tenant_id=tenant_id,
+                        bucket_name=reference.bucket_name,
+                        object_name=reference.object_name,
+                    )
+            except Exception:
+                logger.exception(
+                    "Failed to reconcile storage ledger after deleting '%s'",
+                    path_or_url,
+                )
 
         # Update last_doc_update_time for auto-summary tracking
         update_last_doc_update_time(index_name)

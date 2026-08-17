@@ -178,12 +178,22 @@ export const API_ENDPOINTS = {
   },
   evaluationSets: {
     list: `${API_BASE_URL}/evaluation-sets`,
-    create: `${API_BASE_URL}/evaluation-sets`,
     detail: (id: number) => `${API_BASE_URL}/evaluation-sets/${id}`,
     cases: (id: number) => `${API_BASE_URL}/evaluation-sets/${id}/cases`,
     upload: `${API_BASE_URL}/evaluation-sets/upload`,
     template: `${API_BASE_URL}/evaluation-sets/template`,
+    export: (id: number) => `${API_BASE_URL}/evaluation-sets/${id}/export`,
     delete: (id: number) => `${API_BASE_URL}/evaluation-sets/${id}`,
+  },
+  evaluators: {
+    list: `${API_BASE_URL}/evaluators`,
+    create: `${API_BASE_URL}/evaluators`,
+    detail: (id: number) => `${API_BASE_URL}/evaluators/${id}`,
+    delete: (id: number) => `${API_BASE_URL}/evaluators/${id}`,
+    publish: (id: number) => `${API_BASE_URL}/evaluators/${id}/publish`,
+    export: `${API_BASE_URL}/evaluators/export`,
+    import: `${API_BASE_URL}/evaluators/import`,
+    generate: `${API_BASE_URL}/evaluators/generate`,
   },
   agentEvaluations: {
     create: `${API_BASE_URL}/agent-evaluations`,
@@ -493,6 +503,16 @@ export const API_ENDPOINTS = {
       delete: (memoryId: string | number) =>
         `${API_BASE_URL}/memory/records/${memoryId}`,
     },
+    longTerm: {
+      active: (scope: "tenant" | "user") =>
+        `${API_BASE_URL}/memory/long-term/${scope}`,
+      versions: (scope: "tenant" | "user") =>
+        `${API_BASE_URL}/memory/long-term/${scope}/versions`,
+      detail: (scope: "tenant" | "user", versionId: number) =>
+        `${API_BASE_URL}/memory/long-term/${scope}/versions/${versionId}`,
+      activate: (scope: "tenant" | "user", versionId: number) =>
+        `${API_BASE_URL}/memory/long-term/${scope}/versions/${versionId}/activate`,
+    },
 
     // ---------------- Memory CRUD ----------------
     entry: {
@@ -502,6 +522,12 @@ export const API_ENDPOINTS = {
       delete: (memoryId: string | number) =>
         `${API_BASE_URL}/memory/delete/${memoryId}`,
       clear: `${API_BASE_URL}/memory/clear`,
+    },
+    dreaming: {
+      parameters: `${API_BASE_URL}/memory/dreaming/parameters`,
+      schedule: `${API_BASE_URL}/memory/dreaming/schedule`,
+      run: `${API_BASE_URL}/memory/dreaming/run`,
+      audits: `${API_BASE_URL}/memory/dreaming/audit`,
     },
   },
   agentRepository: {
@@ -742,6 +768,10 @@ export const fetchWithErrorHandling = async (
         if (errorDetail?.code) {
           errorCode = errorDetail.code;
           errorMessage = errorDetail.message || errorMessage;
+        } else if (typeof errorData?.detail === "string") {
+          errorMessage = errorData.detail;
+        } else if (typeof errorData?.message === "string") {
+          errorMessage = errorData.message;
         } else {
           errorMessage = errorText || errorMessage;
         }

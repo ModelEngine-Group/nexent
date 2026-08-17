@@ -159,6 +159,7 @@ export interface AuthenticationContextType {
   isSessionExpiredModalOpen: boolean;
   openSessionExpiredModal: () => void;
   closeSessionExpiredModal: () => void;
+  openLoginModalAfterSessionExpired: () => void;
 }
 
 // Authentication State Return Type - for useAuthenticationState hook
@@ -206,6 +207,7 @@ export interface AuthenticationUIReturn {
   isSessionExpiredModalOpen: boolean;
   openSessionExpiredModal: () => void;
   closeSessionExpiredModal: () => void;
+  openLoginModalAfterSessionExpired: () => void;
 }
 
 // Authorization Context Type

@@ -300,6 +300,18 @@ asset_owner_visibility_mock.postprocess_knowledge_visibility = _mock_postprocess
 sys.modules['services.asset_owner_visibility'] = asset_owner_visibility_mock
 setattr(sys.modules['services'], 'asset_owner_visibility', asset_owner_visibility_mock)
 
+storage_service_mock = types.ModuleType('services.knowledge_storage_service')
+storage_service_mock.release_storage_charge = MagicMock(return_value=True)
+storage_service_mock.resolve_storage_reference = MagicMock(return_value=None)
+sys.modules[
+    'services.knowledge_storage_service'
+] = storage_service_mock
+setattr(
+    sys.modules['services'],
+    'knowledge_storage_service',
+    storage_service_mock,
+)
+
 # Create mock utils modules - backend.utils needs __path__ for submodule lookups
 utils_mock = types.ModuleType('utils')  # No __path__ so Python won't try submodule lookup
 utils_mock.__path__ = []  # Empty __path__ to make it a namespace package
@@ -349,6 +361,12 @@ sys.modules['utils.config_utils'] = config_utils_mock
 sys.modules['backend.utils.config_utils'] = config_utils_mock
 setattr(sys.modules['utils'], 'config_utils', config_utils_mock)
 setattr(sys.modules['backend.utils'], 'config_utils', config_utils_mock)
+
+knowledge_telemetry_mock = types.ModuleType('utils.knowledge_telemetry')
+knowledge_telemetry_mock.set_span_attributes = MagicMock()
+knowledge_telemetry_mock.trace_knowledge_operation = MagicMock()
+sys.modules['utils.knowledge_telemetry'] = knowledge_telemetry_mock
+setattr(sys.modules['utils'], 'knowledge_telemetry', knowledge_telemetry_mock)
 
 # Shared mock instances for MinIO
 storage_client_mock = MagicMock()
@@ -2348,6 +2366,37 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertTrue(result["deleted_minio"])
         mock_delete_file.assert_called()
 
+    @patch('backend.services.vectordatabase_service.release_storage_charge')
+    @patch('backend.services.vectordatabase_service.resolve_storage_reference')
+    @patch('backend.services.vectordatabase_service.file_exists', return_value=False)
+    @patch('backend.services.vectordatabase_service.delete_file')
+    def test_delete_source_file_releases_charge_only_after_minio_success(
+        self, mock_delete_file, _mock_exists, mock_resolve, mock_release
+    ):
+        mock_resolve.return_value = SimpleNamespace(
+            bucket_name="kb-bucket", object_name="knowledge_base/doc.pdf"
+        )
+        mock_delete_file.side_effect = [
+            {"success": False, "error": "MinIO unavailable"},
+            {"success": True},
+        ]
+
+        failed = ElasticSearchService.delete_source_file(
+            "knowledge_base/doc.pdf", tenant_id="tenant-1"
+        )
+        succeeded = ElasticSearchService.delete_source_file(
+            "knowledge_base/doc.pdf", tenant_id="tenant-1"
+        )
+
+        self.assertFalse(failed["deleted_minio"])
+        self.assertTrue(succeeded["deleted_minio"])
+        mock_release.assert_called_once_with(
+            tenant_id="tenant-1",
+            bucket_name="kb-bucket",
+            object_name="knowledge_base/doc.pdf",
+            updated_by=None,
+        )
+
     @patch(
         'backend.services.vectordatabase_service.get_all_files_status',
         new_callable=AsyncMock,
@@ -2374,6 +2423,37 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertEqual(result["deleted_es_count"], 0)
         self.mock_vdb_core.delete_documents.assert_not_called()
 
+    @patch.object(
+        ElasticSearchService,
+        'delete_source_file',
+        return_value={"deleted_minio": False},
+    )
+    @patch(
+        'backend.services.vectordatabase_service.get_knowledge_record',
+        return_value={"tenant_id": "tenant-1"},
+    )
+    @patch(
+        'backend.services.vectordatabase_service.get_all_files_status',
+        new_callable=AsyncMock,
+    )
+    def test_delete_document_by_scope_source_only_reports_physical_failure(
+        self, mock_get_status, _mock_get_knowledge, _mock_delete_source
+    ):
+        mock_get_status.return_value = {}
+
+        result = asyncio.run(
+            ElasticSearchService.delete_document_by_scope(
+                "test_index",
+                "knowledge_base/doc.pdf",
+                "source_only",
+                self.mock_vdb_core,
+            )
+        )
+
+        self.assertEqual(result["status"], "failed")
+        self.assertFalse(result["deleted_minio"])
+        self.assertTrue(result["source_available"])
+
     @patch(
         'backend.services.vectordatabase_service.get_all_files_status',
         new_callable=AsyncMock,
@@ -2394,6 +2474,179 @@ class TestElasticSearchService(unittest.TestCase):
                     self.mock_vdb_core,
                 )
             )
+
+    @patch('backend.services.vectordatabase_service.release_storage_charge')
+    @patch('backend.services.vectordatabase_service.delete_file')
+    @patch(
+        'backend.services.vectordatabase_service.get_all_files_status',
+        new_callable=AsyncMock,
+    )
+    def test_processing_failure_does_not_delete_source_or_release_charge(
+        self, mock_get_status, mock_delete_file, mock_release
+    ):
+        mock_get_status.return_value = {
+            "knowledge_base/failed.pdf": {"state": "PROCESS_FAILED"}
+        }
+
+        delete_operation = ElasticSearchService.delete_document_by_scope(
+            "test_index",
+            "knowledge_base/failed.pdf",
+            "source_only",
+            self.mock_vdb_core,
+        )
+        with self.assertRaises(ValueError):
+            asyncio.run(delete_operation)
+
+        mock_delete_file.assert_not_called()
+        mock_release.assert_not_called()
+
+    @patch('backend.services.vectordatabase_service.release_storage_charge')
+    @patch('backend.services.vectordatabase_service.resolve_storage_reference')
+    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    @patch('backend.services.vectordatabase_service.delete_file')
+    def test_full_document_delete_keeps_charge_when_minio_fails(
+        self, mock_delete_file, mock_get_knowledge, mock_resolve, mock_release
+    ):
+        self.mock_vdb_core.delete_documents.return_value = 4
+        mock_delete_file.return_value = {"success": False, "error": "delete failed"}
+        mock_get_knowledge.return_value = {"tenant_id": "tenant-1"}
+        mock_resolve.return_value = SimpleNamespace(
+            bucket_name="kb-bucket", object_name="knowledge_base/doc.pdf"
+        )
+
+        with patch(
+            'backend.services.vectordatabase_service.update_last_doc_update_time'
+        ):
+            result = ElasticSearchService.delete_documents(
+                "kb-1", "knowledge_base/doc.pdf", self.mock_vdb_core
+            )
+
+        self.assertEqual(result["deleted_es_count"], 4)
+        self.assertFalse(result["deleted_minio"])
+        mock_release.assert_not_called()
+
+    @patch('backend.services.vectordatabase_service.release_storage_charge')
+    @patch('backend.services.vectordatabase_service.resolve_storage_reference')
+    @patch('backend.services.vectordatabase_service.delete_file')
+    @patch('backend.services.vectordatabase_service.list_committed_storage_objects')
+    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    def test_kb_source_cleanup_uses_canonical_union_and_preserves_failed_charge(
+        self,
+        mock_get_knowledge,
+        mock_list_ledger,
+        mock_delete_file,
+        mock_resolve,
+        mock_release,
+    ):
+        mock_get_knowledge.return_value = {
+            "tenant_id": "tenant-1",
+            "knowledge_id": 7,
+        }
+        mock_list_ledger.return_value = [
+            {
+                "bucket_name": "kb-bucket",
+                "object_name": "knowledge_base/indexed.pdf",
+            },
+            {
+                "bucket_name": "kb-bucket",
+                "object_name": "knowledge_base/failed-processing.pdf",
+            },
+        ]
+        mock_resolve.side_effect = lambda value: SimpleNamespace(
+            bucket_name="kb-bucket", object_name=value
+        )
+        mock_delete_file.side_effect = [
+            {"success": True},
+            {"success": False, "error": "MinIO unavailable"},
+        ]
+
+        with patch(
+            'backend.services.vectordatabase_service.ElasticSearchService.list_files',
+            new_callable=AsyncMock,
+            return_value={
+                "files": [
+                    {"path_or_url": "knowledge_base/indexed.pdf"},
+                ]
+            },
+        ):
+            result = asyncio.run(
+                ElasticSearchService._delete_kb_source_objects(
+                    "kb-1", self.mock_vdb_core, updated_by="user-1"
+                )
+            )
+
+        self.assertEqual(result["total_files_found"], 2)
+        self.assertEqual(result["deleted_count"], 1)
+        self.assertEqual(result["failed_count"], 1)
+        self.assertEqual(mock_delete_file.call_count, 2)
+        mock_release.assert_called_once_with(
+            tenant_id="tenant-1",
+            bucket_name="kb-bucket",
+            object_name="knowledge_base/indexed.pdf",
+            updated_by="user-1",
+        )
+
+    @patch('backend.services.vectordatabase_service.release_storage_charge')
+    @patch('backend.services.vectordatabase_service.resolve_storage_reference')
+    @patch('backend.services.vectordatabase_service.delete_file')
+    @patch('backend.services.vectordatabase_service.list_committed_storage_objects')
+    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    def test_kb_source_cleanup_skips_non_canonical_es_reference(
+        self,
+        mock_get_knowledge,
+        mock_list_ledger,
+        mock_delete_file,
+        mock_resolve,
+        mock_release,
+    ):
+        mock_get_knowledge.return_value = {
+            "tenant_id": "tenant-1",
+            "knowledge_id": 7,
+        }
+        mock_list_ledger.return_value = []
+        mock_resolve.return_value = None
+
+        with patch(
+            'backend.services.vectordatabase_service.ElasticSearchService.list_files',
+            new_callable=AsyncMock,
+            return_value={"files": [{"path_or_url": "https://example.com/source.pdf"}]},
+        ):
+            result = asyncio.run(
+                ElasticSearchService._delete_kb_source_objects(
+                    "kb-1", self.mock_vdb_core, updated_by="user-1"
+                )
+            )
+
+        self.assertEqual(result["total_files_found"], 1)
+        self.assertEqual(result["deleted_count"], 0)
+        self.assertEqual(result["failed_count"], 1)
+        mock_delete_file.assert_not_called()
+        mock_release.assert_not_called()
+
+    def test_delete_index_skips_duplicate_source_cleanup(self):
+        from backend.services.vectordatabase_service import _SKIP_INDEX_SOURCE_CLEANUP
+
+        self.mock_vdb_core.delete_index.return_value = True
+        cleanup = AsyncMock()
+        token = _SKIP_INDEX_SOURCE_CLEANUP.set(True)
+        try:
+            with patch(
+                'backend.services.vectordatabase_service.ElasticSearchService._delete_kb_source_objects',
+                cleanup,
+            ), patch(
+                'backend.services.vectordatabase_service.delete_knowledge_record',
+                return_value=True,
+            ):
+                result = asyncio.run(
+                    ElasticSearchService.delete_index(
+                        "kb-1", self.mock_vdb_core, "user-1"
+                    )
+                )
+        finally:
+            _SKIP_INDEX_SOURCE_CLEANUP.reset(token)
+
+        self.assertEqual(result["status"], "success")
+        cleanup.assert_not_awaited()
 
     @patch('backend.services.vectordatabase_service.file_exists', return_value=False)
     def test_compute_source_available_completed_missing_minio(self, _mock_exists):
@@ -4967,14 +5220,18 @@ class TestRethrowOrPlain(unittest.TestCase):
 
         files_payload = {
             "files": [
-                {"path_or_url": "obj-success", "source_type": "minio"},
-                {"path_or_url": "obj-fail", "source_type": "minio"},
+                {"path_or_url": "knowledge_base/obj-success", "source_type": "minio"},
+                {"path_or_url": "knowledge_base/obj-fail", "source_type": "minio"},
             ]
         }
 
         # delete_file returns success for first, failure for second
         with patch('backend.services.vectordatabase_service.ElasticSearchService.list_files',
                    new_callable=AsyncMock, return_value=files_payload) as mock_list_files, \
+                patch('backend.services.vectordatabase_service.resolve_storage_reference',
+                      side_effect=lambda value: SimpleNamespace(
+                          bucket_name="nexent", object_name=value
+                      )), \
                 patch('backend.services.vectordatabase_service.delete_file') as mock_delete_file, \
                 patch('backend.services.vectordatabase_service.ElasticSearchService.delete_index',
                       new_callable=AsyncMock, return_value={"status": "success"}) as mock_delete_index:

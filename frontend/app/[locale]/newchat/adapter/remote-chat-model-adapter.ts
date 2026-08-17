@@ -512,7 +512,7 @@ function parseSseChunk(line: string): SseChunk | null {
 
 /**
  * Extracts the agent run start time from an agent_new_run content string.
- * The backend prepends `[Current time: YYYY-MM-DD HH:MM:SS]` to the task text.
+ * The backend prepends `[Current time: YYYY-MM-DD HH:MM:SS±HHMM]` to the task text.
  * Returns undefined when the prefix is absent or unparseable.
  */
 const AGENT_RUN_TIME_PREFIX = "[Current time:";
@@ -521,8 +521,8 @@ function extractAgentRunTime(content: string): string | undefined {
   const closeIdx = content.indexOf("]", AGENT_RUN_TIME_PREFIX.length);
   if (closeIdx < 0) return undefined;
   const raw = content.slice(AGENT_RUN_TIME_PREFIX.length, closeIdx).trim();
-  // Basic format check: "YYYY-MM-DD HH:MM:SS"
-  if (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(raw)) return undefined;
+  // Format check: "YYYY-MM-DD HH:MM:SS" with optional timezone offset "±HHMM"
+  if (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}([+-]\d{4})?$/.test(raw)) return undefined;
   return raw;
 }
 

@@ -294,39 +294,19 @@ def test_automation_tool_policy_is_required_platform_context():
     ).required is True
 
 
-def test_long_term_memory_prompt_is_a_required_system_item():
-    context = (
-        "### Tenant Long-term Memory\n- Follow company policy\n\n"
-        "### User Long-term Memory\n- Prefers concise answers"
-    )
-
+def test_long_term_memory_documents_are_structured_memory_items():
     items = build_context_inputs(
-        long_term_memory_prompt=context,
+        long_term_memory_items=[{
+            "memory": "## Policy\n\n- Follow company policy", "scope": "tenant",
+            "memory_level": "tenant", "version_id": 7, "source": "manual",
+        }],
         language="en",
     )
-    memory_item = next(
-        item for item in items if item.id == "system:long_term_memory"
-    )
-
-    assert memory_item.type == ContextItemType.SYSTEM
-    assert memory_item.content == {"text": context}
+    memory_item = next(item for item in items if item.id == "memory:0")
+    assert memory_item.type == ContextItemType.MEMORY
+    assert memory_item.metadata["scope"] == "tenant"
+    assert memory_item.metadata["version_id"] == 7
     assert memory_item.metadata["authority"] == "retrieved"
-
-    normalized = normalize_context_inputs(items)
-    normalized_item = next(
-        item for item in normalized if item.id == "system:long_term_memory"
-    )
-    assert normalized_item.required is True
-
-    messages = ContextItemRenderer().render(normalized)
-    system_text = "\n".join(
-        block["text"]
-        for message in messages
-        if message["role"] == "system"
-        for block in message.get("content", ())
-        if block.get("type") == "text"
-    )
-    assert context in system_text
 
 
 def test_group_rendering_uses_only_selected_tool_items():

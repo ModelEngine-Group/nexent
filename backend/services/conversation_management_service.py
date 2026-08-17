@@ -238,11 +238,20 @@ def save_conversation_user(request: AgentRequest, user_id: str, tenant_id: str) 
     user_role_count = sum(1 for item in getattr(
         request, "history", []) if item.role == MESSAGE_ROLE["USER"])
 
+    # Strip the [Current time: ...] prefix before persisting so historical
+    # messages do not show the time marker. The prefix is injected by
+    # run_agent_stream for the LLM call only.
+    raw_query = request.query
+    if raw_query and raw_query.startswith("[Current time:"):
+        close_idx = raw_query.find("]", len("[Current time:"))
+        if close_idx >= 0:
+            raw_query = raw_query[close_idx + 1:].lstrip("\n").strip()
+
     conversation_req = MessageRequest(
         conversation_id=request.conversation_id,
         message_idx=user_role_count * 2,
         role=MESSAGE_ROLE["USER"],
-        message=[MessageUnit(type="string", content=request.query)],
+        message=[MessageUnit(type="string", content=raw_query)],
         minio_files=request.minio_files,
     )
     save_message(

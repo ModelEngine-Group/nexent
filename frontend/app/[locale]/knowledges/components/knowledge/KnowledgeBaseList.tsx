@@ -27,6 +27,7 @@ import { KnowledgeBaseEditModal } from "./KnowledgeBaseEditModal";
 import { KnowledgeBase } from "@/types/knowledgeBase";
 import { KB_LAYOUT, KB_TAG_VARIANTS } from "@/const/knowledgeBaseLayout";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
+import { formatDateOrFallback } from "@/lib/date";
 
 interface KnowledgeBaseListProps {
   knowledgeBases: KnowledgeBase[];
@@ -185,21 +186,6 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
   const handleModelsChange = (values: string[]) => {
     if (onModelFilterChange) onModelFilterChange(values);
     else setSelectedModels(values);
-  };
-
-  // Format date function, only keep date part
-  const formatDate = (dateValue: any) => {
-    try {
-      const date =
-        typeof dateValue === "number"
-          ? new Date(dateValue)
-          : new Date(dateValue);
-      return isNaN(date.getTime())
-        ? String(dateValue ?? "")
-        : date.toISOString().split("T")[0]; // Only return YYYY-MM-DD part
-    } catch (e) {
-      return String(dateValue ?? ""); // If parsing fails, return original string
-    }
   };
 
   // Helper to safely extract timestamp for sorting
@@ -560,7 +546,7 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                               className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.light} mr-1`}
                             >
                               {t("knowledgeBase.tag.createdAt", {
-                                date: formatDate(kb.createdAt),
+                                date: formatDateOrFallback(kb.createdAt),
                               })}
                             </span>
 
