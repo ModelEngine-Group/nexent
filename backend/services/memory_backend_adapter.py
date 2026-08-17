@@ -26,11 +26,14 @@ from typing import Any, Dict, List, Optional
 
 from nexent.memory.embedding_model import EmbeddingModelInfo
 from nexent.memory.models import (
+    MemoryIngestUnit,
     MemoryLayer,
     MemorySearchRequest,
     MemorySearchResult,
 )
 from nexent.memory.service import MemoryService
+
+from consts.const import EXTERNAL_MEMORY_INGEST_ENABLED
 
 from .memory_record_service import (
     MemoryRecordError,
@@ -84,7 +87,64 @@ async def _backend_store_hook(
         embedding_model_info=embedding_model_info,
         actor="agent",
     )
+
+    if EXTERNAL_MEMORY_INGEST_ENABLED:
+        try:
+            await _fanout_external_ingest(payload, result)
+        except Exception:
+            logger.warning("External ingest failed", exc_info=True)
+
     return result
+
+
+def _build_ingestion_event_service():
+    """Lazily construct a MemoryIngestionEventService for transparent proxy."""
+    from services.memory_provider_plugin_loader import PluginLoader
+    from services.memory_provider_config_service import MemoryProviderConfigService
+    from services.memory_external_provider_service import MemoryExternalProviderService
+    from services.memory_ingestion_event_service import MemoryIngestionEventService
+
+    plugin_loader = PluginLoader()
+    config_service = MemoryProviderConfigService(plugin_loader)
+    provider_service = MemoryExternalProviderService(plugin_loader, config_service)
+    return MemoryIngestionEventService(config_service, provider_service)
+
+
+async def _fanout_external_ingest(
+    payload: Dict[str, Any], result: Dict[str, Any]
+) -> None:
+    """Fan-out a store event to all enabled external providers."""
+    from services.memory_provider_config_service import MemoryProviderConfigService
+    from services.memory_provider_plugin_loader import PluginLoader
+
+    tenant_id = payload["tenant_id"]
+    plugin_loader = PluginLoader()
+    config_service = MemoryProviderConfigService(plugin_loader)
+    enabled = config_service.get_enabled_providers(tenant_id)
+    if not enabled:
+        return
+
+    layer = payload.get("layer", MemoryLayer.AGENT.value)
+    if hasattr(layer, "value"):
+        layer = layer.value
+
+    ingest_unit = MemoryIngestUnit(
+        event_id=str(result.get("memory_id", "")),
+        event_type="memory_stored",
+        unit_type=str(layer),
+        unit_content=payload["content"],
+    )
+
+    ingestion_service = _build_ingestion_event_service()
+    await ingestion_service.send_ingest_all_enabled(
+        tenant_id=tenant_id,
+        user_id=payload["user_id"],
+        agent_id=str(payload.get("agent_id", "")),
+        conversation_id=str(payload.get("conversation_id", "")),
+        event_type="memory_stored",
+        event_id=str(result.get("memory_id", "")),
+        units=[ingest_unit],
+    )
 
 
 async def _backend_search_hook(

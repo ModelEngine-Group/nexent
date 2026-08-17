@@ -13,7 +13,7 @@ The resulting MemorySearchContext is what gets serialized into the prompt.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from nexent.memory.embedding_model import EmbeddingModelInfo
 from nexent.memory.models import (
@@ -28,6 +28,7 @@ from nexent.memory.policy import MemoryRetrievalPolicy
 
 from consts.const import (
     AGENT_SHORT_TERM_HALF_LIFE_DAYS,
+    EXTERNAL_MEMORY_SEARCH_ENABLED,
     MMR_CANDIDATE_TOP_K,
     MMR_DUPLICATE_THRESHOLD,
     MMR_FINAL_TOP_K,
@@ -92,6 +93,7 @@ class MemoryContextService:
         self,
         retrieval_service: Optional[MemoryRetrievalService] = None,
         pipeline_enabled: bool = True,
+        external_search_hook: Optional[Callable] = None,
     ):
         """Initialize the context service.
 
@@ -100,9 +102,17 @@ class MemoryContextService:
             pipeline_enabled: When True (default), the Phase 4 retrieval
                 pipeline is applied to agent short-term + external results.
                 Set to False to preserve the Phase 2 behaviour.
+            external_search_hook: Optional async callable for Phase 3
+                transparent proxy.  Signature:
+                ``async (query, tenant_id, user_id, agent_id, conversation_id)
+                -> List[ExternalMemoryItem]``.
+                When set and ``EXTERNAL_MEMORY_SEARCH_ENABLED`` is True,
+                ``build_context`` auto-queries external providers if
+                ``external_results`` was not explicitly passed.
         """
         self.retrieval_service = retrieval_service or get_memory_retrieval_service()
         self.pipeline_enabled = pipeline_enabled
+        self._external_search_hook = external_search_hook
         self._pipeline: Optional[RetrievalPipeline] = None
 
     @property
@@ -190,6 +200,26 @@ class MemoryContextService:
             embedding_model_info=resolved_model_info,
             write_hits=bool(query),
         )
+
+        if (
+            external_results is None
+            and EXTERNAL_MEMORY_SEARCH_ENABLED
+            and self._external_search_hook is not None
+        ):
+            try:
+                external_results = await self._external_search_hook(
+                    query=query or "",
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    agent_id=agent_id,
+                    conversation_id=conversation_id,
+                )
+            except Exception:
+                logger.warning(
+                    "external_search_hook failed for tenant=%s",
+                    tenant_id,
+                    exc_info=True,
+                )
 
         if self.pipeline_enabled and results:
             pipeline_result = self.pipeline.run(

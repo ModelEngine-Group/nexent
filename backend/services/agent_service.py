@@ -21,7 +21,8 @@ from services.agent_version_service import publish_version_impl
 from utils.prompt_template_utils import normalize_prompt_generate_template_content
 from consts.const import TOOL_TYPE_MAPPING, \
     LANGUAGE, MESSAGE_ROLE, MODEL_CONFIG_MAPPING, CAN_EDIT_ALL_USER_ROLES, PERMISSION_PRIVATE, STREAM_STATUS_EVENT, \
-    DEFAULT_EN_TITLE, DEFAULT_ZH_TITLE, RUNTIME_CANCEL_POLL_INTERVAL_SECONDS
+    DEFAULT_EN_TITLE, DEFAULT_ZH_TITLE, RUNTIME_CANCEL_POLL_INTERVAL_SECONDS, \
+    EXTERNAL_MEMORY_INGEST_ENABLED
 from consts.exceptions import AppException, ForbiddenError, MemoryPreparationException, SkillDuplicateError
 from consts.error_code import ErrorCode
 from consts.agent_unavailable_reasons import AgentUnavailableReason
@@ -1522,6 +1523,50 @@ async def _stream_agent_chunks(
                 extraction_task.add_done_callback(_fa_extraction_tasks.discard)
             except Exception:
                 logger.exception("fa_memory_extraction: failed to schedule extraction task")
+
+        if (
+            EXTERNAL_MEMORY_INGEST_ENABLED
+            and terminal_status == "completed"
+            and streaming_message_id is not None
+            and memory_ctx is not None
+            and getattr(getattr(memory_ctx, "user_config", None), "memory_switch", False)
+        ):
+            async def _per_turn_supplement():
+                try:
+                    from database.conversation_db import get_units_by_message
+                    from nexent.memory.models import MemoryIngestUnit
+                    from services.memory_backend_adapter import _build_ingestion_event_service
+
+                    units = get_units_by_message(streaming_message_id)
+                    if not units:
+                        return
+                    units = [u for u in units if u["unit_type"] != "final_answer"]
+                    if not units:
+                        return
+                    ingest_units = [
+                        MemoryIngestUnit(
+                            event_id=str(u["unit_id"]),
+                            event_type="turn_completed",
+                            unit_type=u["unit_type"],
+                            unit_content=u["unit_content"],
+                            unit_index=u["unit_index"],
+                        )
+                        for u in units
+                    ]
+                    ingestion_event_service = _build_ingestion_event_service()
+                    await ingestion_event_service.send_ingest_all_enabled(
+                        tenant_id=tenant_id,
+                        user_id=user_id,
+                        agent_id=str(getattr(agent_request, "agent_id", "")),
+                        conversation_id=str(agent_request.conversation_id),
+                        event_type="turn_completed",
+                        event_id=str(streaming_message_id),
+                        units=ingest_units,
+                    )
+                except Exception as e:
+                    logger.warning("Per-turn supplement failed: %s", e)
+
+            asyncio.create_task(_per_turn_supplement())
 
 
 def get_enable_tool_id_by_agent_id(agent_id: int, tenant_id: str):

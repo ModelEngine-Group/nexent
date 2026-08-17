@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from datetime import datetime
 from typing import List, Optional
@@ -25,6 +26,22 @@ def _compute_age_days(created_at: Optional[datetime]) -> Optional[float]:
         return None
     delta = datetime.utcnow() - created_at
     return delta.total_seconds() / 86400.0
+
+
+def _dedup_by_content_hash(candidates: List[PipelineMemoryRecord]) -> List[PipelineMemoryRecord]:
+    """Remove exact-duplicate candidates by SHA-256 content hash.
+
+    When two candidates have identical content (same hash), keep the first
+    occurrence (which has higher score since candidates are pre-sorted).
+    """
+    seen: dict[str, int] = {}
+    result: list[PipelineMemoryRecord] = []
+    for c in candidates:
+        h = hashlib.sha256(c.content.encode()).hexdigest()
+        if h not in seen:
+            seen[h] = len(result)
+            result.append(c)
+    return result
 
 
 class Normalizer:
@@ -74,6 +91,8 @@ class Normalizer:
                     rec.token_count,
                     rec.is_external,
                 )
+
+        candidates = _dedup_by_content_hash(candidates)
 
         logger.debug(
             "[normalize] done: internal=%d external=%d total=%d",
