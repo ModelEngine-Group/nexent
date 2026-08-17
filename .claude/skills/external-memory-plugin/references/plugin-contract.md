@@ -2,7 +2,9 @@
 
 ## Files and manifest
 
-Each direct child of `MEMORY_PROVIDER_PLUGINS_DIR` is scanned as a plugin directory. It must contain `plugin.yaml` and the declared Python entry point.
+Each direct child of `MEMORY_PROVIDER_PLUGINS_DIR` is scanned as a plugin directory. Deployed containers use `/mnt/nexent-data/memory-provider-plugins`, backed by Docker `${ROOT_DIR}/memory-provider-plugins` or the Kubernetes `nexent-memory-plugins` PVC. A plugin must contain `plugin.yaml` and its declared Python entry point. Partner code belongs in this data directory, not under `backend/memory_provider_plugins`.
+
+Plugin entry points execute trusted Python in the backend process. Review third-party code and dependencies before installation, restrict directory writes, and prefer a read-only container mount after provisioning.
 
 Required manifest fields:
 

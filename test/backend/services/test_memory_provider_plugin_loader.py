@@ -1,7 +1,6 @@
 import sys
 import types
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -41,7 +40,7 @@ sys.modules["nexent.memory"] = memory_pkg
 sys.modules["nexent.memory.providers"] = providers_pkg
 sys.modules["nexent.memory.providers.base"] = providers_base
 
-from backend.services.memory_provider_plugin_loader import PluginLoader
+from backend.services.memory_provider_plugin_loader import PluginLoader  # noqa: E402
 
 
 @pytest.fixture
@@ -84,9 +83,11 @@ class TestProvider:
 """
 
 
-def test_load_all_valid_plugin(plugins_dir):
+def test_ac_p3_26_load_all_valid_plugin_from_configured_data_directory(plugins_dir):
     plugins_dir.mkdir()
-    _create_plugin(plugins_dir, "test-provider", VALID_MANIFEST, VALID_ENTRY)
+    plugin_dir = _create_plugin(
+        plugins_dir, "test-provider", VALID_MANIFEST, VALID_ENTRY
+    )
     loader = PluginLoader(str(plugins_dir))
     loader.load_all()
 
@@ -94,6 +95,11 @@ def test_load_all_valid_plugin(plugins_dir):
     assert len(plugins) == 1
     assert plugins[0].name == "test-provider"
     assert plugins[0].version == "1.0.0"
+    assert Path(plugins[0].entry_module.__file__).resolve().is_relative_to(
+        plugin_dir.resolve()
+    )
+    provider = loader.build_provider("test-provider", {"api_key": "placeholder"})
+    assert provider.config == {"api_key": "placeholder"}
 
 
 def test_load_all_invalid_yaml(plugins_dir):

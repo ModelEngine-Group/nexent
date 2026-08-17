@@ -22,7 +22,9 @@ memory-provider-plugins/
     └── provider.py
 ```
 
-Docker 默认把宿主机的 `memory-provider-plugins` 目录挂载到 `/mnt/nexent-data/memory-provider-plugins`。内置 Mem0 参考实现位于 `backend/memory_provider_plugins/mem0/`。
+容器内固定扫描目录是 `/mnt/nexent-data/memory-provider-plugins`，对应 Nexent 数据目录中的 `memory-provider-plugins` 子目录。Docker 使用宿主机目录挂载，Kubernetes 使用独立 PV/PVC。内置 Mem0 参考实现位于 `backend/memory_provider_plugins/mem0/`，但第三方插件应放入部署实例的 `nexent-data/memory-provider-plugins`，不需要复制进源码目录、提交 Git 或重新构建 Nexent 镜像。
+
+配置服务和 Agent runtime 必须看到同一路径及相同目录内容。Loader 会执行插件入口中的 Python 代码，因此只能安装经过审核、来源可信的插件，并使用文件系统权限限制谁能修改插件目录。
 
 ## 编写 plugin.yaml
 
@@ -160,12 +162,33 @@ pytest test/backend/memory_provider_plugins/test_mem0_provider.py -v \
 
 ## 安装与配置
 
-1. 把插件目录复制到 `MEMORY_PROVIDER_PLUGINS_DIR`。
-2. 重启配置服务，使插件加载器重新扫描目录。
-3. 在“记忆管理 → 外部记忆服务”中新增 Provider，选择插件并填写动态配置。
-4. 先保持 Provider 禁用，执行“测试检索”和“测试写入”。
-5. 测试通过后启用 Provider，并在部署配置中打开所需总开关。
-6. 发起 Agent 会话，通过唯一测试标记分别验证内置记忆和外部记忆检索。
+1. 按下文方法找到当前部署使用的 `nexent-data` 根目录。
+2. 把插件完整目录复制到其 `memory-provider-plugins/<plugin-name>` 子目录。
+3. 重启配置服务和 Agent runtime，使各自的插件加载器重新扫描已有固定目录。
+4. 在“记忆管理 → 外部记忆服务”中新增 Provider，选择插件并填写动态配置。
+5. 先保持 Provider 禁用，执行“测试检索”和“测试写入”。
+6. 测试通过后启用 Provider，并在部署配置中打开所需总开关。
+7. 发起 Agent 会话，通过唯一测试标记分别验证内置记忆和外部记忆检索。
+
+Docker/Compose 部署：部署脚本默认把 `ROOT_DIR` 设为 `$HOME/nexent-data`，也可能由 `--root-dir` 参数或 `deploy/env/.env` 中的 `ROOT_DIR` 覆盖。因此插件宿主机位置为：
+
+```bash
+${ROOT_DIR}/memory-provider-plugins/<plugin-name>
+```
+
+可执行以下命令确认实际值，不要假定它始终位于当前代码目录：
+
+```bash
+grep '^ROOT_DIR=' deploy/env/.env
+```
+
+Kubernetes 本地存储模式：默认宿主机位置来自 Helm `global.sharedStorage.memoryPlugins.localPath`，当前默认值为 `/var/lib/nexent-data/memory-provider-plugins`。其他 StorageClass 模式下，插件位于 `global.sharedStorage.memoryPlugins.existingClaim` 指向的 PVC（默认 `nexent-memory-plugins`）中，而不是某个固定宿主机目录。配置服务和 runtime 都把该 PVC 挂载到容器内 `/mnt/nexent-data/memory-provider-plugins`。
+
+直接运行后端进程时，应保持同一目录结构，并显式指定容器外的数据目录，例如：
+
+```bash
+export MEMORY_PROVIDER_PLUGINS_DIR="$HOME/nexent-data/memory-provider-plugins"
+```
 
 也可以通过 `GET /memory/provider-plugins` 检查插件是否被发现，通过 `/memory/providers` 系列接口管理配置。所有接口均按认证令牌中的租户隔离。
 

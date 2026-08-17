@@ -22,7 +22,9 @@ memory-provider-plugins/
     └── provider.py
 ```
 
-Docker mounts the host `memory-provider-plugins` directory at `/mnt/nexent-data/memory-provider-plugins` by default. The bundled Mem0 reference lives in `backend/memory_provider_plugins/mem0/`.
+The fixed in-container scan path is `/mnt/nexent-data/memory-provider-plugins`, the `memory-provider-plugins` child of the Nexent data directory. Docker mounts a host directory there and Kubernetes mounts a dedicated PV/PVC. The bundled Mem0 reference lives in `backend/memory_provider_plugins/mem0/`, but partner plugins belong in the deployed instance's `nexent-data/memory-provider-plugins`; they do not need to be copied into source, committed to Git, or baked into a new Nexent image.
+
+The configuration service and Agent runtime must see the same path and directory contents. The loader executes Python from plugin entry points, so install only reviewed, trusted plugins and restrict write access to the plugin directory.
 
 ## Define plugin.yaml
 
@@ -151,12 +153,33 @@ New or changed modules should maintain at least 90% coverage. A real-service int
 
 ## Install and configure
 
-1. Copy the plugin directory into `MEMORY_PROVIDER_PLUGINS_DIR`.
-2. Restart the configuration service so the loader rescans plugins.
-3. Open **Memory Management → External Memory Services**, add a provider, select the plugin, and complete its generated form.
-4. Keep the provider disabled while running test search and test ingest.
-5. Enable the provider and the required deployment kill switches after both tests pass.
-6. Run an Agent conversation with unique markers to verify built-in and external retrieval independently.
+1. Locate the deployment's `nexent-data` root as described below.
+2. Copy the complete plugin directory under its `memory-provider-plugins/<plugin-name>` child.
+3. Restart both the configuration service and Agent runtime so each loader rescans the existing fixed path.
+4. Open **Memory Management → External Memory Services**, add a provider, select the plugin, and complete its generated form.
+5. Keep the provider disabled while running test search and test ingest.
+6. Enable the provider and the required deployment kill switches after both tests pass.
+7. Run an Agent conversation with unique markers to verify built-in and external retrieval independently.
+
+Docker/Compose: the deployment script defaults `ROOT_DIR` to `$HOME/nexent-data`; `--root-dir` or `ROOT_DIR` in `deploy/env/.env` may override it. The host plugin location is therefore:
+
+```bash
+${ROOT_DIR}/memory-provider-plugins/<plugin-name>
+```
+
+Check the deployed value instead of assuming it is under the source checkout:
+
+```bash
+grep '^ROOT_DIR=' deploy/env/.env
+```
+
+Kubernetes local-storage mode: the host location comes from Helm `global.sharedStorage.memoryPlugins.localPath`, currently `/var/lib/nexent-data/memory-provider-plugins` by default. With another StorageClass, the plugin lives in the PVC named by `global.sharedStorage.memoryPlugins.existingClaim` (default `nexent-memory-plugins`), not at a universal host path. Both config and runtime mount that PVC at `/mnt/nexent-data/memory-provider-plugins` in the container.
+
+When running backend processes directly, keep the same data-directory layout and point the process at it explicitly:
+
+```bash
+export MEMORY_PROVIDER_PLUGINS_DIR="$HOME/nexent-data/memory-provider-plugins"
+```
 
 Use `GET /memory/provider-plugins` to inspect discovery and the `/memory/providers` APIs to manage configuration. All endpoints are tenant-scoped from the authentication token.
 

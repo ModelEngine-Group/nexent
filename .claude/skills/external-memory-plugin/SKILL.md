@@ -43,13 +43,14 @@ Do not let a test silently reach the internet. Real-provider tests require expli
 
 ## Verify installation and runtime
 
-1. Copy or mount the plugin under `MEMORY_PROVIDER_PLUGINS_DIR` and restart the configuration service.
-2. Confirm discovery through `GET /memory/provider-plugins` or the Memory Management UI.
-3. Create a disabled provider configuration and run test search and ingest.
-4. Enable the provider and the required deployment kill switch only after connectivity succeeds.
-5. Use unique internal and external memory markers in an Agent conversation.
-6. Inspect `nexent.memory.external_provider` spans and standard metrics for operation, provider, outcome, error code, latency, and result/unit counts.
-7. Record sanitized evidence. Do not call the feature complete when real-runtime or required telemetry evidence is unavailable; mark that verification blocked.
+1. Keep partner code outside the Nexent Git worktree and image. Locate the deployment's `nexent-data` root, then copy the plugin to its `memory-provider-plugins/<plugin-name>` child.
+2. For Docker, resolve `ROOT_DIR` from the deployment argument or `deploy/env/.env` (default `$HOME/nexent-data`). For Kubernetes local storage, read `global.sharedStorage.memoryPlugins.localPath`; for other storage classes, inspect the `nexent-memory-plugins` PVC. Do not redefine the established in-container path `/mnt/nexent-data/memory-provider-plugins`.
+3. Restart both services, then confirm discovery through `GET /memory/provider-plugins` or the Memory Management UI.
+4. Create a disabled provider configuration and run test search and ingest.
+5. Enable the provider and the required deployment kill switch only after connectivity succeeds.
+6. Use unique internal and external memory markers in an Agent conversation.
+7. Inspect `nexent.memory.external_provider` spans and standard metrics for operation, provider, outcome, error code, latency, and result/unit counts.
+8. Record sanitized evidence. Do not call the feature complete when real-runtime or required telemetry evidence is unavailable; mark that verification blocked.
 
 ## Review checklist
 
