@@ -124,6 +124,8 @@ class MockSkillInfo:
         self.config_schemas = kwargs.get('config_schemas', {})
         self.config_values = kwargs.get('config_values', {})
         self.source = kwargs.get('source', 'custom')
+        self.unique_id = kwargs.get('unique_id')
+        self.version_update_time = kwargs.get('version_update_time')
         self.group_ids = kwargs.get('group_ids', '')
         self.ingroup_permission = kwargs.get('ingroup_permission')
         self.created_by = kwargs.get('created_by', 'creator1')
@@ -1006,6 +1008,8 @@ class TestToDict:
             config_schemas={'key': 'schema'},
             config_values={'key': 'value'},
             source='custom',
+            unique_id='@owner/test-skill',
+            version_update_time=datetime(2026, 8, 7, 6, 37, 46),
             created_by='creator1',
             create_time=datetime(2024, 1, 1, 12, 0, 0),
             updated_by='updater1',
@@ -1023,6 +1027,8 @@ class TestToDict:
         assert result['config_schemas'] == {'key': 'schema'}
         assert result['config_values'] == {'key': 'value'}
         assert result['source'] == 'custom'
+        assert result['unique_id'] == '@owner/test-skill'
+        assert result['version_update_time'] == '2026-08-07T06:37:46'
         assert result['created_by'] == 'creator1'
         assert result['create_time'] == '2024-01-01T12:00:00'
         assert result['updated_by'] == 'updater1'
@@ -1311,6 +1317,43 @@ class TestCreateSkill:
 
         session.add.assert_called()
         session.commit.assert_called()
+
+    def test_create_skill_preserves_external_identity(self, monkeypatch, mock_session):
+        session, _query = mock_session
+
+        mock_ctx = MagicMock()
+        mock_ctx.__enter__.return_value = session
+        mock_ctx.__exit__.return_value = None
+        monkeypatch.setattr(
+            "backend.database.skill_db.get_db_session", lambda: mock_ctx
+        )
+        monkeypatch.setattr(
+            "backend.database.skill_db._params_value_for_db", lambda value: value
+        )
+
+        class MockSkillInfoClass(MockSkillInfo):
+            pass
+
+        monkeypatch.setattr(
+            "backend.database.skill_db.SkillInfo", MockSkillInfoClass
+        )
+
+        result = create_skill(
+            {
+                "name": "academic-writing",
+                "source": "modelscope",
+                "unique_id": "@Tashanworld/academic-writing",
+                "version_update_time": datetime(2026, 8, 7, 6, 37, 46),
+                "tool_ids": [],
+            },
+            "tenant1",
+        )
+
+        created_skill = session.add.call_args_list[0].args[0]
+        assert created_skill.source == "modelscope"
+        assert created_skill.unique_id == "@Tashanworld/academic-writing"
+        assert result["unique_id"] == "@Tashanworld/academic-writing"
+        assert result["version_update_time"] == "2026-08-07T06:37:46"
 
     def test_create_skill_with_tool_ids(self, monkeypatch, mock_session):
         """Test creating a skill with associated tool IDs."""

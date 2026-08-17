@@ -1406,6 +1406,33 @@ class SkillCreateRequest(BaseModel):
     )
 
 
+class ModelScopeSkillInstallRequest(BaseModel):
+    """Editable local metadata for installing a ModelScope Skill snapshot."""
+
+    skill_id: str = Field(..., min_length=1, max_length=255)
+    name: str = Field(..., min_length=1, max_length=100)
+    description: str = Field(default="", max_length=1000)
+    tags: List[str] = Field(default_factory=list, max_length=20)
+    group_ids: Optional[List[int]] = None
+    ingroup_permission: Optional[Literal["EDIT", "READ_ONLY", "PRIVATE"]] = None
+
+    @field_validator("skill_id", "name")
+    @classmethod
+    def normalize_required_text(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("Value cannot be empty")
+        return normalized
+
+    @field_validator("tags")
+    @classmethod
+    def normalize_tags(cls, value: List[str]) -> List[str]:
+        normalized = [tag.strip() for tag in value if tag.strip()]
+        if any(len(tag) > 100 for tag in normalized):
+            raise ValueError("Each tag must be at most 100 characters")
+        return normalized
+
+
 class SkillFileData(BaseModel):
     """A single file within a skill."""
     path: str = Field(description="Relative file path within the skill (e.g. 'SKILL.md', 'scripts/run.py')")

@@ -281,6 +281,11 @@ def _to_dict(skill: SkillInfo) -> Dict[str, Any]:
         "config_schemas": skill.config_schemas,
         "config_values": skill.config_values,
         "source": skill.source,
+        "unique_id": skill.unique_id,
+        "version_update_time": (
+            skill.version_update_time.isoformat()
+            if skill.version_update_time else None
+        ),
         "group_ids": convert_string_to_list(skill.group_ids),
         "ingroup_permission": skill.ingroup_permission,
         "created_by": skill.created_by,
@@ -435,6 +440,8 @@ def create_skill(skill_data: Dict[str, Any], tenant_id: str) -> Dict[str, Any]:
             config_values=_params_value_for_db(
                 skill_data.get("config_values")),
             source=skill_data.get("source", "custom"),
+            unique_id=skill_data.get("unique_id"),
+            version_update_time=skill_data.get("version_update_time"),
             group_ids=(
                 convert_list_to_string(skill_data.get("group_ids"))
                 if isinstance(skill_data.get("group_ids"), list)

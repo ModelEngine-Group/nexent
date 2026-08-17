@@ -5,12 +5,20 @@ from http import HTTPStatus
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, File, Form, Header, HTTPException, Query, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 from starlette.responses import JSONResponse, StreamingResponse
 
 from consts.const import APP_VERSION
-from consts.exceptions import ForbiddenError, SkillException, UnauthorizedError
+from consts.exceptions import (
+    ForbiddenError,
+    ModelScopeSkillError,
+    ModelScopeSkillNotFoundError,
+    SkillException,
+    UnauthorizedError,
+)
 from consts.model import (
+    ModelScopeSkillInstallRequest,
     NL2SkillRunRequest,
     SkillCreateRequest,
     SkillInstanceInfoRequest,
@@ -19,6 +27,7 @@ from consts.model import (
 )
 from services.asset_owner_visibility import can_view_skill
 from services.nl2skill_service import create_nl2skill_stream
+from services.modelscope_skill_service import ModelScopeSkillService
 from services.skill_service import (
     SkillService,
     get_official_skills_with_status,
@@ -34,6 +43,20 @@ _NOT_FOUND_TEXT = "not found"
 
 router = APIRouter(prefix="/skills", tags=["skills"])
 skill_creator_router = APIRouter(prefix="/skills", tags=["nl2skill"])
+
+
+def _raise_modelscope_http_error(exc: Exception) -> None:
+    if isinstance(exc, UnauthorizedError):
+        raise HTTPException(status_code=401, detail=str(exc))
+    if isinstance(exc, ModelScopeSkillNotFoundError):
+        raise HTTPException(status_code=404, detail=str(exc))
+    if isinstance(exc, ModelScopeSkillError):
+        raise HTTPException(status_code=502, detail=str(exc))
+    if isinstance(exc, SkillException):
+        if "already exists" in str(exc).lower():
+            raise HTTPException(status_code=409, detail=str(exc))
+        raise HTTPException(status_code=400, detail=str(exc))
+    raise exc
 
 
 def _asset_owner_skill_view_denied_response(skill: Optional[Dict[str, Any]], tenant_id: str):
@@ -108,6 +131,85 @@ async def list_official_skills(
         return JSONResponse(content={"skills": skills})
     except Exception as e:
         logger.error(f"Error listing official skills: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/market/list")
+async def list_market_skills(
+    search: Optional[str] = Query(None, max_length=200),
+    page_number: int = Query(1, ge=1),
+    page_size: int = Query(12, ge=1, le=50),
+    authorization: Optional[str] = Header(None),
+) -> JSONResponse:
+    """Search public ModelScope Skills without exposing installation state."""
+    try:
+        get_current_user_id(authorization)
+        result = await run_in_threadpool(
+            ModelScopeSkillService().list_skills,
+            search=search,
+            page_number=page_number,
+            page_size=page_size,
+        )
+        return JSONResponse(content=result)
+    except (UnauthorizedError, ModelScopeSkillError) as exc:
+        _raise_modelscope_http_error(exc)
+    except Exception as exc:
+        logger.error("Error listing ModelScope Skills: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/market/detail")
+async def get_market_skill_detail(
+    skill_id: str = Query(..., min_length=1, max_length=255),
+    authorization: Optional[str] = Header(None),
+) -> JSONResponse:
+    """Return exact public ModelScope Skill metadata."""
+    try:
+        get_current_user_id(authorization)
+        result = await run_in_threadpool(
+            ModelScopeSkillService().get_skill, skill_id
+        )
+        return JSONResponse(content=result)
+    except (
+        UnauthorizedError,
+        ModelScopeSkillNotFoundError,
+        ModelScopeSkillError,
+    ) as exc:
+        _raise_modelscope_http_error(exc)
+    except Exception as exc:
+        logger.error("Error reading ModelScope Skill: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.post("/market/install")
+async def install_market_skill(
+    request: ModelScopeSkillInstallRequest,
+    authorization: Optional[str] = Header(None),
+) -> JSONResponse:
+    """Install a public ModelScope snapshot as an editable tenant-local Skill."""
+    try:
+        user_id, tenant_id = get_current_user_id(authorization)
+        result = await run_in_threadpool(
+            ModelScopeSkillService().install_skill,
+            skill_id=request.skill_id,
+            name=request.name,
+            description=request.description,
+            tags=request.tags,
+            group_ids=request.group_ids,
+            ingroup_permission=request.ingroup_permission,
+            tenant_id=tenant_id,
+            user_id=user_id,
+        )
+        return JSONResponse(content=result, status_code=201)
+    except (
+        UnauthorizedError,
+        ModelScopeSkillNotFoundError,
+        ModelScopeSkillError,
+        SkillException,
+    ) as exc:
+        _raise_modelscope_http_error(exc)
+    except Exception as exc:
+        logger.error("Error installing ModelScope Skill: %s", exc, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
