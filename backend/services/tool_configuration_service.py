@@ -50,7 +50,7 @@ from services.file_management_service import get_llm_model, validate_urls_access
 from services.vectordatabase_service import get_embedding_model_by_index_name, get_rerank_model
 from utils.http_client_utils import create_httpx_client
 from database.client import minio_client
-from services.image_service import get_video_understanding_model, get_vlm_model
+from services.model_gateway_service import get_vlm_adapter
 from nexent.monitor import set_monitoring_context, set_monitoring_operation
 from services.vectordatabase_service import get_vector_db_core
 from utils.langchain_utils import discover_langchain_modules
@@ -920,9 +920,8 @@ def _validate_local_tool(
             if not tenant_id or not user_id:
                 raise ToolExecutionException(
                     f"Tenant ID and User ID are required for {tool_name} validation")
-            # get_vlm_model reads the first multimodal slot, now shown as image understanding.
             selected_model_id = instantiation_params.get("selected_model_id")
-            image_to_text_model = get_vlm_model(tenant_id=tenant_id, model_id=selected_model_id)
+            image_to_text_model = get_vlm_adapter(tenant_id, selected_model_id, slot="vlm")
             vlm_display_name = getattr(
                 image_to_text_model, 'display_name', None)
             set_monitoring_context(tenant_id=tenant_id)
@@ -940,7 +939,7 @@ def _validate_local_tool(
                 raise ToolExecutionException(
                     f"Tenant ID and User ID are required for {tool_name} validation")
             selected_model_id = instantiation_params.get("selected_model_id")
-            video_understanding_model = get_video_understanding_model(tenant_id=tenant_id, model_id=selected_model_id)
+            video_understanding_model = get_vlm_adapter(tenant_id, selected_model_id, slot="vlm3")
             model_display_name = getattr(
                 video_understanding_model, 'display_name', None)
             set_monitoring_context(tenant_id=tenant_id)

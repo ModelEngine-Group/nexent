@@ -43,7 +43,7 @@ from services.remote_mcp_service import get_remote_mcp_server_list
 
 from database.a2a_agent_db import PROTOCOL_JSONRPC
 from services.memory_config_service import build_memory_context
-from services.image_service import get_video_understanding_model, get_vlm_model
+from services.model_gateway_service import get_vlm_adapter
 from database.agent_db import (
     search_agent_info_by_agent_id,
     query_sub_agent_relations,
@@ -242,7 +242,7 @@ def _resolve_safe_input_budget(
     except UncertaintyReserveBasisUnknown as exc:
         # W2 uncertainty reserve needs context_window_tokens as the 10% basis.
         # Falls through here when a model row has max_input_tokens set but
-        # context_window_tokens is NULL — possible for rows imported before
+        # context_window_tokens is NULL - possible for rows imported before
         # W11 V1 save-time defaults landed, or for rows written directly via
         # SQL/legacy import. Degrade to the same "no W2 snapshot" branch the
         # caller already handles (falls back to W1 input_budget).
@@ -277,7 +277,7 @@ def _resolve_input_budget(
     Calls ModelCapacityResolver with the catalog + operator overrides. Returns
     snapshot.provider_input_limit_tokens and monitoring fields on success.
     Falls back to _TOKEN_THRESHOLD_LEGACY_FALLBACK with no snapshot when
-    capacity is unknown — this is the migration-window behavior before all
+    capacity is unknown - this is the migration-window behavior before all
     model rows are backfilled.
     """
     if not isinstance(model_info, dict):
@@ -1638,15 +1638,14 @@ async def create_tool_config_list(
         elif tool_config.class_name == "AnalyzeImageTool":
             selected_model_id = param_dict.get("selected_model_id")
             tool_config.metadata = {
-                # get_vlm_model reads the first multimodal slot, now shown as image understanding.
-                "vlm_model": get_vlm_model(tenant_id=tenant_id, model_id=selected_model_id),
+                "vlm_model": get_vlm_adapter(tenant_id, selected_model_id, slot="vlm"),
                 "storage_client": minio_client,
                 "validate_url_access": lambda urls: validate_urls_access(urls, user_id)
             }
         elif tool_config.class_name in ["AnalyzeAudioTool", "AnalyzeVideoTool"]:
             selected_model_id = param_dict.get("selected_model_id")
             tool_config.metadata = {
-                "vlm_model": get_video_understanding_model(tenant_id=tenant_id, model_id=selected_model_id),
+                "vlm_model": get_vlm_adapter(tenant_id, selected_model_id, slot="vlm3"),
                 "storage_client": minio_client,
                 "validate_url_access": lambda urls: validate_urls_access(urls, user_id)
             }
