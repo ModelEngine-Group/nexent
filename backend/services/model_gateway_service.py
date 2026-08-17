@@ -1,7 +1,17 @@
-"""Backend bridge: turn DB model configs into gateway adapters.
+"""Backend bridge: DB model config → :class:`ModelContext` → :class:`MultimodalGateway`.
 
-Service factory functions keep their signatures but delegate adapter
-construction to the gateway via :func:`get_adapter_from_config`.
+This is the *thin* Phase 2 bridge. Existing service factory functions keep
+their public signatures; they fetch the model config dict (unchanged) and
+delegate construction to the gateway via :func:`get_adapter_from_config`::
+
+    cfg = tenant_config_manager.get_model_config(...)
+    model = get_adapter_from_config(cfg, "llm", "llm", tenant_id,
+                                    temperature=0.3, top_p=0.95)
+
+The vendor ``if model_factory == ...`` dispatch is replaced by registry
+resolution keyed on the normalized factory, so adding a vendor becomes one
+``@register_adapter`` decorator + one ``_FACTORY_NORMALIZE`` entry — the
+service layer is untouched.
 """
 
 from __future__ import annotations
@@ -80,7 +90,7 @@ def _coalesce(*vals: Any) -> Any:
     """Return the first non-``None`` value, or ``None`` if all are ``None``.
 
     Unlike ``a or b``, this preserves falsy-but-valid values such as
-    ``temperature=0`` or ``top_p=0`` - an explicit ``0`` must reach the
+    ``temperature=0`` or ``top_p=0`` — an explicit ``0`` must reach the
     adapter rather than being silently replaced by the cfg/default fallback.
     """
     for v in vals:
@@ -98,17 +108,11 @@ def _config_to_context(
 ) -> ModelContext:
     """Build a modality-specific :class:`ModelContext` from a DB config + per-call extras.
 
-Args:
-    cfg: Raw model config dict from the DB (may be empty).
-    modality: The capability family identifier.
-    slot: The config slot key (e.g. "vlm" / "vlm3").
-    tenant_id: The tenant identifier.
-    **construct_extras: Per-call-site tuning (temperature, top_p, stream, ...);
-        known keys map to subclass fields directly.
-
-Returns:
-    The modality-specific :class:`ModelContext` instance.
-"""
+    ``construct_extras`` carries per-call-site tuning (temperature, top_p,
+    max_output_tokens, stream, observer, display_name, timeout_seconds,
+    language, speed_ratio, ...) so construction is behavior-preserving. Known
+    keys are mapped to subclass fields directly.
+    """
     cfg = cfg or {}
     factory = _normalize_factory(cfg.get("model_factory"), modality)
     needs_observer = modality in ("vlm", "llm", "llm_long_context")
@@ -116,6 +120,7 @@ Returns:
     if needs_observer and observer is None:
         observer = MessageObserver()
 
+    # ---- common kwargs (base class fields) ----
     common: Dict[str, Any] = dict(
         model_name=construct_extras.pop("model_name", None) or get_model_name_from_config(cfg) or "",
         base_url=cfg.get("base_url", ""),
@@ -130,7 +135,30 @@ Returns:
         timeout_seconds=_coalesce(construct_extras.pop("timeout_seconds", None), cfg.get("timeout_seconds")),
     )
 
-    if modality == "vlm":
+    # ---- modality-specific subclass construction ----
+    if modality == "llm":
+        return LLMContext(
+            **common,
+            temperature=_coalesce(construct_extras.pop("temperature", None), cfg.get("temperature")),
+            top_p=_coalesce(construct_extras.pop("top_p", None), cfg.get("top_p")),
+            stream=construct_extras.pop("stream", None),
+            max_output_tokens=_coalesce(construct_extras.pop("max_output_tokens", None), cfg.get("max_output_tokens")),
+            frequency_penalty=cfg.get("frequency_penalty"),
+            extra_body=cfg.get("extra_body"),
+        )
+    elif modality == "llm_long_context":
+        return LongContextLLMContext(
+            **common,
+            temperature=_coalesce(construct_extras.pop("temperature", None), cfg.get("temperature")),
+            top_p=_coalesce(construct_extras.pop("top_p", None), cfg.get("top_p")),
+            stream=construct_extras.pop("stream", None),
+            max_output_tokens=_coalesce(construct_extras.pop("max_output_tokens", None), cfg.get("max_output_tokens")),
+            frequency_penalty=cfg.get("frequency_penalty"),
+            extra_body=cfg.get("extra_body"),
+            max_tokens=cfg.get("max_tokens"),
+            truncation_strategy=cfg.get("truncation_strategy"),
+        )
+    elif modality == "vlm":
         caps = construct_extras.pop("capabilities", None) or {}
         return VLMContext(
             **common,
@@ -143,7 +171,8 @@ Returns:
             max_tokens=cfg.get("max_tokens"),
             capabilities=caps,
         )
-    raise ValueError(f"Unknown modality: {modality}")
+    else:
+        raise ValueError(f"Unknown modality: {modality}")
 
 
 def get_adapter_from_config(
@@ -167,23 +196,35 @@ def build_adapter_fresh(
 ):
     """Build a fresh adapter for ``cfg`` WITHOUT the gateway instance cache.
 
-Used by per-call construction sites (e.g. voice streaming sessions) where
-vendor config carries per-request params (api_key, ws_url, voice, ...) that
-must not collide across tenants under a shared cache key.
-
-Args:
-    cfg: Raw model config dict.
-    modality: The capability family identifier.
-    slot: The config slot key.
-    tenant_id: The tenant identifier.
-    **construct_extras: Extra fields forwarded to the context.
-
-Returns:
-    A newly constructed adapter instance.
-"""
+    Used by per-call construction sites (e.g. voice streaming sessions) where
+    vendor config carries per-request params (api_key, ws_url, voice, …) that
+    must not collide across tenants under a shared cache key.
+    """
     context = _config_to_context(cfg, modality, slot, tenant_id, **construct_extras)
     cls = get_registry().resolve(context.factory, modality)
     return cls(context)
+
+
+# ---- Convenience wrappers (modality-specific defaults) -------------------
+
+def get_llm_adapter_from_config(
+    cfg: Optional[dict],
+    tenant_id: Optional[str] = None,
+    modality: str = "llm",
+    **construct_extras: Any,
+):
+    """LLM / long-context-LLM adapter. ``modality`` = ``"llm"`` or
+    ``"llm_long_context"``."""
+    return get_adapter_from_config(cfg, modality, "llm", tenant_id, **construct_extras)
+
+
+def get_vlm_adapter_from_config(
+    cfg: Optional[dict],
+    tenant_id: Optional[str] = None,
+    slot: str = "vlm",
+    **construct_extras: Any,
+):
+    return get_adapter_from_config(cfg, "vlm", slot, tenant_id, **construct_extras)
 
 
 def _fetch_slot_config(tenant_id, model_id, expected_type, slot_key):
@@ -202,6 +243,41 @@ def _fetch_slot_config(tenant_id, model_id, expected_type, slot_key):
     )
 
 
+def get_vlm_adapter(tenant_id: str, model_id: Optional[int] = None, slot: str = "vlm"):
+    """Resolve the VLM adapter directly (bridge owns config-fetch).
+
+    Replaces ``image_service.get_vlm_model`` / ``get_video_understanding_model``.
+    ``slot`` = ``"vlm"`` (image) or ``"vlm3"`` (video/audio).
+    """
+    cfg = _fetch_slot_config(tenant_id, model_id, expected_type=slot, slot_key=slot)
+    if not cfg:
+        return None
+    return get_gateway().get_adapter(_config_to_context(cfg, "vlm", slot, tenant_id))
+
+
+def get_llm_adapter(tenant_id: str, model_id: Optional[int] = None, modality: str = "llm"):
+    """Resolve the LLM (or long-context) adapter directly (bridge owns config-fetch).
+
+    Replaces ``file_management_service.get_llm_model``. ``modality`` = ``"llm"``
+    (standard) or ``"llm_long_context"`` (AnalyzeTextFile long-context).
+    """
+    if model_id:
+        cfg = get_model_by_model_id(int(model_id), tenant_id)
+        if not cfg:
+            raise ValueError(f"Model not found: {model_id}")
+        if cfg.get("model_type") != "llm":
+            raise ValueError(f"Selected model {model_id} is not an LLM model")
+    else:
+        cfg = tenant_config_manager.get_model_config(
+            key=MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id
+        )
+    if not cfg:
+        return None
+    return get_gateway().get_adapter(
+        _config_to_context(cfg, modality, "llm", tenant_id, observer=MessageObserver())
+    )
+
+
 def _fetch_voice_config(tenant_id, model_type):
     """Fetch an STT/TTS config from tenant_config or model_records (voice fallback)."""
     try:
@@ -217,33 +293,3 @@ def _fetch_voice_config(tenant_id, model_type):
     except Exception:
         pass
     return None
-
-
-def get_vlm_adapter_from_config(
-    cfg: Optional[dict],
-    tenant_id: Optional[str] = None,
-    slot: str = "vlm",
-    **construct_extras: Any,
-):
-    return get_adapter_from_config(cfg, "vlm", slot, tenant_id, **construct_extras)
-
-
-def get_vlm_adapter(tenant_id: str, model_id: Optional[int] = None, slot: str = "vlm"):
-    """Resolve the VLM adapter directly (bridge owns config-fetch).
-
-Replaces ``image_service.get_vlm_model`` / ``get_video_understanding_model``.
-
-Args:
-    tenant_id: The tenant identifier.
-    model_id: Optional model id; defaults to the slot config when omitted.
-    slot: "vlm" (image) or "vlm3" (video/audio).
-
-Returns:
-    A VLM adapter instance, or ``None`` when no config is available.
-"""
-    cfg = _fetch_slot_config(tenant_id, model_id, expected_type=slot, slot_key=slot)
-    if not cfg:
-        return None
-    return get_gateway().get_adapter(_config_to_context(cfg, "vlm", slot, tenant_id))
-
-

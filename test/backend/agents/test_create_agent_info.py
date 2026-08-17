@@ -1205,7 +1205,7 @@ class TestCreateToolConfigList:
 
         with patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
                 patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
-                patch('backend.agents.create_agent_info.get_llm_model') as mock_get_llm_model, \
+                patch('backend.agents.create_agent_info.get_llm_adapter') as mock_get_llm_model, \
                 patch('backend.agents.create_agent_info.minio_client', new_callable=MagicMock) as mock_minio_client:
 
             mock_search_tools.return_value = [
@@ -1226,7 +1226,7 @@ class TestCreateToolConfigList:
 
             assert len(result) == 1
             assert result[0] is mock_tool_instance
-            mock_get_llm_model.assert_called_once_with(tenant_id="tenant_1", model_id=None)
+            mock_get_llm_model.assert_called_once_with("tenant_1", None, modality="llm_long_context")
             # Verify metadata includes validate_url_access lambda
             assert "llm_model" in mock_tool_instance.metadata
             assert "storage_client" in mock_tool_instance.metadata
@@ -1598,7 +1598,7 @@ class TestCreateToolConfigList:
                 patch('backend.agents.create_agent_info.get_embedding_model_by_index_name') as mock_embedding, \
                 patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank, \
                 patch('backend.agents.create_agent_info.get_knowledge_name_map_by_index_names', return_value={"idx_override": "Override KB"}), \
-                patch('backend.agents.create_agent_info.get_llm_model', return_value='llm-model'):
+                patch('backend.agents.create_agent_info.get_llm_adapter', return_value='llm-model'):
             mock_tool_config.side_effect = [kb_tool, analyze_tool]
             mock_get_vector_db_core.return_value = 'vdb-core'
             mock_embedding.return_value = ('embedding-model', 1, {'status': 'ok'})
@@ -1677,7 +1677,7 @@ class TestCreateToolConfigList:
         with patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config, \
                 patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
                 patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
-                patch('backend.agents.create_agent_info.get_llm_model', return_value='llm-model'):
+                patch('backend.agents.create_agent_info.get_llm_adapter', return_value='llm-model'):
             mock_tool_config.return_value = mock_tool_instance
 
             mock_search_tools.return_value = [
@@ -1900,7 +1900,7 @@ class TestCreateToolConfigList:
         with patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config, \
                 patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
                 patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
-                patch('backend.agents.create_agent_info.get_llm_model') as mock_get_llm_model, \
+                patch('backend.agents.create_agent_info.get_llm_adapter') as mock_get_llm_model, \
                 patch('backend.agents.create_agent_info.minio_client', new_callable=MagicMock), \
                 patch('backend.agents.create_agent_info.validate_urls_access') as mock_validate:
 
@@ -2209,7 +2209,7 @@ class TestCreateAgentConfig:
     @pytest.mark.asyncio
     async def test_create_agent_config_basic(self):
         """Test case for basic agent configuration creation"""
-        # Reset module-level mock - parallel_executor appends an extra
+        # Reset module-level mock — parallel_executor appends an extra
         # ToolConfig call after create_tool_config_list returns.  Both
         # call history and side_effect must be cleared because prior
         # tests may have left an exhausted iterator on the shared mock.
@@ -6916,7 +6916,7 @@ class TestCreateAgentConfigMemoryBuildFailure:
             )
             mock_search_tool.return_value.forward = MagicMock(return_value="")
 
-            # Should NOT raise - the exception is caught and warning logged
+            # Should NOT raise — the exception is caught and warning logged
             result = await create_agent_config("a1", "t1", "u1", "en", "query")
             assert result is not None
             tool_names = [
@@ -6980,7 +6980,7 @@ class TestCreateAgentConfigMemoryContextServiceFailure:
             )
             mock_search_tool.return_value.forward = MagicMock(return_value="")
 
-            # Should NOT raise - the error is caught
+            # Should NOT raise — the error is caught
             result = await create_agent_config("a1", "t1", "u1", "en", "query")
             assert result is not None
             mock_search_tool.assert_not_called()

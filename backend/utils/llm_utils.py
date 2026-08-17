@@ -5,9 +5,8 @@ from consts.const import MESSAGE_ROLE, THINK_END_PATTERN, THINK_START_PATTERN
 from consts.error_code import ErrorCode
 from consts.exceptions import AppException
 from database.model_management_db import get_model_by_model_id
-from nexent.core.models import OpenAIModel
+from services.model_gateway_service import get_llm_adapter_from_config
 from nexent.monitor import set_monitoring_context, set_monitoring_operation
-from utils.config_utils import get_model_name_from_config
 
 logger = logging.getLogger("llm_utils")
 
@@ -75,14 +74,11 @@ def call_llm_for_system_prompt(
 
     timeout_seconds = llm_model_config.get("timeout_seconds") if llm_model_config else None
 
-    llm = OpenAIModel(
-        model_id=get_model_name_from_config(llm_model_config) if llm_model_config else "",
-        api_base=llm_model_config.get("base_url", "") if llm_model_config else "",
-        api_key=llm_model_config.get("api_key", "") if llm_model_config else "",
+    llm = get_llm_adapter_from_config(
+        llm_model_config,
+        tenant_id,
         temperature=0.3,
         top_p=0.95,
-        model_factory=llm_model_config.get("model_factory") if llm_model_config else None,
-        ssl_verify=llm_model_config.get("ssl_verify", True) if llm_model_config else True,
         display_name=display_name or None,
         timeout_seconds=timeout_seconds,
     )
