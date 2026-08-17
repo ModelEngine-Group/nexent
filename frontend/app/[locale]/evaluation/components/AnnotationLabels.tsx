@@ -266,6 +266,7 @@ export default function AnnotationLabels({
               value={f.annotation_type}
               onChange={(v) => setF({ ...f, annotation_type: v })}
               options={TYPE_OPTIONS}
+              disabled={!!editing}
             />
           </Flex>
           {f.annotation_type === "classification" && (
