@@ -4,6 +4,7 @@ import functools
 import inspect
 import json
 import logging
+import os
 import re
 import time
 from dataclasses import replace
@@ -343,6 +344,9 @@ class NexentAgent:
                 # kds_name_to_id_map is exclude=True; inject via metadata after init
                 filtered_params = {k: v for k, v in params.items()
                                    if k not in ["kds_name_to_id_map"]}
+                filtered_params["server_url"] = os.getenv("AIDP_SERVER_URL", "")
+                filtered_params["api_key"] = os.getenv("AIDP_API_KEY", "")
+                filtered_params["tenant_id"] = os.getenv("AIDP_TENANT_ID", "aidp")
                 tools_obj = tool_class(**filtered_params)
                 tools_obj.observer = self.observer
                 tools_obj.kds_name_to_id_map = tool_config.metadata.get(

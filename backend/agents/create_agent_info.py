@@ -1413,6 +1413,9 @@ async def create_tool_config_list(
                 "api_key": AIDP_API_KEY,
                 "tenant_id": AIDP_TENANT_ID,
             })
+            param_dict.pop("server_url", None)
+            param_dict.pop("api_key", None)
+            param_dict.pop("tenant_id", None)
 
         # v7.1: inject the runtime whitelist for AidpSearchTool. The
         # permission service recomputes it on every agent call so per-KB
@@ -1458,7 +1461,7 @@ async def create_tool_config_list(
             existing = tool_config.metadata if isinstance(tool_config.metadata, dict) else {}
             tool_config.metadata = {
                 **existing,
-                "allowed_kds_set": _allowed_kds_set,
+                "allowed_kds_set": list(_allowed_kds_set),
                 "kds_name_to_id_map": _kds_name_to_id_map,
             }
             tool_class_name = tool.get("class_name")

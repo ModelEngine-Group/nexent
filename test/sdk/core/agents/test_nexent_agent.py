@@ -5058,7 +5058,12 @@ class TestCreateLocalToolAidpSearchTool:
                 del nexent_agent.__dict__["AidpSearchTool"]
 
         assert result is mock_tool_instance
-        mock_tool_class.assert_called_once_with(param1="val")
+        mock_tool_class.assert_called_once_with(
+            param1="val",
+            server_url="",
+            api_key="",
+            tenant_id="aidp",
+        )
         mock_tool_instance.set_allowed_kds.assert_called_once_with(["kb1", "kb2"])
         assert mock_tool_instance.observer == nexent_agent_instance.observer
 
