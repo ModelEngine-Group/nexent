@@ -21,9 +21,13 @@ from tool_collection.mcp.nl2agent_mcp_tools import (
     NL2A_WRAPPER_NAME,
     Nl2aAgentDraftInput,
     Nl2aLocalMcpRecommendationInput,
+    RequirementClarificationQuestion,
     SEARCH_INSTALLED_MCP_TOOLS_DESCRIPTION,
     SEARCH_INSTALLED_MCP_TOOLS_NAME,
+    SAVE_AGENT_DRAFT_FIELDS_DESCRIPTION,
+    SAVE_AGENT_DRAFT_FIELDS_NAME,
     nl2a_wrapper,
+    save_agent_draft_fields,
     search_installed_mcp_tools,
 )
 
@@ -482,9 +486,11 @@ async def test_mcp_search_registration_has_stable_name_schema_and_marker():
     mounted_tools = await parent.get_tools()
     tool = mounted_tools[SEARCH_INSTALLED_MCP_TOOLS_NAME]
     wrapper_tool = mounted_tools[NL2A_WRAPPER_NAME]
+    save_tool = mounted_tools[SAVE_AGENT_DRAFT_FIELDS_NAME]
 
     assert LOCAL_MCP_TOOL_NAME_OVERRIDES == {
         SEARCH_INSTALLED_MCP_TOOLS_NAME: SEARCH_INSTALLED_MCP_TOOLS_NAME,
+        SAVE_AGENT_DRAFT_FIELDS_NAME: SAVE_AGENT_DRAFT_FIELDS_NAME,
         NL2A_WRAPPER_NAME: NL2A_WRAPPER_NAME,
     }
     assert f"local_{SEARCH_INSTALLED_MCP_TOOLS_NAME}" not in mounted_tools
@@ -499,9 +505,13 @@ async def test_mcp_search_registration_has_stable_name_schema_and_marker():
     assert wrapper_tool.name == NL2A_WRAPPER_NAME
     assert wrapper_tool.description == NL2A_WRAPPER_DESCRIPTION
     assert wrapper_tool.meta == NL2AGENT_MCP_TOOL_META
+    assert save_tool.description == SAVE_AGENT_DRAFT_FIELDS_DESCRIPTION
+    assert save_tool.parameters["required"] == ["agent_id", "fields"]
+    assert set(save_tool.parameters["properties"]) == {"agent_id", "fields"}
     assert wrapper_tool.parameters["required"] == ["subtype"]
     assert set(wrapper_tool.parameters["properties"]) == {
         "subtype",
+        "questions",
         "search_result",
         "selected_tool_ids",
         "language",
@@ -516,6 +526,7 @@ async def test_mcp_search_registration_has_stable_name_schema_and_marker():
         "few_shot_examples",
     }
     assert wrapper_tool.parameters["properties"]["subtype"]["enum"] == [
+        "requirement_clarification",
         "local_mcp_recommendation",
         "agent_draft",
     ]
@@ -530,6 +541,154 @@ async def test_mcp_search_registration_has_stable_name_schema_and_marker():
     assert few_shot_schema["maxItems"] == 2
     assert few_shot_schema["description"] == "Exactly two structured few-shot examples."
     assert wrapper_tool.meta["nexent_internal"] is True
+
+
+@pytest.mark.asyncio
+async def test_save_agent_draft_fields_emits_state_only_for_creation(mocker):
+    mocker.patch.object(
+        nl2agent_mcp_tools_module,
+        "get_http_request",
+        return_value=SimpleNamespace(headers={"Authorization": "Bearer token"}),
+    )
+    mocker.patch.object(
+        nl2agent_mcp_tools_module,
+        "get_current_user_id",
+        return_value=("user-a", "tenant-a"),
+    )
+    save_impl = mocker.patch.object(
+        nl2agent_service,
+        "save_agent_draft_fields_impl",
+        return_value={
+            "status": "success",
+            "agent_id": 1042,
+            "created": True,
+            "updated_fields": [
+                "name",
+                "display_name",
+                "description",
+                "business_description",
+            ],
+        },
+    )
+    fields = {
+        "name": "research_assistant",
+        "display_name": "Research Assistant",
+        "description": "Researches a topic.",
+        "business_description": "Research and summarize.",
+    }
+
+    created_result = await save_agent_draft_fields(None, fields)
+
+    result_json, state_wrapper = created_result.split("\n", 1)
+    assert json.loads(result_json) == {
+        "status": "success",
+        "agent_id": 1042,
+        "created": True,
+        "updated_fields": [
+            "name",
+            "display_name",
+            "description",
+            "business_description",
+        ],
+    }
+    assert state_wrapper == (
+        '<nl2a_state>{"event":"agent_draft_created","agent_id":1042}'
+        "</nl2a_state>"
+    )
+    save_impl.assert_called_once()
+
+    save_impl.return_value = {
+        "status": "success",
+        "agent_id": 1042,
+        "created": False,
+        "updated_fields": ["description"],
+    }
+    updated_result = await save_agent_draft_fields(
+        1042,
+        {"description": "Updated"},
+    )
+    assert "nl2a_state" not in updated_result
+    assert json.loads(updated_result)["created"] is False
+
+
+@pytest.mark.asyncio
+async def test_save_agent_draft_fields_returns_stable_non_sensitive_errors(mocker):
+    mocker.patch.object(
+        nl2agent_mcp_tools_module,
+        "get_http_request",
+        return_value=SimpleNamespace(headers={"Authorization": "Bearer token"}),
+    )
+    mocker.patch.object(
+        nl2agent_mcp_tools_module,
+        "get_current_user_id",
+        return_value=("user-a", "tenant-a"),
+    )
+    mocker.patch.object(
+        nl2agent_service,
+        "save_agent_draft_fields_impl",
+        side_effect=nl2agent_service.Nl2AgentDraftSaveError("agent_read_only"),
+    )
+
+    error_result = json.loads(
+        await save_agent_draft_fields(1042, {"description": "Updated"})
+    )
+    assert error_result == {
+        "status": "error",
+        "agent_id": 1042,
+        "created": False,
+        "updated_fields": [],
+        "code": "agent_read_only",
+        "retryable": False,
+    }
+    assert "database" not in json.dumps(error_result).lower()
+
+    invalid_result = json.loads(
+        await save_agent_draft_fields(1042, {"description": None})
+    )
+    assert invalid_result["code"] == "invalid_agent_fields"
+    assert invalid_result["retryable"] is False
+
+    nl2agent_mcp_tools_module.get_current_user_id.side_effect = PermissionError(
+        "private authorization details"
+    )
+    unauthorized_result = json.loads(
+        await save_agent_draft_fields(1042, {"description": "Updated"})
+    )
+    assert unauthorized_result["code"] == "unauthorized"
+    assert "private authorization details" not in json.dumps(unauthorized_result)
+
+    nl2agent_mcp_tools_module.get_current_user_id.side_effect = RuntimeError(
+        "private database details"
+    )
+    failed_result = json.loads(
+        await save_agent_draft_fields(1042, {"description": "Updated"})
+    )
+    assert failed_result["code"] == "draft_save_failed"
+    assert failed_result["retryable"] is True
+    assert "private database details" not in json.dumps(failed_result)
+
+
+def test_requirement_clarification_rejects_invalid_question_shapes():
+    with pytest.raises(ValidationError, match="cannot have options"):
+        RequirementClarificationQuestion(
+            question_id="details",
+            question_type="text",
+            title="Add details",
+            options=[{"option_id": "unexpected", "label": "Unexpected"}],
+        )
+
+    with pytest.raises(ValidationError, match="require options"):
+        RequirementClarificationQuestion(
+            question_id="output",
+            question_type="single_choice",
+            title="Choose an output",
+        )
+
+
+@pytest.mark.asyncio
+async def test_requirement_clarification_wrapper_requires_questions():
+    with pytest.raises(ValueError, match="requires questions"):
+        await nl2a_wrapper(subtype="requirement_clarification")
 
 
 @pytest.mark.asyncio

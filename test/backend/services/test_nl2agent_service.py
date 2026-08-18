@@ -3,13 +3,397 @@ import json
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from pydantic import ValidationError
 
 from consts.model import HistoryItem, NL2AgentRunRequest
 from services.nl2agent_service import (
+    Nl2AgentDraftSaveError,
     build_nl2agent_run_info,
     create_nl2agent_stream,
+    save_agent_draft_fields_impl,
     search_installed_mcp_tools_by_query,
 )
+from tool_collection.mcp.nl2agent_mcp_tools import AgentDraftFields
+
+
+def _basic_draft_fields(**overrides):
+    values = {
+        "name": "research_assistant",
+        "display_name": "Research Assistant",
+        "description": "Collect and summarize reliable information.",
+        "business_description": "Research, verify, and summarize findings.",
+    }
+    values.update(overrides)
+    return AgentDraftFields(**values)
+
+
+def _mock_create_dependencies(mocker, *, existing_agents=None):
+    mocker.patch(
+        "services.nl2agent_service.tenant_config_manager.get_model_config",
+        return_value={
+            "model_id": 17,
+            "model_type": "llm",
+            "connect_status": "available",
+        },
+    )
+    mocker.patch(
+        "services.nl2agent_service.query_all_agent_info_by_tenant_id",
+        return_value=existing_agents or [],
+    )
+    mocker.patch(
+        "services.agent_service._get_user_group_ids",
+        return_value="3,5",
+    )
+
+
+def test_create_agent_draft_sets_ordinary_agent_defaults(mocker):
+    _mock_create_dependencies(mocker)
+    mocker.patch(
+        "services.agent_service._check_agent_name_duplicate",
+        return_value=False,
+    )
+    mocker.patch(
+        "services.agent_service._check_agent_display_name_duplicate",
+        return_value=False,
+    )
+    create_agent = mocker.patch(
+        "services.nl2agent_service.create_agent",
+        return_value={"agent_id": 1042},
+    )
+
+    result = save_agent_draft_fields_impl(
+        agent_id=None,
+        fields=_basic_draft_fields(),
+        tenant_id="tenant-a",
+        user_id="user-a",
+    )
+
+    assert result == {
+        "status": "success",
+        "agent_id": 1042,
+        "created": True,
+        "updated_fields": [
+            "name",
+            "display_name",
+            "description",
+            "business_description",
+        ],
+    }
+    create_values = create_agent.call_args.kwargs["agent_info"]
+    assert create_values == {
+        "name": "research_assistant",
+        "display_name": "Research Assistant",
+        "description": "Collect and summarize reliable information.",
+        "business_description": "Research, verify, and summarize findings.",
+        "model_ids": [17],
+        "prompt_template_id": 0,
+        "prompt_template_name": "system_default",
+        "group_ids": "3,5",
+        "max_steps": 15,
+        "is_main_agent": True,
+        "provide_run_summary": False,
+        "enabled": True,
+    }
+    assert create_agent.call_args.kwargs["tenant_id"] == "tenant-a"
+    assert create_agent.call_args.kwargs["user_id"] == "user-a"
+
+
+def test_create_agent_draft_reuses_deterministic_name_suffixes(mocker):
+    existing_agents = [{"agent_id": 1, "name": "research_assistant"}]
+    _mock_create_dependencies(mocker, existing_agents=existing_agents)
+    mocker.patch(
+        "services.agent_service._check_agent_name_duplicate",
+        return_value=True,
+    )
+    mocker.patch(
+        "services.agent_service._check_agent_display_name_duplicate",
+        return_value=True,
+    )
+    generate_name = mocker.patch(
+        "services.agent_service._generate_unique_agent_name_with_suffix",
+        return_value="research_assistant_1",
+    )
+    generate_display_name = mocker.patch(
+        "services.agent_service._generate_unique_display_name_with_suffix",
+        return_value="Research Assistant_1",
+    )
+    create_agent = mocker.patch(
+        "services.nl2agent_service.create_agent",
+        return_value={"agent_id": 12},
+    )
+
+    save_agent_draft_fields_impl(
+        None,
+        _basic_draft_fields(),
+        "tenant-a",
+        "user-a",
+    )
+
+    values = create_agent.call_args.kwargs["agent_info"]
+    assert values["name"] == "research_assistant_1"
+    assert values["display_name"] == "Research Assistant_1"
+    generate_name.assert_called_once()
+    generate_display_name.assert_called_once()
+
+
+def test_update_agent_draft_changes_only_explicit_fields_and_allows_empty_list(
+    mocker,
+):
+    mocker.patch(
+        "services.nl2agent_service.query_agent_records_for_nl2agent",
+        return_value=[
+            {
+                "agent_id": 22,
+                "tenant_id": "tenant-a",
+                "version_no": 0,
+                "delete_flag": "N",
+                "created_by": "user-a",
+            }
+        ],
+    )
+    mocker.patch(
+        "services.nl2agent_service.get_user_role_by_tenant",
+        return_value="MEMBER",
+    )
+    update_fields = mocker.patch(
+        "services.nl2agent_service.update_agent_draft_fields",
+        return_value=1,
+    )
+
+    result = save_agent_draft_fields_impl(
+        agent_id=22,
+        fields=AgentDraftFields(
+            duty_prompt="Updated duty",
+            example_questions=[],
+        ),
+        tenant_id="tenant-a",
+        user_id="user-a",
+    )
+
+    assert result["created"] is False
+    assert result["updated_fields"] == ["duty_prompt", "example_questions"]
+    update_fields.assert_called_once_with(
+        agent_id=22,
+        tenant_id="tenant-a",
+        fields={"duty_prompt": "Updated duty", "example_questions": []},
+    )
+
+
+@pytest.mark.parametrize(
+    ("records", "role", "expected_code"),
+    [
+        ([], "MEMBER", "agent_not_found"),
+        (
+            [
+                {
+                    "agent_id": 22,
+                    "tenant_id": "tenant-a",
+                    "version_no": 1,
+                    "delete_flag": "N",
+                }
+            ],
+            "MEMBER",
+            "agent_not_draft",
+        ),
+        (
+            [
+                {
+                    "agent_id": 22,
+                    "tenant_id": "tenant-a",
+                    "version_no": 0,
+                    "delete_flag": "Y",
+                }
+            ],
+            "MEMBER",
+            "agent_deleted",
+        ),
+        (
+            [
+                {
+                    "agent_id": 22,
+                    "tenant_id": "tenant-a",
+                    "version_no": 0,
+                    "delete_flag": "N",
+                    "created_by": "another-user",
+                    "ingroup_permission": "READ_ONLY",
+                }
+            ],
+            "MEMBER",
+            "agent_read_only",
+        ),
+    ],
+)
+def test_update_agent_draft_rejects_invalid_identity_or_permission(
+    mocker,
+    records,
+    role,
+    expected_code,
+):
+    mocker.patch(
+        "services.nl2agent_service.query_agent_records_for_nl2agent",
+        return_value=records,
+    )
+    mocker.patch(
+        "services.nl2agent_service.get_user_role_by_tenant",
+        return_value=role,
+    )
+    update_fields = mocker.patch(
+        "services.nl2agent_service.update_agent_draft_fields"
+    )
+
+    with pytest.raises(Nl2AgentDraftSaveError) as exc_info:
+        save_agent_draft_fields_impl(
+            22,
+            AgentDraftFields(description="Updated"),
+            "tenant-a",
+            "user-a",
+        )
+
+    assert exc_info.value.code == expected_code
+    update_fields.assert_not_called()
+
+
+def test_create_agent_draft_requires_valid_default_model_and_basic_fields(mocker):
+    mocker.patch(
+        "services.nl2agent_service.tenant_config_manager.get_model_config",
+        return_value={},
+    )
+
+    with pytest.raises(Nl2AgentDraftSaveError) as exc_info:
+        save_agent_draft_fields_impl(
+            None,
+            _basic_draft_fields(),
+            "tenant-a",
+            "user-a",
+        )
+    assert exc_info.value.code == "default_model_missing"
+
+    mocker.patch(
+        "services.nl2agent_service.tenant_config_manager.get_model_config",
+        return_value={
+            "model_id": 17,
+            "model_type": "llm",
+            "connect_status": "not_detected",
+        },
+    )
+    with pytest.raises(Nl2AgentDraftSaveError) as exc_info:
+        save_agent_draft_fields_impl(
+            None,
+            _basic_draft_fields(),
+            "tenant-a",
+            "user-a",
+        )
+    assert exc_info.value.code == "default_model_missing"
+
+    with pytest.raises(Nl2AgentDraftSaveError) as exc_info:
+        save_agent_draft_fields_impl(
+            None,
+            AgentDraftFields(name="only_a_name"),
+            "tenant-a",
+            "user-a",
+        )
+    assert exc_info.value.code == "basic_fields_required"
+
+
+@pytest.mark.parametrize("operation", ["create", "update"])
+def test_agent_draft_database_failures_are_stable_and_retryable(mocker, operation):
+    if operation == "create":
+        _mock_create_dependencies(mocker)
+        mocker.patch(
+            "services.agent_service._check_agent_name_duplicate",
+            return_value=False,
+        )
+        mocker.patch(
+            "services.agent_service._check_agent_display_name_duplicate",
+            return_value=False,
+        )
+        mocker.patch(
+            "services.nl2agent_service.create_agent",
+            side_effect=RuntimeError("private database details"),
+        )
+        agent_id = None
+        fields = _basic_draft_fields()
+    else:
+        mocker.patch(
+            "services.nl2agent_service.query_agent_records_for_nl2agent",
+            return_value=[
+                {
+                    "agent_id": 22,
+                    "tenant_id": "tenant-a",
+                    "version_no": 0,
+                    "delete_flag": "N",
+                    "created_by": "user-a",
+                }
+            ],
+        )
+        mocker.patch(
+            "services.nl2agent_service.get_user_role_by_tenant",
+            return_value="MEMBER",
+        )
+        mocker.patch(
+            "services.nl2agent_service.update_agent_draft_fields",
+            side_effect=RuntimeError("private database details"),
+        )
+        agent_id = 22
+        fields = AgentDraftFields(description="Updated")
+
+    with pytest.raises(Nl2AgentDraftSaveError) as exc_info:
+        save_agent_draft_fields_impl(
+            agent_id,
+            fields,
+            "tenant-a",
+            "user-a",
+        )
+
+    assert exc_info.value.code == "draft_save_failed"
+    assert exc_info.value.retryable is True
+
+
+def test_agent_draft_update_rejects_unexpected_row_count(mocker):
+    mocker.patch(
+        "services.nl2agent_service.query_agent_records_for_nl2agent",
+        return_value=[
+            {
+                "agent_id": 22,
+                "tenant_id": "tenant-a",
+                "version_no": 0,
+                "delete_flag": "N",
+                "created_by": "user-a",
+            }
+        ],
+    )
+    mocker.patch(
+        "services.nl2agent_service.get_user_role_by_tenant",
+        return_value="MEMBER",
+    )
+    mocker.patch(
+        "services.nl2agent_service.update_agent_draft_fields",
+        return_value=0,
+    )
+
+    with pytest.raises(Nl2AgentDraftSaveError) as exc_info:
+        save_agent_draft_fields_impl(
+            22,
+            AgentDraftFields(description="Updated"),
+            "tenant-a",
+            "user-a",
+        )
+
+    assert exc_info.value.code == "draft_save_failed"
+    assert exc_info.value.retryable is True
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {},
+        {"description": None},
+        {"unexpected": "field"},
+    ],
+)
+def test_agent_draft_fields_reject_empty_null_and_extra_patches(fields):
+    with pytest.raises(ValidationError):
+        AgentDraftFields.model_validate(fields)
 
 
 def test_search_filters_catalog_and_returns_safe_metadata(mocker):

@@ -549,6 +549,78 @@ class TestMessageObserver:
             "content": "Wrapper rejected.",
         }
 
+    def test_execution_logs_extract_valid_nl2a_state_once(self):
+        observer = MessageObserver(lang="en", enable_nl2a_wrapper=True)
+        content = (
+            '{"status":"success"}\n'
+            '<nl2a_state>{"event":"agent_draft_created","agent_id":1042}'
+            "</nl2a_state>"
+        )
+
+        observer.add_message("nl2agent", ProcessType.EXECUTION_LOGS, content)
+        observer.add_message("nl2agent", ProcessType.EXECUTION_LOGS, content)
+
+        messages = [json.loads(item) for item in observer.get_cached_message()]
+        assert [item["type"] for item in messages] == [
+            ProcessType.NL2A_STATE.value,
+            ProcessType.EXECUTION_LOGS.value,
+            ProcessType.EXECUTION_LOGS.value,
+        ]
+        assert json.loads(messages[0]["content"]) == {
+            "event": "agent_draft_created",
+            "agent_id": 1042,
+        }
+        assert messages[1]["content"] == '{"status":"success"}'
+        assert messages[2]["content"] == '{"status":"success"}'
+
+    @pytest.mark.parametrize(
+        "state_payload",
+        [
+            "{invalid json}",
+            '{"event":"agent_draft_created","agent_id":0}',
+            '{"event":"draft_updated","agent_id":1042}',
+            '{"event":"agent_draft_created","agent_id":1042,"extra":true}',
+            '["agent_draft_created",1042]',
+        ],
+    )
+    def test_execution_logs_hide_invalid_nl2a_state(self, state_payload):
+        observer = MessageObserver(lang="en", enable_nl2a_wrapper=True)
+
+        observer.add_message(
+            "nl2agent",
+            ProcessType.EXECUTION_LOGS,
+            f"<nl2a_state>{state_payload}</nl2a_state>\nVisible result.",
+        )
+
+        messages = [json.loads(item) for item in observer.get_cached_message()]
+        assert messages == [
+            {
+                "type": ProcessType.EXECUTION_LOGS.value,
+                "content": "Visible result.",
+            }
+        ]
+
+    def test_nl2a_state_extractor_ignores_non_string_content(self):
+        assert MessageObserver._extract_nl2a_state({"agent_id": 1042}) == (
+            None,
+            {"agent_id": 1042},
+        )
+
+    def test_final_answer_never_extracts_nl2a_state(self):
+        observer = MessageObserver(lang="en", enable_nl2a_wrapper=True)
+        content = (
+            '<nl2a_state>{"event":"agent_draft_created","agent_id":1042}'
+            "</nl2a_state>"
+        )
+
+        observer.add_message("nl2agent", ProcessType.FINAL_ANSWER, content)
+
+        message = json.loads(observer.get_cached_message()[0])
+        assert message == {
+            "type": ProcessType.FINAL_ANSWER.value,
+            "content": content,
+        }
+
     def test_add_model_reasoning_content(self):
         """Test add_model_reasoning_content method"""
         observer = MessageObserver()

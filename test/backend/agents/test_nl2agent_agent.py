@@ -17,7 +17,13 @@ from tool_collection.mcp.nl2agent_mcp_tools import (
     NL2A_WRAPPER_NAME,
     Nl2aAgentDraftInput,
     Nl2aFewShotToolCall,
+    RecommendResourcesInput,
+    RequirementClarificationPayload,
+    ResourceRequirement,
+    SearchInstalledResourcesInput,
+    SearchUninstalledResourcesInput,
     SEARCH_INSTALLED_MCP_TOOLS_NAME,
+    SAVE_AGENT_DRAFT_FIELDS_NAME,
     build_nl2a_wrapper,
 )
 
@@ -143,14 +149,16 @@ def test_build_nl2agent_system_prompt_is_runtime_specific(
     assert "</nl2a>" not in prompt
     assert "final_answer(" not in prompt
     assert 'subtype="local_mcp_recommendation"' in prompt
+    assert 'subtype="requirement_clarification"' in prompt
     assert 'subtype="agent_draft"' in prompt
+    assert "save_agent_draft_fields" in prompt
     assert 'result = json.loads(runtime_search(keywords=[' in prompt
     assert "wrapped = runtime_wrapper(" in prompt
     assert "search_result=result" in prompt
     assert "import json" in prompt
     assert "few_shots_prompt" not in prompt
     code_blocks = re.findall(r"<code>\n(.*?)\n</code>", prompt, re.DOTALL)
-    assert len(code_blocks) == 3
+    assert len(code_blocks) == 5
     for code_block in code_blocks:
         ast.parse(code_block)
     assert code_blocks[-1].count('{"user_input":') == 2
@@ -216,6 +224,40 @@ def test_nl2agent_models_preserve_tool_inputs_and_define_agent_draft():
     }
 
 
+def test_phase_one_freezes_five_tool_input_models_and_clarification_wrapper():
+    requirement = ResourceRequirement(
+        requirement_id="source",
+        query="Find reliable source material",
+    )
+    assert SearchInstalledResourcesInput(requirements=[requirement]).requirements
+    assert SearchUninstalledResourcesInput(
+        requirements=[requirement],
+        scope="internal",
+    ).exclude_refs == []
+    assert RecommendResourcesInput(candidate_refs=["tool:7"]).recommended_refs == []
+
+    wrapped = build_nl2a_wrapper(
+        subtype="requirement_clarification",
+        questions=[
+            {
+                "question_id": "output",
+                "question_type": "single_choice",
+                "title": "What should the agent produce?",
+                "required": True,
+                "options": [
+                    {"option_id": "report", "label": "A concise report"}
+                ],
+                "allow_other": True,
+                "other_input_expanded": True,
+            }
+        ],
+    )
+    payload = json.loads(wrapped.split("<nl2a>", 1)[1].split("</nl2a>", 1)[0])
+    clarification = RequirementClarificationPayload.model_validate(payload)
+    assert clarification.agent_id is None
+    assert clarification.questions[0].other_input_expanded is True
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("language", ["zh", "en"])
 async def test_create_nl2agent_agent_config_has_only_runtime_tools(language):
@@ -224,20 +266,35 @@ async def test_create_nl2agent_agent_config_has_only_runtime_tools(language):
 
     assert config.name == "__nl2agent_runtime__"
     assert config.model_name == "main_model"
-    assert config.max_steps == 5
+    assert config.max_steps == 8
     assert config.enable_planning is False
     assert [tool.name for tool in config.tools] == [
         SEARCH_INSTALLED_MCP_TOOLS_NAME,
+        SAVE_AGENT_DRAFT_FIELDS_NAME,
         NL2A_WRAPPER_NAME,
     ]
     assert [tool.description for tool in config.tools] == [
         registered_tools[SEARCH_INSTALLED_MCP_TOOLS_NAME].description,
+        registered_tools[SAVE_AGENT_DRAFT_FIELDS_NAME].description,
         registered_tools[NL2A_WRAPPER_NAME].description,
     ]
     assert all(tool.source == "mcp" for tool in config.tools)
     assert all(tool.usage == "outer-apis" for tool in config.tools)
     assert config.tools[0].inputs == '{"keywords": "list[str]"}'
-    wrapper_inputs = json.loads(config.tools[1].inputs)
+    save_inputs = json.loads(config.tools[1].inputs)
+    assert save_inputs["agent_id"] == "int | None"
+    assert set(save_inputs["fields"]) == {
+        "name",
+        "display_name",
+        "description",
+        "business_description",
+        "duty_prompt",
+        "constraint_prompt",
+        "few_shots_prompt",
+        "greeting_message",
+        "example_questions",
+    }
+    wrapper_inputs = json.loads(config.tools[2].inputs)
     assert wrapper_inputs["subtype"] == "str"
     assert wrapper_inputs["search_result"] == "dict | None"
     assert wrapper_inputs["language"] == "str | None"
@@ -247,9 +304,9 @@ async def test_create_nl2agent_agent_config_has_only_runtime_tools(language):
     )
     assert all(tool.metadata is None for tool in config.tools)
     expected_persistence_rule = (
-        "Agent persistence is handled by the product flow"
+        "creates a real ordinary Agent database draft"
         if language == "en"
-        else "持久化由产品流程完成"
+        else "创建真实普通 Agent 数据库草稿"
     )
     assert expected_persistence_rule in config.instructions
 
