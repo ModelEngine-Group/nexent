@@ -10,7 +10,10 @@ import { updateToolList } from "@/services/mcpService";
 import { useAgentStore } from "@/stores/agentStore";
 import { useToolList } from "@/hooks/agent/useToolList";
 import { useSkillList } from "@/hooks/agent/useSkillList";
+import type { Skill } from "@/types/agentConfig";
+import type { MyEditableSkillItem } from "@/types/skillRepository";
 import ToolManagement from "./agentConfig/ToolManagement";
+import SkillBuildModal from "./agentConfig/SkillBuildModal";
 import SelectedSkillManagement from "./agentConfig/SelectedSkillManagement";
 import McpConfigModal from "./agentConfig/McpConfigModal";
 import SelectToolsDialog from "./agentConfig/tool/SelectToolsDialog";
@@ -32,15 +35,21 @@ export default function AgentCapability() {
   );
 
   const [isMcpModalOpen, setIsMcpModalOpen] = useState(false);
+  const [isSkillModalOpen, setIsSkillModalOpen] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isRefreshingSkill, setIsRefreshingSkill] = useState(false);
   const [isToolSelectOpen, setIsToolSelectOpen] = useState(false);
   const [labelModalOpen, setLabelModalOpen] = useState(false);
   const [isSkillSelectOpen, setIsSkillSelectOpen] = useState(false);
   const [tagModalOpen, setTagModalOpen] = useState(false);
+  const [editingSkill, setEditingSkill] = useState<MyEditableSkillItem | null>(
+    null
+  );
 
-  const { invalidate, availableTools } = useToolList();
+  const { invalidate, availableTools, isUserSelectable } = useToolList();
   const { invalidate: invalidateSkills } = useSkillList();
+
+  const selectableToolCount = selectedTools.filter(isUserSelectable).length;
 
   const handleRefreshTools = useCallback(async () => {
     setIsRefreshing(true);
@@ -70,6 +79,34 @@ export default function AgentCapability() {
     }
   }, [invalidateSkills, message, t]);
 
+  const handleSkillBuildSuccess = useCallback(() => {
+    invalidateSkills();
+  }, [invalidateSkills]);
+
+  const handleOpenSkillEditor = useCallback((skill: Skill) => {
+    setEditingSkill({
+      skill_id: Number(skill.skill_id),
+      name: skill.name,
+      description: skill.description,
+      source: skill.source,
+      tags: skill.tags || [],
+      group_ids: skill.group_ids || [],
+      ingroup_permission: skill.ingroup_permission || "READ_ONLY",
+      created_by: skill.created_by,
+      updated_by: skill.updated_by,
+      create_time: skill.create_time,
+      update_time: skill.update_time,
+      permission: skill.permission,
+      repository_info: [],
+    });
+    setIsSkillModalOpen(true);
+  }, []);
+
+  const handleCloseSkillModal = useCallback(() => {
+    setIsSkillModalOpen(false);
+    setEditingSkill(null);
+  }, []);
+
   return (
     <>
       <Tabs defaultValue="tools" className="w-full">
@@ -77,8 +114,8 @@ export default function AgentCapability() {
           <TabsTrigger value="tools">
             <span className="inline-flex items-center gap-1">
               {t("toolPool.title")}
-              {selectedTools.length > 0 && (
-                <Badge count={selectedTools.length} size="small" color="blue" />
+              {selectableToolCount > 0 && (
+                <Badge count={selectableToolCount} size="small" color="blue" />
               )}
             </span>
           </TabsTrigger>
@@ -156,6 +193,19 @@ export default function AgentCapability() {
                   >
                     {t("skillManagement.refresh.button")}
                   </Button>
+                  <Button
+                    type="text"
+                    size="small"
+                    icon={<BlocksIcon size={16} />}
+                    onClick={() => {
+                      setEditingSkill(null);
+                      setIsSkillModalOpen(true);
+                    }}
+                    className="!text-blue-600 hover:!text-blue-700 hover:!bg-blue-50"
+                    title={t("skillManagement.build.title")}
+                  >
+                    {t("skillManagement.build.button")}
+                  </Button>
                 </div>
                 <Button
                   size="small"
@@ -175,6 +225,7 @@ export default function AgentCapability() {
           <SelectedSkillManagement
             currentAgentId={currentAgentId ?? undefined}
             isReadOnly={isReadOnly}
+            onEditSkill={handleOpenSkillEditor}
           />
         </TabsContent>
       </Tabs>
@@ -202,7 +253,7 @@ export default function AgentCapability() {
         open={isSkillSelectOpen}
         onClose={() => setIsSkillSelectOpen(false)}
         onOpenManageTags={() => setTagModalOpen(true)}
-        onEditSkill={() => {}}
+        onEditSkill={handleOpenSkillEditor}
         currentAgentId={currentAgentId ?? undefined}
         isReadOnly={isReadOnly}
       />
@@ -210,6 +261,14 @@ export default function AgentCapability() {
       <SkillTagManagementModal
         open={tagModalOpen}
         onClose={() => setTagModalOpen(false)}
+      />
+
+      <SkillBuildModal
+        isOpen={isSkillModalOpen}
+        onCancel={handleCloseSkillModal}
+        onSuccess={handleSkillBuildSuccess}
+        editingSkill={editingSkill}
+        zIndex={1100}
       />
     </>
   );

@@ -84,6 +84,7 @@ export const fetchTools = async () => {
       description_zh: tool.description_zh,
       source: tool.source,
       is_available: tool.is_available,
+      is_user_selectable: tool.is_user_selectable !== false,
       create_time: tool.create_time,
       usage: tool.usage, // New: handle usage field
       category: tool.category,
@@ -166,6 +167,7 @@ export const fetchAgentList = async (tenantId?: string) => {
       is_published: agent.is_published,
       current_version_no: agent.current_version_no,
       is_a2a_server: agent.is_a2a_server || false,
+      icon_url: agent.icon_url,
     }));
 
     return {
@@ -220,6 +222,7 @@ export const fetchPublishedAgentList = async () => {
       version_name: agent.version_name,
       greeting_message: agent.greeting_message,
       example_questions: agent.example_questions || [],
+      icon_url: agent.icon_url,
     }));
 
     return {
@@ -456,6 +459,7 @@ export interface UpdateAgentInfoPayload {
   ingroup_permission?: string;
   greeting_message?: string;
   example_questions?: string[];
+  icon_url?: string;
 }
 
 export const updateAgentInfo = async (payload: UpdateAgentInfoPayload) => {
@@ -811,6 +815,7 @@ export const searchAgentInfo = async (
       display_name: data.display_name,
       description: data.description,
       author: data.author,
+      icon_url: data.icon_url,
       model:
         data.model_name ||
         (Array.isArray(data.model_names) && data.model_names.length > 0

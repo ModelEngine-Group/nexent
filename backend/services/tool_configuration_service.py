@@ -245,6 +245,7 @@ def get_local_tools() -> List[ToolInfo]:
             output_type=getattr(tool_class, 'output_type'),
             category=getattr(tool_class, 'category'),
             labels=getattr(tool_class, 'labels', None),
+            is_user_selectable=getattr(tool_class, 'is_user_selectable', True),
             class_name=tool_class.__name__,
             usage=None,
             origin_name=getattr(tool_class, 'name')
@@ -291,7 +292,8 @@ def _build_tool_info_from_langchain(obj) -> ToolInfo:
         usage=None,
         origin_name=tool_name,
         category=None,
-        labels=None
+        labels=None,
+        is_user_selectable=True,
     )
     return tool_info
 
@@ -533,7 +535,8 @@ async def get_tool_from_remote_mcp_server(
                                      class_name=sanitized_tool_name,
                                      usage=mcp_server_name,
                                      origin_name=tool.name,
-                                     category=None)
+                                     category=None,
+                                     is_user_selectable=True)
                 tools_info.append(tool_info)
             return tools_info
     except BaseException as e:
@@ -686,6 +689,7 @@ async def list_all_tools(tenant_id: str, labels: Optional[List[str]] = None):
             "inputs": inputs_str,
             "category": tool.get("category"),
             "labels": tool.get("labels", []),
+            "is_user_selectable": tool.get("is_user_selectable", True),
             "updated_by": tool.get("updated_by", ""),
             "updated_by_name": updated_by_email_map.get(tool.get("updated_by"), ""),
         }

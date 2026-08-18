@@ -42,7 +42,7 @@ import { useAgentVersionList } from "@/hooks/agent/useAgentVersionList";
 import { useAgentVersionDetail } from "@/hooks/agent/useAgentVersionDetail";
 import { rollbackVersion, compareVersions, deleteVersion } from "@/services/agentVersionService";
 import { searchAgentInfo } from "@/services/agentConfigService";
-import { useAgentConfigStore } from "@/stores/agentConfigStore";
+import { useAgentStore } from "@/stores/agentStore"
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import log from "@/lib/logger";
 import { resolveAgentListTenantKey } from "@/lib/agentListTenant";
@@ -251,12 +251,11 @@ export function VersionCardItem({
         queryClient.invalidateQueries({ queryKey: ["agents"] });
 
         // Refresh agent detail and sync to Zustand store
-        const store = useAgentConfigStore.getState();
+        const store = useAgentStore.getState();
         if (store.currentAgentId === agentId) {
           const agentResult = await searchAgentInfo(agentId);
           if (agentResult.success && agentResult.data) {
-            store.setCurrentAgent(agentResult.data);
-            store.triggerForceRefresh();
+            store.initialize(agentResult.data);
           }
         }
       } else {
@@ -597,7 +596,6 @@ export function VersionCardItem({
         initialValues={{
           version_name: version.version_name,
           release_note: version.release_note,
-          is_a2a: version.is_a2a,
         }}
         onUpdated={() => {
           // Refresh version list using the proper invalidate function

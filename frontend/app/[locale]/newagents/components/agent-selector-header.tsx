@@ -32,7 +32,7 @@ import {
   Search,
 } from "lucide-react";
 import { ExclamationCircleOutlined } from "@ant-design/icons";
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   useParams,
   usePathname,
@@ -55,7 +55,6 @@ import {
 } from "@/services/agentConfigService";
 
 import { Agent } from "@/types/agentConfig";
-import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import { useAgentStore } from "@/stores/agentStore";
 import { useQueryClient } from "@tanstack/react-query";
 import AgentImportWizard from "@/components/agent/AgentImportWizard";
@@ -86,7 +85,7 @@ export default function AgentSelectorHeader({
   const searchParams = useSearchParams();
   const params = useParams<{ locale: string }>();
   const locale = params.locale || "en";
-  const showBackFromRepository = searchParams.get("from") === "agent-space";
+  const showBackFromRepository = true;
   const queryClient = useQueryClient();
   const waitForAutosave = useAgentStore((state) => state.waitForIdle);
   const isSaving = useAgentStore(
@@ -99,9 +98,9 @@ export default function AgentSelectorHeader({
   const { agents } = useAgentList("");
 
   // Store state
-  const currentAgentId = useAgentConfigStore((state) => state.currentAgentId);
-  const setCurrentAgent = useAgentConfigStore((state) => state.setCurrentAgent);
-  const reset = useAgentConfigStore((state) => state.reset);
+  const currentAgentId = useAgentStore((state) => state.currentAgentId);
+  const initialize = useAgentStore((state) => state.initialize);
+  const reset = useAgentStore((state) => state.reset);
 
   const { agentInfo } = useAgentInfo(currentAgentId);
   const { agentVersionList, total } = useAgentVersionList(currentAgentId);
@@ -125,6 +124,7 @@ export default function AgentSelectorHeader({
   // Dropdown open state
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [agentSearch, setAgentSearch] = useState("");
+  const initialUrlAgentIdRef = useRef<number | null>(null);
 
   // Mutations
   const updateAgentMutation = useMutation({
@@ -142,42 +142,6 @@ export default function AgentSelectorHeader({
       a2aClientService.getServerSettings(Number(selectedAgentForA2A!.id)),
     enabled: showA2ASettings && !!selectedAgentForA2A,
   });
-
-  // Construct a2aAgentCard from supported_interfaces
-  const constructedA2AAgentCard = (() => {
-    const data = a2aSettingsData?.data;
-    if (!data?.supported_interfaces) return undefined;
-
-    const interfaces = data.supported_interfaces;
-    const endpointId = data.endpoint_id;
-    const restEndpoints = interfaces.filter(
-      (iface: any) =>
-        iface.protocolBinding.toLowerCase() === "http+json" ||
-        iface.protocolBinding.toLowerCase() === "httprest"
-    );
-    const jsonrpcEndpoints = interfaces.filter(
-      (iface: any) =>
-        iface.protocolBinding.toLowerCase() === "http-json-rpc" ||
-        iface.protocolBinding.toLowerCase() === "jsonrpc" ||
-        iface.protocolBinding.toLowerCase() === "httpjsonrpc"
-    );
-
-    return {
-      endpoint_id: endpointId,
-      name: data.name || "",
-      description: data.description,
-      version: data.version,
-      streaming: data.streaming,
-      agent_card_url: `/nb/a2a/${endpointId}/.well-known/agent-card.json`,
-      rest_endpoints: {
-        message_send: `${restEndpoints[0]?.url}/message:send`,
-        message_stream: `${restEndpoints[0]?.url}/message:stream`,
-        tasks_get: `${restEndpoints[0]?.url}/tasks/{task_id}`,
-      },
-      jsonrpc_url: jsonrpcEndpoints[0]?.url || "",
-      jsonrpc_methods: ["SendMessage", "SendStreamingMessage", "GetTask"],
-    };
-  })();
 
   // Import wizard state
   const [importWizardVisible, setImportWizardVisible] = useState(false);
@@ -401,7 +365,7 @@ export default function AgentSelectorHeader({
           currentAgentId !== null &&
           String(currentAgentId) === String(agent.id)
         ) {
-          setCurrentAgent(null);
+          reset();
         }
 
         // Refresh agent lists
@@ -426,11 +390,15 @@ export default function AgentSelectorHeader({
   };
 
   // Handle select agent from dropdown
-  const handleSelectAgent = async (agentId: number | null) => {
+  const handleSelectAgent = useCallback(async (agentId: number | null) => {
     if (agentId === null) return;
 
     const agent = agents.find((a: Agent) => String(a.id) === String(agentId));
-    if (!agent) return;
+    if (!agent || currentAgentId === Number(agent.id)) return;
+
+    const nextSearchParams = new URLSearchParams(searchParams.toString());
+    nextSearchParams.set("agent_id", String(agent.id));
+    router.replace(`${pathname}?${nextSearchParams.toString()}`);
 
     // Clear NEW mark when agent is selected for editing
     if (agent.is_new === true) {
@@ -453,10 +421,7 @@ export default function AgentSelectorHeader({
     try {
       const result = await searchAgentInfo(Number(agent.id));
       if (result.success && result.data) {
-        setCurrentAgent(result.data);
-        const nextSearchParams = new URLSearchParams(searchParams.toString());
-        nextSearchParams.set("agent_id", String(agent.id));
-        router.replace(`${pathname}?${nextSearchParams.toString()}`);
+        initialize(result.data);
       } else {
         message.error(
           result.message || t("agentConfig.agents.detailsLoadFailed")
@@ -466,7 +431,39 @@ export default function AgentSelectorHeader({
       log.error("Failed to load agent detail:", error);
       message.error(t("agentConfig.agents.detailsLoadFailed"));
     }
-  };
+  }, [
+    agents,
+    clearAgentNewMark,
+    currentAgentId,
+    initialize,
+    log,
+    message,
+    pathname,
+    queryClient,
+    router,
+    searchParams,
+    t,
+    waitForAutosave,
+  ]);
+
+  useEffect(() => {
+    const rawAgentId = searchParams.get("agent_id");
+    const parsedAgentId = rawAgentId ? Number(rawAgentId) : null;
+
+    if (
+      initialUrlAgentIdRef.current !== null ||
+      parsedAgentId === null ||
+      !Number.isInteger(parsedAgentId) ||
+      parsedAgentId <= 0 ||
+      currentAgentId !== null ||
+      !agents.some((agent: Agent) => Number(agent.id) === parsedAgentId)
+    ) {
+      return;
+    }
+
+    initialUrlAgentIdRef.current = parsedAgentId;
+    void handleSelectAgent(parsedAgentId);
+  }, [agents, currentAgentId, handleSelectAgent, searchParams]);
 
   const filteredAgents = useMemo(() => {
     const query = agentSearch.trim().toLowerCase();
@@ -653,15 +650,12 @@ export default function AgentSelectorHeader({
     queryClient.invalidateQueries({ queryKey: ["agents"] });
     const result = await searchAgentInfo(agentId);
     if (!result.success || !result.data) {
-      message.error(result.message || t("agent.createModal.loadFailed"));
+      message.error(result.message || t("agent.error.fetchAgentList"));
       return;
     }
-    setCurrentAgent({ ...result.data, permission: "EDIT" });
-    const nextSearchParams = new URLSearchParams(searchParams.toString());
-    nextSearchParams.set("agent_id", String(agentId));
-    nextSearchParams.delete("create");
-    router.replace(`${pathname}?${nextSearchParams.toString()}`);
-    message.success(t("agent.createModal.createSuccess"));
+    initialize({ ...result.data, permission: "EDIT" });
+    router.replace(`${pathname}?agent_id=${agentId}`);
+    message.success(t("subAgentPool.button.create"));
   };
 
   return (
@@ -882,14 +876,10 @@ export default function AgentSelectorHeader({
         footer={null}
         zIndex={1050}
       >
-        {selectedAgentForA2A && constructedA2AAgentCard ? (
+        {selectedAgentForA2A && a2aSettingsData?.data ? (
           <A2AServerSettingsPanel
-            agentId={Number(selectedAgentForA2A.id)}
-            agentName={
-              selectedAgentForA2A.display_name || selectedAgentForA2A.name
-            }
-            endpointId={constructedA2AAgentCard.endpoint_id}
-            a2aAgentCard={constructedA2AAgentCard}
+            endpointId={a2aSettingsData?.data?.endpoint_id}
+            supportedInterfaces={a2aSettingsData?.data?.supported_interfaces}
           />
         ) : (
           <div

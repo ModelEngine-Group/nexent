@@ -1,12 +1,14 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "antd";
-import { Bug, MessageSquare, Settings, Sparkles, X } from "lucide-react";
+import { Sparkles, X } from "lucide-react";
 
 import AgentSelectorHeader from "./components/agent-selector-header";
 import AgentConfig from "./agent-config";
 import AgentVersionManage from "./AgentVersionManage";
+import AgentDebugPanel from "./agent-debug";
 import { Nl2AgentChatPanel } from "../newchat/assistant-ui/nl2agent-chat-panel";
 
 interface PanelCardProps {
@@ -33,6 +35,7 @@ function PanelCard({ title, children, className = "", action, icon }: PanelCardP
 }
 
 export default function AgentSetupOrchestrator() {
+  const { t } = useTranslation("common");
   const [isGenerationVisible, setIsGenerationVisible] = useState(true);
   const [isDebugVisible, setIsDebugVisible] = useState(false);
   const [isShowVersionManagePanel, setIsShowVersionManagePanel] = useState(false);
@@ -50,12 +53,12 @@ export default function AgentSetupOrchestrator() {
         <div className="flex min-w-0 min-h-0 flex-1 flex-row gap-4">
         {isGenerationVisible && (
           <PanelCard
-            title="Agent生成"
+            title={t("agent.page.panel.nl2agent")}
             className={isDebugVisible ? "flex-1" : "flex-[1]"}
             action={
               <button
                 type="button"
-                aria-label="关闭Agent生成"
+                aria-label={t("agent.page.panel.nl2agent.closeAria")}
                 onClick={() => setIsGenerationVisible(false)}
                 className="rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
               >
@@ -70,40 +73,34 @@ export default function AgentSetupOrchestrator() {
         )}
 
         <PanelCard
-          title="Agent配置"
+          title={t("agent.page.panel.config")}
           className={!isGenerationVisible && isDebugVisible ? "flex-[1]" : "flex-[2]"}
           action={
-            <div className="flex items-center gap-2">
-              <Button
-                icon={<Sparkles size={16} />}
-                onClick={() => setIsGenerationVisible((visible) => !visible)}
-                type={isGenerationVisible ? "primary" : "default"}
-              >
-                智能生成
-              </Button>
-              <Button
-                icon={<Bug size={16} />}
-                onClick={() => setIsDebugVisible((visible) => !visible)}
-                type={isDebugVisible ? "primary" : "default"}
-              >
-                调试
-              </Button>
-            </div>
+            <Button
+              icon={<Sparkles size={16} />}
+              onClick={() => setIsGenerationVisible((visible) => !visible)}
+              type={isGenerationVisible ? "primary" : "default"}
+            >
+              {t("agent.page.panel.nl2agent")}
+            </Button>
           }
         >
-          <div className="min-h-0 flex-1 overflow-auto p-4 pt-2">
-            <AgentConfig />
+          <div className="min-h-0 flex-1 overflow-auto px-4 py-2">
+            <AgentConfig
+              isDebugVisible={isDebugVisible}
+              onToggleDebug={() => setIsDebugVisible((visible) => !visible)}
+            />
           </div>
         </PanelCard>
 
         {isDebugVisible && (
           <PanelCard
-            title="Agent调试"
+            title={t("agent.page.panel.debug")}
             className={!isGenerationVisible ? "flex-1" : "flex-[1]"}
             action={
               <button
                 type="button"
-                aria-label="关闭Agent调试"
+                aria-label={t("agent.page.panel.debug.closeAria")}
                 onClick={() => setIsDebugVisible(false)}
                 className="rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
               >
@@ -111,7 +108,9 @@ export default function AgentSetupOrchestrator() {
               </button>
             }
           >
-            <div className="min-h-0 flex-1" />
+            <div className="min-h-0 flex-1 overflow-hidden">
+              <AgentDebugPanel />
+            </div>
           </PanelCard>
         )}
         </div>

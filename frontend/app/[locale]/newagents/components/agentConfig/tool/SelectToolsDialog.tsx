@@ -164,7 +164,7 @@ export default function SelectToolsDialog({
     const result: Record<string, { category: string; tools: any[] }[]> = {};
     for (const tab of SOURCE_TABS) {
       const sourceTools = availableTools.filter(
-        (t: any) => t.source === tab.sourceValue
+        (t: any) => t.source === tab.sourceValue && t.is_user_selectable !== false
       );
       // For MCP tools: show API-added (not in server list) or from visible servers
       const filteredTools =

@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   Button,
   InputNumber,
@@ -9,9 +10,9 @@ import {
   Spin,
   Switch,
   Tag,
-
+  Tooltip,
 } from "antd";
-import { Settings, Plus } from "lucide-react";
+import { Settings, Plus, Info } from "lucide-react";
 
 import KnowledgeBaseSelectorModal from "@/components/tool-config/KnowledgeBaseSelectorModal";
 import { useKnowledgeBasesForToolConfig } from "@/hooks/useKnowledgeBaseSelector";
@@ -59,6 +60,16 @@ function updateParam(tool: Tool, name: string, value: unknown): Tool {
   return { ...tool, initParams: params };
 }
 
+function getLocalizedParamDescription(
+  param: ToolParam,
+  language: string
+): string | undefined {
+  if (language.toLowerCase().startsWith("zh")) {
+    return param.description_zh || param.description;
+  }
+  return param.description || param.description_zh;
+}
+
 function isKnowledgeBaseSearchTool(tool: Tool): boolean {
   return (
     tool.name === KNOWLEDGE_BASE_SEARCH ||
@@ -76,6 +87,7 @@ function prepareKnowledgeBaseSearchTool(tool: Tool): Tool {
 }
 
 function renderParamInput(
+  t: (key: string) => string,
   param: ToolParam,
   value: unknown,
   onChange: (value: unknown) => void
@@ -90,7 +102,7 @@ function renderParamInput(
         className="w-full"
         value={typeof value === "number" ? value : undefined}
         onChange={onChange}
-        placeholder={param.default || "请输入数值"}
+        placeholder={param.default || t("agent.knowledge.inputNumberPlaceholder")}
       />
     );
   }
@@ -102,9 +114,9 @@ function renderParamInput(
         value={typeof value === "string" ? value : undefined}
         onChange={onChange}
         options={[
-          { label: "混合检索", value: "hybrid" },
-          { label: "精确检索", value: "accurate" },
-          { label: "语义检索", value: "semantic" },
+          { label: t("agent.knowledge.searchMode.hybrid"), value: "hybrid" },
+          { label: t("agent.knowledge.searchMode.accurate"), value: "accurate" },
+          { label: t("agent.knowledge.searchMode.semantic"), value: "semantic" },
         ]}
       />
     );
@@ -115,7 +127,7 @@ function renderParamInput(
       className="h-8 w-full rounded-md border border-gray-200 bg-white px-2 text-sm outline-none focus:border-primary"
       value={typeof value === "string" ? value : ""}
       onChange={(event) => onChange(event.target.value)}
-      placeholder={param.default || "请输入参数"}
+      placeholder={param.default || t("agent.knowledge.paramPlaceholder")}
     />
   );
 }
@@ -243,6 +255,7 @@ function useKnowledgeBaseConfigState(): KnowledgeBaseConfigState | null {
 }
 
 export function KnowledgeBaseConfigActions() {
+  const { t, i18n } = useTranslation("common");
   const state = useKnowledgeBaseConfigState();
   const [selectorOpen, setSelectorOpen] = useState(false);
   const [configOpen, setConfigOpen] = useState(false);
@@ -257,7 +270,7 @@ export function KnowledgeBaseConfigActions() {
         disabled={state.isReadOnly}
         onClick={() => setConfigOpen(true)}
       >
-        配置
+        {t("agent.knowledge.button.configure")}
       </Button>
       <Button
         size="middle"
@@ -265,7 +278,7 @@ export function KnowledgeBaseConfigActions() {
         disabled={state.isReadOnly}
         onClick={() => setSelectorOpen(true)}
       >
-        选择知识库
+        {t("agent.knowledge.button.select")}
       </Button>
 
       <KnowledgeBaseSelectorModal
@@ -280,35 +293,46 @@ export function KnowledgeBaseConfigActions() {
         knowledgeBases={state.knowledgeBases}
         isLoading={state.isLoading}
         showCheckbox
-        title="选择知识库"
+        title={t("agent.knowledge.selectModal.title")}
         onSync={async () => {
           await state.refetch();
         }}
       />
       <Modal
         open={configOpen}
-        title="知识库检索配置"
+        title={t("agent.knowledge.configModal.title")}
         onCancel={() => setConfigOpen(false)}
         footer={null}
       >
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-          {state.configurableParams.map((param) => (
-            <label key={param.name} className="space-y-1.5">
-              <span className="block text-xs font-medium text-gray-600">
-                {param.name}
-              </span>
-              {renderParamInput(
-                param,
-                getParamValue(state.knowledgeSearchTool, param.name),
-                (value) => state.onParamChange(param, value)
-              )}
-              {param.description && (
-                <span className="block text-[11px] text-gray-400">
-                  {param.description}
+          {state.configurableParams.map((param) => {
+            const description = getLocalizedParamDescription(
+              param,
+              i18n.language
+            );
+            return (
+              <label key={param.name} className="space-y-1.5">
+                <span className="flex items-center gap-1 text-xs font-medium text-gray-600">
+                  {param.name}
+                  {description && (
+                    <Tooltip title={description}>
+                      <Info
+                        size={13}
+                        className="cursor-help text-gray-400"
+                        aria-label={description}
+                      />
+                    </Tooltip>
+                  )}
                 </span>
-              )}
-            </label>
-          ))}
+                {renderParamInput(
+                  t,
+                  param,
+                  getParamValue(state.knowledgeSearchTool, param.name),
+                  (value) => state.onParamChange(param, value)
+                )}
+              </label>
+            );
+          })}
         </div>
       </Modal>
     </>
@@ -316,6 +340,7 @@ export function KnowledgeBaseConfigActions() {
 }
 
 export default function KnowledgeBaseConfig() {
+  const { t } = useTranslation("common");
   const state = useKnowledgeBaseConfigState();
 
   if (!state) {
@@ -326,13 +351,13 @@ export default function KnowledgeBaseConfig() {
     <div className="space-y-3">
       {state.isLoading ? (
         <div className="flex items-center gap-2 text-sm text-gray-500">
-          <Spin size="small" /> 正在加载知识库
+          <Spin size="small" /> {t("agent.knowledge.loading")}
         </div>
       ) : state.isError ? (
         <div className="flex items-center justify-between rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
-          <span>知识库加载失败</span>
+          <span>{t("agent.knowledge.loadFailed")}</span>
           <Button size="small" onClick={() => state.refetch()}>
-            重试
+            {t("common.retry")}
           </Button>
         </div>
       ) : state.selectedKnowledgeBases.length > 0 ? (
@@ -346,9 +371,9 @@ export default function KnowledgeBaseConfig() {
                   ? () => state.onKnowledgeBaseRemove(knowledgeBase)
                   : undefined
               }
-              className="!inline-flex !items-center !whitespace-nowrap !px-3 !py-1.5 !text-xs !bg-blue-50 !text-blue-700 !border !border-blue-200 !rounded-lg !shadow-sm hover:!border-blue-400 hover:!shadow-md transition-all"
+              className="!inline-flex !items-center !gap-1 !whitespace-nowrap !px-2.5 !py-1 !text-sm !text-foreground !bg-primary/5 !border !border-primary/20 !rounded-full transition-colors hover:!border-primary/40 hover:!shadow-sm"
             >
-              <span className="font-medium">
+              <span className="max-w-full truncate">
                 {knowledgeBase.display_name || knowledgeBase.name}
               </span>
             </Tag>
@@ -360,7 +385,7 @@ export default function KnowledgeBaseConfig() {
             <div>
               <p className="text-sm font-medium text-gray-700"></p>
               <p className="mt-0.5 text-xs text-gray-400">
-              暂未选择知识库，点击「选择知识库」添加
+              {t("agent.knowledge.emptyHint")}
               </p>
             </div>
           </div>

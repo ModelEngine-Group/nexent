@@ -92,13 +92,13 @@ export default function AgentDeployment() {
           >
             <Flex align="center" gap={8}>
               <Switch
-                checked={editedAgent.enable_a2a ?? false}
-                onChange={(checked) => updateAgent({ enable_a2a: checked })}
+                checked={editedAgent.is_a2a ?? false}
+                onChange={(checked) => updateAgent({ is_a2a: checked })}
               />
               <Flex align="center" gap={4}>
                 <Globe size={12} className="text-gray-400" />
                 <span className="text-xs text-gray-500">
-                  {editedAgent.enable_a2a
+                  {editedAgent.is_a2a
                     ? t("agent.a2a.publishAsA2AAgent")
                     : t("agent.a2a.notPublished")}
                 </span>

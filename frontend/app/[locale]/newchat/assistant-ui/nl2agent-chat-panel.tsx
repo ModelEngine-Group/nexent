@@ -68,6 +68,7 @@ export const Nl2AgentChatPanel: FC = () => {
             generatedTitle={assistantTitle}
             isLoadingAgents={false}
             showModelSelector={false}
+            showConversationTitle={false}
           />
         </div>
       </TooltipProvider>

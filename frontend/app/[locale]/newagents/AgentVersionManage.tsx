@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import { Card, Flex, Button, Tag, Empty, Spin, message } from "antd";
 import { useAgentVersionList } from "@/hooks/agent/useAgentVersionList";
 import { useAgentInfo } from "@/hooks/agent/useAgentInfo";
-import { useAgentConfigStore } from "@/stores/agentConfigStore";
+import { useAgentStore } from "@/stores/agentStore"
 import { VersionCardItem } from "./AgentVersionCard";
 import log from "@/lib/logger";
 import AgentVersionCompareModal from "./versions/AgentVersionCompareModal";
@@ -17,7 +17,7 @@ interface AgentVersionManageProps {
 
 export default function AgentVersionManage({ onClose }: AgentVersionManageProps) {
   const { t } = useTranslation("common");
-  const currentAgentId = useAgentConfigStore((state) => state.currentAgentId);
+  const currentAgentId = useAgentStore((state) => state.currentAgentId);
 
   const { agentVersionList, total, isLoading, invalidate: invalidateAgentVersionList } = useAgentVersionList(currentAgentId);
   const { agentInfo, invalidate: invalidateAgentInfo } = useAgentInfo(currentAgentId);
@@ -131,7 +131,7 @@ export default function AgentVersionManage({ onClose }: AgentVersionManageProps)
               key="close"
               type="text"
               icon={<X size={18} />}
-              aria-label="关闭版本管理"
+              aria-label={t("agent.version.manage.closeAria")}
               onClick={onClose}
             />
           ) : null,

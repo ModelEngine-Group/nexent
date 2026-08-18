@@ -54,7 +54,7 @@ export default function CreateAgentModal({
     });
 
     if (!result.success || !result.data?.agent_id) {
-      message.error(result.message || t("agent.createModal.createFailed"));
+      message.error(result.message || t("businessLogic.config.error.saveFailed"));
       return;
     }
 
@@ -69,7 +69,7 @@ export default function CreateAgentModal({
     <Modal
       open={open}
       centered
-      title={t("agent.createModal.title")}
+      title={t("chat.agentLanding.createAgent")}
       okText={t("common.confirm")}
       cancelText={t("common.cancel")}
       onCancel={onCancel}
@@ -78,24 +78,23 @@ export default function CreateAgentModal({
       <Form form={form} layout="vertical" preserve={false}>
         <Form.Item
           name="displayName"
-          label={t("agent.createModal.displayName")}
-          rules={[{ required: true, whitespace: true, message: t("agent.createModal.displayNameRequired") }]}
+          label={t("agent.displayName")}
+          rules={[{ required: true, whitespace: true, message: t("agent.info.name.error.empty") }]}
         >
-          <Input autoFocus maxLength={100} placeholder={t("agent.createModal.displayNamePlaceholder")} />
+          <Input autoFocus maxLength={100} placeholder={t("agent.displayNamePlaceholder")} />
         </Form.Item>
         <Form.Item
           name="name"
-          label={t("agent.createModal.name")}
-          extra={t("agent.createModal.nameHint")}
+          label={t("agent.name")}
           rules={[
-            { required: true, whitespace: true, message: t("agent.createModal.nameRequired") },
+            { required: true, whitespace: true, message: t("agent.info.name.error.empty") },
             {
               pattern: /^[A-Za-z_][A-Za-z0-9_]*$/,
-              message: t("agent.createModal.nameInvalid"),
+              message: t("agent.info.name.error.format"),
             },
           ]}
         >
-          <Input maxLength={100} placeholder={t("agent.createModal.namePlaceholder")} />
+          <Input maxLength={100} placeholder={t("agent.namePlaceholder")} />
         </Form.Item>
       </Form>
     </Modal>

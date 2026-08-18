@@ -3,7 +3,7 @@ import logging
 from http import HTTPStatus
 from typing import Optional
 
-from fastapi import APIRouter, Body, Header, HTTPException, Request, Query
+from fastapi import APIRouter, Body, File, Header, HTTPException, Query, Request, UploadFile
 from fastapi.encoders import jsonable_encoder
 from starlette.responses import JSONResponse, Response, StreamingResponse
 
@@ -37,8 +37,10 @@ from services.asset_owner_visibility import apply_agent_detail_prompt_visibility
 
 from services.agent_service import (
     get_agent_info_impl,
+    get_agent_icon_impl,
     get_creating_sub_agent_info_impl,
     update_agent_info_impl,
+    upload_agent_icon_impl,
     delete_agent_impl,
     export_agent_impl,
     import_agent_impl,
@@ -253,6 +255,62 @@ async def update_agent_info_api(request: AgentInfoRequest, authorization: Option
         logger.error(f"Agent update error: {str(e)}")
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Agent update error.")
+
+
+@agent_config_router.post("/{agent_id}/icon")
+async def upload_agent_icon_api(
+    agent_id: int,
+    file: UploadFile = File(...),
+    authorization: Optional[str] = Header(None),
+):
+    """Upload and attach an image icon to an editable agent."""
+    try:
+        user_id, tenant_id = get_current_user_id(authorization)
+        result = await upload_agent_icon_impl(
+            agent_id=agent_id,
+            content=await file.read(),
+            tenant_id=tenant_id,
+            user_id=user_id,
+        )
+        return JSONResponse(status_code=HTTPStatus.OK, content=result)
+    except ForbiddenError as exc:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Agent icon upload error")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Agent icon upload error.",
+        ) from exc
+
+
+@agent_config_router.get("/{agent_id}/icon")
+async def get_agent_icon_api(
+    agent_id: int,
+    authorization: Optional[str] = Header(None),
+):
+    """Stream the stored icon for an agent visible to the current user."""
+    try:
+        user_id, tenant_id = get_current_user_id(authorization)
+        content, content_type = await get_agent_icon_impl(
+            agent_id=agent_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+        )
+        return Response(
+            content=content,
+            media_type=content_type,
+            headers={"Cache-Control": "private, max-age=3600"},
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Agent icon retrieval error")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Agent icon retrieval error.",
+        ) from exc
 
 
 @agent_config_router.post("/generate_guardrail_rules")
@@ -503,7 +561,6 @@ async def publish_version_api(
             user_id=user_id,
             version_name=request.version_name,
             release_note=request.release_note,
-            publish_as_a2a=request.publish_as_a2a,
         )
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
     except ValueError as e:

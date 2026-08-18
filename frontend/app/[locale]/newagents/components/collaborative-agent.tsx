@@ -2,15 +2,78 @@
 
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { App, Button, Col, Flex, Tag } from "antd";
-import { Globe, Plus } from "lucide-react";
+import { App, Button, Col } from "antd";
+import { Plus, X } from "lucide-react";
 
-import CollaborativeAgentSelectorModal from "./collaborative-agent-selector-modal";
+import CollaborativeAgentSelectorModal from "./advanced/collaborative-agent-selector-modal";
 import { useExternalAgents } from "@/hooks/agent/useExternalAgents";
 import { usePublishedAgentList } from "@/hooks/agent/usePublishedAgentList";
 import { a2aClientService, A2AExternalAgent } from "@/services/a2aService";
 import { useAgentStore } from "@/stores/agentStore";
 import { Agent } from "@/types/agentConfig";
+
+type CollaborativeAgentListItem = {
+  id: number | string;
+  name: string;
+};
+
+interface CollaborativeAgentListProps {
+  agents: CollaborativeAgentListItem[];
+  label: string;
+  tone: "primary" | "external";
+  readOnly?: boolean;
+  onRemove?: (agentId: number) => void;
+}
+
+export function CollaborativeAgentList({
+  agents,
+  label,
+  tone,
+  readOnly = false,
+  onRemove,
+}: CollaborativeAgentListProps) {
+  const { t } = useTranslation("common");
+  if (agents.length === 0) return null;
+
+  const toneClasses =
+    tone === "external"
+      ? {
+          badge: "bg-amber-100 text-amber-700",
+          item: "border-amber-200 bg-amber-50 transition-colors hover:border-amber-300  hover:shadow-sm",
+        }
+      : {
+          badge: "bg-primary/10 text-primary",
+          item: "border-primary/20 bg-primary/5 transition-colors hover:border-primary/40  hover:shadow-sm",
+        };
+
+  return (
+    <div className="flex flex-wrap items-center gap-2 p-3">
+      <span
+        className={`shrink-0 rounded px-2 py-0.5 text-xs font-medium ${toneClasses.badge}`}
+      >
+        {label} · {agents.length}
+      </span>
+      {agents.map((agent) => (
+        <span
+          key={`${tone}-${agent.id}`}
+          className={`flex items-center gap-1 rounded-full border px-2.5 py-1 text-sm text-foreground ${toneClasses.item}`}
+        >
+          <span className="max-w-full truncate">{agent.name}</span>
+          {!readOnly && onRemove && (
+            <button
+              type="button"
+              aria-label={t("agent.collaborative.removeAria", { name: agent.name })}
+              onClick={() => onRemove(Number(agent.id))}
+              className="shrink-0 text-muted-foreground hover:text-destructive"
+            >
+              <X size={12} />
+            </button>
+          )}
+        </span>
+      ))}
+    </div>
+  );
+}
 
 export function CollaborativeAgentActions() {
   const { t } = useTranslation("common");
@@ -91,7 +154,7 @@ export function CollaborativeAgentActions() {
         disabled={isReadOnly}
         onClick={() => setSelectorOpen(true)}
       >
-        选择智能体
+        {t("agent.collaborative.button.selectAgent")}
       </Button>
       <CollaborativeAgentSelectorModal
         open={selectorOpen}
@@ -117,12 +180,8 @@ export default function CollaborativeAgent() {
   );
   const isReadOnly = useAgentStore((state) => state.isReadOnly);
 
-  const { availableAgents: internalAgents } = usePublishedAgentList({
-    enabled: true,
-  });
-  const { availableAgents: externalAgents } = useExternalAgents({
-    enabled: true,
-  });
+  const { availableAgents: internalAgents } = usePublishedAgentList();
+  const { availableAgents: externalAgents } = useExternalAgents();
 
   // Local state for edit mode (when currentAgentId exists)
   const [externalRelatedAgents, setExternalRelatedAgents] = useState<
@@ -284,78 +343,38 @@ export default function CollaborativeAgent() {
   return (
     <>
       <Col xs={24}>
-        <div className="min-h-20 rounded-md border border-dashed border-gray-300 bg-white px-4 py-3">
-          {hasCollaborativeAgents ? (
-            <div className="flex items-center gap-4">
-              <div className="min-w-0 flex-1">
-                <div
-                  className={
-                    relatedInternalAgents.length > 0 &&
-                    displayExternalAgents.length > 0
-                      ? "mb-3"
-                      : ""
-                  }
-                >
-                  <Flex className="flex flex-wrap items-center gap-2">
-                    {relatedInternalAgents.map((agent: Agent) => (
-                      <Tag
-                        key={`internal-${agent.id}`}
-                        closable={!isReadOnly}
-                        onClose={
-                          !isReadOnly
-                            ? () => handleRemoveInternalAgent(Number(agent.id))
-                            : undefined
-                        }
-                        className="!inline-flex !items-center !whitespace-nowrap !py-1.5 !px-3 !text-sm !bg-blue-50 !text-blue-700 !border !border-blue-200 !rounded-lg !shadow-sm hover:!shadow-md hover:!border-blue-400 transition-all"
-                      >
-                        <span className="inline-flex items-center gap-1.5">
-                          <span className="text-sm">
-                            {agent.display_name || agent.name}
-                          </span>
-                          {agent.version_name && (
-                            <span className="rounded bg-blue-100 px-1.5 py-0.5 text-xs text-blue-500">
-                              {agent.version_name}
-                            </span>
-                          )}
-                        </span>
-                      </Tag>
-                    ))}
-                  </Flex>
-                </div>
-                <Flex className="flex flex-wrap items-center gap-2">
-                  {displayExternalAgents.map((agent) => (
-                    <Tag
-                      key={`external-${agent.id}`}
-                      closable={!isReadOnly}
-                      onClose={
-                        !isReadOnly
-                          ? () => handleRemoveExternalAgent(agent.id)
-                          : undefined
-                      }
-                      className="!inline-flex !items-center !whitespace-nowrap !py-1.5 !px-3 !text-sm !bg-green-50 !text-green-700 !border !border-green-200 !rounded-lg !shadow-sm hover:!shadow-md hover:!border-green-400 transition-all"
-                    >
-                      <span className="inline-flex items-center gap-1.5">
-                        <Globe size={14} />
-                        <span className="font-medium">{agent.name}</span>
-                      </span>
-                    </Tag>
-                  ))}
-                </Flex>
-              </div>
-            </div>
-          ) : (
-            <div className="flex min-h-20 items-center justify-center gap-4 rounded-md border border-dashed border-gray-300 bg-white px-4 py-3">
-            <div className="flex items-center gap-3">
-              <div>
-                <p className="text-sm font-medium text-gray-700"></p>
-                <p className="mt-0.5 text-xs text-gray-400">
-                暂未选择协作智能体，点击「选择智能体」添加
-                </p>
-              </div>
+        {hasCollaborativeAgents ? (
+          <div className="min-w-0 flex-1 divide-y divide-border rounded-lg border border-border">
+            <CollaborativeAgentList
+              agents={relatedInternalAgents.map((agent) => ({
+                id: agent.id,
+                name: agent.display_name || agent.name,
+              }))}
+              label={t("agent.collaborative.label.internal")}
+              tone="primary"
+              readOnly={isReadOnly}
+              onRemove={handleRemoveInternalAgent}
+            />
+            <CollaborativeAgentList
+              agents={displayExternalAgents}
+              label={t("agent.collaborative.label.external")}
+              tone="external"
+              readOnly={isReadOnly}
+              onRemove={handleRemoveExternalAgent}
+            />
+          </div>
+        ) : (
+          <div className="flex min-h-20 items-center justify-center gap-4 rounded-md border border-dashed border-gray-300 bg-white px-4 py-3">
+          <div className="flex items-center gap-3">
+            <div>
+              <p className="text-sm font-medium text-gray-700"></p>
+              <p className="mt-0.5 text-xs text-gray-400">
+              {t("agent.collaborative.emptyHint")}
+              </p>
             </div>
           </div>
-          )}
         </div>
+        )}
       </Col>
     </>
   );

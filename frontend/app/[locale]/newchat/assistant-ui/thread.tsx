@@ -116,6 +116,7 @@ export interface ThreadProps {
   chatMode: ChatMode;
   onChatModeChange: (mode: ChatMode) => void;
   showModelSelector?: boolean;
+  showConversationTitle?: boolean;
   isDictationConfigured?: boolean;
   knowledgeScope?: ConversationKnowledgeScope | null;
   knowledgePreview?: KnowledgeScopeEffectivePreview | null;
@@ -159,6 +160,12 @@ const useAgentModels = (
       return [{ id: modelName, name: modelName }];
     }
 
+    // Fallback to the single model field (used by AgentDraft / debug panel)
+    const singleModel = (typedAgent as unknown as { model?: string }).model;
+    if (singleModel) {
+      return [{ id: singleModel, name: singleModel }];
+    }
+
     return [];
   }, [agent]);
 };
@@ -173,6 +180,7 @@ export const Thread: FC<ThreadProps> = ({
   chatMode,
   onChatModeChange,
   showModelSelector = true,
+  showConversationTitle = true,
   isDictationConfigured = false,
   knowledgeScope = null,
   knowledgePreview = null,
@@ -387,6 +395,7 @@ export const Thread: FC<ThreadProps> = ({
         chatMode={chatMode}
         onChatModeChange={onChatModeChange}
         showModelSelector={showModelSelector}
+        showConversationTitle={showConversationTitle}
         isDictationConfigured={isDictationConfigured}
         knowledgeScope={knowledgeScope}
         knowledgePreview={knowledgePreview}
@@ -477,6 +486,7 @@ interface ThreadViewProps {
   chatMode: ChatMode;
   onChatModeChange: (mode: ChatMode) => void;
   showModelSelector: boolean;
+  showConversationTitle: boolean;
   isDictationConfigured: boolean;
   knowledgeScope: ConversationKnowledgeScope | null;
   knowledgePreview: KnowledgeScopeEffectivePreview | null;
@@ -515,6 +525,7 @@ const ThreadView: FC<ThreadViewProps> = ({
   chatMode,
   onChatModeChange,
   showModelSelector,
+  showConversationTitle,
   isDictationConfigured,
   knowledgeScope,
   knowledgePreview,
@@ -551,7 +562,8 @@ const ThreadView: FC<ThreadViewProps> = ({
       )}
     >
       <div className="flex h-full min-w-0 flex-1 flex-col">
-        <header className="flex items-center gap-2 border-b px-3 py-2">
+        {showConversationTitle && (
+          <header className="flex items-center gap-2 border-b px-3 py-2">
           {isShareMode ? (
             <>
               <div className="flex min-w-0 flex-1 justify-center text-sm font-medium text-foreground">
@@ -596,7 +608,8 @@ const ThreadView: FC<ThreadViewProps> = ({
               )}
             </>
           )}
-        </header>
+          </header>
+        )}
 
         {isShareMode && (
           <div className="flex items-center justify-between border-b bg-muted/30 px-4 py-2">

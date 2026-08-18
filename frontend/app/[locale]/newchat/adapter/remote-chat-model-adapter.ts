@@ -138,7 +138,7 @@ interface NexentRunConfig {
   resume?: boolean;
   agentId?: number | string;
   enablePlan?: boolean;
-  runtimeMode?: "nl2agent" | "nl2skill";
+  runtimeMode?: "nl2agent" | "nl2skill" | "agent-debug";
   knowledgeScope?: import("@/types/knowledgeScope").ConversationKnowledgeScope;
   onKnowledgeScopeResolved?: (
     resolution: import("@/types/knowledgeScope").KnowledgeScopeResolution
@@ -1133,7 +1133,8 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     const custom = runConfig?.custom as NexentRunConfig | undefined;
     const isNl2Agent = custom?.runtimeMode === "nl2agent";
     const isNl2Skill = custom?.runtimeMode === "nl2skill";
-    const isEphemeralRuntime = isNl2Agent || isNl2Skill;
+    const isAgentDebug = custom?.runtimeMode === "agent-debug";
+    const isEphemeralRuntime = isNl2Agent || isNl2Skill || isAgentDebug;
     const serverThreadId = custom?.threadId;
     const onServerConversationId = custom?.onServerConversationId;
     const isResume = !isEphemeralRuntime && custom?.resume === true;
@@ -1194,7 +1195,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       query: isResume ? "" : query,
       history: isResume ? [] : history,
       minio_files: minioFiles.length > 0 ? minioFiles : null,
-      is_debug: false,
+      is_debug: isAgentDebug,
     };
     const numericServerThreadId = Number(serverThreadId);
     const hasServerConversationId =
@@ -1205,7 +1206,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
 
     // Pass selected agent if provided via custom (set by the page wrapper)
     if (
-      !isEphemeralRuntime &&
+      (isAgentDebug || !isEphemeralRuntime) &&
       custom?.agentId !== undefined &&
       custom.agentId !== null
     ) {
@@ -1224,7 +1225,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
 
     // Pass selected model if provided via ModelContext (registered by ModelSelector)
     const modelName = context.config?.modelName;
-    if (!isEphemeralRuntime && modelName) {
+    if (modelName) {
       requestBody.model_id = Number(modelName);
     }
 
@@ -1247,7 +1248,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           conversation_id: requestBody.conversation_id as number | undefined,
           minio_files: requestBody.minio_files as any,
           agent_id: requestBody.agent_id as number | undefined,
-          is_debug: false,
+          is_debug: isAgentDebug,
           is_resume: isResume,
           enable_plan: custom?.enablePlan === true,
           knowledge_scope: requestBody.knowledge_scope as

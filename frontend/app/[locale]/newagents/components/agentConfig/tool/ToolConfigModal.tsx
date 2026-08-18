@@ -1838,13 +1838,13 @@ export default function ToolConfigModal({
     if (param.name === "selected_model_id" && isAnalyzeToolWithModelSelection) {
       return (
         <Select
-          placeholder="未选择时使用默认模型"
+          placeholder={t("toolConfig.placeholder.useDefaultModel")}
           options={analyzeToolModelOptions}
           loading={registeredModelsLoading}
           allowClear
           showSearch
           optionFilterProp="label"
-          notFoundContent={registeredModelsLoading ? undefined : "暂无可选模型"}
+          notFoundContent={registeredModelsLoading ? undefined : t("toolConfig.placeholder.noAvailableModels")}
         />
       );
     }

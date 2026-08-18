@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Tooltip } from "antd";
 import { useToolList } from "@/hooks/agent/useToolList";
@@ -114,8 +114,19 @@ export default function ToolManagement({
     }
   }, [availableTools, toolsLoaded, selectedTools, updateTools]);
 
+  // Keep system-managed tools in the draft for persistence, but omit them from
+  // the user-facing selected-tools list.
+  const visibleSelectedTools = useMemo(() => {
+    return selectedTools.filter((tool) => {
+      const canonicalTool = availableTools.find(
+        (availableTool: Tool) => String(availableTool.id) === String(tool.id)
+      );
+      return (canonicalTool ?? tool).is_user_selectable !== false;
+    });
+  }, [availableTools, selectedTools]);
+
   // --- Group by source → category ---
-  const grouped = groupToolsBySource(selectedTools);
+  const grouped = groupToolsBySource(visibleSelectedTools);
 
   const mergeParams = useCallback(
     async (tool: Tool, forceFetch?: boolean): Promise<ToolParam[]> => {
@@ -212,7 +223,7 @@ export default function ToolManagement({
         <span className="flex items-center gap-1.5 text-sm font-medium text-gray-700">
           {t("toolPool.selectedToolsLabel")}
           <span className="text-xs text-gray-400">
-            ({selectedTools.length})
+            ({visibleSelectedTools.length})
           </span>
         </span>
       </div>

@@ -5,14 +5,14 @@ import { CheckCircle2Icon, FileCheck2Icon } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
-import { useAgentConfigStore } from "@/stores/agentConfigStore";
+import { useAgentStore } from "@/stores/agentStore";
 import type { Nl2aAgentDraftPayload } from "../adapter/remote-chat-model-adapter";
 
 export const AgentDraftCard: FC<{ draft: Nl2aAgentDraftPayload }> = ({
   draft,
 }) => {
   const { t } = useTranslation("common");
-  const updateAgentConfig = useAgentConfigStore(
+  const updateAgentConfig = useAgentStore(
     (state) => state.updateAgentConfig
   );
   const [isApplied, setIsApplied] = useState(false);

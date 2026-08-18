@@ -7,6 +7,9 @@ import { App, Button, Empty, Input, Spin } from "antd";
 import { ChevronLeft, ChevronRight, Plus, Search, Upload } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import AgentImportWizard from "@/components/agent/AgentImportWizard";
+import CreateAgentModal, {
+  type CreatedAgentResult,
+} from "@/components/agent/CreateAgentModal";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 import { deleteAgent } from "@/services/agentConfigService";
 import {
@@ -105,6 +108,7 @@ export function MineAgentsView({
   const [importWizardVisible, setImportWizardVisible] = useState(false);
   const [importWizardData, setImportWizardData] =
     useState<ImportAgentData | null>(null);
+  const [createAgentModalVisible, setCreateAgentModalVisible] = useState(false);
   const [reviewModalOpen, setReviewModalOpen] = useState(false);
   const [reviewModalAgent, setReviewModalAgent] =
     useState<MyEditableAgentItem | null>(null);
@@ -128,7 +132,16 @@ export function MineAgentsView({
   const normalizedQuery = searchQuery.trim().toLowerCase();
 
   const handleCreateAgent = () => {
-    router.push(`/${locale}/agents?create=true&from=agent-space&tab=mine`);
+    setCreateAgentModalVisible(true);
+  };
+
+  const handleAgentCreated = async ({ agentId }: CreatedAgentResult) => {
+    setCreateAgentModalVisible(false);
+    await Promise.all([
+      invalidateAgentRepositoryCaches(queryClient),
+      queryClient.invalidateQueries({ queryKey: [AGENTS_LIST_QUERY_KEY] }),
+    ]);
+    router.push(`/${locale}/newagents?agent_id=${agentId}`);
   };
 
   const handleImportAgent = async () => {
@@ -542,6 +555,12 @@ export function MineAgentsView({
         isUpdatingStatus={updateStatusMutation.isPending}
         onClose={closeReviewModal}
         onSetNotShared={handleSetNotShared}
+      />
+
+      <CreateAgentModal
+        open={createAgentModalVisible}
+        onCancel={() => setCreateAgentModalVisible(false)}
+        onCreated={handleAgentCreated}
       />
 
       <AgentImportWizard

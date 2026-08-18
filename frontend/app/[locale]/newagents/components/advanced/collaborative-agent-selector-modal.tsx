@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 
+import { useTranslation } from "react-i18next";
+
 import { useExternalAgents } from "@/hooks/agent/useExternalAgents";
 import { usePublishedAgentList } from "@/hooks/agent/usePublishedAgentList";
 import {
@@ -69,7 +71,7 @@ function SelectCard({
       onClick={onToggle}
       aria-pressed={selected}
       title={description}
-      className={`relative flex w-full items-center gap-2.5 rounded-lg border p-2.5 text-left transition ${
+      className={`relative flex w-full min-w-0 items-center gap-2.5 overflow-hidden rounded-lg border p-2.5 text-left transition ${
         selected
           ? "border-primary bg-primary/5"
           : "border-gray-200 hover:border-primary/40 hover:bg-gray-50"
@@ -79,15 +81,15 @@ function SelectCard({
         {icon}
       </span>
       <span className="min-w-0 flex-1">
-        <span className="flex items-center gap-1.5">
-          <strong className="truncate text-sm text-gray-800">{name}</strong>
+        <span className="flex min-w-0 items-center gap-1.5">
+          <strong className="min-w-0 truncate text-sm text-gray-800">{name}</strong>
           {version && (
             <span className="shrink-0 rounded bg-gray-100 px-1.5 py-0.5 font-mono text-[11px] text-gray-500">
               {version}
             </span>
           )}
         </span>
-        <span className="mt-0.5 block truncate text-xs text-gray-500">
+        <span className="mt-0.5 block min-w-0 truncate text-xs text-gray-500">
           {description}
         </span>
       </span>
@@ -105,11 +107,12 @@ export default function CollaborativeAgentSelectorModal({
   onCancel,
   onConfirm,
 }: CollaborativeAgentSelectorModalProps) {
+  const { t } = useTranslation("common");
   const currentAgentId = useAgentStore((state) => state.agentId);
   const { availableAgents: internalAgents, isLoading: isInternalLoading } =
-    usePublishedAgentList({ enabled: open });
+    usePublishedAgentList();
   const { availableAgents: externalAgents, isLoading: isExternalLoading } =
-    useExternalAgents({ enabled: open });
+    useExternalAgents();
   const selectedInternalIds = useAgentStore(
     (state) => state.editedAgent?.sub_agent_id_list || []
   );
@@ -195,7 +198,7 @@ export default function CollaborativeAgentSelectorModal({
         onToggle={() => toggleSelection(activeSource, agentId, !isSelected)}
         icon={<AgentIcon size={16} />}
         name={agentName}
-        description={agent.description || "暂无描述"}
+        description={agent.description || t("agent.collaborative.selector.noDescription")}
         version={version}
       />
     );
@@ -203,14 +206,14 @@ export default function CollaborativeAgentSelectorModal({
 
   return (
     <Modal
-      title="选择协作智能体"
+      title={t("agent.collaborative.selector.title")}
       open={open}
       width={720}
       destroyOnHidden
       onCancel={onCancel}
       footer={[
         <Button key="cancel" onClick={onCancel}>
-          取消
+          {t("common.cancel")}
         </Button>,
         <Button
           key="confirm"
@@ -219,7 +222,7 @@ export default function CollaborativeAgentSelectorModal({
             onConfirm(draftInternalIds, draftExternalIds, internalAgents)
           }
         >
-          确定
+          {t("common.confirm")}
         </Button>,
       ]}
     >
@@ -227,15 +230,15 @@ export default function CollaborativeAgentSelectorModal({
         activeKey={activeSource}
         onChange={changeSource}
         items={[
-          { key: "internal", label: "内部协作智能体" },
-          { key: "external", label: "外部协作智能体" },
+          { key: "internal", label: t("agent.collaborative.selector.tab.internal") },
+          { key: "external", label: t("agent.collaborative.selector.tab.external") },
         ]}
       />
       <Input
         allowClear
         value={search}
         prefix={<Search size={16} className="text-gray-400" />}
-        placeholder="搜索智能体名称或描述"
+        placeholder={t("agent.collaborative.selector.searchPlaceholder")}
         onChange={(event) => {
           setSearch(event.target.value);
           setPage(1);
@@ -250,14 +253,14 @@ export default function CollaborativeAgentSelectorModal({
           <div className="grid gap-2">{pagedAgents.map(renderAgent)}</div>
         ) : (
           <div className="flex min-h-72 items-center justify-center">
-            <Empty description="没有可选择的协作智能体" />
+            <Empty description={t("agent.collaborative.selector.empty")} />
           </div>
         )}
       </div>
       {filteredAgents.length > PAGE_SIZE && (
         <div className="mt-5 flex items-center justify-between border-t border-gray-100 pt-4">
           <span className="text-xs text-gray-400">
-            共 {filteredAgents.length} 个智能体
+            {t("agent.collaborative.selector.totalAgents", { count: filteredAgents.length })}
           </span>
           <Pagination
             current={page}

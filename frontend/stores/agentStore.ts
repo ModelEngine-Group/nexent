@@ -1,14 +1,54 @@
 import { create } from "zustand";
 
 import {
+  AGENT_DESCRIPTION_MAX_LENGTH,
+  AGENT_NAME_MAX_LENGTH,
+  isValidAgentDescription,
+  isValidAgentDisplayName,
+  isValidAgentName,
+} from "@/lib/agentValidation";
+import {
   searchToolConfig,
   updateAgentInfo,
   updateToolConfig,
 } from "@/services/agentConfigService";
-import type { EditableAgent } from "@/stores/agentConfigStore";
-import type { Tool } from "@/types/agentConfig";
+import type { Agent, Skill, Tool } from "@/types/agentConfig";
 
-export type AgentDraft = EditableAgent;
+export type AgentDraft = Pick<
+  Agent,
+  | "name"
+  | "display_name"
+  | "description"
+  | "author"
+  | "created_by"
+  | "model"
+  | "model_ids"
+  | "model_names"
+  | "max_step"
+  | "requested_output_tokens"
+  | "is_main_agent"
+  | "provide_run_summary"
+  | "enable_context_manager"
+  | "is_a2a"
+  | "verification_config"
+  | "tools"
+  | "duty_prompt"
+  | "constraint_prompt"
+  | "few_shots_prompt"
+  | "business_description"
+  | "business_logic_model_name"
+  | "business_logic_model_id"
+  | "prompt_template_id"
+  | "prompt_template_name"
+  | "sub_agent_id_list"
+  | "sub_agent_relations"
+  | "external_sub_agent_id_list"
+  | "group_ids"
+  | "ingroup_permission"
+  | "greeting_message"
+  | "example_questions"
+  | "icon_url"
+> & { skills: Skill[] };
 export type AgentDraftPatch = Partial<AgentDraft>;
 
 export interface AgentSaveTask {
@@ -18,14 +58,17 @@ export interface AgentSaveTask {
 
 interface AgentStoreState {
   agentId: number | null;
+  currentAgentId: number | null;
   isReadOnly: boolean;
   editedAgent: AgentDraft | null;
   savedAgent: AgentDraft | null;
   queue: AgentSaveTask[];
   isSaving: boolean;
+  isGenerating: boolean;
   saveError: string | null;
+  defaultLlmConfig: { id: number | null; name: string; displayName: string } | null;
 
-  initialize: (agentId: number, agent: AgentDraft, isReadOnly: boolean) => void;
+  initialize: (agent: Agent) => void;
   updateDraft: (patch: AgentDraftPatch) => void;
   flushDraft: () => void;
   updateAgentConfig: (patch: AgentDraftPatch) => void;
@@ -36,10 +79,50 @@ interface AgentStoreState {
     relations: AgentDraft["sub_agent_relations"]
   ) => void;
   updateExternalSubAgentIds: (ids: number[]) => void;
+  setDefaultLlmConfig: (
+    config: { id: number | null; name: string; displayName: string } | null
+  ) => void;
+  setIsGenerating: (value: boolean) => void;
   waitForIdle: () => Promise<void>;
   clearSaveError: () => void;
   reset: () => void;
 }
+
+const toDraft = (agent: Agent): AgentDraft => ({
+  name: agent.name,
+  display_name: agent.display_name || "",
+  description: agent.description || "",
+  author: agent.author || "",
+  created_by: agent.created_by ?? null,
+  model: agent.model || "",
+  model_ids: agent.model_ids || [],
+  model_names: agent.model_names || [],
+  max_step: agent.max_step,
+  requested_output_tokens: agent.requested_output_tokens ?? null,
+  is_main_agent: agent.is_main_agent ?? true,
+  provide_run_summary: agent.provide_run_summary,
+  enable_context_manager: agent.enable_context_manager,
+  is_a2a: agent.is_a2a,
+  verification_config: agent.verification_config,
+  tools: [...(agent.tools || [])],
+  skills: [...(agent.skills || [])],
+  duty_prompt: agent.duty_prompt || "",
+  constraint_prompt: agent.constraint_prompt || "",
+  few_shots_prompt: agent.few_shots_prompt || "",
+  business_description: agent.business_description || "",
+  business_logic_model_name: agent.business_logic_model_name || "",
+  business_logic_model_id: agent.business_logic_model_id || 0,
+  prompt_template_id: agent.prompt_template_id ?? 0,
+  prompt_template_name: agent.prompt_template_name || "system_default",
+  sub_agent_id_list: agent.sub_agent_id_list || [],
+  sub_agent_relations: agent.sub_agent_relations || [],
+  external_sub_agent_id_list: agent.external_sub_agent_id_list || [],
+  group_ids: agent.group_ids || [],
+  ingroup_permission: agent.ingroup_permission || "READ_ONLY",
+  greeting_message: agent.greeting_message || "",
+  example_questions: agent.example_questions || [],
+  icon_url: agent.icon_url,
+});
 
 const cloneDraft = <T>(value: T): T => structuredClone(value);
 
@@ -79,6 +162,7 @@ const toAgentPayload = (agentId: number, patch: AgentDraftPatch) => ({
     ? { description: patch.description }
     : {}),
   ...(patch.author !== undefined ? { author: patch.author } : {}),
+  ...(patch.icon_url !== undefined ? { icon_url: patch.icon_url } : {}),
   ...(patch.group_ids !== undefined ? { group_ids: patch.group_ids } : {}),
   ...(patch.model_ids !== undefined ? { model_ids: patch.model_ids } : {}),
   ...(patch.max_step !== undefined ? { max_steps: patch.max_step } : {}),
@@ -91,7 +175,7 @@ const toAgentPayload = (agentId: number, patch: AgentDraftPatch) => ({
   ...(patch.provide_run_summary !== undefined
     ? { provide_run_summary: patch.provide_run_summary }
     : {}),
-  ...(patch.enable_a2a !== undefined ? { enable_a2a: patch.enable_a2a } : {}),
+  ...(patch.is_a2a !== undefined ? { is_a2a: patch.is_a2a } : {}),
   ...(patch.enable_context_manager !== undefined
     ? { enable_context_manager: patch.enable_context_manager }
     : {}),
@@ -307,34 +391,68 @@ export const useAgentStore = create<AgentStoreState>((set) => {
 
   return {
     agentId: null,
+    currentAgentId: null,
     isReadOnly: true,
     editedAgent: null,
     savedAgent: null,
     queue: [],
     isSaving: false,
+    isGenerating: false,
     saveError: null,
+    defaultLlmConfig: null,
 
-    initialize: (agentId, agent, isReadOnly) => {
+    initialize: (agent) => {
       clearPendingDraftSave();
+      const agentId = Number(agent.id);
+      const draft = toDraft(agent);
       set({
         agentId,
-        isReadOnly,
-        editedAgent: cloneDraft(agent),
-        savedAgent: cloneDraft(agent),
+        currentAgentId: agentId,
+        isReadOnly: agent.permission === "READ_ONLY",
+        editedAgent: cloneDraft(draft),
+        savedAgent: cloneDraft(draft),
         queue: [],
         isSaving: false,
+        isGenerating: false,
         saveError: null,
       });
     },
 
     updateDraft: (patch) => {
       const draftPatch = cloneDraft(patch);
-      pendingDraftPatch = { ...pendingDraftPatch, ...draftPatch };
+      const savePatch = cloneDraft(draftPatch);
+      if (
+        savePatch.name !== undefined &&
+        !isValidAgentName(savePatch.name)
+      ) {
+        delete savePatch.name;
+        delete pendingDraftPatch.name;
+      }
+      if (
+        savePatch.display_name !== undefined &&
+        !isValidAgentDisplayName(savePatch.display_name)
+      ) {
+        delete savePatch.display_name;
+        delete pendingDraftPatch.display_name;
+      }
+      if (
+        savePatch.description !== undefined &&
+        !isValidAgentDescription(savePatch.description)
+      ) {
+        delete savePatch.description;
+        delete pendingDraftPatch.description;
+      }
 
       set((state) => ({
         editedAgent: mergeDraft(state.editedAgent, draftPatch),
         saveError: null,
       }));
+
+      if (Object.keys(savePatch).length === 0) {
+        return;
+      }
+
+      pendingDraftPatch = { ...pendingDraftPatch, ...savePatch };
 
       if (draftSaveTimer) {
         clearTimeout(draftSaveTimer);
@@ -364,6 +482,8 @@ export const useAgentStore = create<AgentStoreState>((set) => {
       enqueue({ sub_agent_relations }),
     updateExternalSubAgentIds: (external_sub_agent_id_list) =>
       enqueue({ external_sub_agent_id_list }),
+    setDefaultLlmConfig: (defaultLlmConfig) => set({ defaultLlmConfig }),
+    setIsGenerating: (isGenerating) => set({ isGenerating }),
     waitForIdle: () => {
       useAgentStore.getState().flushDraft();
       return new Promise((resolve) => {
@@ -388,11 +508,13 @@ export const useAgentStore = create<AgentStoreState>((set) => {
       clearPendingDraftSave();
       set({
         agentId: null,
+        currentAgentId: null,
         isReadOnly: true,
         editedAgent: null,
         savedAgent: null,
         queue: [],
         isSaving: false,
+        isGenerating: false,
         saveError: null,
       });
     },

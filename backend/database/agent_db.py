@@ -201,6 +201,7 @@ def create_agent(agent_info, tenant_id: str, user_id: str):
     info_with_metadata.setdefault("is_main_agent", True)
     info_with_metadata.setdefault("verification_config", None)
     info_with_metadata.setdefault("context_policy", None)
+    info_with_metadata.setdefault("is_a2a", False)
     info_with_metadata.update({
         "tenant_id": tenant_id,
         "version_no": 0,  # Default to draft version
@@ -238,6 +239,7 @@ def create_agent(agent_info, tenant_id: str, user_id: str):
             "group_ids": new_agent.group_ids,
             "is_new": new_agent.is_new,
             "enable_context_manager": new_agent.enable_context_manager,
+            "is_a2a": new_agent.is_a2a,
             "requested_output_tokens": new_agent.requested_output_tokens,
             "verification_config": new_agent.verification_config,
             "context_policy": getattr(new_agent, "context_policy", None),
@@ -288,6 +290,22 @@ def update_agent(agent_id, agent_info, user_id, version_no: int = 0):
                 value = convert_list_to_string(value)
             setattr(agent, key, value)
         agent.updated_by = user_id
+
+
+def update_agent_icon(agent_id: int, tenant_id: str, icon_url: str, user_id: str) -> None:
+    """Update the icon URL on every active version of an agent."""
+    with get_db_session() as session:
+        result = session.execute(
+            update(AgentInfo)
+            .where(
+                AgentInfo.agent_id == agent_id,
+                AgentInfo.tenant_id == tenant_id,
+                AgentInfo.delete_flag == "N",
+            )
+            .values(icon_url=icon_url, updated_by=user_id)
+        )
+        if result.rowcount == 0:
+            raise ValueError("ag_tenant_agent_t Agent not found")
 
 
 def delete_agent_by_id(agent_id, tenant_id: str, user_id: str):
