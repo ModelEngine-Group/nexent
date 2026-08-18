@@ -1837,6 +1837,44 @@ class TestMaxStepsReached:
 class TestRunStreamRealExecution:
     """Tests that actually execute the real _run_stream method for line coverage."""
 
+    class _FakeActionStep:
+        def __init__(self, **kwargs):
+            self.__dict__.update(kwargs)
+
+    class _FakeAgentGenerationError(Exception):
+        def __init__(self, message, logger):
+            super().__init__(message)
+
+    @classmethod
+    def _create_canonical_run_agent(cls, monkeypatch, **attributes):
+        monkeypatch.setattr(core_agent_module, "ActionStep", cls._FakeActionStep)
+        monkeypatch.setattr(core_agent_module, "AgentGenerationError", cls._FakeAgentGenerationError)
+        monkeypatch.setattr(core_agent_module, "FinalAnswerStep", lambda output: SimpleNamespace(output=output))
+        monkeypatch.setattr(core_agent_module, "handle_agent_output_types", lambda output: output)
+
+        agent = object.__new__(core_agent_module.CoreAgent)
+        defaults = {
+            "agent_name": "test_agent",
+            "name": "test_agent",
+            "observer": MagicMock(),
+            "stop_event": MagicMock(),
+            "step_number": 1,
+            "memory": MagicMock(),
+            "logger": MagicMock(),
+            "model": MagicMock(),
+            "final_answer_checks": [],
+            "enable_planning": False,
+            "verification_config": SimpleNamespace(enabled=False, final_verification_enabled=False),
+            "_finalize_step": MagicMock(),
+            "_collect_step_metrics": MagicMock(),
+        }
+        defaults.update(attributes)
+        for name, value in defaults.items():
+            setattr(agent, name, value)
+        agent.stop_event.is_set.return_value = False
+        agent.memory.steps = []
+        return agent
+
     @staticmethod
     def _context_runtime_mock(
         *,
@@ -2271,8 +2309,9 @@ class TestRunStreamRealExecution:
         agent.model = MagicMock(return_value=response)
 
         action_step = MagicMock()
+        stream = agent._step_stream(action_step)
         with pytest.raises(Exception, match="empty or whitespace-only output"):
-            next(agent._step_stream(action_step))
+            next(stream)
 
         assert action_step.model_output == "   \n\t"
 
@@ -2511,20 +2550,11 @@ class TestRunStreamRealExecution:
     def test_run_stream_retries_empty_final_answer_tool_result(self, monkeypatch):
         """An empty final_answer tool result must not end the run successfully."""
         module = core_agent_module
-        CoreAgent = module.CoreAgent
 
         class FakeActionOutput:
             def __init__(self, output, is_final_answer):
                 self.output = output
                 self.is_final_answer = is_final_answer
-
-        class FakeActionStep:
-            def __init__(self, **kwargs):
-                self.__dict__.update(kwargs)
-
-        class FakeAgentGenerationError(Exception):
-            def __init__(self, message, logger):
-                super().__init__(message)
 
         class FakeAgentError(Exception):
             pass
@@ -2534,32 +2564,12 @@ class TestRunStreamRealExecution:
                 super().__init__(message)
 
         monkeypatch.setattr(module, "ActionOutput", FakeActionOutput)
-        monkeypatch.setattr(module, "ActionStep", FakeActionStep)
         monkeypatch.setattr(module, "AgentError", FakeAgentError)
         monkeypatch.setattr(module, "AgentExecutionError", FakeAgentExecutionError)
-        monkeypatch.setattr(module, "AgentGenerationError", FakeAgentGenerationError)
-        monkeypatch.setattr(module, "FinalAnswerStep", lambda output: SimpleNamespace(output=output))
-        monkeypatch.setattr(module, "handle_agent_output_types", lambda output: output)
-
-        agent = object.__new__(CoreAgent)
-        agent.agent_name = "test_agent"
-        agent.name = "test_agent"
-        agent.observer = MagicMock()
-        agent.stop_event = MagicMock()
-        agent.stop_event.is_set.return_value = False
-        agent.step_number = 1
-        agent.memory = MagicMock()
-        agent.memory.steps = []
-        agent.logger = MagicMock()
-        agent.model = MagicMock(last_response_diagnostics={"finish_reason": "stop"})
-        agent.final_answer_checks = []
-        agent.enable_planning = False
-        agent.verification_config = SimpleNamespace(
-            enabled=False,
-            final_verification_enabled=False,
+        agent = self._create_canonical_run_agent(
+            monkeypatch,
+            model=MagicMock(last_response_diagnostics={"finish_reason": "stop"}),
         )
-        agent._finalize_step = MagicMock()
-        agent._collect_step_metrics = MagicMock()
 
         outputs = iter(["", "valid answer"])
 
@@ -2577,48 +2587,21 @@ class TestRunStreamRealExecution:
     def test_run_stream_retries_empty_direct_answer_then_verifies_valid_answer(self, monkeypatch):
         """An empty direct response is retried before a later valid response is verified."""
         module = core_agent_module
-        CoreAgent = module.CoreAgent
 
-        class FakeActionStep:
-            def __init__(self, **kwargs):
-                self.__dict__.update(kwargs)
-
-        class FakeAgentGenerationError(Exception):
-            def __init__(self, message, logger):
-                super().__init__(message)
-
-        monkeypatch.setattr(module, "ActionStep", FakeActionStep)
-        monkeypatch.setattr(module, "AgentGenerationError", FakeAgentGenerationError)
-        monkeypatch.setattr(module, "FinalAnswerStep", lambda output: SimpleNamespace(output=output))
-        monkeypatch.setattr(module, "handle_agent_output_types", lambda output: output)
-
-        agent = object.__new__(CoreAgent)
-        agent.agent_name = "test_agent"
-        agent.name = "test_agent"
-        agent.observer = MagicMock()
-        agent.stop_event = MagicMock()
-        agent.stop_event.is_set.return_value = False
-        agent.step_number = 1
-        agent.memory = MagicMock()
-        agent.memory.steps = []
-        agent.logger = MagicMock()
-        agent.model = MagicMock(
-            last_response_diagnostics={"finish_reason": "length"}
-        )
-        agent.final_answer_checks = []
-        agent.enable_planning = False
-        agent.verification_config = SimpleNamespace(
-            enabled=True,
-            final_verification_enabled=True,
-            max_final_rounds=2,
+        agent = self._create_canonical_run_agent(
+            monkeypatch,
+            model=MagicMock(last_response_diagnostics={"finish_reason": "length"}),
+            verification_config=SimpleNamespace(
+                enabled=True,
+                final_verification_enabled=True,
+                max_final_rounds=2,
+            ),
         )
         agent.verification_controller = MagicMock()
         agent.verification_controller.verify_final_answer.return_value = SimpleNamespace(
             passed=True
         )
         agent._build_verification_memory_summary = MagicMock(return_value="summary")
-        agent._finalize_step = MagicMock()
-        agent._collect_step_metrics = MagicMock()
 
         direct_answers = iter([" \n", "valid direct answer"])
 
@@ -2642,35 +2625,9 @@ class TestRunStreamRealExecution:
 
     def test_run_stream_initializes_lazy_planning_state(self, monkeypatch):
         """Planning-enabled runs reset lazy plan state before executing the first step."""
-        module = core_agent_module
-
-        class FakeActionStep:
-            def __init__(self, **kwargs):
-                self.__dict__.update(kwargs)
-
-        monkeypatch.setattr(module, "ActionStep", FakeActionStep)
-
-        agent = object.__new__(module.CoreAgent)
-        agent.agent_name = "test_agent"
-        agent.name = "test_agent"
-        agent.observer = MagicMock()
-        agent.stop_event = MagicMock()
-        agent.stop_event.is_set.return_value = False
-        agent.step_number = 1
-        agent.memory = MagicMock()
-        agent.memory.steps = []
-        agent.logger = MagicMock()
-        agent.model = MagicMock()
-        agent.final_answer_checks = []
-        agent.enable_planning = True
+        agent = self._create_canonical_run_agent(monkeypatch, enable_planning=True)
         agent.current_plan = "stale plan"
         agent.current_step_index = 99
-        agent.verification_config = SimpleNamespace(
-            enabled=False,
-            final_verification_enabled=False,
-        )
-        agent._finalize_step = MagicMock()
-        agent._collect_step_metrics = MagicMock()
         agent._handle_max_steps_reached = MagicMock(return_value="max steps")
 
         def mock_step_stream(_action_step):
@@ -2807,9 +2764,20 @@ class TestHandleMaxStepsReached:
         ]
         assert len(error_calls) >= 1
 
-    def test_handle_max_steps_reached_empty_content_uses_fallback(self, caplog):
+    def test_handle_max_steps_reached_empty_content_uses_fallback(self, caplog, monkeypatch):
         """Empty max-step synthesis returns a visible fallback and records why."""
         agent, _module = self._create_agent_for_handle_max_steps_test()
+
+        class FakeActionStep:
+            def __init__(self, **kwargs):
+                self.__dict__.update(kwargs)
+
+        class FakeAgentMaxStepsError(Exception):
+            def __init__(self, message, logger):
+                super().__init__(message)
+
+        monkeypatch.setattr(core_agent_module, "ActionStep", FakeActionStep)
+        monkeypatch.setattr(core_agent_module, "AgentMaxStepsError", FakeAgentMaxStepsError)
 
         mock_chat_message = MagicMock()
         mock_chat_message.role = "assistant"
@@ -2818,7 +2786,7 @@ class TestHandleMaxStepsReached:
         agent.model = MagicMock(return_value=mock_chat_message)
         agent._finalize_step = MagicMock()
 
-        result = agent._handle_max_steps_reached("original task")
+        result = core_agent_module.CoreAgent._handle_max_steps_reached(agent, "original task")
 
         assert result == (
             "The agent was unable to generate a valid response after reaching "
