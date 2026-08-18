@@ -74,7 +74,19 @@ def _read_directory_skill_data(
     except (OSError, UnicodeError, ValueError) as exc:
         raise SkillException(f"Invalid downloaded SKILL.md: {exc}") from exc
 
-    allowed_tools = parsed.get("allowed_tools", [])
+    raw_allowed_tools = parsed.get("allowed_tools", [])
+    if isinstance(raw_allowed_tools, str):
+        allowed_tools = [
+            tool.strip() for tool in raw_allowed_tools.split(",") if tool.strip()
+        ]
+    elif isinstance(raw_allowed_tools, list):
+        allowed_tools = [
+            tool.strip()
+            for tool in raw_allowed_tools
+            if isinstance(tool, str) and tool.strip()
+        ]
+    else:
+        allowed_tools = []
     tool_ids = skill_db.get_tool_ids_by_names(allowed_tools, tenant_id)
     skill_data: dict[str, Any] = {
         "name": local_name,
@@ -84,6 +96,9 @@ def _read_directory_skill_data(
         "tool_ids": tool_ids,
         "allowed-tools": allowed_tools,
     }
+    script_outputs = parsed.get("script_outputs")
+    if isinstance(script_outputs, dict) and script_outputs:
+        skill_data["script_outputs"] = script_outputs
 
     schema_path = skill_dir / "config" / "schema.yaml"
     if schema_path.is_file():

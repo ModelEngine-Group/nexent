@@ -1,6 +1,6 @@
 """Tests for the ModelScope Skill adapter."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -27,7 +27,7 @@ def _repo(**overrides):
         "downloads": 10,
         "likes": 2,
         "license": "Apache-2.0",
-        "last_modified": datetime(2026, 8, 7, 6, 37, 46, tzinfo=timezone.utc),
+        "last_modified": datetime(2026, 8, 7, 6, 37, 46, tzinfo=UTC),
         "private": False,
     }
     values.update(overrides)
@@ -100,6 +100,27 @@ def test_list_skills_normalizes_page_and_filters_private_items():
     api.list_repos.assert_called_once_with(
         repo_type="skill", search="creator", page_number=1, page_size=12
     )
+
+
+@pytest.mark.parametrize(
+    ("page_number", "expected_has_next"),
+    [(199, True), (200, False)],
+)
+def test_list_skills_stops_at_sdk_result_window(page_number, expected_has_next):
+    api = MagicMock()
+    api.list_repos.return_value = SimpleNamespace(
+        items=[_repo()],
+        total_count=72_000,
+        page_number=page_number,
+        page_size=12,
+        has_next=True,
+    )
+
+    result = ModelScopeSkillAdapter(api).list_skills(
+        search=None, page_number=page_number, page_size=12
+    )
+
+    assert result["has_next"] is expected_has_next
 
 
 def test_list_skills_maps_sdk_failure():

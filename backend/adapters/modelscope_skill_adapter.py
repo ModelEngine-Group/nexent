@@ -11,6 +11,7 @@ from modelscope.hub.api import HubApi
 from modelscope_hub.errors import NotExistError, NotFoundError
 
 MODELSCOPE_SKILL_SOURCE = "modelscope"
+MODELSCOPE_MAX_RESULT_WINDOW = 2_400
 
 
 def _serialize_datetime(value: Any) -> str | None:
@@ -79,12 +80,17 @@ class ModelScopeSkillAdapter:
 
         try:
             items = [_normalize_repo(repo) for repo in page.items]
+            response_page_number = int(page.page_number or page_number)
+            response_page_size = int(page.page_size or page_size)
+            has_accessible_next_page = (
+                response_page_number + 1
+            ) * response_page_size <= MODELSCOPE_MAX_RESULT_WINDOW
             return {
                 "items": [item for item in items if not item["private"]],
                 "total_count": int(page.total_count or 0),
-                "page_number": int(page.page_number or page_number),
-                "page_size": int(page.page_size or page_size),
-                "has_next": bool(page.has_next),
+                "page_number": response_page_number,
+                "page_size": response_page_size,
+                "has_next": bool(page.has_next) and has_accessible_next_page,
             }
         except ModelScopeSkillError:
             raise

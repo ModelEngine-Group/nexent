@@ -4,9 +4,11 @@ from unittest.mock import MagicMock
 
 import pytest
 from consts.exceptions import ModelScopeSkillError, SkillException
+from nexent.skills.skill_loader import SkillLoader
 from services import modelscope_skill_service as module
 from services.modelscope_skill_service import (
     ModelScopeSkillService,
+    _read_directory_skill_data,
     _validate_downloaded_directory,
 )
 
@@ -187,6 +189,47 @@ def test_install_parses_schema_and_config_files(tmp_path, monkeypatch):
     data = update.call_args.args[1]
     assert data["config_schemas"][0]["name"] == "query"
     assert data["config_values"] == {"query": "default"}
+
+
+def test_read_directory_normalizes_allowed_tools_and_preserves_script_outputs(
+    tmp_path, monkeypatch
+):
+    skill_dir = tmp_path / "snapshot"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text(
+        """---
+name: source-skill
+description: Source description
+allowed-tools: tool-a, tool-b
+script_outputs:
+  scripts/run.py:
+    type: text
+---
+
+Use this Skill.
+""",
+        encoding="utf-8",
+    )
+    get_tool_ids = MagicMock(return_value=[7, 8])
+    monkeypatch.setattr(module.skill_db, "get_tool_ids_by_names", get_tool_ids)
+
+    result = _read_directory_skill_data(
+        skill_dir,
+        local_name="local-skill",
+        description="Local description",
+        tags=["local"],
+        tenant_id="tenant-a",
+    )
+
+    get_tool_ids.assert_called_once_with(["tool-a", "tool-b"], "tenant-a")
+    assert result["tool_ids"] == [7, 8]
+    assert result["script_outputs"] == {"scripts/run.py": {"type": "text"}}
+
+    rewritten = SkillLoader.load(str(skill_dir / "SKILL.md"))
+    assert rewritten["allowed_tools"] == ["tool-a", "tool-b"]
+    assert rewritten["script_outputs"] == {
+        "scripts/run.py": {"type": "text"}
+    }
 
 
 def test_install_rejects_existing_database_name(tmp_path, monkeypatch):
