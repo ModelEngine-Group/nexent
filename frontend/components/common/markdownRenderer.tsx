@@ -832,16 +832,16 @@ const HoverableText = ({
             className="inline-flex items-center relative"
             style={{ zIndex: isOpen ? 1000 : "auto" }}
           >
-            <span
-              className="inline-flex items-center cursor-pointer transition-colors"
-              role="button"
-              tabIndex={0}
+            <button
+              type="button"
+              className="inline-flex cursor-pointer items-center border-0 bg-transparent p-0 transition-colors"
+              style={{ font: "inherit" }}
               aria-label={`Citation ${toolSign}${citeIndex}`}
               onClick={handleCitationClick}
               onKeyDown={handleCitationKeyDown}
             >
               <CitationBadge toolSign={toolSign} citeIndex={citeIndex} />
-            </span>
+            </button>
           </span>
         </TooltipTrigger>
         <TooltipContent

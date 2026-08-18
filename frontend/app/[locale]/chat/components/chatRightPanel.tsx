@@ -11,10 +11,12 @@ import { ExternalLink, Database, X, Server } from "lucide-react";
 import { ImageItem, ChatRightPanelProps, SearchResult } from "@/types/chat";
 import { formatDate, formatUrl } from "@/lib/utils";
 import {
+  CiteIndexBadge,
+  HighlightedChunkText,
+} from "@/components/common/highlightedSourceText";
+import {
   escapeRegExp,
   extractHighlightTerms,
-  normalizeForHighlight,
-  splitSourceTextIntoSentences,
 } from "@/lib/citationHighlight";
 import {
   extractObjectNameFromUrl,
@@ -46,44 +48,18 @@ const getCitationKey = (result: SearchResult): string | undefined => {
 };
 
 const getCitedAnswerContext = (answer: string, citationKey: string): string => {
-  const marker = `\\[\\[${escapeRegExp(citationKey)}\\]\\]`;
-  const matches =
-    answer.match(new RegExp(`[^\\n。！？]*${marker}`, "gi")) || [];
+  const marker = String.raw`\[\[${escapeRegExp(citationKey)}\]\]`;
+  const pattern = new RegExp(String.raw`[^\n。！？]*${marker}`, "gi");
+  const matches: string[] = [];
+  for (
+    let match = pattern.exec(answer);
+    match;
+    match = pattern.exec(answer)
+  ) {
+    matches.push(match[0]);
+  }
   return matches.join("\n");
 };
-
-function HighlightedChunkText({
-  text,
-  terms,
-}: {
-  text: string;
-  terms: string[];
-}) {
-  if (!terms.length) return <>{text}</>;
-
-  const matcher = new RegExp(
-    terms.map((term) => escapeRegExp(normalizeForHighlight(term))).join("|"),
-    "i",
-  );
-  return (
-    <>
-      {splitSourceTextIntoSentences(text).map((part, index) => {
-        const isMatch = matcher.test(normalizeForHighlight(part));
-        matcher.lastIndex = 0;
-        return isMatch ? (
-          <mark
-            key={`${part}-${index}`}
-            className="rounded-sm bg-yellow-100 px-1 py-0.5 text-inherit"
-          >
-            {part}
-          </mark>
-        ) : (
-          <React.Fragment key={`${part}-${index}`}>{part}</React.Fragment>
-        );
-      })}
-    </>
-  );
-}
 
 // Search result item component - moved to module scope to prevent re-creation on each render
 function SearchResultItem({
@@ -320,6 +296,13 @@ function SearchResultItem({
     );
   }
 
+  let textClassName = "text-gray-700 mt-1 text-sm whitespace-pre-wrap";
+  if (selected) {
+    textClassName += " max-h-52 overflow-y-auto pr-1";
+  } else if (!isExpanded) {
+    textClassName += " line-clamp-3";
+  }
+
   return (
     <div
       ref={itemRef}
@@ -335,9 +318,10 @@ function SearchResultItem({
             <div className="min-w-0 flex-1">{titleNode}</div>
             {Number.isFinite(result.cite_index) &&
               (result.cite_index ?? -1) >= 0 && (
-                <span className="shrink-0 rounded bg-blue-50 px-1.5 py-0.5 text-[11px] font-medium text-blue-600">
-                  {result.cite_index}
-                </span>
+                <CiteIndexBadge
+                  index={result.cite_index}
+                  className="shrink-0"
+                />
               )}
           </div>
 
@@ -349,16 +333,7 @@ function SearchResultItem({
         </div>
 
         <div>
-          <p
-            ref={textRef}
-            className={`text-gray-700 mt-1 text-sm whitespace-pre-wrap ${
-              selected
-                ? "max-h-52 overflow-y-auto pr-1"
-                : isExpanded
-                  ? ""
-                  : "line-clamp-3"
-            }`}
-          >
+          <p ref={textRef} className={textClassName}>
             <HighlightedChunkText
               text={text}
               terms={highlightTerms}

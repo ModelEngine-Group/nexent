@@ -135,6 +135,14 @@ const extractDomain = (url: string): string => {
   }
 };
 
+function getSourceLabel(source: PanelSourceItem | undefined): string | undefined {
+  if (!source) return undefined;
+  if (source.sourceType === "document" || !source.url) {
+    return "来源: Nexent";
+  }
+  return `来源: ${extractDomain(source.url)}`;
+}
+
 function toPanelSource(source: SearchSource): PanelSourceItem {
   return {
     sourceType:
@@ -284,13 +292,7 @@ const CiteComponent: FC<
       filename={panelSource?.filename}
       url={panelSource?.url}
       sourceType={panelSource?.sourceType}
-      sourceLabel={
-        panelSource
-          ? panelSource.sourceType === "document" || !panelSource.url
-            ? "来源: Nexent"
-            : `来源: ${extractDomain(panelSource.url)}`
-          : undefined
-      }
+      sourceLabel={getSourceLabel(panelSource)}
       loading={!source}
       onClick={
         source && messageId

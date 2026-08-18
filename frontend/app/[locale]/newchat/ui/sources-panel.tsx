@@ -1,6 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type FC } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FC,
+  type ReactNode,
+} from "react";
 import {
   DatabaseIcon,
   DownloadIcon,
@@ -14,10 +21,12 @@ import {
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
-  escapeRegExp,
+  CiteIndexBadge,
+  HighlightedChunkText,
+} from "@/components/common/highlightedSourceText";
+import {
   extractHighlightTerms,
-  normalizeForHighlight,
-  splitSourceTextIntoSentences,
+  mergeHighlightTerms,
 } from "@/lib/citationHighlight";
 import { useTranslation } from "react-i18next";
 import {
@@ -248,38 +257,6 @@ const extractDomain = (url: string): string => {
   }
 };
 
-const HighlightedChunkText: FC<{
-  text: string;
-  terms: string[];
-}> = ({ text, terms }) => {
-  if (!terms.length) return <>{text}</>;
-
-  // One compiled matcher scans each displayed sentence once. This stays local
-  // to the selected card and does not issue an extra search or model request.
-  const matcher = new RegExp(
-    terms.map((term) => escapeRegExp(normalizeForHighlight(term))).join("|"),
-    "i",
-  );
-  return (
-    <>
-      {splitSourceTextIntoSentences(text).map((part, index) => {
-        const isMatch = matcher.test(normalizeForHighlight(part));
-        matcher.lastIndex = 0;
-        return isMatch ? (
-          <mark
-            key={`${part}-${index}`}
-            className="rounded-sm bg-yellow-100 px-1 py-0.5 text-inherit"
-          >
-            {part}
-          </mark>
-        ) : (
-          <span key={`${part}-${index}`}>{part}</span>
-        );
-      })}
-    </>
-  );
-};
-
 const SourceSummary: FC<{
   text?: string;
   highlighted?: boolean;
@@ -344,6 +321,42 @@ const SourceFooter: FC<{ item: PanelSourceItem; sourceLabel: string }> = ({
     </div>
   );
 };
+
+/**
+ * Card content shared by all three source card variants (document, url,
+ * fallback): title row with index badge, date line, summary, and footer.
+ */
+const SourceCardBody: FC<{
+  title: ReactNode;
+  dateFallback?: ReactNode;
+  item: PanelSourceItem;
+  selected: boolean;
+  highlightTerms: string[];
+  sourceLabel: string;
+}> = ({ title, dateFallback, item, selected, highlightTerms, sourceLabel }) => (
+  <>
+    <div className="flex items-start gap-1.5">
+      {title}
+      <CiteIndexBadge
+        index={item.citeIndex}
+        className="inline-flex shrink-0 items-center justify-center"
+      />
+    </div>
+    {item.publishedDate ? (
+      <span className="mt-1 block text-sm text-gray-500">
+        {item.publishedDate}
+      </span>
+    ) : (
+      dateFallback
+    )}
+    <SourceSummary
+      text={item.text}
+      highlighted={selected}
+      highlightTerms={highlightTerms}
+    />
+    <SourceFooter item={item} sourceLabel={sourceLabel} />
+  </>
+);
 
 const SourceListItem: FC<{
   item: PanelSourceItem;
@@ -418,23 +431,16 @@ const SourceListItem: FC<{
           terms.indexOf(term) === index,
       );
   }, [item.retrievalHighlightTerms, item.text, selected]);
-  const highlightTerms = useMemo(() => {
-    if (!selected) return [];
-
-    const sourceText = item.text || "";
-    return Array.from(
-      new Set([
-        ...retrievalHighlightTerms,
-        ...extractHighlightTerms(citationContext || "", sourceText),
-      ]),
-    )
-      .sort((left, right) => right.length - left.length)
-      .filter(
-        (term, index, terms) =>
-          !terms.slice(0, index).some((kept) => kept.includes(term)),
-      )
-      .slice(0, 8);
-  }, [citationContext, retrievalHighlightTerms, item.text, selected]);
+  const highlightTerms = useMemo(
+    () =>
+      selected
+        ? mergeHighlightTerms(
+            retrievalHighlightTerms,
+            extractHighlightTerms(citationContext || "", item.text || ""),
+          )
+        : [],
+    [citationContext, retrievalHighlightTerms, item.text, selected],
+  );
   const previewUrl = getLocalFilePreviewUrl(
     item.url,
     item.filename || item.title,
@@ -459,19 +465,17 @@ const SourceListItem: FC<{
           >
             <FileTextIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
             <div className="min-w-0 flex-1">
-              <div className="flex items-start gap-1.5">
-                <span className="block min-w-0 flex-1 wrap-break-word text-base font-medium text-[#1677ff] group-hover:underline">{item.title || item.filename || t("chat.sources.document")}</span>
-                {Number.isFinite(item.citeIndex) && (
-                  <span className="inline-flex shrink-0 items-center justify-center rounded bg-blue-50 px-1.5 py-0.5 text-[11px] font-medium text-blue-600">{item.citeIndex}</span>
-                )}
-              </div>
-              {item.publishedDate && <span className="mt-1 block text-sm text-gray-500">{item.publishedDate}</span>}
-              <SourceSummary
-                text={item.text}
-                highlighted={selected}
+              <SourceCardBody
+                title={
+                  <span className="block min-w-0 flex-1 wrap-break-word text-base font-medium text-[#1677ff] group-hover:underline">
+                    {item.title || item.filename || t("chat.sources.document")}
+                  </span>
+                }
+                item={item}
+                selected={selected}
                 highlightTerms={highlightTerms}
+                sourceLabel="来源: Nexent"
               />
-              <SourceFooter item={item} sourceLabel="来源: Nexent" />
             </div>
           </button>
           <button
@@ -510,21 +514,22 @@ const SourceListItem: FC<{
         >
           <FileTextIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
           <div className="min-w-0 flex-1">
-            <div className="flex items-start gap-1.5">
-              <span className="block min-w-0 flex-1 truncate text-base font-medium text-[#1677ff] hover:underline">{displayTitle}</span>
-              {Number.isFinite(item.citeIndex) && (
-                <span className="inline-flex shrink-0 items-center justify-center rounded bg-blue-50 px-1.5 py-0.5 text-[11px] font-medium text-blue-600">{item.citeIndex}</span>
-              )}
-            </div>
-            {item.publishedDate ? (
-              <span className="mt-1 block text-sm text-gray-500">{item.publishedDate}</span>
-            ) : <span className="block truncate text-xs text-muted-foreground">{domain}</span>}
-            <SourceSummary
-              text={item.text}
-              highlighted={selected}
+            <SourceCardBody
+              title={
+                <span className="block min-w-0 flex-1 truncate text-base font-medium text-[#1677ff] hover:underline">
+                  {displayTitle}
+                </span>
+              }
+              dateFallback={
+                <span className="block truncate text-xs text-muted-foreground">
+                  {domain}
+                </span>
+              }
+              item={item}
+              selected={selected}
               highlightTerms={highlightTerms}
+              sourceLabel={`来源: ${domain}`}
             />
-            <SourceFooter item={item} sourceLabel={`来源: ${domain}`} />
           </div>
         </a>
       </li>
@@ -536,19 +541,17 @@ const SourceListItem: FC<{
       ref={itemRef}
       className={cn("rounded-lg border p-3 text-sm text-foreground", selectedClassName)}
     >
-      <div className="flex items-start gap-1.5">
-        <span className="min-w-0 flex-1 text-base font-medium text-[#1677ff]">{item.title || t("chat.sources.untitled")}</span>
-        {Number.isFinite(item.citeIndex) && (
-          <span className="inline-flex shrink-0 items-center justify-center rounded bg-blue-50 px-1.5 py-0.5 text-[11px] font-medium text-blue-600">{item.citeIndex}</span>
-        )}
-      </div>
-      {item.publishedDate && <span className="mt-1 block text-sm text-gray-500">{item.publishedDate}</span>}
-      <SourceSummary
-        text={item.text}
-        highlighted={selected}
+      <SourceCardBody
+        title={
+          <span className="min-w-0 flex-1 text-base font-medium text-[#1677ff]">
+            {item.title || t("chat.sources.untitled")}
+          </span>
+        }
+        item={item}
+        selected={selected}
         highlightTerms={highlightTerms}
+        sourceLabel="来源: Nexent"
       />
-      <SourceFooter item={item} sourceLabel="来源: Nexent" />
     </li>
   );
 };

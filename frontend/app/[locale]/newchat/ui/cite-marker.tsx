@@ -13,6 +13,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { CiteIndexBadge } from "@/components/common/highlightedSourceText";
 import { cn } from "@/lib/utils";
 
 export interface CiteMarkerProps {
@@ -49,6 +50,16 @@ const CiteMarkerImpl = ({
 }: CiteMarkerProps) => {
   const markerRef = useRef<HTMLButtonElement>(null);
 
+  let stateClassName =
+    "focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none";
+  if (loading) {
+    stateClassName = "cursor-wait opacity-70";
+  } else if (onClick) {
+    stateClassName += " cursor-pointer hover:bg-sky-200";
+  } else {
+    stateClassName += " cursor-default";
+  }
+
   return (
     <TooltipProvider delayDuration={200}>
       <Tooltip>
@@ -67,11 +78,7 @@ const CiteMarkerImpl = ({
             }
             className={cn(
               "mx-1 inline-flex size-[18px] items-center justify-center rounded-full bg-sky-100 p-0 align-middle text-[11px] font-medium leading-none text-sky-700 transition-colors",
-              loading
-                ? "cursor-wait opacity-70"
-                : onClick
-                  ? "cursor-pointer hover:bg-sky-200 focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none"
-                  : "cursor-default focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none",
+              stateClassName,
               className,
             )}
           >
@@ -94,9 +101,10 @@ const CiteMarkerImpl = ({
                   <span className="block min-w-0 flex-1 wrap-break-word text-sm font-medium text-[#1677ff]">
                     {title}
                   </span>
-                  <span className="inline-flex shrink-0 items-center justify-center rounded bg-blue-50 px-1.5 py-0.5 text-[11px] font-medium text-blue-600">
-                    {citeIndex}
-                  </span>
+                  <CiteIndexBadge
+                    index={citeIndex}
+                    className="inline-flex shrink-0 items-center justify-center"
+                  />
                 </div>
                 {text?.trim() ? (
                   <p className="mt-1 line-clamp-4 wrap-break-word whitespace-pre-wrap text-xs leading-5 text-gray-600">
