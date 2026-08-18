@@ -410,7 +410,7 @@ ModelScope 和 MCP.so 仅保留现有前端外链，不进入该 Tool。
 
 ### 5.3 `recommend_resources`
 
-职责：根据模型已经选定的少量 `candidate_ref`，读取最新详情并生成卡片所需数据：
+职责：根据模型已经选定的少量候选，读取最新详情并生成卡片所需数据：
 
 ```text
 名称与说明
@@ -422,6 +422,17 @@ ModelScope 和 MCP.so 仅保留现有前端外链，不进入该 Tool。
 ```
 
 该 Tool 不重新执行全量搜索，也不直接安装或绑定资源。
+
+输入固定为 `candidates + recommended_refs`。模型必须原样回传
+`search_*_resources` 返回的候选快照；后端不建立 NL2Agent session
+缓存，只保留快照中的 `requirement_ids` 与 `score`，并按
+`candidate_ref` 重新解析当前租户真实资源。`recommended_refs` 必须唯一且为
+`candidates` 的子集，候选总数最多 12 个。
+
+`recommend_resources` 的成功结果不是可见卡片。模型必须将结果与真实
+`agent_id` 再传给 `nl2a_wrapper(subtype="installed_resource_binding")`；
+Wrapper 会再次解析资源并覆盖名称、说明、来源和配置 Schema，防止模型修改
+资源身份或展示字段。
 
 配置表单不再设计一套覆盖 Tool、Skill 和 MCP 的新通用 JSON Schema。`recommend_resources` 对每个资源返回 `form_kind + config`，由前端 NL2Agent 卡片按类型分派：
 
@@ -476,7 +487,7 @@ example_questions
 
 ### 5.5 `nl2a_wrapper`
 
-职责：生成四种 `<nl2a>` payload，并在 `final_review` 时从数据库读取事实。
+职责：生成四种 `<nl2a>` payload，并在资源绑定与 `final_review` 时从数据库读取事实。
 
 最终校验包括：
 
@@ -487,6 +498,10 @@ example_questions
 5. 资源数量允许为零，但仍必须满足用户已经明确放弃相应需求。
 
 Wrapper 不接收模型重新提交的完整 Agent 内容，也不扫描 Prompt 自然语言判断是否提到未绑定资源。
+
+PR2 的 `installed_resource_binding` Wrapper 只接收 `agent_id` 与
+`RecommendResourcesOutput`，验证成功后输出绑定卡；旧
+`local_mcp_recommendation` 与 `agent_draft` subtype 在迁移期继续兼容。
 
 ---
 
@@ -733,7 +748,7 @@ final_confirmation
 
 澄清卡 `agent_id=null`；其余卡片 `agent_id` 必须为正整数。
 
-PR1 只新增 `requirement_clarification` 渲染和 action；另外三种新卡在后续 PR 实现。旧 `local_mcp_recommendation` 与 `agent_draft` 分支在过渡期继续可解析和渲染。
+PR1 新增 `requirement_clarification` 渲染和 action；PR2 新增 `installed_resource_binding`。安装卡与最终确认卡仍由后续 PR 实现。旧 `local_mcp_recommendation` 与 `agent_draft` 分支在过渡期继续可解析和渲染。
 
 ### 8.2 一轮一张卡
 
@@ -962,8 +977,8 @@ Prompt 摘要
 1. 校验 Agent 属于当前租户。
 2. 从数据库读取 Agent 基本信息。
 3. 读取 enabled ToolInstance/SkillInstance。
-4. 读取这些资源的真实名称、描述、输入和配置结果。
-5. 将 `bound_resources` 作为请求级 NL2Agent 上下文注入 `context_input`。
+4. 读取这些资源的真实名称、描述、输入和已配置字段名，不把凭据或原始密钥值注入模型。
+5. PR2 将最小 `bound_resources` 作为请求级 NL2Agent 上下文注入 `context_input`，只包含数据库确认的资源身份、说明、输入或配置字段名，不包含任何配置值或默认值；该上下文只用于确认绑定闭环，PR4 再补充 Agent 基本信息并用于 Prompt 生成。
 
 模型生成 Prompt 时不再使用搜索阶段的未安装候选或用户未绑定资源。
 
@@ -1168,7 +1183,8 @@ Gate 0 默认打开 NL2Agent Panel
 
 1. 仅依赖已安装资源的需求可以完成搜索、配置和绑定闭环。
 2. 无选择、全部成功、部分失败、重试成功和字段错误场景均有测试。
-3. 修改模块单元测试覆盖率达到 90%，并完成绑定 API 验证和绑定卡 Playwright 验证。
+3. 修改的后端模块单元测试覆盖率达到 90%，并完成绑定 API 验证。
+4. 本阶段按项目决策使用 `npm run check-all` 与桌面、平板、移动端人工验收，不新增或运行 Vitest/Playwright；该例外不延伸到后续阶段。
 
 ### 14.6 PR3：未安装资源搜索与安装闭环（P0）
 
