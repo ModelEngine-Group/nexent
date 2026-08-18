@@ -108,6 +108,9 @@ export const fetchTools = async () => {
           type: convertParamType(param.type),
           required: !param.optional,
           value: param.default,
+          // Keep the SDK default so the config form can restore it when an
+          // optional-with-default param (e.g. top_k) is cleared.
+          default: param.default,
           description: param.description,
           description_zh: param.description_zh,
         };
@@ -879,6 +882,9 @@ export const searchAgentInfo = async (
                     type: convertParamType(param.type),
                     required: !param.optional,
                     value: param.default,
+                    // Keep the SDK default so the config form can restore it
+                    // when an optional-with-default param (e.g. top_k) is cleared.
+                    default: param.default,
                     description: param.description,
                     description_zh: param.description_zh,
                   }))

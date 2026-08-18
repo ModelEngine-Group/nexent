@@ -138,6 +138,94 @@ export const TOOL_PARAM_OPTIONS = {
   },
 } as const;
 
+// Numeric value ranges for configurable tool params.
+// Mirrors backend TOOL_PARAM_CONSTRAINTS (backend/services/tool_param_validation.py).
+export const TOOL_PARAM_RANGES: Record<
+  string,
+  Record<string, { min: number; max: number; type: "int" | "float" }>
+> = {
+  knowledge_base_search: { top_k: { min: 1, max: 100, type: "int" } },
+  dify_search: { top_k: { min: 1, max: 100, type: "int" } },
+  datamate_search: {
+    top_k: { min: 1, max: 100, type: "int" },
+    threshold: { min: 0, max: 1, type: "float" },
+    kb_page: { min: 1, max: 10000, type: "int" },
+    kb_page_size: { min: 1, max: 100, type: "int" },
+  },
+  haotian_search: {
+    top_k: { min: 1, max: 100, type: "int" },
+    keyword_weight: { min: 0, max: 1, type: "float" },
+    vector_weight: { min: 0, max: 1, type: "float" },
+  },
+  ragflow_search: {
+    top_k: { min: 1, max: 100, type: "int" },
+    similarity_threshold: { min: 0, max: 1, type: "float" },
+    vector_similarity_weight: { min: 0, max: 1, type: "float" },
+  },
+  idata_search: {
+    top_k: { min: 1, max: 100, type: "int" },
+    similarity_threshold: { min: -10, max: 1, type: "float" },
+    keyword_similarity_weight: { min: 0, max: 1, type: "float" },
+    vector_similarity_weight: { min: 0, max: 1, type: "float" },
+  },
+  tavily_search: { max_results: { min: 1, max: 100, type: "int" } },
+  exa_search: { max_results: { min: 1, max: 100, type: "int" } },
+  linkup_search: { max_results: { min: 1, max: 100, type: "int" } },
+  terminal: { ssh_port: { min: 1, max: 65535, type: "int" } },
+  get_email: { timeout: { min: 1, max: 600, type: "int" } },
+};
+
+// Get the numeric range (min/max/type) for a specific tool and parameter
+export function getToolParamRange(
+  toolName: string,
+  paramName: string
+): { min: number; max: number; type: "int" | "float" } | undefined {
+  return TOOL_PARAM_RANGES[toolName]?.[paramName];
+}
+
+/**
+ * Whether a tool param must hold a value when saving config / running a test.
+ *
+ * These are the optional-with-default params (top_k, threshold, search_mode,
+ * max_results, ...) that the form lets the user clear. Clearing them leaves
+ * the config silently empty (the SDK falls back to its default at runtime),
+ * which is invisible to the user — so we treat them as required at save/test
+ * time and prompt instead. Boolean enum options ([true, false]) are excluded:
+ * they are rendered as switches and never empty.
+ */
+export function isToolParamRequiredOnSave(
+  toolName: string,
+  paramName: string
+): boolean {
+  if (getToolParamRange(toolName, paramName)) return true;
+  const options = getToolParamOptions(toolName, paramName);
+  if (options && options.some((o) => typeof o !== "boolean")) return true;
+  return false;
+}
+
+/**
+ * Constraint hint for a required-on-save param: its allowed range or enum
+ * values, used to build the "required / allowed range / suggested default"
+ * message shown next to the field and on save/test failure.
+ */
+export function getToolParamConstraintHint(
+  toolName: string,
+  paramName: string
+): { kind: "range"; min: number; max: number } | { kind: "enum"; values: string[] } | { kind: "none" } {
+  const range = getToolParamRange(toolName, paramName);
+  if (range) return { kind: "range", min: range.min, max: range.max };
+  const options = getToolParamOptions(toolName, paramName);
+  if (options && options.some((o) => typeof o !== "boolean")) {
+    return {
+      kind: "enum",
+      values: options
+        .filter((o) => typeof o !== "boolean")
+        .map((o) => String(o)),
+    };
+  }
+  return { kind: "none" };
+}
+
 // Get options for a specific tool and parameter
 export function getToolParamOptions(
   toolName: string,

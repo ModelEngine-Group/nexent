@@ -31,7 +31,13 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import { CloseOutlined } from "@ant-design/icons";
 
-import { TOOL_PARAM_TYPES, getToolParamOptions } from "@/const/agentConfig";
+import {
+  TOOL_PARAM_TYPES,
+  getToolParamConstraintHint,
+  getToolParamOptions,
+  getToolParamRange,
+  isToolParamRequiredOnSave,
+} from "@/const/agentConfig";
 import { ToolParam, Tool } from "@/types/agentConfig";
 import { KnowledgeBase } from "@/types/knowledgeBase";
 import ToolTestPanel from "./ToolTestPanel";
@@ -163,6 +169,35 @@ function withAnalyzeToolModelParam(params: ToolParam[], toolName?: string): Tool
 
 function withExtraToolParams(params: ToolParam[], toolName?: string): ToolParam[] {
   return withAnalyzeToolModelParam(withRerankParams(params, toolName), toolName);
+}
+
+/**
+ * Build the required-field hint for a param that is required-on-save,
+ * including its allowed range/enum and the suggested SDK default, e.g.
+ * "top_k is required (range: 1-100, suggested default: 3)".
+ */
+function buildRequiredHint(
+  t: (key: string, vars?: Record<string, any>) => string,
+  param: ToolParam,
+  toolName?: string
+): string {
+  const hint = getToolParamConstraintHint(toolName || "", param.name);
+  if (hint.kind === "range") {
+    return t("toolConfig.validation.requiredWithRange", {
+      name: param.name,
+      min: hint.min,
+      max: hint.max,
+      default: param.default ?? hint.min,
+    });
+  }
+  if (hint.kind === "enum") {
+    return t("toolConfig.validation.requiredWithEnum", {
+      name: param.name,
+      values: hint.values.join(" / "),
+      default: param.default ?? hint.values[0],
+    });
+  }
+  return `${param.name} ${t("toolConfig.validation.required")}`;
 }
 
 export default function ToolConfigModal({
@@ -1327,7 +1362,10 @@ export default function ToolConfigModal({
               p.name === "dataset_ids" ||
               p.name === "kds_list")
         );
-        if (kbParam) {
+        // ragflow_search.dataset_ids carries a "[]" SDK default that marks it
+        // optional in the schema, but the SDK constructor rejects an empty
+        // selection at instantiation time — enforce non-empty here too.
+        if (kbParam || tool?.name === "ragflow_search") {
           message.error(t("toolConfig.validation.selectKb"));
           return;
         }
@@ -1351,6 +1389,20 @@ export default function ToolConfigModal({
           }
         });
       }
+      // Enforce required params (top_k, search_mode, ...) like the
+      // knowledge-base selector: a cleared value must be re-entered on save.
+      const missingRequiredParam = syncedParams.find(
+        (p) =>
+          isToolParamRequiredOnSave(tool?.name || "", p.name) &&
+          (p.value === undefined || p.value === null || p.value === "")
+      );
+      if (missingRequiredParam) {
+        message.error(
+          buildRequiredHint(t, missingRequiredParam, tool?.name || "")
+        );
+        return;
+      }
+
       const paramsObj = syncedParams.reduce(
         (acc, param) => {
           acc[param.name] = param.value;
@@ -1863,14 +1915,19 @@ export default function ToolConfigModal({
       }
 
       switch (param.type) {
-        case TOOL_PARAM_TYPES.NUMBER:
+        case TOOL_PARAM_TYPES.NUMBER: {
+          const range = getToolParamRange(tool?.name, param.name);
           return (
             <InputNumber
+              min={range?.min}
+              max={range?.max}
+              precision={range?.type === "float" ? 2 : 0}
               placeholder={t("toolConfig.input.string.placeholder", {
                 name: getLocalizedDescription(param.description, param.description_zh),
               })}
             />
           );
+        }
 
         case TOOL_PARAM_TYPES.BOOLEAN:
           return <Switch />;
@@ -2064,12 +2121,53 @@ export default function ToolConfigModal({
                   }
                   const fieldName = `param_${index}`;
                   const rules: any[] = [];
+                  const requiredOnSave = isToolParamRequiredOnSave(
+                    tool?.name || "",
+                    param.name
+                  );
 
-                  // Add required validation rule
-                  if (param.required) {
+                  // Add required validation rule (also for optional-with-default
+                  // params like top_k, so the red asterisk and empty-value
+                  // validation match the save/test-time required prompt).
+                  if (param.required || requiredOnSave) {
                     rules.push({
                       required: true,
-                      message: t("toolConfig.validation.required"),
+                      message: param.required
+                        ? t("toolConfig.validation.required")
+                        : buildRequiredHint(t, param, tool?.name || ""),
+                    });
+                  }
+
+                  // Add value-range validation for numeric params with a
+                  // declared range (mirrors backend TOOL_PARAM_CONSTRAINTS).
+                  const range = getToolParamRange(tool?.name, param.name);
+                  if (range) {
+                    rules.push({
+                      validator: async (_: any, value: any) => {
+                        if (value === undefined || value === null || value === "") {
+                          return Promise.resolve();
+                        }
+                        const num = Number(value);
+                        if (Number.isNaN(num)) {
+                          return Promise.reject(
+                            range.type === "int"
+                              ? t("toolConfig.validation.positiveInteger")
+                              : t("toolConfig.validation.percentRange")
+                          );
+                        }
+                        if (num < range.min || num > range.max) {
+                          return Promise.reject(
+                            range.type === "int"
+                              ? t("toolConfig.validation.rangeWithDefault", {
+                                  min: range.min,
+                                  max: range.max,
+                                  default: param.default ?? range.min,
+                                })
+                              : t("toolConfig.validation.percentRange")
+                          );
+                        }
+                        return Promise.resolve();
+                      },
                     });
                   }
 
@@ -2198,7 +2296,7 @@ export default function ToolConfigModal({
                   return (
                     <Form.Item
                       key={param.name}
-                      required={param.required}
+                      required={param.required || requiredOnSave}
                       label={
                         <span
                           className="inline-block w-full truncate"

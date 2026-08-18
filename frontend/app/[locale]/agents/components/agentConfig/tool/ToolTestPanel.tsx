@@ -15,6 +15,10 @@ import {
 import log from "@/lib/logger";
 import { DEFAULT_TYPE } from "@/const/constants";
 import { getLocalizedDescription, mapKbIdsToDisplayNames } from "@/lib/utils";
+import {
+  getToolParamConstraintHint,
+  isToolParamRequiredOnSave,
+} from "@/const/agentConfig";
 
 const { Text, Title } = Typography;
 
@@ -630,8 +634,33 @@ export default function ToolTestPanel({
 
       // Merge KB selection config into configs
       const finalConfigs = { ...configs, ...kbSelectionConfig };
-      // Call validateTool with parameters
+      // Enforce required config params (top_k, search_mode, ...) like the
+      // knowledge-base selector: a cleared value must be provided before the
+      // test runs.
       const toolName = tool.origin_name || tool.name || "";
+      const missingRequiredParam = (configParams || []).find(
+        (p) =>
+          isToolParamRequiredOnSave(toolName, p.name) &&
+          (p.value === undefined || p.value === null || p.value === "")
+      );
+      if (missingRequiredParam) {
+        const hint = getToolParamConstraintHint(toolName, missingRequiredParam.name);
+        if (hint.kind === "range") {
+          setTestResult(
+            `Test failed: ${missingRequiredParam.name} is required (range: ${hint.min}-${hint.max}, suggested default: ${missingRequiredParam.default ?? hint.min})`
+          );
+        } else if (hint.kind === "enum") {
+          setTestResult(
+            `Test failed: ${missingRequiredParam.name} is required (allowed values: ${hint.values.join(", ")}, suggested default: ${missingRequiredParam.default ?? hint.values[0]})`
+          );
+        } else {
+          setTestResult(
+            `Test failed: ${missingRequiredParam.name} is required`
+          );
+        }
+        setTestExecuting(false);
+        return;
+      }
       const toolSource = tool.source || "";
       const result = await validateTool(
         toolName,
