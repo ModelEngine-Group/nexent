@@ -33,7 +33,7 @@
 {{- fail "global.sharedStorage.skills.existingClaim is required for existing storage" -}}
 {{- end -}}
 
-{{- range $component := list "nexent-elasticsearch" "nexent-postgresql" "nexent-redis" "nexent-minio" "nexent-supabase-db" -}}
+{{- range $component := list "nexent-supabase-db" -}}
 {{- $componentValues := default dict (index $.Values $component) -}}
 {{- $persistence := default dict (get $componentValues "persistence") -}}
 {{- if and (eq $mode "existing") (ne (default "dynamic" (get $persistence "mode")) "existing") -}}
@@ -44,7 +44,7 @@
 {{- end -}}
 {{- end -}}
 
-{{- range $component := list "nexent-mcp" "nexent-data-process" "nexent-elasticsearch" "nexent-postgresql" "nexent-redis" "nexent-minio" "nexent-supabase-kong" "nexent-supabase-auth" "nexent-supabase-db" -}}
+{{- range $component := list "nexent-mcp" "nexent-data-process" "nexent-supabase-kong" "nexent-supabase-auth" "nexent-supabase-db" -}}
 {{- $componentValues := default dict (index $.Values $component) -}}
 {{- if gt (int (default 1 (get $componentValues "replicaCount"))) 1 -}}
 {{- fail (printf "%s must remain single-replica in this deployment baseline" $component) -}}

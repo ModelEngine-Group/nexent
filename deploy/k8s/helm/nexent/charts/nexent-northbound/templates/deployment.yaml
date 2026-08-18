@@ -62,6 +62,13 @@ spec:
               value: {{ .Values.config.skipProxy | quote }}
             - name: UMASK
               value: {{ .Values.config.umask | quote }}
+          startupProbe:
+            httpGet:
+              path: /health/live
+              port: 5013
+            periodSeconds: {{ .Values.probes.startup.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.startup.timeoutSeconds }}
+            failureThreshold: {{ .Values.probes.startup.failureThreshold }}
           livenessProbe:
             httpGet:
               path: /health/live

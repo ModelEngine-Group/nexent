@@ -222,7 +222,6 @@ config:
 
 # Secrets used by common templates
 secrets:
-  elasticPassword: "nexent@2025"
   elasticsearchApiKey: ""
   postgresPassword: "nexent@4321"
   minio:

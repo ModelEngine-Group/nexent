@@ -17,7 +17,7 @@ global:
       existingClaim: ""
   deploymentVersion: "full"
   deploymentComponents:
-    infrastructure: true
+    infrastructure: false
     application: true
     data-process: true
     supabase: true
@@ -80,26 +80,6 @@ nexent-common:
       sslVerify: "true"
       caBundle: ""
 
-nexent-elasticsearch:
-  enabled: true
-  persistence:
-    mode: dynamic
-    storageClassName: ""
-nexent-postgresql:
-  enabled: true
-  persistence:
-    mode: dynamic
-    storageClassName: ""
-nexent-redis:
-  enabled: true
-  persistence:
-    mode: dynamic
-    storageClassName: ""
-nexent-minio:
-  enabled: true
-  persistence:
-    mode: dynamic
-    storageClassName: ""
 nexent-config:
   enabled: true
   replicaCount: 3
