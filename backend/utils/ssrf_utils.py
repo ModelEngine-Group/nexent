@@ -3,7 +3,7 @@
 import asyncio
 import ipaddress
 import socket
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 
 class UnsafeOutboundURLError(ValueError):
@@ -14,7 +14,7 @@ async def validate_public_url(
     url: str,
     allowed_schemes: tuple[str, ...] = ("http", "https"),
     allow_local_networks: bool = False,
-) -> None:
+) -> str:
     """Validate an outbound URL and its resolved network addresses."""
     if not isinstance(url, str) or not url.strip():
         raise UnsafeOutboundURLError("URL is required")
@@ -71,3 +71,15 @@ async def validate_public_url(
 
     if unsafe_addresses:
         raise UnsafeOutboundURLError("URL resolves to a disallowed network address")
+
+    hostname = parsed.hostname
+    if ":" in hostname and not hostname.startswith("["):
+        hostname = f"[{hostname}]"
+    authority = f"{hostname}:{port}" if port is not None else hostname
+    return urlunsplit((
+        parsed.scheme.lower(),
+        authority,
+        parsed.path or "/",
+        parsed.query,
+        "",
+    ))

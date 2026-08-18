@@ -6,7 +6,8 @@ from backend.utils.ssrf_utils import UnsafeOutboundURLError, validate_public_url
 
 
 def test_validate_public_url_accepts_public_ip():
-    asyncio.run(validate_public_url("https://8.8.8.8/image.png"))
+    safe_url = asyncio.run(validate_public_url("HTTPS://8.8.8.8/image.png#fragment"))
+    assert safe_url == "https://8.8.8.8/image.png"
 
 
 @pytest.mark.parametrize(

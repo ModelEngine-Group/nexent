@@ -9,17 +9,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from pydantic import BaseModel
 
-# Install consts.exceptions at module level so OfficeConversionException is bound
-# in the app module's namespace on first import.
-_exc_mod = types.ModuleType("consts.exceptions")
-
-
-class _OfficeConversionException(Exception):
-    """Stub exception for Office document conversion failures."""
-
-
-_exc_mod.OfficeConversionException = _OfficeConversionException  # type: ignore[attr-defined]
-sys.modules["consts.exceptions"] = _exc_mod
+from consts.exceptions import OfficeConversionException
 
 
 class _TaskRequest(BaseModel):
@@ -461,11 +451,13 @@ def test_filter_important_image_success_and_error():
     ok = client.post(
         "/tasks/filter_important_image",
         data={"image_url": "u", "positive_prompt": "p", "negative_prompt": "n"},
+        headers={"Authorization": "Bearer t"},
     )
     assert ok.status_code == 200 and ok.json()["important"] is True
     err = client.post(
         "/tasks/filter_important_image",
         data={"image_url": "err", "positive_prompt": "p", "negative_prompt": "n"},
+        headers={"Authorization": "Bearer t"},
     )
     assert err.status_code == 500
 

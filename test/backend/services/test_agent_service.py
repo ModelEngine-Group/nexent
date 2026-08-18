@@ -4379,6 +4379,7 @@ async def test_run_agent_stream(
         tenant_id=None,
         language="en",
         enable_memory=False,
+        authorization="Bearer token",
     )
 
     # Test debug mode
@@ -5465,6 +5466,7 @@ async def test_run_agent_stream_no_memory(
         tenant_id=None,
         language="en",
         enable_memory=False,
+        authorization="Bearer token",
     )
 
 
@@ -17000,9 +17002,16 @@ def test_get_user_group_ids_returns_empty_string_on_query_failure(mock_query_gro
     mock_query_group_ids.assert_called_once_with("user-1")
 
 
-def test_inject_user_timezone_time_with_valid_timezone():
+def test_inject_user_timezone_time_with_valid_timezone(monkeypatch):
     """Should prepend [Current time: ...] when X-User-Timezone header is present."""
+    from datetime import timezone
     from unittest.mock import MagicMock
+
+    monkeypatch.setitem(
+        sys.modules,
+        "zoneinfo",
+        types.SimpleNamespace(ZoneInfo=lambda _: timezone.utc),
+    )
     request = MagicMock()
     request.headers = {"x-user-timezone": "Asia/Shanghai"}
     result = _inject_user_timezone_time("What time is it?", request)

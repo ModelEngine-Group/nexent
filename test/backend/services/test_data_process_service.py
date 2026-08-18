@@ -1319,34 +1319,58 @@ class TestDataProcessService(unittest.TestCase):
 
     def test_load_image(self):
         """
-        Test image loading from various sources.
+        Test image loading from supported sources.
 
         This test serves as a wrapper to run the async tests for load_image.
         It verifies that the service can load images from:
         1. URLs (with both success and failure cases)
         2. Base64-encoded data
-        3. Local files
+        3. S3 objects
         4. Image mode conversions (RGBA to RGB, non-RGB to RGB)
         5. SVG file filtering
-        6. Temporary file fallback mechanism
-        7. Local file loading exceptions
-        8. General exception handling
         """
-        asyncio.run(self.async_test_load_image_from_url())
-        asyncio.run(self.async_test_load_image_from_url_failure())
-        asyncio.run(self.async_test_load_image_from_s3())
-        asyncio.run(self.async_test_load_image_from_base64())
-        asyncio.run(self.async_test_load_image_from_file())
-        asyncio.run(self.async_test_load_image_rgba_to_rgb_conversion())
-        asyncio.run(self.async_test_load_image_non_rgb_to_rgb_conversion())
-        asyncio.run(self.async_test_load_image_rgb_no_conversion())
-        asyncio.run(self.async_test_load_image_rgba_base64_conversion())
-        asyncio.run(self.async_test_load_image_non_rgb_base64_conversion())
-        asyncio.run(self.async_test_load_image_non_rgb_file_conversion())
-        asyncio.run(self.async_test_load_image_rgb_file_no_conversion())
-        asyncio.run(self.async_test_load_image_svg_filtered())
-        asyncio.run(self.async_test_load_image_temp_file_fallback())
-        asyncio.run(self.async_test_load_image_local_file_exception())
+        async def allow_test_url(url):
+            return url
+
+        with patch(
+            'backend.services.data_process_service.validate_public_url',
+            side_effect=allow_test_url,
+        ):
+            asyncio.run(self.async_test_load_image_from_url())
+            asyncio.run(self.async_test_load_image_from_url_failure())
+            asyncio.run(self.async_test_load_image_from_s3())
+            asyncio.run(self.async_test_load_image_from_base64())
+            asyncio.run(self.async_test_load_image_rgba_to_rgb_conversion())
+            asyncio.run(self.async_test_load_image_non_rgb_to_rgb_conversion())
+            asyncio.run(self.async_test_load_image_rgb_no_conversion())
+            asyncio.run(self.async_test_load_image_rgba_base64_conversion())
+            asyncio.run(self.async_test_load_image_non_rgb_base64_conversion())
+            asyncio.run(self.async_test_load_image_svg_filtered())
+
+    @patch('aiohttp.ClientSession')
+    @patch('os.path.isfile')
+    @patch('PIL.Image.open')
+    def test_load_image_rejects_local_file_paths(self, mock_image_open, mock_isfile, mock_session):
+        result = asyncio.run(self.service.load_image('/etc/passwd'))
+
+        self.assertIsNone(result)
+        mock_isfile.assert_not_called()
+        mock_image_open.assert_not_called()
+        mock_session.return_value.__aenter__.return_value.get.assert_not_called()
+
+    @patch('aiohttp.ClientSession')
+    def test_load_image_revalidates_url_before_request(self, mock_session):
+        async def reject_url(_url):
+            raise ValueError('unsafe target')
+
+        with patch(
+            'backend.services.data_process_service.validate_public_url',
+            side_effect=reject_url,
+        ):
+            result = asyncio.run(self.service.load_image('http://127.0.0.1/private'))
+
+        self.assertIsNone(result)
+        mock_session.return_value.__aenter__.return_value.get.assert_not_called()
 
     @patch('backend.services.data_process_service.DataProcessService.load_image')
     @patch('backend.services.data_process_service.DataProcessService.check_image_size')
