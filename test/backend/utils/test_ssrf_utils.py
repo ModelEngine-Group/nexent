@@ -1,0 +1,25 @@
+import asyncio
+
+import pytest
+
+from backend.utils.ssrf_utils import UnsafeOutboundURLError, validate_public_url
+
+
+def test_validate_public_url_accepts_public_ip():
+    asyncio.run(validate_public_url("https://8.8.8.8/image.png"))
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://127.0.0.1/image.png",
+        "http://10.0.0.1/image.png",
+        "http://169.254.169.254/latest/meta-data",
+        "http://[::1]/image.png",
+        "file:///etc/passwd",
+        "http://user:password@8.8.8.8/image.png",
+    ],
+)
+def test_validate_public_url_rejects_unsafe_targets(url):
+    with pytest.raises(UnsafeOutboundURLError):
+        asyncio.run(validate_public_url(url))
