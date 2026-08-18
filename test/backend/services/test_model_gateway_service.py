@@ -30,7 +30,7 @@ sys.modules['utils'] = MockModule()
 sys.modules['utils.config_utils'] = MockModule()
 sys.modules['consts'] = MockModule()
 consts_const_module = MockModule()
-consts_const_module.MODEL_CONFIG_MAPPING = {"vlm": "vlm_config_key", "vlm3": "vlm3_config_key"}
+consts_const_module.MODEL_CONFIG_MAPPING = {"vlm": "vlm_config_key", "vlm3": "vlm3_config_key", "llm": "llm_config_key", "embedding": "embedding_config_key"}
 sys.modules['consts.const'] = consts_const_module
 
 from nexent import MessageObserver
@@ -245,3 +245,160 @@ def test_get_vlm_adapter_returns_adapter():
 def test_get_vlm_adapter_returns_none_without_config():
     with mock.patch.object(mgs, "_fetch_slot_config", return_value=None):
         assert mgs.get_vlm_adapter("t1", None) is None
+
+
+# Additional context branches: llm / long-context / embedding / multi_embedding
+
+
+def _user_cfg(**overrides):
+    cfg = {
+        "model_factory": "openai",
+        "base_url": "https://x/v1",
+        "api_key": "k",
+        "model_type": "llm",
+        "temperature": 0.7,
+        "top_p": 0.9,
+        "max_output_tokens": 128,
+        "frequency_penalty": 0.1,
+        "extra_body": {"a": 1},
+        "max_tokens": 2048,
+        "truncation_strategy": "end",
+        "display_name": "dn",
+        "timeout_seconds": 9.0,
+    }
+    cfg.update(overrides)
+    return cfg
+
+
+def test_config_to_context_llm_branch():
+    with mock.patch.object(mgs, "get_model_name_from_config", return_value="cfg-name"):
+        ctx = mgs._config_to_context(_user_cfg(), "llm", "llm", "t1", temperature=0.2)
+    assert isinstance(ctx, mgs.LLMContext)
+    assert ctx.model_name == "cfg-name"
+    assert ctx.tenant_id == "t1"
+    assert ctx.slot == "llm"
+    assert ctx.temperature == 0.2  # per-call extras win over cfg
+    assert ctx.top_p == 0.9
+    assert ctx.stream is None
+    assert ctx.max_output_tokens == 128
+    assert ctx.frequency_penalty == 0.1
+    assert ctx.extra_body == {"a": 1}
+    assert ctx.display_name == "dn"
+    assert ctx.timeout_seconds == 9.0
+
+
+def test_config_to_context_llm_long_context_branch():
+    ctx = mgs._config_to_context(
+        _user_cfg(), "llm_long_context", "llm", None, model_name="m"
+    )
+    assert isinstance(ctx, mgs.LongContextLLMContext)
+    assert ctx.max_tokens == 2048
+    assert ctx.truncation_strategy == "end"
+
+
+def test_config_to_context_embedding_branch():
+    ctx = mgs._config_to_context(
+        _user_cfg(max_tokens=512), "embedding", "embedding", None, model_name="m"
+    )
+    assert isinstance(ctx, mgs.EmbeddingContext)
+    assert ctx.embedding_dim == 512
+    assert ctx.model_type == "llm"
+
+
+def test_config_to_context_embedding_default_dim():
+    cfg = _user_cfg()
+    cfg.pop("max_tokens")
+    ctx = mgs._config_to_context(cfg, "embedding", "embedding", None, model_name="m")
+    assert ctx.embedding_dim == 1024
+
+
+def test_config_to_context_multi_embedding_branch():
+    ctx = mgs._config_to_context(
+        _user_cfg(), "multi_embedding", "multiEmbedding", None, model_name="m"
+    )
+    assert isinstance(ctx, mgs.EmbeddingContext)
+    assert ctx.embedding_dim == 2048
+    assert ctx.factory == "jina"  # openai has no multi_embedding adapter
+
+
+# ---- convenience wrappers ----
+
+
+def test_get_llm_adapter_from_config_delegates():
+    with mock.patch.object(mgs, "get_adapter_from_config", return_value="adapter") as mock_get:
+        out = mgs.get_llm_adapter_from_config(
+            {"model_factory": "openai"}, "t1", modality="llm_long_context", temperature=0.3
+        )
+    assert out == "adapter"
+    mock_get.assert_called_once_with(
+        {"model_factory": "openai"}, "llm_long_context", "llm", "t1", temperature=0.3
+    )
+
+
+def test_get_embedding_adapter_from_config_text_keeps_modality():
+    with mock.patch.object(mgs, "get_adapter_from_config", return_value="e") as mock_get:
+        out = mgs.get_embedding_adapter_from_config({"model_type": "embedding"}, "t1")
+    assert out == "e"
+    mock_get.assert_called_once_with(
+        {"model_type": "embedding"}, "embedding", "embedding", "t1"
+    )
+
+
+def test_get_embedding_adapter_from_config_multimodal_normalizes():
+    with mock.patch.object(mgs, "get_adapter_from_config", return_value="e") as mock_get:
+        out = mgs.get_embedding_adapter_from_config({"model_type": "multi_embedding"}, "t1")
+    assert out == "e"
+    mock_get.assert_called_once_with(
+        {"model_type": "multi_embedding"}, "multi_embedding", "multiEmbedding", "t1"
+    )
+
+
+def test_get_rerank_adapter_from_config_delegates():
+    with mock.patch.object(mgs, "get_adapter_from_config", return_value="r") as mock_get:
+        out = mgs.get_rerank_adapter_from_config({"base_url": "u"}, "t1")
+    assert out == "r"
+    mock_get.assert_called_once_with({"base_url": "u"}, "rerank", "rerank", "t1")
+
+
+# ---- get_llm_adapter (direct config-fetch bridge) ----
+
+
+def test_get_llm_adapter_by_model_id():
+    cfg = {"model_type": "llm", "base_url": "u", "api_key": "k"}
+    with mock.patch.object(mgs, "get_model_by_model_id", return_value=cfg) as mock_fetch,             mock.patch.object(mgs, "get_gateway") as mock_gw:
+        out = mgs.get_llm_adapter("t1", model_id=5)
+    assert out == mock_gw.return_value.get_adapter.return_value
+    mock_fetch.assert_called_once_with(5, "t1")
+
+
+def test_get_llm_adapter_model_not_found_raises():
+    with mock.patch.object(mgs, "get_model_by_model_id", return_value=None),             pytest.raises(ValueError, match="Model not found: 7"):
+        mgs.get_llm_adapter("t1", model_id=7)
+
+
+def test_get_llm_adapter_wrong_model_type_raises():
+    with mock.patch.object(mgs, "get_model_by_model_id", return_value={"model_type": "vlm"}),             pytest.raises(ValueError, match="not an LLM model"):
+        mgs.get_llm_adapter("t1", model_id=8)
+
+
+def test_get_llm_adapter_by_tenant_config():
+    cfg = {"base_url": "u", "api_key": "k", "model_type": "llm"}
+    with mock.patch.object(mgs, "tenant_config_manager") as mock_tcm,             mock.patch.object(mgs, "get_gateway") as mock_gw:
+        mock_tcm.get_model_config.return_value = cfg
+        out = mgs.get_llm_adapter("t1")
+    assert out == mock_gw.return_value.get_adapter.return_value
+    mock_tcm.get_model_config.assert_called_once_with(key="llm_config_key", tenant_id="t1")
+
+
+def test_get_llm_adapter_long_context_via_tenant_config():
+    cfg = {"base_url": "u", "api_key": "k", "model_type": "llm"}
+    with mock.patch.object(mgs, "tenant_config_manager") as mock_tcm,             mock.patch.object(mgs, "get_gateway") as mock_gw:
+        mock_tcm.get_model_config.return_value = cfg
+        out = mgs.get_llm_adapter("t1", modality="llm_long_context")
+    assert out == mock_gw.return_value.get_adapter.return_value
+
+
+def test_get_llm_adapter_returns_none_without_config():
+    with mock.patch.object(mgs, "tenant_config_manager") as mock_tcm:
+        mock_tcm.get_model_config.return_value = None
+        assert mgs.get_llm_adapter("t1") is None
