@@ -1,48 +1,5 @@
 -- Final pre-production Dreaming schema. This file is the only Dreaming migration.
--- Upgrade unpublished intermediate schemas before the complete CREATE definitions.
--- On a fresh installation none of these tables exist, so this block performs no ALTERs.
-DO $$ BEGIN
-    IF to_regclass('nexent.memory_dreaming_audit_t') IS NOT NULL THEN
-        ALTER TABLE nexent.memory_dreaming_audit_t
-            ADD COLUMN IF NOT EXISTS lock_owner VARCHAR(100),
-            ADD COLUMN IF NOT EXISTS lock_until TIMESTAMP,
-            ADD COLUMN IF NOT EXISTS published_version_id BIGINT,
-            ADD COLUMN IF NOT EXISTS reason VARCHAR(100);
-        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'nexent'
-            AND table_name = 'memory_dreaming_audit_t' AND column_name = 'result_json') THEN
-            ALTER TABLE nexent.memory_dreaming_audit_t
-                ADD COLUMN IF NOT EXISTS decisions JSONB NOT NULL DEFAULT '[]'::jsonb;
-            UPDATE nexent.memory_dreaming_audit_t
-            SET decisions = COALESCE(result_json -> 'decisions', '[]'::jsonb),
-                published_version_id = CASE
-                    WHEN result_json #>> '{version,version_id}' ~ '^[0-9]+$'
-                    THEN (result_json #>> '{version,version_id}')::BIGINT ELSE NULL END,
-                reason = result_json ->> 'reason'
-            WHERE result_json IS NOT NULL;
-            ALTER TABLE nexent.memory_dreaming_audit_t DROP COLUMN result_json;
-        END IF;
-        ALTER TABLE nexent.memory_dreaming_audit_t ALTER COLUMN agent_id SET DEFAULT '';
-    END IF;
-
-    IF to_regclass('nexent.memory_dreaming_schedule_t') IS NOT NULL THEN
-        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'nexent'
-            AND table_name = 'memory_dreaming_schedule_t' AND column_name = 'compression_max_attempts')
-           AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'nexent'
-            AND table_name = 'memory_dreaming_schedule_t' AND column_name = 'summarization_max_attempts') THEN
-            ALTER TABLE nexent.memory_dreaming_schedule_t
-                RENAME COLUMN compression_max_attempts TO summarization_max_attempts;
-        END IF;
-        ALTER TABLE nexent.memory_dreaming_schedule_t
-            ADD COLUMN IF NOT EXISTS min_score DOUBLE PRECISION,
-            ADD COLUMN IF NOT EXISTS min_recall_count INTEGER,
-            ADD COLUMN IF NOT EXISTS min_unique_queries INTEGER,
-            ADD COLUMN IF NOT EXISTS source_limit INTEGER,
-            ADD COLUMN IF NOT EXISTS long_term_max_chars INTEGER,
-            ADD COLUMN IF NOT EXISTS summarization_max_attempts INTEGER;
-        ALTER TABLE nexent.memory_dreaming_schedule_t ALTER COLUMN agent_id SET DEFAULT '';
-    END IF;
-
-END $$;
+-- All tables introduced here are created directly with their final definitions.
 
 CREATE TABLE IF NOT EXISTS nexent.memory_dreaming_audit_t (
     run_id BIGSERIAL PRIMARY KEY, tenant_id VARCHAR(100) NOT NULL,
@@ -73,32 +30,6 @@ CREATE TABLE IF NOT EXISTS nexent.memory_dreaming_decision_t (
 );
 CREATE INDEX IF NOT EXISTS idx_memory_dreaming_decision_memory
     ON nexent.memory_dreaming_decision_t (memory_id);
-
--- Expand decisions written by unpublished intermediate schemas, then remove their JSON columns.
-DO $$ BEGIN
-    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'nexent'
-        AND table_name = 'memory_dreaming_audit_t' AND column_name = 'decisions') THEN
-        INSERT INTO nexent.memory_dreaming_decision_t (
-            run_id, decision_order, memory_id, score, noise, signal_count, context_diversity,
-            evidence_ids, event, reason, archive_suggested
-        )
-        SELECT audit.run_id, item.ordinality - 1,
-            CASE WHEN item.value ->> 'memory_id' ~ '^[0-9]+$' THEN (item.value ->> 'memory_id')::BIGINT ELSE 0 END,
-            CASE WHEN item.value ->> 'score' ~ '^-?[0-9]+([.][0-9]+)?$' THEN (item.value ->> 'score')::DOUBLE PRECISION ELSE 0 END,
-            COALESCE((item.value ->> 'noise')::BOOLEAN, FALSE),
-            COALESCE((item.value ->> 'signal_count')::INTEGER, 0),
-            COALESCE((item.value ->> 'context_diversity')::INTEGER, 0),
-            ARRAY(SELECT jsonb_array_elements_text(COALESCE(item.value -> 'evidence_ids', '[]'::jsonb))),
-            COALESCE(item.value ->> 'event', 'DEFER'), LEFT(COALESCE(item.value ->> 'reason', ''), 100),
-            COALESCE((item.value ->> 'archive_suggested')::BOOLEAN, FALSE)
-        FROM nexent.memory_dreaming_audit_t audit
-        CROSS JOIN LATERAL jsonb_array_elements(COALESCE(audit.decisions, '[]'::jsonb))
-            WITH ORDINALITY AS item(value, ordinality)
-        ON CONFLICT (run_id, decision_order) DO NOTHING;
-        ALTER TABLE nexent.memory_dreaming_audit_t DROP COLUMN decisions;
-    END IF;
-
-END $$;
 
 CREATE TABLE IF NOT EXISTS nexent.memory_dreaming_schedule_t (
     schedule_id BIGSERIAL PRIMARY KEY, tenant_id VARCHAR(100) NOT NULL, user_id VARCHAR(100) NOT NULL,
@@ -167,12 +98,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_memory_long_term_run
 INSERT INTO nexent.role_permission_t (
     role_permission_id, user_role, permission_category, permission_type, permission_subtype
 ) VALUES
-    (1004, 'SU', 'RESOURCE', 'DREAMING', 'VIEW_TENANT'),
-    (1005, 'SU', 'RESOURCE', 'DREAMING', 'EDIT_TENANT'),
-    (1116, 'ADMIN', 'RESOURCE', 'DREAMING', 'VIEW_TENANT'),
-    (1117, 'ADMIN', 'RESOURCE', 'DREAMING', 'EDIT_TENANT'),
-    (1514, 'ASSET_OWNER', 'RESOURCE', 'DREAMING', 'VIEW_TENANT'),
-    (1515, 'ASSET_OWNER', 'RESOURCE', 'DREAMING', 'EDIT_TENANT')
+    (224, 'SU', 'RESOURCE', 'DREAMING', 'VIEW_TENANT'),
+    (225, 'SU', 'RESOURCE', 'DREAMING', 'EDIT_TENANT'),
+    (222, 'ADMIN', 'RESOURCE', 'DREAMING', 'VIEW_TENANT'),
+    (223, 'ADMIN', 'RESOURCE', 'DREAMING', 'EDIT_TENANT'),
+    (226, 'ASSET_OWNER', 'RESOURCE', 'DREAMING', 'VIEW_TENANT'),
+    (227, 'ASSET_OWNER', 'RESOURCE', 'DREAMING', 'EDIT_TENANT')
 ON CONFLICT (role_permission_id) DO UPDATE SET
     user_role = EXCLUDED.user_role, permission_category = EXCLUDED.permission_category,
     permission_type = EXCLUDED.permission_type, permission_subtype = EXCLUDED.permission_subtype;
