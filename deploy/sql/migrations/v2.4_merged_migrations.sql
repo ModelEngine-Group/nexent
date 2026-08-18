@@ -1,13 +1,6 @@
 -- Nexent merged SQL migrations: v2.4
 -- This file is generated from historical migration files.
 
--- Source migration: v2.4.0_0814_add_agent_tool_output_citation_option.sql
--- Keep citations in tool-written user-readable content only when the agent opts in.
-ALTER TABLE nexent.ag_tenant_agent_t
-    ADD COLUMN IF NOT EXISTS include_citations_in_tool_output BOOLEAN NOT NULL DEFAULT FALSE;
-COMMENT ON COLUMN nexent.ag_tenant_agent_t.include_citations_in_tool_output IS
-    'Whether citations are retained in user-readable text written through tools';
-
 -- Source migration: v2.4.0_0710_add_kb_quota_column.sql
 
 -- Add quota_limit_bytes column to knowledge_record_t for per-KB soft storage quota

@@ -292,8 +292,6 @@ export default function AgentGenerateDetail({}) {
       constraintPrompt: editedAgent.constraint_prompt || "",
       fewShotsPrompt: editedAgent.few_shots_prompt || "",
       provideRunSummary: editedAgent.provide_run_summary || false,
-      includeCitationsInToolOutput:
-        editedAgent.include_citations_in_tool_output ?? false,
       verificationEnabled: editedAgent.verification_config?.enabled ?? false,
       businessDescription: editedAgent.business_description || "",
       businessLogicModelName:editedAgent.business_logic_model_name,
@@ -548,8 +546,6 @@ export default function AgentGenerateDetail({}) {
       ingroup_permission: editedAgent.ingroup_permission || "READ_ONLY",
       mainAgentMaxStep: editedAgent.max_step || 15,
       provideRunSummary: editedAgent.provide_run_summary ?? false,
-      includeCitationsInToolOutput:
-        editedAgent.include_citations_in_tool_output ?? false,
       requestedOutputTokens: editedAgent.requested_output_tokens ?? null,
       isMainAgent: editedAgent.is_main_agent ?? true,
       verificationEnabled: editedAgent.verification_config?.enabled ?? false,
@@ -586,7 +582,6 @@ export default function AgentGenerateDetail({}) {
       max_step: values.mainAgentMaxStep,
       is_main_agent: values.isMainAgent,
       provide_run_summary: values.provideRunSummary,
-      include_citations_in_tool_output: values.includeCitationsInToolOutput,
       requested_output_tokens: values.requestedOutputTokens ?? null,
       verification_config: verificationConfig,
     });
@@ -597,7 +592,6 @@ export default function AgentGenerateDetail({}) {
       mainAgentMaxStep: values.mainAgentMaxStep,
       isMainAgent: values.isMainAgent,
       provideRunSummary: values.provideRunSummary,
-      includeCitationsInToolOutput: values.includeCitationsInToolOutput,
       requestedOutputTokens: values.requestedOutputTokens ?? null,
       verificationEnabled: values.verificationEnabled,
     });
@@ -1339,21 +1333,6 @@ export default function AgentGenerateDetail({}) {
                 name="provideRunSummary"
                 label={t("agent.provideRunSummary")}
                 rules={[{ required: true, message: t("agent.provideRunSummary.error") }]}
-              >
-                <Select
-                  options={[
-                    { value: true, label: t("common.yes") },
-                    { value: false, label: t("common.no") },
-                  ]}
-                />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item
-                name="includeCitationsInToolOutput"
-                label={t("agent.toolOutputCitations")}
-                tooltip={t("agent.toolOutputCitations.tooltip")}
-                rules={[{ required: true, message: t("agent.toolOutputCitations.error") }]}
               >
                 <Select
                   options={[

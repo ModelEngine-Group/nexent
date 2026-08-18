@@ -8,6 +8,7 @@ import { v4 as uuidv4 } from "uuid";
 import { useTranslation } from "react-i18next";
 
 import { ROLE_ASSISTANT } from "@/const/agentConfig";
+import { ENABLE_CITATION_CLICK_HIGHLIGHT } from "@/const/citation";
 import { MESSAGE_ROLES } from "@/const/chatConfig";
 import { useConfig } from "@/hooks/useConfig";
 import { useModelList } from "@/hooks/model/useModelList";
@@ -1842,10 +1843,15 @@ export function ChatInterface() {
 
   const handleCitationClick = useCallback(
     (messageId: string, citationKey: string, answerText: string) => {
+      // Clicking a citation marker always opens the panel and selects the
+      // matching source card; the flag only gates sentence-level highlight
+      // extraction from the cited answer context.
       setShowRightPanel(true);
       setSelectedMessageId(messageId);
       setSelectedCitationKey(citationKey);
-      setSelectedCitationContext(answerText);
+      setSelectedCitationContext(
+        ENABLE_CITATION_CLICK_HIGHLIGHT ? answerText : ""
+      );
     },
     []
   );

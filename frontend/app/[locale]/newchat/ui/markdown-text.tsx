@@ -20,6 +20,7 @@ import { MermaidDiagram } from "./mermaid-diagram";
 import { SyntaxHighlighter } from "./shiki-highlighter";
 import { TooltipIconButton } from "./tooltip-icon-button";
 import { cn } from "@/lib/utils";
+import { ENABLE_CITATION_CLICK_HIGHLIGHT } from "@/const/citation";
 import { remarkCite } from "./remark-cite";
 import { CiteMarker } from "./cite-marker";
 import { AuthenticatedImage } from "./authenticated-image";
@@ -116,6 +117,14 @@ function findCiteSource(sources: SearchSource[], citekey: string): SearchSource 
     ? sources.find((source) => source.citeIndex === getCiteIndex(normalizedKey))
     : undefined;
 }
+
+const extractDomain = (url: string): string => {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return url;
+  }
+};
 
 function toPanelSource(source: SearchSource): PanelSourceItem {
   return {
@@ -242,6 +251,7 @@ const CiteComponent: FC<React.ComponentProps<"cite"> & { citekey?: string }> = (
 
   const messageSources = resolveCiteSources(messageId, content);
   const source = findCiteSource(messageSources, citekey);
+  const panelSource = source ? toPanelSource(source) : undefined;
   const citeIndex = getCiteIndex(citekey);
   const resolvedCiteIndex = source?.citeIndex ?? citeIndex ?? 0;
   const citationKey = source
@@ -261,6 +271,17 @@ const CiteComponent: FC<React.ComponentProps<"cite"> & { citekey?: string }> = (
         source: t("chat.sources.source"),
       }) : `${t("chat.sources.source")} ${resolvedCiteIndex}`}
       title={source?.title ?? `Source ${resolvedCiteIndex}`}
+      text={panelSource?.text}
+      filename={panelSource?.filename}
+      url={panelSource?.url}
+      sourceType={panelSource?.sourceType}
+      sourceLabel={
+        panelSource
+          ? panelSource.sourceType === "document" || !panelSource.url
+            ? "来源: Nexent"
+            : `来源: ${extractDomain(panelSource.url)}`
+          : undefined
+      }
       loading={!source}
       onClick={
         source && messageId
@@ -271,11 +292,11 @@ const CiteComponent: FC<React.ComponentProps<"cite"> & { citekey?: string }> = (
                 sources,
                 images,
                 selectedCitationKey: citationKey,
-                citationContext: getCitationScopeText(
-                  content,
-                  citekey,
-                  citationElement,
-                ),
+                // The flag only gates sentence-level highlight terms; the
+                // panel still selects and scrolls to the source card.
+                citationContext: ENABLE_CITATION_CLICK_HIGHLIGHT
+                  ? getCitationScopeText(content, citekey, citationElement)
+                  : undefined,
               })
           : undefined
       }

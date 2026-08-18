@@ -152,23 +152,6 @@ def test_retrieval_citation_prompt_requires_sentence_level_marks(
     assert "同一句可标记多个来源" in prompt or "multiple sources may be marked" in prompt
 
 
-def test_tool_output_policy_is_not_injected_into_the_model_prompt():
-    disabled_prompt = _build_execution_flow_text(
-        language="en", is_manager=False, include_citations_in_tool_output=False
-    )
-    enabled_prompt = _build_execution_flow_text(
-        language="en", is_manager=False, include_citations_in_tool_output=True
-    )
-
-    assert "for the final answer" in disabled_prompt
-    assert "whenever the final answer states a fact" in disabled_prompt
-    assert "whenever the final answer states a fact" in enabled_prompt
-    assert "Tool-call hard constraint" not in disabled_prompt
-    assert "must not appear in any tool-call argument" not in disabled_prompt
-    assert "marker-free body" not in disabled_prompt
-    assert disabled_prompt == enabled_prompt
-
-
 def test_all_sources_are_naturally_granular_and_keep_stable_order():
     items = build_context_inputs(
         duty="duty",

@@ -31,10 +31,6 @@ if TYPE_CHECKING:
     import PIL.Image
 
 from .agent_model import AgentVerificationConfig
-from ..tools.citation_write_guard import (
-    normalize_citation_write_mode,
-    wrap_tool_with_citation_write_guard,
-)
 from ..context_runtime.contracts import ContextRuntime, UnconfiguredContextRuntime
 from .verification import (
     VerificationController,
@@ -434,9 +430,6 @@ class CoreAgent(CodeAgent):
     ):
         # Pop SDK-specific kwargs before passing the rest to smolagents' CodeAgent.
         self.enable_planning: bool = kwargs.pop("enable_planning", False)
-        self.citation_write_mode = normalize_citation_write_mode(
-            kwargs.pop("citation_write_mode", "strip")
-        )
         redis_client = kwargs.pop("redis_client", None)
         self.conversation_id = kwargs.pop("conversation_id", None)
         self.user_id = kwargs.pop("user_id", None)
@@ -543,26 +536,6 @@ class CoreAgent(CodeAgent):
                 if name is None or str(name) in hidden_names:
                     continue
                 _wrap_tool_for_observer(tool, self.observer, self.agent_name)
-
-    def _citation_write_wrap_tools(self) -> None:
-        """Apply the host-side citation policy to configured document-write tools.
-
-        This is deliberately invoked after monitoring and guardrail wrappers:
-        the citation wrapper becomes outermost, so downstream monitoring,
-        guardrail screening and the actual tool all receive the same sanitized
-        document body.  It runs for both direct tools and sandbox-host bridges.
-        """
-        for container in (getattr(self, "tools", {}) or {},):
-            try:
-                iterable = container.values()
-            except AttributeError:
-                iterable = container
-            for tool in list(iterable or ()):
-                wrap_tool_with_citation_write_guard(
-                    tool,
-                    agent_mode=self.citation_write_mode,
-                    logger=self.logger,
-                )
 
     def _context_tools(self) -> List[Any]:
         """Return a stable tool list for ContextRuntime/ContextManager evidence.
@@ -1071,10 +1044,6 @@ You have been provided with these additional arguments, that you can access usin
         if getattr(self, "python_executor", None):
             self._guardrail_wrap_tools()
             self._wrap_visible_tool_events()
-        # Keep this wrapper outside the observer and guardrail wrappers so no
-        # raw [[a1]] marker reaches logging or the write-capable tool itself.
-        self._citation_write_wrap_tools()
-        if getattr(self, "python_executor", None):
             self.python_executor.send_variables(variables=self.state)
             self.python_executor.send_tools(
                 {**self.tools, **self.managed_agents})

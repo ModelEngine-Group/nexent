@@ -199,7 +199,6 @@ def create_agent(agent_info, tenant_id: str, user_id: str):
     info_with_metadata = dict(agent_info)
     info_with_metadata.setdefault("max_steps", 15)
     info_with_metadata.setdefault("is_main_agent", True)
-    info_with_metadata.setdefault("include_citations_in_tool_output", False)
     info_with_metadata.setdefault("verification_config", None)
     info_with_metadata.setdefault("context_policy", None)
     info_with_metadata.update({
@@ -231,7 +230,6 @@ def create_agent(agent_info, tenant_id: str, user_id: str):
             "enabled": new_agent.enabled,
             "is_main_agent": new_agent.is_main_agent,
             "provide_run_summary": new_agent.provide_run_summary,
-            "include_citations_in_tool_output": new_agent.include_citations_in_tool_output,
             "business_description": new_agent.business_description,
             "business_logic_model_id": new_agent.business_logic_model_id,
             "business_logic_model_name": new_agent.business_logic_model_name,

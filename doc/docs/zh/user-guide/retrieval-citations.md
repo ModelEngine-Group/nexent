@@ -13,6 +13,11 @@
 
 ![引用标记与命中片段示例](./assets/start-chat/retrieval-citation-sentence-scope.png)
 
+> 当前版本说明：
+>
+> - 点击引用编号后在右侧定位并高亮 Chunk 的行为由前端常量 ENABLE_CITATION_CLICK_HIGHLIGHT（rontend/const/citation.ts）控制，**默认关闭**；功能代码完整保留，改为 	rue 即可重新启用。
+> - 鼠标悬停在引用编号上会显示与右侧来源面板相同格式的摘要卡片（标题、Chunk 片段、来源）。
+
 ## 2. 用户看到的使用方式
 
 1. 向启用了知识库或网页检索的智能体提问。

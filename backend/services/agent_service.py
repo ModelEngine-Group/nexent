@@ -1805,11 +1805,6 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
                 "requested_output_tokens": request.requested_output_tokens,
                 "is_main_agent": request.is_main_agent if request.is_main_agent is not None else True,
                 "provide_run_summary": request.provide_run_summary,
-                "include_citations_in_tool_output": (
-                    request.include_citations_in_tool_output
-                    if request.include_citations_in_tool_output is not None
-                    else False
-                ),
                 "verification_config": request.verification_config,
                 "context_policy": request.context_policy,
                 "duty_prompt": request.duty_prompt,
@@ -2332,9 +2327,6 @@ async def export_agent_by_agent_id(
                                           requested_output_tokens=agent_info.get("requested_output_tokens"),
                                           is_main_agent=agent_info.get("is_main_agent", True),
                                           provide_run_summary=agent_info["provide_run_summary"],
-                                          include_citations_in_tool_output=agent_info.get(
-                                              "include_citations_in_tool_output", False
-                                          ),
                                           verification_config=agent_info.get("verification_config"),
                                           context_policy=agent_info.get("context_policy"),
                                           duty_prompt=agent_info.get(
@@ -2500,11 +2492,6 @@ async def import_agent_by_agent_id(
                                          "requested_output_tokens": import_agent_info.requested_output_tokens,
                                          "is_main_agent": getattr(import_agent_info, "is_main_agent", True),
                                          "provide_run_summary": import_agent_info.provide_run_summary,
-                                         "include_citations_in_tool_output": getattr(
-                                             import_agent_info,
-                                             "include_citations_in_tool_output",
-                                             False,
-                                         ),
                                          "verification_config": getattr(import_agent_info, "verification_config", None),
                                          "context_policy": getattr(import_agent_info, "context_policy", None),
                                          "duty_prompt": import_agent_info.duty_prompt,

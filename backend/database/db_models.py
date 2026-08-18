@@ -621,12 +621,6 @@ class AgentInfo(TableBase):
     is_main_agent = Column(Boolean, default=True, nullable=False, doc="Whether this agent is a main agent")
     provide_run_summary = Column(
         Boolean, doc="Whether to provide the running summary to the manager agent")
-    include_citations_in_tool_output = Column(
-        Boolean,
-        default=False,
-        nullable=False,
-        doc="Whether citations are retained in user-readable text written through tools",
-    )
     business_description = Column(
         Text, doc="Manually entered by the user to describe the entire business process")
     business_logic_model_name = Column(

@@ -115,15 +115,8 @@ def _create_mock_smolagents():
 
     # utils submodule
     utils_mod = ModuleType("smolagents.utils")
-    class _AgentExecutionError(Exception):
-        def __init__(self, message="", logger=None):
-            super().__init__(message)
-            self.message = message
-            self.logger = logger
-
-    setattr(utils_mod, "AgentExecutionError", _AgentExecutionError)
-    for _name in ["AgentGenerationError", "AgentParsingError", "AgentMaxStepsError",
-                  "truncate_content", "extract_code_from_text"]:
+    for _name in ["AgentExecutionError", "AgentGenerationError", "AgentParsingError",
+                  "AgentMaxStepsError", "truncate_content", "extract_code_from_text"]:
         setattr(utils_mod, _name, MagicMock(name=f"smolagents.utils.{_name}"))
     setattr(mock_smolagents, "utils", utils_mod)
 
@@ -255,9 +248,6 @@ def _load_core_agent_module():
     sys.modules["sdk.nexent"].__path__ = []
     sys.modules["sdk.nexent.core"] = ModuleType("sdk.nexent.core")
     sys.modules["sdk.nexent.core"].__path__ = []
-    tools_pkg = ModuleType("sdk.nexent.core.tools")
-    tools_pkg.__path__ = [os.path.join(project_root, "sdk", "nexent", "core", "tools")]
-    sys.modules["sdk.nexent.core.tools"] = tools_pkg
     agents_pkg = ModuleType("sdk.nexent.core.agents")
     agents_pkg.__path__ = [os.path.join(project_root, "sdk", "nexent", "core", "agents")]
     sys.modules["sdk.nexent.core.agents"] = agents_pkg
@@ -3050,29 +3040,3 @@ def test_wrap_visible_tool_events_skips_tools_without_forward():
     agent._wrap_visible_tool_events()
 
     assert not hasattr(agent.tools[0], "_tool_call_observer_wrapped")
-
-
-def test_citation_write_wrapper_sanitizes_document_body_at_core_agent_boundary():
-    """The agent-level integration must run before the real document tool."""
-    module = TestRunStreamRealExecution()._load_core_agent_in_isolation()
-
-    class DocumentTool:
-        name = "write_document"
-
-        def __init__(self):
-            self.received = None
-
-        def forward(self, content):
-            self.received = content
-            return "written"
-
-    tool = DocumentTool()
-    agent = module.CoreAgent.__new__(module.CoreAgent)
-    agent.tools = {"write_document": tool}
-    agent.citation_write_mode = "strip"
-    agent.logger = MagicMock()
-
-    agent._citation_write_wrap_tools()
-
-    assert tool.forward("内容 [[a1]]") == "written"
-    assert tool.received == "内容"

@@ -285,7 +285,6 @@ CREATE TABLE IF NOT EXISTS nexent.ag_tenant_agent_t (
     tenant_id VARCHAR(100),
     enabled BOOLEAN DEFAULT FALSE,
     provide_run_summary BOOLEAN DEFAULT FALSE,
-    include_citations_in_tool_output BOOLEAN NOT NULL DEFAULT FALSE,
     context_policy JSONB,
     create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     update_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
@@ -293,11 +292,6 @@ CREATE TABLE IF NOT EXISTS nexent.ag_tenant_agent_t (
     updated_by VARCHAR(100),
     delete_flag VARCHAR(1) DEFAULT 'N'
 );
-
--- init.sql is also reapplied for existing deployments. Keep this additive
--- change before the column comment below so an older table upgrades safely.
-ALTER TABLE nexent.ag_tenant_agent_t
-    ADD COLUMN IF NOT EXISTS include_citations_in_tool_output BOOLEAN NOT NULL DEFAULT FALSE;
 
 -- Create a function to update the update_time column
 CREATE OR REPLACE FUNCTION update_ag_tenant_agent_update_time()
@@ -328,7 +322,6 @@ COMMENT ON COLUMN nexent.ag_tenant_agent_t.parent_agent_id IS 'Parent Agent ID';
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.tenant_id IS 'Belonging tenant';
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.enabled IS 'Enable flag';
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.provide_run_summary IS 'Whether to provide the running summary to the manager agent';
-COMMENT ON COLUMN nexent.ag_tenant_agent_t.include_citations_in_tool_output IS 'Whether citations are retained in user-readable text written through tools';
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.create_time IS 'Creation time';
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.update_time IS 'Update time';
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.created_by IS 'Creator';

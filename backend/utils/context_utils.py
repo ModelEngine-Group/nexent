@@ -125,7 +125,6 @@ def _build_execution_flow_text(
     language: str = "zh",
     is_manager: bool = True,
     enable_planning: bool = False,
-    include_citations_in_tool_output: bool = False,
     priority: int = 60,
 ) -> str:
     """Build the execution-flow prompt section.
@@ -436,7 +435,6 @@ def build_context_inputs(
     knowledge_base_summary: Optional[str] = None,
     kb_ids: Optional[List[str]] = None,
     restricted_python_authorized_imports: Optional[List[str]] = None,
-    include_citations_in_tool_output: bool = False,
     include_tools: bool = True,
     include_skills: bool = True,
     include_memory: bool = True,
@@ -507,7 +505,7 @@ def build_context_inputs(
             ))
 
     add_system("execution_flow", _build_execution_flow_text(
-        None, language, is_manager, enable_planning, include_citations_in_tool_output
+        None, language, is_manager, enable_planning
     ), 60, "platform")
     add_system("available_resources_header", _build_available_resources_header_text(
         is_manager, language

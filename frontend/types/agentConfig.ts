@@ -18,7 +18,6 @@ export type AgentConfigUpdate = Partial<
     | "requested_output_tokens"
     | "is_main_agent"
     | "provide_run_summary"
-    | "include_citations_in_tool_output"
     | "description"
     | "duty_prompt"
     | "constraint_prompt"
@@ -147,7 +146,6 @@ export interface Agent {
   requested_output_tokens?: number | null;
   is_main_agent?: boolean;
   provide_run_summary: boolean;
-  include_citations_in_tool_output?: boolean;
   enable_context_manager?: boolean;
   verification_config?: AgentVerificationConfig;
   tools: Tool[];

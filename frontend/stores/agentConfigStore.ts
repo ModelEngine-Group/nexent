@@ -39,7 +39,6 @@ export type EditableAgent = Pick<
   | "requested_output_tokens"
   | "is_main_agent"
   | "provide_run_summary"
-  | "include_citations_in_tool_output"
   | "tools"
   | "duty_prompt"
   | "constraint_prompt"
@@ -193,7 +192,6 @@ function createEmptyEditableAgent(llmConfig?: { id: number | null; name: string;
     requested_output_tokens: null,
     is_main_agent: true,
     provide_run_summary: false,
-    include_citations_in_tool_output: false,
     tools: [],
     skills: [],
     duty_prompt: "",
@@ -233,8 +231,6 @@ const toEditable = (agent: Agent | null): EditableAgent =>
         requested_output_tokens: agent.requested_output_tokens ?? null,
         is_main_agent: agent.is_main_agent ?? true,
         provide_run_summary: agent.provide_run_summary,
-        include_citations_in_tool_output:
-          agent.include_citations_in_tool_output ?? false,
         tools: [...(agent.tools || [])],
         skills: [...(agent.skills || [])],
         duty_prompt: agent.duty_prompt || "",
@@ -358,7 +354,6 @@ const isDirty = (
       editedAgent.requested_output_tokens != null ||
       editedAgent.is_main_agent !== true ||
       editedAgent.provide_run_summary !== false ||
-      editedAgent.include_citations_in_tool_output !== false ||
       editedAgent.duty_prompt !== "" ||
       editedAgent.constraint_prompt !== "" ||
       editedAgent.few_shots_prompt !== "" ||
@@ -393,8 +388,6 @@ const isDirty = (
       (editedAgent.requested_output_tokens ?? null) ||
     (baselineAgent.is_main_agent ?? true) !== (editedAgent.is_main_agent ?? true) ||
     baselineAgent.provide_run_summary !== editedAgent.provide_run_summary ||
-    (baselineAgent.include_citations_in_tool_output ?? false) !==
-      (editedAgent.include_citations_in_tool_output ?? false) ||
     baselineAgent.duty_prompt !== editedAgent.duty_prompt ||
     baselineAgent.constraint_prompt !== editedAgent.constraint_prompt ||
     baselineAgent.few_shots_prompt !== editedAgent.few_shots_prompt ||

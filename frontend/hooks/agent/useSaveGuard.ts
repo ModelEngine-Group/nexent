@@ -253,8 +253,6 @@ export const useSaveGuard = () => {
         requested_output_tokens:
           currentEditedAgent.requested_output_tokens ?? null,
         provide_run_summary: currentEditedAgent.provide_run_summary,
-        include_citations_in_tool_output:
-          currentEditedAgent.include_citations_in_tool_output ?? false,
         verification_config: currentEditedAgent.verification_config,
         enabled: true,
         business_description: currentEditedAgent.business_description,

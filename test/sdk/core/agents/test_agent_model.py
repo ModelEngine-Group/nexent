@@ -1234,18 +1234,6 @@ class TestAgentConfig:
         assert config.instructions is None
         assert config.managed_agents == []
         assert config.external_a2a_agents == []
-        assert config.citation_write_mode == "strip"
-
-    def test_agent_config_accepts_each_citation_write_mode(self):
-        for mode in ("allow", "strip", "block"):
-            config = agent_model_module.AgentConfig(
-                name="citation_policy_agent",
-                description="Agent with citation write policy",
-                tools=[],
-                model_name="test",
-                citation_write_mode=mode,
-            )
-            assert config.citation_write_mode == mode
 
     def test_agent_config_with_tools(self):
         """Test AgentConfig with tools list."""
