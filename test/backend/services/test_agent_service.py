@@ -188,10 +188,13 @@ mock_create_agent_info.create_tool_config_list = AsyncMock(return_value=[])
 sys.modules['agents.create_agent_info'].create_agent_info = mock_create_agent_info
 
 # Mock utils submodules
-sys.modules['utils'] = MagicMock()
+utils_module = types.ModuleType("utils")
+utils_module.__path__ = []
+sys.modules['utils'] = utils_module
 sys.modules['utils.auth_utils'] = MagicMock()
 sys.modules['utils.thread_utils'] = MagicMock()
 sys.modules['utils.context_utils'] = MagicMock()
+sys.modules['utils.knowledge_telemetry'] = MagicMock()
 sys.modules['utils.context_utils'].build_authorized_context_input = (
     lambda agent_run_info, historical_context=None: MockContextInput(
         items=tuple(agent_run_info.agent_config.context_items or ())
@@ -17002,4 +17005,3 @@ def test_inject_user_timezone_time_with_invalid_timezone():
     request.headers = {"x-user-timezone": "Invalid/Timezone"}
     result = _inject_user_timezone_time("What time is it?", request)
     assert result == "What time is it?"
-

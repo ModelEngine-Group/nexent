@@ -541,6 +541,7 @@ class DataProcessService:
             original_filename = source_config.get('original_filename')
             embedding_model_id = source_config.get('embedding_model_id')
             tenant_id = source_config.get('tenant_id')
+            telemetry_context = source_config.get('telemetry_context') or {}
 
             # Validate required fields
             if not source:
@@ -561,6 +562,7 @@ class DataProcessService:
                 authorization=authorization,
                 embedding_model_id=embedding_model_id,
                 tenant_id=tenant_id,
+                telemetry_context=telemetry_context,
             )
             if not chain_id:
                 logger.error(

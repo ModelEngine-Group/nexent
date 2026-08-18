@@ -537,3 +537,49 @@ def test_database_error_handling(monkeypatch, mock_session):
 
     with pytest.raises(MockSQLAlchemyError, match="Database error"):
         get_all_configs_by_tenant_id("test_tenant")
+
+
+def test_insert_tenant_id_config_rejects_platform_tenant_limit(monkeypatch, mock_session):
+    """Writing a new tenant identity is rejected at the platform tenant limit."""
+    import backend.database.tenant_config_db as module
+
+    class ResourceLimitError(Exception):
+        pass
+
+    session, query = mock_session
+    query.filter.return_value.distinct.return_value.count.return_value = 1
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr(module, "get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr(module, "TenantResourceLimitError", ResourceLimitError)
+    monkeypatch.setattr(module, "TENANT_ID", "TENANT_ID")
+    monkeypatch.setattr(module, "MAX_TENANT_COUNT", 1)
+
+    with pytest.raises(ResourceLimitError, match="Tenant limit"):
+        module.insert_config({"tenant_id": "tenant-101", "config_key": "TENANT_ID"})
+
+
+@pytest.mark.parametrize("current_count, should_reject", [(0, False), (1, True), (2, True)])
+def test_tenant_limit_boundaries(monkeypatch, mock_session, current_count, should_reject):
+    """Tenant identity creation is allowed below the cap and rejected at or above it."""
+    import backend.database.tenant_config_db as module
+
+    class ResourceLimitError(Exception):
+        pass
+
+    session, query = mock_session
+    query.filter.return_value.distinct.return_value.count.return_value = current_count
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr(module, "get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr(module, "TenantResourceLimitError", ResourceLimitError)
+    monkeypatch.setattr(module, "TENANT_ID", "TENANT_ID")
+    monkeypatch.setattr(module, "MAX_TENANT_COUNT", 1)
+
+    if should_reject:
+        with pytest.raises(ResourceLimitError):
+            module.insert_config({"tenant_id": "tenant-101", "config_key": "TENANT_ID"})
+    else:
+        assert module.insert_config({"tenant_id": "tenant-1", "config_key": "TENANT_ID"}) is True

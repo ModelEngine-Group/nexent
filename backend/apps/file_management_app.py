@@ -154,7 +154,6 @@ async def process_files(
         index_name: Annotated[str, Body(...)],
         destination: Annotated[str, Body(...)],
         chunking_strategy: Annotated[Optional[str], Body(...)] = "basic",
-        model_id: Annotated[Optional[int], Body(...)] = None,
         authorization: Annotated[Optional[str], Header()] = None
 ):
     """
@@ -172,7 +171,6 @@ async def process_files(
         source_type=destination,
         index_name=index_name,
         authorization=authorization,
-        model_id=model_id
     )
 
     process_result = await trigger_data_process(files, process_params)

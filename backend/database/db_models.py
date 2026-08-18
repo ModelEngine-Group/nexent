@@ -4,6 +4,7 @@ from sqlalchemy import (
     CheckConstraint,
     Column,
     Float,
+    ForeignKey,
     Index,
     Integer,
     JSON,
@@ -880,8 +881,7 @@ class MemoryUserConfig(TableBase):
 class MemoryRecord(TableBase):
     """Internal memory records persisted in PostgreSQL.
 
-    This is the authoritative store for tenant/user/agent memory. Tenant and
-    user long-term memories live here exclusively; agent short-term memory
+    This is the authoritative store for agent short-term memory, which
     additionally mirrors the content into Elasticsearch (managed by
     ``services.memory_index_service``).
 
@@ -980,6 +980,48 @@ class MemoryRecord(TableBase):
                          doc="Last REM Sleep timestamp.")
 
 
+class MemoryLongTermVersion(TableBase):
+    """Immutable Markdown long-term memory shared by tenant and user scopes."""
+
+    __tablename__ = "memory_long_term_version_t"
+    __table_args__ = (
+        CheckConstraint("scope IN ('tenant', 'user')", name="ck_memory_long_term_scope"),
+        Index(
+            "uq_memory_long_term_version_scope_no",
+            "tenant_id", "scope", "subject_id", "version_no", unique=True,
+        ),
+        Index(
+            "uq_memory_long_term_active_scope",
+            "tenant_id", "scope", "subject_id", unique=True,
+            postgresql_where=text("is_active AND delete_flag = 'N'"),
+        ),
+        Index("uq_memory_long_term_run", "dreaming_run_id", unique=True,
+              postgresql_where=text("dreaming_run_id IS NOT NULL")),
+        {"schema": SCHEMA},
+    )
+
+    version_id = Column(BigInteger, Sequence(
+        "memory_long_term_version_t_version_id_seq", schema=SCHEMA), primary_key=True)
+    tenant_id = Column(String(100), nullable=False)
+    scope = Column(String(20), nullable=False)
+    subject_id = Column(String(100), nullable=False)
+    version_no = Column(Integer, nullable=False)
+    parent_version_id = Column(BigInteger)
+    is_active = Column(Boolean, nullable=False, default=False)
+    content = Column(Text, nullable=False)
+    source = Column(String(20), nullable=False)
+    author_user_id = Column(String(100), nullable=False)
+    editor_user_id = Column(String(100), nullable=False)
+    authored_at = Column(TIMESTAMP(timezone=False), nullable=False, server_default=func.now())
+    dreaming_run_id = Column(BigInteger)
+    character_count = Column(Integer, nullable=False)
+    raw_dreaming_input = Column(Text)
+    generation_audit = Column(JSONB, nullable=False, default=dict)
+    evidence_ids = Column(JSONB, nullable=False, default=list)
+    fallback_details = Column(JSONB, nullable=False, default=dict)
+    omission_details = Column(JSONB, nullable=False, default=dict)
+
+
 class MemoryRetrievalHit(TableBase):
     """Per-hit memory retrieval log row, sourced by ``search_memory`` tools.
 
@@ -1036,6 +1078,129 @@ class MemoryRetrievalHit(TableBase):
                         doc="User that last updated the row.")
     delete_flag = Column(String(1), nullable=False, default="N",
                          doc="Soft delete flag (N = active, Y = deleted).")
+
+
+class MemoryDreamingAudit(TableBase):
+    """One durable audit row per manual or scheduled Dreaming run."""
+
+    __tablename__ = "memory_dreaming_audit_t"
+    __table_args__ = (
+        Index(
+            "idx_memory_dreaming_audit_scope",
+            "tenant_id",
+            "user_id",
+            "agent_id",
+            "started_at",
+        ),
+        {"schema": SCHEMA},
+    )
+
+    run_id = Column(
+        BigInteger,
+        Sequence("memory_dreaming_audit_t_run_id_seq", schema=SCHEMA),
+        primary_key=True,
+        nullable=False,
+    )
+    tenant_id = Column(String(100), nullable=False)
+    user_id = Column(String(100), nullable=False)
+    agent_id = Column(String(100), nullable=False)
+    trigger_source = Column(String(30), nullable=False, default="manual")
+    status = Column(String(30), nullable=False, default="running")
+    current_phase = Column(String(30))
+    started_at = Column(TIMESTAMP(timezone=False), nullable=False, server_default=func.now())
+    finished_at = Column(TIMESTAMP(timezone=False))
+    light_count = Column(Integer, nullable=False, default=0)
+    rem_count = Column(Integer, nullable=False, default=0)
+    promoted_count = Column(Integer, nullable=False, default=0)
+    deferred_count = Column(Integer, nullable=False, default=0)
+    published_version_id = Column(BigInteger)
+    reason = Column(String(100))
+    error = Column(Text)
+    lock_owner = Column(String(100), nullable=True)
+    lock_until = Column(TIMESTAMP(timezone=False), nullable=True)
+
+
+class MemoryDreamingDecision(TableBase):
+    """One normalized candidate decision produced by a Dreaming run."""
+
+    __tablename__ = "memory_dreaming_decision_t"
+    __table_args__ = (
+        UniqueConstraint(
+            "run_id",
+            "decision_order",
+            name="uq_memory_dreaming_decision_run_order",
+        ),
+        Index("idx_memory_dreaming_decision_memory", "memory_id"),
+        {"schema": SCHEMA},
+    )
+
+    decision_id = Column(
+        BigInteger,
+        Sequence("memory_dreaming_decision_t_decision_id_seq", schema=SCHEMA),
+        primary_key=True,
+        nullable=False,
+    )
+    run_id = Column(
+        BigInteger,
+        ForeignKey(f"{SCHEMA}.memory_dreaming_audit_t.run_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    decision_order = Column(Integer, nullable=False)
+    memory_id = Column(BigInteger, nullable=False)
+    score = Column(Float, nullable=False)
+    noise = Column(Boolean, nullable=False, default=False)
+    signal_count = Column(Integer, nullable=False, default=0)
+    context_diversity = Column(Integer, nullable=False, default=0)
+    evidence_ids = Column(ARRAY(String(100)), nullable=False, default=list)
+    event = Column(String(20), nullable=False)
+    reason = Column(String(100), nullable=False)
+    archive_suggested = Column(Boolean, nullable=False, default=False)
+
+
+class MemoryDreamingSchedule(TableBase):
+    """Persistent automatic Dreaming schedule for one user/agent scope."""
+
+    __tablename__ = "memory_dreaming_schedule_t"
+    __table_args__ = (
+        Index(
+            "uq_memory_dreaming_schedule_scope",
+            "tenant_id",
+            "user_id",
+            "agent_id",
+            unique=True,
+        ),
+        Index(
+            "idx_memory_dreaming_schedule_due",
+            "enabled",
+            "next_fire_at",
+        ),
+        {"schema": SCHEMA},
+    )
+
+    schedule_id = Column(
+        BigInteger,
+        Sequence("memory_dreaming_schedule_t_schedule_id_seq", schema=SCHEMA),
+        primary_key=True,
+        nullable=False,
+    )
+    tenant_id = Column(String(100), nullable=False)
+    user_id = Column(String(100), nullable=False)
+    agent_id = Column(String(100), nullable=False)
+    enabled = Column(Boolean, nullable=False, default=False)
+    rule_type = Column(String(20), nullable=False, default="CRON")
+    timezone = Column(String(100), nullable=False, default="Asia/Shanghai")
+    start_at = Column(TIMESTAMP(timezone=False), nullable=False)
+    cron_expr = Column(String(100))
+    interval_seconds = Column(Integer)
+    next_fire_at = Column(TIMESTAMP(timezone=False))
+    last_fire_at = Column(TIMESTAMP(timezone=False))
+    fire_count = Column(Integer, nullable=False, default=0)
+    min_score = Column(Float, nullable=True)
+    min_recall_count = Column(Integer, nullable=True)
+    min_unique_queries = Column(Integer, nullable=True)
+    source_limit = Column(Integer, nullable=True)
+    long_term_max_chars = Column(Integer, nullable=True)
+    summarization_max_attempts = Column(Integer, nullable=True)
 
 
 class McpRecord(TableBase):
