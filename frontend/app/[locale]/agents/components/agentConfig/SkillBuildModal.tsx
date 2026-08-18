@@ -20,10 +20,20 @@ import {
   Spin,
   Tooltip,
 } from "antd";
-import { Upload as UploadIcon, Trash2, MessageCircle, Box } from "lucide-react";
+import {
+  Upload as UploadIcon,
+  Trash2,
+  MessageCircle,
+  Box,
+  Store,
+} from "lucide-react";
 import { extractSkillInfo } from "@/lib/skillFileUtils";
 import yaml from "js-yaml";
-import { type SkillFormData, type SkillFileContent } from "@/types/skill";
+import {
+  type SkillBuildTab,
+  type SkillFormData,
+  type SkillFileContent,
+} from "@/types/skill";
 import {
   fetchSkillsList,
   submitSkillForm,
@@ -45,6 +55,7 @@ import { useAuthorizationContext } from "@/components/providers/AuthorizationPro
 import { USER_ROLES } from "@/const/auth";
 import { useGroupDetails, useGroupList } from "@/hooks/group/useGroupList";
 import SkillDraftPanel from "./SkillDraftPanel";
+import ModelScopeSkillMarket from "./ModelScopeSkillMarket";
 import { Nl2SkillChatPanel } from "../../../newchat/assistant-ui/nl2skill-chat-panel";
 import type { Nl2SkillStreamEvent } from "../../../newchat/adapter/remote-chat-model-adapter";
 
@@ -181,7 +192,7 @@ export default function SkillBuildModal({
       })),
     [filteredGroups]
   );
-  const [activeTab, setActiveTab] = useState<string>("interactive");
+  const [activeTab, setActiveTab] = useState<SkillBuildTab>("interactive");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isLoadingEditFiles, setIsLoadingEditFiles] = useState(false);
   const [loadedEditSkillId, setLoadedEditSkillId] = useState<number | null>(
@@ -663,7 +674,8 @@ export default function SkillBuildModal({
     [isEditMode, t]
   );
 
-  const modalBodyFrame = "min(92vh, 760px)";
+  const isMarketMode = !isEditMode && activeTab === "market";
+  const modalBodyFrame = isMarketMode ? "min(82vh, 820px)" : "min(92vh, 760px)";
   const modalViewportFrame = "calc(100vh - 32px)";
   const editingSkillName =
     editingSkill?.name?.trim() || interactiveSkillName.trim();
@@ -872,6 +884,15 @@ export default function SkillBuildModal({
         </Flex>
       ),
     },
+    {
+      key: "market",
+      label: (
+        <Flex gap={6} align="center">
+          <Store size={16} />
+          <span>{t("skillManagement.tabs.market")}</span>
+        </Flex>
+      ),
+    },
   ];
   const visibleTabItems = isEditMode ? [tabItems[0]] : tabItems;
 
@@ -924,44 +945,49 @@ export default function SkillBuildModal({
           overflow: "hidden",
         },
       }}
-      footer={[
-        <Button key="cancel" onClick={handleModalClose}>
-          {t("common.cancel")}
-        </Button>,
-        isEditMode || activeTab === "interactive" ? (
-          <Button
-            key="submit"
-            type="primary"
-            loading={isSubmitting}
-            onClick={handleManualSubmit}
-            disabled={
-              isEditMode && (isLoadingEditFiles || Boolean(editFilesError))
-            }
-          >
-            {getConfirmButtonText()}
-          </Button>
-        ) : (
-          <Button
-            key="submit"
-            type="primary"
-            loading={isSubmitting}
-            onClick={handleUploadSubmit}
-            disabled={
-              !uploadFile ||
-              !uploadExtractedSkillName.trim() ||
-              !uploadIsCreateMode
-            }
-          >
-            {getConfirmButtonText()}
-          </Button>
-        ),
-      ]}
+      footer={
+        isMarketMode
+          ? null
+          : [
+              <Button key="cancel" onClick={handleModalClose}>
+                {t("common.cancel")}
+              </Button>,
+              isEditMode || activeTab === "interactive" ? (
+                <Button
+                  key="submit"
+                  type="primary"
+                  loading={isSubmitting}
+                  onClick={handleManualSubmit}
+                  disabled={
+                    isEditMode &&
+                    (isLoadingEditFiles || Boolean(editFilesError))
+                  }
+                >
+                  {getConfirmButtonText()}
+                </Button>
+              ) : (
+                <Button
+                  key="submit"
+                  type="primary"
+                  loading={isSubmitting}
+                  onClick={handleUploadSubmit}
+                  disabled={
+                    !uploadFile ||
+                    !uploadExtractedSkillName.trim() ||
+                    !uploadIsCreateMode
+                  }
+                >
+                  {getConfirmButtonText()}
+                </Button>
+              ),
+            ]
+      }
     >
       <Tabs
         activeKey={isEditMode ? "interactive" : activeTab}
         onChange={(key) => {
           if (!isEditMode) {
-            setActiveTab(key);
+            setActiveTab(key as SkillBuildTab);
           }
         }}
         items={visibleTabItems}
@@ -981,6 +1007,14 @@ export default function SkillBuildModal({
         <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
           {renderChatPanel()}
           {renderDraftPanel()}
+        </div>
+      ) : activeTab === "market" ? (
+        <div className="min-h-0 flex-1">
+          <ModelScopeSkillMarket
+            groupSelectOptions={groupSelectOptions}
+            defaultGroupIds={accessibleGroupIds}
+            onInstalled={onSuccess}
+          />
         </div>
       ) : (
         <div className="min-h-0 flex-1">{renderUploadTab()}</div>
