@@ -18,6 +18,8 @@ from ...multimodal_adapter import MultimodalAdapter
 from ...transport import HttpTransportMixin
 
 
+DEFAULT_IMAGE_MIME_TYPE = "image/jpeg"
+
 ASSETS_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))), "assets"
 )
@@ -26,18 +28,18 @@ ASSETS_DIR = os.path.join(
 def _detect_image_mime(img_bytes: bytes) -> str:
     """Detect an image's MIME type from its magic bytes (default ``image/jpeg``)."""
     if not img_bytes:
-        return "image/jpeg"
+        return DEFAULT_IMAGE_MIME_TYPE
     if img_bytes[:8] == b"\x89PNG\r\n\x1a\n":
         return "image/png"
     if img_bytes[:3] == b"\xff\xd8\xff":
-        return "image/jpeg"
-    if img_bytes[:4] in (b"GIF87a", b"GIF89a"):
+        return DEFAULT_IMAGE_MIME_TYPE
+    if img_bytes[:6] in (b"GIF87a", b"GIF89a"):
         return "image/gif"
     if img_bytes[:4] == b"RIFF" and img_bytes[8:12] == b"WEBP":
         return "image/webp"
     if img_bytes[:2] == b"BM":
         return "image/bmp"
-    return "image/jpeg"
+    return DEFAULT_IMAGE_MIME_TYPE
 
 
 @dataclass

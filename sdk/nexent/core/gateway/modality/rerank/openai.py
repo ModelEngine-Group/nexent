@@ -122,21 +122,7 @@ class OpenAICompatibleRerankAdapter(RerankAdapter, HttpTransportMixin):
             current_timeout = base_timeout + attempt_index * 10.0
             try:
                 response = self._make_request(data, timeout=current_timeout)
-                results = response.get("results") or response.get("output", {}).get(
-                    "results", []
-                )
-                reranked = []
-                for r in results:
-                    doc = r.get("document")
-                    doc_text = doc.get("text") if isinstance(doc, dict) else doc
-                    reranked.append(
-                        {
-                            "index": r.get("index"),
-                            "relevance_score": r.get("relevance_score"),
-                            "document": doc_text,
-                        }
-                    )
-                return reranked
+                return self._normalize_results(response)
             except requests.exceptions.Timeout as e:
                 logging.warning(
                     f"Rerank API timed out in {current_timeout}s (attempt {attempt_index + 1}/{attempts})"
@@ -152,6 +138,27 @@ class OpenAICompatibleRerankAdapter(RerankAdapter, HttpTransportMixin):
         if last_exception:
             raise last_exception
         return []
+
+    def _normalize_results(self, response: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Normalize provider rerank responses into the common result shape.
+
+        Handles both the flat ``{"results": [...]}`` payload and the nested
+        ``{"output": {"results": [...]}}`` payload, unwrapping document dicts
+        into their text form.
+        """
+        results = response.get("results") or response.get("output", {}).get("results", [])
+        reranked = []
+        for r in results:
+            doc = r.get("document")
+            doc_text = doc.get("text") if isinstance(doc, dict) else doc
+            reranked.append(
+                {
+                    "index": r.get("index"),
+                    "relevance_score": r.get("relevance_score"),
+                    "document": doc_text,
+                }
+            )
+        return reranked
 
     async def rerank_async(
         self, query: str, documents: List[str], top_n: Optional[int] = None

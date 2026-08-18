@@ -14,7 +14,7 @@ interface AidpUpdateKbModalProps {
   open: boolean;
   knowledgeBase: AidpKnowledgeBaseItem | null;
   onCancel: () => void;
-  onSuccess: () => void;
+  onSuccess: (knowledgeBase: AidpKnowledgeBaseItem) => void;
 }
 
 const AidpUpdateKbModal: React.FC<AidpUpdateKbModalProps> = ({
@@ -68,10 +68,13 @@ const AidpUpdateKbModal: React.FC<AidpUpdateKbModalProps> = ({
       setLoading(true);
 
       // Update AIDP-side metadata (name + description).
-      await aidpKnowledgeService.updateKb(knowledgeBase.kds_id, {
-        name: values.name.trim(),
-        description: values.description?.trim() || "",
-      });
+      const updated = await aidpKnowledgeService.updateKb(
+        knowledgeBase.kds_id,
+        {
+          name: values.name.trim(),
+          description: values.description?.trim() || "",
+        }
+      );
 
       // Update Nexent-side permissions only when something actually
       // changed. Skipping the PATCH call when values match the original
@@ -108,7 +111,16 @@ const AidpUpdateKbModal: React.FC<AidpUpdateKbModalProps> = ({
 
       message.success(t("aidpKnowledge.updateKbSuccess"));
       form.resetFields();
-      onSuccess();
+      onSuccess({
+        ...knowledgeBase,
+        ...updated,
+        kds_id: knowledgeBase.kds_id,
+        kds_name: updated.kds_name || values.name.trim(),
+        description: updated.description ?? values.description?.trim() ?? "",
+        ingroup_permission: newPermission,
+        group_ids: normalizedNewGroupIds,
+        resource_status: "ACTIVE",
+      });
     } catch (error) {
       if (error && typeof error === "object" && "errorFields" in error) {
         return;

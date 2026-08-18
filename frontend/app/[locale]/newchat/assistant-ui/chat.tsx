@@ -7,6 +7,11 @@ import { Thread } from "./thread";
 import type { ChatMode } from "./composer";
 import { AgentLandingPage } from "./agent-landing";
 import type { Agent } from "@/types/agentConfig";
+import type {
+  ConversationKnowledgeScope,
+  KnowledgeCapabilities,
+  KnowledgeScopeEffectivePreview,
+} from "@/types/knowledgeScope";
 import type { SkillFileContent } from "@/types/skill";
 
 export interface ChatProps {
@@ -20,6 +25,13 @@ export interface ChatProps {
   onChatModeChange?: (mode: ChatMode) => void;
   showModelSelector?: boolean;
   isDictationConfigured?: boolean;
+  knowledgeScope?: ConversationKnowledgeScope | null;
+  knowledgePreview?: KnowledgeScopeEffectivePreview | null;
+  knowledgeCapabilities?: KnowledgeCapabilities | null;
+  onKnowledgeScopeChange?: (
+    scope: ConversationKnowledgeScope | null,
+    preview?: KnowledgeScopeEffectivePreview | null
+  ) => Promise<void> | void;
   variant?: "default" | "embedded";
   skillFiles?: readonly SkillFileContent[];
   onSkillFileSelect?: (path: string) => void;
@@ -51,6 +63,10 @@ export const Chat: FC<ChatProps> = ({
   onChatModeChange = () => undefined,
   showModelSelector = true,
   isDictationConfigured = false,
+  knowledgeScope = null,
+  knowledgePreview = null,
+  knowledgeCapabilities = null,
+  onKnowledgeScopeChange,
   variant = "default",
   skillFiles,
   onSkillFileSelect,
@@ -83,6 +99,10 @@ export const Chat: FC<ChatProps> = ({
       onChatModeChange={onChatModeChange}
       showModelSelector={showModelSelector}
       isDictationConfigured={isDictationConfigured}
+      knowledgeScope={knowledgeScope}
+      knowledgePreview={knowledgePreview}
+      knowledgeCapabilities={knowledgeCapabilities}
+      onKnowledgeScopeChange={onKnowledgeScopeChange}
       variant={variant}
       skillFiles={skillFiles}
       onSkillFileSelect={onSkillFileSelect}

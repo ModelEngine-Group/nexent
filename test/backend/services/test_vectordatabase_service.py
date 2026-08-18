@@ -96,10 +96,15 @@ class ValidationError(Exception):
     pass
 
 
+class TenantResourceLimitError(ValidationError, ValueError):
+    pass
+
+
 consts_exceptions_mod.UnauthorizedError = UnauthorizedError
 consts_exceptions_mod.NotFoundException = NotFoundException
 consts_exceptions_mod.DuplicateError = DuplicateError
 consts_exceptions_mod.ValidationError = ValidationError
+consts_exceptions_mod.TenantResourceLimitError = TenantResourceLimitError
 
 # Use real consts.const/scheduler (env vars are configured in test/conftest.py)
 consts_pkg = importlib.import_module("consts")

@@ -250,6 +250,10 @@ sys.modules['services.image_service'] = _create_stub_module(
     get_vlm_model=MagicMock(return_value="stub_vlm"),
     get_video_understanding_model=MagicMock(return_value="stub_video_vlm"),
 )
+sys.modules['services.ind_aidp_service'] = _create_stub_module(
+    "services.ind_aidp_service",
+    create_ind_aidp_image_url_builder=MagicMock(),
+)
 sys.modules['services.model_gateway_service'] = _create_stub_module(
     "services.model_gateway_service",
     get_llm_adapter=MagicMock(return_value="stub_llm_adapter"),
@@ -2492,7 +2496,13 @@ class TestCreateAgentConfig:
                 "system_prompt": "populated_system_prompt"}
             mock_get_model_by_id.return_value = {"display_name": "test_model"}
 
-            await create_agent_config("agent_1", "tenant_1", "user_1", "zh", "test query")
+            await create_agent_config(
+                "agent_1",
+                "tenant_1",
+                "user_1",
+                "zh",
+                "test query",
+            )
 
             # Verify that fixed search memory tool's forward was called
             search_instance = mock_search_tool.return_value
@@ -3198,7 +3208,17 @@ class TestCreateAgentConfig:
             ]
             mock_es_service.return_value = mock_es_instance
 
-            await create_agent_config("agent_1", "tenant_1", "user_1", "zh", "test query")
+            await create_agent_config(
+                "agent_1",
+                "tenant_1",
+                "user_1",
+                "zh",
+                "test query",
+                runtime_knowledge_context={
+                    "policy": "scope policy",
+                    "resources": "selected resources",
+                },
+            )
 
             assert mock_es_instance.get_summary.call_args_list == [
                 ((), {"index_name": "idx_a"}),
@@ -3211,9 +3231,72 @@ class TestCreateAgentConfig:
             assert create_agent_info_module.build_context_inputs.call_args.kwargs[
                 "knowledge_base_summary"
             ] == "**idx_a**: AAA\n\n"
+            assert create_agent_info_module.build_context_inputs.call_args.kwargs[
+                "knowledge_scope_policy"
+            ] == "scope policy"
+            assert create_agent_info_module.build_context_inputs.call_args.kwargs[
+                "knowledge_scope_resources"
+            ] == "selected resources"
 
             # Ensure only the first KnowledgeBaseSearchTool is processed.
             assert "idx_c" not in str(mock_es_instance.get_summary.call_args_list)
+
+    def test_scoped_summary_uses_only_effective_tool_indices(self):
+        """Scoped runs build routing summaries from the final tool whitelist."""
+        kb_tool = Mock(
+            class_name="KnowledgeBaseSearchTool",
+            params={"index_names": ["selected-index"]},
+            metadata={
+                "index_name_to_display_map": {
+                    "selected-index": "Selected Knowledge Base"
+                }
+            },
+        )
+
+        with patch(
+            "backend.agents.create_agent_info.ElasticSearchService"
+        ) as mock_es_service:
+            mock_es_service.return_value.get_summary.return_value = {
+                "summary": "Selected summary"
+            }
+            summary, kb_ids = (
+                create_agent_info_module._build_effective_knowledge_base_summary(
+                    [kb_tool],
+                    "en",
+                    include_empty_message=False,
+                )
+            )
+
+        assert summary == (
+            "**Selected Knowledge Base**: Selected summary\n\n"
+        )
+        assert kb_ids == ["selected-index"]
+        mock_es_service.return_value.get_summary.assert_called_once_with(
+            index_name="selected-index"
+        )
+
+    def test_scoped_empty_summary_does_not_restore_agent_defaults(self):
+        """An empty effective scope stays empty instead of adding legacy text."""
+        kb_tool = Mock(
+            class_name="KnowledgeBaseSearchTool",
+            params={"index_names": []},
+            metadata={},
+        )
+
+        with patch(
+            "backend.agents.create_agent_info.ElasticSearchService"
+        ) as mock_es_service:
+            summary, kb_ids = (
+                create_agent_info_module._build_effective_knowledge_base_summary(
+                    [kb_tool],
+                    "en",
+                    include_empty_message=False,
+                )
+            )
+
+        assert summary == ""
+        assert kb_ids == []
+        mock_es_service.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_create_agent_config_uses_metadata_index_name_to_display_map(self):
@@ -7107,15 +7190,24 @@ class TestCreateToolConfigListAidpSearch:
             )
 
             assert len(result) == 1
-            # Verify env creds were injected then removed from params
-            # (runtime params are handled by nexent_agent.py at tool creation time)
-            assert "server_url" not in mock_tc_instance.params
-            assert "api_key" not in mock_tc_instance.params
-            assert "tenant_id" not in mock_tc_instance.params
+            # Platform credentials replace stale database values and are passed
+            # explicitly to the SDK; the SDK must not read process environment.
+            assert mock_tc_instance.params["server_url"] == "https://aidp.test"
+            assert mock_tc_instance.params["api_key"] == "key-123"
+            assert mock_tc_instance.params["tenant_id"] == "aidp-tenant"
 
     @pytest.mark.asyncio
     async def test_aidp_search_permission_whitelist_success(self):
         """When get_allowed_kds_list succeeds, allowed_kds_set is set in metadata."""
+        access_module = MagicMock()
+        access_module.resolve_current_aidp_access.return_value = types.SimpleNamespace(
+            accessible_id_set={"kb_allowed_1", "kb_allowed_2", "kb_not_selected"},
+            name_to_id={
+                "Allowed 1": "kb_allowed_1",
+                "Allowed 2": "kb_allowed_2",
+                "Not selected": "kb_not_selected",
+            },
+        )
         with patch("backend.agents.create_agent_info.discover_langchain_tools",
                    new_callable=AsyncMock, return_value=[]), \
              patch("backend.agents.create_agent_info.search_tools_for_sub_agent") as mock_tools, \
@@ -7126,13 +7218,7 @@ class TestCreateToolConfigListAidpSearch:
              patch("backend.agents.create_agent_info.AIDP_API_KEY", "key"), \
              patch("backend.agents.create_agent_info.AIDP_TENANT_ID", "tenant"), \
              patch.dict(sys.modules, {
-                 "ext_components.aidp.services": MagicMock(
-                     aidp_permission_service=MagicMock(
-                         get_allowed_kds_list=MagicMock(
-                             return_value=["kb_allowed_1", "kb_allowed_2"],
-                         ),
-                     ),
-                 ),
+                 "ext_components.aidp.services.aidp_access_service": access_module,
              }):
 
             mock_tools.return_value = [{
@@ -7141,7 +7227,10 @@ class TestCreateToolConfigListAidpSearch:
                 "description": "AIDP search",
                 "inputs": "{}",
                 "output_type": "string",
-                "params": [{"name": "kds_list", "default": ["kb_allowed_1", "kb_allowed_2"]}],
+                "params": [{
+                    "name": "kds_list",
+                    "default": ["kb_allowed_2", "kb_not_accessible"],
+                }],
                 "source": "langchain",
                 "usage": None,
             }]
@@ -7164,11 +7253,17 @@ class TestCreateToolConfigListAidpSearch:
             assert len(result) == 1
             assert mock_tc_instance.metadata is not None
             assert "allowed_kds_set" in mock_tc_instance.metadata
-            assert set(mock_tc_instance.metadata["allowed_kds_set"]) == {"kb_allowed_1", "kb_allowed_2"}
+            assert mock_tc_instance.params["kds_list"] == ["kb_allowed_2"]
+            assert mock_tc_instance.metadata["allowed_kds_set"] == ["kb_allowed_2"]
+            assert mock_tc_instance.metadata["kds_name_to_id_map"] == {
+                "Allowed 2": "kb_allowed_2",
+            }
 
     @pytest.mark.asyncio
     async def test_aidp_search_permission_whitelist_failure_fallback(self):
         """When get_allowed_kds_list raises, a warning is logged and allowed_kds_set stays empty."""
+        access_module = MagicMock()
+        access_module.resolve_current_aidp_access.side_effect = Exception("AIDP down")
         with patch("backend.agents.create_agent_info.discover_langchain_tools",
                    new_callable=AsyncMock, return_value=[]), \
              patch("backend.agents.create_agent_info.search_tools_for_sub_agent") as mock_tools, \
@@ -7179,13 +7274,7 @@ class TestCreateToolConfigListAidpSearch:
              patch("backend.agents.create_agent_info.AIDP_API_KEY", "key"), \
              patch("backend.agents.create_agent_info.AIDP_TENANT_ID", "tenant"), \
              patch.dict(sys.modules, {
-                 "ext_components.aidp.services": MagicMock(
-                     aidp_permission_service=MagicMock(
-                         get_allowed_kds_list=MagicMock(
-                             side_effect=Exception("DB down"),
-                         ),
-                     ),
-                 ),
+                 "ext_components.aidp.services.aidp_access_service": access_module,
              }):
 
             mock_tools.return_value = [{
@@ -7194,7 +7283,7 @@ class TestCreateToolConfigListAidpSearch:
                 "description": "AIDP search",
                 "inputs": "{}",
                 "output_type": "string",
-                "params": [{"name": "kds_list", "default": []}],
+                "params": [{"name": "kds_list", "default": ["kb_requested"]}],
                 "source": "langchain",
                 "usage": None,
             }]
@@ -7215,7 +7304,8 @@ class TestCreateToolConfigListAidpSearch:
             )
 
             assert len(result) == 1
-            # allowed_kds_set should be empty set on failure
+            # Snapshot failure is fail-closed even when the tool requested a KB.
+            assert mock_tc_instance.params["kds_list"] == []
             assert mock_tc_instance.metadata is not None
             assert mock_tc_instance.metadata["allowed_kds_set"] == []
 
@@ -7410,4 +7500,3 @@ class TestBuildSecurityHeaders:
             "security_credentials": {"k": "v"},
         }
         assert _build_security_headers(agent) == {}
-

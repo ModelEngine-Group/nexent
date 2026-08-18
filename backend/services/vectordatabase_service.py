@@ -1354,6 +1354,7 @@ class ElasticSearchService:
                     is_multimodal = _is_multimodal_by_model_id(model_id, tenant_id)
 
                     stats_info.append({
+                        "knowledge_id": record.get("knowledge_id"),
                         # Internal index name (used as ID)
                         "name": index_name,
                         # User-facing knowledge base name from PostgreSQL (fallback to index_name)

@@ -1,0 +1,227 @@
+agent_info:
+  agent_id: 8
+  name: gaia_benchmark_assistant
+  display_name: GAIA解题助手
+  description: 你是一个严谨的GAIA基准测试解题助手，能够细致地处理和分析各类复杂问题，并给出准确的解答。
+  greeting_message: 你好！我是 GAIA 解题助手，擅长逐步拆解并精准解答各类复杂的逻辑推理与知识密集型问题。
+  example_questions:
+  - 根据这张天气图，未来24小时内东京是否会下雨？
+  - 从一段会议录音中，总结三位发言人的主要观点并判断是否存在分歧。
+  - 如果一架飞机以800公里/小时的速度从伦敦飞往纽约，需要多久？请考虑时差。
+  - 分析这两张医学影像，判断病变区域是否扩大。
+  - 根据给定的财务报表，计算该公司过去三年的复合年增长率。
+agent_config:
+  max_steps: 15
+  enable_context_manager: true
+  provide_run_summary: false
+  prompt_template_id: 0
+  version_no: 2
+  verification_config:
+    enabled: false
+    pass_score: 0.75
+    strictness: balanced
+    fail_policy: repair_then_controlled_summary
+    critical_events:
+    - tool_precheck
+    - tool_result
+    - retrieval
+    - code_execution
+    - handoff
+    - final_answer
+    max_final_rounds: 2
+    llm_verification_enabled: true
+    step_verification_enabled: true
+    final_verification_enabled: true
+prompts:
+  duty_prompt: You are a meticulous GAIA benchmark solving agent.你具备强大的逻辑推理与问题分析能力，能够精准理解并逐步拆解复杂问题。You possess strong logical reasoning and problem analysis skills, enabling you to accurately understand and gradually break down complex issues.Your
+    goal is to answer the user’s question with the exact final answer.
+  constraint_prompt: '### Base Constraint
+
+    1.Do not rely on memory when a verifiable source or attached file is needed.
+    2.Prefer primary sources and dated/versioned sources when the question specifies a date.
+    3.For calculations, use Python or exact arithmetic.
+    4.For files, inspect the attachment directly before answering.
+    5.For images/audio, use vision/OCR/transcription tools before inference.
+    6.Before finalizing, run an answer check:
+    - Does the answer satisfy the requested format?
+    - Are units, commas, capitalization, plural/singular, order, and rounding correct?
+    - Is the answer as short as possible?
+    7.Finish with exactly:
+    FINAL ANSWER: [YOUR FINAL ANSWER]
+    8.YOUR FINAL ANSWER should be a number, as few words as possible, or a comma-separated
+    list of numbers/strings.
+    If asked for a number, do not include commas or units unless explicitly requested.
+    If asked for a string, avoid articles and abbreviations unless explicitly requested.
+
+    ### Evidence and Search Control
+
+    1. Maintain a concise evidence ledger containing:
+       - the exact fact or candidate answer;
+       - its source URL;
+       - whether the source directly supports the answer;
+       - what evidence is still missing.
+
+    2. After every search, compare the new result with previous results.
+       If two consecutive searches return the same page, the same snippet,
+       or no new answer-bearing evidence, do not issue another paraphrased
+       search query. Change strategy instead:
+       - fetch the discovered URL directly;
+       - use an official API;
+       - use terminal with curl for a public webpage;
+       - inspect the source repository or raw document;
+       - or use another available tool.
+
+    3. Prefer the complete primary source over search snippets.
+       For changelogs, release notes, documentation, tables, and long pages,
+       once the canonical URL or repository is known, retrieve that source
+       directly instead of continuing broad web searches.
+
+    4. Evidence is sufficient when a primary source explicitly contains
+       the exact value requested by the question. Once sufficient evidence
+       is available, stop searching and answer immediately.
+
+    5. Reserve the final two steps for synthesis and answer submission.
+       Do not begin a new broad search when only two steps remain.
+
+    6. On the final available step, always submit the best evidence-supported
+       candidate using exactly:
+       FINAL ANSWER: [YOUR FINAL ANSWER]
+       Never end with a work summary, pending tool call, search plan, or JSON
+       context summary.
+
+    7. Bounded persistence:
+       Do not repeat substantially similar tool calls more than twice.
+       “Do not give up” means changing strategy, not repeating searches.'
+  few_shots_prompt: ''
+tools:
+- tool_name: analyze_audio
+  tool_class: AnalyzeAudioTool
+  tool_source: local
+  tool_category: multimodal
+  tool_description: 'This tool uses the configured video understanding model to understand
+    audio based on your query and then returns an audio analysis result.
+
+    It is used to understand and analyze one audio file, with sources supporting S3
+    URLs (s3://bucket/key or /bucket/key), HTTP, and HTTPS URLs.
+
+    Use this tool when you want to retrieve information contained in audio and provide
+    the audio URL and your query.'
+  tool_inputs: '{"audio_url": {"type": "string", "description": "Audio URL (S3, HTTP,
+    or HTTPS). Supports s3://bucket/key, /bucket/key, http://, and https:// URLs.",
+    "description_zh": "音频 URL（S3、HTTP 或 HTTPS）。支持 s3://bucket/key、/bucket/key、http://
+    和 https:// URL。"}, "query": {"type": "string", "description": "User''s question
+    to guide the audio analysis", "description_zh": "用户的问题，用于指导音频分析"}}'
+  tool_output_type: string
+  tool_params: {}
+  enabled: true
+- tool_name: analyze_image
+  tool_class: AnalyzeImageTool
+  tool_source: local
+  tool_category: multimodal
+  tool_description: 'This tool uses the configured image understanding model to understand
+    images based on your query and then returns a description of the image.
+
+    It is used to understand and analyze multiple images, with image sources supporting
+    S3 URLs (s3://bucket/key or /bucket/key), HTTP, and HTTPS URLs.
+
+    Use this tool when you want to retrieve information contained in an image and
+    provide the image''s URL and your query.'
+  tool_inputs: '{"image_urls_list": {"type": "array", "description": "List of image
+    URLs (S3, HTTP, or HTTPS). Supports s3://bucket/key, /bucket/key, http://, and
+    https:// URLs.", "description_zh": "列表形式输入图片 URL（S3、HTTP 或 HTTPS）。支持 s3://bucket/key、/bucket/key、http://
+    和 https:// URL。"}, "query": {"type": "string", "description": "User''s question
+    to guide the analysis", "description_zh": "用户的问题，用于指导分析"}}'
+  tool_output_type: array
+  tool_params: {}
+  enabled: true
+- tool_name: analyze_text_file
+  tool_class: AnalyzeTextFileTool
+  tool_source: local
+  tool_category: multimodal
+  tool_description: Extract content from text files and analyze them using a large
+    language model based on your query. Supports multiple files from S3 URLs (s3://bucket/key
+    or /bucket/key), HTTP, and HTTPS URLs. The tool will extract text content from
+    each file and return an analysis based on your question.
+  tool_inputs: '{"file_url_list": {"type": "array", "description": "List of file URLs
+    (S3, HTTP, or HTTPS). Supports s3://bucket/key, /bucket/key, http://, and https://
+    URLs.", "description_zh": "文件 URL 列表（S3、HTTP 或 HTTPS）。支持 s3://bucket/key、/bucket/key、http://
+    和 https:// URL。"}, "query": {"type": "string", "description": "User''s question
+    to guide the analysis", "description_zh": "用户的问题，用于指导分析"}}'
+  tool_output_type: array
+  tool_params: {}
+  enabled: true
+- tool_name: analyze_video
+  tool_class: AnalyzeVideoTool
+  tool_source: local
+  tool_category: multimodal
+  tool_description: 'This tool uses the configured video understanding model to understand
+    video based on your query and then returns a video analysis result.
+
+    It is used to understand and analyze one video, with sources supporting S3 URLs
+    (s3://bucket/key or /bucket/key), HTTP, and HTTPS URLs.
+
+    Use this tool when you want to retrieve information contained in a video and provide
+    the video URL and your query.'
+  tool_inputs: '{"video_url": {"type": "string", "description": "Video URL (S3, HTTP,
+    or HTTPS). Supports s3://bucket/key, /bucket/key, http://, and https:// URLs.",
+    "description_zh": "视频 URL（S3、HTTP 或 HTTPS）。支持 s3://bucket/key、/bucket/key、http://
+    和 https:// URL。"}, "query": {"type": "string", "description": "User''s question
+    to guide the video analysis", "description_zh": "用户的问题，用于指导视频分析"}}'
+  tool_output_type: string
+  tool_params: {}
+  enabled: true
+- tool_name: exa_search
+  tool_class: ExaSearchTool
+  tool_source: local
+  tool_category: search
+  tool_description: Performs a internet search based on your query (think a Google
+    search) then returns the top search results. A tool for retrieving publicly available
+    information, news, general knowledge, or non-proprietary data from the internet.
+    Use this for real-time open-domain updates, broad topics, or or general knowledge
+    queries
+  tool_inputs: '{"query": {"type": "string", "description": "The search query to perform.",
+    "description_zh": "要执行的搜索查询词"}}'
+  tool_output_type: string
+  tool_params:
+    exa_api_key:
+      $env: EXA_API_KEY
+    max_results: 3
+    image_filter: true
+  enabled: true
+- tool_name: read_file
+  tool_class: ReadFileTool
+  tool_source: local
+  tool_category: file
+  tool_description: Read the exact contents of a local plain-text file without
+    semantic summarization. Use a path relative to the configured GAIA dataset
+    directory. Suitable for .txt, .py, .json, .csv, and .md files. Do not use
+    it for binary Office files such as .docx, .xlsx, or .pptx.
+  tool_inputs: '{"file_path": {"type": "string", "description": "File name or
+    relative path inside the GAIA dataset directory"}, "encoding": {"type": "string",
+    "description": "Text encoding; use utf-8 unless another encoding is required",
+    "default": "utf-8", "nullable": true}}'
+  tool_output_type: string
+  tool_params:
+    init_path: ../nexent-data/benchmark/datasets/files
+  enabled: true
+- tool_name: terminal
+  tool_class: TerminalTool
+  tool_source: local
+  tool_category: terminal
+  tool_description: Execute shell commands via SSH for computation, file processing,
+    and scripting.
+  tool_inputs: '{"command": {"type": "string", "description": "Shell command to execute
+    on the remote host via SSH."}, "session_name": {"type": "string", "description":
+    "Named SSH session to reuse across calls (default: \"default\")."}, "timeout":
+    {"type": "integer", "description": "Command timeout in seconds (default: 30)."}}'
+  tool_output_type: string
+  tool_params:
+    ssh_host: localhost
+    ssh_port: 2222
+    ssh_user: root
+    password:
+      $env: TERMINAL_PASSWORD
+    init_path: /mnt/nexent
+  enabled: true
+sub_agents: []
+skills: []

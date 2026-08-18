@@ -4,7 +4,6 @@ import functools
 import inspect
 import json
 import logging
-import os
 import re
 import time
 from dataclasses import replace
@@ -264,6 +263,10 @@ class NexentAgent:
                     tool_config.metadata.get(
                         "document_paths") if tool_config.metadata else None
                 )
+                tools_obj.set_allowed_index_names(
+                    tool_config.metadata.get("allowed_index_names")
+                    if tool_config.metadata else None
+                )
             elif class_name in ["DifySearchTool", "DataMateSearchTool"]:
                 # These parameters have exclude=True and cannot be passed to __init__
                 filtered_params = {k: v for k, v in params.items()
@@ -352,9 +355,6 @@ class NexentAgent:
                 # kds_name_to_id_map is exclude=True; inject via metadata after init
                 filtered_params = {k: v for k, v in params.items()
                                    if k not in ["kds_name_to_id_map"]}
-                filtered_params["server_url"] = os.getenv("AIDP_SERVER_URL", "")
-                filtered_params["api_key"] = os.getenv("AIDP_API_KEY", "")
-                filtered_params["tenant_id"] = os.getenv("AIDP_TENANT_ID", "aidp")
                 tools_obj = tool_class(**filtered_params)
                 tools_obj.observer = self.observer
                 tools_obj.kds_name_to_id_map = tool_config.metadata.get(
@@ -373,12 +373,24 @@ class NexentAgent:
                     except Exception as exc:
                         logger.warning(
                             "Failed to install Aidp whitelist from metadata: %s; "
-                            "falling back to no-op filtering", exc,
+                            "falling back to an empty whitelist", exc,
                         )
-                        tools_obj.set_allowed_kds(None)
+                        tools_obj.set_allowed_kds([])
                 else:
                     # Whitelist not set by backend → treat as uninstalled.
                     tools_obj.set_allowed_kds(None)
+            elif class_name == "IndependentAidpSearchTool":
+                filtered_params = {
+                    key: value
+                    for key, value in params.items()
+                    if key not in ["observer", "image_url_builder", "rerank_model", "rerank"]
+                }
+                tools_obj = tool_class(**filtered_params)
+                tools_obj.observer = self.observer
+                tools_obj.image_url_builder = (
+                    tool_config.metadata.get("image_url_builder")
+                    if tool_config.metadata else None
+                )
             else:
                 tools_obj = tool_class(**params)
                 if hasattr(tools_obj, 'observer'):
