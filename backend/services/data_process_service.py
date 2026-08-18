@@ -314,7 +314,7 @@ class DataProcessService:
         """
         connector = aiohttp.TCPConnector()
         timeout = aiohttp.ClientTimeout(total=5)
-        async with aiohttp.ClientSession(connector=connector, trust_env=True, timeout=timeout) as session:
+        async with aiohttp.ClientSession(connector=connector, trust_env=False, timeout=timeout) as session:
             return await self._load_image(session, image_url)
 
     async def _load_image(self, session: aiohttp.ClientSession, path: str) -> Optional[Image.Image]:
@@ -372,7 +372,7 @@ class DataProcessService:
             if path.lower().endswith('.svg'):
                 return None
 
-            async with session.get(path) as response:
+            async with session.get(path, allow_redirects=False) as response:
                 if response.status != 200:
                     return None
 

@@ -263,7 +263,7 @@ async def _fetch_image_directly(safe_url: str):
             }
 
 
-async def proxy_image_impl(decoded_url: str):
+async def proxy_image_impl(decoded_url: str, authorization: Optional[str] = None):
     # Fast path #1: AIDP image URLs need a Bearer token. Short-circuit here
     # before the loopback check because the AIDP host may happen to resolve
     # to a loopback address in dev, and we'd skip the auth header if that
@@ -282,11 +282,17 @@ async def proxy_image_impl(decoded_url: str):
         return await _fetch_image_directly(safe_url)
 
     # Create session to call the data processing service
-    async with aiohttp.ClientSession() as session:
+    async with aiohttp.ClientSession(trust_env=False) as session:
         # Call the data processing service to load the image
-        data_process_url = f"{DATA_PROCESS_SERVICE}/tasks/load_image?url={decoded_url}"
+        data_process_url = f"{DATA_PROCESS_SERVICE}/tasks/load_image"
+        headers = {"Authorization": authorization} if authorization else None
 
-        async with session.get(data_process_url) as response:
+        async with session.get(
+            data_process_url,
+            params={"url": decoded_url},
+            headers=headers,
+            allow_redirects=False,
+        ) as response:
             if response.status != HTTPStatus.OK:
                 error_text = await response.text()
                 logger.error(

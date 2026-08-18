@@ -2,6 +2,7 @@ import sys
 import types
 from typing import Any, Dict, List, Optional, Tuple
 from http import HTTPStatus
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import FastAPI, HTTPException
@@ -185,6 +186,29 @@ def stub_modules(monkeypatch):
     setattr(svc_mod, "get_data_process_service", lambda: service_stub)
     sys.modules["services.data_process_service"] = svc_mod
 
+    # Authentication and outbound URL validation used by image endpoints.
+    auth_mod = types.ModuleType("utils.auth_utils")
+
+    def get_current_user_id(authorization=None):
+        if not authorization:
+            raise RuntimeError("No authorization header provided")
+        return "user", "tenant"
+
+    setattr(auth_mod, "get_current_user_id", get_current_user_id)
+    sys.modules["utils.auth_utils"] = auth_mod
+
+    ssrf_mod = types.ModuleType("utils.ssrf_utils")
+
+    class UnsafeOutboundURLError(ValueError):
+        pass
+
+    async def validate_public_url(url, allowed_schemes=("http", "https")):
+        return None
+
+    setattr(ssrf_mod, "UnsafeOutboundURLError", UnsafeOutboundURLError)
+    setattr(ssrf_mod, "validate_public_url", validate_public_url)
+    sys.modules["utils.ssrf_utils"] = ssrf_mod
+
     # data_process.utils
     utils_mod = types.ModuleType("data_process.utils")
     async def get_task_details(task_id: str):
@@ -326,10 +350,11 @@ def test_batch_tasks_http_exception(monkeypatch):
 def test_load_image_success_and_not_found():
     app = _build_app()
     client = TestClient(app)
-    ok = client.get("/tasks/load_image", params={"url": "u"})
+    headers = {"Authorization": "Bearer t"}
+    ok = client.get("/tasks/load_image", params={"url": "u"}, headers=headers)
     assert ok.status_code == 200
     assert ok.json()["success"] is True
-    nf = client.get("/tasks/load_image", params={"url": "none"})
+    nf = client.get("/tasks/load_image", params={"url": "none"}, headers=headers)
     assert nf.status_code == 404
 
 
@@ -342,7 +367,11 @@ def test_load_image_internal_error(monkeypatch):
     monkeypatch.setattr(app_module.service, "load_image", err, raising=True)
     app = _build_app()
     client = TestClient(app)
-    resp = client.get("/tasks/load_image", params={"url": "x"})
+    resp = client.get(
+        "/tasks/load_image",
+        params={"url": "x"},
+        headers={"Authorization": "Bearer t"},
+    )
     assert resp.status_code == 500
 
 
@@ -361,8 +390,42 @@ def test_filter_important_image_http_exception(monkeypatch):
     resp = client.post(
         "/tasks/filter_important_image",
         data={"image_url": "u"},
+        headers={"Authorization": "Bearer t"},
     )
     assert resp.status_code == HTTPStatus.BAD_REQUEST
+
+
+def test_image_endpoints_require_authentication():
+    app = _build_app()
+    client = TestClient(app)
+
+    assert client.get("/tasks/load_image", params={"url": "u"}).status_code == HTTPStatus.UNAUTHORIZED
+    assert client.post(
+        "/tasks/filter_important_image",
+        data={"image_url": "u"},
+    ).status_code == HTTPStatus.UNAUTHORIZED
+
+
+def test_load_image_rejects_unsafe_url(monkeypatch):
+    from backend.apps import data_process_app as app_module
+
+    async def reject_url(url, allowed_schemes=("http", "https")):
+        raise app_module.UnsafeOutboundURLError("unsafe target")
+
+    monkeypatch.setattr(app_module, "validate_public_url", reject_url)
+    load_image_spy = AsyncMock()
+    monkeypatch.setattr(app_module.service, "load_image", load_image_spy)
+
+    app = _build_app()
+    client = TestClient(app)
+    response = client.get(
+        "/tasks/load_image",
+        params={"url": "http://127.0.0.1/image.png"},
+        headers={"Authorization": "Bearer t"},
+    )
+
+    assert response.status_code == HTTPStatus.BAD_REQUEST
+    load_image_spy.assert_not_called()
 
 
 def test_list_tasks():

@@ -65,7 +65,7 @@ async def test_proxy_image_impl_success():
         mock_session_class.return_value = mock_client_session
 
         # Test the function
-        result = await proxy_image_impl(test_url)
+        result = await proxy_image_impl(test_url, "Bearer test-token")
 
         # Assertions
         assert result == success_response
@@ -74,7 +74,10 @@ async def test_proxy_image_impl_success():
         mock_session.get.assert_called_once()
         called_url = mock_session.get.call_args[0][0]
         assert "http://mock-data-process-service/tasks/load_image" in called_url
-        assert f"url={test_url}" in called_url
+        assert mock_session.get.call_args.kwargs["params"] == {"url": test_url}
+        assert mock_session.get.call_args.kwargs["headers"] == {
+            "Authorization": "Bearer test-token"
+        }
 
 
 @pytest.mark.asyncio
@@ -202,7 +205,7 @@ async def test_proxy_image_impl_with_special_chars():
         mock_session.get.assert_called_once()
         called_url = mock_session.get.call_args[0][0]
         assert "http://mock-data-process-service/tasks/load_image" in called_url
-        assert f"url={special_url}" in called_url
+        assert mock_session.get.call_args.kwargs["params"] == {"url": special_url}
 
 
 @pytest.mark.asyncio
@@ -313,7 +316,7 @@ async def test_proxy_image_impl_url_encoding():
         mock_session.get.assert_called_once()
         called_url = mock_session.get.call_args[0][0]
         assert "http://mock-data-process-service/tasks/load_image" in called_url
-        assert f"url={encoded_url}" in called_url
+        assert mock_session.get.call_args.kwargs["params"] == {"url": encoded_url}
 
 
 @patch.object(image_service_module, 'OpenAIVLModel')
@@ -648,12 +651,14 @@ async def test_proxy_image_impl_non_loopback_falls_back_to_data_process_service(
     # The direct fetch path must NOT be taken.
     assert direct_called["value"] is False
 
-    # The data-process-service proxy must be called with the user URL
-    # embedded in the query string.
+    # The data-process-service proxy must pass the user URL as an encoded
+    # query parameter rather than interpolating it into the request URL.
     mock_session.get.assert_called_once()
     called_url = mock_session.get.call_args[0][0]
     assert "http://mock-data-process-service/tasks/load_image" in called_url
-    assert "url=http://example.com/image.jpg" in called_url
+    assert mock_session.get.call_args.kwargs["params"] == {
+        "url": "http://example.com/image.jpg"
+    }
 
     assert result == remote_response
 
@@ -706,7 +711,7 @@ async def test_proxy_image_impl_aidp_and_external_urls_use_proxy_path(external_u
     mock_session.get.assert_called_once()
     called_url = mock_session.get.call_args[0][0]
     assert called_url.startswith("http://mock-data-process-service/tasks/load_image")
-    assert f"url={external_url}" in called_url
+    assert mock_session.get.call_args.kwargs["params"] == {"url": external_url}
 
     assert result == remote_response
 
