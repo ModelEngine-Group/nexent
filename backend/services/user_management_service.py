@@ -228,9 +228,33 @@ async def signup_user_with_invitation(email: EmailStr,
 
         is_asset_owner_registration = user_role == ASSET_OWNER_ROLE
 
-        # Create user tenant relationship
-        insert_user_tenant(
-            user_id=user_id, tenant_id=tenant_id, user_role=user_role, user_email=email)
+        # Create user tenant relationship. Supabase and PostgreSQL do not share
+        # a transaction, so remove the auth account if the local relationship
+        # cannot be persisted (for example, when the tenant user limit is hit).
+        try:
+            insert_user_tenant(
+                user_id=user_id, tenant_id=tenant_id, user_role=user_role, user_email=email)
+        except Exception:
+            try:
+                admin_client = get_supabase_admin_client()
+                if admin_client and hasattr(admin_client.auth, "admin"):
+                    admin_client.auth.admin.delete_user(user_id)
+                    logging.info(
+                        "Deleted Supabase user %s after local tenant relationship failed",
+                        user_id,
+                    )
+                else:
+                    logging.warning(
+                        "Could not get Supabase admin client to clean up user %s",
+                        user_id,
+                    )
+            except Exception as cleanup_error:
+                logging.error(
+                    "Failed to clean up Supabase user %s after local tenant relationship error: %s",
+                    user_id,
+                    cleanup_error,
+                )
+            raise
 
         # Use invitation code now that we have the real user_id
         if invitation_info:
