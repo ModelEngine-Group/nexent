@@ -362,10 +362,17 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
             <div className="flex items-center gap-2 min-w-0">
               <Tag
                 color="#AEB6BF"
-                className="inline-flex items-center"
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  whiteSpace: "nowrap",
+                  flexShrink: 0,
+                }}
                 variant="solid"
               >
-                <Clock className="w-3 h-3 mr-1" />
+                <span className="inline-flex items-center mr-1">
+                  <Clock className="w-3 h-3" />
+                </span>
                 {t("agent.status.unpublished")}
               </Tag>
             </div>
@@ -387,15 +394,15 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
                 style={{
                   display: "inline-flex",
                   alignItems: "center",
-                  padding: "2px 8px",
-                  lineHeight: "20px",
-                  height: "auto",
                   whiteSpace: "nowrap",
+                  flexShrink: 0,
                 }}
                 variant="solid"
               >
-                <CheckCircle className="w-3 h-3 mr-1" />
-                <span>{t("mcpConfig.status.available")}</span>
+                <span className="inline-flex items-center mr-1">
+                  <CheckCircle className="w-3 h-3" />
+                </span>
+                {t("mcpConfig.status.available")}
               </Tag>
             ) : (
               <Tooltip
@@ -407,15 +414,15 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
                   style={{
                     display: "inline-flex",
                     alignItems: "center",
-                    padding: "2px 8px",
-                    lineHeight: "20px",
-                    height: "auto",
                     whiteSpace: "nowrap",
+                    flexShrink: 0,
                   }}
                   variant="solid"
                 >
-                  <CircleSlash className="w-3.5 h-3 mr-1" />
-                  <span>{t("mcpConfig.status.unavailable")}</span>
+                  <span className="inline-flex items-center mr-1">
+                    <CircleSlash className="w-3.5 h-3" />
+                  </span>
+                  {t("mcpConfig.status.unavailable")}
                 </Tag>
               </Tooltip>
             )}

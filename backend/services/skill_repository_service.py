@@ -1,4 +1,5 @@
 import base64
+import json
 import logging
 import math
 import re
@@ -176,6 +177,24 @@ def _as_dict(value: Any) -> Dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def _normalize_mine_skill_tags(tags: Any) -> List[str]:
+    """Return mine-tab skill tags as a validated string list."""
+    if isinstance(tags, str):
+        try:
+            tags = json.loads(tags)
+        except (json.JSONDecodeError, TypeError):
+            return []
+
+    if not isinstance(tags, list):
+        return []
+
+    return [
+        tag.strip()
+        for tag in tags
+        if isinstance(tag, str) and tag.strip()
+    ]
+
+
 def _to_repository_info_item(record: Dict[str, Any]) -> Dict[str, Any]:
     """Map a repository DB row to a my-skills repository_info entry."""
     return {
@@ -210,7 +229,7 @@ def _matches_search(skill: Dict[str, Any], search: Optional[str]) -> bool:
         skill.get("source"),
         skill.get("created_by"),
     ]
-    haystack.extend(_as_list(skill.get("tags")))
+    haystack.extend(_normalize_mine_skill_tags(skill.get("tags")))
     return any(keyword in str(value or "").lower() for value in haystack)
 
 
@@ -929,7 +948,7 @@ def _to_mine_skill_item(
         "name": skill.get("name"),
         "description": skill.get("description"),
         "source": skill.get("source"),
-        "tags": skill.get("tags") or [],
+        "tags": _normalize_mine_skill_tags(skill.get("tags")),
         "group_ids": skill.get("group_ids") or [],
         "ingroup_permission": skill.get("ingroup_permission"),
         "created_by": skill.get("created_by"),

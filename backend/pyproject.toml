@@ -32,6 +32,8 @@ dependencies = [
     "python-docx>=1.1.0",
     "xlrd>=2.0.1",
     "croniter>=2.0.0",
+    "matplotlib>=3.9.0,<3.12",
+    "reportlab>=4.2.0,<5.1",
 ]
 
 [project.optional-dependencies]

@@ -939,6 +939,22 @@ class TestExternalA2AAgentConfig:
         assert config.protocol_type == agent_model_module.PROTOCOL_JSONRPC
         assert config.timeout == 300.0
 
+    def test_external_a2a_agent_config_custom_headers_default(self):
+        """Test custom_headers defaults to None."""
+        config = agent_model_module.ExternalA2AAgentConfig(
+            agent_id="test", name="Test", description="", url="https://test.com"
+        )
+        assert config.custom_headers is None
+
+    def test_external_a2a_agent_config_with_custom_headers(self):
+        """Test custom_headers can be set."""
+        config = agent_model_module.ExternalA2AAgentConfig(
+            agent_id="test", name="Test", description="", url="https://test.com",
+            custom_headers={"X-Custom": "val", "Authorization": "Bearer tok"}
+        )
+        assert config.custom_headers == {"X-Custom": "val", "Authorization": "Bearer tok"}
+
+
     def test_external_a2a_agent_config_with_raw_card_skills(self):
         """Test ExternalA2AAgentConfig auto-enhances description from raw_card skills."""
         config = agent_model_module.ExternalA2AAgentConfig(
@@ -1018,7 +1034,8 @@ class TestExternalA2AAgentConfig:
             protocol_version="1.5",
             protocol_type=agent_model_module.PROTOCOL_HTTP_JSON,
             timeout=450.0,
-            raw_card={"test": "data"}
+            raw_card={"test": "data"},
+            custom_headers={"X-Token": "secret"}
         )
 
         agent_info = config.to_a2a_agent_info()
@@ -1036,6 +1053,7 @@ class TestExternalA2AAgentConfig:
         assert call_kwargs["protocol_type"] == agent_model_module.PROTOCOL_HTTP_JSON
         assert call_kwargs["timeout"] == 450.0
         assert call_kwargs["raw_card"] == {"test": "data"}
+        assert call_kwargs.get("custom_headers") == {"X-Token": "secret"}
 
     def test_external_a2a_agent_config_multiple_skills_examples(self):
         """Test ExternalA2AAgentConfig handles multiple skills with many examples."""

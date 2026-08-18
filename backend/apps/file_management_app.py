@@ -154,7 +154,6 @@ async def process_files(
         index_name: Annotated[str, Body(...)],
         destination: Annotated[str, Body(...)],
         chunking_strategy: Annotated[Optional[str], Body(...)] = "basic",
-        model_id: Annotated[Optional[int], Body(...)] = None,
         authorization: Annotated[Optional[str], Header()] = None
 ):
     """
@@ -172,7 +171,6 @@ async def process_files(
         source_type=destination,
         index_name=index_name,
         authorization=authorization,
-        model_id=model_id
     )
 
     process_result = await trigger_data_process(files, process_params)
@@ -603,7 +601,7 @@ async def remove_storage_file(
     Delete file from MinIO storage.
 
     Access control:
-    - knowledge_base/*: Only allow deletion (admin operation)
+    - knowledge-base sources: Require an active ledger row owned by the caller tenant
     - attachments/{user_id}/*: Only the owner (user_id) can delete
 
     - **object_name**: File object name to delete
@@ -614,21 +612,28 @@ async def remove_storage_file(
         user_id, tenant_id = get_current_user_id(authorization)
 
         if not check_file_access(object_name, user_id, tenant_id):
-            logger.warning(f"[remove_storage_file] Access denied: object_name={object_name}, user_id={user_id}")
+            logger.warning("[remove_storage_file] Access denied")
             raise HTTPException(
                 status_code=HTTPStatus.FORBIDDEN,
                 detail="You don't have permission to delete this file"
             )
 
-        await delete_file_impl(object_name=object_name)
+        await delete_file_impl(
+            object_name=object_name,
+            tenant_id=tenant_id,
+            updated_by=user_id,
+        )
         return {
             "success": True,
             "message": f"File {object_name} successfully deleted"
         }
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error(f"Remove storage file error: {str(e)}")
+    except PermissionError as e:
+        logger.warning("[remove_storage_file] Tenant ownership check failed")
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(e))
+    except Exception:
+        logger.exception("Remove storage file error")
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Remove storage file error."
         )

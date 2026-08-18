@@ -30,6 +30,7 @@ import { useModelList } from "@/hooks/model/useModelList";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
 import log from "@/lib/logger";
 import EmbeddingModelConfigDialog from "./EmbeddingModelConfigDialog";
+import { formatDateOrFallback } from "@/lib/date";
 
 interface KnowledgeBaseSelectorProps {
   isOpen: boolean;
@@ -202,21 +203,6 @@ export default function KnowledgeBaseSelectorModal({
       .filter((model) => model && model !== "unknown")
       .sort();
   }, [knowledgeBases]);
-
-  // Format date function, only keep date part
-  const formatDate = useCallback((dateValue: any) => {
-    try {
-      const date =
-        typeof dateValue === "number"
-          ? new Date(dateValue)
-          : new Date(dateValue);
-      return isNaN(date.getTime())
-        ? String(dateValue ?? "")
-        : date.toISOString().split("T")[0];
-    } catch (e) {
-      return String(dateValue ?? "");
-    }
-  }, []);
 
   const isMultimodalConstraintMismatch = useCallback(
     (kb: KnowledgeBase) => {
@@ -977,7 +963,7 @@ export default function KnowledgeBaseSelectorModal({
                             className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.default} mr-1`}
                           >
                             {t("knowledgeBase.tag.createdAt", {
-                              date: formatDate(kb.createdAt),
+                              date: formatDateOrFallback(kb.createdAt),
                             })}
                           </span>
                         )}

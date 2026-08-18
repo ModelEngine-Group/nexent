@@ -90,9 +90,9 @@ def _build_header_text(
     current time is injected on the user-message side instead (see CoreAgent.run).
     """
     if language == "zh":
-        content = f"### 基本信息\n你是{app_name}，{app_description}"
+        content = f"### 基本信息\n你是{app_name}，{app_description}\n当回答时间相关问题时，请使用用户消息中 [Current time: ...] 标记的时间，该时间为用户本地时间。"
     else:
-        content = f"### Basic Information\nYou are {app_name}, {app_description}"
+        content = f"### Basic Information\nYou are {app_name}, {app_description}\nWhen answering time-related questions, use the time from the [Current time: ...] marker in the user message, which represents the user's local time."
 
     return content
 
@@ -427,7 +427,7 @@ def build_context_inputs(
     memory_search_query: Optional[str] = None,
     memory_tool_policy: Optional[str] = None,
     automation_tool_policy: Optional[str] = None,
-    long_term_memory_prompt: Optional[str] = None,
+    long_term_memory_items: Optional[List[dict[str, Any]]] = None,
     knowledge_base_summary: Optional[str] = None,
     kb_ids: Optional[List[str]] = None,
     restricted_python_authorized_imports: Optional[List[str]] = None,
@@ -469,13 +469,8 @@ def build_context_inputs(
     if automation_tool_policy:
         add_system("automation_tool_policy", automation_tool_policy, 95, "platform")
 
-    if include_memory and long_term_memory_prompt:
-        add_system(
-            "long_term_memory",
-            long_term_memory_prompt,
-            90,
-            "retrieved",
-        )
+    if include_memory and long_term_memory_items:
+        memory_list = [*long_term_memory_items, *(memory_list or [])]
 
     if include_memory and memory_list:
         for index, memory in enumerate(memory_list):
@@ -485,7 +480,21 @@ def build_context_inputs(
             inputs.append(ContextItemInput(
                 id=f"memory:{index}", type=ContextItemType.MEMORY, content=payload,
                 source=(f"memory:{memory_search_query or 'run'}",), priority=90,
-                metadata={"render_group": "memory", "language": language, "authority": "retrieved"},
+                metadata={
+                    "render_group": "memory",
+                    "language": language,
+                    "authority": "retrieved",
+                    **(
+                        {
+                            "version_id": payload.get("version_id") or payload.get("dreaming_version_id"),
+                            "memory_type": "long_term",
+                            "scope": payload.get("scope") or payload.get("memory_level"),
+                            "source": payload.get("source"),
+                        }
+                        if payload.get("version_id") is not None or payload.get("dreaming_version_id") is not None
+                        else {}
+                    ),
+                },
             ))
 
     if duty:
