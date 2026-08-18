@@ -1,3 +1,5 @@
+{{- $globalShared := default dict .Values.global.sharedStorage }}
+{{- $storageClassName := default (default "" $globalShared.storageClassName) .Values.persistence.storageClassName }}
 {{- $mode := default "local" .Values.persistence.mode }}
 {{- if eq $mode "local" }}
 apiVersion: v1
@@ -10,7 +12,7 @@ metadata:
   annotations:
     "helm.sh/hook-weight": "-3"
 spec:
-  storageClassName: {{ .Values.persistence.storageClassName | quote }}
+  storageClassName: {{ $storageClassName | quote }}
   capacity:
     storage: {{ .Values.storage.size }}
   accessModes:
@@ -38,7 +40,7 @@ spec:
   {{- if eq $mode "local" }}
   volumeName: nexent-minio-pv
   {{- end }}
-  {{- if .Values.persistence.storageClassName }}
-  storageClassName: {{ .Values.persistence.storageClassName | quote }}
+  {{- if $storageClassName }}
+  storageClassName: {{ $storageClassName | quote }}
   {{- end }}
 {{- end }}

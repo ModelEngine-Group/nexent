@@ -2,12 +2,11 @@ import asyncio
 import hashlib
 import json
 import logging
-import time
 from dataclasses import dataclass
 from os.path import basename
 from typing import Any, Dict, List, Optional
 
-from fastapi import HTTPException, UploadFile
+from fastapi import UploadFile
 from fastapi.responses import StreamingResponse
 
 
@@ -20,9 +19,10 @@ from consts.const import (
     NORTHBOUND_RATE_LIMIT_PER_MINUTE,
 )
 from consts.exceptions import (
+    ConversationNotFoundError,
+    DistributedStateUnavailable,
     LimitExceededError,
     UnauthorizedError,
-    ConversationNotFoundError,
 )
 from consts.model import AgentRequest, ToolParamsRequest
 from database.knowledge_db import get_knowledge_info_by_tenant_id
@@ -245,92 +245,37 @@ def _normalize_northbound_attachments(
 
 
 # -----------------------------
-# In-memory idempotency and rate limit placeholders
-# -----------------------------
-_IDEMPOTENCY_RUNNING: Dict[str, float] = {}
-_IDEMPOTENCY_LOCK = asyncio.Lock()
-
-_RATE_STATE: Dict[str, Dict[str, int]] = {}
-_RATE_LOCK = asyncio.Lock()
-
-
-def _now_seconds() -> float:
-    return time.time()
-
-
-def _minute_bucket(ts: Optional[float] = None) -> str:
-    t = int((ts or _now_seconds()) // 60)
-    return str(t)
-
-
-async def idempotency_start(key: str, ttl_seconds: Optional[int] = None) -> None:
+async def idempotency_start(key: str, ttl_seconds: Optional[int] = None) -> str:
     ttl = ttl_seconds or NORTHBOUND_IDEMPOTENCY_TTL_SECONDS
-    if runtime_state_service.enabled:
-        try:
-            acquired = await runtime_state_service.acquire_idempotency_async(key, ttl)
-        except Exception:
-            logger.exception("Northbound idempotency Redis operation failed")
-            raise LimitExceededError("Idempotency service is unavailable. Please try again later.")
-        if not acquired:
-            raise LimitExceededError("Duplicate request is still running, please wait.")
-        return
-
-    async with _IDEMPOTENCY_LOCK:
-        # purge expired
-        now = _now_seconds()
-        expired = [k for k, v in _IDEMPOTENCY_RUNNING.items() if now - v > ttl]
-        for k in expired:
-            _IDEMPOTENCY_RUNNING.pop(k, None)
-        if key in _IDEMPOTENCY_RUNNING:
-            raise LimitExceededError("Duplicate request is still running, please wait.")
-        _IDEMPOTENCY_RUNNING[key] = now
+    token = await runtime_state_service.acquire_idempotency_async(key, ttl)
+    if not token:
+        raise LimitExceededError("Duplicate request is still running, please wait.")
+    return token
 
 
-async def idempotency_end(key: str) -> None:
-    if runtime_state_service.enabled:
-        try:
-            await runtime_state_service.release_idempotency_async(key)
-        except Exception as exc:
-            logger.warning("Northbound idempotency release failed: %s", exc)
-        return
-
-    async with _IDEMPOTENCY_LOCK:
-        _IDEMPOTENCY_RUNNING.pop(key, None)
+async def idempotency_end(key: str, token: str) -> None:
+    await runtime_state_service.release_idempotency_async(key, token)
 
 
-async def _release_idempotency_after_delay(key: str, seconds: int = 3) -> None:
+async def _release_idempotency_after_delay(key: str, token: str, seconds: int = 3) -> None:
     await asyncio.sleep(seconds)
-    await idempotency_end(key)
+    try:
+        await idempotency_end(key, token)
+    except DistributedStateUnavailable as exc:
+        logger.error("Northbound idempotency release failed: %s", exc)
 
 
 async def check_and_consume_rate_limit(tenant_id: str) -> None:
     if not NORTHBOUND_RATE_LIMIT_ENABLED:
         return
 
-    if runtime_state_service.enabled:
-        try:
-            await runtime_state_service.consume_rate_limit_async(
-                tenant_id=tenant_id,
-                limit_per_minute=NORTHBOUND_RATE_LIMIT_PER_MINUTE,
-            )
-            return
-        except ValueError:
-            raise LimitExceededError("Query rate exceeded limit. Please try again later")
-        except Exception:
-            logger.exception("Northbound rate limit Redis operation failed")
-            raise LimitExceededError("Rate limit service is unavailable. Please try again later.")
-
-    bucket = _minute_bucket()
-    async with _RATE_LOCK:
-        state = _RATE_STATE.setdefault(tenant_id, {})
-        count = state.get(bucket, 0)
-        if count >= NORTHBOUND_RATE_LIMIT_PER_MINUTE:
-            raise LimitExceededError("Query rate exceeded limit. Please try again later")
-        state[bucket] = count + 1
-        # cleanup old buckets, keep only current
-        for b in list(state.keys()):
-            if b != bucket:
-                state.pop(b, None)
+    try:
+        await runtime_state_service.consume_rate_limit_async(
+            tenant_id=tenant_id,
+            limit_per_minute=NORTHBOUND_RATE_LIMIT_PER_MINUTE,
+        )
+    except ValueError:
+        raise LimitExceededError("Query rate exceeded limit. Please try again later")
 
 
 def _build_idempotency_key(*parts: Any) -> str:
@@ -370,6 +315,8 @@ async def start_streaming_chat(
     model_id: Optional[int] = None,
     idempotency_key: Optional[str] = None
 ) -> StreamingResponse:
+    composed_key: Optional[str] = None
+    idempotency_token: Optional[str] = None
     try:
         # Simple rate limit
         await check_and_consume_rate_limit(ctx.tenant_id)
@@ -395,7 +342,7 @@ async def start_streaming_chat(
         )
         # Idempotency: only prevent concurrent duplicate starts
         composed_key = idempotency_key or _build_idempotency_key(ctx.tenant_id, str(conversation_id), agent_id, query)
-        await idempotency_start(composed_key)
+        idempotency_token = await idempotency_start(composed_key)
         agent_request = AgentRequest(
             conversation_id=internal_conversation_id,
             agent_id=agent_id,
@@ -411,6 +358,8 @@ async def start_streaming_chat(
 
     except LimitExceededError as exc:
         raise LimitExceededError(str(exc))
+    except DistributedStateUnavailable:
+        raise
     except UnauthorizedError as _:
         raise UnauthorizedError("Cannot authenticate.")
     except Exception as e:
@@ -424,8 +373,8 @@ async def start_streaming_chat(
             request_id=ctx.request_id,
         )
     finally:
-        if composed_key:
-            asyncio.create_task(_release_idempotency_after_delay(composed_key))
+        if composed_key and idempotency_token:
+            asyncio.create_task(_release_idempotency_after_delay(composed_key, idempotency_token))
 
     # Log token usage
     if ctx.token_id > 0:
@@ -470,6 +419,8 @@ async def stop_chat(ctx: NorthboundContext, conversation_id: int, meta_data: Opt
 
         return {"message": stop_result.get("message", "success"), "data": conversation_id, "requestId": ctx.request_id}
     except RuntimeServiceError:
+        raise
+    except DistributedStateUnavailable:
         raise
     except Exception as e:
         raise Exception(f"Failed to stop chat for conversation_id {conversation_id}: {str(e)}")
@@ -744,6 +695,7 @@ async def get_agent_knowledge_bases_for_northbound(
 
 async def update_conversation_title(ctx: NorthboundContext, conversation_id: int, title: str, meta_data: Optional[Dict[str, Any]] = None, idempotency_key: Optional[str] = None) -> Dict[str, Any]:
     composed_key: Optional[str] = None
+    idempotency_token: Optional[str] = None
     try:
         # Idempotency: avoid concurrent duplicate title update for same conversation
         composed_key = idempotency_key or _build_title_update_idempotency_key(
@@ -751,7 +703,7 @@ async def update_conversation_title(ctx: NorthboundContext, conversation_id: int
             conversation_id,
             title,
         )
-        await idempotency_start(composed_key)
+        idempotency_token = await idempotency_start(composed_key)
 
         update_conversation_title_service(conversation_id, title, ctx.user_id)
 
@@ -776,10 +728,12 @@ async def update_conversation_title(ctx: NorthboundContext, conversation_id: int
         }
     except LimitExceededError as _:
         raise LimitExceededError("Duplicate request is still running, please wait.")
+    except DistributedStateUnavailable:
+        raise
     except ConversationNotFoundError:
         raise
     except Exception as e:
         raise Exception(f"Failed to update conversation title for conversation_id {conversation_id}: {str(e)}")
     finally:
-        if composed_key:
-            asyncio.create_task(_release_idempotency_after_delay(composed_key))
+        if composed_key and idempotency_token:
+            asyncio.create_task(_release_idempotency_after_delay(composed_key, idempotency_token))

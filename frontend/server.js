@@ -10,7 +10,12 @@ import path from "node:path";
 import multiparty from "multiparty";
 import dotenv from "dotenv";
 import { BASE_PATH } from "./base-path.mjs";
-import { ensureDir, readLocaleConfig, saveLocaleConfig } from "./build-config.js";
+import {
+  ensureDir,
+  readLocaleConfig,
+  saveLocaleConfig,
+} from "./build-config.js";
+import { handleHealthRequest } from "./server-health.js";
 
 const { createProxyServer } = httpProxy;
 const __filename = fileURLToPath(import.meta.url);
@@ -20,7 +25,10 @@ let nextConfig;
 
 if (!dev) {
   nextConfig = JSON.parse(
-    fs.readFileSync(path.join(__dirname, ".next", "required-server-files.json"), "utf8")
+    fs.readFileSync(
+      path.join(__dirname, ".next", "required-server-files.json"),
+      "utf8"
+    )
   ).config;
   process.env.__NEXT_PRIVATE_STANDALONE_CONFIG = JSON.stringify(nextConfig);
 }
@@ -52,9 +60,15 @@ const MARKET_BACKEND =
 const SHARE_BASE_URL =
   process.env.SHARE_BASE_URL || process.env.NEXT_PUBLIC_SHARE_BASE_URL || "";
 
-const ICON_UPLOAD_DIR = path.resolve(__dirname, "./public/");
-const LOCALES_CONFIG_DIR = path.resolve(__dirname, "./public/locales");
-const PORT = 3000;
+const BUILT_IN_PUBLIC_DIR = path.resolve(__dirname, "./public");
+const BUILT_IN_LOCALES_CONFIG_DIR = path.join(BUILT_IN_PUBLIC_DIR, "locales");
+const PROJECT_CONFIG_DIR = path.resolve(
+  process.env.PROJECT_CONFIG_DIR || path.join(__dirname, "project-config")
+);
+const PROJECT_CONFIG_LOCALES_DIR = path.join(PROJECT_CONFIG_DIR, "locales");
+const ICON_UPLOAD_DIR = PROJECT_CONFIG_DIR;
+const parsedPort = Number.parseInt(process.env.PORT || "3000", 10);
+const PORT = Number.isFinite(parsedPort) && parsedPort > 0 ? parsedPort : 3000;
 
 function withoutBasePath(pathname) {
   if (
@@ -247,6 +261,12 @@ async function isSuperAdminRequest(req) {
 
 function renameFile(oldPath, newFileName) {
   ensureDir(ICON_UPLOAD_DIR);
+  const fileDescriptor = fs.openSync(oldPath, "r+");
+  try {
+    fs.fsyncSync(fileDescriptor);
+  } finally {
+    fs.closeSync(fileDescriptor);
+  }
   fs.renameSync(oldPath, path.join(ICON_UPLOAD_DIR, newFileName));
 }
 
@@ -403,7 +423,9 @@ function forwardAuthRequest(req, res, targetUrl) {
               ) {
                 setPendingOAuthCookie(res, data.data.pending_token);
                 const locale = getPreferredLocale(cookies);
-                res.writeHead(302, { Location: withBasePath(`/${locale}/oauth/complete`) });
+                res.writeHead(302, {
+                  Location: withBasePath(`/${locale}/oauth/complete`),
+                });
                 res.end();
                 return;
               } else if (data.data && data.data.session) {
@@ -470,7 +492,9 @@ window.parent && window.parent.postMessage({ type: "cas-renew-success" }, window
                   oauth_error_description:
                     data.data.oauth_error_description || "",
                 });
-                res.writeHead(302, { Location: `${withBasePath("/")}?${errorParams.toString()}` });
+                res.writeHead(302, {
+                  Location: `${withBasePath("/")}?${errorParams.toString()}`,
+                });
                 res.end();
                 return;
               }
@@ -550,6 +574,8 @@ app.prepare().then(() => {
     const internalPathname = withoutBasePath(pathname);
     req.parsedPathname = internalPathname;
 
+    if (handleHealthRequest(internalPathname, req, res)) return;
+
     const isProxyRequest =
       internalPathname.startsWith("/api/") ||
       (internalPathname.includes("/attachments/") &&
@@ -560,6 +586,7 @@ app.prepare().then(() => {
 
     // Route dispatch uses paths without the Next.js base path.
     if (handleFrontendConfigApi(internalPathname, req, res)) return;
+    if (handleProjectConfigAsset(internalPathname, res)) return;
     if (await handleProjectConfigApi(internalPathname, req, res)) return;
     if (handleAttachmentProxy(internalPathname, req, res)) return;
     if (handleAllApiProxy(internalPathname, req, res)) return;
@@ -594,6 +621,7 @@ app.prepare().then(() => {
       console.log(
         `[Proxy] Ignoring non-voice WebSocket upgrade for: ${pathname}`
       );
+      socket.destroy();
     }
   });
 
@@ -621,6 +649,41 @@ function handleFrontendConfigApi(pathname, req, res) {
   return true;
 }
 
+function handleProjectConfigAsset(pathname, res) {
+  const assetMap = {
+    "/modelengine-logo.png": {
+      relativePath: "modelengine-logo.png",
+      contentType: "image/png",
+    },
+    "/modelengine-logo2.png": {
+      relativePath: "modelengine-logo2.png",
+      contentType: "image/png",
+    },
+    "/locales/zh/custom.json": {
+      relativePath: path.join("locales", "zh", "custom.json"),
+      contentType: "application/json; charset=utf-8",
+    },
+    "/locales/en/custom.json": {
+      relativePath: path.join("locales", "en", "custom.json"),
+      contentType: "application/json; charset=utf-8",
+    },
+  };
+  const asset = assetMap[pathname];
+  if (!asset) return false;
+
+  const sharedPath = path.join(PROJECT_CONFIG_DIR, asset.relativePath);
+  const builtInPath = path.join(BUILT_IN_PUBLIC_DIR, asset.relativePath);
+  const selectedPath = fs.existsSync(sharedPath) ? sharedPath : builtInPath;
+  if (!fs.existsSync(selectedPath)) return false;
+
+  res.writeHead(200, {
+    "Content-Type": asset.contentType,
+    "Cache-Control": "no-store",
+  });
+  fs.createReadStream(selectedPath).pipe(res);
+  return true;
+}
+
 /**
  * 接口：/api/config/project-config 上传Logo+修改多语言配置
  */
@@ -634,6 +697,7 @@ async function handleProjectConfigApi(pathname, req, res) {
   }
 
   // 文件上传处理
+  ensureDir(ICON_UPLOAD_DIR);
   const form = new multiparty.Form({ uploadDir: ICON_UPLOAD_DIR });
   try {
     const { fields, files } = await parseMultipartForm(form, req);
@@ -654,7 +718,8 @@ async function handleProjectConfigApi(pathname, req, res) {
  * 静态附件代理 /attachments/
  */
 function handleAttachmentProxy(pathname, req, res) {
-  const isAttachmentRoute = pathname.includes("/attachments/") && !pathname.startsWith("/api/");
+  const isAttachmentRoute =
+    pathname.includes("/attachments/") && !pathname.startsWith("/api/");
   if (!isAttachmentRoute) return false;
 
   proxy.web(req, res, { target: MINIO_BACKEND });
@@ -692,7 +757,9 @@ function handleAllApiProxy(pathname, req, res) {
     "/api/file/storage",
     "/api/file/preprocess",
   ];
-  const isRuntime = runtimePathPrefixes.some(prefix => pathname.startsWith(prefix));
+  const isRuntime = runtimePathPrefixes.some((prefix) =>
+    pathname.startsWith(prefix)
+  );
 
   // 4. skills 特殊接口
   // 分发代理目标
@@ -749,8 +816,16 @@ function handleLogoUpload(files) {
  * 读取、更新、保存多语言配置
  */
 function updateAndSaveLocaleConfig(fields) {
-  const configZh = readLocaleConfig("zh");
-  const configEn = readLocaleConfig("en");
+  const configZh = readLocaleConfig(
+    "zh",
+    PROJECT_CONFIG_LOCALES_DIR,
+    BUILT_IN_LOCALES_CONFIG_DIR
+  );
+  const configEn = readLocaleConfig(
+    "en",
+    PROJECT_CONFIG_LOCALES_DIR,
+    BUILT_IN_LOCALES_CONFIG_DIR
+  );
 
   const fieldsZh = JSON.parse(fields.configZh[0]);
   const fieldsEn = JSON.parse(fields.configEn[0]);
@@ -758,8 +833,16 @@ function updateAndSaveLocaleConfig(fields) {
   const newConfigZh = updateLocalConfig(configZh, fieldsZh);
   const newConfigEn = updateLocalConfig(configEn, fieldsEn);
 
-  saveLocaleConfig(JSON.stringify(newConfigZh, null, 2), "zh");
-  saveLocaleConfig(JSON.stringify(newConfigEn, null, 2), "en");
+  saveLocaleConfig(
+    JSON.stringify(newConfigZh, null, 2),
+    "zh",
+    PROJECT_CONFIG_LOCALES_DIR
+  );
+  saveLocaleConfig(
+    JSON.stringify(newConfigEn, null, 2),
+    "en",
+    PROJECT_CONFIG_LOCALES_DIR
+  );
 }
 
 /**

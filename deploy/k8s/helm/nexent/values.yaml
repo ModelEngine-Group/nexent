@@ -3,18 +3,18 @@ global:
   namespace: nexent
   dataDir: "/var/lib/nexent-data"
   sharedStorage:
-    mode: "local"
-    storageClassName: "nexent-local"
+    mode: "dynamic"
+    storageClassName: ""
     accessModes:
       - ReadWriteMany
     workspace:
       size: "10Gi"
       localPath: "/var/lib/nexent"
-      existingClaim: "nexent-workspace"
+      existingClaim: ""
     skills:
       size: "5Gi"
       localPath: "/var/lib/nexent-data/skills"
-      existingClaim: "nexent-skills"
+      existingClaim: ""
   deploymentVersion: "full"
   deploymentComponents:
     infrastructure: false
@@ -87,18 +87,18 @@ nexent-common:
 
 nexent-config:
   enabled: true
-  replicaCount: 1
+  replicaCount: 3
 nexent-runtime:
   enabled: true
-  replicaCount: 1
+  replicaCount: 3
 nexent-mcp:
   enabled: true
 nexent-northbound:
   enabled: true
-  replicaCount: 1
+  replicaCount: 3
 nexent-web:
   enabled: true
-  replicaCount: 1
+  replicaCount: 3
 nexent-data-process:
   enabled: true
 nexent-supabase-kong:
@@ -107,6 +107,9 @@ nexent-supabase-auth:
   enabled: true
 nexent-supabase-db:
   enabled: true
+  persistence:
+    mode: dynamic
+    storageClassName: ""
 nexent-openssh:
   enabled: false
 nexent-monitoring:

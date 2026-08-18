@@ -7,6 +7,7 @@ import logging
 import os
 import zipfile
 from collections import deque
+from contextlib import suppress
 from typing import Any, Callable, Optional, Dict, List, Union
 
 from fastapi import Header, Request
@@ -16,13 +17,19 @@ from jinja2 import Template
 
 from agents.agent_run_manager import agent_run_manager
 from agents.create_agent_info import create_agent_run_info, create_tool_config_list
-from agents.preprocess_manager import preprocess_manager
 from services.agent_version_service import publish_version_impl
 from utils.prompt_template_utils import normalize_prompt_generate_template_content
 from consts.const import TOOL_TYPE_MAPPING, \
     LANGUAGE, MESSAGE_ROLE, MODEL_CONFIG_MAPPING, CAN_EDIT_ALL_USER_ROLES, PERMISSION_PRIVATE, STREAM_STATUS_EVENT, \
     DEFAULT_EN_TITLE, DEFAULT_ZH_TITLE, RUNTIME_CANCEL_POLL_INTERVAL_SECONDS
-from consts.exceptions import AppException, ForbiddenError, MemoryPreparationException, SkillDuplicateError
+from consts.const import RUNTIME_HEARTBEAT_INTERVAL_SECONDS
+from consts.exceptions import (
+    AppException,
+    DistributedStateUnavailable,
+    ForbiddenError,
+    MemoryPreparationException,
+    SkillDuplicateError,
+)
 from consts.error_code import ErrorCode
 from consts.agent_unavailable_reasons import AgentUnavailableReason
 from nexent.core.utils.observer import ProcessType
@@ -42,6 +49,11 @@ from consts.model import (
     ConversationKnowledgeScopeRequest,
 )
 from services.asset_owner_visibility import resolve_agent_list_permission
+from services.agent_stream_contract import (
+    RUN_INTERRUPTED_MESSAGE,
+    _is_run_interrupted_chunk,
+    _run_interrupted_chunk,
+)
 from database.agent_db import (
     batch_search_agent_display_names,
     create_agent,
@@ -117,7 +129,7 @@ from services.conversation_management_service import (
 )
 from services.memory_config_service import build_memory_context
 from services.streaming_channel import streaming_channel_manager
-from services.runtime_state_service import runtime_state_service
+from services.runtime_state_service import RuntimeExecutionSuperseded, runtime_state_service
 from utils.auth_utils import get_current_user_info, get_user_language
 from utils.config_utils import tenant_config_manager
 from utils.context_utils import build_authorized_context_input
@@ -136,41 +148,67 @@ SAFE_AGENT_STREAM_ERROR_MESSAGE = "Agent execution failed. Please try again late
 _channel_cleanup_tasks: set[asyncio.Task[None]] = set()
 
 
-async def _cleanup_channel_later(conversation_id: Union[int, str], user_id: str, delay: float = 5.0):
+async def _cleanup_channel_later(
+    conversation_id: Union[int, str],
+    user_id: str,
+    delay: float = 5.0,
+    execution_id: Optional[str] = None,
+):
     """
     Remove the streaming channel after a delay to allow subscribers to finish.
     This gives reconnected clients time to receive the final chunks before cleanup.
     """
     await asyncio.sleep(delay)
-    await streaming_channel_manager.remove_channel(conversation_id, user_id)
+    await streaming_channel_manager.remove_channel(
+        conversation_id,
+        user_id,
+        execution_id=execution_id,
+    )
 
 
-async def _poll_runtime_cancel_signal(conversation_id: Union[int, str], user_id: str, stop_event) -> None:
-    """Mirror Redis cancel signal into the local agent stop_event."""
+async def _monitor_runtime_state(
+    conversation_id: Union[int, str],
+    user_id: str,
+    execution_id: str,
+    stop_event,
+    execution_task: asyncio.Task,
+    failure_state: Dict[str, Exception],
+) -> None:
+    """Refresh the run heartbeat and mirror its Redis cancel signal locally."""
+    loop = asyncio.get_running_loop()
+    next_heartbeat_at = loop.time() + RUNTIME_HEARTBEAT_INTERVAL_SECONDS
     while not stop_event.is_set():
-        if await runtime_state_service.is_cancelled_async(user_id=user_id, conversation_id=conversation_id):
-            stop_event.set()
-            logger.info(
-                "Runtime cancel signal received, user_id=%s, conversation_id=%s",
-                user_id,
-                conversation_id,
-            )
-            return
-        await asyncio.sleep(RUNTIME_CANCEL_POLL_INTERVAL_SECONDS)
+        try:
+            if loop.time() >= next_heartbeat_at:
+                refreshed = await runtime_state_service.heartbeat_run_async(
+                    user_id=user_id,
+                    conversation_id=conversation_id,
+                    execution_id=execution_id,
+                )
+                if not refreshed:
+                    raise RuntimeExecutionSuperseded("Runtime execution heartbeat was rejected.")
+                next_heartbeat_at = loop.time() + RUNTIME_HEARTBEAT_INTERVAL_SECONDS
 
-
-async def _cancel_task_on_runtime_signal(conversation_id: Union[int, str], user_id: str, task: asyncio.Task) -> None:
-    """Cancel a local asyncio task when another Pod writes the runtime cancel signal."""
-    while not task.done():
-        if await runtime_state_service.is_cancelled_async(user_id=user_id, conversation_id=conversation_id):
-            task.cancel()
-            logger.info(
-                "Runtime cancel signal cancelled task, user_id=%s, conversation_id=%s",
-                user_id,
-                conversation_id,
-            )
+            if await runtime_state_service.is_cancelled_async(
+                user_id=user_id,
+                conversation_id=conversation_id,
+                execution_id=execution_id,
+            ):
+                stop_event.set()
+                logger.info(
+                    "Runtime cancel signal received, user_id=%s, conversation_id=%s",
+                    user_id,
+                    conversation_id,
+                )
+                return
+        except (DistributedStateUnavailable, RuntimeExecutionSuperseded) as exc:
+            failure_state["error"] = exc
+            if not execution_task.done():
+                execution_task.cancel()
             return
-        await asyncio.sleep(RUNTIME_CANCEL_POLL_INTERVAL_SECONDS)
+
+        heartbeat_wait = max(0.0, next_heartbeat_at - loop.time())
+        await asyncio.sleep(min(RUNTIME_CANCEL_POLL_INTERVAL_SECONDS, heartbeat_wait))
 
 
 def _extract_json_objects_from_text(text: str) -> list[dict]:
@@ -332,6 +370,37 @@ def _safe_agent_stream_error_chunk() -> str:
         ensure_ascii=False,
     )
     return f"data: {error_payload}\n\n"
+
+
+async def _interrupt_channel_locally(channel: Any) -> str:
+    """Notify subscribers when Redis cannot carry the terminal event."""
+    interrupted_chunk = _run_interrupted_chunk()
+    if channel is not None:
+        await channel.interrupt(interrupted_chunk, RUN_INTERRUPTED_MESSAGE)
+    return interrupted_chunk
+
+
+async def _finalize_run_before_agent_start(
+    conversation_id: int,
+    user_id: str,
+    execution_id: Optional[str],
+    channel: Any,
+) -> str:
+    """Persist and finish a run that failed before AgentRunInfo was created."""
+    try:
+        error_chunk = _safe_agent_stream_error_chunk()
+        await channel.publish(error_chunk)
+        complete_kwargs = {
+            "conversation_id": conversation_id,
+            "user_id": user_id,
+            "status": "failed",
+        }
+        if execution_id is not None:
+            complete_kwargs["execution_id"] = execution_id
+        await streaming_channel_manager.complete_channel(**complete_kwargs)
+        return error_chunk
+    except (DistributedStateUnavailable, RuntimeExecutionSuperseded):
+        return await _interrupt_channel_locally(channel)
 
 
 def _resolve_user_tenant_language(
@@ -943,6 +1012,7 @@ async def _stream_agent_chunks(
     resume_from_unit_index: int = 0,
     resume_message_id: Optional[int] = None,
     channel: Optional[Any] = None,
+    execution_id: Optional[str] = None,
     runtime_scope_id: Optional[Union[int, str]] = None,
 ):
     """
@@ -1009,18 +1079,31 @@ async def _stream_agent_chunks(
 
     # Get or create streaming channel for multi-subscriber support
     if channel is None:
-        channel = await streaming_channel_manager.get_or_create_channel(
-            conversation_id=run_scope_id,
-            user_id=user_id
-        )
+        channel_kwargs = {
+            "conversation_id": run_scope_id,
+            "user_id": user_id,
+        }
+        if execution_id is not None:
+            channel_kwargs["execution_id"] = execution_id
+        channel = await streaming_channel_manager.get_or_create_channel(**channel_kwargs)
 
-    cancel_poll_task = asyncio.create_task(
-        _poll_runtime_cancel_signal(
-            conversation_id=run_scope_id,
-            user_id=user_id,
-            stop_event=agent_run_info.stop_event,
+    runtime_failure_state: Dict[str, Exception] = {}
+    execution_task = asyncio.current_task()
+    runtime_monitor_task = (
+        asyncio.create_task(
+            _monitor_runtime_state(
+                conversation_id=run_scope_id,
+                user_id=user_id,
+                execution_id=execution_id,
+                stop_event=agent_run_info.stop_event,
+                execution_task=execution_task,
+                failure_state=runtime_failure_state,
+            )
         )
+        if execution_id is not None and execution_task is not None
+        else None
     )
+    interrupted_sent = False
 
     # In resume mode, emit a status event first
     if is_resume_mode:
@@ -1337,10 +1420,28 @@ async def _stream_agent_chunks(
             await channel.publish(f"data: {chunk}\n\n")
             yield f"data: {chunk}\n\n"
         stream_completed_normally = True
+    except asyncio.CancelledError:
+        if not runtime_failure_state:
+            raise
+        logger.error(
+            "Agent run interrupted by distributed state failure: %r",
+            runtime_failure_state.get("error"),
+        )
+        interrupted_sent = True
+        yield await _interrupt_channel_locally(channel)
+    except (DistributedStateUnavailable, RuntimeExecutionSuperseded) as run_exc:
+        logger.error("Agent run interrupted by distributed state failure: %r", run_exc)
+        interrupted_sent = True
+        yield await _interrupt_channel_locally(channel)
     except Exception as run_exc:
         logger.error("Agent run error: %r", run_exc, exc_info=True)
-        await channel.publish(_safe_agent_stream_error_chunk())
-        yield _safe_agent_stream_error_chunk()
+        try:
+            error_chunk = _safe_agent_stream_error_chunk()
+            await channel.publish(error_chunk)
+            yield error_chunk
+        except (DistributedStateUnavailable, RuntimeExecutionSuperseded):
+            interrupted_sent = True
+            yield await _interrupt_channel_locally(channel)
     finally:
         # Finalize any in-flight unit and transition the parent message to its
         # terminal status before releasing the agent run slot.
@@ -1377,27 +1478,54 @@ async def _stream_agent_chunks(
             except Exception:
                 logger.exception("Failed to mark assistant message as %s", terminal_status)
 
-        if not cancel_poll_task.done():
-            cancel_poll_task.cancel()
+        if runtime_monitor_task is not None:
+            if not runtime_monitor_task.done():
+                runtime_monitor_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await runtime_monitor_task
 
         was_stopped = getattr(agent_run_info, "stop_event", None) and agent_run_info.stop_event.is_set()
-        terminal_status = 'stopped' if was_stopped else 'completed' if stream_completed_normally else 'failed'
+        terminal_status = 'stopped' if was_stopped and not runtime_failure_state else (
+            'completed' if stream_completed_normally else 'failed'
+        )
 
-        agent_run_manager.unregister_agent_run(
-            run_scope_id, user_id, status=terminal_status)
+        if execution_id is None:
+            agent_run_manager.unregister_agent_run(run_scope_id, user_id)
+        else:
+            agent_run_manager.unregister_agent_run(
+                run_scope_id,
+                user_id,
+                execution_id=execution_id,
+            )
 
         # Mark channel as completed and schedule cleanup
         if channel is not None:
-            await streaming_channel_manager.complete_channel(
-                conversation_id=run_scope_id,
-                user_id=user_id,
-                status=terminal_status
-            )
+            try:
+                complete_kwargs = {
+                    "conversation_id": run_scope_id,
+                    "user_id": user_id,
+                    "status": terminal_status,
+                }
+                if execution_id is not None:
+                    complete_kwargs["execution_id"] = execution_id
+                if interrupted_sent or runtime_failure_state:
+                    complete_kwargs["error"] = "run_interrupted"
+                await streaming_channel_manager.complete_channel(**complete_kwargs)
+            except (DistributedStateUnavailable, RuntimeExecutionSuperseded) as finalize_exc:
+                logger.error("Failed to finalize distributed runtime state: %r", finalize_exc)
+                await _interrupt_channel_locally(channel)
+                if not interrupted_sent:
+                    interrupted_sent = True
+                    try:
+                        yield _run_interrupted_chunk()
+                    except RuntimeError:
+                        pass
             # Schedule channel removal (give subscribers time to receive final chunks)
             cleanup_task = asyncio.create_task(
                 _cleanup_channel_later(
                     conversation_id=run_scope_id,
-                    user_id=user_id
+                    user_id=user_id,
+                    execution_id=execution_id,
                 )
             )
             _channel_cleanup_tasks.add(cleanup_task)
@@ -2903,6 +3031,7 @@ async def prepare_agent_run(
     tenant_id: str,
     language: str = LANGUAGE["ZH"],
     allow_memory_search: bool = True,
+    execution_id: Optional[str] = None,
     runtime_scope_id: Optional[Union[int, str]] = None,
 ):
     """
@@ -2969,7 +3098,15 @@ async def prepare_agent_run(
             )) if historical_context is not None else None
         )
     run_scope_id = runtime_scope_id if runtime_scope_id is not None else agent_request.conversation_id
-    agent_run_manager.register_agent_run(run_scope_id, agent_run_info, user_id)
+    if execution_id is None:
+        agent_run_manager.register_agent_run(run_scope_id, agent_run_info, user_id)
+    else:
+        agent_run_manager.register_agent_run(
+            run_scope_id,
+            agent_run_info,
+            user_id,
+            execution_id=execution_id,
+        )
     return agent_run_info, memory_context
 
 
@@ -3003,6 +3140,7 @@ async def generate_stream(
     language: str = LANGUAGE["ZH"],
     enable_memory: bool = False,
     channel: Optional[Any] = None,
+    execution_id: Optional[str] = None,
     runtime_scope_id: Optional[Union[int, str]] = None,
 ):
     """Unified streaming entry point.
@@ -3019,27 +3157,18 @@ async def generate_stream(
         channel: Optional streaming channel; when ``None`` a fresh channel
             is created lazily when memory is enabled.
     """
-    # Poll for cross-pod cancel signal so the outer generator task can be
-    # cancelled when another Pod writes the runtime cancel flag.
     run_scope_id = runtime_scope_id if runtime_scope_id is not None else agent_request.conversation_id
-    _outer_task = asyncio.current_task()
-    cancel_poll_task = (
-        asyncio.create_task(
-            _cancel_task_on_runtime_signal(
-                run_scope_id, user_id, _outer_task
-            )
-        )
-        if _outer_task
-        else None
-    )
 
     # Lazily open the streaming channel. Recursive fallback below needs to
     # reuse the same channel so subscribers stay connected.
-    if channel is None and enable_memory:
-        channel = await streaming_channel_manager.get_or_create_channel(
-            conversation_id=run_scope_id,
-            user_id=user_id,
-        )
+    if channel is None:
+        channel_kwargs = {
+            "conversation_id": run_scope_id,
+            "user_id": user_id,
+        }
+        if execution_id is not None:
+            channel_kwargs["execution_id"] = execution_id
+        channel = await streaming_channel_manager.get_or_create_channel(**channel_kwargs)
 
     memory_enabled_runtime = False
     try:
@@ -3062,6 +3191,8 @@ async def generate_stream(
                 "language": language,
                 "allow_memory_search": memory_enabled_runtime,
             }
+            if execution_id is not None:
+                prepare_kwargs["execution_id"] = execution_id
             if runtime_scope_id is not None:
                 prepare_kwargs["runtime_scope_id"] = runtime_scope_id
             agent_run_info, memory_context = await prepare_agent_run(**prepare_kwargs)
@@ -3079,6 +3210,8 @@ async def generate_stream(
             "memory_ctx": memory_context,
             "channel": channel,
         }
+        if execution_id is not None:
+            stream_kwargs["execution_id"] = execution_id
         if runtime_scope_id is not None:
             stream_kwargs["runtime_scope_id"] = runtime_scope_id
         async for data_chunk in _stream_agent_chunks(**stream_kwargs):
@@ -3090,8 +3223,12 @@ async def generate_stream(
             logger.error(
                 "Agent run error without memory: %r", None, exc_info=True
             )
-            await channel.publish(_safe_agent_stream_error_chunk())
-            yield _safe_agent_stream_error_chunk()
+            yield await _finalize_run_before_agent_start(
+                conversation_id=run_scope_id,
+                user_id=user_id,
+                execution_id=execution_id,
+                channel=channel,
+            )
             return
 
         try:
@@ -3104,6 +3241,8 @@ async def generate_stream(
                 "enable_memory": False,
                 "channel": channel,
             }
+            if execution_id is not None:
+                fallback_kwargs["execution_id"] = execution_id
             if runtime_scope_id is not None:
                 fallback_kwargs["runtime_scope_id"] = runtime_scope_id
             async for data_chunk in generate_stream(agent_request, **fallback_kwargs):
@@ -3114,8 +3253,12 @@ async def generate_stream(
                 run_exc,
                 exc_info=True,
             )
-            await channel.publish(_safe_agent_stream_error_chunk())
-            yield _safe_agent_stream_error_chunk()
+            yield await _finalize_run_before_agent_start(
+                conversation_id=run_scope_id,
+                user_id=user_id,
+                execution_id=execution_id,
+                channel=channel,
+            )
             return
     except Exception as stream_exc:
         logger.error(
@@ -3123,12 +3266,13 @@ async def generate_stream(
             stream_exc,
             exc_info=True,
         )
-        await channel.publish(_safe_agent_stream_error_chunk())
-        yield _safe_agent_stream_error_chunk()
+        yield await _finalize_run_before_agent_start(
+            conversation_id=run_scope_id,
+            user_id=user_id,
+            execution_id=execution_id,
+            channel=channel,
+        )
         return
-    finally:
-        if cancel_poll_task and not cancel_poll_task.done():
-            cancel_poll_task.cancel()
 
 
 def _detect_resume_position(
@@ -3400,32 +3544,19 @@ async def run_agent_stream(
             user_id=resolved_user_id,
             conversation_id=agent_request.conversation_id,
         )
+        stream_status = await runtime_state_service.get_stream_status_async(
+            user_id=resolved_user_id,
+            conversation_id=agent_request.conversation_id,
+        )
         is_remote_running = run_state.get("status") == "running"
-
-        if existing_run_info is None and not is_remote_running:
-            # Agent has finished while frontend was disconnected
-            # Update message status to completed if it's still streaming
-            try:
-                update_message_status(
-                    message_id=resume_info['message_id'],
-                    status='completed'
-                )
-            except Exception:
-                pass
-
-            return JSONResponse(
-                status_code=HTTPStatus.OK,
-                content={
-                    'status': 'completed',
-                    'message': 'Agent finished during disconnection',
-                }
-            )
 
         # Agent is still running - subscribe to the channel to receive new chunks
         channel = streaming_channel_manager.get_channel(
             conversation_id=agent_request.conversation_id,
             user_id=resolved_user_id
         )
+        if channel is not None and channel.execution_id != run_state.get("execution_id"):
+            channel = None
         last_unit_index = resume_info["resume_from_unit_index"] - 1
 
         def _resume_status_chunk(replay_chunk_count: int) -> str:
@@ -3443,9 +3574,13 @@ async def run_agent_stream(
             }
             return f"data: {json.dumps(payload)}\n\n"
 
-        if channel is None:
-            if runtime_state_service.enabled and is_remote_running:
-                async def redis_channel_stream():
+        if channel is None or existing_run_info is None or not is_remote_running:
+            async def redis_channel_stream():
+                interrupted = stream_status.get("error") == "run_interrupted"
+                terminal_status = stream_status.get("status") or run_state.get("status")
+                if interrupted:
+                    terminal_status = "run_interrupted"
+                try:
                     replay_events = await runtime_state_service.read_stream_events_async(
                         user_id=resolved_user_id,
                         conversation_id=agent_request.conversation_id,
@@ -3461,7 +3596,7 @@ async def run_agent_stream(
                         if chunk:
                             yield chunk
 
-                    while True:
+                    while terminal_status == "running":
                         events = await runtime_state_service.wait_for_stream_events_async(
                             user_id=resolved_user_id,
                             conversation_id=agent_request.conversation_id,
@@ -3472,43 +3607,73 @@ async def run_agent_stream(
                             if chunk:
                                 yield chunk
 
-                        stream_status = await runtime_state_service.get_stream_status_async(
-                            user_id=resolved_user_id,
-                            conversation_id=agent_request.conversation_id,
-                        )
                         latest_run_state = await runtime_state_service.get_run_state_async(
                             user_id=resolved_user_id,
                             conversation_id=agent_request.conversation_id,
                         )
-                        if stream_status.get("status") or latest_run_state.get("status") in {
+                        latest_stream_status = await runtime_state_service.get_stream_status_async(
+                            user_id=resolved_user_id,
+                            conversation_id=agent_request.conversation_id,
+                        )
+                        if latest_stream_status.get("error") == "run_interrupted":
+                            interrupted = True
+                            terminal_status = "run_interrupted"
+                            break
+                        if latest_stream_status.get("status"):
+                            terminal_status = latest_stream_status["status"]
+                            break
+                        if latest_run_state.get("status") in {
                             "completed",
                             "failed",
                             "stopped",
                         }:
+                            terminal_status = latest_run_state["status"]
+                            break
+                        if not latest_run_state:
+                            interrupted = True
+                            terminal_status = "run_interrupted"
                             break
 
-                    terminal_status = stream_status.get("status") or latest_run_state.get("status") or "completed"
+                    if not terminal_status:
+                        interrupted = True
+                        terminal_status = "run_interrupted"
+                except (DistributedStateUnavailable, RuntimeExecutionSuperseded):
+                    interrupted = True
+                    terminal_status = "run_interrupted"
+
+                if interrupted:
+                    try:
+                        update_message_status(
+                            message_id=resume_info['message_id'],
+                            status='failed',
+                            user_id=resolved_user_id,
+                        )
+                    except Exception:
+                        logger.warning("Failed to mark interrupted resumed message as failed", exc_info=True)
+                    yield _run_interrupted_chunk()
+                    return
+
+                if terminal_status in {"completed", "failed", "stopped"}:
+                    try:
+                        update_message_status(
+                            message_id=resume_info['message_id'],
+                            status=terminal_status,
+                            user_id=resolved_user_id,
+                        )
+                    except Exception:
+                        logger.warning("Failed to reconcile resumed message terminal status", exc_info=True)
                     yield STREAM_STATUS_EVENT
                     yield _resume_completed_chunk(terminal_status)
 
-                return StreamingResponse(
-                    redis_channel_stream(),
-                    media_type="text/event-stream",
-                    headers={
-                        "Cache-Control": "no-cache",
-                        "Connection": "keep-alive",
-                        "X-Stream-Status": "resumed",
-                        "X-Last-Unit-Index": str(resume_info['resume_from_unit_index']),
-                    },
-                )
-
-            # No channel exists, agent might be in a different state
-            return JSONResponse(
-                status_code=HTTPStatus.OK,
-                content={
-                    'status': 'streaming',
-                    'message': 'Stream channel not found',
-                }
+            return StreamingResponse(
+                redis_channel_stream(),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "X-Stream-Status": "resumed",
+                    "X-Last-Unit-Index": str(resume_info['resume_from_unit_index']),
+                },
             )
 
         # Subscribe to the channel and stream chunks to the frontend
@@ -3526,9 +3691,12 @@ async def run_agent_stream(
             async for chunk in channel.subscribe_with_history(0):
                 yield chunk
 
+            if channel.error or channel.completion_status == "run_interrupted":
+                return
+
             # Mark as complete when channel ends
             yield STREAM_STATUS_EVENT
-            yield _resume_completed_chunk()
+            yield _resume_completed_chunk(channel.completion_status or "completed")
 
         return StreamingResponse(
             channel_stream(),
@@ -3541,11 +3709,14 @@ async def run_agent_stream(
             },
         )
 
-    # Normal mode: start new stream
-    await runtime_state_service.reset_stream_async(
-        user_id=resolved_user_id,
-        conversation_id=agent_request.conversation_id,
-    )
+    # Normal mode: register distributed state before persisting the query or starting the model.
+    execution_id: Optional[str] = None
+    run_scope_id = runtime_scope_id if runtime_scope_id is not None else agent_request.conversation_id
+    if not agent_request.is_debug or runtime_scope_id is not None:
+        execution_id = await runtime_state_service.register_run_async(
+            user_id=resolved_user_id,
+            conversation_id=run_scope_id,
+        )
 
     if not agent_request.is_debug and not skip_user_save:
         save_messages(
@@ -3593,6 +3764,8 @@ async def run_agent_stream(
         "language": language,
         "enable_memory": use_memory_stream,
     }
+    if execution_id is not None:
+        generate_kwargs["execution_id"] = execution_id
     if runtime_scope_id is not None:
         generate_kwargs["runtime_scope_id"] = runtime_scope_id
     stream_gen = generate_stream(agent_request, **generate_kwargs)
@@ -3617,6 +3790,9 @@ async def run_agent_stream(
             with agent_monitoring_context(agent_metadata):
                 async for data_chunk in stream_gen:
                     yield data_chunk
+        except (DistributedStateUnavailable, RuntimeExecutionSuperseded) as stream_exc:
+            logger.error("Agent stream interrupted by distributed state failure: %r", stream_exc)
+            yield _run_interrupted_chunk()
         except Exception as stream_exc:
             logger.error(
                 "Agent stream response error: %r",
@@ -3652,6 +3828,13 @@ async def run_agent_background(
     """
     if not agent_request.conversation_id:
         raise ValueError("conversation_id is required for background agent runs")
+
+    execution_id: Optional[str] = None
+    if not agent_request.is_debug:
+        execution_id = await runtime_state_service.register_run_async(
+            user_id=user_id,
+            conversation_id=agent_request.conversation_id,
+        )
 
     if not agent_request.is_debug and not skip_user_save:
         save_messages(
@@ -3689,25 +3872,29 @@ async def run_agent_background(
     ))
 
     if memory_enabled and not agent_request.is_debug:
-        stream_gen = generate_stream(
-            agent_request,
-            user_id=user_id,
-            tenant_id=tenant_id,
-            language=language,
-            enable_memory=True,
-        )
+        generate_kwargs = {
+            "user_id": user_id,
+            "tenant_id": tenant_id,
+            "language": language,
+            "enable_memory": True,
+        }
     else:
-        stream_gen = generate_stream(
-            agent_request,
-            user_id=user_id,
-            tenant_id=tenant_id,
-            language=language,
-            enable_memory=False,
-        )
+        generate_kwargs = {
+            "user_id": user_id,
+            "tenant_id": tenant_id,
+            "language": language,
+            "enable_memory": False,
+        }
+
+    if execution_id is not None:
+        generate_kwargs["execution_id"] = execution_id
+    stream_gen = generate_stream(agent_request, **generate_kwargs)
 
     chunks = 0
     with agent_monitoring_context(agent_metadata):
-        async for _ in stream_gen:
+        async for chunk in stream_gen:
+            if _is_run_interrupted_chunk(chunk):
+                raise DistributedStateUnavailable()
             chunks += 1
 
     latest_message = get_latest_assistant_message(agent_request.conversation_id, user_id)
@@ -3720,30 +3907,22 @@ async def run_agent_background(
 
 def stop_agent_tasks(conversation_id: Union[int, str], user_id: str):
     """
-    Stop agent run and preprocess tasks for the specified conversation_id.
-    Matches the behavior of agent_app.agent_stop_api.
+    Stop the current agent run for the specified conversation.
     """
-    # Stop agent run
-    agent_stopped = agent_run_manager.stop_agent_run(conversation_id, user_id)
+    remote_signal_set = runtime_state_service.set_cancel_signal(
+        user_id=user_id,
+        conversation_id=conversation_id,
+    )
+    local_agent_stopped = agent_run_manager.stop_agent_run(conversation_id, user_id)
 
-    # Stop preprocess tasks
-    preprocess_stopped = preprocess_manager.stop_preprocess_tasks(
-        conversation_id)
-
-    if agent_stopped or preprocess_stopped:
-        message_parts = []
-        if agent_stopped:
-            message_parts.append("agent run")
-        if preprocess_stopped:
-            message_parts.append("preprocess tasks")
-
-        message = f"successfully stopped {' and '.join(message_parts)} for user_id {user_id}, conversation_id {conversation_id}"
+    if remote_signal_set or local_agent_stopped:
+        message = f"successfully stopped agent run for user_id {user_id}, conversation_id {conversation_id}"
         logging.info(message)
         return {"status": "success", "message": message}
-    else:
-        message = f"no running agent or preprocess tasks found for user_id {user_id}, conversation_id {conversation_id}"
-        logging.info(message)
-        return {"status": "success", "message": message, "already_stopped": True}
+
+    message = f"no running agent found for user_id {user_id}, conversation_id {conversation_id}"
+    logging.info(message)
+    return {"status": "success", "message": message, "already_stopped": True}
 
 
 def is_agent_running(conversation_id: int, user_id: str) -> bool:

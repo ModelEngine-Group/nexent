@@ -24,6 +24,10 @@ persistence:
   localPath: "/var/lib/nexent-data/nexent-postgresql"
   existingClaim: ""
 
+service:
+  type: ClusterIP
+  nodePort: null
+
 config:
   host: "nexent-postgresql"
   user: "root"

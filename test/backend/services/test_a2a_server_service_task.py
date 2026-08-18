@@ -440,7 +440,7 @@ class TestCancelTask:
         mock_task = {
             "id": "task_123",
             "caller_user_id": "user-1",
-            "task_state": "TASK_STATE_WORKING",
+            "task_state": "TASK_STATE_WORKING"
         }
         canceled_task = {**mock_task, "task_state": "TASK_STATE_CANCELED"}
 

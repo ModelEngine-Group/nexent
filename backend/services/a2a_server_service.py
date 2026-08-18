@@ -18,10 +18,11 @@ from services.a2a_agent_adapter import A2AAgentAdapter, A2AExecutionContext
 from consts.a2a_models import A2AAgentCard, A2AAgentCapabilities, A2AAgentProvider
 from consts.const import NORTHBOUND_EXTERNAL_URL
 from consts.model import AgentRequest
-from services.agent_stream_contract import RUN_INTERRUPTED_MESSAGE, _is_run_interrupted_event
+from services.agent_stream_contract import _is_run_interrupted_event
 from services.runtime_agent_client import RuntimeServiceError, runtime_agent_client
 
 logger = logging.getLogger(__name__)
+RUN_INTERRUPTED_MESSAGE = "The agent run was interrupted. Please start it again."
 
 
 class A2AServerServiceError(Exception):

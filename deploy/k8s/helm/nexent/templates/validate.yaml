@@ -1,0 +1,52 @@
+{{- $shared := default dict .Values.global.sharedStorage -}}
+{{- $mode := default "" $shared.mode -}}
+{{- $storageClassName := default "" $shared.storageClassName -}}
+{{- $workspace := default dict $shared.workspace -}}
+{{- $skills := default dict $shared.skills -}}
+{{- $accessModes := default (list) $shared.accessModes -}}
+{{- $webValues := default dict (index .Values "nexent-web") -}}
+{{- $configValues := default dict (index .Values "nexent-config") -}}
+{{- $runtimeValues := default dict (index .Values "nexent-runtime") -}}
+{{- $northboundValues := default dict (index .Values "nexent-northbound") -}}
+{{- $webReplicas := int (default 1 (get $webValues "replicaCount")) -}}
+{{- $configReplicas := int (default 1 (get $configValues "replicaCount")) -}}
+{{- $runtimeReplicas := int (default 1 (get $runtimeValues "replicaCount")) -}}
+{{- $northboundReplicas := int (default 1 (get $northboundValues "replicaCount")) -}}
+{{- $applicationMultiReplica := or (gt $webReplicas 1) (gt $configReplicas 1) (gt $runtimeReplicas 1) (gt $northboundReplicas 1) -}}
+
+{{- if not (has $mode (list "local" "dynamic" "existing")) -}}
+{{- fail "global.sharedStorage.mode must be local, dynamic, or existing" -}}
+{{- end -}}
+{{- if and $applicationMultiReplica (eq $mode "local") -}}
+{{- fail "global.sharedStorage.mode=local is not supported when Web, Config, Runtime, or Northbound has more than one replica" -}}
+{{- end -}}
+{{- if and $applicationMultiReplica (not (has "ReadWriteMany" $accessModes)) -}}
+{{- fail "multi-replica application deployments require ReadWriteMany shared storage" -}}
+{{- end -}}
+{{- if and (eq $mode "dynamic") (eq $storageClassName "") -}}
+{{- fail "global.sharedStorage.storageClassName is required for dynamic RWX storage" -}}
+{{- end -}}
+{{- if and (eq $mode "existing") (eq (default "" $workspace.existingClaim) "") -}}
+{{- fail "global.sharedStorage.workspace.existingClaim is required for existing storage" -}}
+{{- end -}}
+{{- if and (eq $mode "existing") (eq (default "" $skills.existingClaim) "") -}}
+{{- fail "global.sharedStorage.skills.existingClaim is required for existing storage" -}}
+{{- end -}}
+
+{{- range $component := list "nexent-supabase-db" -}}
+{{- $componentValues := default dict (index $.Values $component) -}}
+{{- $persistence := default dict (get $componentValues "persistence") -}}
+{{- if and (eq $mode "existing") (ne (default "dynamic" (get $persistence "mode")) "existing") -}}
+{{- fail (printf "%s.persistence.mode must be existing when global.sharedStorage.mode=existing" $component) -}}
+{{- end -}}
+{{- if and (eq (default "dynamic" (get $persistence "mode")) "existing") (eq (default "" (get $persistence "existingClaim")) "") -}}
+{{- fail (printf "%s.persistence.existingClaim is required for existing storage" $component) -}}
+{{- end -}}
+{{- end -}}
+
+{{- range $component := list "nexent-mcp" "nexent-data-process" "nexent-supabase-kong" "nexent-supabase-auth" "nexent-supabase-db" -}}
+{{- $componentValues := default dict (index $.Values $component) -}}
+{{- if gt (int (default 1 (get $componentValues "replicaCount"))) 1 -}}
+{{- fail (printf "%s must remain single-replica in this deployment baseline" $component) -}}
+{{- end -}}
+{{- end -}}

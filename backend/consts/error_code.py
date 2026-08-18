@@ -259,6 +259,7 @@ class ErrorCode(Enum):
     SYSTEM_DATABASE_ERROR = "990103"  # Database error
     SYSTEM_TIMEOUT = "990104"  # Timeout
     SYSTEM_INTERNAL_ERROR = "990105"  # Internal error
+    DISTRIBUTED_STATE_UNAVAILABLE = "distributed_state_unavailable"
 
     # 02 - Config
     CONFIG_NOT_FOUND = "990201"  # Configuration not found
@@ -293,6 +294,7 @@ ERROR_CODE_HTTP_STATUS = {
     ErrorCode.SYSTEM_TIMEOUT: 504,
     ErrorCode.SYSTEM_DATABASE_ERROR: 500,
     ErrorCode.SYSTEM_INTERNAL_ERROR: 500,
+    ErrorCode.DISTRIBUTED_STATE_UNAVAILABLE: 503,
     # Dify (module 13)
     # Auth failures against upstream services (Dify/iData/AIDP) are mapped to 502,
     # not 401. 401 is reserved for this system's identity/session failures only,

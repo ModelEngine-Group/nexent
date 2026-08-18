@@ -358,6 +358,70 @@ def test_dynamic_storage_class_applies_to_release_owned_pvcs(
         )
 
 
+def test_application_rollout_and_health_contract(chart_dirs: dict[str, Path]) -> None:
+    rendered = _template(chart_dirs["application"], "nexent", _application_dynamic_args())
+    documents = _documents(rendered.stdout)
+    deployments = {
+        document["metadata"]["name"]: document
+        for document in documents
+        if document.get("kind") == "Deployment"
+    }
+    pdbs = {
+        document["metadata"]["name"]: document
+        for document in documents
+        if document.get("kind") == "PodDisruptionBudget"
+    }
+
+    for name, expected_mounts in THREE_REPLICA_APPLICATIONS.items():
+        deployment = deployments[name]
+        assert deployment["spec"]["replicas"] == 3
+        assert deployment["spec"]["strategy"] == {
+            "type": "RollingUpdate",
+            "rollingUpdate": {"maxSurge": 1, "maxUnavailable": 0},
+        }
+        pod_spec = deployment["spec"]["template"]["spec"]
+        container = pod_spec["containers"][0]
+        assert container["livenessProbe"]["httpGet"]["path"] == "/health/live"
+        assert container["readinessProbe"]["httpGet"]["path"] == "/health/ready"
+        mounts = {mount["mountPath"] for mount in container.get("volumeMounts", [])}
+        assert expected_mounts <= mounts
+        assert pdbs[name]["spec"]["minAvailable"] == 1
+
+    for name in APPLICATION_SINGLE_REPLICA:
+        assert deployments[name]["spec"]["replicas"] == 1
+
+    backend_http_ports = {
+        "nexent-config": 5010,
+        "nexent-northbound": 5013,
+        "nexent-runtime": 5014,
+    }
+    for name, port in backend_http_ports.items():
+        container = deployments[name]["spec"]["template"]["spec"]["containers"][0]
+        startup_probe = container["startupProbe"]
+        assert startup_probe["httpGet"] == {"path": "/health/live", "port": port}
+        assert startup_probe["periodSeconds"] == 5
+        assert startup_probe["timeoutSeconds"] == 2
+        assert startup_probe["failureThreshold"] == 60
+
+
+def test_backend_startup_probe_budget_is_configurable(chart_dirs: dict[str, Path]) -> None:
+    backend_services = ("nexent-config", "nexent-northbound", "nexent-runtime")
+    args = [*_application_dynamic_args()]
+    for name in backend_services:
+        args.extend(["--set", f"{name}.probes.startup.failureThreshold=90"])
+
+    rendered = _template(chart_dirs["application"], "nexent", args)
+    assert rendered.returncode == 0, rendered.stderr
+    deployments = {
+        document["metadata"]["name"]: document
+        for document in _documents(rendered.stdout)
+        if document.get("kind") == "Deployment"
+    }
+    for name in backend_services:
+        container = deployments[name]["spec"]["template"]["spec"]["containers"][0]
+        assert container["startupProbe"]["failureThreshold"] == 90
+
+
 @pytest.mark.parametrize("component", sorted(INFRASTRUCTURE_DEPLOYMENTS))
 def test_infrastructure_existing_storage_requires_each_claim(
     chart_dirs: dict[str, Path], component: str
@@ -560,3 +624,35 @@ def test_uninstall_infrastructure_scope_has_dependency_guard(
     assert "cannot uninstall 'nexent-infrastructure'" in result.stdout
     assert "helm uninstall" not in mock_log.read_text(encoding="utf-8")
 
+
+def test_web_image_packages_process_health_module() -> None:
+    dockerfile = WEB_DOCKERFILE.read_text(encoding="utf-8")
+    assert "cp server-health.js ../frontend-dist/server-health.js" in dockerfile
+
+
+@pytest.mark.parametrize(
+    ("arguments", "expected_error"),
+    [
+        (["--persistence-mode", "local"], "local/hostPath persistence is incompatible"),
+        (["--persistence-mode", "dynamic"], "--storage-class is required"),
+        (["--persistence-mode", "existing"], "--existing-claim-prefix is required"),
+    ],
+)
+def test_deploy_defaults_reject_unsafe_storage_options(
+    isolated_k8s_project: tuple[Path, dict[str, str], Path],
+    arguments: list[str],
+    expected_error: str,
+) -> None:
+    project, env, _ = isolated_k8s_project
+    result = _run(
+        [
+            "bash",
+            str(project / "deploy" / "k8s" / "deploy.sh"),
+            "--defaults",
+            *arguments,
+        ],
+        check=False,
+        env=env,
+    )
+    assert result.returncode != 0
+    assert expected_error in result.stdout + result.stderr

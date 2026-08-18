@@ -31,10 +31,14 @@ class UnauthorizedError(Exception):
 class ConversationNotFoundError(Exception):
     pass
 
+class DistributedStateUnavailable(Exception):
+    pass
+
 consts_exceptions_mod = types.ModuleType("consts.exceptions")
 consts_exceptions_mod.LimitExceededError = LimitExceededError
 consts_exceptions_mod.UnauthorizedError = UnauthorizedError
 consts_exceptions_mod.ConversationNotFoundError = ConversationNotFoundError
+consts_exceptions_mod.DistributedStateUnavailable = DistributedStateUnavailable
 sys.modules["consts.exceptions"] = consts_exceptions_mod
 sys.modules["backend.consts.exceptions"] = consts_exceptions_mod
 
@@ -110,9 +114,8 @@ services_package = types.ModuleType("services")
 # Mock runtime_state_service
 runtime_state_service_mod = types.ModuleType("services.runtime_state_service")
 runtime_state_service_mod.runtime_state_service = MagicMock()
-runtime_state_service_mod.runtime_state_service.enabled = False
-runtime_state_service_mod.runtime_state_service.acquire_idempotency_async = AsyncMock(return_value=True)
-runtime_state_service_mod.runtime_state_service.release_idempotency_async = AsyncMock()
+runtime_state_service_mod.runtime_state_service.acquire_idempotency_async = AsyncMock(return_value="token-1")
+runtime_state_service_mod.runtime_state_service.release_idempotency_async = AsyncMock(return_value=True)
 runtime_state_service_mod.runtime_state_service.consume_rate_limit_async = AsyncMock(return_value=1)
 sys.modules["services.runtime_state_service"] = runtime_state_service_mod
 
@@ -216,8 +219,13 @@ class MockNorthboundContext:
 @pytest.fixture(autouse=True)
 def reset_test_isolation():
     """Reset test isolation state before each test."""
-    ns._IDEMPOTENCY_RUNNING.clear()
-    ns._RATE_STATE.clear()
+    runtime_state = runtime_state_service_mod.runtime_state_service
+    runtime_state.acquire_idempotency_async.reset_mock(side_effect=True)
+    runtime_state.acquire_idempotency_async.return_value = "token-1"
+    runtime_state.release_idempotency_async.reset_mock(side_effect=True)
+    runtime_state.release_idempotency_async.return_value = True
+    runtime_state.consume_rate_limit_async.reset_mock(side_effect=True)
+    runtime_state.consume_rate_limit_async.return_value = 1
     token_db_mod.log_token_usage.reset_mock(side_effect=True)
     token_db_mod.log_token_usage.return_value = 1
     agent_version_mod.list_published_agents_impl.reset_mock(side_effect=True)
@@ -225,8 +233,6 @@ def reset_test_isolation():
         {"agent_id": 1, "name": "test_agent", "description": "Test agent"}
     ]
     yield
-    ns._IDEMPOTENCY_RUNNING.clear()
-    ns._RATE_STATE.clear()
 
 
 class TestNorthboundContext:
@@ -323,89 +329,43 @@ class TestIdempotencyStartEnd:
     """Tests for idempotency_start and idempotency_end functions."""
 
     @pytest.mark.asyncio
-    async def test_idempotency_start_new_key(self):
-        """Test starting idempotency with new key succeeds."""
-        await ns.idempotency_start("new-key")
-        assert "new-key" in ns._IDEMPOTENCY_RUNNING
+    async def test_idempotency_start_returns_redis_token(self):
+        """Starting idempotency returns the ownership token from Redis."""
+        token = await ns.idempotency_start("new-key")
 
-    @pytest.mark.asyncio
-    async def test_idempotency_start_duplicate_key_raises(self):
-        """Test that duplicate key raises LimitExceededError."""
-        await ns.idempotency_start("duplicate-key")
-        with pytest.raises(LimitExceededError):
-            await ns.idempotency_start("duplicate-key")
-
-    @pytest.mark.asyncio
-    async def test_idempotency_end_removes_key(self):
-        """Test that idempotency_end removes the key."""
-        await ns.idempotency_start("end-key")
-        assert "end-key" in ns._IDEMPOTENCY_RUNNING
-        await ns.idempotency_end("end-key")
-        assert "end-key" not in ns._IDEMPOTENCY_RUNNING
-
-    @pytest.mark.asyncio
-    async def test_idempotency_end_nonexistent_key(self):
-        """Test that ending nonexistent key does not raise."""
-        await ns.idempotency_end("nonexistent-key")
-
-    @pytest.mark.asyncio
-    async def test_idempotency_expired_key_can_be_reused(self, reset_test_isolation):
-        """Test that expired keys can be reused after TTL."""
-        await ns.idempotency_start("expire-key", ttl_seconds=1)
-        assert "expire-key" in ns._IDEMPOTENCY_RUNNING
-        import asyncio
-        await asyncio.sleep(1.1)
-        await ns.idempotency_start("expire-key", ttl_seconds=1)
-
-    @pytest.mark.asyncio
-    async def test_idempotency_uses_redis_when_enabled(self):
-        """Test Redis-backed idempotency path."""
-        fake_runtime_state = MagicMock()
-        fake_runtime_state.enabled = True
-        fake_runtime_state.acquire_idempotency_async = AsyncMock(return_value=True)
-
-        with patch.object(ns, "runtime_state_service", fake_runtime_state):
-            await ns.idempotency_start("redis-key")
-
-        fake_runtime_state.acquire_idempotency_async.assert_awaited_once_with(
-            "redis-key",
+        assert token == "token-1"
+        runtime_state_service_mod.runtime_state_service.acquire_idempotency_async.assert_awaited_once_with(
+            "new-key",
             ns.NORTHBOUND_IDEMPOTENCY_TTL_SECONDS,
         )
 
     @pytest.mark.asyncio
-    async def test_idempotency_redis_duplicate_raises(self):
-        """Test Redis-backed idempotency rejects duplicate in-flight requests."""
-        fake_runtime_state = MagicMock()
-        fake_runtime_state.enabled = True
-        fake_runtime_state.acquire_idempotency_async = AsyncMock(return_value=False)
+    async def test_idempotency_start_duplicate_key_raises(self):
+        """A missing Redis ownership token means the request is a duplicate."""
+        runtime_state_service_mod.runtime_state_service.acquire_idempotency_async.return_value = None
 
-        with patch.object(ns, "runtime_state_service", fake_runtime_state):
-            with pytest.raises(LimitExceededError, match="Duplicate request"):
-                await ns.idempotency_start("redis-key")
+        with pytest.raises(LimitExceededError):
+            await ns.idempotency_start("duplicate-key")
 
     @pytest.mark.asyncio
-    async def test_idempotency_redis_error_fails_closed(self):
-        """Test Redis errors make idempotency fail closed."""
-        fake_runtime_state = MagicMock()
-        fake_runtime_state.enabled = True
-        fake_runtime_state.acquire_idempotency_async = AsyncMock(side_effect=RuntimeError("redis down"))
+    async def test_idempotency_end_releases_only_owned_token(self):
+        """Redis receives both the request key and its ownership token."""
+        await ns.idempotency_end("redis-key", "token-1")
 
-        with patch.object(ns, "runtime_state_service", fake_runtime_state):
-            with pytest.raises(LimitExceededError, match="Idempotency service is unavailable"):
-                await ns.idempotency_start("redis-key")
+        runtime_state_service_mod.runtime_state_service.release_idempotency_async.assert_awaited_once_with(
+            "redis-key",
+            "token-1",
+        )
 
     @pytest.mark.asyncio
-    async def test_idempotency_end_uses_redis_and_swallows_release_error(self, caplog):
-        """Test Redis-backed idempotency release path and warning handling."""
-        fake_runtime_state = MagicMock()
-        fake_runtime_state.enabled = True
-        fake_runtime_state.release_idempotency_async = AsyncMock(side_effect=RuntimeError("release failed"))
+    async def test_idempotency_redis_error_propagates_as_distributed_state(self):
+        """Redis failures are not converted into duplicate-request errors."""
+        runtime_state_service_mod.runtime_state_service.acquire_idempotency_async.side_effect = (
+            DistributedStateUnavailable("redis down")
+        )
 
-        with patch.object(ns, "runtime_state_service", fake_runtime_state):
-            await ns.idempotency_end("redis-key")
-
-        fake_runtime_state.release_idempotency_async.assert_awaited_once_with("redis-key")
-        assert "Northbound idempotency release failed" in caplog.text
+        with pytest.raises(DistributedStateUnavailable, match="redis down"):
+            await ns.idempotency_start("redis-key")
 
 
 class TestRateLimiting:
@@ -413,96 +373,40 @@ class TestRateLimiting:
 
     @pytest.mark.asyncio
     async def test_rate_limit_first_request_allowed(self):
-        """Test first request under limit is allowed."""
+        """The global rate counter is consumed through Redis."""
         await ns.check_and_consume_rate_limit("tenant-rate")
-        assert ns._RATE_STATE["tenant-rate"].get(ns._minute_bucket(), 0) == 1
-
-    @pytest.mark.asyncio
-    async def test_rate_limit_multiple_requests(self):
-        """Test multiple requests increment counter."""
-        for _ in range(5):
-            await ns.check_and_consume_rate_limit("tenant-multi")
-        assert ns._RATE_STATE["tenant-multi"].get(ns._minute_bucket(), 0) == 5
-
-    @pytest.mark.asyncio
-    async def test_rate_limit_exceeded_raises(self):
-        """Test that exceeding limit raises LimitExceededError."""
-        for _ in range(ns.NORTHBOUND_RATE_LIMIT_PER_MINUTE):
-            await ns.check_and_consume_rate_limit("tenant-limit")
-        with pytest.raises(LimitExceededError):
-            await ns.check_and_consume_rate_limit("tenant-limit")
-
-    @pytest.mark.asyncio
-    async def test_rate_limit_uses_redis_when_enabled(self):
-        """Test Redis-backed rate limit path."""
-        fake_runtime_state = MagicMock()
-        fake_runtime_state.enabled = True
-        fake_runtime_state.consume_rate_limit_async = AsyncMock(return_value=1)
-
-        with patch.object(ns, "runtime_state_service", fake_runtime_state):
-            await ns.check_and_consume_rate_limit("tenant-redis")
-
-        fake_runtime_state.consume_rate_limit_async.assert_awaited_once_with(
-            tenant_id="tenant-redis",
+        runtime_state_service_mod.runtime_state_service.consume_rate_limit_async.assert_awaited_once_with(
+            tenant_id="tenant-rate",
             limit_per_minute=ns.NORTHBOUND_RATE_LIMIT_PER_MINUTE,
         )
 
     @pytest.mark.asyncio
     async def test_rate_limit_disabled_returns_without_state(self):
         """Test disabled rate limit avoids both Redis and local counters."""
-        fake_runtime_state = MagicMock()
-        fake_runtime_state.enabled = True
-        fake_runtime_state.consume_rate_limit_async = AsyncMock()
-
-        with patch.object(ns, "runtime_state_service", fake_runtime_state), \
-                patch.object(ns, "NORTHBOUND_RATE_LIMIT_ENABLED", False):
+        with patch.object(ns, "NORTHBOUND_RATE_LIMIT_ENABLED", False):
             await ns.check_and_consume_rate_limit("tenant-disabled")
 
-        fake_runtime_state.consume_rate_limit_async.assert_not_awaited()
+        runtime_state_service_mod.runtime_state_service.consume_rate_limit_async.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_rate_limit_redis_value_error_maps_to_limit_exceeded(self):
         """Test Redis rate-limit over-quota result maps to the API exception."""
-        fake_runtime_state = MagicMock()
-        fake_runtime_state.enabled = True
-        fake_runtime_state.consume_rate_limit_async = AsyncMock(side_effect=ValueError("rate limit exceeded"))
+        runtime_state_service_mod.runtime_state_service.consume_rate_limit_async.side_effect = ValueError(
+            "rate limit exceeded"
+        )
 
-        with patch.object(ns, "runtime_state_service", fake_runtime_state):
-            with pytest.raises(LimitExceededError, match="Query rate exceeded"):
-                await ns.check_and_consume_rate_limit("tenant-redis")
+        with pytest.raises(LimitExceededError, match="Query rate exceeded"):
+            await ns.check_and_consume_rate_limit("tenant-redis")
 
     @pytest.mark.asyncio
     async def test_rate_limit_redis_error_fails_closed(self):
-        """Test Redis errors make rate limiting fail closed."""
-        fake_runtime_state = MagicMock()
-        fake_runtime_state.enabled = True
-        fake_runtime_state.consume_rate_limit_async = AsyncMock(side_effect=RuntimeError("redis down"))
+        """Distributed-state failures remain distinguishable from real limits."""
+        runtime_state_service_mod.runtime_state_service.consume_rate_limit_async.side_effect = (
+            DistributedStateUnavailable("redis down")
+        )
 
-        with patch.object(ns, "runtime_state_service", fake_runtime_state):
-            with pytest.raises(LimitExceededError, match="Rate limit service is unavailable"):
-                await ns.check_and_consume_rate_limit("tenant-redis")
-
-    @pytest.mark.asyncio
-    async def test_rate_limit_different_tenants(self):
-        """Test that different tenants have separate limits."""
-        for _ in range(10):
-            await ns.check_and_consume_rate_limit("tenant-a")
-        for _ in range(5):
-            await ns.check_and_consume_rate_limit("tenant-b")
-        assert ns._RATE_STATE["tenant-a"].get(ns._minute_bucket(), 0) == 10
-        assert ns._RATE_STATE["tenant-b"].get(ns._minute_bucket(), 0) == 5
-
-    @pytest.mark.asyncio
-    async def test_rate_limit_cleanup_old_buckets(self):
-        """Test that old minute buckets are cleaned up."""
-        old_bucket = str(int(ns._now_seconds() // 60) - 1)
-        ns._RATE_STATE["tenant-cleanup"] = {old_bucket: 50}
-
-        await ns.check_and_consume_rate_limit("tenant-cleanup")
-
-        current_bucket = ns._minute_bucket()
-        assert old_bucket not in ns._RATE_STATE["tenant-cleanup"]
-        assert ns._RATE_STATE["tenant-cleanup"].get(current_bucket, 0) == 1
+        with pytest.raises(DistributedStateUnavailable, match="redis down"):
+            await ns.check_and_consume_rate_limit("tenant-redis")
 
 
 @pytest.mark.asyncio
@@ -1253,6 +1157,10 @@ class TestUpdateConversationTitle:
     async def test_update_conversation_title_idempotency_prevents_duplicate(self):
         """Test that duplicate requests within TTL are prevented."""
         ctx = MockNorthboundContext(tenant_id="tenant-1", token_id=0)
+        runtime_state_service_mod.runtime_state_service.acquire_idempotency_async.side_effect = [
+            "token-1",
+            None,
+        ]
 
         # First call should succeed
         await ns.update_conversation_title(
@@ -1275,40 +1183,24 @@ class TestReleaseIdempotencyAfterDelay:
 
     @pytest.mark.asyncio
     async def test_release_after_delay(self):
-        """Test that idempotency key is released after delay."""
-        import asyncio
+        """Delayed release keeps the Redis ownership token."""
+        await ns._release_idempotency_after_delay("delayed-key", "token-1", seconds=0)
 
-        await ns.idempotency_start("delayed-key")
-        assert "delayed-key" in ns._IDEMPOTENCY_RUNNING
+        runtime_state_service_mod.runtime_state_service.release_idempotency_async.assert_awaited_once_with(
+            "delayed-key",
+            "token-1",
+        )
 
-        asyncio.create_task(ns._release_idempotency_after_delay("delayed-key", seconds=0.1))
-        await asyncio.sleep(0.2)
+    @pytest.mark.asyncio
+    async def test_release_failure_is_logged_after_response(self, caplog):
+        """A delayed release cannot alter an already-returned response."""
+        runtime_state_service_mod.runtime_state_service.release_idempotency_async.side_effect = (
+            DistributedStateUnavailable("redis down")
+        )
 
-        assert "delayed-key" not in ns._IDEMPOTENCY_RUNNING
+        await ns._release_idempotency_after_delay("delayed-key", "token-1", seconds=0)
 
-
-class TestMinuteBucket:
-    """Tests for _minute_bucket helper function."""
-
-    def test_minute_bucket_returns_string(self):
-        """Test that minute bucket is a string."""
-        bucket = ns._minute_bucket()
-        assert isinstance(bucket, str)
-
-    def test_minute_bucket_consistent_for_same_time(self):
-        """Test that same time produces same bucket."""
-        ts = 1234567890.0
-        bucket1 = ns._minute_bucket(ts)
-        bucket2 = ns._minute_bucket(ts)
-        assert bucket1 == bucket2
-
-    def test_minute_bucket_different_for_different_minutes(self):
-        """Test that different minutes produce different buckets."""
-        ts1 = 1000000.0
-        ts2 = ts1 + 60
-        bucket1 = ns._minute_bucket(ts1)
-        bucket2 = ns._minute_bucket(ts2)
-        assert bucket1 != bucket2
+        assert "Northbound idempotency release failed" in caplog.text
 
 
 class TestStartStreamingChatErrorHandling:
@@ -1329,20 +1221,15 @@ class TestStartStreamingChatErrorHandling:
                 )
 
 
-    async def test_start_streaming_chat_runtime_error(self):
-        """Test that Runtime service errors are propagated unchanged."""
+    async def test_start_streaming_chat_distributed_state_error_propagates(self):
+        """Runtime Redis failures remain HTTP-503 domain errors at the app boundary."""
         ctx = MockNorthboundContext(token_id=0)
-
-        mock_response = MagicMock()
-        mock_response.headers = {}
-        agent_service_mod.run_agent_stream.return_value = mock_response
 
         async def mock_get_history(*args, **kwargs):
             return {"data": {"history": []}}
 
         with patch.object(ns, 'check_and_consume_rate_limit', new_callable=AsyncMock), \
-                patch.object(ns, 'idempotency_start', new_callable=AsyncMock), \
-                patch.object(ns, 'idempotency_end', new_callable=AsyncMock), \
+                patch.object(ns, 'idempotency_start', new_callable=AsyncMock, return_value="token-1"), \
                 patch.object(ns, 'get_conversation_history_internal', side_effect=mock_get_history), \
                 patch.object(
                     runtime_agent_client_mod.runtime_agent_client,
@@ -1425,8 +1312,8 @@ class TestStartStreamingChatErrorHandling:
             assert call_kwargs["agent_request"].version_no == 5
             assert call_kwargs["agent_request"].agent_id == 42
 
-    async def test_start_streaming_chat_delegates_identity_to_runtime(self, mocker):
-        """Test that explicit caller identity and request ID are delegated to Runtime."""
+    async def test_start_streaming_chat_delegates_user_persistence_to_runtime(self):
+        """Northbound does not persist the query before Runtime registers Redis state."""
         ctx = MockNorthboundContext(token_id=0)
 
         mock_response = MagicMock()
@@ -1437,8 +1324,7 @@ class TestStartStreamingChatErrorHandling:
             return {"data": {"history": []}}
 
         with patch.object(ns, 'check_and_consume_rate_limit', new_callable=AsyncMock), \
-                patch.object(ns, 'idempotency_start', new_callable=AsyncMock), \
-                patch.object(ns, 'idempotency_end', new_callable=AsyncMock), \
+                patch.object(ns, 'idempotency_start', new_callable=AsyncMock, return_value="token-1"), \
                 patch.object(ns, 'get_conversation_history_internal', side_effect=mock_get_history), \
                 patch.object(
                     runtime_agent_client_mod.runtime_agent_client,

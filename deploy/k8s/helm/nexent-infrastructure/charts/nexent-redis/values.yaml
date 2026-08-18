@@ -23,3 +23,7 @@ persistence:
     - ReadWriteMany
   localPath: "/var/lib/nexent-data/nexent-redis"
   existingClaim: ""
+
+service:
+  type: ClusterIP
+  nodePort: null

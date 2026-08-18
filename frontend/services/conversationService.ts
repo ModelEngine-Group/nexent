@@ -8,6 +8,7 @@ import type {
   ApiConversationResponse,
 } from "@/types/conversation";
 import { getAuthHeaders, fetchWithAuth } from "@/lib/auth";
+import { buildAgentRunError } from "@/lib/agentRunError";
 import log from "@/lib/logger";
 import type {
   ConversationKnowledgeScope,
@@ -15,7 +16,6 @@ import type {
   KnowledgeScopeUpdateResult,
 } from "@/types/knowledgeScope";
 
-// @ts-ignore
 const fetch = fetchWithAuth;
 
 // This helper function now ALWAYS connects through the current host and port.
@@ -171,7 +171,7 @@ export const conversationService = {
       }
 
       throw new ApiError(data.code, data.message);
-    } catch (error: any) {
+    } catch (error: unknown) {
       // If the error is caused by canceling the request, return a specific response instead of throwing an error
       if (
         (error instanceof Error && error.name === "AbortError") ||
@@ -990,7 +990,7 @@ export const conversationService = {
   > {
     try {
       // Construct request parameters
-      const requestParams: any = {
+      const requestParams: Record<string, unknown> = {
         query: params.query,
         conversation_id: params.conversation_id,
         history: params.history,
@@ -1041,7 +1041,7 @@ export const conversationService = {
         url = `${url}?${queryParams.toString()}`;
       }
 
-      const response = await fetch(url, {
+      const response = await globalThis.fetch(url, {
         method: "POST",
         headers: getAuthHeaders(),
         body: JSON.stringify(requestParams),
@@ -1054,14 +1054,17 @@ export const conversationService = {
       }
 
       if (!response.ok) {
-        let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+        let errorPayload: unknown;
         try {
-          const errorData = await response.json();
-          errorMessage = errorData.detail || errorData.message || errorMessage;
+          errorPayload = await response.json();
         } catch {
-          // Preserve the HTTP status when the error response is not JSON.
+          errorPayload = undefined;
         }
-        throw new Error(errorMessage);
+        throw buildAgentRunError(
+          response.status,
+          response.statusText,
+          errorPayload
+        );
       }
 
       if (!response.body) {
@@ -1077,7 +1080,7 @@ export const conversationService = {
       }
 
       return response.body.getReader();
-    } catch (error: any) {
+    } catch (error: unknown) {
       // If the error is caused by canceling the request, return a specific response instead of throwing an error
       if (error instanceof Error && error.name === "AbortError") {
         log.log("Agent请求已被取消");

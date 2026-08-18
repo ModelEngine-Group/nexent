@@ -1,4 +1,5 @@
 import sys
+import threading
 import types
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -79,47 +80,32 @@ def fmu(monkeypatch):
 @pytest.mark.asyncio
 async def test_save_upload_file_success(tmp_path, fmu, monkeypatch):
     written: Dict[str, bytes] = {}
+    event_loop_thread = threading.get_ident()
+    write_thread = None
 
     class _FakeFile:
         async def read(self) -> bytes:
             return b"hello"
 
-    class _FakeAIOOpen:
-        def __init__(self, path, mode):
-            self.path = str(path)
-            self.mode = mode
+    def _atomic_write(path: Path, content: bytes) -> None:
+        nonlocal write_thread
+        write_thread = threading.get_ident()
+        written[str(path)] = content
 
-        async def __aenter__(self):
-            class _Writer:
-                async def write(_, b: bytes):  # noqa: N803
-                    written[self.path] = b
-
-            return _Writer()
-
-        async def __aexit__(self, exc_type, exc, tb):
-            return False
-
-    fake_aiofiles = types.SimpleNamespace(open=_FakeAIOOpen)
-    monkeypatch.setattr(fmu, "aiofiles", fake_aiofiles)
+    monkeypatch.setattr(fmu, "atomic_write_bytes", _atomic_write)
 
     ok = await fmu.save_upload_file(_FakeFile(), tmp_path / "x.bin")
     assert ok is True
     assert written[str(tmp_path / "x.bin")] == b"hello"
+    assert write_thread != event_loop_thread
 
 
 @pytest.mark.asyncio
 async def test_save_upload_file_error(tmp_path, fmu, monkeypatch):
-    class _ErrOpen:
-        def __init__(self, *a, **k):
-            pass
+    def _raise_write_error(path: Path, content: bytes) -> None:
+        raise RuntimeError("fail")
 
-        async def __aenter__(self):
-            raise RuntimeError("fail")
-
-        async def __aexit__(self, exc_type, exc, tb):
-            return False
-
-    monkeypatch.setattr(fmu, "aiofiles", types.SimpleNamespace(open=_ErrOpen))
+    monkeypatch.setattr(fmu, "atomic_write_bytes", _raise_write_error)
 
     class _FakeFile:
         filename = "x.bin"

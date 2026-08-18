@@ -8,6 +8,7 @@ import json
 import base64
 import types
 import ast
+import importlib.util
 
 # Python 3.14 removed the legacy AST alias still referenced by the service.
 if not hasattr(ast, "Num"):
@@ -36,6 +37,13 @@ nexent_skills_mock = types.ModuleType('nexent.skills')
 nexent_skills_mock.__path__ = []  # Required for submodule lookups
 nexent_skills_skill_loader_mock = types.ModuleType('nexent.skills.skill_loader')
 nexent_skills_skill_manager_mock = types.ModuleType('nexent.skills.skill_manager')
+nexent_utils_mock = types.ModuleType('nexent.utils')
+atomic_file_spec = importlib.util.spec_from_file_location(
+    'nexent.utils.atomic_file',
+    os.path.join(os.path.dirname(__file__), '../../../sdk/nexent/utils/atomic_file.py'),
+)
+nexent_utils_atomic_file_mock = importlib.util.module_from_spec(atomic_file_spec)
+atomic_file_spec.loader.exec_module(nexent_utils_atomic_file_mock)
 nexent_storage_mock = types.ModuleType('nexent.storage')
 nexent_storage_storage_client_factory_mock = types.ModuleType('nexent.storage.storage_client_factory')
 nexent_storage_minio_config_mock = types.ModuleType('nexent.storage.minio_config')
@@ -68,6 +76,8 @@ sys.modules['nexent.core.agents.agent_model'] = nexent_core_agents_agent_model_m
 sys.modules['nexent.skills'] = nexent_skills_mock
 sys.modules['nexent.skills.skill_loader'] = nexent_skills_skill_loader_mock
 sys.modules['nexent.skills.skill_manager'] = nexent_skills_skill_manager_mock
+sys.modules['nexent.utils'] = nexent_utils_mock
+sys.modules['nexent.utils.atomic_file'] = nexent_utils_atomic_file_mock
 sys.modules['nexent.storage'] = nexent_storage_mock
 sys.modules['nexent.storage.storage_client_factory'] = nexent_storage_storage_client_factory_mock
 sys.modules['nexent.storage.minio_config'] = nexent_storage_minio_config_mock
@@ -2595,7 +2605,7 @@ class TestUploadZipFiles:
         service.skill_manager = mock_manager
 
         with patch('os.makedirs'):
-            with patch('builtins.open', mock_open()):
+            with patch('backend.services.skill_service.atomic_write_bytes'):
                 service._upload_zip_files(zip_buffer.getvalue(), "new_name", "old_name", tenant_id=None)
 
     def test_upload_zip_with_nested_files(self, mocker):
@@ -2613,7 +2623,7 @@ class TestUploadZipFiles:
         service.skill_manager = mock_manager
 
         with patch('os.makedirs'):
-            with patch('builtins.open', mock_open()):
+            with patch('backend.services.skill_service.atomic_write_bytes'):
                 service._upload_zip_files(zip_buffer.getvalue(), "nested", "nested", tenant_id=None)
 
     def test_upload_zip_handles_nested_directories(self, mocker):
@@ -2631,7 +2641,7 @@ class TestUploadZipFiles:
         service.skill_manager = mock_manager
 
         with patch('os.makedirs'):
-            with patch('builtins.open', mock_open()):
+            with patch('backend.services.skill_service.atomic_write_bytes'):
                 service._upload_zip_files(zip_buffer.getvalue(), "nested", "nested", tenant_id=None)
 
 
@@ -2971,14 +2981,17 @@ class TestWriteSkillParamsWithRealUtils:
 
     def test_write_params_with_nested_dict(self, mocker):
         with patch('os.makedirs'):
-            with patch('builtins.open', mock_open()) as mock_file:
+            with patch('backend.services.skill_service.atomic_write_text') as atomic_write:
                 with patch('backend.services.skill_service._local_skill_config_yaml_path', return_value="/tmp/skill/config.yaml"):
                     _write_skill_params_to_local_config_yaml(
                         "skill",
                         {"nested": {"key": "value"}},
                         "/tmp"
                     )
-                    mock_file().write.assert_called()
+                    atomic_write.assert_called_once_with(
+                        "/tmp/skill/config.yaml",
+                        "params: {}",
+                    )
 
 
 # ===== Service Methods Additional Edge Cases =====
@@ -6406,3 +6419,381 @@ class TestLocalSkillPathSecurity:
 
         with pytest.raises(skill_service.ForbiddenError, match="Unsafe local skill path"):
             service.get_skill_file_content("safe-skill", "README.md")
+
+
+class TestMultiReplicaSkillCoverage:
+    """Cover ZIP and schema paths used by shared skill storage."""
+
+    def test_commented_yaml_and_local_script_scan_cover_nested_values(self, tmp_path):
+        parsed = skill_service._parse_yaml_with_ruamel_merge_eol_comments(
+            """
+# Root tooltip
+enabled: true # Enabled tooltip
+items:
+  - first # First item
+  # Second tooltip
+  - second
+nested:
+  value: 3 # Number tooltip
+"""
+        )
+        assert parsed["enabled"].startswith("true")
+        assert parsed["items"][0].startswith("first")
+        assert parsed["items"][1].startswith("second")
+        assert parsed["nested"]["value"].startswith("3")
+
+        plain = skill_service._parse_yaml_ruamel_plain(
+            "enabled: true\nitems:\n  - first\n  - second\n"
+        )
+        assert plain == {"enabled": True, "items": ["first", "second"]}
+
+        scripts_dir = tmp_path / "scripts"
+        scripts_dir.mkdir()
+        (scripts_dir / "run.py").write_text(
+            """
+import argparse
+parser = argparse.ArgumentParser()
+parser.add_argument("--count", type=int, required=True, help="Item count")
+parser.add_argument("--ratio", type=float)
+parser.add_argument("--enabled", type=bool, default=True)
+parser.add_argument("--count", type=int)
+parser.add_argument("-h", action="store_true")
+""",
+            encoding="utf-8",
+        )
+        (scripts_dir / "broken.py").write_text("def broken(:", encoding="utf-8")
+        (scripts_dir / "_private.py").write_text(
+            "parser.add_argument('--private')",
+            encoding="utf-8",
+        )
+        (scripts_dir / "notes.txt").write_text("ignored", encoding="utf-8")
+
+        inputs = skill_service._get_skill_inputs_from_code(str(scripts_dir))
+        assert [item["name"] for item in inputs] == ["count", "ratio", "enabled"]
+        assert inputs[0] == {
+            "name": "count",
+            "type": "number",
+            "required": True,
+            "description_en": "Item count",
+        }
+        assert inputs[2]["type"] == "boolean"
+        assert skill_service._get_skill_inputs_from_code(str(tmp_path / "missing")) == []
+        assert skill_service._parse_yaml_ruamel_plain("") == {}
+        assert skill_service._parse_yaml_with_ruamel_merge_eol_comments("") == {}
+
+    def test_schema_and_script_inputs_are_read_from_zip(self):
+        import zipfile
+
+        schema = skill_service._parse_skill_schema_from_yaml_bytes(
+            json.dumps(
+                {
+                    "query": {
+                        "type": "string",
+                        "required": True,
+                        "description_en": "Search query",
+                        "description_zh": "搜索词",
+                    },
+                    "ignored": "not-a-mapping",
+                }
+            ).encode("utf-8")
+        )
+        assert schema == [
+            {
+                "name": "query",
+                "type": "string",
+                "required": True,
+                "description_en": "Search query",
+                "description_zh": "搜索词",
+                "depends_on": None,
+            }
+        ]
+        assert skill_service._parse_skill_schema_from_yaml_bytes(b"") == []
+        assert skill_service._parse_skill_schema_from_yaml_bytes(b"[]") == []
+
+        archive = io.BytesIO()
+        with zipfile.ZipFile(archive, "w") as zf:
+            zf.writestr(
+                "demo/scripts/run.py",
+                """
+import argparse
+parser = argparse.ArgumentParser()
+parser.add_argument("--query", type=str, required=True, help="Search query")
+parser.add_argument("--query", type=str, help="Duplicate")
+parser.add_argument("-h", action="store_true")
+""",
+            )
+            zf.writestr("other/scripts/ignored.py", "parser.add_argument('--other')")
+            zf.writestr("demo/scripts/broken.py", "def broken(:")
+            zf.writestr("demo/scripts/binary.py", b"\xff\xfe")
+
+        inputs = skill_service._get_skill_inputs_from_zip(
+            archive.getvalue(),
+            preferred_skill_root="demo",
+        )
+        assert [item["name"] for item in inputs] == ["query"]
+        assert inputs[0]["required"] is True
+        assert skill_service._get_skill_inputs_from_zip(b"not-a-zip") == []
+
+    def test_create_skill_from_zip_bytes_persists_schema_config_and_atomic_files(
+        self,
+        mocker,
+    ):
+        import zipfile
+
+        archive = io.BytesIO()
+        with zipfile.ZipFile(archive, "w") as zf:
+            zf.writestr("demo/SKILL.md", "---\nname: demo\n---\nDemo body")
+            zf.writestr(
+                "demo/config/schema.yaml",
+                json.dumps(
+                    {
+                        "query": {
+                            "type": "string",
+                            "required": True,
+                            "description": "Search query",
+                        }
+                    }
+                ),
+            )
+            zf.writestr("demo/config/config.yaml", json.dumps({"query": "default"}))
+            zf.writestr("demo/scripts/run.py", "parser.add_argument('--fallback')")
+
+        manager = MagicMock()
+        service = SkillService(skill_manager=manager, tenant_id="tenant-1")
+        service._upload_zip_files = MagicMock()
+        service._enrich_configs_from_yaml = lambda value: value
+        mocker.patch.object(
+            skill_service.SkillLoader,
+            "parse",
+            return_value={
+                "description": "Demo skill",
+                "content": "Demo body",
+                "tags": ["demo"],
+                "allowed_tools": ["search"],
+            },
+        )
+        mocker.patch(
+            "backend.services.skill_service.skill_db.get_skill_by_name",
+            return_value=None,
+        )
+        mocker.patch(
+            "backend.services.skill_service.skill_db.get_tool_ids_by_names",
+            return_value=[7],
+        )
+        create = mocker.patch(
+            "backend.services.skill_service.skill_db.create_skill",
+            side_effect=lambda value, tenant_id: {"skill_id": 9, **value},
+        )
+
+        result = service.create_skill_from_zip_bytes(
+            archive.getvalue(),
+            source="import",
+            user_id="user-1",
+            tenant_id="tenant-1",
+            ingroup_permission="READ_ONLY",
+        )
+
+        assert result["name"] == "demo"
+        assert result["tool_ids"] == [7]
+        assert result["config_schemas"][0]["name"] == "query"
+        assert result["config_values"] == {"query": "default"}
+        assert result["created_by"] == "user-1"
+        assert result["updated_by"] == "user-1"
+        assert result["ingroup_permission"] == "READ_ONLY"
+        create.assert_called_once()
+        manager.save_skill.assert_called_once()
+        service._upload_zip_files.assert_called_once_with(
+            archive.getvalue(),
+            "demo",
+            "demo",
+            tenant_id="tenant-1",
+        )
+
+    def test_create_skill_from_zip_bytes_uses_script_schema_fallback(self, mocker):
+        archive = self._zip_bytes(
+            {
+                "demo/SKILL.md": "---\nname: demo\n---\nbody",
+                "demo/scripts/run.py": (
+                    "parser.add_argument('--count', type=int, required=True, "
+                    "help='Item count')"
+                ),
+            }
+        )
+        manager = MagicMock()
+        service = SkillService(skill_manager=manager, tenant_id="tenant-1")
+        service._upload_zip_files = MagicMock()
+        service._enrich_configs_from_yaml = lambda value: value
+        mocker.patch.object(
+            skill_service.SkillLoader,
+            "parse",
+            return_value={"description": "Demo", "content": "body"},
+        )
+        mocker.patch(
+            "backend.services.skill_service.skill_db.get_skill_by_name",
+            return_value=None,
+        )
+        mocker.patch(
+            "backend.services.skill_service.skill_db.create_skill",
+            side_effect=lambda value, tenant_id: value,
+        )
+
+        result = service.create_skill_from_zip_bytes(
+            archive,
+            tenant_id="tenant-1",
+            skip_duplicate_check=True,
+        )
+
+        assert result["config_schemas"] == [
+            {
+                "name": "count",
+                "type": "number",
+                "required": True,
+                "description_en": "Item count",
+            }
+        ]
+        assert "config_values" not in result
+
+    @pytest.mark.parametrize(
+        ("archive_builder", "skill_name", "message"),
+        [
+            (lambda: b"not-a-zip", None, "Invalid ZIP archive"),
+            (
+                lambda: TestMultiReplicaSkillCoverage._zip_bytes(
+                    {"README.md": "missing skill metadata"}
+                ),
+                None,
+                "SKILL.md not found",
+            ),
+            (
+                lambda: TestMultiReplicaSkillCoverage._zip_bytes(
+                    {"SKILL.md": "---\nname: demo\n---\nbody"}
+                ),
+                None,
+                "Skill name is required",
+            ),
+        ],
+    )
+    def test_create_skill_from_zip_bytes_rejects_invalid_archives(
+        self,
+        archive_builder,
+        skill_name,
+        message,
+    ):
+        service = SkillService(skill_manager=MagicMock(), tenant_id="tenant-1")
+        with pytest.raises(skill_service.SkillException, match=message):
+            service.create_skill_from_zip_bytes(
+                archive_builder(),
+                skill_name=skill_name,
+                tenant_id="tenant-1",
+            )
+
+    def test_create_skill_from_zip_bytes_rejects_duplicates(self, mocker):
+        archive = self._zip_bytes(
+            {"demo/SKILL.md": "---\nname: demo\n---\nbody"}
+        )
+        mocker.patch(
+            "backend.services.skill_service.skill_db.get_skill_by_name",
+            return_value={"skill_id": 1},
+        )
+        service = SkillService(skill_manager=MagicMock(), tenant_id="tenant-1")
+
+        with pytest.raises(skill_service.SkillException, match="already exists"):
+            service.create_skill_from_zip_bytes(archive, tenant_id="tenant-1")
+
+    def test_install_official_zip_skills_handles_all_outcomes(self, mocker, tmp_path):
+        for name in ("existing", "created", "broken"):
+            (tmp_path / f"{name}.zip").write_bytes(b"zip-content")
+
+        mocker.patch(
+            "backend.services.skill_service.OFFICIAL_SKILLS_ZIP_PATH",
+            str(tmp_path),
+        )
+        mocker.patch(
+            "backend.services.skill_service.skill_db.get_skill_by_name",
+            side_effect=lambda name, tenant_id: {"skill_id": 1} if name == "existing" else None,
+        )
+
+        def create_from_file(_service, **kwargs):
+            if kwargs["skill_name"] == "broken":
+                raise RuntimeError("broken archive")
+            return {"name": kwargs["skill_name"]}
+
+        mocker.patch.object(SkillService, "create_skill_from_file", create_from_file)
+
+        assert skill_service.install_skills_from_zip_for_tenant(
+            ["missing", "existing", "created", "broken"],
+            "tenant-1",
+            user_id="user-1",
+            locale="zh",
+        ) == ["existing", "created"]
+        assert skill_service.install_skills_from_zip_for_tenant([], "tenant-1") == []
+
+        missing_dir = tmp_path / "missing-dir"
+        mocker.patch(
+            "backend.services.skill_service.OFFICIAL_SKILLS_ZIP_PATH",
+            str(missing_dir),
+        )
+        assert skill_service.install_skills_from_zip_for_tenant(["created"], "tenant-1") == []
+
+    def test_install_skill_templates_covers_empty_invalid_and_failed_records(self, mocker):
+        assert skill_service.install_skills_for_tenant([], "tenant-1") == []
+
+        mocker.patch(
+            "backend.services.skill_service.skill_db.get_skill_by_id_global",
+            side_effect=[
+                {"description": "missing name"},
+                {"name": "missing-id"},
+                {"name": "failed-create"},
+            ],
+        )
+        mocker.patch(
+            "backend.services.skill_service.skill_db.get_skill_by_name",
+            return_value=None,
+        )
+        mocker.patch(
+            "backend.services.skill_service.skill_db.create_skill",
+            side_effect=[{}, RuntimeError("database failure")],
+        )
+
+        assert skill_service.install_skills_for_tenant(
+            [1, 2, 3],
+            "tenant-1",
+            "user-1",
+        ) == []
+
+    def test_official_skill_status_handles_missing_unreadable_and_empty_names(
+        self,
+        mocker,
+        tmp_path,
+    ):
+        missing_dir = tmp_path / "missing"
+        mocker.patch(
+            "backend.services.skill_service.OFFICIAL_SKILLS_ZIP_PATH",
+            str(missing_dir),
+        )
+        assert skill_service.get_official_skills_with_status("tenant-1") == []
+
+        mocker.patch(
+            "backend.services.skill_service.OFFICIAL_SKILLS_ZIP_PATH",
+            str(tmp_path),
+        )
+        mocker.patch("backend.services.skill_service.os.listdir", side_effect=OSError("unreadable"))
+        assert skill_service.get_official_skills_with_status("tenant-1") == []
+
+        mocker.stopall()
+        mocker.patch(
+            "backend.services.skill_service.OFFICIAL_SKILLS_ZIP_PATH",
+            str(tmp_path),
+        )
+        (tmp_path / ".zip").write_bytes(b"empty-name")
+        assert skill_service.get_official_skills_with_status() == []
+
+    @staticmethod
+    def _zip_bytes(files):
+        import zipfile
+
+        archive = io.BytesIO()
+        with zipfile.ZipFile(archive, "w") as zf:
+            for name, content in files.items():
+                zf.writestr(name, content)
+        return archive.getvalue()

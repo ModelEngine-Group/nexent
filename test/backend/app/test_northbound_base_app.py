@@ -4,11 +4,11 @@ Unit tests for northbound_base_app module.
 Tests cover FastAPI application configuration, CORS middleware, router inclusion,
 and basic A2A endpoint routing and error handling.
 """
-import asyncio
 import os
 import sys
 import types
 import unittest
+import asyncio
 from dataclasses import dataclass
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -29,6 +29,11 @@ sys.path.insert(0, backend_dir)
 services_pkg = types.ModuleType("services")
 services_pkg.__path__ = [os.path.join(backend_dir, "services")]
 sys.modules['services'] = services_pkg
+
+runtime_state_module = types.ModuleType("services.runtime_state_service")
+runtime_state_module.runtime_state_service = MagicMock()
+runtime_state_module.runtime_state_service.ping_async = AsyncMock(return_value=True)
+sys.modules["services.runtime_state_service"] = runtime_state_module
 
 runtime_agent_client_module = types.ModuleType("services.runtime_agent_client")
 
@@ -67,6 +72,8 @@ northbound_service_module.NorthboundContext = NorthboundContext
 sys.modules['services.northbound_service'] = northbound_service_module
 
 # services.a2a_server_service - stub with a2a_server_service object and exceptions
+from unittest.mock import AsyncMock, MagicMock
+
 a2a_service_module = types.ModuleType("services.a2a_server_service")
 a2a_service_module.EndpointNotFoundError = type("EndpointNotFoundError", (Exception,), {})
 a2a_service_module.AgentNotEnabledError = type("AgentNotEnabledError", (Exception,), {})
@@ -345,12 +352,15 @@ class TestNorthboundBaseApp(unittest.TestCase):
         paths = app.openapi()["paths"]
         self.assertIn("/dummy", paths)
 
-    def test_lifespan_owns_runtime_client(self):
-        """Northbound lifespan must start and close the Runtime proxy client."""
+    def test_lifespan_requires_redis_ping(self):
+        """Northbound startup must verify Redis before serving requests."""
+        ping = runtime_state_module.runtime_state_service.ping_async
         runtime_start = runtime_agent_client_module.runtime_agent_client.start
         runtime_close = runtime_agent_client_module.runtime_agent_client.close
+        ping.reset_mock()
         runtime_start.reset_mock()
         runtime_close.reset_mock()
+        ping.return_value = True
 
         async def run_lifespan():
             async with northbound_base_app_module.northbound_lifespan(app):
@@ -358,8 +368,23 @@ class TestNorthboundBaseApp(unittest.TestCase):
 
         asyncio.run(run_lifespan())
 
+        ping.assert_awaited_once_with()
         runtime_start.assert_awaited_once_with()
         runtime_close.assert_awaited_once_with()
+
+    def test_lifespan_propagates_redis_ping_failure(self):
+        """A failed Redis startup check must prevent Northbound startup."""
+        ping = runtime_state_module.runtime_state_service.ping_async
+        ping.reset_mock()
+        ping.side_effect = RuntimeError("redis down")
+
+        async def run_lifespan():
+            async with northbound_base_app_module.northbound_lifespan(app):
+                pass
+
+        with self.assertRaisesRegex(RuntimeError, "redis down"):
+            asyncio.run(run_lifespan())
+        ping.side_effect = None
 
     def test_runtime_service_exception_handler_preserves_proxy_response(self):
         """Runtime status, body, and content type must survive Northbound handling."""

@@ -5,6 +5,7 @@ import os
 from io import BytesIO
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+from uuid import uuid4
 
 import httpx
 from fastapi import UploadFile
@@ -50,7 +51,7 @@ from nexent.core.models import OpenAILongContextModel
 
 # Create upload directory
 upload_dir = Path(UPLOAD_FOLDER)
-upload_dir.mkdir(exist_ok=True)
+upload_dir.mkdir(parents=True, exist_ok=True)
 upload_semaphore = asyncio.Semaphore(MAX_CONCURRENT_UPLOADS)
 
 # Per-file locks prevent duplicate conversions of the same file
@@ -675,7 +676,9 @@ async def resolve_preview_file(object_name: str) -> Tuple[str, str, int]:
             '.', 1)[0] if '.' in object_name else object_name
         hash_suffix = hashlib.md5(object_name.encode()).hexdigest()[:8]
         pdf_object_name = f"preview/converted/{name_without_ext}_{hash_suffix}.pdf"
-        temp_pdf_object_name = f"preview/converting/{name_without_ext}_{hash_suffix}.pdf.tmp"
+        temp_pdf_object_name = (
+            f"preview/converting/{name_without_ext}_{hash_suffix}_{uuid4().hex}.pdf.tmp"
+        )
 
         # Trigger conversion if cache is missing or corrupted
         if not _is_pdf_cache_valid(pdf_object_name):

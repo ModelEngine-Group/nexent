@@ -2,14 +2,14 @@
 FastAPI application factory with common configurations and exception handlers.
 """
 import logging
-from contextlib import AbstractAsyncContextManager
-from typing import Callable
+from typing import Any, Optional
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from consts.exceptions import AppException, QuotaExceededError
+from services.health_service import install_health_contract
 
 
 logger = logging.getLogger(__name__)
@@ -23,7 +23,7 @@ def create_app(
     cors_origins: list = None,
     cors_methods: list = None,
     enable_monitoring: bool = True,
-    lifespan: Callable[..., AbstractAsyncContextManager] | None = None,
+    lifespan: Optional[Any] = None,
 ) -> FastAPI:
     """
     Create a FastAPI application with common configurations.
@@ -60,6 +60,9 @@ def create_app(
 
     # Register exception handlers
     register_exception_handlers(app)
+
+    # Process health endpoints never poll external dependencies.
+    install_health_contract(app)
 
     # Initialize monitoring if enabled
     if enable_monitoring:

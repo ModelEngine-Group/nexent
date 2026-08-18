@@ -14,6 +14,7 @@ import { useModelList } from "@/hooks/model/useModelList";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { conversationService } from "@/services/conversationService";
+import { AgentRunError } from "@/lib/agentRunError";
 import { configService } from "@/services/configService";
 import {
   analyzeAutomationMessage,
@@ -943,12 +944,19 @@ export function ChatInterface() {
                 if (title) {
                   conversationManagement.setConversationTitle(title);
                 }
-                void conversationManagement.fetchConversationList().catch((error) => {
-                  log.error(t("chatInterface.refreshDialogListFailedButContinue"), error);
-                });
+                void conversationManagement
+                  .fetchConversationList()
+                  .catch((error) => {
+                    log.error(
+                      t("chatInterface.refreshDialogListFailedButContinue"),
+                      error
+                    );
+                  });
               })
               .catch((error) => {
-                titleGenerationConversationIdsRef.current.delete(conversationId);
+                titleGenerationConversationIdsRef.current.delete(
+                  conversationId
+                );
                 log.error(t("chatStreamHandler.generateTitleFailed"), error);
               });
           }
@@ -1034,7 +1042,13 @@ export function ChatInterface() {
           });
         } else {
           log.error(t("chatInterface.errorLabel"), error);
-          const errorMessage = t("chatInterface.errorProcessingRequest");
+          const errorMessage =
+            error instanceof AgentRunError
+              ? error.message
+              : t("chatInterface.errorProcessingRequest");
+          if (error instanceof AgentRunError) {
+            message.error(errorMessage);
+          }
           setSessionMessages((prev) => {
             const newMessages = { ...prev };
             const lastMsg =
@@ -1233,6 +1247,38 @@ export function ChatInterface() {
         lastUnitIndex: lastUnit?.unit_index ?? -1,
       };
 
+      // The conversation detail keeps the in-flight assistant message in
+      // `streaming_message`, outside the persisted `message` list. Add a
+      // placeholder before replaying Redis events so resumed chunks always
+      // have an assistant message to update.
+      setSessionMessages((prev) => {
+        const messages = prev[conversationId] || [];
+        const hasStreamingAssistant = messages.some(
+          (item) =>
+            item.role === ROLE_ASSISTANT &&
+            item.message_id === streamingMessage.message_id
+        );
+        if (hasStreamingAssistant) return prev;
+
+        return {
+          ...prev,
+          [conversationId]: [
+            ...messages,
+            {
+              id: `assistant-resume-${streamingMessage.message_id}`,
+              role: ROLE_ASSISTANT,
+              message_id: streamingMessage.message_id,
+              content: "",
+              timestamp: new Date(),
+              isComplete: false,
+              steps: [],
+              attachments: [],
+              images: [],
+            },
+          ],
+        };
+      });
+
       // Create new AbortController for the resume request
       const controller = new AbortController();
       conversationControllersRef.current.set(conversationId, controller);
@@ -1295,6 +1341,9 @@ export function ChatInterface() {
         );
       } catch (error) {
         log.error(t("chatInterface.resumeStreamFailed"), error);
+        if (error instanceof AgentRunError) {
+          message.error(error.message);
+        }
       } finally {
         conversationControllersRef.current.delete(conversationId);
         setStreamingConversations((prev) => {

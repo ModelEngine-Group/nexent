@@ -6,6 +6,7 @@ for FastAPI application factory with common configurations and exception handler
 """
 import sys
 import os
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
@@ -17,7 +18,7 @@ sys.path.insert(0, backend_path)
 
 # Import AppException from consts.exceptions where it is defined
 from consts.error_code import ErrorCode
-from consts.exceptions import AppException
+from consts.exceptions import AppException, DistributedStateUnavailable
 from backend.apps.app_factory import create_app, register_exception_handlers
 
 class TestCreateApp:
@@ -101,6 +102,22 @@ class TestCreateApp:
         assert app.description == "Full description"
         assert app.version == "3.0.0"
         assert app.root_path == "/v3"
+
+    def test_create_app_uses_lifespan(self):
+        """The factory should pass the application lifespan to FastAPI."""
+        events = []
+
+        @asynccontextmanager
+        async def lifespan(_app):
+            events.append("start")
+            yield
+            events.append("stop")
+
+        app = create_app(lifespan=lifespan, enable_monitoring=False)
+        with TestClient(app):
+            assert events == ["start"]
+
+        assert events == ["start", "stop"]
 
 
 class TestRegisterExceptionHandlers:
@@ -311,6 +328,20 @@ class TestExceptionMappingToHttpStatus:
         response = client.get("/validation-error")
 
         assert response.status_code == 400
+
+    def test_distributed_state_unavailable_maps_to_503(self):
+        """Required Redis failures should retain their public code and HTTP status."""
+        app = FastAPI()
+        register_exception_handlers(app)
+
+        @app.get("/distributed-state")
+        def distributed_state():
+            raise DistributedStateUnavailable("redis down")
+
+        response = TestClient(app, raise_server_exceptions=False).get("/distributed-state")
+
+        assert response.status_code == 503
+        assert response.json()["code"] == "distributed_state_unavailable"
 
     def test_parameter_invalid_maps_to_400(self):
         """Test PARAMETER_INVALID maps to 400."""
@@ -901,9 +932,7 @@ class TestGenericHandlerAppExceptionDelegation:
         # Create a request-like object and an AppException
         exc = AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Delegated error")
 
-        response = asyncio.get_event_loop().run_until_complete(
-            generic_handler(None, exc)
-        )
+        response = asyncio.run(generic_handler(None, exc))
 
         assert response.status_code == 400
         body = __import__("json").loads(response.body)

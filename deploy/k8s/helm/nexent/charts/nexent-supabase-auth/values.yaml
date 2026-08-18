@@ -1,5 +1,9 @@
 replicaCount: 1
 
+service:
+  type: ClusterIP
+  nodePort: null
+
 image:
   repository: supabase/gotrue
   tag: v2.170.0

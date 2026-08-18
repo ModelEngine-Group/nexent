@@ -402,6 +402,41 @@ async def test_agent_run_api_maps_forbidden_conversation_to_403(mocker):
 
 
 @pytest.mark.asyncio
+async def test_agent_run_api_preserves_distributed_state_error(mocker):
+    """The route must leave distributed-state failures for the global 503 handler."""
+    from consts.exceptions import DistributedStateUnavailable
+    from consts.model import AgentRequest
+    from starlette.requests import Request
+
+    from apps.agent_app import agent_run_api
+
+    failure = DistributedStateUnavailable("redis down")
+    mock_run_agent_stream = mocker.patch(
+        "apps.agent_app.run_agent_stream",
+        new_callable=AsyncMock,
+        side_effect=failure,
+    )
+    request = AgentRequest(
+        agent_id=1,
+        conversation_id=123,
+        query="test query",
+        history=[],
+        minio_files=[],
+        is_debug=False,
+    )
+
+    with pytest.raises(DistributedStateUnavailable, match="redis down"):
+        await agent_run_api(
+            agent_request=request,
+            http_request=Request({"type": "http", "headers": []}),
+            authorization="Bearer token",
+            resume=False,
+        )
+
+    mock_run_agent_stream.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_agent_run_api_maps_scope_validation_to_422(mocker):
     from consts.exceptions import ValidationError
     from consts.model import AgentRequest
@@ -409,7 +444,7 @@ async def test_agent_run_api_maps_scope_validation_to_422(mocker):
 
     from apps.agent_app import agent_run_api
 
-    mock_run_agent_stream = mocker.patch(
+    mocker.patch(
         "apps.agent_app.run_agent_stream",
         new_callable=AsyncMock,
         side_effect=ValidationError("Selected knowledge bases are incompatible"),

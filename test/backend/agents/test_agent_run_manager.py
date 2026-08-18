@@ -10,6 +10,7 @@ class TestAgentRunManager:
         self.manager = AgentRunManager()
         # Clear any existing state
         self.manager.agent_runs.clear()
+        self.manager.execution_ids.clear()
 
     def test_singleton_pattern(self):
         """Test that AgentRunManager is a singleton"""
@@ -151,21 +152,13 @@ class TestAgentRunManager:
         assert result is True
         mock_stop_event.set.assert_called_once()
 
-    def test_stop_agent_run_nonexistent(self, monkeypatch):
-        """Return false when neither a local run nor a remote signal exists."""
-        monkeypatch.setattr(
-            "backend.agents.agent_run_manager.runtime_state_service.set_cancel_signal",
-            lambda **_kwargs: False,
-        )
+    def test_stop_agent_run_nonexistent(self):
+        """Return false when no local run exists."""
         result = self.manager.stop_agent_run(999, "nonexistent_user")
         assert result is False
 
-    def test_stop_agent_run_wrong_user(self, monkeypatch):
+    def test_stop_agent_run_wrong_user(self):
         """A different user cannot stop the locally registered run."""
-        monkeypatch.setattr(
-            "backend.agents.agent_run_manager.runtime_state_service.set_cancel_signal",
-            lambda **_kwargs: False,
-        )
         conversation_id = 123
         user1_id = "user1"
         user2_id = "user2"
@@ -178,14 +171,27 @@ class TestAgentRunManager:
         result = self.manager.stop_agent_run(conversation_id, user2_id)
         assert result is False
 
-    def test_stop_agent_run_returns_remote_signal_result(self, monkeypatch):
-        """A remote cancellation signal is a successful stop request."""
-        monkeypatch.setattr(
-            "backend.agents.agent_run_manager.runtime_state_service.set_cancel_signal",
-            lambda **_kwargs: True,
-        )
+    def test_old_execution_cannot_unregister_new_local_run(self):
+        """An old execution finalizer must not remove a newer local run."""
+        first_run = Mock()
+        second_run = Mock()
+        self.manager.register_agent_run(123, first_run, "user1", execution_id="first")
+        self.manager.register_agent_run(123, second_run, "user1", execution_id="second")
 
-        assert self.manager.stop_agent_run(999, "remote_user") is True
+        assert self.manager.unregister_agent_run(123, "user1", execution_id="first") is False
+        assert self.manager.get_agent_run_info(123, "user1") is second_run
+
+        assert self.manager.unregister_agent_run(123, "user1", execution_id="second") is True
+        assert self.manager.get_agent_run_info(123, "user1") is None
+
+    def test_executionless_run_clears_old_fence_and_rejects_stale_cleanup(self):
+        """A later executionless run is not removed by an older fenced finalizer."""
+        self.manager.register_agent_run(123, Mock(), "user1", execution_id="old")
+        current_run = Mock()
+        self.manager.register_agent_run(123, current_run, "user1")
+
+        assert self.manager.unregister_agent_run(123, "user1", execution_id="old") is False
+        assert self.manager.get_agent_run_info(123, "user1") is current_run
 
     def test_thread_safety(self):
         """Test thread safety of the manager"""

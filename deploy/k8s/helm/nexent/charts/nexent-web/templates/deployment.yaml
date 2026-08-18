@@ -1,3 +1,6 @@
+{{- $global := default dict .Values.global -}}
+{{- $sharedStorage := default dict $global.sharedStorage -}}
+{{- $workspaceStorage := default dict $sharedStorage.workspace -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -22,6 +25,15 @@ spec:
         checksum/nexent-env: {{ dig "rolloutChecksums" "env" "" .Values.global | quote }}
         checksum/nexent-web-image: {{ dig "rolloutChecksums" "webImage" "" .Values.global | quote }}
     spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: nexent-web
+                topologyKey: kubernetes.io/hostname
       containers:
         - name: nexent-web
           image: "{{ .Values.images.web.repository }}:{{ .Values.images.web.tag }}"
@@ -55,6 +67,9 @@ spec:
               value: {{ .Values.config.sseProxyTimeoutMs | quote }}
             - name: MODEL_ENGINE_ENABLED
               value: {{ .Values.config.modelEngine.enabled | quote }}
+          volumeMounts:
+            - name: nexent-workspace
+              mountPath: /mnt/nexent
           resources:
             requests:
               memory: {{ .Values.resources.web.requests.memory }}
@@ -64,13 +79,17 @@ spec:
               cpu: {{ .Values.resources.web.limits.cpu }}
           livenessProbe:
             httpGet:
-              path: /
+              path: /health/live
               port: 3000
             initialDelaySeconds: 10
             periodSeconds: 10
           readinessProbe:
             httpGet:
-              path: /
+              path: /health/ready
               port: 3000
             initialDelaySeconds: 5
             periodSeconds: 5
+      volumes:
+        - name: nexent-workspace
+          persistentVolumeClaim:
+            claimName: {{ default "nexent-workspace" $workspaceStorage.existingClaim }}

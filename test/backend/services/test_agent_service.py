@@ -117,14 +117,20 @@ sys.modules['services'] = services_module
 
 runtime_state_service_module = types.ModuleType("services.runtime_state_service")
 runtime_state_service_mock = MagicMock()
-runtime_state_service_mock.enabled = False
 runtime_state_service_mock.is_cancelled_async = AsyncMock(return_value=False)
 runtime_state_service_mock.get_run_state_async = AsyncMock(return_value={})
 runtime_state_service_mock.read_stream_events_async = AsyncMock(return_value=[])
 runtime_state_service_mock.wait_for_stream_events_async = AsyncMock(return_value=[])
 runtime_state_service_mock.get_stream_status_async = AsyncMock(return_value={})
-runtime_state_service_mock.reset_stream_async = AsyncMock(return_value=None)
+runtime_state_service_mock.register_run_async = AsyncMock(return_value=None)
 runtime_state_service_module.runtime_state_service = runtime_state_service_mock
+
+
+class MockRuntimeExecutionSuperseded(Exception):
+    """Mirror the runtime-state execution fence exception for isolated imports."""
+
+
+runtime_state_service_module.RuntimeExecutionSuperseded = MockRuntimeExecutionSuperseded
 sys.modules['services.runtime_state_service'] = runtime_state_service_module
 
 conversation_management_service_mock = MagicMock()
@@ -153,6 +159,9 @@ class AsyncChannelMock:
     async def publish(self, *args, **kwargs):
         pass
     async def close(self, *args, **kwargs):
+        pass
+
+    async def interrupt(self, *args, **kwargs):
         pass
 
 streaming_channel_manager_mock = MagicMock()
@@ -4293,11 +4302,9 @@ async def test_run_agent_stream_rejects_inaccessible_conversation_before_side_ef
     access_lookup = MagicMock(return_value=None)
     update_agent = MagicMock()
     save_user_message = MagicMock()
-    reset_stream = AsyncMock()
     monkeypatch.setattr(agent_service, "get_conversation_service", access_lookup)
     monkeypatch.setattr(agent_service, "update_conversation_agent_id_service", update_agent)
     monkeypatch.setattr(agent_service, "save_messages", save_user_message)
-    monkeypatch.setattr(agent_service.runtime_state_service, "reset_stream_async", reset_stream)
 
     with pytest.raises(agent_service.ForbiddenError, match="not accessible"):
         await run_agent_stream(mock_agent_request, mock_http_request, "Bearer token")
@@ -4309,7 +4316,6 @@ async def test_run_agent_stream_rejects_inaccessible_conversation_before_side_ef
     )
     update_agent.assert_not_called()
     save_user_message.assert_not_called()
-    reset_stream.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -4477,33 +4483,28 @@ async def test_run_agent_stream_sanitizes_uncaught_stream_exception(
 
 
 @patch('backend.services.agent_service.agent_run_manager')
-@patch('backend.services.agent_service.preprocess_manager')
-def test_stop_agent_tasks(mock_preprocess_manager, mock_agent_run_manager):
-    """Test stop_agent_tasks function."""
-    # Test both stopped
+@patch('backend.services.agent_service.runtime_state_service')
+def test_stop_agent_tasks_contract(mock_runtime_state, mock_agent_run_manager):
+    """stop_agent_tasks combines Redis and local execution stop results."""
     mock_agent_run_manager.stop_agent_run.return_value = True
-    mock_preprocess_manager.stop_preprocess_tasks.return_value = True
+    mock_runtime_state.set_cancel_signal.return_value = True
 
-    result = stop_agent_tasks(123, "test_user")
-    assert result["status"] == "success"
-    assert "successfully stopped agent run and preprocess tasks" in result["message"]
-
-    mock_agent_run_manager.stop_agent_run.assert_called_once_with(
-        123, "test_user")
-
-    # Test only agent stopped
-    mock_agent_run_manager.stop_agent_run.return_value = True
-    mock_preprocess_manager.stop_preprocess_tasks.return_value = False
     result = stop_agent_tasks(123, "test_user")
     assert result["status"] == "success"
     assert "successfully stopped agent run" in result["message"]
 
-    # Test neither stopped
+    mock_agent_run_manager.stop_agent_run.assert_called_once_with(
+        123, "test_user")
+    mock_runtime_state.set_cancel_signal.assert_called_once_with(
+        user_id="test_user",
+        conversation_id=123,
+    )
+
+    mock_runtime_state.set_cancel_signal.return_value = False
     mock_agent_run_manager.stop_agent_run.return_value = False
-    mock_preprocess_manager.stop_preprocess_tasks.return_value = False
     result = stop_agent_tasks(123, "test_user")
     assert result["status"] == "success"
-    assert "no running agent or preprocess tasks found" in result["message"]
+    assert "no running agent found" in result["message"]
     assert result.get("already_stopped") is True
 
 
@@ -10274,6 +10275,18 @@ def test_generate_stream_decorated():
     assert callable(generate_stream)
 
 
+def test_run_interrupted_chunk_detection_checks_contract_fields_only():
+    assert agent_service._is_run_interrupted_chunk(
+        'data: {"type":"text","content":"explain run_interrupted semantics"}\n\n'
+    ) is False
+    assert agent_service._is_run_interrupted_chunk(
+        'data: {"type":"error","code":"run_interrupted"}\n\n'
+    ) is True
+    assert agent_service._is_run_interrupted_chunk(
+        'data: {"status":"run_interrupted"}\n\n'
+    ) is True
+
+
 @pytest.mark.asyncio
 async def test_run_agent_background_consumes_stream_and_returns_assistant_message():
     request = MagicMock()
@@ -10285,7 +10298,7 @@ async def test_run_agent_background_consumes_stream_and_returns_assistant_messag
     request.minio_files = []
 
     async def fake_stream():
-        yield "chunk-1"
+        yield 'data: {"type":"text","content":"explain run_interrupted semantics"}\n\n'
         yield "chunk-2"
 
     memory_context = MagicMock(user_config=MagicMock(memory_switch=False))
@@ -11652,7 +11665,7 @@ async def test_cleanup_channel_later():
 
     with patch.object(streaming_channel_manager, 'remove_channel', new_callable=AsyncMock) as mock_remove:
         await _cleanup_channel_later(conversation_id=123, user_id="user1", delay=0.01)
-        mock_remove.assert_called_once_with(123, "user1")
+        mock_remove.assert_called_once_with(123, "user1", execution_id=None)
 
 
 def test_get_user_group_ids_success():
@@ -11884,15 +11897,18 @@ async def test_process_skill_file_uploads_uses_content_type(
 
 
 def test_stop_agent_tasks():
-    """stop_agent_tasks should call preprocess_manager.stop_preprocess_tasks."""
+    """stop_agent_tasks should always publish a Redis cancel signal first."""
     from backend.services.agent_service import stop_agent_tasks
-    from agents.preprocess_manager import preprocess_manager
     from agents.agent_run_manager import agent_run_manager
 
-    with patch.object(preprocess_manager, "stop_preprocess_tasks", return_value=False) as mock_preprocess:
-        with patch.object(agent_run_manager, "stop_agent_run", return_value=False):
-            result = stop_agent_tasks(conversation_id=123, user_id="user1")
-            mock_preprocess.assert_called_once_with(123)
+    with patch(
+        "backend.services.agent_service.runtime_state_service.set_cancel_signal",
+        return_value=False,
+    ) as mock_cancel, patch.object(agent_run_manager, "stop_agent_run", return_value=False):
+        result = stop_agent_tasks(conversation_id=123, user_id="user1")
+
+    mock_cancel.assert_called_once_with(user_id="user1", conversation_id=123)
+    assert result["already_stopped"] is True
 
 
 # ============================================================================
@@ -11996,58 +12012,63 @@ def test_resolve_model_ids_with_fallback_model_not_found_in_catalog(mock_get_mod
 
 # Tests for stop_agent_tasks with various scenarios
 def test_stop_agent_tasks_both_stopped():
-    """stop_agent_tasks should return success when both agent and preprocess stop."""
+    """stop_agent_tasks returns success when Redis and the local execution both stop."""
     from backend.services.agent_service import stop_agent_tasks
-    from agents.preprocess_manager import preprocess_manager
     from agents.agent_run_manager import agent_run_manager
 
-    with patch.object(preprocess_manager, "stop_preprocess_tasks", return_value=True) as mock_preprocess:
-        with patch.object(agent_run_manager, "stop_agent_run", return_value=True):
-            result = stop_agent_tasks(conversation_id=123, user_id="user1")
-            assert result["status"] == "success"
-            assert "agent run" in result["message"]
-            assert "preprocess tasks" in result["message"]
+    with patch(
+        "backend.services.agent_service.runtime_state_service.set_cancel_signal",
+        return_value=True,
+    ), patch.object(agent_run_manager, "stop_agent_run", return_value=True):
+        result = stop_agent_tasks(conversation_id=123, user_id="user1")
+
+    assert result["status"] == "success"
+    assert "agent run" in result["message"]
 
 
 def test_stop_agent_tasks_agent_only():
     """stop_agent_tasks should return success when only agent stops."""
     from backend.services.agent_service import stop_agent_tasks
-    from agents.preprocess_manager import preprocess_manager
     from agents.agent_run_manager import agent_run_manager
 
-    with patch.object(preprocess_manager, "stop_preprocess_tasks", return_value=False) as mock_preprocess:
-        with patch.object(agent_run_manager, "stop_agent_run", return_value=True):
-            result = stop_agent_tasks(conversation_id=123, user_id="user1")
-            assert result["status"] == "success"
-            assert "agent run" in result["message"]
-            assert "preprocess tasks" not in result["message"]
+    with patch(
+        "backend.services.agent_service.runtime_state_service.set_cancel_signal",
+        return_value=False,
+    ), patch.object(agent_run_manager, "stop_agent_run", return_value=True):
+        result = stop_agent_tasks(conversation_id=123, user_id="user1")
+
+    assert result["status"] == "success"
+    assert "agent run" in result["message"]
 
 
-def test_stop_agent_tasks_preprocess_only():
-    """stop_agent_tasks should return success when only preprocess stops."""
+def test_stop_agent_tasks_remote_only():
+    """A stop accepted by Redis succeeds even when the owner is remote."""
     from backend.services.agent_service import stop_agent_tasks
-    from agents.preprocess_manager import preprocess_manager
     from agents.agent_run_manager import agent_run_manager
 
-    with patch.object(preprocess_manager, "stop_preprocess_tasks", return_value=True) as mock_preprocess:
-        with patch.object(agent_run_manager, "stop_agent_run", return_value=False):
-            result = stop_agent_tasks(conversation_id=123, user_id="user1")
-            assert result["status"] == "success"
-            assert "agent run" not in result["message"]
-            assert "preprocess tasks" in result["message"]
+    with patch(
+        "backend.services.agent_service.runtime_state_service.set_cancel_signal",
+        return_value=True,
+    ), patch.object(agent_run_manager, "stop_agent_run", return_value=False):
+        result = stop_agent_tasks(conversation_id=123, user_id="user1")
+
+    assert result["status"] == "success"
+    assert "agent run" in result["message"]
 
 
 def test_stop_agent_tasks_none_stopped():
     """stop_agent_tasks should return already_stopped when nothing stops."""
     from backend.services.agent_service import stop_agent_tasks
-    from agents.preprocess_manager import preprocess_manager
     from agents.agent_run_manager import agent_run_manager
 
-    with patch.object(preprocess_manager, "stop_preprocess_tasks", return_value=False) as mock_preprocess:
-        with patch.object(agent_run_manager, "stop_agent_run", return_value=False):
-            result = stop_agent_tasks(conversation_id=123, user_id="user1")
-            assert result["status"] == "success"
-            assert result.get("already_stopped") is True
+    with patch(
+        "backend.services.agent_service.runtime_state_service.set_cancel_signal",
+        return_value=False,
+    ), patch.object(agent_run_manager, "stop_agent_run", return_value=False):
+        result = stop_agent_tasks(conversation_id=123, user_id="user1")
+
+    assert result["status"] == "success"
+    assert result.get("already_stopped") is True
 
 
 # Tests for _check_agent_value_duplicate
@@ -12488,15 +12509,17 @@ def test_format_existing_values_chinese():
 def test_stop_agent_tasks_logs_messages():
     """stop_agent_tasks should log appropriate messages."""
     from backend.services.agent_service import stop_agent_tasks
-    from agents.preprocess_manager import preprocess_manager
     from agents.agent_run_manager import agent_run_manager
 
-    with patch.object(preprocess_manager, "stop_preprocess_tasks", return_value=True):
-        with patch.object(agent_run_manager, "stop_agent_run", return_value=True):
-            with patch("backend.services.agent_service.logging") as mock_logging:
-                result = stop_agent_tasks(conversation_id=123, user_id="user1")
-                # Should have called info logging
-                assert mock_logging.info.called
+    with patch(
+        "backend.services.agent_service.runtime_state_service.set_cancel_signal",
+        return_value=True,
+    ), patch.object(agent_run_manager, "stop_agent_run", return_value=True), patch(
+        "backend.services.agent_service.logging"
+    ) as mock_logging:
+        stop_agent_tasks(conversation_id=123, user_id="user1")
+
+    assert mock_logging.info.called
 
 
 # Tests for _safe_agent_stream_error_chunk with multiple calls
@@ -14397,102 +14420,319 @@ async def test_run_agent_stream_resume_with_chunks(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_poll_runtime_cancel_signal_sets_stop_event(monkeypatch):
-    """Redis cancel polling should set the local stop event."""
+async def test_monitor_runtime_state_sets_local_stop_on_matching_cancel(monkeypatch):
+    """The execution-scoped Redis cancel signal is mirrored to the local run."""
     from backend.services import agent_service
 
     fake_runtime_state = MagicMock()
-    fake_runtime_state.is_cancelled_async = AsyncMock(side_effect=[False, True])
-    sleeps = []
-
-    async def fake_sleep(delay):
-        sleeps.append(delay)
-
-    monkeypatch.setattr(agent_service, "runtime_state_service", fake_runtime_state)
-    monkeypatch.setattr(agent_service.asyncio, "sleep", fake_sleep)
+    fake_runtime_state.is_cancelled_async = AsyncMock(return_value=True)
+    execution_task = MagicMock()
+    failure_state = {}
     stop_event = asyncio.Event()
+    monkeypatch.setattr(agent_service, "runtime_state_service", fake_runtime_state)
 
-    await agent_service._poll_runtime_cancel_signal(123, "user1", stop_event)
+    await agent_service._monitor_runtime_state(
+        123,
+        "user1",
+        "execution-1",
+        stop_event,
+        execution_task,
+        failure_state,
+    )
 
     assert stop_event.is_set()
-    fake_runtime_state.is_cancelled_async.assert_any_await(user_id="user1", conversation_id=123)
-    assert sleeps == [agent_service.RUNTIME_CANCEL_POLL_INTERVAL_SECONDS]
+    assert failure_state == {}
+    fake_runtime_state.is_cancelled_async.assert_awaited_once_with(
+        user_id="user1",
+        conversation_id=123,
+        execution_id="execution-1",
+    )
+    execution_task.cancel.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_poll_runtime_cancel_signal_skips_when_already_stopped(monkeypatch):
-    """Redis cancel polling should not touch Redis when the stop event is already set."""
+async def test_monitor_runtime_state_cancels_stream_when_heartbeat_is_superseded(monkeypatch):
+    """A rejected heartbeat interrupts the stale local execution."""
+    from backend.services import agent_service
+
+    fake_runtime_state = MagicMock()
+    fake_runtime_state.heartbeat_run_async = AsyncMock(return_value=False)
+    fake_runtime_state.is_cancelled_async = AsyncMock(return_value=False)
+    execution_task = MagicMock()
+    execution_task.done.return_value = False
+    failure_state = {}
+    monkeypatch.setattr(agent_service, "runtime_state_service", fake_runtime_state)
+    monkeypatch.setattr(agent_service, "RUNTIME_HEARTBEAT_INTERVAL_SECONDS", 0)
+
+    await agent_service._monitor_runtime_state(
+        123,
+        "user1",
+        "execution-1",
+        asyncio.Event(),
+        execution_task,
+        failure_state,
+    )
+
+    assert isinstance(failure_state["error"], agent_service.RuntimeExecutionSuperseded)
+    execution_task.cancel.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_monitor_runtime_state_interrupts_on_redis_failure(monkeypatch):
+    """A runtime Redis outage interrupts the active SSE execution task."""
+    from backend.services import agent_service
+
+    failure = agent_service.DistributedStateUnavailable("redis down")
+    fake_runtime_state = MagicMock()
+    fake_runtime_state.is_cancelled_async = AsyncMock(side_effect=failure)
+    execution_task = MagicMock()
+    execution_task.done.return_value = False
+    failure_state = {}
+    monkeypatch.setattr(agent_service, "runtime_state_service", fake_runtime_state)
+
+    await agent_service._monitor_runtime_state(
+        123,
+        "user1",
+        "execution-1",
+        asyncio.Event(),
+        execution_task,
+        failure_state,
+    )
+
+    assert failure_state["error"] is failure
+    execution_task.cancel.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_monitor_runtime_state_skips_when_already_stopped(monkeypatch):
+    """An already-stopped run does not touch Redis."""
     from backend.services import agent_service
 
     fake_runtime_state = MagicMock()
     fake_runtime_state.is_cancelled_async = AsyncMock()
     stop_event = asyncio.Event()
     stop_event.set()
-
     monkeypatch.setattr(agent_service, "runtime_state_service", fake_runtime_state)
 
-    await agent_service._poll_runtime_cancel_signal(123, "user1", stop_event)
+    await agent_service._monitor_runtime_state(
+        123,
+        "user1",
+        "execution-1",
+        stop_event,
+        MagicMock(),
+        {},
+    )
 
     fake_runtime_state.is_cancelled_async.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_cancel_task_on_runtime_signal_cancels_task(monkeypatch):
-    """Redis cancel polling should cancel an active asyncio task."""
+async def test_run_agent_stream_registers_redis_before_saving_query(monkeypatch):
+    """A non-debug query is persisted only after distributed registration succeeds."""
     from backend.services import agent_service
 
+    order = []
     fake_runtime_state = MagicMock()
-    fake_runtime_state.is_cancelled_async = AsyncMock(return_value=True)
-    task = MagicMock()
-    task.done.return_value = False
 
+    async def register_run_async(**_kwargs):
+        order.append("register")
+        return "execution-1"
+
+    async def empty_stream(*_args, **_kwargs):
+        if False:
+            yield ""
+
+    fake_runtime_state.register_run_async = register_run_async
+    request = MagicMock(
+        is_debug=False,
+        conversation_id=999,
+        agent_id=1,
+        enable_plan=False,
+        query="hello",
+        history=[],
+        minio_files=[],
+    )
+    memory_context = MagicMock()
+    memory_context.user_config.memory_switch = False
     monkeypatch.setattr(agent_service, "runtime_state_service", fake_runtime_state)
+    monkeypatch.setattr(
+        agent_service,
+        "_resolve_user_tenant_language",
+        lambda **_kwargs: ("user1", "tenant1", "en"),
+    )
+    monkeypatch.setattr(agent_service, "get_conversation_service", lambda **_kwargs: {"conversation_id": 999})
+    monkeypatch.setattr(agent_service, "update_conversation_chat_mode_service", lambda **_kwargs: None)
+    monkeypatch.setattr(agent_service, "update_conversation_agent_id_service", lambda **_kwargs: None)
+    monkeypatch.setattr(
+        agent_service,
+        "save_messages",
+        lambda *_args, **_kwargs: order.append("save"),
+    )
+    monkeypatch.setattr(agent_service, "build_memory_context", lambda *_args, **_kwargs: memory_context)
+    monkeypatch.setattr(agent_service, "generate_stream", empty_stream)
 
-    await agent_service._cancel_task_on_runtime_signal(123, "user1", task)
+    response = await agent_service.run_agent_stream(request, MagicMock(), "Bearer token")
 
-    task.cancel.assert_called_once()
-    fake_runtime_state.is_cancelled_async.assert_awaited_once_with(user_id="user1", conversation_id=123)
+    assert response.status_code == 200
+    assert order == ["register", "save"]
 
 
 @pytest.mark.asyncio
-async def test_cancel_task_on_runtime_signal_waits_then_cancels(monkeypatch):
-    """Redis cancel polling should sleep between checks before cancelling."""
+async def test_run_agent_stream_registration_failure_does_not_save_query(monkeypatch):
+    """A Redis registration failure returns before the user query is saved."""
     from backend.services import agent_service
 
+    failure = agent_service.DistributedStateUnavailable("redis down")
     fake_runtime_state = MagicMock()
-    fake_runtime_state.is_cancelled_async = AsyncMock(side_effect=[False, True])
-    task = MagicMock()
-    task.done.return_value = False
-    sleeps = []
-
-    async def fake_sleep(delay):
-        sleeps.append(delay)
-
+    fake_runtime_state.register_run_async = AsyncMock(side_effect=failure)
+    request = MagicMock(
+        is_debug=False,
+        conversation_id=999,
+        agent_id=1,
+        enable_plan=False,
+        query="hello",
+        history=[],
+        minio_files=[],
+    )
+    save_mock = MagicMock()
     monkeypatch.setattr(agent_service, "runtime_state_service", fake_runtime_state)
-    monkeypatch.setattr(agent_service.asyncio, "sleep", fake_sleep)
+    monkeypatch.setattr(
+        agent_service,
+        "_resolve_user_tenant_language",
+        lambda **_kwargs: ("user1", "tenant1", "en"),
+    )
+    monkeypatch.setattr(agent_service, "get_conversation_service", lambda **_kwargs: {"conversation_id": 999})
+    monkeypatch.setattr(agent_service, "update_conversation_chat_mode_service", lambda **_kwargs: None)
+    monkeypatch.setattr(agent_service, "update_conversation_agent_id_service", lambda **_kwargs: None)
+    monkeypatch.setattr(agent_service, "save_messages", save_mock)
 
-    await agent_service._cancel_task_on_runtime_signal(123, "user1", task)
+    with pytest.raises(agent_service.DistributedStateUnavailable, match="redis down"):
+        await agent_service.run_agent_stream(request, MagicMock(), "Bearer token")
 
-    task.cancel.assert_called_once()
-    assert sleeps == [agent_service.RUNTIME_CANCEL_POLL_INTERVAL_SECONDS]
+    save_mock.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_cancel_task_on_runtime_signal_skips_done_task(monkeypatch):
-    """Redis cancel polling should exit immediately for completed tasks."""
+async def test_stream_agent_chunks_converts_redis_publish_failure_to_run_interrupted(monkeypatch):
+    """Once SSE has started, a Redis publish failure terminates with run_interrupted."""
     from backend.services import agent_service
 
-    fake_runtime_state = MagicMock()
-    fake_runtime_state.is_cancelled_async = AsyncMock()
-    task = MagicMock()
-    task.done.return_value = True
+    request = MagicMock(
+        is_debug=True,
+        conversation_id=-1,
+        agent_id=1,
+        query="debug",
+        history=[],
+        minio_files=[],
+    )
+    run_info = MagicMock()
+    run_info.stop_event = asyncio.Event()
+    run_info.agent_config.pre_run_tool_events = []
 
-    monkeypatch.setattr(agent_service, "runtime_state_service", fake_runtime_state)
+    async def one_chunk(_run_info):
+        yield json.dumps({"type": "final_answer", "content": "done"})
 
-    await agent_service._cancel_task_on_runtime_signal(123, "user1", task)
+    channel = MagicMock()
+    channel.publish = AsyncMock(
+        side_effect=agent_service.DistributedStateUnavailable("redis down")
+    )
+    channel.interrupt = AsyncMock()
+    monkeypatch.setattr(agent_service, "agent_run", one_chunk)
+    monkeypatch.setattr(agent_service, "_cleanup_channel_later", AsyncMock())
 
-    task.cancel.assert_not_called()
-    fake_runtime_state.is_cancelled_async.assert_not_awaited()
+    chunks = [
+        chunk
+        async for chunk in agent_service._stream_agent_chunks(
+            request,
+            "user1",
+            "tenant1",
+            run_info,
+            MagicMock(),
+            channel=channel,
+        )
+    ]
+
+    assert any("run_interrupted" in chunk for chunk in chunks)
+
+
+@pytest.mark.asyncio
+async def test_stream_agent_chunks_emits_run_interrupted_when_monitor_cancels_execution(monkeypatch):
+    """A heartbeat failure cancels model work but remains an SSE terminal event."""
+    from backend.services import agent_service
+
+    request = MagicMock(
+        is_debug=True,
+        conversation_id=-1,
+        agent_id=1,
+        query="debug",
+        history=[],
+        minio_files=[],
+    )
+    run_info = MagicMock()
+    run_info.stop_event = asyncio.Event()
+    run_info.agent_config.pre_run_tool_events = []
+
+    async def blocked_agent_run(_run_info):
+        await asyncio.Event().wait()
+        yield "unreachable"
+
+    async def fail_monitor(*_args, **kwargs):
+        kwargs["failure_state"]["error"] = agent_service.DistributedStateUnavailable("redis down")
+        kwargs["execution_task"].cancel()
+
+    channel = MagicMock()
+    channel.publish = AsyncMock()
+    channel.interrupt = AsyncMock()
+    channel.execution_id = "execution-1"
+    complete_channel = AsyncMock()
+    unregister = MagicMock()
+    monkeypatch.setattr(agent_service, "agent_run", blocked_agent_run)
+    monkeypatch.setattr(agent_service, "_monitor_runtime_state", fail_monitor)
+    monkeypatch.setattr(agent_service, "_cleanup_channel_later", AsyncMock())
+    monkeypatch.setattr(agent_service.streaming_channel_manager, "complete_channel", complete_channel)
+    monkeypatch.setattr(agent_service.agent_run_manager, "unregister_agent_run", unregister)
+
+    async def collect_chunks():
+        return [
+            chunk
+            async for chunk in agent_service._stream_agent_chunks(
+                request,
+                "user1",
+                "tenant1",
+                run_info,
+                MagicMock(),
+                channel=channel,
+                execution_id="execution-1",
+            )
+        ]
+
+    chunks = await asyncio.create_task(collect_chunks())
+
+    assert any("run_interrupted" in chunk for chunk in chunks)
+    channel.interrupt.assert_awaited()
+    complete_channel.assert_awaited_once_with(
+        conversation_id=-1,
+        user_id="user1",
+        status="failed",
+        execution_id="execution-1",
+        error="run_interrupted",
+    )
+    unregister.assert_called_once_with(-1, "user1", execution_id="execution-1")
+
+
+def test_stop_agent_tasks_propagates_distributed_state_failure(monkeypatch):
+    """Stop does not pretend the run is absent when Redis is unavailable."""
+    from backend.services import agent_service
+
+    failure = agent_service.DistributedStateUnavailable("redis down")
+    monkeypatch.setattr(
+        agent_service.runtime_state_service,
+        "set_cancel_signal",
+        MagicMock(side_effect=failure),
+    )
+
+    with pytest.raises(agent_service.DistributedStateUnavailable, match="redis down"):
+        agent_service.stop_agent_tasks(999, "user1")
 
 
 @pytest.mark.asyncio
@@ -14548,7 +14788,7 @@ async def test_stream_agent_chunks_marks_stopped_when_stop_event_set(monkeypatch
     monkeypatch.setattr(
         agent_service.agent_run_manager,
         "unregister_agent_run",
-        lambda conv_id, user_id, status="completed": unregister_calls.append((conv_id, user_id, status)),
+        lambda conv_id, user_id, execution_id=None: unregister_calls.append((conv_id, user_id, execution_id)),
         raising=False,
     )
 
@@ -14564,7 +14804,7 @@ async def test_stream_agent_chunks_marks_stopped_when_stop_event_set(monkeypatch
 
     assert collected
     assert statuses[-1] == (4242, "stopped", "user1")
-    assert unregister_calls[-1] == (999, "user1", "stopped")
+    assert unregister_calls[-1] == (999, "user1", None)
 
 
 @pytest.mark.asyncio
@@ -14594,7 +14834,10 @@ async def test_run_agent_stream_resume_remote_running_uses_runtime_stream(monkey
     fake_runtime_state.wait_for_stream_events_async = AsyncMock(return_value=[
         ("3-0", 'data: {"type": "final_answer", "content": "new"}\n\n'),
     ])
-    fake_runtime_state.get_stream_status_async = AsyncMock(return_value={"status": "completed"})
+    fake_runtime_state.get_stream_status_async = AsyncMock(side_effect=[
+        {},
+        {"status": "completed"},
+    ])
 
     with patch(
         "backend.services.agent_service._resolve_user_tenant_language",
@@ -14702,6 +14945,76 @@ async def test_run_agent_stream_resume_remote_running_uses_run_state_terminal_st
 
 
 @pytest.mark.asyncio
+async def test_run_agent_stream_resume_returns_recorded_run_interrupted(monkeypatch):
+    """A persisted interruption is replayed as run_interrupted, not completed."""
+    from backend.services import agent_service
+
+    agent_request = MagicMock(
+        agent_id=1,
+        conversation_id=999,
+        query="",
+        history=[],
+        minio_files=[],
+        is_debug=False,
+        resume=True,
+    )
+    fake_runtime_state = MagicMock()
+    fake_runtime_state.get_run_state_async = AsyncMock(return_value={
+        "status": "failed",
+        "execution_id": "execution-1",
+    })
+    fake_runtime_state.get_stream_status_async = AsyncMock(return_value={
+        "status": "failed",
+        "execution_id": "execution-1",
+        "error": "run_interrupted",
+    })
+    fake_runtime_state.read_stream_events_async = AsyncMock(return_value=[
+        ("1-0", 'data: {"type": "model_output", "content": "partial"}\n\n'),
+    ])
+    update_status = MagicMock()
+
+    with patch(
+        "backend.services.agent_service._resolve_user_tenant_language",
+        return_value=("user1", "tenant1", "en"),
+    ), patch(
+        "backend.services.agent_service._detect_resume_position",
+        return_value={
+            "should_resume": True,
+            "message_id": 1,
+            "message_status": "streaming",
+            "resume_from_unit_index": 2,
+            "reason": "backend_streaming",
+        },
+    ), patch(
+        "backend.services.agent_service.agent_run_manager.get_agent_run_info",
+        return_value=None,
+    ), patch(
+        "backend.services.agent_service.streaming_channel_manager.get_channel",
+        return_value=None,
+    ), patch.object(
+        agent_service,
+        "runtime_state_service",
+        fake_runtime_state,
+    ), patch.object(
+        agent_service,
+        "update_message_status",
+        update_status,
+    ):
+        result = await agent_service.run_agent_stream(
+            agent_request,
+            MagicMock(),
+            "Bearer token",
+            resume=True,
+        )
+        chunks = [chunk async for chunk in result.body_iterator]
+
+    assert "partial" in "".join(chunks)
+    assert "run_interrupted" in chunks[-1]
+    assert not any('"status": "completed"' in chunk for chunk in chunks)
+    update_status.assert_called_once_with(message_id=1, status="failed", user_id="user1")
+
+
+@pytest.mark.asyncio
 async def test_run_agent_stream_resume_channel_body_yields_completed_status(monkeypatch):
     """Local channel resume should yield replay metadata, chunks, and completed status."""
     from backend.services import agent_service
@@ -14716,10 +15029,17 @@ async def test_run_agent_stream_resume_channel_body_yields_completed_status(monk
     agent_request.resume = True
 
     fake_runtime_state = MagicMock()
-    fake_runtime_state.get_run_state_async = AsyncMock(return_value={})
+    fake_runtime_state.get_run_state_async = AsyncMock(return_value={
+        "status": "running",
+        "execution_id": "execution-1",
+    })
+    fake_runtime_state.get_stream_status_async = AsyncMock(return_value={})
 
     mock_channel = MagicMock()
     mock_channel.history_size = 1
+    mock_channel.execution_id = "execution-1"
+    mock_channel.completion_status = "completed"
+    mock_channel.error = None
 
     async def mock_subscribe(_start_index):
         yield 'data: {"type": "final_answer", "content": "from-channel"}\n\n'
@@ -14786,9 +15106,7 @@ async def test_generate_stream_with_memory_handles_missing_current_task(monkeypa
     async def fake_stream_agent_chunks(**_kwargs):
         yield "data: done\n\n"
 
-    fake_preprocess_manager = MagicMock()
     monkeypatch.setattr(agent_service.asyncio, "current_task", lambda: None)
-    monkeypatch.setattr(agent_service, "preprocess_manager", fake_preprocess_manager)
     monkeypatch.setattr(
         agent_service.streaming_channel_manager,
         "get_or_create_channel",
@@ -14824,10 +15142,6 @@ async def test_generate_stream_with_memory_handles_missing_current_task(monkeypa
         language="en",
         allow_memory_search=False,
     )
-    fake_preprocess_manager.register_preprocess_task.assert_not_called()
-    # preprocess_manager.unregister_preprocess_task was removed together with
-    # the legacy preprocess registration; only the register call is gated
-    # on asyncio.current_task() being non-None.
 
 
 
@@ -15197,8 +15511,14 @@ async def test_run_agent_stream_resume_update_message_status_exception(
         'reason': 'backend_streaming'
     }
     mock_agent_run_manager.get_agent_run_info.return_value = None
+    fake_runtime_state = MagicMock()
+    fake_runtime_state.get_run_state_async = AsyncMock(return_value={})
+    fake_runtime_state.get_stream_status_async = AsyncMock(return_value={})
+    fake_runtime_state.read_stream_events_async = AsyncMock(return_value=[])
 
-    with patch('backend.services.agent_service.update_message_status') as mock_update:
+    with patch('backend.services.agent_service.update_message_status') as mock_update, \
+            patch.object(agent_service, "runtime_state_service", fake_runtime_state), \
+            patch.object(agent_service.streaming_channel_manager, "get_channel", return_value=None):
         mock_update.side_effect = Exception("DB error on update_message_status")
 
         agent_request = MagicMock()
@@ -15219,6 +15539,8 @@ async def test_run_agent_stream_resume_update_message_status_exception(
 
         # Should still return success response
         assert result.status_code == 200
+        chunks = [chunk async for chunk in result.body_iterator]
+        assert any("run_interrupted" in chunk for chunk in chunks)
         # Verify update_message_status was called
         assert mock_update.call_count == 1
 

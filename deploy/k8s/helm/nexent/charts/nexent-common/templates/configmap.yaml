@@ -34,6 +34,10 @@ data:
   POSTGRES_USER: {{ .Values.config.postgres.user | quote }}
   POSTGRES_DB: {{ .Values.config.postgres.db | quote }}
   POSTGRES_PORT: {{ .Values.config.postgres.port | quote }}
+  POSTGRES_POOL_SIZE: {{ .Values.config.postgres.poolSize | quote }}
+  POSTGRES_MAX_OVERFLOW: {{ .Values.config.postgres.maxOverflow | quote }}
+  POSTGRES_POOL_TIMEOUT_SECONDS: {{ .Values.config.postgres.poolTimeoutSeconds | quote }}
+  POSTGRES_POOL_RECYCLE_SECONDS: {{ .Values.config.postgres.poolRecycleSeconds | quote }}
 
   # Minio Config
   MINIO_ENDPOINT: {{ .Values.config.minio.endpoint | quote }}
@@ -47,12 +51,17 @@ data:
   RUNTIME_STREAM_TTL_SECONDS: {{ .Values.config.runtimeState.streamTtlSeconds | quote }}
   RUNTIME_STREAM_MAX_LEN: {{ .Values.config.runtimeState.streamMaxLen | quote }}
   RUNTIME_RUN_TTL_SECONDS: {{ .Values.config.runtimeState.runTtlSeconds | quote }}
+  RUNTIME_HEARTBEAT_INTERVAL_SECONDS: {{ .Values.config.runtimeState.heartbeatIntervalSeconds | quote }}
   RUNTIME_CANCEL_TTL_SECONDS: {{ .Values.config.runtimeState.cancelTtlSeconds | quote }}
   RUNTIME_COMPLETED_TTL_SECONDS: {{ .Values.config.runtimeState.completedTtlSeconds | quote }}
   RUNTIME_CANCEL_POLL_INTERVAL_SECONDS: {{ .Values.config.runtimeState.cancelPollIntervalSeconds | quote }}
   NORTHBOUND_IDEMPOTENCY_TTL_SECONDS: {{ .Values.config.northbound.idempotencyTtlSeconds | quote }}
   NORTHBOUND_RATE_LIMIT_ENABLED: {{ .Values.config.northbound.rateLimitEnabled | quote }}
   NORTHBOUND_RATE_LIMIT_PER_MINUTE: {{ .Values.config.northbound.rateLimitPerMinute | quote }}
+
+  # Shared application paths
+  PROJECT_CONFIG_DIR: {{ .Values.config.paths.projectConfigDir | quote }}
+  UPLOAD_FOLDER: {{ .Values.config.paths.uploadFolder | quote }}
 
   # Model Engine Config
   MODEL_ENGINE_ENABLED: {{ .Values.config.modelEngine.enabled | quote }}

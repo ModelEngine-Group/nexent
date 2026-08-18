@@ -1,5 +1,9 @@
 replicaCount: 1
 
+service:
+  type: ClusterIP
+  nodePorts: {}
+
 images:
   backend:
     repository: nexent/nexent

@@ -8,9 +8,9 @@ to the ongoing stream instead of starting a new one.
 
 import asyncio
 import logging
-from typing import Dict, Optional, AsyncIterator, List
+from typing import Dict, Optional, AsyncIterator, List, Union
 
-from services.runtime_state_service import runtime_state_service
+from services.runtime_state_service import RuntimeExecutionSuperseded, runtime_state_service
 
 logger = logging.getLogger(__name__)
 
@@ -31,12 +31,14 @@ class StreamingChannel:
 
     def __init__(
         self,
-        conversation_id: str,
+        conversation_id: Union[int, str],
         user_id: str,
+        execution_id: Optional[str] = None,
         history_size: int = DEFAULT_HISTORY_SIZE
     ):
         self.conversation_id = conversation_id
         self.user_id = user_id
+        self.execution_id = execution_id
         # Unbounded buffer so resume subscribers receive the full chunk history
         # even after long-running streams. Channels are cleaned up shortly after
         # stream completion (see _cleanup_channel_later in agent_service), so
@@ -84,14 +86,16 @@ class StreamingChannel:
         if self._completed:
             return
 
+        if self.execution_id is not None:
+            await runtime_state_service.append_stream_event_async(
+                user_id=self.user_id,
+                conversation_id=self.conversation_id,
+                execution_id=self.execution_id,
+                chunk=chunk,
+            )
+
         async with self._lock:
             self._history_buffer.append(chunk)
-
-        await runtime_state_service.append_stream_event_async(
-            user_id=self.user_id,
-            conversation_id=self.conversation_id,
-            chunk=chunk,
-        )
 
         # Wake up waiting subscribers immediately
         self._data_event.set()
@@ -102,6 +106,8 @@ class StreamingChannel:
         Status can be 'completed', 'failed', or 'stopped'.
         Signals completion to wake up waiting subscribers.
         """
+        if self._completed:
+            return
         self._completed = True
         self._completion_status = status
         # Wake up waiting subscribers so they can exit
@@ -112,11 +118,26 @@ class StreamingChannel:
 
     def set_error(self, error: str):
         """Set an error on the channel."""
+        if self._completed:
+            return
         self._error = error
         self._completed = True
         # Wake up waiting subscribers so they can exit
         self._data_event.set()
         logger.debug(f"Channel {self.conversation_id} error: {error}")
+
+    async def interrupt(self, chunk: str, error: str) -> None:
+        """Publish a local terminal event when Redis is unavailable."""
+        if self._completed:
+            return
+        async with self._lock:
+            if self._completed:
+                return
+            self._history_buffer.append(chunk)
+            self._error = error
+            self._completion_status = "run_interrupted"
+            self._completed = True
+        self._data_event.set()
 
     @property
     def is_completed(self) -> bool:
@@ -241,14 +262,15 @@ class StreamingChannelManager:
         return cls._instance
 
     @classmethod
-    def get_channel_key(cls, conversation_id: int, user_id: str) -> str:
+    def get_channel_key(cls, conversation_id: Union[int, str], user_id: str) -> str:
         """Generate a unique key for a channel."""
         return f"{user_id}:{conversation_id}"
 
     async def get_or_create_channel(
         self,
-        conversation_id: int,
+        conversation_id: Union[int, str],
         user_id: str,
+        execution_id: Optional[str] = None,
         history_size: int = DEFAULT_HISTORY_SIZE
     ) -> StreamingChannel:
         """
@@ -256,10 +278,12 @@ class StreamingChannelManager:
         """
         key = self.get_channel_key(conversation_id, user_id)
         async with self._lock:
-            if key not in self._channels:
+            channel = self._channels.get(key)
+            if channel is None or channel.execution_id != execution_id or channel.is_completed:
                 self._channels[key] = StreamingChannel(
                     conversation_id=conversation_id,
                     user_id=user_id,
+                    execution_id=execution_id,
                     history_size=history_size
                 )
                 logger.debug(f"Created new channel: {key}")
@@ -267,7 +291,7 @@ class StreamingChannelManager:
 
     def get_channel(
         self,
-        conversation_id: int,
+        conversation_id: Union[int, str],
         user_id: str
     ) -> Optional[StreamingChannel]:
         """Get an existing channel without creating one."""
@@ -276,25 +300,38 @@ class StreamingChannelManager:
 
     async def complete_channel(
         self,
-        conversation_id: int,
+        conversation_id: Union[int, str],
         user_id: str,
-        status: str = 'completed'
+        execution_id: Optional[str] = None,
+        status: str = 'completed',
+        error: Optional[str] = None,
     ):
         """Mark a channel as completed."""
+        if execution_id is not None:
+            finished = await runtime_state_service.mark_stream_completed_async(
+                user_id=user_id,
+                conversation_id=conversation_id,
+                execution_id=execution_id,
+                status=status,
+                error=error,
+            )
+            if not finished:
+                raise RuntimeExecutionSuperseded("Runtime execution completion was rejected.")
         channel = self.get_channel(conversation_id, user_id)
-        if channel:
+        if channel and channel.execution_id == execution_id:
             channel.complete(status)
-        await runtime_state_service.mark_stream_completed_async(
-            user_id=user_id,
-            conversation_id=conversation_id,
-            status=status,
-        )
 
-    async def remove_channel(self, conversation_id: int, user_id: str):
-        """Remove a channel from the manager."""
+    async def remove_channel(
+        self,
+        conversation_id: Union[int, str],
+        user_id: str,
+        execution_id: Optional[str] = None,
+    ):
+        """Remove the matching execution channel from the manager."""
         key = self.get_channel_key(conversation_id, user_id)
         async with self._lock:
-            if key in self._channels:
+            channel = self._channels.get(key)
+            if channel is not None and channel.execution_id == execution_id:
                 del self._channels[key]
                 logger.debug(f"Removed channel: {key}")
 

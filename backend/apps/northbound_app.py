@@ -9,7 +9,7 @@ import httpx
 from fastapi import APIRouter, Body, File, Header, HTTPException, Query, Request, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from consts.exceptions import LimitExceededError, UnauthorizedError, ConversationNotFoundError
+from consts.exceptions import AppException, LimitExceededError, UnauthorizedError, ConversationNotFoundError
 from consts.model import ToolParamsRequest
 from services.northbound_service import (
     NorthboundContext,
@@ -280,6 +280,8 @@ async def run_chat(
         raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(e))
     except HTTPException as e:
         raise e
+    except AppException:
+        raise
     except Exception as e:
         logging.error(f"Failed to run chat: {str(e)}", exc_info=e)
         raise HTTPException(
@@ -310,6 +312,8 @@ async def stop_chat_stream(
         raise
     except HTTPException as e:
         raise e
+    except AppException:
+        raise
     except Exception as e:
         logging.error(f"Failed to stop chat: {str(e)}", exc_info=e)
         raise HTTPException(
@@ -470,6 +474,8 @@ async def update_convs_title(
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(e))
     except HTTPException as e:
         raise e
+    except AppException:
+        raise
     except Exception as e:
         logging.error(f"Failed to update conversation title: {str(e)}", exc_info=e)
         raise HTTPException(

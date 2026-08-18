@@ -59,6 +59,13 @@ class AppException(Exception):
         return ERROR_CODE_HTTP_STATUS.get(self.error_code, 500)
 
 
+class DistributedStateUnavailable(AppException):
+    """Raised when required Redis-backed distributed state is unavailable."""
+
+    def __init__(self, message: str = "Distributed state is unavailable. Please try again later."):
+        super().__init__(ErrorCode.DISTRIBUTED_STATE_UNAVAILABLE, message)
+
+
 def raise_error(error_code: ErrorCode, message: str = None, details: dict = None):
     """Raise an AppException with the given error code."""
     raise AppException(error_code, message, details)
