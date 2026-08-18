@@ -1710,6 +1710,34 @@ export default function ToolConfigModal({
     }
   };
 
+  // Page provider for the independent AIDP knowledge-base selector. The
+  // independent endpoint exposes no server-side pagination, so slice the
+  // already-loaded list (useKnowledgeBasesForToolConfig) into pages and map
+  // onto the AidpKnowledgeBaseItem shape expected by the selector.
+  const independentAidpItemsProvider = useCallback(
+    async (page: number, pageSize: number) => {
+      const list = Array.isArray(knowledgeBases) ? knowledgeBases : [];
+      const start = (page - 1) * pageSize;
+      const pageItems = list.slice(start, start + pageSize).map((kb) => ({
+        kds_id: String(kb.id),
+        kds_name: kb.name || String(kb.id),
+        description:
+          typeof kb.description === "string" ? kb.description : undefined,
+      }));
+      return { value: pageItems, total_count: list.length };
+    },
+    [knowledgeBases]
+  );
+
+  // Re-fetch the independent AIDP list when the selector's Sync button is hit.
+  const handleIndependentAidpSync = useCallback(async () => {
+    const result = await refetchKnowledgeBases();
+    if (result.isError || result.error) {
+      clearKnowledgeBases();
+      message.error(t("knowledgeBase.message.syncError"));
+    }
+  }, [refetchKnowledgeBases, clearKnowledgeBases, t]);
+
   // Remove a single knowledge base from selection
   const removeKbFromSelection = (indexToRemove: number, paramIndex: number) => {
     const newIds = selectedKbIds.filter((_, i) => i !== indexToRemove);
@@ -2485,13 +2513,23 @@ export default function ToolConfigModal({
           isLoading={haotianSetsLoading}
           title="Haotian knowledge sets"
         />
-      ) : toolKbType === "aidp_search" ? (
+      ) : toolKbType === "aidp_search" || toolKbType === "ind_aidp_search" ? (
         <AidpKnowledgeSelectorModal
           isOpen={kbSelectorVisible}
           onClose={() => setKbSelectorVisible(false)}
           onConfirm={handleAidpKbConfirm}
           selectedDatasetIds={
             isTestPanelKbSelection ? testPanelKbIds : selectedKbIds
+          }
+          itemsProvider={
+            toolKbType === "ind_aidp_search"
+              ? independentAidpItemsProvider
+              : undefined
+          }
+          onSync={
+            toolKbType === "ind_aidp_search"
+              ? handleIndependentAidpSync
+              : undefined
           }
         />
       ) : (
@@ -2521,11 +2559,7 @@ export default function ToolConfigModal({
             }
           }}
           syncLoading={kbLoading}
-          isSelectable={
-            toolKbType === "ind_aidp_search"
-              ? () => true
-              : canSelectKnowledgeBase
-          }
+          isSelectable={canSelectKnowledgeBase}
           difyConfig={resolveDifyModalConfig()}
         />
       )}
