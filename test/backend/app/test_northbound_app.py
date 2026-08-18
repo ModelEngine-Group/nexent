@@ -336,6 +336,49 @@ def test_get_agent_by_name_internal_error():
         assert resp.status_code == 500
 
 
+def test_get_agent_knowledge_bases_success():
+    """Test user-visible knowledge bases are returned for a published agent."""
+    with patch('apps.northbound_app._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('apps.northbound_app.get_agent_knowledge_bases_for_northbound', new_callable=AsyncMock) as mock_get:
+        mock_ctx.return_value = MagicMock()
+        mock_get.return_value = {
+            "message": "success",
+            "data": {
+                "source": "aidp",
+                "tool_name": "AidpSearchTool",
+                "range_parameter": "kds_list",
+                "knowledge_bases": [{"id": "kds-1", "name": "Policies"}],
+            },
+            "requestId": "req-123",
+        }
+
+        resp = client.get(
+            "/nb/v1/agents/agent1/knowledge-bases",
+            headers=_build_headers(),
+        )
+
+        assert resp.status_code == 200
+        assert resp.json()["data"]["range_parameter"] == "kds_list"
+        mock_get.assert_awaited_once()
+
+
+def test_get_agent_knowledge_bases_source_conflict():
+    """Test agents with both knowledge sources return a configuration conflict."""
+    with patch('apps.northbound_app._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('apps.northbound_app.get_agent_knowledge_bases_for_northbound', new_callable=AsyncMock) as mock_get:
+        mock_ctx.return_value = MagicMock()
+        mock_get.side_effect = ValueError(
+            "The agent enables both local and AIDP knowledge retrieval."
+        )
+
+        resp = client.get(
+            "/nb/v1/agents/agent1/knowledge-bases",
+            headers=_build_headers(),
+        )
+
+        assert resp.status_code == 409
+
+
 # =============================================================================
 # List Conversations Tests
 # =============================================================================
@@ -1038,3 +1081,65 @@ def test_resolve_proxy_download_filename_empty_content_disposition():
         None
     )
     assert result == "file.pdf"
+
+def test_get_agent_knowledge_bases_not_found():
+    """Test 404 when the target agent cannot be found."""
+    with patch('apps.northbound_app._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('apps.northbound_app.get_agent_knowledge_bases_for_northbound', new_callable=AsyncMock) as mock_get:
+        mock_ctx.return_value = MagicMock()
+        mock_get.side_effect = LookupError("agent not found")
+
+        resp = client.get(
+            "/nb/v1/agents/missing/knowledge-bases",
+            headers=_build_headers(),
+        )
+
+        assert resp.status_code == 404
+        assert resp.json()["detail"] == "agent not found"
+
+
+def test_get_agent_knowledge_bases_limit_exceeded():
+    """Test 429 when the northbound quota is exceeded."""
+    with patch('apps.northbound_app._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('apps.northbound_app.get_agent_knowledge_bases_for_northbound', new_callable=AsyncMock) as mock_get:
+        mock_ctx.return_value = MagicMock()
+        mock_get.side_effect = LimitExceededError("Rate limit exceeded")
+
+        resp = client.get(
+            "/nb/v1/agents/agent1/knowledge-bases",
+            headers=_build_headers(),
+        )
+
+        assert resp.status_code == 429
+
+
+def test_get_agent_knowledge_bases_internal_error():
+    """Test 500 when an unexpected error occurs."""
+    with patch('apps.northbound_app._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('apps.northbound_app.get_agent_knowledge_bases_for_northbound', new_callable=AsyncMock) as mock_get:
+        mock_ctx.return_value = MagicMock()
+        mock_get.side_effect = RuntimeError("boom")
+
+        resp = client.get(
+            "/nb/v1/agents/agent1/knowledge-bases",
+            headers=_build_headers(),
+        )
+
+        assert resp.status_code == 500
+
+
+def test_get_agent_knowledge_bases_http_exception_passthrough():
+    """HTTPException raised earlier in the call chain is re-raised unchanged."""
+    from fastapi import HTTPException
+
+    with patch('apps.northbound_app._get_northbound_context', new_callable=AsyncMock) as mock_ctx,             patch('apps.northbound_app.get_agent_knowledge_bases_for_northbound', new_callable=AsyncMock) as mock_get:
+        mock_ctx.return_value = MagicMock()
+        mock_get.side_effect = HTTPException(status_code=403, detail="forbidden")
+
+        resp = client.get(
+            "/nb/v1/agents/agent1/knowledge-bases",
+            headers=_build_headers(),
+        )
+
+        assert resp.status_code == 403
+        assert resp.json()["detail"] == "forbidden"

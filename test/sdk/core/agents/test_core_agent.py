@@ -356,6 +356,31 @@ def test_get_context_summary_returns_none_when_manager_summary_fails():
 # Tests for parse_code_blobs function
 # ----------------------------------------------------------------------------
 
+
+def test_incomplete_action_preamble_is_not_a_final_answer():
+    output = "思考：我需要先调用 knowledge_base_search 检索当前选择的知识库。"
+
+    assert core_agent_module._looks_like_incomplete_action_output(
+        output,
+        available_tool_names={"knowledge_base_search"},
+    ) is True
+
+
+def test_complete_answer_that_names_tool_is_not_misclassified():
+    output = "knowledge_base_search 是用于检索知识库的工具。"
+
+    assert core_agent_module._looks_like_incomplete_action_output(
+        output,
+        available_tool_names={"knowledge_base_search"},
+    ) is False
+
+
+def test_length_truncated_non_code_output_is_not_a_final_answer():
+    assert core_agent_module._looks_like_incomplete_action_output(
+        "这是一个尚未完成的回答",
+        finish_reason="length",
+    ) is True
+
 def test_parse_code_blobs_run_format():
     """Test parse_code_blobs with <code>...</code> pattern (new format)."""
     text = """Here is some code:

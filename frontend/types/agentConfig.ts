@@ -241,6 +241,8 @@ export interface AidpKnowledgeBaseItem {
   updated_at?: string;
   /** Embedding model name configured for this KB in AIDP. */
   embedding_model?: string;
+  /** Whether this AIDP knowledge base supports multimodal content. */
+  is_multimodal?: boolean;
 }
 
 export interface AidpKnowledgeBaseListResponse {

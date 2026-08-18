@@ -98,6 +98,11 @@ import { AuthenticatedImage } from "../ui/authenticated-image";
 import { copyToClipboard } from "@/lib/clipboard";
 import { configService } from "@/services/configService";
 import { conversationService } from "@/services/conversationService";
+import type {
+  ConversationKnowledgeScope,
+  KnowledgeCapabilities,
+  KnowledgeScopeEffectivePreview,
+} from "@/types/knowledgeScope";
 import { SkillFileCard } from "../ui/skill-file-card";
 import type { SkillFileContent } from "@/types/skill";
 
@@ -112,6 +117,13 @@ export interface ThreadProps {
   onChatModeChange: (mode: ChatMode) => void;
   showModelSelector?: boolean;
   isDictationConfigured?: boolean;
+  knowledgeScope?: ConversationKnowledgeScope | null;
+  knowledgePreview?: KnowledgeScopeEffectivePreview | null;
+  knowledgeCapabilities?: KnowledgeCapabilities | null;
+  onKnowledgeScopeChange?: (
+    scope: ConversationKnowledgeScope | null,
+    preview?: KnowledgeScopeEffectivePreview | null
+  ) => Promise<void> | void;
   variant?: "default" | "embedded";
   skillFiles?: readonly SkillFileContent[];
   onSkillFileSelect?: (path: string) => void;
@@ -162,6 +174,10 @@ export const Thread: FC<ThreadProps> = ({
   onChatModeChange,
   showModelSelector = true,
   isDictationConfigured = false,
+  knowledgeScope = null,
+  knowledgePreview = null,
+  knowledgeCapabilities = null,
+  onKnowledgeScopeChange,
   variant = "default",
   skillFiles,
   onSkillFileSelect,
@@ -372,6 +388,10 @@ export const Thread: FC<ThreadProps> = ({
         onChatModeChange={onChatModeChange}
         showModelSelector={showModelSelector}
         isDictationConfigured={isDictationConfigured}
+        knowledgeScope={knowledgeScope}
+        knowledgePreview={knowledgePreview}
+        knowledgeCapabilities={knowledgeCapabilities}
+        onKnowledgeScopeChange={onKnowledgeScopeChange}
         variant={variant}
         skillFiles={skillFiles}
         onSkillFileSelect={onSkillFileSelect}
@@ -458,6 +478,13 @@ interface ThreadViewProps {
   onChatModeChange: (mode: ChatMode) => void;
   showModelSelector: boolean;
   isDictationConfigured: boolean;
+  knowledgeScope: ConversationKnowledgeScope | null;
+  knowledgePreview: KnowledgeScopeEffectivePreview | null;
+  knowledgeCapabilities: KnowledgeCapabilities | null;
+  onKnowledgeScopeChange?: (
+    scope: ConversationKnowledgeScope | null,
+    preview?: KnowledgeScopeEffectivePreview | null
+  ) => Promise<void> | void;
   hasMessages: boolean;
   displayName: string;
   conversationTitle: string;
@@ -489,6 +516,10 @@ const ThreadView: FC<ThreadViewProps> = ({
   onChatModeChange,
   showModelSelector,
   isDictationConfigured,
+  knowledgeScope,
+  knowledgePreview,
+  knowledgeCapabilities,
+  onKnowledgeScopeChange,
   hasMessages,
   displayName,
   conversationTitle,
@@ -645,6 +676,10 @@ const ThreadView: FC<ThreadViewProps> = ({
             onChatModeChange={onChatModeChange}
             showModelSelector={showModelSelector}
             isDictationConfigured={isDictationConfigured}
+            knowledgeScope={knowledgeScope}
+            knowledgePreview={knowledgePreview}
+            knowledgeCapabilities={knowledgeCapabilities}
+            onKnowledgeScopeChange={onKnowledgeScopeChange}
             compact={variant === "embedded"}
             skillFiles={skillFiles}
           />
@@ -1185,6 +1220,20 @@ const AssistantMessage: FC<{
                 }
                 return <MarkdownText />;
               }
+              case "image": {
+                const imageUrl = (part as typeof part & { image?: string })
+                  .image;
+                return imageUrl ? (
+                  <GlobalSearchImage
+                    source={{
+                      type: "source",
+                      sourceType: "url",
+                      url: imageUrl,
+                      title: imageUrl,
+                    }}
+                  />
+                ) : null;
+              }
               case "reasoning":
                 return <Reasoning {...part} />;
               case "tool-call":
@@ -1435,6 +1484,8 @@ interface SourcePartLike {
 const GlobalSearchImage: FC<{ source: SourcePartLike }> = ({ source }) => {
   const imageUrl = source.url || "";
   if (!imageUrl) return null;
+  const displayTitle =
+    source.title && source.title !== imageUrl ? source.title : undefined;
   return (
     <figure
       className="aui-global-search-image w-full max-w-xl overflow-hidden rounded-md border bg-muted/30"
@@ -1442,16 +1493,17 @@ const GlobalSearchImage: FC<{ source: SourcePartLike }> = ({ source }) => {
     >
       <AuthenticatedImage
         src={imageUrl}
-        alt={source.title || imageUrl}
+        alt={displayTitle || imageUrl}
         loading="lazy"
         preview
+        proxy
         className="max-h-[28rem] w-full bg-muted/50 object-contain"
       />
-      {source.title || source.text ? (
+      {displayTitle || source.text ? (
         <figcaption className="border-t bg-card px-3 py-2">
-          {source.title ? (
+          {displayTitle ? (
             <div className="text-sm font-medium text-foreground">
-              {source.title}
+              {displayTitle}
             </div>
           ) : null}
           {source.text ? (
