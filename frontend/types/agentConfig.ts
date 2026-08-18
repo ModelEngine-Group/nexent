@@ -671,6 +671,9 @@ export interface StreamResponseData {
   type: (typeof GENERATE_PROMPT_STREAM_TYPES)[keyof typeof GENERATE_PROMPT_STREAM_TYPES];
   content: string;
   is_complete: boolean;
+  description_adjustment?: "compressed" | "truncated";
+  original_display_width?: number;
+  final_display_width?: number;
 }
 
 export type PromptTemplateContent = Record<PromptTemplateFieldKey, string>;

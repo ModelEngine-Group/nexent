@@ -10,7 +10,11 @@ from jinja2 import StrictUndefined, Template
 
 from nexent.core.tools.parallel_executor import ParallelExecutorTool
 
-from consts.const import LANGUAGE, ENABLE_JIUWEN_SDK
+from consts.const import (
+    ENABLE_JIUWEN_SDK,
+    LANGUAGE,
+    MAX_AGENT_DESCRIPTION_DISPLAY_WIDTH,
+)
 from consts.tool_labels import PARALLEL_EXECUTOR_TOOL_NAME
 from consts.error_code import ErrorCode
 from consts.error_message import ErrorMessage
@@ -33,6 +37,7 @@ from services.agent_service import (
 )
 from services.prompt_template_service import resolve_prompt_generate_template
 from utils.llm_utils import call_llm_for_system_prompt
+from utils.text_length_utils import get_display_width, truncate_to_display_width
 from utils.prompt_template_utils import (
     get_prompt_optimize_prompt_template,
     get_prompt_template,
@@ -132,6 +137,74 @@ def _copy_bad_cases_with_scope_instruction(bad_cases: list, language: str) -> li
             )
         copied_cases.append(copied_case)
     return copied_cases
+
+
+def _get_description_compression_target_width(original_width: int) -> int:
+    """Leave a safety margin that increases with the required compression ratio."""
+    overflow_ratio = (original_width - MAX_AGENT_DESCRIPTION_DISPLAY_WIDTH) / MAX_AGENT_DESCRIPTION_DISPLAY_WIDTH
+    if overflow_ratio <= 0.1:
+        return int(MAX_AGENT_DESCRIPTION_DISPLAY_WIDTH * 0.95)
+    if overflow_ratio <= 0.5:
+        return int(MAX_AGENT_DESCRIPTION_DISPLAY_WIDTH * 0.9)
+    return int(MAX_AGENT_DESCRIPTION_DISPLAY_WIDTH * 0.8)
+
+
+def _fit_generated_agent_description(
+    description: str,
+    model_id: int,
+    tenant_id: str,
+    language: str,
+) -> tuple[str, dict]:
+    """Compress an overlong generated description and truncate only as a final fallback."""
+    normalized_description = description.strip().replace("\n", "")
+    original_width = get_display_width(normalized_description)
+    if original_width <= MAX_AGENT_DESCRIPTION_DISPLAY_WIDTH:
+        return normalized_description, {}
+
+    target_width = _get_description_compression_target_width(original_width)
+    compression_ratio = target_width / original_width
+    language_instruction = "Use Chinese." if language == LANGUAGE["ZH"] else "Use English."
+    system_prompt = (
+        "You are an expert editor. Rewrite an Agent description to fit a strict display-width budget. "
+        "Preserve distinct facts, prioritizing role, objectives, unique capabilities, named tools or knowledge bases, "
+        "hard constraints, and numbers. Remove repetition, examples, and filler. Do not add facts. "
+        "Return only the rewritten description."
+    )
+    user_prompt = (
+        f"Original display width: {original_width}. Target display width: no more than {target_width}. "
+        f"Required compression ratio: {compression_ratio:.0%}. {language_instruction}\n\n"
+        f"Original description:\n{normalized_description}"
+    )
+
+    try:
+        compressed_description = call_llm_for_system_prompt(
+            model_id=model_id,
+            user_prompt=user_prompt,
+            system_prompt=system_prompt,
+            tenant_id=tenant_id,
+        ).strip().replace("\n", "")
+    except Exception as exc:
+        logger.warning("Failed to semantically compress an Agent description: %s", exc)
+        compressed_description = ""
+
+    if compressed_description and get_display_width(compressed_description) <= MAX_AGENT_DESCRIPTION_DISPLAY_WIDTH:
+        return compressed_description, {
+            "description_adjustment": "compressed",
+            "original_display_width": original_width,
+            "final_display_width": get_display_width(compressed_description),
+        }
+
+    fallback_source = compressed_description or normalized_description
+    truncated_description = truncate_to_display_width(
+        fallback_source,
+        MAX_AGENT_DESCRIPTION_DISPLAY_WIDTH,
+        suffix="…",
+    )
+    return truncated_description, {
+        "description_adjustment": "truncated",
+        "original_display_width": original_width,
+        "final_display_width": get_display_width(truncated_description),
+    }
 
 
 def gen_system_prompt_streamable(agent_id: int, model_id: int, task_description: str, user_id: str, tenant_id: str, language: str, prompt_template_id: Optional[int] = None, tool_ids: Optional[List[int]] = None, sub_agent_ids: Optional[List[int]] = None, knowledge_base_display_names: Optional[List[str]] = None, has_selected_resources: bool = True):
@@ -256,6 +329,10 @@ def generate_and_save_system_prompt_impl(agent_id: int,
         has_selected_resources
     ):
         result_type = result_data["type"]
+        if result_type == "agent_description" and result_data.get("is_complete", False):
+            description, adjustment = _fit_generated_agent_description(
+                result_data["content"], model_id, tenant_id, language)
+            result_data = {**result_data, "content": description, **adjustment}
         final_results[result_type] = result_data["content"]
 
         # Yield non-name fields immediately

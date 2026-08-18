@@ -884,6 +884,32 @@ async def test_update_agent_info_impl_exception_handling(mock_get_current_user_i
     assert "Failed to update agent info" in str(context.value)
 
 
+@patch('backend.services.agent_service.update_agent')
+@patch('backend.services.agent_service.get_current_user_info')
+@pytest.mark.asyncio
+async def test_update_agent_info_impl_preserves_tenant_limit_error(
+    mock_get_current_user_info, mock_update_agent
+):
+    from consts.exceptions import TenantResourceLimitError
+
+    mock_get_current_user_info.return_value = (
+        "test_user", "test_tenant", "en")
+    mock_update_agent.side_effect = TenantResourceLimitError(
+        "Tenant agent limit reached: maximum 1000 agents per tenant")
+
+    request = MagicMock()
+    request.agent_id = 123
+    request.model_id = None
+    request.display_name = "Test Display Name"
+    request.enabled_tool_ids = None
+    request.related_agent_ids = None
+    request.example_questions = None
+    apply_default_prompt_template_request_fields(request)
+
+    with pytest.raises(TenantResourceLimitError, match="maximum 1000 agents per tenant"):
+        await update_agent_info_impl(request, authorization="Bearer token")
+
+
 @patch('backend.services.agent_service.create_or_update_tool_by_tool_info')
 @patch('backend.services.agent_service.query_tool_instances_by_agent_id')
 @patch('backend.services.agent_service.update_agent')

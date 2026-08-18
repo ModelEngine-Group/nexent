@@ -7,6 +7,7 @@ from apps.agent_app import (
     agent_config_router,
     agent_runtime_router,
     nl2agent_run_api,
+    _localize_agent_limit_error,
 )
 import atexit
 from unittest.mock import AsyncMock, patch, Mock, MagicMock, ANY
@@ -23,7 +24,7 @@ from fastapi.responses import StreamingResponse
 from fastapi.testclient import TestClient
 
 from consts.const import AGENT_PROMPTS_HIDDEN_FLAG, ASSET_OWNER_TENANT_ID
-from consts.exceptions import UnauthorizedError
+from consts.exceptions import TenantResourceLimitError, UnauthorizedError
 from consts.model import NL2AgentRunRequest
 
 # Filter out deprecation warnings from third-party libraries
@@ -723,6 +724,46 @@ def test_get_creating_sub_agent_info_api_exception(mocker, mock_auth_header):
     assert "Agent create error" in response.json()["detail"]
 
 
+def test_get_creating_sub_agent_info_api_returns_validation_error(mocker, mock_auth_header):
+    """The sub-agent creation endpoint must preserve limit failures."""
+    from consts.exceptions import ValidationError
+
+    mock_get_creating_agent = mocker.patch(
+        "apps.agent_app.get_creating_sub_agent_info_impl", new_callable=AsyncMock)
+    mock_get_creating_agent.side_effect = ValidationError(
+        "Tenant agent limit reached: maximum 1000 agents per tenant")
+
+    response = config_client.get(
+        "/agent/get_creating_sub_agent_id",
+        headers=mock_auth_header,
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Tenant agent limit reached: maximum 1000 agents per tenant"
+
+
+def test_get_creating_sub_agent_info_api_localizes_tenant_limit(mocker, mock_auth_header):
+    mock_get_creating_agent = mocker.patch(
+        "apps.agent_app.get_creating_sub_agent_info_impl", new_callable=AsyncMock)
+    mock_get_creating_agent.side_effect = TenantResourceLimitError(
+        "Tenant agent limit reached: maximum 1 agents per tenant")
+    mocker.patch("apps.agent_app.get_user_language", return_value="zh")
+
+    response = config_client.get(
+        "/agent/get_creating_sub_agent_id",
+        headers=mock_auth_header,
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "租户智能体数量已达到上限：每个租户最多 1 个智能体"
+
+
+def test_localize_agent_limit_error_preserves_unrecognized_messages():
+    error = Exception("a different validation message")
+
+    assert _localize_agent_limit_error(error, "zh") == str(error)
+
+
 # update_agent_info_api Tests
 # ---------------------------------------------------------------------------
 
@@ -775,6 +816,51 @@ def test_update_agent_info_api_exception(mocker, mock_auth_header):
 
     assert response.status_code == 500
     assert "Agent update error" in response.json()["detail"]
+
+
+def test_update_agent_info_api_returns_validation_error(mocker, mock_auth_header):
+    """Validation failures must remain visible to the frontend."""
+    from consts.exceptions import ValidationError
+
+    mock_update_agent = mocker.patch(
+        "apps.agent_app.update_agent_info_impl", new_callable=AsyncMock)
+    mock_update_agent.side_effect = ValidationError(
+        "Tenant agent limit reached: maximum 1000 agents per tenant")
+
+    response = config_client.post(
+        "/agent/update",
+        json={"name": "Updated Agent"},
+        headers=mock_auth_header,
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Tenant agent limit reached: maximum 1000 agents per tenant"
+
+
+@pytest.mark.parametrize(
+    ("language", "expected_message"),
+    [
+        ("zh", "租户智能体数量已达到上限：每个租户最多 1 个智能体"),
+        ("en", "Tenant agent limit reached: maximum 1 agents per tenant"),
+    ],
+)
+def test_update_agent_info_localizes_agent_limit_error(
+    mocker, mock_auth_header, language, expected_message
+):
+    mock_update_agent = mocker.patch(
+        "apps.agent_app.update_agent_info_impl", new_callable=AsyncMock)
+    mock_update_agent.side_effect = TenantResourceLimitError(
+        "Tenant agent limit reached: maximum 1 agents per tenant")
+    mocker.patch("apps.agent_app.get_user_language", return_value=language)
+
+    response = config_client.post(
+        "/agent/update",
+        json={"name": "Updated Agent"},
+        headers=mock_auth_header,
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == expected_message
 
 
 # delete_agent_api Tests

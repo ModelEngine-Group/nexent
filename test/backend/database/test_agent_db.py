@@ -1,4 +1,7 @@
 import sys
+import types
+import importlib.util
+from pathlib import Path
 import pytest
 from unittest.mock import patch, MagicMock
 
@@ -17,10 +20,30 @@ consts_mock.const.NEXENT_POSTGRES_PASSWORD = "test_password"
 consts_mock.const.POSTGRES_DB = "test_db"
 consts_mock.const.POSTGRES_PORT = 5432
 consts_mock.const.DEFAULT_TENANT_ID = "default_tenant"
+consts_mock.const.ASSET_OWNER_TENANT_ID = "asset_owner_tenant_id"
+consts_mock.const.MAX_AGENTS_PER_TENANT = 1000
+consts_mock.const.MAX_AGENT_NAME_DISPLAY_WIDTH = 60
+consts_mock.const.MAX_AGENT_DESCRIPTION_DISPLAY_WIDTH = 1000
+consts_mock.const.MAX_AGENT_BUSINESS_DESCRIPTION_DISPLAY_WIDTH = 10000
 
 # 将模拟的consts模块添加到sys.modules中
 sys.modules['consts'] = consts_mock
 sys.modules['consts.const'] = consts_mock.const
+
+exceptions_mock = types.ModuleType("consts.exceptions")
+
+
+class MockValidationError(Exception):
+    pass
+
+
+class MockTenantResourceLimitError(MockValidationError, ValueError):
+    pass
+
+
+exceptions_mock.ValidationError = MockValidationError
+exceptions_mock.TenantResourceLimitError = MockTenantResourceLimitError
+sys.modules['consts.exceptions'] = exceptions_mock
 
 # 模拟utils模块
 utils_mock = MagicMock()
@@ -40,6 +63,13 @@ str_utils_mock.convert_string_to_list = MagicMock(
     side_effect=lambda s: [] if not s else [int(x) for x in str(s).split(",") if str(x).strip().isdigit()]
 )
 sys.modules['utils.str_utils'] = str_utils_mock
+
+text_length_utils_path = Path(__file__).parents[3] / "backend" / "utils" / "text_length_utils.py"
+text_length_utils_spec = importlib.util.spec_from_file_location("utils.text_length_utils", text_length_utils_path)
+text_length_utils_module = importlib.util.module_from_spec(text_length_utils_spec)
+assert text_length_utils_spec and text_length_utils_spec.loader
+text_length_utils_spec.loader.exec_module(text_length_utils_module)
+sys.modules['utils.text_length_utils'] = text_length_utils_module
 
 # Provide a stub for the `boto3` module so that it can be imported safely even
 # if the testing environment does not have it available.
@@ -104,7 +134,10 @@ from backend.database.agent_db import (
     delete_agent_relationship,
     update_related_agents,
     batch_search_agent_display_names,
+    _get_display_width,
+    _validate_agent_text_limits,
 )
+from consts.exceptions import TenantResourceLimitError, ValidationError
 
 class MockAgent:
     def __init__(self):
@@ -368,6 +401,7 @@ def test_create_agent_success(monkeypatch, mock_session):
     monkeypatch.setattr("backend.database.agent_db.filter_property", lambda data, model: data)
     monkeypatch.setattr("backend.database.agent_db.as_dict", lambda obj: obj.__dict__)
     monkeypatch.setattr("backend.database.agent_db.AgentInfo", lambda **kwargs: mock_agent)
+    monkeypatch.setattr("backend.database.agent_db._enforce_tenant_agent_limit", lambda session, tenant_id: None)
 
     agent_info = {"name": "new_agent", "description": "test description"}
     result = create_agent(agent_info, "tenant1", "user1")
@@ -375,6 +409,53 @@ def test_create_agent_success(monkeypatch, mock_session):
     assert result["agent_id"] == 1
     session.add.assert_called_once()
     session.flush.assert_called_once()
+
+
+def test_create_agent_rejects_tenant_limit(monkeypatch, mock_session):
+    """Creating one more active draft agent must not exceed the tenant limit."""
+    session, query = mock_session
+    query.filter.return_value.count.return_value = 1
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("backend.database.agent_db.MAX_AGENTS_PER_TENANT", 1)
+
+    with pytest.raises(TenantResourceLimitError, match="maximum 1 agents per tenant"):
+        create_agent({"name": "new_agent"}, "tenant1", "user1")
+
+    session.add.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("value", "expected_width"),
+    [
+        ("a" * 60, 60),
+        ("中" * 30, 60),
+        ("中" * 29 + "a" * 2, 60),
+    ],
+)
+def test_agent_text_display_width_accepts_boundary_values(value, expected_width):
+    assert _get_display_width(value) == expected_width
+    _validate_agent_text_limits({"name": value})
+
+
+def test_agent_work_description_accepts_the_5000_chinese_character_boundary():
+    _validate_agent_text_limits({"business_description": "中" * 5000})
+
+
+@pytest.mark.parametrize(
+    "agent_info",
+    [
+        {"name": "a" * 61},
+        {"display_name": "中" * 31},
+        {"description": "中" * 501},
+        {"business_description": "中" * 5001},
+    ],
+)
+def test_agent_text_display_width_rejects_values_over_the_limit(agent_info):
+    with pytest.raises(ValidationError, match="exceeds the maximum"):
+        _validate_agent_text_limits(agent_info)
 
 def test_update_agent_success(monkeypatch, mock_session):
     """测试成功更新agent"""

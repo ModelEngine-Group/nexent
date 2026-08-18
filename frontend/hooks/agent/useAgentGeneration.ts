@@ -27,6 +27,9 @@ import { GENERATE_PROMPT_STREAM_TYPES } from "@/const/agentConfig";
 export { GENERATE_PROMPT_STREAM_TYPES };
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import { AgentConfigUpdate } from "@/types/agentConfig";
+import { getDisplayWidth } from "@/lib/textDisplayWidth";
+
+const AGENT_BUSINESS_DESCRIPTION_DISPLAY_WIDTH_LIMIT = 10000;
 
 export interface StreamUpdatePayload {
   type: typeof GENERATE_PROMPT_STREAM_TYPES[keyof typeof GENERATE_PROMPT_STREAM_TYPES];
@@ -68,6 +71,11 @@ export function useAgentGeneration({
     // Validate business description
     if (!businessInfo.businessDescription || businessInfo.businessDescription.trim() === "") {
       message.error(t("businessLogic.config.error.businessDescriptionRequired"));
+      return;
+    }
+
+    if (getDisplayWidth(businessInfo.businessDescription) > AGENT_BUSINESS_DESCRIPTION_DISPLAY_WIDTH_LIMIT) {
+      message.error(t("businessLogic.config.error.businessDescriptionDisplayWidth"));
       return;
     }
 
@@ -142,6 +150,19 @@ export function useAgentGeneration({
               }
               break;
             case GENERATE_PROMPT_STREAM_TYPES.AGENT_DESCRIPTION:
+              if (data.description_adjustment) {
+                message.warning(
+                  t(
+                    data.description_adjustment === "truncated"
+                      ? "businessLogic.config.message.agentDescriptionTruncated"
+                      : "businessLogic.config.message.agentDescriptionCompressed",
+                    {
+                      original: data.original_display_width,
+                      final: data.final_display_width,
+                    }
+                  )
+                );
+              }
               // Only save to cache if user hasn't filled in agent description themselves
               if (!editedAgent.description) {
                 saveGeneratedField(generationAgentId, 'agentDescription', data.content);

@@ -176,6 +176,8 @@ from backend.services.prompt_service import (
     OptimizeResult,
     _copy_bad_cases_with_scope_instruction,
     _resolve_knowledge_tool_capabilities,
+    _get_description_compression_target_width,
+    _fit_generated_agent_description,
 )
 
 
@@ -183,6 +185,83 @@ class TestPromptService(unittest.TestCase):
 
     def setUp(self):
         self.test_model_id = 1
+
+    def test_description_compression_target_width_scales_with_overflow(self):
+        assert _get_description_compression_target_width(1001) == 950
+        assert _get_description_compression_target_width(1101) == 900
+        assert _get_description_compression_target_width(1501) == 800
+
+    def test_generated_agent_description_under_limit_is_normalized_without_adjustment(self):
+        result, metadata = _fit_generated_agent_description(
+            "  short\ndescription  ",
+            model_id=self.test_model_id,
+            tenant_id="tenant-1",
+            language="zh",
+        )
+
+        self.assertEqual(result, "shortdescription")
+        self.assertEqual(metadata, {})
+
+    @patch('backend.services.prompt_service.call_llm_for_system_prompt')
+    def test_generated_agent_description_uses_truncation_when_compression_fails(self, mock_call_llm):
+        mock_call_llm.side_effect = RuntimeError("model unavailable")
+
+        result, metadata = _fit_generated_agent_description(
+            "中" * 501,
+            model_id=self.test_model_id,
+            tenant_id="tenant-1",
+            language="zh",
+        )
+
+        self.assertEqual(result, "中" * 499 + "…")
+        self.assertEqual(metadata["description_adjustment"], "truncated")
+
+    @patch('backend.services.prompt_service.call_llm_for_system_prompt')
+    def test_generated_agent_description_is_semantically_compressed_when_over_limit(self, mock_call_llm):
+        mock_call_llm.return_value = "中" * 450
+
+        result, metadata = _fit_generated_agent_description(
+            "中" * 501,
+            model_id=self.test_model_id,
+            tenant_id="tenant-1",
+            language="zh",
+        )
+
+        self.assertEqual(result, "中" * 450)
+        self.assertEqual(metadata["description_adjustment"], "compressed")
+        self.assertEqual(metadata["original_display_width"], 1002)
+        self.assertEqual(metadata["final_display_width"], 900)
+        self.assertIn("Required compression ratio", mock_call_llm.call_args.kwargs["user_prompt"])
+
+    @patch('backend.services.prompt_service.call_llm_for_system_prompt')
+    def test_generated_agent_description_falls_back_to_truncation_when_compression_still_over_limit(self, mock_call_llm):
+        mock_call_llm.return_value = "中" * 501
+
+        result, metadata = _fit_generated_agent_description(
+            "中" * 501,
+            model_id=self.test_model_id,
+            tenant_id="tenant-1",
+            language="zh",
+        )
+
+        self.assertEqual(result, "中" * 499 + "…")
+        self.assertEqual(metadata["description_adjustment"], "truncated")
+        self.assertLessEqual(metadata["final_display_width"], 1000)
+
+    @patch('backend.services.prompt_service.call_llm_for_system_prompt')
+    def test_generated_agent_description_uses_english_compression_instruction(self, mock_call_llm):
+        mock_call_llm.return_value = "compressed description"
+
+        result, metadata = _fit_generated_agent_description(
+            "x" * 1001,
+            model_id=self.test_model_id,
+            tenant_id="tenant-1",
+            language="en",
+        )
+
+        self.assertEqual(result, "compressed description")
+        self.assertEqual(metadata["description_adjustment"], "compressed")
+        self.assertIn("Use English.", mock_call_llm.call_args.kwargs["user_prompt"])
 
     @patch('backend.services.prompt_service.call_llm_for_system_prompt')
     @patch('backend.services.prompt_service.get_prompt_optimize_prompt_template')

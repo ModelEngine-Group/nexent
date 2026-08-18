@@ -467,7 +467,12 @@ export const updateAgentInfo = async (payload: UpdateAgentInfoPayload) => {
     });
 
     if (!response.ok) {
-      throw new Error(`Request failed: ${response.status}`);
+      const errorPayload = await response.json().catch(() => null);
+      throw new Error(
+        errorPayload?.detail ||
+          errorPayload?.message ||
+          `Request failed: ${response.status}`
+      );
     }
 
     const data = await response.json();
@@ -481,7 +486,10 @@ export const updateAgentInfo = async (payload: UpdateAgentInfoPayload) => {
     return {
       success: false,
       data: null,
-      message: "Failed to update Agent, please try again later",
+      message:
+        error instanceof Error
+          ? error.message
+          : "Failed to update Agent, please try again later",
     };
   }
 };

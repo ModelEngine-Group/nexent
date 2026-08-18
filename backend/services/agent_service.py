@@ -22,7 +22,13 @@ from utils.prompt_template_utils import normalize_prompt_generate_template_conte
 from consts.const import TOOL_TYPE_MAPPING, \
     LANGUAGE, MESSAGE_ROLE, MODEL_CONFIG_MAPPING, CAN_EDIT_ALL_USER_ROLES, PERMISSION_PRIVATE, STREAM_STATUS_EVENT, \
     DEFAULT_EN_TITLE, DEFAULT_ZH_TITLE, RUNTIME_CANCEL_POLL_INTERVAL_SECONDS
-from consts.exceptions import AppException, ForbiddenError, MemoryPreparationException, SkillDuplicateError
+from consts.exceptions import (
+    AppException,
+    ForbiddenError,
+    MemoryPreparationException,
+    SkillDuplicateError,
+    TenantResourceLimitError,
+)
 from consts.error_code import ErrorCode
 from consts.agent_unavailable_reasons import AgentUnavailableReason
 from nexent.core.utils.observer import ProcessType
@@ -1842,6 +1848,8 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
             request.prompt_template_id = prompt_template_id
             request.prompt_template_name = prompt_template_name
             update_agent(agent_id, request, user_id)
+    except TenantResourceLimitError:
+        raise
     except Exception as e:
         logger.error(f"Failed to update agent info: {str(e)}")
         raise ValueError(f"Failed to update agent info: {str(e)}")
