@@ -2242,12 +2242,12 @@ class TestRunStreamRealExecution:
         # When the runtime has no raw count, fall back to msg_token_count.
         assert agent._last_uncompressed_est != 5000
 
-    def test_step_stream_rejects_whitespace_only_model_output(self):
+    def test_step_stream_rejects_whitespace_only_model_output(self, monkeypatch):
         """Whitespace-only provider content is a generation error, not a final answer."""
-        module = self._load_core_agent_in_isolation()
+        module = core_agent_module
         CoreAgent = module.CoreAgent
-        module.AgentExecutionError = type("AgentExecutionError", (Exception,), {})
-        module.AgentGenerationError = type("AgentGenerationError", (Exception,), {})
+        monkeypatch.setattr(module, "AgentExecutionError", type("AgentExecutionError", (Exception,), {}))
+        monkeypatch.setattr(module, "AgentGenerationError", type("AgentGenerationError", (Exception,), {}))
 
         agent = object.__new__(CoreAgent)
         agent.agent_name = "test"
@@ -2508,9 +2508,9 @@ class TestRunStreamRealExecution:
         max_steps_calls = [c for c in observer_calls if c[1] == TestProcessType.MAX_STEPS_REACHED]
         assert len(max_steps_calls) == 0
 
-    def test_run_stream_retries_empty_final_answer_tool_result(self):
+    def test_run_stream_retries_empty_final_answer_tool_result(self, monkeypatch):
         """An empty final_answer tool result must not end the run successfully."""
-        module = self._load_core_agent_in_isolation()
+        module = core_agent_module
         CoreAgent = module.CoreAgent
 
         class FakeActionOutput:
@@ -2518,9 +2518,28 @@ class TestRunStreamRealExecution:
                 self.output = output
                 self.is_final_answer = is_final_answer
 
-        module.ActionOutput = FakeActionOutput
-        module.FinalAnswerStep = lambda output: SimpleNamespace(output=output)
-        module.handle_agent_output_types = lambda output: output
+        class FakeActionStep:
+            def __init__(self, **kwargs):
+                self.__dict__.update(kwargs)
+
+        class FakeAgentGenerationError(Exception):
+            def __init__(self, message, logger):
+                super().__init__(message)
+
+        class FakeAgentError(Exception):
+            pass
+
+        class FakeAgentExecutionError(FakeAgentError):
+            def __init__(self, message, logger):
+                super().__init__(message)
+
+        monkeypatch.setattr(module, "ActionOutput", FakeActionOutput)
+        monkeypatch.setattr(module, "ActionStep", FakeActionStep)
+        monkeypatch.setattr(module, "AgentError", FakeAgentError)
+        monkeypatch.setattr(module, "AgentExecutionError", FakeAgentExecutionError)
+        monkeypatch.setattr(module, "AgentGenerationError", FakeAgentGenerationError)
+        monkeypatch.setattr(module, "FinalAnswerStep", lambda output: SimpleNamespace(output=output))
+        monkeypatch.setattr(module, "handle_agent_output_types", lambda output: output)
 
         agent = object.__new__(CoreAgent)
         agent.agent_name = "test_agent"
@@ -2555,12 +2574,23 @@ class TestRunStreamRealExecution:
         assert len(agent.memory.steps) == 2
         assert agent.memory.steps[0].error is not None
 
-    def test_run_stream_retries_empty_direct_answer_then_verifies_valid_answer(self):
+    def test_run_stream_retries_empty_direct_answer_then_verifies_valid_answer(self, monkeypatch):
         """An empty direct response is retried before a later valid response is verified."""
-        module = self._load_core_agent_in_isolation()
+        module = core_agent_module
         CoreAgent = module.CoreAgent
-        module.FinalAnswerStep = lambda output: SimpleNamespace(output=output)
-        module.handle_agent_output_types = lambda output: output
+
+        class FakeActionStep:
+            def __init__(self, **kwargs):
+                self.__dict__.update(kwargs)
+
+        class FakeAgentGenerationError(Exception):
+            def __init__(self, message, logger):
+                super().__init__(message)
+
+        monkeypatch.setattr(module, "ActionStep", FakeActionStep)
+        monkeypatch.setattr(module, "AgentGenerationError", FakeAgentGenerationError)
+        monkeypatch.setattr(module, "FinalAnswerStep", lambda output: SimpleNamespace(output=output))
+        monkeypatch.setattr(module, "handle_agent_output_types", lambda output: output)
 
         agent = object.__new__(CoreAgent)
         agent.agent_name = "test_agent"
@@ -2609,6 +2639,50 @@ class TestRunStreamRealExecution:
         assert agent.verification_controller.verify_final_answer.call_args.kwargs[
             "candidate"
         ] == "valid direct answer"
+
+    def test_run_stream_initializes_lazy_planning_state(self, monkeypatch):
+        """Planning-enabled runs reset lazy plan state before executing the first step."""
+        module = core_agent_module
+
+        class FakeActionStep:
+            def __init__(self, **kwargs):
+                self.__dict__.update(kwargs)
+
+        monkeypatch.setattr(module, "ActionStep", FakeActionStep)
+
+        agent = object.__new__(module.CoreAgent)
+        agent.agent_name = "test_agent"
+        agent.name = "test_agent"
+        agent.observer = MagicMock()
+        agent.stop_event = MagicMock()
+        agent.stop_event.is_set.return_value = False
+        agent.step_number = 1
+        agent.memory = MagicMock()
+        agent.memory.steps = []
+        agent.logger = MagicMock()
+        agent.model = MagicMock()
+        agent.final_answer_checks = []
+        agent.enable_planning = True
+        agent.current_plan = "stale plan"
+        agent.current_step_index = 99
+        agent.verification_config = SimpleNamespace(
+            enabled=False,
+            final_verification_enabled=False,
+        )
+        agent._finalize_step = MagicMock()
+        agent._collect_step_metrics = MagicMock()
+        agent._handle_max_steps_reached = MagicMock(return_value="max steps")
+
+        def mock_step_stream(_action_step):
+            if False:
+                yield None
+
+        agent._step_stream = mock_step_stream
+
+        list(agent._run_stream("test task", max_steps=0))
+
+        assert agent.current_plan is None
+        assert agent.current_step_index == 0
 
 
 # ----------------------------------------------------------------------------
