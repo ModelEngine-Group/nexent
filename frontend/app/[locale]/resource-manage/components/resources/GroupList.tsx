@@ -170,8 +170,8 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
 
       if (nameConflictMatch && nameConflictMatch[1]) {
         message.error(t("tenantResources.groups.duplicateName"));
-      } else if (err.response?.data?.message) {
-        message.error(err.response.data.message);
+      } else {
+        message.error(errorMessage || t("common.unknownError"));
       }
     }
   };

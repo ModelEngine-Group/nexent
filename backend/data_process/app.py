@@ -48,7 +48,7 @@ app.conf.update(
     task_routes={
         f'{import_path}.process': {'queue': 'process_q'},
         f'{import_path}.forward': {'queue': 'forward_q'},
-        f'{import_path}.process_and_forward': {'queue': 'process_q'}
+        f'{import_path}.process_and_forward': {'queue': 'process_q'},
     },
     task_serializer='json',
     accept_content=['json'],

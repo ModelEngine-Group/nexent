@@ -35,7 +35,6 @@ from backend.services.tenant_service import (
     create_tenant,
     update_tenant_info,
     delete_tenant,
-    _create_default_group_for_tenant,
     check_tenant_name_exists
 )
 
@@ -86,16 +85,16 @@ def service_mocks():
     """Create mocks for service layer dependencies"""
     with patch('backend.services.tenant_service.get_single_config_info') as mock_get_single_config, \
             patch('backend.services.tenant_service.insert_config') as mock_insert_config, \
+            patch('backend.services.tenant_service.create_tenant_with_default_group') as mock_create_tenant_with_default_group, \
             patch('backend.services.tenant_service.update_config_by_tenant_config_id') as mock_update_config, \
-            patch('backend.services.tenant_service.get_all_tenant_ids') as mock_get_all_tenant_ids, \
-            patch('backend.services.tenant_service.add_group') as mock_add_group:
+            patch('backend.services.tenant_service.get_all_tenant_ids') as mock_get_all_tenant_ids:
 
         yield {
             'get_single_config_info': mock_get_single_config,
             'insert_config': mock_insert_config,
+            'create_tenant_with_default_group': mock_create_tenant_with_default_group,
             'update_config_by_tenant_config_id': mock_update_config,
-            'get_all_tenant_ids': mock_get_all_tenant_ids,
-            'add_group': mock_add_group
+            'get_all_tenant_ids': mock_get_all_tenant_ids
         }
 
 
@@ -402,23 +401,14 @@ class TestCreateTenant:
         user_id = "creator_user"
         group_id = 123
 
-        # Mock check_tenant_name_exists to return False (name not taken)
-        with patch('backend.services.tenant_service.check_tenant_name_exists', return_value=False), \
-             patch('backend.services.tenant_service._create_default_group_for_tenant', return_value=group_id):
-
-            # Configure insert_config to succeed
-            service_mocks['insert_config'].return_value = True
-
-            # Execute
+        service_mocks['create_tenant_with_default_group'].return_value = group_id
+        with patch('backend.services.tenant_service.check_tenant_name_exists', return_value=False):
             result = create_tenant(tenant_name, user_id)
 
-            # Assert
-            assert result["tenant_name"] == tenant_name
-            assert result["default_group_id"] == str(group_id)
-            assert "tenant_id" in result  # tenant_id is auto-generated UUID
-
-            # Verify config insertions were called (3 configs: ID, name, group)
-            assert service_mocks['insert_config'].call_count == 3
+        assert result["tenant_name"] == tenant_name
+        assert result["default_group_id"] == str(group_id)
+        assert "tenant_id" in result
+        service_mocks['create_tenant_with_default_group'].assert_called_once()
 
     def test_create_tenant_name_already_exists(self, service_mocks):
         """Test creating tenant with a name that already exists"""
@@ -446,20 +436,14 @@ class TestCreateTenant:
             with pytest.raises(ValidationError, match="Tenant name cannot be empty"):
                 create_tenant(tenant_name, user_id)
 
-    def test_create_tenant_config_insertion_failure(self, service_mocks):
-        """Test create_tenant when config insertion fails"""
-        # Setup
+    def test_create_tenant_rolls_back_when_transactional_creation_fails(self, service_mocks):
+        """Test create_tenant surfaces a transactional creation failure."""
         tenant_name = "New Tenant"
         user_id = "creator_user"
+        service_mocks['create_tenant_with_default_group'].side_effect = RuntimeError("Database error")
 
-        # Mock dependencies
-        with patch('backend.services.tenant_service.check_tenant_name_exists', return_value=False), \
-             patch('backend.services.tenant_service._create_default_group_for_tenant', return_value=123):
-
-            service_mocks['insert_config'].return_value = False
-
-            # Execute & Assert
-            with pytest.raises(ValidationError, match="Failed to create tenant ID configuration"):
+        with patch('backend.services.tenant_service.check_tenant_name_exists', return_value=False):
+            with pytest.raises(ValidationError, match="Failed to create tenant: Database error"):
                 create_tenant(tenant_name, user_id)
 
     def test_create_tenant_whitespace_name(self, service_mocks):
@@ -475,66 +459,16 @@ class TestCreateTenant:
             with pytest.raises(ValidationError, match="Tenant name cannot be empty"):
                 create_tenant(tenant_name, user_id)
 
-    def test_create_tenant_tenant_id_config_failure(self, service_mocks):
-        """Test create_tenant when tenant ID config insertion fails"""
-        # Setup
+    def test_create_tenant_limit_failure_happens_before_any_group_is_persisted(self, service_mocks):
+        """The transactional helper must own all tenant and default-group writes."""
         tenant_name = "New Tenant"
         user_id = "creator_user"
+        service_mocks['create_tenant_with_default_group'].side_effect = ValidationError(
+            "Tenant limit reached: maximum 1 tenants"
+        )
 
-        # Mock dependencies
-        with patch('backend.services.tenant_service.check_tenant_name_exists', return_value=False), \
-                patch('backend.services.tenant_service._create_default_group_for_tenant', return_value=123):
-
-            # Configure insert_config to fail on first call (tenant ID config)
-            service_mocks['insert_config'].side_effect = [False, True, True]
-
-            # Execute & Assert
-            with pytest.raises(ValidationError, match="Failed to create tenant ID configuration"):
-                create_tenant(tenant_name, user_id)
-
-    def test_create_tenant_group_config_failure(self, service_mocks):
-        """Test create_tenant when group config insertion fails"""
-        # Setup
-        tenant_name = "New Tenant"
-        user_id = "creator_user"
-
-        # Mock dependencies
-        with patch('backend.services.tenant_service.check_tenant_name_exists', return_value=False), \
-                patch('backend.services.tenant_service._create_default_group_for_tenant', return_value=123):
-
-            # Configure insert_config to succeed for first two, fail for third (group config)
-            service_mocks['insert_config'].side_effect = [True, True, False]
-
-            # Execute & Assert
-            with pytest.raises(ValidationError, match="Failed to create tenant default group configuration"):
-                create_tenant(tenant_name, user_id)
-
-    def test_create_tenant_default_group_creation_failure(self, service_mocks):
-        """Test create_tenant when default group creation fails"""
-        # Setup
-        tenant_name = "New Tenant"
-        user_id = "creator_user"
-
-        # Mock dependencies
-        with patch('backend.services.tenant_service.check_tenant_name_exists', return_value=False), \
-                patch('backend.services.tenant_service._create_default_group_for_tenant', side_effect=ValidationError("Group creation failed")):
-
-            # Execute & Assert
-            with pytest.raises(ValidationError, match="Failed to create tenant: Group creation failed"):
-                create_tenant(tenant_name, user_id)
-
-    def test_create_tenant_unexpected_exception_in_try_block(self, service_mocks):
-        """Test create_tenant when unexpected exception occurs in try block"""
-        # Setup
-        tenant_name = "New Tenant"
-        user_id = "creator_user"
-
-        # Mock dependencies
-        with patch('backend.services.tenant_service.check_tenant_name_exists', return_value=False), \
-                patch('backend.services.tenant_service._create_default_group_for_tenant', side_effect=Exception("Unexpected error")):
-
-            # Execute & Assert
-            with pytest.raises(ValidationError, match="Failed to create tenant: Unexpected error"):
+        with patch('backend.services.tenant_service.check_tenant_name_exists', return_value=False):
+            with pytest.raises(ValidationError, match="maximum 1 tenants"):
                 create_tenant(tenant_name, user_id)
 
     def test_create_tenant_uuid_collision(self, service_mocks):
@@ -1082,81 +1016,6 @@ class TestDeleteTenant:
             # Assert
             assert result is True
             assert mock_remove_invitation.call_count == 2
-
-
-class TestCreateDefaultGroupForTenant:
-    """Test cases for _create_default_group_for_tenant function"""
-
-    def test_create_default_group_for_tenant_success(self, service_mocks):
-        """Test successfully creating default group for tenant"""
-        # Setup
-        tenant_id = "test_tenant"
-        user_id = "creator_user"
-        expected_group_id = 123
-
-        # Mock add_group to return expected group ID
-        with patch('backend.services.tenant_service.add_group', return_value=expected_group_id) as mock_add_group:
-            # Execute
-            result = _create_default_group_for_tenant(tenant_id, user_id)
-
-            # Assert
-            assert result == expected_group_id
-
-            # Verify add_group was called with correct parameters
-            mock_add_group.assert_called_once_with(
-                tenant_id=tenant_id,
-                group_name="Default Group",
-                group_description="Default group created automatically for new tenant",
-                created_by=user_id
-            )
-
-    def test_create_default_group_for_tenant_failure(self, service_mocks):
-        """Test _create_default_group_for_tenant when group creation fails"""
-        # Setup
-        tenant_id = "test_tenant"
-        user_id = "creator_user"
-
-        # Mock add_group to raise exception
-        with patch('backend.services.tenant_service.add_group', side_effect=Exception("Database error")):
-            # Execute & Assert
-            with pytest.raises(ValidationError, match="Failed to create default group"):
-                _create_default_group_for_tenant(tenant_id, user_id)
-
-    def test_create_default_group_for_tenant_with_none_user(self, service_mocks):
-        """Test _create_default_group_for_tenant with None user"""
-        # Setup
-        tenant_id = "test_tenant"
-        user_id = None
-        expected_group_id = 123
-
-        # Mock add_group to return expected group ID
-        with patch('backend.services.tenant_service.add_group', return_value=expected_group_id) as mock_add_group:
-            # Execute
-            result = _create_default_group_for_tenant(tenant_id, user_id)
-
-            # Assert
-            assert result == expected_group_id
-
-            # Verify add_group was called with None as created_by
-            mock_add_group.assert_called_once_with(
-                tenant_id=tenant_id,
-                group_name="Default Group",
-                group_description="Default group created automatically for new tenant",
-                created_by=None
-            )
-
-    def test_create_default_group_for_tenant_validation_error_from_add_group(self, service_mocks):
-        """Test _create_default_group_for_tenant when add_group raises ValidationError"""
-        # Setup
-        tenant_id = "test_tenant"
-        user_id = "creator_user"
-
-        # Mock add_group to raise ValidationError
-        from consts.exceptions import ValidationError as VE
-        with patch('backend.services.tenant_service.add_group', side_effect=VE("Invalid group data")):
-            # Execute & Assert
-            with pytest.raises(ValidationError, match="Failed to create default group: Invalid group data"):
-                _create_default_group_for_tenant(tenant_id, user_id)
 
 
 class TestCheckTenantNameExists:

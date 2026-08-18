@@ -210,6 +210,17 @@ def test_memory_formatting_renders_agent_presearch_and_ignores_retired_levels():
     ) == ""
 
 
+def test_versioned_long_term_markdown_is_not_wrapped_as_scored_list_item():
+    markdown = "## Preferences\n\n- concise\n- use English"
+    rendered = _format_memory_context([{
+        "memory": markdown, "memory_level": "user", "version_id": 9,
+        "memory_type": "long_term", "source": "dreaming",
+    }], language="en")
+    assert markdown in rendered
+    assert f"- {markdown}" not in rendered
+    assert "`(0.00)`" not in rendered
+
+
 def _direct_item(item_id, item_type, content, metadata=None):
     return ContextItem(
         id=item_id,

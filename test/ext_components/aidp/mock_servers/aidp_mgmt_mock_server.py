@@ -515,15 +515,31 @@ async def upload_documents(
             success_docs.append(doc)
             logger.info("UPLOAD  kds_id=%s file=%s size=%d", kds_id, f.filename, len(content))
         except Exception as e:
-            failed.append({"name": f.filename or "unknown", "error": str(e)})
+            failed.append({
+                "file_name": f.filename or "unknown",
+                "reason_zh": f"文件上传失败：{e}",
+                "reason_en": f"File upload failed: {e}",
+            })
             logger.warning("UPLOAD FAIL  kds_id=%s file=%s error=%s", kds_id, f.filename, e)
 
     _save_state()
     return JSONResponse(content={
-        "success_count": len(success_docs),
-        "failed_count": len(failed),
-        "errors": [f"{d['name']}: {d['error']}" for d in failed],
-        "document_ids": [d["file_ino_no"] for d in success_docs],
+        "summary": {
+            "total": len(files),
+            "success": len(success_docs),
+            "failed": len(failed),
+        },
+        "success_list": [
+            {
+                "file_name": doc["file_name"],
+                "file_type": doc["file_type"],
+                "file_size": doc["file_size"],
+                "file_ino_no": doc["file_ino_no"],
+                "first_upload_time": doc["create_time"],
+            }
+            for doc in success_docs
+        ],
+        "failed_list": failed,
     })
 
 

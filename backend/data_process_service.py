@@ -19,7 +19,8 @@ from utils.logging_utils import configure_logging
 from consts.const import (
     REDIS_URL, REDIS_PORT, FLOWER_PORT, RAY_DASHBOARD_PORT, RAY_DASHBOARD_HOST,
     RAY_ACTOR_NUM_CPUS, RAY_NUM_CPUS, DISABLE_RAY_DASHBOARD, DISABLE_CELERY_FLOWER,
-    DOCKER_ENVIRONMENT, RAY_OBJECT_STORE_MEMORY_GB, RAY_preallocate_plasma, RAY_TEMP_DIR
+    DOCKER_ENVIRONMENT, RAY_OBJECT_STORE_MEMORY_GB, RAY_preallocate_plasma, RAY_TEMP_DIR,
+    DP_PART_PROCESSOR_COUNT,
 )
 
 # Load environment variables
@@ -198,7 +199,10 @@ class ServiceManager:
             
             # Calculate concurrency for the process-worker. Each worker will spawn an actor,
             # so we limit concurrency to avoid oversubscribing Ray's CPU resources.
-            process_worker_concurrency = max(1, total_cpus // ray_actor_num_cpus)
+            process_worker_concurrency = min(
+                DP_PART_PROCESSOR_COUNT,
+                max(1, total_cpus // ray_actor_num_cpus),
+            )
             
             # For forward-worker, it's I/O bound. A higher concurrency is fine, but we can cap it
             # relative to CPU count to avoid creating excessive threads on small machines.

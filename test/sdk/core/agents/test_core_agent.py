@@ -356,6 +356,31 @@ def test_get_context_summary_returns_none_when_manager_summary_fails():
 # Tests for parse_code_blobs function
 # ----------------------------------------------------------------------------
 
+
+def test_incomplete_action_preamble_is_not_a_final_answer():
+    output = "思考：我需要先调用 knowledge_base_search 检索当前选择的知识库。"
+
+    assert core_agent_module._looks_like_incomplete_action_output(
+        output,
+        available_tool_names={"knowledge_base_search"},
+    ) is True
+
+
+def test_complete_answer_that_names_tool_is_not_misclassified():
+    output = "knowledge_base_search 是用于检索知识库的工具。"
+
+    assert core_agent_module._looks_like_incomplete_action_output(
+        output,
+        available_tool_names={"knowledge_base_search"},
+    ) is False
+
+
+def test_length_truncated_non_code_output_is_not_a_final_answer():
+    assert core_agent_module._looks_like_incomplete_action_output(
+        "这是一个尚未完成的回答",
+        finish_reason="length",
+    ) is True
+
 def test_parse_code_blobs_run_format():
     """Test parse_code_blobs with <code>...</code> pattern (new format)."""
     text = """Here is some code:
@@ -3040,3 +3065,44 @@ def test_wrap_visible_tool_events_skips_tools_without_forward():
     agent._wrap_visible_tool_events()
 
     assert not hasattr(agent.tools[0], "_tool_call_observer_wrapped")
+
+
+def _create_minimal_core_agent_for_time_tests():
+    """Create a CoreAgent with minimal mocking for time-prefix tests."""
+    module = TestRunStreamRealExecution()._load_core_agent_in_isolation()
+    agent = module.CoreAgent.__new__(module.CoreAgent)
+    agent.max_steps = 3
+    agent.state = {}
+    agent.memory = MagicMock()
+    agent.monitor = MagicMock()
+    agent.context_runtime = MagicMock()
+    agent.system_prompt = ""
+    agent.logger = MagicMock()
+    agent.model = MagicMock()
+    agent.model.model_id = "test-model"
+    agent.name = "test_agent"
+    agent.observer = MagicMock()
+    agent.python_executor = None
+    agent._run_stream_with_context_evidence = MagicMock(return_value=iter([]))
+    return agent
+
+
+def test_run_preserves_existing_current_time_prefix():
+    """When task already has [Current time: ...] prefix, run() should not re-inject."""
+    agent = _create_minimal_core_agent_for_time_tests()
+
+    prefixed_task = "[Current time: 2026-01-01 20:00:00]\n\nWhat time is it?"
+    list(agent.run(task=prefixed_task, stream=True))
+
+    assert agent.task == prefixed_task
+
+
+def test_run_injects_current_time_when_missing():
+    """When task has no [Current time: ...] prefix, run() should inject server time."""
+    agent = _create_minimal_core_agent_for_time_tests()
+
+    list(agent.run(task="What time is it?", stream=True))
+
+    assert agent.task.startswith("[Current time:")
+    assert "What time is it?" in agent.task
+

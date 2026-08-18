@@ -95,7 +95,7 @@ export const SourcesPanel: FC<SourcesPanelProps> = ({
 }) => {
   const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState<PanelTab>(
-    sources.length > 0 ? "sources" : "images",
+    sources.length > 0 ? "sources" : "images"
   );
 
   useEffect(() => {
@@ -163,7 +163,9 @@ export const SourcesPanel: FC<SourcesPanelProps> = ({
       <div className="flex-1 overflow-y-auto bg-slate-50/40 px-3 py-3">
         {currentItems.length === 0 ? (
           <p className="py-8 text-center text-sm text-muted-foreground">
-            {showSources ? t("chat.sources.noSources") : t("chat.sources.noImages")}
+            {showSources
+              ? t("chat.sources.noSources")
+              : t("chat.sources.noImages")}
           </p>
         ) : showSources ? (
           <ul className="flex flex-col gap-2">
@@ -198,7 +200,13 @@ interface TabButtonProps {
   onClick: () => void;
 }
 
-const TabButton: FC<TabButtonProps> = ({ label, count, icon, active, onClick }) => {
+const TabButton: FC<TabButtonProps> = ({
+  label,
+  count,
+  icon,
+  active,
+  onClick,
+}) => {
   return (
     <button
       type="button"
@@ -495,7 +503,7 @@ const SourceListItem: FC<{
   const previewUrl = getLocalFilePreviewUrl(
     item.url,
     item.filename || item.title,
-    item.objectName,
+    item.objectName
   );
 
   if (item.sourceType === "document") {
@@ -504,7 +512,10 @@ const SourceListItem: FC<{
         <div className="flex items-start gap-2 text-left text-sm">
           <button
             type="button"
-            onClick={() => previewUrl && window.open(previewUrl, "_blank", "noopener,noreferrer")}
+            onClick={() =>
+              previewUrl &&
+              window.open(previewUrl, "_blank", "noopener,noreferrer")
+            }
             disabled={!previewUrl}
             className="group flex min-w-0 flex-1 items-start gap-2 text-left transition-colors hover:text-primary disabled:cursor-default disabled:hover:text-foreground"
             aria-label={t("chat.sources.preview", {
@@ -664,6 +675,7 @@ const ImageListItem: FC<{ item: PanelSourceItem }> = ({ item }) => {
         alt={item.title || imageUrl}
         loading="lazy"
         preview
+        proxy={!resolvedUrl}
         className="aspect-square w-full object-cover"
       />
     </div>

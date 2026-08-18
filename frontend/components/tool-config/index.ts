@@ -10,7 +10,8 @@ export type ToolKbType =
   | "idata_search"
   | "haotian_search"
   | "ragflow_search"
-  | "aidp_search";
+  | "aidp_search"
+  | "ind_aidp_search";
 
 // Knowledge base selector component props
 export interface KnowledgeBaseSelectorProps {
@@ -48,6 +49,8 @@ export function getKnowledgeBaseSourcesForTool(toolType: ToolKbType): string[] {
       return ["ragflow"];
     case "aidp_search":
       return ["aidp"];
+    case "ind_aidp_search":
+      return ["ind-aidp"];
     default:
       return ["nexent"];
   }
@@ -88,7 +91,10 @@ export function getToolTypeForSkill(skillName: string): ToolKbType {
  */
 export function skillRequiresKbSelection(params: { name: string }[]): boolean {
   return params.some(
-    (p) => p.name === "index_names" || p.name === "dataset_ids" || p.name === "kds_list"
+    (p) =>
+      p.name === "index_names" ||
+      p.name === "dataset_ids" ||
+      p.name === "kds_list"
   );
 }
 
@@ -101,7 +107,11 @@ export function getKbParamNameForSkill(skillName: string): string {
   if (toolType === "aidp_search") {
     return "kds_list";
   }
-  if (toolType === "dify_search" || toolType === "idata_search" || toolType === "haotian_search") {
+  if (
+    toolType === "dify_search" ||
+    toolType === "idata_search" ||
+    toolType === "haotian_search"
+  ) {
     return "dataset_ids";
   }
   return "index_names";

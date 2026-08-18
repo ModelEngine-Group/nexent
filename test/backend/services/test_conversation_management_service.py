@@ -392,6 +392,74 @@ class TestConversationManagementService(unittest.TestCase):
             save_conversation_assistant(
                 agent_request, [], self.user_id, self.tenant_id)
 
+    @patch('backend.services.conversation_management_service.save_message')
+    def test_save_conversation_user_strips_current_time_prefix(self, mock_save_message):
+        """When query has [Current time: ...] prefix, it should be stripped before persisting."""
+        mock_save_message.return_value = 1001
+        agent_request = AgentRequest(
+            conversation_id=456,
+            query="[Current time: 2026-01-01 20:00:00]\n\nWhat is the weather?",
+            minio_files=[],
+            history=[]
+        )
+
+        save_conversation_user(agent_request, self.user_id, self.tenant_id)
+
+        mock_save_message.assert_called_once()
+        request_arg = mock_save_message.call_args[0][0]
+        self.assertEqual(request_arg.message[0].content, "What is the weather?")
+
+    @patch('backend.services.conversation_management_service.save_message')
+    def test_save_conversation_user_without_prefix_unchanged(self, mock_save_message):
+        """When query has no [Current time: ...] prefix, it should be persisted as-is."""
+        mock_save_message.return_value = 1002
+        agent_request = AgentRequest(
+            conversation_id=456,
+            query="What is machine learning?",
+            minio_files=[],
+            history=[]
+        )
+
+        save_conversation_user(agent_request, self.user_id, self.tenant_id)
+
+        mock_save_message.assert_called_once()
+        request_arg = mock_save_message.call_args[0][0]
+        self.assertEqual(request_arg.message[0].content, "What is machine learning?")
+
+    @patch('backend.services.conversation_management_service.save_message')
+    def test_save_conversation_user_empty_query(self, mock_save_message):
+        """When query is empty, it should be persisted as-is without errors."""
+        mock_save_message.return_value = 1003
+        agent_request = AgentRequest(
+            conversation_id=456,
+            query="",
+            minio_files=[],
+            history=[]
+        )
+
+        save_conversation_user(agent_request, self.user_id, self.tenant_id)
+
+        mock_save_message.assert_called_once()
+        request_arg = mock_save_message.call_args[0][0]
+        self.assertEqual(request_arg.message[0].content, "")
+
+    @patch('backend.services.conversation_management_service.save_message')
+    def test_save_conversation_user_malformed_prefix_no_bracket(self, mock_save_message):
+        """When query has [Current time: prefix but no closing bracket, persist as-is."""
+        mock_save_message.return_value = 1004
+        agent_request = AgentRequest(
+            conversation_id=456,
+            query="[Current time: no closing bracket here",
+            minio_files=[],
+            history=[]
+        )
+
+        save_conversation_user(agent_request, self.user_id, self.tenant_id)
+
+        mock_save_message.assert_called_once()
+        request_arg = mock_save_message.call_args[0][0]
+        self.assertEqual(request_arg.message[0].content, "[Current time: no closing bracket here")
+
     @patch('backend.services.conversation_management_service.OpenAIModel')
     @patch('backend.services.conversation_management_service.get_generate_title_prompt_template')
     @patch('backend.services.conversation_management_service.tenant_config_manager.get_model_config')

@@ -6,7 +6,6 @@ import type { PanelSourceItem } from "./sources-panel";
 import {
   AlertCircleIcon,
   CheckIcon,
-  ChevronDownIcon,
   LoaderIcon,
   XCircleIcon,
 } from "lucide-react";
@@ -21,7 +20,6 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
-import { AuthenticatedImage } from "./authenticated-image";
 import { SourceIcon, SourceTitle } from "./sources";
 
 const statusIconMap: Record<string, typeof LoaderIcon> = {
@@ -197,26 +195,19 @@ type ToolSearchSource = {
 
 function ToolFallbackSearchContent({
   searchContent,
-  searchImages,
   className,
   ...props
 }: React.ComponentProps<"div"> & {
   searchContent?: ToolSearchSource[];
-  searchImages?: string[];
 }) {
   const { open } = useSourcesPanel();
-  const imageSources = [
-    ...(searchImages ?? []).map((url) => ({ url, title: url, isImage: true })),
-    ...(searchContent ?? []).filter((item) => item.isImage),
-  ].filter(
-    (item, index, items) =>
-      item.url &&
-      items.findIndex((candidate) => candidate.url === item.url) === index
-  );
   const regularSources = (searchContent ?? []).filter((item) => !item.isImage);
   const panelSources: PanelSourceItem[] = regularSources.map((item, index) => ({
     sourceType:
-      item.sourceType === "file" || item.sourceType === "document" || item.filename || item.objectName
+      item.sourceType === "file" ||
+      item.sourceType === "document" ||
+      item.filename ||
+      item.objectName
         ? "document"
         : "url",
     url: item.url,
@@ -227,33 +218,13 @@ function ToolFallbackSearchContent({
     citeIndex: item.citeIndex ?? index,
     toolSign: item.toolSign,
   }));
-  const hasContent = imageSources.length > 0 || regularSources.length > 0;
-  if (!hasContent) return null;
+  if (regularSources.length === 0) return null;
 
   return (
     <div className={cn("mt-2", className)} {...props}>
       <div className="mb-1 text-xs font-medium text-muted-foreground">
         Sources:
       </div>
-      {imageSources.length > 0 && (
-        <div className="mb-2 flex flex-wrap gap-2">
-          {imageSources.map((item, index) => (
-            <div
-              key={`img-${item.url}-${index}`}
-              className="aui-tool-fallback-search-image block overflow-hidden rounded-md border bg-muted/50"
-              title={item.title || item.url}
-            >
-              <AuthenticatedImage
-                src={item.url!}
-                alt={item.title || item.url}
-                loading="lazy"
-                preview
-                className="size-20 object-cover"
-              />
-            </div>
-          ))}
-        </div>
-      )}
       {regularSources.length > 0 && (
         <div className="flex flex-wrap items-center gap-1.5">
           {regularSources.map((item, index) => {
@@ -274,7 +245,9 @@ function ToolFallbackSearchContent({
               >
                 <span className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border bg-secondary px-2 py-1 text-xs text-secondary-foreground transition-colors hover:bg-secondary/80">
                   <SourceIcon url={item.url || ""} />
-                  <SourceTitle>{item.title || item.url || "Source"}</SourceTitle>
+                  <SourceTitle>
+                    {item.title || item.url || "Source"}
+                  </SourceTitle>
                 </span>
               </button>
             );
@@ -291,10 +264,8 @@ const ToolFallbackImpl = ({
   result,
   status,
   searchContent,
-  searchImages,
 }: ToolCallMessagePartProps & {
   searchContent?: ToolSearchSource[];
-  searchImages?: string[];
 }) => {
   const isCancelled =
     status?.type === "incomplete" && status.reason === "cancelled";
@@ -306,10 +277,7 @@ const ToolFallbackImpl = ({
         <ToolFallbackContent>
           <ToolFallbackArgs argsText={argsText} />
           <ToolFallbackResult result={result} />
-          <ToolFallbackSearchContent
-            searchContent={searchContent}
-            searchImages={searchImages}
-          />
+          <ToolFallbackSearchContent searchContent={searchContent} />
           <ToolFallbackError status={status} />
         </ToolFallbackContent>
       )}

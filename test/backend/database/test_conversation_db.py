@@ -104,6 +104,7 @@ class ConversationRecord:
     conversation_title = MagicMock(name="ConversationRecord.conversation_title")
     agent_id = MagicMock(name="ConversationRecord.agent_id")
     chat_mode = MagicMock(name="ConversationRecord.chat_mode")
+    knowledge_scope = MagicMock(name="ConversationRecord.knowledge_scope")
     create_time = MagicMock(name="ConversationRecord.create_time")
     update_time = MagicMock(name="ConversationRecord.update_time")
     created_by = MagicMock(name="ConversationRecord.created_by")
@@ -223,6 +224,7 @@ from backend.database.conversation_db import (
     update_message_opinion,
     update_message_unit_content,
     update_message_unit_status,
+    update_conversation_knowledge_scope,
 )
 
 
@@ -2637,3 +2639,60 @@ def test_get_historical_context_returns_latest_summary_and_only_new_turns(
         "user_message_id": 31,
         "assistant_message_id": 32,
     }]
+
+# =============================================================================
+# Tests for create_conversation knowledge_scope + update_conversation_knowledge_scope
+# =============================================================================
+
+
+def test_create_conversation_with_knowledge_scope(monkeypatch, mock_session_ctx, fresh_insert_mock):
+    """create_conversation persists the desired knowledge scope."""
+    session, ctx = mock_session_ctx
+    mock_record = MagicMock()
+    mock_record.conversation_id = 43
+    mock_record.conversation_title = "Scoped Title"
+    mock_record.agent_id = None
+    mock_record.create_time = 1000.0
+    mock_record.update_time = 1000.0
+    session.execute.return_value.fetchone.return_value = mock_record
+
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    scope = {"local": {"mode": "override", "index_names": ["idx-a"]}, "aidp": {"mode": "disabled"}}
+    result = create_conversation(
+        "Scoped Title", user_id="user-1", chat_mode="chat", knowledge_scope=scope
+    )
+
+    assert result["conversation_id"] == 43
+    assert _captured_insert_values["knowledge_scope"] == scope
+    assert _captured_insert_values["chat_mode"] == "chat"
+
+
+def test_update_conversation_knowledge_scope_success(monkeypatch, mock_session_ctx, fresh_update_mock):
+    """update_conversation_knowledge_scope returns True when a row was updated."""
+    session, ctx = mock_session_ctx
+    result_mock = MagicMock()
+    result_mock.rowcount = 1
+    session.execute.return_value = result_mock
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    scope = {"local": {"mode": "inherit"}}
+    ok = update_conversation_knowledge_scope(999, scope, user_id="user-1")
+
+    assert ok is True
+    session.execute.assert_called_once()
+    assert _captured_update_values["knowledge_scope"] == scope
+
+
+def test_update_conversation_knowledge_scope_missing_row(monkeypatch, mock_session_ctx):
+    """update_conversation_knowledge_scope returns False when no row matches."""
+    session, ctx = mock_session_ctx
+    result_mock = MagicMock()
+    result_mock.rowcount = 0
+    session.execute.return_value = result_mock
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    ok = update_conversation_knowledge_scope(404, {"local": {"mode": "disabled"}}, user_id="nobody")
+
+    assert ok is False
+    session.execute.assert_called_once()

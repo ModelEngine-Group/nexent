@@ -132,7 +132,8 @@ export interface Nl2aAgentDraftPayload {
 }
 
 export type Nl2aPayload =
-  Nl2aLocalMcpRecommendationPayload | Nl2aAgentDraftPayload;
+  | Nl2aLocalMcpRecommendationPayload
+  | Nl2aAgentDraftPayload;
 
 export interface Nl2aMessage {
   type: "nl2a";
@@ -147,11 +148,40 @@ interface NexentRunConfig {
   agentId?: number | string;
   enablePlan?: boolean;
   runtimeMode?: "nl2agent" | "nl2skill";
+  knowledgeScope?: import("@/types/knowledgeScope").ConversationKnowledgeScope;
+  onKnowledgeScopeResolved?: (
+    resolution: import("@/types/knowledgeScope").KnowledgeScopeResolution
+  ) => void;
   draftSnapshot?: Record<string, unknown>;
   complexity?: "simple" | "complicated";
   language?: "zh" | "en";
   onNl2SkillEvent?: (event: Nl2SkillStreamEvent) => void;
   modelId?: number;
+}
+
+function notifyKnowledgeScopeResolved(
+  content: unknown,
+  callback: NexentRunConfig["onKnowledgeScopeResolved"]
+): void {
+  if (!callback) return;
+  try {
+    const resolution =
+      typeof content === "string" ? JSON.parse(content) : content;
+    if (
+      resolution &&
+      typeof resolution === "object" &&
+      Array.isArray((resolution as { warnings?: unknown }).warnings)
+    ) {
+      callback(
+        resolution as import("@/types/knowledgeScope").KnowledgeScopeResolution
+      );
+    }
+  } catch (error) {
+    log.warn(
+      "[ChatModelAdapter] Failed to parse knowledge_scope_resolved:",
+      error
+    );
+  }
 }
 
 // assistant-ui valid part types referenced by this adapter
@@ -491,7 +521,7 @@ function parseSseChunk(line: string): SseChunk | null {
 
 /**
  * Extracts the agent run start time from an agent_new_run content string.
- * The backend prepends `[Current time: YYYY-MM-DD HH:MM:SS]` to the task text.
+ * The backend prepends `[Current time: YYYY-MM-DD HH:MM:SS±HHMM]` to the task text.
  * Returns undefined when the prefix is absent or unparseable.
  */
 const AGENT_RUN_TIME_PREFIX = "[Current time:";
@@ -500,8 +530,8 @@ function extractAgentRunTime(content: string): string | undefined {
   const closeIdx = content.indexOf("]", AGENT_RUN_TIME_PREFIX.length);
   if (closeIdx < 0) return undefined;
   const raw = content.slice(AGENT_RUN_TIME_PREFIX.length, closeIdx).trim();
-  // Basic format check: "YYYY-MM-DD HH:MM:SS"
-  if (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(raw)) return undefined;
+  // Format check: "YYYY-MM-DD HH:MM:SS" with optional timezone offset "±HHMM"
+  if (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}([+-]\d{4})?$/.test(raw)) return undefined;
   return raw;
 }
 
@@ -574,6 +604,7 @@ function mapChunkType(type: string): AssistantPartType | null {
       // runs. Falling through here would push them as plain text parts.
       return null;
     case "conversation_created":
+    case "knowledge_scope_resolved":
     case "other":
     case "agent_new_run":
     case "token_count":
@@ -715,6 +746,12 @@ export function attachSearchContentToTool(
   },
   toolCallId: string | undefined = undefined
 ): boolean {
+  // Images are rendered from the authenticated PICTURE_WEB source in the
+  // answer and sources panel. Attaching SEARCH_CONTENT image metadata here
+  // would render the same image again inside the tool call, and relative AIDP
+  // ViewImage paths would be resolved against the current locale route.
+  if (item.isImage) return false;
+
   const targetToolCall = findMostRecentToolCall(contentParts, toolCallId);
   if (!targetToolCall) return false;
   if (!targetToolCall.searchContent) {
@@ -779,6 +816,8 @@ export const searchImagesRegistry = new Map<
 >();
 
 const AIDP_IMAGE_MARKER_PATTERN = /\/__aidp_image__\/([a-z]+\d+)/gi;
+const MARKDOWN_IMAGE_URL_PATTERN =
+  /!\[[^\]]*\]\(\s*<?([^>\s)]+)>?(?:\s+["'][^)]*["'])?\s*\)/g;
 
 export function extractAidpImageKeys(texts: readonly string[]): string[] {
   const keys: string[] = [];
@@ -794,6 +833,22 @@ export function extractAidpImageKeys(texts: readonly string[]): string[] {
     }
   }
   return keys;
+}
+
+export function extractMarkdownImageUrls(texts: readonly string[]): string[] {
+  const urls: string[] = [];
+  const seen = new Set<string>();
+  for (const text of texts) {
+    MARKDOWN_IMAGE_URL_PATTERN.lastIndex = 0;
+    for (const match of text.matchAll(MARKDOWN_IMAGE_URL_PATTERN)) {
+      const url = match[1];
+      if (!seen.has(url)) {
+        seen.add(url);
+        urls.push(url);
+      }
+    }
+  }
+  return urls;
 }
 
 // Conversation-level search sources registry for historical messages.
@@ -1111,7 +1166,8 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       isNl2Agent && lastUserIndex >= 0
         ? (
             messages[lastUserIndex].metadata?.custom as
-              { nl2agentToolSelection?: Nl2AgentToolSelection } | undefined
+              | { nl2agentToolSelection?: Nl2AgentToolSelection }
+              | undefined
           )?.nl2agentToolSelection
         : undefined;
     const query = selectionMetadata
@@ -1175,6 +1231,9 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       }
     }
     requestBody.enable_plan = custom?.enablePlan === true;
+    if (!isResume && !isEphemeralRuntime && custom?.knowledgeScope) {
+      requestBody.knowledge_scope = custom.knowledgeScope;
+    }
 
     // Pass selected model if provided via ModelContext (registered by ModelSelector)
     const modelName = context.config?.modelName;
@@ -1187,7 +1246,8 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     );
 
     let agentResponse:
-      ReadableStreamDefaultReader<Uint8Array> | { type: "json"; data: unknown };
+      | ReadableStreamDefaultReader<Uint8Array>
+      | { type: "json"; data: unknown };
     try {
       agentResponse = await conversationService.runAgent(
         {
@@ -1203,6 +1263,9 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           is_debug: false,
           is_resume: isResume,
           enable_plan: custom?.enablePlan === true,
+          knowledge_scope: requestBody.knowledge_scope as
+            | import("@/types/knowledgeScope").ConversationKnowledgeScope
+            | undefined,
           runtime_mode: isNl2Agent
             ? "nl2agent"
             : isNl2Skill
@@ -1496,10 +1559,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     let nl2a: Nl2aMessage | undefined;
     let verificationPanel: VerificationPanelPart | null = null;
 
-    const appendSearchImages = (
-      imageUrls: string[],
-      toolCallId: string | undefined = undefined
-    ) => {
+    const appendSearchImages = (imageUrls: string[]) => {
       const imageMetadata = searchSourcesAccumulator.filter(
         (source) => source.isImage
       );
@@ -1522,7 +1582,6 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
               : undefined),
         };
         searchImagesAccumulator.push(imageSource);
-        attachSearchContentToTool(contentParts, imageSource, toolCallId);
       }
     };
 
@@ -1576,6 +1635,14 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
 
           // Internal status / resume events: skip
           if (chunk.type === "status") continue;
+
+          if (chunk.type === "knowledge_scope_resolved") {
+            notifyKnowledgeScopeResolved(
+              chunk.content as unknown,
+              custom?.onKnowledgeScopeResolved
+            );
+            continue;
+          }
 
           if (isNl2Skill) {
             custom?.onNl2SkillEvent?.(chunk);
@@ -1736,7 +1803,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
               const imageUrls: string[] = Array.isArray(parsed?.images_url)
                 ? parsed.images_url
                 : [];
-              appendSearchImages(imageUrls, chunk.tool_call_id);
+              appendSearchImages(imageUrls);
             } catch (e) {
               log.warn("[ChatModelAdapter] Failed to parse picture_web:", e);
             }
@@ -2018,7 +2085,12 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         const chunk = parseSseChunk(buffer);
         if (chunk && chunk.type !== "status") {
           if (isNl2Skill) custom?.onNl2SkillEvent?.(chunk);
-          if (
+          if (chunk.type === "knowledge_scope_resolved") {
+            notifyKnowledgeScopeResolved(
+              chunk.content as unknown,
+              custom?.onKnowledgeScopeResolved
+            );
+          } else if (
             isNl2Skill &&
             (chunk.type === "skill_body" || chunk.type === "file_content")
           ) {
@@ -2027,9 +2099,10 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             yield buildStreamResult(contentParts);
           } else if (isNl2Skill && chunk.type === "summary") {
             flushOpenReasoning();
-            contentParts.push({ type: "text", text: chunk.content });
+            appendNl2SkillSummary(chunk.content);
             yield buildStreamResult(contentParts);
           } else if (isNl2Skill && chunk.type === "done") {
+            flushOpenReasoning();
             finishNl2SkillFiles();
             yield buildStreamResult(contentParts);
           } else if (chunk.type === "plan") {
@@ -2081,7 +2154,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
               const imageUrls: string[] = Array.isArray(parsed?.images_url)
                 ? parsed.images_url
                 : [];
-              appendSearchImages(imageUrls, chunk.tool_call_id);
+              appendSearchImages(imageUrls);
             } catch (e) {
               log.warn("[ChatModelAdapter] Failed to parse picture_web:", e);
             }
@@ -2275,6 +2348,15 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             : []
         )
       );
+      const answerImageUrls = new Set(
+        extractMarkdownImageUrls(
+          contentParts.flatMap((part) =>
+            part?.type === "text" && typeof part.text === "string"
+              ? [part.text]
+              : []
+          )
+        )
+      );
       const imageMetadata = searchSourcesAccumulator.filter(
         (source) => source.isImage
       );
@@ -2314,6 +2396,26 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         ...searchSourcesAccumulator.filter((source) => !source.isImage),
         ...searchImagesAccumulator,
       ]);
+
+      // Web search tools return verified images through PICTURE_WEB, but the
+      // model does not always include image markdown in its answer. Render
+      // those otherwise-unreferenced images after the answer, outside the
+      // grouped source block. AIDP markers and explicit markdown images keep
+      // their original inline position and are not duplicated here.
+      for (const image of searchImagesAccumulator) {
+        if (
+          answerImageUrls.has(image.url) ||
+          ((image.url.includes("/KnowledgeBase/Tenants/") ||
+            image.url.includes("/ind-aidp/images/")) &&
+            image.imageKey &&
+            answerImageKeys.includes(image.imageKey))
+        ) {
+          continue;
+        }
+        // Use assistant-ui's native image part. Custom fields attached to an
+        // empty text part are not preserved when history is reconstructed.
+        contentParts.push({ type: "image", image: image.url });
+      }
 
       // Emit one contiguous source block after the answer and image cards.
       // Also register it so MarkdownText can resolve citation markers.
