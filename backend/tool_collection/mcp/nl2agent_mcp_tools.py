@@ -43,6 +43,7 @@ SAVE_AGENT_DRAFT_FIELDS_DESCRIPTION = (
 )
 NL2AGENT_MCP_TOOL_META = {"nexent_internal": True}
 MAX_TOOL_RECOMMENDATIONS = 5
+MAX_REQUIREMENT_CLARIFICATION_QUESTIONS = 5
 FEW_SHOT_EXAMPLE_COUNT = 2
 NL2A_SUBTYPES = Literal[
     "requirement_clarification",
@@ -240,15 +241,34 @@ class RequirementClarificationQuestion(BaseModel):
     title: str = Field(min_length=1, max_length=500)
     required: bool = True
     options: list[RequirementClarificationOption] = Field(default_factory=list)
-    allow_other: Literal[True] = True
-    other_input_expanded: Literal[True] = True
+    allow_other: bool = True
+    other_input_expanded: bool = True
+
+    @model_validator(mode="before")
+    @classmethod
+    def apply_question_type_defaults(cls, value: Any) -> Any:
+        if isinstance(value, dict) and value.get("question_type") == "text":
+            normalized = dict(value)
+            normalized.setdefault("allow_other", False)
+            normalized.setdefault("other_input_expanded", False)
+            return normalized
+        return value
 
     @model_validator(mode="after")
     def validate_options(self) -> "RequirementClarificationQuestion":
-        if self.question_type == "text" and self.options:
-            raise ValueError("text clarification questions cannot have options")
-        if self.question_type != "text" and not self.options:
+        if self.question_type == "text":
+            if self.options:
+                raise ValueError("text clarification questions cannot have options")
+            if self.allow_other or self.other_input_expanded:
+                raise ValueError(
+                    "text clarification questions cannot allow other answers"
+                )
+        elif not self.options:
             raise ValueError("choice clarification questions require options")
+        elif not self.allow_other or not self.other_input_expanded:
+            raise ValueError(
+                "choice clarification questions require expanded other input"
+            )
         return self
 
 
@@ -260,7 +280,7 @@ class RequirementClarificationPayload(BaseModel):
     agent_id: None = None
     questions: list[RequirementClarificationQuestion] = Field(
         min_length=1,
-        max_length=8,
+        max_length=MAX_REQUIREMENT_CLARIFICATION_QUESTIONS,
     )
 
 

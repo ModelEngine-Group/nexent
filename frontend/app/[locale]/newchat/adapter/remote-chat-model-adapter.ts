@@ -126,8 +126,8 @@ export interface Nl2aRequirementClarificationQuestion {
   title: string;
   required: boolean;
   options: Nl2aRequirementClarificationOption[];
-  allow_other: true;
-  other_input_expanded: true;
+  allow_other: boolean;
+  other_input_expanded: boolean;
 }
 
 export interface Nl2aRequirementClarificationPayload {

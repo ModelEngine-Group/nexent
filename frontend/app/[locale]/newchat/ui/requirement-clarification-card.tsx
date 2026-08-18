@@ -14,6 +14,13 @@ import type {
 
 type AnswerValue = string | string[];
 
+const supportsOtherAnswer = (
+  question: Nl2aRequirementClarificationPayload["questions"][number]
+) =>
+  question.question_type !== "text" &&
+  question.allow_other &&
+  question.other_input_expanded;
+
 export const RequirementClarificationCard: FC<{
   payload: Nl2aRequirementClarificationPayload;
   disabled?: boolean;
@@ -39,7 +46,11 @@ export const RequirementClarificationCard: FC<{
         const hasAnswer = Array.isArray(answer)
           ? answer.length > 0
           : Boolean(answer?.trim());
-        return hasAnswer || Boolean(otherAnswers[question.question_id]?.trim());
+        return (
+          hasAnswer ||
+          (supportsOtherAnswer(question) &&
+            Boolean(otherAnswers[question.question_id]?.trim()))
+        );
       }),
     [answers, otherAnswers, payload.questions]
   );
@@ -73,7 +84,9 @@ export const RequirementClarificationCard: FC<{
           value:
             answers[question.question_id] ??
             (question.question_type === "multiple_choice" ? [] : ""),
-          other_text: otherAnswers[question.question_id]?.trim() || null,
+          other_text: supportsOtherAnswer(question)
+            ? otherAnswers[question.question_id]?.trim() || null
+            : null,
         })),
       },
     };
@@ -193,7 +206,7 @@ export const RequirementClarificationCard: FC<{
                 </div>
               )}
 
-              {question.allow_other ? (
+              {supportsOtherAnswer(question) ? (
                 <label className="mt-3 block text-xs text-muted-foreground">
                   <span>
                     {t("nl2agent.requirementClarification.other", "Other")}

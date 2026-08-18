@@ -18,6 +18,7 @@ from tool_collection.mcp.nl2agent_mcp_tools import (
     Nl2aAgentDraftInput,
     Nl2aFewShotToolCall,
     RecommendResourcesInput,
+    RequirementClarificationQuestion,
     RequirementClarificationPayload,
     ResourceRequirement,
     SearchInstalledResourcesInput,
@@ -157,6 +158,14 @@ def test_build_nl2agent_system_prompt_is_runtime_specific(
     assert "search_result=result" in prompt
     assert "import json" in prompt
     assert "few_shots_prompt" not in prompt
+    if language == "en":
+        assert "one to five schema-driven questions" in prompt
+        assert "Prefer at most four focused questions" in prompt
+        assert "Text questions set both fields to `False`" in prompt
+    else:
+        assert "一到五个 Schema 驱动的问题" in prompt
+        assert "优先只问不超过四个聚焦问题" in prompt
+        assert "文本题的主文本框已经是开放输入" in prompt
     code_blocks = re.findall(r"<code>\n(.*?)\n</code>", prompt, re.DOTALL)
     assert len(code_blocks) == 5
     for code_block in code_blocks:
@@ -256,6 +265,50 @@ def test_phase_one_freezes_five_tool_input_models_and_clarification_wrapper():
     clarification = RequirementClarificationPayload.model_validate(payload)
     assert clarification.agent_id is None
     assert clarification.questions[0].other_input_expanded is True
+
+
+def test_requirement_clarification_accepts_at_most_five_questions():
+    questions = [
+        {
+            "question_id": f"question-{index}",
+            "question_type": "text",
+            "title": f"Question {index}",
+        }
+        for index in range(5)
+    ]
+
+    assert len(RequirementClarificationPayload(questions=questions).questions) == 5
+    with pytest.raises(ValidationError, match="at most 5 items"):
+        RequirementClarificationPayload(
+            questions=[
+                *questions,
+                {
+                    "question_id": "question-5",
+                    "question_type": "text",
+                    "title": "Question 5",
+                },
+            ]
+        )
+
+
+def test_text_clarification_does_not_allow_a_second_open_input():
+    question = RequirementClarificationQuestion(
+        question_id="details",
+        question_type="text",
+        title="Describe the expected workflow.",
+    )
+
+    assert question.allow_other is False
+    assert question.other_input_expanded is False
+
+    with pytest.raises(ValidationError, match="cannot allow other answers"):
+        RequirementClarificationQuestion(
+            question_id="details",
+            question_type="text",
+            title="Describe the expected workflow.",
+            allow_other=True,
+            other_input_expanded=True,
+        )
 
 
 @pytest.mark.asyncio

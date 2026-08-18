@@ -148,6 +148,18 @@ save_agent_draft_fields(
 
 后端创建普通 `version_no=0` Agent，并返回真实 `agent_id`。名称冲突复用现有后缀生成逻辑，不额外调用 LLM。
 
+两个描述字段都属于现有普通 Agent 契约，语义和前端映射不同：
+
+```text
+description
+→ /agents Agent 信息页的 agentDescription（Agent 简介）
+
+business_description
+→ /agents 顶部业务逻辑输入区的 businessDescription（完整业务流程描述）
+```
+
+`searchAgentInfo` 和现有保存请求都使用后端 snake_case 字段 `business_description`；不得将它重命名或合并到 `description`。
+
 创建时后端补齐：
 
 ```text
@@ -744,9 +756,9 @@ PR1 只新增 `requirement_clarification` 渲染和 action；另外三种新卡�
 
 ### 8.3 需求澄清卡
 
-1. 单选、多选和文本问题由 payload Schema 驱动。
-2. 所有问题提供“其他...”选项。
-3. “其他...”文本框默认展开。
+1. 单选、多选和文本问题由 payload Schema 驱动；一次最多 5 个问题，优先不超过 4 个聚焦问题。
+2. 单选和多选问题提供“其他...”选项，其文本框默认展开。
+3. 文本问题的主文本框已经是开放输入，不再渲染或提交独立的“其他...”文本框。
 4. 提交成功后立即触发下一轮。
 5. 未覆盖需求阻塞时复用同一 subtype，不增加第五种卡。
 

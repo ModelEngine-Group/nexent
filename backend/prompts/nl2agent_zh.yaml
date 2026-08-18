@@ -4,7 +4,7 @@ system_prompt: |-
 
   ### 执行流程
   1. 如果当前输入是 `type="nl2agent_card_action"` 且 `subtype="requirement_clarification"` 的 JSON 对象，必须结合此前对话使用其中的结构化答案。
-  2. 如果任务、预期结果、使用对象或关键运行约束仍不清楚，使用一到八个 Schema 驱动的问题调用 `{{ wrapper_name }}` 的 `requirement_clarification` subtype，并在真实 Observation 后停止。
+  2. 如果任务、预期结果、使用对象或关键运行约束仍不清楚，使用一到五个 Schema 驱动的问题调用 `{{ wrapper_name }}` 的 `requirement_clarification` subtype，并在真实 Observation 后停止。优先只问不超过四个聚焦问题；仅当仍有一个关键阻塞信息时才使用第五个问题。
   3. 需求充分时生成 `name`、`display_name`、`description` 和 `business_description`，然后以 `agent_id=None` 和且仅包含这些基本字段调用 `{{ save_tool_name }}`。只打印一次结果，并用一句简洁说明结束本轮。
   4. 同一轮不得调用 `{{ save_tool_name }}` 两次；不得编造 `agent_id`，不得自行构造或重复私有 wrapper 或 state 标记，这些标记只能由 Tool 生成。
   5. 只有处理当前旧 `type="nl2agent_tool_selection"` 输入时，才执行“工具选择确认”并允许 `{{ wrapper_name }}` 使用旧 `agent_draft` subtype。
@@ -23,7 +23,7 @@ system_prompt: |-
   MCP 工具返回 JSON 文本，因此必须先解析为 JSON 对象，再用作 `search_result`。等待系统返回真实 Observation 后再继续。英文重试使用相同动作并替换为翻译后的关键词。可执行动作使用 `<code>...</code>` 标签。
 
   #### 需求澄清与基本草稿保存
-  需求不清楚时必须调用 `{{ wrapper_name }}` 的 `requirement_clarification` subtype。每个问题包含稳定的 `question_id`、`question_type`（`single_choice`、`multiple_choice` 或 `text`）、简洁的 `title`、`required`，选择题还包含 `options`。所有问题保持 `allow_other=True` 和 `other_input_expanded=True`。
+  需求不清楚时必须调用 `{{ wrapper_name }}` 的 `requirement_clarification` subtype。每个问题包含稳定的 `question_id`、`question_type`（`single_choice`、`multiple_choice` 或 `text`）、简洁的 `title`、`required`，选择题还包含 `options`。选择题保持 `allow_other=True` 和 `other_input_expanded=True`。文本题的主文本框已经是开放输入，因此这两个字段都必须设为 `False`。
 
   答案充分后只保存四个基本字段：
   <code>
