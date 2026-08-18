@@ -168,13 +168,23 @@ class HaotianSearchTool(Tool):
         self.authorization = authorization.strip()
 
         self.dataset_ids = self._parse_dataset_ids(dataset_ids)
-        self.top_k = top_k
+        # Normalize optional params so a null/out-of-range value from a legacy
+        # tool config cannot crash the search at runtime.
+        self.top_k = top_k if isinstance(top_k, int) and 1 <= top_k <= 100 else 3
         self.search_method = search_method
         self.reranking_enable = reranking_enable
         self.reranking_provider_name = reranking_provider_name
         self.reranking_model_name = reranking_model_name
-        self.keyword_weight = keyword_weight
-        self.vector_weight = vector_weight
+        self.keyword_weight = (
+            keyword_weight
+            if isinstance(keyword_weight, (int, float)) and 0.0 <= keyword_weight <= 1.0
+            else 0.1
+        )
+        self.vector_weight = (
+            vector_weight
+            if isinstance(vector_weight, (int, float)) and 0.0 <= vector_weight <= 1.0
+            else 0.3
+        )
         self.embedding_provider_name = embedding_provider_name
         self.embedding_model_name = embedding_model_name
         self.score_threshold_enabled = score_threshold_enabled

@@ -57,7 +57,11 @@ class LinkupSearchTool(Tool):
         super().__init__()
         self.observer = observer
         self.client = LinkupClient(api_key=linkup_api_key)
-        self.max_results = max_results
+        # Normalize optional params so a null/out-of-range value from a legacy
+        # tool config cannot crash the search at runtime.
+        self.max_results = (
+            max_results if isinstance(max_results, int) and 1 <= max_results <= 100 else 3
+        )
         self.record_ops = 1
         self.image_filter = image_filter
         self.data_process_service = os.getenv("DATA_PROCESS_SERVICE")

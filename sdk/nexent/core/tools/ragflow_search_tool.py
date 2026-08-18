@@ -156,9 +156,24 @@ class RAGFlowSearchTool(Tool):
 
         self.server_url = server_url.rstrip("/")
         self.api_key = api_key
-        self.top_k = top_k
-        self.similarity_threshold = similarity_threshold
-        self.vector_similarity_weight = vector_similarity_weight
+        # Normalize optional params so a null/out-of-range value from a legacy
+        # tool config cannot crash the search at runtime.
+        top_k = _resolve_default(top_k)
+        similarity_threshold = _resolve_default(similarity_threshold)
+        vector_similarity_weight = _resolve_default(vector_similarity_weight)
+        self.top_k = top_k if isinstance(top_k, int) and 1 <= top_k <= 100 else 3
+        self.similarity_threshold = (
+            similarity_threshold
+            if isinstance(similarity_threshold, (int, float))
+            and 0.0 <= similarity_threshold <= 1.0
+            else 0.2
+        )
+        self.vector_similarity_weight = (
+            vector_similarity_weight
+            if isinstance(vector_similarity_weight, (int, float))
+            and 0.0 <= vector_similarity_weight <= 1.0
+            else 0.3
+        )
         self.keyword = keyword
         self.highlight = highlight
         self.observer = observer

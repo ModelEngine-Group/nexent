@@ -120,10 +120,28 @@ class IdataSearchTool(Tool):
         self.user_id = user_id
         self.knowledge_space_id = knowledge_space_id
         self.rerank_model_id = rerank_model_id
-        self.top_k = top_k
-        self.similarity_threshold = similarity_threshold
-        self.keyword_similarity_weight = keyword_similarity_weight
-        self.vector_similarity_weight = vector_similarity_weight
+        # Normalize optional params so a null/out-of-range value from a legacy
+        # tool config cannot crash the search at runtime.
+        self.top_k = top_k if isinstance(top_k, int) and 1 <= top_k <= 100 else 10
+        # -10.0 is the SDK sentinel for "threshold disabled"; keep it legal.
+        self.similarity_threshold = (
+            similarity_threshold
+            if isinstance(similarity_threshold, (int, float))
+            and -10.0 <= similarity_threshold <= 1.0
+            else -10.0
+        )
+        self.keyword_similarity_weight = (
+            keyword_similarity_weight
+            if isinstance(keyword_similarity_weight, (int, float))
+            and 0.0 <= keyword_similarity_weight <= 1.0
+            else 0.1
+        )
+        self.vector_similarity_weight = (
+            vector_similarity_weight
+            if isinstance(vector_similarity_weight, (int, float))
+            and 0.0 <= vector_similarity_weight <= 1.0
+            else 0.3
+        )
         self.observer = observer
 
         # Cache HTTP client for reuse (uses shared HttpClientManager internally)

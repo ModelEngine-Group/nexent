@@ -139,11 +139,19 @@ class KnowledgeBaseSearchTool(Tool):
             ValueError: If language is not supported
         """
         super().__init__()
-        self.top_k = top_k
+        # Normalize optional params so a null/out-of-range value from a legacy
+        # tool config cannot crash the search at runtime.
+        top_k = _unwrap_field_info(top_k)
+        search_mode = _unwrap_field_info(search_mode)
+        self.top_k = top_k if isinstance(top_k, int) and 1 <= top_k <= 100 else 3
         self.observer = observer
         self.vdb_core = vdb_core
         self.index_names = [] if index_names is None else index_names
-        self.search_mode = search_mode
+        self.search_mode = (
+            search_mode
+            if search_mode in ("hybrid", "accurate", "semantic")
+            else "hybrid"
+        )
         self.embedding_model = embedding_model
         self.rerank = rerank
         self.rerank_model_name = rerank_model_name

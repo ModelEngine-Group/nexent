@@ -85,7 +85,11 @@ class GetEmailTool(Tool):
         self.username = username
         self.password = password
         self.use_ssl = use_ssl
-        self.timeout = timeout
+        # Normalize optional params so a null/out-of-range value from a legacy
+        # tool config cannot crash the email lookup at runtime.
+        self.timeout = (
+            timeout if isinstance(timeout, int) and 1 <= timeout <= 600 else 30
+        )
 
     def _decode_subject(self, subject):
         """Decode email subject, fallback to utf-8 or latin1 for unknown encodings"""

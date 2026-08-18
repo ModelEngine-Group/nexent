@@ -132,8 +132,15 @@ class DifySearchTool(Tool):
 
         self.server_url = server_url.rstrip("/")
         self.api_key = api_key
-        self.top_k = top_k
-        self.search_method = search_method
+        # Normalize optional params so a null/out-of-range value from a legacy
+        # tool config cannot crash the search at runtime.
+        self.top_k = top_k if isinstance(top_k, int) and 1 <= top_k <= 100 else 3
+        self.search_method = (
+            search_method
+            if search_method
+            in ("keyword_search", "semantic_search", "full_text_search", "hybrid_search")
+            else "semantic_search"
+        )
         self.observer = observer
         self.rerank = rerank
         self.rerank_model_name = rerank_model_name

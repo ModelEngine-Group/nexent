@@ -104,7 +104,11 @@ class TerminalTool(Tool):
 
         self.observer = observer
         self.ssh_host = ssh_host
-        self.ssh_port = ssh_port
+        # Normalize optional params so a null/out-of-range value from a legacy
+        # tool config cannot crash the SSH connection at runtime.
+        self.ssh_port = (
+            ssh_port if isinstance(ssh_port, int) and 1 <= ssh_port <= 65535 else 22
+        )
         self.ssh_user = ssh_user
         self.password = password
 

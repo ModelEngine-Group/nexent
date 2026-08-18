@@ -127,8 +127,14 @@ class DataMateSearchTool(Tool):
         self.use_https = parsed_url["use_https"]
         self.server_base_url = parsed_url["base_url"]
         self.index_names = [] if index_names is None else index_names
-        self.top_k = top_k
-        self.threshold = threshold
+        # Normalize optional params so a null/out-of-range value from a legacy
+        # tool config cannot crash the search at runtime.
+        self.top_k = top_k if isinstance(top_k, int) and 1 <= top_k <= 100 else 3
+        self.threshold = (
+            threshold
+            if isinstance(threshold, (int, float)) and 0.0 <= threshold <= 1.0
+            else 0.2
+        )
         self.rerank = rerank
         self.rerank_model_name = rerank_model_name
         self.rerank_model = rerank_model
@@ -146,8 +152,14 @@ class DataMateSearchTool(Tool):
             verify_ssl=self.verify_ssl if self.use_https else True
         )
 
-        self.kb_page = kb_page
-        self.kb_page_size = kb_page_size
+        self.kb_page = (
+            kb_page if isinstance(kb_page, int) and kb_page >= 1 else 1
+        )
+        self.kb_page_size = (
+            kb_page_size
+            if isinstance(kb_page_size, int) and 1 <= kb_page_size <= 100
+            else 20
+        )
         self.observer = observer
 
         self.record_ops = 1  # To record serial number
