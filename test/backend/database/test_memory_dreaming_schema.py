@@ -67,3 +67,24 @@ def test_final_migration_is_the_only_dreaming_schema_source():
             final,
             flags=re.IGNORECASE,
         )
+
+
+def test_final_migration_upgrades_v24_without_intermediate_v25_schema():
+    root = Path(__file__).resolve().parents[3]
+    migrations = root / "deploy/sql/migrations"
+    v24 = (migrations / "v2.4_merged_migrations.sql").read_text()
+    final = (migrations / "v2.5.0_0813_versioned_markdown_long_term_memory.sql").read_text()
+
+    assert "CREATE TABLE IF NOT EXISTS nexent.memory_records_t" in v24
+    for table_name in (
+        "memory_dreaming_audit_t",
+        "memory_dreaming_decision_t",
+        "memory_dreaming_schedule_t",
+        "memory_long_term_version_t",
+    ):
+        assert f"nexent.{table_name}" not in v24
+
+    assert "DELETE FROM nexent.memory_records_t WHERE layer IN ('tenant', 'user')" in final
+    assert "ALTER TABLE nexent.memory_records_t" in final
+    assert "result_json" not in final
+    assert "compression_max_attempts" not in final
