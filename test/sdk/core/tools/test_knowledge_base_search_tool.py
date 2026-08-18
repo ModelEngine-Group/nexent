@@ -1036,6 +1036,8 @@ class TestKnowledgeBaseSearchToolMissingBranches:
             display_name_to_index_map={},
         )
         tool.data_process_service = "https://data-process"
+        mock_observer.authorization = "Bearer test-token"
+        request_headers = []
 
         class FakeResponse:
             def __init__(self, status, payload=None):
@@ -1071,7 +1073,8 @@ class TestKnowledgeBaseSearchToolMissingBranches:
             async def __aexit__(self, exc_type, exc, tb):
                 return False
 
-            def post(self, api_url, data):
+            def post(self, api_url, data, headers=None):
+                request_headers.append(headers)
                 return FakePostContext(data["image_url"])
 
         fake_aiohttp = types.ModuleType("aiohttp")
@@ -1081,6 +1084,7 @@ class TestKnowledgeBaseSearchToolMissingBranches:
         monkeypatch.setitem(sys.modules, "aiohttp", fake_aiohttp)
 
         assert tool._filter_images(["keep", "skip", "bad", "raise"], "query") == ["keep"]
+        assert request_headers == [{"Authorization": "Bearer test-token"}] * 4
 
         mocker.patch("asyncio.new_event_loop", side_effect=RuntimeError("loop boom"))
         assert tool._filter_images(["keep"], "query") == []

@@ -167,7 +167,11 @@ class ExaSearchTool(Tool):
                                 }
 
                                 # Make async API request
-                                async with session.post(api_url, data=data) as response:
+                                headers = None
+                                authorization = getattr(self.observer, "authorization", None)
+                                if authorization:
+                                    headers = {"Authorization": authorization}
+                                async with session.post(api_url, data=data, headers=headers) as response:
                                     if response.status != 200:
                                         logger.info(
                                             f"API error for {img_url}: {response.status}")

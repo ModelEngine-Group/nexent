@@ -741,7 +741,7 @@ async def test_verify_model_config_success(client, auth_header, sample_model_dat
         'backend.apps.model_managment_app.get_current_user_id',
         return_value=("test_user", "test_tenant"),
     )
-    mocker.patch('backend.apps.model_managment_app.validate_public_url')
+    mock_validate_url = mocker.patch('backend.apps.model_managment_app.validate_public_url')
     mock_verify = mocker.patch(
         'backend.apps.model_managment_app.verify_model_config_connectivity', 
         return_value={"connectivity": True, "model_name": "gpt-4"}
@@ -766,6 +766,11 @@ async def test_verify_model_config_success(client, auth_header, sample_model_dat
     assert "error" not in data["data"]
     mock_verify.assert_called_once()
     mock_suggest.assert_called_once()
+    mock_validate_url.assert_awaited_once_with(
+        sample_model_data["base_url"],
+        allowed_schemes=("http", "https", "ws", "wss"),
+        allow_local_networks=True,
+    )
 
 
 @pytest.mark.asyncio

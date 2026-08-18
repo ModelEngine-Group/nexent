@@ -1921,6 +1921,7 @@ async def create_agent_run_info(
     context_policy: Optional[Dict[str, Any]] = None,
     enable_planning: bool = False,
     enable_automation_tool: bool = True,
+    authorization: Optional[str] = None,
 ):
     # Determine which version_no to use based on is_debug flag
     # If is_debug=false, use the current published version (current_version_no)
@@ -2026,7 +2027,7 @@ async def create_agent_run_info(
     agent_run_info = AgentRunInfo(
         query=final_query,
         model_config_list=model_list,
-        observer=MessageObserver(lang=language),
+        observer=MessageObserver(lang=language, authorization=authorization),
         agent_config=agent_config,
         mcp_host=mcp_host,
         history=converted_history,

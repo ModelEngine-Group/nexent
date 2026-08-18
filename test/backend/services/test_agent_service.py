@@ -4206,6 +4206,7 @@ async def test_prepare_agent_run(
         mock_agent_request,
         user_id="test_user",
         tenant_id="test_tenant",
+        authorization="Bearer test-token",
     )
 
     # Assert
@@ -4230,6 +4231,7 @@ async def test_prepare_agent_run(
         conversation_id=123,
         context_policy=None,
         enable_planning=False,
+        authorization="Bearer test-token",
     )
     mock_agent_run_manager.register_agent_run.assert_called_once_with(
         123, mock_run_info, "test_user")

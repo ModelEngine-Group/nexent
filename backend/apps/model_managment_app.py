@@ -486,6 +486,7 @@ async def check_temporary_model_health(
             await validate_public_url(
                 request.base_url,
                 allowed_schemes=("http", "https", "ws", "wss"),
+                allow_local_networks=True,
             )
 
         result = await verify_model_config_connectivity(request.model_dump())

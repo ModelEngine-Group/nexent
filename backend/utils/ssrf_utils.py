@@ -13,8 +13,9 @@ class UnsafeOutboundURLError(ValueError):
 async def validate_public_url(
     url: str,
     allowed_schemes: tuple[str, ...] = ("http", "https"),
+    allow_local_networks: bool = False,
 ) -> None:
-    """Require a URL whose hostname resolves only to public IP addresses."""
+    """Validate an outbound URL and its resolved network addresses."""
     if not isinstance(url, str) or not url.strip():
         raise UnsafeOutboundURLError("URL is required")
 
@@ -53,5 +54,20 @@ async def validate_public_url(
             except ValueError as exc:
                 raise UnsafeOutboundURLError("URL hostname resolved to an invalid address") from exc
 
-    if not addresses or any(not address.is_global for address in addresses):
+    if not addresses:
         raise UnsafeOutboundURLError("URL must resolve only to public network addresses")
+
+    if allow_local_networks:
+        unsafe_addresses = [
+            address
+            for address in addresses
+            if address.is_link_local
+            or address.is_multicast
+            or address.is_unspecified
+            or (address.is_reserved and not address.is_loopback)
+        ]
+    else:
+        unsafe_addresses = [address for address in addresses if not address.is_global]
+
+    if unsafe_addresses:
+        raise UnsafeOutboundURLError("URL resolves to a disallowed network address")
