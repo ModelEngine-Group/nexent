@@ -52,23 +52,12 @@ def test_stream_false_round_trips():
     assert ctx.stream is False
 
 
-# ---- base / TTS numerics ----
+# ---- base numerics ----
 
 def test_timeout_seconds_zero_round_trips():
     ctx = _config_to_context(_cfg(), "llm", "llm", None,
                             model_name="m", timeout_seconds=0)
     assert ctx.timeout_seconds == 0
-
-
-def test_speed_ratio_zero_round_trips():
-    ctx = _config_to_context(_cfg(), "tts", "tts", None,
-                            model_name="m", speed_ratio=0)
-    assert ctx.speed_ratio == 0.0
-
-
-def test_speed_ratio_unset_defaults_to_one():
-    ctx = _config_to_context(_cfg(), "tts", "tts", None, model_name="m")
-    assert ctx.speed_ratio == 1.0
 
 
 # ---- unset sampling stays None (model uses its own default) ----

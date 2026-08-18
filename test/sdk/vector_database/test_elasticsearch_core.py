@@ -26,6 +26,19 @@ vector_pkg = _pkg("sdk.nexent.vector_database", REPO_ROOT / "sdk" / "nexent" / "
 sdk_pkg.nexent = nexent_pkg
 nexent_pkg.core = core_pkg
 nexent_pkg.vector_database = vector_pkg
+
+# Stub the gateway bridge: ``elasticsearch_core`` only uses ``EmbeddingAdapter``
+# as a type annotation, but the real gateway eagerly registers every vendor
+# adapter and pulls absolute ``nexent.*`` imports that break under the manual
+# ``sdk.nexent.*`` module graph below.
+gateway_mod = types.ModuleType("sdk.nexent.core.gateway")
+gateway_mod.__path__ = []
+modality_mod = types.ModuleType("sdk.nexent.core.gateway.modality")
+modality_mod.__path__ = []
+modality_mod.EmbeddingAdapter = MagicMock(name="gateway.modality.EmbeddingAdapter")
+gateway_mod.modality = modality_mod
+sys.modules["sdk.nexent.core.gateway"] = gateway_mod
+sys.modules["sdk.nexent.core.gateway.modality"] = modality_mod
 core_pkg.models = models_pkg
 core_pkg.nlp = nlp_pkg
 

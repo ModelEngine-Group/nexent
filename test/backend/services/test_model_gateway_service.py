@@ -1,7 +1,7 @@
 """Unit tests for backend.services.model_gateway_service.
 
 Covers factory normalization, context construction, adapter resolution and
-the voice/VLM config-fetch helpers. Heavy database / utils / consts modules
+the VLM config-fetch helpers. Heavy database / utils / consts modules
 are stubbed before import so only the gateway bridge logic is exercised.
 """
 
@@ -31,7 +31,6 @@ sys.modules['utils.config_utils'] = MockModule()
 sys.modules['consts'] = MockModule()
 consts_const_module = MockModule()
 consts_const_module.MODEL_CONFIG_MAPPING = {"vlm": "vlm_config_key", "vlm3": "vlm3_config_key"}
-consts_const_module.TEST_PCM_PATH = "/tmp/test_voice.pcm"
 sys.modules['consts.const'] = consts_const_module
 
 from nexent import MessageObserver
@@ -56,13 +55,6 @@ def test_normalize_factory_volc_aliases():
         assert mgs._normalize_factory("dashscope", "vlm") == "dashscope"
 
 
-def test_normalize_factory_stt_tts_route_dashscope_to_ali():
-    with mock.patch.object(mgs, "get_registry") as mock_get_registry:
-        mock_get_registry.return_value.has.return_value = True
-        assert mgs._normalize_factory("dashscope", "stt") == "ali"
-        assert mgs._normalize_factory("ali", "tts") == "ali"
-
-
 def test_normalize_factory_unknown_falls_back_to_modality_default():
     with mock.patch.object(mgs, "get_registry") as mock_get_registry:
         registry = mock_get_registry.return_value
@@ -70,7 +62,6 @@ def test_normalize_factory_unknown_falls_back_to_modality_default():
         assert mgs._normalize_factory("", "llm") == "openai"
         assert mgs._normalize_factory(None, "llm") == "openai"
         assert mgs._normalize_factory("unknown", "llm") == "openai"
-        assert mgs._normalize_factory("", "stt") == "ali"
         assert mgs._normalize_factory("", "embedding") == "openai"
         assert mgs._normalize_factory("", "multi_embedding") == "jina"
 
@@ -163,8 +154,8 @@ def test_config_to_context_cfg_none_uses_defaults_and_observer():
 def test_config_to_context_unknown_modality_raises():
     with mock.patch.object(mgs, "get_registry") as mock_get_registry:
         mock_get_registry.return_value.has.return_value = False
-        with pytest.raises(ValueError, match="Unknown modality: embedding"):
-            mgs._config_to_context({}, "embedding", "slot", None)
+        with pytest.raises(ValueError, match="Unknown modality: foo"):
+            mgs._config_to_context({}, "foo", "slot", None)
 
 
 # Gateway / registry delegation
@@ -225,41 +216,6 @@ def test_fetch_slot_config_by_slot_key():
     with mock.patch.object(mgs, "tenant_config_manager", tenant_config_manager):
         assert mgs._fetch_slot_config("t1", None, "vlm", "vlm") is cfg
     tenant_config_manager.get_model_config.assert_called_once_with(key="vlm_config_key", tenant_id="t1")
-
-
-# _fetch_voice_config
-
-
-def test_fetch_voice_config_from_tenant_config():
-    tenant_config_manager = mock.MagicMock()
-    cfg = {"model_type": "stt"}
-    tenant_config_manager.get_model_config.return_value = cfg
-    with mock.patch.object(mgs, "tenant_config_manager", tenant_config_manager):
-        assert mgs._fetch_voice_config("t1", "stt") is cfg
-    tenant_config_manager.get_model_config.assert_called_once_with("t1", "stt")
-
-
-def test_fetch_voice_config_falls_back_to_model_records():
-    tenant_config_manager = mock.MagicMock()
-    tenant_config_manager.get_model_config.side_effect = RuntimeError("db down")
-    record = {"model_type": "stt"}
-    with mock.patch.object(mgs, "tenant_config_manager", tenant_config_manager),             mock.patch.object(mgs, "get_model_records", return_value=[record]) as mock_records:
-        assert mgs._fetch_voice_config("t1", "stt") is record
-    mock_records.assert_called_once_with({"model_type": "stt"}, "t1")
-
-
-def test_fetch_voice_config_returns_none_when_unavailable():
-    tenant_config_manager = mock.MagicMock()
-    tenant_config_manager.get_model_config.return_value = None
-    with mock.patch.object(mgs, "tenant_config_manager", tenant_config_manager),             mock.patch.object(mgs, "get_model_records", return_value=[]):
-        assert mgs._fetch_voice_config("t1", "stt") is None
-
-
-def test_fetch_voice_config_records_error_returns_none():
-    tenant_config_manager = mock.MagicMock()
-    tenant_config_manager.get_model_config.return_value = None
-    with mock.patch.object(mgs, "tenant_config_manager", tenant_config_manager),             mock.patch.object(mgs, "get_model_records", side_effect=RuntimeError("boom")):
-        assert mgs._fetch_voice_config("t1", "stt") is None
 
 
 # Public entry points

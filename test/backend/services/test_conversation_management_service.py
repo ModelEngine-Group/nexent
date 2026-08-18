@@ -460,7 +460,7 @@ class TestConversationManagementService(unittest.TestCase):
         request_arg = mock_save_message.call_args[0][0]
         self.assertEqual(request_arg.message[0].content, "[Current time: no closing bracket here")
 
-    @patch('backend.services.conversation_management_service.OpenAIModel')
+    @patch('backend.services.conversation_management_service.get_llm_adapter_from_config')
     @patch('backend.services.conversation_management_service.get_generate_title_prompt_template')
     @patch('backend.services.conversation_management_service.tenant_config_manager.get_model_config')
     def test_call_llm_for_title(self, mock_get_model_config, mock_get_prompt_template, mock_openai):
@@ -1039,7 +1039,7 @@ class TestConversationManagementService(unittest.TestCase):
 class TestCallLlmForTitleMonitoring(unittest.TestCase):
     """Verify call_llm_for_title sets monitoring context and operation."""
 
-    @patch('backend.services.conversation_management_service.OpenAIModel')
+    @patch('backend.services.conversation_management_service.get_llm_adapter_from_config')
     @patch('backend.services.conversation_management_service.tenant_config_manager')
     @patch('backend.services.conversation_management_service.set_monitoring_operation')
     @patch('backend.services.conversation_management_service.set_monitoring_context')
@@ -1058,7 +1058,7 @@ class TestCallLlmForTitleMonitoring(unittest.TestCase):
 
         mock_ctx.assert_called_once_with(tenant_id="tenant-123", user_id=None)
 
-    @patch('backend.services.conversation_management_service.OpenAIModel')
+    @patch('backend.services.conversation_management_service.get_llm_adapter_from_config')
     @patch('backend.services.conversation_management_service.tenant_config_manager')
     @patch('backend.services.conversation_management_service.set_monitoring_operation')
     @patch('backend.services.conversation_management_service.set_monitoring_context')
@@ -1179,7 +1179,7 @@ class TestUpdateFunctions(unittest.TestCase):
 class TestCallLlmForTitleEdgeCases(unittest.TestCase):
     """Test edge cases for call_llm_for_title."""
 
-    @patch('backend.services.conversation_management_service.OpenAIModel')
+    @patch('backend.services.conversation_management_service.get_llm_adapter_from_config')
     @patch('backend.services.conversation_management_service.get_generate_title_prompt_template')
     @patch('backend.services.conversation_management_service.tenant_config_manager.get_model_config')
     def test_modelengine_factory_uses_flat_messages(self, mock_get_config, mock_get_prompt, mock_model):
@@ -1209,7 +1209,7 @@ class TestCallLlmForTitleEdgeCases(unittest.TestCase):
             self.assertIn("role", msg)
             self.assertIn("content", msg)
 
-    @patch('backend.services.conversation_management_service.OpenAIModel')
+    @patch('backend.services.conversation_management_service.get_llm_adapter_from_config')
     @patch('backend.services.conversation_management_service.get_generate_title_prompt_template')
     @patch('backend.services.conversation_management_service.tenant_config_manager.get_model_config')
     def test_empty_response_returns_default_zh_title(self, mock_get_config, mock_get_prompt, mock_model):
@@ -1231,7 +1231,7 @@ class TestCallLlmForTitleEdgeCases(unittest.TestCase):
         result = call_llm_for_title("test", "tenant-1", "zh")
         self.assertEqual(result, "新对话")  # DEFAULT_ZH_TITLE
 
-    @patch('backend.services.conversation_management_service.OpenAIModel')
+    @patch('backend.services.conversation_management_service.get_llm_adapter_from_config')
     @patch('backend.services.conversation_management_service.get_generate_title_prompt_template')
     @patch('backend.services.conversation_management_service.tenant_config_manager.get_model_config')
     def test_none_response_returns_default_zh_title(self, mock_get_config, mock_get_prompt, mock_model):
@@ -1253,7 +1253,7 @@ class TestCallLlmForTitleEdgeCases(unittest.TestCase):
         result = call_llm_for_title("test", "tenant-1", "zh")
         self.assertEqual(result, "新对话")
 
-    @patch('backend.services.conversation_management_service.OpenAIModel')
+    @patch('backend.services.conversation_management_service.get_llm_adapter_from_config')
     @patch('backend.services.conversation_management_service.get_generate_title_prompt_template')
     @patch('backend.services.conversation_management_service.tenant_config_manager.get_model_config')
     def test_english_title_response(self, mock_get_config, mock_get_prompt, mock_model):
@@ -1275,7 +1275,7 @@ class TestCallLlmForTitleEdgeCases(unittest.TestCase):
         result = call_llm_for_title("test", "tenant-1", "en")
         self.assertEqual(result, "New Conversation")  # DEFAULT_EN_TITLE
 
-    @patch('backend.services.conversation_management_service.OpenAIModel')
+    @patch('backend.services.conversation_management_service.get_llm_adapter_from_config')
     @patch('backend.services.conversation_management_service.get_generate_title_prompt_template')
     @patch('backend.services.conversation_management_service.tenant_config_manager.get_model_config')
     def test_remove_think_blocks(self, mock_get_config, mock_get_prompt, mock_model):
@@ -1297,7 +1297,7 @@ class TestCallLlmForTitleEdgeCases(unittest.TestCase):
         result = call_llm_for_title("test", "tenant-1", "zh")
         self.assertEqual(result, "Actual Title")
 
-    @patch('backend.services.conversation_management_service.OpenAIModel')
+    @patch('backend.services.conversation_management_service.get_llm_adapter_from_config')
     @patch('backend.services.conversation_management_service.get_generate_title_prompt_template')
     @patch('backend.services.conversation_management_service.tenant_config_manager.get_model_config')
     def test_no_model_config_returns_empty_display_name(self, mock_get_config, mock_get_prompt, mock_model):
