@@ -686,8 +686,8 @@ class TestGetSkillScriptTools:
                 version_no=0
             )
 
-            assert len(result) == 4
-            assert mock_tool_config.call_count == 4
+            assert len(result) == 6
+            assert mock_tool_config.call_count == 6
 
             # Verify the calls made to ToolConfig
             calls = mock_tool_config.call_args_list
@@ -710,6 +710,11 @@ class TestGetSkillScriptTools:
             assert calls[3][1]['class_name'] == "WriteSkillFileTool"
             assert calls[3][1]['name'] == "write_skill_file"
 
+            assert calls[4][1]['class_name'] == "DownloadFromS3Tool"
+            assert calls[4][1]['name'] == "download_from_s3"
+            assert calls[5][1]['class_name'] == "UploadToS3Tool"
+            assert calls[5][1]['name'] == "upload_to_s3"
+
     def test_get_skill_script_tools_metadata_context(self):
         """Test that skill context metadata is correctly set for all tools"""
         mock_tool_config.reset_mock()
@@ -720,15 +725,17 @@ class TestGetSkillScriptTools:
                 version_no=7
             )
 
-            assert len(result) == 4
-            # Verify all tools have the correct metadata
+            assert len(result) == 6
+            # Skill tools retain skill context; file tools use run-scoped metadata.
             calls = mock_tool_config.call_args_list
-            for call in calls:
+            for call in calls[:4]:
                 assert call[1]['metadata'] == {
                     "agent_id": 123,
                     "tenant_id": "test_tenant",
                     "version_no": 7
                 }
+            for call in calls[4:]:
+                assert call[1]['metadata'] == {}
 
     def test_get_skill_script_tools_input_schemas(self):
         """Test that input schemas are correctly defined for all tools"""
@@ -803,7 +810,25 @@ class TestGetSkillScriptTools:
             for call in calls:
                 desc = call[1]['description']
                 assert len(desc) > 0
-                assert "skill" in desc.lower()
+                assert isinstance(desc, str)
+
+    def test_get_skill_script_tools_injects_runtime_file_context(self):
+        mock_tool_config.reset_mock()
+        file_context = {
+            "workspace_path": "/mnt/nexent/workdir/t/u/run",
+            "user_id": "u",
+            "tenant_id": "t",
+            "run_id": "run",
+            "minio_client": object(),
+        }
+
+        _get_skill_script_tools(1, "t", runtime_file_context=file_context)
+
+        calls = mock_tool_config.call_args_list
+        assert calls[0][1]["params"]["workspace_path"] == file_context["workspace_path"]
+        for call in calls[4:]:
+            assert call[1]["metadata"] == file_context
+            assert call[1]["params"]["workspace_path"] == file_context["workspace_path"]
 
 
 class TestDiscoverLangchainTools:
@@ -3913,6 +3938,10 @@ class TestCreateAgentRunInfo:
                 redis_client=ANY,
                 sandbox_config=None,
                 minio_client=None,
+                workspace_path=ANY,
+                workspace_run_id=ANY,
+                tenant_id="tenant_1",
+                minio_files=[],
             )
 
             # Verify that other functions were called correctly
@@ -3930,6 +3959,7 @@ class TestCreateAgentRunInfo:
                 tool_params=None,
                 conversation_id=None,
                 enable_planning=ANY,
+                runtime_file_context=ANY,
             )
             mock_get_mcp.assert_called_once_with(tenant_id="tenant_1", is_need_auth=True)
             mock_filter.assert_called_once_with("agent_config", {
@@ -4519,6 +4549,7 @@ class TestCreateAgentRunInfo:
                 version_no=1,
                 conversation_id=None,
                 enable_planning=False,
+                runtime_file_context=ANY,
                 tool_params=None,
             )
 
@@ -4568,6 +4599,7 @@ class TestCreateAgentRunInfo:
                 version_no=0,  # Debug mode uses draft version 0
                 conversation_id=None,
                 enable_planning=False,
+                runtime_file_context=ANY,
                 tool_params=None,
             )
 
@@ -4623,6 +4655,7 @@ class TestCreateAgentRunInfo:
                 version_no=0,  # Fallback to draft version 0
                 conversation_id=None,
                 enable_planning=False,
+                runtime_file_context=ANY,
                 tool_params=None,
             )
             # Verify that get_remote_mcp_server_list was called with is_need_auth=True
@@ -7410,4 +7443,3 @@ class TestBuildSecurityHeaders:
             "security_credentials": {"k": "v"},
         }
         assert _build_security_headers(agent) == {}
-

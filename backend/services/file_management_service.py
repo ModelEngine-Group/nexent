@@ -161,6 +161,17 @@ def check_file_access(
         # Generated documents are private to the uploader and must stay user-scoped.
         return object_name.startswith(f"skill-files/{user_id}/")
 
+    if object_name.startswith("workspace/"):
+        # Generated agent artifacts are isolated by both tenant and user:
+        # workspace/{tenant_id}/{user_id}/{run_id}/outputs/{file}
+        parts = object_name.split("/")
+        return (
+            len(parts) >= 5
+            and bool(caller_tenant_id)
+            and parts[1] == caller_tenant_id
+            and parts[2] == user_id
+        )
+
     # Check if file is in user's attachments folder
     # Pattern: attachments/{user_id}/*
     if object_name.startswith(f"attachments/{user_id}/"):

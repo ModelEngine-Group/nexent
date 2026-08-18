@@ -1018,6 +1018,36 @@ description: Python script
 
             assert result == '{"result": "success"}'
 
+    def test_run_python_script_uses_isolated_working_directory(self, mocker, tmp_path):
+        with TempSkillDir() as temp:
+            temp.create_skill(
+                "workspace-script-skill",
+                """---
+name: workspace-script-skill
+description: Workspace script
+---
+# Content
+""",
+                subdirs={
+                    "scripts": [{"name": "write.py", "content": "print('done')"}],
+                },
+            )
+            mock_result = MagicMock(returncode=0, stdout="done", stderr="")
+            mock_run = mocker.patch("subprocess.run", return_value=mock_result)
+            workspace = tmp_path / "tenant" / "user" / "run"
+
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
+            result = manager.run_skill_script(
+                "workspace-script-skill",
+                "scripts/write.py",
+                tenant_id=None,
+                working_directory=str(workspace),
+            )
+
+            assert result == "done"
+            assert mock_run.call_args.kwargs["cwd"] == str(workspace)
+            assert mock_run.call_args.kwargs["env"]["NEXENT_WORKSPACE"] == str(workspace)
+
     def test_run_python_script_error(self, mocker):
         """Test running Python script that returns error."""
         with TempSkillDir() as temp:

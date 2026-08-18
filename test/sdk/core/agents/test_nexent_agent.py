@@ -120,6 +120,7 @@ class _MockProcessType:
     FINAL_ANSWER = "final_answer"
     ERROR = "error"
     NL2A = "nl2a"
+    FILE_ARTIFACT = "file_artifact"
 
 
 @dataclass
@@ -2578,6 +2579,84 @@ class TestCreateBuiltinTool:
         )
         assert result is mock_tool_instance
 
+    def test_create_builtin_download_from_s3_tool(self, nexent_agent_instance):
+        validator = MagicMock()
+        storage = MagicMock()
+        tool_instance = MagicMock()
+        tool_class = MagicMock(return_value=tool_instance)
+        tool_config = ToolConfig(
+            class_name="DownloadFromS3Tool",
+            name="download_from_s3",
+            description="desc",
+            inputs="{}",
+            output_type="string",
+            params={"workspace_path": "/tmp/workspace"},
+            source="builtin",
+            metadata={
+                "minio_client": storage,
+                "user_id": "user-1",
+                "tenant_id": "tenant-1",
+                "validate_url_access": validator,
+            },
+        )
+
+        with patch.dict("sys.modules", {
+            "nexent.core.tools.download_from_s3_tool": MagicMock(
+                DownloadFromS3Tool=tool_class,
+            )
+        }):
+            result = nexent_agent_instance.create_builtin_tool(tool_config)
+
+        assert result is tool_instance
+        tool_class.assert_called_once_with(
+            workspace_path="/tmp/workspace",
+            minio_client=storage,
+            user_id="user-1",
+            tenant_id="tenant-1",
+            observer=nexent_agent_instance.observer,
+            validate_url_access=validator,
+            on_download=ANY,
+        )
+
+    def test_create_builtin_upload_to_s3_tool(self, nexent_agent_instance):
+        storage = MagicMock()
+        tool_instance = MagicMock()
+        tool_class = MagicMock(return_value=tool_instance)
+        tool_config = ToolConfig(
+            class_name="UploadToS3Tool",
+            name="upload_to_s3",
+            description="desc",
+            inputs="{}",
+            output_type="string",
+            params={"workspace_path": "/tmp/workspace"},
+            source="builtin",
+            metadata={
+                "minio_client": storage,
+                "user_id": "user-1",
+                "tenant_id": "tenant-1",
+                "run_id": "run-1",
+            },
+        )
+
+        with patch.dict("sys.modules", {
+            "nexent.core.tools.upload_to_s3_tool": MagicMock(
+                UploadToS3Tool=tool_class,
+            )
+        }):
+            result = nexent_agent_instance.create_builtin_tool(tool_config)
+
+        assert result is tool_instance
+        tool_class.assert_called_once_with(
+            workspace_path="/tmp/workspace",
+            minio_client=storage,
+            user_id="user-1",
+            tenant_id="tenant-1",
+            observer=nexent_agent_instance.observer,
+            run_id="run-1",
+            on_upload=nexent_agent_instance._record_workspace_upload,
+            ensure_local_file=ANY,
+        )
+
 
 class TestCreateToolExceptionHandling:
     """Tests for exception handling in create_tool method."""
@@ -4228,6 +4307,61 @@ class TestCreateBuiltinTool:
                 version_no=1,
                 observer=nexent_agent_instance.observer,
             )
+
+
+class TestCreateBuiltinToolAndFileWorkspaceLifecycle:
+    def test_download_finalize_emit_and_cleanup(self, nexent_agent_instance, tmp_path):
+        workspace = tmp_path / "tenant" / "user" / "run-1"
+        nexent_agent_instance.workspace_path = str(workspace)
+        nexent_agent_instance.workspace_run_id = "run-1"
+        nexent_agent_instance.minio_files = [
+            {"name": "input.csv", "object_name": "attachments/user/input.csv"}
+        ]
+
+        download_tool = MagicMock()
+        download_tool.minio_client.default_bucket = "nexent"
+
+        def download_file(_source, local_filename):
+            path = workspace / local_filename
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("input", encoding="utf-8")
+            return json.dumps({"local_path": str(path)})
+
+        download_tool.forward.side_effect = download_file
+        upload_tool = MagicMock()
+        upload_tool.uploaded_paths = set()
+
+        def upload_file(file_path, _target_filename):
+            payload = {
+                "object_name": "workspace/tenant/user/run-1/outputs/result.txt",
+                "name": Path(file_path).name,
+                "file_size_bytes": Path(file_path).stat().st_size,
+            }
+            nexent_agent_instance._record_workspace_upload(payload)
+            return json.dumps(payload)
+
+        upload_tool.forward.side_effect = upload_file
+        nexent_agent_instance.agent = MagicMock(
+            tools={
+                "download_from_s3": download_tool,
+                "upload_to_s3": upload_tool,
+            },
+            python_executor=None,
+        )
+
+        query = nexent_agent_instance._prepare_file_workspace("analyze")
+        output = workspace / "outputs" / "result.txt"
+        output.write_text("result", encoding="utf-8")
+        nexent_agent_instance._finalize_file_workspace()
+        nexent_agent_instance._cleanup_file_workspace()
+
+        assert str(workspace / "inputs" / "000_input.csv") in query
+        upload_tool.forward.assert_called_once_with(str(output), "outputs/result.txt")
+        assert not workspace.exists()
+        assert any(
+            call.args[1] == ProcessType.FILE_ARTIFACT
+            for call in nexent_agent_instance.observer.add_message.call_args_list
+        )
 
     def test_create_builtin_tool_read_skill_md(self, nexent_agent_instance):
         """Test create_builtin_tool with ReadSkillMdTool."""

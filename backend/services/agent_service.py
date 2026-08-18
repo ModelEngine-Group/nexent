@@ -319,6 +319,16 @@ async def _process_skill_file_uploads(
                 file_name,
                 absolute_path,
             )
+        finally:
+            # Declared skill artifacts are ephemeral. MinIO is the sole durable store.
+            try:
+                if os.path.isfile(absolute_path):
+                    os.remove(absolute_path)
+            except OSError:
+                logger.exception(
+                    "[skill-file] failed to delete local artifact absolute_path=%s",
+                    absolute_path,
+                )
 
     return upload_results
 
@@ -963,6 +973,7 @@ async def _stream_agent_chunks(
 
     captured_skill_files: dict[str, dict] = {}
     skill_file_uploads: list[dict] = []
+    workspace_file_uploads: dict[str, dict] = {}
 
     # Determine if we're in resume mode
     is_resume_mode = resume_from_unit_index > 0
@@ -1092,6 +1103,26 @@ async def _stream_agent_chunks(
                     len(artifacts),
                     len(captured_skill_files),
                 )
+                continue
+
+            if chunk_type == ProcessType.FILE_ARTIFACT.value:
+                artifact_content = data.get("content")
+                if isinstance(artifact_content, str):
+                    try:
+                        artifact_content = json.loads(artifact_content)
+                    except json.JSONDecodeError:
+                        artifact_content = {}
+                artifacts = (
+                    artifact_content.get("artifacts", [])
+                    if isinstance(artifact_content, dict)
+                    else []
+                )
+                for artifact in artifacts:
+                    if not isinstance(artifact, dict):
+                        continue
+                    object_name = str(artifact.get("object_name") or "").strip()
+                    if object_name:
+                        workspace_file_uploads[object_name] = artifact
                 continue
 
             should_parse_skill_file = (
@@ -1439,6 +1470,29 @@ async def _stream_agent_chunks(
                         )
         except Exception:
             logger.exception("Failed to process skill file uploads")
+
+        if workspace_file_uploads:
+            uploaded_files = list(workspace_file_uploads.values())
+            files_payload = json.dumps(
+                {"skill_file_uploads": uploaded_files},
+                ensure_ascii=False,
+            )
+            try:
+                yield f"data: {json.dumps({'type': 'skill_files', 'content': files_payload}, ensure_ascii=False)}\n\n"
+            except RuntimeError:
+                pass
+            if not agent_request.is_debug:
+                try:
+                    save_skill_files_to_conversation(
+                        conversation_id=agent_request.conversation_id,
+                        skill_file_uploads=_transform_skill_files_to_standard_format(uploaded_files),
+                        user_id=user_id,
+                    )
+                except Exception:
+                    logger.exception(
+                        "Failed to persist workspace file uploads for conversation=%s",
+                        agent_request.conversation_id,
+                    )
 
         # Memory recording is now handled by the agent-side ``StoreMemoryTool``
         # (which delegates to the new ``MemoryService`` facade). The legacy

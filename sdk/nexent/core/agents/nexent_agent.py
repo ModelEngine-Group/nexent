@@ -2,12 +2,16 @@ from __future__ import annotations
 
 import functools
 import inspect
+import io
 import json
 import logging
 import os
 import re
+import shutil
+import tarfile
 import time
 from dataclasses import replace
+from pathlib import Path
 from threading import Event
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Sequence
 
@@ -167,7 +171,11 @@ class NexentAgent:
                  sandbox_config=None,
                  minio_client=None,
                  conversation_id=None,
-                 user_id=None):
+                 user_id=None,
+                 tenant_id=None,
+                 workspace_path=None,
+                 workspace_run_id=None,
+                 minio_files=None):
         """
         Initialize the NexentAgent factory.
 
@@ -183,6 +191,10 @@ class NexentAgent:
                 Required when sandbox_config.auto_sync_outputs is True.
             conversation_id: Optional conversation id for plan persistence.
             user_id: Optional user id for plan persistence.
+            tenant_id: Optional tenant id for file isolation.
+            workspace_path: Run-scoped host workspace path.
+            workspace_run_id: Opaque run id used to validate cleanup scope.
+            minio_files: Authorized files attached to the current request.
         """
         if not isinstance(observer, MessageObserver):
             raise TypeError("Create Observer Object with MessageObserver")
@@ -196,6 +208,11 @@ class NexentAgent:
         self.minio_client = minio_client
         self.conversation_id = conversation_id
         self.user_id = user_id
+        self.tenant_id = tenant_id
+        self.workspace_path = workspace_path
+        self.workspace_run_id = workspace_run_id
+        self.minio_files = list(minio_files or [])
+        self._workspace_uploads: List[Dict[str, Any]] = []
 
         self.agent = None
 
@@ -379,6 +396,15 @@ class NexentAgent:
                 else:
                     # Whitelist not set by backend → treat as uninstalled.
                     tools_obj.set_allowed_kds(None)
+            elif class_name in ["DownloadFromS3Tool", "UploadToS3Tool"]:
+                metadata = tool_config.metadata or {}
+                tools_obj = tool_class(
+                    workspace_path=params.get("workspace_path", "/mnt/nexent"),
+                    minio_client=metadata.get("minio_client"),
+                    user_id=metadata.get("user_id", ""),
+                    tenant_id=metadata.get("tenant_id", ""),
+                    observer=self.observer,
+                )
             else:
                 tools_obj = tool_class(**params)
                 if hasattr(tools_obj, 'observer'):
@@ -429,13 +455,16 @@ class NexentAgent:
         if class_name == "RunSkillScriptTool":
             from nexent.core.tools.run_skill_script_tool import RunSkillScriptTool
             metadata = tool_config.metadata or {}
-            return RunSkillScriptTool(
+            kwargs = dict(
                 local_skills_dir=params.get("local_skills_dir"),
                 agent_id=metadata.get("agent_id"),
                 tenant_id=metadata.get("tenant_id"),
                 version_no=metadata.get("version_no", 0),
                 observer=self.observer,
             )
+            if params.get("workspace_path"):
+                kwargs["workspace_path"] = params["workspace_path"]
+            return RunSkillScriptTool(**kwargs)
         elif class_name == "ReadSkillMdTool":
             from nexent.core.tools.read_skill_md_tool import ReadSkillMdTool
             metadata = tool_config.metadata or {}
@@ -463,6 +492,31 @@ class NexentAgent:
                 tenant_id=metadata.get("tenant_id"),
                 version_no=metadata.get("version_no", 0),
                 config_overrides=params.get("config_overrides"),
+            )
+        elif class_name == "DownloadFromS3Tool":
+            from nexent.core.tools.download_from_s3_tool import DownloadFromS3Tool
+            metadata = tool_config.metadata or {}
+            return DownloadFromS3Tool(
+                workspace_path=params.get("workspace_path", self.workspace_path or "/mnt/nexent/workdir"),
+                minio_client=metadata.get("minio_client"),
+                user_id=metadata.get("user_id", self.user_id or ""),
+                tenant_id=metadata.get("tenant_id", self.tenant_id or ""),
+                observer=self.observer,
+                validate_url_access=metadata.get("validate_url_access"),
+                on_download=lambda _result: self._push_file_workspace_to_sandbox(),
+            )
+        elif class_name == "UploadToS3Tool":
+            from nexent.core.tools.upload_to_s3_tool import UploadToS3Tool
+            metadata = tool_config.metadata or {}
+            return UploadToS3Tool(
+                workspace_path=params.get("workspace_path", self.workspace_path or "/mnt/nexent/workdir"),
+                minio_client=metadata.get("minio_client"),
+                user_id=metadata.get("user_id", self.user_id or ""),
+                tenant_id=metadata.get("tenant_id", self.tenant_id or ""),
+                observer=self.observer,
+                run_id=metadata.get("run_id", self.workspace_run_id or ""),
+                on_upload=self._record_workspace_upload,
+                ensure_local_file=lambda _path: self._pull_file_workspace_from_sandbox(),
             )
         elif class_name == "CreatePlanTool":
             from nexent.core.tools.plan_tools import CreatePlanTool
@@ -785,6 +839,7 @@ class NexentAgent:
                 step_type="agent_loop",
             ):
                 try:
+                    query = self._prepare_file_workspace(query)
                     step_log = None
                     for step_log in self.agent.run(query, stream=True, reset=reset):
                         # Add content to observer
@@ -913,12 +968,167 @@ class NexentAgent:
 
                 finally:
                     self._log_step_metrics()
-                    self._cleanup_sandbox()
+                    try:
+                        self._finalize_file_workspace()
+                    finally:
+                        self._cleanup_file_workspace()
+                        self._cleanup_sandbox()
 
             if final_answer_for_trace is not None:
                 if hasattr(self.agent, "step_metrics"):
                     monitoring_manager.set_agent_context_metrics(self.agent.step_metrics)
                 monitoring_manager.set_openinference_output(final_answer_for_trace)
+
+    def _record_workspace_upload(self, upload: Dict[str, Any]) -> None:
+        """Collect one upload result for the frontend artifact event."""
+        object_name = str(upload.get("object_name") or "")
+        if object_name and any(item.get("object_name") == object_name for item in self._workspace_uploads):
+            return
+        self._workspace_uploads.append(upload)
+
+    def _prepare_file_workspace(self, query: str) -> str:
+        """Create the run workspace and download current-request attachments."""
+        if not self.workspace_path:
+            return query
+
+        workspace = Path(self.workspace_path)
+        (workspace / "inputs").mkdir(parents=True, exist_ok=True)
+        (workspace / "outputs").mkdir(parents=True, exist_ok=True)
+        download_tool = (getattr(self.agent, "tools", {}) or {}).get("download_from_s3")
+        downloaded: List[Dict[str, str]] = []
+        if self.minio_files and download_tool is None:
+            raise RuntimeError("Uploaded files are present but download_from_s3 is unavailable")
+
+        for index, item in enumerate(self.minio_files):
+            if not isinstance(item, dict):
+                continue
+            object_name = str(item.get("object_name") or "").strip().lstrip("/")
+            source_url = str(item.get("url") or "").strip()
+            if object_name:
+                bucket = getattr(getattr(download_tool, "minio_client", None), "default_bucket", None) or "nexent"
+                source_url = f"s3://{bucket}/{object_name}"
+            if not source_url:
+                continue
+            filename = os.path.basename(str(item.get("name") or object_name or f"file_{index}"))
+            local_filename = f"inputs/{index:03d}_{filename}"
+            result = json.loads(download_tool.forward(source_url, local_filename))
+            downloaded.append({"name": filename, "path": result["local_path"]})
+
+        file_lines = "\n".join(f"- {item['name']}: {item['path']}" for item in downloaded)
+        workspace_note = (
+            f"\n\nRun workspace: {workspace}\n"
+            f"Write every generated file under: {workspace / 'outputs'}\n"
+            "Files created there are uploaded to MinIO automatically when the run finishes."
+        )
+        if file_lines:
+            workspace_note += f"\nUploaded files are available locally:\n{file_lines}"
+        self._push_file_workspace_to_sandbox()
+        return query + workspace_note
+
+    def _sandbox_container(self) -> Any:
+        """Return the active Docker container when the executor exposes one."""
+        executor = getattr(self.agent, "python_executor", None)
+        return getattr(executor, "container", None) if executor is not None else None
+
+    def _push_file_workspace_to_sandbox(self) -> None:
+        """Copy the prepared host workspace into a Docker sandbox."""
+        container = self._sandbox_container()
+        if container is None or not self.workspace_path:
+            return
+        workspace = Path(self.workspace_path).resolve()
+        if not workspace.exists() or workspace.drive:
+            return
+        archive = io.BytesIO()
+        with tarfile.open(fileobj=archive, mode="w") as tar:
+            tar.add(workspace, arcname=str(workspace).lstrip("/"), recursive=True)
+        archive.seek(0)
+        if not container.put_archive("/", archive.getvalue()):
+            raise RuntimeError("Failed to copy run workspace into the sandbox")
+
+    def _pull_file_workspace_from_sandbox(self) -> None:
+        """Copy sandbox outputs back to the host workspace with safe extraction."""
+        container = self._sandbox_container()
+        if container is None or not self.workspace_path:
+            return
+        workspace = Path(self.workspace_path).resolve()
+        if workspace.drive:
+            return
+        try:
+            chunks, _ = container.get_archive(str(workspace))
+            archive = io.BytesIO(b"".join(chunks))
+            with tarfile.open(fileobj=archive, mode="r:*") as tar:
+                members = []
+                extraction_root = workspace.parent.resolve()
+                for member in tar.getmembers():
+                    if not (member.isfile() or member.isdir()):
+                        raise RuntimeError("Sandbox workspace archive contains an unsupported entry")
+                    target = (extraction_root / member.name).resolve()
+                    try:
+                        target.relative_to(extraction_root)
+                    except ValueError as exc:
+                        raise RuntimeError("Sandbox workspace archive escapes the run root") from exc
+                    members.append(member)
+                tar.extractall(extraction_root, members=members)
+        except Exception as exc:
+            logger.warning("Failed to copy sandbox workspace back to host: %s", exc)
+
+    def _finalize_file_workspace(self) -> None:
+        """Upload all workspace outputs that were not already uploaded explicitly."""
+        if not self.workspace_path:
+            return
+        self._pull_file_workspace_from_sandbox()
+        workspace = Path(self.workspace_path)
+        upload_tool = (getattr(self.agent, "tools", {}) or {}).get("upload_to_s3")
+        if upload_tool is None:
+            logger.error("Run workspace exists but upload_to_s3 is unavailable")
+            return
+
+        uploaded_paths = getattr(upload_tool, "uploaded_paths", set())
+        for path in workspace.rglob("*") if workspace.exists() else ():
+            if not path.is_file():
+                continue
+            relative = path.relative_to(workspace)
+            if relative.parts and relative.parts[0] == "inputs":
+                continue
+            normalized = os.path.normcase(os.path.abspath(str(path)))
+            if normalized in uploaded_paths:
+                continue
+            try:
+                upload_tool.forward(str(path), relative.as_posix())
+            except Exception as exc:
+                logger.error("Failed to upload workspace output %s: %s", path, exc)
+                self.observer.add_message("", ProcessType.ERROR, f"Failed to upload output file {relative}: {exc}")
+
+        if self._workspace_uploads:
+            self.observer.add_message(
+                "",
+                ProcessType.FILE_ARTIFACT,
+                {"artifacts": list(self._workspace_uploads)},
+            )
+
+    def _cleanup_file_workspace(self) -> None:
+        """Delete only the exact run-scoped workspace after upload finalization."""
+        if not self.workspace_path or not self.workspace_run_id:
+            return
+        workspace = Path(self.workspace_path).resolve()
+        if workspace.name != self.workspace_run_id or not workspace.exists():
+            return
+        try:
+            container = self._sandbox_container()
+            if container is not None:
+                try:
+                    container.exec_run(["rm", "-rf", "--", str(workspace)])
+                except Exception as exc:
+                    logger.warning("Failed to clean sandbox run workspace %s: %s", workspace, exc)
+            if workspace.exists():
+                shutil.rmtree(workspace)
+            for parent in (workspace.parent, workspace.parent.parent):
+                try:
+                    parent.rmdir()
+                except OSError:
+                    break
+        except Exception as exc:
+            logger.error("Failed to clean run workspace %s: %s", workspace, exc)
 
     def set_agent(self, agent: CoreAgent):
         if not isinstance(agent, CoreAgent):
@@ -1033,7 +1243,8 @@ class NexentAgent:
 
         # Sync outputs to MinIO before destroying the container.
         if (
-            self.sandbox_config is not None
+            not self.workspace_path
+            and self.sandbox_config is not None
             and self.sandbox_config.auto_sync_outputs
             and self.minio_client is not None
         ):

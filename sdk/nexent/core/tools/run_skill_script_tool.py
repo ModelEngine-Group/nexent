@@ -32,6 +32,7 @@ class RunSkillScriptTool(Tool):
         tenant_id: Optional[str] = None,
         version_no: int = 0,
         observer: Optional[Any] = None,
+        workspace_path: Optional[str] = None,
     ):
         """Initialize the tool with local skills directory and agent context.
         Args:
@@ -40,6 +41,7 @@ class RunSkillScriptTool(Tool):
             tenant_id: Tenant ID for filtering available skills in error messages.
             version_no: Version number for filtering available skills.
             observer: Message observer used to publish structured skill artifacts.
+            workspace_path: Optional run-scoped working directory for script files.
         """
         super().__init__()
         self.skill_manager = None
@@ -48,6 +50,7 @@ class RunSkillScriptTool(Tool):
         self.tenant_id = tenant_id
         self.version_no = version_no
         self.observer = observer
+        self.workspace_path = workspace_path
 
     def _get_skill_manager(self):
         """Lazy load skill manager."""
@@ -181,11 +184,14 @@ class RunSkillScriptTool(Tool):
         from nexent.skills.skill_manager import SkillNotFoundError, SkillScriptNotFoundError
         try:
             manager = self._get_skill_manager()
+            run_kwargs = {"tenant_id": self.tenant_id}
+            if self.workspace_path:
+                run_kwargs["working_directory"] = self.workspace_path
             result = manager.run_skill_script(
                 skill_name,
                 script_path,
                 params,
-                tenant_id=self.tenant_id,
+                **run_kwargs,
             )
             artifacts = self._extract_file_artifacts(manager, skill_name, script_path, result)
             self._publish_artifacts(skill_name, script_path, artifacts)

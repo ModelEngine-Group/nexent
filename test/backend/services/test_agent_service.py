@@ -279,6 +279,9 @@ class MockProcessType:
     class SKILL_ARTIFACT:
         value = "skill_artifact"
 
+    class FILE_ARTIFACT:
+        value = "file_artifact"
+
 sys.modules['nexent.core.utils.observer'] = MagicMock()
 sys.modules['nexent.core.utils.observer'].ProcessType = MockProcessType
 
@@ -13318,6 +13321,48 @@ async def test_stream_agent_chunks_captures_structured_skill_artifacts(monkeypat
     assert uploaded_payloads == [first_artifact, second_artifact]
     assert len(collected) == 1
     assert "final_answer" in collected[0]
+
+
+@pytest.mark.asyncio
+async def test_stream_agent_chunks_emits_uploaded_workspace_artifacts(monkeypatch):
+    from backend.services import agent_service
+
+    agent_request = AgentRequest(
+        agent_id=1,
+        conversation_id=999,
+        query="test",
+        history=[],
+        minio_files=[],
+        is_debug=True,
+    )
+    artifact = {
+        "object_name": "workspace/tenant/user/run/outputs/report.pdf",
+        "name": "report.pdf",
+        "size": 123,
+        "presigned_url": "https://example.test/report.pdf",
+    }
+
+    async def fake_agent_run(*_, **__):
+        yield json.dumps({
+            "type": MockProcessType.FILE_ARTIFACT.value,
+            "content": {"artifacts": [artifact]},
+        })
+        yield json.dumps({"type": "final_answer", "content": "done"})
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.agent_run", fake_agent_run, raising=False
+    )
+
+    collected = [
+        chunk
+        async for chunk in agent_service._stream_agent_chunks(
+            agent_request, "user", "tenant", MagicMock(), MagicMock()
+        )
+    ]
+
+    assert len(collected) == 2
+    assert "final_answer" in collected[0]
+    assert "workspace/tenant/user/run/outputs/report.pdf" in collected[1]
 
 
 @pytest.mark.asyncio

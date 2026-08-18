@@ -894,6 +894,15 @@ class TestCheckFileAccess:
         assert check_file_access("system/config.json", "user123") is False
         assert check_file_access("preview/file.pdf", "user123") is False
 
+    def test_check_file_access_workspace_requires_matching_tenant_and_user(self):
+        from backend.services.file_management_service import check_file_access
+
+        path = "workspace/tenant-a/user-a/run-1/outputs/report.pdf"
+        assert check_file_access(path, "user-a", "tenant-a") is True
+        assert check_file_access(path, "user-b", "tenant-a") is False
+        assert check_file_access(path, "user-a", "tenant-b") is False
+        assert check_file_access(path, "user-a", None) is False
+
     def test_check_file_access_asset_owner_prefix_requires_asset_owner_tenant(self):
         """Asset-owner attachment paths are restricted to the asset-owner tenant."""
         from backend.services.file_management_service import check_file_access

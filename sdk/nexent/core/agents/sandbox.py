@@ -1225,6 +1225,16 @@ class SandboxPoolManager:
             ),
             **({"extra_hosts": {"host.docker.internal": "host-gateway"}} if host_tools_exist else {}),
         }
+        workspace_root = config.extra_kwargs.get("workspace_root")
+        if workspace_root:
+            resolved_workspace_root = str(Path(workspace_root).resolve())
+            Path(resolved_workspace_root).mkdir(parents=True, exist_ok=True)
+            container_run_kwargs["volumes"] = {
+                resolved_workspace_root: {
+                    "bind": resolved_workspace_root,
+                    "mode": "rw",
+                }
+            }
         if config.scope == SandboxScope.SYSTEM:
             try:
                 import docker
