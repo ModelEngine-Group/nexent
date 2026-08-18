@@ -2,6 +2,7 @@ import logging
 from typing import Optional
 
 from sqlalchemy import select, update
+from sqlalchemy.dialects.postgresql import insert
 
 from database.client import as_dict, filter_property, get_db_session
 from database.db_models import PromptTemplate
@@ -22,24 +23,23 @@ def create_prompt_template(template_data: dict) -> dict:
 
 
 def upsert_prompt_template_by_id(template_id: int, template_data: dict, user_id: str) -> dict:
-    """Create or update a prompt template with a fixed template ID."""
+    """Atomically create or update a prompt template with a fixed template ID."""
     with get_db_session() as session:
-        prompt_template = session.query(PromptTemplate).filter(
-            PromptTemplate.template_id == template_id,
-        ).first()
-
         filtered_data = filter_property(template_data, PromptTemplate)
-        if prompt_template:
-            for key, value in filtered_data.items():
-                setattr(prompt_template, key, value)
-            prompt_template.updated_by = user_id
-        else:
-            prompt_template = PromptTemplate(**filtered_data)
-            prompt_template.template_id = template_id
-            prompt_template.delete_flag = filtered_data.get("delete_flag", "N")
-            session.add(prompt_template)
-
-        session.flush()
+        filtered_data["template_id"] = template_id
+        filtered_data.setdefault("delete_flag", "N")
+        statement = insert(PromptTemplate).values(**filtered_data)
+        update_values = {
+            key: getattr(statement.excluded, key)
+            for key in filtered_data
+            if key not in {"template_id", "created_by", "create_time"}
+        }
+        update_values["updated_by"] = user_id
+        statement = statement.on_conflict_do_update(
+            index_elements=[PromptTemplate.template_id],
+            set_=update_values,
+        ).returning(PromptTemplate)
+        prompt_template = session.execute(statement).scalar_one()
         return as_dict(prompt_template)
 
 

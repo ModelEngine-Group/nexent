@@ -439,16 +439,19 @@ class TestCancelTask:
         mock_task = {
             "id": "task_123",
             "caller_user_id": "user-1",
-            "task_state": "TASK_STATE_CANCELED"
+            "task_state": "TASK_STATE_WORKING"
         }
+        canceled_task = {**mock_task, "task_state": "TASK_STATE_CANCELED"}
 
-        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
-            mock_db.get_task.return_value = mock_task
+        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db, \
+                patch("services.agent_service.stop_agent_tasks") as stop_agent_tasks:
+            mock_db.get_task.side_effect = [mock_task, canceled_task]
             mock_db.cancel_task.return_value = True
 
             result = service.cancel_task("task_123", user_id="user-1")
 
             assert result["task_state"] == "TASK_STATE_CANCELED"
+            stop_agent_tasks.assert_called_once_with("a2a:task_123", "user-1")
 
     def test_cancel_task_not_found(self):
         """Test cancel_task when task not found."""
@@ -512,3 +515,4 @@ class TestCancelTask:
                 service.cancel_task("task_123", user_id="user-1")
 
             assert "cannot be canceled" in str(exc_info.value)
+            mock_db.cancel_task.assert_not_called()

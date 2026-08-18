@@ -19,6 +19,7 @@ from consts.a2a_models import A2AAgentCard, A2AAgentCapabilities, A2AAgentProvid
 from consts.const import NORTHBOUND_EXTERNAL_URL
 
 logger = logging.getLogger(__name__)
+RUN_INTERRUPTED_MESSAGE = "The agent run was interrupted. Please start it again."
 
 
 class A2AServerServiceError(Exception):
@@ -66,6 +67,11 @@ class A2AServerService:
 
     def __init__(self):
         self.adapter = A2AAgentAdapter()
+
+    @staticmethod
+    def _is_run_interrupted_event(event: Dict[str, Any]) -> bool:
+        """Return whether an SSE event represents a terminal runtime interruption."""
+        return event.get("code") == "run_interrupted" or event.get("status") == "run_interrupted"
 
     # =============================================================================
     # Agent Registration
@@ -671,6 +677,7 @@ class A2AServerService:
             context,
             server_agent["agent_id"]
         )
+        runtime_scope_id = f"a2a:{task_id or uuid4().hex}"
 
         try:
             from services.agent_service import run_agent_stream
@@ -699,10 +706,13 @@ class A2AServerService:
                 http_request=mock_request,
                 authorization=None,
                 user_id=user_id,
-                tenant_id=tenant_id or server_agent.get("tenant_id")
+                tenant_id=tenant_id or server_agent.get("tenant_id"),
+                runtime_scope_id=runtime_scope_id,
             )
 
             events = await self._collect_stream_events(stream_response)
+            if any(self._is_run_interrupted_event(event) for event in events):
+                raise A2AServerServiceError(RUN_INTERRUPTED_MESSAGE)
             final_answer = self._extract_final_answer(events)
             self._store_agent_response(task_id, final_answer, endpoint_id)
             raw_parts = self._build_agent_run_event_parts(
@@ -797,6 +807,7 @@ class A2AServerService:
             context,
             server_agent["agent_id"]
         )
+        runtime_scope_id = f"a2a:{task_id or uuid4().hex}"
 
         try:
             from consts.model import AgentRequest
@@ -825,7 +836,8 @@ class A2AServerService:
                 http_request=mock_request,
                 authorization=None,
                 user_id=user_id,
-                tenant_id=tenant_id or server_agent.get("tenant_id")
+                tenant_id=tenant_id or server_agent.get("tenant_id"),
+                runtime_scope_id=runtime_scope_id,
             )
 
             events = []
@@ -855,6 +867,8 @@ class A2AServerService:
                     },
                     context_id=context_id
                 )
+                if self._is_run_interrupted_event(chunk_data):
+                    raise A2AServerServiceError(RUN_INTERRUPTED_MESSAGE)
 
             final_answer = self._extract_final_answer(events)
             self._store_agent_response(task_id, final_answer, endpoint_id)
@@ -1053,6 +1067,16 @@ class A2AServerService:
         # Verify authorization
         if user_id and task.get("caller_user_id") != user_id:
             raise A2AServerServiceError("Unauthorized: caller does not match task owner")
+        if task.get("task_state") in self.TERMINAL_STATES:
+            raise A2AServerServiceError(f"Task {task_id} cannot be canceled (may already be completed)")
+
+        runtime_user_id = user_id or task.get("caller_user_id")
+        if not runtime_user_id:
+            raise A2AServerServiceError("Task owner is unavailable; the running task cannot be canceled")
+
+        from services.agent_service import stop_agent_tasks
+
+        stop_agent_tasks(f"a2a:{task_id}", runtime_user_id)
 
         # Cancel task
         result = a2a_agent_db.cancel_task(task_id)

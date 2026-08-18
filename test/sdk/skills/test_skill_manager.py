@@ -77,6 +77,18 @@ mock_skills_module.__path__ = [os.path.join(os.path.dirname(__file__), "../../..
 sys.modules['nexent'] = MagicMock()
 sys.modules['nexent.skills'] = mock_skills_module
 
+# Load the atomic file helper used by SkillManager without importing the full package.
+mock_utils_module = MagicMock()
+mock_utils_module.__path__ = [os.path.join(os.path.dirname(__file__), "../../../sdk/nexent/utils")]
+sys.modules['nexent.utils'] = mock_utils_module
+spec_atomic_file = importlib.util.spec_from_file_location(
+    "nexent.utils.atomic_file",
+    os.path.join(os.path.dirname(__file__), "../../../sdk/nexent/utils/atomic_file.py"),
+)
+module_atomic_file = importlib.util.module_from_spec(spec_atomic_file)
+spec_atomic_file.loader.exec_module(module_atomic_file)
+sys.modules['nexent.utils.atomic_file'] = module_atomic_file
+
 # Load constants first
 spec_const = importlib.util.spec_from_file_location(
     "nexent.skills.constants",

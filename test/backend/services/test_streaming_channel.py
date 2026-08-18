@@ -3,6 +3,8 @@ Unit tests for StreamingChannel event-driven implementation.
 """
 
 import asyncio
+from unittest.mock import AsyncMock
+
 import pytest
 
 from backend.services.streaming_channel import (
@@ -150,6 +152,25 @@ class TestStreamingChannel:
         assert channel.completion_status is None
 
     @pytest.mark.asyncio
+    async def test_interrupt_publishes_local_terminal_event(self, channel):
+        """A Redis outage still notifies subscribers attached to the local channel."""
+        results = []
+
+        async def consumer():
+            async for chunk in channel.subscribe():
+                results.append(chunk)
+
+        consumer_task = asyncio.create_task(consumer())
+        await asyncio.sleep(0.05)
+        await channel.interrupt("data: interrupted\n\n", "redis unavailable")
+        channel.complete("failed")
+        await asyncio.wait_for(consumer_task, timeout=2.0)
+
+        assert results == ["data: interrupted\n\n"]
+        assert channel.error == "redis unavailable"
+        assert channel.completion_status == "run_interrupted"
+
+    @pytest.mark.asyncio
     async def test_subscriber_counting(self, channel):
         """Test subscriber count management."""
         assert channel.has_subscribers is False
@@ -293,6 +314,92 @@ class TestStreamingChannelManager:
         
         assert channel.is_completed is True
         assert channel.completion_status == "completed"
+
+    @pytest.mark.asyncio
+    async def test_old_execution_cannot_complete_new_channel(self, manager, monkeypatch):
+        """A stale finalizer must not close the replacement execution channel."""
+        from backend.services import streaming_channel as streaming_channel_module
+
+        await manager.get_or_create_channel(
+            conversation_id=222,
+            user_id="user1",
+            execution_id="old",
+        )
+        new_channel = await manager.get_or_create_channel(
+            conversation_id=222,
+            user_id="user1",
+            execution_id="new",
+        )
+        monkeypatch.setattr(
+            streaming_channel_module.runtime_state_service,
+            "mark_stream_completed_async",
+            AsyncMock(return_value=False),
+        )
+
+        with pytest.raises(streaming_channel_module.RuntimeExecutionSuperseded):
+            await manager.complete_channel(
+                conversation_id=222,
+                user_id="user1",
+                execution_id="old",
+                status="failed",
+            )
+
+        assert new_channel.is_completed is False
+
+    @pytest.mark.asyncio
+    async def test_distributed_completion_precedes_local_completion(self, manager, monkeypatch):
+        """Local subscribers close only after the fenced Redis completion succeeds."""
+        from backend.services import streaming_channel as streaming_channel_module
+
+        channel = await manager.get_or_create_channel(
+            conversation_id=444,
+            user_id="user1",
+            execution_id="run-1",
+        )
+
+        async def finish_state(**kwargs):
+            assert channel.is_completed is False
+            assert kwargs["error"] == "run_interrupted"
+            return True
+
+        monkeypatch.setattr(
+            streaming_channel_module.runtime_state_service,
+            "mark_stream_completed_async",
+            AsyncMock(side_effect=finish_state),
+        )
+
+        await manager.complete_channel(
+            conversation_id=444,
+            user_id="user1",
+            execution_id="run-1",
+            status="failed",
+            error="run_interrupted",
+        )
+
+        assert channel.is_completed is True
+        assert channel.completion_status == "failed"
+
+    @pytest.mark.asyncio
+    async def test_old_execution_cleanup_cannot_remove_new_channel(self, manager):
+        """Delayed cleanup is fenced by execution_id."""
+        await manager.get_or_create_channel(
+            conversation_id=333,
+            user_id="user1",
+            execution_id="old",
+        )
+        new_channel = await manager.get_or_create_channel(
+            conversation_id=333,
+            user_id="user1",
+            execution_id="new",
+        )
+
+        await manager.remove_channel(
+            conversation_id=333,
+            user_id="user1",
+            execution_id="old",
+        )
+
+        assert manager.get_channel(333, "user1") is new_channel
 
 
 class TestEventDrivenBehavior:

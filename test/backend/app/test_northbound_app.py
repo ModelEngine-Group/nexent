@@ -1,21 +1,21 @@
 """Unit tests for backend.apps.northbound_app module."""
-import sys
-import os
+from io import BytesIO
+from unittest.mock import AsyncMock, MagicMock, patch
 
 # The conftest.py sets up all mocks
 
-from unittest.mock import AsyncMock, MagicMock, patch
+import httpx
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.testclient import TestClient
-from io import BytesIO
 
 # Import from conftest (which sets up mocks automatically)
-from apps.northbound_app import router
+from apps.northbound_app import _get_northbound_context, router
+from apps.app_factory import create_app
 from consts.exceptions import (
+    DistributedStateUnavailable,
     LimitExceededError,
     UnauthorizedError,
-    SignatureValidationError,
 )
 
 
@@ -37,6 +37,82 @@ def _build_headers(auth="Bearer test_jwt", request_id="req-123", aksk=True):
             "X-Signature": "sig",
         })
     return headers
+
+
+def _build_request(auth="Bearer test-access-key", request_id="req-123"):
+    """Build a minimal Starlette request for context-resolution tests."""
+    headers = [(b"authorization", auth.encode())]
+    if request_id is not None:
+        headers.append((b"x-request-id", request_id.encode()))
+    return Request({"type": "http", "method": "GET", "path": "/", "headers": headers})
+
+
+@pytest.mark.asyncio
+async def test_get_northbound_context_resolves_identity_and_request_id():
+    """A valid access key resolves the shared northbound request context."""
+    with patch("apps.northbound_app.validate_bearer_token", return_value=(True, {"sub": "user-1"})), \
+            patch("apps.northbound_app.get_user_and_tenant_by_access_key", return_value={
+                "user_id": "user-1", "tenant_id": "tenant-1", "token_id": 7,
+            }):
+        context = await _get_northbound_context(_build_request())
+
+    assert context.user_id == "user-1"
+    assert context.tenant_id == "tenant-1"
+    assert context.token_id == 7
+    assert context.request_id == "req-123"
+    assert context.authorization == "Bearer test-access-key"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("validation_error", "expected_status", "expected_detail"),
+    [
+        (LimitExceededError("limited"), 429, "Too Many Requests"),
+        (UnauthorizedError("revoked"), 401, "revoked"),
+        (RuntimeError("database unavailable"), 401, "Unauthorized: invalid API key"),
+    ],
+)
+async def test_get_northbound_context_maps_validation_errors(
+    validation_error, expected_status, expected_detail
+):
+    """Authentication failures preserve their public HTTP contract."""
+    with patch("apps.northbound_app.validate_bearer_token", side_effect=validation_error):
+        with pytest.raises(HTTPException) as exc_info:
+            await _get_northbound_context(_build_request())
+
+    assert exc_info.value.status_code == expected_status
+    assert expected_detail in str(exc_info.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_get_northbound_context_rejects_invalid_token():
+    """An absent or invalid bearer token is rejected before identity lookup."""
+    with patch("apps.northbound_app.validate_bearer_token", return_value=(False, None)), \
+            patch("apps.northbound_app.get_user_and_tenant_by_access_key") as identity_lookup:
+        with pytest.raises(HTTPException) as exc_info:
+            await _get_northbound_context(_build_request())
+
+    assert exc_info.value.status_code == 401
+    identity_lookup.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("identity", "expected_detail"),
+    [
+        ({"user_id": None, "tenant_id": "tenant-1", "token_id": 7}, "Missing user information"),
+        ({"user_id": "user-1", "tenant_id": None, "token_id": 7}, "Missing tenant information"),
+    ],
+)
+async def test_get_northbound_context_requires_user_and_tenant(identity, expected_detail):
+    """A valid token must map to both a user and a tenant."""
+    with patch("apps.northbound_app.validate_bearer_token", return_value=(True, {"sub": "user-1"})), \
+            patch("apps.northbound_app.get_user_and_tenant_by_access_key", return_value=identity):
+        with pytest.raises(HTTPException) as exc_info:
+            await _get_northbound_context(_build_request())
+
+    assert exc_info.value.status_code == 400
+    assert expected_detail in str(exc_info.value.detail)
 
 
 # =============================================================================
@@ -169,6 +245,27 @@ def test_run_chat_limit_exceeded():
         )
 
         assert resp.status_code == 429
+
+
+def test_run_chat_distributed_state_failure_returns_503():
+    """Northbound must not rewrite required Redis failures as 500 or 429."""
+    handled_app = create_app(enable_monitoring=False)
+    handled_app.include_router(router)
+    handled_client = TestClient(handled_app, raise_server_exceptions=False)
+
+    with patch('apps.northbound_app._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('apps.northbound_app.start_streaming_chat', new_callable=AsyncMock) as mock_run:
+        mock_ctx.return_value = MagicMock()
+        mock_run.side_effect = DistributedStateUnavailable("redis down")
+
+        response = handled_client.post(
+            "/nb/v1/chat/run",
+            json={"agent_name": "general-assistant", "query": "Hello"},
+            headers=_build_headers(),
+        )
+
+    assert response.status_code == 503
+    assert response.json()["code"] == "distributed_state_unavailable"
 
 
 def test_run_chat_unauthorized():
@@ -384,6 +481,26 @@ def test_update_conversation_title_success():
         assert resp.status_code == 200
 
 
+def test_update_conversation_title_distributed_state_failure_returns_503():
+    """Title idempotency must preserve required Redis failures as HTTP 503."""
+    handled_app = create_app(enable_monitoring=False)
+    handled_app.include_router(router)
+    handled_client = TestClient(handled_app, raise_server_exceptions=False)
+
+    with patch('apps.northbound_app._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('apps.northbound_app.update_conversation_title', new_callable=AsyncMock) as mock_update:
+        mock_ctx.return_value = MagicMock(request_id="req-123")
+        mock_update.side_effect = DistributedStateUnavailable("redis down")
+
+        response = handled_client.put(
+            "/nb/v1/conversations/123/title?title=New%20Title",
+            headers=_build_headers(),
+        )
+
+    assert response.status_code == 503
+    assert response.json()["code"] == "distributed_state_unavailable"
+
+
 # =============================================================================
 # File Fetch Tests
 # =============================================================================
@@ -397,6 +514,81 @@ def test_file_fetch_missing_url():
 
     # Missing required parameter returns 422
     assert resp.status_code == 422
+
+
+def test_file_fetch_proxies_content_and_filename():
+    """The proxy streams upstream bytes with a stable download filename."""
+    response = MagicMock(status_code=200)
+    response.headers = {
+        "Content-Type": "text/plain",
+        "Content-Disposition": "attachment; filename*=UTF-8''report%20final.txt",
+    }
+
+    async def stream_bytes():
+        yield b"report contents"
+
+    response.aiter_bytes = stream_bytes
+    upstream_client = AsyncMock()
+    upstream_client.get.return_value = response
+    client_context = AsyncMock()
+    client_context.__aenter__.return_value = upstream_client
+
+    with patch("apps.northbound_app.httpx.AsyncClient", return_value=client_context):
+        result = client.get(
+            "/nb/v1/file/fetch",
+            params={"presigned_url": "https://storage.example/reports/original.txt"},
+        )
+
+    assert result.status_code == 200
+    assert result.content == b"report contents"
+    assert result.headers["content-type"].startswith("text/plain")
+    assert 'filename="report final.txt"' in result.headers["content-disposition"]
+
+
+@pytest.mark.parametrize(
+    ("side_effect", "expected_status"),
+    [
+        (httpx.TimeoutException("timeout"), 504),
+        (httpx.RequestError("connection failed"), 502),
+        (RuntimeError("unexpected"), 500),
+    ],
+)
+def test_file_fetch_maps_upstream_failures(side_effect, expected_status):
+    """The proxy distinguishes timeout, transport, and unexpected failures."""
+    upstream_client = AsyncMock()
+    upstream_client.get.side_effect = side_effect
+    client_context = AsyncMock()
+    client_context.__aenter__.return_value = upstream_client
+
+    with patch("apps.northbound_app.httpx.AsyncClient", return_value=client_context):
+        result = client.get(
+            "/nb/v1/file/fetch",
+            params={"presigned_url": "https://storage.example/reports/report.txt"},
+        )
+
+    assert result.status_code == expected_status
+
+
+def test_file_fetch_rejects_invalid_scheme_and_upstream_status():
+    """The proxy rejects unsafe schemes and non-success storage responses."""
+    invalid_scheme = client.get(
+        "/nb/v1/file/fetch",
+        params={"presigned_url": "file:///etc/passwd"},
+    )
+    assert invalid_scheme.status_code == 400
+
+    response = MagicMock(status_code=404, headers={})
+    upstream_client = AsyncMock()
+    upstream_client.get.return_value = response
+    client_context = AsyncMock()
+    client_context.__aenter__.return_value = upstream_client
+    with patch("apps.northbound_app.httpx.AsyncClient", return_value=client_context):
+        upstream_failure = client.get(
+            "/nb/v1/file/fetch",
+            params={"presigned_url": "https://storage.example/missing.txt"},
+        )
+
+    assert upstream_failure.status_code == 502
 
 
 # =============================================================================
@@ -716,6 +908,26 @@ def test_stop_chat_limit_exceeded():
         )
 
         assert resp.status_code == 429
+
+
+def test_stop_chat_distributed_state_failure_returns_503():
+    """Cross-Pod stop must preserve required Redis failures as HTTP 503."""
+    handled_app = create_app(enable_monitoring=False)
+    handled_app.include_router(router)
+    handled_client = TestClient(handled_app, raise_server_exceptions=False)
+
+    with patch('apps.northbound_app._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('apps.northbound_app.stop_chat', new_callable=AsyncMock) as mock_stop:
+        mock_ctx.return_value = MagicMock()
+        mock_stop.side_effect = DistributedStateUnavailable("redis down")
+
+        response = handled_client.get(
+            "/nb/v1/chat/stop/123",
+            headers=_build_headers(),
+        )
+
+    assert response.status_code == 503
+    assert response.json()["code"] == "distributed_state_unavailable"
 
 
 def test_stop_chat_internal_error():

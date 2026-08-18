@@ -24,6 +24,10 @@ persistence:
   localPath: "/var/lib/nexent-data/nexent-elasticsearch"
   existingClaim: ""
 
+service:
+  type: ClusterIP
+  nodePorts: {}
+
 config:
   javaOpts: "-Xms2g -Xmx2g"
   diskWatermarkLow: "85%"

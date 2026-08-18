@@ -1665,9 +1665,36 @@ class TestResolvePreviewFile:
             actual_name, actual_ct, total_size = await resolve_preview_file("test/document.docx")
 
             mock_convert.assert_called_once()
+            temp_object_name = mock_convert.call_args.args[2]
+            assert temp_object_name.startswith("preview/converting/test/document_")
+            assert temp_object_name.endswith(".pdf.tmp")
             assert actual_ct == 'application/pdf'
             assert actual_name.endswith('.pdf')
             assert total_size == 6000
+
+    @pytest.mark.asyncio
+    async def test_office_conversion_uses_unique_temp_object_per_request(self):
+        """Concurrent replicas never upload through the same temporary object key."""
+        from backend.services.file_management_service import resolve_preview_file
+
+        docx_type = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+        first_uuid = MagicMock(hex="first-run")
+        second_uuid = MagicMock(hex="second-run")
+        with patch('backend.services.file_management_service.file_exists', return_value=True), \
+             patch('backend.services.file_management_service.get_file_size_from_minio', return_value=2048), \
+             patch('backend.services.file_management_service.get_content_type', return_value=docx_type), \
+             patch('backend.services.file_management_service._is_pdf_cache_valid', return_value=False), \
+             patch('backend.services.file_management_service.uuid4', side_effect=[first_uuid, second_uuid]), \
+             patch('backend.services.file_management_service._convert_office_to_cached_pdf',
+                   new_callable=AsyncMock) as mock_convert:
+            await resolve_preview_file("test/document.docx")
+            await resolve_preview_file("test/document.docx")
+
+        first_call, second_call = mock_convert.call_args_list
+        assert first_call.args[1] == second_call.args[1]
+        assert first_call.args[2].endswith("_first-run.pdf.tmp")
+        assert second_call.args[2].endswith("_second-run.pdf.tmp")
+        assert first_call.args[2] != second_call.args[2]
 
     @pytest.mark.asyncio
     async def test_file_too_large_raises_exception(self):

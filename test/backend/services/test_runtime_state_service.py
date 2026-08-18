@@ -2,443 +2,381 @@ import asyncio
 
 import pytest
 
+from consts.exceptions import DistributedStateUnavailable
 from backend.services import runtime_state_service as runtime_state_module
-from backend.services.runtime_state_service import RuntimeStateService
+from backend.services.runtime_state_service import (
+    RuntimeExecutionSuperseded,
+    RuntimeStateService,
+)
+
+
+class FakePipeline:
+    def __init__(self, client):
+        self.client = client
+
+    def incr(self, key):
+        self.key = key
+        return self
+
+    def expire(self, key, ttl):
+        self.ttl = (key, ttl)
+        return self
+
+    def execute(self):
+        self.client._maybe_fail("pipeline")
+        current = int(self.client.values.get(self.key, 0)) + 1
+        self.client.values[self.key] = str(current)
+        self.client.ttls[self.key] = self.ttl[1]
+        return current, True
 
 
 class FakeRedisClient:
     def __init__(self):
-        self.hsets = []
-        self.expires = []
-        self.deletes = []
-        self.setexes = []
-        self.sets = []
-        self.xadds = []
-        self.xranges = []
-        self.xreads = []
         self.hashes = {}
         self.values = {}
-        self.stream_events = []
+        self.streams = {}
+        self.ttls = {}
         self.fail_next = set()
-        self.pipeline_result = (1, True)
+        self.eval_calls = []
+        self.ping_result = True
 
     def _maybe_fail(self, method):
         if method in self.fail_next:
             self.fail_next.remove(method)
             raise RuntimeError(f"{method} failed")
 
-    def hset(self, key, mapping):
-        self._maybe_fail("hset")
-        self.hsets.append((key, mapping))
-        self.hashes.setdefault(key, {}).update(mapping)
+    def ping(self):
+        self._maybe_fail("ping")
+        return self.ping_result
 
-    def expire(self, key, ttl):
-        self._maybe_fail("expire")
-        self.expires.append((key, ttl))
+    def eval(self, script, numkeys, *values):
+        self._maybe_fail("eval")
+        keys = list(values[:numkeys])
+        args = list(values[numkeys:])
+        self.eval_calls.append((script, keys, args))
+
+        if "redis.call('DEL', KEYS[1], KEYS[2], KEYS[3], KEYS[4])" in script:
+            for key in keys:
+                self.hashes.pop(key, None)
+                self.values.pop(key, None)
+                self.streams.pop(key, None)
+                self.ttls.pop(key, None)
+            execution_id, now, ttl = args
+            payload = {
+                "execution_id": str(execution_id),
+                "status": "running",
+                "started_at": str(now),
+                "updated_at": str(now),
+            }
+            self.hashes[keys[0]] = payload
+            self.ttls[keys[0]] = int(ttl)
+            return execution_id
+
+        if "redis.call('HSET', KEYS[4]" in script:
+            execution_id, status, now, completed_ttl, error, stream_ttl = args
+            if self.hashes.get(keys[0], {}).get("execution_id") != execution_id:
+                return 0
+            current_status = self.hashes.get(keys[0], {}).get("status")
+            if current_status != "running":
+                return int(current_status == status)
+            self.hashes[keys[0]].update({"status": status, "updated_at": now})
+            self.hashes[keys[3]] = {
+                "execution_id": execution_id,
+                "status": status,
+                "updated_at": now,
+            }
+            if error:
+                self.hashes[keys[0]]["error"] = error
+                self.hashes[keys[3]]["error"] = error
+            self.values.pop(keys[1], None)
+            self.ttls.pop(keys[1], None)
+            self.ttls[keys[0]] = int(completed_ttl)
+            self.ttls[keys[2]] = int(stream_ttl)
+            self.ttls[keys[3]] = int(completed_ttl)
+            return 1
+
+        if "local execution_id = redis.call('HGET'" in script:
+            execution_id = self.hashes.get(keys[0], {}).get("execution_id")
+            if execution_id is None or self.hashes.get(keys[0], {}).get("status") != "running":
+                return 0
+            self.values[keys[1]] = execution_id
+            self.ttls[keys[1]] = int(args[0])
+            return 1
+
+        if "redis.call('GET', KEYS[1]) == ARGV[1]" in script:
+            return int(self.values.get(keys[0]) == args[0])
+
+        if "return redis.call('DEL', KEYS[1])" in script:
+            if self.values.get(keys[0]) != args[0]:
+                return 0
+            self.values.pop(keys[0], None)
+            self.ttls.pop(keys[0], None)
+            return 1
+
+        if "redis.call('XADD'" in script:
+            execution_id, chunk, _max_len, ttl = args
+            run_state = self.hashes.get(keys[0], {})
+            if run_state.get("execution_id") != execution_id or run_state.get("status") != "running":
+                return None
+            events = self.streams.setdefault(keys[1], [])
+            event_id = f"{len(events) + 1}-0"
+            events.append((event_id, {"chunk": chunk}))
+            self.ttls[keys[1]] = int(ttl)
+            return event_id
+
+        execution_id, now, ttl = args
+        run_state = self.hashes.get(keys[0], {})
+        if run_state.get("execution_id") != execution_id or run_state.get("status") != "running":
+            return 0
+        self.hashes[keys[0]]["updated_at"] = now
+        self.ttls[keys[0]] = int(ttl)
+        return 1
 
     def delete(self, *keys):
         self._maybe_fail("delete")
-        self.deletes.append(keys)
         for key in keys:
             self.hashes.pop(key, None)
             self.values.pop(key, None)
+            self.streams.pop(key, None)
+            self.ttls.pop(key, None)
 
     def hgetall(self, key):
         self._maybe_fail("hgetall")
         return dict(self.hashes.get(key, {}))
 
-    def setex(self, key, ttl, value):
-        self._maybe_fail("setex")
-        self.setexes.append((key, ttl, value))
-        self.values[key] = value
-        return True
-
-    def get(self, key):
-        self._maybe_fail("get")
-        return self.values.get(key)
-
-    def xadd(self, key, values, maxlen=None, approximate=False):
-        self._maybe_fail("xadd")
-        event_id = f"{len(self.stream_events) + 1}-0"
-        self.xadds.append((key, values, maxlen, approximate))
-        self.stream_events.append((event_id, values))
-        return event_id
-
     def xrange(self, key, min="-"):
         self._maybe_fail("xrange")
-        self.xranges.append((key, min))
-        if min == "-":
-            return list(self.stream_events)
+        events = list(self.streams.get(key, []))
         if min.startswith("("):
             after_id = min[1:]
-            return [(event_id, values) for event_id, values in self.stream_events if event_id > after_id]
-        return list(self.stream_events)
+            return [(event_id, values) for event_id, values in events if event_id > after_id]
+        return events
 
     def xread(self, streams, count=100, block=1000):
         self._maybe_fail("xread")
-        self.xreads.append((streams, count, block))
-        if not self.stream_events:
-            return []
-        return [(next(iter(streams.keys())), list(self.stream_events[:count]))]
+        key, last_id = next(iter(streams.items()))
+        events = [event for event in self.streams.get(key, []) if event[0] > last_id][:count]
+        return [(key, events)] if events else []
 
     def set(self, key, value, nx=False, ex=None):
         self._maybe_fail("set")
-        self.sets.append((key, value, nx, ex))
         if nx and key in self.values:
             return False
         self.values[key] = value
+        self.ttls[key] = ex
         return True
 
     def pipeline(self):
         return FakePipeline(self)
 
 
-class FakePipeline:
-    def __init__(self, client):
-        self.client = client
-        self.operations = []
-
-    def incr(self, key):
-        self.operations.append(("incr", key))
-        return self
-
-    def expire(self, key, ttl):
-        self.operations.append(("expire", key, ttl))
-        return self
-
-    def execute(self):
-        self.client._maybe_fail("pipeline")
-        return self.client.pipeline_result
+@pytest.fixture
+def client():
+    return FakeRedisClient()
 
 
-class TestRuntimeStateService(RuntimeStateService):
-    def __init__(self, client):
-        super().__init__()
-        self._fake_client = client
-
-    @property
-    def enabled(self):
-        return True
-
-    @property
-    def client(self):
-        return self._fake_client
+@pytest.fixture
+def service(client):
+    return RuntimeStateService(client=client)
 
 
-def test_mark_run_finished_shortens_completed_runtime_key_ttls(monkeypatch):
-    monkeypatch.setattr(runtime_state_module, "RUNTIME_COMPLETED_TTL_SECONDS", 300)
-    client = FakeRedisClient()
-    service = TestRuntimeStateService(client)
+def test_register_run_replaces_old_state_without_owner_pod(service, client, monkeypatch):
+    monkeypatch.setattr(runtime_state_module, "RUNTIME_RUN_TTL_SECONDS", 60)
+    client.hashes["runtime:run:user-1:42"] = {"execution_id": "old"}
+    client.values["runtime:cancel:user-1:42"] = "old"
+    client.streams["runtime:stream:user-1:42"] = [("1-0", {"chunk": "old"})]
 
-    service.mark_run_finished("user-1", 42, "completed")
+    execution_id = service.register_run("user-1", 42, execution_id="new")
 
-    assert client.hsets[0][0] == "runtime:run:user-1:42"
-    assert client.hsets[0][1]["status"] == "completed"
-    assert set(client.expires) == {
-        ("runtime:run:user-1:42", 300),
-        ("runtime:cancel:user-1:42", 300),
-        ("runtime:stream:user-1:42", 300),
-        ("runtime:stream:done:user-1:42", 300),
+    assert execution_id == "new"
+    assert client.hashes["runtime:run:user-1:42"] == {
+        "execution_id": "new",
+        "status": "running",
+        "started_at": client.hashes["runtime:run:user-1:42"]["started_at"],
+        "updated_at": client.hashes["runtime:run:user-1:42"]["updated_at"],
     }
+    assert "owner_pod" not in client.hashes["runtime:run:user-1:42"]
+    assert "runtime:cancel:user-1:42" not in client.values
+    assert "runtime:stream:user-1:42" not in client.streams
+    assert client.ttls["runtime:run:user-1:42"] == 60
 
 
-def test_mark_stream_completed_shortens_completed_runtime_key_ttls(monkeypatch):
+def test_execution_id_fences_heartbeat_and_finish(service, client):
+    service.register_run("user-1", 42, execution_id="first")
+    service.register_run("user-1", 42, execution_id="second")
+
+    assert service.heartbeat_run("user-1", 42, "first") is False
+    assert service.mark_run_finished("user-1", 42, "first", "completed") is False
+    assert client.hashes["runtime:run:user-1:42"]["status"] == "running"
+
+    assert service.heartbeat_run("user-1", 42, "second") is True
+    assert service.mark_run_finished("user-1", 42, "second", "completed") is True
+    assert client.hashes["runtime:run:user-1:42"]["status"] == "completed"
+    assert client.hashes["runtime:stream:done:user-1:42"]["execution_id"] == "second"
+
+
+def test_finish_sets_terminal_state_error_and_completed_ttl(service, client, monkeypatch):
     monkeypatch.setattr(runtime_state_module, "RUNTIME_COMPLETED_TTL_SECONDS", 300)
-    client = FakeRedisClient()
-    service = TestRuntimeStateService(client)
+    monkeypatch.setattr(runtime_state_module, "RUNTIME_STREAM_TTL_SECONDS", 86400)
+    service.register_run("user-1", 42, execution_id="run-1")
+    service.append_stream_event("user-1", 42, "run-1", "chunk")
+    service.set_cancel_signal("user-1", 42)
 
-    service.mark_stream_completed("user-1", 42, "failed", error="model error")
+    assert service.mark_run_finished("user-1", 42, "run-1", "failed", "model error") is True
 
-    assert client.hsets[0][0] == "runtime:stream:done:user-1:42"
-    assert client.hsets[0][1]["status"] == "failed"
-    assert client.hsets[0][1]["error"] == "model error"
-    assert set(client.expires) == {
-        ("runtime:run:user-1:42", 300),
-        ("runtime:cancel:user-1:42", 300),
-        ("runtime:stream:user-1:42", 300),
-        ("runtime:stream:done:user-1:42", 300),
-    }
+    assert client.hashes["runtime:stream:done:user-1:42"]["status"] == "failed"
+    assert client.hashes["runtime:stream:done:user-1:42"]["error"] == "model error"
+    assert client.ttls["runtime:run:user-1:42"] == 300
+    assert client.ttls["runtime:stream:done:user-1:42"] == 300
+    assert client.ttls["runtime:stream:user-1:42"] == 86400
+    assert "runtime:cancel:user-1:42" not in client.values
 
 
-def test_disabled_service_methods_return_without_client(monkeypatch):
-    monkeypatch.setattr(runtime_state_module, "RUNTIME_STATE_REDIS_URL", "")
-    service = RuntimeStateService()
-
-    assert service.enabled is False
-    assert service.get_run_state("user-1", 42) == {}
+def test_terminal_run_rejects_heartbeat_cancel_and_append(service):
+    service.register_run("user-1", 42, execution_id="run-1")
+    assert service.mark_run_finished("user-1", 42, "run-1", "completed") is True
+    assert service.mark_run_finished("user-1", 42, "run-1", "completed") is True
+    assert service.heartbeat_run("user-1", 42, "run-1") is False
     assert service.set_cancel_signal("user-1", 42) is False
-    assert service.is_cancelled("user-1", 42) is False
-    assert service.append_stream_event("user-1", 42, "chunk") is None
-    assert service.get_stream_status("user-1", 42) == {}
-    assert service.read_stream_events("user-1", 42) == []
-    assert service.wait_for_stream_events("user-1", 42, "0-0") == []
-    service.reset_stream("user-1", 42)
-    service.register_run("user-1", 42)
-    service.mark_run_finished("user-1", 42, "completed")
-    service.mark_stream_completed("user-1", 42, "completed")
+    with pytest.raises(RuntimeExecutionSuperseded):
+        service.append_stream_event("user-1", 42, "run-1", "late")
 
 
-def test_client_property_requires_redis_url(monkeypatch):
-    monkeypatch.setattr(runtime_state_module, "RUNTIME_STATE_REDIS_URL", "")
-    service = RuntimeStateService()
-
-    with pytest.raises(ValueError, match="RUNTIME_STATE_REDIS_URL"):
-        _ = service.client
+def test_finish_rejects_unknown_terminal_status(service):
+    service.register_run("user-1", 42, execution_id="run-1")
+    with pytest.raises(ValueError, match="Unsupported runtime terminal status"):
+        service.mark_run_finished("user-1", 42, "run-1", "running")
 
 
-def test_client_property_requires_redis_package(monkeypatch):
-    monkeypatch.setattr(runtime_state_module, "RUNTIME_STATE_REDIS_URL", "redis://test")
-    monkeypatch.setattr(runtime_state_module, "redis", None)
-    service = RuntimeStateService()
+def test_cancel_signal_is_bound_to_current_execution(service, client, monkeypatch):
+    monkeypatch.setattr(runtime_state_module, "RUNTIME_CANCEL_TTL_SECONDS", 60)
+    assert service.set_cancel_signal("user-1", 42) is False
 
-    with pytest.raises(ValueError, match="redis package"):
-        _ = service.client
-
-
-def test_client_property_lazily_creates_redis_client(monkeypatch):
-    fake_client = FakeRedisClient()
-    fake_redis = type("FakeRedisModule", (), {
-        "from_url": staticmethod(lambda url, **kwargs: fake_client)
-    })
-    monkeypatch.setattr(runtime_state_module, "RUNTIME_STATE_REDIS_URL", "redis://test")
-    monkeypatch.setattr(runtime_state_module, "redis", fake_redis)
-    service = RuntimeStateService()
-
-    assert service.client is fake_client
-    assert service.client is fake_client
-
-
-def test_reset_stream_deletes_stream_and_done_keys():
-    client = FakeRedisClient()
-    service = TestRuntimeStateService(client)
-
-    service.reset_stream("user-1", 42)
-
-    assert client.deletes == [("runtime:stream:user-1:42", "runtime:stream:done:user-1:42")]
-
-
-def test_reset_stream_swallows_redis_errors(caplog):
-    client = FakeRedisClient()
-    client.fail_next.add("delete")
-    service = TestRuntimeStateService(client)
-
-    service.reset_stream("user-1", 42)
-
-    assert "Failed to reset runtime stream state" in caplog.text
-
-
-def test_register_run_writes_owner_status_ttl_and_clears_cancel(monkeypatch):
-    monkeypatch.setattr(runtime_state_module, "RUNTIME_RUN_TTL_SECONDS", 123)
-    client = FakeRedisClient()
-    service = TestRuntimeStateService(client)
-
-    service.register_run("user-1", 42, message_id=99)
-
-    key, mapping = client.hsets[0]
-    assert key == "runtime:run:user-1:42"
-    assert mapping["status"] == "running"
-    assert mapping["message_id"] == "99"
-    assert ("runtime:run:user-1:42", 123) in client.expires
-    assert ("runtime:cancel:user-1:42",) in client.deletes
-
-
-def test_register_run_swallows_redis_errors(caplog):
-    client = FakeRedisClient()
-    client.fail_next.add("hset")
-    service = TestRuntimeStateService(client)
-
-    service.register_run("user-1", 42)
-
-    assert "Failed to register runtime run state" in caplog.text
-
-
-def test_get_run_state_returns_hash_and_handles_errors(caplog):
-    client = FakeRedisClient()
-    client.hashes["runtime:run:user-1:42"] = {"status": "running"}
-    service = TestRuntimeStateService(client)
-
-    assert service.get_run_state("user-1", 42) == {"status": "running"}
-
-    client.fail_next.add("hgetall")
-    assert service.get_run_state("user-1", 42) == {}
-    assert "Failed to get runtime run state" in caplog.text
-
-
-def test_mark_run_finished_swallows_redis_errors(caplog):
-    client = FakeRedisClient()
-    client.fail_next.add("hset")
-    service = TestRuntimeStateService(client)
-
-    service.mark_run_finished("user-1", 42, "failed")
-
-    assert "Failed to mark runtime run state as finished" in caplog.text
-
-
-def test_cancel_signal_set_and_read_with_error_paths(caplog):
-    client = FakeRedisClient()
-    service = TestRuntimeStateService(client)
-
+    service.register_run("user-1", 42, execution_id="run-1")
     assert service.set_cancel_signal("user-1", 42) is True
-    assert client.setexes[0][0] == "runtime:cancel:user-1:42"
-    assert service.is_cancelled("user-1", 42) is True
-
-    client.fail_next.add("setex")
-    assert service.set_cancel_signal("user-1", 42) is False
-    client.fail_next.add("get")
-    assert service.is_cancelled("user-1", 42) is False
-    assert "Failed to set runtime cancel signal" in caplog.text
-    assert "Failed to read runtime cancel signal" in caplog.text
+    assert client.values["runtime:cancel:user-1:42"] == "run-1"
+    assert client.ttls["runtime:cancel:user-1:42"] == 60
+    assert service.is_cancelled("user-1", 42, "run-1") is True
+    assert service.is_cancelled("user-1", 42, "run-2") is False
 
 
-def test_append_stream_event_success_and_error(monkeypatch, caplog):
-    monkeypatch.setattr(runtime_state_module, "RUNTIME_STREAM_MAX_LEN", 10)
-    monkeypatch.setattr(runtime_state_module, "RUNTIME_STREAM_TTL_SECONDS", 20)
-    client = FakeRedisClient()
-    service = TestRuntimeStateService(client)
+def test_stream_append_is_fenced_and_can_be_replayed(service, client, monkeypatch):
+    monkeypatch.setattr(runtime_state_module, "RUNTIME_STREAM_TTL_SECONDS", 120)
+    service.register_run("user-1", 42, execution_id="run-1")
 
-    event_id = service.append_stream_event("user-1", 42, "chunk")
+    assert service.append_stream_event("user-1", 42, "run-1", "chunk-1") == "1-0"
+    assert service.append_stream_event("user-1", 42, "run-1", "chunk-2") == "2-0"
+    assert service.read_stream_events("user-1", 42) == [("1-0", "chunk-1"), ("2-0", "chunk-2")]
+    assert service.read_stream_events("user-1", 42, after_id="1-0") == [("2-0", "chunk-2")]
+    assert service.wait_for_stream_events("user-1", 42, "1-0") == [("2-0", "chunk-2")]
+    assert client.ttls["runtime:stream:user-1:42"] == 120
 
-    assert event_id == "1-0"
-    assert client.xadds == [("runtime:stream:user-1:42", {"chunk": "chunk"}, 10, True)]
-    assert ("runtime:stream:user-1:42", 20) in client.expires
-
-    client.fail_next.add("xadd")
-    assert service.append_stream_event("user-1", 42, "chunk") is None
-    assert "Failed to append runtime stream event" in caplog.text
+    with pytest.raises(RuntimeExecutionSuperseded):
+        service.append_stream_event("user-1", 42, "old-run", "stale")
 
 
-def test_mark_stream_completed_without_error_and_error_path(caplog):
-    client = FakeRedisClient()
-    service = TestRuntimeStateService(client)
-
-    service.mark_stream_completed("user-1", 42, "completed")
-
-    assert client.hsets[0][0] == "runtime:stream:done:user-1:42"
-    assert client.hsets[0][1]["status"] == "completed"
-    assert "error" not in client.hsets[0][1]
-
-    client.fail_next.add("hset")
-    service.mark_stream_completed("user-1", 42, "failed")
-    assert "Failed to mark runtime stream completed" in caplog.text
-
-
-def test_stream_status_returns_hash_and_handles_errors(caplog):
-    client = FakeRedisClient()
-    client.hashes["runtime:stream:done:user-1:42"] = {"status": "completed"}
-    service = TestRuntimeStateService(client)
-
-    assert service.get_stream_status("user-1", 42) == {"status": "completed"}
-
-    client.fail_next.add("hgetall")
-    assert service.get_stream_status("user-1", 42) == {}
-    assert "Failed to get runtime stream status" in caplog.text
+@pytest.mark.parametrize(
+    ("method", "args", "failure"),
+    [
+        ("register_run", ("user-1", 42), "eval"),
+        ("get_run_state", ("user-1", 42), "hgetall"),
+        ("read_stream_events", ("user-1", 42), "xrange"),
+        ("wait_for_stream_events", ("user-1", 42, "0-0"), "xread"),
+        ("acquire_idempotency", ("key", 30), "set"),
+        ("consume_rate_limit", ("tenant", 10), "pipeline"),
+    ],
+)
+def test_redis_failures_raise_distributed_state_unavailable(service, client, method, args, failure):
+    client.fail_next.add(failure)
+    with pytest.raises(DistributedStateUnavailable):
+        getattr(service, method)(*args)
 
 
-def test_read_stream_events_with_and_without_after_id_and_error(caplog):
-    client = FakeRedisClient()
-    client.stream_events = [
-        ("1-0", {"chunk": "first"}),
-        ("2-0", {"other": "missing chunk"}),
-    ]
-    service = TestRuntimeStateService(client)
+def test_missing_configuration_and_ping_failure_raise_distributed_error(monkeypatch, client):
+    monkeypatch.setattr(runtime_state_module, "RUNTIME_STATE_REDIS_URL", "")
+    with pytest.raises(DistributedStateUnavailable, match="RUNTIME_STATE_REDIS_URL"):
+        RuntimeStateService().ping()
 
-    assert service.read_stream_events("user-1", 42) == [("1-0", "first"), ("2-0", "")]
-    assert client.xranges[-1] == ("runtime:stream:user-1:42", "-")
-    assert service.read_stream_events("user-1", 42, after_id="1-0") == [("2-0", "")]
-    assert client.xranges[-1] == ("runtime:stream:user-1:42", "(1-0")
-
-    client.fail_next.add("xrange")
-    assert service.read_stream_events("user-1", 42) == []
-    assert "Failed to read runtime stream events" in caplog.text
+    client.ping_result = False
+    with pytest.raises(DistributedStateUnavailable, match="Redis PING"):
+        RuntimeStateService(client=client).ping()
 
 
-def test_wait_for_stream_events_success_empty_and_error(caplog):
-    client = FakeRedisClient()
-    service = TestRuntimeStateService(client)
+def test_idempotency_and_rate_limit_use_redis(service):
+    token = service.acquire_idempotency("request", 30)
+    assert token
+    assert service.acquire_idempotency("request", 30) is None
+    assert service.release_idempotency("request", "wrong-token") is False
+    assert service.acquire_idempotency("request", 30) is None
+    assert service.release_idempotency("request", token) is True
+    assert service.acquire_idempotency("request", 30)
 
-    assert service.wait_for_stream_events("user-1", 42, "0-0") == []
-
-    client.stream_events = [("1-0", {"chunk": "first"}), ("2-0", {"other": "missing"})]
-    assert service.wait_for_stream_events("user-1", 42, "0-0", block_ms=5, count=2) == [
-        ("1-0", "first"),
-        ("2-0", ""),
-    ]
-    assert client.xreads[-1] == ({"runtime:stream:user-1:42": "0-0"}, 2, 5)
-
-    client.fail_next.add("xread")
-    assert service.wait_for_stream_events("user-1", 42, "0-0") == []
-    assert "Failed to wait for runtime stream events" in caplog.text
-
-
-def test_idempotency_acquire_and_release():
-    client = FakeRedisClient()
-    service = TestRuntimeStateService(client)
-    redis_key = service._idempotency_key("request-key")
-
-    assert service.acquire_idempotency("request-key", 60) is True
-    assert client.sets[-1] == (redis_key, service._pod_name, True, 60)
-    assert service.acquire_idempotency("request-key", 60) is False
-
-    service.release_idempotency("request-key")
-
-    assert (redis_key,) in client.deletes
-
-
-def test_consume_rate_limit_success_and_limit_exceeded(monkeypatch):
-    monkeypatch.setattr(runtime_state_module.time, "time", lambda: 120.0)
-    client = FakeRedisClient()
-    service = TestRuntimeStateService(client)
-
-    assert service.consume_rate_limit("tenant-1", 2) == 1
-
-    client.pipeline_result = (3, True)
+    assert service.consume_rate_limit("tenant", 1) == 1
     with pytest.raises(ValueError, match="rate limit exceeded"):
-        service.consume_rate_limit("tenant-1", 2)
+        service.consume_rate_limit("tenant", 1)
 
 
-def test_async_wrappers_delegate_to_sync_methods(monkeypatch):
-    client = FakeRedisClient()
-    service = TestRuntimeStateService(client)
+def test_status_reads_are_strict(service, client):
+    service.register_run("user-1", 42, execution_id="run-1")
+    service.append_stream_event("user-1", 42, "run-1", "chunk")
+    service.mark_run_finished("user-1", 42, "run-1", "completed")
+    assert service.get_run_state("user-1", 42)["status"] == "completed"
+    assert service.get_stream_status("user-1", 42)["status"] == "completed"
 
-    async def fake_to_thread(func, *args, **kwargs):
-        return func(*args, **kwargs)
-
-    monkeypatch.setattr(runtime_state_module.asyncio, "to_thread", fake_to_thread)
-    monkeypatch.setattr(
-        service,
-        "reset_stream",
-        lambda user_id, conversation_id: client.values.setdefault("reset", True),
+def test_client_is_created_from_configured_url(monkeypatch, client):
+    fake_redis_module = type(
+        "FakeRedisModule",
+        (),
+        {"from_url": staticmethod(lambda *args, **kwargs: client)},
     )
-    monkeypatch.setattr(service, "get_run_state", lambda user_id, conversation_id: {"status": "running"})
-    monkeypatch.setattr(service, "is_cancelled", lambda user_id, conversation_id: True)
-    monkeypatch.setattr(service, "append_stream_event", lambda user_id, conversation_id, chunk: "1-0")
-    monkeypatch.setattr(
-        service,
-        "mark_stream_completed",
-        lambda *args, **kwargs: client.values.setdefault("done", True),
-    )
-    monkeypatch.setattr(service, "get_stream_status", lambda user_id, conversation_id: {"status": "completed"})
-    monkeypatch.setattr(
-        service,
-        "read_stream_events",
-        lambda user_id, conversation_id, after_id=None: [("1-0", "chunk")],
-    )
-    monkeypatch.setattr(service, "wait_for_stream_events", lambda *args, **kwargs: [("2-0", "chunk2")])
-    monkeypatch.setattr(service, "acquire_idempotency", lambda key, ttl_seconds: True)
-    monkeypatch.setattr(service, "release_idempotency", lambda key: client.values.setdefault("released", key))
-    monkeypatch.setattr(service, "consume_rate_limit", lambda tenant_id, limit_per_minute: 1)
+    monkeypatch.setattr(runtime_state_module, "redis", fake_redis_module)
+    monkeypatch.setattr(runtime_state_module, "RUNTIME_STATE_REDIS_URL", "redis://example")
 
-    async def run_checks():
-        await service.reset_stream_async("user-1", 42)
-        assert await service.get_run_state_async("user-1", 42) == {"status": "running"}
-        assert await service.is_cancelled_async("user-1", 42) is True
-        assert await service.append_stream_event_async("user-1", 42, "chunk") == "1-0"
-        await service.mark_stream_completed_async("user-1", 42, "completed")
-        assert await service.get_stream_status_async("user-1", 42) == {"status": "completed"}
+    service = RuntimeStateService()
+
+    assert service.client is client
+    assert service.client is client
+
+
+def test_client_creation_failures_are_distributed_errors(monkeypatch):
+    class FailingRedisModule:
+        @staticmethod
+        def from_url(*args, **kwargs):
+            raise RuntimeError("connection setup failed")
+
+    monkeypatch.setattr(runtime_state_module, "redis", None)
+    monkeypatch.setattr(runtime_state_module, "RUNTIME_STATE_REDIS_URL", "redis://example")
+    with pytest.raises(DistributedStateUnavailable, match="redis package"):
+        RuntimeStateService().client
+
+    monkeypatch.setattr(runtime_state_module, "redis", FailingRedisModule)
+    with pytest.raises(DistributedStateUnavailable, match="create Redis client"):
+        RuntimeStateService().client
+
+
+def test_async_wrappers_preserve_execution_contract(service):
+    async def run():
+        assert await service.ping_async() is True
+        execution_id = await service.register_run_async("user-1", 42, execution_id="run-1")
+        assert execution_id == "run-1"
+        assert (await service.get_run_state_async("user-1", 42))["execution_id"] == "run-1"
+        assert await service.heartbeat_run_async("user-1", 42, "run-1") is True
+        assert await service.is_cancelled_async("user-1", 42, "run-1") is False
+        assert await service.set_cancel_signal_async("user-1", 42) is True
+        assert await service.is_cancelled_async("user-1", 42, "run-1") is True
+        assert await service.append_stream_event_async("user-1", 42, "run-1", "chunk") == "1-0"
         assert await service.read_stream_events_async("user-1", 42) == [("1-0", "chunk")]
-        assert await service.wait_for_stream_events_async("user-1", 42, "1-0") == [("2-0", "chunk2")]
-        assert await service.acquire_idempotency_async("request-key", 60) is True
-        await service.release_idempotency_async("request-key")
-        assert await service.consume_rate_limit_async("tenant-1", 2) == 1
+        assert await service.wait_for_stream_events_async("user-1", 42, "0-0") == [("1-0", "chunk")]
+        assert service.mark_stream_completed("user-1", 42, "run-1", "completed") is True
+        assert (await service.get_stream_status_async("user-1", 42))["status"] == "completed"
 
-    asyncio.run(run_checks())
+        execution_id = await service.register_run_async("user-1", 42, execution_id="run-2")
+        assert execution_id == "run-2"
+        assert await service.mark_stream_completed_async("user-1", 42, "run-2", "stopped") is True
+
+        token = await service.acquire_idempotency_async("request", 30)
+        assert token
+        assert await service.release_idempotency_async("request", token) is True
+        assert await service.consume_rate_limit_async("tenant", 2) == 1
+
+    asyncio.run(run())

@@ -3,20 +3,38 @@ Northbound API with A2A support.
 
 This module combines northbound app with A2A server endpoints.
 """
-import base64
 import hashlib
 import json
 import logging
-from typing import Annotated, Any, Dict
+from contextlib import asynccontextmanager
 from http import HTTPStatus
+from typing import Annotated, Any, Dict
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Request
+from fastapi import APIRouter, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
 from apps.app_factory import create_app
+from services.a2a_server_service import (
+    A2AServerServiceError,
+    AgentNotEnabledError,
+    EndpointNotFoundError,
+    TaskNotFoundError,
+    UnsupportedOperationError,
+    a2a_server_service,
+)
+from services.northbound_service import NorthboundContext
+from services.runtime_state_service import runtime_state_service
+
 from .northbound_app import router as northbound_router
 from .northbound_knowledge_app import router as northbound_knowledge_router
+
+
+@asynccontextmanager
+async def northbound_lifespan(_app):
+    """Reject startup when required Redis-backed distributed state is unavailable."""
+    await runtime_state_service.ping_async()
+    yield
 
 
 class A2AServerSettings(BaseModel):
@@ -27,17 +45,6 @@ class A2AServerSettings(BaseModel):
     card_overrides: Dict[str, Any] | None = None
 
 
-from services.northbound_service import NorthboundContext
-from services.a2a_server_service import (
-    a2a_server_service,
-    EndpointNotFoundError,
-    AgentNotEnabledError,
-    TaskNotFoundError,
-    UnsupportedOperationError,
-    A2AServerServiceError,
-)
-from database import a2a_agent_db
-
 logger = logging.getLogger("northbound_base_app")
 
 # Create FastAPI app with common configurations
@@ -46,7 +53,8 @@ northbound_app = create_app(
     description="Northbound APIs for partners",
     version="1.0.0",
     cors_methods=["GET", "POST", "PUT", "DELETE"],
-    enable_monitoring=False  # Disable monitoring for northbound API if not needed
+    enable_monitoring=False,  # Disable monitoring for northbound API if not needed
+    lifespan=northbound_lifespan,
 )
 
 northbound_app.include_router(northbound_router)
@@ -159,19 +167,19 @@ async def jsonrpc_handler(
                 "id": payload.id
             })
 
-    except EndpointNotFoundError as e:
+    except EndpointNotFoundError:
         return JSONResponse({
             "jsonrpc": "2.0",
             "error": {"code": -32601, "message": "Endpoint not found"},
             "id": payload.id
         })
-    except TaskNotFoundError as e:
+    except TaskNotFoundError:
         return JSONResponse({
             "jsonrpc": "2.0",
             "error": {"code": -32001, "message": "Task not found"},
             "id": payload.id
         })
-    except UnsupportedOperationError as e:
+    except UnsupportedOperationError:
         return JSONResponse({
             "jsonrpc": "2.0",
             "error": {"code": -32004, "message": "Unsupported operation"},

@@ -401,6 +401,41 @@ async def test_agent_run_api_maps_forbidden_conversation_to_403(mocker):
     assert exc_info.value.detail == "Conversation is not accessible"
 
 
+@pytest.mark.asyncio
+async def test_agent_run_api_preserves_distributed_state_error(mocker):
+    """The route must leave distributed-state failures for the global 503 handler."""
+    from consts.exceptions import DistributedStateUnavailable
+    from consts.model import AgentRequest
+    from starlette.requests import Request
+
+    from apps.agent_app import agent_run_api
+
+    failure = DistributedStateUnavailable("redis down")
+    mock_run_agent_stream = mocker.patch(
+        "apps.agent_app.run_agent_stream",
+        new_callable=AsyncMock,
+        side_effect=failure,
+    )
+    request = AgentRequest(
+        agent_id=1,
+        conversation_id=123,
+        query="test query",
+        history=[],
+        minio_files=[],
+        is_debug=False,
+    )
+
+    with pytest.raises(DistributedStateUnavailable, match="redis down"):
+        await agent_run_api(
+            agent_request=request,
+            http_request=Request({"type": "http", "headers": []}),
+            authorization="Bearer token",
+            resume=False,
+        )
+
+    mock_run_agent_stream.assert_awaited_once()
+
+
 def test_agent_stop_api_success(mocker, mock_conversation_id):
     """Test agent_stop_api success case."""
     mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")

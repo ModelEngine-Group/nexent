@@ -1,4 +1,4 @@
-replicaCount: 1
+replicaCount: 3
 
 strategy:
   type: RollingUpdate
@@ -27,3 +27,7 @@ config:
 
 serviceAccount:
   name: nexent-config
+
+service:
+  type: ClusterIP
+  nodePort: null

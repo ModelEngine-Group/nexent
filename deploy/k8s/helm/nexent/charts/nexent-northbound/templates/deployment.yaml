@@ -28,6 +28,15 @@ spec:
         checksum/nexent-backend-image: {{ dig "rolloutChecksums" "backendImage" "" .Values.global | quote }}
         checksum/nexent-sql: {{ dig "rolloutChecksums" "sql" "" .Values.global | quote }}
     spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: nexent-northbound
+                topologyKey: kubernetes.io/hostname
       containers:
         - name: nexent-northbound
           image: "{{ .Values.images.backend.repository }}:{{ .Values.images.backend.tag }}"
@@ -53,6 +62,18 @@ spec:
               value: {{ .Values.config.skipProxy | quote }}
             - name: UMASK
               value: {{ .Values.config.umask | quote }}
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: 5013
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: 5013
+            initialDelaySeconds: 5
+            periodSeconds: 5
           volumeMounts:
             - name: nexent-sql-files
               mountPath: /opt/nexent/sql

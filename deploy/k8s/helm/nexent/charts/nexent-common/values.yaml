@@ -38,6 +38,10 @@ config:
     user: "root"
     db: "nexent"
     port: "5432"
+    poolSize: "5"
+    maxOverflow: "5"
+    poolTimeoutSeconds: "30"
+    poolRecycleSeconds: "1800"
   redis:
     url: "redis://nexent-redis:6379/0"
     backendUrl: "redis://nexent-redis:6379/1"
@@ -46,10 +50,14 @@ config:
     redisUrl: ""
     streamTtlSeconds: "86400"
     streamMaxLen: "10000"
-    runTtlSeconds: "86400"
-    cancelTtlSeconds: "86400"
+    runTtlSeconds: "60"
+    heartbeatIntervalSeconds: "15"
+    cancelTtlSeconds: "60"
     completedTtlSeconds: "300"
     cancelPollIntervalSeconds: "1.0"
+  paths:
+    projectConfigDir: "/mnt/nexent/project-config"
+    uploadFolder: "/mnt/nexent/uploads"
   northbound:
     idempotencyTtlSeconds: "600"
     rateLimitEnabled: "true"

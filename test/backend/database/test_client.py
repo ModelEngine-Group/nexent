@@ -87,6 +87,10 @@ class TestPostgresClient:
             'backend.database.client.NEXENT_POSTGRES_PASSWORD', 'test_password')
         mocker.patch('backend.database.client.POSTGRES_DB', 'test_db')
         mocker.patch('backend.database.client.POSTGRES_PORT', 5432)
+        mocker.patch('backend.database.client.POSTGRES_POOL_SIZE', 5)
+        mocker.patch('backend.database.client.POSTGRES_MAX_OVERFLOW', 5)
+        mocker.patch('backend.database.client.POSTGRES_POOL_TIMEOUT_SECONDS', 30)
+        mocker.patch('backend.database.client.POSTGRES_POOL_RECYCLE_SECONDS', 1800)
 
         # Mock the SQLAlchemy functions
         mock_engine = MagicMock()
@@ -104,6 +108,10 @@ class TestPostgresClient:
         assert client.database == 'test_db'
         assert client.port == 5432
         mock_create_engine.assert_called_once()
+        assert mock_create_engine.call_args.kwargs["pool_size"] == 5
+        assert mock_create_engine.call_args.kwargs["max_overflow"] == 5
+        assert mock_create_engine.call_args.kwargs["pool_timeout"] == 30
+        assert mock_create_engine.call_args.kwargs["pool_recycle"] == 1800
         mock_sessionmaker.assert_called_once_with(bind=mock_engine)
 
     def test_postgres_client_singleton(self):
@@ -627,6 +635,28 @@ class TestFilterProperty:
 
 
 class TestAdditionalCoverage:
+    def test_monitoring_engine_uses_parameterized_pool(self, mocker):
+        from backend.database import client as client_module
+
+        client_module._monitoring_engine = None
+        client_module._monitoring_session_maker = None
+        engine = MagicMock()
+        create_engine_mock = mocker.patch(
+            "backend.database.client.create_engine",
+            return_value=engine,
+        )
+        mocker.patch("backend.database.client.POSTGRES_POOL_SIZE", 5)
+        mocker.patch("backend.database.client.POSTGRES_MAX_OVERFLOW", 5)
+        mocker.patch("backend.database.client.POSTGRES_POOL_TIMEOUT_SECONDS", 30)
+        mocker.patch("backend.database.client.POSTGRES_POOL_RECYCLE_SECONDS", 1800)
+
+        assert client_module._get_monitoring_engine() is engine
+
+        assert create_engine_mock.call_args.kwargs["pool_size"] == 5
+        assert create_engine_mock.call_args.kwargs["max_overflow"] == 5
+        assert create_engine_mock.call_args.kwargs["pool_timeout"] == 30
+        assert create_engine_mock.call_args.kwargs["pool_recycle"] == 1800
+
     def test_minio_default_bucket_fallback_on_init_error(self, mocker):
         MinioClient._instance = None
         MinioClient._initialized = False

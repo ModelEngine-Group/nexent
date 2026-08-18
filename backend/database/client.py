@@ -15,6 +15,10 @@ from consts.const import (
     NEXENT_POSTGRES_PASSWORD,
     POSTGRES_DB,
     POSTGRES_HOST,
+    POSTGRES_MAX_OVERFLOW,
+    POSTGRES_POOL_RECYCLE_SECONDS,
+    POSTGRES_POOL_SIZE,
+    POSTGRES_POOL_TIMEOUT_SECONDS,
     POSTGRES_PORT,
     POSTGRES_USER,
 )
@@ -51,9 +55,11 @@ class PostgresClient:
                 "client_encoding": "utf8"
             },
             echo=False,
-            pool_size=10,
+            pool_size=POSTGRES_POOL_SIZE,
+            max_overflow=POSTGRES_MAX_OVERFLOW,
             pool_pre_ping=True,
-            pool_timeout=30
+            pool_timeout=POSTGRES_POOL_TIMEOUT_SECONDS,
+            pool_recycle=POSTGRES_POOL_RECYCLE_SECONDS,
         )
         self.session_maker = sessionmaker(bind=self.engine)
 
@@ -378,9 +384,11 @@ def _get_monitoring_engine():
                 "client_encoding": "utf8",
             },
             echo=False,
-            pool_size=3,
+            pool_size=POSTGRES_POOL_SIZE,
+            max_overflow=POSTGRES_MAX_OVERFLOW,
             pool_pre_ping=True,
-            pool_timeout=30,
+            pool_timeout=POSTGRES_POOL_TIMEOUT_SECONDS,
+            pool_recycle=POSTGRES_POOL_RECYCLE_SECONDS,
         )
         _monitoring_session_maker = sessionmaker(bind=_monitoring_engine)
     return _monitoring_engine

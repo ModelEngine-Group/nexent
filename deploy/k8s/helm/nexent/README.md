@@ -7,6 +7,7 @@ This directory contains a Helm chart for deploying Nexent on Kubernetes.
 - Kubernetes cluster (e.g., Minikube, K3s, Docker Desktop)
 - Helm 3+
 - kubectl configured with cluster access
+- A StorageClass that supports `ReadWriteMany` (RWX), or pre-created RWX claims for the shared workspace and skills directories
 
 ## Quick Start
 
@@ -32,8 +33,15 @@ bash deploy.sh k8s
 # Interactive deployment (will prompt for all options)
 bash deploy.sh k8s
 
-# Non-interactive deployment with the default component set
-bash deploy.sh k8s --components infrastructure,application,data-process,supabase --port-policy development --image-source general
+# Non-interactive deployment with dynamic RWX storage
+bash deploy.sh k8s --defaults \
+  --persistence-mode dynamic \
+  --storage-class <rwx-storage-class>
+
+# Non-interactive deployment with pre-created claims
+bash deploy.sh k8s --defaults \
+  --persistence-mode existing \
+  --existing-claim-prefix <claim-prefix>
 
 # Add terminal to the default component set
 bash deploy.sh k8s --components infrastructure,application,data-process,supabase,terminal
@@ -44,8 +52,8 @@ bash deploy.sh k8s --image-source mainland
 # Use local latest Nexent images
 bash deploy.sh k8s --image-source local-latest
 
-# Use a specific StorageClass with the short alias
-bash deploy.sh k8s --sc fast-storage
+# Use a specific RWX StorageClass with the short alias
+bash deploy.sh k8s --persistence-mode dynamic --sc <rwx-storage-class>
 
 # Clean helm state (fixes stuck releases)
 bash uninstall.sh k8s clean
@@ -71,7 +79,7 @@ bash uninstall.sh k8s delete-all --keep-local-data
 
 K8s deployments read runtime configuration from `deploy/env/.env`, the same file used by Docker. Before every deployment, existing values, comments, ordering, and old-only variables are preserved while assignments newly introduced by the current `deploy/env/.env.example` are appended. If `.env` is missing, the deploy script first reuses legacy `docker/.env`, then falls back to the current template. A readable template is required before deployment starts. Do not edit generated Helm values by hand; they are recreated from the merged `deploy/env/.env` and deployment options.
 
-When `--persistence-mode local` is used, Nexent renders static PVs with `hostPath` and `DirectoryOrCreate`; node affinity is not required. Shared workspace data uses `/var/lib/nexent`, shared skills use `/var/lib/nexent-data/skills`, and service data uses `/var/lib/nexent-data/nexent-*` by default.
+The application baseline runs Web, Config, Runtime, and Northbound with three replicas. The deployment script therefore requires an explicit `dynamic` or `existing` persistence mode. It rejects `local`/`hostPath`, because a Pod-local path cannot provide a consistent workspace to replicas scheduled on different nodes.
 
 ## Deploy Options
 
@@ -88,11 +96,11 @@ When `--persistence-mode local` is used, Nexent renders static PVs with `hostPat
 | `--is-mainland` | Legacy network location option | `Y` maps to `--image-source mainland`; `N` maps to `general` |
 | `--version` | Application version | Version tag (auto-detected from `backend/consts/const.py` if not set) |
 | `--deployment-version` | Legacy deployment version | `speed` maps to `infrastructure,application`; `full` adds `supabase` |
-| `--persistence-mode` | Persistent volume mode | `local`, `dynamic`, or `existing`; default `local` |
-| `--storage-class` | StorageClass for PV/PVC binding | StorageClass name; aliases `--storageclass`, `--storage-class-name`, `--sc` |
+| `--persistence-mode` | Persistent volume mode | `dynamic` or `existing` for the three-replica baseline; must be explicit for non-interactive deployment |
+| `--storage-class` | StorageClass for PV/PVC binding | Required with `dynamic`; must support RWX; aliases `--storageclass`, `--storage-class-name`, `--sc` |
 | `--local-path` | Base host path for local PVs except workspace | Path; default `/var/lib/nexent-data` |
 | `--local-node-name` | Deprecated compatibility option | Ignored; local mode uses hostPath and does not require nodeAffinity |
-| `--existing-claim-prefix` | Prefix for existing PVC names | Renders as `<prefix>-<component>` |
+| `--existing-claim-prefix` | Prefix for existing PVC names | Required with `existing`; resolves claims as `<prefix>-<component>` |
 
 ## Uninstall Options
 
@@ -204,6 +212,37 @@ After successful deployment:
 
 ## Data Persistence
 
+### Three-replica storage contract
+
+The shared workspace and skills claims are mounted by multiple Pods:
+
+- workspace claim at `/mnt/nexent`, including `/mnt/nexent/project-config` and `/mnt/nexent/uploads`
+- skills claim at `/mnt/nexent-data/skills`
+
+`dynamic` mode creates every application and infrastructure claim with the explicitly supplied StorageClass. That class must support `ReadWriteMany` for workspace and skills. `existing` mode does not create claims. With prefix `prod`, the deployment expects `prod-nexent-workspace`, `prod-nexent-skills`, `prod-nexent-elasticsearch`, `prod-nexent-postgresql`, `prod-nexent-redis`, `prod-nexent-minio`, and, when Supabase is enabled, `prod-nexent-supabase-db`.
+
+Infrastructure and Supabase services remain single-replica. Increasing an application Deployment to three replicas does not create a PVC per replica. New installations default all managed PVCs to `dynamic`; an existing PVC StorageClass is immutable and is never changed in place.
+
+### Upgrade from one replica
+
+If every current PVC already uses the target dynamic StorageClass and the StorageClass value is unchanged:
+
+1. Pause configuration and Skill writes during the rollout.
+2. Run `helm upgrade` or the deployment script with the existing dynamic storage configuration.
+3. Verify all four application Deployments reach three ready replicas before reopening writes.
+
+Active HTTP, SSE, WebSocket, and Agent runs may be interrupted during the rollout. A terminated Agent run expires from Redis and resumes with `run_interrupted`; users must start a new run.
+
+If any installation PVC uses `local`/`hostPath`, do not change its StorageClass in place:
+
+1. Create new dynamic claims for workspace, skills, Elasticsearch, PostgreSQL, Redis, MinIO, and Supabase DB when enabled.
+2. Copy workspace, uploads, project branding, skills, and MinIO objects. Use database backup/restore for PostgreSQL and Supabase, and migrate only business Elasticsearch indexes. Redis runtime state is temporary and is not migrated.
+3. Verify data, file counts, ownership, and permissions, then point the release at the new claims.
+4. Scale Web, Config, Runtime, and Northbound to three replicas.
+5. Retain the old volumes for rollback; this release does not delete or migrate them automatically.
+
+Pause configuration and Skill writes while old and new application versions coexist. Automated storage or Docker-to-Kubernetes migration is outside this release.
+
 ### Preserved Data
 
 By default, `bash uninstall.sh k8s` removes the Helm release and preserves local PV data. It prompts before deleting the namespace or local PV contents. In non-interactive environments, both are preserved unless explicitly requested.
@@ -229,11 +268,11 @@ Use `--delete-local-data true` or `--remove-local-data` to delete known Nexent l
 
 | Service | Description | Replicas |
 |---------|-------------|----------|
-| nexent-config | Configuration service | 1 |
-| nexent-runtime | Runtime service | 1 |
+| nexent-config | Configuration service | 3 |
+| nexent-runtime | Runtime service | 3 |
 | nexent-mcp | MCP container service | 1 |
-| nexent-northbound | Northbound API service | 1 |
-| nexent-web | Web frontend | 1 |
+| nexent-northbound | Northbound API service | 3 |
+| nexent-web | Web frontend | 3 |
 | nexent-data-process | Data processing service | 1 |
 
 ### Infrastructure Services

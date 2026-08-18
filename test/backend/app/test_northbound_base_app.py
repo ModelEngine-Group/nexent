@@ -8,8 +8,9 @@ import os
 import sys
 import types
 import unittest
+import asyncio
 from dataclasses import dataclass
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from fastapi import APIRouter, HTTPException
 from fastapi.testclient import TestClient
@@ -28,6 +29,11 @@ sys.path.insert(0, backend_dir)
 services_pkg = types.ModuleType("services")
 services_pkg.__path__ = [os.path.join(backend_dir, "services")]
 sys.modules['services'] = services_pkg
+
+runtime_state_module = types.ModuleType("services.runtime_state_service")
+runtime_state_module.runtime_state_service = MagicMock()
+runtime_state_module.runtime_state_service.ping_async = AsyncMock(return_value=True)
+sys.modules["services.runtime_state_service"] = runtime_state_module
 
 # NorthboundContext stub - minimal dataclass for type compatibility
 @dataclass
@@ -229,7 +235,8 @@ sys.modules['apps.app_factory'] = app_factory_module
 
 # Provide a real create_app function that returns a FastAPI app
 def _create_app_impl(title, description="", version="1.0.0", root_path="/api",
-                     cors_origins=None, cors_methods=None, enable_monitoring=True):
+                     cors_origins=None, cors_methods=None, enable_monitoring=True,
+                     lifespan=None):
     """Minimal implementation of create_app for testing."""
     from fastapi import FastAPI
     from fastapi.middleware.cors import CORSMiddleware
@@ -238,7 +245,8 @@ def _create_app_impl(title, description="", version="1.0.0", root_path="/api",
         title=title,
         description=description,
         version=version,
-        root_path=root_path
+        root_path=root_path,
+        lifespan=lifespan,
     )
 
     # Add CORS middleware (simplified)
@@ -286,6 +294,7 @@ async def _async_iter(items):
 # ---------------------------------------------------------------------------
 # SAFE TO IMPORT THE TARGET MODULE
 # ---------------------------------------------------------------------------
+import apps.northbound_base_app as northbound_base_app_module  # noqa: E402
 from apps.northbound_base_app import A2AServerSettings, northbound_app as app  # noqa: E402
 from fastapi import HTTPException  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
@@ -321,6 +330,34 @@ class TestNorthboundBaseApp(unittest.TestCase):
         """The main northbound router should be included."""
         paths = app.openapi()["paths"]
         self.assertIn("/dummy", paths)
+
+    def test_lifespan_requires_redis_ping(self):
+        """Northbound startup must verify Redis before serving requests."""
+        ping = runtime_state_module.runtime_state_service.ping_async
+        ping.reset_mock()
+        ping.return_value = True
+
+        async def run_lifespan():
+            async with northbound_base_app_module.northbound_lifespan(app):
+                pass
+
+        asyncio.run(run_lifespan())
+
+        ping.assert_awaited_once_with()
+
+    def test_lifespan_propagates_redis_ping_failure(self):
+        """A failed Redis startup check must prevent Northbound startup."""
+        ping = runtime_state_module.runtime_state_service.ping_async
+        ping.reset_mock()
+        ping.side_effect = RuntimeError("redis down")
+
+        async def run_lifespan():
+            async with northbound_base_app_module.northbound_lifespan(app):
+                pass
+
+        with self.assertRaisesRegex(RuntimeError, "redis down"):
+            asyncio.run(run_lifespan())
+        ping.side_effect = None
 
     def test_a2a_router_inclusion(self):
         """A2A router should be registered under /nb/a2a."""

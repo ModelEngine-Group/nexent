@@ -22,5 +22,3 @@ if __name__ == "__main__":
     logger.info("Starting server initialization...")
     logger.info(f"APP version is: {APP_VERSION}")
     uvicorn.run(app, host="0.0.0.0", port=5014, log_level="info")
-
-

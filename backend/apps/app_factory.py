@@ -2,12 +2,14 @@
 FastAPI application factory with common configurations and exception handlers.
 """
 import logging
+from typing import Any, Optional
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from consts.exceptions import AppException, QuotaExceededError
+from services.health_service import install_health_contract
 
 
 logger = logging.getLogger(__name__)
@@ -21,6 +23,7 @@ def create_app(
     cors_origins: list = None,
     cors_methods: list = None,
     enable_monitoring: bool = True,
+    lifespan: Optional[Any] = None,
 ) -> FastAPI:
     """
     Create a FastAPI application with common configurations.
@@ -33,6 +36,7 @@ def create_app(
         cors_origins: List of allowed CORS origins (default: ["*"])
         cors_methods: List of allowed CORS methods (default: ["*"])
         enable_monitoring: Whether to enable monitoring
+        lifespan: Optional FastAPI lifespan context manager
 
     Returns:
         Configured FastAPI application
@@ -41,7 +45,8 @@ def create_app(
         title=title,
         description=description,
         version=version,
-        root_path=root_path
+        root_path=root_path,
+        lifespan=lifespan,
     )
 
     # Add CORS middleware
@@ -55,6 +60,9 @@ def create_app(
 
     # Register exception handlers
     register_exception_handlers(app)
+
+    # Process health endpoints never poll external dependencies.
+    install_health_contract(app)
 
     # Initialize monitoring if enabled
     if enable_monitoring:

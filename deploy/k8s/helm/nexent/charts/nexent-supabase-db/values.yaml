@@ -1,5 +1,9 @@
 replicaCount: 1
 
+service:
+  type: ClusterIP
+  nodePort: null
+
 image:
   repository: supabase/postgres
   tag: 15.8.1.060

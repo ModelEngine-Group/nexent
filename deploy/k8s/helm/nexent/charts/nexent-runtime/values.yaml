@@ -1,4 +1,4 @@
-replicaCount: 1
+replicaCount: 3
 
 strategy:
   type: RollingUpdate
@@ -24,3 +24,7 @@ resources:
 config:
   skipProxy: "true"
   umask: "0022"
+
+service:
+  type: ClusterIP
+  nodePort: null

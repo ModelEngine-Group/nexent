@@ -275,6 +275,28 @@ render_shared_storage_persistence_values() {
   } >> "$output_file"
 }
 
+validate_persistence_configuration() {
+  case "$PERSISTENCE_MODE" in
+    local)
+      echo "Error: local/hostPath persistence is incompatible with the default three-replica application deployment."
+      echo "Use --persistence-mode dynamic --storage-class <rwx-class>, or --persistence-mode existing --existing-claim-prefix <prefix>."
+      return 1
+      ;;
+    dynamic)
+      if [ -z "$STORAGE_CLASS_NAME" ]; then
+        echo "Error: --storage-class is required with --persistence-mode dynamic."
+        return 1
+      fi
+      ;;
+    existing)
+      if [ -z "$EXISTING_CLAIM_PREFIX" ]; then
+        echo "Error: --existing-claim-prefix is required with --persistence-mode existing."
+        return 1
+      fi
+      ;;
+  esac
+}
+
 render_persistence_values() {
   local output_file="$1"
   case "$PERSISTENCE_MODE" in
@@ -285,6 +307,7 @@ render_persistence_values() {
       exit 1
       ;;
   esac
+  validate_persistence_configuration || return 1
 
   {
     echo "# Generated persistence overrides"
@@ -420,10 +443,30 @@ render_k8s_runtime_config_values() {
     printf '      user: %s\n' "$(yaml_quote "$(env_or_default POSTGRES_USER "root")")"
     printf '      db: %s\n' "$(yaml_quote "$(env_or_default POSTGRES_DB "nexent")")"
     printf '      port: %s\n' "$(yaml_quote "$(env_or_default POSTGRES_PORT "5432")")"
+    printf '      poolSize: %s\n' "$(yaml_quote "$(env_or_default POSTGRES_POOL_SIZE "5")")"
+    printf '      maxOverflow: %s\n' "$(yaml_quote "$(env_or_default POSTGRES_MAX_OVERFLOW "5")")"
+    printf '      poolTimeoutSeconds: %s\n' "$(yaml_quote "$(env_or_default POSTGRES_POOL_TIMEOUT_SECONDS "30")")"
+    printf '      poolRecycleSeconds: %s\n' "$(yaml_quote "$(env_or_default POSTGRES_POOL_RECYCLE_SECONDS "1800")")"
     echo "    redis:"
     printf '      url: %s\n' "$(yaml_quote "$(env_or_default REDIS_URL "redis://nexent-redis:6379/0")")"
     printf '      backendUrl: %s\n' "$(yaml_quote "$(env_or_default REDIS_BACKEND_URL "redis://nexent-redis:6379/1")")"
     printf '      port: %s\n' "$(yaml_quote "$(env_or_default REDIS_PORT "6379")")"
+    echo "    runtimeState:"
+    printf '      redisUrl: %s\n' "$(yaml_quote "$(env_or_default RUNTIME_STATE_REDIS_URL "")")"
+    printf '      streamTtlSeconds: %s\n' "$(yaml_quote "$(env_or_default RUNTIME_STREAM_TTL_SECONDS "86400")")"
+    printf '      streamMaxLen: %s\n' "$(yaml_quote "$(env_or_default RUNTIME_STREAM_MAX_LEN "10000")")"
+    printf '      runTtlSeconds: %s\n' "$(yaml_quote "$(env_or_default RUNTIME_RUN_TTL_SECONDS "60")")"
+    printf '      heartbeatIntervalSeconds: %s\n' "$(yaml_quote "$(env_or_default RUNTIME_HEARTBEAT_INTERVAL_SECONDS "15")")"
+    printf '      cancelTtlSeconds: %s\n' "$(yaml_quote "$(env_or_default RUNTIME_CANCEL_TTL_SECONDS "60")")"
+    printf '      completedTtlSeconds: %s\n' "$(yaml_quote "$(env_or_default RUNTIME_COMPLETED_TTL_SECONDS "300")")"
+    printf '      cancelPollIntervalSeconds: %s\n' "$(yaml_quote "$(env_or_default RUNTIME_CANCEL_POLL_INTERVAL_SECONDS "1.0")")"
+    echo "    northbound:"
+    printf '      idempotencyTtlSeconds: %s\n' "$(yaml_quote "$(env_or_default NORTHBOUND_IDEMPOTENCY_TTL_SECONDS "600")")"
+    printf '      rateLimitEnabled: %s\n' "$(yaml_quote "$(env_or_default NORTHBOUND_RATE_LIMIT_ENABLED "true")")"
+    printf '      rateLimitPerMinute: %s\n' "$(yaml_quote "$(env_or_default NORTHBOUND_RATE_LIMIT_PER_MINUTE "120")")"
+    echo "    paths:"
+    printf '      projectConfigDir: %s\n' "$(yaml_quote "$(env_or_default PROJECT_CONFIG_DIR "/mnt/nexent/project-config")")"
+    printf '      uploadFolder: %s\n' "$(yaml_quote "$(env_or_default UPLOAD_FOLDER "/mnt/nexent/uploads")")"
     echo "    minio:"
     printf '      endpoint: %s\n' "$(yaml_quote "$(env_or_default MINIO_ENDPOINT "http://nexent-minio:9000")")"
     printf '      region: %s\n' "$(yaml_quote "$(env_or_default MINIO_REGION "cn-north-1")")"
@@ -1370,7 +1413,7 @@ print_usage() {
         echo "  --version VERSION          指定应用版本（未设置时自动从 const.py 检测）"
         echo "  --defaults                 复用保存配置或内置默认值并跳过交互界面"
         echo "  --deployment-version VER   兼容旧部署版本：speed 或 full"
-        echo "  --persistence-mode MODE    local、dynamic 或 existing"
+        echo "  --persistence-mode MODE    三副本部署必须为 dynamic 或 existing"
         echo "  --storage-class NAME       用于 PV/PVC 绑定的 StorageClass（别名：--storageclass、--storage-class-name、--sc）"
         echo "  --local-path PATH          本地 PV 基础路径"
         echo "  --local-node-name NAME     已废弃；local 模式使用 hostPath，不需要 nodeAffinity"
@@ -1398,7 +1441,7 @@ print_usage() {
     echo "  --version VERSION          Specify app version (auto-detected from const.py if not set)"
     echo "  --defaults                 Use saved config or built-in defaults and skip TUI"
     echo "  --deployment-version VER   Legacy deployment version: speed or full"
-    echo "  --persistence-mode MODE    local, dynamic, or existing"
+    echo "  --persistence-mode MODE    Three-replica deploys require dynamic or existing"
     echo "  --storage-class NAME       StorageClass for PV/PVC binding (aliases: --storageclass, --storage-class-name, --sc)"
     echo "  --local-path PATH          Base path for local PVs"
     echo "  --local-node-name NAME     Deprecated; local mode uses hostPath and does not require nodeAffinity"

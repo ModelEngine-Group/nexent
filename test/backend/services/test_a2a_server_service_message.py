@@ -393,7 +393,7 @@ class TestHandleMessageSend:
                     "agent_id": 7, "query": "hello", "history": [], "is_debug": True
                 }), \
                 patch.object(service.adapter, "build_a2a_message_response", return_value={"ok": True}) as build_response, \
-                patch("services.agent_service.run_agent_stream", new_callable=AsyncMock, return_value=stream_response):
+                patch("services.agent_service.run_agent_stream", new_callable=AsyncMock, return_value=stream_response) as run_stream:
             result = await service.handle_message_send("endpoint-1", {"message": {}})
 
         assert result == {"ok": True}
@@ -401,6 +401,9 @@ class TestHandleMessageSend:
         build_response.assert_called_once()
         assert build_response.call_args.kwargs["text"] is None
         assert [part["data"] for part in build_response.call_args.kwargs["parts"]] == events
+        runtime_scope_id = run_stream.await_args.kwargs["runtime_scope_id"]
+        assert runtime_scope_id.startswith("a2a:")
+        assert runtime_scope_id != "a2a:simple"
 
     @pytest.mark.asyncio
     async def test_handle_message_send_complex_request_builds_task_response(self):
@@ -424,13 +427,47 @@ class TestHandleMessageSend:
                     "agent_id": 7, "query": "", "history": [], "is_debug": True
                 }), \
                 patch.object(service.adapter, "build_a2a_task_response", return_value={"task": True}) as build_response, \
-                patch("services.agent_service.run_agent_stream", new_callable=AsyncMock, return_value=stream_response):
+                patch("services.agent_service.run_agent_stream", new_callable=AsyncMock, return_value=stream_response) as run_stream:
             result = await service.handle_message_send("endpoint-1", {"message": {}})
 
         assert result == {"task": True}
         store_response.assert_called_once_with("task-1", "AB", "endpoint-1")
         parts = build_response.call_args.kwargs["parts"]
         assert parts == [{"data": {"type": "final_answer", "content": "AB"}, "mediaType": "application/json"}]
+        assert run_stream.await_args.kwargs["runtime_scope_id"] == "a2a:task-1"
+
+    @pytest.mark.asyncio
+    async def test_handle_message_send_maps_runtime_interruption_to_failed_response(self):
+        """A runtime interruption must not be persisted as a completed A2A response."""
+        from backend.services.a2a_server_service import A2AServerService, RUN_INTERRUPTED_MESSAGE
+
+        service = A2AServerService()
+        server_agent = {"agent_id": 7, "tenant_id": "agent-tenant", "is_enabled": True}
+        interrupted_event = {
+            "type": "error",
+            "status": "run_interrupted",
+            "code": "run_interrupted",
+        }
+        stream_response = MagicMock(body_iterator=AsyncMockIterator([
+            f"data: {json.dumps(interrupted_event)}\n\n",
+        ]))
+
+        with patch.object(service, "_validate_endpoint", return_value=server_agent), \
+                patch.object(service.adapter, "parse_a2a_message", return_value={"message": {"parts": []}}), \
+                patch.object(service, "_resolve_task_id", return_value=("task-1", "ctx-1", True)), \
+                patch.object(service, "_store_user_message"), \
+                patch.object(service, "_store_agent_response") as store_response, \
+                patch.object(service, "_store_error_response") as store_error, \
+                patch.object(service.adapter, "build_agent_request", return_value={
+                    "agent_id": 7, "query": "", "history": [], "is_debug": True
+                }), \
+                patch.object(service.adapter, "build_a2a_message_response", return_value={"failed": True}), \
+                patch("services.agent_service.run_agent_stream", new_callable=AsyncMock, return_value=stream_response):
+            result = await service.handle_message_send("endpoint-1", {"message": {}})
+
+        assert result == {"failed": True}
+        store_response.assert_not_called()
+        store_error.assert_called_once_with("task-1", RUN_INTERRUPTED_MESSAGE, "endpoint-1")
 
 
 class TestHandleMessageStream:
@@ -461,7 +498,7 @@ class TestHandleMessageStream:
                     "agent_id": 7, "query": "", "history": [], "is_debug": True
                 }), \
                 patch.object(service.adapter, "build_a2a_task_event", side_effect=lambda **kwargs: kwargs), \
-                patch("services.agent_service.run_agent_stream", new_callable=AsyncMock, return_value=stream_response):
+                patch("services.agent_service.run_agent_stream", new_callable=AsyncMock, return_value=stream_response) as run_stream:
             result = [event async for event in service.handle_message_stream("endpoint-1", {"message": {}})]
 
         assert result[0]["event_type"] == "taskStatusUpdate"
@@ -471,6 +508,40 @@ class TestHandleMessageStream:
         assert result[-2]["data"]["lastChunk"] is True
         assert result[-1]["data"]["status"]["state"] == "TASK_STATE_COMPLETED"
         store_response.assert_called_once_with("task-1", "done", "endpoint-1")
+        assert run_stream.await_args.kwargs["runtime_scope_id"] == "a2a:task-1"
+
+    @pytest.mark.asyncio
+    async def test_handle_message_stream_ends_failed_on_runtime_interruption(self):
+        """A streamed runtime interruption must end the A2A task as failed."""
+        from backend.services.a2a_server_service import A2AServerService, RUN_INTERRUPTED_MESSAGE
+
+        service = A2AServerService()
+        server_agent = {"agent_id": 7, "tenant_id": "agent-tenant", "is_enabled": True}
+        interrupted_event = {
+            "type": "error",
+            "status": "run_interrupted",
+            "code": "run_interrupted",
+        }
+        stream_response = MagicMock(body_iterator=AsyncMockIterator([
+            f"data: {json.dumps(interrupted_event)}",
+        ]))
+
+        with patch.object(service, "_validate_endpoint", return_value=server_agent), \
+                patch.object(service.adapter, "parse_a2a_message", return_value={"message": {"parts": []}}), \
+                patch.object(service, "_resolve_task_id", return_value=("task-1", "ctx-1", True)), \
+                patch.object(service, "_store_user_message"), \
+                patch.object(service, "_store_agent_response") as store_response, \
+                patch.object(service, "_store_error_response") as store_error, \
+                patch.object(service.adapter, "build_agent_request", return_value={
+                    "agent_id": 7, "query": "", "history": [], "is_debug": True
+                }), \
+                patch.object(service.adapter, "build_a2a_task_event", side_effect=lambda **kwargs: kwargs), \
+                patch("services.agent_service.run_agent_stream", new_callable=AsyncMock, return_value=stream_response):
+            result = [event async for event in service.handle_message_stream("endpoint-1", {"message": {}})]
+
+        assert result[-1]["data"]["status"]["state"] == "TASK_STATE_FAILED"
+        store_response.assert_not_called()
+        store_error.assert_called_once_with("task-1", RUN_INTERRUPTED_MESSAGE, "endpoint-1")
 
 
 class TestHandleMessageSendValidation:

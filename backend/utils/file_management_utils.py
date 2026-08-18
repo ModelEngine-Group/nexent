@@ -7,10 +7,11 @@ import traceback
 from pathlib import Path
 from typing import List
 
-import aiofiles
 import httpx
 import requests
 from fastapi import UploadFile
+
+from nexent.utils.atomic_file import atomic_write_bytes
 
 from consts.const import DATA_PROCESS_SERVICE, LIBREOFFICE_PROFILE_DIR
 from consts.model import ProcessParams
@@ -30,9 +31,8 @@ def ensure_secure_libreoffice_profile_dir(profile_dir: str) -> Path:
 
 async def save_upload_file(file: UploadFile, upload_path: Path) -> bool:
     try:
-        async with aiofiles.open(upload_path, 'wb') as out_file:
-            content = await file.read()
-            await out_file.write(content)
+        content = await file.read()
+        await asyncio.to_thread(atomic_write_bytes, upload_path, content)
         return True
     except Exception as e:
         logger.error(f"Error saving file {file.filename}: {str(e)}")
@@ -412,4 +412,3 @@ async def convert_office_to_pdf(input_path: str, output_dir: str, timeout: int =
         raise FileNotFoundError(
             "LibreOffice is not installed or not available in PATH. "
         ) from e
-

@@ -17,6 +17,7 @@ import yaml
 
 from nexent.skills import SkillManager
 from nexent.skills.skill_loader import SkillLoader
+from nexent.utils.atomic_file import atomic_write_bytes, atomic_write_text
 from consts.const import (
     CAN_EDIT_ALL_USER_ROLES,
     CONTAINER_SKILLS_PATH,
@@ -983,8 +984,7 @@ def _write_skill_params_to_local_config_yaml(
     config_dir = os.path.dirname(path)
     os.makedirs(config_dir, exist_ok=True)
     text = params_dict_to_roundtrip_yaml_text(params)
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(text)
+    atomic_write_text(path, text)
     logger.info("Wrote skill params to %s", path)
 
 
@@ -1624,8 +1624,7 @@ class SkillService:
                 for file_path, local_path in validated_files:
                     file_data = zf.read(file_path)
                     os.makedirs(os.path.dirname(local_path), exist_ok=True)
-                    with open(local_path, "wb") as f:
-                        f.write(file_data)
+                    atomic_write_bytes(local_path, file_data)
                     extracted_count += 1
                     logger.debug("Extracted file '%s' -> '%s'", file_path, local_path)
 

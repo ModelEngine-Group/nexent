@@ -96,6 +96,8 @@ async def agent_run_api(
         )
     except ForbiddenError as e:
         raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(e)) from e
+    except AppException:
+        raise
     except Exception as e:
         logger.error(f"Agent run error: {str(e)}")
         # Only expose actual error in debug mode for better diagnosis
@@ -140,7 +142,7 @@ async def nl2agent_run_api(
 @agent_runtime_router.get("/stop/{conversation_id}")
 async def agent_stop_api(conversation_id: int, authorization: Optional[str] = Header(None)):
     """
-    stop agent run and preprocess tasks for specified conversation_id
+    Stop the current agent run for the specified conversation.
     """
     user_id, _ = get_current_user_id(authorization)
     return stop_agent_tasks(conversation_id, user_id)

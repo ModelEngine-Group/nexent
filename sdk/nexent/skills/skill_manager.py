@@ -13,8 +13,10 @@ import threading
 import zipfile
 from typing import Any, Dict, List, Optional, Union
 
+from ..utils.atomic_file import atomic_write_bytes, atomic_write_text
 from .constants import SKILL_FILE_NAME
 from .skill_loader import SkillLoader
+
 
 logger = logging.getLogger(__name__)
 
@@ -184,8 +186,7 @@ class SkillManager:
 
         # Write SKILL.md
         skill_md_path = os.path.join(local_dir, SKILL_FILE_NAME)
-        with open(skill_md_path, "w", encoding="utf-8") as f:
-            f.write(content)
+        atomic_write_text(skill_md_path, content)
 
         # Write additional files
         extra_files = skill_data.get("files") or []
@@ -215,8 +216,7 @@ class SkillManager:
         normalized_path = file_path.replace("/", os.sep).replace("\\", os.sep)
         full_path = os.path.normpath(os.path.join(local_dir, normalized_path))
         os.makedirs(os.path.dirname(full_path), exist_ok=True)
-        with open(full_path, "w", encoding="utf-8") as f:
-            f.write(content)
+        atomic_write_text(full_path, content)
         logger.debug(f"Wrote skill file '{skill_name}/{file_path}'")
 
     def upload_skill_from_file(
@@ -394,8 +394,7 @@ class SkillManager:
                 normalized_relative = relative_path.replace("/", os.sep).replace("\\", os.sep)
                 local_path = os.path.normpath(os.path.join(local_dir, normalized_relative))
                 os.makedirs(os.path.dirname(local_path), exist_ok=True)
-                with open(local_path, "wb") as f:
-                    f.write(file_data)
+                atomic_write_bytes(local_path, file_data)
 
         logger.info(f"Extracted skill '{name}' from ZIP with {len(file_list)} files")
         return self.load_skill(name, tenant_id=tenant_id)
@@ -529,8 +528,7 @@ class SkillManager:
                 normalized_relative = relative_path.replace("/", os.sep).replace("\\", os.sep)
                 local_path = os.path.normpath(os.path.join(local_dir, normalized_relative))
                 os.makedirs(os.path.dirname(local_path), exist_ok=True)
-                with open(local_path, "wb") as f:
-                    f.write(file_data)
+                atomic_write_bytes(local_path, file_data)
 
         logger.info(f"Updated skill '{skill_name}' from ZIP")
         return self.load_skill(skill_name, tenant_id=tenant_id)
