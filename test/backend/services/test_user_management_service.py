@@ -633,6 +633,89 @@ class TestSignupUserWithInvitation(unittest.IsolatedAsyncioTestCase):
 
         mock_admin_client.auth.admin.delete_user.assert_called_once_with("user-limit")
 
+    @patch('backend.services.user_management_service.get_supabase_admin_client')
+    @patch('backend.services.user_management_service.insert_user_tenant')
+    @patch('backend.services.user_management_service.get_invitation_by_code')
+    @patch('backend.services.user_management_service.check_invitation_available')
+    @patch('backend.services.user_management_service.get_supabase_client')
+    async def test_signup_preserves_limit_error_when_admin_client_unavailable(
+        self,
+        mock_get_client,
+        mock_check_available,
+        mock_get_invite_code,
+        mock_insert_tenant,
+        mock_get_admin_client,
+    ):
+        """A missing admin client must not hide the original relationship error."""
+        mock_client = MagicMock()
+        mock_client.auth.sign_up.return_value = MagicMock(user=MagicMock(id="user-limit"))
+        mock_get_client.return_value = mock_client
+        mock_check_available.return_value = True
+        mock_get_invite_code.return_value = {
+            "code_type": "DEV_INVITE",
+            "group_ids": [],
+            "tenant_id": "tenant-limit",
+        }
+        limit_error = TenantResourceLimitError(
+            "Tenant user limit reached: maximum 1 users per tenant",
+            "user",
+            1,
+        )
+        mock_insert_tenant.side_effect = limit_error
+        mock_get_admin_client.return_value = types.SimpleNamespace(auth=types.SimpleNamespace())
+
+        with self.assertRaises(TenantResourceLimitError) as exc_info:
+            await signup_user_with_invitation(
+                "limit-no-admin@example.com",
+                "Password123",
+                invite_code="DEV123",
+            )
+
+        self.assertIs(exc_info.exception, limit_error)
+
+    @patch('backend.services.user_management_service.get_supabase_admin_client')
+    @patch('backend.services.user_management_service.insert_user_tenant')
+    @patch('backend.services.user_management_service.get_invitation_by_code')
+    @patch('backend.services.user_management_service.check_invitation_available')
+    @patch('backend.services.user_management_service.get_supabase_client')
+    async def test_signup_preserves_limit_error_when_auth_cleanup_fails(
+        self,
+        mock_get_client,
+        mock_check_available,
+        mock_get_invite_code,
+        mock_insert_tenant,
+        mock_get_admin_client,
+    ):
+        """A cleanup failure must not replace the original relationship error."""
+        mock_client = MagicMock()
+        mock_client.auth.sign_up.return_value = MagicMock(user=MagicMock(id="user-limit"))
+        mock_get_client.return_value = mock_client
+        mock_check_available.return_value = True
+        mock_get_invite_code.return_value = {
+            "code_type": "DEV_INVITE",
+            "group_ids": [],
+            "tenant_id": "tenant-limit",
+        }
+        limit_error = TenantResourceLimitError(
+            "Tenant user limit reached: maximum 1 users per tenant",
+            "user",
+            1,
+        )
+        mock_insert_tenant.side_effect = limit_error
+        mock_admin_client = MagicMock()
+        mock_admin_client.auth.admin.delete_user.side_effect = RuntimeError("cleanup failed")
+        mock_get_admin_client.return_value = mock_admin_client
+
+        with self.assertRaises(TenantResourceLimitError) as exc_info:
+            await signup_user_with_invitation(
+                "limit-cleanup-fails@example.com",
+                "Password123",
+                invite_code="DEV123",
+            )
+
+        self.assertIs(exc_info.exception, limit_error)
+        mock_admin_client.auth.admin.delete_user.assert_called_once_with("user-limit")
+
     @patch('backend.services.user_management_service.add_user_to_groups')
     @patch('backend.services.user_management_service.parse_supabase_response')
     @patch('backend.services.user_management_service.insert_user_tenant')

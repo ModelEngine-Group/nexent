@@ -953,6 +953,31 @@ class TestCompleteOAuth(unittest.TestCase):
 
         self.assertEqual(response.status_code, HTTPStatus.CONFLICT)
 
+    def test_complete_returns_structured_error_for_tenant_limit(self):
+        complete_mock = AsyncMock(
+            side_effect=_TenantResourceLimitError(
+                "Tenant user limit reached: maximum 1 users per tenant",
+                resource="user",
+                limit=1,
+            )
+        )
+
+        with patch("apps.oauth_app.complete_pending_oauth_account", new=complete_mock):
+            response = client.post(
+                "/user/oauth/complete",
+                headers={"X-OAuth-Pending-Token": "pending.jwt"},
+                json={
+                    "email": "limit@example.com",
+                    "password": "secret1",
+                    "invite_code": "ABC123",
+                },
+            )
+
+        self.assertEqual(response.status_code, HTTPStatus.BAD_REQUEST)
+        detail = response.json()["detail"]
+        self.assertEqual(detail["code"], "TENANT_RESOURCE_LIMIT_REACHED")
+        self.assertEqual(detail["data"], {"resource": "user", "limit": 1})
+
 
 class TestGetAccounts(unittest.TestCase):
     def test_returns_500_on_service_error(self):
