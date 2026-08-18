@@ -78,6 +78,7 @@ import { SingleTurnTokenUsage } from "../ui/token-usage";
 import { ToolFallback } from "../ui/tool-fallback";
 import { ToolRecommendations } from "../ui/tool-recommendations";
 import { AgentDraftCard } from "../ui/agent-draft-card";
+import { RequirementClarificationCard } from "../ui/requirement-clarification-card";
 import {
   ToolGroupContent,
   ToolGroupRoot,
@@ -128,6 +129,7 @@ export interface ThreadProps {
   variant?: "default" | "embedded";
   skillFiles?: readonly SkillFileContent[];
   onSkillFileSelect?: (path: string) => void;
+  readOnly?: boolean;
 }
 
 /**
@@ -189,6 +191,7 @@ export const Thread: FC<ThreadProps> = ({
   variant = "default",
   skillFiles,
   onSkillFileSelect,
+  readOnly = false,
 }) => {
   const { t } = useTranslation();
   const models = useAgentModels(agent);
@@ -404,6 +407,7 @@ export const Thread: FC<ThreadProps> = ({
         variant={variant}
         skillFiles={skillFiles}
         onSkillFileSelect={onSkillFileSelect}
+        readOnly={readOnly}
         hasMessages={hasMessages}
         displayName={displayName}
         conversationTitle={conversationTitle}
@@ -514,6 +518,7 @@ interface ThreadViewProps {
   variant: "default" | "embedded";
   skillFiles?: readonly SkillFileContent[];
   onSkillFileSelect?: (path: string) => void;
+  readOnly: boolean;
 }
 
 const ThreadView: FC<ThreadViewProps> = ({
@@ -550,6 +555,7 @@ const ThreadView: FC<ThreadViewProps> = ({
   variant,
   skillFiles,
   onSkillFileSelect,
+  readOnly,
 }) => {
   const { t } = useTranslation();
 
@@ -662,6 +668,7 @@ const ThreadView: FC<ThreadViewProps> = ({
           {hasMessages ? (
             <ThreadMessages
               agent={agent}
+              readOnly={readOnly}
               enableSkillDirectives={Boolean(skillFiles)}
               onSkillFileSelect={onSkillFileSelect}
               shareMode={isShareMode}
@@ -695,6 +702,7 @@ const ThreadView: FC<ThreadViewProps> = ({
             onKnowledgeScopeChange={onKnowledgeScopeChange}
             compact={variant === "embedded"}
             skillFiles={skillFiles}
+            disabled={readOnly}
           />
         </ThreadPrimitive.ViewportFooter>
       </div>
@@ -1299,10 +1307,15 @@ const AssistantMessage: FC<{
             }
           }}
         </MessagePrimitive.GroupedParts>
-        {nl2a?.content.subtype === "local_mcp_recommendation" ? (
-          <ToolRecommendations payload={nl2a.content} />
+        {nl2a?.content.subtype === "requirement_clarification" ? (
+          <RequirementClarificationCard
+            payload={nl2a.content}
+            disabled={readOnly}
+          />
+        ) : nl2a?.content.subtype === "local_mcp_recommendation" ? (
+          <ToolRecommendations payload={nl2a.content} disabled={readOnly} />
         ) : nl2a?.content.subtype === "agent_draft" ? (
-          <AgentDraftCard draft={nl2a.content} />
+          <AgentDraftCard draft={nl2a.content} disabled={readOnly} />
         ) : null}
         {skillFileAttachments?.length ? (
           <AssistantMessageAttachments attachments={skillFileAttachments} />

@@ -7,6 +7,7 @@ from consts.const import LANGUAGE
 from tool_collection.mcp.nl2agent_mcp_tools import (
     MAX_TOOL_RECOMMENDATIONS,
     NL2A_WRAPPER_NAME,
+    SAVE_AGENT_DRAFT_FIELDS_NAME,
     SEARCH_INSTALLED_MCP_TOOLS_NAME,
     create_nl2agent_mcp_tool_configs,
 )
@@ -19,6 +20,7 @@ def build_nl2agent_system_prompt(
     language: str,
     tool_name: str = SEARCH_INSTALLED_MCP_TOOLS_NAME,
     wrapper_name: str = NL2A_WRAPPER_NAME,
+    save_tool_name: str = SAVE_AGENT_DRAFT_FIELDS_NAME,
     max_results: int = MAX_TOOL_RECOMMENDATIONS,
 ) -> str:
     """Load and render the localized NL2Agent system prompt."""
@@ -30,6 +32,7 @@ def build_nl2agent_system_prompt(
     return Template(template, undefined=StrictUndefined).render(
         tool_name=tool_name,
         wrapper_name=wrapper_name,
+        save_tool_name=save_tool_name,
         max_results=max_results,
     )
 
@@ -42,7 +45,7 @@ def create_nl2agent_agent_config(language: str) -> AgentConfig:
         description="Ephemeral natural-language agent builder",
         prompt_templates=None,
         tools=create_nl2agent_mcp_tool_configs(),
-        max_steps=5,
+        max_steps=8,
         model_name="main_model",
         provide_run_summary=False,
         instructions=build_nl2agent_system_prompt(language),

@@ -308,6 +308,44 @@ def update_agent_icon(agent_id: int, tenant_id: str, icon_url: str, user_id: str
             raise ValueError("ag_tenant_agent_t Agent not found")
 
 
+def query_agent_records_for_nl2agent(agent_id: int, tenant_id: str) -> list[dict]:
+    """Return all tenant-owned records for NL2Agent draft validation.
+
+    Deleted rows are intentionally included so the service can return a stable
+    deleted-draft error without weakening the tenant boundary.
+    """
+    with get_db_session() as session:
+        records = session.query(AgentInfo).filter(
+            AgentInfo.agent_id == agent_id,
+            AgentInfo.tenant_id == tenant_id,
+        ).order_by(AgentInfo.version_no.asc()).all()
+        return [as_dict(record) for record in records]
+
+
+def update_agent_draft_fields(
+    agent_id: int,
+    tenant_id: str,
+    fields: dict,
+) -> int:
+    """Update only explicit AgentInfo draft fields within one tenant."""
+    if not fields:
+        return 0
+
+    values = filter_property(fields, AgentInfo)
+    with get_db_session() as session:
+        result = session.execute(
+            update(AgentInfo)
+            .where(
+                AgentInfo.agent_id == agent_id,
+                AgentInfo.tenant_id == tenant_id,
+                AgentInfo.version_no == 0,
+                AgentInfo.delete_flag != "Y",
+            )
+            .values(**values)
+        )
+        return result.rowcount
+
+
 def delete_agent_by_id(agent_id, tenant_id: str, user_id: str):
     """
     Delete an agent in the database (all versions).

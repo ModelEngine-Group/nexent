@@ -13,34 +13,31 @@ import type { Agent } from "@/types/agentConfig";
 import { compositeAttachmentAdapter } from "../adapter/attachment-adapter";
 import { useConfig } from "@/hooks/useConfig";
 import { ServerDictationAdapter } from "../adapter/server-dictation-adapter";
-import { remoteChatModelAdapter } from "../adapter/remote-chat-model-adapter";
+import {
+  remoteChatModelAdapter,
+  type Nl2AgentStateEvent,
+} from "../adapter/remote-chat-model-adapter";
 import { Chat } from "./chat";
-
-const nl2AgentChatModelAdapter: ChatModelAdapter = {
-  run(options) {
-    return remoteChatModelAdapter.run({
-      ...options,
-      runConfig: {
-        custom: {
-          ...options.runConfig?.custom,
-          runtimeMode: "nl2agent",
-        },
-      },
-    });
-  },
-};
 
 const NL2AGENT_DISPLAY_BASE: Agent = {
   id: "__nl2agent_runtime__",
   name: "NL2Agent",
   description: "",
   model: "main_model",
-  max_step: 5,
+  max_step: 8,
   provide_run_summary: false,
   tools: [],
 };
 
-export const Nl2AgentChatPanel: FC = () => {
+export interface Nl2AgentChatPanelProps {
+  disabled?: boolean;
+  onStateEvent?: (event: Nl2AgentStateEvent) => void;
+}
+
+export const Nl2AgentChatPanel: FC<Nl2AgentChatPanelProps> = ({
+  disabled = false,
+  onStateEvent,
+}) => {
   const { t } = useTranslation("common");
   const { modelConfig } = useConfig();
   const adapters = useMemo(
@@ -50,7 +47,24 @@ export const Nl2AgentChatPanel: FC = () => {
     }),
     [modelConfig?.stt]
   );
-  const runtime = useLocalRuntime(nl2AgentChatModelAdapter, { adapters });
+  const chatModelAdapter = useMemo<ChatModelAdapter>(
+    () => ({
+      run(options) {
+        return remoteChatModelAdapter.run({
+          ...options,
+          runConfig: {
+            custom: {
+              ...options.runConfig?.custom,
+              runtimeMode: "nl2agent",
+              onNl2AgentState: onStateEvent,
+            },
+          },
+        });
+      },
+    }),
+    [onStateEvent]
+  );
+  const runtime = useLocalRuntime(chatModelAdapter, { adapters });
 
   const assistantTitle = t("agentConfig.button.generationAssistant");
   const nl2AgentDisplay: Agent = {
@@ -69,6 +83,8 @@ export const Nl2AgentChatPanel: FC = () => {
             isLoadingAgents={false}
             showModelSelector={false}
             showConversationTitle={false}
+            readOnly={disabled}
+            variant="embedded"
           />
         </div>
       </TooltipProvider>

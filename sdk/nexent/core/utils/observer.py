@@ -10,6 +10,10 @@ from typing import Any
 
 
 _NL2A_WRAPPER_PATTERN = re.compile(r"<nl2a>\s*(.*?)\s*</nl2a>", re.DOTALL)
+_NL2A_STATE_PATTERN = re.compile(
+    r"<nl2a_state>\s*(.*?)\s*</nl2a_state>",
+    re.DOTALL,
+)
 
 
 class ProcessType(Enum):
@@ -34,6 +38,7 @@ class ProcessType(Enum):
     CARD = "card"  # content that needs to be rendered by the front end using cards
     TOOL = "tool"  # tool name
     NL2A = "nl2a"  # structured NL2Agent runtime output
+    NL2A_STATE = "nl2a_state"  # trusted NL2Agent workflow identity update
     SKILL_ARTIFACT = "skill_artifact"  # structured file output from a skill script
     MEMORY_SEARCH = "memory_search"  # memory search status
     MAX_STEPS_REACHED = "max_steps_reached"  # agent reached maximum steps limit
@@ -120,6 +125,8 @@ class MessageObserver:
         # Control output language
         self.lang = lang
         self.enable_nl2a_wrapper = enable_nl2a_wrapper
+        self._nl2a_state_events: set[tuple[str, int]] = set()
+        self._nl2a_state_lock = threading.Lock()
 
         # Thread-local state for stream parsing. Must be created before
         # ``_init_message_transformers()`` because that call triggers setters
@@ -217,6 +224,7 @@ class MessageObserver:
             ProcessType.CARD: default_transformer,
             ProcessType.TOOL: default_transformer,
             ProcessType.NL2A: default_transformer,
+            ProcessType.NL2A_STATE: default_transformer,
             ProcessType.SKILL_ARTIFACT: default_transformer,
             ProcessType.MEMORY_SEARCH: default_transformer,
             ProcessType.VERIFICATION: default_transformer,
@@ -440,6 +448,33 @@ class MessageObserver:
             return None, visible_content
         return json.dumps(payload, ensure_ascii=False), visible_content
 
+    @staticmethod
+    def _extract_nl2a_state(content):
+        """Extract one strict state event and always remove its private marker."""
+        if not isinstance(content, str):
+            return None, content
+
+        match = _NL2A_STATE_PATTERN.search(content)
+        if match is None:
+            return None, content
+
+        visible_content = (content[:match.start()] + content[match.end():]).strip()
+        try:
+            payload = json.loads(match.group(1))
+        except (json.JSONDecodeError, TypeError):
+            return None, visible_content
+
+        if (
+            not isinstance(payload, dict)
+            or set(payload) != {"event", "agent_id"}
+            or payload.get("event") != "agent_draft_created"
+            or not isinstance(payload.get("agent_id"), int)
+            or isinstance(payload.get("agent_id"), bool)
+            or payload["agent_id"] <= 0
+        ):
+            return None, visible_content
+        return json.dumps(payload, ensure_ascii=False), visible_content
+
     def add_message(self, agent_name, process_type, content, **kwargs):
         """add message to the queue"""
         transformer = self.transformers.get(
@@ -447,11 +482,15 @@ class MessageObserver:
         formatted_content = transformer.transform(
             content=content, lang=self.lang, agent_name=agent_name, **kwargs)
         nl2a_content = None
+        nl2a_state_content = None
 
         if (
             self.enable_nl2a_wrapper
             and process_type == ProcessType.EXECUTION_LOGS
         ):
+            nl2a_state_content, formatted_content = self._extract_nl2a_state(
+                formatted_content
+            )
             nl2a_content, formatted_content = self._extract_nl2a_wrapper(
                 formatted_content
             )
@@ -462,6 +501,25 @@ class MessageObserver:
         explicit_agent_id = "agent_id" in kwargs
         active = self._active_subagent()
         active_invocation_id = active[0] if active is not None else None
+
+        if nl2a_state_content is not None:
+            state_payload = json.loads(nl2a_state_content)
+            state_key = (state_payload["event"], state_payload["agent_id"])
+            with self._nl2a_state_lock:
+                should_emit_state = state_key not in self._nl2a_state_events
+                if should_emit_state:
+                    self._nl2a_state_events.add(state_key)
+            if should_emit_state:
+                self._append_message(
+                    Message(
+                        ProcessType.NL2A_STATE,
+                        nl2a_state_content,
+                        agent_id=active[1] if active is not None else None,
+                        agent_name=agent_name,
+                        depth=self._current_depth.get(),
+                        invocation_id=active_invocation_id,
+                    ).to_json()
+                )
 
         # NL2A side-channel units are emitted alongside execution logs. Preserve
         # the active invocation identity so parallel sub-agent output remains

@@ -2,7 +2,17 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Row, Col, Flex, Badge, Divider, Button, Drawer, Tooltip, Tag } from "antd";
+import {
+  Row,
+  Col,
+  Flex,
+  Badge,
+  Divider,
+  Button,
+  Drawer,
+  Tooltip,
+  Tag,
+} from "antd";
 import { Bug, Save, Info, GitBranch, History, Rocket } from "lucide-react";
 
 import { AGENT_SETUP_LAYOUT_DEFAULT } from "@/const/agentConfig";
@@ -15,6 +25,7 @@ import { useAgentVersionList } from "@/hooks/agent/useAgentVersionList";
 import { useAgentVersionDetail } from "@/hooks/agent/useAgentVersionDetail";
 import { useAgentInfo } from "@/hooks/agent/useAgentInfo";
 import AgentVersionPubulishModal from "../versions/AgentVersionPubulishModal";
+import { useAgentReadOnly } from "@/hooks/agent/useAgentReadOnly";
 
 export default function AgentInfoComp() {
   const { t } = useTranslation("common");
@@ -23,16 +34,23 @@ export default function AgentInfoComp() {
   const currentAgentId = useAgentConfigStore((state) => state.currentAgentId);
   const isGenerating = useAgentConfigStore((state) => state.isGenerating);
 
-  const isPanelActive = (currentAgentId != null && currentAgentId != undefined) || isCreatingMode;
-  const { agentVersionList, total, invalidate: invalidateAgentVersionList } = useAgentVersionList(currentAgentId);
+  const isPanelActive =
+    (currentAgentId != null && currentAgentId != undefined) || isCreatingMode;
+  const {
+    agentVersionList,
+    total,
+    invalidate: invalidateAgentVersionList,
+  } = useAgentVersionList(currentAgentId);
 
-  const { agentInfo, invalidate: invalidateAgentInfo } = useAgentInfo(currentAgentId);
+  const { agentInfo, invalidate: invalidateAgentInfo } =
+    useAgentInfo(currentAgentId);
 
   const { agentVersionDetail } = useAgentVersionDetail(
-    currentAgentId, agentInfo?.current_version_no
+    currentAgentId,
+    agentInfo?.current_version_no
   );
-    
-  const isReadOnly = useAgentConfigStore((state) => state.isReadOnly());
+
+  const isReadOnly = useAgentReadOnly();
 
   // Save guard hook
   const saveGuard = useSaveGuard();
@@ -83,7 +101,7 @@ export default function AgentInfoComp() {
           <Row className="flex-1 min-h-0 h-full">
             <Col xs={24} className="h-full">
               <Flex vertical className="h-full min-h-0 w-full min-w-0">
-                <AgentGenerateDetail/>
+                <AgentGenerateDetail />
               </Flex>
             </Col>
           </Row>
@@ -102,12 +120,14 @@ export default function AgentInfoComp() {
                     })
                   }
                   size="middle"
-                  disabled={isGenerating}
+                  disabled={isGenerating || isReadOnly}
                 >
                   {t("systemPrompt.button.debug")}
                 </Button>
 
-                <Tooltip title={isReadOnly ? t("agent.noEditPermission") : undefined}>
+                <Tooltip
+                  title={isReadOnly ? t("agent.noEditPermission") : undefined}
+                >
                   <span>
                     <Button
                       icon={<Save size={16} />}
@@ -123,7 +143,9 @@ export default function AgentInfoComp() {
                   </span>
                 </Tooltip>
 
-                <Tooltip title={isReadOnly ? t("agent.noEditPermission") : undefined}>
+                <Tooltip
+                  title={isReadOnly ? t("agent.noEditPermission") : undefined}
+                >
                   <span>
                     <Button
                       type="primary"

@@ -69,7 +69,8 @@ const ToolRecommendationsError: FC = () => {
 
 export const ToolRecommendations: FC<{
   payload: Nl2aLocalMcpRecommendationPayload;
-}> = ({ payload }) => {
+  disabled?: boolean;
+}> = ({ payload, disabled = false }) => {
   const { t } = useTranslation("common");
   const aui = useAui();
   const updateTools = useAgentConfigStore((state) => state.updateTools);
@@ -85,7 +86,7 @@ export const ToolRecommendations: FC<{
   const confirmationStarted = useRef(false);
 
   const toggleTool = (toolId: number) => {
-    if (isConfirmed) return;
+    if (isConfirmed || disabled) return;
     setSelectedToolIds((current) => {
       const next = new Set(current);
       if (next.has(toolId)) {
@@ -98,7 +99,7 @@ export const ToolRecommendations: FC<{
   };
 
   const confirmSelection = () => {
-    if (!isSuccess || confirmationStarted.current) return;
+    if (!isSuccess || disabled || confirmationStarted.current) return;
     confirmationStarted.current = true;
     setIsConfirmed(true);
 
@@ -191,7 +192,7 @@ export const ToolRecommendations: FC<{
                       id={checkboxId}
                       type="checkbox"
                       checked={selectedToolIds.has(tool.tool_id)}
-                      disabled={isConfirmed}
+                      disabled={isConfirmed || disabled}
                       onChange={() => toggleTool(tool.tool_id)}
                       className="mt-2 size-4 shrink-0 accent-primary disabled:cursor-not-allowed"
                       aria-label={t("nl2agent.toolRecommendations.selectTool", {
@@ -267,7 +268,7 @@ export const ToolRecommendations: FC<{
           <Button
             type="button"
             size="sm"
-            disabled={isConfirmed}
+            disabled={isConfirmed || disabled}
             onClick={confirmSelection}
           >
             <CheckCircle2Icon />

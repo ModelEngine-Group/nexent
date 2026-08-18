@@ -36,6 +36,7 @@ export interface ChatProps {
   variant?: "default" | "embedded";
   skillFiles?: readonly SkillFileContent[];
   onSkillFileSelect?: (path: string) => void;
+  readOnly?: boolean;
 }
 
 const AgentsLoadingState: FC = () => {
@@ -72,6 +73,7 @@ export const Chat: FC<ChatProps> = ({
   variant = "default",
   skillFiles,
   onSkillFileSelect,
+  readOnly = false,
 }) => {
   const handleSelectAgent = useCallback(
     (agent: Agent) => {
@@ -109,6 +111,7 @@ export const Chat: FC<ChatProps> = ({
       variant={variant}
       skillFiles={skillFiles}
       onSkillFileSelect={onSkillFileSelect}
+      readOnly={readOnly}
     />
   );
 };

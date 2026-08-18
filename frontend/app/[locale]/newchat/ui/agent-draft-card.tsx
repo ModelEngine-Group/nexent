@@ -8,9 +8,10 @@ import { Button } from "@/components/ui/button";
 import { useAgentStore } from "@/stores/agentStore";
 import type { Nl2aAgentDraftPayload } from "../adapter/remote-chat-model-adapter";
 
-export const AgentDraftCard: FC<{ draft: Nl2aAgentDraftPayload }> = ({
-  draft,
-}) => {
+export const AgentDraftCard: FC<{
+  draft: Nl2aAgentDraftPayload;
+  disabled?: boolean;
+}> = ({ draft, disabled = false }) => {
   const { t } = useTranslation("common");
   const updateAgentConfig = useAgentStore(
     (state) => state.updateAgentConfig
@@ -18,7 +19,7 @@ export const AgentDraftCard: FC<{ draft: Nl2aAgentDraftPayload }> = ({
   const [isApplied, setIsApplied] = useState(false);
 
   const applyDraft = () => {
-    if (isApplied) return;
+    if (isApplied || disabled) return;
 
     updateAgentConfig({
       name: draft.name,
@@ -65,7 +66,7 @@ export const AgentDraftCard: FC<{ draft: Nl2aAgentDraftPayload }> = ({
         <Button
           type="button"
           size="sm"
-          disabled={isApplied}
+          disabled={isApplied || disabled}
           onClick={applyDraft}
         >
           <CheckCircle2Icon />

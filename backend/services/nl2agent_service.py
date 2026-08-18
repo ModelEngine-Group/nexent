@@ -24,10 +24,30 @@ from agents.create_agent_info import (
     join_minio_file_description_to_query,
 )
 from agents.nl2agent_agent import create_nl2agent_agent_config
-from consts.const import LOCAL_MCP_SERVER, MODEL_CONFIG_MAPPING
-from consts.model import HistoryItem, NL2AgentRunRequest, ToolSourceEnum
+from consts.const import (
+    CAN_EDIT_ALL_USER_ROLES,
+    LOCAL_MCP_SERVER,
+    MODEL_CONFIG_MAPPING,
+    PERMISSION_EDIT,
+)
+from consts.model import HistoryItem, ModelConnectStatusEnum, NL2AgentRunRequest, ToolSourceEnum
+from database.agent_db import (
+    create_agent,
+    query_agent_records_for_nl2agent,
+    query_all_agent_info_by_tenant_id,
+    update_agent_draft_fields,
+)
 from database.tool_db import query_all_tools
-from tool_collection.mcp.nl2agent_mcp_tools import InstalledMcpToolRecommendation
+from database.user_tenant_db import get_user_role_by_tenant
+from services.asset_owner_visibility import resolve_agent_list_permission
+from services.prompt_template_service import (
+    SYSTEM_PROMPT_TEMPLATE_ID,
+    SYSTEM_PROMPT_TEMPLATE_NAME,
+)
+from tool_collection.mcp.nl2agent_mcp_tools import (
+    AgentDraftFields,
+    InstalledMcpToolRecommendation,
+)
 from utils.config_utils import tenant_config_manager
 from utils.context_utils import build_authorized_context_input
 
@@ -35,6 +55,181 @@ logger = logging.getLogger(__name__)
 
 MINIMUM_RECOMMENDATION_SCORE = 0.45
 MAX_RECOMMENDATIONS = 5
+AGENT_DRAFT_FIELD_ORDER = (
+    "name",
+    "display_name",
+    "description",
+    "business_description",
+    "duty_prompt",
+    "constraint_prompt",
+    "few_shots_prompt",
+    "greeting_message",
+    "example_questions",
+)
+AGENT_DRAFT_CREATE_REQUIRED_FIELDS = (
+    "name",
+    "display_name",
+    "description",
+    "business_description",
+)
+
+
+class Nl2AgentDraftSaveError(Exception):
+    """Stable service error consumed by the MCP boundary."""
+
+    def __init__(self, code: str, retryable: bool = False):
+        super().__init__(code)
+        self.code = code
+        self.retryable = retryable
+
+
+def _ordered_updated_fields(fields: AgentDraftFields) -> list[str]:
+    return [name for name in AGENT_DRAFT_FIELD_ORDER if name in fields.model_fields_set]
+
+
+def _resolve_default_draft_model(tenant_id: str) -> int:
+    default_model = tenant_config_manager.get_model_config(
+        key=MODEL_CONFIG_MAPPING["llm"],
+        tenant_id=tenant_id,
+    )
+    model_id = default_model.get("model_id") if isinstance(default_model, dict) else None
+    model_type = default_model.get("model_type") if isinstance(default_model, dict) else None
+    connect_status = (
+        ModelConnectStatusEnum.get_value(default_model.get("connect_status"))
+        if isinstance(default_model, dict)
+        else ModelConnectStatusEnum.UNAVAILABLE.value
+    )
+    if (
+        not isinstance(model_id, int)
+        or model_id <= 0
+        or model_type not in (None, "llm")
+        or connect_status != ModelConnectStatusEnum.AVAILABLE.value
+    ):
+        raise Nl2AgentDraftSaveError("default_model_missing")
+    return model_id
+
+
+def _create_agent_draft_from_fields(
+    fields: AgentDraftFields,
+    tenant_id: str,
+    user_id: str,
+) -> dict[str, Any]:
+    patch = fields.model_dump(mode="python", exclude_unset=True)
+    missing = [
+        field_name
+        for field_name in AGENT_DRAFT_CREATE_REQUIRED_FIELDS
+        if not isinstance(patch.get(field_name), str) or not patch[field_name].strip()
+    ]
+    if missing:
+        raise Nl2AgentDraftSaveError("basic_fields_required")
+
+    default_model_id = _resolve_default_draft_model(tenant_id)
+
+    # Reuse the ordinary Agent path's deterministic suffix helpers without
+    # invoking its optional LLM-based regeneration flow.
+    from services.agent_service import (
+        _check_agent_display_name_duplicate,
+        _check_agent_name_duplicate,
+        _generate_unique_agent_name_with_suffix,
+        _generate_unique_display_name_with_suffix,
+        _get_user_group_ids,
+    )
+
+    agents_cache = query_all_agent_info_by_tenant_id(tenant_id=tenant_id)
+    if _check_agent_name_duplicate(
+        patch["name"], tenant_id=tenant_id, agents_cache=agents_cache
+    ):
+        patch["name"] = _generate_unique_agent_name_with_suffix(
+            patch["name"], tenant_id=tenant_id, agents_cache=agents_cache
+        )
+    if _check_agent_display_name_duplicate(
+        patch["display_name"], tenant_id=tenant_id, agents_cache=agents_cache
+    ):
+        patch["display_name"] = _generate_unique_display_name_with_suffix(
+            patch["display_name"], tenant_id=tenant_id, agents_cache=agents_cache
+        )
+
+    patch.update(
+        model_ids=[default_model_id],
+        prompt_template_id=SYSTEM_PROMPT_TEMPLATE_ID,
+        prompt_template_name=SYSTEM_PROMPT_TEMPLATE_NAME,
+        group_ids=_get_user_group_ids(user_id, tenant_id),
+        max_steps=15,
+        is_main_agent=True,
+        provide_run_summary=False,
+        enabled=True,
+    )
+    try:
+        created = create_agent(agent_info=patch, tenant_id=tenant_id, user_id=user_id)
+    except Exception as exc:
+        logger.exception("Failed to create NL2Agent AgentInfo draft")
+        raise Nl2AgentDraftSaveError("draft_save_failed", retryable=True) from exc
+
+    return {
+        "status": "success",
+        "agent_id": created["agent_id"],
+        "created": True,
+        "updated_fields": _ordered_updated_fields(fields),
+    }
+
+
+def _update_agent_draft_from_fields(
+    agent_id: int,
+    fields: AgentDraftFields,
+    tenant_id: str,
+    user_id: str,
+) -> dict[str, Any]:
+    records = query_agent_records_for_nl2agent(agent_id=agent_id, tenant_id=tenant_id)
+    if not records:
+        raise Nl2AgentDraftSaveError("agent_not_found")
+
+    draft = next((record for record in records if record.get("version_no") == 0), None)
+    if draft is None:
+        raise Nl2AgentDraftSaveError("agent_not_draft")
+    if draft.get("delete_flag") == "Y":
+        raise Nl2AgentDraftSaveError("agent_deleted")
+
+    user_role = get_user_role_by_tenant(user_id=user_id, tenant_id=tenant_id)
+    permission = resolve_agent_list_permission(
+        user_role=user_role,
+        agent=draft,
+        user_id=user_id,
+        can_edit_all=user_role.upper() in CAN_EDIT_ALL_USER_ROLES,
+    )
+    if permission != PERMISSION_EDIT:
+        raise Nl2AgentDraftSaveError("agent_read_only")
+
+    patch = fields.model_dump(mode="python", exclude_unset=True)
+    try:
+        rowcount = update_agent_draft_fields(
+            agent_id=agent_id,
+            tenant_id=tenant_id,
+            fields=patch,
+        )
+    except Exception as exc:
+        logger.exception("Failed to update NL2Agent AgentInfo draft")
+        raise Nl2AgentDraftSaveError("draft_save_failed", retryable=True) from exc
+    if rowcount != 1:
+        raise Nl2AgentDraftSaveError("draft_save_failed", retryable=True)
+
+    return {
+        "status": "success",
+        "agent_id": agent_id,
+        "created": False,
+        "updated_fields": _ordered_updated_fields(fields),
+    }
+
+
+def save_agent_draft_fields_impl(
+    agent_id: int | None,
+    fields: AgentDraftFields,
+    tenant_id: str,
+    user_id: str,
+) -> dict[str, Any]:
+    """Create or partially update one ordinary tenant-owned AgentInfo draft."""
+    if agent_id is None:
+        return _create_agent_draft_from_fields(fields, tenant_id, user_id)
+    return _update_agent_draft_from_fields(agent_id, fields, tenant_id, user_id)
 
 
 def _normalize_search_text(value: Any) -> str:

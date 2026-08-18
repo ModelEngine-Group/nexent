@@ -10,13 +10,17 @@ from typing import Annotated, Any, Literal
 
 from fastmcp.server.dependencies import get_http_request
 from nexent.core.agents.agent_model import ToolConfig
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from utils.auth_utils import get_current_user_id
 
 logger = logging.getLogger(__name__)
 
 SEARCH_INSTALLED_MCP_TOOLS_NAME = "search_installed_mcp_tools"
+SEARCH_INSTALLED_RESOURCES_NAME = "search_installed_resources"
+SEARCH_UNINSTALLED_RESOURCES_NAME = "search_uninstalled_resources"
+RECOMMEND_RESOURCES_NAME = "recommend_resources"
+SAVE_AGENT_DRAFT_FIELDS_NAME = "save_agent_draft_fields"
 NL2A_WRAPPER_NAME = "nl2a_wrapper"
 SEARCH_INSTALLED_MCP_TOOLS_DESCRIPTION = (
     "Search the current tenant's installed and available MCP tools using keywords. "
@@ -26,14 +30,25 @@ SEARCH_INSTALLED_MCP_TOOLS_DESCRIPTION = (
 )
 NL2A_WRAPPER_DESCRIPTION = (
     "Build one NL2Agent output from subtype-specific parameters. Always pass "
-    "`subtype`. For `local_mcp_recommendation`, also pass `search_result` and "
+    "`subtype`. For `requirement_clarification`, pass structured `questions`. "
+    "For `local_mcp_recommendation`, also pass `search_result` and "
     "`selected_tool_ids`. For `agent_draft`, pass the agent draft fields. Call "
     "the tool as `result = nl2a_wrapper(...)`, then use `print(result)`."
+)
+SAVE_AGENT_DRAFT_FIELDS_DESCRIPTION = (
+    "Create or partially update the current tenant's ordinary agent draft. "
+    "Pass only whitelisted fields, never null. Creation requires name, "
+    "display_name, description, and business_description. Call the tool as "
+    "`result = save_agent_draft_fields(...)`, then use `print(result)` exactly once."
 )
 NL2AGENT_MCP_TOOL_META = {"nexent_internal": True}
 MAX_TOOL_RECOMMENDATIONS = 5
 FEW_SHOT_EXAMPLE_COUNT = 2
-NL2A_SUBTYPES = Literal["local_mcp_recommendation", "agent_draft"]
+NL2A_SUBTYPES = Literal[
+    "requirement_clarification",
+    "local_mcp_recommendation",
+    "agent_draft",
+]
 
 LOCAL_MCP_RECOMMENDATION_JSON_TEMPLATE: dict[str, Any] = {
     "subtype": "local_mcp_recommendation",
@@ -53,6 +68,200 @@ AGENT_DRAFT_JSON_TEMPLATE: dict[str, Any] = {
     "greeting_message": "",
     "example_questions": [],
 }
+
+
+class ResourceRequirement(BaseModel):
+    """One capability requirement shared by the phase-two search tools."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    requirement_id: str = Field(min_length=1, max_length=100)
+    query: str = Field(min_length=1, max_length=500)
+    resource_name_hint: str | None = Field(default=None, max_length=200)
+    search_terms: list[str] = Field(default_factory=list, max_length=10)
+
+
+class ResourceCandidate(BaseModel):
+    """Frozen common output boundary for resource discovery."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    candidate_ref: str = Field(min_length=1)
+    resource_type: Literal["tool", "skill", "mcp_server"]
+    source: str = Field(min_length=1)
+    name: str = Field(min_length=1)
+    description: str = ""
+    requirement_ids: list[str] = Field(min_length=1)
+    score: float = Field(ge=0, le=1)
+
+
+class SearchInstalledResourcesInput(BaseModel):
+    """Frozen input for installed Tool/Skill discovery (implemented in PR2)."""
+
+    model_config = ConfigDict(extra="forbid")
+    requirements: list[ResourceRequirement] = Field(min_length=1, max_length=8)
+
+
+class SearchUninstalledResourcesInput(BaseModel):
+    """Frozen input for internal or official-registry discovery (PR2)."""
+
+    model_config = ConfigDict(extra="forbid")
+    requirements: list[ResourceRequirement] = Field(min_length=1, max_length=8)
+    scope: Literal["internal", "external_registry"]
+    exclude_refs: list[str] = Field(default_factory=list, max_length=100)
+
+
+class ResourceSearchOutput(BaseModel):
+    """Frozen successful output shared by both resource search tools."""
+
+    model_config = ConfigDict(extra="forbid")
+    status: Literal["success"] = "success"
+    candidates: list[ResourceCandidate]
+    uncovered_requirement_ids: list[str]
+
+
+class RecommendResourcesInput(BaseModel):
+    """Frozen input for resolving selected candidates into card data (PR2)."""
+
+    model_config = ConfigDict(extra="forbid")
+    candidate_refs: list[str] = Field(min_length=1, max_length=12)
+    recommended_refs: list[str] = Field(default_factory=list, max_length=12)
+
+
+class RecommendedResource(BaseModel):
+    """Frozen card-facing resource detail boundary (implemented in PR2)."""
+
+    model_config = ConfigDict(extra="forbid")
+    candidate: ResourceCandidate
+    recommendation: Literal["recommended", "optional"]
+    form_kind: Literal[
+        "TOOL_CONFIG",
+        "SKILL_CONFIG",
+        "MCP_REMOTE",
+        "MCP_PACKAGE",
+        "MCP_CONTAINER",
+    ]
+    config: dict[str, Any] | list[dict[str, Any]]
+
+
+class RecommendResourcesOutput(BaseModel):
+    """Frozen successful recommend-resources output (implemented in PR2)."""
+
+    model_config = ConfigDict(extra="forbid")
+    status: Literal["success"] = "success"
+    resources: list[RecommendedResource]
+
+
+class AgentDraftFields(BaseModel):
+    """Whitelisted partial fields accepted by the database draft tool."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    name: str | None = Field(default=None, max_length=100)
+    display_name: str | None = Field(default=None, max_length=100)
+    description: str | None = None
+    business_description: str | None = None
+    duty_prompt: str | None = None
+    constraint_prompt: str | None = None
+    few_shots_prompt: str | None = None
+    greeting_message: str | None = None
+    example_questions: list[str] | None = Field(default=None, max_length=6)
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_explicit_null(cls, value: Any) -> Any:
+        if isinstance(value, dict):
+            null_fields = [key for key, item in value.items() if item is None]
+            if null_fields:
+                raise ValueError("agent draft fields cannot be null")
+        return value
+
+    @model_validator(mode="after")
+    def reject_empty_patch(self) -> "AgentDraftFields":
+        if not self.model_fields_set:
+            raise ValueError("agent draft fields cannot be empty")
+        return self
+
+
+class SaveAgentDraftFieldsInput(BaseModel):
+    """Frozen input model for create-or-update draft persistence."""
+
+    model_config = ConfigDict(extra="forbid")
+    agent_id: int | None = Field(default=None, gt=0)
+    fields: AgentDraftFields
+
+
+class SaveAgentDraftFieldsSuccess(BaseModel):
+    """Stable success result returned by save_agent_draft_fields."""
+
+    model_config = ConfigDict(extra="forbid")
+    status: Literal["success"] = "success"
+    agent_id: int = Field(gt=0)
+    created: bool
+    updated_fields: list[str]
+
+
+class SaveAgentDraftFieldsError(BaseModel):
+    """Stable non-sensitive error returned by save_agent_draft_fields."""
+
+    model_config = ConfigDict(extra="forbid")
+    status: Literal["error"] = "error"
+    agent_id: int | None = None
+    created: Literal[False] = False
+    updated_fields: list[str] = Field(default_factory=list)
+    code: Literal[
+        "invalid_agent_fields",
+        "basic_fields_required",
+        "default_model_missing",
+        "agent_not_found",
+        "agent_not_draft",
+        "agent_deleted",
+        "agent_read_only",
+        "draft_save_failed",
+        "unauthorized",
+    ]
+    retryable: bool
+
+
+class RequirementClarificationOption(BaseModel):
+    """One selectable answer in a clarification question."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    option_id: str = Field(min_length=1, max_length=100)
+    label: str = Field(min_length=1, max_length=300)
+
+
+class RequirementClarificationQuestion(BaseModel):
+    """One schema-driven clarification question rendered by the old frontend."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    question_id: str = Field(min_length=1, max_length=100)
+    question_type: Literal["single_choice", "multiple_choice", "text"]
+    title: str = Field(min_length=1, max_length=500)
+    required: bool = True
+    options: list[RequirementClarificationOption] = Field(default_factory=list)
+    allow_other: Literal[True] = True
+    other_input_expanded: Literal[True] = True
+
+    @model_validator(mode="after")
+    def validate_options(self) -> "RequirementClarificationQuestion":
+        if self.question_type == "text" and self.options:
+            raise ValueError("text clarification questions cannot have options")
+        if self.question_type != "text" and not self.options:
+            raise ValueError("choice clarification questions require options")
+        return self
+
+
+class RequirementClarificationPayload(BaseModel):
+    """NL2A payload for the PR1 clarification card."""
+
+    model_config = ConfigDict(extra="forbid")
+    subtype: Literal["requirement_clarification"] = "requirement_clarification"
+    agent_id: None = None
+    questions: list[RequirementClarificationQuestion] = Field(
+        min_length=1,
+        max_length=8,
+    )
 
 
 class InstalledMcpToolRecommendation(BaseModel):
@@ -298,6 +507,7 @@ def _render_few_shots(
 
 def build_nl2a_wrapper(
     subtype: NL2A_SUBTYPES,
+    questions: list[RequirementClarificationQuestion] | None = None,
     search_result: dict[str, Any] | None = None,
     selected_tool_ids: list[int] | None = None,
     language: Literal["en", "zh"] | None = None,
@@ -313,7 +523,13 @@ def build_nl2a_wrapper(
 ) -> str:
     """Fill the JSON template selected by subtype and return its wrapper."""
 
-    if subtype == "local_mcp_recommendation":
+    if subtype == "requirement_clarification":
+        if questions is None:
+            raise ValueError("requirement_clarification requires questions")
+        output = RequirementClarificationPayload(
+            questions=questions,
+        ).model_dump(mode="json")
+    elif subtype == "local_mcp_recommendation":
         if search_result is None or selected_tool_ids is None:
             raise ValueError(
                 "local_mcp_recommendation requires search_result and selected_tool_ids"
@@ -424,7 +640,7 @@ def build_nl2a_wrapper(
 
 
 def create_nl2agent_mcp_tool_configs() -> list[ToolConfig]:
-    """Create fresh SDK configs for the two NL2Agent MCP tools."""
+    """Create fresh SDK configs for the NL2Agent tools exposed in PR1."""
     return [
         ToolConfig(
             class_name=SEARCH_INSTALLED_MCP_TOOLS_NAME,
@@ -437,12 +653,42 @@ def create_nl2agent_mcp_tool_configs() -> list[ToolConfig]:
             usage="outer-apis",
         ),
         ToolConfig(
+            class_name=SAVE_AGENT_DRAFT_FIELDS_NAME,
+            name=SAVE_AGENT_DRAFT_FIELDS_NAME,
+            description=SAVE_AGENT_DRAFT_FIELDS_DESCRIPTION,
+            inputs=json.dumps(
+                {
+                    "agent_id": "int | None",
+                    "fields": {
+                        field_name: field_type
+                        for field_name, field_type in {
+                            "name": "str",
+                            "display_name": "str",
+                            "description": "str",
+                            "business_description": "str",
+                            "duty_prompt": "str",
+                            "constraint_prompt": "str",
+                            "few_shots_prompt": "str",
+                            "greeting_message": "str",
+                            "example_questions": "list[str]",
+                        }.items()
+                    },
+                },
+                separators=(",", ":"),
+            ),
+            output_type="string",
+            params={},
+            source="mcp",
+            usage="outer-apis",
+        ),
+        ToolConfig(
             class_name=NL2A_WRAPPER_NAME,
             name=NL2A_WRAPPER_NAME,
             description=NL2A_WRAPPER_DESCRIPTION,
             inputs=json.dumps(
                 {
                     "subtype": "str",
+                    "questions": "list[RequirementClarificationQuestion] | None",
                     "search_result": "dict | None",
                     "selected_tool_ids": "list[int] | None",
                     "language": "str | None",
@@ -534,7 +780,12 @@ async def search_installed_mcp_tools(keywords: list[str]) -> dict[str, Any]:
 
 
 async def nl2a_wrapper(
-    subtype: Literal["local_mcp_recommendation", "agent_draft"],
+    subtype: Literal[
+        "requirement_clarification",
+        "local_mcp_recommendation",
+        "agent_draft",
+    ],
+    questions: list[RequirementClarificationQuestion] | None = None,
     search_result: dict[str, Any] | None = None,
     selected_tool_ids: list[int] | None = None,
     language: Literal["en", "zh"] | None = None,
@@ -552,6 +803,7 @@ async def nl2a_wrapper(
 
     return build_nl2a_wrapper(
         subtype=subtype,
+        questions=questions,
         search_result=search_result,
         selected_tool_ids=selected_tool_ids,
         language=language,
@@ -565,3 +817,78 @@ async def nl2a_wrapper(
         selected_tool_names=selected_tool_names,
         few_shot_examples=few_shot_examples,
     )
+
+
+def _serialize_agent_draft_save_result(
+    result: SaveAgentDraftFieldsSuccess | SaveAgentDraftFieldsError,
+) -> str:
+    payload = result.model_dump(mode="json")
+    serialized = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    if isinstance(result, SaveAgentDraftFieldsSuccess) and result.created:
+        state = json.dumps(
+            {"event": "agent_draft_created", "agent_id": result.agent_id},
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        return f"{serialized}\n<nl2a_state>{state}</nl2a_state>"
+    return serialized
+
+
+async def save_agent_draft_fields(
+    agent_id: int | None,
+    fields: dict[str, Any],
+) -> str:
+    """Validate and persist a tenant-scoped ordinary AgentInfo draft patch."""
+    try:
+        payload = SaveAgentDraftFieldsInput(agent_id=agent_id, fields=fields)
+    except ValidationError:
+        return _serialize_agent_draft_save_result(
+            SaveAgentDraftFieldsError(
+                agent_id=agent_id,
+                code="invalid_agent_fields",
+                retryable=False,
+            )
+        )
+
+    try:
+        from services.nl2agent_service import (
+            Nl2AgentDraftSaveError,
+            save_agent_draft_fields_impl,
+        )
+
+        authorization = get_http_request().headers.get("Authorization")
+        user_id, tenant_id = get_current_user_id(authorization)
+        result = save_agent_draft_fields_impl(
+            agent_id=payload.agent_id,
+            fields=payload.fields,
+            tenant_id=tenant_id,
+            user_id=user_id,
+        )
+        return _serialize_agent_draft_save_result(
+            SaveAgentDraftFieldsSuccess.model_validate(result)
+        )
+    except Nl2AgentDraftSaveError as exc:
+        return _serialize_agent_draft_save_result(
+            SaveAgentDraftFieldsError(
+                agent_id=payload.agent_id,
+                code=exc.code,
+                retryable=exc.retryable,
+            )
+        )
+    except PermissionError:
+        return _serialize_agent_draft_save_result(
+            SaveAgentDraftFieldsError(
+                agent_id=payload.agent_id,
+                code="unauthorized",
+                retryable=False,
+            )
+        )
+    except Exception:
+        logger.exception("Failed to save NL2Agent draft fields")
+        return _serialize_agent_draft_save_result(
+            SaveAgentDraftFieldsError(
+                agent_id=payload.agent_id,
+                code="draft_save_failed",
+                retryable=True,
+            )
+        )

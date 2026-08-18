@@ -6,6 +6,7 @@ import { Tag, App, Flex, Dropdown, Col, Button } from "antd";
 import { Plus, Globe } from "lucide-react";
 import { Agent } from "@/types/agentConfig";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
+import { useAgentReadOnly } from "@/hooks/agent/useAgentReadOnly";
 import { usePublishedAgentList } from "@/hooks/agent/usePublishedAgentList";
 import { useExternalAgents } from "@/hooks/agent/useExternalAgents";
 import { a2aClientService, A2AExternalAgent } from "@/services/a2aService";
@@ -36,7 +37,7 @@ export default function CollaborativeAgent() {
   );
 
   // isReadOnly from store: isCreatingMode → false, READ_ONLY permission → true
-  const isReadOnly = useAgentConfigStore((state) => state.isReadOnly());
+  const isReadOnly = useAgentReadOnly();
 
   // Related internal agent IDs
   const relatedAgentIds = Array.isArray(editedAgent?.sub_agent_id_list) ? editedAgent.sub_agent_id_list : [];
