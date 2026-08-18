@@ -62,22 +62,22 @@ spec:
             - name: MINIO_ROOT_USER
               valueFrom:
                 secretKeyRef:
-                  name: nexent-secrets
+                  name: nexent-infrastructure-secrets
                   key: MINIO_ROOT_USER
             - name: MINIO_ROOT_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: nexent-secrets
+                  name: nexent-infrastructure-secrets
                   key: MINIO_ROOT_PASSWORD
             - name: MINIO_ACCESS_KEY
               valueFrom:
                 secretKeyRef:
-                  name: nexent-secrets
+                  name: nexent-infrastructure-secrets
                   key: MINIO_ACCESS_KEY
             - name: MINIO_SECRET_KEY
               valueFrom:
                 secretKeyRef:
-                  name: nexent-secrets
+                  name: nexent-infrastructure-secrets
                   key: MINIO_SECRET_KEY
             - name: MINIO_REGION
               value: {{ .Values.config.region | quote }}
