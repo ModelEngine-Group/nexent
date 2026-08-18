@@ -2584,12 +2584,13 @@ class TestRunStreamRealExecution:
         assert len(agent.memory.steps) == 2
         assert agent.memory.steps[0].error is not None
 
-    def test_run_stream_retries_empty_direct_answer_then_verifies_valid_answer(self, monkeypatch):
-        """An empty direct response is retried before a later valid response is verified."""
+    def test_planning_run_retries_empty_direct_answer_then_verifies_valid_answer(self, monkeypatch):
+        """Planning runs reset state, retry an empty answer, and verify the next answer."""
         module = core_agent_module
 
         agent = self._create_canonical_run_agent(
             monkeypatch,
+            enable_planning=True,
             model=MagicMock(last_response_diagnostics={"finish_reason": "length"}),
             verification_config=SimpleNamespace(
                 enabled=True,
@@ -2597,6 +2598,8 @@ class TestRunStreamRealExecution:
                 max_final_rounds=2,
             ),
         )
+        agent.current_plan = "stale plan"
+        agent.current_step_index = 99
         agent.verification_controller = MagicMock()
         agent.verification_controller.verify_final_answer.return_value = SimpleNamespace(
             passed=True
@@ -2616,31 +2619,14 @@ class TestRunStreamRealExecution:
         results = list(agent._run_stream("test task", max_steps=2))
 
         assert results[-1].output == "valid direct answer"
+        assert agent.current_plan is None
+        assert agent.current_step_index == 0
         assert len(agent.memory.steps) == 2
         assert agent.memory.steps[0].error is not None
         agent.verification_controller.verify_final_answer.assert_called_once()
         assert agent.verification_controller.verify_final_answer.call_args.kwargs[
             "candidate"
         ] == "valid direct answer"
-
-    def test_run_stream_initializes_lazy_planning_state(self, monkeypatch):
-        """Planning-enabled runs reset lazy plan state before executing the first step."""
-        agent = self._create_canonical_run_agent(monkeypatch, enable_planning=True)
-        agent.current_plan = "stale plan"
-        agent.current_step_index = 99
-        agent._handle_max_steps_reached = MagicMock(return_value="max steps")
-
-        def mock_step_stream(_action_step):
-            if False:
-                yield None
-
-        agent._step_stream = mock_step_stream
-
-        list(agent._run_stream("test task", max_steps=0))
-
-        assert agent.current_plan is None
-        assert agent.current_step_index == 0
-
 
 # ----------------------------------------------------------------------------
 # Tests for _handle_max_steps_reached method
