@@ -5,7 +5,6 @@ from http import HTTPStatus
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, File, Form, Header, HTTPException, Query, UploadFile
-from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 from starlette.responses import JSONResponse, StreamingResponse
 
@@ -144,8 +143,7 @@ async def list_market_skills(
     """Search public ModelScope Skills without exposing installation state."""
     try:
         get_current_user_id(authorization)
-        result = await run_in_threadpool(
-            ModelScopeSkillService().list_skills,
+        result = ModelScopeSkillService().list_skills(
             search=search,
             page_number=page_number,
             page_size=page_size,
@@ -166,9 +164,7 @@ async def get_market_skill_detail(
     """Return exact public ModelScope Skill metadata."""
     try:
         get_current_user_id(authorization)
-        result = await run_in_threadpool(
-            ModelScopeSkillService().get_skill, skill_id
-        )
+        result = ModelScopeSkillService().get_skill(skill_id)
         return JSONResponse(content=result)
     except (
         UnauthorizedError,
@@ -189,8 +185,7 @@ async def install_market_skill(
     """Install a public ModelScope snapshot as an editable tenant-local Skill."""
     try:
         user_id, tenant_id = get_current_user_id(authorization)
-        result = await run_in_threadpool(
-            ModelScopeSkillService().install_skill,
+        result = ModelScopeSkillService().install_skill(
             skill_id=request.skill_id,
             name=request.name,
             description=request.description,

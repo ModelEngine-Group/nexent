@@ -13,7 +13,7 @@ from adapters.modelscope_skill_adapter import (
     MODELSCOPE_SKILL_SOURCE,
     ModelScopeSkillAdapter,
 )
-from consts.exceptions import ModelScopeSkillError, SkillException
+from consts.exceptions import SkillException
 from database import skill_db
 from database.group_db import query_groups_by_tenant
 from nexent.skills.skill_loader import SkillLoader
@@ -22,6 +22,7 @@ from services.skill_service import (
     _get_skill_inputs_from_code,
     _parse_skill_params_from_config_bytes,
     _parse_skill_schema_from_yaml_bytes,
+    _resolve_local_skill_path,
     get_skill_manager,
 )
 
@@ -29,17 +30,6 @@ logger = logging.getLogger(__name__)
 
 MAX_SKILL_FILE_COUNT = 1_000
 MAX_SKILL_TOTAL_BYTES = 100 * 1024 * 1024
-
-
-def _parse_source_timestamp(value: str | None) -> datetime | None:
-    if not value:
-        return None
-    try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError as exc:
-        raise ModelScopeSkillError(
-            "ModelScope returned an invalid last_modified value"
-        ) from exc
 
 
 def _validate_downloaded_directory(skill_dir: Path) -> None:
@@ -118,6 +108,16 @@ def _read_directory_skill_data(
     return skill_data
 
 
+def _rollback_created_skill(local_name: str, tenant_id: str, user_id: str) -> None:
+    try:
+        skill_db.delete_skill(local_name, tenant_id, updated_by=user_id)
+    except Exception:
+        logger.exception(
+            "Failed to roll back database record for ModelScope Skill %s",
+            local_name,
+        )
+
+
 class ModelScopeSkillService:
     """Query and install anonymous public Skills from ModelScope."""
 
@@ -153,30 +153,11 @@ class ModelScopeSkillService:
     ) -> dict[str, Any]:
         """Install one public ModelScope snapshot as an independent local Skill."""
         local_name = name.strip()
-        if (
-            not local_name
-            or local_name in {".", ".."}
-            or "/" in local_name
-            or "\\" in local_name
-            or "\x00" in local_name
-            or os.path.basename(local_name) != local_name
-            or os.path.isabs(local_name)
-        ):
-            raise SkillException("Invalid Skill name")
-
         tenant_root = Path(
             self.skill_manager.resolve_tenant_dir(tenant_id=tenant_id)
         ).resolve()
         tenant_root.mkdir(parents=True, exist_ok=True)
-        try:
-            destination = Path(
-                self.skill_manager.resolve_skill_dir(
-                    local_name, tenant_id=tenant_id
-                )
-            ).resolve()
-            destination.relative_to(tenant_root)
-        except (ValueError, OSError) as exc:
-            raise SkillException("Invalid Skill name") from exc
+        destination = Path(_resolve_local_skill_path(str(tenant_root), local_name))
 
         if skill_db.get_skill_by_name(local_name, tenant_id):
             raise SkillException(f"Skill '{local_name}' already exists")
@@ -198,52 +179,59 @@ class ModelScopeSkillService:
         source_skill = self.adapter.get_skill(skill_id)
         canonical_id = source_skill["skill_id"]
 
-        with tempfile.TemporaryDirectory(
-            prefix=".modelscope-skill-", dir=tenant_root
-        ) as staging_dir:
-            downloaded = self.adapter.download_skill(
-                canonical_id, Path(staging_dir)
-            )
-            _validate_downloaded_directory(downloaded)
-            skill_data = _read_directory_skill_data(
-                downloaded,
-                local_name=local_name,
-                description=description.strip(),
-                tags=tags,
-                tenant_id=tenant_id,
-            )
-            skill_data.update(
-                {
-                    "source": MODELSCOPE_SKILL_SOURCE,
-                    "unique_id": canonical_id,
-                    "version_update_time": _parse_source_timestamp(
-                        source_skill.get("last_modified")
-                    ),
-                    "group_ids": group_ids,
-                    "ingroup_permission": ingroup_permission,
-                    "created_by": user_id,
-                    "updated_by": user_id,
+        skill_data: dict[str, Any] = {
+            "name": local_name,
+            "description": description.strip(),
+            "tags": tags,
+            "source": MODELSCOPE_SKILL_SOURCE,
+            "unique_id": canonical_id,
+            "version_update_time": datetime.now(),
+            "group_ids": group_ids,
+            "ingroup_permission": ingroup_permission,
+            "created_by": user_id,
+            "updated_by": user_id,
+        }
+        _apply_default_skill_permission_fields(skill_data, user_id)
+
+        # Insert first so the tenant-unique name is claimed before the download.
+        result = skill_db.create_skill(skill_data, tenant_id)
+        try:
+            with tempfile.TemporaryDirectory(
+                prefix=".modelscope-skill-", dir=tenant_root
+            ) as staging_dir:
+                downloaded = self.adapter.download_skill(
+                    canonical_id, Path(staging_dir)
+                )
+                _validate_downloaded_directory(downloaded)
+                downloaded_data = _read_directory_skill_data(
+                    downloaded,
+                    local_name=local_name,
+                    description=description.strip(),
+                    tags=tags,
+                    tenant_id=tenant_id,
+                )
+                update_data: dict[str, Any] = {
+                    "content": downloaded_data.get("content", ""),
+                    "tool_ids": downloaded_data.get("tool_ids", []),
                 }
-            )
-            _apply_default_skill_permission_fields(skill_data, user_id)
-
-            # Recheck after the network download to narrow the name-conflict race window.
-            if skill_db.get_skill_by_name(local_name, tenant_id) or destination.exists():
-                raise SkillException(f"Skill '{local_name}' already exists")
-
-            result = skill_db.create_skill(skill_data, tenant_id)
-            try:
-                os.replace(downloaded, destination)
-            except Exception as exc:
+                if "config_schemas" in downloaded_data:
+                    update_data["config_schemas"] = downloaded_data["config_schemas"]
+                if "config_values" in downloaded_data:
+                    update_data["config_values"] = downloaded_data["config_values"]
+                result = skill_db.update_skill(
+                    local_name,
+                    update_data,
+                    tenant_id,
+                    updated_by=user_id,
+                )
                 try:
-                    skill_db.delete_skill(local_name, tenant_id, updated_by=user_id)
-                except Exception:
-                    logger.exception(
-                        "Failed to roll back database record for ModelScope Skill %s",
-                        local_name,
-                    )
-                raise SkillException(
-                    "Failed to move the downloaded Skill into local storage"
-                ) from exc
+                    os.replace(downloaded, destination)
+                except Exception as exc:
+                    raise SkillException(
+                        "Failed to move the downloaded Skill into local storage"
+                    ) from exc
+        except Exception:
+            _rollback_created_skill(local_name, tenant_id, user_id)
+            raise
 
         return result

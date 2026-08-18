@@ -1,12 +1,12 @@
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-from consts.exceptions import SkillException
+from consts.exceptions import ModelScopeSkillError, SkillException
 from services import modelscope_skill_service as module
 from services.modelscope_skill_service import (
     ModelScopeSkillService,
-    _parse_source_timestamp,
     _validate_downloaded_directory,
 )
 
@@ -29,9 +29,6 @@ class FakeSkillManager:
 
     def resolve_tenant_dir(self, *, tenant_id: str) -> str:
         return str(self.root / tenant_id)
-
-    def resolve_skill_dir(self, skill_name: str, *, tenant_id: str) -> str:
-        return str(self.root / tenant_id / skill_name)
 
 
 class FakeAdapter:
@@ -78,6 +75,14 @@ class ConfiguredAdapter(FakeAdapter):
 
 
 @pytest.fixture(autouse=True)
+def patch_container_skills_path(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "services.skill_service.CONTAINER_SKILLS_PATH",
+        str(tmp_path),
+    )
+
+
+@pytest.fixture(autouse=True)
 def mock_tenant_groups(monkeypatch):
     monkeypatch.setattr(
         module,
@@ -111,11 +116,31 @@ def _install(service: ModelScopeSkillService, name: str = "local-skill"):
     )
 
 
-def test_install_skill_parses_db_data_and_moves_snapshot(tmp_path, monkeypatch):
+def _mock_create_skill(monkeypatch, create=None):
     monkeypatch.setattr(module.skill_db, "get_skill_by_name", MagicMock(return_value=None))
-    monkeypatch.setattr(module.skill_db, "get_tool_ids_by_names", MagicMock(return_value=[7]))
-    create = MagicMock(side_effect=lambda data, tenant_id: {**data, "skill_id": 9})
+    if create is None:
+        create = MagicMock(side_effect=lambda data, tenant_id: {**data, "skill_id": 9})
     monkeypatch.setattr(module.skill_db, "create_skill", create)
+    return create
+
+
+def _mock_update_skill(monkeypatch, update=None):
+    if update is None:
+        update = MagicMock(
+            side_effect=lambda name, data, tenant_id, updated_by=None: {
+                **data,
+                "skill_id": 9,
+                "name": name,
+            }
+        )
+    monkeypatch.setattr(module.skill_db, "update_skill", update)
+    return update
+
+
+def test_install_skill_parses_db_data_and_moves_snapshot(tmp_path, monkeypatch):
+    create = _mock_create_skill(monkeypatch)
+    update = _mock_update_skill(monkeypatch)
+    monkeypatch.setattr(module.skill_db, "get_tool_ids_by_names", MagicMock(return_value=[7]))
 
     result = _install(_service(tmp_path))
 
@@ -125,18 +150,21 @@ def test_install_skill_parses_db_data_and_moves_snapshot(tmp_path, monkeypatch):
     saved_md = destination.joinpath("SKILL.md").read_text(encoding="utf-8")
     assert "name: local-skill" in saved_md
     assert "description: Local description" in saved_md
-    data = create.call_args.args[0]
-    assert data["unique_id"] == "@owner/source-skill"
-    assert data["source"] == "modelscope"
-    assert data["tool_ids"] == [7]
-    assert data["version_update_time"].isoformat() == "2026-08-07T06:37:46+00:00"
+    created = create.call_args.args[0]
+    assert created["unique_id"] == "@owner/source-skill"
+    assert created["source"] == "modelscope"
+    assert isinstance(created["version_update_time"], datetime)
+    updated = update.call_args.args[1]
+    assert updated["tool_ids"] == [7]
 
 
 def test_same_external_skill_can_be_installed_under_different_names(tmp_path, monkeypatch):
-    monkeypatch.setattr(module.skill_db, "get_skill_by_name", MagicMock(return_value=None))
+    create = _mock_create_skill(
+        monkeypatch,
+        MagicMock(side_effect=lambda data, tenant_id: dict(data)),
+    )
+    _mock_update_skill(monkeypatch)
     monkeypatch.setattr(module.skill_db, "get_tool_ids_by_names", MagicMock(return_value=[]))
-    create = MagicMock(side_effect=lambda data, tenant_id: dict(data))
-    monkeypatch.setattr(module.skill_db, "create_skill", create)
     adapter = FakeAdapter()
     service = _service(tmp_path, adapter)
 
@@ -150,14 +178,13 @@ def test_same_external_skill_can_be_installed_under_different_names(tmp_path, mo
 
 
 def test_install_parses_schema_and_config_files(tmp_path, monkeypatch):
-    monkeypatch.setattr(module.skill_db, "get_skill_by_name", MagicMock(return_value=None))
+    _mock_create_skill(monkeypatch)
+    update = _mock_update_skill(monkeypatch)
     monkeypatch.setattr(module.skill_db, "get_tool_ids_by_names", MagicMock(return_value=[]))
-    create = MagicMock(side_effect=lambda data, tenant_id: dict(data))
-    monkeypatch.setattr(module.skill_db, "create_skill", create)
 
     _install(_service(tmp_path, ConfiguredAdapter()))
 
-    data = create.call_args.args[0]
+    data = update.call_args.args[1]
     assert data["config_schemas"][0]["name"] == "query"
     assert data["config_values"] == {"query": "default"}
 
@@ -178,15 +205,18 @@ def test_install_rejects_existing_local_directory(tmp_path, monkeypatch):
 
 
 def test_install_rejects_unsafe_name(tmp_path):
-    with pytest.raises(SkillException, match="Invalid Skill name"):
+    with pytest.raises(SkillException, match="Invalid skill name"):
         _install(_service(tmp_path), "../escape")
 
 
 def test_install_rejects_missing_skill_md(tmp_path, monkeypatch):
-    monkeypatch.setattr(module.skill_db, "get_skill_by_name", MagicMock(return_value=None))
+    _mock_create_skill(monkeypatch)
+    delete = MagicMock(return_value=True)
+    monkeypatch.setattr(module.skill_db, "delete_skill", delete)
 
     with pytest.raises(SkillException, match="root SKILL.md"):
         _install(_service(tmp_path, FakeAdapter(with_skill_md=False)))
+    delete.assert_called_once_with("local-skill", "tenant-a", updated_by="user-a")
 
 
 def test_install_rejects_group_from_another_tenant(tmp_path, monkeypatch):
@@ -200,20 +230,34 @@ def test_install_rejects_group_from_another_tenant(tmp_path, monkeypatch):
         _install(_service(tmp_path))
 
 
-def test_install_does_not_move_files_when_database_insert_fails(tmp_path, monkeypatch):
+def test_install_does_not_download_when_database_insert_fails(tmp_path, monkeypatch):
     monkeypatch.setattr(module.skill_db, "get_skill_by_name", MagicMock(return_value=None))
-    monkeypatch.setattr(module.skill_db, "get_tool_ids_by_names", MagicMock(return_value=[]))
     monkeypatch.setattr(module.skill_db, "create_skill", MagicMock(side_effect=RuntimeError("db down")))
+    adapter = FakeAdapter()
 
     with pytest.raises(RuntimeError, match="db down"):
-        _install(_service(tmp_path))
+        _install(_service(tmp_path, adapter))
+    assert adapter.download_calls == []
+    assert not (tmp_path / "tenant-a" / "local-skill").exists()
+
+
+def test_install_rolls_back_database_when_download_fails(tmp_path, monkeypatch):
+    _mock_create_skill(monkeypatch)
+    delete = MagicMock(return_value=True)
+    monkeypatch.setattr(module.skill_db, "delete_skill", delete)
+    adapter = FakeAdapter()
+    adapter.download_skill = MagicMock(side_effect=ModelScopeSkillError("download failed"))
+
+    with pytest.raises(ModelScopeSkillError, match="download failed"):
+        _install(_service(tmp_path, adapter))
+    delete.assert_called_once_with("local-skill", "tenant-a", updated_by="user-a")
     assert not (tmp_path / "tenant-a" / "local-skill").exists()
 
 
 def test_install_rolls_back_database_when_atomic_move_fails(tmp_path, monkeypatch):
-    monkeypatch.setattr(module.skill_db, "get_skill_by_name", MagicMock(return_value=None))
+    _mock_create_skill(monkeypatch)
+    _mock_update_skill(monkeypatch)
     monkeypatch.setattr(module.skill_db, "get_tool_ids_by_names", MagicMock(return_value=[]))
-    monkeypatch.setattr(module.skill_db, "create_skill", MagicMock(return_value={"skill_id": 8}))
     delete = MagicMock(return_value=True)
     monkeypatch.setattr(module.skill_db, "delete_skill", delete)
     monkeypatch.setattr(module.os, "replace", MagicMock(side_effect=OSError("locked")))
@@ -260,12 +304,6 @@ def test_validate_download_enforces_total_size(tmp_path, monkeypatch):
 def test_validate_download_rejects_missing_directory(tmp_path):
     with pytest.raises(SkillException, match="does not exist"):
         _validate_downloaded_directory(tmp_path / "missing")
-
-
-def test_parse_source_timestamp_handles_empty_and_invalid_values():
-    assert _parse_source_timestamp(None) is None
-    with pytest.raises(module.ModelScopeSkillError, match="last_modified"):
-        _parse_source_timestamp("not-a-timestamp")
 
 
 def test_market_query_methods_delegate_to_adapter(tmp_path):
