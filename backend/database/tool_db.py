@@ -97,6 +97,29 @@ def query_all_tools(tenant_id: str):
         return [as_dict(tool) for tool in tools]
 
 
+def query_tool_info_by_tool_id(tool_id: int, tenant_id: str):
+    """
+    Query the ToolInfo record (tool catalog entry) by tool_id.
+
+    Returns the tool's ``name`` and ``class_name`` so the service layer can
+    validate params against the right constraint table entry.
+
+    Args:
+        tool_id: Tool catalog ID
+        tenant_id: Tenant ID for filtering, mandatory
+
+    Returns:
+        Dict with name/class_name, or None if the tool does not exist.
+    """
+    with get_db_session() as session:
+        record = session.query(ToolInfo).filter(
+            ToolInfo.tool_id == tool_id,
+            ToolInfo.author == tenant_id,
+            ToolInfo.delete_flag != 'Y',
+        ).first()
+        return as_dict(record) if record else None
+
+
 def query_tool_instances_by_id(agent_id: int, tool_id: int, tenant_id: str, version_no: int = 0):
     """
     Query ToolInstance in the database.

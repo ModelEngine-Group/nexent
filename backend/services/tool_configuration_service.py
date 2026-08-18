@@ -38,6 +38,7 @@ from database.tool_db import (
     check_tool_list_initialized,
     create_or_update_tool_by_tool_info,
     query_all_tools,
+    query_tool_info_by_tool_id,
     query_tools_by_labels,
     query_tool_instances_by_id,
     search_last_tool_instance_by_tool_id,
@@ -47,6 +48,7 @@ from database.knowledge_db import get_knowledge_name_map_by_index_names
 from database.user_tenant_db import get_user_email_map
 from mcpadapt.smolagents_adapter import _sanitize_function_name
 from services.file_management_service import get_llm_model, validate_urls_access
+from services.tool_param_validation import validate_tool_params
 from services.vectordatabase_service import get_embedding_model_by_index_name, get_rerank_model
 from utils.http_client_utils import create_httpx_client
 from database.client import minio_client
@@ -362,6 +364,18 @@ def update_tool_info_impl(tool_info: ToolInstanceInfoRequest, tenant_id: str, us
     Raises:
         ValueError: If database update fails
     """
+    # v2.3: validate value ranges for user-configurable tool params so an
+    # out-of-range / illegal-enum value cannot be persisted (which breaks the
+    # search tool at runtime). Runs for every tool; unknown tools are skipped
+    # by the constraint table lookup.
+    tool_record = query_tool_info_by_tool_id(
+        getattr(tool_info, "tool_id", 0), tenant_id)
+    if tool_record:
+        validate_tool_params(
+            tool_record.get("name") or tool_record.get("class_name"),
+            tool_info.params or {},
+        )
+
     # v7.1: validate per-KB READ access for aidp_search so a tenant user
     # cannot stash a forbidden kds_id in their tool config for later abuse.
     if getattr(tool_info, "name", None) == "aidp_search":
