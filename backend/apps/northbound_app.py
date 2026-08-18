@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from consts.exceptions import LimitExceededError, UnauthorizedError, ConversationNotFoundError
 from consts.model import ToolParamsRequest
+from services.model_management_service import list_northbound_models_for_tenant
 from services.northbound_service import (
     NorthboundContext,
     get_conversation_history,
@@ -375,6 +376,24 @@ async def get_agent_by_name(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Internal Server Error")
 
 
+@router.get("/models")
+async def list_models(request: Request):
+    """Get detailed model information for the current tenant, including model_id."""
+    try:
+        ctx: NorthboundContext = await _get_northbound_context(request)
+        return await list_northbound_models_for_tenant(ctx.tenant_id)
+    except LimitExceededError as e:
+        logging.error(f"Too Many Requests: rate limit exceeded: {str(e)}", exc_info=e)
+        raise HTTPException(status_code=HTTPStatus.TOO_MANY_REQUESTS,
+                            detail="Too Many Requests: rate limit exceeded")
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        logging.error(f"Failed to list models: {str(e)}", exc_info=e)
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Internal Server Error")
+
+
 @router.get("/conversations")
 async def list_convs(request: Request):
     try:
@@ -519,3 +538,4 @@ async def fetch_file_from_presigned_url(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail="Internal server error"
         )
+

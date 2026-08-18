@@ -41,6 +41,7 @@ class FakeAdapter:
     def get_skill(self, skill_id: str):
         return {
             "skill_id": "@owner/source-skill",
+            "description": "Source description",
             "last_modified": "2026-08-07T06:37:46Z",
         }
 
@@ -303,7 +304,7 @@ def test_install_rolls_back_database_when_atomic_move_fails(tmp_path, monkeypatc
     monkeypatch.setattr(module.skill_db, "get_tool_ids_by_names", MagicMock(return_value=[]))
     delete = MagicMock(return_value=True)
     monkeypatch.setattr(module.skill_db, "delete_skill", delete)
-    monkeypatch.setattr(module.os, "replace", MagicMock(side_effect=OSError("locked")))
+    monkeypatch.setattr(module.shutil, "move", MagicMock(side_effect=OSError("locked")))
 
     with pytest.raises(SkillException, match="local storage"):
         _install(_service(tmp_path))
@@ -362,3 +363,77 @@ def test_market_query_methods_delegate_to_adapter(tmp_path):
     adapter.list_skills.assert_called_once_with(
         search="demo", page_number=2, page_size=8
     )
+
+
+def test_update_skill_refreshes_downloaded_content_and_preserves_local_metadata(
+    tmp_path, monkeypatch
+):
+    existing_skill = {
+        "skill_id": 9,
+        "name": "local-skill",
+        "description": "Local description",
+        "tags": ["local", "demo"],
+        "source": "modelscope",
+        "unique_id": "@owner/source-skill",
+    }
+    monkeypatch.setattr(
+        module.skill_db, "get_skill_by_id", MagicMock(return_value=existing_skill)
+    )
+    update_by_id = MagicMock(
+        side_effect=lambda skill_id, data, tenant_id, updated_by=None: {
+            **existing_skill,
+            **data,
+            "skill_id": skill_id,
+        }
+    )
+    monkeypatch.setattr(module.skill_db, "update_skill_by_id", update_by_id)
+    monkeypatch.setattr(
+        module.skill_db, "get_tool_ids_by_names", MagicMock(return_value=[7])
+    )
+    destination = tmp_path / "tenant-a" / "local-skill"
+    destination.mkdir(parents=True)
+    (destination / "SKILL.md").write_text("old", encoding="utf-8")
+
+    result = _service(tmp_path).update_skill(
+        skill_id=9,
+        unique_id="@owner/source-skill",
+        tenant_id="tenant-a",
+        user_id="user-a",
+    )
+
+    assert result["skill_id"] == 9
+    assert destination.joinpath("assets", "note.txt").read_text() == "kept"
+    saved_md = destination.joinpath("SKILL.md").read_text(encoding="utf-8")
+    assert "name: local-skill" in saved_md
+    assert "description: Source description" in saved_md
+    updated = update_by_id.call_args.args[1]
+    assert updated["tool_ids"] == [7]
+    assert isinstance(updated["version_update_time"], datetime)
+    assert "name" not in updated
+    assert "description" not in updated
+    assert "tags" not in updated
+
+
+def test_update_skill_rejects_non_modelscope_skill(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        module.skill_db,
+        "get_skill_by_id",
+        MagicMock(
+            return_value={
+                "skill_id": 9,
+                "name": "local-skill",
+                "description": "Local description",
+                "tags": ["local"],
+                "source": "custom",
+                "unique_id": "@owner/source-skill",
+            }
+        ),
+    )
+
+    with pytest.raises(SkillException, match="Only ModelScope skills can be updated"):
+        _service(tmp_path).update_skill(
+            skill_id=9,
+            unique_id="@owner/source-skill",
+            tenant_id="tenant-a",
+            user_id="user-a",
+        )

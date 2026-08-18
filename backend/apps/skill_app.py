@@ -18,6 +18,7 @@ from consts.exceptions import (
 )
 from consts.model import (
     ModelScopeSkillInstallRequest,
+    ModelScopeSkillUpdateRequest,
     NL2SkillRunRequest,
     SkillCreateRequest,
     SkillInstanceInfoRequest,
@@ -159,21 +160,23 @@ async def list_market_skills(
 @router.get("/market/detail")
 async def get_market_skill_detail(
     skill_id: str = Query(..., min_length=1, max_length=255),
+    source: str = Query(..., min_length=1, max_length=30),
     authorization: Optional[str] = Header(None),
 ) -> JSONResponse:
-    """Return exact public ModelScope Skill metadata."""
+    """Return a locally installed market skill record for the current user."""
     try:
-        get_current_user_id(authorization)
-        result = ModelScopeSkillService().get_skill(skill_id)
+        user_id, tenant_id = get_current_user_id(authorization)
+        result = ModelScopeSkillService().get_market_skill_detail(
+            skill_id=skill_id,
+            source=source,
+            user_id=user_id,
+            tenant_id=tenant_id,
+        )
         return JSONResponse(content=result)
-    except (
-        UnauthorizedError,
-        ModelScopeSkillNotFoundError,
-        ModelScopeSkillError,
-    ) as exc:
+    except UnauthorizedError as exc:
         _raise_modelscope_http_error(exc)
     except Exception as exc:
-        logger.error("Error reading ModelScope Skill: %s", exc, exc_info=True)
+        logger.error("Error reading market Skill detail: %s", exc, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -186,7 +189,7 @@ async def install_market_skill(
     try:
         user_id, tenant_id = get_current_user_id(authorization)
         result = ModelScopeSkillService().install_skill(
-            skill_id=request.skill_id,
+            skill_id=request.unique_id,
             name=request.name,
             description=request.description,
             tags=request.tags,
@@ -205,6 +208,33 @@ async def install_market_skill(
         _raise_modelscope_http_error(exc)
     except Exception as exc:
         logger.error("Error installing ModelScope Skill: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.post("/market/update")
+async def update_market_skill(
+    request: ModelScopeSkillUpdateRequest,
+    authorization: Optional[str] = Header(None),
+) -> JSONResponse:
+    """Update an installed ModelScope skill with the latest upstream snapshot."""
+    try:
+        user_id, tenant_id = get_current_user_id(authorization)
+        result = ModelScopeSkillService().update_skill(
+            skill_id=request.skill_id,
+            unique_id=request.unique_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+        )
+        return JSONResponse(content=result, status_code=HTTPStatus.OK)
+    except (
+        UnauthorizedError,
+        ModelScopeSkillNotFoundError,
+        ModelScopeSkillError,
+        SkillException,
+    ) as exc:
+        _raise_modelscope_http_error(exc)
+    except Exception as exc:
+        logger.error("Error updating ModelScope Skill: %s", exc, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 

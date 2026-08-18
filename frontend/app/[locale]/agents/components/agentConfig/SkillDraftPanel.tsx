@@ -257,6 +257,7 @@ export default function SkillDraftPanel({
                 style={{ marginBottom: 10 }}
               >
                 <Select
+                  disabled
                   options={[
                     { label: t("skillPool.group.custom"), value: "custom" },
                   ]}

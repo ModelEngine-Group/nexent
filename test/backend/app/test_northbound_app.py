@@ -807,6 +807,81 @@ def test_list_agents_internal_error():
 
 
 # =============================================================================
+# List Models Tests
+# =============================================================================
+
+def test_list_models_success():
+    """Test successful retrieval of tenant model list."""
+    with patch('apps.northbound_app._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('apps.northbound_app.list_northbound_models_for_tenant', new_callable=AsyncMock) as mock_list:
+
+        mock_ctx.return_value = MagicMock(tenant_id="tenant-a", request_id="req-123")
+        mock_list.return_value = [
+            {
+                "model_id": 1,
+                "model_name": "huggingface/llama",
+                "display_name": "LLaMA Model",
+                "model_type": "llm",
+            },
+            {
+                "model_id": 2,
+                "model_name": "openai/clip",
+                "display_name": "CLIP Model",
+                "model_type": "embedding",
+            },
+        ]
+
+        resp = client.get(
+            "/nb/v1/models",
+            headers=_build_headers(),
+        )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data) == 2
+        assert set(data[0].keys()) == {
+            "model_id",
+            "model_name",
+            "model_type",
+            "display_name",
+        }
+        assert data[0]["model_id"] == 1
+        mock_list.assert_awaited_once_with("tenant-a")
+
+
+def test_list_models_limit_exceeded():
+    """Test list models returns 429 when limit exceeded."""
+    with patch('apps.northbound_app._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('apps.northbound_app.list_northbound_models_for_tenant', new_callable=AsyncMock) as mock_list:
+
+        mock_ctx.return_value = MagicMock(tenant_id="tenant-a", request_id="req-123")
+        mock_list.side_effect = LimitExceededError("Rate limit exceeded")
+
+        resp = client.get(
+            "/nb/v1/models",
+            headers=_build_headers(),
+        )
+
+        assert resp.status_code == 429
+
+
+def test_list_models_internal_error():
+    """Test list models returns 500 on internal error."""
+    with patch('apps.northbound_app._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('apps.northbound_app.list_northbound_models_for_tenant', new_callable=AsyncMock) as mock_list:
+
+        mock_ctx.return_value = MagicMock(tenant_id="tenant-a", request_id="req-123")
+        mock_list.side_effect = Exception("Unexpected error")
+
+        resp = client.get(
+            "/nb/v1/models",
+            headers=_build_headers(),
+        )
+
+        assert resp.status_code == 500
+
+
+# =============================================================================
 # List Conversations Error Tests
 # =============================================================================
 

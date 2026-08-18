@@ -130,6 +130,18 @@ export interface ModelScopeMarketSkill {
   private: boolean;
 }
 
+export interface InstalledMarketSkill {
+  skill_id: number;
+  name?: string | null;
+  description?: string | null;
+  source?: string | null;
+  tags?: string[];
+  group_ids?: number[];
+  ingroup_permission?: "EDIT" | "READ_ONLY" | "PRIVATE" | null;
+  created_by?: string | null;
+  version_update_time?: string | null;
+}
+
 export interface ModelScopeMarketListResponse {
   items: ModelScopeMarketSkill[];
   total_count: number;
@@ -139,12 +151,17 @@ export interface ModelScopeMarketListResponse {
 }
 
 export interface ModelScopeSkillInstallPayload {
-  skill_id: string;
+  unique_id: string;
   name: string;
   description: string;
   tags: string[];
   group_ids?: number[];
   ingroup_permission?: "EDIT" | "READ_ONLY" | "PRIVATE";
+}
+
+export interface ModelScopeSkillUpdatePayload {
+  skill_id: number;
+  unique_id: string;
 }
 
 /**

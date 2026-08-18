@@ -157,13 +157,16 @@ export default function SkillBuildModal({
   const { t, i18n } = useTranslation("common");
   const { user, getAccessibleGroupIds } = useAuthorizationContext();
   const [form] = Form.useForm<SkillFormData>();
-  const isEditMode = Boolean(editingSkill);
+  const [openedInstalledSkill, setOpenedInstalledSkill] =
+    useState<MyEditableSkillItem | null>(null);
+  const activeEditingSkill = editingSkill ?? openedInstalledSkill;
+  const isEditMode = Boolean(activeEditingSkill);
   const isAdmin = !!user?.role && CAN_EDIT_ALL_ROLES.has(user.role);
   const isCreator =
     !isEditMode ||
-    (!!editingSkill?.created_by &&
+    (!!activeEditingSkill?.created_by &&
       !!user?.id &&
-      String(editingSkill.created_by) === String(user.id));
+      String(activeEditingSkill.created_by) === String(user.id));
   const canEditGroupSettings = isAdmin || isCreator;
   const { data: groupData } = useGroupList(user?.tenantId ?? null);
   const groupNamesById = useMemo(
@@ -304,6 +307,7 @@ export default function SkillBuildModal({
       setLoadedEditSkillId(null);
       setEditFilesError(null);
       setIsLoadingEditFiles(false);
+      setOpenedInstalledSkill(null);
     }
   }, [isOpen]);
 
@@ -320,8 +324,8 @@ export default function SkillBuildModal({
   }, [uploadExtractedSkillName, allSkills]);
 
   useEffect(() => {
-    if (!isOpen || !editingSkill) return;
-    const skillName = editingSkill.name?.trim() || "";
+    if (!isOpen || !activeEditingSkill) return;
+    const skillName = activeEditingSkill.name?.trim() || "";
     let cancelled = false;
 
     const applySkillInfo = (
@@ -347,18 +351,18 @@ export default function SkillBuildModal({
 
     const loadEditFiles = async () => {
       try {
-        const result = await fetchSkillById(editingSkill.skill_id);
+        const result = await fetchSkillById(activeEditingSkill.skill_id);
         const skillInfo =
           result.success && result.data
             ? result.data
             : {
                 name: skillName,
-                description: editingSkill.description || "",
-                source: editingSkill.source || "custom",
-                tags: editingSkill.tags || [],
-                group_ids: editingSkill.group_ids || [],
+                description: activeEditingSkill.description || "",
+                source: activeEditingSkill.source || "custom",
+                tags: activeEditingSkill.tags || [],
+                group_ids: activeEditingSkill.group_ids || [],
                 ingroup_permission:
-                  editingSkill.ingroup_permission || "READ_ONLY",
+                  activeEditingSkill.ingroup_permission || "READ_ONLY",
               };
         const resolvedSkillName = skillInfo.name?.trim() || skillName;
         const fileTree = await fetchSkillFiles(resolvedSkillName);
@@ -392,7 +396,7 @@ export default function SkillBuildModal({
           applySkillInfo(skillInfo);
           setSkillTabs(sortedTabs);
           setActiveSkillTab(sortedTabs[0]?.path || "SKILL.md");
-          setLoadedEditSkillId(editingSkill.skill_id);
+          setLoadedEditSkillId(activeEditingSkill.skill_id);
         }
       } catch (error) {
         log.error("Failed to load skill files for editing:", error);
@@ -411,7 +415,7 @@ export default function SkillBuildModal({
     return () => {
       cancelled = true;
     };
-  }, [isOpen, editingSkill?.skill_id]);
+  }, [isOpen, activeEditingSkill?.skill_id]);
 
   const handleNameChange = (event: ChangeEvent<HTMLInputElement>) => {
     const value = event.target.value;
@@ -443,8 +447,8 @@ export default function SkillBuildModal({
         return;
       }
       const values = await form.validateFields();
-      if (isEditMode && editingSkill && onBeforeEditSave) {
-        const shouldContinue = await onBeforeEditSave(editingSkill);
+      if (isEditMode && activeEditingSkill && onBeforeEditSave) {
+        const shouldContinue = await onBeforeEditSave(activeEditingSkill);
         if (!shouldContinue) {
           return;
         }
@@ -471,8 +475,8 @@ export default function SkillBuildModal({
         onSuccess,
         closeModal,
         t,
-        isEditMode && editingSkill?.skill_id
-          ? { mode: "edit", skillId: editingSkill.skill_id }
+        isEditMode && activeEditingSkill?.skill_id
+          ? { mode: "edit", skillId: activeEditingSkill.skill_id }
           : { mode: "create" }
       );
     } catch (error) {
@@ -678,9 +682,9 @@ export default function SkillBuildModal({
   const modalBodyFrame = isMarketMode ? "min(82vh, 820px)" : "min(92vh, 760px)";
   const modalViewportFrame = "calc(100vh - 32px)";
   const editingSkillName =
-    editingSkill?.name?.trim() || interactiveSkillName.trim();
+    activeEditingSkill?.name?.trim() || interactiveSkillName.trim();
   const isEditContentReady =
-    !isEditMode || loadedEditSkillId === editingSkill?.skill_id;
+    !isEditMode || loadedEditSkillId === activeEditingSkill?.skill_id;
 
   const renderUploadTab = () => {
     const existingSkill = allSkills.find(
@@ -1014,6 +1018,19 @@ export default function SkillBuildModal({
             groupSelectOptions={groupSelectOptions}
             defaultGroupIds={accessibleGroupIds}
             onInstalled={onSuccess}
+            onOpenInstalledSkill={(skill) =>
+              setOpenedInstalledSkill({
+                skill_id: skill.skill_id,
+                name: skill.name,
+                description: skill.description,
+                source: skill.source,
+                tags: skill.tags || [],
+                group_ids: skill.group_ids || [],
+                ingroup_permission: skill.ingroup_permission,
+                created_by: skill.created_by,
+                repository_info: [],
+              })
+            }
           />
         </div>
       ) : (

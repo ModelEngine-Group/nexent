@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 import tempfile
 from datetime import datetime
 from pathlib import Path
@@ -154,6 +155,71 @@ class ModelScopeSkillService:
     def get_skill(self, skill_id: str) -> dict[str, Any]:
         return self.adapter.get_skill(skill_id)
 
+    def get_market_skill_detail(
+        self,
+        *,
+        skill_id: str,
+        source: str,
+        user_id: str,
+        tenant_id: str,
+    ) -> dict[str, Any]:
+        """Return a locally installed market skill record, or {} if absent."""
+        record = skill_db.get_skill_by_unique_id_and_owner(
+            unique_id=skill_id,
+            source=source,
+            created_by=user_id,
+            tenant_id=tenant_id,
+        )
+        return record or {}
+
+    def _download_skill_snapshot(
+        self,
+        *,
+        canonical_id: str,
+        tenant_root: Path,
+        local_name: str,
+        description: str,
+        tags: list[str],
+        tenant_id: str,
+    ) -> tuple[Path, dict[str, Any]]:
+        """Download a skill into staging and parse the resulting snapshot."""
+        with tempfile.TemporaryDirectory(
+            prefix=".modelscope-skill-", dir=tenant_root
+        ) as staging_dir:
+            downloaded = self.adapter.download_skill(
+                canonical_id, Path(staging_dir)
+            )
+            _validate_downloaded_directory(downloaded)
+            downloaded_data = _read_directory_skill_data(
+                downloaded,
+                local_name=local_name,
+                description=description,
+                tags=tags,
+                tenant_id=tenant_id,
+            )
+            persistent_staging = tenant_root / f".modelscope-skill-staged-{next(tempfile._get_candidate_names())}"
+            shutil.copytree(downloaded, persistent_staging)
+            return persistent_staging, downloaded_data
+
+    def _replace_local_skill_directory(
+        self, *, destination: Path, downloaded: Path
+    ) -> None:
+        """Replace the local skill directory with a downloaded snapshot."""
+        backup_path = destination.parent / f".modelscope-skill-backup-{next(tempfile._get_candidate_names())}"
+        try:
+            if destination.exists():
+                os.replace(destination, backup_path)
+            shutil.move(str(downloaded), str(destination))
+        except Exception:
+            if destination.exists():
+                shutil.rmtree(destination, ignore_errors=True)
+            if backup_path.exists() and not destination.exists():
+                os.replace(backup_path, destination)
+            raise
+        else:
+            if backup_path.exists():
+                shutil.rmtree(backup_path, ignore_errors=True)
+
     def install_skill(
         self,
         *,
@@ -211,42 +277,104 @@ class ModelScopeSkillService:
         # Insert first so the tenant-unique name is claimed before the download.
         result = skill_db.create_skill(skill_data, tenant_id)
         try:
-            with tempfile.TemporaryDirectory(
-                prefix=".modelscope-skill-", dir=tenant_root
-            ) as staging_dir:
-                downloaded = self.adapter.download_skill(
-                    canonical_id, Path(staging_dir)
+            downloaded, downloaded_data = self._download_skill_snapshot(
+                canonical_id=canonical_id,
+                tenant_root=tenant_root,
+                local_name=local_name,
+                description=description.strip(),
+                tags=tags,
+                tenant_id=tenant_id,
+            )
+            update_data: dict[str, Any] = {
+                "content": downloaded_data.get("content", ""),
+                "tool_ids": downloaded_data.get("tool_ids", []),
+            }
+            if "config_schemas" in downloaded_data:
+                update_data["config_schemas"] = downloaded_data["config_schemas"]
+            if "config_values" in downloaded_data:
+                update_data["config_values"] = downloaded_data["config_values"]
+            result = skill_db.update_skill(
+                local_name,
+                update_data,
+                tenant_id,
+                updated_by=user_id,
+            )
+            try:
+                self._replace_local_skill_directory(
+                    destination=destination, downloaded=downloaded
                 )
-                _validate_downloaded_directory(downloaded)
-                downloaded_data = _read_directory_skill_data(
-                    downloaded,
-                    local_name=local_name,
-                    description=description.strip(),
-                    tags=tags,
-                    tenant_id=tenant_id,
-                )
-                update_data: dict[str, Any] = {
-                    "content": downloaded_data.get("content", ""),
-                    "tool_ids": downloaded_data.get("tool_ids", []),
-                }
-                if "config_schemas" in downloaded_data:
-                    update_data["config_schemas"] = downloaded_data["config_schemas"]
-                if "config_values" in downloaded_data:
-                    update_data["config_values"] = downloaded_data["config_values"]
-                result = skill_db.update_skill(
-                    local_name,
-                    update_data,
-                    tenant_id,
-                    updated_by=user_id,
-                )
-                try:
-                    os.replace(downloaded, destination)
-                except Exception as exc:
-                    raise SkillException(
-                        "Failed to move the downloaded Skill into local storage"
-                    ) from exc
+            except Exception as exc:
+                raise SkillException(
+                    "Failed to move the downloaded Skill into local storage"
+                ) from exc
         except Exception:
             _rollback_created_skill(local_name, tenant_id, user_id)
             raise
 
+        return result
+
+    def update_skill(
+        self,
+        *,
+        skill_id: int,
+        unique_id: str,
+        tenant_id: str,
+        user_id: str,
+    ) -> dict[str, Any]:
+        """Refresh an installed ModelScope skill while preserving local metadata."""
+        existing_skill = skill_db.get_skill_by_id(skill_id, tenant_id)
+        if not existing_skill:
+            raise SkillException(f"Skill not found: {skill_id}")
+        if existing_skill.get("source") != MODELSCOPE_SKILL_SOURCE:
+            raise SkillException("Only ModelScope skills can be updated")
+        if str(existing_skill.get("unique_id") or "").strip() != unique_id:
+            raise SkillException("Skill unique_id does not match installed record")
+
+        local_name = str(existing_skill.get("name") or "").strip()
+        if not local_name:
+            raise SkillException(f"Skill name is missing: {skill_id}")
+
+        tenant_root = Path(
+            self.skill_manager.resolve_tenant_dir(tenant_id=tenant_id)
+        ).resolve()
+        tenant_root.mkdir(parents=True, exist_ok=True)
+        destination = Path(_resolve_local_skill_path(str(tenant_root), local_name))
+        if not destination.exists():
+            raise SkillException(f"Skill directory not found: {local_name}")
+
+        source_skill = self.adapter.get_skill(unique_id)
+        canonical_id = source_skill["skill_id"]
+
+        downloaded, downloaded_data = self._download_skill_snapshot(
+            canonical_id=canonical_id,
+            tenant_root=tenant_root,
+            local_name=local_name,
+            description=str(source_skill.get("description") or ""),
+            tags=list(existing_skill.get("tags") or []),
+            tenant_id=tenant_id,
+        )
+        update_data: dict[str, Any] = {
+            "content": downloaded_data.get("content", ""),
+            "tool_ids": downloaded_data.get("tool_ids", []),
+            "version_update_time": datetime.now(),
+        }
+        if "config_schemas" in downloaded_data:
+            update_data["config_schemas"] = downloaded_data["config_schemas"]
+        if "config_values" in downloaded_data:
+            update_data["config_values"] = downloaded_data["config_values"]
+
+        result = skill_db.update_skill_by_id(
+            skill_id,
+            update_data,
+            tenant_id,
+            updated_by=user_id,
+        )
+        try:
+            self._replace_local_skill_directory(
+                destination=destination, downloaded=downloaded
+            )
+        except Exception as exc:
+            raise SkillException(
+                "Failed to move the downloaded Skill into local storage"
+            ) from exc
         return result

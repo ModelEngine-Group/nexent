@@ -233,6 +233,7 @@ def _build_skill_update_values(
         "tags": "skill_tags",
         "source": "source",
         "ingroup_permission": "ingroup_permission",
+        "version_update_time": "version_update_time",
     }
     for input_field, model_field in field_mapping.items():
         if input_field in skill_data:
@@ -352,6 +353,29 @@ def get_skill_by_name(skill_name: str, tenant_id: str) -> Optional[Dict[str, Any
             SkillInfo.skill_name == skill_name,
             SkillInfo.tenant_id == tenant_id,
             SkillInfo.delete_flag != 'Y'
+        ).first()
+        if skill:
+            result = _to_dict(skill)
+            result["tool_ids"] = _get_tool_ids(session, skill.skill_id)
+            return result
+        return None
+
+
+def get_skill_by_unique_id_and_owner(
+    *,
+    unique_id: str,
+    source: str,
+    created_by: str,
+    tenant_id: str,
+) -> Optional[Dict[str, Any]]:
+    """Get a tenant skill by external unique_id, source, and creator."""
+    with get_db_session() as session:
+        skill = session.query(SkillInfo).filter(
+            SkillInfo.unique_id == unique_id,
+            SkillInfo.source == source,
+            SkillInfo.created_by == created_by,
+            SkillInfo.tenant_id == tenant_id,
+            SkillInfo.delete_flag != 'Y',
         ).first()
         if skill:
             result = _to_dict(skill)

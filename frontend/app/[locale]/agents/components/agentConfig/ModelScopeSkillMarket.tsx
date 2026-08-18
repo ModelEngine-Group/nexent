@@ -31,8 +31,11 @@ import {
   fetchModelScopeSkillDetail,
   fetchModelScopeSkills,
   installModelScopeSkill,
+  parseInstalledMarketSkill,
+  updateModelScopeSkill,
 } from "@/services/modelscopeSkillService";
 import type {
+  InstalledMarketSkill,
   ModelScopeMarketListResponse,
   ModelScopeMarketSkill,
   ModelScopeSkillInstallPayload,
@@ -57,10 +60,12 @@ interface ModelScopeSkillMarketProps {
   groupSelectOptions: Array<{ label: string; value: number }>;
   defaultGroupIds: number[];
   onInstalled: () => void | Promise<void>;
+  onOpenInstalledSkill: (skill: InstalledMarketSkill) => void;
 }
 
 function getMetadataTag(skill: ModelScopeMarketSkill, prefix: string) {
-  return skill.tags
+  return (skill.tags ?? [])
+    .filter((tag): tag is string => typeof tag === "string")
     .find((tag) => tag.toLowerCase().startsWith(`${prefix}:`))
     ?.slice(prefix.length + 1)
     .trim();
@@ -69,7 +74,7 @@ function getMetadataTag(skill: ModelScopeMarketSkill, prefix: string) {
 function getAuthor(skill: ModelScopeMarketSkill) {
   const developer = getMetadataTag(skill, "developer");
   if (developer) return developer;
-  return skill.skill_id.split("/")[0]?.replace(/^@/, "") || "ModelScope";
+  return String(skill.skill_id).split("/")[0]?.replace(/^@/, "") || "ModelScope";
 }
 
 function getCategory(skill: ModelScopeMarketSkill) {
@@ -81,7 +86,8 @@ function getVisibleTags(skill: ModelScopeMarketSkill) {
   const visibleTags: string[] = [];
   const seenTags = new Set<string>();
 
-  skill.tags.forEach((tag) => {
+  (skill.tags ?? []).forEach((tag) => {
+    if (typeof tag !== "string") return;
     const trimmedTag = tag.trim();
     const normalized = trimmedTag.toLowerCase();
     if (
@@ -114,15 +120,53 @@ function getCategoryStyle(category: string) {
   return CATEGORY_COLORS[index % CATEGORY_COLORS.length];
 }
 
-function formatDownloads(downloads: number, isChinese: boolean) {
-  if (isChinese && downloads >= 10_000) {
-    const value = (downloads / 10_000).toFixed(1).replace(/\.0$/, "");
-    return `${value}w`;
+function mergeMarketSkillDetail(
+  marketSkill: ModelScopeMarketSkill,
+  localRecord: InstalledMarketSkill | Record<string, never>
+): ModelScopeMarketSkill {
+  if (Object.keys(localRecord).length === 0) {
+    return marketSkill;
   }
-  if (!isChinese && downloads >= 1_000) {
-    return `${(downloads / 1_000).toFixed(1).replace(/\.0$/, "")}K`;
+  const localName =
+    "name" in localRecord && typeof localRecord.name === "string"
+      ? localRecord.name.trim()
+      : "";
+  const localDescription =
+    "description" in localRecord && typeof localRecord.description === "string"
+      ? localRecord.description
+      : undefined;
+  return {
+    ...marketSkill,
+    name: localName || marketSkill.name,
+    description:
+      localDescription === undefined
+        ? marketSkill.description
+        : localDescription,
+  };
+}
+
+function formatDownloads(downloads: number): string {
+  const count = Number.isFinite(downloads) ? downloads : 0;
+  if (count < 1000) {
+    return String(Math.trunc(count));
   }
-  return downloads.toLocaleString();
+  return `${(count / 1000).toFixed(1)}k`;
+}
+
+function parseTimestamp(value: string | null | undefined): number | null {
+  if (!value) return null;
+  const timestamp = Date.parse(value);
+  return Number.isNaN(timestamp) ? null : timestamp;
+}
+
+function shouldShowUpdateButton(
+  marketSkill: ModelScopeMarketSkill | null,
+  localSkill: InstalledMarketSkill | null
+): boolean {
+  if (!marketSkill || !localSkill) return false;
+  const marketTimestamp = parseTimestamp(marketSkill.last_modified);
+  const localTimestamp = parseTimestamp(localSkill.version_update_time);
+  return marketTimestamp !== null && localTimestamp !== null && localTimestamp < marketTimestamp;
 }
 
 function getPaginationItems(
@@ -161,6 +205,7 @@ export default function ModelScopeSkillMarket({
   groupSelectOptions,
   defaultGroupIds,
   onInstalled,
+  onOpenInstalledSkill,
 }: ModelScopeSkillMarketProps) {
   const { t, i18n } = useTranslation("common");
   const [installForm] = Form.useForm<ModelScopeSkillInstallPayload>();
@@ -173,11 +218,14 @@ export default function ModelScopeSkillMarket({
   const [data, setData] = useState<ModelScopeMarketListResponse | null>(null);
   const [detail, setDetail] = useState<ModelScopeMarketSkill | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [installedSkill, setInstalledSkill] =
+    useState<InstalledMarketSkill | null>(null);
   const detailRequestId = useRef(0);
   const [installingSkill, setInstallingSkill] =
     useState<ModelScopeMarketSkill | null>(null);
   const [installing, setInstalling] = useState(false);
-  const isChinese = !i18n.language?.startsWith("en");
+  const [updating, setUpdating] = useState(false);
+  const showUpdateButton = shouldShowUpdateButton(detail, installedSkill);
 
   useEffect(() => {
     let cancelled = false;
@@ -215,11 +263,13 @@ export default function ModelScopeSkillMarket({
   const openDetail = async (skill: ModelScopeMarketSkill) => {
     const requestId = ++detailRequestId.current;
     setDetail(skill);
+    setInstalledSkill(null);
     setDetailLoading(true);
     try {
       const result = await fetchModelScopeSkillDetail(skill.skill_id);
       if (requestId === detailRequestId.current) {
-        setDetail(result);
+        setDetail(mergeMarketSkillDetail(skill, result));
+        setInstalledSkill(parseInstalledMarketSkill(result));
       }
     } catch (requestError) {
       if (requestId === detailRequestId.current) {
@@ -236,13 +286,14 @@ export default function ModelScopeSkillMarket({
   const closeDetail = () => {
     detailRequestId.current += 1;
     setDetail(null);
+    setInstalledSkill(null);
     setDetailLoading(false);
   };
 
   const openInstall = (skill: ModelScopeMarketSkill) => {
     setInstallingSkill(skill);
     installForm.setFieldsValue({
-      skill_id: skill.skill_id,
+      unique_id: skill.skill_id,
       name: skill.name,
       description: skill.description,
       tags: getVisibleTags(skill),
@@ -263,7 +314,7 @@ export default function ModelScopeSkillMarket({
       setInstalling(true);
       await installModelScopeSkill({
         ...values,
-        skill_id: installingSkill.skill_id,
+        unique_id: installingSkill.skill_id,
       });
       message.success(t("skillManagement.market.installSuccess"));
       closeInstall();
@@ -289,6 +340,28 @@ export default function ModelScopeSkillMarket({
       }
     } finally {
       setInstalling(false);
+    }
+  };
+
+  const submitUpdate = async () => {
+    if (!installedSkill || !detail) return;
+    try {
+      setUpdating(true);
+      const result = await updateModelScopeSkill({
+        skill_id: installedSkill.skill_id,
+        unique_id: detail.skill_id,
+      });
+      const parsed = parseInstalledMarketSkill(result);
+      if (parsed) {
+        setInstalledSkill(parsed);
+      }
+      message.success(t("skillManagement.market.updateSuccess"));
+      await onInstalled();
+    } catch (requestError) {
+      log.error("Failed to update ModelScope Skill", requestError);
+      message.error(t("skillManagement.market.updateFailed"));
+    } finally {
+      setUpdating(false);
     }
   };
 
@@ -322,7 +395,7 @@ export default function ModelScopeSkillMarket({
           {visibleTags.map((tag) => (
             <Tag
               key={tag}
-              bordered={false}
+              variant="filled"
               className="m-0 bg-slate-100 text-slate-500"
             >
               <span className="inline-flex items-center gap-1">
@@ -339,8 +412,7 @@ export default function ModelScopeSkillMarket({
           </span>
           <span className="inline-flex shrink-0 items-center gap-1.5">
             <Download size={13} />
-            {formatDownloads(skill.downloads, isChinese)}{" "}
-            {t("skillManagement.market.downloadUnit")}
+            {formatDownloads(skill.downloads)}
           </span>
         </div>
       </button>
@@ -484,16 +556,32 @@ export default function ModelScopeSkillMarket({
                 <Button key="close" onClick={closeDetail}>
                   {t("common.close")}
                 </Button>,
-                <Button
-                  key="install"
-                  type="primary"
-                  onClick={() => {
-                    openInstall(detail);
-                    closeDetail();
-                  }}
-                >
-                  {t("skillManagement.market.install")}
-                </Button>,
+                installedSkill ? (
+                  <Button
+                    key="open"
+                    type="primary"
+                    loading={detailLoading}
+                    onClick={() => {
+                      const skillToOpen = installedSkill;
+                      closeDetail();
+                      onOpenInstalledSkill(skillToOpen);
+                    }}
+                  >
+                    {t("skillManagement.market.open")}
+                  </Button>
+                ) : (
+                  <Button
+                    key="install"
+                    type="primary"
+                    loading={detailLoading}
+                    onClick={() => {
+                      openInstall(detail);
+                      closeDetail();
+                    }}
+                  >
+                    {t("skillManagement.market.install")}
+                  </Button>
+                ),
               ]
             : null
         }
@@ -517,8 +605,7 @@ export default function ModelScopeSkillMarket({
                     {t("skillManagement.market.downloads")}
                   </div>
                   <div className="mt-2 font-medium text-slate-800 dark:text-slate-100">
-                    {formatDownloads(detail.downloads, isChinese)}{" "}
-                    {t("skillManagement.market.times")}
+                    {formatDownloads(detail.downloads)}
                   </div>
                 </div>
                 <div>
@@ -526,12 +613,24 @@ export default function ModelScopeSkillMarket({
                     <Clock3 size={16} />
                     {t("skillManagement.market.lastModified")}
                   </div>
-                  <div className="mt-2 font-medium text-slate-800 dark:text-slate-100">
-                    {detail.last_modified
-                      ? new Date(detail.last_modified).toLocaleDateString(
-                          i18n.language
-                        )
-                      : "-"}
+                  <div className="mt-2 flex items-center gap-2 font-medium text-slate-800 dark:text-slate-100">
+                    <span>
+                      {detail.last_modified
+                        ? new Date(detail.last_modified).toLocaleDateString(
+                            i18n.language
+                          )
+                        : "-"}
+                    </span>
+                    {showUpdateButton ? (
+                      <Button
+                        size="small"
+                        type="primary"
+                        loading={updating}
+                        onClick={() => void submitUpdate()}
+                      >
+                        {t("skillManagement.market.update")}
+                      </Button>
+                    ) : null}
                   </div>
                 </div>
               </div>
@@ -551,7 +650,7 @@ export default function ModelScopeSkillMarket({
                   {getVisibleTags(detail).map((tag) => (
                     <Tag
                       key={tag}
-                      bordered={false}
+                      variant="filled"
                       className="m-0 bg-slate-100 text-slate-500"
                     >
                       <span className="inline-flex items-center gap-1">
@@ -597,7 +696,7 @@ export default function ModelScopeSkillMarket({
           preserve={false}
           className="pt-4"
         >
-          <Form.Item name="skill_id" hidden>
+          <Form.Item name="unique_id" hidden>
             <Input />
           </Form.Item>
           <Form.Item

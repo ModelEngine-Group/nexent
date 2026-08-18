@@ -726,6 +726,20 @@ async def list_models_for_tenant(tenant_id: str):
         raise Exception(f"Failed to retrieve model list: {str(e)}")
 
 
+async def list_northbound_models_for_tenant(tenant_id: str) -> List[Dict[str, Any]]:
+    """Return tenant models with only fields needed by the northbound API."""
+    models = await list_models_for_tenant(tenant_id)
+    return [
+        {
+            "model_id": model["model_id"],
+            "model_name": model["model_name"],
+            "model_type": model["model_type"],
+            "display_name": model["display_name"],
+        }
+        for model in models
+    ]
+
+
 async def list_llm_models_for_tenant(tenant_id: str):
     """Get detailed information for all models for a tenant with normalized fields."""
     try:

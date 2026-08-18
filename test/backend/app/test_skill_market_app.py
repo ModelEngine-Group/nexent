@@ -59,12 +59,40 @@ def test_list_market_skills_maps_provider_failure_to_bad_gateway(client, market_
     assert response.json()["detail"] == "market unavailable"
 
 
-def test_detail_maps_missing_skill_to_not_found(client, market_service):
-    market_service.get_skill.side_effect = ModelScopeSkillNotFoundError("not found")
+def test_detail_returns_empty_object_when_not_installed(client, market_service):
+    market_service.get_market_skill_detail.return_value = {}
 
-    response = client.get("/skills/market/detail", params={"skill_id": "@owner/missing"})
+    response = client.get(
+        "/skills/market/detail",
+        params={"skill_id": "@owner/missing", "source": "modelscope"},
+    )
 
-    assert response.status_code == 404
+    assert response.status_code == 200
+    assert response.json() == {}
+    market_service.get_market_skill_detail.assert_called_once_with(
+        skill_id="@owner/missing",
+        source="modelscope",
+        user_id="user-a",
+        tenant_id="tenant-a",
+    )
+
+
+def test_detail_returns_installed_skill_record(client, market_service):
+    market_service.get_market_skill_detail.return_value = {
+        "skill_id": 12,
+        "name": "local-demo",
+        "source": "modelscope",
+        "unique_id": "@owner/demo",
+    }
+
+    response = client.get(
+        "/skills/market/detail",
+        params={"skill_id": "@owner/demo", "source": "modelscope"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["skill_id"] == 12
+    assert response.json()["name"] == "local-demo"
 
 
 def test_install_market_skill_uses_authenticated_identity(client, market_service):
@@ -74,7 +102,7 @@ def test_install_market_skill_uses_authenticated_identity(client, market_service
         "source": "modelscope",
     }
     payload = {
-        "skill_id": "@owner/demo",
+        "unique_id": "@owner/demo",
         "name": " local-demo ",
         "description": "Editable description",
         "tags": [" demo "],
@@ -105,7 +133,7 @@ def test_install_market_skill_maps_name_conflict(client, market_service):
     response = client.post(
         "/skills/market/install",
         json={
-            "skill_id": "@owner/demo",
+            "unique_id": "@owner/demo",
             "name": "local-demo",
             "description": "",
             "tags": [],
@@ -113,6 +141,27 @@ def test_install_market_skill_maps_name_conflict(client, market_service):
     )
 
     assert response.status_code == 409
+
+
+def test_update_market_skill_uses_authenticated_identity(client, market_service):
+    market_service.update_skill.return_value = {
+        "skill_id": 12,
+        "name": "local-demo",
+        "source": "modelscope",
+    }
+
+    response = client.post(
+        "/skills/market/update",
+        json={"skill_id": 12, "unique_id": "@owner/demo"},
+    )
+
+    assert response.status_code == 200
+    market_service.update_skill.assert_called_once_with(
+        skill_id=12,
+        unique_id="@owner/demo",
+        tenant_id="tenant-a",
+        user_id="user-a",
+    )
 
 
 def test_market_rejects_invalid_pagination_before_service(client, market_service):
