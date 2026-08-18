@@ -1,7 +1,7 @@
 # NL2Agent 能力发现、安装、绑定与 Agent 草稿设计方案
 
 > 日期：2026-08-17  
-> 状态：需求澄清中，作为当前开发设计基线  
+> 状态：第一阶段实现中，作为当前开发设计基线
 > 历史方案：`2026-08-11-nl2agent-capability-design-handoff.md` 仅保留作决策演进记录  
 > 前端示意：`2026-08-12-nl2agent-card-prototype.html`
 
@@ -21,6 +21,16 @@
 10. 前端不展示推荐百分比，只展示“推荐/可选”和需求对应关系。
 
 本文仍是本地设计 handoff。正式编码前，应按项目 `spec-coding` 流程将最终需求、功能设计、技术设计和开发计划同步到 Nexent Development SPECs Wiki。
+
+### 0.1 第一阶段实现边界
+
+第一阶段不迁移到 `/newagents`，继续使用当前 `/agents`、`useAgentConfigStore` 和现有手动保存语义。实现顺序固定为：
+
+1. Gate 0 默认恢复旧 `Nl2AgentChatPanel` 和旧三栏布局。
+2. PR1 开放需求澄清、`save_agent_draft_fields` 与扩展后的 `nl2a_wrapper`。
+3. 资源发现、安装、绑定和最终确认卡保留本文契约，但在后续 PR 实现。
+
+旧 `local_mcp_recommendation`、`agent_draft` 和 `/agent/nl2agent/run` payload 在第一阶段保持兼容。旧推荐卡继续整体替换当前工具列表，旧 Draft 卡继续整体更新当前表单字段；除 PR1 的受限草稿写库外，普通表单仍由用户点击现有保存按钮持久化。
 
 ---
 
@@ -165,11 +175,13 @@ searchAgentInfo(agent_id)
 
 同步时点：
 
-1. Agent 草稿创建后，第一张资源卡出现时。
+1. Agent 草稿创建成功后，收到后端生成的 `agent_draft_created` 状态事件时立即同步，不等待下一张资源卡。
 2. 绑定卡成功继续后。
 3. 最终确认卡出现时。
 
 Agent 草稿创建后，前端立即从创建模式切换为编辑模式。NL2Agent 流程进行期间普通 Agent 编辑表单只读，最终确认结束流程后恢复编辑；对话面板保持打开，但 Composer 进入禁用状态。
+
+PR1 只实现第一个同步时点。页面执行 `searchAgentInfo(agent_id) → setCurrentAgent()`，并刷新 Agent、ToolInstance 和 SkillInstance 查询。该创建模式到编辑模式的身份升级必须保留当前临时对话；用户选择其他 Agent 或再次点击“新建”则重置对话。
 
 ---
 
@@ -671,6 +683,24 @@ MCP 官方 Registry 当前不存在独立的任意 Docker 镜像安装分支。`
 
 ## 8. `<nl2a>` 卡片与 action 协议
 
+### 8.0 草稿身份同步事件
+
+Agent 草稿创建不是交互卡，使用独立 SSE 类型同步真实身份：
+
+```json
+{
+  "type": "nl2a_state",
+  "content": {
+    "event": "agent_draft_created",
+    "agent_id": 1042
+  }
+}
+```
+
+该事件只能由 `save_agent_draft_fields(agent_id=null)` 成功结果中的专用 `<nl2a_state>` 标记触发。SDK Observer 只从 Tool execution log 提取并移除该标记，拒绝非法结构，并对同一创建事件去重；模型普通输出不能触发事件。更新已有草稿不发送该事件。
+
+前端 adapter 校验事件后通过 `Nl2AgentChatPanel` 回调通知 `/agents` 页面。事件不写入消息卡 metadata，不创建可见消息，也不进入 Zustand 或数据库中的流程状态。
+
 ### 8.1 四种卡片 subtype
 
 ```text
@@ -690,6 +720,8 @@ final_confirmation
 ```
 
 澄清卡 `agent_id=null`；其余卡片 `agent_id` 必须为正整数。
+
+PR1 只新增 `requirement_clarification` 渲染和 action；另外三种新卡在后续 PR 实现。旧 `local_mcp_recommendation` 与 `agent_draft` 分支在过渡期继续可解析和渲染。
 
 ### 8.2 一轮一张卡
 
