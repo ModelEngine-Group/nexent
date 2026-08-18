@@ -4100,3 +4100,63 @@ class TestKnowledgeAgnosticPromptRules(unittest.TestCase):
         feedback = adapter.optimize.call_args.kwargs["feedback"]
         self.assertIn("Improve it", feedback)
         self.assertIn("fixed kds_list", feedback)
+
+
+def test_join_info_for_optimize_prompt_section_full_context(mocker):
+    """Full tool/sub-agent rendering exercises knowledge capability flags and the scope instruction."""
+    from jinja2 import Template as JinjaTemplate
+
+    render_kwargs = {}
+    mocked_template = MagicMock()
+    mocked_template.render = MagicMock(side_effect=lambda *args, **kwargs: render_kwargs.update(kwargs or (args[0] if args else {})) or "rendered")
+
+    prompt_for_optimize = {
+        "OPTIMIZE_USER_PROMPT": "{{ section_type }} {{ task_description }} {{ tool_description }} {{ has_local_knowledge_tool }} {{ has_aidp_knowledge_tool }}"
+    }
+    with mocker.patch("backend.services.prompt_service.Template", return_value=mocked_template):
+        result = join_info_for_optimize_prompt_section(
+            prompt_for_optimize=prompt_for_optimize,
+            section_type="constraint",
+            section_title="section-title",
+            task_description="task",
+            current_content="body",
+            feedback="fb",
+            tool_info_list=[
+                {"name": "knowledge_base_search", "description": "kb tool", "inputs": "{}", "output_type": "string"},
+                {"name": "aidp_search", "description": "aidp tool", "inputs": "{}", "output_type": "string"},
+            ],
+            sub_agent_info_list=[{"name": "sub-1", "description": "sub desc"}],
+            language="zh",
+            knowledge_base_display_names=["KB 1"],
+            aidp_kb_display_names=["AIDP 1"],
+        )
+
+    assert result == "rendered"
+    assert render_kwargs["has_local_knowledge_tool"] is True
+    assert render_kwargs["has_aidp_knowledge_tool"] is True
+    assert "knowledge_base_search" in render_kwargs["tool_description"]
+    assert "优化后的内容不得新增或保留具体知识库名称" in render_kwargs["tool_description"]
+
+
+def test_join_info_for_optimize_prompt_section_english_scope_instruction(mocker):
+    from jinja2 import Template as JinjaTemplate
+
+    render_kwargs = {}
+    mocked_template = MagicMock()
+    mocked_template.render = MagicMock(side_effect=lambda *args, **kwargs: render_kwargs.update(kwargs or (args[0] if args else {})) or "ok")
+
+    with mocker.patch("backend.services.prompt_service.Template", return_value=mocked_template):
+        join_info_for_optimize_prompt_section(
+            prompt_for_optimize={"OPTIMIZE_USER_PROMPT": "{{ tool_description }}"},
+            section_type="constraint",
+            section_title="t",
+            task_description="task",
+            current_content="c",
+            feedback="f",
+            tool_info_list=[{"name": "t1", "description": "d", "inputs": "{}", "output_type": "string"}],
+            sub_agent_info_list=[],
+            language="en",
+        )
+
+    assert "Inputs" in render_kwargs["tool_description"]
+    assert "must not add or retain concrete knowledge base names" in render_kwargs["tool_description"]

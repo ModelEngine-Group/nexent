@@ -1126,3 +1126,20 @@ def test_get_agent_knowledge_bases_internal_error():
         )
 
         assert resp.status_code == 500
+
+
+def test_get_agent_knowledge_bases_http_exception_passthrough():
+    """HTTPException raised earlier in the call chain is re-raised unchanged."""
+    from fastapi import HTTPException
+
+    with patch('apps.northbound_app._get_northbound_context', new_callable=AsyncMock) as mock_ctx,             patch('apps.northbound_app.get_agent_knowledge_bases_for_northbound', new_callable=AsyncMock) as mock_get:
+        mock_ctx.return_value = MagicMock()
+        mock_get.side_effect = HTTPException(status_code=403, detail="forbidden")
+
+        resp = client.get(
+            "/nb/v1/agents/agent1/knowledge-bases",
+            headers=_build_headers(),
+        )
+
+        assert resp.status_code == 403
+        assert resp.json()["detail"] == "forbidden"

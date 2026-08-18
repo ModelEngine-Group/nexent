@@ -697,3 +697,75 @@ class TestGetKdsNameToIdMap:
         result = svc.get_kds_name_to_id_map("u", "t")
         assert result["Alpha"] == "kb-100"
         assert result["Beta"] == "kb-200"
+
+
+# --- intersect_accessible_kbs -------------------------------------------------
+
+
+class TestIntersectAccessibleKbs:
+    def test_order_follows_remote_and_merges_protected_fields(self, patched):
+        local_rows = [
+            {
+                "kb_id": "k1", "kds_name": "Local KB 1", "tenant_id": "t",
+                "owner_user_id": "owner", "ingroup_permission": "READ_ONLY",
+                "group_ids": [1], "permission": "READ",
+            },
+            {
+                "kb_id": "k2", "kds_name": "Local KB 2", "tenant_id": "t",
+                "owner_user_id": "owner", "ingroup_permission": "PRIVATE",
+                "group_ids": [], "permission": "EDIT",
+            },
+        ]
+        with patch.object(svc, "_compute_accessible_rows", return_value=local_rows):
+            remote = [
+                {"kds_id": "k1", "kds_name": "Remote KB 1"},
+                {"kds_id": "k2", "kds_name": "Remote KB 2"},
+            ]
+            result = svc.intersect_accessible_kbs(remote, "u", "t")
+
+        assert [r["kds_id"] for r in result] == ["k1", "k2"]
+        assert result[0]["kds_name"] == "Remote KB 1"
+        assert result[0]["tenant_id"] == "t"
+        assert result[0]["owner_user_id"] == "owner"
+        assert result[0]["kb_id"] == "k1"
+        assert result[0]["kds_id"] == "k1"
+
+    def test_skips_missing_ids_and_permissionless(self, patched):
+        with patch.object(svc, "_compute_accessible_rows", return_value=[]):
+            remote = [
+                None,
+                {"kds_name": "no id"},
+                {"kds_id": "k1"},  # no local permission
+            ]
+            assert svc.intersect_accessible_kbs(remote, "u", "t") == []
+
+    def test_dedupes_remote_ids(self, patched):
+        local_rows = [
+            {
+                "kb_id": "k1", "kds_name": "Local", "tenant_id": "t",
+                "owner_user_id": "o", "ingroup_permission": "PUBLIC",
+                "group_ids": [], "permission": "READ",
+            }
+        ]
+        with patch.object(svc, "_compute_accessible_rows", return_value=local_rows):
+            remote = [
+                {"kds_id": "k1"},
+                {"id": "k1"},
+            ]
+            result = svc.intersect_accessible_kbs(remote, "u", "t")
+
+        assert len(result) == 1
+        assert result[0]["kds_id"] == "k1"
+
+    def test_treats_int_id_as_string(self, patched):
+        local_rows = [
+            {
+                "kb_id": "7", "kds_name": "Local", "tenant_id": "t",
+                "owner_user_id": "o", "ingroup_permission": "PUBLIC",
+                "group_ids": [], "permission": "READ",
+            }
+        ]
+        with patch.object(svc, "_compute_accessible_rows", return_value=local_rows):
+            result = svc.intersect_accessible_kbs([{"kds_id": 7}], "u", "t")
+
+        assert result[0]["kds_id"] == "7"
