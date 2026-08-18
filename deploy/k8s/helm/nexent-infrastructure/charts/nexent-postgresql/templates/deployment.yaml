@@ -33,7 +33,7 @@ spec:
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: nexent-secrets
+                  name: nexent-infrastructure-secrets
                   key: NEXENT_POSTGRES_PASSWORD
             - name: POSTGRES_DB
               value: {{ .Values.config.db | quote }}
@@ -58,4 +58,4 @@ spec:
             claimName: {{ default "nexent-postgresql" .Values.persistence.existingClaim }}
         - name: nexent-sql-files
           configMap:
-            name: nexent-sql-files
+            name: nexent-infrastructure-sql

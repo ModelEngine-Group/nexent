@@ -58,7 +58,7 @@ spec:
             - name: ELASTIC_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: nexent-secrets
+                  name: nexent-infrastructure-secrets
                   key: ELASTIC_PASSWORD
             - name: ELASTIC_USERNAME
               value: "elastic"
