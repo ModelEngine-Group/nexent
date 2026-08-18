@@ -842,7 +842,7 @@ export default function AgentGenerateDetail({}) {
                     }}
                     autoSize={false}
                     disabled={!editable || isGenerating}
-                    onBlur={(e) => handleBusinessDescriptionChange(e.target.value)}
+                    onChange={(e) => handleBusinessDescriptionChange(e.target.value)}
                   />
                 </Form.Item>
 
