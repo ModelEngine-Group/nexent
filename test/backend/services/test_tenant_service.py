@@ -26,7 +26,12 @@ patch('nexent.storage.minio_config.MinIOStorageConfig.validate',
 patch('backend.database.client.MinioClient',
       return_value=minio_client_mock).start()
 
-from consts.exceptions import ForbiddenError, ValidationError, NotFoundException
+from consts.exceptions import (
+    ForbiddenError,
+    NotFoundException,
+    TenantResourceLimitError,
+    ValidationError,
+)
 from backend.services.tenant_service import (
     get_tenant_info,
     get_tenant_info_for_user,
@@ -470,6 +475,23 @@ class TestCreateTenant:
         with patch('backend.services.tenant_service.check_tenant_name_exists', return_value=False):
             with pytest.raises(ValidationError, match="maximum 1 tenants"):
                 create_tenant(tenant_name, user_id)
+
+    def test_create_tenant_preserves_structured_limit_error(self, service_mocks):
+        """Tenant limits must reach the API layer with code and metadata intact."""
+        tenant_name = "New Tenant"
+        user_id = "creator_user"
+        service_mocks['create_tenant_with_default_group'].side_effect = TenantResourceLimitError(
+            "Tenant limit reached: maximum 1 tenants",
+            "tenant",
+            1,
+        )
+
+        with patch('backend.services.tenant_service.check_tenant_name_exists', return_value=False):
+            with pytest.raises(TenantResourceLimitError) as exc_info:
+                create_tenant(tenant_name, user_id)
+
+        assert exc_info.value.code == "TENANT_RESOURCE_LIMIT_REACHED"
+        assert exc_info.value.to_detail()["data"] == {"resource": "tenant", "limit": 1}
 
     def test_create_tenant_uuid_collision(self, service_mocks):
         """Test create_tenant when UUID collision occurs (unlikely but possible)"""

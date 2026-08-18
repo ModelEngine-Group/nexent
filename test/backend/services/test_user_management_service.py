@@ -46,6 +46,7 @@ from consts.exceptions import (
     IncorrectInviteCodeException,
     UserRegistrationException,
     UnauthorizedError,
+    TenantResourceLimitError,
     AppException,
     ValidationError,
 )
@@ -588,6 +589,49 @@ class TestCheckAuthServiceHealth(unittest.IsolatedAsyncioTestCase):
 
 class TestSignupUserWithInvitation(unittest.IsolatedAsyncioTestCase):
     """Test signup_user_with_invitation"""
+
+    @patch('backend.services.user_management_service.get_supabase_admin_client')
+    @patch('backend.services.user_management_service.insert_user_tenant')
+    @patch('backend.services.user_management_service.get_invitation_by_code')
+    @patch('backend.services.user_management_service.check_invitation_available')
+    @patch('backend.services.user_management_service.get_supabase_client')
+    async def test_signup_cleans_up_auth_user_when_tenant_relationship_fails(
+        self,
+        mock_get_client,
+        mock_check_available,
+        mock_get_invite_code,
+        mock_insert_tenant,
+        mock_get_admin_client,
+    ):
+        """A failed local relationship write must not leave an auth-only user."""
+        mock_client = MagicMock()
+        mock_user = MagicMock(id="user-limit")
+        mock_response = MagicMock(user=mock_user)
+        mock_client.auth.sign_up.return_value = mock_response
+        mock_get_client.return_value = mock_client
+
+        mock_check_available.return_value = True
+        mock_get_invite_code.return_value = {
+            "code_type": "DEV_INVITE",
+            "group_ids": [],
+            "tenant_id": "tenant-limit",
+        }
+        mock_insert_tenant.side_effect = TenantResourceLimitError(
+            "Tenant user limit reached: maximum 1 users per tenant",
+            "user",
+            1,
+        )
+        mock_admin_client = MagicMock()
+        mock_get_admin_client.return_value = mock_admin_client
+
+        with self.assertRaises(TenantResourceLimitError):
+            await signup_user_with_invitation(
+                "limit@example.com",
+                "Password123",
+                invite_code="DEV123",
+            )
+
+        mock_admin_client.auth.admin.delete_user.assert_called_once_with("user-limit")
 
     @patch('backend.services.user_management_service.add_user_to_groups')
     @patch('backend.services.user_management_service.parse_supabase_response')
