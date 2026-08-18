@@ -18,12 +18,14 @@ from tool_collection.mcp.nl2agent_mcp_tools import (
     Nl2aAgentDraftInput,
     Nl2aFewShotToolCall,
     RecommendResourcesInput,
+    RECOMMEND_RESOURCES_NAME,
     RequirementClarificationQuestion,
     RequirementClarificationPayload,
     ResourceRequirement,
+    ResourceCandidate,
     SearchInstalledResourcesInput,
     SearchUninstalledResourcesInput,
-    SEARCH_INSTALLED_MCP_TOOLS_NAME,
+    SEARCH_INSTALLED_RESOURCES_NAME,
     SAVE_AGENT_DRAFT_FIELDS_NAME,
     build_nl2a_wrapper,
 )
@@ -91,18 +93,18 @@ def _agent_draft_input(**overrides):
         (
             "zh",
             "### 核心职责",
-            "MCP 工具返回 JSON 文本",
-            "中文关键词搜索成功但没有候选结果时",
-            "只有处理当前",
+            "不要改写 `candidates`",
+            "不得调用未安装资源搜索",
+            "只有处理旧",
             "选择工具时生成恰好 2",
             "思考：",
         ),
         (
             "en",
             "### Core Responsibilities",
-            "MCP tool returns JSON text",
-            "successful Chinese-keyword search returns no candidates",
-            "only while processing the current",
+            "Do not rewrite candidate identities",
+            "Never split the requirements",
+            "only for a current",
             "selected tool set produces exactly 2",
             "Think:",
         ),
@@ -128,7 +130,7 @@ def test_build_nl2agent_system_prompt_is_runtime_specific(
     assert "runtime_search" in prompt
     assert "runtime_wrapper" in prompt
     assert "3" in prompt
-    assert "keywords" in prompt
+    assert "requirements" in prompt
     assert "nl2agent_tool_selection" in prompt
     assert "few_shot_examples" in prompt
     assert "greeting_message" in prompt
@@ -150,13 +152,14 @@ def test_build_nl2agent_system_prompt_is_runtime_specific(
     assert "</nl2a>" not in prompt
     assert "final_answer(" not in prompt
     assert 'subtype="local_mcp_recommendation"' in prompt
+    assert 'subtype="installed_resource_binding"' in prompt
     assert 'subtype="requirement_clarification"' in prompt
     assert 'subtype="agent_draft"' in prompt
     assert "save_agent_draft_fields" in prompt
-    assert 'result = json.loads(runtime_search(keywords=[' in prompt
+    assert "result = runtime_search(requirements=[" in prompt
     assert "wrapped = runtime_wrapper(" in prompt
     assert "search_result=result" in prompt
-    assert "import json" in prompt
+    assert "recommend_resources" in prompt
     assert "few_shots_prompt" not in prompt
     if language == "en":
         assert "one to five schema-driven questions" in prompt
@@ -167,7 +170,7 @@ def test_build_nl2agent_system_prompt_is_runtime_specific(
         assert "优先只问不超过四个聚焦问题" in prompt
         assert "文本题的主文本框已经是开放输入" in prompt
     code_blocks = re.findall(r"<code>\n(.*?)\n</code>", prompt, re.DOTALL)
-    assert len(code_blocks) == 5
+    assert len(code_blocks) == 7
     for code_block in code_blocks:
         ast.parse(code_block)
     assert code_blocks[-1].count('{"user_input":') == 2
@@ -243,7 +246,15 @@ def test_phase_one_freezes_five_tool_input_models_and_clarification_wrapper():
         requirements=[requirement],
         scope="internal",
     ).exclude_refs == []
-    assert RecommendResourcesInput(candidate_refs=["tool:7"]).recommended_refs == []
+    candidate = ResourceCandidate(
+        candidate_ref="tool:7",
+        resource_type="tool",
+        source="LOCAL_TOOL",
+        name="search",
+        requirement_ids=["source"],
+        score=0.9,
+    )
+    assert RecommendResourcesInput(candidates=[candidate]).recommended_refs == []
 
     wrapped = build_nl2a_wrapper(
         subtype="requirement_clarification",
@@ -265,6 +276,59 @@ def test_phase_one_freezes_five_tool_input_models_and_clarification_wrapper():
     clarification = RequirementClarificationPayload.model_validate(payload)
     assert clarification.agent_id is None
     assert clarification.questions[0].other_input_expanded is True
+
+
+def test_installed_resource_binding_wrapper_preserves_verified_contract():
+    candidate = ResourceCandidate(
+        candidate_ref="skill:12",
+        resource_type="skill",
+        source="INSTALLED_SKILL",
+        name="daily_report",
+        description="Create a daily report",
+        requirement_ids=["report"],
+        score=0.88,
+    )
+    resource_result = {
+        "status": "success",
+        "resources": [
+            {
+                "candidate": candidate.model_dump(mode="json"),
+                "recommendation": "recommended",
+                "form_kind": "SKILL_CONFIG",
+                "config": [],
+            }
+        ],
+    }
+
+    wrapped = build_nl2a_wrapper(
+        subtype="installed_resource_binding",
+        agent_id=42,
+        resource_result=resource_result,
+    )
+    payload = json.loads(wrapped.split("<nl2a>", 1)[1].split("</nl2a>", 1)[0])
+
+    assert payload["subtype"] == "installed_resource_binding"
+    assert payload["agent_id"] == 42
+    assert payload["resources"][0]["candidate"]["candidate_ref"] == "skill:12"
+
+
+def test_recommend_resources_input_rejects_duplicates_and_unknown_recommended_refs():
+    candidate = ResourceCandidate(
+        candidate_ref="tool:7",
+        resource_type="tool",
+        source="MCP_TOOL",
+        name="search",
+        requirement_ids=["source"],
+        score=0.8,
+    )
+
+    with pytest.raises(ValidationError, match="candidate_ref values must be unique"):
+        RecommendResourcesInput(candidates=[candidate, candidate])
+    with pytest.raises(ValidationError, match="subset of candidates"):
+        RecommendResourcesInput(
+            candidates=[candidate],
+            recommended_refs=["tool:99"],
+        )
 
 
 def test_requirement_clarification_accepts_at_most_five_questions():
@@ -322,19 +386,23 @@ async def test_create_nl2agent_agent_config_has_only_runtime_tools(language):
     assert config.max_steps == 8
     assert config.enable_planning is False
     assert [tool.name for tool in config.tools] == [
-        SEARCH_INSTALLED_MCP_TOOLS_NAME,
+        SEARCH_INSTALLED_RESOURCES_NAME,
+        RECOMMEND_RESOURCES_NAME,
         SAVE_AGENT_DRAFT_FIELDS_NAME,
         NL2A_WRAPPER_NAME,
     ]
     assert [tool.description for tool in config.tools] == [
-        registered_tools[SEARCH_INSTALLED_MCP_TOOLS_NAME].description,
+        registered_tools[SEARCH_INSTALLED_RESOURCES_NAME].description,
+        registered_tools[RECOMMEND_RESOURCES_NAME].description,
         registered_tools[SAVE_AGENT_DRAFT_FIELDS_NAME].description,
         registered_tools[NL2A_WRAPPER_NAME].description,
     ]
     assert all(tool.source == "mcp" for tool in config.tools)
     assert all(tool.usage == "outer-apis" for tool in config.tools)
-    assert config.tools[0].inputs == '{"keywords": "list[str]"}'
-    save_inputs = json.loads(config.tools[1].inputs)
+    assert config.tools[0].inputs == '{"requirements":"list[ResourceRequirement]"}'
+    recommend_inputs = json.loads(config.tools[1].inputs)
+    assert recommend_inputs["candidates"] == "list[ResourceCandidate]"
+    save_inputs = json.loads(config.tools[2].inputs)
     assert save_inputs["agent_id"] == "int | None"
     assert set(save_inputs["fields"]) == {
         "name",
@@ -347,7 +415,7 @@ async def test_create_nl2agent_agent_config_has_only_runtime_tools(language):
         "greeting_message",
         "example_questions",
     }
-    wrapper_inputs = json.loads(config.tools[2].inputs)
+    wrapper_inputs = json.loads(config.tools[3].inputs)
     assert wrapper_inputs["subtype"] == "str"
     assert wrapper_inputs["search_result"] == "dict | None"
     assert wrapper_inputs["language"] == "str | None"

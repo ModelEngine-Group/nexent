@@ -938,15 +938,21 @@ class TestUpdateToolInfoImpl:
         with pytest.raises(Exception):
             update_tool_info_impl(mock_request, "test_tenant", "test_user")
 
-    @patch('backend.services.tool_configuration_service._is_aidp_search_tool', return_value=False)
+    @patch('backend.services.tool_configuration_service.query_all_tools')
+    @patch('backend.services.tool_configuration_service.require_agent_draft_edit')
     @patch('backend.services.tool_configuration_service.create_or_update_tool_by_tool_info')
-    def test_update_tool_info_impl_with_version_no_zero(self, mock_create_update, _mock_is_aidp):
+    def test_update_tool_info_impl_with_version_no_zero(
+        self, mock_create_update, mock_require_edit, mock_query_tools
+    ):
         """Test update_tool_info_impl when version_no is 0"""
         mock_request = Mock(spec=ToolInstanceInfoRequest)
         mock_request.version_no = 0
         mock_request.__dict__ = {"agent_id": 1, "tool_id": 1, "version_no": 0}
         mock_tool_instance = {"id": 1, "name": "test_tool"}
         mock_create_update.return_value = mock_tool_instance
+        mock_query_tools.return_value = [
+            {"tool_id": 1, "name": "test_tool", "is_available": True}
+        ]
 
         from backend.services.tool_configuration_service import update_tool_info_impl
         result = update_tool_info_impl(mock_request, "test_tenant", "test_user")
@@ -956,9 +962,12 @@ class TestUpdateToolInfoImpl:
         mock_create_update.assert_called_once_with(
             mock_request, "test_tenant", "test_user", version_no=0)
 
-    @patch('backend.services.tool_configuration_service._is_aidp_search_tool', return_value=False)
+    @patch('backend.services.tool_configuration_service.query_all_tools')
+    @patch('backend.services.tool_configuration_service.require_agent_draft_edit')
     @patch('backend.services.tool_configuration_service.create_or_update_tool_by_tool_info')
-    def test_update_tool_info_impl_without_version_no(self, mock_create_update, _mock_is_aidp):
+    def test_update_tool_info_impl_without_version_no(
+        self, mock_create_update, mock_require_edit, mock_query_tools
+    ):
         """Test update_tool_info_impl when version_no is not provided (should default to 0)"""
         # Create a simple object without version_no attribute
         class MockToolInfoWithoutVersion:
@@ -970,6 +979,9 @@ class TestUpdateToolInfoImpl:
         mock_request = MockToolInfoWithoutVersion()
         mock_tool_instance = {"id": 1, "name": "test_tool"}
         mock_create_update.return_value = mock_tool_instance
+        mock_query_tools.return_value = [
+            {"tool_id": 1, "name": "test_tool", "is_available": True}
+        ]
 
         from backend.services.tool_configuration_service import update_tool_info_impl
         result = update_tool_info_impl(mock_request, "test_tenant", "test_user")
@@ -986,16 +998,11 @@ class TestUpdateToolInfoImpl:
         mock_request = Mock(spec=ToolInstanceInfoRequest)
         mock_request.version_no = 5
         mock_request.__dict__ = {"agent_id": 1, "tool_id": 1, "version_no": 5}
-        mock_tool_instance = {"id": 1, "name": "test_tool"}
-        mock_create_update.return_value = mock_tool_instance
-
+        from backend.services.agent_draft_permission_service import AgentDraftEditError
         from backend.services.tool_configuration_service import update_tool_info_impl
-        result = update_tool_info_impl(mock_request, "test_tenant", "test_user")
-
-        assert result["tool_instance"] == mock_tool_instance
-        # Verify that create_or_update_tool_by_tool_info was called with version_no=5
-        mock_create_update.assert_called_once_with(
-            mock_request, "test_tenant", "test_user", version_no=5)
+        with pytest.raises(AgentDraftEditError, match="agent_not_draft"):
+            update_tool_info_impl(mock_request, "test_tenant", "test_user")
+        mock_create_update.assert_not_called()
 
 
 class TestListAllTools:
@@ -5272,6 +5279,27 @@ class TestUpdateToolInfoImplAidpPermission:
         request.version_no = 0
         return request
 
+    @pytest.fixture(autouse=True)
+    def mock_binding_preconditions(self, mocker):
+        mocker.patch(
+            "backend.services.tool_configuration_service.require_agent_draft_edit"
+        )
+        mocker.patch(
+            "backend.services.tool_configuration_service.query_all_tools",
+            return_value=[
+                {
+                    "tool_id": 9,
+                    "name": "aidp_search",
+                    "is_available": True,
+                },
+                {
+                    "tool_id": 8,
+                    "name": "knowledge_base_search",
+                    "is_available": True,
+                },
+            ],
+        )
+
     @patch("backend.services.tool_configuration_service.create_or_update_tool_by_tool_info")
     @patch("backend.services.tool_configuration_service.query_tool_instances_by_id")
     @patch("backend.services.tool_configuration_service._resolve_aidp_snapshot")
@@ -5345,6 +5373,7 @@ class TestUpdateToolInfoImplAidpPermission:
         mock_create_update.return_value = {"id": 5}
         tool_info = self._request(["kb1"])
         tool_info.name = "knowledge_base_search"
+        tool_info.tool_id = 8
 
         from backend.services.tool_configuration_service import update_tool_info_impl
         result = update_tool_info_impl(tool_info, "tenant1", "user1")

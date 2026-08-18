@@ -4,6 +4,7 @@ Unit tests for backend.apps.skill_app module.
 import sys
 import os
 import io
+import json
 import types
 import zipfile
 
@@ -187,13 +188,30 @@ services_mock.__path__ = []  # Make it a package so submodules can be imported
 services_skill_service_mock = types.ModuleType('services.skill_service')
 services_nl2skill_service_mock = types.ModuleType('services.nl2skill_service')
 services_asset_owner_visibility_mock = types.ModuleType('services.asset_owner_visibility')
+services_agent_draft_permission_mock = types.ModuleType('services.agent_draft_permission_service')
 sys.modules['services'] = services_mock
 sys.modules['services.skill_service'] = services_skill_service_mock
 sys.modules['services.nl2skill_service'] = services_nl2skill_service_mock
 sys.modules['services.asset_owner_visibility'] = services_asset_owner_visibility_mock
+sys.modules['services.agent_draft_permission_service'] = services_agent_draft_permission_mock
 setattr(services_mock, 'skill_service', services_skill_service_mock)
 setattr(services_mock, 'nl2skill_service', services_nl2skill_service_mock)
 setattr(services_mock, 'asset_owner_visibility', services_asset_owner_visibility_mock)
+
+
+class AgentDraftEditError(Exception):
+    def __init__(self, code):
+        self.code = code
+
+
+class ResourceBindingError(Exception):
+    def __init__(self, code):
+        self.code = code
+
+
+services_agent_draft_permission_mock.AgentDraftEditError = AgentDraftEditError
+services_agent_draft_permission_mock.ResourceBindingError = ResourceBindingError
+services_agent_draft_permission_mock.require_agent_draft_edit = MagicMock()
 
 class MockSkillService:
     def __init__(self):
@@ -213,6 +231,7 @@ def setup_function():
     sys.modules['services.skill_service'] = services_skill_service_mock
     sys.modules['services.nl2skill_service'] = services_nl2skill_service_mock
     sys.modules['services.asset_owner_visibility'] = services_asset_owner_visibility_mock
+    sys.modules['services.agent_draft_permission_service'] = services_agent_draft_permission_mock
 services_asset_owner_visibility_mock.can_view_skill = MagicMock(return_value=True)
 
 # Mock utils
@@ -951,64 +970,59 @@ description: Updated description
 class TestUpdateSkillInstanceEndpoint:
     """Test POST /skills/instance/update endpoint."""
 
-    def test_update_instance_success(self, mocker):
+    @pytest.mark.asyncio
+    @patch('backend.apps.skill_app.require_agent_draft_edit')
+    async def test_update_instance_success(self, mock_require_edit, mocker):
         """Test successful skill instance update."""
         with patch('backend.apps.skill_app.SkillService') as mock_service_class:
             with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
                 mock_auth.return_value = ("user123", "tenant123")
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
-                mock_service.get_skill_by_id.return_value = {
-                    "skill_id": 1,
-                    "name": "test_skill"
-                }
+                mock_service.list_visible_skills.return_value = [
+                    {"skill_id": 1, "name": "test_skill"}
+                ]
                 mock_service.create_or_update_skill_instance.return_value = {
                     "skill_id": 1,
                     "agent_id": 1
                 }
 
-                app = FastAPI()
-                app.include_router(skill_app.router)
-                client = TestClient(app)
-
-                response = client.post(
-                    "/skills/instance/update",
-                    json={
-                        "skill_id": 1,
-                        "agent_id": 1,
-                        "enabled": True
-                    },
-                    headers={"Authorization": "Bearer token123"}
+                response = await skill_app.update_skill_instance(
+                    SkillInstanceInfoRequest(
+                        skill_id=1,
+                        agent_id=1,
+                        enabled=True,
+                    ),
+                    authorization="Bearer token123",
                 )
 
                 assert response.status_code == 200
-                data = response.json()
+                data = json.loads(response.body)
                 assert "instance" in data
 
-    def test_update_instance_skill_not_found(self, mocker):
+    @pytest.mark.asyncio
+    @patch('backend.apps.skill_app.require_agent_draft_edit')
+    async def test_update_instance_skill_not_found(self, mock_require_edit, mocker):
         """Test update instance for non-existent skill."""
         with patch('backend.apps.skill_app.SkillService') as mock_service_class:
             with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
                 mock_auth.return_value = ("user123", "tenant123")
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
-                mock_service.get_skill_by_id.return_value = None
+                mock_service.list_visible_skills.return_value = []
 
-                app = FastAPI()
-                app.include_router(skill_app.router)
-                client = TestClient(app)
+                with pytest.raises(skill_app.HTTPException) as exc_info:
+                    await skill_app.update_skill_instance(
+                        SkillInstanceInfoRequest(
+                            skill_id=999,
+                            agent_id=1,
+                            enabled=True,
+                        ),
+                        authorization="Bearer token123",
+                    )
 
-                response = client.post(
-                    "/skills/instance/update",
-                    json={
-                        "skill_id": 999,
-                        "agent_id": 1,
-                        "enabled": True
-                    },
-                    headers={"Authorization": "Bearer token123"}
-                )
-
-                assert response.status_code == 404
+                assert exc_info.value.status_code == 404
+                assert exc_info.value.detail["code"] == "resource_not_visible"
 
 
 # ===== List Skill Instances Endpoint Tests =====
@@ -1208,7 +1222,9 @@ class TestErrorHandling:
 class TestUpdateSkillInstanceEndpointExtended:
     """Additional tests for POST /skills/instance/update endpoint."""
 
-    def test_update_instance_validation_error(self, mocker):
+    @pytest.mark.asyncio
+    @patch('backend.apps.skill_app.require_agent_draft_edit')
+    async def test_update_instance_validation_error(self, mock_require_edit, mocker):
         """Test update instance with validation error."""
         from backend.apps.skill_app import SkillException
         with patch('backend.apps.skill_app.SkillService') as mock_service_class:
@@ -1216,27 +1232,22 @@ class TestUpdateSkillInstanceEndpointExtended:
                 mock_auth.return_value = ("user123", "tenant123")
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
-                mock_service.get_skill_by_id.return_value = {
-                    "skill_id": 1,
-                    "name": "test_skill"
-                }
+                mock_service.list_visible_skills.return_value = [
+                    {"skill_id": 1, "name": "test_skill"}
+                ]
                 mock_service.create_or_update_skill_instance.side_effect = SkillException("Validation failed")
 
-                app = FastAPI()
-                app.include_router(skill_app.router)
-                client = TestClient(app)
+                with pytest.raises(skill_app.HTTPException) as exc_info:
+                    await skill_app.update_skill_instance(
+                        SkillInstanceInfoRequest(
+                            skill_id=1,
+                            agent_id=1,
+                            enabled=True,
+                        ),
+                        authorization="Bearer token123",
+                    )
 
-                response = client.post(
-                    "/skills/instance/update",
-                    json={
-                        "skill_id": 1,
-                        "agent_id": 1,
-                        "enabled": True
-                    },
-                    headers={"Authorization": "Bearer token123"}
-                )
-
-                assert response.status_code == 400
+                assert exc_info.value.status_code == 400
 
     def test_update_instance_unauthorized(self, mocker):
         """Test update instance without authorization."""
@@ -2619,14 +2630,16 @@ class TestStopSkillCreationEndpoint:
 class TestUpdateSkillInstanceWithConfigMerge:
     """Test config_values merge in update skill instance."""
 
-    def test_update_instance_with_config_values_merge(self, mocker):
+    @pytest.mark.asyncio
+    @patch('backend.apps.skill_app.require_agent_draft_edit')
+    async def test_update_instance_with_config_values_merge(self, mock_require_edit, mocker):
         """Test instance update with config_values merges with template defaults (lines 368-371)."""
         with patch('backend.apps.skill_app.SkillService') as mock_service_class:
             with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
                 mock_auth.return_value = ("user123", "tenant123")
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
-                mock_service.get_skill_by_id.return_value = {
+                skill = {
                     "skill_id": 1,
                     "name": "test_skill",
                     "description": "Test",
@@ -2634,6 +2647,7 @@ class TestUpdateSkillInstanceWithConfigMerge:
                     "config_schemas": [{"name": "key1", "type": "string"}],
                     "config_values": {"template_key": "template_value"}
                 }
+                mock_service.list_visible_skills.return_value = [skill]
                 mock_service.create_or_update_skill_instance.return_value = {
                     "skill_id": 1,
                     "agent_id": 1,
@@ -2641,22 +2655,17 @@ class TestUpdateSkillInstanceWithConfigMerge:
                     "config_values": {"instance_key": "instance_value"}
                 }
 
-                app = FastAPI()
-                app.include_router(skill_app.router)
-                client = TestClient(app)
-
-                response = client.post(
-                    "/skills/instance/update",
-                    json={
-                        "skill_id": 1,
-                        "agent_id": 1,
-                        "enabled": True
-                    },
-                    headers={"Authorization": "Bearer token123"}
+                response = await skill_app.update_skill_instance(
+                    SkillInstanceInfoRequest(
+                        skill_id=1,
+                        agent_id=1,
+                        enabled=True,
+                    ),
+                    authorization="Bearer token123",
                 )
 
                 assert response.status_code == 200
-                data = response.json()
+                data = json.loads(response.body)
                 assert "instance" in data
                 assert data["instance"]["config_values"] == {
                     "template_key": "template_value",

@@ -8,12 +8,24 @@ from pydantic import ValidationError
 from consts.model import HistoryItem, NL2AgentRunRequest
 from services.nl2agent_service import (
     Nl2AgentDraftSaveError,
+    Nl2AgentResourceError,
+    _build_verified_bound_resources_context,
+    _normalize_skill_config,
+    _normalize_tool_config,
+    _parse_installed_binding_action,
+    _resource_similarity,
     build_nl2agent_run_info,
     create_nl2agent_stream,
+    recommend_installed_resources_impl,
     save_agent_draft_fields_impl,
+    search_installed_resources_impl,
     search_installed_mcp_tools_by_query,
 )
-from tool_collection.mcp.nl2agent_mcp_tools import AgentDraftFields
+from tool_collection.mcp.nl2agent_mcp_tools import (
+    AgentDraftFields,
+    ResourceCandidate,
+    ResourceRequirement,
+)
 
 
 def _basic_draft_fields(**overrides):
@@ -140,7 +152,7 @@ def test_update_agent_draft_changes_only_explicit_fields_and_allows_empty_list(
     mocker,
 ):
     mocker.patch(
-        "services.nl2agent_service.query_agent_records_for_nl2agent",
+        "services.agent_draft_permission_service.query_agent_records_for_nl2agent",
         return_value=[
             {
                 "agent_id": 22,
@@ -152,7 +164,7 @@ def test_update_agent_draft_changes_only_explicit_fields_and_allows_empty_list(
         ],
     )
     mocker.patch(
-        "services.nl2agent_service.get_user_role_by_tenant",
+        "services.agent_draft_permission_service.get_user_role_by_tenant",
         return_value="MEMBER",
     )
     update_fields = mocker.patch(
@@ -230,11 +242,11 @@ def test_update_agent_draft_rejects_invalid_identity_or_permission(
     expected_code,
 ):
     mocker.patch(
-        "services.nl2agent_service.query_agent_records_for_nl2agent",
+        "services.agent_draft_permission_service.query_agent_records_for_nl2agent",
         return_value=records,
     )
     mocker.patch(
-        "services.nl2agent_service.get_user_role_by_tenant",
+        "services.agent_draft_permission_service.get_user_role_by_tenant",
         return_value=role,
     )
     update_fields = mocker.patch(
@@ -315,7 +327,7 @@ def test_agent_draft_database_failures_are_stable_and_retryable(mocker, operatio
         fields = _basic_draft_fields()
     else:
         mocker.patch(
-            "services.nl2agent_service.query_agent_records_for_nl2agent",
+            "services.agent_draft_permission_service.query_agent_records_for_nl2agent",
             return_value=[
                 {
                     "agent_id": 22,
@@ -327,7 +339,7 @@ def test_agent_draft_database_failures_are_stable_and_retryable(mocker, operatio
             ],
         )
         mocker.patch(
-            "services.nl2agent_service.get_user_role_by_tenant",
+            "services.agent_draft_permission_service.get_user_role_by_tenant",
             return_value="MEMBER",
         )
         mocker.patch(
@@ -351,7 +363,7 @@ def test_agent_draft_database_failures_are_stable_and_retryable(mocker, operatio
 
 def test_agent_draft_update_rejects_unexpected_row_count(mocker):
     mocker.patch(
-        "services.nl2agent_service.query_agent_records_for_nl2agent",
+        "services.agent_draft_permission_service.query_agent_records_for_nl2agent",
         return_value=[
             {
                 "agent_id": 22,
@@ -363,7 +375,7 @@ def test_agent_draft_update_rejects_unexpected_row_count(mocker):
         ],
     )
     mocker.patch(
-        "services.nl2agent_service.get_user_role_by_tenant",
+        "services.agent_draft_permission_service.get_user_role_by_tenant",
         return_value="MEMBER",
     )
     mocker.patch(
@@ -564,6 +576,285 @@ def test_search_skips_unsearchable_tools_and_sanitizes_malformed_inputs(mocker):
         None,
         limit=-1,
     ) == []
+
+
+@pytest.mark.asyncio
+async def test_search_installed_resources_covers_visible_tools_and_skills(mocker):
+    mocker.patch(
+        "services.tool_configuration_service.list_all_tools",
+        new=AsyncMock(
+            return_value=[
+                {
+                    "tool_id": 7,
+                    "name": "weather_forecast",
+                    "description": "Weather forecast lookup",
+                    "description_zh": "天气预报查询",
+                    "source": "local",
+                    "is_available": True,
+                    "params": [],
+                    "inputs": '{"city":{"type":"string"}}',
+                    "labels": ["weather"],
+                },
+                {
+                    "tool_id": 8,
+                    "name": "disabled_weather",
+                    "description": "Weather forecast lookup",
+                    "source": "mcp",
+                    "is_available": False,
+                },
+                {
+                    "tool_id": 9,
+                    "name": "langchain_weather",
+                    "description": "Weather forecast lookup",
+                    "source": "langchain",
+                    "is_available": True,
+                },
+            ]
+        ),
+    )
+    mocker.patch(
+        "services.skill_service.SkillService.list_visible_skills",
+        return_value=[
+            {
+                "skill_id": 11,
+                "name": "daily_report",
+                "description": "Create a concise daily report",
+                "source": "custom",
+                "tags": ["report"],
+                "config_schemas": [],
+            }
+        ],
+    )
+
+    result = await search_installed_resources_impl(
+        requirements=[
+            ResourceRequirement(
+                requirement_id="weather",
+                query="weather forecast",
+                search_terms=["天气预报"],
+            ),
+            ResourceRequirement(
+                requirement_id="report",
+                query="daily report",
+            ),
+        ],
+        tenant_id="tenant-a",
+        user_id="user-a",
+    )
+
+    refs = {candidate.candidate_ref for candidate in result.candidates}
+    assert refs == {"tool:7", "skill:11"}
+    assert result.uncovered_requirement_ids == []
+    assert {candidate.source for candidate in result.candidates} == {
+        "LOCAL_TOOL",
+        "INSTALLED_SKILL",
+    }
+
+
+def test_resource_config_normalization_is_frontend_safe():
+    assert _normalize_tool_config(None) == []
+    assert _normalize_tool_config(
+        [
+            None,
+            {"name": ""},
+            {
+                "name": "limit",
+                "type": "integer",
+                "optional": False,
+                "default": 10,
+                "depends_on": "enabled",
+            },
+        ]
+    ) == [
+        {
+            "name": "limit",
+            "type": "number",
+            "required": True,
+            "value": 10,
+            "description": "",
+            "description_zh": "",
+            "depends_on": "enabled",
+        }
+    ]
+    assert _normalize_skill_config({"config_schemas": None}) == []
+    skill_config = _normalize_skill_config(
+        {
+            "config_schemas": [
+                None,
+                {"name": ""},
+                {"name": "region", "type": "string", "default": "global"},
+            ],
+            "config_values": {"region": "eu"},
+        }
+    )
+    assert skill_config == [
+        {"name": "region", "type": "string", "required": True, "value": "eu"}
+    ]
+    assert _resource_similarity("", "search") == 0
+
+
+@pytest.mark.asyncio
+async def test_recommend_resources_overwrites_model_display_fields(mocker):
+    mocker.patch(
+        "services.nl2agent_service._load_installed_resource_catalog",
+        new=AsyncMock(
+            return_value=[
+                {
+                    "candidate_ref": "tool:7",
+                    "resource_type": "tool",
+                    "source": "LOCAL_TOOL",
+                    "name": "verified_name",
+                    "description": "Verified description",
+                    "config": [
+                        {
+                            "name": "region",
+                            "type": "string",
+                            "required": True,
+                            "value": "global",
+                        }
+                    ],
+                }
+            ]
+        ),
+    )
+    supplied = ResourceCandidate(
+        candidate_ref="tool:7",
+        resource_type="tool",
+        source="LOCAL_TOOL",
+        name="tampered_name",
+        description="Tampered description",
+        requirement_ids=["search"],
+        score=0.91,
+    )
+
+    result = await recommend_installed_resources_impl(
+        candidates=[supplied],
+        recommended_refs=["tool:7"],
+        tenant_id="tenant-a",
+        user_id="user-a",
+    )
+
+    resource = result.resources[0]
+    assert resource.candidate.name == "verified_name"
+    assert resource.candidate.description == "Verified description"
+    assert resource.candidate.requirement_ids == ["search"]
+    assert resource.recommendation == "recommended"
+    assert resource.form_kind == "TOOL_CONFIG"
+
+
+@pytest.mark.asyncio
+async def test_recommend_resources_rejects_missing_or_mismatched_catalog_entries(mocker):
+    load_catalog = mocker.patch(
+        "services.nl2agent_service._load_installed_resource_catalog",
+        new=AsyncMock(return_value=[]),
+    )
+    supplied = ResourceCandidate(
+        candidate_ref="tool:7",
+        resource_type="tool",
+        source="LOCAL_TOOL",
+        name="search",
+        requirement_ids=["lookup"],
+        score=0.9,
+    )
+
+    with pytest.raises(Nl2AgentResourceError) as missing:
+        await recommend_installed_resources_impl(
+            candidates=[supplied],
+            recommended_refs=[],
+            tenant_id="tenant-a",
+            user_id="user-a",
+        )
+    assert missing.value.code == "resource_not_visible"
+
+    load_catalog.return_value = [
+        {
+            "candidate_ref": "tool:7",
+            "resource_type": "skill",
+            "source": "INSTALLED_SKILL",
+        }
+    ]
+    with pytest.raises(Nl2AgentResourceError) as mismatched:
+        await recommend_installed_resources_impl(
+            candidates=[supplied],
+            recommended_refs=[],
+            tenant_id="tenant-a",
+            user_id="user-a",
+        )
+    assert mismatched.value.code == "invalid_candidates"
+
+
+def test_binding_action_parser_accepts_only_continue_with_positive_agent_id():
+    assert _parse_installed_binding_action(json.dumps({
+        "type": "nl2agent_card_action",
+        "subtype": "installed_resource_binding",
+        "agent_id": 42,
+        "action": "continue",
+        "result": {"bound": [{"resource_type": "tool", "resource_id": 999}]},
+    })) == 42
+    assert _parse_installed_binding_action("plain text") is None
+    assert _parse_installed_binding_action(json.dumps({
+        "type": "nl2agent_card_action",
+        "subtype": "requirement_clarification",
+    })) is None
+
+
+@pytest.mark.asyncio
+async def test_verified_binding_context_rereads_database_without_secret_values(mocker):
+    mocker.patch("services.nl2agent_service.require_agent_draft_edit")
+    mocker.patch(
+        "services.nl2agent_service._load_installed_resource_catalog",
+        new=AsyncMock(
+            return_value=[
+                {
+                    "candidate_ref": "tool:7",
+                    "name": "weather_forecast",
+                    "description": "Weather lookup",
+                    "inputs": {
+                        "city": {"type": "string", "default": "catalog-secret"}
+                    },
+                    "config": [],
+                },
+                {
+                    "candidate_ref": "skill:11",
+                    "name": "daily_report",
+                    "description": "Create a report",
+                    "inputs": {},
+                    "config": [
+                        {"name": "api_key", "value": "catalog-skill-secret"}
+                    ],
+                }
+            ]
+        ),
+    )
+    mocker.patch(
+        "services.nl2agent_service.query_all_enabled_tool_instances",
+        return_value=[{"tool_id": 7, "params": {"api_key": "private-secret"}}],
+    )
+    mocker.patch(
+        "services.nl2agent_service.query_enabled_skill_instances",
+        return_value=[
+            {
+                "skill_id": 11,
+                "config_values": {"api_key": "instance-skill-secret"},
+            }
+        ],
+    )
+
+    context = await _build_verified_bound_resources_context(
+        agent_id=42,
+        tenant_id="tenant-a",
+        user_id="user-a",
+    )
+
+    assert context.id == "system:nl2agent_bound_resources"
+    assert "weather_forecast" in context.content["text"]
+    assert "api_key" in context.content["text"]
+    assert "private-secret" not in context.content["text"]
+    assert "catalog-secret" not in context.content["text"]
+    assert "daily_report" in context.content["text"]
+    assert "catalog-skill-secret" not in context.content["text"]
+    assert "instance-skill-secret" not in context.content["text"]
+    assert "999" not in context.content["text"]
 
 
 @pytest.mark.asyncio
