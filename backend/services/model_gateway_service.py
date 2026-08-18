@@ -245,5 +245,3 @@ Returns:
     if not cfg:
         return None
     return get_gateway().get_adapter(_config_to_context(cfg, "vlm", slot, tenant_id))
-
-

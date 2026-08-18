@@ -199,6 +199,11 @@ _ACTION_RECORD_LINE_RE = re.compile(
     r"(?im)^\s*(?:[-*#>]\s*)*(?:step\s+\d+\s*:|called\s+tool\b|observation\s*:|tool_calls?\s*:)"
 )
 _ACTION_JSON_KEYS = frozenset({"action", "tool_call", "tool_calls", "arguments"})
+_ACTION_INTENT_RE = re.compile(
+    r"(?is)(?:^|\n)\s*(?:(?:思考|分析|thoughts?|analysis)\s*[:：].{0,800}"
+    r"|(?:我(?:将|需要|先)|接下来|下一步|i\s+(?:will|need\s+to|should)\b|next\b).{0,240})"
+    r"(?:调用|使用|检索|搜索|call|use|search|invoke)"
+)
 
 
 def _looks_like_invalid_action_output(text: Any) -> bool:
@@ -227,6 +232,34 @@ def _looks_like_invalid_action_output(text: Any) -> bool:
             for record in records
         )
     return False
+
+
+def _looks_like_incomplete_action_output(
+    text: Any,
+    available_tool_names: Any = (),
+    finish_reason: Optional[str] = None,
+) -> bool:
+    """Identify a truncated or unfinished action that must not become a final answer.
+
+    Providers omit the matched stop sequence from their response. A model may
+    therefore return only a preamble such as "思考：我将调用
+    knowledge_base_search" before the executable ``<code>`` block. Treating
+    that preamble as a final answer ends the loop after one model call.
+    """
+    if not isinstance(text, str) or not text.strip():
+        return False
+    if finish_reason == "length":
+        return True
+    if _looks_like_invalid_action_output(text):
+        return True
+
+    normalized = text.casefold()
+    mentioned_tool = any(
+        str(tool_name).casefold() in normalized
+        for tool_name in available_tool_names or ()
+        if tool_name
+    )
+    return mentioned_tool and bool(_ACTION_INTENT_RE.search(text))
 
 
 class ToolInputBlockedError(AgentExecutionError):
@@ -839,11 +872,15 @@ Additional Args:
         except AgentExecutionError:
             raise
         except Exception:
-            if _looks_like_invalid_action_output(model_output):
+            if _looks_like_incomplete_action_output(
+                model_output,
+                available_tool_names=self._known_tool_names(),
+                finish_reason=getattr(self.model, "last_finish_reason", None),
+            ):
                 raise InvalidActionFormatError(
-                    "The previous response resembled a historical or malformed action record and was not "
-                    "executable. Do not copy historical records. Emit executable Python inside <code>...</code>, "
-                    "or return the actual user-facing final answer.",
+                    "The previous response described an action but ended before producing an executable tool call. "
+                    "Do not treat an action preamble as the final answer. Emit executable Python inside "
+                    "<code>...</code>, or return a complete user-facing final answer.",
                     self.logger,
                 )
             self.logger.log_markdown(

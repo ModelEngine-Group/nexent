@@ -10,6 +10,7 @@ import {
 // Knowledge base basic type
 export interface KnowledgeBase {
   id: string; // Internal index_name
+  knowledge_id?: number | string; // Stable local knowledge base business ID
   name: string; // User-facing knowledge_name
   index_name?: string; // Internal index_name (same as id for nexent KBs), used for API calls
   display_name?: string; // User-friendly display name, falls back to name if not available

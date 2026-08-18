@@ -28,6 +28,34 @@ def test_model_request_and_validation():
     assert req.filename == "f"
 
 
+def test_conversation_knowledge_scope_validates_three_state_contract():
+    scope = model_consts.ConversationKnowledgeScopeRequest.model_validate({
+        "local": {"mode": "override", "knowledge_ids": [" 12 ", "12", "13"]},
+        "aidp": {"mode": "disabled", "kds_ids": []},
+    })
+
+    assert scope.local.knowledge_ids == ["12", "13"]
+    assert scope.aidp.mode == "disabled"
+
+    with pytest.raises(ValidationError):
+        model_consts.ConversationKnowledgeScopeRequest.model_validate({
+            "local": {"mode": "override", "knowledge_ids": []},
+        })
+
+    with pytest.raises(ValidationError):
+        model_consts.ConversationKnowledgeScopeRequest.model_validate({
+            "aidp": {"mode": "inherit", "kds_ids": ["unexpected"]},
+        })
+
+    with pytest.raises(ValidationError):
+        model_consts.ConversationKnowledgeScopeRequest.model_validate({
+            "aidp": {
+                "mode": "override",
+                "kds_ids": [f"kds-{index}" for index in range(11)],
+            },
+        })
+
+
 def test_skill_repository_install_request_limits_target_name_to_100_characters():
     request = model_consts.SkillRepositoryInstallRequest(target_name="x" * 100)
     assert len(request.target_name) == 100

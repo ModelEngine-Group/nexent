@@ -116,7 +116,7 @@ async function batchUpdateToolConfigs(
       await updateToolConfig(toolId, agentId, params, isEnabled);
     } catch (error) {
       log.error(`Failed to save tool config for tool ${toolId}:`, error);
-      // Continue with other tools even if one fails
+      throw error;
     }
   }
 
@@ -138,7 +138,7 @@ async function batchUpdateToolConfigs(
       await updateToolConfig(toolId, agentId, existingParams, false);
     } catch (error) {
       log.error(`Failed to disable tool ${toolId}:`, error);
-      // Continue with other tools even if one fails
+      throw error;
     }
   }
 }
@@ -279,10 +279,6 @@ export const useSaveGuard = () => {
       });
 
       if (result.success) {
-        // Mark as saved
-        useAgentConfigStore.getState().markAsSaved();
-        message.success(t("businessLogic.config.message.agentSaveSuccess"));
-
         // Get the final agent ID (from result for new agents, existing currentAgentId for updates)
         const finalAgentId = result.data?.agent_id || currentAgentId;
         if (!finalAgentId) {
@@ -355,6 +351,7 @@ export const useSaveGuard = () => {
 
         // Mark as saved (this will sync editedAgent to baselineAgent)
         useAgentConfigStore.getState().markAsSaved();
+        message.success(t("businessLogic.config.message.agentSaveSuccess"));
         return true;
       } else {
         message.error(
@@ -363,7 +360,8 @@ export const useSaveGuard = () => {
         return false;
       }
     } catch (error) {
-      message.error(t("businessLogic.config.error.saveFailed"));
+      const reason = error instanceof Error ? error.message : "";
+      message.error(reason || t("businessLogic.config.error.saveFailed"));
       return false;
     }
   }, [t, message, queryClient]);
