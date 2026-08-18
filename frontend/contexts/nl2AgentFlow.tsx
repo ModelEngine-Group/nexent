@@ -10,7 +10,8 @@ import {
   type PropsWithChildren,
 } from "react";
 
-export type Nl2AgentFlowPhase = "idle" | "clarifying" | "draft_created";
+export type Nl2AgentFlowPhase =
+  "idle" | "clarifying" | "draft_created" | "binding" | "resources_bound";
 
 interface ActiveNl2AgentCard {
   key: string;
@@ -30,7 +31,8 @@ type Nl2AgentFlowAction =
   | { type: "reset"; agentId: number | null }
   | { type: "register_card"; card: ActiveNl2AgentCard }
   | { type: "submit_card"; cardKey: string }
-  | { type: "draft_created"; agentId: number };
+  | { type: "draft_created"; agentId: number }
+  | { type: "resources_bound"; agentId: number };
 
 const INITIAL_STATE: Nl2AgentFlowState = {
   phase: "idle",
@@ -59,7 +61,9 @@ function reducer(
         phase:
           action.card.subtype === "requirement_clarification"
             ? "clarifying"
-            : state.phase,
+            : action.card.subtype === "installed_resource_binding"
+              ? "binding"
+              : state.phase,
         activeCard: action.card,
       };
     case "submit_card": {
@@ -80,6 +84,13 @@ function reducer(
         activeCard: null,
         isFormLocked: true,
       };
+    case "resources_bound":
+      return {
+        ...state,
+        phase: "resources_bound",
+        agentId: action.agentId,
+        isFormLocked: true,
+      };
   }
 }
 
@@ -88,6 +99,7 @@ interface Nl2AgentFlowContextValue extends Nl2AgentFlowState {
   registerCard: (key: string, subtype: string) => void;
   submitCard: (key: string) => void;
   markDraftCreated: (agentId: number) => void;
+  markResourcesBound: (agentId: number) => void;
   isCardInteractive: (key: string) => boolean;
 }
 
@@ -114,6 +126,10 @@ export const Nl2AgentFlowProvider: FC<PropsWithChildren> = ({ children }) => {
     (agentId: number) => dispatch({ type: "draft_created", agentId }),
     []
   );
+  const markResourcesBound = useCallback(
+    (agentId: number) => dispatch({ type: "resources_bound", agentId }),
+    []
+  );
   const isCardInteractive = useCallback(
     (key: string) =>
       state.activeCard?.key === key && !state.submittedCardKeys.has(key),
@@ -126,11 +142,13 @@ export const Nl2AgentFlowProvider: FC<PropsWithChildren> = ({ children }) => {
       registerCard,
       submitCard,
       markDraftCreated,
+      markResourcesBound,
       isCardInteractive,
     }),
     [
       isCardInteractive,
       markDraftCreated,
+      markResourcesBound,
       registerCard,
       resetFlow,
       state,

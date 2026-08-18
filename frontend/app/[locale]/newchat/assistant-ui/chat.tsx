@@ -37,6 +37,7 @@ export interface ChatProps {
   skillFiles?: readonly SkillFileContent[];
   onSkillFileSelect?: (path: string) => void;
   readOnly?: boolean;
+  onResourcesBound?: (agentId: number) => Promise<boolean>;
 }
 
 const AgentsLoadingState: FC = () => {
@@ -74,6 +75,7 @@ export const Chat: FC<ChatProps> = ({
   skillFiles,
   onSkillFileSelect,
   readOnly = false,
+  onResourcesBound,
 }) => {
   const handleSelectAgent = useCallback(
     (agent: Agent) => {
@@ -112,6 +114,7 @@ export const Chat: FC<ChatProps> = ({
       skillFiles={skillFiles}
       onSkillFileSelect={onSkillFileSelect}
       readOnly={readOnly}
+      onResourcesBound={onResourcesBound}
     />
   );
 };

@@ -1,4 +1,9 @@
-import { API_ENDPOINTS } from "./api";
+import {
+  API_ENDPOINTS,
+  fetchWithErrorHandling,
+  toApiError,
+  type ApiError,
+} from "./api";
 
 import { NAME_CHECK_STATUS } from "@/const/agentConfig";
 import { getAuthHeaders } from "@/lib/auth";
@@ -92,13 +97,13 @@ export const fetchTools = async () => {
         ? tool.labels
         : typeof tool.labels === "string"
           ? (() => {
-            try {
-              const p = JSON.parse(tool.labels);
-              return Array.isArray(p) ? p : [];
-            } catch {
-              return [];
-            }
-          })()
+              try {
+                const p = JSON.parse(tool.labels);
+                return Array.isArray(p) ? p : [];
+              } catch {
+                return [];
+              }
+            })()
           : [],
       updated_by: tool.updated_by || "",
       updated_by_name: tool.updated_by_name || "",
@@ -301,9 +306,14 @@ export const updateToolConfig = async (
   agentId: number,
   params: Record<string, any>,
   enable: boolean
-) => {
+): Promise<{
+  success: boolean;
+  data: unknown;
+  message: string;
+  error?: ApiError;
+}> => {
   try {
-    const response = await fetch(API_ENDPOINTS.tool.update, {
+    const response = await fetchWithErrorHandling(API_ENDPOINTS.tool.update, {
       method: "POST",
       headers: getAuthHeaders(),
       body: JSON.stringify({
@@ -337,7 +347,16 @@ export const updateToolConfig = async (
     };
   } catch (error) {
     log.error("Failed to update tool configuration:", error);
-    throw error;
+    const apiError = toApiError(
+      error,
+      "Failed to update tool configuration, please try again later"
+    );
+    return {
+      success: false,
+      data: null,
+      message: apiError.message,
+      error: apiError,
+    };
   }
 };
 
@@ -546,7 +565,9 @@ export const exportAgent = async (agentId: number) => {
     if (contentType.includes("application/zip")) {
       const blob = await response.blob();
       const contentDisposition = response.headers.get("Content-Disposition");
-      const filename = extractFilenameFromContentDisposition(contentDisposition) || `agent_${agentId}.zip`;
+      const filename =
+        extractFilenameFromContentDisposition(contentDisposition) ||
+        `agent_${agentId}.zip`;
       downloadBlob(blob, filename);
       return {
         success: true,
@@ -586,7 +607,9 @@ export const exportAgent = async (agentId: number) => {
  * @param contentDisposition The Content-Disposition header value
  * @returns Extracted filename or null if not found
  */
-const extractFilenameFromContentDisposition = (contentDisposition: string | null): string | null => {
+const extractFilenameFromContentDisposition = (
+  contentDisposition: string | null
+): string | null => {
   if (!contentDisposition) {
     return null;
   }
@@ -1221,7 +1244,12 @@ export const saveSkillInstance = async (
   enabled: boolean,
   versionNo: number = 0,
   params?: Record<string, any>
-) => {
+): Promise<{
+  success: boolean;
+  data: unknown;
+  message: string;
+  error?: ApiError;
+}> => {
   try {
     const requestBody: Record<string, any> = {
       skill_id: skillId,
@@ -1233,18 +1261,17 @@ export const saveSkillInstance = async (
       requestBody.config_values = params;
     }
 
-    const response = await fetch(API_ENDPOINTS.skills.instanceUpdate, {
-      method: "POST",
-      headers: {
-        ...getAuthHeaders(),
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(requestBody),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Request failed: ${response.status}`);
-    }
+    const response = await fetchWithErrorHandling(
+      API_ENDPOINTS.skills.instanceUpdate,
+      {
+        method: "POST",
+        headers: {
+          ...getAuthHeaders(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(requestBody),
+      }
+    );
 
     const data = await response.json();
 
@@ -1255,10 +1282,12 @@ export const saveSkillInstance = async (
     };
   } catch (error) {
     log.error("Error saving skill instance:", error);
+    const apiError = toApiError(error, "agentConfig.skills.saveFailed");
     return {
       success: false,
       data: null,
-      message: "agentConfig.skills.saveFailed",
+      message: apiError.message,
+      error: apiError,
     };
   }
 };
@@ -1570,8 +1599,8 @@ export const createSkillFromFile = async (
           ? errorData.detail
           : Array.isArray(errorData.detail)
             ? errorData.detail
-              .map((e: any) => e.msg || JSON.stringify(e))
-              .join("; ")
+                .map((e: any) => e.msg || JSON.stringify(e))
+                .join("; ")
             : JSON.stringify(errorData.detail);
       throw new Error(errorMessage || `Request failed: ${response.status}`);
     }

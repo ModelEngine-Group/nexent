@@ -48,6 +48,11 @@ from database.knowledge_db import get_knowledge_name_map_by_index_names
 from database.user_tenant_db import get_user_email_map
 from mcpadapt.smolagents_adapter import _sanitize_function_name
 from services.file_management_service import get_llm_model, validate_urls_access
+from .agent_draft_permission_service import (
+    AgentDraftEditError,
+    ResourceBindingError,
+    require_agent_draft_edit,
+)
 from services.vectordatabase_service import get_embedding_model_by_index_name, get_rerank_model
 from utils.http_client_utils import create_httpx_client
 from database.client import minio_client
@@ -411,9 +416,30 @@ def update_tool_info_impl(tool_info: ToolInstanceInfoRequest, tenant_id: str, us
     Raises:
         ValueError: If database update fails
     """
-    # Use version_no from request if provided, otherwise default to 0
-    version_no = getattr(tool_info, 'version_no', 0)
-    if _is_aidp_search_tool(tool_info.tool_id, getattr(tool_info, "name", None)):
+    version_no = getattr(tool_info, "version_no", 0)
+    if version_no != 0:
+        raise AgentDraftEditError("agent_not_draft")
+    require_agent_draft_edit(
+        agent_id=tool_info.agent_id,
+        tenant_id=tenant_id,
+        user_id=user_id,
+    )
+    tool = next(
+        (
+            item
+            for item in query_all_tools(tenant_id)
+            if item.get("tool_id") == tool_info.tool_id
+        ),
+        None,
+    )
+    if (
+        tool is None
+        or tool.get("is_available") is not True
+        or tool.get("name") in SYSTEM_MANAGED_TOOL_NAMES
+    ):
+        raise ResourceBindingError("resource_not_visible")
+
+    if _is_aidp_search_tool(tool_info.tool_id, tool.get("name")):
         existing = query_tool_instances_by_id(
             tool_info.agent_id,
             tool_info.tool_id,

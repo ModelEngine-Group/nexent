@@ -120,6 +120,34 @@ function AgentSetupOrchestratorContent() {
     [markDraftCreated, queryClient, setCurrentAgent]
   );
 
+  const handleResourcesBound = useCallback(
+    async (agentId: number): Promise<boolean> => {
+      try {
+        const result = await searchAgentInfo(agentId);
+        if (!result.success || !result.data) {
+          log.error(
+            "Failed to synchronize NL2Agent resource bindings:",
+            result.message
+          );
+          return false;
+        }
+        setCurrentAgent(result.data);
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: ["agents"] }),
+          queryClient.invalidateQueries({ queryKey: ["agentInfo"] }),
+          queryClient.invalidateQueries({ queryKey: ["tools"] }),
+          queryClient.invalidateQueries({ queryKey: ["skills"] }),
+          queryClient.invalidateQueries({ queryKey: ["toolInfo"] }),
+        ]);
+        return true;
+      } catch (error) {
+        log.error("Failed to synchronize NL2Agent resource bindings:", error);
+        return false;
+      }
+    },
+    [queryClient, setCurrentAgent]
+  );
+
   // Reset agent selection state when leaving the page
   useEffect(() => {
     return () => {
@@ -217,6 +245,7 @@ function AgentSetupOrchestratorContent() {
                         key={sessionGeneration}
                         disabled={isAgentReadOnly}
                         onStateEvent={handleDraftCreated}
+                        onResourcesBound={handleResourcesBound}
                       />
                     </Card>
                   </Col>

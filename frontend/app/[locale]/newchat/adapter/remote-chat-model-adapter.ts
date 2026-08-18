@@ -11,6 +11,7 @@ import type {
 import { conversationService } from "@/services/conversationService";
 import log from "@/lib/logger";
 import { parseAutomationProposal } from "@/features/agentAutomation/parseProposal";
+import type { SkillParam, ToolParam } from "@/types/agentConfig";
 
 // Backend SSE chunk format
 interface ImageMetadata {
@@ -172,7 +173,32 @@ export interface Nl2aSuggestedResourceInstallationPayload {
 export interface Nl2aInstalledResourceBindingPayload {
   subtype: "installed_resource_binding";
   agent_id: number;
+  resources: Nl2aRecommendedResource[];
 }
+
+export interface Nl2aResourceCandidate {
+  candidate_ref: string;
+  resource_type: "tool" | "skill";
+  source: "LOCAL_TOOL" | "MCP_TOOL" | "INSTALLED_SKILL";
+  name: string;
+  description: string;
+  requirement_ids: string[];
+  score: number;
+}
+
+export type Nl2aRecommendedResource =
+  | {
+      candidate: Nl2aResourceCandidate & { resource_type: "tool" };
+      recommendation: "recommended" | "optional";
+      form_kind: "TOOL_CONFIG";
+      config: ToolParam[];
+    }
+  | {
+      candidate: Nl2aResourceCandidate & { resource_type: "skill" };
+      recommendation: "recommended" | "optional";
+      form_kind: "SKILL_CONFIG";
+      config: SkillParam[];
+    };
 
 export interface Nl2aFinalConfirmationPayload {
   subtype: "final_confirmation";
@@ -738,10 +764,29 @@ function appendToolCallPart(contentParts: any[], toolCallPart: any): any {
  */
 function parseNl2aMessage(chunk: SseChunk): Nl2aMessage | null {
   try {
+    const content = JSON.parse(chunk.content) as Nl2aPayload;
+    if (content.subtype === "installed_resource_binding") {
+      if (
+        !Number.isInteger(content.agent_id) ||
+        content.agent_id <= 0 ||
+        !Array.isArray(content.resources) ||
+        content.resources.length > 12 ||
+        content.resources.some(
+          (resource) =>
+            !resource?.candidate?.candidate_ref ||
+            !["tool", "skill"].includes(resource.candidate.resource_type) ||
+            !["recommended", "optional"].includes(resource.recommendation) ||
+            !Array.isArray(resource.config)
+        )
+      ) {
+        log.warn("[ChatModelAdapter] Ignored invalid binding-card payload");
+        return null;
+      }
+    }
     return {
       type: "nl2a",
       tool_name: chunk.tool_name,
-      content: JSON.parse(chunk.content) as Nl2aPayload,
+      content,
     };
   } catch (error) {
     log.warn("[ChatModelAdapter] Failed to parse nl2a content:", error);
@@ -1260,7 +1305,13 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     const historyMessages =
       !isResume && lastUserIndex > 0 ? messages.slice(0, lastUserIndex) : [];
     const history = historyMessages.map((msg) => {
-      const text = extractTextContent([msg]);
+      const customMetadata = isNl2Agent
+        ? (msg.metadata?.custom as
+            { nl2agentCardAction?: Nl2AgentCardAction } | undefined)
+        : undefined;
+      const text = customMetadata?.nl2agentCardAction
+        ? JSON.stringify(customMetadata.nl2agentCardAction)
+        : extractTextContent([msg]);
       return {
         role: msg.role === "user" ? ("user" as const) : ("assistant" as const),
         content: text,
