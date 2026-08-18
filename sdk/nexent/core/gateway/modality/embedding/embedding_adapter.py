@@ -238,8 +238,8 @@ class _MultimodalEmbeddingAdapter(EmbeddingAdapter):
         except requests.exceptions.ConnectionError:
             logging.error(f"{type(self).__name__} connection error")
             return []
-        except Exception as e:
-            logging.error(f"{type(self).__name__} connection failed: {str(e)}")
+        except Exception:
+            logging.exception(f"{type(self).__name__} connection failed")
             return []
 
     async def invoke(self, request: EmbeddingRequest):

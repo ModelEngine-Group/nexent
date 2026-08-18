@@ -78,8 +78,8 @@ class OpenAICompatibleEmbeddingAdapter(EmbeddingAdapter):
         except requests.exceptions.ConnectionError:
             logging.error("OpenAI embedding connection error")
             return []
-        except Exception as e:
-            logging.error(f"OpenAI embedding connection failed: {str(e)}")
+        except Exception:
+            logging.exception("OpenAI embedding connection failed")
             return []
 
     async def invoke(self, request: EmbeddingRequest):

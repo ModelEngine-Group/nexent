@@ -132,8 +132,8 @@ class OpenAICompatibleRerankAdapter(RerankAdapter, HttpTransportMixin):
                     logging.error("Rerank API timed out after all retries.")
                     raise
                 continue
-            except requests.exceptions.RequestException as e:
-                logging.error(f"Rerank API request failed: {str(e)}")
+            except requests.exceptions.RequestException:
+                logging.exception("Rerank API request failed")
                 raise
         if last_exception:
             raise last_exception
@@ -195,8 +195,8 @@ class OpenAICompatibleRerankAdapter(RerankAdapter, HttpTransportMixin):
         except requests.exceptions.ConnectionError:
             logging.error("Rerank API connection error, unable to establish connection")
             return False
-        except Exception as e:
-            logging.error(f"Rerank API connectivity check failed: {str(e)}")
+        except Exception:
+            logging.exception("Rerank API connectivity check failed")
             return False
 
     # ---- adapter interface ----
