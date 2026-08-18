@@ -690,6 +690,17 @@ const HoverableText = ({
     }
   };
 
+  // Keyboard activation (Enter / Space) keeps the citation marker accessible.
+  const handleCitationKeyDown = (event: React.KeyboardEvent) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (matchedResult) {
+      const citationContext = getCitationScopeText(containerRef.current);
+      onCitationClick?.(`${toolSign}${citeIndex}`, citationContext);
+    }
+  };
+
   // Handle mouse events
   React.useEffect(() => {
     const container = containerRef.current;
@@ -823,7 +834,11 @@ const HoverableText = ({
           >
             <span
               className="inline-flex items-center cursor-pointer transition-colors"
+              role="button"
+              tabIndex={0}
+              aria-label={`Citation ${toolSign}${citeIndex}`}
               onClick={handleCitationClick}
+              onKeyDown={handleCitationKeyDown}
             >
               <CitationBadge toolSign={toolSign} citeIndex={citeIndex} />
             </span>

@@ -13,6 +13,12 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import {
+  escapeRegExp,
+  extractHighlightTerms,
+  normalizeForHighlight,
+  splitSourceTextIntoSentences,
+} from "@/lib/citationHighlight";
 import { useTranslation } from "react-i18next";
 import {
   extractObjectNameFromUrl,
@@ -241,77 +247,6 @@ const extractDomain = (url: string): string => {
     return url;
   }
 };
-
-const escapeRegExp = (value: string) =>
-  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
-const normalizeForHighlight = (value: string) =>
-  value.normalize("NFKC").toLocaleLowerCase();
-
-const extractHighlightTerms = (
-  answerContext: string,
-  sourceText: string,
-): string[] => {
-  if (!answerContext || !sourceText) return [];
-
-  const sourceLower = normalizeForHighlight(sourceText);
-  const candidates = new Set<string>();
-  const addIfPresent = (value: string) => {
-    const term = value.trim();
-    if (term.length >= 2 && sourceLower.includes(normalizeForHighlight(term))) {
-      candidates.add(term);
-    }
-  };
-
-  for (const value of answerContext.match(
-    /\b(?:\d{1,3}(?:\.\d{1,3}){3}|\d{2,}(?:[-:.]\d{1,4})*)\b/g,
-  ) || []) {
-    addIfPresent(value);
-  }
-  for (const value of answerContext.match(/[A-Za-z_][A-Za-z0-9_.\/-]{2,}/g) || []) {
-    addIfPresent(value);
-  }
-  for (const value of answerContext.match(/\b[A-Za-z]{1,4}\d{1,4}\b/g) || []) {
-    addIfPresent(value);
-  }
-  for (const phrase of answerContext.match(/[\u4e00-\u9fff]{3,}/g) || []) {
-    for (let start = 0; start <= phrase.length - 3;) {
-      let matched = "";
-      for (let length = Math.min(12, phrase.length - start); length >= 3; length -= 1) {
-        const candidate = phrase.slice(start, start + length);
-        if (sourceLower.includes(normalizeForHighlight(candidate))) {
-          matched = candidate;
-          break;
-        }
-      }
-      if (matched) {
-        candidates.add(matched);
-        start += matched.length;
-      } else {
-        start += 1;
-      }
-    }
-  }
-
-  return Array.from(candidates)
-    .sort((left, right) => right.length - left.length)
-    .filter(
-      (term, index, terms) =>
-        !terms.slice(0, index).some((kept) => kept.includes(term)),
-    )
-    .slice(0, 8);
-};
-
-const splitSourceTextIntoSentences = (text: string): string[] =>
-  text.split(/(\r?\n)/).flatMap((line) => {
-    if (!line || /^\r?\n$/.test(line)) return [line];
-
-    // Retrieval chunks keep Markdown tables as lines. A row is the smallest
-    // readable unit in that format, so highlight the whole row when it matches.
-    if (/^\s*\|.*\|\s*$/.test(line)) return [line];
-
-    return line.match(/[^。！？!?；;]+[。！？!?；;]?/g) || [line];
-  });
 
 const HighlightedChunkText: FC<{
   text: string;
