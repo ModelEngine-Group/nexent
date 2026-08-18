@@ -181,8 +181,28 @@ export const InstalledResourceBindingCard: FC<{
     (item) => candidateRef(item) === configuringRef
   );
 
+  const synchronizeAgentView = async (): Promise<boolean> => {
+    setIsSynchronizing(true);
+    try {
+      return (await onResourcesBound?.(payload.agent_id)) ?? true;
+    } catch {
+      return false;
+    } finally {
+      setIsSynchronizing(false);
+    }
+  };
+
+  const showSynchronizationError = () => {
+    setSummaryError(
+      t(
+        "nl2agent.resourceBinding.syncFailed",
+        "Resources were saved, but the Agent view could not be refreshed. Retry to continue."
+      )
+    );
+  };
+
   const bindSelected = async () => {
-    if (isLocked || isBinding) return;
+    if (isLocked || isBinding || isSynchronizing) return;
     const pending = items.filter(
       (item) => item.selected && item.bindingStatus !== "bound"
     );
@@ -250,21 +270,19 @@ export const InstalledResourceBindingCard: FC<{
         });
       }
     });
+
+    if (settled.some((result) => result.status === "fulfilled")) {
+      const synchronized = await synchronizeAgentView();
+      if (!synchronized) showSynchronizationError();
+    }
   };
 
   const continueFlow = async () => {
     if (isLocked || !canContinue || isSynchronizing) return;
-    setIsSynchronizing(true);
     setSummaryError(null);
-    const synchronized = (await onResourcesBound?.(payload.agent_id)) ?? true;
-    setIsSynchronizing(false);
+    const synchronized = await synchronizeAgentView();
     if (!synchronized) {
-      setSummaryError(
-        t(
-          "nl2agent.resourceBinding.syncFailed",
-          "Resources were saved, but the Agent view could not be refreshed. Retry to continue."
-        )
-      );
+      showSynchronizationError();
       return;
     }
 
@@ -435,7 +453,10 @@ export const InstalledResourceBindingCard: FC<{
         ) : null}
         <div className="flex flex-wrap justify-end gap-2">
           {!canContinue ? (
-            <Button disabled={isLocked || isBinding} onClick={bindSelected}>
+            <Button
+              disabled={isLocked || isBinding || isSynchronizing}
+              onClick={bindSelected}
+            >
               {isBinding ? (
                 <Loader2 className="mr-2 size-4 animate-spin" />
               ) : null}
