@@ -33,6 +33,7 @@ import {
   buildToolCallPart,
   conversationSourcesRegistry,
   extractAidpImageKeys,
+  extractMarkdownImageUrls,
   searchImagesRegistry,
   isReasoningChunkType,
   skillFileUploadsRegistry,
@@ -62,7 +63,8 @@ type HistoricalChatMode = "planning" | "execution";
 let activeHistoricalConversationId: string | undefined;
 let activeHistoricalChatModeConversationId: string | undefined;
 let historicalChatModeListener:
-  ((mode: HistoricalChatMode) => void) | undefined;
+  | ((mode: HistoricalChatMode) => void)
+  | undefined;
 const historicalChatModeCache = new Map<string, HistoricalChatMode>();
 
 export const restoreHistoricalPlan = (conversationId?: string): void => {
@@ -139,7 +141,8 @@ const toToolSearchItem = (value: unknown) => {
   const item = value as Record<string, unknown>;
   const url = typeof item.url === "string" ? item.url : "";
   const filename = typeof item.filename === "string" ? item.filename : "";
-  const sourceFile = typeof item.source_file === "string" ? item.source_file : "";
+  const sourceFile =
+    typeof item.source_file === "string" ? item.source_file : "";
   const imageMetadata = parseImageMetadata(item.text);
   const resolvedUrl = imageMetadata?.image_url || url;
   const title =
@@ -154,17 +157,24 @@ const toToolSearchItem = (value: unknown) => {
       : typeof item.citeIndex === "number"
         ? item.citeIndex
         : undefined;
-  const toolSign = typeof item.tool_sign === "string" ? item.tool_sign : undefined;
+  const toolSign =
+    typeof item.tool_sign === "string" ? item.tool_sign : undefined;
 
   return resolvedUrl || sourceFile
     ? {
         url: resolvedUrl,
         title,
-        text: imageMetadata ? undefined : typeof item.text === "string" ? item.text : undefined,
-        sourceType: typeof item.source_type === "string" ? item.source_type : undefined,
+        text: imageMetadata
+          ? undefined
+          : typeof item.text === "string"
+            ? item.text
+            : undefined,
+        sourceType:
+          typeof item.source_type === "string" ? item.source_type : undefined,
         filename: filename || undefined,
         sourceFile: sourceFile || imageMetadata?.source_file || undefined,
-        objectName: typeof item.object_name === "string" ? item.object_name : undefined,
+        objectName:
+          typeof item.object_name === "string" ? item.object_name : undefined,
         citeIndex,
         toolSign,
         isImage: Boolean(imageMetadata),
@@ -211,7 +221,7 @@ const buildBranchableHistory = (
   const branchableMessages: BranchableHistoryMessage[] = [];
   let visibleHeadId: string | null = null;
 
-  for (let groupStart = 0; groupStart < messages.length;) {
+  for (let groupStart = 0; groupStart < messages.length; ) {
     const role = messages[groupStart].role;
     let groupEnd = groupStart + 1;
     while (groupEnd < messages.length && messages[groupEnd].role === role) {
@@ -355,6 +365,16 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
           typeof part.content === "string"
             ? [part.content]
             : []
+        )
+      );
+      const persistedAnswerImageUrls = new Set(
+        extractMarkdownImageUrls(
+          messageParts.flatMap((part) =>
+            (part.type === "final_answer" || part.type === "text") &&
+            typeof part.content === "string"
+              ? [part.content]
+              : []
+          )
         )
       );
 
@@ -609,20 +629,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
 
           if (part.type === "picture_web") {
             for (const imageUrl of parseSearchImageUrls(part.content)) {
-              const imagePart = appendHistoricalImage(imageUrl);
-              if (imagePart) {
-                attachSearchContentToTool(
-                  content,
-                  {
-                    url: imagePart.url,
-                    title: imagePart.title,
-                    text: imagePart.text,
-                    isImage: true,
-                    imageKey: imagePart.imageKey,
-                  },
-                  part.tool_call_id,
-                );
-              }
+              appendHistoricalImage(imageUrl);
             }
             continue;
           }
@@ -912,6 +919,21 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
           ...restoredImages,
         ]);
 
+        for (const image of restoredImages) {
+          if (
+            persistedAnswerImageUrls.has(image.url) ||
+            ((image.url.includes("/KnowledgeBase/Tenants/") ||
+              image.url.includes("/ind-aidp/images/")) &&
+              image.imageKey &&
+              answerImageKeys.includes(image.imageKey))
+          ) {
+            continue;
+          }
+          // Native image parts survive ExportedMessageRepository history
+          // normalization; custom fields on empty text parts do not.
+          content.push({ type: "image", image: image.url });
+        }
+
         // Emit a `source` part for each persisted search result so the
         // `group-source` block renders the inline "检索结果" trigger button.
         // Mirrors the streaming adapter's end-of-stream emission, but uses the
@@ -922,7 +944,8 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
             if (typeof searchItem === "object" && searchItem !== null) {
               const item = searchItem as Record<string, unknown>;
               const scoreDetails = item.score_details as
-                Record<string, unknown> | undefined;
+                | Record<string, unknown>
+                | undefined;
               const searchImageKey = `${item.tool_sign ?? ""}${item.cite_index ?? ""}`;
               if (
                 scoreDetails?.chunk_type === "image" ||

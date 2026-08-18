@@ -53,8 +53,8 @@ def _parse_kds_list(kds_list: str) -> List[str]:
         parsed_kds = json.loads(kds_list) if isinstance(kds_list, str) else kds_list
     except json.JSONDecodeError as e:
         raise ValueError(f"kds_list must be a valid JSON array: {e}") from e
-    if not isinstance(parsed_kds, list) or not (1 <= len(parsed_kds) <= _MAX_KDS):
-        raise ValueError(f"kds_list must be a list of 1-{_MAX_KDS} knowledge base IDs")
+    if not isinstance(parsed_kds, list) or len(parsed_kds) > _MAX_KDS:
+        raise ValueError(f"kds_list must be a list of 0-{_MAX_KDS} knowledge base IDs")
     return [str(k) for k in parsed_kds]
 
 
@@ -573,13 +573,14 @@ class AidpSearchTool(Tool):
         )
 
         if not search_kds_list:
-            # Provide a clear, actionable message so the LLM (and the user)
-            # know that the configured KBs were filtered out by the
-            # permission system rather than failing silently.
-            raise AidpSearchError(
-                "No accessible knowledge base. The configured KBs are either "
-                "missing from your accessible set or have been revoked. "
-                "Ask the operator to grant access to at least one KB."
+            # Permission denial is a valid tool observation, not a transport
+            # failure. Returning it lets the agent produce a complete answer
+            # while still preventing any request to the AIDP endpoint.
+            return json.dumps(
+                "No AIDP knowledge base is accessible within the selected "
+                "conversation scope. The configured knowledge bases may have "
+                "been removed or your access may have been revoked.",
+                ensure_ascii=False,
             )
 
         try:
@@ -592,8 +593,16 @@ class AidpSearchTool(Tool):
             raise AidpSearchError(f"AIDP search error: {e}") from e
 
         if not records:
-            raise AidpSearchError(
-                "AIDP search error: No results found! Try a less restrictive or shorter query."
+            logger.info(
+                "AIDP search returned no results for query '%s' in kds_list=%s",
+                query,
+                search_kds_list,
+            )
+            return json.dumps(
+                "No relevant information was found in the selected AIDP knowledge "
+                "bases. Try a broader or shorter query, or explain that the selected "
+                "scope does not contain enough evidence.",
+                ensure_ascii=False,
             )
 
         search_results_json, search_results_return, images_url = self._process_records(records)

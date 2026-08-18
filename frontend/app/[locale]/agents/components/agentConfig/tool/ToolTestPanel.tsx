@@ -2,7 +2,16 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { Input, Button, Card, Typography, Tooltip, Modal, Form, Tag } from "antd";
+import {
+  Input,
+  Button,
+  Card,
+  Typography,
+  Tooltip,
+  Modal,
+  Form,
+  Tag,
+} from "antd";
 import { Settings, PenLine, X } from "lucide-react";
 
 import { Tool, ToolParam } from "@/types/agentConfig";
@@ -102,7 +111,16 @@ export interface ToolTestPanelProps {
   /** Callback to notify parent when testPanelKbIds should change (e.g., from manual JSON edit) */
   onTestPanelKbIdsChange?: (ids: string[], displayNames: string[]) => void;
   /** Tool type for KB selection (used to determine parameter name) */
-  toolKbType?: "knowledge_base_search" | "dify_search" | "datamate_search" | "idata_search" | "haotian_search" | "aidp_search" | "ragflow_search" | null;
+  toolKbType?:
+    | "knowledge_base_search"
+    | "dify_search"
+    | "datamate_search"
+    | "idata_search"
+    | "haotian_search"
+    | "aidp_search"
+    | "ind_aidp_search"
+    | "ragflow_search"
+    | null;
   /** Haotian knowledge sets for display name resolution */
   haotianKnowledgeSets?: Array<{
     name: string;
@@ -143,10 +161,14 @@ export default function ToolTestPanel({
   const [testExecuting, setTestExecuting] = useState<boolean>(false);
   const [testResult, setTestResult] = useState<string>("");
   const [parsedInputs, setParsedInputs] = useState<Record<string, any>>({});
-  const [parameterValues, setParameterValues] = useState<Record<string, any>>({});
+  const [parameterValues, setParameterValues] = useState<Record<string, any>>(
+    {}
+  );
   const [isManualInputMode, setIsManualInputMode] = useState(false);
   const [manualJsonInput, setManualJsonInput] = useState<string>("");
   const [isParseSuccessful, setIsParseSuccessful] = useState<boolean>(false);
+  const isAidpRuntimeSelection =
+    toolKbType === "aidp_search" || toolKbType === "ind_aidp_search";
   const isKnowledgeBaseSearchTool =
     tool?.origin_name === "knowledge_base_search" ||
     tool?.name === "knowledge_base_search";
@@ -215,24 +237,42 @@ export default function ToolTestPanel({
 
           // Check if this is the KB selector parameter and KB selection is enabled
           // Haotian and iData use dataset_ids, ragflow_search also uses dataset_ids, others use index_names
-          const isKbSelectorParam = paramName === "index_names" && toolRequiresKbSelection && toolKbType !== "haotian_search" && toolKbType !== "idata_search" && toolKbType !== "aidp_search" && toolKbType !== "ragflow_search"
-            || paramName === "dataset_ids" && toolRequiresKbSelection && (toolKbType === "haotian_search" || toolKbType === "idata_search" || toolKbType === "ragflow_search")
-            || paramName === "kds_list" && toolRequiresKbSelection && toolKbType === "aidp_search";
+          const isKbSelectorParam =
+            (paramName === "index_names" &&
+              toolRequiresKbSelection &&
+              toolKbType !== "haotian_search" &&
+              toolKbType !== "idata_search" &&
+              !isAidpRuntimeSelection &&
+              toolKbType !== "ragflow_search") ||
+            (paramName === "dataset_ids" &&
+              toolRequiresKbSelection &&
+              (toolKbType === "haotian_search" ||
+                toolKbType === "idata_search" ||
+                toolKbType === "ragflow_search")) ||
+            (paramName === "kds_list" &&
+              toolRequiresKbSelection &&
+              isAidpRuntimeSelection);
 
           if (isKbSelectorParam) {
             // For aidp_search kds_list: use testPanelKbIds (independent from config's selectedKbIds)
             // For other tools: use selectedKbIds
-            const kbIds = (paramName === "kds_list" && toolKbType === "aidp_search")
-              ? testPanelKbIds
-              : selectedKbIds;
+            const kbIds =
+              paramName === "kds_list" && isAidpRuntimeSelection
+                ? testPanelKbIds
+                : selectedKbIds;
             if (kbIds.length > 0) {
               parameterValues[paramName] = kbIds;
               formValues[`param_${paramName}`] = kbIds;
             }
           } else {
             // Priority: configParams (user's saved value) > parsedInputs default
-            const configParam = (configParams || []).find((p) => p.name === paramName);
-            const hasSavedValue = configParam != null && configParam.value !== undefined && configParam.value !== null;
+            const configParam = (configParams || []).find(
+              (p) => p.name === paramName
+            );
+            const hasSavedValue =
+              configParam != null &&
+              configParam.value !== undefined &&
+              configParam.value !== null;
 
             if (hasSavedValue) {
               // Use saved value from configParams
@@ -240,11 +280,17 @@ export default function ToolTestPanel({
               parameterValues[paramName] = savedValue;
               switch (paramType) {
                 case "boolean":
-                  formValues[`param_${paramName}`] = savedValue ? "true" : "false";
+                  formValues[`param_${paramName}`] = savedValue
+                    ? "true"
+                    : "false";
                   break;
                 case "array":
                 case "object":
-                  formValues[`param_${paramName}`] = JSON.stringify(savedValue, null, 2);
+                  formValues[`param_${paramName}`] = JSON.stringify(
+                    savedValue,
+                    null,
+                    2
+                  );
                   break;
                 default:
                   formValues[`param_${paramName}`] = String(savedValue);
@@ -258,7 +304,9 @@ export default function ToolTestPanel({
               parameterValues[paramName] = paramInfo.default;
               switch (paramType) {
                 case "boolean":
-                  formValues[`param_${paramName}`] = paramInfo.default ? "true" : "false";
+                  formValues[`param_${paramName}`] = paramInfo.default
+                    ? "true"
+                    : "false";
                   break;
                 case "array":
                 case "object":
@@ -316,8 +364,10 @@ export default function ToolTestPanel({
   useEffect(() => {
     if (!toolRequiresKbSelection) return;
 
-    const isHaotianOrIdata = toolKbType === "haotian_search" || toolKbType === "idata_search";
-    const isAidpOrKbSearch = toolKbType === "aidp_search" || isKnowledgeBaseSearchTool;
+    const isHaotianOrIdata =
+      toolKbType === "haotian_search" || toolKbType === "idata_search";
+    const isAidpOrKbSearch =
+      isAidpRuntimeSelection || isKnowledgeBaseSearchTool;
 
     // Determine source of truth, field name, and state key for each tool type
     let ids: string[];
@@ -327,8 +377,10 @@ export default function ToolTestPanel({
     if (isAidpOrKbSearch) {
       // aidp_search and knowledge_base_search use independent test panel KB state
       ids = testPanelKbIds;
-      fieldName = toolKbType === "aidp_search" ? "param_kds_list" : "param_index_names";
-      stateKey = toolKbType === "aidp_search" ? "kds_list" : "index_names";
+      fieldName = isAidpRuntimeSelection
+        ? "param_kds_list"
+        : "param_index_names";
+      stateKey = isAidpRuntimeSelection ? "kds_list" : "index_names";
     } else if (isHaotianOrIdata) {
       ids = selectedKbIds;
       fieldName = "param_dataset_ids";
@@ -358,7 +410,14 @@ export default function ToolTestPanel({
         return prev;
       }
     });
-  }, [selectedKbIds, testPanelKbIds, toolRequiresKbSelection, toolKbType, form]);
+  }, [
+    selectedKbIds,
+    testPanelKbIds,
+    toolRequiresKbSelection,
+    toolKbType,
+    isAidpRuntimeSelection,
+    form,
+  ]);
 
   // Handle aidp_search testPanelKbIds that may arrive after initial form setup.
   // This runs when testPanelKbIds transitions from [] to non-empty so the form
@@ -369,10 +428,12 @@ export default function ToolTestPanel({
     if (!visible) return;
     if (!toolRequiresKbSelection) return;
     if (testPanelKbIds.length === 0) return;
-    if (toolKbType !== "aidp_search" && !isKnowledgeBaseSearchTool) return;
+    if (!isAidpRuntimeSelection && !isKnowledgeBaseSearchTool) return;
 
-    const fieldName = toolKbType === "aidp_search" ? "param_kds_list" : "param_index_names";
-    const stateKey = toolKbType === "aidp_search" ? "kds_list" : "index_names";
+    const fieldName = isAidpRuntimeSelection
+      ? "param_kds_list"
+      : "param_index_names";
+    const stateKey = isAidpRuntimeSelection ? "kds_list" : "index_names";
 
     const currentValue = form.getFieldValue(fieldName);
     const idsMatch =
@@ -393,17 +454,28 @@ export default function ToolTestPanel({
         return prev;
       }
     });
-  }, [testPanelKbIds, visible, toolKbType, toolRequiresKbSelection, form]);
+  }, [
+    testPanelKbIds,
+    visible,
+    toolRequiresKbSelection,
+    isAidpRuntimeSelection,
+    form,
+  ]);
 
   // When switching back from manual mode to parsed mode, extract kds_list/index_names from
   // the manual JSON and notify the parent so testPanelKbIds stays in sync.
   useEffect(() => {
     if (prevManualInputModeRef.current && !isManualInputMode) {
       // Transitioned from manual → parsed mode
-      if ((toolKbType === "aidp_search" || isKnowledgeBaseSearchTool) && onTestPanelKbIdsChange) {
+      if (
+        (isAidpRuntimeSelection || isKnowledgeBaseSearchTool) &&
+        onTestPanelKbIdsChange
+      ) {
         try {
           const parsed = JSON.parse(manualJsonInput);
-          const kbIds = toolKbType === "aidp_search" ? parsed.kds_list : parsed.index_names;
+          const kbIds = isAidpRuntimeSelection
+            ? parsed.kds_list
+            : parsed.index_names;
           if (Array.isArray(kbIds) && kbIds.length > 0) {
             onTestPanelKbIdsChange(kbIds, kbIds);
           }
@@ -413,7 +485,13 @@ export default function ToolTestPanel({
       }
     }
     prevManualInputModeRef.current = isManualInputMode;
-  }, [isManualInputMode, manualJsonInput, toolKbType, onTestPanelKbIdsChange]);
+  }, [
+    isManualInputMode,
+    manualJsonInput,
+    isAidpRuntimeSelection,
+    isKnowledgeBaseSearchTool,
+    onTestPanelKbIdsChange,
+  ]);
 
   // Close test panel
   const handleClose = () => {
@@ -426,10 +504,25 @@ export default function ToolTestPanel({
 
     // Validate that knowledge base is selected when required
     // For aidp_search and knowledge_base_search, use test panel's independent KB state
-    const kbIds = (toolKbType === "aidp_search" || isKnowledgeBaseSearchTool)
-      ? testPanelKbIds
-      : selectedKbIds;
-    if (toolRequiresKbSelection && !isKnowledgeBaseSearchTool && kbIds.length === 0) {
+    let kbIds =
+      isAidpRuntimeSelection || isKnowledgeBaseSearchTool
+        ? testPanelKbIds
+        : selectedKbIds;
+    if (isManualInputMode && isAidpRuntimeSelection) {
+      try {
+        const manualParams = JSON.parse(manualJsonInput);
+        if (Array.isArray(manualParams.kds_list)) {
+          kbIds = manualParams.kds_list;
+        }
+      } catch {
+        // The detailed invalid-JSON error is reported below.
+      }
+    }
+    if (
+      toolRequiresKbSelection &&
+      !isKnowledgeBaseSearchTool &&
+      kbIds.length === 0
+    ) {
       setTestResult(`Test failed: Please select at least one knowledge base`);
       return;
     }
@@ -455,8 +548,7 @@ export default function ToolTestPanel({
         // Fallback to configParams if parsedInputs is empty (e.g. knowledge_base_search
         // whose DB inputs may be empty or stale).
         const formValues = form.getFieldsValue();
-        const useConfigParamsFallback =
-          Object.keys(parsedInputs).length === 0;
+        const useConfigParamsFallback = Object.keys(parsedInputs).length === 0;
         const paramNames = useConfigParamsFallback
           ? (configParams || []).map((p) => p.name)
           : Object.keys(parsedInputs);
@@ -473,16 +565,19 @@ export default function ToolTestPanel({
               ? typeof value === "number"
                 ? "number"
                 : typeof value === "boolean"
-                ? "boolean"
-                : Array.isArray(value)
-                ? "array"
-                : "string"
+                  ? "boolean"
+                  : Array.isArray(value)
+                    ? "array"
+                    : "string"
               : DEFAULT_TYPE);
 
           // If form value is empty (e.g. configParams fallback path), use
           // the saved configParam value as the source of truth.
           let effectiveValue = value;
-          if (useConfigParamsFallback && (value === undefined || value === "")) {
+          if (
+            useConfigParamsFallback &&
+            (value === undefined || value === "")
+          ) {
             const cfg = (configParams || []).find((p) => p.name === paramName);
             if (cfg && cfg.value !== undefined && cfg.value !== null) {
               effectiveValue = cfg.value;
@@ -493,7 +588,8 @@ export default function ToolTestPanel({
           const isKbSelectorParam =
             (paramName === "index_names" ||
               paramName === "dataset_ids" ||
-              paramName === "kds_list") && toolRequiresKbSelection;
+              paramName === "kds_list") &&
+            toolRequiresKbSelection;
 
           // For knowledge_base_search: index_names is a runtime input (not config).
           // The KB selector uses testPanelKbIds (independent from config).
@@ -510,7 +606,7 @@ export default function ToolTestPanel({
           // For aidp_search kds_list: prioritize testPanelKbIds (from test panel KB selector)
           // over form value (which may be [] from initialization timing).
           // Fallback to form value if testPanelKbIds is also empty.
-          if (paramName === "kds_list" && toolKbType === "aidp_search") {
+          if (paramName === "kds_list" && isAidpRuntimeSelection) {
             if (Array.isArray(effectiveValue) && effectiveValue.length > 0) {
               toolParams[paramName] = effectiveValue;
             } else if (testPanelKbIds.length > 0) {
@@ -523,16 +619,20 @@ export default function ToolTestPanel({
             if (Array.isArray(effectiveValue) && effectiveValue.length > 0) {
               toolParams[paramName] = effectiveValue;
             } else {
-              const kbIds = paramName === "kds_list" && toolKbType === "aidp_search"
-                ? testPanelKbIds
-                : selectedKbIds;
+              const kbIds =
+                paramName === "kds_list" && isAidpRuntimeSelection
+                  ? testPanelKbIds
+                  : selectedKbIds;
               toolParams[paramName] = kbIds;
             }
             return;
           }
 
           // Handle string values
-          if (typeof effectiveValue === "string" && effectiveValue.trim() !== "") {
+          if (
+            typeof effectiveValue === "string" &&
+            effectiveValue.trim() !== ""
+          ) {
             switch (paramType) {
               case "integer":
               case "number":
@@ -544,7 +644,8 @@ export default function ToolTestPanel({
                 }
                 break;
               case "boolean":
-                toolParams[paramName] = effectiveValue.trim().toLowerCase() === "true";
+                toolParams[paramName] =
+                  effectiveValue.trim().toLowerCase() === "true";
                 break;
               case "array":
               case "object":
@@ -557,17 +658,28 @@ export default function ToolTestPanel({
               default:
                 toolParams[paramName] = effectiveValue.trim();
             }
-          } else if (Array.isArray(effectiveValue) && effectiveValue.length > 0) {
+          } else if (
+            Array.isArray(effectiveValue) &&
+            effectiveValue.length > 0
+          ) {
             toolParams[paramName] = effectiveValue;
-          } else if (typeof effectiveValue === "object" && effectiveValue !== null) {
+          } else if (
+            typeof effectiveValue === "object" &&
+            effectiveValue !== null
+          ) {
             toolParams[paramName] = effectiveValue;
           }
         });
       }
 
       if (isKnowledgeBaseSearchTool) {
-        if (!Array.isArray(toolParams.index_names) || toolParams.index_names.length === 0) {
-          setTestResult(`Test failed: Please provide non-empty index_names in input params`);
+        if (
+          !Array.isArray(toolParams.index_names) ||
+          toolParams.index_names.length === 0
+        ) {
+          setTestResult(
+            `Test failed: Please provide non-empty index_names in input params`
+          );
           return;
         }
       }
@@ -577,15 +689,18 @@ export default function ToolTestPanel({
       let kbSelectionConfig: Record<string, any> = {};
       // Determine KB selection config based on tool type
       // For aidp_search, use testPanelKbIds (independent from config's selectedKbIds)
-      const aidpKbIds = toolKbType === "aidp_search" ? testPanelKbIds : selectedKbIds;
+      const aidpKbIds = isAidpRuntimeSelection ? testPanelKbIds : selectedKbIds;
       if (toolRequiresKbSelection && aidpKbIds.length > 0) {
         // Determine the correct parameter name based on tool type
         if (tool?.name === "dify_search" || tool?.name === "ragflow_search") {
           kbSelectionConfig = { dataset_ids: JSON.stringify(aidpKbIds) };
-        } else if (tool?.name === "haotian_search" || tool?.name === "idata_search") {
+        } else if (
+          tool?.name === "haotian_search" ||
+          tool?.name === "idata_search"
+        ) {
           // Haotian and iData use dataset_ids as an array
           kbSelectionConfig = { dataset_ids: aidpKbIds };
-        } else if (tool?.name === "aidp_search") {
+        } else if (isAidpRuntimeSelection) {
           // AIDP uses kds_list as an array
           kbSelectionConfig = { kds_list: aidpKbIds };
         } else if (!isKnowledgeBaseSearchTool) {
@@ -613,7 +728,11 @@ export default function ToolTestPanel({
             ) {
               return acc;
             }
-            if (param.name === "kds_list" && tool?.name !== "aidp_search") {
+            if (
+              param.name === "kds_list" &&
+              tool?.name !== "aidp_search" &&
+              tool?.name !== "ind_aidp_search"
+            ) {
               return acc;
             }
           }
@@ -663,8 +782,7 @@ export default function ToolTestPanel({
   if (!tool) return null;
 
   return (
-
-    <div className="mb-4" >
+    <div className="mb-4">
       <div>
         {/* Input parameters section with conditional toggle */}
         {Object.keys(parameterValues).length > 0 && (
@@ -702,19 +820,22 @@ export default function ToolTestPanel({
                       const currentParamsJson: Record<string, any> = {};
 
                       Object.keys(parameterValues).forEach((paramName) => {
-                        const formValue = currentFormValues[`param_${paramName}`];
+                        const formValue =
+                          currentFormValues[`param_${paramName}`];
 
                         // Check if this is a KB selector parameter
                         const isKbSelectorParam =
-            (paramName === "index_names" ||
-              paramName === "dataset_ids" ||
-              paramName === "kds_list") && toolRequiresKbSelection;
+                          (paramName === "index_names" ||
+                            paramName === "dataset_ids" ||
+                            paramName === "kds_list") &&
+                          toolRequiresKbSelection;
 
                         // Handle KB selector parameters - use testPanelKbIds for aidp, selectedKbIds for others
                         if (isKbSelectorParam && !isKnowledgeBaseSearchTool) {
-                          const kbIds = paramName === "kds_list" && toolKbType === "aidp_search"
-                            ? testPanelKbIds
-                            : selectedKbIds;
+                          const kbIds =
+                            paramName === "kds_list" && isAidpRuntimeSelection
+                              ? testPanelKbIds
+                              : selectedKbIds;
                           if (kbIds.length > 0) {
                             currentParamsJson[paramName] = kbIds;
                           }
@@ -722,7 +843,10 @@ export default function ToolTestPanel({
                         }
 
                         // Handle string values
-                        if (typeof formValue === "string" && formValue.trim() !== "") {
+                        if (
+                          typeof formValue === "string" &&
+                          formValue.trim() !== ""
+                        ) {
                           const paramInfo = parsedInputs[paramName];
                           const paramType = paramInfo?.type || DEFAULT_TYPE;
 
@@ -750,10 +874,16 @@ export default function ToolTestPanel({
                           } catch {
                             currentParamsJson[paramName] = formValue.trim();
                           }
-                        } else if (Array.isArray(formValue) && formValue.length > 0) {
+                        } else if (
+                          Array.isArray(formValue) &&
+                          formValue.length > 0
+                        ) {
                           // Handle array values
                           currentParamsJson[paramName] = formValue;
-                        } else if (typeof formValue === "object" && formValue !== null) {
+                        } else if (
+                          typeof formValue === "object" &&
+                          formValue !== null
+                        ) {
                           // Handle object values
                           currentParamsJson[paramName] = formValue;
                         }
@@ -774,14 +904,17 @@ export default function ToolTestPanel({
 
                           // Check if this is a KB selector parameter
                           const isKbSelectorParam =
-            (paramName === "index_names" ||
-              paramName === "dataset_ids" ||
-              paramName === "kds_list") && toolRequiresKbSelection;
+                            (paramName === "index_names" ||
+                              paramName === "dataset_ids" ||
+                              paramName === "kds_list") &&
+                            toolRequiresKbSelection;
 
                           if (manualValue !== undefined) {
                             // KB selector parameters should keep their array form
                             if (isKbSelectorParam) {
-                              formValues[`param_${paramName}`] = Array.isArray(manualValue)
+                              formValues[`param_${paramName}`] = Array.isArray(
+                                manualValue
+                              )
                                 ? manualValue
                                 : [];
                             } else {
@@ -803,7 +936,9 @@ export default function ToolTestPanel({
                               }
                             }
                           } else {
-                            formValues[`param_${paramName}`] = isKbSelectorParam ? [] : "";
+                            formValues[`param_${paramName}`] = isKbSelectorParam
+                              ? []
+                              : "";
                           }
                         });
                         form.setFieldsValue(formValues);
@@ -832,129 +967,140 @@ export default function ToolTestPanel({
             >
               {isManualInputMode ? (
                 // Manual JSON input mode
-              <Form.Item className="w-full" wrapperCol={{ span: 24 }}>
-                <Input.TextArea
-                  value={manualJsonInput}
-                  onChange={(e) => setManualJsonInput(e.target.value)}
-                  rows={6}
-                  style={{ fontFamily: "monospace", width: "100%" }}
-                />
-              </Form.Item>
+                <Form.Item className="w-full" wrapperCol={{ span: 24 }}>
+                  <Input.TextArea
+                    value={manualJsonInput}
+                    onChange={(e) => setManualJsonInput(e.target.value)}
+                    rows={6}
+                    style={{ fontFamily: "monospace", width: "100%" }}
+                  />
+                </Form.Item>
               ) : (
                 // Parsed parameters mode
                 <>
                   {Object.keys(parameterValues).map((paramName) => {
-                      const paramInfo = parsedInputs[paramName];
-                      const description =
-                        paramInfo &&
-                        typeof paramInfo === "object" &&
-                        paramInfo.description
-                          ? paramInfo.description
-                          : paramName;
-                      const description_zh =
-                        paramInfo &&
-                        typeof paramInfo === "object" &&
-                        paramInfo.description_zh
-                          ? paramInfo.description_zh
-                          : undefined;
+                    const paramInfo = parsedInputs[paramName];
+                    const description =
+                      paramInfo &&
+                      typeof paramInfo === "object" &&
+                      paramInfo.description
+                        ? paramInfo.description
+                        : paramName;
+                    const description_zh =
+                      paramInfo &&
+                      typeof paramInfo === "object" &&
+                      paramInfo.description_zh
+                        ? paramInfo.description_zh
+                        : undefined;
 
-                      const fieldName = `param_${paramName}`;
-                      const rules: any[] = [];
+                    const fieldName = `param_${paramName}`;
+                    const rules: any[] = [];
 
-                      // Check if this is the KB selector parameter and KB selection is enabled
-                      // Haotian uses dataset_ids, others use index_names
-                      // For aidp_search, kds_list should be shown in both config AND input areas
-                      const isKbSelectorParam =
-                        (paramName === "index_names" ||
-                          paramName === "dataset_ids" ||
-                          paramName === "kds_list") && toolRequiresKbSelection;
+                    // Check if this is the KB selector parameter and KB selection is enabled
+                    // Haotian uses dataset_ids, others use index_names
+                    // For aidp_search, kds_list should be shown in both config AND input areas
+                    const isKbSelectorParam =
+                      (paramName === "index_names" ||
+                        paramName === "dataset_ids" ||
+                        paramName === "kds_list") &&
+                      toolRequiresKbSelection;
 
-                      // KB selection is configured in the upper config area.
-                      // For index_names/dataset_ids: do not render duplicated KB params in test input area.
-                      // For aidp_search kds_list: render it in test input area so user can override KB selection.
-                      const shouldHideKbSelector =
-                        isKbSelectorParam &&
-                        !isKnowledgeBaseSearchTool &&
-                        !(toolKbType === "aidp_search" && paramName === "kds_list");
+                    // KB selection is configured in the upper config area.
+                    // For index_names/dataset_ids: do not render duplicated KB params in test input area.
+                    // For aidp_search kds_list: render it in test input area so user can override KB selection.
+                    const shouldHideKbSelector =
+                      isKbSelectorParam &&
+                      !isKnowledgeBaseSearchTool &&
+                      !(isAidpRuntimeSelection && paramName === "kds_list");
 
-                      if (shouldHideKbSelector) {
-                        return null;
-                      }
+                    if (shouldHideKbSelector) {
+                      return null;
+                    }
 
-                      // Add type-specific validation rules
-                      switch (paramInfo?.type || DEFAULT_TYPE) {
-                        case "array":
-                          rules.push({
-                            validator: async (_: any, value: any) => {
-                              if (!value) return;
-                              try {
-                                const parsed =
-                                  typeof value === "string"
-                                    ? JSON.parse(value)
-                                    : value;
-                                if (!Array.isArray(parsed)) {
-                                  throw new Error(t("toolConfig.validation.array.invalid"));
-                                }
-                              } catch (e) {
-                                throw new Error(t("toolConfig.validation.array.invalid"));
+                    // Add type-specific validation rules
+                    switch (paramInfo?.type || DEFAULT_TYPE) {
+                      case "array":
+                        rules.push({
+                          validator: async (_: any, value: any) => {
+                            if (!value) return;
+                            try {
+                              const parsed =
+                                typeof value === "string"
+                                  ? JSON.parse(value)
+                                  : value;
+                              if (!Array.isArray(parsed)) {
+                                throw new Error(
+                                  t("toolConfig.validation.array.invalid")
+                                );
                               }
-                            },
-                          });
-                          break;
-                        case "object":
-                          rules.push({
-                            validator: async (_: any, value: any) => {
-                              if (!value) return;
-                              try {
-                                const parsed =
-                                  typeof value === "string"
-                                    ? JSON.parse(value)
-                                    : value;
-                                if (
-                                  typeof parsed !== "object" ||
-                                  Array.isArray(parsed)
-                                ) {
-                                  throw new Error(t("toolConfig.validation.object.invalid"));
-                                }
-                              } catch {
-                                throw new Error(t("toolConfig.validation.object.invalid"));
-                              }
-                            },
-                          });
-                          break;
-                      }
-
-                      return (
-                        (() => {
-                          const kbPlaceholder = t(
-                            "toolConfig.input.knowledgeBaseSelector.placeholder",
-                            {
-                              name:
-                                getLocalizedDescription(description, description_zh) ||
-                                paramName,
+                            } catch (e) {
+                              throw new Error(
+                                t("toolConfig.validation.array.invalid")
+                              );
                             }
-                          );
-                          return (
+                          },
+                        });
+                        break;
+                      case "object":
+                        rules.push({
+                          validator: async (_: any, value: any) => {
+                            if (!value) return;
+                            try {
+                              const parsed =
+                                typeof value === "string"
+                                  ? JSON.parse(value)
+                                  : value;
+                              if (
+                                typeof parsed !== "object" ||
+                                Array.isArray(parsed)
+                              ) {
+                                throw new Error(
+                                  t("toolConfig.validation.object.invalid")
+                                );
+                              }
+                            } catch {
+                              throw new Error(
+                                t("toolConfig.validation.object.invalid")
+                              );
+                            }
+                          },
+                        });
+                        break;
+                    }
+
+                    return (() => {
+                      const kbPlaceholder = t(
+                        "toolConfig.input.knowledgeBaseSelector.placeholder",
+                        {
+                          name:
+                            getLocalizedDescription(
+                              description,
+                              description_zh
+                            ) || paramName,
+                        }
+                      );
+                      return (
                         <Form.Item
                           key={paramName}
                           label={
-                            <span
-                              style={{ width: "100%" }}
-                              title={paramName}
-                            >
+                            <span style={{ width: "100%" }} title={paramName}>
                               {paramName}
                             </span>
                           }
                           name={fieldName}
                           rules={rules}
                           tooltip={{
-                            title: getLocalizedDescription(description, description_zh),
+                            title: getLocalizedDescription(
+                              description,
+                              description_zh
+                            ),
                             placement: "topLeft",
                             styles: { root: { maxWidth: 400 } },
                           }}
                         >
                           {/* KB selector for knowledge_base_search tool */}
-                          {isKnowledgeBaseSearchTool && paramName === "index_names" ? (
+                          {isKnowledgeBaseSearchTool &&
+                          paramName === "index_names" ? (
                             <KbSelectorDisplay
                               selectedKbIds={testPanelKbIds}
                               selectedKbDisplayNames={testPanelKbDisplayNames}
@@ -962,7 +1108,8 @@ export default function ToolTestPanel({
                               onOpenKbSelector={onOpenKbSelector}
                               onKbRemove={onTestPanelKbRemove}
                             />
-                          ) : toolKbType === "aidp_search" && paramName === "kds_list" ? (
+                          ) : isAidpRuntimeSelection &&
+                            paramName === "kds_list" ? (
                             <KbSelectorDisplay
                               selectedKbIds={testPanelKbIds}
                               selectedKbDisplayNames={testPanelKbDisplayNames}
@@ -972,15 +1119,17 @@ export default function ToolTestPanel({
                             />
                           ) : (
                             <Input
-                              placeholder={getLocalizedDescription(description, description_zh)}
+                              placeholder={getLocalizedDescription(
+                                description,
+                                description_zh
+                              )}
                             />
                           )}
                         </Form.Item>
-                          );
-                        })()
                       );
-                    })}
-                  </>
+                    })();
+                  })}
+                </>
               )}
             </Form>
           </>

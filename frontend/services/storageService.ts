@@ -29,7 +29,7 @@ export function extractObjectNameFromUrl(url: string): string | null {
 
       // Find attachments in path
       const storageIndex = parts.findIndex(
-        (part) => part === "attachments" || part === "knowledge_base",
+        (part) => part === "attachments" || part === "knowledge_base"
       );
       if (storageIndex >= 0) {
         return parts.slice(storageIndex).join("/");
@@ -60,9 +60,11 @@ export function extractObjectNameFromUrl(url: string): string | null {
       const storageIndex = ["attachments/", "knowledge_base/"].reduce(
         (firstIndex, prefix) => {
           const index = normalized.indexOf(prefix);
-          return index >= 0 && (firstIndex < 0 || index < firstIndex) ? index : firstIndex;
+          return index >= 0 && (firstIndex < 0 || index < firstIndex)
+            ? index
+            : firstIndex;
         },
-        -1,
+        -1
       );
       if (storageIndex >= 0) {
         return normalized.slice(storageIndex);
@@ -78,7 +80,7 @@ export function extractObjectNameFromUrl(url: string): string | null {
       // Remove leading slash and extract path after /nexent/ or /attachments/
       const parts = url.split("/").filter(Boolean);
       const storageIndex = parts.findIndex(
-        (part) => part === "attachments" || part === "knowledge_base",
+        (part) => part === "attachments" || part === "knowledge_base"
       );
       if (storageIndex >= 0) {
         return parts.slice(storageIndex).join("/");
@@ -95,7 +97,7 @@ export function extractObjectNameFromUrl(url: string): string | null {
     const parts = pathname.split("/").filter(Boolean);
 
     const storageIndex = parts.findIndex(
-      (part) => part === "attachments" || part === "knowledge_base",
+      (part) => part === "attachments" || part === "knowledge_base"
     );
     if (storageIndex >= 0) {
       return parts.slice(storageIndex).join("/");
@@ -117,16 +119,22 @@ export function isLocalStorageObjectUrl(url: string | undefined): boolean {
   if (url.startsWith("s3://")) return true;
 
   const objectName = extractObjectNameFromUrl(url);
-  return Boolean(objectName && /(^|\/)(knowledge_base|attachments)\//.test(objectName));
+  return Boolean(
+    objectName && /(^|\/)(knowledge_base|attachments)\//.test(objectName)
+  );
 }
 
 export function getLocalFilePreviewUrl(
   url: string | undefined,
   filename?: string,
-  objectName?: string,
+  objectName?: string
 ): string | undefined {
-  const resolvedObjectName = objectName || (url ? extractObjectNameFromUrl(url) : null);
-  if (!resolvedObjectName || !isLocalStorageObjectUrl(url ?? resolvedObjectName)) {
+  const resolvedObjectName =
+    objectName || (url ? extractObjectNameFromUrl(url) : null);
+  if (
+    !resolvedObjectName ||
+    !isLocalStorageObjectUrl(url ?? resolvedObjectName)
+  ) {
     return undefined;
   }
 
@@ -142,7 +150,9 @@ export async function fetchImageBlob(url: string): Promise<Blob> {
   const apiUrl = convertImageUrlToApiUrl(url);
   log.info(`[fetchImageBlob] input=${url}, apiUrl=${apiUrl}`);
   const response = await fetch(apiUrl);
-  log.info(`[fetchImageBlob] status=${response.status}, contentType=${response.headers.get("content-type")}`);
+  log.info(
+    `[fetchImageBlob] status=${response.status}, contentType=${response.headers.get("content-type")}`
+  );
   if (!response.ok) {
     throw new Error(
       `Failed to fetch image: ${response.status} ${response.statusText}`
@@ -153,7 +163,9 @@ export async function fetchImageBlob(url: string): Promise<Blob> {
   // must detect this or FileReader will try to render JSON as an image.
   if (contentType.startsWith("application/json")) {
     const body = await response.text();
-    log.error(`[fetchImageBlob] got JSON instead of image: ${body.slice(0, 300)}`);
+    log.error(
+      `[fetchImageBlob] got JSON instead of image: ${body.slice(0, 300)}`
+    );
     try {
       const json = JSON.parse(body);
       throw new Error(
@@ -161,7 +173,9 @@ export async function fetchImageBlob(url: string): Promise<Blob> {
       );
     } catch (e) {
       if (e instanceof SyntaxError) {
-        throw new Error(`Image proxy returned non-image JSON: ${body.slice(0, 200)}`);
+        throw new Error(
+          `Image proxy returned non-image JSON: ${body.slice(0, 200)}`
+        );
       }
       throw e;
     }
@@ -171,6 +185,10 @@ export async function fetchImageBlob(url: string): Promise<Blob> {
 
 export function convertImageUrlToApiUrl(url: string): string {
   const isHttpUrl = url.startsWith("http://") || url.startsWith("https://");
+
+  if (url.startsWith("/api/ind-aidp/images/")) {
+    return withBasePath(url);
+  }
 
   if (url.startsWith(`${API_BASE_URL}/share/`)) {
     return url;
@@ -353,7 +371,10 @@ export const storageService = {
     }
   },
 
-  async downloadFileWithAuth(objectName: string, filename?: string): Promise<void> {
+  async downloadFileWithAuth(
+    objectName: string,
+    filename?: string
+  ): Promise<void> {
     try {
       const response = await fetch(
         API_ENDPOINTS.storage.file(objectName, "stream", filename)

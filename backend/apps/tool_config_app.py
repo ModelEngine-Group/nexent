@@ -5,7 +5,7 @@ from typing import Optional, Dict, Any, List
 from fastapi import APIRouter, Header, HTTPException, Body, Query
 from fastapi.responses import JSONResponse
 
-from consts.exceptions import MCPConnectionError, NotFoundException
+from consts.exceptions import AppException, MCPConnectionError, NotFoundException, ValidationError
 from consts.model import ToolInstanceInfoRequest, ToolInstanceSearchRequest, ToolValidateRequest
 from services.tool_configuration_service import (
     search_tool_info_impl,
@@ -47,8 +47,10 @@ async def list_tools_api(
 @router.post("/search")
 async def search_tool_info_api(request: ToolInstanceSearchRequest, authorization: Optional[str] = Header(None)):
     try:
-        _, tenant_id = get_current_user_id(authorization)
-        return search_tool_info_impl(request.agent_id, request.tool_id, tenant_id)
+        user_id, tenant_id = get_current_user_id(authorization)
+        return search_tool_info_impl(request.agent_id, request.tool_id, tenant_id, user_id)
+    except (HTTPException, AppException):
+        raise
     except Exception as e:
         logging.error(f"Failed to search tool, error in: {str(e)}")
         raise HTTPException(
@@ -63,6 +65,10 @@ async def update_tool_info_api(request: ToolInstanceInfoRequest, authorization: 
     try:
         user_id, tenant_id = get_current_user_id(authorization)
         return update_tool_info_impl(request, tenant_id, user_id)
+    except ValidationError as e:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
+    except (HTTPException, AppException):
+        raise
     except Exception as e:
         logging.error(f"Failed to update tool, error in: {str(e)}")
         raise HTTPException(
