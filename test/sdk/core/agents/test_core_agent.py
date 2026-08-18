@@ -2028,7 +2028,6 @@ class TestRunStreamRealExecution:
         # Load CoreAgent in isolation
         module = self._load_core_agent_in_isolation()
         CoreAgent = module.CoreAgent
-
         # Verify CoreAgent is a real class, not a Mock
         assert not isinstance(CoreAgent, MagicMock), "CoreAgent should not be MagicMock"
 
@@ -2036,9 +2035,15 @@ class TestRunStreamRealExecution:
         def mock_add_message(agent_name, process_type, data):
             observer_calls.append((agent_name, process_type, data))
 
-        # Create mock action output
-        mock_action_output = MagicMock()
-        mock_action_output.is_final_answer = False
+        # Use a real output type so the isinstance branch is covered while
+        # is_final_answer=False continues to the max-step fallback.
+        class FakeActionOutput:
+            def __init__(self):
+                self.output = "intermediate result"
+                self.is_final_answer = False
+
+        module.ActionOutput = FakeActionOutput
+        mock_action_output = FakeActionOutput()
 
         # Track _handle_max_steps_reached
         handle_calls = []
@@ -2087,6 +2092,11 @@ class TestRunStreamRealExecution:
         agent.managed_agents = {}
         agent.provide_run_summary = False
         agent._use_structured_outputs_internally = False
+        agent.enable_planning = False
+        agent.verification_config = SimpleNamespace(
+            enabled=False,
+            final_verification_enabled=False,
+        )
         agent.context_runtime = self._context_runtime_mock()
         agent.step_metrics = []
 
@@ -2231,6 +2241,40 @@ class TestRunStreamRealExecution:
 
         # When the runtime has no raw count, fall back to msg_token_count.
         assert agent._last_uncompressed_est != 5000
+
+    def test_step_stream_rejects_whitespace_only_model_output(self):
+        """Whitespace-only provider content is a generation error, not a final answer."""
+        module = self._load_core_agent_in_isolation()
+        CoreAgent = module.CoreAgent
+        module.AgentExecutionError = type("AgentExecutionError", (Exception,), {})
+        module.AgentGenerationError = type("AgentGenerationError", (Exception,), {})
+
+        agent = object.__new__(CoreAgent)
+        agent.agent_name = "test"
+        agent.observer = MagicMock()
+        agent.step_number = 1
+        agent.memory = MagicMock()
+        agent.memory.steps = []
+        agent.logger = MagicMock()
+        agent.context_runtime = self._context_runtime_mock()
+        final_context = MagicMock()
+        final_context.messages = [MagicMock()]
+        final_context.evidence.over_hard_budget = False
+        agent.context_runtime.prepare_step.return_value = final_context
+        agent._history_step_count = 0
+        agent._context_tools = MagicMock(return_value=[])
+        agent._use_structured_outputs_internally = False
+
+        response = MagicMock()
+        response.content = "   \n\t"
+        response.token_usage = None
+        agent.model = MagicMock(return_value=response)
+
+        action_step = MagicMock()
+        with pytest.raises(Exception, match="empty or whitespace-only output"):
+            next(agent._step_stream(action_step))
+
+        assert action_step.model_output == "   \n\t"
 
     def test_run_stream_stop_event_path_real_execution(self):
         """Test _run_stream with stop_event set (user break)."""
@@ -2511,6 +2555,61 @@ class TestRunStreamRealExecution:
         assert len(agent.memory.steps) == 2
         assert agent.memory.steps[0].error is not None
 
+    def test_run_stream_retries_empty_direct_answer_then_verifies_valid_answer(self):
+        """An empty direct response is retried before a later valid response is verified."""
+        module = self._load_core_agent_in_isolation()
+        CoreAgent = module.CoreAgent
+        module.FinalAnswerStep = lambda output: SimpleNamespace(output=output)
+        module.handle_agent_output_types = lambda output: output
+
+        agent = object.__new__(CoreAgent)
+        agent.agent_name = "test_agent"
+        agent.name = "test_agent"
+        agent.observer = MagicMock()
+        agent.stop_event = MagicMock()
+        agent.stop_event.is_set.return_value = False
+        agent.step_number = 1
+        agent.memory = MagicMock()
+        agent.memory.steps = []
+        agent.logger = MagicMock()
+        agent.model = MagicMock(
+            last_response_diagnostics={"finish_reason": "length"}
+        )
+        agent.final_answer_checks = []
+        agent.enable_planning = False
+        agent.verification_config = SimpleNamespace(
+            enabled=True,
+            final_verification_enabled=True,
+            max_final_rounds=2,
+        )
+        agent.verification_controller = MagicMock()
+        agent.verification_controller.verify_final_answer.return_value = SimpleNamespace(
+            passed=True
+        )
+        agent._build_verification_memory_summary = MagicMock(return_value="summary")
+        agent._finalize_step = MagicMock()
+        agent._collect_step_metrics = MagicMock()
+
+        direct_answers = iter([" \n", "valid direct answer"])
+
+        def mock_step_stream(action_step):
+            action_step.model_output = next(direct_answers)
+            if False:
+                yield None
+            raise module.FinalAnswerError()
+
+        agent._step_stream = mock_step_stream
+
+        results = list(agent._run_stream("test task", max_steps=2))
+
+        assert results[-1].output == "valid direct answer"
+        assert len(agent.memory.steps) == 2
+        assert agent.memory.steps[0].error is not None
+        agent.verification_controller.verify_final_answer.assert_called_once()
+        assert agent.verification_controller.verify_final_answer.call_args.kwargs[
+            "candidate"
+        ] == "valid direct answer"
+
 
 # ----------------------------------------------------------------------------
 # Tests for _handle_max_steps_reached method
@@ -2633,6 +2732,26 @@ class TestHandleMaxStepsReached:
             if call[1].get("level") and "ERROR" in str(call[1].get("level"))
         ]
         assert len(error_calls) >= 1
+
+    def test_handle_max_steps_reached_empty_content_uses_fallback(self, caplog):
+        """Empty max-step synthesis returns a visible fallback and records why."""
+        agent, _module = self._create_agent_for_handle_max_steps_test()
+
+        mock_chat_message = MagicMock()
+        mock_chat_message.role = "assistant"
+        mock_chat_message.content = " \n\t"
+        mock_chat_message.token_usage = None
+        agent.model = MagicMock(return_value=mock_chat_message)
+        agent._finalize_step = MagicMock()
+
+        result = agent._handle_max_steps_reached("original task")
+
+        assert result == (
+            "The agent was unable to generate a valid response after reaching "
+            "the maximum number of steps. Please try rephrasing your request."
+        )
+        assert agent.memory.steps[0].action_output == result
+        assert "model returned empty content, using fallback" in caplog.text
 
     def test_handle_max_steps_reached_creates_memory_step_with_error(self):
         """Test that a memory step with AgentMaxStepsError is created."""
