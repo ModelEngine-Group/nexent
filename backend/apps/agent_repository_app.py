@@ -5,8 +5,12 @@ from typing import Annotated, Optional
 from fastapi import APIRouter, Body, Header, HTTPException, Query
 from starlette.responses import JSONResponse
 
-from consts.exceptions import SkillDuplicateError, UnauthorizedError
-from consts.model import AgentRepositoryListingCreateRequest, OfficialAgentInstallRequest
+from consts.exceptions import RepoSourceError, SkillDuplicateError, UnauthorizedError
+from consts.model import (
+    AgentRepositoryListingCreateRequest,
+    OfficialAgentGithubInstallRequest,
+    OfficialAgentInstallRequest,
+)
 from services.agent_repository_service import (
     check_repository_import_precheck_impl,
     create_agent_repository_listing_impl,
@@ -157,6 +161,10 @@ async def install_official_agents_api(
             renames=payload.renames,
             model_ids=payload.model_ids,
             embedding_model_ids=payload.embedding_model_ids,
+            skill_renames=payload.skill_renames,
+            kb_renames=payload.kb_renames,
+            mcp_renames=payload.mcp_renames,
+            mcp_skips=payload.mcp_skips,
         )
         return JSONResponse(
             status_code=HTTPStatus.OK,
@@ -167,6 +175,80 @@ async def install_official_agents_api(
             f"Unauthorized official agent install attempt: {str(e)}"
         )
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
+
+
+@agent_repository_router.get("/official/gitcode")
+async def list_official_gitcode_agents_api(
+    tenant_id: Optional[str] = Query(
+        None,
+        description="Tenant ID for super admin to query a specific tenant's agents",
+    ),
+    ref: Optional[str] = Query(
+        None, description="GitCode branch/tag to discover (defaults to the configured ref)"
+    ),
+    authorization: str = Header(None),
+):
+    """Discover the fixed GitCode AgentsHub repo into a grouped catalog."""
+    from services.official_agent_service import discover_from_gitcode
+
+    try:
+        _, current_tenant_id = get_current_user_id(authorization)
+        effective_tenant_id = tenant_id if tenant_id else current_tenant_id
+        result = await discover_from_gitcode(effective_tenant_id, ref=ref)
+        return JSONResponse(status_code=HTTPStatus.OK, content=result.model_dump())
+    except UnauthorizedError as e:
+        logger.warning(
+            f"Unauthorized GitCode agent listing attempt: {str(e)}"
+        )
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
+    except RepoSourceError as e:
+        logger.warning(f"GitCode agent discovery failed: {e.message}")
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail={"type": e.code, "message": e.message},
+        )
+
+
+@agent_repository_router.post("/official/gitcode/install")
+async def install_official_gitcode_agents_api(
+    payload: OfficialAgentGithubInstallRequest = Body(...),
+    tenant_id: Optional[str] = Query(
+        None,
+        description="Tenant ID for super admin to install into a specific tenant",
+    ),
+    authorization: str = Header(None),
+):
+    """Install remote official agents (from the fixed GitCode source) by bundle key."""
+    from services.official_agent_service import install_from_gitcode
+
+    try:
+        user_id, current_tenant_id = get_current_user_id(authorization)
+        effective_tenant_id = tenant_id if tenant_id else current_tenant_id
+        result = await install_from_gitcode(
+            payload.agent_names,
+            tenant_id=effective_tenant_id,
+            user_id=user_id,
+            authorization=authorization,
+            renames=payload.renames,
+            model_ids=payload.model_ids,
+            embedding_model_ids=payload.embedding_model_ids,
+            skill_renames=payload.skill_renames,
+            kb_renames=payload.kb_renames,
+            mcp_renames=payload.mcp_renames,
+            mcp_skips=payload.mcp_skips,
+        )
+        return JSONResponse(status_code=HTTPStatus.OK, content=result.model_dump())
+    except UnauthorizedError as e:
+        logger.warning(
+            f"Unauthorized GitCode agent install attempt: {str(e)}"
+        )
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
+    except RepoSourceError as e:
+        logger.warning(f"GitCode agent install failed: {e.message}")
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail={"type": e.code, "message": e.message},
+        )
 
 
 @agent_repository_router.get("/{agent_repository_id}")

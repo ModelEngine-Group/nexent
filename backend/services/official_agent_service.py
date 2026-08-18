@@ -11,21 +11,39 @@ generated index names, and imports the agent with its skills.
 """
 
 import base64
+import hashlib
 import json
 import logging
 import os
+import re
+import shutil
+import subprocess
+import tempfile
 from typing import Dict, List, Optional
+from urllib.parse import urlparse
 
-from consts.const import OFFICIAL_AGENTS_PATH
+from consts.const import (
+    OFFICIAL_AGENTS_PATH,
+    OFFICIAL_AGENTS_REPO_REF,
+    OFFICIAL_AGENTS_REPO_URL,
+    SNAPSHOT_MAX_BYTES,
+)
+from consts.exceptions import RepoSourceError
 from consts.model import (
     KnowledgeBaseSeedDoc,
     ModelConnectStatusEnum,
     OfficialAgentAgentInfo,
     OfficialAgentBundle,
+    OfficialAgentGithubCategory,
+    OfficialAgentGithubDiscoverResult,
+    OfficialAgentGithubGroup,
+    OfficialAgentGithubInstallResult,
     OfficialAgentInstallItem,
     OfficialAgentInstallStep,
+    OfficialAgentKbPreview,
     OfficialAgentListItem,
     OfficialAgentMcpPreview,
+    OfficialAgentSkillPreview,
     SkillZipEntry,
 )
 
@@ -37,23 +55,32 @@ _KB_TOOL_CLASS_NAMES = frozenset({"KnowledgeBaseSearchTool", "DataMateSearchTool
 # KB seed file suffixes treated as plain text (embedded via index_documents).
 _TEXT_DOC_SUFFIXES = frozenset({".md", ".txt", ".markdown"})
 
+# GitCode 固定源：目录发现与快照
+_GITCODE_HOSTS = frozenset({"gitcode.com", "gitcode.net"})
+_REPO_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
+_SNAPSHOT_ROOT = os.path.join(tempfile.gettempdir(), "official-agents-repo")
+# 已知第一层分组；新增分组名默认归入 "其他"（容忍未来新增第一层目录）。
+_KNOWN_GROUPS = frozenset({"行业智能体", "通用智能体"})
 
-def _list_bundle_files() -> List[str]:
-    """Return sorted official bundle keys found under OFFICIAL_AGENTS_PATH.
 
-    A bundle is either a directory (``<name>/agent.json``) or a single JSON file
-    (``<name>.json``) — mirroring the dual import-agent formats.
+def _list_bundle_files(base_dir: Optional[str] = None) -> List[str]:
+    """Return sorted official bundle keys found under ``base_dir``.
+
+    ``base_dir`` defaults to ``OFFICIAL_AGENTS_PATH``. A bundle is either a
+    directory (``<name>/agent.json``) or a single JSON file (``<name>.json``) —
+    mirroring the dual import-agent formats. Keys are top-level entries.
     """
-    if not os.path.isdir(OFFICIAL_AGENTS_PATH):
+    root = base_dir if base_dir is not None else OFFICIAL_AGENTS_PATH
+    if not os.path.isdir(root):
         logger.warning(
             "Official agents bundle directory not found: %s",
-            OFFICIAL_AGENTS_PATH,
+            root,
         )
         return []
     try:
         names = set()
-        for entry in os.listdir(OFFICIAL_AGENTS_PATH):
-            entry_path = os.path.join(OFFICIAL_AGENTS_PATH, entry)
+        for entry in os.listdir(root):
+            entry_path = os.path.join(root, entry)
             if os.path.isdir(entry_path) and os.path.isfile(
                 os.path.join(entry_path, "agent.json")
             ):
@@ -84,16 +111,23 @@ def _attach_skills_from_dir(bundle: OfficialAgentBundle, dir_path: str) -> None:
     attached: List[SkillZipEntry] = []
     for skill_name in skill_names:
         zip_path = os.path.join(skills_dir, f"{skill_name}.zip")
-        if not os.path.isfile(zip_path):
-            logger.warning(
-                "Official agent '%s' references skill '%s' but %s is missing",
-                bundle.name,
-                skill_name,
-                zip_path,
-            )
-            continue
-        with open(zip_path, "rb") as f:
-            zip_bytes = f.read()
+        if os.path.isfile(zip_path):
+            with open(zip_path, "rb") as f:
+                zip_bytes = f.read()
+        else:
+            md_path = os.path.join(skills_dir, f"{skill_name}.md")
+            if not os.path.isfile(md_path):
+                logger.warning(
+                    "Official agent '%s' references skill '%s' but %s is missing",
+                    bundle.name,
+                    skill_name,
+                    zip_path,
+                )
+                continue
+            # Markdown skill: wrap the file as SKILL.md inside a minimal zip so
+            # it flows through the standard skill import pipeline. An invalid
+            # SKILL.md surfaces as a per-bundle install failure at install time.
+            zip_bytes = _wrap_markdown_skill(md_path)
         attached.append(
             SkillZipEntry(
                 skill_name=skill_name,
@@ -102,6 +136,17 @@ def _attach_skills_from_dir(bundle: OfficialAgentBundle, dir_path: str) -> None:
         )
     if attached:
         bundle.skills = attached
+
+
+def _wrap_markdown_skill(md_path: str) -> bytes:
+    """Return a minimal skill zip containing the given markdown as SKILL.md."""
+    from io import BytesIO
+    import zipfile
+
+    buffer = BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.write(md_path, "SKILL.md")
+    return buffer.getvalue()
 
 
 def _attach_kb_docs_from_dir(bundle: OfficialAgentBundle, dir_path: str) -> None:
@@ -153,14 +198,21 @@ def _attach_kb_docs_from_dir(bundle: OfficialAgentBundle, dir_path: str) -> None
             kb.documents = docs
 
 
-def _load_bundle(name: str) -> Optional[OfficialAgentBundle]:
+def _load_bundle(
+    name: str, base_dir: Optional[str] = None
+) -> Optional[OfficialAgentBundle]:
     """Load a bundle by key, supporting both directory and single-file layouts.
+
+    ``base_dir`` defaults to ``OFFICIAL_AGENTS_PATH``; ``name`` may be a
+    relative path (e.g. ``行业智能体/医疗/体检报告解读助手``) when loading from a
+    remote repository snapshot.
 
     Directory layout: ``<name>/agent.json`` + ``skills/`` + ``kb/`` (skills and
     KB documents are attached from files). Single-file layout: ``<name>.json``
     with skills/documents inline. The key is treated as the authoritative name.
     """
-    dir_path = os.path.join(OFFICIAL_AGENTS_PATH, name)
+    root = base_dir if base_dir is not None else OFFICIAL_AGENTS_PATH
+    dir_path = os.path.join(root, name)
     if os.path.isdir(dir_path) and os.path.isfile(
         os.path.join(dir_path, "agent.json")
     ):
@@ -176,7 +228,7 @@ def _load_bundle(name: str) -> Optional[OfficialAgentBundle]:
         _attach_kb_docs_from_dir(bundle, dir_path)
         return bundle
 
-    single_path = os.path.join(OFFICIAL_AGENTS_PATH, f"{name}.json")
+    single_path = os.path.join(root, f"{name}.json")
     if os.path.isfile(single_path):
         try:
             with open(single_path, encoding="utf-8") as f:
@@ -308,7 +360,9 @@ def _mcp_previews(
     """Return the bundle's MCP declarations with per-tenant install state.
 
     ``installed`` mirrors the install dedup rule: an MCP is considered installed
-    only when a server with the same name AND url already exists.
+    only when a server with the same name AND url already exists. ``conflict`` is
+    True when the name is taken by a different url (the user must rename or skip
+    it during install).
     """
     from database.remote_mcp_db import get_mcp_server_by_name_and_tenant
 
@@ -322,9 +376,119 @@ def _mcp_previews(
                 mcp_server_name=mcp.mcp_server_name,
                 mcp_url=mcp.mcp_url,
                 installed=existing_url == mcp.mcp_url,
+                conflict=bool(existing_url) and existing_url != mcp.mcp_url,
             )
         )
     return previews
+
+
+def _skill_previews(
+    bundle: OfficialAgentBundle,
+    tenant_id: str,
+) -> List[OfficialAgentSkillPreview]:
+    """Return the bundle's skills with per-tenant name-conflict state.
+
+    ``exists`` is True when a skill with the same name already exists in the
+    tenant, which drives the reuse-vs-rename choice during install.
+    """
+    from database import skill_db
+
+    existing_names = {
+        s.get("name") for s in skill_db.list_skills(tenant_id) if s.get("name")
+    }
+    previews: List[OfficialAgentSkillPreview] = []
+    for entry in bundle.skills or []:
+        previews.append(
+            OfficialAgentSkillPreview(
+                name=entry.skill_name,
+                exists=entry.skill_name in existing_names,
+            )
+        )
+    return previews
+
+
+def _kb_previews(
+    bundle: OfficialAgentBundle,
+    tenant_id: str,
+) -> List[OfficialAgentKbPreview]:
+    """Return the bundle's knowledge bases with per-tenant name-conflict state.
+
+    ``exists`` is True when a knowledge base with the same display name already
+    exists in the tenant (the reuse key used by the install pipeline).
+    """
+    from database.knowledge_db import get_knowledge_record
+
+    previews: List[OfficialAgentKbPreview] = []
+    for kb in bundle.knowledge_bases or []:
+        kb_name = kb.display_name or kb.logical_index_name
+        existing = get_knowledge_record(
+            {"knowledge_name": kb_name, "tenant_id": tenant_id}
+        )
+        previews.append(
+            OfficialAgentKbPreview(
+                logical_index_name=kb.logical_index_name,
+                display_name=kb.display_name,
+                # get_knowledge_record returns {} (falsy) when nothing matches,
+                # so use truthiness, not `is not None`, to detect a real conflict.
+                exists=bool(existing),
+            )
+        )
+    return previews
+
+
+async def _status_item_for_bundle(
+    bundle: OfficialAgentBundle, tenant_id: str
+) -> OfficialAgentListItem:
+    """Build the catalog item for one loaded bundle.
+
+    Status priority: installed > needs_model > installable. Shared by the local
+    (OFFICIAL_AGENTS_PATH) and GitCode sources.
+    """
+    has_knowledge = bool(bundle.knowledge_bases)
+    missing_models = await _missing_model_types(bundle, tenant_id)
+
+    if _is_agent_installed(bundle, tenant_id):
+        status = "installed"
+    elif missing_models:
+        status = "needs_model"
+    else:
+        status = "installable"
+
+    return OfficialAgentListItem(
+        name=bundle.name,
+        display_name=bundle.display_name,
+        description=bundle.description,
+        icon=bundle.icon,
+        tags=bundle.tags,
+        version_label=bundle.version_label,
+        status=status,
+        has_knowledge=has_knowledge,
+        mcp_count=len(bundle.mcp_info or []),
+        skill_count=len(bundle.skills or []),
+        kb_count=len(bundle.knowledge_bases or []),
+        missing_models=missing_models,
+        agents=_agent_infos(bundle),
+        mcps=_mcp_previews(bundle, tenant_id),
+        skills=_skill_previews(bundle, tenant_id),
+        knowledge_bases=_kb_previews(bundle, tenant_id),
+    )
+
+
+async def _list_bundles_with_status(
+    base_dir: Optional[str], tenant_id: str
+) -> List[OfficialAgentListItem]:
+    """List bundles under ``base_dir`` with per-tenant installation status.
+
+    Shared by the local path (OFFICIAL_AGENTS_PATH) and the GitCode snapshot
+    directory, so a remote catalog and the local catalog behave identically.
+    """
+    items: List[OfficialAgentListItem] = []
+    for name in _list_bundle_files(base_dir):
+        bundle = _load_bundle(name, base_dir)
+        if bundle is None:
+            continue
+        items.append(await _status_item_for_bundle(bundle, tenant_id))
+    return items
 
 
 async def list_official_agents_with_status(
@@ -334,41 +498,7 @@ async def list_official_agents_with_status(
 
     Status priority: installed > needs_model > installable.
     """
-    items: List[OfficialAgentListItem] = []
-    for name in _list_bundle_files():
-        bundle = _load_bundle(name)
-        if bundle is None:
-            continue
-
-        has_knowledge = bool(bundle.knowledge_bases)
-        missing_models = await _missing_model_types(bundle, tenant_id)
-
-        if _is_agent_installed(bundle, tenant_id):
-            status = "installed"
-        elif missing_models:
-            status = "needs_model"
-        else:
-            status = "installable"
-
-        items.append(
-            OfficialAgentListItem(
-                name=bundle.name,
-                display_name=bundle.display_name,
-                description=bundle.description,
-                icon=bundle.icon,
-                tags=bundle.tags,
-                version_label=bundle.version_label,
-                status=status,
-                has_knowledge=has_knowledge,
-                mcp_count=len(bundle.mcp_info or []),
-                skill_count=len(bundle.skills or []),
-                kb_count=len(bundle.knowledge_bases or []),
-                missing_models=missing_models,
-                agents=_agent_infos(bundle),
-                mcps=_mcp_previews(bundle, tenant_id),
-            )
-        )
-    return items
+    return await _list_bundles_with_status(OFFICIAL_AGENTS_PATH, tenant_id)
 
 
 # ---------------------------------------------------------------------------
@@ -380,13 +510,17 @@ async def _install_mcp_servers(
     bundle: OfficialAgentBundle,
     tenant_id: str,
     user_id: str,
+    mcp_renames: Optional[Dict[str, str]] = None,
+    mcp_skips: Optional[List[str]] = None,
 ) -> None:
     """Install the bundle's MCP servers that are missing in the tenant.
 
     An MCP is skipped only when a server with the same name AND url already
     exists (matching the agent-config import behaviour). A server whose name is
-    taken by a different URL is a genuine conflict and aborts the install with
-    a clear message, so the agent's tools never point at the wrong server.
+    taken by a different URL is a conflict; unlike the previous hard abort, the
+    user resolves it up front: ``mcp_renames`` maps the original name to a new
+    name to install under, and ``mcp_skips`` lists original names to skip
+    entirely (its tools would be missing).
 
     Official MCP endpoints are trusted platform-provided URLs, so health checks
     are skipped.
@@ -394,29 +528,43 @@ async def _install_mcp_servers(
     from database.remote_mcp_db import get_mcp_server_by_name_and_tenant
     from services.remote_mcp_service import add_mcp_service
 
+    renames = mcp_renames or {}
+    skips = set(mcp_skips or [])
+
     for mcp in bundle.mcp_info or []:
+        if mcp.mcp_server_name in skips:
+            logger.warning(
+                "Skipping MCP server '%s' for tenant %s (user requested skip)",
+                mcp.mcp_server_name,
+                tenant_id,
+            )
+            continue
+        effective_name = renames.get(mcp.mcp_server_name, mcp.mcp_server_name)
         existing_url = get_mcp_server_by_name_and_tenant(
-            mcp.mcp_server_name, tenant_id
+            effective_name, tenant_id
         )
         if existing_url == mcp.mcp_url:
             logger.info(
                 "MCP server '%s' already exists for tenant %s with the same "
                 "URL, skipping",
-                mcp.mcp_server_name,
+                effective_name,
                 tenant_id,
             )
             continue
-        if existing_url:
+        # effective_name resolves a previous name-conflict (user renamed): it no
+        # longer collides, so create it fresh. Without a rename the conflict was
+        # meant to be surfaced in the resources step, so do not silently proceed.
+        if existing_url and effective_name == mcp.mcp_server_name:
             raise ValueError(
-                f"MCP server name '{mcp.mcp_server_name}' already exists for "
+                f"MCP server name '{effective_name}' already exists for "
                 f"tenant {tenant_id} but with a different URL "
-                f"('{existing_url}' != '{mcp.mcp_url}'). Remove or rename the "
-                f"existing server before installing."
+                f"('{existing_url}' != '{mcp.mcp_url}'). Rename or skip it to "
+                f"continue."
             )
         await add_mcp_service(
             tenant_id=tenant_id,
             user_id=user_id,
-            name=mcp.mcp_server_name,
+            name=effective_name,
             description=None,
             source="local",
             server_url=mcp.mcp_url,
@@ -429,7 +577,7 @@ async def _install_mcp_servers(
         )
         logger.info(
             "Installed official MCP server '%s' for tenant %s",
-            mcp.mcp_server_name,
+            effective_name,
             tenant_id,
         )
 
@@ -440,13 +588,16 @@ async def _create_knowledge_bases(
     user_id: str,
     embedding_model_id: int,
     authorization: str,
+    kb_renames: Optional[Dict[str, str]] = None,
 ) -> Dict[str, str]:
     """Create the bundle's knowledge bases for the tenant and index seed docs.
 
     Each knowledge base is created as an independent per-tenant instance (the
     vector index name is generated per KB, so tenants never share indices).
     Returns a mapping ``logical_index_name -> actual tenant index_name``. A KB
-    whose logical index name already exists in the tenant is reused unchanged.
+    whose display name already exists in the tenant is reused unchanged, unless
+    ``kb_renames`` maps its logical index name to a new display name (then it is
+    created fresh under the new name).
     """
     from database.knowledge_db import get_knowledge_record
     from services.vectordatabase_service import (
@@ -458,10 +609,15 @@ async def _create_knowledge_bases(
     vdb_core = get_vector_db_core()
     embedding_model, _ = get_embedding_model_by_id(tenant_id, embedding_model_id)
     mapping: Dict[str, str] = {}
+    renames = kb_renames or {}
 
     for kb in bundle.knowledge_bases or []:
         logical = kb.logical_index_name
-        kb_name = kb.display_name or logical
+        kb_name = renames.get(logical) or kb.display_name or logical
+        logger.info(
+            "[KB-DEBUG] bundle=%s logical=%r kb_name=%r documents=%d",
+            bundle.name, logical, kb_name, len(kb.documents or []),
+        )
         # Reuse by display name (matching the KB page's per-tenant uniqueness),
         # not by the logical key: logical keys never match a real index_name, so
         # name-based reuse avoids creating a duplicate KB on re-install.
@@ -471,17 +627,15 @@ async def _create_knowledge_bases(
         if existing:
             existing_index = existing.get("index_name") or logical
             logger.info(
-                "Knowledge base '%s' already exists for tenant %s, reusing "
-                "(index %s)",
+                "[KB-DEBUG] '%s' already exists, reusing index %s",
                 kb_name,
-                tenant_id,
                 existing_index,
             )
             mapping[logical] = existing_index
             continue
 
         created = ElasticSearchService.create_knowledge_base(
-            knowledge_name=kb.display_name or logical,
+            knowledge_name=kb_name,
             embedding_dim=None,
             vdb_core=vdb_core,
             user_id=user_id,
@@ -489,10 +643,17 @@ async def _create_knowledge_bases(
             embedding_model_id=embedding_model_id,
         )
         actual_index = created["id"]
+        logger.info(
+            "[KB-DEBUG] created new KB name=%r index=%s", kb_name, actual_index,
+        )
 
         if kb.documents:
             text_docs = [doc for doc in kb.documents if doc.content]
             file_docs = [doc for doc in kb.documents if doc.file_path]
+            logger.info(
+                "[KB-DEBUG] index=%s text_docs=%d file_docs=%d",
+                actual_index, len(text_docs), len(file_docs),
+            )
             if text_docs:
                 data = [
                     {
@@ -578,11 +739,14 @@ async def _index_binary_docs(
         )
         if not uploaded_file_paths:
             logger.warning(
-                "Failed to upload KB seed file '%s' for index %s",
+                "[KB-DEBUG] upload returned empty paths for '%s' index %s",
                 doc.file_name,
                 index_name,
             )
             continue
+        logger.info(
+            "[KB-DEBUG] uploaded '%s' -> %s", doc.file_name, uploaded_file_paths[0],
+        )
         files_to_process.append(
             {
                 "path_or_url": uploaded_file_paths[0],
@@ -590,6 +754,10 @@ async def _index_binary_docs(
             }
         )
 
+    logger.info(
+        "[KB-DEBUG] index=%s trigger_data_process over %d file(s)",
+        index_name, len(files_to_process),
+    )
     if files_to_process:
         await trigger_data_process(
             files_to_process,
@@ -633,6 +801,10 @@ async def _install_bundle(
     authorization: str,
     embedding_model_id: Optional[int] = None,
     steps: Optional[List[OfficialAgentInstallStep]] = None,
+    skill_renames: Optional[Dict[str, str]] = None,
+    kb_renames: Optional[Dict[str, str]] = None,
+    mcp_renames: Optional[Dict[str, str]] = None,
+    mcp_skips: Optional[List[str]] = None,
 ) -> Optional[int]:
     """Install one official agent bundle, returning the new main agent id.
 
@@ -642,6 +814,8 @@ async def _install_bundle(
 
     Skill names already present in the tenant are reused (not re-created), so
     installing into a tenant that already has a same-name skill succeeds.
+    ``skill_renames`` / ``kb_renames`` map original names to new names for the
+    resources the user chose to rename instead of reuse.
 
     Each step's outcome (ok/failed + reason) is appended to ``steps`` so the
     caller can surface exactly where an install failed.
@@ -661,7 +835,13 @@ async def _install_bundle(
         return result
 
     async def _install_mcp_and_tools():
-        await _install_mcp_servers(bundle, tenant_id, user_id)
+        await _install_mcp_servers(
+            bundle,
+            tenant_id,
+            user_id,
+            mcp_renames=mcp_renames,
+            mcp_skips=mcp_skips,
+        )
         from services.tool_configuration_service import update_tool_list
 
         await update_tool_list(tenant_id=tenant_id, user_id=user_id)
@@ -683,6 +863,7 @@ async def _install_bundle(
                 tenant_id,
                 user_id,
                 reuse_existing_skills=True,
+                skill_renames=skill_renames,
             ),
         )
 
@@ -702,6 +883,7 @@ async def _install_bundle(
                 user_id,
                 embedding_model_id,
                 authorization=authorization,
+                kb_renames=kb_renames,
             ),
         )
         _remap_kb_refs(bundle, kb_mapping)
@@ -754,6 +936,79 @@ def _apply_install_options(
             agent.model_ids = [selected]
 
 
+async def _install_one_bundle(
+    bundle: OfficialAgentBundle,
+    name: str,
+    tenant_id: str,
+    user_id: str,
+    authorization: str,
+    renames: Optional[Dict[str, str]] = None,
+    model_ids: Optional[Dict[str, int]] = None,
+    embedding_model_ids: Optional[Dict[str, int]] = None,
+    skill_renames: Optional[Dict[str, str]] = None,
+    kb_renames: Optional[Dict[str, str]] = None,
+    mcp_renames: Optional[Dict[str, str]] = None,
+    mcp_skips: Optional[List[str]] = None,
+) -> OfficialAgentInstallItem:
+    """Install one loaded bundle, returning its per-agent result item.
+
+    Shared by the local and GitCode install paths. ``name`` is the bundle key
+    (used for ``model_ids``/``embedding_model_ids`` lookups). A failure on this
+    bundle is captured in the returned item and never raised.
+    """
+    root_agent = bundle.agent_info.get(str(bundle.agent_id))
+    root_name = getattr(root_agent, "name", None) if root_agent else None
+    root_renamed = bool(renames) and bool(root_name) and root_name in renames
+    if not root_renamed and _is_agent_installed(bundle, tenant_id):
+        return OfficialAgentInstallItem(name=name, status="already_installed")
+
+    missing_models = await _missing_model_types(bundle, tenant_id)
+    if missing_models:
+        return OfficialAgentInstallItem(
+            name=name,
+            status="needs_model",
+            missing_models=missing_models,
+            message="缺少模型: " + ", ".join(missing_models),
+        )
+
+    _apply_install_options(bundle, renames, model_ids)
+
+    embedding_model_id: Optional[int] = None
+    if bundle.knowledge_bases:
+        embedding_model_id = (embedding_model_ids or {}).get(name)
+        if embedding_model_id is None:
+            embedding_model_id = await _first_available_embedding_model_id(
+                tenant_id
+            )
+
+    steps: List[OfficialAgentInstallStep] = []
+    try:
+        agent_id = await _install_bundle(
+            bundle,
+            tenant_id,
+            user_id,
+            authorization,
+            embedding_model_id=embedding_model_id,
+            steps=steps,
+            skill_renames=skill_renames,
+            kb_renames=kb_renames,
+            mcp_renames=mcp_renames,
+            mcp_skips=mcp_skips,
+        )
+        return OfficialAgentInstallItem(
+            name=name, status="installed", steps=steps, agent_id=agent_id
+        )
+    except Exception as e:
+        logger.exception(
+            "Failed to install official agent '%s' for tenant %s",
+            name,
+            tenant_id,
+        )
+        return OfficialAgentInstallItem(
+            name=name, status="failed", message=str(e), steps=steps
+        )
+
+
 async def install_official_agents(
     agent_names: List[str],
     tenant_id: str,
@@ -762,6 +1017,10 @@ async def install_official_agents(
     renames: Optional[Dict[str, str]] = None,
     model_ids: Optional[Dict[str, int]] = None,
     embedding_model_ids: Optional[Dict[str, int]] = None,
+    skill_renames: Optional[Dict[str, str]] = None,
+    kb_renames: Optional[Dict[str, str]] = None,
+    mcp_renames: Optional[Dict[str, str]] = None,
+    mcp_skips: Optional[List[str]] = None,
 ) -> List[OfficialAgentInstallItem]:
     """Install the requested official agents for a tenant.
 
@@ -774,7 +1033,10 @@ async def install_official_agents(
     ``model_ids`` maps a bundle key to a tenant LLM model_id for the root agent;
     ``embedding_model_ids`` maps a bundle key to a tenant embedding model_id used
     to create its knowledge bases (falls back to the first available embedding
-    model when omitted).
+    model when omitted). ``skill_renames`` / ``kb_renames`` map original resource
+    names to new names for the resources the user chose to rename instead of
+    reuse. ``mcp_renames`` maps a conflicting MCP name to a new name, and
+    ``mcp_skips`` lists conflicting MCP names to skip entirely.
     """
     results: List[OfficialAgentInstallItem] = []
     for name in agent_names:
@@ -788,62 +1050,276 @@ async def install_official_agents(
                 )
             )
             continue
-
-        root_agent = bundle.agent_info.get(str(bundle.agent_id))
-        root_name = getattr(root_agent, "name", None) if root_agent else None
-        root_renamed = bool(renames) and bool(root_name) and root_name in renames
-        if not root_renamed and _is_agent_installed(bundle, tenant_id):
-            results.append(
-                OfficialAgentInstallItem(name=name, status="already_installed")
-            )
-            continue
-
-        missing_models = await _missing_model_types(bundle, tenant_id)
-        if missing_models:
-            results.append(
-                OfficialAgentInstallItem(
-                    name=name,
-                    status="needs_model",
-                    missing_models=missing_models,
-                    message="缺少模型: " + ", ".join(missing_models),
-                )
-            )
-            continue
-
-        _apply_install_options(bundle, renames, model_ids)
-
-        embedding_model_id: Optional[int] = None
-        if bundle.knowledge_bases:
-            embedding_model_id = (embedding_model_ids or {}).get(name)
-            if embedding_model_id is None:
-                embedding_model_id = await _first_available_embedding_model_id(
-                    tenant_id
-                )
-
-        steps: List[OfficialAgentInstallStep] = []
-        try:
-            agent_id = await _install_bundle(
+        results.append(
+            await _install_one_bundle(
                 bundle,
+                name,
                 tenant_id,
                 user_id,
                 authorization,
-                embedding_model_id=embedding_model_id,
-                steps=steps,
+                renames=renames,
+                model_ids=model_ids,
+                embedding_model_ids=embedding_model_ids,
+                skill_renames=skill_renames,
+                kb_renames=kb_renames,
+                mcp_renames=mcp_renames,
+                mcp_skips=mcp_skips,
             )
+        )
+    return results
+
+
+# ---------------------------------------------------------------------------
+# GitCode 固定源：快照获取 / 目录发现 / 安装
+# ---------------------------------------------------------------------------
+
+
+def _resolve_repo_source(ref: Optional[str] = None):
+    """Resolve the fixed GitCode source into ``(url, owner, repo, ref)``.
+
+    Validates that the configured URL points at gitcode.com and that the
+    ``owner/repo`` path is well-formed. Raises ``RepoSourceError`` on any
+    configuration problem.
+    """
+    url = (OFFICIAL_AGENTS_REPO_URL or "").strip().rstrip("/")
+    if not url:
+        raise RepoSourceError("repo_source_not_configured", "仓库源未配置")
+    parsed = urlparse(url)
+    if parsed.hostname not in _GITCODE_HOSTS:
+        raise RepoSourceError(
+            "repo_source_not_configured",
+            f"仓库源域名不受支持: {parsed.hostname}",
+        )
+    parts = [p for p in parsed.path.split("/") if p]
+    if len(parts) < 2 or not (
+        _REPO_NAME_RE.fullmatch(parts[0]) and _REPO_NAME_RE.fullmatch(parts[1])
+    ):
+        raise RepoSourceError(
+            "repo_source_not_configured", f"仓库地址格式不合法: {url}"
+        )
+    owner, repo = parts[0], parts[1]
+    effective_ref = ref or OFFICIAL_AGENTS_REPO_REF or "main"
+    return url, owner, repo, effective_ref
+
+
+def _git_clone_snapshot(url: str, ref: str, snapshot_dir: str) -> str:
+    """Shallow-clone ``url@ref`` into ``snapshot_dir`` and return the commit SHA.
+
+    Raises ``RepoSourceError`` when git is unavailable or the clone fails.
+    """
+    if shutil.which("git") is None:
+        raise RepoSourceError(
+            "git_binary_missing", "服务器缺少 git 环境，无法从仓库源拉取智能体"
+        )
+    try:
+        subprocess.run(
+            ["git", "clone", "--depth", "1", "--branch", ref, url, snapshot_dir],
+            capture_output=True,
+            text=True,
+            timeout=300,
+            check=True,
+        )
+        commit = subprocess.run(
+            ["git", "-C", snapshot_dir, "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=True,
+        ).stdout.strip()
+    except subprocess.CalledProcessError as e:
+        raise RepoSourceError(
+            "repo_clone_failed",
+            f"仓库拉取失败: {(e.stderr or e.stdout or str(e))[-500:]}",
+        )
+    except subprocess.TimeoutExpired:
+        raise RepoSourceError("repo_network_error", "仓库拉取超时")
+    except OSError as e:
+        raise RepoSourceError("repo_network_error", f"仓库拉取失败: {e}")
+    return commit
+
+
+def _snapshot_size_bytes(path: str) -> int:
+    """Return the total size of files under ``path`` (used for the cap check)."""
+    total = 0
+    for dirpath, _dirnames, filenames in os.walk(path):
+        for fn in filenames:
+            try:
+                total += os.path.getsize(os.path.join(dirpath, fn))
+            except OSError:
+                pass
+    return total
+
+
+def _ensure_repo_snapshot(url: str, ref: str):
+    """Return ``(snapshot_dir, commit)`` for ``url@ref``, cloning when needed.
+
+    Snapshots are cached under the temp dir keyed by ``(url, ref)`` so discover
+    and install reuse the exact same commit within a session. Clone is staged to
+    a unique dir first (size cap check) then moved into the cache key.
+    """
+    key = hashlib.sha1(f"{url}@{ref}".encode("utf-8")).hexdigest()[:16]
+    snapshot_dir = os.path.join(_SNAPSHOT_ROOT, key)
+    commit_file = os.path.join(_SNAPSHOT_ROOT, f"{key}.commit")
+
+    if os.path.isdir(snapshot_dir) and os.path.isfile(commit_file):
+        try:
+            with open(commit_file, encoding="utf-8") as f:
+                cached_commit = f.read().strip()
+            if cached_commit:
+                return snapshot_dir, cached_commit
+        except OSError:
+            pass
+
+    staging = f"{snapshot_dir}.tmp-{os.getpid()}"
+    shutil.rmtree(staging, ignore_errors=True)
+    commit = _git_clone_snapshot(url, ref, staging)
+    size = _snapshot_size_bytes(staging)
+    if size > SNAPSHOT_MAX_BYTES:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise RepoSourceError(
+            "snapshot_too_large",
+            f"仓库包大小 {size} 超过上限 {SNAPSHOT_MAX_BYTES}",
+        )
+
+    shutil.rmtree(snapshot_dir, ignore_errors=True)
+    shutil.move(staging, snapshot_dir)
+    try:
+        with open(commit_file, "w", encoding="utf-8") as f:
+            f.write(commit)
+    except OSError:
+        logger.warning("Failed to persist GitCode snapshot commit for %s", url)
+    return snapshot_dir, commit
+
+
+def clear_repo_snapshot_cache() -> None:
+    """Clear the GitCode snapshot cache (test / ops helper)."""
+    shutil.rmtree(_SNAPSHOT_ROOT, ignore_errors=True)
+
+
+def _discover_bundles_in_dir(base_dir: str) -> List[str]:
+    """Return relative-path bundle keys under ``base_dir`` (directory-only rule).
+
+    A bundle root is a directory that directly contains ``agent.json``. Loose
+    ``*.json`` files are ignored: the AgentsHub repo carries stray bundle-shaped
+    JSON files that must not be surfaced as installable agents.
+    """
+    keys: List[str] = []
+    for dirpath, dirnames, filenames in os.walk(base_dir):
+        dirnames[:] = [d for d in dirnames if not d.startswith(".")]
+        if "agent.json" not in filenames:
+            continue
+        rel = os.path.relpath(dirpath, base_dir).replace("\\", "/")
+        if rel == ".":
+            continue
+        keys.append(rel)
+    return sorted(keys)
+
+
+def _group_and_categorize(bundle_keys: List[str]):
+    """Group bundle keys into ``{group: {category: [keys]}}``.
+
+    The first path segment is the group (unknown groups fall into ``其他``) and
+    the second is the category.
+    """
+    grouped: Dict[str, Dict[str, List[str]]] = {}
+    for key in bundle_keys:
+        parts = key.split("/")
+        group = parts[0] if parts else "其他"
+        if group not in _KNOWN_GROUPS:
+            group = "其他"
+        category = parts[1] if len(parts) >= 2 else "其他"
+        grouped.setdefault(group, {}).setdefault(category, []).append(key)
+    return grouped
+
+
+async def discover_from_gitcode(
+    tenant_id: str, ref: Optional[str] = None
+) -> OfficialAgentGithubDiscoverResult:
+    """Discover the fixed GitCode repo into a group -> category -> bundle catalog.
+
+    Clones the snapshot on first call (cached thereafter), scans only
+    directories containing ``agent.json``, and reuses the local status logic for
+    every bundle.
+    """
+    url, owner, repo, effective_ref = _resolve_repo_source(ref)
+    snapshot_dir, commit = _ensure_repo_snapshot(url, effective_ref)
+    keys = _discover_bundles_in_dir(snapshot_dir)
+    grouped = _group_and_categorize(keys)
+
+    groups: List[OfficialAgentGithubGroup] = []
+    for group_name in sorted(grouped):
+        categories: List[OfficialAgentGithubCategory] = []
+        for cat_name in sorted(grouped[group_name]):
+            bundles: List[OfficialAgentListItem] = []
+            for key in grouped[group_name][cat_name]:
+                bundle = _load_bundle(key, snapshot_dir)
+                if bundle is None:
+                    continue
+                bundles.append(await _status_item_for_bundle(bundle, tenant_id))
+            categories.append(
+                OfficialAgentGithubCategory(name=cat_name, bundles=bundles)
+            )
+        groups.append(OfficialAgentGithubGroup(name=group_name, categories=categories))
+
+    return OfficialAgentGithubDiscoverResult(
+        repo=f"{owner}/{repo}",
+        ref=effective_ref,
+        commit=commit,
+        groups=groups,
+    )
+
+
+async def install_from_gitcode(
+    agent_names: List[str],
+    tenant_id: str,
+    user_id: str,
+    authorization: str,
+    renames: Optional[Dict[str, str]] = None,
+    model_ids: Optional[Dict[str, int]] = None,
+    embedding_model_ids: Optional[Dict[str, int]] = None,
+    ref: Optional[str] = None,
+    skill_renames: Optional[Dict[str, str]] = None,
+    kb_renames: Optional[Dict[str, str]] = None,
+    mcp_renames: Optional[Dict[str, str]] = None,
+    mcp_skips: Optional[List[str]] = None,
+) -> OfficialAgentGithubInstallResult:
+    """Install remote official agents by their relative bundle keys.
+
+    Reuses the same snapshot cache as discovery, so install operates on the
+    commit the user saw. Each bundle is installed through the shared
+    ``_install_one_bundle`` pipeline.
+    """
+    url, owner, repo, effective_ref = _resolve_repo_source(ref)
+    snapshot_dir, commit = _ensure_repo_snapshot(url, effective_ref)
+
+    results: List[OfficialAgentInstallItem] = []
+    for name in agent_names:
+        bundle = _load_bundle(name, snapshot_dir)
+        if bundle is None:
             results.append(
                 OfficialAgentInstallItem(
-                    name=name, status="installed", steps=steps, agent_id=agent_id
+                    name=name,
+                    status="not_found",
+                    message=f"Remote agent bundle '{name}' not found",
                 )
             )
-        except Exception as e:
-            logger.exception(
-                "Failed to install official agent '%s' for tenant %s",
+            continue
+        results.append(
+            await _install_one_bundle(
+                bundle,
                 name,
                 tenant_id,
+                user_id,
+                authorization,
+                renames=renames,
+                model_ids=model_ids,
+                embedding_model_ids=embedding_model_ids,
+                skill_renames=skill_renames,
+                kb_renames=kb_renames,
+                mcp_renames=mcp_renames,
+                mcp_skips=mcp_skips,
             )
-            results.append(
-                OfficialAgentInstallItem(
-                    name=name, status="failed", message=str(e), steps=steps
-                )
-            )
-    return results
+        )
+    return OfficialAgentGithubInstallResult(
+        repo=f"{owner}/{repo}", commit=commit, results=results
+    )

@@ -544,6 +544,8 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/repository/agent/${agentRepositoryId}`,
     official: `${API_BASE_URL}/repository/agent/official`,
     officialInstall: `${API_BASE_URL}/repository/agent/official/install`,
+    officialGitcode: `${API_BASE_URL}/repository/agent/official/gitcode`,
+    officialGitcodeInstall: `${API_BASE_URL}/repository/agent/official/gitcode/install`,
     importPrecheck: (agentRepositoryId: number) =>
       `${API_BASE_URL}/repository/agent/${agentRepositoryId}/import_precheck`,
     import: (agentRepositoryId: number) =>

@@ -840,10 +840,29 @@ class OfficialAgentAgentInfo(BaseModel):
 
 
 class OfficialAgentMcpPreview(BaseModel):
-    """MCP server declaration inside an official bundle, with per-tenant install state."""
+    """MCP server declaration inside an official bundle, with per-tenant install state.
+
+    ``installed`` is True when a server with the same name AND url already exists
+    (reuse). ``conflict`` is True when the name is taken by a different url (the
+    user must rename or skip during install). Both False = no conflict.
+    """
     mcp_server_name: str
     mcp_url: str
     installed: bool = False
+    conflict: bool = False
+
+
+class OfficialAgentSkillPreview(BaseModel):
+    """A skill bundled in an official agent, with per-tenant name-conflict state."""
+    name: str
+    exists: bool = False
+
+
+class OfficialAgentKbPreview(BaseModel):
+    """A knowledge base declared in an official agent, with per-tenant name-conflict state."""
+    logical_index_name: str
+    display_name: Optional[str] = None
+    exists: bool = False
 
 
 class OfficialAgentListItem(BaseModel):
@@ -862,6 +881,8 @@ class OfficialAgentListItem(BaseModel):
     missing_models: List[str] = []
     agents: List[OfficialAgentAgentInfo] = []
     mcps: List[OfficialAgentMcpPreview] = []
+    skills: List[OfficialAgentSkillPreview] = []
+    knowledge_bases: List[OfficialAgentKbPreview] = []
 
 
 OfficialAgentInstallStatus = Literal[
@@ -895,6 +916,10 @@ class OfficialAgentInstallRequest(BaseModel):
     renames: Optional[Dict[str, str]] = None
     model_ids: Optional[Dict[str, int]] = None
     embedding_model_ids: Optional[Dict[str, int]] = None
+    skill_renames: Optional[Dict[str, str]] = None
+    kb_renames: Optional[Dict[str, str]] = None
+    mcp_renames: Optional[Dict[str, str]] = None
+    mcp_skips: Optional[List[str]] = None
 
 
 class OfficialAgentInstallItem(BaseModel):
@@ -909,6 +934,61 @@ class OfficialAgentInstallItem(BaseModel):
 
 class OfficialAgentInstallResponse(BaseModel):
     """Response payload for POST /repository/agent/official/install."""
+    results: List[OfficialAgentInstallItem]
+
+
+# ---------------------------------------------------------------------------
+# GitCode 固定源（远程官方智能体仓库）
+# ---------------------------------------------------------------------------
+
+
+class OfficialAgentGithubCategory(BaseModel):
+    """A sub-category (second level) in the remote AgentsHub catalog."""
+    name: str
+    bundles: List[OfficialAgentListItem] = []
+
+
+class OfficialAgentGithubGroup(BaseModel):
+    """A top-level group (first level) in the remote AgentsHub catalog."""
+    name: str
+    categories: List[OfficialAgentGithubCategory] = []
+
+
+class OfficialAgentGithubDiscoverResult(BaseModel):
+    """Catalog of remote official agents grouped by group -> category.
+
+    ``commit`` identifies the repository snapshot the catalog was built from;
+    ``repo`` is the ``owner/repo`` of the fixed GitCode source.
+    """
+    repo: str
+    ref: str
+    commit: Optional[str] = None
+    groups: List[OfficialAgentGithubGroup] = []
+
+
+class OfficialAgentGithubInstallRequest(BaseModel):
+    """Request body for installing remote official agents by bundle key.
+
+    ``agent_names`` are relative bundle keys inside the remote repo (e.g.
+    ``行业智能体/医疗/体检报告解读助手``); ``renames``/``model_ids``/
+    ``embedding_model_ids`` mirror the local official install options.
+    """
+    agent_names: List[str] = Field(
+        ..., min_length=1, description="Remote official agent bundle keys to install"
+    )
+    renames: Optional[Dict[str, str]] = None
+    model_ids: Optional[Dict[str, int]] = None
+    embedding_model_ids: Optional[Dict[str, int]] = None
+    skill_renames: Optional[Dict[str, str]] = None
+    kb_renames: Optional[Dict[str, str]] = None
+    mcp_renames: Optional[Dict[str, str]] = None
+    mcp_skips: Optional[List[str]] = None
+
+
+class OfficialAgentGithubInstallResult(BaseModel):
+    """Response payload for POST .../official/gitcode/install."""
+    repo: str
+    commit: Optional[str] = None
     results: List[OfficialAgentInstallItem]
 
 

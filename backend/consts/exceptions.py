@@ -264,6 +264,19 @@ class SkillException(Exception):
     pass
 
 
+class RepoSourceError(Exception):
+    """Raised when fetching/discovering a remote official-agent repository fails.
+
+    Carries a stable ``code`` so the API layer can map it to an error payload
+    (e.g. ``{"type": "repo_clone_failed", "message": ...}``).
+    """
+
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
+        self.message = message
+
+
 class QuotaExceededError(Exception):
     """Raised when tenant storage hard limit is exceeded during file upload."""
 

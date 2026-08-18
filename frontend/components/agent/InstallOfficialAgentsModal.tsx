@@ -6,8 +6,9 @@ import {
   Button,
   Input,
   Modal,
+  Radio,
+  Segmented,
   Select,
-  Space,
   Spin,
   Steps,
   Tag,
@@ -19,20 +20,25 @@ import {
   Database,
   Download,
   ExternalLink,
+  GitBranch,
   LoaderCircle,
   Plug,
+  RefreshCw,
   Sparkles,
 } from "lucide-react";
 import { useParams, useRouter } from "next/navigation";
 import { useTranslation } from "react-i18next";
 import {
   useInstallOfficialAgents,
+  useInstallOfficialAgentsFromGitcode,
   useOfficialAgents,
+  useOfficialAgentsFromGitcode,
 } from "@/hooks/agentRepository/useAgentRepositoryListings";
 import { useModelList } from "@/hooks/model/useModelList";
 import { checkAgentNameConflictBatch } from "@/services/agentConfigService";
 import type { ModelOption } from "@/types/modelConfig";
 import type {
+  OfficialAgentGithubDiscoverResult,
   OfficialAgentInstallItem,
   OfficialAgentInstallStep,
   OfficialAgentItem,
@@ -51,6 +57,42 @@ interface ConflictItem {
   conflictAgents: Array<{ name?: string; display_name?: string }>;
 }
 
+interface ResourceConflict {
+  bundleName: string;
+  /** Skill name or KB logical index name, used as the resolution key. */
+  key: string;
+  /** Displayed name (skill name or KB display name). */
+  display: string;
+}
+
+interface ResourceResolution {
+  action: "reuse" | "rename";
+  newName: string;
+}
+
+/** MCP conflicts cannot be reused (same name, different url), so the only choices are rename or skip. */
+interface McpResolution {
+  action: "rename" | "skip";
+  newName: string;
+}
+
+/** A conflict is resolved when a choice is committed and, for rename, a non-empty new name is given. */
+function isResolutionValid(res?: ResourceResolution): boolean {
+  return (
+    !!res &&
+    (res.action === "reuse" ||
+      (res.action === "rename" && res.newName.trim() !== ""))
+  );
+}
+
+function isMcpResolutionValid(res?: McpResolution): boolean {
+  return (
+    !!res &&
+    (res.action === "skip" ||
+      (res.action === "rename" && res.newName.trim() !== ""))
+  );
+}
+
 export function InstallOfficialAgentsModal({
   open,
   onClose,
@@ -64,6 +106,7 @@ export function InstallOfficialAgentsModal({
   const locale = params.locale || "zh";
 
   const [currentStep, setCurrentStep] = useState(0);
+  const [activeSource, setActiveSource] = useState<"local" | "gitcode">("local");
   const [selectedNames, setSelectedNames] = useState<Set<string>>(new Set());
   const [conflicts, setConflicts] = useState<ConflictItem[]>([]);
   const [renameDrafts, setRenameDrafts] = useState<Record<string, string>>({});
@@ -79,10 +122,66 @@ export function InstallOfficialAgentsModal({
   const [lastResults, setLastResults] = useState<
     OfficialAgentInstallItem[] | null
   >(null);
+  const [skillResolutions, setSkillResolutions] = useState<
+    Record<string, ResourceResolution>
+  >({});
+  const [kbResolutions, setKbResolutions] = useState<
+    Record<string, ResourceResolution>
+  >({});
+  const [mcpResolutions, setMcpResolutions] = useState<
+    Record<string, McpResolution>
+  >({});
+
+  // GitCode 固定源视图状态（上提到父组件，供底部 footer 渲染操作按钮）
+  const [gcStage, setGcStage] = useState<
+    "catalog" | "resources" | "model" | "done"
+  >("catalog");
+  const [gcSelected, setGcSelected] = useState<Set<string>>(new Set());
+  const [gcModelSelections, setGcModelSelections] = useState<
+    Record<string, number>
+  >({});
+  const [gcEmbeddingModelSelections, setGcEmbeddingModelSelections] = useState<
+    Record<string, number>
+  >({});
+  const [gcSkillResolutions, setGcSkillResolutions] = useState<
+    Record<string, ResourceResolution>
+  >({});
+  const [gcKbResolutions, setGcKbResolutions] = useState<
+    Record<string, ResourceResolution>
+  >({});
+  const [gcMcpResolutions, setGcMcpResolutions] = useState<
+    Record<string, McpResolution>
+  >({});
+  const [gcInstalling, setGcInstalling] = useState(false);
+  const [gcResults, setGcResults] = useState<
+    OfficialAgentInstallItem[] | null
+  >(null);
 
   const { data: agents, isLoading } = useOfficialAgents(open, tenantId);
   const installMutation = useInstallOfficialAgents(tenantId);
   const { availableLlmModels, models: allModels } = useModelList();
+
+  const gitcodeCatalog = useOfficialAgentsFromGitcode(open, tenantId);
+  const gitcodeInstallMutation = useInstallOfficialAgentsFromGitcode(tenantId);
+
+  const gcAllBundles = useMemo(
+    () =>
+      (gitcodeCatalog.data?.groups ?? []).flatMap((group) =>
+        group.categories.flatMap((cat) => cat.bundles)
+      ),
+    [gitcodeCatalog.data]
+  );
+  const gcInstallableBundles = useMemo(
+    () => gcAllBundles.filter((b) => b.status === "installable"),
+    [gcAllBundles]
+  );
+  const gcSelectedBundles = useMemo(
+    () => gcAllBundles.filter((b) => gcSelected.has(b.name)),
+    [gcAllBundles, gcSelected]
+  );
+  const gcAllSelected =
+    gcInstallableBundles.length > 0 &&
+    gcInstallableBundles.every((b) => gcSelected.has(b.name));
 
   // Available vector/embedding models (embedding + multi_embedding), used for
   // the knowledge bases created during install.
@@ -96,8 +195,28 @@ export function InstallOfficialAgentsModal({
     [allModels]
   );
 
+  // Pre-select the first available LLM for every selected GitCode bundle on the
+  // model stage.
+  useEffect(() => {
+    if (gcStage !== "model" || !availableLlmModels.length) return;
+    const first = availableLlmModels[0].id;
+    setGcModelSelections((prev) => {
+      const next = { ...prev };
+      let changed = false;
+      for (const b of gcSelectedBundles) {
+        if (next[b.name] == null) {
+          next[b.name] = first;
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gcStage, availableLlmModels, gcSelectedBundles]);
+
   useEffect(() => {
     if (!open) return;
+    setActiveSource("local");
     setCurrentStep(0);
     setSelectedNames(new Set());
     setConflicts([]);
@@ -108,6 +227,18 @@ export function InstallOfficialAgentsModal({
     setChecking(false);
     setIsInstalling(false);
     setLastResults(null);
+    setSkillResolutions({});
+    setKbResolutions({});
+    setMcpResolutions({});
+    setGcStage("catalog");
+    setGcSelected(new Set());
+    setGcModelSelections({});
+    setGcEmbeddingModelSelections({});
+    setGcSkillResolutions({});
+    setGcKbResolutions({});
+    setGcMcpResolutions({});
+    setGcInstalling(false);
+    setGcResults(null);
   }, [open]);
 
   const allAgents = useMemo(() => agents ?? [], [agents]);
@@ -130,6 +261,99 @@ export function InstallOfficialAgentsModal({
     (a) => (a.mcps?.length ?? 0) > 0
   );
 
+  // Skill / knowledge base / MCP name conflicts across the currently selected
+  // bundles (drives the "reuse vs rename / skip" resources step).
+  const resourceConflicts = useMemo(() => {
+    const skills: ResourceConflict[] = [];
+    const kbs: ResourceConflict[] = [];
+    const mcps: ResourceConflict[] = [];
+    for (const a of selectedAgents) {
+      for (const s of a.skills ?? []) {
+        if (s.exists) skills.push({ bundleName: a.name, key: s.name, display: s.name });
+      }
+      for (const k of a.knowledge_bases ?? []) {
+        if (k.exists)
+          kbs.push({
+            bundleName: a.name,
+            key: k.logical_index_name,
+            display: k.display_name || k.logical_index_name,
+          });
+      }
+      for (const m of a.mcps ?? []) {
+        if (m.conflict)
+          mcps.push({
+            bundleName: a.name,
+            key: m.mcp_server_name,
+            display: m.mcp_server_name,
+          });
+      }
+    }
+    return { skills, kbs, mcps };
+  }, [selectedAgents]);
+  const hasResourceConflicts =
+    resourceConflicts.skills.length > 0 ||
+    resourceConflicts.kbs.length > 0 ||
+    resourceConflicts.mcps.length > 0;
+
+  // Same computation for the GitCode source (selected bundles at catalog stage).
+  const gcResourceConflicts = useMemo(() => {
+    const skills: ResourceConflict[] = [];
+    const kbs: ResourceConflict[] = [];
+    const mcps: ResourceConflict[] = [];
+    for (const a of gcSelectedBundles) {
+      for (const s of a.skills ?? []) {
+        if (s.exists) skills.push({ bundleName: a.name, key: s.name, display: s.name });
+      }
+      for (const k of a.knowledge_bases ?? []) {
+        if (k.exists)
+          kbs.push({
+            bundleName: a.name,
+            key: k.logical_index_name,
+            display: k.display_name || k.logical_index_name,
+          });
+      }
+      for (const m of a.mcps ?? []) {
+        if (m.conflict)
+          mcps.push({
+            bundleName: a.name,
+            key: m.mcp_server_name,
+            display: m.mcp_server_name,
+          });
+      }
+    }
+    return { skills, kbs, mcps };
+  }, [gcSelectedBundles]);
+  const gcHasResourceConflicts =
+    gcResourceConflicts.skills.length > 0 ||
+    gcResourceConflicts.kbs.length > 0 ||
+    gcResourceConflicts.mcps.length > 0;
+
+  const resourceAllResolved = useMemo(
+    () =>
+      resourceConflicts.skills.every((c) =>
+        isResolutionValid(skillResolutions[c.key])
+      ) &&
+      resourceConflicts.kbs.every((c) => isResolutionValid(kbResolutions[c.key])) &&
+      resourceConflicts.mcps.every((c) =>
+        isMcpResolutionValid(mcpResolutions[c.key])
+      ),
+    [resourceConflicts, skillResolutions, kbResolutions, mcpResolutions]
+  );
+
+  const gcResourceAllResolved = useMemo(
+    () =>
+      gcResourceConflicts.skills.every((c) =>
+        isResolutionValid(gcSkillResolutions[c.key])
+      ) &&
+      gcResourceConflicts.kbs.every((c) =>
+        isResolutionValid(gcKbResolutions[c.key])
+      ) &&
+      gcResourceConflicts.mcps.every((c) =>
+        isMcpResolutionValid(gcMcpResolutions[c.key])
+      ),
+    [gcResourceConflicts, gcSkillResolutions, gcKbResolutions, gcMcpResolutions]
+  );
+
   const steps = useMemo(() => {
     const items: Array<{ key: string; title: string }> = [
       { key: "select", title: t("officialAgent.wizard.select") },
@@ -137,12 +361,18 @@ export function InstallOfficialAgentsModal({
     if (conflicts.length > 0) {
       items.push({ key: "rename", title: t("officialAgent.wizard.rename") });
     }
+    if (hasResourceConflicts) {
+      items.push({
+        key: "resources",
+        title: t("officialAgent.wizard.resources"),
+      });
+    }
     if (hasSelectedMcps) {
       items.push({ key: "mcp", title: t("officialAgent.wizard.mcp") });
     }
     items.push({ key: "model", title: t("officialAgent.wizard.model") });
     return items;
-  }, [conflicts.length, hasSelectedMcps, t]);
+  }, [conflicts.length, hasResourceConflicts, hasSelectedMcps, t]);
 
   const currentStepKey = steps[currentStep]?.key;
 
@@ -195,9 +425,140 @@ export function InstallOfficialAgentsModal({
   };
 
   const handleCancel = () => {
-    if (isInstalling) return;
+    if (isInstalling || gcInstalling) return;
     onClose();
   };
+
+  // ----- GitCode 固定源处理逻辑（状态在父组件，footer 渲染操作按钮） -----
+
+  const handleGcToggle = (name: string) => {
+    setGcSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+  };
+
+  const handleGcToggleAll = () => {
+    if (gcAllSelected) {
+      setGcSelected(new Set());
+    } else {
+      setGcSelected(new Set(gcInstallableBundles.map((b) => b.name)));
+    }
+  };
+
+  const handleGcNext = () => {
+    if (gcSelected.size === 0) {
+      message.warning(t("officialAgent.installModal.selectAtLeastOne"));
+      return;
+    }
+    setGcStage(gcHasResourceConflicts ? "resources" : "model");
+  };
+
+  const handleGcResourcesNext = () => {
+    if (!gcResourceAllResolved) {
+      message.warning(t("officialAgent.resources.required"));
+      return;
+    }
+    setGcStage("model");
+  };
+
+  const handleGcBack = () => {
+    if (gcStage === "model") {
+      setGcStage(gcHasResourceConflicts ? "resources" : "catalog");
+    } else {
+      setGcStage("catalog");
+    }
+  };
+
+  const handleGcInstall = async () => {
+    const finalModelIds: Record<string, number> = { ...gcModelSelections };
+    for (const b of gcSelectedBundles) {
+      if (finalModelIds[b.name] == null) {
+        if (!availableLlmModels.length) {
+          message.warning(t("officialAgent.modelStep.placeholder"));
+          return;
+        }
+        finalModelIds[b.name] = availableLlmModels[0].id;
+      }
+    }
+    setGcModelSelections(finalModelIds);
+
+    const finalEmbeddingModelIds: Record<string, number> = {
+      ...gcEmbeddingModelSelections,
+    };
+    for (const b of gcSelectedBundles) {
+      if (!b.has_knowledge) continue;
+      if (finalEmbeddingModelIds[b.name] == null) {
+        if (!availableEmbeddingModels.length) {
+          message.warning(t("officialAgent.modelStep.embeddingPlaceholder"));
+          return;
+        }
+        finalEmbeddingModelIds[b.name] = availableEmbeddingModels[0].id;
+      }
+    }
+
+    const gcSkillRenames: Record<string, string> = {};
+    for (const c of gcResourceConflicts.skills) {
+      const r = gcSkillResolutions[c.key];
+      if (r?.action === "rename" && r.newName.trim()) {
+        gcSkillRenames[c.key] = r.newName.trim();
+      }
+    }
+    const gcKbRenames: Record<string, string> = {};
+    for (const c of gcResourceConflicts.kbs) {
+      const r = gcKbResolutions[c.key];
+      if (r?.action === "rename" && r.newName.trim()) {
+        gcKbRenames[c.key] = r.newName.trim();
+      }
+    }
+    const gcMcpRenames: Record<string, string> = {};
+    const gcMcpSkips: string[] = [];
+    for (const c of gcResourceConflicts.mcps) {
+      const r = gcMcpResolutions[c.key];
+      if (r?.action === "rename" && r.newName.trim()) {
+        gcMcpRenames[c.key] = r.newName.trim();
+      } else if (r?.action === "skip") {
+        gcMcpSkips.push(c.key);
+      }
+    }
+
+    setGcInstalling(true);
+    try {
+      const res = await gitcodeInstallMutation.mutateAsync({
+        names: Array.from(gcSelected),
+        model_ids: Object.keys(finalModelIds).length
+          ? finalModelIds
+          : undefined,
+        embedding_model_ids: Object.keys(finalEmbeddingModelIds).length
+          ? finalEmbeddingModelIds
+          : undefined,
+        skill_renames: Object.keys(gcSkillRenames).length
+          ? gcSkillRenames
+          : undefined,
+        kb_renames: Object.keys(gcKbRenames).length
+          ? gcKbRenames
+          : undefined,
+        mcp_renames: Object.keys(gcMcpRenames).length
+          ? gcMcpRenames
+          : undefined,
+        mcp_skips: gcMcpSkips.length ? gcMcpSkips : undefined,
+      });
+      setGcResults(res);
+      setGcStage("done");
+      onInstalled?.();
+    } catch (error) {
+      message.error(
+        error instanceof Error
+          ? error.message
+          : t("officialAgent.installModal.failed")
+      );
+    } finally {
+      setGcInstalling(false);
+    }
+  };
+
 
   // select -> conflict pre-check -> rename / mcp / model
   const handleSelectNext = async () => {
@@ -244,10 +605,17 @@ export function InstallOfficialAgentsModal({
       const nextKeys = [
         "select",
         ...(found.length > 0 ? ["rename"] : []),
+        ...(hasResourceConflicts ? ["resources"] : []),
         ...(hasSelectedMcps ? ["mcp"] : []),
         "model",
       ];
-      const target = found.length > 0 ? "rename" : hasSelectedMcps ? "mcp" : "model";
+      const target = found.length > 0
+        ? "rename"
+        : hasResourceConflicts
+          ? "resources"
+          : hasSelectedMcps
+            ? "mcp"
+            : "model";
       setCurrentStep(nextKeys.indexOf(target));
     } finally {
       setChecking(false);
@@ -268,6 +636,10 @@ export function InstallOfficialAgentsModal({
         }
       }
       setRenames(next);
+    }
+    if (currentStepKey === "resources" && !resourceAllResolved) {
+      message.warning(t("officialAgent.resources.required"));
+      return;
     }
     setCurrentStep(currentStep + 1);
   };
@@ -300,6 +672,31 @@ export function InstallOfficialAgentsModal({
       }
     }
 
+    const skillRenames: Record<string, string> = {};
+    for (const c of resourceConflicts.skills) {
+      const r = skillResolutions[c.key];
+      if (r?.action === "rename" && r.newName.trim()) {
+        skillRenames[c.key] = r.newName.trim();
+      }
+    }
+    const kbRenames: Record<string, string> = {};
+    for (const c of resourceConflicts.kbs) {
+      const r = kbResolutions[c.key];
+      if (r?.action === "rename" && r.newName.trim()) {
+        kbRenames[c.key] = r.newName.trim();
+      }
+    }
+    const mcpRenames: Record<string, string> = {};
+    const mcpSkips: string[] = [];
+    for (const c of resourceConflicts.mcps) {
+      const r = mcpResolutions[c.key];
+      if (r?.action === "rename" && r.newName.trim()) {
+        mcpRenames[c.key] = r.newName.trim();
+      } else if (r?.action === "skip") {
+        mcpSkips.push(c.key);
+      }
+    }
+
     setIsInstalling(true);
     try {
       const results = await installMutation.mutateAsync({
@@ -311,6 +708,12 @@ export function InstallOfficialAgentsModal({
         embedding_model_ids: Object.keys(finalEmbeddingModelIds).length
           ? finalEmbeddingModelIds
           : undefined,
+        skill_renames: Object.keys(skillRenames).length
+          ? skillRenames
+          : undefined,
+        kb_renames: Object.keys(kbRenames).length ? kbRenames : undefined,
+        mcp_renames: Object.keys(mcpRenames).length ? mcpRenames : undefined,
+        mcp_skips: mcpSkips.length ? mcpSkips : undefined,
       });
       setLastResults(results);
       onInstalled?.();
@@ -329,6 +732,9 @@ export function InstallOfficialAgentsModal({
     if (checking) return false;
     if (currentStepKey === "select") {
       return selectedNames.size > 0 && !isLoading;
+    }
+    if (currentStepKey === "resources") {
+      return resourceAllResolved;
     }
     if (currentStepKey === "model") {
       return availableLlmModels.length > 0;
@@ -389,6 +795,27 @@ export function InstallOfficialAgentsModal({
         />
       );
     }
+    if (currentStepKey === "resources") {
+      return (
+        <ResourceConflictStep
+          skills={resourceConflicts.skills}
+          kbs={resourceConflicts.kbs}
+          mcps={resourceConflicts.mcps}
+          skillResolutions={skillResolutions}
+          kbResolutions={kbResolutions}
+          mcpResolutions={mcpResolutions}
+          onSkillChange={(key, res) =>
+            setSkillResolutions((prev) => ({ ...prev, [key]: res }))
+          }
+          onKbChange={(key, res) =>
+            setKbResolutions((prev) => ({ ...prev, [key]: res }))
+          }
+          onMcpChange={(key, res) =>
+            setMcpResolutions((prev) => ({ ...prev, [key]: res }))
+          }
+        />
+      );
+    }
     if (currentStepKey === "mcp") {
       return <McpPreviewStep agents={selectedAgents} />;
     }
@@ -430,11 +857,54 @@ export function InstallOfficialAgentsModal({
       width={800}
       destroyOnHidden
       footer={
-        <div className="flex justify-between">
-          <Button onClick={handleCancel}>
-            {t("common.cancel", "Cancel")}
-          </Button>
-          <Space>
+        activeSource === "gitcode" ? (
+          // GitCode：操作按钮固定在底部 footer、紧邻取消键左侧
+          <div className="flex items-center justify-end gap-2">
+            {(gcStage === "model" || gcStage === "resources") &&
+              !gcInstalling &&
+              !gcResults && (
+                <Button onClick={handleGcBack}>
+                  {t("officialAgent.wizard.back", "Previous")}
+                </Button>
+              )}
+            {gcResults ? (
+              <Button type="primary" onClick={onClose}>
+                {t("common.confirm", "OK")}
+              </Button>
+            ) : gcStage === "catalog" ? (
+              <Button
+                type="primary"
+                disabled={gcSelected.size === 0 || gitcodeCatalog.isLoading}
+                onClick={handleGcNext}
+              >
+                {t("officialAgent.wizard.next", "Next")}
+              </Button>
+            ) : gcStage === "resources" ? (
+              <Button
+                type="primary"
+                disabled={!gcResourceAllResolved}
+                onClick={handleGcResourcesNext}
+              >
+                {t("officialAgent.wizard.next", "Next")}
+              </Button>
+            ) : (
+              <Button
+                type="primary"
+                loading={gcInstalling}
+                onClick={handleGcInstall}
+                icon={<Download size={16} />}
+              >
+                {gcInstalling
+                  ? t("officialAgent.wizard.installing", "Installing...")
+                  : t("officialAgent.wizard.install", "Install")}
+              </Button>
+            )}
+            <Button onClick={handleCancel}>
+              {t("common.cancel", "Cancel")}
+            </Button>
+          </div>
+        ) : (
+          <div className="flex items-center justify-end gap-2">
             {currentStep > 0 && !isInstalling && !lastResults && (
               <Button onClick={() => setCurrentStep(currentStep - 1)}>
                 {t("officialAgent.wizard.back", "Previous")}
@@ -466,20 +936,106 @@ export function InstallOfficialAgentsModal({
                   : t("officialAgent.wizard.install", "Install")}
               </Button>
             )}
-          </Space>
-        </div>
+            <Button onClick={handleCancel}>
+              {t("common.cancel", "Cancel")}
+            </Button>
+          </div>
+        )
       }
     >
-      <div className="py-4">
-        <Steps
-          current={currentStep}
-          items={steps.map((step) => ({ title: step.title }))}
-          className="mb-6"
+      <div className="pt-6 pb-4">
+        <Segmented
+          style={{ marginBottom: "1.5rem" }}
+          value={activeSource}
+          onChange={(value) => setActiveSource(value as "local" | "gitcode")}
+          options={[
+            { label: t("officialAgent.gitcode.sourceLocal"), value: "local" },
+            { label: t("officialAgent.gitcode.sourceGitcode"), value: "gitcode" },
+          ]}
         />
 
-        <div className="min-h-[300px] max-h-[70vh] overflow-y-auto pr-1">
-          {renderStepContent()}
-        </div>
+        {activeSource === "local" ? (
+          <>
+            <Steps
+              current={currentStep}
+              items={steps.map((step) => ({ title: step.title }))}
+              style={{ marginBottom: "1.5rem" }}
+            />
+
+            <div className="min-h-[300px] max-h-[70vh] overflow-y-auto pr-1">
+              {renderStepContent()}
+            </div>
+          </>
+        ) : gitcodeCatalog.isLoading ? (
+          <div className="flex min-h-[300px] items-center justify-center">
+            <Spin size="large" />
+          </div>
+        ) : gitcodeCatalog.isError || !gitcodeCatalog.data ? (
+          <div className="flex min-h-[300px] flex-col items-center justify-center gap-3">
+            <CircleOff className="size-8 text-red-400" />
+            <p className="text-sm text-gray-500 dark:text-gray-400">
+              {t("officialAgent.gitcode.loadError")}
+            </p>
+            <Button
+              icon={<RefreshCw className="size-3.5" />}
+              onClick={() => gitcodeCatalog.refetch()}
+            >
+              {t("officialAgent.gitcode.refresh")}
+            </Button>
+          </div>
+        ) : (
+          <div className="min-h-[300px] max-h-[70vh] overflow-y-auto pr-1">
+            <GitcodeView
+              data={gitcodeCatalog.data}
+              stage={gcStage}
+              selected={gcSelected}
+              allSelected={gcAllSelected}
+              selectedBundles={gcSelectedBundles}
+              modelSelections={gcModelSelections}
+              onModelChange={(bundleName, modelId) =>
+                setGcModelSelections((prev) => ({
+                  ...prev,
+                  [bundleName]: modelId,
+                }))
+              }
+              embeddingSelections={gcEmbeddingModelSelections}
+              onEmbeddingChange={(bundleName, modelId) =>
+                setGcEmbeddingModelSelections((prev) => ({
+                  ...prev,
+                  [bundleName]: modelId,
+                }))
+              }
+              availableLlmModels={availableLlmModels}
+              availableEmbeddingModels={availableEmbeddingModels}
+              onToggle={handleGcToggle}
+              onToggleAll={handleGcToggleAll}
+              onGoConfigureModel={goConfigureModel}
+              onRefresh={() => gitcodeCatalog.refetch()}
+              refreshing={gitcodeCatalog.isFetching}
+              onBackToCatalog={() => {
+                setGcStage("catalog");
+                setGcResults(null);
+                setGcSelected(new Set());
+              }}
+              results={gcResults}
+              skills={gcResourceConflicts.skills}
+              kbs={gcResourceConflicts.kbs}
+              mcps={gcResourceConflicts.mcps}
+              skillResolutions={gcSkillResolutions}
+              kbResolutions={gcKbResolutions}
+              mcpResolutions={gcMcpResolutions}
+              onSkillChange={(key, res) =>
+                setGcSkillResolutions((prev) => ({ ...prev, [key]: res }))
+              }
+              onKbChange={(key, res) =>
+                setGcKbResolutions((prev) => ({ ...prev, [key]: res }))
+              }
+              onMcpChange={(key, res) =>
+                setGcMcpResolutions((prev) => ({ ...prev, [key]: res }))
+              }
+            />
+          </div>
+        )}
       </div>
     </Modal>
   );
@@ -522,74 +1078,96 @@ function SelectStep({
           </span>
         </div>
         <div className="space-y-3">
-          {agents.map((agent) => {
-            const isDisabled =
-              agent.status === "installed" || agent.status === "needs_model";
-            const title =
-              agent.display_name?.trim() ||
-              agent.name ||
-              t("officialAgent.card.untitled");
-            return (
-              <div
-                key={agent.name}
-                className={`flex items-start gap-3 rounded-lg border p-3 ${
-                  isDisabled
-                    ? "opacity-60 border-gray-200 dark:border-gray-700"
-                    : "border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800/50"
-                }`}
-              >
-                <input
-                  type="checkbox"
-                  checked={selectedNames.has(agent.name)}
-                  onChange={() => {
-                    if (isDisabled) return;
-                    onToggle(agent.name);
-                  }}
-                  disabled={isDisabled}
-                  className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer accent-blue-500"
-                />
-                <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-base text-primary">
-                  {agent.icon?.trim() ? (
-                    <span aria-hidden>{agent.icon.trim()}</span>
-                  ) : (
-                    <Bot className="size-4" aria-hidden />
-                  )}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="truncate text-sm font-medium text-gray-900 dark:text-gray-100">
-                      {title}
-                    </span>
-                    <AgentCountChips agent={agent} />
-                  </div>
-                  {agent.description?.trim() ? (
-                    <p className="mt-0.5 truncate text-xs text-gray-500 dark:text-gray-400">
-                      {agent.description.trim()}
-                    </p>
-                  ) : null}
-                </div>
-                <div className="shrink-0">
-                  {agent.status === "needs_model" ? (
-                    <Button
-                      type="link"
-                      size="small"
-                      className="flex items-center gap-1 p-0 text-amber-600"
-                      onClick={onGoConfigure}
-                    >
-                      <CircleOff className="size-3.5" />
-                      <span>{t("officialAgent.install.goConfigure")}</span>
-                      <ExternalLink className="size-3" />
-                    </Button>
-                  ) : agent.status === "installed" ? (
-                    <Tag color="success" icon={<CircleCheck size={14} />}>
-                      {t("officialAgent.status.installed")}
-                    </Tag>
-                  ) : null}
-                </div>
-              </div>
-            );
-          })}
+          {agents.map((agent) => (
+            <AgentSelectCard
+              key={agent.name}
+              agent={agent}
+              checked={selectedNames.has(agent.name)}
+              onToggle={onToggle}
+              onGoConfigure={onGoConfigure}
+            />
+          ))}
         </div>
+      </div>
+    </div>
+  );
+}
+
+function AgentSelectCard({
+  agent,
+  checked,
+  onToggle,
+  onGoConfigure,
+}: {
+  agent: OfficialAgentItem;
+  checked: boolean;
+  onToggle: (name: string) => void;
+  onGoConfigure: () => void;
+}) {
+  const { t } = useTranslation("common");
+
+  const isDisabled =
+    agent.status === "installed" || agent.status === "needs_model";
+  const title =
+    agent.display_name?.trim() ||
+    agent.name ||
+    t("officialAgent.card.untitled");
+
+  return (
+    <div
+      className={`flex items-start gap-3 rounded-lg border p-3 ${
+        isDisabled
+          ? "opacity-60 border-gray-200 dark:border-gray-700"
+          : "border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800/50"
+      }`}
+    >
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={() => {
+          if (isDisabled) return;
+          onToggle(agent.name);
+        }}
+        disabled={isDisabled}
+        className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer accent-blue-500"
+      />
+      <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-base text-primary">
+        {agent.icon?.trim() ? (
+          <span aria-hidden>{agent.icon.trim()}</span>
+        ) : (
+          <Bot className="size-4" aria-hidden />
+        )}
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <span className="truncate text-sm font-medium text-gray-900 dark:text-gray-100">
+            {title}
+          </span>
+          <AgentCountChips agent={agent} />
+        </div>
+        {agent.description?.trim() ? (
+          <p className="mt-0.5 truncate text-xs text-gray-500 dark:text-gray-400">
+            {agent.description.trim()}
+          </p>
+        ) : null}
+      </div>
+      <div className="shrink-0">
+        {agent.status === "needs_model" ? (
+          <Button
+            type="link"
+            size="small"
+            className="flex items-center gap-1 p-0 text-amber-600"
+            onClick={onGoConfigure}
+          >
+            <CircleOff className="size-3.5" />
+            <span>{t("officialAgent.install.goConfigure")}</span>
+            <ExternalLink className="size-3" />
+          </Button>
+        ) : agent.status === "installed" ? (
+          <Tag color="success" icon={<CircleCheck size={14} />}>
+            {t("officialAgent.status.installed")}
+          </Tag>
+        ) : null}
       </div>
     </div>
   );
@@ -663,6 +1241,161 @@ function RenameStep({
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+function ResourceConflictStep({
+  skills,
+  kbs,
+  mcps,
+  skillResolutions,
+  kbResolutions,
+  mcpResolutions,
+  onSkillChange,
+  onKbChange,
+  onMcpChange,
+}: {
+  skills: ResourceConflict[];
+  kbs: ResourceConflict[];
+  mcps: ResourceConflict[];
+  skillResolutions: Record<string, ResourceResolution>;
+  kbResolutions: Record<string, ResourceResolution>;
+  mcpResolutions: Record<string, McpResolution>;
+  onSkillChange: (key: string, res: ResourceResolution) => void;
+  onKbChange: (key: string, res: ResourceResolution) => void;
+  onMcpChange: (key: string, res: McpResolution) => void;
+}) {
+  const { t } = useTranslation("common");
+
+  if (skills.length === 0 && kbs.length === 0 && mcps.length === 0) return null;
+
+  const renderItem = (
+    conflict: ResourceConflict,
+    resolution: ResourceResolution | undefined,
+    onChange: (key: string, res: ResourceResolution) => void
+  ) => (
+    <div
+      key={conflict.key}
+      className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 space-y-3"
+    >
+      <div className="flex items-center gap-2">
+        <Tag color="purple">{conflict.bundleName}</Tag>
+        <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+          {conflict.display}
+        </span>
+      </div>
+      <Radio.Group
+        value={resolution?.action}
+        onChange={(e) =>
+          onChange(conflict.key, {
+            action: e.target.value,
+            newName: e.target.value === "rename" ? resolution?.newName ?? "" : "",
+          })
+        }
+      >
+        <Radio value="reuse">{t("officialAgent.resources.reuse")}</Radio>
+        <Radio value="rename">{t("officialAgent.resources.rename")}</Radio>
+      </Radio.Group>
+      {resolution?.action === "rename" ? (
+        <Input
+          value={resolution.newName}
+          onChange={(e) =>
+            onChange(conflict.key, { action: "rename", newName: e.target.value })
+          }
+          placeholder={t("officialAgent.resources.newNamePlaceholder")}
+          size="large"
+        />
+      ) : null}
+    </div>
+  );
+
+  const renderMcpItem = (
+    conflict: ResourceConflict,
+    resolution: McpResolution | undefined,
+    onChange: (key: string, res: McpResolution) => void
+  ) => (
+    <div
+      key={conflict.key}
+      className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 space-y-3"
+    >
+      <div className="flex items-center gap-2">
+        <Tag color="purple">{conflict.bundleName}</Tag>
+        <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+          {conflict.display}
+        </span>
+      </div>
+      <Radio.Group
+        value={resolution?.action}
+        onChange={(e) =>
+          onChange(conflict.key, {
+            action: e.target.value,
+            newName:
+              e.target.value === "rename" ? resolution?.newName ?? "" : "",
+          })
+        }
+      >
+        <Radio value="rename">{t("officialAgent.resources.rename")}</Radio>
+        <Radio value="skip">{t("officialAgent.resources.skip")}</Radio>
+      </Radio.Group>
+      {resolution?.action === "rename" ? (
+        <Input
+          value={resolution.newName}
+          onChange={(e) =>
+            onChange(conflict.key, { action: "rename", newName: e.target.value })
+          }
+          placeholder={t("officialAgent.resources.newNamePlaceholder")}
+          size="large"
+        />
+      ) : resolution?.action === "skip" ? (
+        <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded p-2">
+          <p className="text-xs text-yellow-800 dark:text-yellow-200">
+            {t("officialAgent.resources.mcpSkipWarning")}
+          </p>
+        </div>
+      ) : null}
+    </div>
+  );
+
+  return (
+    <div className="space-y-6">
+      <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4">
+        <p className="text-sm font-semibold text-yellow-800 dark:text-yellow-200">
+          {t("officialAgent.resources.title")}
+        </p>
+        <p className="text-xs text-yellow-800 dark:text-yellow-200">
+          {t("officialAgent.resources.desc")}
+        </p>
+      </div>
+
+      {skills.length > 0 ? (
+        <div className="space-y-3">
+          <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
+            {t("officialAgent.resources.skills")}
+          </p>
+          {skills.map((c) => renderItem(c, skillResolutions[c.key], onSkillChange))}
+        </div>
+      ) : null}
+
+      {kbs.length > 0 ? (
+        <div className="space-y-3">
+          <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
+            {t("officialAgent.resources.knowledgeBases")}
+          </p>
+          {kbs.map((c) => renderItem(c, kbResolutions[c.key], onKbChange))}
+        </div>
+      ) : null}
+
+      {mcps.length > 0 ? (
+        <div className="space-y-3">
+          <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
+            {t("officialAgent.resources.mcps")}
+          </p>
+          {mcps.map((c) =>
+            renderMcpItem(c, mcpResolutions[c.key], onMcpChange)
+          )}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -998,6 +1731,176 @@ function InstallResultsView({
           <ExternalLink className="size-3" />
         </Button>
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * GitCode 固定源目录视图（纯展示）。
+ *
+ * 状态与操作由父组件管理（footer 渲染操作按钮）；此处仅渲染目录或选模型表单。
+ */
+function GitcodeView({
+  data,
+  stage,
+  selected,
+  allSelected,
+  selectedBundles,
+  modelSelections,
+  onModelChange,
+  embeddingSelections,
+  onEmbeddingChange,
+  availableLlmModels,
+  availableEmbeddingModels,
+  onToggle,
+  onToggleAll,
+  onGoConfigureModel,
+  onRefresh,
+  refreshing,
+  onBackToCatalog,
+  results,
+  skills,
+  kbs,
+  mcps,
+  skillResolutions,
+  kbResolutions,
+  mcpResolutions,
+  onSkillChange,
+  onKbChange,
+  onMcpChange,
+}: {
+  data: OfficialAgentGithubDiscoverResult;
+  stage: "catalog" | "resources" | "model" | "done";
+  selected: Set<string>;
+  allSelected: boolean;
+  selectedBundles: OfficialAgentItem[];
+  modelSelections: Record<string, number>;
+  onModelChange: (bundleName: string, modelId: number) => void;
+  embeddingSelections: Record<string, number>;
+  onEmbeddingChange: (bundleName: string, modelId: number) => void;
+  availableLlmModels: ModelOption[];
+  availableEmbeddingModels: ModelOption[];
+  onToggle: (name: string) => void;
+  onToggleAll: () => void;
+  onGoConfigureModel: () => void;
+  onRefresh: () => void;
+  refreshing: boolean;
+  onBackToCatalog: () => void;
+  results: OfficialAgentInstallItem[] | null;
+  skills: ResourceConflict[];
+  kbs: ResourceConflict[];
+  mcps: ResourceConflict[];
+  skillResolutions: Record<string, ResourceResolution>;
+  kbResolutions: Record<string, ResourceResolution>;
+  mcpResolutions: Record<string, McpResolution>;
+  onSkillChange: (key: string, res: ResourceResolution) => void;
+  onKbChange: (key: string, res: ResourceResolution) => void;
+  onMcpChange: (key: string, res: McpResolution) => void;
+}) {
+  const { t } = useTranslation("common");
+
+  if (stage === "done") {
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+            {data.repo}
+          </span>
+          <Button type="link" onClick={onBackToCatalog}>
+            {t("officialAgent.gitcode.backToCatalog")}
+          </Button>
+        </div>
+        <InstallResultsView
+          results={results ?? []}
+          onGoConfigure={onGoConfigureModel}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div className="flex min-w-0 items-center gap-2">
+          <GitBranch className="size-4 shrink-0 text-slate-400" />
+          <span className="truncate text-sm font-medium text-gray-900 dark:text-gray-100">
+            {data.repo}
+          </span>
+          {data.commit ? <Tag>{data.commit.slice(0, 7)}</Tag> : null}
+          <Tag color="blue">{data.ref}</Tag>
+        </div>
+        <Button
+          size="small"
+          icon={<RefreshCw className="size-3.5" />}
+          loading={refreshing}
+          onClick={onRefresh}
+        >
+          {t("officialAgent.gitcode.refresh")}
+        </Button>
+      </div>
+
+      {stage === "catalog" ? (
+        <div className="space-y-4">
+          <div className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={allSelected}
+              onChange={onToggleAll}
+              className="h-4 w-4 shrink-0 cursor-pointer accent-blue-500"
+            />
+            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+              {t("common.selectAll")}
+            </span>
+          </div>
+          {data.groups.map((group) => (
+            <div key={group.name}>
+              <h3 className="mb-2 text-sm font-semibold text-gray-900 dark:text-gray-100">
+                {group.name}
+              </h3>
+              {group.categories.map((cat) => (
+                <div key={cat.name} className="mb-3">
+                  <p className="mb-1 text-xs font-medium text-slate-500 dark:text-slate-400">
+                    {cat.name}
+                  </p>
+                  <div className="space-y-2">
+                    {cat.bundles.map((agent) => (
+                      <AgentSelectCard
+                        key={agent.name}
+                        agent={agent}
+                        checked={selected.has(agent.name)}
+                        onToggle={onToggle}
+                        onGoConfigure={onGoConfigureModel}
+                      />
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      ) : stage === "resources" ? (
+        <ResourceConflictStep
+          skills={skills}
+          kbs={kbs}
+          mcps={mcps}
+          skillResolutions={skillResolutions}
+          kbResolutions={kbResolutions}
+          mcpResolutions={mcpResolutions}
+          onSkillChange={onSkillChange}
+          onKbChange={onKbChange}
+          onMcpChange={onMcpChange}
+        />
+      ) : (
+        <ModelStep
+          agents={selectedBundles}
+          selections={modelSelections}
+          onChange={onModelChange}
+          availableLlmModels={availableLlmModels}
+          embeddingSelections={embeddingSelections}
+          onEmbeddingChange={onEmbeddingChange}
+          availableEmbeddingModels={availableEmbeddingModels}
+        />
+      )}
     </div>
   );
 }

@@ -199,6 +199,10 @@ export interface OfficialAgentItem {
   agents?: OfficialAgentAgentInfo[];
   /** MCP servers in the bundle with per-tenant install state. */
   mcps?: OfficialAgentMcpPreview[];
+  /** Skills in the bundle with per-tenant name-conflict state. */
+  skills?: OfficialAgentSkillPreview[];
+  /** Knowledge bases in the bundle with per-tenant name-conflict state. */
+  knowledge_bases?: OfficialAgentKbPreview[];
 }
 
 /** An agent inside an official bundle (root or sub-agent). */
@@ -212,6 +216,21 @@ export interface OfficialAgentMcpPreview {
   mcp_server_name: string;
   mcp_url: string;
   installed: boolean;
+  /** True when the name is taken by a different url (must rename or skip on install). */
+  conflict?: boolean;
+}
+
+/** A skill bundled in an official agent, with per-tenant name-conflict state. */
+export interface OfficialAgentSkillPreview {
+  name: string;
+  exists: boolean;
+}
+
+/** A knowledge base declared in an official agent, with per-tenant name-conflict state. */
+export interface OfficialAgentKbPreview {
+  logical_index_name: string;
+  display_name?: string | null;
+  exists: boolean;
 }
 
 /** User choices passed with an official agent install request. */
@@ -222,6 +241,14 @@ export interface OfficialAgentInstallOptions {
   model_ids?: Record<string, number>;
   /** Maps a bundle key to a tenant embedding model_id used for its knowledge bases. */
   embedding_model_ids?: Record<string, number>;
+  /** Maps an original skill name to a new name (rename instead of reuse). */
+  skill_renames?: Record<string, string>;
+  /** Maps a KB logical index name to a new display name (rename instead of reuse). */
+  kb_renames?: Record<string, string>;
+  /** Maps a conflicting MCP server name to a new name (rename on conflict). */
+  mcp_renames?: Record<string, string>;
+  /** Conflicting MCP server names to skip entirely (their tools would be missing). */
+  mcp_skips?: string[];
 }
 
 /** Per-agent result of POST /repository/agent/official/install. */
@@ -245,5 +272,35 @@ export interface OfficialAgentInstallStep {
 }
 
 export interface OfficialAgentInstallResponse {
+  results: OfficialAgentInstallItem[];
+}
+
+// GitCode 固定源（远程官方智能体仓库）
+// ---------------------------------------------------------------------------
+
+/** A sub-category (second level) in the remote AgentsHub catalog. */
+export interface OfficialAgentGithubCategory {
+  name: string;
+  bundles: OfficialAgentItem[];
+}
+
+/** A top-level group (first level) in the remote AgentsHub catalog. */
+export interface OfficialAgentGithubGroup {
+  name: string;
+  categories: OfficialAgentGithubCategory[];
+}
+
+/** Catalog returned by GET /repository/agent/official/gitcode. */
+export interface OfficialAgentGithubDiscoverResult {
+  repo: string;
+  ref: string;
+  commit?: string | null;
+  groups: OfficialAgentGithubGroup[];
+}
+
+/** Response of POST /repository/agent/official/gitcode/install. */
+export interface OfficialAgentGithubInstallResult {
+  repo: string;
+  commit?: string | null;
   results: OfficialAgentInstallItem[];
 }

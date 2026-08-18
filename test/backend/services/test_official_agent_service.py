@@ -1,6 +1,8 @@
 """Unit tests for official agent listing service."""
 
 import json
+import os
+import subprocess
 import sys
 import types
 from enum import Enum
@@ -10,6 +12,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from pydantic import BaseModel, model_validator
+
+from consts.exceptions import RepoSourceError
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _BACKEND_DIR = _REPO_ROOT / "backend"
@@ -66,12 +70,17 @@ class _MCPInfo(BaseModel):
     mcp_url: str
 
 
+class _SkillZipEntry(BaseModel):
+    skill_name: str
+    skill_zip_base64: str
+
+
 class _OfficialAgentBundle(BaseModel):
     name: Optional[str] = None
     agent_id: int
     agent_info: Dict[str, _ExportAndImportAgentInfo] = {}
     mcp_info: List[_MCPInfo] = []
-    skills: Optional[List] = None
+    skills: Optional[List[_SkillZipEntry]] = None
     display_name: Optional[str] = None
     description: Optional[str] = None
     icon: Optional[str] = None
@@ -112,6 +121,8 @@ class _OfficialAgentListItem(BaseModel):
     missing_models: List[str] = []
     agents: List = []
     mcps: List = []
+    skills: List = []
+    knowledge_bases: List = []
 
 
 class _OfficialAgentAgentInfo(BaseModel):
@@ -123,11 +134,18 @@ class _OfficialAgentMcpPreview(BaseModel):
     mcp_server_name: str
     mcp_url: str
     installed: bool = False
+    conflict: bool = False
 
 
-class _SkillZipEntry(BaseModel):
-    skill_name: str
-    skill_zip_base64: str
+class _OfficialAgentSkillPreview(BaseModel):
+    name: str
+    exists: bool = False
+
+
+class _OfficialAgentKbPreview(BaseModel):
+    logical_index_name: str
+    display_name: Optional[str] = None
+    exists: bool = False
 
 
 class _OfficialAgentInstallItem(BaseModel):
@@ -145,19 +163,62 @@ class _OfficialAgentInstallStep(BaseModel):
     message: Optional[str] = None
 
 
+class _OfficialAgentGithubCategory(BaseModel):
+    name: str
+    bundles: List = []
+
+
+class _OfficialAgentGithubGroup(BaseModel):
+    name: str
+    categories: List = []
+
+
+class _OfficialAgentGithubDiscoverResult(BaseModel):
+    repo: str
+    ref: str
+    commit: Optional[str] = None
+    groups: List = []
+
+
+class _OfficialAgentGithubInstallResult(BaseModel):
+    repo: str
+    commit: Optional[str] = None
+    results: List = []
+
+
 consts_model.ModelConnectStatusEnum = _ModelConnectStatusEnum
 consts_model.OfficialAgentBundle = _OfficialAgentBundle
 consts_model.OfficialAgentListItem = _OfficialAgentListItem
 consts_model.OfficialAgentAgentInfo = _OfficialAgentAgentInfo
 consts_model.OfficialAgentMcpPreview = _OfficialAgentMcpPreview
+consts_model.OfficialAgentSkillPreview = _OfficialAgentSkillPreview
+consts_model.OfficialAgentKbPreview = _OfficialAgentKbPreview
 consts_model.OfficialAgentInstallItem = _OfficialAgentInstallItem
 consts_model.OfficialAgentInstallStep = _OfficialAgentInstallStep
+consts_model.OfficialAgentGithubCategory = _OfficialAgentGithubCategory
+consts_model.OfficialAgentGithubGroup = _OfficialAgentGithubGroup
+consts_model.OfficialAgentGithubDiscoverResult = _OfficialAgentGithubDiscoverResult
+consts_model.OfficialAgentGithubInstallResult = _OfficialAgentGithubInstallResult
 consts_model.KnowledgeBaseSeedDoc = _KnowledgeBaseSeedDoc
 consts_model.SkillZipEntry = _SkillZipEntry
 consts_model.ProcessParams = _ProcessParams
 sys.modules["consts.model"] = consts_model
 
 from services import official_agent_service  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _no_db_conflict_queries():
+    """Keep the skill/KB conflict previews off the real database in unit tests.
+
+    ``_status_item_for_bundle`` now probes existing skills/KBs per bundle; these
+    queries are irrelevant to the isolated behaviour under test, so default them
+    to "no existing resource" and let individual tests override as needed.
+    """
+    with patch("database.skill_db.list_skills", return_value=[]), patch(
+        "database.knowledge_db.get_knowledge_record", return_value=None
+    ):
+        yield
 
 
 # ---------------------------------------------------------------------------
@@ -362,6 +423,107 @@ async def test_item_field_mapping(tmp_path):
         ("mcp-0", True),
         ("mcp-1", False),
     ]
+
+
+async def test_item_reports_skill_and_kb_conflicts(tmp_path):
+    _write_bundle(tmp_path, "full", has_knowledge=True, skill_count=2)
+
+    fake_remote_db = types.ModuleType("database.remote_mcp_db")
+    fake_remote_db.get_mcp_server_by_name_and_tenant = MagicMock(return_value="")
+
+    with patch.object(
+        official_agent_service, "OFFICIAL_AGENTS_PATH", str(tmp_path)
+    ), patch.object(
+        official_agent_service, "_is_agent_installed", return_value=False
+    ), patch.object(
+        official_agent_service,
+        "_missing_model_types",
+        new_callable=AsyncMock,
+        return_value=[],
+    ), patch.dict(sys.modules, {"database.remote_mcp_db": fake_remote_db}), patch(
+        "database.skill_db.list_skills",
+        return_value=[{"name": "skill-0", "skill_id": 1}],
+    ), patch(
+        "database.knowledge_db.get_knowledge_record",
+        return_value={"index_name": "kb-real", "knowledge_name": "KB"},
+    ):
+        items = await official_agent_service.list_official_agents_with_status(
+            "tenant-1"
+        )
+
+    item = items[0]
+    # skill-0 exists in the tenant, skill-1 does not
+    assert [(s.name, s.exists) for s in item.skills] == [
+        ("skill-0", True),
+        ("skill-1", False),
+    ]
+    # KB display name "KB" already exists in the tenant
+    assert item.knowledge_bases[0].logical_index_name == "kb-1"
+    assert item.knowledge_bases[0].display_name == "KB"
+    assert item.knowledge_bases[0].exists is True
+
+
+async def test_install_forwards_skill_and_kb_renames():
+    bundle = _make_bundle(name="research", has_knowledge=True)
+    with patch.object(
+        official_agent_service, "_load_bundle", return_value=bundle
+    ), patch.object(
+        official_agent_service, "_is_agent_installed", return_value=False
+    ), patch.object(
+        official_agent_service,
+        "_missing_model_types",
+        new_callable=AsyncMock,
+        return_value=[],
+    ), patch.object(
+        official_agent_service,
+        "_install_bundle",
+        new_callable=AsyncMock,
+        return_value=42,
+    ) as mock_install:
+        await official_agent_service.install_official_agents(
+            ["research"],
+            tenant_id="tenant-1",
+            user_id="u",
+            authorization="auth",
+            embedding_model_ids={"research": 9},
+            skill_renames={"skill-0": "skill-0-v2"},
+            kb_renames={"kb-1": "KB-v2"},
+        )
+
+    assert mock_install.await_args.kwargs["skill_renames"] == {
+        "skill-0": "skill-0-v2"
+    }
+    assert mock_install.await_args.kwargs["kb_renames"] == {"kb-1": "KB-v2"}
+
+
+async def test_install_from_gitcode_forwards_skill_and_kb_renames(tmp_path):
+    (tmp_path / "research" / "agent.json").parent.mkdir(parents=True)
+    (tmp_path / "research" / "agent.json").write_text(
+        json.dumps(_bundle_dict("research", has_knowledge=True)),
+        encoding="utf-8",
+    )
+
+    bundle = _make_bundle(name="research", has_knowledge=True)
+    with patch.object(
+        official_agent_service, "_resolve_repo_source", return_value=("url", "o", "r", "main")
+    ), patch.object(
+        official_agent_service, "_ensure_repo_snapshot", return_value=(str(tmp_path), "abc123")
+    ), patch.object(
+        official_agent_service, "_load_bundle", return_value=bundle
+    ), patch.object(
+        official_agent_service, "_install_one_bundle", new_callable=AsyncMock
+    ) as mock_one:
+        await official_agent_service.install_from_gitcode(
+            ["research"],
+            tenant_id="tenant-1",
+            user_id="u",
+            authorization="auth",
+            skill_renames={"skill-0": "skill-0-v2"},
+            kb_renames={"kb-1": "KB-v2"},
+        )
+
+    assert mock_one.await_args.kwargs["skill_renames"] == {"skill-0": "skill-0-v2"}
+    assert mock_one.await_args.kwargs["kb_renames"] == {"kb-1": "KB-v2"}
 
 
 # ---------------------------------------------------------------------------
@@ -729,7 +891,9 @@ async def test_install_bundle_with_skills():
         )
 
     assert result == 100
-    mock_mcp.assert_awaited_once_with(bundle, "tenant-1", "u")
+    mock_mcp.assert_awaited_once_with(
+        bundle, "tenant-1", "u", mcp_renames=None, mcp_skips=None
+    )
     fake_tool.update_tool_list.assert_awaited_once_with(
         tenant_id="tenant-1", user_id="u"
     )
@@ -738,6 +902,7 @@ async def test_install_bundle_with_skills():
         "tenant-1",
         "u",
         reuse_existing_skills=True,
+        skill_renames=None,
     )
     fake_agent._import_agent_with_skill_links.assert_awaited_once_with(
         bundle,
@@ -832,6 +997,74 @@ async def test_install_mcp_servers_raises_on_same_name_different_url():
     assert "mcp-0" in str(exc_info.value)
     assert "http://old-url" in str(exc_info.value)
     fake_mcp_svc.add_mcp_service.assert_not_awaited()
+
+
+async def test_install_mcp_servers_rename_on_same_name_different_url():
+    bundle = _make_bundle(name="research", mcp_count=1)
+    fake_remote_db = types.ModuleType("database.remote_mcp_db")
+    # renamed name no longer collides -> returns "" so it is created
+    fake_remote_db.get_mcp_server_by_name_and_tenant = MagicMock(return_value="")
+    fake_mcp_svc = types.ModuleType("services.remote_mcp_service")
+    fake_mcp_svc.add_mcp_service = AsyncMock()
+
+    with patch.dict(
+        sys.modules,
+        {
+            "database.remote_mcp_db": fake_remote_db,
+            "services.remote_mcp_service": fake_mcp_svc,
+        },
+    ):
+        await official_agent_service._install_mcp_servers(
+            bundle, "tenant-1", "u", mcp_renames={"mcp-0": "mcp-0-renamed"}
+        )
+
+    fake_mcp_svc.add_mcp_service.assert_awaited_once()
+    kwargs = fake_mcp_svc.add_mcp_service.await_args.kwargs
+    assert kwargs["name"] == "mcp-0-renamed"
+    assert kwargs["server_url"] == "http://mcp-0"
+
+
+async def test_install_mcp_servers_skips_requested():
+    bundle = _make_bundle(name="research", mcp_count=2)
+    fake_remote_db = types.ModuleType("database.remote_mcp_db")
+    # mcp-0 skipped entirely; mcp-1 missing -> created
+    fake_remote_db.get_mcp_server_by_name_and_tenant = MagicMock(
+        side_effect=["", ""]
+    )
+    fake_mcp_svc = types.ModuleType("services.remote_mcp_service")
+    fake_mcp_svc.add_mcp_service = AsyncMock()
+
+    with patch.dict(
+        sys.modules,
+        {
+            "database.remote_mcp_db": fake_remote_db,
+            "services.remote_mcp_service": fake_mcp_svc,
+        },
+    ):
+        await official_agent_service._install_mcp_servers(
+            bundle, "tenant-1", "u", mcp_skips=["mcp-0"]
+        )
+
+    fake_mcp_svc.add_mcp_service.assert_awaited_once()
+    kwargs = fake_mcp_svc.add_mcp_service.await_args.kwargs
+    assert kwargs["name"] == "mcp-1"
+
+
+def test_mcp_previews_detects_conflict():
+    bundle = _make_bundle(name="research", mcp_count=2)
+    fake_remote_db = types.ModuleType("database.remote_mcp_db")
+    # mcp-0 same url (installed), mcp-1 same name different url (conflict)
+    fake_remote_db.get_mcp_server_by_name_and_tenant = MagicMock(
+        side_effect=["http://mcp-0", "http://old-url"]
+    )
+
+    with patch.dict(sys.modules, {"database.remote_mcp_db": fake_remote_db}):
+        previews = official_agent_service._mcp_previews(bundle, "tenant-1")
+
+    assert [(p.mcp_server_name, p.installed, p.conflict) for p in previews] == [
+        ("mcp-0", True, False),
+        ("mcp-1", False, True),
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -1010,7 +1243,7 @@ async def test_install_bundle_creates_kb_and_remaps_refs():
         )
 
     mock_kb.assert_awaited_once_with(
-        bundle, "tenant-1", "u", 5, authorization="auth"
+        bundle, "tenant-1", "u", 5, authorization="auth", kb_renames=None
     )
     # tool references were remapped to the tenant-generated index name
     assert bundle.agent_info["1"].tools[0].params["index_names"] == ["42-abc"]
@@ -1051,7 +1284,7 @@ async def test_install_bundle_derives_embedding_model_when_not_given():
         await official_agent_service._install_bundle(bundle, "tenant-1", "u", "auth")
 
     mock_kb.assert_awaited_once_with(
-        bundle, "tenant-1", "u", 7, authorization="auth"
+        bundle, "tenant-1", "u", 7, authorization="auth", kb_renames=None
     )
 
 
@@ -1322,6 +1555,296 @@ async def test_install_bundle_records_skill_step():
     ]
 
 
+# ---------------------------------------------------------------------------
+# GitCode 固定源：源解析 / 快照 / 目录发现 / 安装
+# ---------------------------------------------------------------------------
+
+
+def _write_remote_snapshot(tmp_path, rel_paths):
+    """Write a minimal agent.json per relative path under tmp_path."""
+    for rel in rel_paths:
+        p = tmp_path / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(
+            '{"agent_id": 1, "agent_info": {"1": {"name": "x"}}, "mcp_info": []}',
+            encoding="utf-8",
+        )
+
+
+def test_resolve_repo_source_default():
+    with patch.object(
+        official_agent_service, "OFFICIAL_AGENTS_REPO_URL", "https://gitcode.com/ModelEngine/AgentsHub"
+    ), patch.object(official_agent_service, "OFFICIAL_AGENTS_REPO_REF", "main"):
+        url, owner, repo, ref = official_agent_service._resolve_repo_source()
+    assert (owner, repo, ref) == ("ModelEngine", "AgentsHub", "main")
+    assert url == "https://gitcode.com/ModelEngine/AgentsHub"
+
+
+def test_resolve_repo_source_prefers_explicit_ref():
+    with patch.object(
+        official_agent_service, "OFFICIAL_AGENTS_REPO_URL", "https://gitcode.com/ModelEngine/AgentsHub"
+    ), patch.object(official_agent_service, "OFFICIAL_AGENTS_REPO_REF", "main"):
+        _url, _owner, _repo, ref = official_agent_service._resolve_repo_source(ref="v2")
+    assert ref == "v2"
+
+
+def test_resolve_repo_source_rejects_non_gitcode_host():
+    with patch.object(official_agent_service, "OFFICIAL_AGENTS_REPO_URL", "https://github.com/a/b"):
+        with pytest.raises(RepoSourceError) as exc:
+            official_agent_service._resolve_repo_source()
+    assert exc.value.code == "repo_source_not_configured"
+
+
+def test_resolve_repo_source_rejects_bad_path():
+    with patch.object(official_agent_service, "OFFICIAL_AGENTS_REPO_URL", "https://gitcode.com/not-a-repo"):
+        with pytest.raises(RepoSourceError) as exc:
+            official_agent_service._resolve_repo_source()
+    assert exc.value.code == "repo_source_not_configured"
+
+
+def test_git_clone_snapshot_missing_git(tmp_path):
+    with patch.object(official_agent_service.shutil, "which", return_value=None):
+        with pytest.raises(RepoSourceError) as exc:
+            official_agent_service._git_clone_snapshot(
+                "https://gitcode.com/a/b", "main", str(tmp_path / "d")
+            )
+    assert exc.value.code == "git_binary_missing"
+
+
+def test_git_clone_snapshot_success(tmp_path):
+    clone_result = subprocess.CompletedProcess([], 0, stdout="", stderr="")
+    rev_result = subprocess.CompletedProcess([], 0, stdout="abc123\n", stderr="")
+    target = str(tmp_path / "d")
+    with patch.object(
+        official_agent_service.shutil, "which", return_value="/usr/bin/git"
+    ), patch.object(
+        official_agent_service.subprocess,
+        "run",
+        side_effect=[clone_result, rev_result],
+    ) as mock_run:
+        commit = official_agent_service._git_clone_snapshot(
+            "https://gitcode.com/a/b", "main", target
+        )
+    assert commit == "abc123"
+    assert mock_run.call_args_list[0].args[0][:7] == [
+        "git", "clone", "--depth", "1", "--branch", "main", "https://gitcode.com/a/b",
+    ]
+    assert mock_run.call_args_list[1].args[0] == [
+        "git", "-C", target, "rev-parse", "HEAD",
+    ]
+
+
+def test_git_clone_snapshot_reports_failure(tmp_path):
+    err = subprocess.CalledProcessError(128, ["git"], stderr="fatal: could not read")
+    with patch.object(
+        official_agent_service.shutil, "which", return_value="/usr/bin/git"
+    ), patch.object(
+        official_agent_service.subprocess, "run", side_effect=err
+    ):
+        with pytest.raises(RepoSourceError) as exc:
+            official_agent_service._git_clone_snapshot(
+                "https://gitcode.com/a/b", "main", str(tmp_path / "d")
+            )
+    assert exc.value.code == "repo_clone_failed"
+
+
+def test_ensure_repo_snapshot_caches_after_first_clone(tmp_path):
+    snapshot_root = tmp_path / "snap"
+
+    def fake_clone(url, ref, staging):
+        os.makedirs(staging, exist_ok=True)
+        return "abc123"
+
+    with patch.object(
+        official_agent_service, "_SNAPSHOT_ROOT", str(snapshot_root)
+    ), patch.object(official_agent_service, "SNAPSHOT_MAX_BYTES", 10**9), patch.object(
+        official_agent_service, "_git_clone_snapshot", side_effect=fake_clone
+    ) as mock_clone:
+        d1, c1 = official_agent_service._ensure_repo_snapshot("url", "main")
+        d2, c2 = official_agent_service._ensure_repo_snapshot("url", "main")
+    assert (c1, c2) == ("abc123", "abc123")
+    assert d1 == d2
+    assert os.path.isdir(d1)
+    mock_clone.assert_called_once()
+
+
+def test_ensure_repo_snapshot_rejects_oversized(tmp_path):
+    snapshot_root = tmp_path / "snap"
+
+    def fake_clone(url, ref, staging):
+        os.makedirs(staging, exist_ok=True)
+        with open(os.path.join(staging, "big.bin"), "wb") as f:
+            f.write(b"x" * 100)
+        return "abc123"
+
+    with patch.object(
+        official_agent_service, "_SNAPSHOT_ROOT", str(snapshot_root)
+    ), patch.object(official_agent_service, "SNAPSHOT_MAX_BYTES", 50), patch.object(
+        official_agent_service, "_git_clone_snapshot", side_effect=fake_clone
+    ):
+        with pytest.raises(RepoSourceError) as exc:
+            official_agent_service._ensure_repo_snapshot("url", "main")
+    assert exc.value.code == "snapshot_too_large"
+    # neither the staging clone nor a cache entry is left behind
+    assert not os.path.exists(snapshot_root) or not os.listdir(snapshot_root)
+
+
+def test_discover_bundles_in_dir_directory_only(tmp_path):
+    _write_remote_snapshot(
+        tmp_path,
+        [
+            "行业智能体/医疗/体检报告解读助手/agent.json",
+            "行业智能体/医疗/病历助手/agent.json",
+            "通用智能体/内容创作/文案创作者/agent.json",
+            "通用智能体/内容创作/某助手/agent.json",
+        ],
+    )
+    # loose bundle-shaped JSON files and hidden dirs must be ignored
+    (tmp_path / "行业智能体" / "stray.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "通用智能体" / "内容创作" / "某助手" / "extra.json").write_text("{}", encoding="utf-8")
+    (tmp_path / ".github").mkdir()
+
+    keys = official_agent_service._discover_bundles_in_dir(str(tmp_path))
+
+    assert keys == sorted(
+        [
+            "行业智能体/医疗/病历助手",
+            "行业智能体/医疗/体检报告解读助手",
+            "通用智能体/内容创作/文案创作者",
+            "通用智能体/内容创作/某助手",
+        ]
+    )
+
+
+def test_group_and_categorize_derives_groups():
+    keys = [
+        "行业智能体/医疗/体检报告解读助手",
+        "行业智能体/医疗/病历助手",
+        "通用智能体/内容创作/文案创作者",
+        "新分组/分类/某助手",
+    ]
+    grouped = official_agent_service._group_and_categorize(keys)
+    assert "行业智能体" in grouped
+    assert grouped["行业智能体"]["医疗"] == [
+        "行业智能体/医疗/体检报告解读助手",
+        "行业智能体/医疗/病历助手",
+    ]
+    assert grouped["通用智能体"]["内容创作"] == ["通用智能体/内容创作/文案创作者"]
+    # unknown first-level group falls into 其他
+    assert "新分组" not in grouped
+    assert grouped["其他"]["分类"] == ["新分组/分类/某助手"]
+
+
+async def test_discover_from_gitcode_groups_and_status(tmp_path):
+    _write_remote_snapshot(
+        tmp_path,
+        [
+            "行业智能体/医疗/体检报告解读助手/agent.json",
+            "通用智能体/内容创作/文案创作者/agent.json",
+        ],
+    )
+    fake_item = _OfficialAgentListItem(
+        name="k",
+        display_name="D",
+        status="installable",
+        has_knowledge=False,
+        mcp_count=0,
+        skill_count=0,
+        kb_count=0,
+    )
+    with patch.object(
+        official_agent_service, "OFFICIAL_AGENTS_REPO_URL", "https://gitcode.com/ModelEngine/AgentsHub"
+    ), patch.object(official_agent_service, "OFFICIAL_AGENTS_REPO_REF", "main"), patch.object(
+        official_agent_service, "_ensure_repo_snapshot", return_value=(str(tmp_path), "abc123")
+    ), patch.object(
+        official_agent_service,
+        "_status_item_for_bundle",
+        new_callable=AsyncMock,
+        return_value=fake_item,
+    ) as mock_status:
+        result = await official_agent_service.discover_from_gitcode("tenant-1")
+
+    assert result.repo == "ModelEngine/AgentsHub"
+    assert result.ref == "main"
+    assert result.commit == "abc123"
+    groups = {g.name: g for g in result.groups}
+    assert set(groups) == {"行业智能体", "通用智能体"}
+    assert {c.name for c in groups["行业智能体"].categories} == {"医疗"}
+    assert len(groups["行业智能体"].categories[0].bundles) == 1
+    assert mock_status.await_count == 2
+
+
+async def test_install_from_gitcode_success(tmp_path):
+    bundle = _make_bundle(name="research")
+    fake_item = _OfficialAgentInstallItem(name="k", status="installed")
+    with patch.object(
+        official_agent_service, "OFFICIAL_AGENTS_REPO_URL", "https://gitcode.com/ModelEngine/AgentsHub"
+    ), patch.object(
+        official_agent_service, "_ensure_repo_snapshot", return_value=(str(tmp_path), "abc123")
+    ), patch.object(
+        official_agent_service, "_load_bundle", return_value=bundle
+    ), patch.object(
+        official_agent_service,
+        "_install_one_bundle",
+        new_callable=AsyncMock,
+        return_value=fake_item,
+    ) as mock_install:
+        result = await official_agent_service.install_from_gitcode(
+            ["行业智能体/医疗/a"],
+            tenant_id="t",
+            user_id="u",
+            authorization="auth",
+        )
+
+    assert result.repo == "ModelEngine/AgentsHub"
+    assert result.commit == "abc123"
+    assert result.results[0].status == "installed"
+    assert mock_install.await_args.args[:2] == (bundle, "行业智能体/医疗/a")
+
+
+async def test_install_from_gitcode_not_found(tmp_path):
+    with patch.object(
+        official_agent_service, "_ensure_repo_snapshot", return_value=(str(tmp_path), "abc")
+    ), patch.object(
+        official_agent_service, "_load_bundle", return_value=None
+    ):
+        result = await official_agent_service.install_from_gitcode(
+            ["行业智能体/医疗/ghost"],
+            tenant_id="t",
+            user_id="u",
+            authorization="auth",
+        )
+    assert result.results[0].status == "not_found"
+
+
+def test_attach_md_skill_from_dir(tmp_path):
+    _write_dir_bundle(tmp_path, "foldered", skill_names=("my-skill",))
+    (tmp_path / "foldered" / "skills" / "my-skill.zip").unlink()
+    (tmp_path / "foldered" / "skills" / "my-skill.md").write_text("hello", encoding="utf-8")
+
+    with patch.object(
+        official_agent_service, "OFFICIAL_AGENTS_PATH", str(tmp_path)
+    ):
+        bundle = official_agent_service._load_bundle("foldered")
+
+    assert len(bundle.skills or []) == 1
+    import base64 as _b64
+    import io as _io
+    import zipfile as _zip
+
+    raw = _b64.b64decode(bundle.skills[0].skill_zip_base64)
+    with _zip.ZipFile(_io.BytesIO(raw)) as zf:
+        assert zf.read("SKILL.md") == b"hello"
+
+
+def test_clear_repo_snapshot_cache_removes_dir(tmp_path):
+    snapshot_root = tmp_path / "snap"
+    os.makedirs(snapshot_root, exist_ok=True)
+    with patch.object(official_agent_service, "_SNAPSHOT_ROOT", str(snapshot_root)):
+        official_agent_service.clear_repo_snapshot_cache()
+    assert not os.path.exists(snapshot_root)
+
+
 async def test_install_bundle_records_failed_step():
     bundle = _make_bundle(name="research")
     fake_tool = types.ModuleType("services.tool_configuration_service")
@@ -1348,3 +1871,56 @@ async def test_install_bundle_records_failed_step():
 
     assert [(s.name, s.status) for s in steps] == [("mcp", "failed")]
     assert steps[0].message == "boom"
+
+
+async def test_create_knowledge_bases_rename_new_binary_docs(tmp_path):
+    """重命名新建 + binary 文档时,文档仍会上传并触发处理到新 index。"""
+    bundle = _make_bundle(name="research", has_knowledge=True)
+    binary_file = tmp_path / "b.docx"
+    binary_file.write_bytes(b"%PDF-1.4 fake")
+    bundle.knowledge_bases[0].documents = [
+        _KnowledgeBaseSeedDoc(file_name="b.docx", file_path=str(binary_file))
+    ]
+    fake_kb_db = types.ModuleType("database.knowledge_db")
+    fake_kb_db.get_knowledge_record = MagicMock(return_value=None)
+    fake_vdb = types.ModuleType("services.vectordatabase_service")
+    fake_vdb.ElasticSearchService = MagicMock()
+    fake_vdb.ElasticSearchService.create_knowledge_base.return_value = {
+        "id": "new-abc"
+    }
+    fake_vdb.get_embedding_model_by_id = MagicMock(return_value=(MagicMock(), 5))
+    fake_vdb.get_vector_db_core = MagicMock()
+    fake_file_svc = types.ModuleType("services.file_management_service")
+    fake_file_svc.upload_files_impl = AsyncMock(
+        return_value=([], ["minio/b.docx"], ["b.docx"])
+    )
+    fake_utils = types.ModuleType("utils.file_management_utils")
+    fake_utils.trigger_data_process = AsyncMock()
+
+    with patch.dict(
+        sys.modules,
+        {
+            "consts.model": consts_model,
+            "database.knowledge_db": fake_kb_db,
+            "services.vectordatabase_service": fake_vdb,
+            "services.file_management_service": fake_file_svc,
+            "utils.file_management_utils": fake_utils,
+        },
+    ):
+        mapping = await official_agent_service._create_knowledge_bases(
+            bundle, "tenant-1", "u", embedding_model_id=5, authorization="auth",
+            kb_renames={"kb-1": "KB-重命名"},
+        )
+
+    assert mapping == {"kb-1": "new-abc"}
+    # 用新名创建
+    create_kwargs = fake_vdb.ElasticSearchService.create_knowledge_base.call_args.kwargs
+    assert create_kwargs["knowledge_name"] == "KB-重命名"
+    # binary 文档上传到新 index
+    fake_file_svc.upload_files_impl.assert_awaited_once()
+    assert fake_file_svc.upload_files_impl.await_args.kwargs["index_name"] == "new-abc"
+    # 触发数据处理,使用新 index
+    fake_utils.trigger_data_process.assert_awaited_once()
+    _, pp = fake_utils.trigger_data_process.await_args.args
+    assert pp.index_name == "new-abc"
+    assert pp.source_type == "minio"

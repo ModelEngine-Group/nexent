@@ -83,6 +83,16 @@ OFFICIAL_AGENTS_PATH = os.getenv(
     "OFFICIAL_AGENTS_PATH", "/mnt/nexent/official-agents"
 )
 
+# GitCode 固定源：远程官方智能体仓库（唯一远程源，前端无需输入 URL）
+OFFICIAL_AGENTS_REPO_URL = os.getenv(
+    "OFFICIAL_AGENTS_REPO_URL", "https://gitcode.com/ModelEngine/AgentsHub"
+)
+OFFICIAL_AGENTS_REPO_REF = os.getenv("OFFICIAL_AGENTS_REPO_REF", "main")
+# 快照目录体积上限（git clone 后校验，默认 100MB）
+SNAPSHOT_MAX_BYTES = int(
+    os.getenv("SNAPSHOT_MAX_BYTES", str(100 * 1024 * 1024))
+)
+
 
 # Preview Configuration
 FILE_PREVIEW_SIZE_LIMIT = 100 * 1024 * 1024  # 100MB

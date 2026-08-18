@@ -3825,12 +3825,16 @@ async def _create_skills_for_install(
     tenant_id: str,
     user_id: str,
     reuse_existing_skills: bool = False,
+    skill_renames: Optional[Dict[str, str]] = None,
 ) -> Dict[str, int]:
     """Create (or reuse) the skills bundled with an agent import.
 
     Raises ``SkillDuplicateError`` when a bundled skill name already exists in
     the tenant and ``reuse_existing_skills`` is False. Returns a mapping
     ``skill_name -> skill_id``; existing skills are reused when allowed.
+
+    ``skill_renames`` maps an original skill name to a new name: the skill is
+    then created (not reused) under the new name.
     """
     from services.skill_service import SkillService
 
@@ -3847,18 +3851,20 @@ async def _create_skills_for_install(
     if duplicate_names and not reuse_existing_skills:
         raise SkillDuplicateError(duplicate_names)
 
+    renames = skill_renames or {}
     skill_name_to_id: Dict[str, int] = {}
     skill_service = SkillService(tenant_id=tenant_id)
 
     for skill_name, zip_base64 in skill_name_to_zip_base64.items():
-        if reuse_existing_skills and skill_name in existing_skill_ids:
+        effective_name = renames.get(skill_name, skill_name)
+        if reuse_existing_skills and effective_name in existing_skill_ids:
             # Reuse the tenant's existing skill instead of creating a duplicate.
-            skill_name_to_id[skill_name] = existing_skill_ids[skill_name]
+            skill_name_to_id[skill_name] = existing_skill_ids[effective_name]
             continue
         zip_bytes = base64.b64decode(zip_base64)
         result = skill_service.create_skill_from_zip_bytes(
             zip_bytes=zip_bytes,
-            skill_name=skill_name,
+            skill_name=effective_name,
             source="导入",
             user_id=user_id,
             tenant_id=tenant_id,

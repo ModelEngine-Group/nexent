@@ -169,6 +169,10 @@ export function useInstallOfficialAgents(tenantId?: string) {
       renames?: Record<string, string>;
       model_ids?: Record<string, number>;
       embedding_model_ids?: Record<string, number>;
+      skill_renames?: Record<string, string>;
+      kb_renames?: Record<string, string>;
+      mcp_renames?: Record<string, string>;
+      mcp_skips?: string[];
     }) =>
       agentRepositoryService.installOfficialAgents(
         payload.names,
@@ -176,6 +180,10 @@ export function useInstallOfficialAgents(tenantId?: string) {
           renames: payload.renames,
           model_ids: payload.model_ids,
           embedding_model_ids: payload.embedding_model_ids,
+          skill_renames: payload.skill_renames,
+          kb_renames: payload.kb_renames,
+          mcp_renames: payload.mcp_renames,
+          mcp_skips: payload.mcp_skips,
         },
         tenantId
       ),
@@ -184,6 +192,53 @@ export function useInstallOfficialAgents(tenantId?: string) {
         invalidateAgentRepositoryCaches(queryClient),
         queryClient.invalidateQueries({ queryKey: [AGENTS_LIST_QUERY_KEY] }),
         queryClient.invalidateQueries({ queryKey: ["officialAgents"] }),
+      ]);
+    },
+  });
+}
+
+/** Fetch the grouped GitCode AgentsHub catalog (fixed source, no URL input). */
+export function useOfficialAgentsFromGitcode(enabled = true, tenantId?: string) {
+  return useQuery({
+    queryKey: ["officialAgentsGitcode", tenantId ?? null],
+    queryFn: () => agentRepositoryService.fetchOfficialAgentsFromGitcode(tenantId),
+    staleTime: 30_000,
+    enabled,
+  });
+}
+
+/** Install selected remote official agents by their bundle keys. */
+export function useInstallOfficialAgentsFromGitcode(tenantId?: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (payload: {
+      names: string[];
+      model_ids?: Record<string, number>;
+      embedding_model_ids?: Record<string, number>;
+      skill_renames?: Record<string, string>;
+      kb_renames?: Record<string, string>;
+      mcp_renames?: Record<string, string>;
+      mcp_skips?: string[];
+    }) =>
+      agentRepositoryService.installOfficialAgentsFromGitcode(
+        payload.names,
+        {
+          model_ids: payload.model_ids,
+          embedding_model_ids: payload.embedding_model_ids,
+          skill_renames: payload.skill_renames,
+          kb_renames: payload.kb_renames,
+          mcp_renames: payload.mcp_renames,
+          mcp_skips: payload.mcp_skips,
+        },
+        tenantId
+      ),
+    onSuccess: async () => {
+      await Promise.all([
+        invalidateAgentRepositoryCaches(queryClient),
+        queryClient.invalidateQueries({ queryKey: [AGENTS_LIST_QUERY_KEY] }),
+        queryClient.invalidateQueries({ queryKey: ["officialAgents"] }),
+        queryClient.invalidateQueries({ queryKey: ["officialAgentsGitcode"] }),
       ]);
     },
   });

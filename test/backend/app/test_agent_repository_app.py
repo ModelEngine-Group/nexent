@@ -17,6 +17,10 @@ sys.path.insert(0, backend_dir)
 
 sys.modules.setdefault("services.agent_repository_service", MagicMock())
 sys.modules.setdefault("utils.auth_utils", MagicMock())
+# Default fake for the official-agent service so endpoint lazy imports never
+# touch the real module (whose consts.model deps are not fully stubbed here).
+# Success cases override it via patch.dict with a richer fake.
+sys.modules.setdefault("services.official_agent_service", MagicMock())
 
 consts_model = types.ModuleType("consts.model")
 
@@ -33,10 +37,26 @@ class _OfficialAgentInstallRequest(BaseModel):
     renames: Optional[Dict[str, str]] = None
     model_ids: Optional[Dict[str, int]] = None
     embedding_model_ids: Optional[Dict[str, int]] = None
+    skill_renames: Optional[Dict[str, str]] = None
+    kb_renames: Optional[Dict[str, str]] = None
+    mcp_renames: Optional[Dict[str, str]] = None
+    mcp_skips: Optional[List[str]] = None
+
+
+class _OfficialAgentGithubInstallRequest(BaseModel):
+    agent_names: List[str]
+    renames: Optional[Dict[str, str]] = None
+    model_ids: Optional[Dict[str, int]] = None
+    embedding_model_ids: Optional[Dict[str, int]] = None
+    skill_renames: Optional[Dict[str, str]] = None
+    kb_renames: Optional[Dict[str, str]] = None
+    mcp_renames: Optional[Dict[str, str]] = None
+    mcp_skips: Optional[List[str]] = None
 
 
 consts_model.AgentRepositoryListingCreateRequest = _AgentRepositoryListingCreateRequest
 consts_model.OfficialAgentInstallRequest = _OfficialAgentInstallRequest
+consts_model.OfficialAgentGithubInstallRequest = _OfficialAgentGithubInstallRequest
 sys.modules["consts.model"] = consts_model
 
 from apps.agent_repository_app import agent_repository_router
@@ -873,6 +893,10 @@ def test_install_official_agents_api_success(
         renames=None,
         model_ids=None,
         embedding_model_ids=None,
+        skill_renames=None,
+        kb_renames=None,
+        mcp_renames=None,
+        mcp_skips=None,
     )
 
 
@@ -960,4 +984,185 @@ def test_install_official_agents_api_uses_target_tenant(
         renames=None,
         model_ids=None,
         embedding_model_ids=None,
+        skill_renames=None,
+        kb_renames=None,
+        mcp_renames=None,
+        mcp_skips=None,
     )
+
+
+# ---------------------------------------------------------------------------
+# GitCode 固定源端点
+# ---------------------------------------------------------------------------
+
+
+def test_list_official_gitcode_agents_api_success(
+    mocker,
+    mock_auth_header,
+):
+    """Test GitCode discovery API returns the serialized grouped catalog."""
+    from unittest.mock import AsyncMock, MagicMock, patch as unittest_patch
+
+    mock_get_user_id = mocker.patch(
+        "apps.agent_repository_app.get_current_user_id"
+    )
+    mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
+
+    fake_svc = types.ModuleType("services.official_agent_service")
+    fake_result = MagicMock(
+        model_dump=MagicMock(
+            return_value={
+                "repo": "ModelEngine/AgentsHub",
+                "ref": "main",
+                "commit": "abc123",
+                "groups": [],
+            }
+        )
+    )
+    fake_svc.discover_from_gitcode = AsyncMock(return_value=fake_result)
+
+    with unittest_patch.dict(
+        sys.modules, {"services.official_agent_service": fake_svc}
+    ):
+        response = client.get(
+            "/repository/agent/official/gitcode", headers=mock_auth_header
+        )
+
+    assert response.status_code == 200
+    assert response.json()["repo"] == "ModelEngine/AgentsHub"
+    assert response.json()["commit"] == "abc123"
+    fake_svc.discover_from_gitcode.assert_awaited_once_with("test_tenant_id", ref=None)
+
+
+def test_list_official_gitcode_agents_api_forwards_ref_and_tenant(
+    mocker,
+    mock_auth_header,
+):
+    """Test GitCode discovery API forwards ref and an explicit tenant_id."""
+    from unittest.mock import AsyncMock, patch as unittest_patch
+
+    mock_get_user_id = mocker.patch(
+        "apps.agent_repository_app.get_current_user_id"
+    )
+    mock_get_user_id.return_value = ("admin_user", "admin_tenant")
+    fake_svc = types.ModuleType("services.official_agent_service")
+    fake_svc.discover_from_gitcode = AsyncMock(
+        return_value=MagicMock(
+            model_dump=MagicMock(return_value={"groups": []})
+        )
+    )
+
+    with unittest_patch.dict(
+        sys.modules, {"services.official_agent_service": fake_svc}
+    ):
+        response = client.get(
+            "/repository/agent/official/gitcode?tenant_id=target-tenant&ref=v2",
+            headers=mock_auth_header,
+        )
+
+    assert response.status_code == 200
+    fake_svc.discover_from_gitcode.assert_awaited_once_with("target-tenant", ref="v2")
+
+
+def test_list_official_gitcode_agents_api_repo_error(
+    mocker,
+    mock_auth_header,
+):
+    """Test GitCode discovery API maps RepoSourceError to a typed 400."""
+    from unittest.mock import AsyncMock, patch as unittest_patch
+
+    from consts.exceptions import RepoSourceError
+
+    mocker.patch(
+        "apps.agent_repository_app.get_current_user_id",
+        return_value=("u", "t"),
+    )
+    fake_svc = types.ModuleType("services.official_agent_service")
+    fake_svc.discover_from_gitcode = AsyncMock(
+        side_effect=RepoSourceError("repo_clone_failed", "拉取失败")
+    )
+
+    with unittest_patch.dict(
+        sys.modules, {"services.official_agent_service": fake_svc}
+    ):
+        response = client.get(
+            "/repository/agent/official/gitcode", headers=mock_auth_header
+        )
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "detail": {"type": "repo_clone_failed", "message": "拉取失败"}
+    }
+
+
+def test_install_official_gitcode_agents_api_success(
+    mocker,
+    mock_auth_header,
+):
+    """Test GitCode install API forwards bundle keys and serializes results."""
+    from unittest.mock import AsyncMock, MagicMock, patch as unittest_patch
+
+    mock_get_user_id = mocker.patch(
+        "apps.agent_repository_app.get_current_user_id"
+    )
+    mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
+
+    fake_svc = types.ModuleType("services.official_agent_service")
+    fake_result = MagicMock(
+        model_dump=MagicMock(
+            return_value={
+                "repo": "ModelEngine/AgentsHub",
+                "commit": "abc123",
+                "results": [
+                    {"name": "行业智能体/医疗/a", "status": "installed"}
+                ],
+            }
+        )
+    )
+    fake_svc.install_from_gitcode = AsyncMock(return_value=fake_result)
+
+    with unittest_patch.dict(
+        sys.modules, {"services.official_agent_service": fake_svc}
+    ):
+        response = client.post(
+            "/repository/agent/official/gitcode/install",
+            json={"agent_names": ["行业智能体/医疗/a"]},
+            headers=mock_auth_header,
+        )
+
+    assert response.status_code == 200
+    assert response.json()["results"][0]["status"] == "installed"
+    fake_svc.install_from_gitcode.assert_awaited_once_with(
+        ["行业智能体/医疗/a"],
+        tenant_id="test_tenant_id",
+        user_id="test_user_id",
+        authorization=mock_auth_header["Authorization"],
+        renames=None,
+        model_ids=None,
+        embedding_model_ids=None,
+        skill_renames=None,
+        kb_renames=None,
+        mcp_renames=None,
+        mcp_skips=None,
+    )
+
+
+def test_install_official_gitcode_agents_api_unauthorized(
+    mocker,
+    mock_auth_header,
+):
+    """Test GitCode install API returns 401 on unauthorized access."""
+    from consts.exceptions import UnauthorizedError
+
+    mocker.patch(
+        "apps.agent_repository_app.get_current_user_id",
+        side_effect=UnauthorizedError("not authorized"),
+    )
+
+    response = client.post(
+        "/repository/agent/official/gitcode/install",
+        json={"agent_names": ["行业智能体/医疗/a"]},
+        headers=mock_auth_header,
+    )
+
+    assert response.status_code == 401
