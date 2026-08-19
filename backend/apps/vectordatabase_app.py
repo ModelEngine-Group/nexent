@@ -480,7 +480,6 @@ def _check_personal_kb_quota_before_indexing(
     knowledge_record: Optional[Dict[str, Any]],
     tenant_id: str,
     user_id: str,
-    index_name: str,
 ) -> None:
     """Validate personal quota before indexing documents into a private KB."""
     if not knowledge_record or knowledge_record.get("ingroup_permission") != "PRIVATE":
@@ -498,7 +497,7 @@ def _check_personal_kb_quota_before_indexing(
     except AppException:
         raise
     except Exception as exc:
-        logger.error("Personal KB quota check failed for %s: %s", index_name, exc)
+        logger.exception("Personal KB quota check failed")
         raise AppException(
             ErrorCode.TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE,
             f"Personal KB quota service unavailable: {str(exc)}",
@@ -537,7 +536,6 @@ def create_index_documents(
             knowledge_record,
             tenant_id,
             user_id,
-            index_name,
         )
 
         # Use the saved model from knowledge base by model_id
