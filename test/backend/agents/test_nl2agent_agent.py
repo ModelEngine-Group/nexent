@@ -78,6 +78,25 @@ def test_build_nl2agent_system_prompt_configures_existing_draft(
     assert "<nl2a>" not in prompt
     assert "```" not in prompt
 
+    if language == "en":
+        assert "### State And Completion Rules" in prompt
+        assert "They never prove that its configuration is complete" in prompt
+        assert "an empty-description draft must produce" in prompt
+        assert "Configuration is complete only after descriptions are saved" in prompt
+        assert "Never produce a plain final answer" in prompt
+        assert "Weather Assistant" not in prompt
+        assert "Describe the tasks this Agent must perform" not in prompt
+        assert '"question_id": "expected_output"' in prompt
+    else:
+        assert "### 状态判定与完成标准" in prompt
+        assert "不证明该 Agent 已完成配置" in prompt
+        assert "空描述草稿必须先输出一次" in prompt
+        assert "只有描述已保存、资源需求已绑定或明确放弃" in prompt
+        assert "禁止输出普通最终答案" in prompt
+        assert "天气助手" not in prompt
+        assert "请详细说明这个智能体需要完成的任务" not in prompt
+        assert '"question_id": "expected_output"' in prompt
+
     description_save = prompt.index('"description":')
     resource_search = prompt.index("raw_result = runtime_search")
     assert description_save < resource_search

@@ -1243,6 +1243,126 @@ async def test_create_stream_wraps_sdk_chunks_and_stops_run(mocker):
 
 
 @pytest.mark.asyncio
+async def test_create_stream_yields_process_chunks_without_waiting_for_later_output(
+    mocker,
+):
+    run_info = MagicMock()
+    run_info.stop_event = MagicMock()
+    mocker.patch(
+        "services.nl2agent_service.build_nl2agent_run_info",
+        new_callable=AsyncMock,
+        return_value=run_info,
+    )
+    process_chunks = [
+        {"type": "step_count", "content": "1"},
+        {"type": "model_output_thinking", "content": "reason"},
+        {"type": "model_output_deep_thinking", "content": "deeper reason"},
+        {"type": "model_output_code", "content": "code"},
+        {"type": "parse", "content": "parsed"},
+        {"type": "tool", "content": "call"},
+        {"type": "execution_logs", "content": "observation"},
+        {"type": "final_answer", "content": "plain answer"},
+    ]
+    release_next = [asyncio.Event() for _ in process_chunks]
+
+    async def gated_agent_run(_run_info):
+        for payload, gate in zip(process_chunks, release_next, strict=True):
+            yield json.dumps(payload)
+            await gate.wait()
+
+    mocker.patch(
+        "services.nl2agent_service.agent_run",
+        side_effect=gated_agent_run,
+    )
+    stream = await create_nl2agent_stream(
+        NL2AgentRunRequest(query="Build an assistant", agent_id=42),
+        "tenant-a",
+        "en",
+        None,
+    )
+
+    for expected, gate in zip(process_chunks, release_next, strict=True):
+        chunk = await asyncio.wait_for(anext(stream), timeout=0.5)
+        assert json.loads(chunk.removeprefix("data: ").strip()) == expected
+        gate.set()
+
+    with pytest.raises(StopAsyncIteration):
+        await anext(stream)
+    run_info.stop_event.set.assert_called_once_with()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "content",
+    [
+        "The configuration still needs user input.",
+        "Run Agent Error: Model main_model not found",
+    ],
+)
+async def test_create_stream_preserves_final_answers_without_fallback(mocker, content):
+    run_info = MagicMock()
+    run_info.stop_event = MagicMock()
+    mocker.patch(
+        "services.nl2agent_service.build_nl2agent_run_info",
+        new_callable=AsyncMock,
+        return_value=run_info,
+    )
+
+    async def final_answer_agent_run(_run_info):
+        yield json.dumps({"type": "final_answer", "content": content})
+
+    mocker.patch(
+        "services.nl2agent_service.agent_run",
+        side_effect=final_answer_agent_run,
+    )
+    stream = await create_nl2agent_stream(
+        NL2AgentRunRequest(query="Build an assistant", agent_id=42),
+        "tenant-a",
+        "en",
+        None,
+    )
+
+    chunks = [chunk async for chunk in stream]
+
+    assert len(chunks) == 1
+    assert json.loads(chunks[0].removeprefix("data: ").strip()) == {
+        "type": "final_answer",
+        "content": content,
+    }
+
+
+@pytest.mark.asyncio
+async def test_create_stream_ends_without_synthesizing_nl2a_fallback(mocker):
+    run_info = MagicMock()
+    run_info.stop_event = MagicMock()
+    mocker.patch(
+        "services.nl2agent_service.build_nl2agent_run_info",
+        new_callable=AsyncMock,
+        return_value=run_info,
+    )
+
+    async def no_action_agent_run(_run_info):
+        yield json.dumps({"type": "model_output_thinking", "content": "reason"})
+
+    mocker.patch(
+        "services.nl2agent_service.agent_run",
+        side_effect=no_action_agent_run,
+    )
+    stream = await create_nl2agent_stream(
+        NL2AgentRunRequest(query="Build an assistant", agent_id=42),
+        "tenant-a",
+        "en",
+        None,
+    )
+
+    chunks = [chunk async for chunk in stream]
+
+    assert [json.loads(chunk.removeprefix("data: ").strip()) for chunk in chunks] == [
+        {"type": "model_output_thinking", "content": "reason"}
+    ]
+
+
+@pytest.mark.asyncio
 async def test_create_stream_hides_runtime_errors_and_stops_run(mocker):
     run_info = MagicMock()
     run_info.stop_event = MagicMock()
