@@ -33,14 +33,12 @@ export interface Nl2AgentChatPanelProps {
   agentId?: number | null;
   disabled?: boolean;
   onStateEvent?: (event: Nl2AgentStateEvent) => void;
-  onResourcesBound?: (agentId: number) => Promise<boolean>;
 }
 
 export const Nl2AgentChatPanel: FC<Nl2AgentChatPanelProps> = ({
   agentId = null,
   disabled = false,
   onStateEvent,
-  onResourcesBound,
 }) => {
   const { t } = useTranslation("common");
   const { modelConfig } = useConfig();
@@ -89,7 +87,6 @@ export const Nl2AgentChatPanel: FC<Nl2AgentChatPanelProps> = ({
             showModelSelector={false}
             showConversationTitle={false}
             readOnly={disabled}
-            onResourcesBound={onResourcesBound}
             variant="embedded"
           />
         </div>

@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useReducer, useState, type FC } from "react";
 import { useAui } from "@assistant-ui/react";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -17,12 +18,19 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useNl2AgentFlow } from "@/contexts/nl2AgentFlow";
 import {
+  searchAgentInfo,
   updateToolConfig,
   saveSkillInstance,
 } from "@/services/agentConfigService";
 import { toApiError, type ApiError } from "@/services/api";
 import { useAgentStore } from "@/stores/agentStore";
-import type { Skill, SkillParam, Tool, ToolParam } from "@/types/agentConfig";
+import type {
+  Agent,
+  Skill,
+  SkillParam,
+  Tool,
+  ToolParam,
+} from "@/types/agentConfig";
 import type {
   Nl2AgentCardAction,
   Nl2aInstalledResourceBindingPayload,
@@ -147,13 +155,79 @@ const parseResourceId = (ref: string, expected: "tool" | "skill"): number => {
   return resourceId;
 };
 
+const toPersistedBindings = (
+  boundItems: BindingItemState[],
+  toolCatalog: Tool[],
+  skillCatalog: Skill[]
+): { tools?: Tool[]; skills?: Skill[] } => {
+  const tools = boundItems
+    .filter((item) => item.resource.candidate.resource_type === "tool")
+    .map((item) => {
+      const toolId = parseResourceId(candidateRef(item), "tool");
+      const canonical = toolCatalog.find((tool) => Number(tool.id) === toolId);
+      return {
+        ...canonical,
+        id: String(toolId),
+        name: canonical?.name || item.resource.candidate.name,
+        description:
+          canonical?.description || item.resource.candidate.description,
+        source:
+          canonical?.source ||
+          (item.resource.candidate.source === "LOCAL_TOOL" ? "local" : "mcp"),
+        initParams: item.draftParams as ToolParam[],
+        is_available: true,
+      } satisfies Tool;
+    });
+  const skills = boundItems
+    .filter((item) => item.resource.candidate.resource_type === "skill")
+    .map((item) => {
+      const skillId = parseResourceId(candidateRef(item), "skill");
+      const canonical = skillCatalog.find(
+        (skill) => Number(skill.skill_id) === skillId
+      );
+      return {
+        ...canonical,
+        skill_id: skillId,
+        name: canonical?.name || item.resource.candidate.name,
+        description:
+          canonical?.description || item.resource.candidate.description,
+        source: canonical?.source || "custom",
+        config_schemas:
+          canonical?.config_schemas || (item.draftParams as SkillParam[]),
+        config_values: nl2AgentParamsToRecord(item.draftParams),
+      } satisfies Skill;
+    });
+
+  return {
+    ...(tools.length ? { tools } : {}),
+    ...(skills.length ? { skills } : {}),
+  };
+};
+
+const snapshotContainsBindings = (
+  agent: Agent,
+  boundItems: BindingItemState[]
+): boolean => {
+  const toolIds = new Set((agent.tools ?? []).map((tool) => Number(tool.id)));
+  const skillIds = new Set(
+    (agent.skills ?? []).map((skill) => Number(skill.skill_id))
+  );
+  return boundItems.every((item) => {
+    const resourceType = item.resource.candidate.resource_type;
+    const resourceId = parseResourceId(candidateRef(item), resourceType);
+    return resourceType === "tool"
+      ? toolIds.has(resourceId)
+      : skillIds.has(resourceId);
+  });
+};
+
 export const InstalledResourceBindingCard: FC<{
   payload: Nl2aInstalledResourceBindingPayload;
   disabled?: boolean;
-  onResourcesBound?: (agentId: number) => Promise<boolean>;
-}> = ({ payload, disabled = false, onResourcesBound }) => {
+}> = ({ payload, disabled = false }) => {
   const { t } = useTranslation("common");
   const aui = useAui();
+  const queryClient = useQueryClient();
   const reactId = useId();
   const cardKey = `installed_resource_binding:${payload.agent_id}:${reactId}`;
   const { registerCard, submitCard, markResourcesBound, isCardInteractive } =
@@ -168,6 +242,12 @@ export const InstalledResourceBindingCard: FC<{
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [isSynchronizing, setIsSynchronizing] = useState(false);
   const waitForAutosave = useAgentStore((state) => state.waitForIdle);
+  const applyPersistedResourceBindings = useAgentStore(
+    (state) => state.applyPersistedResourceBindings
+  );
+  const replaceServerSnapshot = useAgentStore(
+    (state) => state.replaceServerSnapshot
+  );
 
   useEffect(() => {
     registerCard(cardKey, payload.subtype);
@@ -183,10 +263,26 @@ export const InstalledResourceBindingCard: FC<{
     (item) => candidateRef(item) === configuringRef
   );
 
-  const synchronizeAgentView = async (): Promise<boolean> => {
+  const reloadAgentSnapshot = async (
+    expectedBindings: BindingItemState[]
+  ): Promise<boolean> => {
     setIsSynchronizing(true);
     try {
-      return (await onResourcesBound?.(payload.agent_id)) ?? true;
+      const result = await searchAgentInfo(payload.agent_id, undefined, 0);
+      if (!result.success || !result.data) return false;
+      if (!snapshotContainsBindings(result.data, expectedBindings))
+        return false;
+      if (!replaceServerSnapshot(payload.agent_id, result.data)) return false;
+
+      queryClient.setQueryData(["agentInfo", payload.agent_id], result.data);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["agents"] }),
+        queryClient.invalidateQueries({ queryKey: ["toolInfo"] }),
+        queryClient.invalidateQueries({
+          queryKey: ["agentSkillInstances", payload.agent_id],
+        }),
+      ]);
+      return true;
     } catch {
       return false;
     } finally {
@@ -268,12 +364,14 @@ export const InstalledResourceBindingCard: FC<{
         if (!result.success) {
           throw result.error ?? new Error(result.message);
         }
-        return ref;
+        return item;
       })
     );
+    const boundItems: BindingItemState[] = [];
     settled.forEach((result, index) => {
       const ref = candidateRef(pending[index]);
       if (result.status === "fulfilled") {
+        boundItems.push(result.value);
         dispatch({ type: "binding_succeeded", ref });
       } else {
         dispatch({
@@ -284,8 +382,22 @@ export const InstalledResourceBindingCard: FC<{
       }
     });
 
-    if (settled.some((result) => result.status === "fulfilled")) {
-      const synchronized = await synchronizeAgentView();
+    if (boundItems.length) {
+      const persistedBindings = toPersistedBindings(
+        boundItems,
+        queryClient.getQueryData<Tool[]>(["tools"]) ?? [],
+        queryClient.getQueryData<Skill[]>(["skills"]) ?? []
+      );
+      const applied = applyPersistedResourceBindings(
+        payload.agent_id,
+        persistedBindings
+      );
+      const synchronized =
+        applied &&
+        (await reloadAgentSnapshot([
+          ...items.filter((item) => item.bindingStatus === "bound"),
+          ...boundItems,
+        ]));
       if (!synchronized) showSynchronizationError();
     }
   };
@@ -293,7 +405,9 @@ export const InstalledResourceBindingCard: FC<{
   const continueFlow = async () => {
     if (isLocked || !canContinue || isSynchronizing) return;
     setSummaryError(null);
-    const synchronized = await synchronizeAgentView();
+    const synchronized = await reloadAgentSnapshot(
+      items.filter((item) => item.bindingStatus === "bound")
+    );
     if (!synchronized) {
       showSynchronizationError();
       return;

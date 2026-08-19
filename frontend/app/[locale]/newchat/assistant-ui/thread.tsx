@@ -131,7 +131,6 @@ export interface ThreadProps {
   skillFiles?: readonly SkillFileContent[];
   onSkillFileSelect?: (path: string) => void;
   readOnly?: boolean;
-  onResourcesBound?: (agentId: number) => Promise<boolean>;
 }
 
 /**
@@ -194,7 +193,6 @@ export const Thread: FC<ThreadProps> = ({
   skillFiles,
   onSkillFileSelect,
   readOnly = false,
-  onResourcesBound,
 }) => {
   const { t } = useTranslation();
   const models = useAgentModels(agent);
@@ -410,7 +408,6 @@ export const Thread: FC<ThreadProps> = ({
         variant={variant}
         skillFiles={skillFiles}
         onSkillFileSelect={onSkillFileSelect}
-        onResourcesBound={onResourcesBound}
         readOnly={readOnly}
         hasMessages={hasMessages}
         displayName={displayName}
@@ -522,7 +519,6 @@ interface ThreadViewProps {
   variant: "default" | "embedded";
   skillFiles?: readonly SkillFileContent[];
   onSkillFileSelect?: (path: string) => void;
-  onResourcesBound?: (agentId: number) => Promise<boolean>;
   readOnly: boolean;
 }
 
@@ -560,7 +556,6 @@ const ThreadView: FC<ThreadViewProps> = ({
   variant,
   skillFiles,
   onSkillFileSelect,
-  onResourcesBound,
   readOnly,
 }) => {
   const { t } = useTranslation();
@@ -677,7 +672,6 @@ const ThreadView: FC<ThreadViewProps> = ({
               readOnly={readOnly}
               enableSkillDirectives={Boolean(skillFiles)}
               onSkillFileSelect={onSkillFileSelect}
-              onResourcesBound={onResourcesBound}
               shareMode={isShareMode}
               selectedShareMessageIds={selectedShareMessageIds}
               backendMessageIdsByAuiId={backendMessageIdsByAuiId}
@@ -848,7 +842,6 @@ export const ThreadMessages: FC<{
   onToggleShareMessage?: (messageId: number) => void;
   enableSkillDirectives?: boolean;
   onSkillFileSelect?: (path: string) => void;
-  onResourcesBound?: (agentId: number) => Promise<boolean>;
 }> = ({
   agent,
   readOnly = false,
@@ -858,7 +851,6 @@ export const ThreadMessages: FC<{
   onToggleShareMessage,
   enableSkillDirectives = false,
   onSkillFileSelect,
-  onResourcesBound,
 }) => {
   const { t } = useTranslation();
   const messages = useAuiState((s) => s.thread.messages);
@@ -900,14 +892,12 @@ export const ThreadMessages: FC<{
           agent={agent}
           readOnly={readOnly}
           onSkillFileSelect={onSkillFileSelect}
-          onResourcesBound={onResourcesBound}
         />
       ),
     }),
     [
       agent,
       enableSkillDirectives,
-      onResourcesBound,
       onSkillFileSelect,
       readOnly,
     ]
@@ -1057,8 +1047,7 @@ const AssistantMessage: FC<{
   agent: Agent | PublishedAgent;
   readOnly?: boolean;
   onSkillFileSelect?: (path: string) => void;
-  onResourcesBound?: (agentId: number) => Promise<boolean>;
-}> = ({ agent, readOnly = false, onSkillFileSelect, onResourcesBound }) => {
+}> = ({ agent, readOnly = false, onSkillFileSelect }) => {
   const { t } = useTranslation();
   // Reserves space for the action bar; `-mb` compensates so the action bar's
   // hover-revealed position does not shift the message spacing. For pt-[n]
@@ -1337,7 +1326,6 @@ const AssistantMessage: FC<{
           <InstalledResourceBindingCard
             payload={nl2a.content}
             disabled={readOnly}
-            onResourcesBound={onResourcesBound}
           />
         ) : null}
         {skillFileAttachments?.length ? (

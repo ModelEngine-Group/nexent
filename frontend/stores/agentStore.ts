@@ -56,6 +56,11 @@ export interface AgentSaveTask {
   patch: AgentDraftPatch;
 }
 
+export interface PersistedResourceBindings {
+  tools?: Tool[];
+  skills?: Skill[];
+}
+
 interface AgentStoreState {
   agentId: number | null;
   currentAgentId: number | null;
@@ -88,6 +93,11 @@ interface AgentStoreState {
     config: { id: number | null; name: string; displayName: string } | null
   ) => void;
   setIsGenerating: (value: boolean) => void;
+  applyPersistedResourceBindings: (
+    agentId: number,
+    resources: PersistedResourceBindings
+  ) => boolean;
+  replaceServerSnapshot: (agentId: number, agent: Agent) => boolean;
   waitForIdle: () => Promise<boolean>;
   clearSaveError: () => void;
   reset: () => void;
@@ -136,9 +146,68 @@ const mergeDraft = (
   patch: AgentDraftPatch
 ): AgentDraft | null => (agent ? { ...agent, ...patch } : null);
 
+const mergeResourcesById = <T>(
+  current: T[],
+  persisted: T[],
+  getId: (resource: T) => number
+): T[] => {
+  const merged = new Map(
+    current.map((resource) => [getId(resource), cloneDraft(resource)])
+  );
+  persisted.forEach((resource) => {
+    const resourceId = getId(resource);
+    const existing = merged.get(resourceId);
+    merged.set(
+      resourceId,
+      existing ? { ...existing, ...cloneDraft(resource) } : cloneDraft(resource)
+    );
+  });
+  return Array.from(merged.values());
+};
+
+const mergePersistedResources = (
+  draft: AgentDraft | null,
+  resources: PersistedResourceBindings
+): AgentDraft | null => {
+  if (!draft) return null;
+  return {
+    ...draft,
+    ...(resources.tools
+      ? {
+          tools: mergeResourcesById(draft.tools, resources.tools, (tool) =>
+            Number(tool.id)
+          ),
+        }
+      : {}),
+    ...(resources.skills
+      ? {
+          skills: mergeResourcesById(draft.skills, resources.skills, (skill) =>
+            Number(skill.skill_id)
+          ),
+        }
+      : {}),
+  };
+};
+
 const DRAFT_SAVE_DEBOUNCE_MS = 500;
 let pendingDraftPatch: AgentDraftPatch = {};
 let draftSaveTimer: ReturnType<typeof setTimeout> | null = null;
+
+const hasPendingSaveWork = (state: AgentStoreState): boolean =>
+  state.isSaving ||
+  state.queue.length > 0 ||
+  draftSaveTimer !== null ||
+  Object.keys(pendingDraftPatch).length > 0;
+
+const canApplyPersistedState = (
+  state: AgentStoreState,
+  agentId: number
+): boolean =>
+  state.agentId === agentId &&
+  state.currentAgentId === agentId &&
+  state.editedAgent !== null &&
+  state.savedAgent !== null &&
+  !hasPendingSaveWork(state);
 
 const clearPendingDraftSave = () => {
   if (draftSaveTimer) {
@@ -495,6 +564,38 @@ export const useAgentStore = create<AgentStoreState>((set) => {
       enqueue({ external_sub_agent_id_list }),
     setDefaultLlmConfig: (defaultLlmConfig) => set({ defaultLlmConfig }),
     setIsGenerating: (isGenerating) => set({ isGenerating }),
+    applyPersistedResourceBindings: (agentId, resources) => {
+      let applied = false;
+      set((state) => {
+        if (!canApplyPersistedState(state, agentId)) return state;
+        applied = true;
+        return {
+          editedAgent: mergePersistedResources(state.editedAgent, resources),
+          savedAgent: mergePersistedResources(state.savedAgent, resources),
+          saveError: null,
+          lastSaveFailed: false,
+        };
+      });
+      return applied;
+    },
+    replaceServerSnapshot: (agentId, agent) => {
+      if (Number(agent.id) !== agentId) return false;
+
+      const draft = toDraft(agent);
+      let replaced = false;
+      set((state) => {
+        if (!canApplyPersistedState(state, agentId)) return state;
+        replaced = true;
+        return {
+          isReadOnly: agent.permission === "READ_ONLY",
+          editedAgent: cloneDraft(draft),
+          savedAgent: cloneDraft(draft),
+          saveError: null,
+          lastSaveFailed: false,
+        };
+      });
+      return replaced;
+    },
     waitForIdle: () => {
       useAgentStore.getState().flushDraft();
       return new Promise((resolve) => {

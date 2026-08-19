@@ -96,22 +96,6 @@ function AgentSetupContent() {
     }
   }, [currentAgentId, resetFlow]);
 
-  const refreshAgentSnapshot = useCallback(
-    async (agentId: number): Promise<boolean> => {
-      const result = await searchAgentInfo(agentId, undefined, 0);
-      if (!result.success || !result.data) return false;
-      if (useAgentStore.getState().currentAgentId !== agentId) return false;
-
-      initializeAgent(result.data);
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["agents"] }),
-        queryClient.invalidateQueries({ queryKey: ["agentInfo", agentId] }),
-      ]);
-      return true;
-    },
-    [initializeAgent, queryClient]
-  );
-
   const synchronizeCreatedDraft = useCallback(
     async (event: Nl2AgentStateEvent) => {
       if (synchronizingCreatedIdsRef.current.has(event.agent_id)) return;
@@ -212,7 +196,6 @@ function AgentSetupContent() {
                     (currentAgentId !== null && permissionReadOnly)
                   }
                   onStateEvent={handleStateEvent}
-                  onResourcesBound={refreshAgentSnapshot}
                 />
               </div>
             </PanelCard>
