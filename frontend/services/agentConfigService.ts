@@ -1,4 +1,4 @@
-import { API_ENDPOINTS, ApiError } from "./api";
+import { API_ENDPOINTS, parseApiErrorResponse } from "./api";
 
 import { NAME_CHECK_STATUS } from "@/const/agentConfig";
 import { getAuthHeaders } from "@/lib/auth";
@@ -250,25 +250,7 @@ export const getCreatingSubAgentId = async () => {
     });
 
     if (!response.ok) {
-      const errorPayload = await response.json().catch(() => null);
-      const errorDetail =
-        errorPayload?.detail && typeof errorPayload.detail === "object"
-          ? errorPayload.detail
-          : errorPayload?.message && typeof errorPayload.message === "object"
-            ? errorPayload.message
-            : null;
-      if (errorDetail) {
-        throw new ApiError(
-          errorDetail.code ?? response.status,
-          errorDetail.message ?? `Request failed: ${response.status}`,
-          errorDetail.data
-        );
-      }
-      throw new Error(
-        (typeof errorPayload?.detail === "string" && errorPayload.detail) ||
-          (typeof errorPayload?.message === "string" && errorPayload.message) ||
-          `Request failed: ${response.status}`
-      );
+      throw await parseApiErrorResponse(response);
     }
 
     const data = await response.json();
@@ -486,25 +468,7 @@ export const updateAgentInfo = async (payload: UpdateAgentInfoPayload) => {
     });
 
     if (!response.ok) {
-      const errorPayload = await response.json().catch(() => null);
-      const errorDetail =
-        errorPayload?.detail && typeof errorPayload.detail === "object"
-          ? errorPayload.detail
-          : errorPayload?.message && typeof errorPayload.message === "object"
-            ? errorPayload.message
-            : null;
-      if (errorDetail) {
-        throw new ApiError(
-          errorDetail.code ?? response.status,
-          errorDetail.message ?? `Request failed: ${response.status}`,
-          errorDetail.data
-        );
-      }
-      throw new Error(
-        (typeof errorPayload?.detail === "string" && errorPayload.detail) ||
-          (typeof errorPayload?.message === "string" && errorPayload.message) ||
-          `Request failed: ${response.status}`
-      );
+      throw await parseApiErrorResponse(response);
     }
 
     const data = await response.json();

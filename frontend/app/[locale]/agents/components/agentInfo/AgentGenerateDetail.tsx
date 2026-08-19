@@ -744,9 +744,8 @@ export default function AgentGenerateDetail({}) {
     errorKey: string
   ) => {
     if (value && getDisplayWidth(value) > limit) {
-      return Promise.reject(new Error(t(errorKey)));
+      throw new Error(t(errorKey));
     }
-    return Promise.resolve();
   };
 
   // Select options for available models

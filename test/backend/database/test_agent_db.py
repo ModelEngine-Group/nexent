@@ -70,7 +70,8 @@ sys.modules['utils.str_utils'] = str_utils_mock
 text_length_utils_path = Path(__file__).parents[3] / "backend" / "utils" / "text_length_utils.py"
 text_length_utils_spec = importlib.util.spec_from_file_location("utils.text_length_utils", text_length_utils_path)
 text_length_utils_module = importlib.util.module_from_spec(text_length_utils_spec)
-assert text_length_utils_spec and text_length_utils_spec.loader
+assert text_length_utils_spec
+assert text_length_utils_spec.loader
 text_length_utils_spec.loader.exec_module(text_length_utils_module)
 sys.modules['utils.text_length_utils'] = text_length_utils_module
 
