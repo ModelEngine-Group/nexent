@@ -142,9 +142,9 @@ class TestCasApp(unittest.TestCase):
 
         response = client.get("/user/cas/callback?ticket=limit")
 
-        self.assertEqual(response.status_code, HTTPStatus.BAD_REQUEST)
+        self.assertEqual(response.status_code, HTTPStatus.TOO_MANY_REQUESTS)
         self.assertEqual(response.json()["detail"], {
-            "code": "TENANT_RESOURCE_LIMIT_REACHED",
+            "code": "120104",
             "message": "Tenant user limit reached: maximum 10000 users per tenant",
             "data": {"resource": "user", "limit": 10_000},
         })

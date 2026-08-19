@@ -470,9 +470,9 @@ class TestTenantEndpointMappings:
 
         response = client.post("/tenants", json={"tenant_name": "Tenant 101"})
 
-        assert response.status_code == 400
+        assert response.status_code == 429
         assert response.json()["detail"] == {
-            "code": "TENANT_RESOURCE_LIMIT_REACHED",
+            "code": "120104",
             "message": "Tenant limit reached: maximum 100 tenants",
             "data": {"resource": "tenant", "limit": 100},
         }

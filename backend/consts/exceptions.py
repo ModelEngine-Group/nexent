@@ -196,7 +196,7 @@ class ValidationError(Exception):
 class TenantResourceLimitError(ValidationError, ValueError):
     """Raised when a platform or tenant hard resource limit is reached."""
 
-    code = "TENANT_RESOURCE_LIMIT_REACHED"
+    code = ErrorCode.TENANT_RESOURCE_EXCEEDED.value
 
     def __init__(self, message: str, resource: str, limit: int):
         super().__init__(message)

@@ -231,7 +231,7 @@ async def callback(
     except TenantResourceLimitError as e:
         logger.warning(f"OAuth callback rejected by tenant resource limit for provider={provider}: {e}")
         return JSONResponse(
-            status_code=HTTPStatus.BAD_REQUEST,
+            status_code=HTTPStatus.TOO_MANY_REQUESTS,
             content={
                 "code": e.code,
                 "message": str(e),
@@ -315,7 +315,7 @@ async def complete(
         )
         raise HTTPException(status_code=status_code, detail=str(e))
     except TenantResourceLimitError as e:
-        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=e.to_detail())
+        raise HTTPException(status_code=HTTPStatus.TOO_MANY_REQUESTS, detail=e.to_detail())
     except PydanticValidationError as e:
         raise HTTPException(
             status_code=HTTPStatus.UNPROCESSABLE_ENTITY,

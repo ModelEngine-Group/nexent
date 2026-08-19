@@ -73,7 +73,7 @@ async def create_group_endpoint(
     except TenantResourceLimitError as exc:
         logger.warning(f"Group creation rejected by resource limit: {str(exc)}")
         raise HTTPException(
-            status_code=HTTPStatus.BAD_REQUEST,
+            status_code=HTTPStatus.TOO_MANY_REQUESTS,
             detail=exc.to_detail(),
         )
     except ValidationError as exc:

@@ -74,7 +74,7 @@ async def signup(request: UserSignUpRequest):
                             detail="INVITE_CODE_INVALID")
     except TenantResourceLimitError as e:
         logging.warning(f"User registration rejected by resource limit: {str(e)}")
-        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=e.to_detail())
+        raise HTTPException(status_code=HTTPStatus.TOO_MANY_REQUESTS, detail=e.to_detail())
     except ValidationError as e:
         detail = str(e)
         if detail == ASSET_OWNER_SIGNUP_USE_OAUTH_DETAIL:

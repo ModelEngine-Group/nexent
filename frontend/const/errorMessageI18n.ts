@@ -67,7 +67,7 @@ export const getTenantResourceLimitMessage = (
     code?: unknown;
     data?: { resource?: unknown; limit?: unknown };
   };
-  if (apiError.code !== "TENANT_RESOURCE_LIMIT_REACHED") {
+  if (String(apiError.code) !== ErrorCode.TENANT_RESOURCE_EXCEEDED) {
     return null;
   }
 

@@ -58,7 +58,7 @@ class _UnauthorizedError(Exception):
 
 
 class _TenantResourceLimitError(Exception):
-    code = "TENANT_RESOURCE_LIMIT_REACHED"
+    code = "120104"
 
     def __init__(self, message, resource="user", limit=10_000):
         super().__init__(message)
@@ -381,9 +381,9 @@ class TestCallback(unittest.TestCase):
 
         response = client.get("/user/oauth/callback?provider=github&code=limit_code")
 
-        self.assertEqual(response.status_code, HTTPStatus.BAD_REQUEST)
+        self.assertEqual(response.status_code, HTTPStatus.TOO_MANY_REQUESTS)
         data = response.json()
-        self.assertEqual(data["code"], "TENANT_RESOURCE_LIMIT_REACHED")
+        self.assertEqual(data["code"], "120104")
         self.assertEqual(data["data"]["oauth_error"], "tenant_resource_limit_exceeded")
         self.assertEqual(data["data"]["resource_limit"], {"resource": "user", "limit": 10_000})
         self.assertIn("maximum 10000", data["message"])
@@ -973,9 +973,9 @@ class TestCompleteOAuth(unittest.TestCase):
                 },
             )
 
-        self.assertEqual(response.status_code, HTTPStatus.BAD_REQUEST)
+        self.assertEqual(response.status_code, HTTPStatus.TOO_MANY_REQUESTS)
         detail = response.json()["detail"]
-        self.assertEqual(detail["code"], "TENANT_RESOURCE_LIMIT_REACHED")
+        self.assertEqual(detail["code"], "120104")
         self.assertEqual(detail["data"], {"resource": "user", "limit": 1})
 
 

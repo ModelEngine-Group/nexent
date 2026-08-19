@@ -400,9 +400,9 @@ class TestUpdateUserEndpoint:
                 headers={"Authorization": "Bearer token123"},
             )
 
-        assert response.status_code == HTTPStatus.BAD_REQUEST
+        assert response.status_code == HTTPStatus.TOO_MANY_REQUESTS
         assert response.json()["detail"] == {
-            "code": "TENANT_RESOURCE_LIMIT_REACHED",
+            "code": "120104",
             "message": "Tenant administrator limit reached: maximum 1000 administrators per tenant",
             "data": {"resource": "admin", "limit": 1000},
         }

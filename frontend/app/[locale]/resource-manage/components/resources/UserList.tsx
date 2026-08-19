@@ -33,6 +33,14 @@ import {
 } from "@/services/groupService";
 import { getTenantResourceLimitMessage } from "@/const/errorMessageI18n";
 
+const ROLE_COLORS: Record<string, string> = {
+  SUPER_ADMIN: "magenta",
+  ADMIN: "purple",
+  DEV: "cyan",
+  USER: "blue",
+  ASSET_OWNER: "gold",
+};
+
 export default function UserList({
   tenantId,
   refreshKey,
@@ -201,18 +209,7 @@ export default function UserList({
             USER: t("user.role.user"),
             ASSET_OWNER: t("user.role.assetOwner"),
           };
-          const color =
-            role === "SUPER_ADMIN"
-              ? "magenta"
-              : role === "ADMIN"
-                ? "purple"
-                : role === "DEV"
-                  ? "cyan"
-                  : role === "USER"
-                    ? "blue"
-                    : role === "ASSET_OWNER"
-                      ? "gold"
-                      : "gray";
+          const color = ROLE_COLORS[role] || "gray";
           return <Tag color={color}>{roleLabels[role] || role}</Tag>;
         },
         width: "20%",

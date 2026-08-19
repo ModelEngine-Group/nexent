@@ -142,9 +142,9 @@ class TestGroupCreation:
                 headers={"Authorization": "Bearer token"},
             )
 
-        assert response.status_code == HTTPStatus.BAD_REQUEST
+        assert response.status_code == HTTPStatus.TOO_MANY_REQUESTS
         assert response.json()["detail"] == {
-            "code": "TENANT_RESOURCE_LIMIT_REACHED",
+            "code": "120104",
             "message": "Tenant group limit reached: maximum 1000 groups per tenant",
             "data": {"resource": "group", "limit": 1000},
         }

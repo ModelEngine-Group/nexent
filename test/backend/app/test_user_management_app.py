@@ -297,9 +297,9 @@ class TestUserSignup:
                 },
             )
 
-        assert response.status_code == HTTPStatus.BAD_REQUEST
+        assert response.status_code == HTTPStatus.TOO_MANY_REQUESTS
         assert response.json()["detail"] == {
-            "code": "TENANT_RESOURCE_LIMIT_REACHED",
+            "code": "120104",
             "message": "Tenant user limit reached: maximum 10000 users per tenant",
             "data": {"resource": "user", "limit": 10_000},
         }

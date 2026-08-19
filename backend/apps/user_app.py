@@ -131,7 +131,7 @@ async def update_user_endpoint(
     except TenantResourceLimitError as exc:
         logger.warning(f"User update rejected by resource limit for user {user_id}: {str(exc)}")
         raise HTTPException(
-            status_code=HTTPStatus.BAD_REQUEST,
+            status_code=HTTPStatus.TOO_MANY_REQUESTS,
             detail=exc.to_detail(),
         )
     except ValueError as exc:

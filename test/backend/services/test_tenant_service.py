@@ -490,7 +490,7 @@ class TestCreateTenant:
             with pytest.raises(TenantResourceLimitError) as exc_info:
                 create_tenant(tenant_name, user_id)
 
-        assert exc_info.value.code == "TENANT_RESOURCE_LIMIT_REACHED"
+        assert exc_info.value.code == "120104"
         assert exc_info.value.to_detail()["data"] == {"resource": "tenant", "limit": 1}
 
     def test_create_tenant_uuid_collision(self, service_mocks):
