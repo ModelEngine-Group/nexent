@@ -655,7 +655,7 @@ def set_personal_user_quota(
     except HTTPException:
         raise
     except Exception as exc:
-        logger.exception("Error setting personal KB quota for user %s", user_id)
+        logger.exception("Error setting personal KB quota")
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail=f"Error setting personal KB quota: {str(exc)}",
