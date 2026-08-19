@@ -18,6 +18,7 @@ import KnowledgeBaseSelectorModal from "@/components/tool-config/KnowledgeBaseSe
 import { useKnowledgeBasesForToolConfig } from "@/hooks/useKnowledgeBaseSelector";
 import { useToolList } from "@/hooks/agent/useToolList";
 import { useAgentStore } from "@/stores/agentStore";
+import { useAgentReadOnly } from "@/hooks/agent/useAgentReadOnly";
 import type { Tool, ToolParam } from "@/types/agentConfig";
 import type { KnowledgeBase } from "@/types/knowledgeBase";
 
@@ -102,7 +103,9 @@ function renderParamInput(
         className="w-full"
         value={typeof value === "number" ? value : undefined}
         onChange={onChange}
-        placeholder={param.default || t("agent.knowledge.inputNumberPlaceholder")}
+        placeholder={
+          param.default || t("agent.knowledge.inputNumberPlaceholder")
+        }
       />
     );
   }
@@ -115,8 +118,14 @@ function renderParamInput(
         onChange={onChange}
         options={[
           { label: t("agent.knowledge.searchMode.hybrid"), value: "hybrid" },
-          { label: t("agent.knowledge.searchMode.accurate"), value: "accurate" },
-          { label: t("agent.knowledge.searchMode.semantic"), value: "semantic" },
+          {
+            label: t("agent.knowledge.searchMode.accurate"),
+            value: "accurate",
+          },
+          {
+            label: t("agent.knowledge.searchMode.semantic"),
+            value: "semantic",
+          },
         ]}
       />
     );
@@ -148,9 +157,11 @@ interface KnowledgeBaseConfigState {
 }
 
 function useKnowledgeBaseConfigState(): KnowledgeBaseConfigState | null {
-  const selectedTools = useAgentStore((state) => state.editedAgent?.tools ?? []);
+  const selectedTools = useAgentStore(
+    (state) => state.editedAgent?.tools ?? []
+  );
   const updateTools = useAgentStore((state) => state.updateTools);
-  const isReadOnly = useAgentStore((state) => state.isReadOnly);
+  const isReadOnly = useAgentReadOnly();
 
   const { availableTools, isLoading: isToolsLoading } = useToolList({
     enabled: true,
@@ -226,12 +237,15 @@ function useKnowledgeBaseConfigState(): KnowledgeBaseConfigState | null {
   };
 
   const onKnowledgeBaseRemove = (knowledgeBase: KnowledgeBase) => {
-    const knowledgeBaseKey = String(knowledgeBase.index_name || knowledgeBase.id);
+    const knowledgeBaseKey = String(
+      knowledgeBase.index_name || knowledgeBase.id
+    );
     onKnowledgeBaseConfirm(
       selectedKnowledgeBases.filter(
         (selectedKnowledgeBase) =>
-          String(selectedKnowledgeBase.index_name || selectedKnowledgeBase.id) !==
-          knowledgeBaseKey
+          String(
+            selectedKnowledgeBase.index_name || selectedKnowledgeBase.id
+          ) !== knowledgeBaseKey
       )
     );
   };
@@ -385,7 +399,7 @@ export default function KnowledgeBaseConfig() {
             <div>
               <p className="text-sm font-medium text-gray-700"></p>
               <p className="mt-0.5 text-xs text-gray-400">
-              {t("agent.knowledge.emptyHint")}
+                {t("agent.knowledge.emptyHint")}
               </p>
             </div>
           </div>

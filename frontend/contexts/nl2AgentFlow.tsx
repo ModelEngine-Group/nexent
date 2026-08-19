@@ -65,6 +65,7 @@ function reducer(
               ? "binding"
               : state.phase,
         activeCard: action.card,
+        isFormLocked: state.agentId !== null || state.isFormLocked,
       };
     case "submit_card": {
       const submittedCardKeys = new Set(state.submittedCardKeys);

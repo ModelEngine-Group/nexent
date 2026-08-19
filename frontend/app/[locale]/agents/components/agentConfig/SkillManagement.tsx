@@ -13,7 +13,6 @@ import {
   fetchSkillInstances,
 } from "@/services/agentConfigService";
 import log from "@/lib/logger";
-import { useAgentReadOnly } from "@/hooks/agent/useAgentReadOnly";
 import SkillDetailModal from "./SkillDetailModal";
 import SkillConfigModal from "./skill/SkillConfigModal";
 import SkillRowContent from "./skill/SkillRowContent";
@@ -46,7 +45,7 @@ export default function SkillManagement({
   const { confirm } = useConfirmModal();
 
   // Use prop if provided, otherwise fall back to store
-  const storeIsReadOnly = useAgentReadOnly();
+  const storeIsReadOnly = useAgentConfigStore((state) => state.isReadOnly());
   const isReadOnly = isReadOnlyProp ?? storeIsReadOnly;
 
   const originalSelectedSkills = useAgentConfigStore(

@@ -57,7 +57,8 @@ from services.agent_service import (
 )
 from services.prompt_service import generate_guardrail_rules_impl
 from services.knowledge_scope_service import get_agent_knowledge_capabilities
-from services.nl2agent_service import create_nl2agent_stream
+from services.agent_draft_permission_service import AgentDraftEditError
+from services.nl2agent_service import Nl2AgentDraftSaveError, create_nl2agent_stream
 from services.agent_version_service import (
     publish_version_impl,
     get_version_list_impl,
@@ -166,6 +167,28 @@ async def nl2agent_run_api(
         raise HTTPException(
             status_code=HTTPStatus.UNAUTHORIZED,
             detail=str(exc),
+        ) from exc
+    except AgentDraftEditError as exc:
+        status_code = (
+            HTTPStatus.NOT_FOUND
+            if exc.code == "agent_not_found"
+            else HTTPStatus.FORBIDDEN
+            if exc.code in {"agent_deleted", "agent_read_only"}
+            else HTTPStatus.BAD_REQUEST
+        )
+        raise HTTPException(
+            status_code=status_code,
+            detail={"code": exc.code, "message": "Agent draft cannot be reused."},
+        ) from exc
+    except Nl2AgentDraftSaveError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail={"code": exc.code, "message": "Agent context is invalid."},
+        ) from exc
+    except PermissionError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.FORBIDDEN,
+            detail="Agent draft cannot be reused.",
         ) from exc
     except Exception as exc:
         logger.exception("NL2Agent run error")

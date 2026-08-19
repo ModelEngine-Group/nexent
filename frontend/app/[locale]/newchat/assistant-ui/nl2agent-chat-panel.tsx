@@ -30,12 +30,14 @@ const NL2AGENT_DISPLAY_BASE: Agent = {
 };
 
 export interface Nl2AgentChatPanelProps {
+  agentId?: number | null;
   disabled?: boolean;
   onStateEvent?: (event: Nl2AgentStateEvent) => void;
   onResourcesBound?: (agentId: number) => Promise<boolean>;
 }
 
 export const Nl2AgentChatPanel: FC<Nl2AgentChatPanelProps> = ({
+  agentId = null,
   disabled = false,
   onStateEvent,
   onResourcesBound,
@@ -58,13 +60,14 @@ export const Nl2AgentChatPanel: FC<Nl2AgentChatPanelProps> = ({
             custom: {
               ...options.runConfig?.custom,
               runtimeMode: "nl2agent",
+              agentId,
               onNl2AgentState: onStateEvent,
             },
           },
         });
       },
     }),
-    [onStateEvent]
+    [agentId, onStateEvent]
   );
   const runtime = useLocalRuntime(chatModelAdapter, { adapters });
 

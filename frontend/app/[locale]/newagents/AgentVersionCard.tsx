@@ -43,6 +43,7 @@ import { useAgentVersionDetail } from "@/hooks/agent/useAgentVersionDetail";
 import { rollbackVersion, compareVersions, deleteVersion } from "@/services/agentVersionService";
 import { searchAgentInfo } from "@/services/agentConfigService";
 import { useAgentStore } from "@/stores/agentStore"
+import { useAgentReadOnly } from "@/hooks/agent/useAgentReadOnly";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import log from "@/lib/logger";
 import { resolveAgentListTenantKey } from "@/lib/agentListTenant";
@@ -156,7 +157,8 @@ export function VersionCardItem({
     return agentList.find((a: Agent) => a.id === String(agentId));
   }, [agentList, agentId]);
 
-  const isReadOnly = currentAgent?.permission === "READ_ONLY";
+  const isReadOnly =
+    useAgentReadOnly() || currentAgent?.permission === "READ_ONLY";
 
   // Modal state
   const [compareModalOpen, setCompareModalOpen] = useState(false);

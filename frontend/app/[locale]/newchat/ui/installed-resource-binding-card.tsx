@@ -11,8 +11,8 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import ToolConfigModal from "../../agents/components/agentConfig/tool/ToolConfigModal";
-import SkillConfigModal from "../../agents/components/agentConfig/skill/SkillConfigModal";
+import ToolConfigModal from "../../newagents/components/agentConfig/tool/ToolConfigModal";
+import SkillConfigModal from "../../newagents/components/agentConfig/skill/SkillConfigModal";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useNl2AgentFlow } from "@/contexts/nl2AgentFlow";
@@ -21,6 +21,7 @@ import {
   saveSkillInstance,
 } from "@/services/agentConfigService";
 import { toApiError, type ApiError } from "@/services/api";
+import { useAgentStore } from "@/stores/agentStore";
 import type { Skill, SkillParam, Tool, ToolParam } from "@/types/agentConfig";
 import type {
   Nl2AgentCardAction,
@@ -166,6 +167,7 @@ export const InstalledResourceBindingCard: FC<{
   const [summaryError, setSummaryError] = useState<string | null>(null);
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [isSynchronizing, setIsSynchronizing] = useState(false);
+  const waitForAutosave = useAgentStore((state) => state.waitForIdle);
 
   useEffect(() => {
     registerCard(cardKey, payload.subtype);
@@ -227,6 +229,17 @@ export const InstalledResourceBindingCard: FC<{
       return;
     }
     if (!pending.length) return;
+
+    const autosaveSucceeded = await waitForAutosave();
+    if (!autosaveSucceeded) {
+      setSummaryError(
+        t(
+          "nl2agent.resourceBinding.autosaveFailed",
+          "Save the pending Agent changes before binding resources."
+        )
+      );
+      return;
+    }
 
     setSummaryError(null);
     dispatch({
@@ -493,7 +506,6 @@ export const InstalledResourceBindingCard: FC<{
           tool={toolForDialog}
           initialParams={configuringItem.draftParams as ToolParam[]}
           selectedTool={toolForDialog}
-          isCreatingMode
           currentAgentId={payload.agent_id}
           localOnly
         />
@@ -512,7 +524,6 @@ export const InstalledResourceBindingCard: FC<{
           skill={skillForDialog}
           initialParams={configuringItem.draftParams as SkillParam[]}
           currentAgentId={payload.agent_id}
-          isCreatingMode
         />
       ) : null}
     </section>

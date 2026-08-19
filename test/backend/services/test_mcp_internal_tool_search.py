@@ -16,6 +16,7 @@ from tool_collection.mcp.local_mcp_service import (
     local_mcp_service,
 )
 from tool_collection.mcp.nl2agent_mcp_tools import (
+    NL2AGENT_AGENT_ID_HEADER,
     NL2AGENT_MCP_TOOL_META,
     NL2A_WRAPPER_DESCRIPTION,
     NL2A_WRAPPER_NAME,
@@ -514,12 +515,16 @@ async def test_mcp_search_registration_has_stable_name_schema_and_marker():
     assert "print(result)" in tool.description
     assert tool.description == SEARCH_INSTALLED_MCP_TOOLS_DESCRIPTION
     assert resource_search_tool.description == SEARCH_INSTALLED_RESOURCES_DESCRIPTION
-    assert set(resource_search_tool.parameters["properties"]) == {"requirements"}
+    assert set(resource_search_tool.parameters["properties"]) == {
+        "requirements",
+        "agent_id",
+    }
     assert resource_search_tool.parameters["required"] == ["requirements"]
     assert recommend_tool.description == RECOMMEND_RESOURCES_DESCRIPTION
     assert set(recommend_tool.parameters["properties"]) == {
         "candidates",
         "recommended_refs",
+        "agent_id",
     }
     assert recommend_tool.parameters["required"] == [
         "candidates",
@@ -635,6 +640,133 @@ async def test_save_agent_draft_fields_emits_state_only_for_creation(mocker):
     )
     assert "nl2a_state" not in updated_result
     assert json.loads(updated_result)["created"] is False
+
+
+@pytest.mark.asyncio
+async def test_save_agent_draft_fields_reuses_trusted_context_across_rounds(mocker):
+    request = SimpleNamespace(headers={"Authorization": "Bearer token"})
+    mocker.patch.object(
+        nl2agent_mcp_tools_module,
+        "get_http_request",
+        return_value=request,
+    )
+    mocker.patch.object(
+        nl2agent_mcp_tools_module,
+        "get_current_user_id",
+        return_value=("user-a", "tenant-a"),
+    )
+
+    def save_impl(*, agent_id, fields, tenant_id, user_id):
+        return {
+            "status": "success",
+            "agent_id": 1042,
+            "created": agent_id is None,
+            "updated_fields": list(fields.model_fields_set),
+        }
+
+    save = mocker.patch.object(
+        nl2agent_service,
+        "save_agent_draft_fields_impl",
+        side_effect=save_impl,
+    )
+    first = await save_agent_draft_fields(
+        None,
+        {
+            "name": "research_assistant",
+            "display_name": "Research Assistant",
+            "description": "Researches a topic.",
+            "business_description": "Research and summarize.",
+        },
+    )
+
+    request.headers[NL2AGENT_AGENT_ID_HEADER] = "1042"
+    second = await save_agent_draft_fields(None, {"description": "Updated"})
+    third = await save_agent_draft_fields(None, {"duty_prompt": "Verify sources"})
+
+    assert [call.kwargs["agent_id"] for call in save.call_args_list] == [
+        None,
+        1042,
+        1042,
+    ]
+    assert sum(result.count("<nl2a_state>") for result in (first, second, third)) == 1
+    assert json.loads(second)["created"] is False
+    assert json.loads(third)["created"] is False
+
+
+@pytest.mark.asyncio
+async def test_save_agent_draft_fields_rejects_context_mismatch_without_write(mocker):
+    mocker.patch.object(
+        nl2agent_mcp_tools_module,
+        "get_http_request",
+        return_value=SimpleNamespace(
+            headers={
+                "Authorization": "Bearer token",
+                NL2AGENT_AGENT_ID_HEADER: "1042",
+            }
+        ),
+    )
+    save = mocker.patch.object(
+        nl2agent_service,
+        "save_agent_draft_fields_impl",
+    )
+
+    result = json.loads(
+        await save_agent_draft_fields(1043, {"description": "Wrong draft"})
+    )
+
+    assert result == {
+        "status": "error",
+        "agent_id": 1043,
+        "created": False,
+        "updated_fields": [],
+        "code": "agent_context_mismatch",
+        "retryable": False,
+    }
+    save.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_clarification_wrapper_fills_agent_id_from_trusted_context(mocker):
+    mocker.patch.object(
+        nl2agent_mcp_tools_module,
+        "get_http_request",
+        return_value=SimpleNamespace(
+            headers={
+                "Authorization": "Bearer token",
+                NL2AGENT_AGENT_ID_HEADER: "42",
+            }
+        ),
+    )
+    mocker.patch.object(
+        nl2agent_mcp_tools_module,
+        "get_current_user_id",
+        return_value=("user-a", "tenant-a"),
+    )
+    require_edit = mocker.patch(
+        "services.agent_draft_permission_service.require_agent_draft_edit"
+    )
+
+    wrapped = await nl2a_wrapper(
+        subtype="requirement_clarification",
+        questions=[
+            RequirementClarificationQuestion(
+                question_id="scope",
+                question_type="text",
+                title="What should the Agent cover?",
+                required=True,
+                options=[],
+                allow_other=False,
+                other_input_expanded=False,
+            )
+        ],
+    )
+
+    assert _unwrap_nl2a(wrapped)["agent_id"] == 42
+    require_edit.assert_called_once_with(
+        agent_id=42,
+        tenant_id="tenant-a",
+        user_id="user-a",
+    )
 
 
 @pytest.mark.asyncio

@@ -8,6 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 import { updateToolList } from "@/services/mcpService";
 import { useAgentStore } from "@/stores/agentStore";
+import { useAgentReadOnly } from "@/hooks/agent/useAgentReadOnly";
 import { useToolList } from "@/hooks/agent/useToolList";
 import { useSkillList } from "@/hooks/agent/useSkillList";
 import type { Skill } from "@/types/agentConfig";
@@ -26,7 +27,7 @@ export default function AgentCapability() {
   const { message } = App.useApp();
 
   const currentAgentId = useAgentStore((state) => state.agentId);
-  const isReadOnly = useAgentStore((state) => state.isReadOnly);
+  const isReadOnly = useAgentReadOnly();
   const selectedTools = useAgentStore(
     (state) => state.editedAgent?.tools ?? []
   );

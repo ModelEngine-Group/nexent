@@ -4,7 +4,8 @@ import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { SkillGroup, Skill, SkillParam } from "@/types/agentConfig";
 import { Badge, message, Tabs, Tooltip } from "antd";
-import { useAgentStore } from "@/stores/agentStore"
+import { useAgentStore } from "@/stores/agentStore";
+import { useAgentReadOnly } from "@/hooks/agent/useAgentReadOnly";
 import { useSkillList } from "@/hooks/agent/useSkillList";
 import { Eye, Pencil, Trash2, Settings } from "lucide-react";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
@@ -42,9 +43,8 @@ export default function SkillManagement({
   const { t } = useTranslation("common");
   const { confirm } = useConfirmModal();
 
-  // Use prop if provided, otherwise fall back to store
-  const storeIsReadOnly = useAgentStore((state) => state.isReadOnly);
-  const isReadOnly = isReadOnlyProp ?? storeIsReadOnly;
+  const agentIsReadOnly = useAgentReadOnly();
+  const isReadOnly = Boolean(isReadOnlyProp) || agentIsReadOnly;
 
   const originalSelectedSkills = useAgentStore(
     (state) => state.editedAgent?.skills ?? []

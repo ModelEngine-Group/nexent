@@ -133,7 +133,7 @@ export interface Nl2aRequirementClarificationQuestion {
 
 export interface Nl2aRequirementClarificationPayload {
   subtype: "requirement_clarification";
-  agent_id: null;
+  agent_id: number | null;
   questions: Nl2aRequirementClarificationQuestion[];
 }
 
@@ -1342,7 +1342,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
 
     // Pass selected agent if provided via custom (set by the page wrapper)
     if (
-      (isAgentDebug || !isEphemeralRuntime) &&
+      (isAgentDebug || isNl2Agent || !isEphemeralRuntime) &&
       custom?.agentId !== undefined &&
       custom.agentId !== null
     ) {
@@ -1370,8 +1370,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     );
 
     let agentResponse:
-      | ReadableStreamDefaultReader<Uint8Array>
-      | { type: "json"; data: unknown };
+      ReadableStreamDefaultReader<Uint8Array> | { type: "json"; data: unknown };
     try {
       agentResponse = await conversationService.runAgent(
         {

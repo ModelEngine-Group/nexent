@@ -66,7 +66,12 @@ interface AgentStoreState {
   isSaving: boolean;
   isGenerating: boolean;
   saveError: string | null;
-  defaultLlmConfig: { id: number | null; name: string; displayName: string } | null;
+  lastSaveFailed: boolean;
+  defaultLlmConfig: {
+    id: number | null;
+    name: string;
+    displayName: string;
+  } | null;
 
   initialize: (agent: Agent) => void;
   updateDraft: (patch: AgentDraftPatch) => void;
@@ -83,7 +88,7 @@ interface AgentStoreState {
     config: { id: number | null; name: string; displayName: string } | null
   ) => void;
   setIsGenerating: (value: boolean) => void;
-  waitForIdle: () => Promise<void>;
+  waitForIdle: () => Promise<boolean>;
   clearSaveError: () => void;
   reset: () => void;
 }
@@ -306,6 +311,7 @@ async function processSaveQueue(): Promise<void> {
   if (useAgentStore.getState().isSaving) {
     return;
   }
+  let drainHadFailure = false;
 
   while (true) {
     const task = useAgentStore.getState().queue[0];
@@ -344,8 +350,13 @@ async function processSaveQueue(): Promise<void> {
         savedAgent: mergeDraft(state.savedAgent, task.patch),
         queue: state.queue.slice(1),
         isSaving: false,
+        lastSaveFailed:
+          drainHadFailure || state.queue.length > 1
+            ? state.lastSaveFailed
+            : false,
       }));
     } catch (error) {
+      drainHadFailure = true;
       const currentState = useAgentStore.getState();
       if (
         currentState.agentId !== task.agentId ||
@@ -363,6 +374,7 @@ async function processSaveQueue(): Promise<void> {
           ),
           queue,
           isSaving: false,
+          lastSaveFailed: true,
           saveError:
             error instanceof Error
               ? error.message
@@ -399,6 +411,7 @@ export const useAgentStore = create<AgentStoreState>((set) => {
     isSaving: false,
     isGenerating: false,
     saveError: null,
+    lastSaveFailed: false,
     defaultLlmConfig: null,
 
     initialize: (agent) => {
@@ -415,16 +428,14 @@ export const useAgentStore = create<AgentStoreState>((set) => {
         isSaving: false,
         isGenerating: false,
         saveError: null,
+        lastSaveFailed: false,
       });
     },
 
     updateDraft: (patch) => {
       const draftPatch = cloneDraft(patch);
       const savePatch = cloneDraft(draftPatch);
-      if (
-        savePatch.name !== undefined &&
-        !isValidAgentName(savePatch.name)
-      ) {
+      if (savePatch.name !== undefined && !isValidAgentName(savePatch.name)) {
         delete savePatch.name;
         delete pendingDraftPatch.name;
       }
@@ -491,14 +502,14 @@ export const useAgentStore = create<AgentStoreState>((set) => {
           !useAgentStore.getState().isSaving &&
           useAgentStore.getState().queue.length === 0
         ) {
-          resolve();
+          resolve(!useAgentStore.getState().lastSaveFailed);
           return;
         }
 
         const unsubscribe = useAgentStore.subscribe((state) => {
           if (!state.isSaving && state.queue.length === 0) {
             unsubscribe();
-            resolve();
+            resolve(!state.lastSaveFailed);
           }
         });
       });
@@ -516,6 +527,7 @@ export const useAgentStore = create<AgentStoreState>((set) => {
         isSaving: false,
         isGenerating: false,
         saveError: null,
+        lastSaveFailed: false,
       });
     },
   };

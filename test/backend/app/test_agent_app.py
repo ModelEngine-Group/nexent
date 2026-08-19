@@ -25,6 +25,8 @@ from fastapi.testclient import TestClient
 from consts.const import AGENT_PROMPTS_HIDDEN_FLAG, ASSET_OWNER_TENANT_ID
 from consts.exceptions import UnauthorizedError
 from consts.model import NL2AgentRunRequest
+from services.agent_draft_permission_service import AgentDraftEditError
+from services.nl2agent_service import Nl2AgentDraftSaveError
 
 # Filter out deprecation warnings from third-party libraries
 warnings.filterwarnings(
@@ -233,7 +235,7 @@ async def test_nl2agent_run_api_streams_without_persistent_ids(
     assert "final_answer" in "".join(chunks)
     request = create_stream.call_args.kwargs["request"]
     assert request.query == "Build a weather agent"
-    assert not hasattr(request, "agent_id")
+    assert request.agent_id is None
     assert (
         create_stream.call_args.kwargs["authorization"]
         == mock_auth_header["Authorization"]
@@ -288,6 +290,51 @@ async def test_nl2agent_run_api_hides_internal_startup_errors(mocker):
     assert exc_info.value.status_code == 500
     assert exc_info.value.detail == "NL2Agent run error."
     assert "private model configuration" not in exc_info.value.detail
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("error", "expected_status", "expected_code"),
+    [
+        (AgentDraftEditError("agent_not_found"), 404, "agent_not_found"),
+        (AgentDraftEditError("agent_not_draft"), 400, "agent_not_draft"),
+        (AgentDraftEditError("agent_deleted"), 403, "agent_deleted"),
+        (AgentDraftEditError("agent_read_only"), 403, "agent_read_only"),
+        (
+            Nl2AgentDraftSaveError("agent_context_mismatch"),
+            400,
+            "agent_context_mismatch",
+        ),
+    ],
+)
+async def test_nl2agent_run_api_maps_draft_identity_errors(
+    mocker,
+    error,
+    expected_status,
+    expected_code,
+):
+    mocker.patch(
+        "apps.agent_app.get_current_user_info",
+        return_value=("user-a", "tenant-a", "en"),
+    )
+    mocker.patch(
+        "apps.agent_app.create_nl2agent_stream",
+        new_callable=AsyncMock,
+        side_effect=error,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await nl2agent_run_api(
+            nl2agent_request=NL2AgentRunRequest(
+                query="Continue configuring the Agent",
+                agent_id=42,
+            ),
+            http_request=MagicMock(),
+            authorization="Bearer tenant-token",
+        )
+
+    assert exc_info.value.status_code == expected_status
+    assert exc_info.value.detail["code"] == expected_code
 
 
 async def test_agent_run_api_error_debug_mode(mocker, mock_auth_header):

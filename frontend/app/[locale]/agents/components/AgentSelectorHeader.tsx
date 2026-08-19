@@ -43,14 +43,12 @@ interface AgentSelectorHeaderProps {
   onOpenVersionManage: () => void;
   isShowVersionManagePanel?: boolean;
   onCloseVersionManagePanel?: () => void;
-  onAgentContextChange?: (agentId: number | null) => void;
 }
 
 export default function AgentSelectorHeader({
   onOpenVersionManage,
   isShowVersionManagePanel = false,
   onCloseVersionManagePanel,
-  onAgentContextChange,
 }: AgentSelectorHeaderProps) {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
@@ -412,7 +410,6 @@ export default function AgentSelectorHeader({
       const result = await searchAgentInfo(Number(agent.id));
       if (result.success && result.data) {
         setCurrentAgent(result.data);
-        onAgentContextChange?.(Number(agent.id));
         const nextSearchParams = new URLSearchParams(searchParams.toString());
         nextSearchParams.set("agent_id", String(agent.id));
         router.replace(`${pathname}?${nextSearchParams.toString()}`);
@@ -592,7 +589,6 @@ export default function AgentSelectorHeader({
 
   const handleCreateAgent = () => {
     enterCreateMode();
-    onAgentContextChange?.(null);
     const nextSearchParams = new URLSearchParams(searchParams.toString());
     nextSearchParams.delete("agent_id");
     const query = nextSearchParams.toString();

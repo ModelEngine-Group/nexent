@@ -48,6 +48,7 @@ from services.prompt_template_service import (
 from tool_collection.mcp.nl2agent_mcp_tools import (
     AgentDraftFields,
     InstalledMcpToolRecommendation,
+    NL2AGENT_AGENT_ID_HEADER,
     RecommendResourcesOutput,
     RecommendedResource,
     ResourceCandidate,
@@ -758,13 +759,30 @@ def _parse_installed_binding_action(query: str) -> int | None:
     return agent_id
 
 
+def _parse_nl2agent_card_action_agent_id(query: str) -> int | None:
+    """Return a valid optional Agent ID from a structured NL2Agent action."""
+
+    try:
+        action = json.loads(query)
+    except (TypeError, json.JSONDecodeError):
+        return None
+    if not isinstance(action, dict) or action.get("type") != "nl2agent_card_action":
+        return None
+    agent_id = action.get("agent_id")
+    if agent_id is None:
+        return None
+    if not isinstance(agent_id, int) or isinstance(agent_id, bool) or agent_id <= 0:
+        raise Nl2AgentDraftSaveError("agent_context_mismatch")
+    return agent_id
+
+
 async def _build_verified_bound_resources_context(
     *,
     agent_id: int,
     tenant_id: str,
     user_id: str,
 ) -> ContextItemInput:
-    require_agent_draft_edit(
+    draft = require_agent_draft_edit(
         agent_id=agent_id,
         tenant_id=tenant_id,
         user_id=user_id,
@@ -821,6 +839,15 @@ async def _build_verified_bound_resources_context(
     state = {
         "type": "nl2agent_verified_state",
         "agent_id": agent_id,
+        "draft_fields": (
+            {
+                field_name: draft.get(field_name)
+                for field_name in AGENT_DRAFT_FIELD_ORDER
+                if draft.get(field_name) is not None
+            }
+            if isinstance(draft, dict)
+            else {}
+        ),
         "bound_resources": facts,
     }
     return ContextItemInput(
@@ -862,12 +889,26 @@ async def build_nl2agent_run_info(
     model_config_list = await create_model_config_list(tenant_id)
     agent_config = create_nl2agent_agent_config(language)
     binding_agent_id = _parse_installed_binding_action(request.query)
-    if binding_agent_id is not None:
+    action_agent_id = _parse_nl2agent_card_action_agent_id(request.query)
+    if (
+        request.agent_id is not None
+        and action_agent_id is not None
+        and request.agent_id != action_agent_id
+    ):
+        raise Nl2AgentDraftSaveError("agent_context_mismatch")
+    effective_agent_id = request.agent_id or action_agent_id
+    if (
+        binding_agent_id is not None
+        and effective_agent_id is not None
+        and binding_agent_id != effective_agent_id
+    ):
+        raise Nl2AgentDraftSaveError("agent_context_mismatch")
+    if effective_agent_id is not None:
         user_id, authenticated_tenant_id = get_current_user_id(authorization)
         if authenticated_tenant_id != tenant_id:
             raise PermissionError("tenant mismatch")
         binding_context = await _build_verified_bound_resources_context(
-            agent_id=binding_agent_id,
+            agent_id=effective_agent_id,
             tenant_id=tenant_id,
             user_id=user_id,
         )
@@ -919,8 +960,13 @@ async def build_nl2agent_run_info(
         "url": urljoin(LOCAL_MCP_SERVER, "sse"),
         "transport": "sse",
     }
+    mcp_headers: dict[str, str] = {}
     if authorization:
-        mcp_config["headers"] = {"Authorization": authorization}
+        mcp_headers["Authorization"] = authorization
+    if effective_agent_id is not None:
+        mcp_headers[NL2AGENT_AGENT_ID_HEADER] = str(effective_agent_id)
+    if mcp_headers:
+        mcp_config["headers"] = mcp_headers
 
     run_info = AgentRunInfo(
         query=final_query,

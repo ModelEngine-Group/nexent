@@ -156,7 +156,7 @@ def test_build_nl2agent_system_prompt_is_runtime_specific(
     assert 'subtype="requirement_clarification"' in prompt
     assert 'subtype="agent_draft"' in prompt
     assert "save_agent_draft_fields" in prompt
-    assert "result = runtime_search(requirements=[" in prompt
+    assert "result = runtime_search(agent_id=1042, requirements=[" in prompt
     assert "wrapped = runtime_wrapper(" in prompt
     assert "search_result=result" in prompt
     assert "recommend_resources" in prompt
@@ -399,8 +399,13 @@ async def test_create_nl2agent_agent_config_has_only_runtime_tools(language):
     ]
     assert all(tool.source == "mcp" for tool in config.tools)
     assert all(tool.usage == "outer-apis" for tool in config.tools)
-    assert config.tools[0].inputs == '{"requirements":"list[ResourceRequirement]"}'
+    search_inputs = json.loads(config.tools[0].inputs)
+    assert search_inputs == {
+        "agent_id": "int | None",
+        "requirements": "list[ResourceRequirement]",
+    }
     recommend_inputs = json.loads(config.tools[1].inputs)
+    assert recommend_inputs["agent_id"] == "int | None"
     assert recommend_inputs["candidates"] == "list[ResourceCandidate]"
     save_inputs = json.loads(config.tools[2].inputs)
     assert save_inputs["agent_id"] == "int | None"

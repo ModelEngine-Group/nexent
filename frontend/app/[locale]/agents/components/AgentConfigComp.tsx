@@ -31,7 +31,6 @@ import {
   Globe,
 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { useAgentReadOnly } from "@/hooks/agent/useAgentReadOnly";
 
 export default function AgentConfigComp() {
   const { t } = useTranslation("common");
@@ -40,7 +39,7 @@ export default function AgentConfigComp() {
   // Get state from store
   const currentAgentId = useAgentConfigStore((state) => state.currentAgentId);
   const isCreatingMode = useAgentConfigStore((state) => state.isCreatingMode);
-  const isReadOnly = useAgentReadOnly();
+  const isReadOnly = useAgentConfigStore((state) => state.isReadOnly());
   const selectedTools = useAgentConfigStore((state) => state.editedAgent.tools);
   const selectedSkills = useAgentConfigStore(
     (state) => state.editedAgent.skills
@@ -160,7 +159,6 @@ export default function AgentConfigComp() {
                 size="small"
                 icon={<Globe size={16} />}
                 onClick={() => setShowA2ADiscovery(true)}
-                disabled={isReadOnly}
                 className="!text-green-600 hover:!bg-green-50 hover:!text-green-700"
                 title={t("toolManagement.refresh.title")}
               >
@@ -245,7 +243,6 @@ export default function AgentConfigComp() {
                       icon={<RefreshCw size={16} />}
                       onClick={handleRefreshTools}
                       loading={isRefreshing}
-                      disabled={isReadOnly}
                       className="!text-emerald-600 hover:!text-emerald-700 hover:!bg-emerald-50"
                     >
                       {t("toolManagement.refresh.button.refresh")}
@@ -255,7 +252,6 @@ export default function AgentConfigComp() {
                       size="small"
                       icon={<Plug size={16} />}
                       onClick={() => setIsMcpModalOpen(true)}
-                      disabled={isReadOnly}
                       className="!text-blue-600 hover:!text-blue-700 hover:!bg-blue-50"
                     >
                       {t("toolManagement.mcp.button")}
@@ -267,10 +263,7 @@ export default function AgentConfigComp() {
                       size="small"
                       icon={<Wrench size={14} />}
                       onClick={() => setIsToolSelectOpen(true)}
-                      disabled={
-                        isReadOnly ||
-                        (currentAgentId === null && !isCreatingMode)
-                      }
+                      disabled={currentAgentId === null && !isCreatingMode}
                       className="!inline-flex h-7 !items-center !justify-center gap-1 border border-gray-200 bg-white text-xs leading-none hover:!border-gray-300 hover:!bg-gray-50"
                     >
                       <span className="inline-flex items-center self-center leading-none">
@@ -287,7 +280,6 @@ export default function AgentConfigComp() {
                 <ToolManagement
                   isCreatingMode={isCreatingMode}
                   currentAgentId={currentAgentId ?? undefined}
-                  isReadOnly={isReadOnly}
                 />
               </Col>
             </Row>
@@ -307,7 +299,6 @@ export default function AgentConfigComp() {
                       icon={<RefreshCw size={16} />}
                       onClick={handleRefreshSkills}
                       loading={isRefreshingSkill}
-                      disabled={isReadOnly}
                       className="!text-emerald-600 hover:!text-emerald-700 hover:!bg-emerald-50"
                       title={t("skillManagement.refresh.title")}
                     >
@@ -321,7 +312,6 @@ export default function AgentConfigComp() {
                         setEditingSkill(null);
                         setIsSkillModalOpen(true);
                       }}
-                      disabled={isReadOnly}
                       className="!text-blue-600 hover:!text-blue-700 hover:!bg-blue-50"
                       title={t("skillManagement.build.title")}
                     >
@@ -332,9 +322,7 @@ export default function AgentConfigComp() {
                     size="small"
                     icon={<Wrench size={14} />}
                     onClick={() => setIsSkillSelectOpen(true)}
-                    disabled={
-                      isReadOnly || (currentAgentId === null && !isCreatingMode)
-                    }
+                    disabled={currentAgentId === null && !isCreatingMode}
                     className="!inline-flex h-7 !items-center !justify-center gap-1 border border-gray-200 bg-white text-xs leading-none hover:!border-gray-300 hover:!bg-gray-50"
                   >
                     <span className="inline-flex items-center self-center leading-none">
@@ -370,7 +358,6 @@ export default function AgentConfigComp() {
         onOpenManageLabels={() => setLabelModalOpen(true)}
         isCreatingMode={isCreatingMode}
         currentAgentId={currentAgentId ?? undefined}
-        isReadOnly={isReadOnly}
       />
 
       <LabelManagementModal

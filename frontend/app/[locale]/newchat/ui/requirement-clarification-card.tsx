@@ -29,7 +29,8 @@ export const RequirementClarificationCard: FC<{
   const aui = useAui();
   const reactId = useId();
   const cardKey = `requirement_clarification:${reactId}`;
-  const { registerCard, submitCard, isCardInteractive } = useNl2AgentFlow();
+  const { agentId, registerCard, submitCard, isCardInteractive } =
+    useNl2AgentFlow();
   const [answers, setAnswers] = useState<Record<string, AnswerValue>>({});
   const [otherAnswers, setOtherAnswers] = useState<Record<string, string>>({});
   const [isSubmitted, setIsSubmitted] = useState(false);
@@ -76,7 +77,7 @@ export const RequirementClarificationCard: FC<{
     const action: Nl2AgentCardAction = {
       type: "nl2agent_card_action",
       subtype: payload.subtype,
-      agent_id: null,
+      agent_id: payload.agent_id ?? agentId,
       action: "submit",
       result: {
         answers: payload.questions.map((question) => ({

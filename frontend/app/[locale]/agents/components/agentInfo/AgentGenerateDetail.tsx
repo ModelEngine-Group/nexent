@@ -50,7 +50,6 @@ import PromptOptimizeModal from "./PromptOptimizeModal";
 import GuardrailConfigContent from "./GuardrailConfigContent";
 import type { GuardrailConfigContentRef } from "./GuardrailConfigContent";
 import { isAgentPromptsHidden } from "@/lib/agentPromptVisibility";
-import { useAgentReadOnly } from "@/hooks/agent/useAgentReadOnly";
 
 const { TextArea } = Input;
 
@@ -80,7 +79,7 @@ export default function AgentGenerateDetail({}) {
   const editedAgent = useAgentConfigStore((state) => state.editedAgent);
   const currentAgentId = useAgentConfigStore((state) => state.currentAgentId);
   const forceRefreshKey = useAgentConfigStore((state) => state.forceRefreshKey);
-  const isReadOnly = useAgentReadOnly();
+  const isReadOnly = useAgentConfigStore((state) => state.isReadOnly());
   const updateAgentConfig = useAgentConfigStore((state) => state.updateAgentConfig);
   const setSaveValidation = useAgentConfigStore((state) => state.setSaveValidation);
   const isGenerating = useAgentConfigStore((state) => state.isGenerating);

@@ -1,11 +1,6 @@
 "use client";
 
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { App, Button, Form } from "antd";
 import {
@@ -16,6 +11,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { useAgentStore } from "@/stores/agentStore";
+import { useAgentReadOnly } from "@/hooks/agent/useAgentReadOnly";
 
 import AgentInfo from "./components/agent-info";
 import AgentPrmopt from "./components/agent-prompt";
@@ -110,7 +106,7 @@ export default function AgentConfig({
   const [form] = Form.useForm();
   const [isPublishModalOpen, setIsPublishModalOpen] = useState(false);
 
-  const isReadOnly = useAgentStore((state) => state.isReadOnly);
+  const isReadOnly = useAgentReadOnly();
   const agentId = useAgentStore((state) => state.agentId);
   const editedAgent = useAgentStore((state) => state.editedAgent);
   const flushDraft = useAgentStore((state) => state.flushDraft);
@@ -246,7 +242,9 @@ export default function AgentConfig({
           {/* 5. 发布属性 */}
           <ConfigSection
             title={t("agent.config.section.publishAttributes.title")}
-            description={t("agent.config.section.publishAttributes.description")}
+            description={t(
+              "agent.config.section.publishAttributes.description"
+            )}
             icon={<Globe className="h-4 w-4 shrink-0 text-blue-500" />}
           >
             <AgentDeployment />
@@ -259,7 +257,9 @@ export default function AgentConfig({
         >
           <ConfigSection
             title={t("agent.config.section.collaborativeAgents.title")}
-            description={t("agent.config.section.collaborativeAgents.description")}
+            description={t(
+              "agent.config.section.collaborativeAgents.description"
+            )}
             icon={<Cpu className="h-4 w-4 shrink-0 text-blue-500" />}
             headerActions={<CollaborativeAgentActions />}
           >
@@ -277,7 +277,9 @@ export default function AgentConfig({
 
           <ConfigSection
             title={t("agent.config.section.conversationGuide.title")}
-            description={t("agent.config.section.conversationGuide.description")}
+            description={t(
+              "agent.config.section.conversationGuide.description"
+            )}
             icon={<MessageSquare className="h-4 w-4 shrink-0 text-blue-500" />}
           >
             <AgentGuide />

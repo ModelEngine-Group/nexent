@@ -23,6 +23,7 @@ SEARCH_UNINSTALLED_RESOURCES_NAME = "search_uninstalled_resources"
 RECOMMEND_RESOURCES_NAME = "recommend_resources"
 SAVE_AGENT_DRAFT_FIELDS_NAME = "save_agent_draft_fields"
 NL2A_WRAPPER_NAME = "nl2a_wrapper"
+NL2AGENT_AGENT_ID_HEADER = "X-Nexent-NL2Agent-Agent-ID"
 SEARCH_INSTALLED_MCP_TOOLS_DESCRIPTION = (
     "Search the current tenant's installed and available MCP tools using keywords. "
     "Returns a structured JSON observation ordered by relevance. "
@@ -38,7 +39,8 @@ SEARCH_INSTALLED_RESOURCES_DESCRIPTION = (
 RECOMMEND_RESOURCES_DESCRIPTION = (
     "Resolve installed resource candidates into verified binding-card details. "
     "Pass the unchanged candidates returned by search_installed_resources and a "
-    "unique recommended_refs subset, then pass this result unchanged to "
+    "unique recommended_refs subset. Reuse the current agent_id when one exists, "
+    "then pass this result unchanged to "
     "nl2a_wrapper with subtype installed_resource_binding."
 )
 NL2A_WRAPPER_DESCRIPTION = (
@@ -52,7 +54,8 @@ NL2A_WRAPPER_DESCRIPTION = (
 SAVE_AGENT_DRAFT_FIELDS_DESCRIPTION = (
     "Create or partially update the current tenant's ordinary agent draft. "
     "Pass only whitelisted fields, never null. Creation requires name, "
-    "display_name, description, and business_description. Call the tool as "
+    "display_name, description, and business_description. Reuse the current "
+    "agent_id whenever one exists. Call the tool as "
     "`result = save_agent_draft_fields(...)`, then use `print(result)` exactly once."
 )
 NL2AGENT_MCP_TOOL_META = {"nexent_internal": True}
@@ -215,6 +218,11 @@ class ResourceToolError(BaseModel):
         "resource_not_found",
         "resource_not_visible",
         "resource_resolution_failed",
+        "agent_context_mismatch",
+        "agent_not_found",
+        "agent_not_draft",
+        "agent_deleted",
+        "agent_read_only",
         "unauthorized",
     ]
     retryable: bool
@@ -297,6 +305,7 @@ class SaveAgentDraftFieldsError(BaseModel):
         "agent_not_draft",
         "agent_deleted",
         "agent_read_only",
+        "agent_context_mismatch",
         "draft_save_failed",
         "unauthorized",
     ]
@@ -356,7 +365,7 @@ class RequirementClarificationPayload(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
     subtype: Literal["requirement_clarification"] = "requirement_clarification"
-    agent_id: None = None
+    agent_id: int | None = Field(default=None, gt=0)
     questions: list[RequirementClarificationQuestion] = Field(
         min_length=1,
         max_length=MAX_REQUIREMENT_CLARIFICATION_QUESTIONS,
@@ -628,6 +637,7 @@ def build_nl2a_wrapper(
         if questions is None:
             raise ValueError("requirement_clarification requires questions")
         output = RequirementClarificationPayload(
+            agent_id=agent_id,
             questions=questions,
         ).model_dump(mode="json")
     elif subtype == "installed_resource_binding":
@@ -757,7 +767,10 @@ def create_nl2agent_mcp_tool_configs() -> list[ToolConfig]:
             class_name=SEARCH_INSTALLED_RESOURCES_NAME,
             name=SEARCH_INSTALLED_RESOURCES_NAME,
             description=SEARCH_INSTALLED_RESOURCES_DESCRIPTION,
-            inputs='{"requirements":"list[ResourceRequirement]"}',
+            inputs=(
+                '{"agent_id":"int | None",'
+                '"requirements":"list[ResourceRequirement]"}'
+            ),
             output_type="object",
             params={},
             source="mcp",
@@ -768,7 +781,8 @@ def create_nl2agent_mcp_tool_configs() -> list[ToolConfig]:
             name=RECOMMEND_RESOURCES_NAME,
             description=RECOMMEND_RESOURCES_DESCRIPTION,
             inputs=(
-                '{"candidates":"list[ResourceCandidate]",'
+                '{"agent_id":"int | None",'
+                '"candidates":"list[ResourceCandidate]",'
                 '"recommended_refs":"list[str]"}'
             ),
             output_type="object",
@@ -836,6 +850,37 @@ def create_nl2agent_mcp_tool_configs() -> list[ToolConfig]:
             usage="outer-apis",
         ),
     ]
+
+
+class AgentContextMismatchError(Exception):
+    """The model supplied an Agent ID that conflicts with trusted run context."""
+
+
+def _resolve_agent_context_id(agent_id: int | None) -> int | None:
+    """Resolve and validate the request-scoped Agent ID forwarded by NL2Agent."""
+
+    try:
+        raw_context_id = get_http_request().headers.get(NL2AGENT_AGENT_ID_HEADER)
+    except RuntimeError:
+        # Pure unit calls have no FastMCP HTTP context.
+        raw_context_id = None
+    if raw_context_id is None:
+        return agent_id
+    try:
+        context_id = int(raw_context_id)
+    except (TypeError, ValueError) as exc:
+        raise AgentContextMismatchError("agent_context_mismatch") from exc
+    if context_id <= 0 or (agent_id is not None and agent_id != context_id):
+        raise AgentContextMismatchError("agent_context_mismatch")
+    return context_id
+
+
+def _agent_context_error(code: str = "agent_context_mismatch") -> str:
+    return json.dumps(
+        {"status": "error", "code": code, "retryable": False},
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
 
 
 def _dump_tool_search_observation(
@@ -918,6 +963,7 @@ def _dump_resource_tool_error(
 
 async def search_installed_resources(
     requirements: list[dict[str, Any]],
+    agent_id: int | None = None,
 ) -> dict[str, Any]:
     """Search installed resources through a safe tenant-scoped service boundary."""
 
@@ -930,16 +976,36 @@ async def search_installed_resources(
         )
 
     try:
+        resolved_agent_id = _resolve_agent_context_id(agent_id)
+    except AgentContextMismatchError:
+        return _dump_resource_tool_error(
+            "agent_context_mismatch",
+            retryable=False,
+        )
+
+    try:
+        from services.agent_draft_permission_service import (
+            AgentDraftEditError,
+            require_agent_draft_edit,
+        )
         from services.nl2agent_service import search_installed_resources_impl
 
         authorization = get_http_request().headers.get("Authorization")
         user_id, tenant_id = get_current_user_id(authorization)
+        if resolved_agent_id is not None:
+            require_agent_draft_edit(
+                agent_id=resolved_agent_id,
+                tenant_id=tenant_id,
+                user_id=user_id,
+            )
         result = await search_installed_resources_impl(
             requirements=payload.requirements,
             tenant_id=tenant_id,
             user_id=user_id,
         )
         return result.model_dump(mode="json")
+    except AgentDraftEditError as exc:
+        return _dump_resource_tool_error(exc.code, retryable=False)
     except (PermissionError, UnauthorizedError):
         return _dump_resource_tool_error("unauthorized", retryable=False)
     except Exception:
@@ -953,6 +1019,7 @@ async def search_installed_resources(
 async def recommend_resources(
     candidates: list[dict[str, Any]],
     recommended_refs: list[str],
+    agent_id: int | None = None,
 ) -> dict[str, Any]:
     """Resolve installed candidates into verified binding-card metadata."""
 
@@ -965,6 +1032,18 @@ async def recommend_resources(
         return _dump_resource_tool_error("invalid_candidates", retryable=False)
 
     try:
+        resolved_agent_id = _resolve_agent_context_id(agent_id)
+    except AgentContextMismatchError:
+        return _dump_resource_tool_error(
+            "agent_context_mismatch",
+            retryable=False,
+        )
+
+    try:
+        from services.agent_draft_permission_service import (
+            AgentDraftEditError,
+            require_agent_draft_edit,
+        )
         from services.nl2agent_service import (
             Nl2AgentResourceError,
             recommend_installed_resources_impl,
@@ -972,6 +1051,12 @@ async def recommend_resources(
 
         authorization = get_http_request().headers.get("Authorization")
         user_id, tenant_id = get_current_user_id(authorization)
+        if resolved_agent_id is not None:
+            require_agent_draft_edit(
+                agent_id=resolved_agent_id,
+                tenant_id=tenant_id,
+                user_id=user_id,
+            )
         result = await recommend_installed_resources_impl(
             candidates=payload.candidates,
             recommended_refs=payload.recommended_refs,
@@ -979,6 +1064,8 @@ async def recommend_resources(
             user_id=user_id,
         )
         return result.model_dump(mode="json")
+    except AgentDraftEditError as exc:
+        return _dump_resource_tool_error(exc.code, retryable=False)
     except Nl2AgentResourceError as exc:
         return _dump_resource_tool_error(
             exc.code,
@@ -1019,22 +1106,36 @@ async def nl2a_wrapper(
 ) -> str:
     """Return the NL2Agent JSON template selected by subtype in its wrapper."""
 
+    from services.agent_draft_permission_service import (
+        AgentDraftEditError,
+        require_agent_draft_edit,
+    )
+
+    try:
+        resolved_agent_id = _resolve_agent_context_id(agent_id)
+        if resolved_agent_id is not None:
+            authorization = get_http_request().headers.get("Authorization")
+            user_id, tenant_id = get_current_user_id(authorization)
+            require_agent_draft_edit(
+                agent_id=resolved_agent_id,
+                tenant_id=tenant_id,
+                user_id=user_id,
+            )
+    except AgentContextMismatchError:
+        return _agent_context_error()
+    except AgentDraftEditError as exc:
+        return _agent_context_error(exc.code)
+    except (PermissionError, UnauthorizedError):
+        return _agent_context_error("unauthorized")
+
     if subtype == "installed_resource_binding":
-        if agent_id is None or resource_result is None:
+        if resolved_agent_id is None or resource_result is None:
             raise ValueError(
                 "installed_resource_binding requires agent_id and resource_result"
             )
         supplied = RecommendResourcesOutput.model_validate(resource_result)
-        from services.agent_draft_permission_service import require_agent_draft_edit
         from services.nl2agent_service import recommend_installed_resources_impl
 
-        authorization = get_http_request().headers.get("Authorization")
-        user_id, tenant_id = get_current_user_id(authorization)
-        require_agent_draft_edit(
-            agent_id=agent_id,
-            tenant_id=tenant_id,
-            user_id=user_id,
-        )
         verified = await recommend_installed_resources_impl(
             candidates=[resource.candidate for resource in supplied.resources],
             recommended_refs=[
@@ -1047,13 +1148,13 @@ async def nl2a_wrapper(
         )
         return build_nl2a_wrapper(
             subtype=subtype,
-            agent_id=agent_id,
+            agent_id=resolved_agent_id,
             resource_result=verified,
         )
 
     return build_nl2a_wrapper(
         subtype=subtype,
-        agent_id=agent_id,
+        agent_id=resolved_agent_id,
         resource_result=resource_result,
         questions=questions,
         search_result=search_result,
@@ -1103,6 +1204,17 @@ async def save_agent_draft_fields(
         )
 
     try:
+        resolved_agent_id = _resolve_agent_context_id(payload.agent_id)
+    except AgentContextMismatchError:
+        return _serialize_agent_draft_save_result(
+            SaveAgentDraftFieldsError(
+                agent_id=payload.agent_id,
+                code="agent_context_mismatch",
+                retryable=False,
+            )
+        )
+
+    try:
         from services.nl2agent_service import (
             Nl2AgentDraftSaveError,
             save_agent_draft_fields_impl,
@@ -1111,7 +1223,7 @@ async def save_agent_draft_fields(
         authorization = get_http_request().headers.get("Authorization")
         user_id, tenant_id = get_current_user_id(authorization)
         result = save_agent_draft_fields_impl(
-            agent_id=payload.agent_id,
+            agent_id=resolved_agent_id,
             fields=payload.fields,
             tenant_id=tenant_id,
             user_id=user_id,
@@ -1122,7 +1234,7 @@ async def save_agent_draft_fields(
     except Nl2AgentDraftSaveError as exc:
         return _serialize_agent_draft_save_result(
             SaveAgentDraftFieldsError(
-                agent_id=payload.agent_id,
+                agent_id=resolved_agent_id,
                 code=exc.code,
                 retryable=exc.retryable,
             )
@@ -1130,7 +1242,7 @@ async def save_agent_draft_fields(
     except (PermissionError, UnauthorizedError):
         return _serialize_agent_draft_save_result(
             SaveAgentDraftFieldsError(
-                agent_id=payload.agent_id,
+                agent_id=resolved_agent_id,
                 code="unauthorized",
                 retryable=False,
             )
@@ -1139,7 +1251,7 @@ async def save_agent_draft_fields(
         logger.exception("Failed to save NL2Agent draft fields")
         return _serialize_agent_draft_save_result(
             SaveAgentDraftFieldsError(
-                agent_id=payload.agent_id,
+                agent_id=resolved_agent_id,
                 code="draft_save_failed",
                 retryable=True,
             )

@@ -10,6 +10,7 @@ import { useExternalAgents } from "@/hooks/agent/useExternalAgents";
 import { usePublishedAgentList } from "@/hooks/agent/usePublishedAgentList";
 import { a2aClientService, A2AExternalAgent } from "@/services/a2aService";
 import { useAgentStore } from "@/stores/agentStore";
+import { useAgentReadOnly } from "@/hooks/agent/useAgentReadOnly";
 import { Agent } from "@/types/agentConfig";
 
 type CollaborativeAgentListItem = {
@@ -62,7 +63,9 @@ export function CollaborativeAgentList({
           {!readOnly && onRemove && (
             <button
               type="button"
-              aria-label={t("agent.collaborative.removeAria", { name: agent.name })}
+              aria-label={t("agent.collaborative.removeAria", {
+                name: agent.name,
+              })}
               onClick={() => onRemove(Number(agent.id))}
               className="shrink-0 text-muted-foreground hover:text-destructive"
             >
@@ -88,7 +91,7 @@ export function CollaborativeAgentActions() {
   const updateExternalSubAgentIds = useAgentStore(
     (state) => state.updateExternalSubAgentIds
   );
-  const isReadOnly = useAgentStore((state) => state.isReadOnly);
+  const isReadOnly = useAgentReadOnly();
   const relatedAgentIds = Array.isArray(editedAgent?.sub_agent_id_list)
     ? editedAgent.sub_agent_id_list
     : [];
@@ -178,7 +181,7 @@ export default function CollaborativeAgent() {
   const updateExternalSubAgentIds = useAgentStore(
     (state) => state.updateExternalSubAgentIds
   );
-  const isReadOnly = useAgentStore((state) => state.isReadOnly);
+  const isReadOnly = useAgentReadOnly();
 
   const { availableAgents: internalAgents } = usePublishedAgentList();
   const { availableAgents: externalAgents } = useExternalAgents();
@@ -365,15 +368,15 @@ export default function CollaborativeAgent() {
           </div>
         ) : (
           <div className="flex min-h-20 items-center justify-center gap-4 rounded-md border border-dashed border-gray-300 bg-white px-4 py-3">
-          <div className="flex items-center gap-3">
-            <div>
-              <p className="text-sm font-medium text-gray-700"></p>
-              <p className="mt-0.5 text-xs text-gray-400">
-              {t("agent.collaborative.emptyHint")}
-              </p>
+            <div className="flex items-center gap-3">
+              <div>
+                <p className="text-sm font-medium text-gray-700"></p>
+                <p className="mt-0.5 text-xs text-gray-400">
+                  {t("agent.collaborative.emptyHint")}
+                </p>
+              </div>
             </div>
           </div>
-        </div>
         )}
       </Col>
     </>

@@ -67,7 +67,6 @@ interface SelectToolsDialogProps {
   onOpenManageLabels: () => void;
   isCreatingMode?: boolean;
   currentAgentId?: number;
-  isReadOnly?: boolean;
 }
 
 export default function SelectToolsDialog({
@@ -76,7 +75,6 @@ export default function SelectToolsDialog({
   onOpenManageLabels,
   isCreatingMode,
   currentAgentId,
-  isReadOnly = false,
 }: SelectToolsDialogProps) {
   const { t } = useTranslation("common");
   const { confirm } = useConfirmModal();
@@ -295,7 +293,6 @@ export default function SelectToolsDialog({
   // --- Open ToolConfigModal (which handles add/update internally) ---
   const openConfigModal = useCallback(
     async (tool: any) => {
-      if (isReadOnly) return;
       const numericId = parseInt(tool.id);
       const kbType = getToolKbType(tool.name);
       if (kbType) prefetchKnowledgeBases(kbType);
@@ -311,13 +308,12 @@ export default function SelectToolsDialog({
       setConfigParams(mergedParams);
       setConfigModalOpen(true);
     },
-    [isReadOnly, mergeInstanceParams, prefetchKnowledgeBases]
+    [mergeInstanceParams, prefetchKnowledgeBases]
   );
 
   // --- Checkbox toggle ---
   const handleToolToggle = useCallback(
     async (tool: any) => {
-      if (isReadOnly) return;
       const numericId = parseInt(tool.id);
       const kbType = getToolKbType(tool.name);
       if (kbType) prefetchKnowledgeBases(kbType);
@@ -360,11 +356,11 @@ export default function SelectToolsDialog({
         await doAdd();
       }
     },
-    [prefetchKnowledgeBases, mergeInstanceParams, hasMissingRequired, confirm, updateTools, t, isReadOnly]
+    [prefetchKnowledgeBases, mergeInstanceParams, hasMissingRequired, confirm, updateTools, t]
   );
 
   const selectAllVisibleTools = useCallback(async () => {
-    if (isReadOnly || isSelectingAll) return;
+    if (isSelectingAll) return;
 
     const currentSelected = useAgentConfigStore.getState().editedAgent.tools;
     const currentSelectedIds = new Set(
@@ -406,7 +402,6 @@ export default function SelectToolsDialog({
     }
   }, [
     hasMissingRequired,
-    isReadOnly,
     isSelectingAll,
     mergeInstanceParams,
     selectableToolsInActiveGroup,
@@ -414,7 +409,7 @@ export default function SelectToolsDialog({
   ]);
 
   const deselectAllVisibleTools = useCallback(() => {
-    if (isReadOnly || !activeToolGroup) return;
+    if (!activeToolGroup) return;
 
     const visibleToolIds = new Set(
       activeToolGroup.tools.map((tool: any) => parseInt(tool.id))
@@ -423,7 +418,7 @@ export default function SelectToolsDialog({
     updateTools(
       currentSelected.filter((tool) => !visibleToolIds.has(parseInt(tool.id)))
     );
-  }, [activeToolGroup, isReadOnly, updateTools]);
+  }, [activeToolGroup, updateTools]);
 
   const tabItems: TabsProps["items"] = SOURCE_TABS
     .filter((tab) => (sourceGroups[tab.key] || []).length > 0)
@@ -505,7 +500,7 @@ export default function SelectToolsDialog({
           <Button
             loading={isSelectingAll}
             disabled={
-              isReadOnly || isSelectingAll || selectableToolsInActiveGroup.length === 0
+              isSelectingAll || selectableToolsInActiveGroup.length === 0
             }
             onClick={() => {
               if (allVisibleSelectableToolsSelected) {
@@ -565,14 +560,12 @@ export default function SelectToolsDialog({
                   <ul className="space-y-1">
                     {g.tools.map((tool: any) => {
                       const isSelected = selectedToolIds.has(parseInt(tool.id));
-                      const disabled =
-                        isReadOnly ||
-                        isToolDisabled(
-                          tool.name,
-                          isImageUnderstandingAvailable,
-                          isVideoUnderstandingAvailable,
-                          isEmbeddingAvailable
-                        );
+                      const disabled = isToolDisabled(
+                        tool.name,
+                        isImageUnderstandingAvailable,
+                        isVideoUnderstandingAvailable,
+                        isEmbeddingAvailable
+                      );
                       const disabledTooltipKey = disabled
                         ? getToolDisabledTooltipKey(
                             tool.name,

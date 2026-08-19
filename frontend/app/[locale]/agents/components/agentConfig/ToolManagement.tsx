@@ -47,11 +47,10 @@ const SOURCE_META: Record<
 interface ToolManagementProps {
   isCreatingMode?: boolean;
   currentAgentId?: number;
-  isReadOnly?: boolean;
 }
 
 /** Display selected tools as grouped, collapsible cards (demo layout). */
-export default function ToolManagement({ isCreatingMode, currentAgentId, isReadOnly = false }: ToolManagementProps) {
+export default function ToolManagement({ isCreatingMode, currentAgentId }: ToolManagementProps) {
   const { t } = useTranslation("common");
   const { prefetchKnowledgeBases } = usePrefetchKnowledgeBases();
   const { isImageUnderstandingAvailable, isVideoUnderstandingAvailable, isEmbeddingAvailable } = useConfig();
@@ -116,7 +115,6 @@ export default function ToolManagement({ isCreatingMode, currentAgentId, isReadO
 
   const openConfig = useCallback(
     async (tool: Tool) => {
-      if (isReadOnly) return;
       const kbType = getToolKbType(tool.name);
       if (kbType) prefetchKnowledgeBases(kbType);
       const current = useAgentConfigStore.getState().editedAgent.tools;
@@ -139,16 +137,15 @@ export default function ToolManagement({ isCreatingMode, currentAgentId, isReadO
       setConfigParams(merged);
       setModalOpen(true);
     },
-    [isReadOnly, mergeParams, prefetchKnowledgeBases, availableTools]
+    [mergeParams, prefetchKnowledgeBases, availableTools]
   );
 
   const removeTool = useCallback(
     (toolId: string) => {
-      if (isReadOnly) return;
       const current = useAgentConfigStore.getState().editedAgent.tools;
       updateTools(current.filter((t) => t.id !== toolId));
     },
-    [isReadOnly, updateTools]
+    [updateTools]
   );
 
   const toggleCat = (cat: string) => setCollapsedCats((p) => ({ ...p, [cat]: !p[cat] }));
@@ -242,7 +239,6 @@ export default function ToolManagement({ isCreatingMode, currentAgentId, isReadO
 
                               <button
                                 onClick={() => openConfig(tool)}
-                                disabled={isReadOnly}
                                 className="flex size-7 shrink-0 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600"
                                 title={t("toolPool.configure")}
                               >
@@ -251,7 +247,6 @@ export default function ToolManagement({ isCreatingMode, currentAgentId, isReadO
 
                               <button
                                 onClick={() => removeTool(tool.id)}
-                                disabled={isReadOnly}
                                 className="flex size-7 shrink-0 items-center justify-center rounded-md text-transparent transition-colors hover:bg-red-50 hover:text-red-500 group-hover:text-gray-400"
                                 title={t("toolPool.remove")}
                               >

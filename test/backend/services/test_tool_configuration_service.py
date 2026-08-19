@@ -5600,6 +5600,19 @@ class _AnonymousToolInfo:
 def test_update_tool_info_preserves_existing_kds_when_key_missing(mocker):
     """A missing kds_list key means the scope was not edited; keep existing ids."""
     mocker.patch(
+        "backend.services.tool_configuration_service.require_agent_draft_edit"
+    )
+    mocker.patch(
+        "backend.services.tool_configuration_service.query_all_tools",
+        return_value=[
+            {
+                "tool_id": 9,
+                "name": "aidp_search",
+                "is_available": True,
+            }
+        ],
+    )
+    mocker.patch(
         "backend.services.tool_configuration_service._is_aidp_search_tool",
         return_value=True,
     )
@@ -5624,6 +5637,19 @@ def test_update_tool_info_rejects_new_kds_when_aidp_unavailable(mocker):
     """When AIDP is unreachable and the submission adds ids, the edit must fail."""
     from consts.exceptions import ValidationError
 
+    mocker.patch(
+        "backend.services.tool_configuration_service.require_agent_draft_edit"
+    )
+    mocker.patch(
+        "backend.services.tool_configuration_service.query_all_tools",
+        return_value=[
+            {
+                "tool_id": 9,
+                "name": "aidp_search",
+                "is_available": True,
+            }
+        ],
+    )
     mocker.patch(
         "backend.services.tool_configuration_service._is_aidp_search_tool",
         return_value=True,

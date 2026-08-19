@@ -3,6 +3,7 @@ import json
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from nexent.core.agents.context import ContextItemInput, ContextItemType
 from pydantic import ValidationError
 
 from consts.model import HistoryItem, NL2AgentRunRequest
@@ -23,6 +24,7 @@ from services.nl2agent_service import (
 )
 from tool_collection.mcp.nl2agent_mcp_tools import (
     AgentDraftFields,
+    NL2AGENT_AGENT_ID_HEADER,
     ResourceCandidate,
     ResourceRequirement,
 )
@@ -800,7 +802,13 @@ def test_binding_action_parser_accepts_only_continue_with_positive_agent_id():
 
 @pytest.mark.asyncio
 async def test_verified_binding_context_rereads_database_without_secret_values(mocker):
-    mocker.patch("services.nl2agent_service.require_agent_draft_edit")
+    mocker.patch(
+        "services.nl2agent_service.require_agent_draft_edit",
+        return_value={
+            "name": "current_assistant",
+            "description": "Current authoritative description",
+        },
+    )
     mocker.patch(
         "services.nl2agent_service._load_installed_resource_catalog",
         new=AsyncMock(
@@ -847,6 +855,8 @@ async def test_verified_binding_context_rereads_database_without_secret_values(m
     )
 
     assert context.id == "system:nl2agent_bound_resources"
+    assert "current_assistant" in context.content["text"]
+    assert "Current authoritative description" in context.content["text"]
     assert "weather_forecast" in context.content["text"]
     assert "api_key" in context.content["text"]
     assert "private-secret" not in context.content["text"]
@@ -896,8 +906,24 @@ async def test_build_run_info_is_ephemeral(mocker):
         "services.nl2agent_service.LOCAL_MCP_SERVER",
         "http://local-mcp:5011",
     )
+    get_current_user = mocker.patch(
+        "services.nl2agent_service.get_current_user_id",
+        return_value=("user-a", "tenant-a"),
+    )
+    verified_context = ContextItemInput(
+        id="system:nl2agent_bound_resources",
+        type=ContextItemType.SYSTEM,
+        content={"text": "verified draft state"},
+        source=("database:agent_bindings",),
+    )
+    build_verified_context = mocker.patch(
+        "services.nl2agent_service._build_verified_bound_resources_context",
+        new_callable=AsyncMock,
+        return_value=verified_context,
+    )
     request = NL2AgentRunRequest(
         query='{"type":"nl2agent_tool_selection","tools":[]}',
+        agent_id=42,
         history=[
             HistoryItem(
                 role="user",
@@ -934,8 +960,9 @@ async def test_build_run_info_is_ephemeral(mocker):
     assert run_info.history[0].content == (
         "Build an agent that summarizes weather risks."
     )
-    assert len(run_info.context_input.items) == 1
-    history_item = run_info.context_input.items[0]
+    assert len(run_info.context_input.items) == 2
+    assert run_info.context_input.items[0] == verified_context
+    history_item = run_info.context_input.items[1]
     assert history_item.type.value == "conversation_turn"
     assert history_item.content == {
         "user_message": "Build an agent that summarizes weather risks.",
@@ -949,7 +976,10 @@ async def test_build_run_info_is_ephemeral(mocker):
         {
             "url": "http://local-mcp:5011/sse",
             "transport": "sse",
-            "headers": {"Authorization": "Bearer tenant-token"},
+            "headers": {
+                "Authorization": "Bearer tenant-token",
+                NL2AGENT_AGENT_ID_HEADER: "42",
+            },
         }
     ]
     assert run_info.sandbox_config is None
@@ -972,6 +1002,53 @@ async def test_build_run_info_is_ephemeral(mocker):
         agent_requested_output_tokens=None,
         request_requested_output_tokens=None,
     )
+    get_current_user.assert_called_once_with("Bearer tenant-token")
+    build_verified_context.assert_awaited_once_with(
+        agent_id=42,
+        tenant_id="tenant-a",
+        user_id="user-a",
+    )
+
+
+@pytest.mark.asyncio
+async def test_build_run_info_rejects_request_action_agent_mismatch(mocker):
+    mocker.patch(
+        "services.nl2agent_service.join_minio_file_description_to_query",
+        new_callable=AsyncMock,
+        return_value="structured action",
+    )
+    mocker.patch(
+        "services.nl2agent_service.create_model_config_list",
+        new_callable=AsyncMock,
+        return_value=[],
+    )
+    build_verified_context = mocker.patch(
+        "services.nl2agent_service._build_verified_bound_resources_context",
+        new_callable=AsyncMock,
+    )
+    request = NL2AgentRunRequest(
+        agent_id=42,
+        query=json.dumps(
+            {
+                "type": "nl2agent_card_action",
+                "subtype": "requirement_clarification",
+                "agent_id": 43,
+                "action": "submit",
+                "result": {"answers": []},
+            }
+        ),
+    )
+
+    with pytest.raises(Nl2AgentDraftSaveError) as exc_info:
+        await build_nl2agent_run_info(
+            request,
+            tenant_id="tenant-a",
+            language="en",
+            authorization="Bearer tenant-token",
+        )
+
+    assert exc_info.value.code == "agent_context_mismatch"
+    build_verified_context.assert_not_awaited()
 
 
 @pytest.mark.asyncio

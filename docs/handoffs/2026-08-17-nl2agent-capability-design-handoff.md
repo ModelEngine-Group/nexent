@@ -1,7 +1,7 @@
 # NL2Agent 能力发现、安装、绑定与 Agent 草稿设计方案
 
 > 日期：2026-08-17  
-> 状态：第一阶段实现中，作为当前开发设计基线
+> 状态：两阶段迁移完成，作为 `/newagents` 当前开发设计基线
 > 历史方案：`2026-08-11-nl2agent-capability-design-handoff.md` 仅保留作决策演进记录  
 > 前端示意：`2026-08-12-nl2agent-card-prototype.html`
 
@@ -22,15 +22,16 @@
 
 本文仍是本地设计 handoff。正式编码前，应按项目 `spec-coding` 流程将最终需求、功能设计、技术设计和开发计划同步到 Nexent Development SPECs Wiki。
 
-### 0.1 第一阶段实现边界
+### 0.1 两阶段完成边界
 
-第一阶段不迁移到 `/newagents`，继续使用当前 `/agents`、`useAgentConfigStore` 和现有手动保存语义。实现顺序固定为：
+两阶段前端统一落在 `/newagents`，只使用 `useAgentStore` 和自动保存队列。`/agents` 保持目标分支原状，仅作为回退入口，不承载 NL2Agent 状态、卡片或双 Store 适配。
 
-1. Gate 0 默认恢复旧 `Nl2AgentChatPanel` 和旧三栏布局。
-2. PR1 开放需求澄清、`save_agent_draft_fields` 与扩展后的 `nl2a_wrapper`。
-3. 资源发现、安装、绑定和最终确认卡保留本文契约，但在后续 PR 实现。
+1. `/newagents` 默认挂载 `Nl2AgentFlowProvider` 和 `Nl2AgentChatPanel`。
+2. 需求澄清、草稿创建、资源发现、配置、绑定和最终确认共享同一个临时对话 Runtime。
+3. 普通表单、旧推荐卡、Draft 卡和新绑定卡统一写 `useAgentStore`；Store 同时维护编辑快照、服务端快照和自动保存队列。
+4. 草稿首次获得真实 ID 时只升级页面身份，不重建 Runtime；选择、新建或删除 Agent 时才重置对话。
 
-旧 `local_mcp_recommendation`、`agent_draft` 和 `/agent/nl2agent/run` payload 在第一阶段保持兼容。旧推荐卡继续整体替换当前工具列表，旧 Draft 卡继续整体更新当前表单字段；除 PR1 的受限草稿写库外，普通表单仍由用户点击现有保存按钮持久化。
+旧 `local_mcp_recommendation`、`agent_draft` 和 `/agent/nl2agent/run` payload 保持兼容。旧推荐卡仍可整体替换当前工具列表，旧 Draft 卡仍可整体更新当前表单字段，但持久化统一由 `useAgentStore` 自动保存，不再依赖手动保存按钮。
 
 ---
 
@@ -152,10 +153,10 @@ save_agent_draft_fields(
 
 ```text
 description
-→ /agents Agent 信息页的 agentDescription（Agent 简介）
+→ /newagents Agent 信息区的 description（Agent 简介）
 
 business_description
-→ /agents 顶部业务逻辑输入区的 businessDescription（完整业务流程描述）
+→ /newagents 业务逻辑输入区的 business_description（完整业务流程描述）
 ```
 
 `searchAgentInfo` 和现有保存请求都使用后端 snake_case 字段 `business_description`；不得将它重命名或合并到 `description`。
@@ -181,8 +182,9 @@ version_no=0
 
 ```text
 searchAgentInfo(agent_id)
-→ useAgentConfigStore.setCurrentAgent(agent)
-→ invalidate Tool/Skill Instance 查询
+→ useAgentStore.initialize(agent)
+→ 原子替换 editedAgent 与 savedAgent
+→ invalidate Agent、Tool/Skill Instance 查询
 ```
 
 同步时点：
@@ -191,9 +193,11 @@ searchAgentInfo(agent_id)
 2. 绑定卡成功继续后。
 3. 最终确认卡出现时。
 
-Agent 草稿创建后，前端立即从创建模式切换为编辑模式。NL2Agent 流程进行期间普通 Agent 编辑表单只读，最终确认结束流程后恢复编辑；对话面板保持打开，但 Composer 进入禁用状态。
+Agent 草稿创建后，前端立即从无 ID 状态升级为可编辑草稿。NL2Agent 流程锁与数据库 `READ_ONLY` 权限分别计算，但共同禁用普通表单、Tool/Skill、协作 Agent、知识库和发布操作；只读 Agent 同时禁用 Composer 和交互卡。
 
-PR1 只实现第一个同步时点。页面执行 `searchAgentInfo(agent_id) → setCurrentAgent()`，并刷新 Agent、ToolInstance 和 SkillInstance 查询。该创建模式到编辑模式的身份升级必须保留当前临时对话；用户选择其他 Agent 或再次点击“新建”则重置对话。
+页面执行 `searchAgentInfo(agent_id, version_no=0) → useAgentStore.initialize()`，更新 URL 并刷新相关查询。该身份升级必须保留当前临时对话；用户选择其他 Agent、新建或删除 Agent 时重置对话。
+
+每次 NL2Agent 请求都携带当前 `agent_id`。后端校验它属于当前租户、是 `version_no=0` 草稿且当前用户可编辑，并向内部 Local MCP 注入受信任的当前草稿 ID Header。存在该上下文时，所有保存、搜索和 Wrapper 调用必须复用同一 ID；模型传空 ID 时强制更新当前草稿，传入不同 ID 时返回 `agent_context_mismatch`，不得创建第二个 Agent。
 
 ---
 
@@ -203,7 +207,7 @@ PR1 只实现第一个同步时点。页面执行 `searchAgentInfo(agent_id) →
 
 1. 用户描述 Agent 需求。
 2. 模型判断信息是否足够；不足时输出需求澄清卡。
-3. 用户提交澄清卡，每个问题均支持默认展开的“其他...”文本框。
+3. 用户提交澄清卡；单选和多选可提供默认展开的“其他...”文本框，文本题不再增加第二个“其他”输入框。
 4. 模型调用 `save_agent_draft_fields(agent_id=null, fields=...)` 创建 Agent 草稿。
 5. 模型通过当前官方 `parallel_executor` 并行执行：
    - `search_installed_resources`
@@ -726,7 +730,7 @@ Agent 草稿创建不是交互卡，使用独立 SSE 类型同步真实身份：
 
 该事件只能由 `save_agent_draft_fields(agent_id=null)` 成功结果中的专用 `<nl2a_state>` 标记触发。SDK Observer 只从 Tool execution log 提取并移除该标记，拒绝非法结构，并对同一创建事件去重；模型普通输出不能触发事件。更新已有草稿不发送该事件。
 
-前端 adapter 校验事件后通过 `Nl2AgentChatPanel` 回调通知 `/agents` 页面。事件不写入消息卡 metadata，不创建可见消息，也不进入 Zustand 或数据库中的流程状态。
+前端 adapter 校验事件后通过 `Nl2AgentChatPanel` 回调通知 `/newagents` 页面。页面原子刷新 `useAgentStore` 快照并更新 URL，但不重建 Chat Runtime。事件不写入消息卡 metadata，不创建可见消息，也不进入数据库中的流程状态。
 
 ### 8.1 四种卡片 subtype
 

@@ -67,6 +67,7 @@ export interface ToolConfigModalProps {
   initialParams: ToolParam[];
   selectedTool?: Tool | null;
   currentAgentId?: number;
+  localOnly?: boolean;
 }
 
 // Tool types that require knowledge base selection
@@ -186,6 +187,7 @@ export default function ToolConfigModal({
   initialParams,
   selectedTool,
   currentAgentId,
+  localOnly = false,
 }: ToolConfigModalProps) {
   const [currentParams, setCurrentParams] = useState<ToolParam[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -1432,15 +1434,16 @@ export default function ToolConfigModal({
         newSelectedTools = [...currentTools, updatedTool];
       }
 
-      // Update local state only - actual save will happen when user clicks "Save Agent"
-      updateTools(newSelectedTools);
+      if (!localOnly) {
+        updateTools(newSelectedTools);
+      }
 
       message.success(t("toolConfig.message.saveSuccess"));
       handleClose(); // Close modal
 
       // Call original onSave if provided
       if (onSave) {
-        onSave(currentParams);
+        onSave(syncedParams);
       }
     } catch {
       // Form validation failed, error will be shown by antd Form
@@ -1844,7 +1847,11 @@ export default function ToolConfigModal({
           allowClear
           showSearch
           optionFilterProp="label"
-          notFoundContent={registeredModelsLoading ? undefined : t("toolConfig.placeholder.noAvailableModels")}
+          notFoundContent={
+            registeredModelsLoading
+              ? undefined
+              : t("toolConfig.placeholder.noAvailableModels")
+          }
         />
       );
     }

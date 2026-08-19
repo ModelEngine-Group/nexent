@@ -14,7 +14,7 @@ import { useTranslation } from "react-i18next";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { useAgentConfigStore } from "@/stores/agentConfigStore";
+import { useAgentStore } from "@/stores/agentStore";
 import type { Tool } from "@/types/agentConfig";
 import type {
   Nl2AgentToolSelection,
@@ -73,7 +73,7 @@ export const ToolRecommendations: FC<{
 }> = ({ payload, disabled = false }) => {
   const { t } = useTranslation("common");
   const aui = useAui();
-  const updateTools = useAgentConfigStore((state) => state.updateTools);
+  const updateTools = useAgentStore((state) => state.updateTools);
   const checkboxIdPrefix = useId();
   const content = payload;
   const isSuccess = content.status === "success";
