@@ -28,6 +28,7 @@ consts_mock.const.NEXENT_POSTGRES_PASSWORD = "test_password"
 consts_mock.const.POSTGRES_DB = "test_db"
 consts_mock.const.POSTGRES_PORT = 5432
 consts_mock.const.DEFAULT_TENANT_ID = "default_tenant"
+consts_mock.const.ASSET_OWNER_TENANT_ID = "asset_owner_tenant"
 consts_mock.const.TENANT_ID = "tenant_id"
 
 # Provide the exceptions submodule used by tenant_config_db at import time.
