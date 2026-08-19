@@ -205,7 +205,7 @@ async def test_openai_llm_stream(monkeypatch):
 async def test_openai_llm_health_check(monkeypatch):
     adapter = OpenAILLMAdapter(_ctx())
     model = MagicMock()
-    model.check_connectivity = MagicMock(return_value=True)
+    model.check_connectivity = AsyncMock(return_value=True)
     adapter._model = model
     assert await adapter.health_check() is True
 
@@ -285,7 +285,7 @@ async def test_openai_stream_builds_model_when_missing():
 async def test_openai_health_check_builds_model_when_missing():
     adapter = OpenAILLMAdapter(_ctx())
     model = MagicMock()
-    model.check_connectivity = MagicMock(return_value=True)
+    model.check_connectivity = AsyncMock(return_value=True)
     adapter._build_model = MagicMock(
         side_effect=lambda: setattr(adapter, "_model", model)
     )

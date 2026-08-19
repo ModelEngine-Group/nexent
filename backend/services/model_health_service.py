@@ -4,7 +4,7 @@ from typing import Optional
 from nexent.core import MessageObserver
 from nexent.monitor import set_monitoring_context, set_monitoring_operation
 
-from services.model_gateway_service import build_adapter_fresh, get_llm_adapter_from_config
+from services.model_gateway_service import build_adapter_fresh
 from services.voice_service import get_voice_service
 from consts.const import LOCALHOST_IP, LOCALHOST_NAME, DOCKER_INTERNAL_HOST
 from consts.model import ModelConnectStatusEnum
@@ -178,11 +178,11 @@ async def _perform_connectivity_check(
         observer = MessageObserver()
         set_monitoring_operation("connectivity_check",
                                  display_name=display_name)
-        connectivity = await get_llm_adapter_from_config(
+        connectivity = await build_adapter_fresh(
             {"base_url": model_base_url, "api_key": model_api_key,
              "ssl_verify": ssl_verify, "timeout_seconds": timeout_seconds,
              "display_name": display_name},
-            tenant_id=None,
+            "llm", "llm", None,
             observer=observer,
             model_name=model_name,
             timeout_seconds=timeout_seconds,
