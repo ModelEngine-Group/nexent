@@ -1,17 +1,6 @@
-"""Backend bridge: DB model config → :class:`ModelContext` → :class:`MultimodalGateway`.
-
-This is the *thin* Phase 2 bridge. Existing service factory functions keep
-their public signatures; they fetch the model config dict (unchanged) and
-delegate construction to the gateway via :func:`get_adapter_from_config`::
-
-    cfg = tenant_config_manager.get_model_config(...)
-    model = get_adapter_from_config(cfg, "llm", "llm", tenant_id,
-                                    temperature=0.3, top_p=0.95)
-
-The vendor ``if model_factory == ...`` dispatch is replaced by registry
-resolution keyed on the normalized factory, so adding a vendor becomes one
-``@register_adapter`` decorator + one ``_FACTORY_NORMALIZE`` entry — the
-service layer is untouched.
+"""Backend bridge: turn DB model configs into gateway adapters.
+Service factory functions keep their signatures but delegate adapter
+construction to the gateway via :func:`get_adapter_from_config`.
 """
 
 from __future__ import annotations
@@ -170,6 +159,8 @@ def _config_to_context(
             embedding_dim=cfg.get("max_tokens", 1024),
             model_type=cfg.get("model_type"),
         )
+    elif modality == "rerank":
+        return ModelContext(**common)
     else:
         raise ValueError(f"Unknown modality: {modality}")
 

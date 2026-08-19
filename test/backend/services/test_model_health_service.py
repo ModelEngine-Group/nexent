@@ -68,7 +68,7 @@ sys.modules['nexent.core.models.rerank_model'] = rerank_module
 # Mock services packages
 sys.modules['services'] = MockModule()
 sys.modules['services.voice_service'] = MockModule()
-# model_health_service imports build_adapter_fresh / get_llm_adapter_from_config
+# model_health_service imports build_adapter_fresh
 # from the real services.model_gateway_service since the gateway bridge landed;
 # the blanket ``services`` mock above shadows it, so expose a mock submodule
 # (tests that exercise the VLM/LLM paths patch the name on model_health_service
@@ -159,13 +159,13 @@ async def test_perform_connectivity_check_multi_embedding():
 async def test_perform_connectivity_check_llm():
     # Setup
     with mock.patch("backend.services.model_health_service.MessageObserver") as mock_observer, \
-            mock.patch("backend.services.model_health_service.get_llm_adapter_from_config") as mock_get_llm:
+            mock.patch("backend.services.model_health_service.build_adapter_fresh") as mock_build:
         mock_observer_instance = mock.MagicMock()
         mock_observer.return_value = mock_observer_instance
 
         mock_adapter = mock.MagicMock()
         mock_adapter.health_check = mock.AsyncMock(return_value=True)
-        mock_get_llm.return_value = mock_adapter
+        mock_build.return_value = mock_adapter
 
         # Execute
         result = await _perform_connectivity_check(
@@ -177,10 +177,10 @@ async def test_perform_connectivity_check_llm():
 
         # Assert
         assert result is True
-        mock_get_llm.assert_called_once_with(
+        mock_build.assert_called_once_with(
             {"base_url": "https://api.openai.com", "api_key": "test-key",
              "ssl_verify": True, "timeout_seconds": None, "display_name": None},
-            tenant_id=None,
+            "llm", "llm", None,
             observer=mock_observer_instance,
             model_name="gpt-4",
             timeout_seconds=None,
@@ -326,13 +326,13 @@ async def test_perform_connectivity_check_rerank():
 async def test_perform_connectivity_check_base_url_normalization_localhost():
     # Setup
     with mock.patch("backend.services.model_health_service.MessageObserver") as mock_observer, \
-            mock.patch("backend.services.model_health_service.get_llm_adapter_from_config") as mock_get_llm:
+            mock.patch("backend.services.model_health_service.build_adapter_fresh") as mock_build:
         mock_observer_instance = mock.MagicMock()
         mock_observer.return_value = mock_observer_instance
 
         mock_adapter = mock.MagicMock()
         mock_adapter.health_check = mock.AsyncMock(return_value=True)
-        mock_get_llm.return_value = mock_adapter
+        mock_build.return_value = mock_adapter
 
         # Execute with localhost which should be normalized
         result = await _perform_connectivity_check(
@@ -345,10 +345,10 @@ async def test_perform_connectivity_check_base_url_normalization_localhost():
         # Assert
         assert result is True
         # Ensure api_base has been normalized when calling the adapter builder
-        mock_get_llm.assert_called_once_with(
+        mock_build.assert_called_once_with(
             {"base_url": "http://host.docker.internal:8080", "api_key": "test-key",
              "ssl_verify": True, "timeout_seconds": None, "display_name": None},
-            tenant_id=None,
+            "llm", "llm", None,
             observer=mock_observer_instance,
             model_name="gpt-4",
             timeout_seconds=None,
@@ -360,13 +360,13 @@ async def test_perform_connectivity_check_base_url_normalization_localhost():
 async def test_perform_connectivity_check_base_url_normalization_127001():
     # Setup
     with mock.patch("backend.services.model_health_service.MessageObserver") as mock_observer, \
-            mock.patch("backend.services.model_health_service.get_llm_adapter_from_config") as mock_get_llm:
+            mock.patch("backend.services.model_health_service.build_adapter_fresh") as mock_build:
         mock_observer_instance = mock.MagicMock()
         mock_observer.return_value = mock_observer_instance
 
         mock_adapter = mock.MagicMock()
         mock_adapter.health_check = mock.AsyncMock(return_value=True)
-        mock_get_llm.return_value = mock_adapter
+        mock_build.return_value = mock_adapter
 
         # Execute with 127.0.0.1 which should be normalized
         result = await _perform_connectivity_check(
@@ -379,10 +379,10 @@ async def test_perform_connectivity_check_base_url_normalization_127001():
         # Assert
         assert result is True
         # Ensure api_base has been normalized when calling the adapter builder
-        mock_get_llm.assert_called_once_with(
+        mock_build.assert_called_once_with(
             {"base_url": "http://host.docker.internal:8000", "api_key": "test-key",
              "ssl_verify": True, "timeout_seconds": None, "display_name": None},
-            tenant_id=None,
+            "llm", "llm", None,
             observer=mock_observer_instance,
             model_name="gpt-4",
             timeout_seconds=None,
@@ -948,14 +948,14 @@ async def test_embedding_dimension_check_fallback_still_fails():
 @pytest.mark.asyncio
 async def test_perform_connectivity_check_llm_sets_monitoring_operation():
     with mock.patch("backend.services.model_health_service.MessageObserver") as mock_observer, \
-            mock.patch("backend.services.model_health_service.get_llm_adapter_from_config") as mock_get_llm, \
+            mock.patch("backend.services.model_health_service.build_adapter_fresh") as mock_build, \
             mock.patch("backend.services.model_health_service.set_monitoring_operation") as mock_set_op:
         mock_observer_instance = mock.MagicMock()
         mock_observer.return_value = mock_observer_instance
 
         mock_adapter = mock.MagicMock()
         mock_adapter.health_check = mock.AsyncMock(return_value=True)
-        mock_get_llm.return_value = mock_adapter
+        mock_build.return_value = mock_adapter
 
         await _perform_connectivity_check(
             "gpt-4", "llm", "https://api.openai.com", "test-key",
