@@ -603,6 +603,7 @@
   "agent.error.nameExists": "Agent var name {{name}} already exists, please modify",
   "agent.error.displayNameExists": "Agent name {{displayName}} already exists, please modify",
   "agent.error.modelUnavailable": "LLM is unavailable, please modify",
+  "agent.error.tenantLimitExceeded": "Tenant agent limit reached: maximum {{limit}} agents per tenant",
   "agent.debug.placeholder": "Enter test question...",
   "agent.debug.stop": "Stop",
   "agent.debug.clear": "Clear",

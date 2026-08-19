@@ -20,9 +20,10 @@ This module provides two types of exceptions:
 The exception handler automatically maps legacy exception class names to ErrorCode.
 """
 
+from typing import List, Optional
+
 from .error_code import ErrorCode, ERROR_CODE_HTTP_STATUS
 from .error_message import ErrorMessage
-from typing import List
 
 
 # ==================== New Framework: AppException with ErrorCode ====================
@@ -196,7 +197,30 @@ class ValidationError(Exception):
 class TenantResourceLimitError(ValidationError, ValueError):
     """Raised when a platform or tenant hard resource limit is reached."""
 
-    pass
+    code = ErrorCode.TENANT_RESOURCE_EXCEEDED.value
+
+    def __init__(
+        self,
+        message: str,
+        resource: Optional[str] = None,
+        limit: Optional[int] = None,
+    ):
+        super().__init__(message)
+        self.resource = resource
+        self.limit = limit
+
+    def to_detail(self) -> dict:
+        """Return the stable error payload consumed by API clients."""
+        data = {}
+        if self.resource is not None:
+            data["resource"] = self.resource
+        if self.limit is not None:
+            data["limit"] = self.limit
+        return {
+            "code": self.code,
+            "message": str(self),
+            "data": data,
+        }
 
 
 class NotFoundException(Exception):

@@ -1,6 +1,5 @@
 import json
 import logging
-import re
 from http import HTTPStatus
 from typing import Optional
 
@@ -8,7 +7,7 @@ from fastapi import APIRouter, Body, Header, HTTPException, Request, Query
 from fastapi.encoders import jsonable_encoder
 from starlette.responses import JSONResponse, Response, StreamingResponse
 
-from consts.const import ASSET_OWNER_TENANT_ID, LANGUAGE
+from consts.const import ASSET_OWNER_TENANT_ID
 from consts.model import (
     AgentRequest,
     AgentInfoRequest,
@@ -72,7 +71,7 @@ from services.agent_version_service import (
     compare_versions_impl,
     list_published_agents_impl,
 )
-from utils.auth_utils import get_current_user_info, get_current_user_id, get_user_language
+from utils.auth_utils import get_current_user_info, get_current_user_id
 
 agent_runtime_router = APIRouter(prefix="/agent")
 agent_config_router = APIRouter(prefix="/agent")
@@ -106,22 +105,6 @@ async def get_agent_knowledge_capabilities_api(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail="Failed to resolve agent knowledge capabilities.",
         ) from exc
-
-
-def _localize_agent_limit_error(error: Exception, language: str) -> str:
-    """Return the Agent tenant-limit message in the caller's UI language."""
-    message = str(error)
-    if language != LANGUAGE["ZH"]:
-        return message
-
-    match = re.fullmatch(
-        r"Tenant agent limit reached: maximum (\d+) agents per tenant",
-        message,
-    )
-    if not match:
-        return message
-
-    return f"租户智能体数量已达到上限：每个租户最多 {match.group(1)} 个智能体"
 
 
 # Define API route
@@ -249,7 +232,6 @@ async def get_agent_by_name_api(
 @agent_config_router.get("/get_creating_sub_agent_id")
 async def get_creating_sub_agent_info_api(
     authorization: Optional[str] = Header(None),
-    request: Request = None,
 ):
     """
     Create a new sub agent, return agent_ID
@@ -259,8 +241,8 @@ async def get_creating_sub_agent_info_api(
     except TenantResourceLimitError as e:
         logger.warning(f"Sub-agent creation validation error: {str(e)}")
         raise HTTPException(
-            status_code=HTTPStatus.BAD_REQUEST,
-            detail=_localize_agent_limit_error(e, get_user_language(request)),
+            status_code=HTTPStatus.TOO_MANY_REQUESTS,
+            detail=e.to_detail(),
         ) from e
     except (ValidationError, ValueError) as e:
         logger.warning(f"Sub-agent creation validation error: {str(e)}")
@@ -287,8 +269,8 @@ async def update_agent_info_api(
     except TenantResourceLimitError as e:
         logger.warning(f"Agent update validation error: {str(e)}")
         raise HTTPException(
-            status_code=HTTPStatus.BAD_REQUEST,
-            detail=_localize_agent_limit_error(e, get_user_language(http_request)),
+            status_code=HTTPStatus.TOO_MANY_REQUESTS,
+            detail=e.to_detail(),
         ) from e
     except (ValidationError, ValueError) as e:
         logger.warning(f"Agent update validation error: {str(e)}")

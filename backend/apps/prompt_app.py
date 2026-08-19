@@ -33,7 +33,7 @@ async def generate_and_save_system_prompt_api(
 ):
     if get_display_width(prompt_request.task_description) > MAX_AGENT_BUSINESS_DESCRIPTION_DISPLAY_WIDTH:
         raise HTTPException(
-            status_code=HTTPStatus.BAD_REQUEST,
+            status_code=HTTPStatus.TOO_MANY_REQUESTS,
             detail=(
                 "Agent work description exceeds the maximum "
                 f"{MAX_AGENT_BUSINESS_DESCRIPTION_DISPLAY_WIDTH} display characters "

@@ -38,7 +38,10 @@ class MockValidationError(Exception):
 
 
 class MockTenantResourceLimitError(MockValidationError, ValueError):
-    pass
+    def __init__(self, message, resource=None, limit=None):
+        super().__init__(message)
+        self.resource = resource
+        self.limit = limit
 
 
 exceptions_mock.ValidationError = MockValidationError

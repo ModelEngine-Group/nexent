@@ -735,7 +735,8 @@ export const API_ENDPOINTS = {
 export class ApiError extends Error {
   constructor(
     public code: string | number,
-    message: string
+    message: string,
+    public data?: Record<string, unknown>
   ) {
     super(message);
     this.name = "ApiError";
@@ -755,23 +756,27 @@ export const fetchWithErrorHandling = async (
       // Try to parse JSON response for business error code first
       let errorCode = response.status;
       let errorMessage = `Request failed: ${response.status}`;
+      let errorData: Record<string, unknown> | undefined;
       const errorText = await response.text();
 
       try {
-        const errorData = JSON.parse(errorText);
+        const parsedErrorData = JSON.parse(errorText);
         const errorDetail =
-          errorData?.detail && typeof errorData.detail === "object"
-            ? errorData.detail
-            : errorData?.message && typeof errorData.message === "object"
-              ? errorData.message
-              : errorData;
+          parsedErrorData?.detail && typeof parsedErrorData.detail === "object"
+            ? parsedErrorData.detail
+            : parsedErrorData?.message && typeof parsedErrorData.message === "object"
+              ? parsedErrorData.message
+              : parsedErrorData;
         if (errorDetail?.code) {
           errorCode = errorDetail.code;
           errorMessage = errorDetail.message || errorMessage;
-        } else if (typeof errorData?.detail === "string") {
-          errorMessage = errorData.detail;
-        } else if (typeof errorData?.message === "string") {
-          errorMessage = errorData.message;
+          if (errorDetail.data && typeof errorDetail.data === "object") {
+            errorData = errorDetail.data as Record<string, unknown>;
+          }
+        } else if (typeof parsedErrorData?.detail === "string") {
+          errorMessage = parsedErrorData.detail;
+        } else if (typeof parsedErrorData?.message === "string") {
+          errorMessage = parsedErrorData.message;
         } else {
           errorMessage = errorText || errorMessage;
         }
@@ -788,13 +793,13 @@ export const fetchWithErrorHandling = async (
         errorCodeStr === ErrorCode.TOKEN_INVALID
       ) {
         handleSessionExpired();
-        throw new ApiError(errorCode, errorMessage);
+        throw new ApiError(errorCode, errorMessage, errorData);
       }
 
       // Handle HTTP 401 - trigger session expired modal for all unauthorized errors
       if (response.status === 401) {
         handleSessionExpired();
-        throw new ApiError(errorCode, errorMessage);
+        throw new ApiError(errorCode, errorMessage, errorData);
       }
 
       // Handle custom 499 error code (client closed connection)
@@ -828,7 +833,7 @@ export const fetchWithErrorHandling = async (
         );
       }
 
-      throw new ApiError(errorCode, errorMessage);
+      throw new ApiError(errorCode, errorMessage, errorData);
     }
 
     return response;

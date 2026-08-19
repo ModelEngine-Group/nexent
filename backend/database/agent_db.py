@@ -68,7 +68,9 @@ def _enforce_tenant_agent_limit(session, tenant_id: str) -> None:
     ).count()
     if agent_count >= MAX_AGENTS_PER_TENANT:
         raise TenantResourceLimitError(
-            f"Tenant agent limit reached: maximum {MAX_AGENTS_PER_TENANT} agents per tenant"
+            f"Tenant agent limit reached: maximum {MAX_AGENTS_PER_TENANT} agents per tenant",
+            resource="agent",
+            limit=MAX_AGENTS_PER_TENANT,
         )
 
 

@@ -39,7 +39,7 @@ def test_generate_prompt_api_rejects_an_overlong_work_description():
         },
     )
 
-    assert response.status_code == 400
+    assert response.status_code == 429
     assert "maximum 10000 display characters" in response.json()["detail"]
 
 

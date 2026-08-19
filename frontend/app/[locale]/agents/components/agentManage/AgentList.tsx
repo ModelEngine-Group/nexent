@@ -25,6 +25,7 @@ import { a2aClientService } from "@/services/a2aService";
 import A2AServerSettingsPanel from "../a2a/A2AServerSettingsPanel";
 import log from "@/lib/logger";
 import { getUnavailableReasonLabels } from "@/lib/agentLabelMapper";
+import { getTenantResourceLimitMessage } from "@/const/errorMessageI18n";
 
 interface AgentListProps {
   agentList: Agent[];
@@ -275,7 +276,9 @@ export default function AgentList({
 
       if (!createResult.success || !createResult.data?.agent_id) {
         message.error(
-          createResult.message || t("agentConfig.agents.copyFailed")
+          getTenantResourceLimitMessage(createResult.error, t) ||
+            createResult.message ||
+            t("agentConfig.agents.copyFailed")
         );
         return;
       }

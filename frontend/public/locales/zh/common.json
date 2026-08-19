@@ -605,6 +605,7 @@
   "agent.error.nameExists": "智能体变量名{{name}}已存在，请修改",
   "agent.error.displayNameExists": "智能体名称{{displayName}}已存在，请修改",
   "agent.error.modelUnavailable": "大语言模型不可用，请修改",
+  "agent.error.tenantLimitExceeded": "租户智能体数量已达到上限：每个租户最多 {{limit}} 个智能体",
   "agent.debug.placeholder": "输入测试问题...",
   "agent.debug.stop": "停止",
   "agent.debug.clear": "清空",

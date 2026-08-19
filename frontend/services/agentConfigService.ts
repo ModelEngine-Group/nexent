@@ -1,4 +1,4 @@
-import { API_ENDPOINTS } from "./api";
+import { API_ENDPOINTS, ApiError } from "./api";
 
 import { NAME_CHECK_STATUS } from "@/const/agentConfig";
 import { getAuthHeaders } from "@/lib/auth";
@@ -250,7 +250,25 @@ export const getCreatingSubAgentId = async () => {
     });
 
     if (!response.ok) {
-      throw new Error(`Request failed: ${response.status}`);
+      const errorPayload = await response.json().catch(() => null);
+      const errorDetail =
+        errorPayload?.detail && typeof errorPayload.detail === "object"
+          ? errorPayload.detail
+          : errorPayload?.message && typeof errorPayload.message === "object"
+            ? errorPayload.message
+            : null;
+      if (errorDetail) {
+        throw new ApiError(
+          errorDetail.code ?? response.status,
+          errorDetail.message ?? `Request failed: ${response.status}`,
+          errorDetail.data
+        );
+      }
+      throw new Error(
+        (typeof errorPayload?.detail === "string" && errorPayload.detail) ||
+          (typeof errorPayload?.message === "string" && errorPayload.message) ||
+          `Request failed: ${response.status}`
+      );
     }
 
     const data = await response.json();
@@ -281,6 +299,7 @@ export const getCreatingSubAgentId = async () => {
       success: false,
       data: null,
       message: "agentConfig.agents.createSubAgentIdFailed",
+      error,
     };
   }
 };
@@ -468,9 +487,22 @@ export const updateAgentInfo = async (payload: UpdateAgentInfoPayload) => {
 
     if (!response.ok) {
       const errorPayload = await response.json().catch(() => null);
+      const errorDetail =
+        errorPayload?.detail && typeof errorPayload.detail === "object"
+          ? errorPayload.detail
+          : errorPayload?.message && typeof errorPayload.message === "object"
+            ? errorPayload.message
+            : null;
+      if (errorDetail) {
+        throw new ApiError(
+          errorDetail.code ?? response.status,
+          errorDetail.message ?? `Request failed: ${response.status}`,
+          errorDetail.data
+        );
+      }
       throw new Error(
-        errorPayload?.detail ||
-          errorPayload?.message ||
+        (typeof errorPayload?.detail === "string" && errorPayload.detail) ||
+          (typeof errorPayload?.message === "string" && errorPayload.message) ||
           `Request failed: ${response.status}`
       );
     }
@@ -490,6 +522,7 @@ export const updateAgentInfo = async (payload: UpdateAgentInfoPayload) => {
         error instanceof Error
           ? error.message
           : "Failed to update Agent, please try again later",
+      error,
     };
   }
 };
