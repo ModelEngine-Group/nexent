@@ -81,22 +81,6 @@ export interface Nl2aToolRecommendation {
   score: number;
 }
 
-export interface Nl2AgentSelectedTool {
-  tool_id: number;
-  name: string;
-  origin_name?: string | null;
-  description: string;
-  source: "mcp";
-  usage: string;
-  labels: string[];
-  inputs: string;
-}
-
-export interface Nl2AgentToolSelection {
-  type: "nl2agent_tool_selection";
-  tools: Nl2AgentSelectedTool[];
-}
-
 export type Nl2AgentCardActionSubtype =
   | "requirement_clarification"
   | "suggested_resource_installation"
@@ -106,21 +90,16 @@ export type Nl2AgentCardActionSubtype =
 export interface Nl2AgentCardAction {
   type: "nl2agent_card_action";
   subtype: Nl2AgentCardActionSubtype;
-  agent_id: number | null;
+  agent_id: number;
   action: string;
   result: Record<string, unknown>;
 }
 
-export type Nl2AgentStateEvent =
-  | {
-      event: "agent_draft_created";
-      agent_id: number;
-    }
-  | {
-      event: "prompt_generation_failed";
-      agent_id: number;
-      failed_fields: Nl2aPromptField[];
-    };
+export type Nl2AgentStateEvent = {
+  event: "prompt_generation_failed";
+  agent_id: number;
+  failed_fields: Nl2aPromptField[];
+};
 
 export interface Nl2aRequirementClarificationOption {
   option_id: string;
@@ -139,7 +118,7 @@ export interface Nl2aRequirementClarificationQuestion {
 
 export interface Nl2aRequirementClarificationPayload {
   subtype: "requirement_clarification";
-  agent_id: number | null;
+  agent_id: number;
   questions: Nl2aRequirementClarificationQuestion[];
 }
 
@@ -804,6 +783,18 @@ function appendToolCallPart(contentParts: any[], toolCallPart: any): any {
 function parseNl2aMessage(chunk: SseChunk): Nl2aMessage | null {
   try {
     const content = JSON.parse(chunk.content) as Nl2aPayload;
+    if (content.subtype === "requirement_clarification") {
+      if (
+        !Number.isInteger(content.agent_id) ||
+        content.agent_id <= 0 ||
+        !Array.isArray(content.questions) ||
+        content.questions.length === 0 ||
+        content.questions.length > 5
+      ) {
+        log.warn("[ChatModelAdapter] Ignored invalid clarification payload");
+        return null;
+      }
+    }
     if (content.subtype === "installed_resource_binding") {
       if (
         !Number.isInteger(content.agent_id) ||
@@ -884,12 +875,6 @@ export function parseNl2AgentState(content: string): Nl2AgentStateEvent | null {
     const parsed = JSON.parse(content) as Record<string, unknown>;
     if (!Number.isInteger(parsed.agent_id) || Number(parsed.agent_id) <= 0) {
       return null;
-    }
-    if (
-      parsed.event === "agent_draft_created" &&
-      Object.keys(parsed).length === 2
-    ) {
-      return parsed as unknown as Nl2AgentStateEvent;
     }
     const promptFields = new Set<Nl2aPromptField>([
       "duty_prompt",
@@ -1371,6 +1356,17 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     const serverThreadId = custom?.threadId;
     const onServerConversationId = custom?.onServerConversationId;
     const isResume = !isEphemeralRuntime && custom?.resume === true;
+    const nl2AgentId =
+      typeof custom?.agentId === "string"
+        ? Number(custom.agentId)
+        : custom?.agentId;
+    if (
+      isNl2Agent &&
+      (!Number.isInteger(nl2AgentId) || Number(nl2AgentId) <= 0)
+    ) {
+      log.warn("[ChatModelAdapter] NL2Agent requires an editable Agent ID");
+      return;
+    }
 
     // Extract user query: last user message text
     let lastUserIndex = -1;
@@ -1388,13 +1384,17 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         ? (messages[lastUserIndex].metadata?.custom as
             | {
                 nl2agentCardAction?: Nl2AgentCardAction;
-                nl2agentToolSelection?: Nl2AgentToolSelection;
               }
             | undefined)
         : undefined;
-    const structuredNl2AgentInput =
-      lastUserCustom?.nl2agentCardAction ??
-      lastUserCustom?.nl2agentToolSelection;
+    const structuredNl2AgentInput = lastUserCustom?.nl2agentCardAction;
+    if (
+      structuredNl2AgentInput &&
+      structuredNl2AgentInput.agent_id !== nl2AgentId
+    ) {
+      log.warn("[ChatModelAdapter] Ignored mismatched NL2Agent action ID");
+      return;
+    }
     const query = structuredNl2AgentInput
       ? JSON.stringify(structuredNl2AgentInput)
       : visibleQuery;

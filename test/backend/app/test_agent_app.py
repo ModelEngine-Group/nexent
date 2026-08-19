@@ -18,6 +18,7 @@ import types
 import warnings
 
 import pytest
+import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from fastapi.testclient import TestClient
@@ -201,7 +202,7 @@ async def test_agent_run_api(mocker, mock_auth_header):
 
 
 @pytest.mark.asyncio
-async def test_nl2agent_run_api_streams_without_persistent_ids(
+async def test_nl2agent_run_api_streams_for_existing_draft(
     mocker, mock_auth_header
 ):
     mocker.patch(
@@ -223,6 +224,7 @@ async def test_nl2agent_run_api_streams_without_persistent_ids(
             query="Build a weather agent",
             history=[],
             minio_files=[],
+            agent_id=42,
         ),
         http_request=MagicMock(),
         authorization=mock_auth_header["Authorization"],
@@ -235,7 +237,7 @@ async def test_nl2agent_run_api_streams_without_persistent_ids(
     assert "final_answer" in "".join(chunks)
     request = create_stream.call_args.kwargs["request"]
     assert request.query == "Build a weather agent"
-    assert request.agent_id is None
+    assert request.agent_id == 42
     assert (
         create_stream.call_args.kwargs["authorization"]
         == mock_auth_header["Authorization"]
@@ -258,7 +260,10 @@ async def test_nl2agent_run_api_maps_authentication_failure_to_401(mocker):
 
     with pytest.raises(HTTPException) as exc_info:
         await nl2agent_run_api(
-            nl2agent_request=NL2AgentRunRequest(query="Build an assistant"),
+            nl2agent_request=NL2AgentRunRequest(
+                query="Build an assistant",
+                agent_id=42,
+            ),
             http_request=MagicMock(),
             authorization="Bearer invalid-token",
         )
@@ -282,7 +287,10 @@ async def test_nl2agent_run_api_hides_internal_startup_errors(mocker):
 
     with pytest.raises(HTTPException) as exc_info:
         await nl2agent_run_api(
-            nl2agent_request=NL2AgentRunRequest(query="Build an assistant"),
+            nl2agent_request=NL2AgentRunRequest(
+                query="Build an assistant",
+                agent_id=42,
+            ),
             http_request=MagicMock(),
             authorization="Bearer tenant-token",
         )
@@ -335,6 +343,21 @@ async def test_nl2agent_run_api_maps_draft_identity_errors(
 
     assert exc_info.value.status_code == expected_status
     assert exc_info.value.detail["code"] == expected_code
+
+
+@pytest.mark.asyncio
+async def test_nl2agent_run_api_requires_agent_id():
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=runtime_app),
+        base_url="http://test",
+    ) as client:
+        response = await client.post(
+            "/agent/nl2agent/run",
+            json={"query": "Build an assistant"},
+        )
+
+    assert response.status_code == 422
+    assert response.json()["detail"][0]["loc"][-1] == "agent_id"
 
 
 async def test_agent_run_api_error_debug_mode(mocker, mock_auth_header):

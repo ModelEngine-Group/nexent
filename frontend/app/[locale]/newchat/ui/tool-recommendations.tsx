@@ -1,24 +1,17 @@
 "use client";
 
-import { useId, useRef, useState, type FC } from "react";
+import { type FC } from "react";
 import {
   AlertTriangleIcon,
-  CheckCircle2Icon,
   SearchXIcon,
   ServerIcon,
   SparklesIcon,
   WrenchIcon,
 } from "lucide-react";
-import { useAui } from "@assistant-ui/react";
 import { useTranslation } from "react-i18next";
 
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { useAgentStore } from "@/stores/agentStore";
-import type { Tool } from "@/types/agentConfig";
 import type {
-  Nl2AgentToolSelection,
-  Nl2AgentSelectedTool,
   Nl2aLocalMcpRecommendationPayload,
   Nl2aToolRecommendation,
 } from "../adapter/remote-chat-model-adapter";
@@ -70,85 +63,12 @@ const ToolRecommendationsError: FC = () => {
 export const ToolRecommendations: FC<{
   payload: Nl2aLocalMcpRecommendationPayload;
   disabled?: boolean;
-}> = ({ payload, disabled = false }) => {
+}> = ({ payload }) => {
   const { t } = useTranslation("common");
-  const aui = useAui();
-  const updateTools = useAgentStore((state) => state.updateTools);
-  const checkboxIdPrefix = useId();
   const content = payload;
   const isSuccess = content.status === "success";
   const recommendations: Nl2aToolRecommendation[] =
     content.status === "success" ? content.recommendations : [];
-  const [selectedToolIds, setSelectedToolIds] = useState(
-    () => new Set(recommendations.map((tool) => tool.tool_id))
-  );
-  const [isConfirmed, setIsConfirmed] = useState(false);
-  const confirmationStarted = useRef(false);
-
-  const toggleTool = (toolId: number) => {
-    if (isConfirmed || disabled) return;
-    setSelectedToolIds((current) => {
-      const next = new Set(current);
-      if (next.has(toolId)) {
-        next.delete(toolId);
-      } else {
-        next.add(toolId);
-      }
-      return next;
-    });
-  };
-
-  const confirmSelection = () => {
-    if (!isSuccess || disabled || confirmationStarted.current) return;
-    confirmationStarted.current = true;
-    setIsConfirmed(true);
-
-    const tools: Nl2AgentSelectedTool[] = recommendations
-      .filter((tool) => selectedToolIds.has(tool.tool_id))
-      .map((tool) => ({
-        tool_id: tool.tool_id,
-        name: tool.name,
-        origin_name: tool.origin_name,
-        description: tool.description,
-        source: tool.source,
-        usage: tool.usage,
-        labels: tool.labels,
-        inputs: JSON.stringify(tool.inputs),
-      }));
-    const agentTools: Tool[] = tools.map((tool) => ({
-      id: String(tool.tool_id),
-      name: tool.name,
-      origin_name: tool.origin_name ?? undefined,
-      description: tool.description,
-      source: tool.source,
-      initParams: [],
-      usage: tool.usage,
-      inputs: tool.inputs,
-      labels: tool.labels,
-    }));
-    const selection: Nl2AgentToolSelection = {
-      type: "nl2agent_tool_selection",
-      tools,
-    };
-
-    updateTools(agentTools);
-    aui.thread().append({
-      role: "user",
-      content: [
-        {
-          type: "text",
-          text: t("nl2agent.toolRecommendations.confirmedSummary", {
-            count: tools.length,
-          }),
-        },
-      ],
-      metadata: {
-        custom: { nl2agentToolSelection: selection },
-      },
-      startRun: true,
-    });
-  };
-
   return (
     <section
       data-slot="aui-tool-recommendations"
@@ -179,26 +99,13 @@ export const ToolRecommendations: FC<{
           <ToolRecommendationsEmpty />
         ) : (
           <div className="space-y-3">
-            {recommendations.map((tool, index) => {
-              const checkboxId = `${checkboxIdPrefix}-${index}`;
+            {recommendations.map((tool) => {
               return (
-                <label
+                <div
                   key={tool.tool_id}
-                  htmlFor={checkboxId}
-                  className="block rounded-lg border bg-background p-4 transition-colors has-checked:border-primary/50 has-checked:bg-primary/[0.03]"
+                  className="block rounded-lg border bg-background p-4"
                 >
                   <div className="flex items-start gap-3">
-                    <input
-                      id={checkboxId}
-                      type="checkbox"
-                      checked={selectedToolIds.has(tool.tool_id)}
-                      disabled={isConfirmed || disabled}
-                      onChange={() => toggleTool(tool.tool_id)}
-                      className="mt-2 size-4 shrink-0 accent-primary disabled:cursor-not-allowed"
-                      aria-label={t("nl2agent.toolRecommendations.selectTool", {
-                        name: tool.name,
-                      })}
-                    />
                     <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-muted">
                       <WrenchIcon className="size-4 text-muted-foreground" />
                     </div>
@@ -244,40 +151,12 @@ export const ToolRecommendations: FC<{
                       </div>
                     </div>
                   </div>
-                </label>
+                </div>
               );
             })}
           </div>
         )}
       </div>
-
-      {isSuccess && (
-        <div className="flex flex-wrap items-center justify-between gap-3 border-t bg-muted/20 px-4 py-3">
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            {isConfirmed && (
-              <CheckCircle2Icon className="size-4 text-emerald-600 dark:text-emerald-400" />
-            )}
-            <span>
-              {isConfirmed
-                ? t("nl2agent.toolRecommendations.confirmed")
-                : t("nl2agent.toolRecommendations.selectedCount", {
-                    count: selectedToolIds.size,
-                  })}
-            </span>
-          </div>
-          <Button
-            type="button"
-            size="sm"
-            disabled={isConfirmed || disabled}
-            onClick={confirmSelection}
-          >
-            <CheckCircle2Icon />
-            {selectedToolIds.size === 0
-              ? t("nl2agent.toolRecommendations.continueWithoutTools")
-              : t("nl2agent.toolRecommendations.confirm")}
-          </Button>
-        </div>
-      )}
     </section>
   );
 };

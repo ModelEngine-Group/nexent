@@ -432,7 +432,7 @@ class NL2AgentRunRequest(BaseModel):
     query: str = Field(min_length=1)
     history: Optional[List[HistoryItem]] = None
     minio_files: Optional[List[Dict[str, Any]]] = None
-    agent_id: Optional[int] = Field(default=None, gt=0)
+    agent_id: int = Field(gt=0)
 
 
 class NL2SkillRunRequest(BaseModel):

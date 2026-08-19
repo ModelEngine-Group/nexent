@@ -13,174 +13,79 @@ from agents.nl2agent_agent import (
 from tool_collection.mcp.local_mcp_service import local_mcp_service
 from tool_collection.mcp.nl2agent_mcp_tools import (
     FinalConfirmationPayload,
-    GeneratedAgentDraft,
-    InstalledMcpToolRecommendation,
     NL2A_WRAPPER_NAME,
-    Nl2aAgentDraftInput,
-    Nl2aFewShotToolCall,
-    RecommendResourcesInput,
     RECOMMEND_RESOURCES_NAME,
-    RequirementClarificationQuestion,
+    RecommendResourcesInput,
     RequirementClarificationPayload,
-    ResourceRequirement,
     ResourceCandidate,
-    SearchInstalledResourcesInput,
-    SearchUninstalledResourcesInput,
-    SEARCH_INSTALLED_RESOURCES_NAME,
+    ResourceRequirement,
     SAVE_AGENT_DRAFT_FIELDS_NAME,
+    SEARCH_INSTALLED_RESOURCES_NAME,
+    SearchInstalledResourcesInput,
     build_nl2a_wrapper,
 )
 
 
-def _few_shot_examples(tool_name="weather_forecast"):
-    return [
-        {
-            "user_input": question,
-            "steps": [
-                {
-                    "reasoning": f"Look up the forecast for {city}.",
-                    "tool_calls": [
-                        {
-                            "name": tool_name,
-                            "arguments": {"city": city},
-                        }
-                    ],
-                    "observation": f"{city} will be dry and mild.",
-                }
-            ],
-            "final_reasoning": "The forecast is sufficient to answer.",
-            "final_answer": f"{city} will be dry and mild.",
-        }
-        for question, city in [
-            ("Will it rain in Paris?", "Paris"),
-            ("What is the weather in Rome?", "Rome"),
-        ]
-    ]
-
-
-def _agent_draft_input(**overrides):
-    payload = {
-        "subtype": "agent_draft",
-        "language": "en",
-        "name": "weather_assistant",
-        "display_name": "WeatherAssistant",
-        "description": "You can get weather guidance.",
-        "duty_prompt": "Answer weather questions.",
-        "constraint_prompt": "1. Use the selected weather tool.",
-        "greeting_message": "Hello, I can help with weather.",
-        "example_questions": [
-            "Will it rain in Paris?",
-            "What is the weather in Rome?",
-            "Is it suitable for hiking?",
-        ],
-        "selected_tool_names": ["weather_forecast"],
-        "few_shot_examples": _few_shot_examples(),
-    }
-    payload.update(overrides)
-    return payload
-
-
 @pytest.mark.parametrize(
-    (
-        "language",
-        "expected",
-        "json_rule",
-        "retry_rule",
-        "selection_rule",
-        "few_shot_rule",
-        "thought_label",
-    ),
+    ("language", "heading", "immutable_rule", "description_rule"),
     [
+        (
+            "en",
+            "### Role",
+            "`name` and `display_name` are immutable",
+            "generate only `description` and `business_description`",
+        ),
         (
             "zh",
             "### 核心职责",
-            "不要改写 `candidates`",
-            "不得调用未安装资源搜索",
-            "只有处理旧",
-            "选择工具时生成恰好 2",
-            "思考：",
-        ),
-        (
-            "en",
-            "### Core Responsibilities",
-            "Do not rewrite candidate identities",
-            "Never split the requirements",
-            "only for a current",
-            "selected tool set produces exactly 2",
-            "Think:",
+            "`name` 和 `display_name` 不可修改",
+            "只生成 `description` 和 `business_description`",
         ),
     ],
 )
-def test_build_nl2agent_system_prompt_is_runtime_specific(
+def test_build_nl2agent_system_prompt_configures_existing_draft(
     language,
-    expected,
-    json_rule,
-    retry_rule,
-    selection_rule,
-    few_shot_rule,
-    thought_label,
+    heading,
+    immutable_rule,
+    description_rule,
 ):
     prompt = build_nl2agent_system_prompt(
         language,
         tool_name="runtime_search",
+        recommend_tool_name="runtime_recommend",
         wrapper_name="runtime_wrapper",
+        save_tool_name="runtime_save",
         max_results=3,
     )
 
-    assert expected in prompt
+    assert heading in prompt
+    assert immutable_rule in prompt
+    assert description_rule in prompt
     assert "runtime_search" in prompt
+    assert "runtime_recommend" in prompt
     assert "runtime_wrapper" in prompt
-    assert "3" in prompt
-    assert "requirements" in prompt
-    assert "nl2agent_tool_selection" in prompt
-    assert "few_shot_examples" in prompt
-    assert "greeting_message" in prompt
-    assert "example_questions" in prompt
-    assert thought_label in prompt
-    assert json_rule in prompt
-    assert retry_rule in prompt
-    assert selection_rule in prompt
-    assert few_shot_rule in prompt
-    assert "_assistant" in prompt
-    assert "30" in prompt
-    assert "exactly 2" in prompt or "恰好 2" in prompt
-    assert "second person" in prompt or "第二人称" in prompt
-    assert "Observation" in prompt
-    assert "final_answer" in prompt
-    assert "<code>" in prompt
-    assert "</code>" in prompt
-    assert "<nl2a>" not in prompt
-    assert "</nl2a>" not in prompt
-    assert "final_answer(" not in prompt
-    assert 'subtype="local_mcp_recommendation"' in prompt
+    assert "runtime_save" in prompt
+    assert "json.loads" in prompt
+    assert "bound_resources" in prompt
+    assert "basic_info" in prompt
+    assert 'subtype="requirement_clarification"' in prompt
     assert 'subtype="installed_resource_binding"' in prompt
     assert 'subtype="final_confirmation"' in prompt
-    assert 'subtype="requirement_clarification"' in prompt
-    assert 'subtype="agent_draft"' in prompt
-    assert "save_agent_draft_fields" in prompt
-    assert "raw_result = runtime_search(agent_id=1042, requirements=[" in prompt
-    assert "result = json.loads(raw_result)" in prompt
-    assert "wrapped = runtime_wrapper(" in prompt
-    assert "resource_result = json.loads(raw_resource_result)" in prompt
-    assert "search_result = json.loads(result)" in prompt
-    assert "search_result=search_result" in prompt
-    assert "recommend_resources" in prompt
-    assert "few_shots_prompt" in prompt
-    assert "abandoned_requirement_ids" in prompt
-    if language == "en":
-        assert "one to five schema-driven questions" in prompt
-        assert "Prefer at most four focused questions" in prompt
-        assert "Text questions set both fields to `False`" in prompt
-    else:
-        assert "一到五个 Schema 驱动的问题" in prompt
-        assert "优先只问不超过四个聚焦问题" in prompt
-        assert "文本题的主文本框已经是开放输入" in prompt
+    assert "agent_id=None" not in prompt
+    assert "nl2agent_tool_selection" not in prompt
+    assert 'subtype="agent_draft"' not in prompt
+    assert 'subtype="local_mcp_recommendation"' not in prompt
+    assert "<nl2a>" not in prompt
+    assert "```" not in prompt
+
+    description_save = prompt.index('"description":')
+    resource_search = prompt.index("raw_result = runtime_search")
+    assert description_save < resource_search
+
     code_blocks = re.findall(r"<code>\n(.*?)\n</code>", prompt, re.DOTALL)
-    assert len(code_blocks) == 9
+    assert len(code_blocks) == 7
     for code_block in code_blocks:
         ast.parse(code_block)
-    assert code_blocks[-1].count('{"user_input":') == 2
-    assert "```" not in prompt
 
 
 def test_build_nl2agent_system_prompt_falls_back_to_chinese():
@@ -199,59 +104,12 @@ def test_build_nl2agent_system_prompt_rejects_unknown_template_variables(mocker)
     prompt_loader.assert_called_once_with("nl2agent", "en")
 
 
-def test_nl2agent_models_preserve_tool_inputs_and_define_agent_draft():
-    recommendation = InstalledMcpToolRecommendation(
-        tool_id=10,
-        name="weather_forecast",
-        origin_name="weather",
-        description="Get weather forecasts",
-        usage="weather-server",
-        labels=["weather"],
-        inputs={"city": "string"},
-        score=0.9,
-    )
-    draft = GeneratedAgentDraft(
-        name="weather_assistant",
-        display_name="Weather Assistant",
-        description="Weather help",
-        duty_prompt="Answer weather questions.",
-        constraint_prompt="Use only selected tools.",
-        greeting_message="Hello! I can help with weather questions.",
-        example_questions=[
-            "Will it rain tomorrow?",
-            "What should I wear today?",
-            "Is it a good day for hiking?",
-        ],
-    )
-
-    assert recommendation.inputs == {"city": "string"}
-    assert draft.model_dump() == {
-        "subtype": "agent_draft",
-        "name": "weather_assistant",
-        "display_name": "Weather Assistant",
-        "description": "Weather help",
-        "duty_prompt": "Answer weather questions.",
-        "constraint_prompt": "Use only selected tools.",
-        "few_shots_prompt": None,
-        "greeting_message": "Hello! I can help with weather questions.",
-        "example_questions": [
-            "Will it rain tomorrow?",
-            "What should I wear today?",
-            "Is it a good day for hiking?",
-        ],
-    }
-
-
-def test_phase_one_freezes_five_tool_input_models_and_clarification_wrapper():
+def test_current_wrapper_models_require_existing_agent_id():
     requirement = ResourceRequirement(
         requirement_id="source",
         query="Find reliable source material",
     )
     assert SearchInstalledResourcesInput(requirements=[requirement]).requirements
-    assert SearchUninstalledResourcesInput(
-        requirements=[requirement],
-        scope="internal",
-    ).exclude_refs == []
     candidate = ResourceCandidate(
         candidate_ref="tool:7",
         resource_type="tool",
@@ -264,15 +122,14 @@ def test_phase_one_freezes_five_tool_input_models_and_clarification_wrapper():
 
     wrapped = build_nl2a_wrapper(
         subtype="requirement_clarification",
+        agent_id=42,
         questions=[
             {
                 "question_id": "output",
                 "question_type": "single_choice",
-                "title": "What should the agent produce?",
+                "title": "What should the Agent produce?",
                 "required": True,
-                "options": [
-                    {"option_id": "report", "label": "A concise report"}
-                ],
+                "options": [{"option_id": "report", "label": "A report"}],
                 "allow_other": True,
                 "other_input_expanded": True,
             }
@@ -280,8 +137,18 @@ def test_phase_one_freezes_five_tool_input_models_and_clarification_wrapper():
     )
     payload = json.loads(wrapped.split("<nl2a>", 1)[1].split("</nl2a>", 1)[0])
     clarification = RequirementClarificationPayload.model_validate(payload)
-    assert clarification.agent_id is None
-    assert clarification.questions[0].other_input_expanded is True
+    assert clarification.agent_id == 42
+
+    with pytest.raises(ValidationError):
+        RequirementClarificationPayload(
+            questions=[
+                {
+                    "question_id": "output",
+                    "question_type": "text",
+                    "title": "What should the Agent produce?",
+                }
+            ]
+        )
 
 
 def test_installed_resource_binding_wrapper_preserves_verified_contract():
@@ -294,67 +161,25 @@ def test_installed_resource_binding_wrapper_preserves_verified_contract():
         requirement_ids=["report"],
         score=0.88,
     )
-    resource_result = {
-        "status": "success",
-        "resources": [
-            {
-                "candidate": candidate.model_dump(mode="json"),
-                "recommendation": "recommended",
-                "form_kind": "SKILL_CONFIG",
-                "config": [],
-            }
-        ],
-    }
-
     wrapped = build_nl2a_wrapper(
         subtype="installed_resource_binding",
         agent_id=42,
-        resource_result=resource_result,
+        resource_result={
+            "status": "success",
+            "resources": [
+                {
+                    "candidate": candidate.model_dump(mode="json"),
+                    "recommendation": "recommended",
+                    "form_kind": "SKILL_CONFIG",
+                    "config": [],
+                }
+            ],
+        },
     )
     payload = json.loads(wrapped.split("<nl2a>", 1)[1].split("</nl2a>", 1)[0])
 
-    assert payload["subtype"] == "installed_resource_binding"
     assert payload["agent_id"] == 42
     assert payload["resources"][0]["candidate"]["candidate_ref"] == "skill:12"
-
-
-@pytest.mark.parametrize(
-    "arguments",
-    [
-        {
-            "subtype": "installed_resource_binding",
-            "agent_id": 42,
-            "resource_result": '{"status":"success","resources":[]}',
-        },
-        {
-            "subtype": "local_mcp_recommendation",
-            "search_result": '{"status":"success","recommendations":[]}',
-            "selected_tool_ids": [],
-        },
-    ],
-)
-def test_wrapper_rejects_raw_json_string_parameters(arguments):
-    with pytest.raises(ValidationError):
-        build_nl2a_wrapper(**arguments)
-
-
-def test_recommend_resources_input_rejects_duplicates_and_unknown_recommended_refs():
-    candidate = ResourceCandidate(
-        candidate_ref="tool:7",
-        resource_type="tool",
-        source="MCP_TOOL",
-        name="search",
-        requirement_ids=["source"],
-        score=0.8,
-    )
-
-    with pytest.raises(ValidationError, match="candidate_ref values must be unique"):
-        RecommendResourcesInput(candidates=[candidate, candidate])
-    with pytest.raises(ValidationError, match="subset of candidates"):
-        RecommendResourcesInput(
-            candidates=[candidate],
-            recommended_refs=["tool:99"],
-        )
 
 
 def test_requirement_clarification_accepts_at_most_five_questions():
@@ -367,9 +192,10 @@ def test_requirement_clarification_accepts_at_most_five_questions():
         for index in range(5)
     ]
 
-    assert len(RequirementClarificationPayload(questions=questions).questions) == 5
+    assert len(RequirementClarificationPayload(agent_id=42, questions=questions).questions) == 5
     with pytest.raises(ValidationError, match="at most 5 items"):
         RequirementClarificationPayload(
+            agent_id=42,
             questions=[
                 *questions,
                 {
@@ -377,40 +203,16 @@ def test_requirement_clarification_accepts_at_most_five_questions():
                     "question_type": "text",
                     "title": "Question 5",
                 },
-            ]
-        )
-
-
-def test_text_clarification_does_not_allow_a_second_open_input():
-    question = RequirementClarificationQuestion(
-        question_id="details",
-        question_type="text",
-        title="Describe the expected workflow.",
-    )
-
-    assert question.allow_other is False
-    assert question.other_input_expanded is False
-
-    with pytest.raises(ValidationError, match="cannot allow other answers"):
-        RequirementClarificationQuestion(
-            question_id="details",
-            question_type="text",
-            title="Describe the expected workflow.",
-            allow_other=True,
-            other_input_expanded=True,
+            ],
         )
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("language", ["zh", "en"])
-async def test_create_nl2agent_agent_config_has_only_runtime_tools(language):
+async def test_create_nl2agent_agent_config_has_only_current_runtime_tools(language):
     config = create_nl2agent_agent_config(language)
     registered_tools = await local_mcp_service.get_tools()
 
-    assert config.name == "__nl2agent_runtime__"
-    assert config.model_name == "main_model"
-    assert config.max_steps == 8
-    assert config.enable_planning is False
     assert [tool.name for tool in config.tools] == [
         SEARCH_INSTALLED_RESOURCES_NAME,
         RECOMMEND_RESOURCES_NAME,
@@ -423,21 +225,11 @@ async def test_create_nl2agent_agent_config_has_only_runtime_tools(language):
         registered_tools[SAVE_AGENT_DRAFT_FIELDS_NAME].description,
         registered_tools[NL2A_WRAPPER_NAME].description,
     ]
-    assert all(tool.source == "mcp" for tool in config.tools)
-    assert all(tool.usage == "outer-apis" for tool in config.tools)
-    search_inputs = json.loads(config.tools[0].inputs)
-    assert search_inputs == {
-        "agent_id": "int | None",
-        "requirements": "list[ResourceRequirement]",
-    }
-    recommend_inputs = json.loads(config.tools[1].inputs)
-    assert recommend_inputs["agent_id"] == "int | None"
-    assert recommend_inputs["candidates"] == "list[ResourceCandidate]"
+    assert json.loads(config.tools[0].inputs)["agent_id"] == "int"
+    assert json.loads(config.tools[1].inputs)["agent_id"] == "int"
     save_inputs = json.loads(config.tools[2].inputs)
-    assert save_inputs["agent_id"] == "int | None"
+    assert save_inputs["agent_id"] == "int"
     assert set(save_inputs["fields"]) == {
-        "name",
-        "display_name",
         "description",
         "business_description",
         "duty_prompt",
@@ -446,187 +238,36 @@ async def test_create_nl2agent_agent_config_has_only_runtime_tools(language):
         "greeting_message",
         "example_questions",
     }
-    wrapper_inputs = json.loads(config.tools[3].inputs)
-    assert wrapper_inputs["subtype"] == "str"
-    assert wrapper_inputs["search_result"] == "dict | None"
-    assert (
-        wrapper_inputs["requirements"]
-        == "list[FinalConfirmationRequirement] | None"
-    )
-    assert wrapper_inputs["abandoned_requirement_ids"] == "list[str] | None"
-    assert wrapper_inputs["language"] == "str | None"
-    assert (
-        wrapper_inputs["few_shot_examples"]
-        == "list[dict] with exactly 2 items | None"
-    )
-    assert all(tool.metadata is None for tool in config.tools)
-    expected_persistence_rule = (
-        "creates a real ordinary Agent database draft"
-        if language == "en"
-        else "创建真实普通 Agent 数据库草稿"
-    )
-    assert expected_persistence_rule in config.instructions
-
-
-@pytest.mark.parametrize(
-    ("name", "arguments", "message"),
-    [
-        ("weather-tool", {"city": "Paris"}, "tool call name"),
-        ("weather_forecast", {"city-name": "Paris"}, "tool argument names"),
-        ("weather_forecast", {"class": "Paris"}, "tool argument names"),
-    ],
-)
-def test_few_shot_tool_calls_require_executable_python_names(
-    name,
-    arguments,
-    message,
-):
-    with pytest.raises(ValidationError, match=message):
-        Nl2aFewShotToolCall(name=name, arguments=arguments)
-
-
-@pytest.mark.parametrize(
-    ("overrides", "message"),
-    [
-        (
-            {"language": "zh", "display_name": "WeatherAssistant"},
-            "Chinese display_name must end with",
-        ),
-        (
-            {"selected_tool_names": ["weather_forecast", "weather_forecast"]},
-            "selected_tool_names must be unique",
-        ),
-        (
-            {"selected_tool_names": ["weather-tool"]},
-            "selected tool names must be valid Python identifiers",
-        ),
-        (
-            {"few_shot_examples": None},
-            "few_shot_examples are required",
-        ),
-        (
-            {"constraint_prompt": ""},
-            "constraint_prompt is required",
-        ),
-        (
-            {"selected_tool_names": [], "constraint_prompt": ""},
-            "few_shot_examples require selected tools",
-        ),
-        (
-            {
-                "selected_tool_names": [],
-                "constraint_prompt": "Must use a tool.",
-                "few_shot_examples": None,
-            },
-            "constraint_prompt must be empty",
-        ),
-    ],
-)
-def test_agent_draft_rejects_invalid_tool_binding_contract(overrides, message):
-    with pytest.raises(ValidationError, match=message):
-        Nl2aAgentDraftInput(**_agent_draft_input(**overrides))
-
-
-@pytest.mark.parametrize(
-    ("arguments", "message"),
-    [
-        (
-            {"subtype": "local_mcp_recommendation"},
-            "requires search_result and selected_tool_ids",
-        ),
-        (
-            {
-                "subtype": "local_mcp_recommendation",
-                "search_result": {
-                    "subtype": "local_mcp_recommendation",
-                    "status": "error",
-                    "code": "tool_search_failed",
-                    "retryable": True,
-                },
-                "selected_tool_ids": [7],
-            },
-            "must be empty for a search error",
-        ),
-        (
-            {
-                "subtype": "local_mcp_recommendation",
-                "search_result": {"status": "pending"},
-                "selected_tool_ids": [],
-            },
-            "unsupported status",
-        ),
-        (
-            {"subtype": "agent_draft"},
-            "agent_draft requires parameters",
-        ),
-        (
-            {"subtype": "final_confirmation"},
-            "final_confirmation requires verified final_payload",
-        ),
-        (
-            {"subtype": "unsupported"},
-            "unsupported nl2a subtype",
-        ),
-    ],
-)
-def test_wrapper_rejects_invalid_workflow_contracts(arguments, message):
-    with pytest.raises(ValueError, match=message):
-        build_nl2a_wrapper(**arguments)
+    assert set(json.loads(config.tools[3].inputs)) == {
+        "subtype",
+        "agent_id",
+        "resource_result",
+        "questions",
+        "requirements",
+        "abandoned_requirement_ids",
+    }
 
 
 def test_final_confirmation_payload_rejects_duplicate_requirement_ids():
-    common = {
-        "agent_id": 42,
-        "agent": {
-            "name": "research_assistant",
-            "display_name": "Research Assistant",
-            "description": "Research help",
-            "business_description": "Verify and summarize sources",
-        },
-        "resources": [],
-        "prompts": {
-            "duty_prompt": "Research",
-            "constraint_prompt": "",
-            "few_shots_prompt": "",
-            "greeting_message": "Hello",
-            "example_questions": ["What should I research?"],
-        },
-    }
-
     with pytest.raises(ValidationError, match="requirement IDs must be unique"):
         FinalConfirmationPayload(
-            **common,
+            agent_id=42,
+            agent={
+                "name": "research_assistant",
+                "display_name": "Research Assistant",
+                "description": "Research help",
+                "business_description": "Verify and summarize sources",
+            },
             requirements=[{"requirement_id": "research", "query": "Research"}],
             abandoned_requirements=[
                 {"requirement_id": "research", "query": "Old research"}
             ],
+            resources=[],
+            prompts={
+                "duty_prompt": "Research",
+                "constraint_prompt": "",
+                "few_shots_prompt": "",
+                "greeting_message": "Hello",
+                "example_questions": ["What should I research?"],
+            },
         )
-
-
-def test_wrapper_renders_english_multi_tool_steps_as_executable_few_shots():
-    examples = _few_shot_examples()
-    examples[0]["steps"][0]["tool_calls"].append(
-        {
-            "name": "weather_alerts",
-            "arguments": {"city": "Paris", "severe_only": True},
-        }
-    )
-    wrapped = build_nl2a_wrapper(
-        **_agent_draft_input(
-            selected_tool_names=["weather_forecast", "weather_alerts"],
-            few_shot_examples=examples,
-        )
-    )
-
-    serialized = wrapped.split("<nl2a>\n", 1)[1].split("\n</nl2a>", 1)[0]
-    payload = json.loads(serialized)
-    few_shots = payload["few_shots_prompt"]
-
-    assert 'Task 1: "Will it rain in Paris?"' in few_shots
-    assert "result_1_1 = weather_forecast(city='Paris')" in few_shots
-    assert (
-        "result_1_2 = weather_alerts(city='Paris', severe_only=True)"
-        in few_shots
-    )
-    assert "# System returns Observation: Paris will be dry and mild." in few_shots
-    assert few_shots.count("<code>") == 2

@@ -29,21 +29,13 @@ from agents.create_agent_info import (
 )
 from agents.nl2agent_agent import create_nl2agent_agent_config
 from consts.const import LOCAL_MCP_SERVER, MODEL_CONFIG_MAPPING
-from consts.model import HistoryItem, ModelConnectStatusEnum, NL2AgentRunRequest, ToolSourceEnum
-from database.agent_db import (
-    create_agent,
-    query_all_agent_info_by_tenant_id,
-    update_agent_draft_fields,
-)
+from consts.model import HistoryItem, NL2AgentRunRequest, ToolSourceEnum
+from database.agent_db import update_agent_draft_fields
 from database.skill_db import query_enabled_skill_instances
 from database.tool_db import query_all_enabled_tool_instances, query_all_tools
 from services.agent_draft_permission_service import (
     AgentDraftEditError,
     require_agent_draft_edit,
-)
-from services.prompt_template_service import (
-    SYSTEM_PROMPT_TEMPLATE_ID,
-    SYSTEM_PROMPT_TEMPLATE_NAME,
 )
 from tool_collection.mcp.nl2agent_mcp_tools import (
     AgentDraftFields,
@@ -81,12 +73,6 @@ AGENT_DRAFT_FIELD_ORDER = (
     "few_shots_prompt",
     "greeting_message",
     "example_questions",
-)
-AGENT_DRAFT_CREATE_REQUIRED_FIELDS = (
-    "name",
-    "display_name",
-    "description",
-    "business_description",
 )
 
 
@@ -150,92 +136,6 @@ def _ordered_updated_fields(fields: AgentDraftFields) -> list[str]:
     return [name for name in AGENT_DRAFT_FIELD_ORDER if name in fields.model_fields_set]
 
 
-def _resolve_default_draft_model(tenant_id: str) -> int:
-    default_model = tenant_config_manager.get_model_config(
-        key=MODEL_CONFIG_MAPPING["llm"],
-        tenant_id=tenant_id,
-    )
-    model_id = default_model.get("model_id") if isinstance(default_model, dict) else None
-    model_type = default_model.get("model_type") if isinstance(default_model, dict) else None
-    connect_status = (
-        ModelConnectStatusEnum.get_value(default_model.get("connect_status"))
-        if isinstance(default_model, dict)
-        else ModelConnectStatusEnum.UNAVAILABLE.value
-    )
-    if (
-        not isinstance(model_id, int)
-        or model_id <= 0
-        or model_type not in (None, "llm")
-        or connect_status != ModelConnectStatusEnum.AVAILABLE.value
-    ):
-        raise Nl2AgentDraftSaveError("default_model_missing")
-    return model_id
-
-
-def _create_agent_draft_from_fields(
-    fields: AgentDraftFields,
-    tenant_id: str,
-    user_id: str,
-) -> dict[str, Any]:
-    patch = fields.model_dump(mode="python", exclude_unset=True)
-    missing = [
-        field_name
-        for field_name in AGENT_DRAFT_CREATE_REQUIRED_FIELDS
-        if not isinstance(patch.get(field_name), str) or not patch[field_name].strip()
-    ]
-    if missing:
-        raise Nl2AgentDraftSaveError("basic_fields_required")
-
-    default_model_id = _resolve_default_draft_model(tenant_id)
-
-    # Reuse the ordinary Agent path's deterministic suffix helpers without
-    # invoking its optional LLM-based regeneration flow.
-    from services.agent_service import (
-        _check_agent_display_name_duplicate,
-        _check_agent_name_duplicate,
-        _generate_unique_agent_name_with_suffix,
-        _generate_unique_display_name_with_suffix,
-        _get_user_group_ids,
-    )
-
-    agents_cache = query_all_agent_info_by_tenant_id(tenant_id=tenant_id)
-    if _check_agent_name_duplicate(
-        patch["name"], tenant_id=tenant_id, agents_cache=agents_cache
-    ):
-        patch["name"] = _generate_unique_agent_name_with_suffix(
-            patch["name"], tenant_id=tenant_id, agents_cache=agents_cache
-        )
-    if _check_agent_display_name_duplicate(
-        patch["display_name"], tenant_id=tenant_id, agents_cache=agents_cache
-    ):
-        patch["display_name"] = _generate_unique_display_name_with_suffix(
-            patch["display_name"], tenant_id=tenant_id, agents_cache=agents_cache
-        )
-
-    patch.update(
-        model_ids=[default_model_id],
-        prompt_template_id=SYSTEM_PROMPT_TEMPLATE_ID,
-        prompt_template_name=SYSTEM_PROMPT_TEMPLATE_NAME,
-        group_ids=_get_user_group_ids(user_id, tenant_id),
-        max_steps=15,
-        is_main_agent=True,
-        provide_run_summary=False,
-        enabled=True,
-    )
-    try:
-        created = create_agent(agent_info=patch, tenant_id=tenant_id, user_id=user_id)
-    except Exception as exc:
-        logger.exception("Failed to create NL2Agent AgentInfo draft")
-        raise Nl2AgentDraftSaveError("draft_save_failed", retryable=True) from exc
-
-    return {
-        "status": "success",
-        "agent_id": created["agent_id"],
-        "created": True,
-        "updated_fields": _ordered_updated_fields(fields),
-    }
-
-
 def _update_agent_draft_from_fields(
     agent_id: int,
     fields: AgentDraftFields,
@@ -273,14 +173,12 @@ def _update_agent_draft_from_fields(
 
 
 def save_agent_draft_fields_impl(
-    agent_id: int | None,
+    agent_id: int,
     fields: AgentDraftFields,
     tenant_id: str,
     user_id: str,
 ) -> dict[str, Any]:
-    """Create or partially update one ordinary tenant-owned AgentInfo draft."""
-    if agent_id is None:
-        return _create_agent_draft_from_fields(fields, tenant_id, user_id)
+    """Partially update one existing tenant-owned AgentInfo draft."""
     return _update_agent_draft_from_fields(agent_id, fields, tenant_id, user_id)
 
 
@@ -794,25 +692,8 @@ async def recommend_installed_resources_impl(
     return RecommendResourcesOutput(resources=resources)
 
 
-def _parse_installed_binding_action(query: str) -> int | None:
-    try:
-        action = json.loads(query)
-    except (TypeError, json.JSONDecodeError):
-        return None
-    if not isinstance(action, dict) or (
-        action.get("type") != "nl2agent_card_action"
-        or action.get("subtype") != "installed_resource_binding"
-        or action.get("action") != "continue"
-    ):
-        return None
-    agent_id = action.get("agent_id")
-    if not isinstance(agent_id, int) or isinstance(agent_id, bool) or agent_id <= 0:
-        raise Nl2AgentResourceError("invalid_candidates")
-    return agent_id
-
-
 def _parse_nl2agent_card_action_agent_id(query: str) -> int | None:
-    """Return a valid optional Agent ID from a structured NL2Agent action."""
+    """Return the required Agent ID from a structured NL2Agent action."""
 
     try:
         action = json.loads(query)
@@ -821,8 +702,6 @@ def _parse_nl2agent_card_action_agent_id(query: str) -> int | None:
     if not isinstance(action, dict) or action.get("type") != "nl2agent_card_action":
         return None
     agent_id = action.get("agent_id")
-    if agent_id is None:
-        return None
     if not isinstance(agent_id, int) or isinstance(agent_id, bool) or agent_id <= 0:
         raise Nl2AgentDraftSaveError("agent_context_mismatch")
     return agent_id
@@ -1042,6 +921,17 @@ async def build_nl2agent_run_info(
 ) -> AgentRunInfo:
     """Build all request-scoped NL2Agent runtime objects in memory."""
 
+    action_agent_id = _parse_nl2agent_card_action_agent_id(request.query)
+    if action_agent_id is not None and request.agent_id != action_agent_id:
+        raise Nl2AgentDraftSaveError("agent_context_mismatch")
+    user_id, authenticated_tenant_id = get_current_user_id(authorization)
+    if authenticated_tenant_id != tenant_id:
+        raise PermissionError("tenant mismatch")
+    binding_context = await _build_verified_bound_resources_context(
+        agent_id=request.agent_id,
+        tenant_id=tenant_id,
+        user_id=user_id,
+    )
     final_query = await join_minio_file_description_to_query(
         minio_files=request.minio_files,
         query=request.query,
@@ -1049,34 +939,10 @@ async def build_nl2agent_run_info(
     )
     model_config_list = await create_model_config_list(tenant_id)
     agent_config = create_nl2agent_agent_config(language)
-    binding_agent_id = _parse_installed_binding_action(request.query)
-    action_agent_id = _parse_nl2agent_card_action_agent_id(request.query)
-    if (
-        request.agent_id is not None
-        and action_agent_id is not None
-        and request.agent_id != action_agent_id
-    ):
-        raise Nl2AgentDraftSaveError("agent_context_mismatch")
-    effective_agent_id = request.agent_id or action_agent_id
-    if (
-        binding_agent_id is not None
-        and effective_agent_id is not None
-        and binding_agent_id != effective_agent_id
-    ):
-        raise Nl2AgentDraftSaveError("agent_context_mismatch")
-    if effective_agent_id is not None:
-        user_id, authenticated_tenant_id = get_current_user_id(authorization)
-        if authenticated_tenant_id != tenant_id:
-            raise PermissionError("tenant mismatch")
-        binding_context = await _build_verified_bound_resources_context(
-            agent_id=effective_agent_id,
-            tenant_id=tenant_id,
-            user_id=user_id,
-        )
-        agent_config.context_items = [
-            *(agent_config.context_items or []),
-            binding_context,
-        ]
+    agent_config.context_items = [
+        *(agent_config.context_items or []),
+        binding_context,
+    ]
     default_model = tenant_config_manager.get_model_config(
         key=MODEL_CONFIG_MAPPING["llm"],
         tenant_id=tenant_id,
@@ -1124,8 +990,7 @@ async def build_nl2agent_run_info(
     mcp_headers: dict[str, str] = {}
     if authorization:
         mcp_headers["Authorization"] = authorization
-    if effective_agent_id is not None:
-        mcp_headers[NL2AGENT_AGENT_ID_HEADER] = str(effective_agent_id)
+    mcp_headers[NL2AGENT_AGENT_ID_HEADER] = str(request.agent_id)
     if mcp_headers:
         mcp_config["headers"] = mcp_headers
 

@@ -993,9 +993,14 @@ def test_nl2_agent_skill_requests():
     nl2_agent = model_consts.NL2AgentRunRequest(
         query="Create a chatbot",
         history=[],
-        minio_files=[]
+        minio_files=[],
+        agent_id=42,
     )
     assert nl2_agent.query == "Create a chatbot"
+    assert nl2_agent.agent_id == 42
+
+    with pytest.raises(ValidationError):
+        model_consts.NL2AgentRunRequest(query="Create a chatbot")
 
     nl2_skill = model_consts.NL2SkillRunRequest(
         query="Build an automation",
@@ -1342,4 +1347,3 @@ def test_delete_mcp_service_request():
         mcp_id=42
     )
     assert req.mcp_id == 42
-

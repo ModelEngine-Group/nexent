@@ -1,38 +1,16 @@
 "use client";
 
-import { useState, type FC } from "react";
-import { CheckCircle2Icon, FileCheck2Icon } from "lucide-react";
+import { type FC } from "react";
+import { FileCheck2Icon } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import { Button } from "@/components/ui/button";
-import { useAgentStore } from "@/stores/agentStore";
 import type { Nl2aAgentDraftPayload } from "../adapter/remote-chat-model-adapter";
 
 export const AgentDraftCard: FC<{
   draft: Nl2aAgentDraftPayload;
   disabled?: boolean;
-}> = ({ draft, disabled = false }) => {
+}> = ({ draft }) => {
   const { t } = useTranslation("common");
-  const updateAgentConfig = useAgentStore(
-    (state) => state.updateAgentConfig
-  );
-  const [isApplied, setIsApplied] = useState(false);
-
-  const applyDraft = () => {
-    if (isApplied || disabled) return;
-
-    updateAgentConfig({
-      name: draft.name,
-      display_name: draft.display_name,
-      description: draft.description,
-      duty_prompt: draft.duty_prompt,
-      constraint_prompt: draft.constraint_prompt,
-      few_shots_prompt: draft.few_shots_prompt ?? "",
-      greeting_message: draft.greeting_message,
-      example_questions: draft.example_questions,
-    });
-    setIsApplied(true);
-  };
 
   return (
     <section
@@ -60,20 +38,6 @@ export const AgentDraftCard: FC<{
         <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
           {draft.description}
         </p>
-      </div>
-
-      <div className="flex items-center justify-end border-t bg-muted/20 px-4 py-3">
-        <Button
-          type="button"
-          size="sm"
-          disabled={isApplied || disabled}
-          onClick={applyDraft}
-        >
-          <CheckCircle2Icon />
-          {isApplied
-            ? t("nl2agent.agentDraft.applied")
-            : t("nl2agent.agentDraft.apply")}
-        </Button>
       </div>
     </section>
   );

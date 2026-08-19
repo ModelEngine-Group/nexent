@@ -20,8 +20,6 @@ from tool_collection.mcp.nl2agent_mcp_tools import (
     NL2AGENT_MCP_TOOL_META,
     NL2A_WRAPPER_DESCRIPTION,
     NL2A_WRAPPER_NAME,
-    Nl2aAgentDraftInput,
-    Nl2aLocalMcpRecommendationInput,
     RecommendResourcesOutput,
     RECOMMEND_RESOURCES_DESCRIPTION,
     RECOMMEND_RESOURCES_NAME,
@@ -228,262 +226,6 @@ async def test_mcp_search_returns_sanitized_contract_errors(mocker):
 
 
 @pytest.mark.asyncio
-async def test_nl2a_wrapper_filters_real_search_results_and_wraps_errors():
-    search_result = {
-        "subtype": "local_mcp_recommendation",
-        "status": "success",
-        "recommendation_count": 2,
-        "recommendations": [
-            {
-                "tool_id": tool_id,
-                "name": name,
-                "origin_name": None,
-                "description": f"Tool {tool_id}",
-                "source": "mcp",
-                "usage": "weather-server",
-                "labels": ["weather"],
-                "inputs": {"city": "string"},
-                "score": score,
-            }
-            for tool_id, name, score in [
-                (7, "primary_weather", 0.95),
-                (12, "secondary_weather", 0.75),
-            ]
-        ],
-    }
-
-    result = await nl2a_wrapper(
-        subtype="local_mcp_recommendation",
-        search_result=search_result,
-        selected_tool_ids=[12],
-    )
-
-    assert _unwrap_nl2a(result) == {
-        "subtype": "local_mcp_recommendation",
-        "status": "success",
-        "recommendation_count": 1,
-        "recommendations": [search_result["recommendations"][1]],
-    }
-
-    with pytest.raises(ValueError, match="not present in search_result"):
-        await nl2a_wrapper(
-            subtype="local_mcp_recommendation",
-            search_result=search_result,
-            selected_tool_ids=[999],
-        )
-    with pytest.raises(ValidationError, match="selected_tool_ids must be unique"):
-        Nl2aLocalMcpRecommendationInput(
-            subtype="local_mcp_recommendation",
-            search_result=search_result,
-            selected_tool_ids=[7, 7],
-        )
-
-    error_result = await nl2a_wrapper(
-        subtype="local_mcp_recommendation",
-        search_result={
-            "subtype": "local_mcp_recommendation",
-            "status": "error",
-            "code": "tool_search_failed",
-            "retryable": True,
-        },
-        selected_tool_ids=[],
-    )
-    assert _unwrap_nl2a(error_result) == {
-        "subtype": "local_mcp_recommendation",
-        "status": "error",
-        "code": "tool_search_failed",
-        "retryable": True,
-    }
-
-
-@pytest.mark.asyncio
-async def test_nl2a_wrapper_renders_structured_agent_few_shots():
-    examples = [
-        {
-            "user_input": question,
-            "steps": [
-                {
-                    "reasoning": f"Query weather for {city}.",
-                    "tool_calls": [
-                        {
-                            "name": "weather_forecast",
-                            "arguments": {"city": city},
-                        }
-                    ],
-                    "observation": f"{city} has mild and dry weather.",
-                }
-            ],
-            "final_reasoning": "The observation answers the question.",
-            "final_answer": "The weather is mild and dry.",
-        }
-        for question, city in [
-            ("上海明天会下雨吗？", "上海"),
-            ("北京今天适合穿什么？", "北京"),
-        ]
-    ]
-    payload = {
-        "subtype": "agent_draft",
-        "language": "zh",
-        "name": "weather_assistant",
-        "display_name": "天气助手",
-        "description": "查询天气并提供出行建议。",
-        "duty_prompt": "回答天气问题。",
-        "constraint_prompt": "使用真实工具结果。",
-        "greeting_message": "你好，我可以帮助查询天气。",
-        "example_questions": [
-            "上海明天会下雨吗？",
-            "北京今天适合穿什么？",
-            "杭州今天适合徒步吗？",
-        ],
-        "selected_tool_names": ["weather_forecast"],
-        "few_shot_examples": examples,
-    }
-
-    result = _unwrap_nl2a(await nl2a_wrapper(**payload))
-
-    assert result["subtype"] == "agent_draft"
-    assert result["example_questions"] == [
-        "上海明天会下雨吗？",
-        "北京今天适合穿什么？",
-        "杭州今天适合徒步吗？",
-    ]
-    assert result["few_shots_prompt"].count("<code>") == 2
-    assert "任务1" in result["few_shots_prompt"]
-    assert "result_1 = weather_forecast(city='上海')" in result["few_shots_prompt"]
-    assert "# 系统返回 Observation: 上海 has mild and dry weather." in result["few_shots_prompt"]
-    assert "The weather is mild and dry." in result["few_shots_prompt"]
-    assert "selected_tool_names" not in result
-    assert "few_shot_examples" not in result
-
-    no_tool_payload = {
-        "subtype": "agent_draft",
-        "language": "en",
-        "name": "writing_assistant",
-        "display_name": "WritingAssistant",
-        "description": "Helps improve writing.",
-        "duty_prompt": "Improve user-provided text.",
-        "constraint_prompt": "",
-        "greeting_message": "Hello, I can help improve your writing.",
-        "example_questions": [
-            "Can you improve this paragraph?",
-            "Can you make this more concise?",
-            "Can you correct the grammar?",
-        ],
-        "selected_tool_names": [],
-        "few_shot_examples": None,
-    }
-    no_tool_result = _unwrap_nl2a(await nl2a_wrapper(**no_tool_payload))
-    assert no_tool_result["constraint_prompt"] == ""
-    assert no_tool_result["few_shots_prompt"] is None
-
-
-def test_agent_draft_wrapper_rejects_missing_or_unknown_few_shot_tools():
-    common = {
-        "subtype": "agent_draft",
-        "language": "en",
-        "name": "weather_assistant",
-        "display_name": "WeatherAssistant",
-        "description": "Weather help.",
-        "duty_prompt": "Answer weather questions.",
-        "constraint_prompt": "Use real observations.",
-        "greeting_message": "Hello, I can help with weather.",
-        "example_questions": ["Question one?", "Question two?", "Question three?"],
-        "selected_tool_names": ["weather_forecast"],
-    }
-    with pytest.raises(ValidationError, match="few_shot_examples are required"):
-        Nl2aAgentDraftInput(**common)
-
-    invalid_examples = [
-        {
-            "user_input": f"Question {index}?",
-            "steps": [
-                {
-                    "reasoning": "Use a tool.",
-                    "tool_calls": [
-                        {"name": "invented_tool", "arguments": {}}
-                    ],
-                    "observation": "A tool result.",
-                }
-            ],
-            "final_reasoning": "Use the observation.",
-            "final_answer": "A concrete answer.",
-        }
-        for index in range(2)
-    ]
-    with pytest.raises(ValidationError, match="must use selected tool names"):
-        Nl2aAgentDraftInput(**common, few_shot_examples=invalid_examples)
-
-
-@pytest.mark.parametrize("example_count", [1, 3])
-def test_agent_draft_wrapper_requires_exactly_two_few_shot_examples(
-    example_count,
-):
-    examples = [
-        {
-            "user_input": f"Question {index}?",
-            "steps": [
-                {
-                    "reasoning": "Use the selected tool.",
-                    "tool_calls": [
-                        {"name": "weather_forecast", "arguments": {}}
-                    ],
-                    "observation": "A tool result.",
-                }
-            ],
-            "final_reasoning": "Use the observation.",
-            "final_answer": "A concrete answer.",
-        }
-        for index in range(example_count)
-    ]
-
-    with pytest.raises(ValidationError):
-        Nl2aAgentDraftInput(
-            subtype="agent_draft",
-            language="en",
-            name="weather_assistant",
-            display_name="WeatherAssistant",
-            description="Weather help.",
-            duty_prompt="Answer weather questions.",
-            constraint_prompt="Use real observations.",
-            greeting_message="Hello, I can help with weather.",
-            example_questions=["Question one?", "Question two?", "Question three?"],
-            selected_tool_names=["weather_forecast"],
-            few_shot_examples=examples,
-        )
-
-
-@pytest.mark.parametrize(
-    ("field", "value", "message"),
-    [
-        ("name", "weather", "ending with _assistant"),
-        ("display_name", "Weather Assistant", "one word ending with Assistant"),
-    ],
-)
-def test_agent_draft_wrapper_enforces_ordinary_agent_name_rules(
-    field,
-    value,
-    message,
-):
-    payload = {
-        "subtype": "agent_draft",
-        "language": "en",
-        "name": "writing_assistant",
-        "display_name": "WritingAssistant",
-        "description": "You are a writing assistant.",
-        "duty_prompt": "Improve user-provided text.",
-        "constraint_prompt": "",
-        "greeting_message": "Hello, I can help improve your writing.",
-        "example_questions": ["Question one?", "Question two?", "Question three?"],
-        "selected_tool_names": [],
-        "few_shot_examples": None,
-    }
-    payload[field] = value
-
-    with pytest.raises(ValidationError, match=message):
-        Nl2aAgentDraftInput(**payload)
-
-
-@pytest.mark.asyncio
 async def test_mcp_search_registration_has_stable_name_schema_and_marker():
     parent = FastMCP("test-parent")
     parent.mount(
@@ -519,7 +261,10 @@ async def test_mcp_search_registration_has_stable_name_schema_and_marker():
         "requirements",
         "agent_id",
     }
-    assert resource_search_tool.parameters["required"] == ["requirements"]
+    assert resource_search_tool.parameters["required"] == [
+        "agent_id",
+        "requirements",
+    ]
     assert recommend_tool.description == RECOMMEND_RESOURCES_DESCRIPTION
     assert set(recommend_tool.parameters["properties"]) == {
         "candidates",
@@ -527,6 +272,7 @@ async def test_mcp_search_registration_has_stable_name_schema_and_marker():
         "agent_id",
     }
     assert recommend_tool.parameters["required"] == [
+        "agent_id",
         "candidates",
         "recommended_refs",
     ]
@@ -536,7 +282,7 @@ async def test_mcp_search_registration_has_stable_name_schema_and_marker():
     assert save_tool.description == SAVE_AGENT_DRAFT_FIELDS_DESCRIPTION
     assert save_tool.parameters["required"] == ["agent_id", "fields"]
     assert set(save_tool.parameters["properties"]) == {"agent_id", "fields"}
-    assert wrapper_tool.parameters["required"] == ["subtype"]
+    assert wrapper_tool.parameters["required"] == ["subtype", "agent_id"]
     assert set(wrapper_tool.parameters["properties"]) == {
         "subtype",
         "agent_id",
@@ -544,41 +290,19 @@ async def test_mcp_search_registration_has_stable_name_schema_and_marker():
         "questions",
         "requirements",
         "abandoned_requirement_ids",
-        "search_result",
-        "selected_tool_ids",
-        "language",
-        "name",
-        "display_name",
-        "description",
-        "duty_prompt",
-        "constraint_prompt",
-        "greeting_message",
-        "example_questions",
-        "selected_tool_names",
-        "few_shot_examples",
     }
     assert wrapper_tool.parameters["properties"]["subtype"]["enum"] == [
         "requirement_clarification",
         "installed_resource_binding",
         "final_confirmation",
-        "local_mcp_recommendation",
-        "agent_draft",
     ]
-    few_shot_schema = next(
-        option
-        for option in wrapper_tool.parameters["properties"]["few_shot_examples"][
-            "anyOf"
-        ]
-        if option.get("type") == "array"
-    )
-    assert few_shot_schema["minItems"] == 2
-    assert few_shot_schema["maxItems"] == 2
-    assert few_shot_schema["description"] == "Exactly two structured few-shot examples."
     assert wrapper_tool.meta["nexent_internal"] is True
 
 
 @pytest.mark.asyncio
-async def test_save_agent_draft_fields_emits_state_only_for_creation(mocker):
+async def test_save_agent_draft_fields_updates_existing_draft_without_creation_state(
+    mocker,
+):
     mocker.patch.object(
         nl2agent_mcp_tools_module,
         "get_http_request",
@@ -595,54 +319,58 @@ async def test_save_agent_draft_fields_emits_state_only_for_creation(mocker):
         return_value={
             "status": "success",
             "agent_id": 1042,
-            "created": True,
+            "created": False,
             "updated_fields": [
-                "name",
-                "display_name",
                 "description",
                 "business_description",
             ],
         },
     )
     fields = {
-        "name": "research_assistant",
-        "display_name": "Research Assistant",
         "description": "Researches a topic.",
         "business_description": "Research and summarize.",
     }
 
-    created_result = await save_agent_draft_fields(None, fields)
+    result = await save_agent_draft_fields(1042, fields)
 
-    result_json, state_wrapper = created_result.split("\n", 1)
-    assert json.loads(result_json) == {
+    assert json.loads(result) == {
         "status": "success",
         "agent_id": 1042,
-        "created": True,
+        "created": False,
         "updated_fields": [
-            "name",
-            "display_name",
             "description",
             "business_description",
         ],
     }
-    assert state_wrapper == (
-        '<nl2a_state>{"event":"agent_draft_created","agent_id":1042}'
-        "</nl2a_state>"
-    )
+    assert "nl2a_state" not in result
     save_impl.assert_called_once()
 
-    save_impl.return_value = {
-        "status": "success",
-        "agent_id": 1042,
-        "created": False,
-        "updated_fields": ["description"],
-    }
-    updated_result = await save_agent_draft_fields(
-        1042,
-        {"description": "Updated"},
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("agent_id", "fields"),
+    [
+        (None, {"description": "Missing ID"}),
+        (1042, {"name": "renamed_agent"}),
+        (1042, {"display_name": "Renamed Agent"}),
+        (1042, {}),
+    ],
+)
+async def test_save_agent_draft_fields_rejects_missing_id_and_forbidden_fields(
+    mocker,
+    agent_id,
+    fields,
+):
+    save_impl = mocker.patch.object(
+        nl2agent_service,
+        "save_agent_draft_fields_impl",
     )
-    assert "nl2a_state" not in updated_result
-    assert json.loads(updated_result)["created"] is False
+
+    result = json.loads(await save_agent_draft_fields(agent_id, fields))
+
+    assert result["code"] == "invalid_agent_fields"
+    assert result["created"] is False
+    save_impl.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -682,7 +410,12 @@ async def test_save_agent_draft_fields_emits_prompt_failure_state(mocker):
 
 @pytest.mark.asyncio
 async def test_save_agent_draft_fields_reuses_trusted_context_across_rounds(mocker):
-    request = SimpleNamespace(headers={"Authorization": "Bearer token"})
+    request = SimpleNamespace(
+        headers={
+            "Authorization": "Bearer token",
+            NL2AGENT_AGENT_ID_HEADER: "1042",
+        }
+    )
     mocker.patch.object(
         nl2agent_mcp_tools_module,
         "get_http_request",
@@ -698,7 +431,7 @@ async def test_save_agent_draft_fields_reuses_trusted_context_across_rounds(mock
         return {
             "status": "success",
             "agent_id": 1042,
-            "created": agent_id is None,
+            "created": False,
             "updated_fields": list(fields.model_fields_set),
         }
 
@@ -707,28 +440,16 @@ async def test_save_agent_draft_fields_reuses_trusted_context_across_rounds(mock
         "save_agent_draft_fields_impl",
         side_effect=save_impl,
     )
-    first = await save_agent_draft_fields(
-        None,
-        {
-            "name": "research_assistant",
-            "display_name": "Research Assistant",
-            "description": "Researches a topic.",
-            "business_description": "Research and summarize.",
-        },
+    first = await save_agent_draft_fields(1042, {"description": "Updated"})
+    second = await save_agent_draft_fields(
+        1042,
+        {"duty_prompt": "Verify sources"},
     )
 
-    request.headers[NL2AGENT_AGENT_ID_HEADER] = "1042"
-    second = await save_agent_draft_fields(None, {"description": "Updated"})
-    third = await save_agent_draft_fields(None, {"duty_prompt": "Verify sources"})
-
-    assert [call.kwargs["agent_id"] for call in save.call_args_list] == [
-        None,
-        1042,
-        1042,
-    ]
-    assert sum(result.count("<nl2a_state>") for result in (first, second, third)) == 1
+    assert [call.kwargs["agent_id"] for call in save.call_args_list] == [1042, 1042]
+    assert all("<nl2a_state>" not in result for result in (first, second))
+    assert json.loads(first)["created"] is False
     assert json.loads(second)["created"] is False
-    assert json.loads(third)["created"] is False
 
 
 @pytest.mark.asyncio
@@ -764,7 +485,7 @@ async def test_save_agent_draft_fields_rejects_context_mismatch_without_write(mo
 
 
 @pytest.mark.asyncio
-async def test_clarification_wrapper_fills_agent_id_from_trusted_context(mocker):
+async def test_clarification_wrapper_keeps_trusted_agent_id(mocker):
     mocker.patch.object(
         nl2agent_mcp_tools_module,
         "get_http_request",
@@ -786,6 +507,7 @@ async def test_clarification_wrapper_fills_agent_id_from_trusted_context(mocker)
 
     wrapped = await nl2a_wrapper(
         subtype="requirement_clarification",
+        agent_id=42,
         questions=[
             RequirementClarificationQuestion(
                 question_id="scope",
@@ -820,8 +542,9 @@ async def test_resource_tools_reject_invalid_model_echoes_without_service_calls(
         "recommend_installed_resources_impl",
     )
 
-    search_result = await search_installed_resources([])
+    search_result = await search_installed_resources(agent_id=42, requirements=[])
     recommend_result = await recommend_resources(
+        agent_id=42,
         candidates=[
             {
                 "candidate_ref": "tool:7",
@@ -878,6 +601,9 @@ async def test_resource_tools_return_tenant_scoped_results_and_stable_errors(
         "recommend_installed_resources_impl",
         new=AsyncMock(return_value=recommend_output),
     )
+    mocker.patch(
+        "services.agent_draft_permission_service.require_agent_draft_edit"
+    )
     requirements = [{"requirement_id": "lookup", "query": "web search"}]
     candidate = {
         "candidate_ref": "tool:7",
@@ -888,16 +614,29 @@ async def test_resource_tools_return_tenant_scoped_results_and_stable_errors(
         "score": 0.9,
     }
 
-    assert (await search_installed_resources(requirements))["status"] == "success"
-    assert (await recommend_resources([candidate], ["tool:7"]))["status"] == "success"
+    assert (
+        await search_installed_resources(agent_id=42, requirements=requirements)
+    )["status"] == "success"
+    assert (
+        await recommend_resources(
+            agent_id=42,
+            candidates=[candidate],
+            recommended_refs=["tool:7"],
+        )
+    )["status"] == "success"
     assert get_user.call_count == 2
     assert search_impl.await_args.kwargs["tenant_id"] == "tenant-a"
     assert recommend_impl.await_args.kwargs["user_id"] == "user-a"
 
     search_impl.side_effect = PermissionError("private auth details")
-    assert (await search_installed_resources(requirements))["code"] == "unauthorized"
+    assert (
+        await search_installed_resources(agent_id=42, requirements=requirements)
+    )["code"] == "unauthorized"
     search_impl.side_effect = RuntimeError("private search details")
-    search_error = await search_installed_resources(requirements)
+    search_error = await search_installed_resources(
+        agent_id=42,
+        requirements=requirements,
+    )
     assert search_error["code"] == "resource_search_failed"
     assert "private" not in json.dumps(search_error)
 
@@ -905,14 +644,26 @@ async def test_resource_tools_return_tenant_scoped_results_and_stable_errors(
         "resource_not_visible"
     )
     assert (
-        await recommend_resources([candidate], ["tool:7"])
+        await recommend_resources(
+            agent_id=42,
+            candidates=[candidate],
+            recommended_refs=["tool:7"],
+        )
     )["code"] == "resource_not_visible"
     recommend_impl.side_effect = PermissionError("private auth details")
     assert (
-        await recommend_resources([candidate], ["tool:7"])
+        await recommend_resources(
+            agent_id=42,
+            candidates=[candidate],
+            recommended_refs=["tool:7"],
+        )
     )["code"] == "unauthorized"
     recommend_impl.side_effect = RuntimeError("private resolution details")
-    resolution_error = await recommend_resources([candidate], ["tool:7"])
+    resolution_error = await recommend_resources(
+        agent_id=42,
+        candidates=[candidate],
+        recommended_refs=["tool:7"],
+    )
     assert resolution_error["code"] == "resource_resolution_failed"
     assert "private" not in json.dumps(resolution_error)
 
@@ -1106,9 +857,12 @@ def test_requirement_clarification_rejects_invalid_question_shapes():
 
 
 @pytest.mark.asyncio
-async def test_requirement_clarification_wrapper_requires_questions():
-    with pytest.raises(ValueError, match="requires questions"):
-        await nl2a_wrapper(subtype="requirement_clarification")
+async def test_requirement_clarification_wrapper_requires_agent_id():
+    with pytest.raises(TypeError, match="agent_id"):
+        await nl2a_wrapper(
+            subtype="requirement_clarification",
+            questions=[],
+        )
 
 
 @pytest.mark.asyncio

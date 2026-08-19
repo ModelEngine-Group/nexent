@@ -175,7 +175,10 @@ export const FinalConfirmationCard: FC<{
       <div className="space-y-5 p-4 text-sm">
         <section>
           <h4 className="mb-2 font-medium">
-            {t("nl2agent.finalConfirmation.basicInfo", "Agent information")}
+            {t(
+              "nl2agent.finalConfirmation.basicInfo",
+              "Description information"
+            )}
           </h4>
           <dl className="grid gap-2 text-sm sm:grid-cols-2">
             <div>

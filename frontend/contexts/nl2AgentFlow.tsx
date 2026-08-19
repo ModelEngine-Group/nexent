@@ -13,7 +13,6 @@ import {
 export type Nl2AgentFlowPhase =
   | "idle"
   | "clarifying"
-  | "draft_created"
   | "binding"
   | "generating"
   | "generation_failed"
@@ -40,7 +39,6 @@ type Nl2AgentFlowAction =
   | { type: "reset"; agentId: number | null }
   | { type: "register_card"; card: ActiveNl2AgentCard }
   | { type: "submit_card"; cardKey: string }
-  | { type: "draft_created"; agentId: number }
   | { type: "resources_bound"; agentId: number }
   | { type: "prompt_generation_failed"; agentId: number; fields: string[] }
   | { type: "final_confirmed"; agentId: number };
@@ -96,15 +94,6 @@ function reducer(
         submittedCardKeys,
       };
     }
-    case "draft_created":
-      return {
-        ...state,
-        phase: "draft_created",
-        agentId: action.agentId,
-        activeCard: null,
-        isFormLocked: true,
-        isComposerDisabled: false,
-      };
     case "resources_bound":
       return {
         ...state,
@@ -141,7 +130,6 @@ interface Nl2AgentFlowContextValue extends Nl2AgentFlowState {
   resetFlow: (agentId?: number | null) => void;
   registerCard: (key: string, subtype: string) => void;
   submitCard: (key: string) => void;
-  markDraftCreated: (agentId: number) => void;
   markResourcesBound: (agentId: number) => void;
   markPromptGenerationFailed: (agentId: number, fields: string[]) => void;
   markFinalConfirmed: (agentId: number) => void;
@@ -165,10 +153,6 @@ export const Nl2AgentFlowProvider: FC<PropsWithChildren> = ({ children }) => {
   );
   const submitCard = useCallback(
     (cardKey: string) => dispatch({ type: "submit_card", cardKey }),
-    []
-  );
-  const markDraftCreated = useCallback(
-    (agentId: number) => dispatch({ type: "draft_created", agentId }),
     []
   );
   const markResourcesBound = useCallback(
@@ -195,7 +179,6 @@ export const Nl2AgentFlowProvider: FC<PropsWithChildren> = ({ children }) => {
       resetFlow,
       registerCard,
       submitCard,
-      markDraftCreated,
       markResourcesBound,
       markPromptGenerationFailed,
       markFinalConfirmed,
@@ -203,7 +186,6 @@ export const Nl2AgentFlowProvider: FC<PropsWithChildren> = ({ children }) => {
     }),
     [
       isCardInteractive,
-      markDraftCreated,
       markFinalConfirmed,
       markPromptGenerationFailed,
       markResourcesBound,

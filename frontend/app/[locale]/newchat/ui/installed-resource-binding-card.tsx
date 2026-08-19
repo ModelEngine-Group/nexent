@@ -232,7 +232,7 @@ export const InstalledResourceBindingCard: FC<{
   const reactId = useId();
   const cardKey = `installed_resource_binding:${payload.agent_id}:${reactId}`;
   const {
-    agentId: flowAgentId,
+    agentId: sessionAgentId,
     failedPromptFields,
     phase,
     registerCard,
@@ -274,7 +274,7 @@ export const InstalledResourceBindingCard: FC<{
     isSubmitted &&
     !isRunning &&
     phase === "generation_failed" &&
-    flowAgentId === payload.agent_id;
+    sessionAgentId === payload.agent_id;
 
   const reloadAgentSnapshot = async (
     expectedBindings: BindingItemState[]

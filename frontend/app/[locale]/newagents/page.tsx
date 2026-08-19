@@ -1,17 +1,10 @@
 "use client";
 
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { App, Button } from "antd";
+import { Button } from "antd";
 import { Sparkles, X } from "lucide-react";
-import { useQueryClient } from "@tanstack/react-query";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 
 import AgentSelectorHeader from "./components/agent-selector-header";
 import AgentConfig from "./agent-config";
@@ -19,7 +12,6 @@ import AgentVersionManage from "./AgentVersionManage";
 import AgentDebugPanel from "./agent-debug";
 import { Nl2AgentChatPanel } from "../newchat/assistant-ui/nl2agent-chat-panel";
 import { Nl2AgentFlowProvider, useNl2AgentFlow } from "@/contexts/nl2AgentFlow";
-import { searchAgentInfo } from "@/services/agentConfigService";
 import { useAgentStore } from "@/stores/agentStore";
 import type { Nl2AgentStateEvent } from "../newchat/adapter/remote-chat-model-adapter";
 
@@ -56,10 +48,6 @@ function PanelCard({
 
 function AgentSetupContent() {
   const { t } = useTranslation("common");
-  const { message } = App.useApp();
-  const queryClient = useQueryClient();
-  const pathname = usePathname();
-  const router = useRouter();
   const searchParams = useSearchParams();
   const [isGenerationVisible, setIsGenerationVisible] = useState(true);
   const [isDebugVisible, setIsDebugVisible] = useState(false);
@@ -67,102 +55,28 @@ function AgentSetupContent() {
     useState(false);
   const currentAgentId = useAgentStore((state) => state.currentAgentId);
   const permissionReadOnly = useAgentStore((state) => state.isReadOnly);
-  const initializeAgent = useAgentStore((state) => state.initialize);
   const {
-    agentId: flowAgentId,
     isComposerDisabled,
-    markDraftCreated,
     markPromptGenerationFailed,
     resetFlow,
     sessionGeneration,
   } = useNl2AgentFlow();
-  const previousAgentIdRef = useRef<number | null>(currentAgentId);
-  const promotedAgentIdRef = useRef<number | null>(null);
-  const synchronizingCreatedIdsRef = useRef(new Set<number>());
   const requestedAgentId = Number(searchParams.get("agent_id"));
   const isRequestedAgentLoading =
     Number.isInteger(requestedAgentId) &&
     requestedAgentId > 0 &&
     requestedAgentId !== currentAgentId;
+  const isNl2AgentUnavailable = currentAgentId === null || permissionReadOnly;
 
   useEffect(() => {
-    if (previousAgentIdRef.current === currentAgentId) return;
-
-    const isDraftPromotion =
-      previousAgentIdRef.current === null &&
-      promotedAgentIdRef.current === currentAgentId;
-    previousAgentIdRef.current = currentAgentId;
-    promotedAgentIdRef.current = null;
-    if (!isDraftPromotion) {
-      resetFlow(currentAgentId);
-    }
+    resetFlow(currentAgentId);
   }, [currentAgentId, resetFlow]);
-
-  const synchronizeCreatedDraft = useCallback(
-    async (event: Nl2AgentStateEvent) => {
-      if (synchronizingCreatedIdsRef.current.has(event.agent_id)) return;
-      synchronizingCreatedIdsRef.current.add(event.agent_id);
-
-      const startingAgentId = useAgentStore.getState().currentAgentId;
-      if (startingAgentId !== null && startingAgentId !== event.agent_id) {
-        return;
-      }
-
-      markDraftCreated(event.agent_id);
-      const nextSearchParams = new URLSearchParams(searchParams.toString());
-      nextSearchParams.set("agent_id", String(event.agent_id));
-      router.replace(`${pathname}?${nextSearchParams.toString()}`);
-
-      try {
-        const result = await searchAgentInfo(event.agent_id, undefined, 0);
-        if (!result.success || !result.data) {
-          throw new Error(result.message);
-        }
-        if (useAgentStore.getState().currentAgentId !== startingAgentId) {
-          return;
-        }
-
-        if (startingAgentId === null) {
-          promotedAgentIdRef.current = event.agent_id;
-        }
-        initializeAgent(result.data);
-        await Promise.all([
-          queryClient.invalidateQueries({ queryKey: ["agents"] }),
-          queryClient.invalidateQueries({
-            queryKey: ["agentInfo", event.agent_id],
-          }),
-        ]);
-      } catch {
-        synchronizingCreatedIdsRef.current.delete(event.agent_id);
-        message.error(
-          t(
-            "nl2agent.draft.syncFailed",
-            "The Agent draft was created, but its details could not be loaded."
-          )
-        );
-      }
-    },
-    [
-      initializeAgent,
-      markDraftCreated,
-      message,
-      pathname,
-      queryClient,
-      router,
-      searchParams,
-      t,
-    ]
-  );
 
   const handleStateEvent = useCallback(
     (event: Nl2AgentStateEvent) => {
-      if (event.event === "agent_draft_created") {
-        void synchronizeCreatedDraft(event);
-        return;
-      }
       markPromptGenerationFailed(event.agent_id, event.failed_fields);
     },
-    [markPromptGenerationFailed, synchronizeCreatedDraft]
+    [markPromptGenerationFailed]
   );
 
   return (
@@ -193,14 +107,25 @@ function AgentSetupContent() {
                 </button>
               }
             >
-              <div className="min-h-0 flex-1 overflow-hidden">
+              <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                {isNl2AgentUnavailable ? (
+                  <div
+                    className="shrink-0 border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900"
+                    role="status"
+                  >
+                    {t(
+                      "nl2agent.unavailable",
+                      "Create or select an editable Agent first."
+                    )}
+                  </div>
+                ) : null}
                 <Nl2AgentChatPanel
                   key={sessionGeneration}
-                  agentId={currentAgentId ?? flowAgentId}
+                  agentId={currentAgentId}
                   disabled={
                     isComposerDisabled ||
                     isRequestedAgentLoading ||
-                    (currentAgentId !== null && permissionReadOnly)
+                    isNl2AgentUnavailable
                   }
                   onStateEvent={handleStateEvent}
                 />
