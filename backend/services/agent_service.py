@@ -7,7 +7,7 @@ import logging
 import os
 import zipfile
 from collections import deque
-from typing import Any, Callable, Optional, Dict, List
+from typing import Any, Callable, Optional, Dict, List, Union
 
 from fastapi import Header, Request
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -136,7 +136,7 @@ SAFE_AGENT_STREAM_ERROR_MESSAGE = "Agent execution failed. Please try again late
 _channel_cleanup_tasks: set[asyncio.Task[None]] = set()
 
 
-async def _cleanup_channel_later(conversation_id: int, user_id: str, delay: float = 5.0):
+async def _cleanup_channel_later(conversation_id: Union[int, str], user_id: str, delay: float = 5.0):
     """
     Remove the streaming channel after a delay to allow subscribers to finish.
     This gives reconnected clients time to receive the final chunks before cleanup.
@@ -145,7 +145,7 @@ async def _cleanup_channel_later(conversation_id: int, user_id: str, delay: floa
     await streaming_channel_manager.remove_channel(conversation_id, user_id)
 
 
-async def _poll_runtime_cancel_signal(conversation_id: int, user_id: str, stop_event) -> None:
+async def _poll_runtime_cancel_signal(conversation_id: Union[int, str], user_id: str, stop_event) -> None:
     """Mirror Redis cancel signal into the local agent stop_event."""
     while not stop_event.is_set():
         if await runtime_state_service.is_cancelled_async(user_id=user_id, conversation_id=conversation_id):
@@ -159,7 +159,7 @@ async def _poll_runtime_cancel_signal(conversation_id: int, user_id: str, stop_e
         await asyncio.sleep(RUNTIME_CANCEL_POLL_INTERVAL_SECONDS)
 
 
-async def _cancel_task_on_runtime_signal(conversation_id: int, user_id: str, task: asyncio.Task) -> None:
+async def _cancel_task_on_runtime_signal(conversation_id: Union[int, str], user_id: str, task: asyncio.Task) -> None:
     """Cancel a local asyncio task when another Pod writes the runtime cancel signal."""
     while not task.done():
         if await runtime_state_service.is_cancelled_async(user_id=user_id, conversation_id=conversation_id):
@@ -943,6 +943,7 @@ async def _stream_agent_chunks(
     resume_from_unit_index: int = 0,
     resume_message_id: Optional[int] = None,
     channel: Optional[Any] = None,
+    runtime_scope_id: Optional[Union[int, str]] = None,
 ):
     """
     Yield SSE chunks from agent_run while persisting messages incrementally.
@@ -954,6 +955,8 @@ async def _stream_agent_chunks(
                           (instead of creating a new one).
         channel: Optional StreamingChannel for multi-subscriber support.
     """
+
+    run_scope_id = runtime_scope_id if runtime_scope_id is not None else agent_request.conversation_id
 
     # Types whose chunks should be merged into the previous unit boundary,
     # matching the legacy batch merge logic.
@@ -1007,13 +1010,13 @@ async def _stream_agent_chunks(
     # Get or create streaming channel for multi-subscriber support
     if channel is None:
         channel = await streaming_channel_manager.get_or_create_channel(
-            conversation_id=agent_request.conversation_id,
+            conversation_id=run_scope_id,
             user_id=user_id
         )
 
     cancel_poll_task = asyncio.create_task(
         _poll_runtime_cancel_signal(
-            conversation_id=agent_request.conversation_id,
+            conversation_id=run_scope_id,
             user_id=user_id,
             stop_event=agent_run_info.stop_event,
         )
@@ -1381,19 +1384,19 @@ async def _stream_agent_chunks(
         terminal_status = 'stopped' if was_stopped else 'completed' if stream_completed_normally else 'failed'
 
         agent_run_manager.unregister_agent_run(
-            agent_request.conversation_id, user_id, status=terminal_status)
+            run_scope_id, user_id, status=terminal_status)
 
         # Mark channel as completed and schedule cleanup
         if channel is not None:
             await streaming_channel_manager.complete_channel(
-                conversation_id=agent_request.conversation_id,
+                conversation_id=run_scope_id,
                 user_id=user_id,
                 status=terminal_status
             )
             # Schedule channel removal (give subscribers time to receive final chunks)
             cleanup_task = asyncio.create_task(
                 _cleanup_channel_later(
-                    conversation_id=agent_request.conversation_id,
+                    conversation_id=run_scope_id,
                     user_id=user_id
                 )
             )
@@ -2900,6 +2903,7 @@ async def prepare_agent_run(
     tenant_id: str,
     language: str = LANGUAGE["ZH"],
     allow_memory_search: bool = True,
+    runtime_scope_id: Optional[Union[int, str]] = None,
 ):
     """
     Prepare for an agent run by creating context and run info, and registering the run.
@@ -2964,8 +2968,8 @@ async def prepare_agent_run(
                 agent_request.conversation_id, candidate, user_id, tenant_id
             )) if historical_context is not None else None
         )
-    agent_run_manager.register_agent_run(
-        agent_request.conversation_id, agent_run_info, user_id)
+    run_scope_id = runtime_scope_id if runtime_scope_id is not None else agent_request.conversation_id
+    agent_run_manager.register_agent_run(run_scope_id, agent_run_info, user_id)
     return agent_run_info, memory_context
 
 
@@ -2999,6 +3003,7 @@ async def generate_stream(
     language: str = LANGUAGE["ZH"],
     enable_memory: bool = False,
     channel: Optional[Any] = None,
+    runtime_scope_id: Optional[Union[int, str]] = None,
 ):
     """Unified streaming entry point.
 
@@ -3016,11 +3021,12 @@ async def generate_stream(
     """
     # Poll for cross-pod cancel signal so the outer generator task can be
     # cancelled when another Pod writes the runtime cancel flag.
+    run_scope_id = runtime_scope_id if runtime_scope_id is not None else agent_request.conversation_id
     _outer_task = asyncio.current_task()
     cancel_poll_task = (
         asyncio.create_task(
             _cancel_task_on_runtime_signal(
-                agent_request.conversation_id, user_id, _outer_task
+                run_scope_id, user_id, _outer_task
             )
         )
         if _outer_task
@@ -3031,7 +3037,7 @@ async def generate_stream(
     # reuse the same channel so subscribers stay connected.
     if channel is None and enable_memory:
         channel = await streaming_channel_manager.get_or_create_channel(
-            conversation_id=agent_request.conversation_id,
+            conversation_id=run_scope_id,
             user_id=user_id,
         )
 
@@ -3049,27 +3055,33 @@ async def generate_stream(
         # Prepare the agent with or without memory. The preparation path runs
         # fixed retrieval before the model loop and exposes only store_memory.
         try:
-            agent_run_info, memory_context = await prepare_agent_run(
-                agent_request=agent_request,
-                user_id=user_id,
-                tenant_id=tenant_id,
-                language=language,
-                allow_memory_search=memory_enabled_runtime,
-            )
+            prepare_kwargs = {
+                "agent_request": agent_request,
+                "user_id": user_id,
+                "tenant_id": tenant_id,
+                "language": language,
+                "allow_memory_search": memory_enabled_runtime,
+            }
+            if runtime_scope_id is not None:
+                prepare_kwargs["runtime_scope_id"] = runtime_scope_id
+            agent_run_info, memory_context = await prepare_agent_run(**prepare_kwargs)
         except Exception as prep_err:
             # Normalize any preparation error to MemoryPreparationException so
             # the memory-enabled path can decide between retry-without-memory
             # and propagating the failure.
             raise MemoryPreparationException(str(prep_err)) from prep_err
 
-        async for data_chunk in _stream_agent_chunks(
-            agent_request=agent_request,
-            user_id=user_id,
-            tenant_id=tenant_id,
-            agent_run_info=agent_run_info,
-            memory_ctx=memory_context,
-            channel=channel,
-        ):
+        stream_kwargs = {
+            "agent_request": agent_request,
+            "user_id": user_id,
+            "tenant_id": tenant_id,
+            "agent_run_info": agent_run_info,
+            "memory_ctx": memory_context,
+            "channel": channel,
+        }
+        if runtime_scope_id is not None:
+            stream_kwargs["runtime_scope_id"] = runtime_scope_id
+        async for data_chunk in _stream_agent_chunks(**stream_kwargs):
             yield data_chunk
 
     except MemoryPreparationException:
@@ -3085,14 +3097,16 @@ async def generate_stream(
         try:
             # Single fallback: re-issue this generator with memory turned off
             # so the actual ``_stream_agent_chunks`` still runs.
-            async for data_chunk in generate_stream(
-                agent_request,
-                user_id=user_id,
-                tenant_id=tenant_id,
-                language=language,
-                enable_memory=False,
-                channel=channel,
-            ):
+            fallback_kwargs = {
+                "user_id": user_id,
+                "tenant_id": tenant_id,
+                "language": language,
+                "enable_memory": False,
+                "channel": channel,
+            }
+            if runtime_scope_id is not None:
+                fallback_kwargs["runtime_scope_id"] = runtime_scope_id
+            async for data_chunk in generate_stream(agent_request, **fallback_kwargs):
                 yield data_chunk
         except Exception as run_exc:
             logger.error(
@@ -3199,6 +3213,7 @@ async def run_agent_stream(
     tenant_id: str = None,
     skip_user_save: bool = False,
     resume: bool = False,
+    runtime_scope_id: Optional[str] = None,
 ):
     """
     Start an agent run and stream responses.
@@ -3572,13 +3587,15 @@ async def run_agent_stream(
 
     use_memory_stream = memory_enabled and not agent_request.is_debug
 
-    stream_gen = generate_stream(
-        agent_request,
-        user_id=resolved_user_id,
-        tenant_id=resolved_tenant_id,
-        language=language,
-        enable_memory=use_memory_stream,
-    )
+    generate_kwargs = {
+        "user_id": resolved_user_id,
+        "tenant_id": resolved_tenant_id,
+        "language": language,
+        "enable_memory": use_memory_stream,
+    }
+    if runtime_scope_id is not None:
+        generate_kwargs["runtime_scope_id"] = runtime_scope_id
+    stream_gen = generate_stream(agent_request, **generate_kwargs)
 
     async def stream_with_agent_context():
         try:
@@ -3701,7 +3718,7 @@ async def run_agent_background(
     }
 
 
-def stop_agent_tasks(conversation_id: int, user_id: str):
+def stop_agent_tasks(conversation_id: Union[int, str], user_id: str):
     """
     Stop agent run and preprocess tasks for the specified conversation_id.
     Matches the behavior of agent_app.agent_stop_api.

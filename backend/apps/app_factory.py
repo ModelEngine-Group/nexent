@@ -2,6 +2,8 @@
 FastAPI application factory with common configurations and exception handlers.
 """
 import logging
+from contextlib import AbstractAsyncContextManager
+from typing import Callable
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -21,6 +23,7 @@ def create_app(
     cors_origins: list = None,
     cors_methods: list = None,
     enable_monitoring: bool = True,
+    lifespan: Callable[..., AbstractAsyncContextManager] | None = None,
 ) -> FastAPI:
     """
     Create a FastAPI application with common configurations.
@@ -33,6 +36,7 @@ def create_app(
         cors_origins: List of allowed CORS origins (default: ["*"])
         cors_methods: List of allowed CORS methods (default: ["*"])
         enable_monitoring: Whether to enable monitoring
+        lifespan: Optional FastAPI lifespan context manager
 
     Returns:
         Configured FastAPI application
@@ -41,7 +45,8 @@ def create_app(
         title=title,
         description=description,
         version=version,
-        root_path=root_path
+        root_path=root_path,
+        lifespan=lifespan,
     )
 
     # Add CORS middleware

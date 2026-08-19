@@ -192,6 +192,7 @@ services:
       - ${ROOT_DIR}/openssh-server/ssh-keys:/opt/ssh-keys:ro
     environment:
       <<: [*minio-vars, *es-vars]
+      RUNTIME_SERVICE_URL: http://nexent-runtime:5014
       NEXENT_SQL_STARTUP_MODE: wait
       NEXENT_SQL_FILES_CHECKSUM: ${NEXENT_SQL_FILES_CHECKSUM:-}
       skip_proxy: "true"

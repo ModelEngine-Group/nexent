@@ -23,6 +23,7 @@ from services.northbound_service import (
     update_conversation_title,
     upload_files_for_northbound,
 )
+from services.runtime_agent_client import RuntimeServiceError
 
 from utils.auth_utils import validate_bearer_token, get_user_and_tenant_by_access_key
 
@@ -305,6 +306,8 @@ async def stop_chat_stream(
         logging.error(f"Too Many Requests: rate limit exceeded: {str(e)}", exc_info=e)
         raise HTTPException(status_code=HTTPStatus.TOO_MANY_REQUESTS,
                             detail="Too Many Requests: rate limit exceeded")
+    except RuntimeServiceError:
+        raise
     except HTTPException as e:
         raise e
     except Exception as e:

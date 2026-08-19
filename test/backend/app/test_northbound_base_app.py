@@ -4,14 +4,15 @@ Unit tests for northbound_base_app module.
 Tests cover FastAPI application configuration, CORS middleware, router inclusion,
 and basic A2A endpoint routing and error handling.
 """
+import asyncio
 import os
 import sys
 import types
 import unittest
 from dataclasses import dataclass
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response
 from fastapi.testclient import TestClient
 from pydantic import BaseModel, Field
 
@@ -29,6 +30,27 @@ services_pkg = types.ModuleType("services")
 services_pkg.__path__ = [os.path.join(backend_dir, "services")]
 sys.modules['services'] = services_pkg
 
+runtime_agent_client_module = types.ModuleType("services.runtime_agent_client")
+
+
+class RuntimeServiceError(HTTPException):
+    def __init__(self, status_code=503, content=b'{"message":"runtime unavailable"}', content_type="application/json"):
+        super().__init__(status_code=status_code, detail="Runtime service request failed")
+        self.content = content
+        self.content_type = content_type
+
+
+runtime_agent_client_module.RuntimeServiceError = RuntimeServiceError
+runtime_agent_client_module.runtime_agent_client = MagicMock()
+runtime_agent_client_module.runtime_agent_client.start = AsyncMock()
+runtime_agent_client_module.runtime_agent_client.close = AsyncMock()
+runtime_agent_client_module.runtime_service_error_response = lambda exc: Response(
+    content=exc.content,
+    status_code=exc.status_code,
+    headers={"Content-Type": exc.content_type},
+)
+sys.modules["services.runtime_agent_client"] = runtime_agent_client_module
+
 # NorthboundContext stub - minimal dataclass for type compatibility
 @dataclass
 class NorthboundContext:
@@ -45,8 +67,6 @@ northbound_service_module.NorthboundContext = NorthboundContext
 sys.modules['services.northbound_service'] = northbound_service_module
 
 # services.a2a_server_service - stub with a2a_server_service object and exceptions
-from unittest.mock import AsyncMock, MagicMock
-
 a2a_service_module = types.ModuleType("services.a2a_server_service")
 a2a_service_module.EndpointNotFoundError = type("EndpointNotFoundError", (Exception,), {})
 a2a_service_module.AgentNotEnabledError = type("AgentNotEnabledError", (Exception,), {})
@@ -229,7 +249,8 @@ sys.modules['apps.app_factory'] = app_factory_module
 
 # Provide a real create_app function that returns a FastAPI app
 def _create_app_impl(title, description="", version="1.0.0", root_path="/api",
-                     cors_origins=None, cors_methods=None, enable_monitoring=True):
+                     cors_origins=None, cors_methods=None, enable_monitoring=True,
+                     lifespan=None):
     """Minimal implementation of create_app for testing."""
     from fastapi import FastAPI
     from fastapi.middleware.cors import CORSMiddleware
@@ -238,7 +259,8 @@ def _create_app_impl(title, description="", version="1.0.0", root_path="/api",
         title=title,
         description=description,
         version=version,
-        root_path=root_path
+        root_path=root_path,
+        lifespan=lifespan,
     )
 
     # Add CORS middleware (simplified)
@@ -286,6 +308,7 @@ async def _async_iter(items):
 # ---------------------------------------------------------------------------
 # SAFE TO IMPORT THE TARGET MODULE
 # ---------------------------------------------------------------------------
+import apps.northbound_base_app as northbound_base_app_module  # noqa: E402
 from apps.northbound_base_app import A2AServerSettings, northbound_app as app  # noqa: E402
 from fastapi import HTTPException  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
@@ -321,6 +344,52 @@ class TestNorthboundBaseApp(unittest.TestCase):
         """The main northbound router should be included."""
         paths = app.openapi()["paths"]
         self.assertIn("/dummy", paths)
+
+    def test_lifespan_owns_runtime_client(self):
+        """Northbound lifespan must start and close the Runtime proxy client."""
+        runtime_start = runtime_agent_client_module.runtime_agent_client.start
+        runtime_close = runtime_agent_client_module.runtime_agent_client.close
+        runtime_start.reset_mock()
+        runtime_close.reset_mock()
+
+        async def run_lifespan():
+            async with northbound_base_app_module.northbound_lifespan(app):
+                pass
+
+        asyncio.run(run_lifespan())
+
+        runtime_start.assert_awaited_once_with()
+        runtime_close.assert_awaited_once_with()
+
+    def test_runtime_service_exception_handler_preserves_proxy_response(self):
+        """Runtime status, body, and content type must survive Northbound handling."""
+        exc = RuntimeServiceError(
+            status_code=403,
+            content=b'{"code":"forbidden"}',
+            content_type="application/problem+json",
+        )
+
+        response = asyncio.run(
+            northbound_base_app_module.runtime_service_exception_handler(MagicMock(), exc)
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.body, b'{"code":"forbidden"}')
+        self.assertEqual(response.headers["content-type"], "application/problem+json")
+
+    def test_rest_message_stream_raises_runtime_error_before_response(self):
+        """A Runtime connection error must escape before a StreamingResponse is created."""
+        runtime_error = RuntimeServiceError(status_code=503)
+        a2a_service_module.a2a_server_service.handle_message_stream.side_effect = runtime_error
+
+        with self.assertRaises(RuntimeServiceError):
+            asyncio.run(
+                northbound_base_app_module.rest_message_stream(
+                    endpoint_id="test-endpoint",
+                    message={"message": {}},
+                    request=MagicMock(),
+                )
+            )
 
     def test_a2a_router_inclusion(self):
         """A2A router should be registered under /nb/a2a."""
@@ -664,7 +733,7 @@ class TestNorthboundBaseApp(unittest.TestCase):
         self.assertGreaterEqual(len(lines), 2)
 
     def test_jsonrpc_send_streaming_internal_error(self):
-        """POST /v1 with SendStreamingMessage when stream throws should yield JSON-RPC error event."""
+        """A failure before the first stream event returns a JSON-RPC error response."""
         # Arrange
         async def fake_stream_error():
             raise RuntimeError("stream broken")
@@ -683,10 +752,8 @@ class TestNorthboundBaseApp(unittest.TestCase):
 
         # Assert
         self.assertEqual(response.status_code, 200)
-        self.assertIn("text/event-stream", response.headers["content-type"])
-        import json
-        events = [json.loads(ln.replace("data: ", "")) for ln in response.text.strip().split("\n") if ln.startswith("data: ")]
-        self.assertTrue(any(e.get("error", {}).get("code") == -32603 for e in events))
+        self.assertIn("application/json", response.headers["content-type"])
+        self.assertEqual(response.json()["error"]["code"], -32603)
 
     def test_rest_message_send_endpoint_not_found(self):
         """POST /message:send returns 404 when endpoint is not registered."""
@@ -729,7 +796,7 @@ class TestNorthboundBaseApp(unittest.TestCase):
     def test_rest_message_stream_success(self):
         """POST /message:stream should return SSE response with correct headers."""
         # Arrange
-        async def fake_stream():
+        async def fake_stream(**_kwargs):
             yield {"statusUpdate": {"taskId": "sse-task", "status": {"state": "working"}}}
             yield {"statusUpdate": {"taskId": "sse-task", "status": {"state": "completed"}}}
 
@@ -746,7 +813,7 @@ class TestNorthboundBaseApp(unittest.TestCase):
         self.assertEqual(response.headers["X-Accel-Buffering"], "no")
 
     def test_rest_message_stream_endpoint_not_found(self):
-        """POST /message:stream - EndpointNotFoundError is caught inside generate_sse and returns 200 with fail event."""
+        """Endpoint validation fails with 404 before the SSE response starts."""
         # Arrange
         a2a_service_module.a2a_server_service.handle_message_stream.side_effect = (
             a2a_service_module.EndpointNotFoundError("not registered")
@@ -756,14 +823,10 @@ class TestNorthboundBaseApp(unittest.TestCase):
         response = self.client.post("/nb/a2a/unknown-ep/message:stream", json={"message": {}})
 
         # Assert
-        self.assertEqual(response.status_code, 200)
-        import json
-        events = [json.loads(ln.replace("data: ", "")) for ln in response.text.strip().split("\n") if ln.startswith("data: ")]
-        fail_events = [e for e in events if e.get("statusUpdate", {}).get("status", {}).get("state") == "TASK_STATE_FAILED"]
-        self.assertTrue(len(fail_events) > 0, "Failure event should appear in SSE when endpoint not found")
+        self.assertEqual(response.status_code, 404)
 
     def test_rest_message_stream_agent_not_enabled(self):
-        """POST /message:stream - AgentNotEnabledError is caught inside generate_sse and returns 200 with fail event."""
+        """Agent availability validation fails with 503 before SSE starts."""
         # Arrange
         a2a_service_module.a2a_server_service.handle_message_stream.side_effect = (
             a2a_service_module.AgentNotEnabledError("disabled")
@@ -773,14 +836,10 @@ class TestNorthboundBaseApp(unittest.TestCase):
         response = self.client.post("/nb/a2a/test-endpoint/message:stream", json={"message": {}})
 
         # Assert
-        self.assertEqual(response.status_code, 200)
-        import json
-        events = [json.loads(ln.replace("data: ", "")) for ln in response.text.strip().split("\n") if ln.startswith("data: ")]
-        fail_events = [e for e in events if e.get("statusUpdate", {}).get("status", {}).get("state") == "TASK_STATE_FAILED"]
-        self.assertTrue(len(fail_events) > 0, "Failure event should appear in SSE when agent not enabled")
+        self.assertEqual(response.status_code, 503)
 
     def test_rest_message_stream_internal_error(self):
-        """POST /message:stream - exception is caught inside generate_sse and returns 200 with fail event."""
+        """An unexpected pre-stream failure returns HTTP 500."""
         # Arrange
         a2a_service_module.a2a_server_service.handle_message_stream.side_effect = RuntimeError("pre-stream crash")
 
@@ -788,16 +847,27 @@ class TestNorthboundBaseApp(unittest.TestCase):
         response = self.client.post("/nb/a2a/test-endpoint/message:stream", json={"message": {}})
 
         # Assert
-        self.assertEqual(response.status_code, 200)
-        import json
-        events = [json.loads(ln.replace("data: ", "")) for ln in response.text.strip().split("\n") if ln.startswith("data: ")]
-        fail_events = [e for e in events if e.get("statusUpdate", {}).get("status", {}).get("state") == "TASK_STATE_FAILED"]
-        self.assertTrue(len(fail_events) > 0, "Failure event should appear in SSE on internal error")
+        self.assertEqual(response.status_code, 500)
+        self.assertIn("Failed to stream message", response.json()["detail"])
+
+    def test_rest_message_stream_runtime_error_preserves_status_before_start(self):
+        """A Runtime proxy error remains an HTTP response before the first SSE event."""
+        a2a_service_module.a2a_server_service.handle_message_stream.side_effect = RuntimeServiceError(
+            status_code=503,
+            content=b'{"message":"runtime unavailable"}',
+            content_type="application/problem+json",
+        )
+
+        response = self.client.post("/nb/a2a/test-endpoint/message:stream", json={"message": {}})
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.headers["content-type"], "application/problem+json")
+        self.assertEqual(response.content, b'{"message":"runtime unavailable"}')
 
     def test_rest_message_stream_generator_error_yields_fail_event(self):
         """POST /message:stream when stream generator throws should yield failure event in SSE."""
         # Arrange
-        async def fake_stream():
+        async def fake_stream(**_kwargs):
             yield {"statusUpdate": {"taskId": "ok-task", "status": {"state": "working"}}}
             raise RuntimeError("stream broke mid-way")
 

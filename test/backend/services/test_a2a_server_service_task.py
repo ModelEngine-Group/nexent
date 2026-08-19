@@ -6,7 +6,7 @@ This module contains tests for:
 - get_task, list_tasks, list_tasks_paginated, cancel_task methods
 """
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 
 class TestValidateEndpoint:
@@ -430,7 +430,8 @@ class TestListTasksPaginated:
 class TestCancelTask:
     """Test class for cancel_task method."""
 
-    def test_cancel_task_success(self):
+    @pytest.mark.asyncio
+    async def test_cancel_task_success(self):
         """Test successful task cancellation."""
         from backend.services.a2a_server_service import A2AServerService
 
@@ -439,18 +440,30 @@ class TestCancelTask:
         mock_task = {
             "id": "task_123",
             "caller_user_id": "user-1",
-            "task_state": "TASK_STATE_CANCELED"
+            "task_state": "TASK_STATE_WORKING",
         }
+        canceled_task = {**mock_task, "task_state": "TASK_STATE_CANCELED"}
 
-        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
-            mock_db.get_task.return_value = mock_task
+        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db, \
+                patch(
+                    "backend.services.a2a_server_service.runtime_agent_client.stop_agent",
+                    new_callable=AsyncMock,
+                    return_value={"status": "success"},
+                ) as stop_agent:
+            mock_db.get_task.side_effect = [mock_task, canceled_task]
             mock_db.cancel_task.return_value = True
 
-            result = service.cancel_task("task_123", user_id="user-1")
+            result = await service.cancel_task("task_123", user_id="user-1", request_id="req-1")
 
             assert result["task_state"] == "TASK_STATE_CANCELED"
+            stop_agent.assert_awaited_once_with(
+                conversation_id="a2a:task_123",
+                user_id="user-1",
+                request_id="req-1",
+            )
 
-    def test_cancel_task_not_found(self):
+    @pytest.mark.asyncio
+    async def test_cancel_task_not_found(self):
         """Test cancel_task when task not found."""
         from backend.services.a2a_server_service import (
             A2AServerService,
@@ -463,11 +476,12 @@ class TestCancelTask:
             mock_db.get_task.return_value = None
 
             with pytest.raises(TaskNotFoundError) as exc_info:
-                service.cancel_task("nonexistent")
+                await service.cancel_task("nonexistent")
 
             assert "not found" in str(exc_info.value)
 
-    def test_cancel_task_unauthorized(self):
+    @pytest.mark.asyncio
+    async def test_cancel_task_unauthorized(self):
         """Test cancel_task with wrong user_id."""
         from backend.services.a2a_server_service import (
             A2AServerService,
@@ -485,11 +499,12 @@ class TestCancelTask:
             mock_db.get_task.return_value = mock_task
 
             with pytest.raises(A2AServerServiceError) as exc_info:
-                service.cancel_task("task_123", user_id="wrong-user")
+                await service.cancel_task("task_123", user_id="wrong-user")
 
             assert "Unauthorized" in str(exc_info.value)
 
-    def test_cancel_task_cannot_cancel(self):
+    @pytest.mark.asyncio
+    async def test_cancel_task_cannot_cancel(self):
         """Test cancel_task when task cannot be canceled (already completed)."""
         from backend.services.a2a_server_service import (
             A2AServerService,
@@ -509,6 +524,33 @@ class TestCancelTask:
             mock_db.cancel_task.return_value = False
 
             with pytest.raises(A2AServerServiceError) as exc_info:
-                service.cancel_task("task_123", user_id="user-1")
+                await service.cancel_task("task_123", user_id="user-1")
 
             assert "cannot be canceled" in str(exc_info.value)
+            mock_db.cancel_task.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_cancel_task_keeps_task_running_when_runtime_stop_fails(self):
+        """A failed Runtime stop must not mark the A2A task as canceled."""
+        from backend.services.a2a_server_service import A2AServerService
+        from services.runtime_agent_client import RuntimeServiceError
+
+        service = A2AServerService()
+        mock_task = {
+            "id": "task_123",
+            "caller_user_id": "user-1",
+            "task_state": "TASK_STATE_WORKING",
+        }
+
+        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db, \
+                patch(
+                    "backend.services.a2a_server_service.runtime_agent_client.stop_agent",
+                    new_callable=AsyncMock,
+                    side_effect=RuntimeServiceError(503, b'{}'),
+                ):
+            mock_db.get_task.return_value = mock_task
+
+            with pytest.raises(RuntimeServiceError):
+                await service.cancel_task("task_123", user_id="user-1")
+
+            mock_db.cancel_task.assert_not_called()

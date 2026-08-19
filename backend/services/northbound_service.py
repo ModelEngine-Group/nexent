@@ -27,12 +27,9 @@ from consts.exceptions import (
 from consts.model import AgentRequest, ToolParamsRequest
 from database.knowledge_db import get_knowledge_info_by_tenant_id
 from database.conversation_db import get_conversation_messages
-from database.token_db import log_token_usage, get_latest_usage_metadata
-from services.agent_service import (
-    run_agent_stream,
-    stop_agent_tasks,
-    get_agent_by_name_impl,
-)
+from database.token_db import log_token_usage
+from services.agent_service import get_agent_by_name_impl
+from services.runtime_agent_client import RuntimeServiceError, runtime_agent_client
 from services.runtime_state_service import runtime_state_service
 from services.agent_version_service import list_published_agents_impl
 from services.knowledge_scope_service import (
@@ -45,7 +42,6 @@ from services.vectordatabase_service import (
     _is_multimodal_by_model_id,
 )
 from services.conversation_management_service import (
-    save_conversation_user,
     get_conversation_list_service,
     create_new_conversation,
     update_conversation_title as update_conversation_title_service,
@@ -413,22 +409,6 @@ async def start_streaming_chat(
             enable_automation_tool=False,
         )
 
-        # Persist the user message off the event loop before starting the stream.
-        # We deliberately keep this synchronous step (not async submit) for
-        # northbound reliability -- external callers may not have SSE reconnect
-        # capability, so a late INSERT failure after the stream starts would
-        # silently lose the user message.  asyncio.to_thread avoids blocking
-        # the event loop while preserving the synchronous commit semantics.
-        try:
-            await asyncio.to_thread(
-                save_conversation_user,
-                agent_request,
-                ctx.user_id,
-                ctx.tenant_id,
-            )
-        except Exception as e:
-            raise Exception(f"Failed to persist user message: {str(e)}")
-
     except LimitExceededError as exc:
         raise LimitExceededError(str(exc))
     except UnauthorizedError as _:
@@ -437,13 +417,11 @@ async def start_streaming_chat(
         raise Exception(f"Failed to start streaming chat for conversation_id {conversation_id}: {str(e)}")
 
     try:
-        response = await run_agent_stream(
+        response = await runtime_agent_client.run_agent(
             agent_request=agent_request,
-            http_request=None,
-            authorization=ctx.authorization,
             user_id=ctx.user_id,
             tenant_id=ctx.tenant_id,
-            skip_user_save=True,
+            request_id=ctx.request_id,
         )
     finally:
         if composed_key:
@@ -471,7 +449,11 @@ async def start_streaming_chat(
 
 async def stop_chat(ctx: NorthboundContext, conversation_id: int, meta_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     try:
-        stop_result = stop_agent_tasks(conversation_id, ctx.user_id)
+        stop_result = await runtime_agent_client.stop_agent(
+            conversation_id=conversation_id,
+            user_id=ctx.user_id,
+            request_id=ctx.request_id,
+        )
 
         # Log token usage
         if ctx.token_id > 0:
@@ -487,6 +469,8 @@ async def stop_chat(ctx: NorthboundContext, conversation_id: int, meta_data: Opt
                 logger.warning(f"Failed to log token usage: {str(e)}")
 
         return {"message": stop_result.get("message", "success"), "data": conversation_id, "requestId": ctx.request_id}
+    except RuntimeServiceError:
+        raise
     except Exception as e:
         raise Exception(f"Failed to stop chat for conversation_id {conversation_id}: {str(e)}")
 

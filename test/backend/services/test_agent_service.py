@@ -176,6 +176,15 @@ _asset_owner_spec.loader.exec_module(_asset_owner_mod)
 sys.modules["services.asset_owner_visibility"] = _asset_owner_mod
 setattr(services_module, "asset_owner_visibility", _asset_owner_mod)
 
+_agent_stream_contract_path = Path(__file__).resolve().parents[3] / "backend" / "services" / "agent_stream_contract.py"
+_agent_stream_contract_spec = importlib.util.spec_from_file_location(
+    "services.agent_stream_contract", _agent_stream_contract_path
+)
+_agent_stream_contract_mod = importlib.util.module_from_spec(_agent_stream_contract_spec)
+_agent_stream_contract_spec.loader.exec_module(_agent_stream_contract_mod)
+sys.modules["services.agent_stream_contract"] = _agent_stream_contract_mod
+setattr(services_module, "agent_stream_contract", _agent_stream_contract_mod)
+
 # Mock agents submodules
 sys.modules['agents'] = MagicMock()
 sys.modules['agents.create_agent_info'] = MagicMock()
