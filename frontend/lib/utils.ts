@@ -6,6 +6,11 @@ import React from 'react'
 import log from "@/lib/logger";
 import i18n from "@/app/i18n";
 
+// Re-export date utilities for unified timezone handling (dayjs-based).
+// Callers importing { formatDate, formatDateTime } from "@/lib/utils" get
+// the timezone-aware versions without any call-site changes.
+export { formatDate, formatDateTime } from "./date";
+
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
@@ -102,43 +107,6 @@ export function formatFileSize(bytes: number): string {
   const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   return `${parseFloat((bytes / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`;
-}
-
-// Format date
-export function formatDate(dateString: string): string {
-  try {
-    const date = new Date(dateString)
-    if (isNaN(date.getTime())) {
-      return ""
-    }
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-
-    return `${year}-${month}-${day}`;
-  } catch (error) {
-    return ""
-  }
-}
-
-// Format date time (YYYY-MM-DD HH:mm:ss)
-export function formatDateTime(dateString: string): string {
-  try {
-    const date = new Date(dateString)
-    if (isNaN(date.getTime())) {
-      return ""
-    }
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    const hours = String(date.getHours()).padStart(2, '0');
-    const minutes = String(date.getMinutes()).padStart(2, '0');
-    const seconds = String(date.getSeconds()).padStart(2, '0');
-
-    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
-  } catch (error) {
-    return ""
-  }
 }
 
 // Format URL display

@@ -36,7 +36,7 @@ def test_analyze_audio_uses_video_understanding_model(observer_en, mock_vlm_mode
         return {"system_prompt": "Analyze audio for {{ query }}"}
 
     monkeypatch.setattr(analyze_audio_tool, "get_prompt_template", _fake_get_prompt)
-    mock_vlm_model.analyze_audio.return_value = SimpleNamespace(content="audio result")
+    mock_vlm_model.invoke_sync.return_value = SimpleNamespace(content="audio result")
     tool = AnalyzeAudioTool(
         observer=observer_en,
         vlm_model=mock_vlm_model,
@@ -47,10 +47,11 @@ def test_analyze_audio_uses_video_understanding_model(observer_en, mock_vlm_mode
 
     assert result == "audio result"
     assert calls == [("analyze_audio", "en")]
-    mock_vlm_model.analyze_audio.assert_called_once()
-    call_kwargs = mock_vlm_model.analyze_audio.call_args.kwargs
-    assert hasattr(call_kwargs["audio_input"], "read")
-    assert call_kwargs["content_type"].startswith("audio/")
+    mock_vlm_model.invoke_sync.assert_called_once()
+    request = mock_vlm_model.invoke_sync.call_args.args[0]
+    assert request.media_type == "audio"
+    assert hasattr(request.media_input, "read")
+    assert request.kwargs["content_type"].startswith("audio/")
 
 def test_analyze_audio_schema_uses_single_url():
     assert "audio_url" in AnalyzeAudioTool.inputs
@@ -64,7 +65,7 @@ def test_analyze_audio_accepts_legacy_url_list(observer_en, mock_vlm_model, mock
         "get_prompt_template",
         lambda template_type, language=None, **_: {"system_prompt": "Analyze audio for {{ query }}"},
     )
-    mock_vlm_model.analyze_audio.return_value = SimpleNamespace(content="audio result")
+    mock_vlm_model.invoke_sync.return_value = SimpleNamespace(content="audio result")
     tool = AnalyzeAudioTool(
         observer=observer_en,
         vlm_model=mock_vlm_model,
@@ -77,10 +78,9 @@ def test_analyze_audio_accepts_legacy_url_list(observer_en, mock_vlm_model, mock
 
 
 def test_analyze_audio_rejects_siliconflow_non_omni_model(observer_en, mock_storage_client):
-    vlm_model = SimpleNamespace(
-        model_id="Qwen/Qwen3-VL-32B-Instruct",
-        client_kwargs={"base_url": "https://api.siliconflow.cn/v1"},
-    )
+    vlm_model = MagicMock()
+    vlm_model.get_model_info.return_value = SimpleNamespace(
+        capabilities={"audio": False})
     tool = AnalyzeAudioTool(
         observer=observer_en,
         vlm_model=vlm_model,
@@ -101,7 +101,7 @@ def test_analyze_video_uses_video_understanding_model(observer_en, mock_vlm_mode
         return {"system_prompt": "Analyze video for {{ query }}"}
 
     monkeypatch.setattr(analyze_video_tool, "get_prompt_template", _fake_get_prompt)
-    mock_vlm_model.analyze_video.return_value = SimpleNamespace(content="video result")
+    mock_vlm_model.invoke_sync.return_value = SimpleNamespace(content="video result")
     tool = AnalyzeVideoTool(
         observer=observer_en,
         vlm_model=mock_vlm_model,
@@ -112,10 +112,11 @@ def test_analyze_video_uses_video_understanding_model(observer_en, mock_vlm_mode
 
     assert result == "video result"
     assert calls == [("analyze_video", "en")]
-    mock_vlm_model.analyze_video.assert_called_once()
-    call_kwargs = mock_vlm_model.analyze_video.call_args.kwargs
-    assert hasattr(call_kwargs["video_input"], "read")
-    assert call_kwargs["content_type"].startswith("video/")
+    mock_vlm_model.invoke_sync.assert_called_once()
+    request = mock_vlm_model.invoke_sync.call_args.args[0]
+    assert request.media_type == "video"
+    assert hasattr(request.media_input, "read")
+    assert request.kwargs["content_type"].startswith("video/")
 
 def test_analyze_video_schema_uses_single_url():
     assert "video_url" in AnalyzeVideoTool.inputs
@@ -129,7 +130,7 @@ def test_analyze_video_accepts_legacy_url_list(observer_en, mock_vlm_model, mock
         "get_prompt_template",
         lambda template_type, language=None, **_: {"system_prompt": "Analyze video for {{ query }}"},
     )
-    mock_vlm_model.analyze_video.return_value = SimpleNamespace(content="video result")
+    mock_vlm_model.invoke_sync.return_value = SimpleNamespace(content="video result")
     tool = AnalyzeVideoTool(
         observer=observer_en,
         vlm_model=mock_vlm_model,

@@ -206,10 +206,13 @@ mock_create_agent_info.create_tool_config_list = AsyncMock(return_value=[])
 sys.modules['agents.create_agent_info'].create_agent_info = mock_create_agent_info
 
 # Mock utils submodules
-sys.modules['utils'] = MagicMock()
+utils_module = types.ModuleType("utils")
+utils_module.__path__ = []
+sys.modules['utils'] = utils_module
 sys.modules['utils.auth_utils'] = MagicMock()
 sys.modules['utils.thread_utils'] = MagicMock()
 sys.modules['utils.context_utils'] = MagicMock()
+sys.modules['utils.knowledge_telemetry'] = MagicMock()
 sys.modules['utils.context_utils'].build_authorized_context_input = (
     lambda agent_run_info, historical_context=None: MockContextInput(
         items=tuple(agent_run_info.agent_config.context_items or ())
@@ -246,6 +249,7 @@ def mock_convert_list_to_string(items):
         run_agent_stream,
         stop_agent_tasks,
         _resolve_user_tenant_language,
+        _inject_user_timezone_time,
         _apply_duplicate_name_availability_rules,
         _check_single_model_availability,
         _normalize_language_key,
@@ -412,6 +416,7 @@ from backend.services.agent_service import (
         run_agent_stream,
         stop_agent_tasks,
         _resolve_user_tenant_language,
+        _inject_user_timezone_time,
         _apply_duplicate_name_availability_rules,
         _check_single_model_availability,
         _normalize_language_key,
@@ -17293,3 +17298,360 @@ def test_resolve_user_tenant_language_honors_explicit_identity(
 def test_get_user_group_ids_returns_empty_string_on_query_failure(mock_query_group_ids):
     assert agent_service._get_user_group_ids("user-1", "tenant-1") == ""
     mock_query_group_ids.assert_called_once_with("user-1")
+
+
+def test_inject_user_timezone_time_with_valid_timezone():
+    """Should prepend [Current time: ...] when X-User-Timezone header is present."""
+    from unittest.mock import MagicMock
+    request = MagicMock()
+    request.headers = {"x-user-timezone": "Asia/Shanghai"}
+    result = _inject_user_timezone_time("What time is it?", request)
+    assert result.startswith("[Current time:")
+    assert "What time is it?" in result
+
+
+def test_inject_user_timezone_time_without_header():
+    """Should return query unchanged when X-User-Timezone header is absent."""
+    from unittest.mock import MagicMock
+    request = MagicMock()
+    request.headers = {}
+    result = _inject_user_timezone_time("What time is it?", request)
+    assert result == "What time is it?"
+
+
+def test_inject_user_timezone_time_with_existing_prefix():
+    """Should not double-inject when query already has [Current time:] prefix."""
+    from unittest.mock import MagicMock
+    request = MagicMock()
+    request.headers = {"x-user-timezone": "Asia/Shanghai"}
+    prefixed = "[Current time: 2026-01-01 20:00:00]\n\nWhat time is it?"
+    result = _inject_user_timezone_time(prefixed, request)
+    assert result == prefixed
+
+
+def test_inject_user_timezone_time_with_invalid_timezone():
+    """Should return query unchanged when timezone is invalid."""
+    from unittest.mock import MagicMock
+    request = MagicMock()
+    request.headers = {"x-user-timezone": "Invalid/Timezone"}
+    result = _inject_user_timezone_time("What time is it?", request)
+    assert result == "What time is it?"
+
+
+# ---------------------------------------------------------------------------
+# run_agent_stream knowledge_scope resolution (scoped conversation selection)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_run_agent_stream_resolves_dict_knowledge_scope(
+    mocker, mock_agent_request, mock_http_request,
+):
+    """A dict knowledge_scope resolves the per-run pool and wires runtime context."""
+    from backend.consts.model import ConversationKnowledgeScopeRequest
+
+    import sys as _sys
+    import types as _types
+    kss_module = _types.ModuleType("services.knowledge_scope_service")
+    _services_pkg = _types.ModuleType("services")
+    _services_pkg.__path__ = []
+    _sys.modules["services"] = _services_pkg
+    _sys.modules["services.knowledge_scope_service"] = kss_module
+    mock_resolve = mocker.patch.object(kss_module, "resolve_knowledge_scope", create=True)
+    mocker.patch.object(kss_module, "build_runtime_knowledge_policy", return_value="scope policy", create=True)
+    mocker.patch.object(kss_module, "build_runtime_knowledge_resources", return_value="scope resources", create=True)
+
+
+    mock_create_conversation = mocker.patch.object(
+        agent_service, "create_new_conversation", return_value={"conversation_id": 999}
+    )
+    mocker.patch.object(
+        agent_service, "_resolve_user_tenant_language", return_value=("u", "t", "en")
+    )
+    mocker.patch.object(
+        agent_service, "build_memory_context",
+        return_value=MagicMock(user_config=MagicMock(memory_switch=True)),
+    )
+    mocker.patch.object(agent_service, "save_messages")
+
+    async def stream_chunks():
+        yield "data: done\n\n"
+
+    mocker.patch.object(agent_service, "generate_stream", return_value=stream_chunks())
+
+    resolved = Mock()
+    resolved.tool_params = {"index_names": ["pool-a"]}
+    resolved.desired_scope = {
+        "local": {"mode": "override", "knowledge_ids": ["1"]},
+        "aidp": {"mode": "disabled"},
+    }
+    resolved.warnings = ["warn-1"]
+    resolved.local_disabled = False
+    resolved.local_knowledge_ids = [1]
+    resolved.local_display_names = ["KB A"]
+    resolved.aidp_disabled = True
+    resolved.aidp_kds_ids = []
+    resolved.aidp_display_names = []
+    mock_resolve.return_value = resolved
+
+    mock_agent_request.conversation_id = None
+    mock_agent_request.is_debug = False
+    mock_agent_request.knowledge_scope = {
+        "local": {"mode": "override", "knowledge_ids": ["1"]}
+    }
+
+    await run_agent_stream(mock_agent_request, mock_http_request, "Bearer token")
+
+    mock_resolve.assert_called_once()
+    call_kwargs = dict(mock_resolve.call_args.kwargs)
+    scope = call_kwargs.pop("scope")
+    assert scope.local.mode == "override"
+    assert scope.local.knowledge_ids == ["1"]
+    assert call_kwargs == {
+        "agent_id": mock_agent_request.agent_id,
+        "tenant_id": "t",
+        "user_id": "u",
+        "version_no": mock_agent_request.version_no,
+        "is_debug": False,
+        "request_tool_params": None,
+    }
+    assert mock_agent_request.tool_params == {"index_names": ["pool-a"]}
+    assert mock_agent_request.__dict__["_runtime_knowledge_context"] == {
+        "policy": "scope policy",
+        "resources": "scope resources",
+    }
+    event = mock_agent_request.__dict__["_resolved_knowledge_scope_event"]
+    assert event["warnings"] == ["warn-1"]
+    assert event["effective"]["local"]["knowledge_ids"] == [1]
+    assert event["effective"]["aidp"]["disabled"] is True
+    mock_create_conversation.assert_called_once()
+    assert mock_create_conversation.call_args.kwargs["knowledge_scope"] == (
+        resolved.desired_scope
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_agent_stream_persists_request_scope_on_existing_conversation(
+    mocker, mock_agent_request, mock_http_request,
+):
+    """A request scope on an existing conversation is re-persisted after resolution."""
+    from backend.consts.model import ConversationKnowledgeScopeRequest
+
+    import sys as _sys
+    import types as _types
+    kss_module = _types.ModuleType("services.knowledge_scope_service")
+    _services_pkg = _types.ModuleType("services")
+    _services_pkg.__path__ = []
+    _sys.modules["services"] = _services_pkg
+    _sys.modules["services.knowledge_scope_service"] = kss_module
+    mock_resolve = mocker.patch.object(kss_module, "resolve_knowledge_scope", create=True)
+    mocker.patch.object(
+        kss_module, "build_runtime_knowledge_policy",
+        return_value="scope policy", create=True,
+    )
+    mocker.patch.object(
+        kss_module, "build_runtime_knowledge_resources",
+        return_value="scope resources", create=True,
+    )
+    mocker.patch.object(
+        agent_service, "get_conversation_service",
+        return_value={"knowledge_scope": None},
+    )
+    mocker.patch.object(agent_service, "update_conversation_chat_mode_service")
+    mock_update_scope = mocker.patch.object(
+        agent_service, "update_conversation_knowledge_scope_service"
+    )
+    mocker.patch.object(
+        agent_service, "_resolve_user_tenant_language", return_value=("u", "t", "en")
+    )
+    mocker.patch.object(
+        agent_service, "build_memory_context",
+        return_value=MagicMock(user_config=MagicMock(memory_switch=True)),
+    )
+    mocker.patch.object(agent_service, "save_messages")
+
+    async def stream_chunks():
+        yield "data: done\n\n"
+
+    mocker.patch.object(agent_service, "generate_stream", return_value=stream_chunks())
+
+    resolved = Mock()
+    resolved.tool_params = {}
+    resolved.desired_scope = {"local": {"mode": "inherit"}}
+    resolved.warnings = []
+    resolved.local_disabled = False
+    resolved.local_knowledge_ids = []
+    resolved.local_display_names = []
+    resolved.aidp_disabled = True
+    resolved.aidp_kds_ids = []
+    resolved.aidp_display_names = []
+    mock_resolve.return_value = resolved
+
+    mock_agent_request.conversation_id = 55
+    mock_agent_request.is_debug = False
+    mock_agent_request.knowledge_scope = {"local": {"mode": "inherit"}}
+
+    await run_agent_stream(mock_agent_request, mock_http_request, "Bearer token")
+
+    mock_resolve.assert_called_once()
+    call_kwargs = dict(mock_resolve.call_args.kwargs)
+    scope = call_kwargs.pop("scope")
+    assert scope.local.mode == "inherit"
+    assert call_kwargs == {
+        "agent_id": mock_agent_request.agent_id,
+        "tenant_id": "t",
+        "user_id": "u",
+        "version_no": mock_agent_request.version_no,
+        "is_debug": False,
+        "request_tool_params": None,
+    }
+    mock_update_scope.assert_called_once_with(
+        conversation_id=55,
+        knowledge_scope=resolved.desired_scope,
+        user_id="u",
+        tenant_id="t",
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_agent_stream_uses_stored_scope_when_request_has_none(
+    mocker, mock_agent_request, mock_http_request,
+):
+    """When the request carries no scope, the stored conversation scope wins."""
+    from backend.consts.model import ConversationKnowledgeScopeRequest
+
+    import sys as _sys
+    import types as _types
+    kss_module = _types.ModuleType("services.knowledge_scope_service")
+    _services_pkg = _types.ModuleType("services")
+    _services_pkg.__path__ = []
+    _sys.modules["services"] = _services_pkg
+    _sys.modules["services.knowledge_scope_service"] = kss_module
+    mock_resolve = mocker.patch.object(kss_module, "resolve_knowledge_scope", create=True)
+    mocker.patch.object(
+        kss_module, "build_runtime_knowledge_policy",
+        return_value="scope policy", create=True,
+    )
+    mocker.patch.object(
+        kss_module, "build_runtime_knowledge_resources",
+        return_value="scope resources", create=True,
+    )
+    mock_get_conversation = mocker.patch.object(
+        agent_service, "get_conversation_service",
+        return_value={"knowledge_scope": {"local": {"mode": "inherit"}}},
+    )
+    mock_update_scope = mocker.patch.object(
+        agent_service, "update_conversation_knowledge_scope_service"
+    )
+    mocker.patch.object(agent_service, "update_conversation_chat_mode_service")
+    mocker.patch.object(
+        agent_service, "_resolve_user_tenant_language", return_value=("u", "t", "en")
+    )
+    mocker.patch.object(
+        agent_service, "build_memory_context",
+        return_value=MagicMock(user_config=MagicMock(memory_switch=True)),
+    )
+    mocker.patch.object(agent_service, "save_messages")
+
+    async def stream_chunks():
+        yield "data: done\n\n"
+
+    mocker.patch.object(agent_service, "generate_stream", return_value=stream_chunks())
+
+    resolved = Mock()
+    resolved.tool_params = {}
+    resolved.desired_scope = {"local": {"mode": "inherit"}}
+    resolved.warnings = []
+    resolved.local_disabled = False
+    resolved.local_knowledge_ids = []
+    resolved.local_display_names = []
+    resolved.aidp_disabled = True
+    resolved.aidp_kds_ids = []
+    resolved.aidp_display_names = []
+    mock_resolve.return_value = resolved
+
+    mock_agent_request.conversation_id = 55
+    mock_agent_request.is_debug = False
+    mock_agent_request.knowledge_scope = None
+
+    await run_agent_stream(mock_agent_request, mock_http_request, "Bearer token")
+
+    mock_get_conversation.assert_called_once_with(
+        conversation_id=55, user_id="u", tenant_id="t"
+    )
+    mock_resolve.assert_called_once()
+    scope = dict(mock_resolve.call_args.kwargs)["scope"]
+    assert scope.local.mode == "inherit"
+    # A stored scope is used but not re-persisted: the request carried none.
+    mock_update_scope.assert_not_called()
+
+
+
+
+@pytest.mark.asyncio
+async def test_run_agent_stream_emits_knowledge_scope_resolved_event(
+    mocker, mock_agent_request, mock_http_request,
+):
+    """The stream emits a knowledge_scope_resolved SSE event carrying the effective scope."""
+    import sys as _sys
+    import types as _types
+
+    kss_module = _types.ModuleType("services.knowledge_scope_service")
+    _services_pkg = _types.ModuleType("services")
+    _services_pkg.__path__ = []
+    _sys.modules["services"] = _services_pkg
+    _sys.modules["services.knowledge_scope_service"] = kss_module
+    mock_resolve = mocker.patch.object(kss_module, "resolve_knowledge_scope", create=True)
+    mocker.patch.object(
+        kss_module, "build_runtime_knowledge_policy",
+        return_value="scope policy", create=True,
+    )
+    mocker.patch.object(
+        kss_module, "build_runtime_knowledge_resources",
+        return_value="scope resources", create=True,
+    )
+    mocker.patch.object(
+        agent_service, "get_conversation_service",
+        return_value={"knowledge_scope": None},
+    )
+    mocker.patch.object(agent_service, "update_conversation_chat_mode_service")
+    mocker.patch.object(agent_service, "update_conversation_knowledge_scope_service")
+    mocker.patch.object(
+        agent_service, "_resolve_user_tenant_language", return_value=("u", "t", "en")
+    )
+    mocker.patch.object(
+        agent_service, "build_memory_context",
+        return_value=MagicMock(user_config=MagicMock(memory_switch=True)),
+    )
+    mocker.patch.object(agent_service, "save_messages")
+
+    resolved = Mock()
+    resolved.tool_params = {}
+    resolved.desired_scope = {"local": {"mode": "inherit"}}
+    resolved.warnings = []
+    resolved.local_disabled = False
+    resolved.local_knowledge_ids = [1]
+    resolved.local_display_names = ["KB A"]
+    resolved.aidp_disabled = True
+    resolved.aidp_kds_ids = []
+    resolved.aidp_display_names = []
+    mock_resolve.return_value = resolved
+
+    async def stream_chunks():
+        yield "data: chunk\n\n"
+
+    mocker.patch.object(agent_service, "generate_stream", return_value=stream_chunks())
+
+    mock_agent_request.conversation_id = 55
+    mock_agent_request.is_debug = False
+    mock_agent_request.knowledge_scope = {"local": {"mode": "inherit"}}
+
+    response = await run_agent_stream(mock_agent_request, mock_http_request, "Bearer token")
+    chunks = []
+    async for chunk in response.body_iterator:
+        chunks.append(chunk)
+
+    body = "".join(chunks)
+    assert "knowledge_scope_resolved" in body
+    assert '"local"' in body
+    assert '"KB A"' in body

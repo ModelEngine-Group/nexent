@@ -11,6 +11,8 @@ from fastapi.responses import StreamingResponse
 
 
 from consts.const import (
+    AIDP_API_KEY,
+    AIDP_SERVER_URL,
     ASSET_OWNER_TENANT_ID,
     NORTHBOUND_IDEMPOTENCY_TTL_SECONDS,
     NORTHBOUND_RATE_LIMIT_ENABLED,
@@ -23,12 +25,22 @@ from consts.exceptions import (
     UnauthorizedError,
 )
 from consts.model import AgentRequest, ToolParamsRequest
+from database.knowledge_db import get_knowledge_info_by_tenant_id
 from database.conversation_db import get_conversation_messages
 from database.token_db import log_token_usage
 from services.agent_service import get_agent_by_name_impl
 from services.runtime_agent_client import RuntimeServiceError, runtime_agent_client
 from services.runtime_state_service import runtime_state_service
 from services.agent_version_service import list_published_agents_impl
+from services.knowledge_scope_service import (
+    AIDP_TOOL_CLASS,
+    LOCAL_TOOL_CLASS,
+    get_agent_knowledge_capabilities,
+)
+from services.vectordatabase_service import (
+    ElasticSearchService,
+    _is_multimodal_by_model_id,
+)
 from services.conversation_management_service import (
     get_conversation_list_service,
     create_new_conversation,
@@ -460,15 +472,26 @@ async def get_conversation_history(ctx: NorthboundContext, conversation_id: int)
 
 async def _get_visible_published_agents(ctx: NorthboundContext) -> list[dict]:
     """Return published agents visible to the northbound caller."""
-    agent_info_list = await list_published_agents_impl(
-        tenant_id=ctx.tenant_id,
-        user_id=ctx.user_id,
-    )
-    if ctx.tenant_id != ASSET_OWNER_TENANT_ID:
-        agent_info_list.extend(await list_published_agents_impl(
-            tenant_id=ASSET_OWNER_TENANT_ID,
+    agent_info_list = [
+        dict(agent)
+        for agent in await list_published_agents_impl(
+            tenant_id=ctx.tenant_id,
             user_id=ctx.user_id,
-        ))
+        )
+    ]
+    for agent in agent_info_list:
+        agent["_northbound_tenant_id"] = ctx.tenant_id
+    if ctx.tenant_id != ASSET_OWNER_TENANT_ID:
+        asset_owner_agents = [
+            dict(agent)
+            for agent in await list_published_agents_impl(
+                tenant_id=ASSET_OWNER_TENANT_ID,
+                user_id=ctx.user_id,
+            )
+        ]
+        for agent in asset_owner_agents:
+            agent["_northbound_tenant_id"] = ASSET_OWNER_TENANT_ID
+        agent_info_list.extend(asset_owner_agents)
     return agent_info_list
 
 
@@ -477,6 +500,7 @@ async def get_agent_info_list(ctx: NorthboundContext) -> Dict[str, Any]:
         agent_info_list = await _get_visible_published_agents(ctx)
         for agent_info in agent_info_list:
             agent_info.pop("agent_id", None)
+            agent_info.pop("_northbound_tenant_id", None)
 
         return {"message": "success", "data": agent_info_list, "requestId": ctx.request_id}
     except Exception as e:
@@ -505,6 +529,7 @@ async def get_agent_info_by_name_for_northbound(
 
         result = dict(agent_info)
         result.pop("agent_id", None)
+        result.pop("_northbound_tenant_id", None)
         return {"message": "success", "data": result, "requestId": ctx.request_id}
     except (ValueError, LookupError):
         raise
@@ -512,6 +537,160 @@ async def get_agent_info_by_name_for_northbound(
         raise Exception(
             f"Failed to get agent info for agent_name {agent_name} in tenant {ctx.tenant_id}: {str(e)}"
         )
+
+
+async def get_agent_knowledge_bases_for_northbound(
+    ctx: NorthboundContext,
+    agent_name: str,
+) -> Dict[str, Any]:
+    """Return knowledge bases the caller may pass to the selected agent tool."""
+    if not agent_name.strip():
+        raise ValueError("agent_name is required")
+
+    visible_agents = await _get_visible_published_agents(ctx)
+    agent = next(
+        (item for item in visible_agents if item.get("name") == agent_name),
+        None,
+    )
+    if agent is None:
+        raise LookupError(f"Published agent not found: {agent_name}")
+
+    agent_tenant_id = str(agent.get("_northbound_tenant_id") or ctx.tenant_id)
+    agent_id = int(agent["agent_id"])
+    version_no = agent.get("current_version_no")
+    capabilities = get_agent_knowledge_capabilities(
+        agent_id=agent_id,
+        tenant_id=agent_tenant_id,
+        version_no=int(version_no) if version_no is not None else None,
+        user_id=ctx.user_id,
+    )
+    local_enabled = bool(capabilities["sources"]["local"]["enabled"])
+    aidp_enabled = bool(capabilities["sources"]["aidp"]["enabled"])
+    if local_enabled and aidp_enabled:
+        raise ValueError(
+            "The agent enables both local and AIDP knowledge retrieval."
+        )
+
+    if not local_enabled and not aidp_enabled:
+        return {
+            "message": "success",
+            "data": {
+                "agent_name": agent_name,
+                "source": None,
+                "tool_name": None,
+                "range_parameter": None,
+                "max_select": 0,
+                "default_selected_ids": [],
+                "knowledge_bases": [],
+            },
+            "requestId": ctx.request_id,
+        }
+
+    if local_enabled:
+        records = get_knowledge_info_by_tenant_id(agent_tenant_id)
+        candidate_indices = [
+            str(record["index_name"])
+            for record in records
+            if record.get("index_name")
+            and record.get("knowledge_sources") != "datamate"
+        ]
+        accessible_indices = set(
+            ElasticSearchService.filter_accessible_indices(
+                candidate_indices,
+                user_id=ctx.user_id,
+                tenant_id=agent_tenant_id,
+            )
+        )
+        items = [
+            {
+                "id": str(record["index_name"]),
+                "knowledge_id": str(record["knowledge_id"]),
+                "name": str(record.get("knowledge_name") or record["index_name"]),
+                "embedding_model": str(record.get("embedding_model_name") or ""),
+                "embedding_model_id": record.get("embedding_model_id"),
+                "is_multimodal": _is_multimodal_by_model_id(
+                    record.get("embedding_model_id"),
+                    agent_tenant_id,
+                ),
+            }
+            for record in records
+            if str(record.get("index_name") or "") in accessible_indices
+        ]
+        source = "local"
+        tool_name = LOCAL_TOOL_CLASS
+        range_parameter = "index_names"
+    else:
+        from ext_components.aidp.services.aidp_access_service import (
+            resolve_current_aidp_access,
+        )
+        from ext_components.aidp.services.aidp_service import (
+            get_aidp_kb_impl,
+        )
+
+        snapshot = await asyncio.to_thread(
+            resolve_current_aidp_access,
+            server_url=AIDP_SERVER_URL,
+            api_key=AIDP_API_KEY,
+            user_id=ctx.user_id,
+            tenant_id=agent_tenant_id,
+            aidp_tenant_id="aidp",
+        )
+        rows = snapshot.accessible_rows
+        items = []
+        for row in rows:
+            detail: Dict[str, Any] = {}
+            resource_status = str(row.get("resource_status") or "ACTIVE")
+            try:
+                detail = await asyncio.to_thread(
+                    get_aidp_kb_impl,
+                    AIDP_SERVER_URL,
+                    AIDP_API_KEY,
+                    str(row["kb_id"]),
+                ) or {}
+                resource_status = "ACTIVE"
+            except Exception as exc:
+                logger.warning(
+                    "AIDP detail fetch failed for northbound knowledge list kb_id=%s: %s",
+                    row["kb_id"],
+                    exc,
+                )
+                resource_status = "UNAVAILABLE"
+            items.append({
+                "id": str(row["kb_id"]),
+                "name": str(
+                    detail.get("kds_name")
+                    or detail.get("name")
+                    or row.get("kds_name")
+                    or row.get("name")
+                    or row["kb_id"]
+                ),
+                "document_count": int(
+                    detail.get("document_count") or row.get("document_count") or 0
+                ),
+                "chunk_count": int(detail.get("chunk_count") or row.get("chunk_count") or 0),
+                "is_multimodal": (
+                    detail.get("caption_enable", row.get("caption_enable")) in (1, "1", True)
+                ),
+                "resource_status": resource_status,
+            })
+        source = "aidp"
+        tool_name = AIDP_TOOL_CLASS
+        range_parameter = "kds_list"
+
+    source_capabilities = capabilities["sources"][source]
+    return {
+        "message": "success",
+        "data": {
+            "agent_name": agent_name,
+            "source": source,
+            "tool_name": tool_name,
+            "range_parameter": range_parameter,
+            "max_select": source_capabilities["max_select"],
+            "default_selected_ids": source_capabilities["default_range_values"],
+            "knowledge_bases": items,
+        },
+        "requestId": ctx.request_id,
+    }
 
 
 async def update_conversation_title(ctx: NorthboundContext, conversation_id: int, title: str, meta_data: Optional[Dict[str, Any]] = None, idempotency_key: Optional[str] = None) -> Dict[str, Any]:

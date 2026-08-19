@@ -44,6 +44,8 @@ sys.modules["backend.consts.exceptions"] = consts_exceptions_mod
 
 # Mock consts.const
 consts_const_mod = types.ModuleType("consts.const")
+consts_const_mod.AIDP_API_KEY = "test-aidp-api-key"
+consts_const_mod.AIDP_SERVER_URL = "https://aidp.example"
 consts_const_mod.ASSET_OWNER_TENANT_ID = "asset-owner-tenant"
 consts_const_mod.RUNTIME_STATE_REDIS_URL = ""
 consts_const_mod.RUNTIME_STREAM_TTL_SECONDS = 86400
@@ -86,6 +88,10 @@ conversation_db_mod.get_conversation_messages = MagicMock(return_value=[
 ])
 conversation_db_mod.get_source_searches_by_message = MagicMock(return_value=[])
 sys.modules["database.conversation_db"] = conversation_db_mod
+
+knowledge_db_mod = types.ModuleType("database.knowledge_db")
+knowledge_db_mod.get_knowledge_info_by_tenant_id = MagicMock(return_value=[])
+sys.modules["database.knowledge_db"] = knowledge_db_mod
 
 # Mock attachment_db
 attachment_db_mod = types.ModuleType("database.attachment_db")
@@ -149,6 +155,20 @@ agent_version_mod.list_published_agents_impl = AsyncMock(return_value=[
 ])
 sys.modules["services.agent_version_service"] = agent_version_mod
 
+knowledge_scope_service_mod = types.ModuleType("services.knowledge_scope_service")
+knowledge_scope_service_mod.LOCAL_TOOL_CLASS = "KnowledgeBaseSearchTool"
+knowledge_scope_service_mod.AIDP_TOOL_CLASS = "AidpSearchTool"
+knowledge_scope_service_mod.get_agent_knowledge_capabilities = MagicMock()
+sys.modules["services.knowledge_scope_service"] = knowledge_scope_service_mod
+
+vectordatabase_service_mod = types.ModuleType("services.vectordatabase_service")
+vectordatabase_service_mod.ElasticSearchService = MagicMock()
+vectordatabase_service_mod.ElasticSearchService.filter_accessible_indices = MagicMock(
+    return_value=[]
+)
+vectordatabase_service_mod._is_multimodal_by_model_id = MagicMock(return_value=False)
+sys.modules["services.vectordatabase_service"] = vectordatabase_service_mod
+
 # Mock file_management_service
 file_mgmt_mod = types.ModuleType("services.file_management_service")
 file_mgmt_mod.upload_to_minio = AsyncMock(return_value=[])
@@ -163,6 +183,8 @@ services_package.conversation_management_service = conv_mgmt_mod
 services_package.file_management_service = file_mgmt_mod
 services_package.runtime_state_service = runtime_state_service_mod
 services_package.runtime_agent_client = runtime_agent_client_mod
+services_package.knowledge_scope_service = knowledge_scope_service_mod
+services_package.vectordatabase_service = vectordatabase_service_mod
 sys.modules["services"] = services_package
 
 # Mock consts.model - create stub classes
@@ -904,6 +926,187 @@ class TestGetAgentInfoList:
 
         with pytest.raises(Exception, match="Failed to get agent info for agent_name"):
             await ns.get_agent_info_by_name_for_northbound(ctx, "any_agent")
+
+    async def test_get_agent_knowledge_bases_returns_accessible_local_indices(self):
+        ctx = MockNorthboundContext(tenant_id="tenant-1", user_id="user-1")
+        agent_version_mod.list_published_agents_impl.return_value = [
+            {
+                "agent_id": 42,
+                "tenant_id": "tenant-1",
+                "name": "local_agent",
+                "current_version_no": 3,
+            }
+        ]
+        knowledge_scope_service_mod.get_agent_knowledge_capabilities.return_value = {
+            "sources": {
+                "local": {
+                    "enabled": True,
+                    "max_select": 50,
+                    "default_range_values": ["allowed-index"],
+                },
+                "aidp": {
+                    "enabled": False,
+                    "max_select": 10,
+                    "default_range_values": [],
+                },
+            }
+        }
+        knowledge_db_mod.get_knowledge_info_by_tenant_id.return_value = [
+            {
+                "knowledge_id": 7,
+                "index_name": "allowed-index",
+                "knowledge_name": "Allowed KB",
+                "knowledge_sources": "elasticsearch",
+                "embedding_model_name": "bge-m3",
+                "embedding_model_id": 9,
+            },
+            {
+                "knowledge_id": 8,
+                "index_name": "denied-index",
+                "knowledge_name": "Denied KB",
+                "knowledge_sources": "elasticsearch",
+            },
+        ]
+        ns.ElasticSearchService.filter_accessible_indices.return_value = [
+            "allowed-index"
+        ]
+
+        result = await ns.get_agent_knowledge_bases_for_northbound(
+            ctx, "local_agent"
+        )
+
+        assert result["data"]["source"] == "local"
+        assert result["data"]["tool_name"] == "KnowledgeBaseSearchTool"
+        assert result["data"]["range_parameter"] == "index_names"
+        assert result["data"]["default_selected_ids"] == ["allowed-index"]
+        assert result["data"]["knowledge_bases"] == [{
+            "id": "allowed-index",
+            "knowledge_id": "7",
+            "name": "Allowed KB",
+            "embedding_model": "bge-m3",
+            "embedding_model_id": 9,
+            "is_multimodal": False,
+        }]
+
+    async def test_get_agent_knowledge_bases_rejects_source_conflict(self):
+        ctx = MockNorthboundContext(tenant_id="tenant-1", user_id="user-1")
+        agent_version_mod.list_published_agents_impl.return_value = [
+            {
+                "agent_id": 42,
+                "tenant_id": "tenant-1",
+                "name": "conflicting_agent",
+                "current_version_no": 3,
+            }
+        ]
+        knowledge_scope_service_mod.get_agent_knowledge_capabilities.return_value = {
+            "sources": {
+                "local": {"enabled": True},
+                "aidp": {"enabled": True},
+            }
+        }
+
+        with pytest.raises(ValueError, match="both local and AIDP"):
+            await ns.get_agent_knowledge_bases_for_northbound(
+                ctx, "conflicting_agent"
+            )
+
+    async def test_get_agent_knowledge_bases_returns_accessible_aidp_items(self):
+        ctx = MockNorthboundContext(tenant_id="tenant-1", user_id="user-1")
+        agent_version_mod.list_published_agents_impl.return_value = [{
+            "agent_id": 42,
+            "name": "aidp_agent",
+            "current_version_no": 3,
+        }]
+        knowledge_scope_service_mod.get_agent_knowledge_capabilities.return_value = {
+            "sources": {
+                "local": {
+                    "enabled": False,
+                    "max_select": 50,
+                    "default_range_values": [],
+                },
+                "aidp": {
+                    "enabled": True,
+                    "max_select": 10,
+                    "default_range_values": ["kds-1"],
+                },
+            }
+        }
+        permission_service = types.ModuleType(
+            "ext_components.aidp.services.aidp_permission_service"
+        )
+        permission_service.intersect_accessible_kbs = MagicMock(return_value=[{
+            "kb_id": "kds-1",
+            "kds_name": "Fallback name",
+            "resource_status": "ACTIVE",
+        }])
+        aidp_service = types.ModuleType(
+            "ext_components.aidp.services.aidp_service"
+        )
+        aidp_service.get_aidp_kb_impl = MagicMock(return_value={
+            "kds_name": "Policies",
+            "document_count": 2,
+            "chunk_count": 12,
+            "caption_enable": 1,
+        })
+        aidp_service.fetch_all_aidp_knowledge_bases_impl = MagicMock(return_value={
+            "value": [{"kds_id": "kds-1"}],
+            "total_count": 1,
+            "next_link": None,
+        })
+        aidp_access_service = types.ModuleType(
+            "ext_components.aidp.services.aidp_access_service"
+        )
+        aidp_access_service.resolve_current_aidp_access = MagicMock(
+            return_value=types.SimpleNamespace(
+                accessible_rows=[{
+                    "kb_id": "kds-1",
+                    "kds_name": "Fallback name",
+                    "resource_status": "ACTIVE",
+                }]
+            )
+        )
+        services_module = types.ModuleType("ext_components.aidp.services")
+        services_module.aidp_permission_service = permission_service
+        aidp_module = types.ModuleType("ext_components.aidp")
+        aidp_module.services = services_module
+        ext_components_module = types.ModuleType("ext_components")
+        ext_components_module.aidp = aidp_module
+
+        with patch.dict(sys.modules, {
+            "ext_components": ext_components_module,
+            "ext_components.aidp": aidp_module,
+            "ext_components.aidp.services": services_module,
+            "ext_components.aidp.services.aidp_permission_service": permission_service,
+            "ext_components.aidp.services.aidp_service": aidp_service,
+            "ext_components.aidp.services.aidp_access_service": aidp_access_service,
+        }):
+            result = await ns.get_agent_knowledge_bases_for_northbound(
+                ctx, "aidp_agent"
+            )
+
+        assert result["data"]["source"] == "aidp"
+        assert result["data"]["range_parameter"] == "kds_list"
+        assert result["data"]["default_selected_ids"] == ["kds-1"]
+        assert result["data"]["knowledge_bases"] == [{
+            "id": "kds-1",
+            "name": "Policies",
+            "document_count": 2,
+            "chunk_count": 12,
+            "is_multimodal": True,
+            "resource_status": "ACTIVE",
+        }]
+        aidp_service.get_aidp_kb_impl.assert_called_once_with(
+            "https://aidp.example",
+            "test-aidp-api-key",
+            "kds-1",
+        )
+        aidp_access_service.resolve_current_aidp_access.assert_called_once_with(
+            server_url="https://aidp.example",
+            api_key="test-aidp-api-key",
+            user_id="user-1",
+            tenant_id="tenant-1",
+            aidp_tenant_id="aidp",
+        )
 
 
 @pytest.mark.asyncio

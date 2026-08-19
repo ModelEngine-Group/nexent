@@ -1,9 +1,13 @@
 import { API_ENDPOINTS } from "@/services/api";
+import { buildHeartbeatAuthHeader } from "@/lib/casHeartbeat";
 import log from "@/lib/logger";
 
 export interface CasConfig {
   enabled: boolean;
   login_mode: "button" | "force" | "disabled";
+  heartbeat_url: string;
+  heartbeat_interval_seconds: number;
+  heartbeat_cookie_name: string;
   renew_before_seconds: number;
   renew_timeout_seconds: number;
   display_name: string;
@@ -16,6 +20,9 @@ interface GetCasConfigOptions {
 const disabledConfig: CasConfig = {
   enabled: false,
   login_mode: "disabled",
+  heartbeat_url: "",
+  heartbeat_interval_seconds: 300,
+  heartbeat_cookie_name: "",
   renew_before_seconds: 300,
   renew_timeout_seconds: 10,
   display_name: "CAS",
@@ -27,6 +34,7 @@ const FAILURE_CACHE_TTL_MS = 30 * 1000;
 let cachedConfig: CasConfig | null = null;
 let cacheExpiresAt = 0;
 let inFlightConfigPromise: Promise<CasConfig> | null = null;
+let inFlightHeartbeatPromise: Promise<boolean> | null = null;
 
 const cacheConfig = (config: CasConfig, ttlMs: number) => {
   cachedConfig = config;
@@ -72,6 +80,73 @@ export const casService = {
     const target =
       redirect || window.location.pathname + window.location.search;
     window.location.href = `${API_ENDPOINTS.cas.login}?redirect=${encodeURIComponent(target)}`;
+  },
+
+  sendHeartbeat: (config: CasConfig): Promise<boolean> => {
+    if (typeof window === "undefined" || !config.heartbeat_url.trim()) {
+      return Promise.resolve(false);
+    }
+    if (inFlightHeartbeatPromise) return inFlightHeartbeatPromise;
+
+    let heartbeatUrl: URL;
+    try {
+      heartbeatUrl = new URL(config.heartbeat_url, window.location.origin);
+      if (!["http:", "https:"].includes(heartbeatUrl.protocol)) {
+        log.warn("CAS heartbeat URL must use HTTP or HTTPS");
+        return Promise.resolve(false);
+      }
+    } catch {
+      log.warn("CAS heartbeat URL is invalid");
+      return Promise.resolve(false);
+    }
+
+    const headers: Record<string, string> = {};
+    const authHeader = buildHeartbeatAuthHeader(
+      document.cookie,
+      config.heartbeat_cookie_name
+    );
+    if (authHeader) headers["X-Auth-Token"] = authHeader;
+
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(
+      () => controller.abort(),
+      Math.max(1, config.renew_timeout_seconds) * 1_000
+    );
+
+    const heartbeatPromise = (async (): Promise<boolean> => {
+      try {
+        const response = await fetch(heartbeatUrl.toString(), {
+          method: "GET",
+          headers,
+          credentials: "omit",
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        if (!response.ok) {
+          log.warn(`CAS heartbeat failed with status ${response.status}`);
+          return false;
+        }
+        log.info("CAS heartbeat succeeded");
+        return true;
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") {
+          log.warn("CAS heartbeat timed out");
+        } else {
+          log.warn("CAS heartbeat request failed");
+        }
+        return false;
+      } finally {
+        window.clearTimeout(timeoutId);
+      }
+    })();
+
+    inFlightHeartbeatPromise = heartbeatPromise;
+    void heartbeatPromise.finally(() => {
+      if (inFlightHeartbeatPromise === heartbeatPromise) {
+        inFlightHeartbeatPromise = null;
+      }
+    });
+    return heartbeatPromise;
   },
 
   renewInIframe: (timeoutSeconds: number): Promise<boolean> => {

@@ -66,8 +66,7 @@ export default function SelectedSkillManagement({
     (state) => state.editedAgent.skills
   );
   const updateSkills = useAgentConfigStore((state) => state.updateSkills);
-  const { skills: catalogSkillData } = useSkillList({ enabled: true });
-  const catalogSkills = catalogSkillData as Skill[];
+  const { availableSkills: catalogSkills } = useSkillList({ enabled: true });
   const [detailSkill, setDetailSkill] = useState<Skill | null>(null);
   const [configSkill, setConfigSkill] = useState<Skill | null>(null);
   const [collapsedGroups, setCollapsedGroups] = useState<
@@ -79,7 +78,7 @@ export default function SelectedSkillManagement({
   // them by ID so an agent reloaded after saving keeps both its selection and
   // the canonical card content.
   const groupedSkills = useMemo<SelectedSkillGroup[]>(() => {
-    const catalogById = new Map(
+    const catalogById = new Map<number, Skill>(
       catalogSkills.map((skill: Skill) => [Number(skill.skill_id), skill])
     );
     const grouped = new Map<SkillSourceKey, Skill[]>([

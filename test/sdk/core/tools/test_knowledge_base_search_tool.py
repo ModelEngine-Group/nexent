@@ -439,14 +439,14 @@ class TestKnowledgeBaseSearchTool:
         assert "hybrid, accurate, semantic" in str(excinfo.value)
 
     def test_forward_no_results(self, knowledge_base_search_tool):
-        """Test forward method with no search results"""
+        """No results should be an observation so the agent can finish its answer."""
         # Mock empty search results
         knowledge_base_search_tool.vdb_core.hybrid_search.return_value = []
 
-        with pytest.raises(Exception) as excinfo:
-            knowledge_base_search_tool.forward("test query")
+        result = json.loads(knowledge_base_search_tool.forward("test query"))
 
-        assert "No results found" in str(excinfo.value)
+        assert "No relevant information" in result
+        assert "selected knowledge bases" in result
 
     def test_forward_with_custom_index_names(self, knowledge_base_search_tool):
         """Test forward method uses configured custom index names."""
@@ -1761,7 +1761,7 @@ class TestDocumentPathsAccessControl:
         assert search_results[0].get("url") == "s3://bucket/doc1.txt"
 
     def test_forward_with_document_paths_filter_no_results_after_filter(self, mock_vdb_core, mock_embedding_model, mock_observer):
-        """Test that forward raises exception when all results are filtered out."""
+        """All filtered results should produce a safe no-evidence observation."""
         tool = KnowledgeBaseSearchTool(
             index_names=["kb1"],
             search_mode="hybrid",
@@ -1776,11 +1776,10 @@ class TestDocumentPathsAccessControl:
         mock_results = self._create_mock_vdb_results_with_paths(["s3://bucket/doc1.txt", "s3://bucket/doc2.txt", "s3://bucket/doc3.txt"])
         mock_vdb_core.hybrid_search.return_value = mock_results
 
-        # Should raise exception because after filtering, no results remain
-        with pytest.raises(Exception) as excinfo:
-            tool.forward("test query")
+        result = json.loads(tool.forward("test query"))
 
-        assert "No results found" in str(excinfo.value)
+        assert "No relevant information" in result
+        assert "selected knowledge bases" in result
 
     def test_filter_by_document_paths_unwraps_fieldinfo_default(self, mock_vdb_core, mock_embedding_model):
         """Filter should tolerate a FieldInfo default instead of a concrete list.

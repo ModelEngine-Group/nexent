@@ -213,6 +213,15 @@ class MinioClient:
         self._ensure_initialized()
         return self._storage_client.get_file_size(object_name, bucket)
 
+    def get_file_size_strict(
+        self,
+        object_name: str,
+        bucket: Optional[str] = None,
+    ) -> Optional[int]:
+        """Return authoritative size, distinguishing a missing object from operational errors."""
+        self._ensure_initialized()
+        return self._storage_client.get_file_size_strict(object_name, bucket)
+
     def list_files(self, prefix: str = "", bucket: Optional[str] = None) -> List[dict]:
         """
         List files in bucket

@@ -83,7 +83,7 @@ FEW_SHOTS_SYSTEM_PROMPT: |-
   Think: I will first use the knowledge_base_search tool to find if there is relevant information in the local knowledge base.
   Code:
   <code>
-  knowledge_info = knowledge_base_search(query="Oriental Pearl Tower introduction", index_names=["local_knowledge_base1", "local_knowledge_base2"])
+  knowledge_info = knowledge_base_search(query="Oriental Pearl Tower introduction")
   print(knowledge_info)
   </code>
   # System returns Observation: No relevant results found
@@ -245,16 +245,16 @@ FEW_SHOTS_SYSTEM_PROMPT: |-
 
   Task 9: "Search for appointment information"
 
-  Think: I need to use aidp_search to search for information in the Appointment Knowledge Base.
+  Think: I need to use aidp_search to search for appointment information.
   Code:
   <code>
-  appointment_info = aidp_search(query="appointment information", kds_list=["Appointment Knowledge Base"])
+  appointment_info = aidp_search(query="appointment information")
   print(appointment_info)
   </code>
   # System returns Observation: Found relevant appointment information...
 
   Think: I have the appointment information. Now I will generate the final answer.
-  Based on the query results from the Appointment Knowledge Base...
+  Based on the retrieval results...
 
   ---
 
@@ -335,18 +335,12 @@ USER_PROMPT: |-
   You have no available assistants
   {% endif %}
 
-  {% if knowledge_base_names %}
-  ### Knowledge Base Configuration Note:
-  When generating few-shot examples, if using the knowledge_base_search tool, you MUST use the following actual configured knowledge base names:
-  {{ knowledge_base_names | default('') }}
-  Please use these names directly in examples, e.g.: knowledge_base_search(query="xxx", index_names=[{{ knowledge_base_names | default('') }}])
-  {% endif %}
-
-  {% if aidp_kb_names %}
-  ### aidp_search Knowledge Base Configuration Note:
-  kds_list is optional; if not provided, uses the tool's default configured knowledge bases. To search a specific KB, pass its name in kds_list (NOT index_names):
-  {{ aidp_kb_names | default('') }}
-  Example: aidp_search(query="xxx", kds_list=[{{ aidp_kb_names | default('') }}])
+  {% if has_local_knowledge_tool or has_aidp_knowledge_tool %}
+  ### Knowledge Tool Rules:
+  - Describe only when retrieval is needed and how to use retrieval results.
+  - Do not include concrete knowledge base names, IDs, index names, or KDS IDs.
+  - Do not fix `index_names` or `kds_list` in few-shot examples; the platform injects the runtime scope.
+  - Follow the knowledge scope allowed for the current conversation. Never infer scope from history or static prompts.
   {% endif %}
 
 

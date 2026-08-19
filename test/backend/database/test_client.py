@@ -308,6 +308,23 @@ class TestMinioClient:
 
     @patch('backend.database.client.create_storage_client_from_config')
     @patch('backend.database.client.MinIOStorageConfig')
+    def test_minio_client_get_file_size_strict(self, mock_config_class, mock_create_client):
+        """Test strict size lookup preserves missing versus error semantics."""
+        MinioClient._instance = None
+        MinioClient._initialized = False
+
+        mock_storage_client = MagicMock()
+        mock_storage_client.get_file_size_strict.side_effect = [1024, None]
+        mock_create_client.return_value = mock_storage_client
+        mock_config_class.return_value = MagicMock()
+
+        client = MinioClient()
+        assert client.get_file_size_strict('file.txt', 'bucket') == 1024
+        assert client.get_file_size_strict('missing.txt', 'bucket') is None
+        assert mock_storage_client.get_file_size_strict.call_count == 2
+
+    @patch('backend.database.client.create_storage_client_from_config')
+    @patch('backend.database.client.MinIOStorageConfig')
     def test_minio_client_list_files(self, mock_config_class, mock_create_client):
         """Test MinioClient.list_files delegates to storage client"""
         MinioClient._instance = None

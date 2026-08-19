@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional
 
 from database import skill_db
 from database.tenant_config_db import (
+    create_tenant_with_default_group,
     get_single_config_info,
     insert_config,
     update_config_by_tenant_config_id,
@@ -19,7 +20,7 @@ from database.tenant_config_db import (
 )
 from database.user_tenant_db import get_users_by_tenant_id, soft_delete_users_by_tenant_id
 from services.user_service import delete_user_and_cleanup
-from database.group_db import add_group, query_groups_by_tenant, remove_group
+from database.group_db import query_groups_by_tenant, remove_group
 from database.model_management_db import get_model_records, delete_model_record
 from database.knowledge_db import get_knowledge_info_by_tenant_id, delete_knowledge_record
 from database.agent_db import query_all_agent_info_by_tenant_id, delete_agent_by_id, delete_agent_relationship
@@ -252,46 +253,11 @@ def create_tenant(
             f"Tenant with name '{tenant_name.strip()}' already exists")
 
     try:
-        # Create default group first
-        default_group_id = _create_default_group_for_tenant(
-            tenant_id, created_by)
-
-        # Create tenant ID configuration
-        tenant_id_data = {
-            "tenant_id": tenant_id,
-            "config_key": TENANT_ID,
-            "config_value": tenant_id,
-            "created_by": created_by,
-            "updated_by": created_by
-        }
-        id_success = insert_config(tenant_id_data)
-        if not id_success:
-            raise ValidationError("Failed to create tenant ID configuration")
-
-        # Create tenant name configuration
-        tenant_name_data = {
-            "tenant_id": tenant_id,
-            "config_key": TENANT_NAME,
-            "config_value": tenant_name.strip(),
-            "created_by": created_by,
-            "updated_by": created_by
-        }
-        name_success = insert_config(tenant_name_data)
-        if not name_success:
-            raise ValidationError("Failed to create tenant name configuration")
-
-        # Create default group ID configuration
-        group_config_data = {
-            "tenant_id": tenant_id,
-            "config_key": DEFAULT_GROUP_ID,
-            "config_value": str(default_group_id),
-            "created_by": created_by,
-            "updated_by": created_by
-        }
-        group_success = insert_config(group_config_data)
-        if not group_success:
-            raise ValidationError(
-                "Failed to create tenant default group configuration")
+        default_group_id = create_tenant_with_default_group(
+            tenant_id=tenant_id,
+            tenant_name=tenant_name.strip(),
+            created_by=created_by,
+        )
 
         # Install requested skills for the new tenant
         # Prefer skill_names (ZIP-based installation) over skill_ids (legacy record-copy)
@@ -616,34 +582,3 @@ async def delete_tenant(tenant_id: str, deleted_by: Optional[str] = None) -> boo
     except Exception as e:
         logger.error(f"Failed to delete tenant {tenant_id}: {str(e)}")
         raise ValidationError(f"Failed to delete tenant: {str(e)}")
-
-
-def _create_default_group_for_tenant(tenant_id: str, created_by: Optional[str] = None) -> int:
-    """
-    Create a default group for a new tenant
-
-    Args:
-        tenant_id (str): Tenant ID
-        created_by (Optional[str]): Created by user ID
-
-    Returns:
-        int: Created default group ID
-
-    Raises:
-        ValidationError: When default group creation fails
-    """
-    try:
-        default_group_name = "Default Group"
-        group_id = add_group(
-            tenant_id=tenant_id,
-            group_name=default_group_name,
-            group_description="Default group created automatically for new tenant",
-            created_by=created_by
-        )
-
-        return group_id
-
-    except Exception as e:
-        logger.error(
-            f"Failed to create default group for tenant {tenant_id}: {str(e)}")
-        raise ValidationError(f"Failed to create default group: {str(e)}")

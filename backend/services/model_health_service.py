@@ -2,10 +2,11 @@ import logging
 from typing import Optional
 
 from nexent.core import MessageObserver
-from nexent.core.models import OpenAIModel, OpenAIVLModel
+from nexent.core.models import OpenAIModel
 from nexent.core.models.embedding_model import JinaEmbedding, OpenAICompatibleEmbedding, DashScopeMultimodalEmbedding, SiliconflowMultimodalEmbedding
 from nexent.monitor import set_monitoring_context, set_monitoring_operation
 from nexent.core.models.rerank_model import OpenAICompatibleRerank
+from services.model_gateway_service import build_adapter_fresh
 
 from services.voice_service import get_voice_service
 from consts.const import LOCALHOST_IP, LOCALHOST_NAME, DOCKER_INTERNAL_HOST
@@ -74,51 +75,67 @@ async def _embedding_dimension_check(
     model_factory: Optional[str] = None,
     timeout_seconds: Optional[float] = None,
 ):
+    # For embedding types, try the user-provided URL first; if that returns
+    # no valid dimension, fall back to the URL with /embeddings appended.
+    # Some providers serve embeddings at the bare base URL while others
+    # require the explicit /embeddings endpoint.
     if model_type in EMBEDDING_TYPES:
-        model_base_url = _normalize_embedding_url(model_base_url)
+        original_url = model_base_url
+        normalized_url = _normalize_embedding_url(original_url)
+        urls_to_try = [original_url]
+        if normalized_url != original_url:
+            urls_to_try.append(normalized_url)
+    else:
+        urls_to_try = [model_base_url]
 
     effective_timeout = timeout_seconds if timeout_seconds else 5.0
 
+    for url in urls_to_try:
+        if model_type == "embedding":
+            # DashScope text embedding models use OpenAI-compatible endpoint, same as generic
+            embedding = await OpenAICompatibleEmbedding(
+                model_name=model_name,
+                base_url=url,
+                api_key=model_api_key,
+                embedding_dim=0,
+                ssl_verify=ssl_verify,
+            ).dimension_check(timeout=effective_timeout)
+            if len(embedding) > 0:
+                return len(embedding[0])
+        elif model_type == "multi_embedding":
+            model_factory_lower = (model_factory or "").lower()
+            if model_factory_lower == "dashscope":
+                embedding_instance = DashScopeMultimodalEmbedding(
+                    api_key=model_api_key,
+                    base_url=url,
+                    model_name=model_name,
+                    embedding_dim=0,
+                    ssl_verify=ssl_verify,
+                )
+            else:
+                embedding_instance = SiliconflowMultimodalEmbedding(
+                    api_key=model_api_key,
+                    base_url=url,
+                    model_name=model_name,
+                    embedding_dim=0,
+                    ssl_verify=ssl_verify,
+                )
+            embedding = await embedding_instance.dimension_check(timeout=effective_timeout)
+            if isinstance(embedding, list) and len(embedding) > 0 and isinstance(embedding[0], list):
+                return len(embedding[0])
+        else:
+            raise ValueError(f"Unsupported model type: {model_type}")
+
+    # All URL variants failed
     if model_type == "embedding":
-        # DashScope text embedding models use OpenAI-compatible endpoint, same as generic
-        embedding = await OpenAICompatibleEmbedding(
-            model_name=model_name,
-            base_url=model_base_url,
-            api_key=model_api_key,
-            embedding_dim=0,
-            ssl_verify=ssl_verify,
-        ).dimension_check(timeout=effective_timeout)
-        if len(embedding) > 0:
-            return len(embedding[0])
         logging.warning(
             f"Embedding dimension check for {model_name} gets empty response")
-        return 0
     elif model_type == "multi_embedding":
-        model_factory_lower = (model_factory or "").lower()
-        if model_factory_lower == "dashscope":
-            embedding_instance = DashScopeMultimodalEmbedding(
-                api_key=model_api_key,
-                base_url=model_base_url,
-                model_name=model_name,
-                embedding_dim=0,
-                ssl_verify=ssl_verify,
-            )
-        else:
-            embedding_instance = SiliconflowMultimodalEmbedding(
-                api_key=model_api_key,
-                base_url=model_base_url,
-                model_name=model_name,
-                embedding_dim=0,
-                ssl_verify=ssl_verify,
-            )
-        embedding = await embedding_instance.dimension_check(timeout=effective_timeout)
-        if isinstance(embedding, list) and len(embedding) > 0 and isinstance(embedding[0], list):
-            return len(embedding[0])
         logging.warning(
-            f"Embedding dimension check for {model_name} gets unexpected response: {type(embedding)}, value: {embedding}")
-        return 0
-    else:
-        raise ValueError(f"Unsupported model type: {model_type}")
+            f"Embedding dimension check for {model_name} gets unexpected response")
+    return 0
+
+
 
 
 async def _provider_catalog_connectivity_check(
@@ -175,42 +192,56 @@ async def _perform_connectivity_check(
         model_base_url = model_base_url.replace(
             LOCALHOST_NAME, DOCKER_INTERNAL_HOST).replace(LOCALHOST_IP, DOCKER_INTERNAL_HOST)
 
-    # Normalize embedding URLs by appending /embeddings if not present
+    # For embedding types, try the user-provided URL first; if that fails,
+    # fall back to the URL with /embeddings appended. Some providers serve
+    # embeddings at the bare base URL while others require the explicit endpoint.
     if model_type in EMBEDDING_TYPES:
-        model_base_url = _normalize_embedding_url(model_base_url)
+        original_url = model_base_url
+        normalized_url = _normalize_embedding_url(model_base_url)
+        urls_to_try = [original_url]
+        if normalized_url != original_url:
+            urls_to_try.append(normalized_url)
+    else:
+        urls_to_try = [model_base_url]
 
     effective_timeout = timeout_seconds if timeout_seconds else 5.0
-    connectivity: bool
+    connectivity: bool = False
 
     if model_type == "embedding":
-        emb = await OpenAICompatibleEmbedding(
-            model_name=model_name,
-            base_url=model_base_url,
-            api_key=model_api_key,
-            embedding_dim=0,
-            ssl_verify=ssl_verify,
-        ).dimension_check(timeout=effective_timeout)
-        connectivity = len(emb) > 0 and len(emb[0]) > 0
+        for url in urls_to_try:
+            emb = await OpenAICompatibleEmbedding(
+                model_name=model_name,
+                base_url=url,
+                api_key=model_api_key,
+                embedding_dim=0,
+                ssl_verify=ssl_verify,
+            ).dimension_check(timeout=effective_timeout)
+            if len(emb) > 0 and len(emb[0]) > 0:
+                connectivity = True
+                break
     elif model_type == "multi_embedding":
         model_factory_lower = (model_factory or "").lower()
-        if model_factory_lower == "dashscope":
-            embedding = DashScopeMultimodalEmbedding(
-                api_key=model_api_key,
-                base_url=model_base_url,
-                model_name=model_name,
-                embedding_dim=0,
-                ssl_verify=ssl_verify,
-            )
-        else:
-            embedding = SiliconflowMultimodalEmbedding(
-                api_key=model_api_key,
-                base_url=model_base_url,
-                model_name=model_name,
-                embedding_dim=0,
-                ssl_verify=ssl_verify,
-            )
-        emb = await embedding.dimension_check(timeout=effective_timeout)
-        connectivity = len(emb) > 0 and len(emb[0]) > 0
+        for url in urls_to_try:
+            if model_factory_lower == "dashscope":
+                embedding = DashScopeMultimodalEmbedding(
+                    api_key=model_api_key,
+                    base_url=url,
+                    model_name=model_name,
+                    embedding_dim=0,
+                    ssl_verify=ssl_verify,
+                )
+            else:
+                embedding = SiliconflowMultimodalEmbedding(
+                    api_key=model_api_key,
+                    base_url=url,
+                    model_name=model_name,
+                    embedding_dim=0,
+                    ssl_verify=ssl_verify,
+                )
+            emb = await embedding.dimension_check(timeout=effective_timeout)
+            if len(emb) > 0 and len(emb[0]) > 0:
+                connectivity = True
+                break
     elif model_type == "llm":
         observer = MessageObserver()
         set_monitoring_operation("connectivity_check",
@@ -247,13 +278,12 @@ async def _perform_connectivity_check(
         observer = MessageObserver()
         set_monitoring_operation("connectivity_check",
                                  display_name=display_name)
-        connectivity = await OpenAIVLModel(
-            observer,
-            model_id=model_name,
-            api_base=model_base_url,
-            api_key=model_api_key,
-            ssl_verify=ssl_verify
-        ).check_connectivity()
+        connectivity = await build_adapter_fresh(
+            {"base_url": model_base_url, "api_key": model_api_key,
+             "ssl_verify": ssl_verify},
+            "vlm", "vlm", None, model_name=model_name,
+            observer=observer, display_name=display_name,
+        ).health_check()
     elif model_type == 'stt':
         voice_service = get_voice_service()
 
