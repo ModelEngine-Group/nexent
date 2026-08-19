@@ -79,10 +79,17 @@ class OpenAILLMAdapter(LLMAdapter, HttpTransportMixin):
         return await self._model.client.chat.completions.create(**completion_kwargs)
 
     async def health_check(self) -> bool:
-        """Probe the wrapped model's connectivity."""
+        """Probe the wrapped model's connectivity.
+
+        ``OpenAIModel.check_connectivity`` is itself a coroutine (it offloads
+        the blocking SDK call to a thread internally), so it must be awaited
+        directly — wrapping it in ``asyncio.to_thread`` would return the
+        coroutine object un-awaited (truthy) and report success for every
+        model, even one with an invalid API key.
+        """
         if self._model is None:
             self._build_model()
-        return await asyncio.to_thread(self._model.check_connectivity)
+        return await self._model.check_connectivity()
 
     def get_model_info(self) -> ModelInfo:
         """Return ``ModelInfo`` advertising text + tool_calling capabilities."""

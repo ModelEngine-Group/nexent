@@ -134,19 +134,15 @@ class EmbeddingAdapter(MultimodalAdapter, HttpTransportMixin):
             requests.exceptions.Timeout: If ``fn()`` still times out after all
                 retries.
         """
-        last_timeout = None
         for i in range(attempts):
             current = base_timeout + i * step
             try:
                 return fn(current)
-            except requests.exceptions.Timeout as e:
+            except requests.exceptions.Timeout:
                 logging.warning(f"{label} API timed out in {current}s ({i + 1}/{attempts})")
-                last_timeout = e
                 if i == attempts - 1:
                     logging.error(f"{label} API timed out after all retries.")
                     raise
-        if last_timeout:
-            raise last_timeout
         return []
 
     async def health_check(self) -> bool:

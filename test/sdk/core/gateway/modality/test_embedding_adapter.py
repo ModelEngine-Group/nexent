@@ -439,3 +439,19 @@ def test_siliconflow_prepare_multimodal_input_passthrough_unknown_item():
         [{"text": "hi"}, {"image": b"GIF89a\x00\x00\x00"}, {"other": "x"}]
     )
     assert out["input"][2] == {"other": "x"}
+
+
+def test_jina_prepare_multimodal_input_passthrough_image_url():
+    adapter = JinaEmbeddingAdapter(_mctx())
+    out = adapter._prepare_multimodal_input(
+        [{"text": "hi"}, {"image": "https://example.com/a.png"}]
+    )
+    assert out["input"][1] == {"image": "https://example.com/a.png"}
+
+
+def test_siliconflow_prepare_multimodal_input_passthrough_image_url():
+    adapter = SiliconflowEmbeddingAdapter(_mctx(factory="siliconflow"))
+    out = adapter._prepare_multimodal_input(
+        [{"text": "hi"}, {"image": "https://example.com/a.png"}]
+    )
+    assert out["input"][1] == {"image": "https://example.com/a.png"}

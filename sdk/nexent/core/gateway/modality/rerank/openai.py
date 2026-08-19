@@ -117,7 +117,7 @@ class OpenAICompatibleRerankAdapter(RerankAdapter, HttpTransportMixin):
         data = self._prepare_request(query, documents, top_n)
         base_timeout = 30.0
         attempts = 4
-        last_exception = None
+        last_exception: Optional[requests.exceptions.Timeout] = None
         for attempt_index in range(attempts):
             current_timeout = base_timeout + attempt_index * 10.0
             try:
@@ -128,16 +128,12 @@ class OpenAICompatibleRerankAdapter(RerankAdapter, HttpTransportMixin):
                     f"Rerank API timed out in {current_timeout}s (attempt {attempt_index + 1}/{attempts})"
                 )
                 last_exception = e
-                if attempt_index == attempts - 1:
-                    logging.error("Rerank API timed out after all retries.")
-                    raise
                 continue
             except requests.exceptions.RequestException:
                 logging.exception("Rerank API request failed")
                 raise
-        if last_exception:
-            raise last_exception
-        return []
+        logging.error("Rerank API timed out after all retries.")
+        raise last_exception
 
     def _normalize_results(self, response: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Normalize provider rerank responses into the common result shape.
