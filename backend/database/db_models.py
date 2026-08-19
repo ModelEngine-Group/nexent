@@ -72,6 +72,11 @@ class ConversationRecord(TableBase):
         server_default=text("'execution'"),
         doc="UI chat mode for the conversation: 'planning' or 'execution'",
     )
+    knowledge_scope = Column(
+        JSONB,
+        nullable=True,
+        doc="Conversation-scoped desired policy for local and AIDP knowledge retrieval",
+    )
 
 
 class ConversationMessage(TableBase):

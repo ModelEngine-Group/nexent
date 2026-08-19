@@ -1,6 +1,5 @@
+import re
 from pathlib import Path
-
-from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 
 from database.db_models import (
     MemoryDreamingAudit,
@@ -9,6 +8,7 @@ from database.db_models import (
     MemoryLongTermVersion,
     TableBase,
 )
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 
 
 def test_final_orm_contract_has_only_shared_long_term_versions():
@@ -50,9 +50,41 @@ def test_final_migration_is_the_only_dreaming_schema_source():
     assert not list(migrations.glob("v2.4.0_*dreaming*.sql"))
     assert not list(migrations.glob("v2.5.0_072*_*dreaming*.sql"))
     assert "current_phase = 'compression'" not in final
-    assert "DROP COLUMN result_json" in final
-    assert "ALTER TABLE nexent.memory_dreaming_audit_t DROP COLUMN decisions" in final
+    assert "result_json" not in final
+    assert "compression_max_attempts" not in final
     assert "CREATE TABLE IF NOT EXISTS nexent.memory_dreaming_decision_t" in final
     assert "ON DELETE CASCADE" in final
     assert "published_version_id BIGINT" in final
     assert "reason VARCHAR(100)" in final
+
+    created_tables = re.findall(
+        r"CREATE TABLE IF NOT EXISTS nexent\.(\w+)", final, flags=re.IGNORECASE
+    )
+    assert created_tables
+    for table_name in created_tables:
+        assert not re.search(
+            rf"ALTER TABLE\s+(?:ONLY\s+)?nexent\.{re.escape(table_name)}\b",
+            final,
+            flags=re.IGNORECASE,
+        )
+
+
+def test_final_migration_upgrades_v24_without_intermediate_v25_schema():
+    root = Path(__file__).resolve().parents[3]
+    migrations = root / "deploy/sql/migrations"
+    v24 = (migrations / "v2.4_merged_migrations.sql").read_text()
+    final = (migrations / "v2.5.0_0813_versioned_markdown_long_term_memory.sql").read_text()
+
+    assert "CREATE TABLE IF NOT EXISTS nexent.memory_records_t" in v24
+    for table_name in (
+        "memory_dreaming_audit_t",
+        "memory_dreaming_decision_t",
+        "memory_dreaming_schedule_t",
+        "memory_long_term_version_t",
+    ):
+        assert f"nexent.{table_name}" not in v24
+
+    assert "DELETE FROM nexent.memory_records_t WHERE layer IN ('tenant', 'user')" in final
+    assert "ALTER TABLE nexent.memory_records_t" in final
+    assert "result_json" not in final
+    assert "compression_max_attempts" not in final

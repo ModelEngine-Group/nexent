@@ -53,6 +53,8 @@ export const API_ENDPOINTS = {
     save: `${API_BASE_URL}/conversation/save`,
     rename: `${API_BASE_URL}/conversation/rename`,
     detail: (id: number) => `${API_BASE_URL}/conversation/${id}`,
+    knowledgeScope: (id: number) =>
+      `${API_BASE_URL}/conversation/${id}/knowledge-scope`,
     delete: (id: number) => `${API_BASE_URL}/conversation/${id}`,
     generateTitle: `${API_BASE_URL}/conversation/generate_title`,
     // TODO: Remove this endpoint
@@ -95,6 +97,8 @@ export const API_ENDPOINTS = {
     callRelationship: `${API_BASE_URL}/agent/call_relationship`,
     byName: (agentName: string) =>
       `${API_BASE_URL}/agent/by-name/${encodeURIComponent(agentName)}`,
+    knowledgeCapabilities: (agentId: number) =>
+      `${API_BASE_URL}/agent/${agentId}/knowledge-capabilities`,
     clearNew: (agentId: string | number) =>
       `${API_BASE_URL}/agent/clear_new/${agentId}`,
     generateGuardrailRules: `${API_BASE_URL}/agent/generate_guardrail_rules`,
@@ -349,6 +353,9 @@ export const API_ENDPOINTS = {
   aidp: {
     knowledgeBases: `${API_BASE_URL}/aidp/knowledge-bases`,
     knowledgeBasesAll: `${API_BASE_URL}/aidp/knowledge-bases-all`,
+  },
+  independentAidp: {
+    knowledgeBases: `${API_BASE_URL}/ind-aidp/knowledge-bases/list`,
   },
   aidpMgmt: {
     knowledgeBases: `${API_BASE_URL}/aidp-mgmt/knowledge-bases`,

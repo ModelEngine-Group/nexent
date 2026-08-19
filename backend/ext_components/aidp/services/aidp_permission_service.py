@@ -327,6 +327,55 @@ def count_accessible_kbs(user_id: str, tenant_id: str) -> int:
     return len(accessible)
 
 
+def intersect_accessible_kbs(
+    remote_items: Sequence[dict],
+    user_id: str,
+    tenant_id: str,
+) -> list[dict]:
+    """Intersect the current AIDP catalog with the user's local permissions.
+
+    The AIDP result is authoritative for whether a resource exists under the
+    currently configured credentials. The local permission table remains
+    authoritative for whether the Nexent user may see that resource. Result
+    order follows the AIDP catalog so pagination remains stable with the
+    upstream listing.
+    """
+    local_rows = _compute_accessible_rows(user_id, tenant_id)
+    local_by_id = {str(row["kb_id"]): row for row in local_rows}
+    protected_local_fields = (
+        "tenant_id",
+        "owner_user_id",
+        "ingroup_permission",
+        "group_ids",
+        "permission",
+    )
+
+    intersection: list[dict] = []
+    seen_ids: set[str] = set()
+    for remote_item in remote_items:
+        if not isinstance(remote_item, dict):
+            continue
+        raw_kds_id = remote_item.get("kds_id") or remote_item.get("id")
+        if raw_kds_id is None:
+            continue
+        kds_id = str(raw_kds_id)
+        if kds_id in seen_ids:
+            continue
+        local_row = local_by_id.get(kds_id)
+        if local_row is None:
+            continue
+
+        merged = {**local_row, **remote_item}
+        for field in protected_local_fields:
+            if field in local_row:
+                merged[field] = local_row[field]
+        merged["kb_id"] = kds_id
+        merged["kds_id"] = kds_id
+        intersection.append(merged)
+        seen_ids.add(kds_id)
+    return intersection
+
+
 def filter_accessible_kds(
     kds_ids: Sequence[str],
     user_id: str,
@@ -460,6 +509,7 @@ __all__ = [
     "filter_accessible_kds",
     "get_accessible_kbs",
     "count_accessible_kbs",
+    "intersect_accessible_kbs",
     "get_allowed_kds_list",
     "get_kds_name_to_id_map",
     "require_permission",

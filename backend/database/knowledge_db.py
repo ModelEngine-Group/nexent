@@ -311,6 +311,39 @@ def get_knowledge_info_by_knowledge_ids(knowledge_ids: List[str]) -> List[Dict[s
         raise e
 
 
+def get_knowledge_info_by_ids_and_tenant(
+    knowledge_ids: List[int],
+    tenant_id: str,
+) -> List[Dict[str, Any]]:
+    """Return active local knowledge bases within one tenant, preserving input order."""
+    if not knowledge_ids:
+        return []
+    try:
+        with get_db_session() as session:
+            records = session.query(KnowledgeRecord).filter(
+                KnowledgeRecord.knowledge_id.in_(knowledge_ids),
+                KnowledgeRecord.tenant_id == tenant_id,
+                KnowledgeRecord.delete_flag != 'Y',
+            ).all()
+            by_id = {record.knowledge_id: record for record in records}
+            result = []
+            for knowledge_id in knowledge_ids:
+                record = by_id.get(knowledge_id)
+                if record is None:
+                    continue
+                result.append({
+                    "knowledge_id": record.knowledge_id,
+                    "index_name": record.index_name,
+                    "knowledge_name": record.knowledge_name,
+                    "knowledge_sources": record.knowledge_sources,
+                    "embedding_model_name": record.embedding_model_name,
+                    "embedding_model_id": record.embedding_model_id,
+                })
+            return result
+    except SQLAlchemyError as exc:
+        raise exc
+
+
 def get_knowledge_ids_by_index_names(index_names: List[str]) -> List[str]:
     try:
         with get_db_session() as session:
