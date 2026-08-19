@@ -214,8 +214,9 @@ async def test_proxy_image_with_special_chars(monkeypatch):
 
         # Verify URL was correctly passed
         mock_session.get.assert_called_once()
-        called_args = mock_session.get.call_args[0][0]
-        assert special_url in called_args or encoded_special_url in called_args
+        called_args, called_kwargs = mock_session.get.call_args
+        assert called_args[0] == "http://mock-data-process-service/tasks/load_image"
+        assert called_kwargs["params"]["url"] == special_url
 
 
 @pytest.mark.asyncio

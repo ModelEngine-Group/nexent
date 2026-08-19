@@ -46,6 +46,7 @@ def bootstrap_test_env() -> Dict[str, Any]:
 
     mock_const = MagicMock()
     consts_module = _create_module("consts", const=mock_const)
+    consts_module.__path__ = [str(backend_dir / "consts")]
     sys.modules["consts.const"] = mock_const
 
     boto3_mock = MagicMock()
@@ -63,7 +64,10 @@ def bootstrap_test_env() -> Dict[str, Any]:
     )
     sys.modules["database.client"] = client_module
     if "database" not in sys.modules:
-        _create_module("database")
+        database_module = _create_module("database")
+        database_module.__path__ = [str(backend_dir / "database")]
+    _create_module("database.user_tenant_db", get_user_tenant_by_user_id=MagicMock())
+    _create_module("database.token_db", get_token_by_access_key=MagicMock())
 
     config_utils_module = _create_module(
         "utils.config_utils",
