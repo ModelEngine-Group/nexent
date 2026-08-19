@@ -4947,7 +4947,7 @@ async def test__stream_agent_chunks_persists_tool_metadata(monkeypatch):
             "type": "tool",
             "content": "",
             "tool_name": "create_plan",
-            "tool_arguments": {"plan_id": "hainan_travel_plan"},
+            "tool_arguments": {},
             "role": "tool",
         })
         yield json.dumps({"type": "plan", "content": plan_content})
@@ -4991,7 +4991,7 @@ async def test__stream_agent_chunks_persists_tool_metadata(monkeypatch):
     assert persisted == {
         "content": "",
         "tool_name": "create_plan",
-        "tool_arguments": {"plan_id": "hainan_travel_plan"},
+        "tool_arguments": {},
         "role": "tool",
     }
 
