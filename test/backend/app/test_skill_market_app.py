@@ -75,9 +75,34 @@ def test_detail_returns_empty_object_when_not_installed(client, market_service):
         user_id="user-a",
         tenant_id="tenant-a",
     )
+    market_service.get_upstream_last_modified.assert_not_called()
 
 
 def test_detail_returns_installed_skill_record(client, market_service):
+    market_service.get_market_skill_detail.return_value = {
+        "skill_id": 12,
+        "name": "local-demo",
+        "source": "modelscope",
+        "unique_id": "@owner/demo",
+    }
+    market_service.get_upstream_last_modified.return_value = "2026-08-07T06:37:46Z"
+
+    response = client.get(
+        "/skills/market/detail",
+        params={
+            "skill_id": "@owner/demo",
+            "source": "modelscope",
+            "include_upstream_last_modified": "true",
+        },
+    )
+
+    assert response.json()["skill_id"] == 12
+    assert response.json()["name"] == "local-demo"
+    assert response.json()["upstream_last_modified"] == "2026-08-07T06:37:46Z"
+    market_service.get_upstream_last_modified.assert_called_once_with("@owner/demo")
+
+
+def test_detail_skips_upstream_last_modified_by_default(client, market_service):
     market_service.get_market_skill_detail.return_value = {
         "skill_id": 12,
         "name": "local-demo",
@@ -91,8 +116,8 @@ def test_detail_returns_installed_skill_record(client, market_service):
     )
 
     assert response.status_code == 200
-    assert response.json()["skill_id"] == 12
-    assert response.json()["name"] == "local-demo"
+    assert "upstream_last_modified" not in response.json()
+    market_service.get_upstream_last_modified.assert_not_called()
 
 
 def test_install_market_skill_uses_authenticated_identity(client, market_service):

@@ -1541,6 +1541,7 @@
   "skillManagement.form.descriptionPlaceholder": "Enter skill description",
   "skillManagement.form.descriptionRequired": "Please enter skill description",
   "skillManagement.form.source": "Source",
+  "skillManagement.form.sourceModelScope": "ModelScope",
   "skillManagement.form.tags": "Tags",
   "skillManagement.form.tagsMaxCount": "Add up to 5 tags",
   "skillManagement.form.tagMaxLength": "Each tag can be up to 20 characters",

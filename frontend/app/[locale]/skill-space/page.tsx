@@ -464,9 +464,11 @@ export default function SkillRepositoryPage() {
     ]);
   };
 
-  const handleSkillBuildSuccess = async () => {
+  const handleSkillBuildSuccess = async (options?: { keepEditing?: boolean }) => {
     await refreshSkillCaches().catch(() => {});
-    setEditingSkill(null);
+    if (!options?.keepEditing) {
+      setEditingSkill(null);
+    }
   };
 
   const openReviewConfirmModal = (

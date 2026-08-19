@@ -260,6 +260,10 @@ export default function SkillDraftPanel({
                   disabled
                   options={[
                     { label: t("skillPool.group.custom"), value: "custom" },
+                    {
+                      label: t("skillManagement.form.sourceModelScope"),
+                      value: "modelscope",
+                    },
                   ]}
                 />
               </Form.Item>

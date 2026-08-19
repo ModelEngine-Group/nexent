@@ -14,7 +14,7 @@ from adapters.modelscope_skill_adapter import (
     MODELSCOPE_SKILL_SOURCE,
     ModelScopeSkillAdapter,
 )
-from consts.exceptions import SkillException
+from consts.exceptions import ModelScopeSkillNotFoundError, SkillException
 from database import skill_db
 from database.group_db import query_groups_by_tenant
 from nexent.skills.skill_loader import SkillLoader
@@ -170,7 +170,27 @@ class ModelScopeSkillService:
             created_by=user_id,
             tenant_id=tenant_id,
         )
-        return record or {}
+        if not record:
+            return {}
+        return dict(record)
+
+    def get_upstream_last_modified(self, unique_id: str) -> str | None:
+        """Fetch upstream last_modified for a ModelScope skill, or None if unavailable."""
+        normalized_id = unique_id.strip()
+        if not normalized_id:
+            return None
+        try:
+            upstream = self.adapter.get_skill(normalized_id)
+            return upstream.get("last_modified")
+        except ModelScopeSkillNotFoundError:
+            return None
+        except Exception:
+            logger.warning(
+                "Failed to fetch upstream ModelScope Skill metadata for %s",
+                normalized_id,
+                exc_info=True,
+            )
+            return None
 
     def _download_skill_snapshot(
         self,
@@ -355,6 +375,7 @@ class ModelScopeSkillService:
         )
         update_data: dict[str, Any] = {
             "content": downloaded_data.get("content", ""),
+            "description": downloaded_data.get("description", ""),
             "tool_ids": downloaded_data.get("tool_ids", []),
             "version_update_time": datetime.now(),
         }

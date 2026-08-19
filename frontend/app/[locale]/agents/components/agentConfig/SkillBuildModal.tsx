@@ -51,6 +51,12 @@ import {
 } from "@/services/agentConfigService";
 import { normalizeSkillFiles } from "@/lib/skillFileUtils";
 import log from "@/lib/logger";
+import { shouldShowModelScopeUpdate } from "@/lib/modelscopeSkillUpdate";
+import {
+  fetchModelScopeSkillDetail,
+  parseInstalledMarketSkill,
+  updateModelScopeSkill,
+} from "@/services/modelscopeSkillService";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { USER_ROLES } from "@/const/auth";
 import { useGroupDetails, useGroupList } from "@/hooks/group/useGroupList";
@@ -68,10 +74,14 @@ const CAN_EDIT_ALL_ROLES: ReadonlySet<string> = new Set([
   USER_ROLES.ASSET_OWNER,
 ]);
 
+interface SkillBuildSuccessOptions {
+  keepEditing?: boolean;
+}
+
 interface SkillBuildModalProps {
   isOpen: boolean;
   onCancel: () => void;
-  onSuccess: () => void | Promise<void>;
+  onSuccess: (options?: SkillBuildSuccessOptions) => void | Promise<void>;
   editingSkill?: MyEditableSkillItem | null;
   onBeforeEditSave?: (skill: MyEditableSkillItem) => Promise<boolean>;
   zIndex?: number;
@@ -161,6 +171,11 @@ export default function SkillBuildModal({
     useState<MyEditableSkillItem | null>(null);
   const activeEditingSkill = editingSkill ?? openedInstalledSkill;
   const isEditMode = Boolean(activeEditingSkill);
+  const editSource = Form.useWatch("source", form);
+  const isModelScopeEdit =
+    isEditMode &&
+    (editSource === "modelscope" ||
+      activeEditingSkill?.source === "modelscope");
   const isAdmin = !!user?.role && CAN_EDIT_ALL_ROLES.has(user.role);
   const isCreator =
     !isEditMode ||
@@ -202,6 +217,16 @@ export default function SkillBuildModal({
     null
   );
   const [editFilesError, setEditFilesError] = useState<string | null>(null);
+  const [editReloadNonce, setEditReloadNonce] = useState(0);
+  const [modelScopeUpdateAvailable, setModelScopeUpdateAvailable] =
+    useState(false);
+  const [modelScopeUpdateChecking, setModelScopeUpdateChecking] =
+    useState(false);
+  const [modelScopeUpdating, setModelScopeUpdating] = useState(false);
+  const [modelScopeUniqueId, setModelScopeUniqueId] = useState<string | null>(
+    null
+  );
+  const prevEditSkillIdRef = useRef<number | null>(null);
   const [allSkills, setAllSkills] = useState<SkillListItem[]>([]);
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploadExtractedSkillName, setUploadExtractedSkillName] =
@@ -308,6 +333,11 @@ export default function SkillBuildModal({
       setEditFilesError(null);
       setIsLoadingEditFiles(false);
       setOpenedInstalledSkill(null);
+      setModelScopeUpdateAvailable(false);
+      setModelScopeUniqueId(null);
+      setModelScopeUpdateChecking(false);
+      setModelScopeUpdating(false);
+      prevEditSkillIdRef.current = null;
     }
   }, [isOpen]);
 
@@ -328,8 +358,56 @@ export default function SkillBuildModal({
     const skillName = activeEditingSkill.name?.trim() || "";
     let cancelled = false;
 
+    const checkModelScopeUpdate = async (
+      skillInfo: {
+        source?: string | null;
+        unique_id?: string | null;
+      }
+    ) => {
+      setModelScopeUpdateAvailable(false);
+      if (skillInfo.source !== "modelscope") {
+        return;
+      }
+      const uniqueId = String(skillInfo.unique_id || "").trim();
+      if (!uniqueId) {
+        return;
+      }
+
+      setModelScopeUpdateChecking(true);
+      try {
+        const result = await fetchModelScopeSkillDetail(
+          uniqueId,
+          "modelscope",
+          true
+        );
+        if (cancelled) return;
+        const installed = parseInstalledMarketSkill(result);
+        if (!installed) {
+          return;
+        }
+        setModelScopeUniqueId(uniqueId);
+        setModelScopeUpdateAvailable(
+          shouldShowModelScopeUpdate(
+            installed.version_update_time,
+            installed.upstream_last_modified
+          )
+        );
+      } catch (error) {
+        if (!cancelled) {
+          log.error("Failed to check ModelScope Skill update", error);
+        }
+      } finally {
+        if (!cancelled) {
+          setModelScopeUpdateChecking(false);
+        }
+      }
+    };
+
     const applySkillInfo = (
-      skill: Partial<SkillListItem> & { content?: string | null }
+      skill: Partial<SkillListItem> & {
+        content?: string | null;
+        unique_id?: string | null;
+      }
     ) => {
       if (cancelled) return;
       const nextName = skill.name?.trim() || skillName;
@@ -348,6 +426,19 @@ export default function SkillBuildModal({
     setEditFilesError(null);
     setLoadedEditSkillId(null);
     setIsLoadingEditFiles(true);
+
+    const skillId = activeEditingSkill.skill_id;
+    const skillIdChanged = prevEditSkillIdRef.current !== skillId;
+    prevEditSkillIdRef.current = skillId;
+
+    setModelScopeUpdateAvailable(false);
+    if (skillIdChanged) {
+      setModelScopeUniqueId(null);
+    }
+
+    if (activeEditingSkill.source === "modelscope") {
+      form.setFieldValue("source", "modelscope");
+    }
 
     const loadEditFiles = async () => {
       try {
@@ -397,6 +488,7 @@ export default function SkillBuildModal({
           setSkillTabs(sortedTabs);
           setActiveSkillTab(sortedTabs[0]?.path || "SKILL.md");
           setLoadedEditSkillId(activeEditingSkill.skill_id);
+          await checkModelScopeUpdate(skillInfo);
         }
       } catch (error) {
         log.error("Failed to load skill files for editing:", error);
@@ -415,7 +507,27 @@ export default function SkillBuildModal({
     return () => {
       cancelled = true;
     };
-  }, [isOpen, activeEditingSkill?.skill_id]);
+  }, [isOpen, activeEditingSkill?.skill_id, editReloadNonce, form, t]);
+
+  const handleModelScopeUpdate = async () => {
+    if (!activeEditingSkill || !modelScopeUniqueId) return;
+    try {
+      setModelScopeUpdating(true);
+      await updateModelScopeSkill({
+        skill_id: activeEditingSkill.skill_id,
+        unique_id: modelScopeUniqueId,
+      });
+      message.success(t("skillManagement.market.updateSuccess"));
+      setModelScopeUpdateAvailable(false);
+      await onSuccess({ keepEditing: true });
+      setEditReloadNonce((value) => value + 1);
+    } catch (error) {
+      log.error("Failed to update ModelScope Skill from edit modal", error);
+      message.error(t("skillManagement.market.updateFailed"));
+    } finally {
+      setModelScopeUpdating(false);
+    }
+  };
 
   const handleNameChange = (event: ChangeEvent<HTMLInputElement>) => {
     const value = event.target.value;
@@ -430,6 +542,11 @@ export default function SkillBuildModal({
 
   const closeModal = () => {
     form.resetFields();
+    setModelScopeUpdateAvailable(false);
+    setModelScopeUniqueId(null);
+    setModelScopeUpdateChecking(false);
+    setModelScopeUpdating(false);
+    prevEditSkillIdRef.current = null;
     onCancel();
   };
 
@@ -956,6 +1073,29 @@ export default function SkillBuildModal({
               <Button key="cancel" onClick={handleModalClose}>
                 {t("common.cancel")}
               </Button>,
+              isEditMode && isModelScopeEdit ? (
+                <Button
+                  key="modelscope-update"
+                  type={
+                    modelScopeUpdateAvailable || modelScopeUpdating
+                      ? "primary"
+                      : "default"
+                  }
+                  loading={modelScopeUpdating || modelScopeUpdateChecking}
+                  disabled={
+                    !modelScopeUpdateAvailable ||
+                    modelScopeUpdateChecking ||
+                    modelScopeUpdating ||
+                    isLoadingEditFiles ||
+                    Boolean(editFilesError) ||
+                    isSubmitting ||
+                    !modelScopeUniqueId
+                  }
+                  onClick={() => void handleModelScopeUpdate()}
+                >
+                  {t("skillManagement.market.update")}
+                </Button>
+              ) : null,
               isEditMode || activeTab === "interactive" ? (
                 <Button
                   key="submit"

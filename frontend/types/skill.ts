@@ -123,6 +123,7 @@ export interface ModelScopeMarketSkill {
   name: string;
   description: string;
   tags: string[];
+  category: string;
   downloads: number;
   likes: number;
   license: string;
@@ -140,6 +141,7 @@ export interface InstalledMarketSkill {
   ingroup_permission?: "EDIT" | "READ_ONLY" | "PRIVATE" | null;
   created_by?: string | null;
   version_update_time?: string | null;
+  upstream_last_modified?: string | null;
 }
 
 export interface ModelScopeMarketListResponse {

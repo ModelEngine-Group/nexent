@@ -26,9 +26,13 @@ export async function fetchModelScopeSkills(params: {
 
 export async function fetchModelScopeSkillDetail(
   skillId: string,
-  source = "modelscope"
+  source = "modelscope",
+  includeUpstreamLastModified = false
 ): Promise<InstalledMarketSkill | Record<string, never>> {
   const query = new URLSearchParams({ skill_id: skillId, source });
+  if (includeUpstreamLastModified) {
+    query.set("include_upstream_last_modified", "true");
+  }
   const response = await fetchWithErrorHandling(
     `${API_ENDPOINTS.skills.marketDetail}?${query.toString()}`,
     { headers: getAuthHeaders() }
@@ -65,6 +69,12 @@ export function parseInstalledMarketSkill(
       typeof record.version_update_time === "string"
         ? record.version_update_time
         : null,
+    upstream_last_modified:
+      typeof record.upstream_last_modified === "string"
+        ? record.upstream_last_modified
+        : record.upstream_last_modified === null
+          ? null
+          : undefined,
   };
 }
 

@@ -365,6 +365,117 @@ def test_market_query_methods_delegate_to_adapter(tmp_path):
     )
 
 
+def test_get_market_skill_detail_returns_empty_when_not_installed(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        module.skill_db,
+        "get_skill_by_unique_id_and_owner",
+        MagicMock(return_value=None),
+    )
+    adapter = MagicMock()
+
+    result = _service(tmp_path, adapter).get_market_skill_detail(
+        skill_id="@owner/missing",
+        source="modelscope",
+        user_id="user-a",
+        tenant_id="tenant-a",
+    )
+
+    assert result == {}
+    adapter.get_skill.assert_not_called()
+
+
+def test_get_market_skill_detail_returns_local_record_without_upstream(
+    tmp_path, monkeypatch
+):
+    local_record = {
+        "skill_id": 12,
+        "name": "local-demo",
+        "source": "modelscope",
+        "unique_id": "@owner/demo",
+        "version_update_time": "2026-08-01T00:00:00Z",
+    }
+    monkeypatch.setattr(
+        module.skill_db,
+        "get_skill_by_unique_id_and_owner",
+        MagicMock(return_value=local_record),
+    )
+    adapter = MagicMock()
+
+    result = _service(tmp_path, adapter).get_market_skill_detail(
+        skill_id="@owner/demo",
+        source="modelscope",
+        user_id="user-a",
+        tenant_id="tenant-a",
+    )
+
+    assert result == local_record
+    assert "upstream_last_modified" not in result
+    adapter.get_skill.assert_not_called()
+
+
+def test_get_upstream_last_modified_returns_hub_timestamp(tmp_path):
+    adapter = MagicMock()
+    adapter.get_skill.return_value = {
+        "skill_id": "@owner/demo",
+        "last_modified": "2026-08-07T06:37:46Z",
+    }
+
+    result = _service(tmp_path, adapter).get_upstream_last_modified("@owner/demo")
+
+    assert result == "2026-08-07T06:37:46Z"
+    adapter.get_skill.assert_called_once_with("@owner/demo")
+
+
+def test_get_upstream_last_modified_returns_none_for_empty_unique_id(tmp_path):
+    adapter = MagicMock()
+
+    result = _service(tmp_path, adapter).get_upstream_last_modified("  ")
+
+    assert result is None
+    adapter.get_skill.assert_not_called()
+
+
+def test_get_market_skill_detail_skips_upstream_for_non_modelscope_source(
+    tmp_path, monkeypatch
+):
+    local_record = {
+        "skill_id": 12,
+        "name": "local-demo",
+        "source": "custom",
+        "unique_id": "@owner/demo",
+    }
+    monkeypatch.setattr(
+        module.skill_db,
+        "get_skill_by_unique_id_and_owner",
+        MagicMock(return_value=local_record),
+    )
+    adapter = MagicMock()
+
+    result = _service(tmp_path, adapter).get_market_skill_detail(
+        skill_id="@owner/demo",
+        source="custom",
+        user_id="user-a",
+        tenant_id="tenant-a",
+    )
+
+    assert result == local_record
+    assert "upstream_last_modified" not in result
+    adapter.get_skill.assert_not_called()
+
+
+def test_get_upstream_last_modified_returns_none_when_hub_missing(tmp_path):
+    from consts.exceptions import ModelScopeSkillNotFoundError
+
+    adapter = MagicMock()
+    adapter.get_skill.side_effect = ModelScopeSkillNotFoundError("missing")
+
+    result = _service(tmp_path, adapter).get_upstream_last_modified("@owner/demo")
+
+    assert result is None
+
+
 def test_update_skill_refreshes_downloaded_content_and_preserves_local_metadata(
     tmp_path, monkeypatch
 ):
@@ -408,9 +519,9 @@ def test_update_skill_refreshes_downloaded_content_and_preserves_local_metadata(
     assert "description: Source description" in saved_md
     updated = update_by_id.call_args.args[1]
     assert updated["tool_ids"] == [7]
+    assert updated["description"] == "Source description"
     assert isinstance(updated["version_update_time"], datetime)
     assert "name" not in updated
-    assert "description" not in updated
     assert "tags" not in updated
 
 

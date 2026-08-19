@@ -12,6 +12,7 @@ from modelscope_hub.errors import NotFoundError
 from backend.adapters.modelscope_skill_adapter import (
     ModelScopeSkillAdapter,
     _normalize_repo,
+    _parse_raw_tags,
     _serialize_datetime,
 )
 
@@ -41,7 +42,8 @@ def test_normalize_repo_uses_public_sdk_fields():
         "skill_id": "@anthropics/skill-creator",
         "name": "skill-creator",
         "description": "Create and improve skills",
-        "tags": ["category:skill-management"],
+        "tags": [],
+        "category": "skill-management",
         "downloads": 10,
         "likes": 2,
         "license": "Apache-2.0",
@@ -70,8 +72,49 @@ def test_normalize_repo_falls_back_to_id_name_and_empty_optional_fields():
 
     assert result["name"] == "skill-creator"
     assert result["tags"] == []
+    assert result["category"] == ""
     assert result["last_modified"] is None
     assert _serialize_datetime(" 2026-01-01 ") == "2026-01-01"
+
+
+def test_parse_raw_tags_splits_category_and_custom_tags():
+    tags, category = _parse_raw_tags(
+        [
+            "category:developer-tools",
+            "license:Apache-2.0",
+            "custom_tag:onescience",
+            "custom_tag:ai4s",
+            "custom_tag:research",
+            "custom_tag:skills",
+        ]
+    )
+
+    assert category == "developer-tools"
+    assert tags == ["onescience", "ai4s", "research", "skills"]
+
+
+def test_parse_raw_tags_keeps_first_category_and_dedupes_custom_tags():
+    tags, category = _parse_raw_tags(
+        [
+            "category:developer-tools",
+            "CATEGORY:skill-management",
+            "custom_tag:AI4S",
+            "custom_tag:ai4s",
+            "custom_tag:",
+            "developer:anthropics",
+            "unprefixed",
+            "unknown:value",
+            "",
+        ]
+    )
+
+    assert category == "developer-tools"
+    assert tags == ["AI4S"]
+
+
+@pytest.mark.parametrize("raw_tags", [None, "not-a-list", 12])
+def test_parse_raw_tags_rejects_invalid_types(raw_tags):
+    assert _parse_raw_tags(raw_tags) == ([], "")
 
 
 def test_normalize_repo_rejects_invalid_statistics():

@@ -1509,6 +1509,7 @@
   "skillManagement.form.descriptionPlaceholder": "输入技能描述",
   "skillManagement.form.descriptionRequired": "请输入技能描述",
   "skillManagement.form.source": "来源",
+  "skillManagement.form.sourceModelScope": "ModelScope",
   "skillManagement.form.tags": "标签",
   "skillManagement.form.tagsMaxCount": "最多添加 5 个标签",
   "skillManagement.form.tagMaxLength": "单个标签最多 20 个字符",

@@ -26,6 +26,7 @@ import {
 } from "lucide-react";
 
 import log from "@/lib/logger";
+import { shouldShowModelScopeUpdate } from "@/lib/modelscopeSkillUpdate";
 import { ApiError } from "@/services/api";
 import {
   fetchModelScopeSkillDetail,
@@ -54,6 +55,10 @@ const CATEGORY_COLORS = [
   { background: "#fff7ed", color: "#ea580c" },
   { background: "#ecfeff", color: "#0891b2" },
   { background: "#f7fee7", color: "#65a30d" },
+  { background: "#faf5ff", color: "#9333ea" },
+  { background: "#fffbeb", color: "#d97706" },
+  { background: "#fff1f2", color: "#e11d48" },
+  { background: "#eef2ff", color: "#4f46e5" },
 ];
 
 interface ModelScopeSkillMarketProps {
@@ -63,53 +68,12 @@ interface ModelScopeSkillMarketProps {
   onOpenInstalledSkill: (skill: InstalledMarketSkill) => void;
 }
 
-function getMetadataTag(skill: ModelScopeMarketSkill, prefix: string) {
-  return (skill.tags ?? [])
-    .filter((tag): tag is string => typeof tag === "string")
-    .find((tag) => tag.toLowerCase().startsWith(`${prefix}:`))
-    ?.slice(prefix.length + 1)
-    .trim();
-}
-
 function getAuthor(skill: ModelScopeMarketSkill) {
-  const developer = getMetadataTag(skill, "developer");
-  if (developer) return developer;
   return String(skill.skill_id).split("/")[0]?.replace(/^@/, "") || "ModelScope";
 }
 
-function getCategory(skill: ModelScopeMarketSkill) {
-  const category = getMetadataTag(skill, "category");
-  return category?.replaceAll("-", " ") || "";
-}
-
-function getVisibleTags(skill: ModelScopeMarketSkill) {
-  const visibleTags: string[] = [];
-  const seenTags = new Set<string>();
-
-  (skill.tags ?? []).forEach((tag) => {
-    if (typeof tag !== "string") return;
-    const trimmedTag = tag.trim();
-    const normalized = trimmedTag.toLowerCase();
-    if (
-      !trimmedTag ||
-      normalized.startsWith("category:") ||
-      normalized.startsWith("developer:") ||
-      normalized.startsWith("license:")
-    ) {
-      return;
-    }
-
-    const displayTag = normalized.startsWith("custom_tag:")
-      ? trimmedTag.slice("custom_tag:".length).trim()
-      : trimmedTag;
-    const deduplicationKey = displayTag.toLowerCase();
-    if (displayTag && !seenTags.has(deduplicationKey)) {
-      visibleTags.push(displayTag);
-      seenTags.add(deduplicationKey);
-    }
-  });
-
-  return visibleTags;
+function formatCategoryLabel(category: string | undefined) {
+  return category?.replaceAll("-", " ").trim() || "";
 }
 
 function getCategoryStyle(category: string) {
@@ -153,20 +117,21 @@ function formatDownloads(downloads: number): string {
   return `${(count / 1000).toFixed(1)}k`;
 }
 
-function parseTimestamp(value: string | null | undefined): number | null {
-  if (!value) return null;
-  const timestamp = Date.parse(value);
-  return Number.isNaN(timestamp) ? null : timestamp;
-}
-
 function shouldShowUpdateButton(
   marketSkill: ModelScopeMarketSkill | null,
   localSkill: InstalledMarketSkill | null
 ): boolean {
   if (!marketSkill || !localSkill) return false;
-  const marketTimestamp = parseTimestamp(marketSkill.last_modified);
-  const localTimestamp = parseTimestamp(localSkill.version_update_time);
-  return marketTimestamp !== null && localTimestamp !== null && localTimestamp < marketTimestamp;
+  if (localSkill.upstream_last_modified !== undefined) {
+    return shouldShowModelScopeUpdate(
+      localSkill.version_update_time,
+      localSkill.upstream_last_modified
+    );
+  }
+  return shouldShowModelScopeUpdate(
+    localSkill.version_update_time,
+    marketSkill.last_modified
+  );
 }
 
 function getPaginationItems(
@@ -296,7 +261,7 @@ export default function ModelScopeSkillMarket({
       unique_id: skill.skill_id,
       name: skill.name,
       description: skill.description,
-      tags: getVisibleTags(skill),
+      tags: skill.tags ?? [],
       group_ids: defaultGroupIds,
       ingroup_permission: "READ_ONLY",
     });
@@ -366,25 +331,26 @@ export default function ModelScopeSkillMarket({
   };
 
   const renderSkillCard = (skill: ModelScopeMarketSkill) => {
-    const category = getCategory(skill);
-    const visibleTags = getVisibleTags(skill).slice(0, 3);
+    const categoryLabel = formatCategoryLabel(skill.category);
+    const visibleTags = (skill.tags ?? []).slice(0, 3);
 
     return (
       <button
         type="button"
-        className="flex h-full min-h-[198px] w-full flex-col rounded-xl border border-slate-200 bg-white px-4 py-4 text-left transition hover:border-blue-300 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-slate-700 dark:bg-slate-900"
+        className="flex h-full min-h-[198px] w-full min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white px-4 py-4 text-left transition hover:border-blue-300 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-slate-700 dark:bg-slate-900"
         onClick={() => void openDetail(skill)}
       >
-        <div className="flex w-full items-start justify-between gap-3">
-          <h3 className="min-w-0 truncate text-base font-semibold text-slate-900 dark:text-slate-100">
+        <div className="flex w-full min-w-0 items-start justify-between gap-3">
+          <h3 className="min-w-0 flex-1 truncate text-base font-semibold text-slate-900 dark:text-slate-100">
             {skill.name}
           </h3>
-          {category ? (
+          {categoryLabel ? (
             <span
-              className="shrink-0 rounded-full px-2.5 py-1 text-xs font-medium capitalize"
-              style={getCategoryStyle(category)}
+              className="max-w-[50%] shrink-0 truncate rounded-full px-2.5 py-1 text-xs font-medium capitalize"
+              style={getCategoryStyle(categoryLabel)}
+              title={categoryLabel}
             >
-              {category}
+              {categoryLabel}
             </span>
           ) : null}
         </div>
@@ -405,7 +371,7 @@ export default function ModelScopeSkillMarket({
             </Tag>
           ))}
         </div>
-        <div className="mt-3 flex w-full items-center gap-5 border-t border-slate-100 pt-3 text-xs text-slate-400 dark:border-slate-800">
+        <div className="mt-auto flex w-full items-center gap-5 border-t border-slate-100 pt-3 text-xs text-slate-400 dark:border-slate-800">
           <span className="inline-flex min-w-0 items-center gap-1.5 truncate">
             <UserRound size={13} />
             {getAuthor(skill)}
@@ -419,7 +385,7 @@ export default function ModelScopeSkillMarket({
     );
   };
 
-  const detailCategory = detail ? getCategory(detail) : "";
+  const detailCategory = formatCategoryLabel(detail?.category);
   const providerTotalPages = data ? Math.ceil(data.total_count / PAGE_SIZE) : 0;
   const accessibleTotalPages = Math.min(providerTotalPages, MAX_BROWSE_PAGES);
   const paginationItems = getPaginationItems(page, accessibleTotalPages);
@@ -447,8 +413,8 @@ export default function ModelScopeSkillMarket({
         {loading ? (
           <Row gutter={[16, 16]}>
             {Array.from({ length: 9 }).map((_, index) => (
-              <Col xs={24} md={12} xl={8} key={index}>
-                <div className="h-[198px] rounded-xl border border-slate-200 p-4 dark:border-slate-700">
+              <Col xs={24} md={12} xl={8} key={index} className="flex">
+                <div className="h-[198px] w-full rounded-xl border border-slate-200 p-4 dark:border-slate-700">
                   <Skeleton active />
                 </div>
               </Col>
@@ -469,7 +435,7 @@ export default function ModelScopeSkillMarket({
         ) : (
           <Row gutter={[16, 16]}>
             {data.items.map((skill) => (
-              <Col xs={24} md={12} xl={8} key={skill.skill_id}>
+              <Col xs={24} md={12} xl={8} key={skill.skill_id} className="flex">
                 {renderSkillCard(skill)}
               </Col>
             ))}
@@ -528,15 +494,16 @@ export default function ModelScopeSkillMarket({
               <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-xl font-medium text-blue-600">
                 {detail.name.trim().charAt(0).toUpperCase() || "S"}
               </div>
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="truncate text-lg font-semibold">
+              <div className="min-w-0 flex-1">
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className="min-w-0 flex-1 truncate text-lg font-semibold">
                     {detail.name}
                   </span>
                   {detailCategory ? (
                     <span
-                      className="rounded-full px-2.5 py-1 text-xs font-medium capitalize"
+                      className="max-w-[50%] shrink-0 truncate rounded-full px-2.5 py-1 text-xs font-medium capitalize"
                       style={getCategoryStyle(detailCategory)}
+                      title={detailCategory}
                     >
                       {detailCategory}
                     </span>
@@ -562,9 +529,7 @@ export default function ModelScopeSkillMarket({
                     type="primary"
                     loading={detailLoading}
                     onClick={() => {
-                      const skillToOpen = installedSkill;
-                      closeDetail();
-                      onOpenInstalledSkill(skillToOpen);
+                      onOpenInstalledSkill(installedSkill);
                     }}
                   >
                     {t("skillManagement.market.open")}
@@ -647,7 +612,7 @@ export default function ModelScopeSkillMarket({
                   {t("skillManagement.form.tags")}
                 </h4>
                 <div className="flex flex-wrap gap-2">
-                  {getVisibleTags(detail).map((tag) => (
+                  {(detail.tags ?? []).map((tag) => (
                     <Tag
                       key={tag}
                       variant="filled"

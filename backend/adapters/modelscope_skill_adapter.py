@@ -12,6 +12,8 @@ from modelscope_hub.errors import NotExistError, NotFoundError
 
 MODELSCOPE_SKILL_SOURCE = "modelscope"
 MODELSCOPE_MAX_RESULT_WINDOW = 2_400
+_CATEGORY_PREFIX = "category:"
+_CUSTOM_TAG_PREFIX = "custom_tag:"
 
 
 def _serialize_datetime(value: Any) -> str | None:
@@ -23,13 +25,55 @@ def _serialize_datetime(value: Any) -> str | None:
     return text or None
 
 
+def _prefixed_value(text: str, prefix: str) -> str | None:
+    if not text.lower().startswith(prefix):
+        return None
+    return text[len(prefix) :].strip()
+
+
+def _parse_raw_tags(raw_tags: Any) -> tuple[list[str], str]:
+    """Split ModelScope Hub tags into display tags and a category.
+
+    API contract for GET /skills/market/list and adapter get_skill:
+    - ``category:`` -> ``category`` (first non-empty value, hyphens preserved)
+    - ``custom_tag:`` -> ``tags`` (unique, case-insensitive)
+    - ``license:``, ``developer:``, unknown prefixes, and unprefixed values are dropped
+    - ``license`` continues to come from the SDK repo.license field
+    """
+    if not isinstance(raw_tags, (list, tuple)):
+        return [], ""
+
+    tags: list[str] = []
+    seen_tags: set[str] = set()
+    category = ""
+
+    for raw_tag in raw_tags:
+        text = str(raw_tag).strip()
+        if not text:
+            continue
+
+        category_value = _prefixed_value(text, _CATEGORY_PREFIX)
+        if category_value is not None:
+            if category_value and not category:
+                category = category_value
+            continue
+
+        custom_tag = _prefixed_value(text, _CUSTOM_TAG_PREFIX)
+        if custom_tag is not None:
+            dedupe_key = custom_tag.lower()
+            if custom_tag and dedupe_key not in seen_tags:
+                tags.append(custom_tag)
+                seen_tags.add(dedupe_key)
+
+    return tags, category
+
+
 def _normalize_repo(repo: Any) -> dict[str, Any]:
     skill_id = str(getattr(repo, "repo_id", None) or getattr(repo, "id", "")).strip()
     if not skill_id:
         raise ModelScopeSkillError("ModelScope returned a Skill without an id")
 
-    raw_tags = getattr(repo, "tags", None)
-    tags = [str(tag) for tag in raw_tags] if isinstance(raw_tags, (list, tuple)) else []
+    tags, category = _parse_raw_tags(getattr(repo, "tags", None))
     display_name = str(getattr(repo, "display_name", None) or getattr(repo, "name", "")).strip()
     if not display_name:
         display_name = skill_id.rsplit("/", 1)[-1]
@@ -47,6 +91,7 @@ def _normalize_repo(repo: Any) -> dict[str, Any]:
         "name": display_name,
         "description": str(getattr(repo, "description", None) or ""),
         "tags": tags,
+        "category": category,
         "downloads": downloads,
         "likes": likes,
         "license": str(getattr(repo, "license", None) or ""),
