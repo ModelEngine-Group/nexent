@@ -284,7 +284,7 @@ INSERT INTO nexent.role_permission_t
     (role_permission_id, user_role, permission_category, permission_type, permission_subtype, parent_key)
 SELECT v.role_permission_id, v.user_role, c.vis, c.nav, c.eval_path, c.parent_key
 FROM (VALUES
-    (1118, 'ADMIN'),
+    (1116, 'ADMIN'),
     (1215, 'DEV'),
     (1415, 'SPEED'),
     (1516, 'ASSET_OWNER')
