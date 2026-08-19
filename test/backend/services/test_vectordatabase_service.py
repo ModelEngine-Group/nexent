@@ -308,6 +308,7 @@ setattr(sys.modules['services'], 'asset_owner_visibility', asset_owner_visibilit
 storage_service_mock = types.ModuleType('services.knowledge_storage_service')
 storage_service_mock.release_storage_charge = MagicMock(return_value=True)
 storage_service_mock.resolve_storage_reference = MagicMock(return_value=None)
+storage_service_mock.resolve_storage_object_knowledge = MagicMock(return_value=None)
 sys.modules[
     'services.knowledge_storage_service'
 ] = storage_service_mock
@@ -606,6 +607,23 @@ class TestElasticSearchService(unittest.TestCase):
             "7-uuid", embedding_dim=256
         )
         call_kwargs = mock_create_knowledge.call_args[0][0]
+
+    @patch(
+        'backend.services.vectordatabase_service.create_knowledge_record',
+        side_effect=DuplicateError("Knowledge base name 'kb1' already exists"),
+    )
+    def test_create_knowledge_base_name_conflict_does_not_create_es_index(self, _mock_create_knowledge):
+        with self.assertRaises(DuplicateError):
+            ElasticSearchService.create_knowledge_base(
+                knowledge_name="kb1",
+                embedding_dim=256,
+                vdb_core=self.mock_vdb_core,
+                user_id="user-1",
+                tenant_id="tenant-1",
+                embedding_model_id=1,
+            )
+
+        self.mock_vdb_core.create_index.assert_not_called()
 
     @patch('backend.services.vectordatabase_service.get_embedding_model')
     @patch('backend.services.vectordatabase_service.create_knowledge_record')
@@ -1349,13 +1367,13 @@ class TestElasticSearchService(unittest.TestCase):
         )
 
         # Assert
-        self.assertEqual(len(result["indices"]), 2)
-        self.assertEqual(result["count"], 2)
+        self.assertEqual(len(result["indices"]), 1)
+        self.assertEqual(result["count"], 1)
 
         # When include_stats=False, indices is just a list of names
         # When include_stats=True, indices_info contains the detailed info with permissions
         self.assertIn("index1", result["indices"])
-        self.assertIn("index2", result["indices"])
+        self.assertNotIn("index2", result["indices"])
 
     @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
     @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
@@ -1387,7 +1405,7 @@ class TestElasticSearchService(unittest.TestCase):
             }
         ]
         mock_get_user_tenant.return_value = {
-            "user_role": "USER", "tenant_id": "test_tenant"}
+            "user_role": "DEV", "tenant_id": "test_tenant"}
         mock_get_group_ids.return_value = [1]  # User belongs to group 1
 
         # Execute
@@ -1434,7 +1452,7 @@ class TestElasticSearchService(unittest.TestCase):
             }
         ]
         mock_get_user_tenant.return_value = {
-            "user_role": "USER", "tenant_id": "test_tenant"}
+            "user_role": "DEV", "tenant_id": "test_tenant"}
         mock_get_group_ids.return_value = [1]  # User belongs to group 1
 
         # Execute
@@ -1520,7 +1538,7 @@ class TestElasticSearchService(unittest.TestCase):
             }
         ]
         mock_get_user_tenant.return_value = {
-            "user_role": "USER", "tenant_id": "test_tenant"}
+            "user_role": "DEV", "tenant_id": "test_tenant"}
         mock_get_group_ids.return_value = [1]  # User belongs to group 1
 
         # Execute
@@ -1566,7 +1584,7 @@ class TestElasticSearchService(unittest.TestCase):
             }
         ]
         mock_get_user_tenant.return_value = {
-            "user_role": "USER", "tenant_id": "test_tenant"}
+            "user_role": "DEV", "tenant_id": "test_tenant"}
         mock_get_group_ids.return_value = []  # Empty user groups
 
         # Execute
@@ -1612,7 +1630,7 @@ class TestElasticSearchService(unittest.TestCase):
             }
         ]
         mock_get_user_tenant.return_value = {
-            "user_role": "USER", "tenant_id": "test_tenant"}
+            "user_role": "DEV", "tenant_id": "test_tenant"}
         mock_get_group_ids.return_value = []  # Empty user groups
 
         # Execute
@@ -1797,7 +1815,7 @@ class TestElasticSearchService(unittest.TestCase):
             }
         ]
         mock_get_user_tenant.return_value = {
-            "user_role": "USER", "tenant_id": "test_tenant"}
+            "user_role": "DEV", "tenant_id": "test_tenant"}
         mock_get_group_ids.return_value = [1, 2]
 
         # Execute
@@ -2425,6 +2443,27 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertEqual(result["scope"], "source_only")
         self.assertEqual(result["deleted_es_count"], 0)
         self.mock_vdb_core.delete_documents.assert_not_called()
+
+    def test_delete_document_by_scope_rejects_object_from_another_knowledge_base(self):
+        with patch(
+            'backend.services.vectordatabase_service.resolve_storage_reference',
+            return_value=SimpleNamespace(
+                bucket_name="kb-bucket",
+                object_name="knowledge_base/doc.pdf",
+            ),
+        ), patch(
+            'backend.services.vectordatabase_service.resolve_storage_object_knowledge',
+            return_value={"knowledge": {"index_name": "other-index"}},
+        ):
+            with self.assertRaises(PermissionError):
+                asyncio.run(
+                    ElasticSearchService.delete_document_by_scope(
+                        "test_index",
+                        "knowledge_base/doc.pdf",
+                        "full",
+                        self.mock_vdb_core,
+                    )
+                )
 
     @patch.object(
         ElasticSearchService,
@@ -7183,7 +7222,7 @@ class TestCoverageImprovement(unittest.TestCase):
     def test_list_indices_empty_both_groups_backward_compat(self, mock_get_info, mock_group_ids, mock_user_tenant):
         """Test list_indices backward compat when both kb and user groups are empty (line 939)."""
         mock_user_tenant.return_value = {
-            "user_id": "user-1", "tenant_id": "tenant-1", "user_role": "USER"
+            "user_id": "user-1", "tenant_id": "tenant-1", "user_role": "DEV"
         }
         mock_group_ids.return_value = []  # User has no groups
         # Knowledge base also has no groups (empty string)
@@ -7688,7 +7727,7 @@ class TestCoverageImprovement(unittest.TestCase):
     @patch('backend.services.vectordatabase_service.IS_SPEED_MODE', new=False)
     def test_list_indices_both_empty_groups_backward_compat(self, mock_get_info, mock_group_ids, mock_user_tenant):
         """Test list_indices backward compat when both kb and user groups are empty (line 999-1001)."""
-        mock_user_tenant.return_value = {"user_role": "USER", "tenant_id": "tenant-1"}
+        mock_user_tenant.return_value = {"user_role": "DEV", "tenant_id": "tenant-1"}
         mock_group_ids.return_value = []  # Empty user groups
         mock_get_info.return_value = [{
             "index_name": "legacy-kb",
@@ -7751,7 +7790,7 @@ class TestCoverageImprovement(unittest.TestCase):
     @patch('backend.services.vectordatabase_service.IS_SPEED_MODE', new=False)
     def test_list_indices_non_creator_edit_permission(self, mock_update_model, mock_get_info, mock_group_ids, mock_user_tenant):
         """Test list_indices grants EDIT permission when user is not creator but ingroup_permission is EDIT (line 1014-1016)."""
-        mock_user_tenant.return_value = {"user_role": "USER", "tenant_id": "tenant-1"}
+        mock_user_tenant.return_value = {"user_role": "DEV", "tenant_id": "tenant-1"}
         mock_group_ids.return_value = [1]
         mock_get_info.return_value = [{
             "index_name": "shared-kb",
@@ -8000,10 +8039,16 @@ def test_resolve_knowledge_base_permission_not_found(monkeypatch):
         )
 
 
-def test_resolve_knowledge_base_permission_datamate_is_read_only(monkeypatch):
+def test_resolve_knowledge_base_permission_datamate_creator_is_read_only(monkeypatch):
     _patch_kb_permission_context(
         monkeypatch,
-        record={"index_name": "datamate-kb", "knowledge_sources": "datamate"},
+        record={
+            "index_name": "datamate-kb",
+            "knowledge_sources": "datamate",
+            "tenant_id": "tenant-1",
+            "created_by": "user-1",
+        },
+        user_tenant={"user_role": "USER", "tenant_id": "tenant-1"},
     )
 
     permission = ElasticSearchService.resolve_knowledge_base_permission(
@@ -8011,6 +8056,46 @@ def test_resolve_knowledge_base_permission_datamate_is_read_only(monkeypatch):
     )
 
     assert permission == "READ_ONLY"
+
+
+def test_resolve_knowledge_base_permission_datamate_cross_tenant_denied(monkeypatch):
+    _patch_kb_permission_context(
+        monkeypatch,
+        record={
+            "index_name": "datamate-kb",
+            "knowledge_sources": "datamate",
+            "tenant_id": "tenant-2",
+            "created_by": "admin-user",
+        },
+        user_tenant={"user_role": "ADMIN", "tenant_id": "tenant-1"},
+    )
+
+    assert (
+        ElasticSearchService.resolve_knowledge_base_permission(
+            "datamate-kb", "admin-user", "tenant-1"
+        )
+        is None
+    )
+
+
+def test_resolve_knowledge_base_permission_datamate_user_non_owner_denied(monkeypatch):
+    _patch_kb_permission_context(
+        monkeypatch,
+        record={
+            "index_name": "datamate-kb",
+            "knowledge_sources": "datamate",
+            "tenant_id": "tenant-1",
+            "created_by": "other-user",
+        },
+        user_tenant={"user_role": "USER", "tenant_id": "tenant-1"},
+    )
+
+    assert (
+        ElasticSearchService.resolve_knowledge_base_permission(
+            "datamate-kb", "user-1", "tenant-1"
+        )
+        is None
+    )
 
 
 def test_resolve_knowledge_base_permission_without_user_tenant_returns_none(monkeypatch):
@@ -8125,14 +8210,14 @@ def test_resolve_knowledge_base_permission_unknown_role_returns_none(monkeypatch
 @pytest.mark.parametrize(
     "record,user_group_ids,expected",
     [
-        ({"group_ids": "1,2", "created_by": "other", "ingroup_permission": "EDIT"}, [2], "EDIT"),
-        ({"group_ids": "1", "created_by": "other", "ingroup_permission": "READ_ONLY"}, [1], "READ_ONLY"),
+        ({"group_ids": "1,2", "created_by": "other", "ingroup_permission": "EDIT"}, [2], None),
+        ({"group_ids": "1", "created_by": "other", "ingroup_permission": "READ_ONLY"}, [1], None),
         ({"group_ids": "1", "created_by": "other", "ingroup_permission": "PRIVATE"}, [1], None),
         ({"group_ids": "1", "created_by": "other", "ingroup_permission": "UNKNOWN"}, [1], None),
         ({"group_ids": "1", "created_by": "other", "ingroup_permission": "EDIT"}, [3], None),
         ({"group_ids": "", "created_by": "user-1", "ingroup_permission": "READ_ONLY"}, [], "CREATOR"),
         ({"group_ids": "9", "created_by": "user-1", "ingroup_permission": "PRIVATE"}, [], "CREATOR"),
-        ({"group_ids": None, "created_by": "other"}, [], "READ_ONLY"),
+        ({"group_ids": None, "created_by": "other"}, [], None),
     ],
 )
 def test_resolve_knowledge_base_permission_user_group_rules(

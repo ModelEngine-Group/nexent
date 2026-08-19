@@ -107,12 +107,40 @@ class TestGroupAndTenantRules:
         )
         assert access.permission_label is None
 
-    def test_datamate_read_only(self):
+    def test_datamate_creator_is_read_only(self):
         access = _check(
             _resource(knowledge_sources="datamate", ingroup_permission="PRIVATE"),
+            user_id="creator-1",
             role="USER",
         )
         assert access.permission_label == "READ_ONLY"
+
+    def test_datamate_same_tenant_user_non_owner_denied(self):
+        access = _check(
+            _resource(knowledge_sources="datamate", ingroup_permission="READ_ONLY"),
+            user_id="other-user",
+            role="USER",
+        )
+        assert access.permission_label is None
+
+    @pytest.mark.parametrize("role", ["DEV", "ADMIN", "SU"])
+    def test_datamate_same_tenant_non_user_is_read_only(self, role):
+        access = _check(
+            _resource(knowledge_sources="datamate", ingroup_permission="PRIVATE"),
+            user_id="other-user",
+            role=role,
+        )
+        assert access.permission_label == "READ_ONLY"
+
+    @pytest.mark.parametrize("role", ["USER", "DEV", "ADMIN", "SU"])
+    def test_datamate_cross_tenant_denied(self, role):
+        access = _check(
+            _resource(tenant_id="tenant-a", knowledge_sources="datamate"),
+            user_id="creator-1",
+            role=role,
+            user_tenant_id="tenant-b",
+        )
+        assert access.permission_label is None
 
     def test_private_denied_for_non_member_user(self):
         access = _check(
@@ -130,6 +158,7 @@ class TestGroupAndTenantRules:
         access = _check(
             _resource(ingroup_permission=permission, group_ids=[10, 20]),
             user_id="member-user",
+            role="DEV",
             groups=[20, 30],
         )
         assert access.permission_label == expected
@@ -138,6 +167,7 @@ class TestGroupAndTenantRules:
         access = _check(
             _resource(ingroup_permission="EDIT", group_ids=[10]),
             user_id="member-user",
+            role="DEV",
             groups=[99],
         )
         assert access.permission_label is None
@@ -146,6 +176,7 @@ class TestGroupAndTenantRules:
         access = _check(
             _resource(ingroup_permission="READ_ONLY", group_ids=None),
             user_id="legacy-user",
+            role="DEV",
             groups=[],
         )
         assert access.permission_label == "READ_ONLY"
@@ -154,6 +185,7 @@ class TestGroupAndTenantRules:
         access = _check(
             _resource(ingroup_permission=None, group_ids=None),
             user_id="legacy-user",
+            role="DEV",
             groups=[],
         )
         assert access.permission_label == "READ_ONLY"

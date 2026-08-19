@@ -34,9 +34,9 @@ class ResourceAccessControl:
     ) -> ResourceAccess:
         """Resolve access for one resource.
 
-        Creator-first semantics apply after the special DataMate and
-        ASSET_OWNER paths: the creator of a PRIVATE KB always keeps full
-        access even when the caller is an ADMIN/SU/DEV/SPEED.
+        Tenant and USER ownership boundaries apply before source-specific
+        behavior. DataMate resources remain read-only after those boundaries.
+        Creator-first semantics then apply to regular knowledge bases.
 
         ``asset_owner_tenant_id`` is injectable for callers that override the
         default tenant marker (for example in tests or for deployment configs).
@@ -51,9 +51,6 @@ class ResourceAccessControl:
             else ASSET_OWNER_TENANT_ID
         )
 
-        if str(resource.knowledge_sources or "") == "datamate":
-            return ResourceAccess.read_only()
-
         if not normalized_user_tenant_id:
             return ResourceAccess.deny()
 
@@ -67,6 +64,12 @@ class ResourceAccessControl:
 
         if record_tenant_id and normalized_user_tenant_id and record_tenant_id != normalized_user_tenant_id:
             return ResourceAccess.deny()
+
+        if normalized_role == "USER" and str(resource.created_by or "") != normalized_user_id:
+            return ResourceAccess.deny()
+
+        if str(resource.knowledge_sources or "") == "datamate":
+            return ResourceAccess.read_only()
 
         resource_groups = _normalize_group_ids(resource.group_ids)
         normalized_user_groups = [

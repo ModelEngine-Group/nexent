@@ -126,18 +126,21 @@ def check_file_access(
     object_name: str,
     user_id: Optional[str],
     caller_tenant_id: Optional[str] = None,
+    required_permission: str = "READ",
 ) -> bool:
     """
     Check if user has permission to access the file.
 
     Access rules:
-    - knowledge_base/*: All authenticated users can access
+    - knowledge_base/*: All authenticated users can read; write operations
+      resolve the storage ledger and the owning knowledge-base DAC permission
     - attachments/{user_id}/*: Only the owner (user_id) can access
-    - images_in_attachments/*: All authenticated users can access
+    - images_in_attachments/*: All authenticated users can read; writes are denied
 
     Args:
         object_name: File object name in storage
         user_id: Current user ID
+        required_permission: READ for compatibility reads, or EDIT/DELETE for writes
 
     Returns:
         True if access is allowed, False otherwise
@@ -145,17 +148,38 @@ def check_file_access(
     if not user_id:
         return False
 
+    normalized_permission = str(required_permission or "READ").upper()
+    is_read = normalized_permission in {"READ", "READ_ONLY"}
+
     if object_name.startswith(ASSET_OWNER_ATTACHMENTS_PREFIX):
-        return caller_tenant_id == ASSET_OWNER_TENANT_ID
+        if is_read:
+            return caller_tenant_id == ASSET_OWNER_TENANT_ID
+        from services.knowledge_storage_service import resolve_storage_object_access
+
+        return resolve_storage_object_access(
+            object_name=object_name,
+            user_id=user_id,
+            tenant_id=caller_tenant_id,
+            required_permission=normalized_permission,
+        )
 
     if object_name.startswith("knowledge_base/"):
-        # Knowledge base files: all authenticated users can access
-        return True
+        # Preserve the established compatibility policy for source reads.
+        if is_read:
+            return True
+        from services.knowledge_storage_service import resolve_storage_object_access
+
+        return resolve_storage_object_access(
+            object_name=object_name,
+            user_id=user_id,
+            tenant_id=caller_tenant_id,
+            required_permission=normalized_permission,
+        )
 
     if object_name.startswith("images_in_attachments/"):
         # Extracted image files used by knowledge-base image chunks.
         # Keep them readable for authenticated users to avoid broken image citations.
-        return True
+        return is_read
 
     if object_name.startswith("skill-files/"):
         # Generated documents are private to the uploader and must stay user-scoped.
@@ -171,7 +195,7 @@ def check_file_access(
     if object_name.startswith("attachments/") and "/" not in object_name.replace("attachments/", "", 1):
         # Old format: attachments/filename (no subdirectory)
         # Allow access for backward compatibility
-        return True
+        return is_read
 
     return False
 
@@ -180,6 +204,7 @@ def check_file_access_batch(
     object_names: List[str],
     user_id: Optional[str],
     caller_tenant_id: Optional[str] = None,
+    required_permission: str = "READ",
 ) -> Dict[str, bool]:
     """
     Batch check file access permissions.
@@ -193,7 +218,12 @@ def check_file_access_batch(
         Dict mapping object_name to access permission (True/False)
     """
     return {
-        obj_name: check_file_access(obj_name, user_id, caller_tenant_id)
+        obj_name: check_file_access(
+            obj_name,
+            user_id,
+            caller_tenant_id,
+            required_permission=required_permission,
+        )
         for obj_name in object_names
     }
 
@@ -388,6 +418,14 @@ async def upload_files_impl(
                 total_file_size,
                 index_name=storage_context.index_name,
             )
+            if (
+                getattr(storage_context, "ingroup_permission", None) == "PRIVATE"
+                and user_id
+            ):
+                quota_service.check_personal_user_quota(
+                    user_id,
+                    total_file_size,
+                )
 
         minio_results = await upload_to_minio(files=file, folder=actual_folder)
         for result in minio_results:

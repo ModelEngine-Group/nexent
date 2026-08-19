@@ -11,6 +11,7 @@ import importlib.machinery
 from unittest.mock import patch, MagicMock, ANY, AsyncMock
 from fastapi.testclient import TestClient
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import JSONResponse
 
 from typing import List, Optional, Any, Dict
 from pydantic import BaseModel
@@ -106,12 +107,18 @@ RedisService = MagicMock()
 from backend.apps.vectordatabase_app import router
 from nexent.vector_database.elasticsearch_core import ElasticSearchCore
 from consts.exceptions import (
-    PersonalKbQuotaExceededError,
-    PersonalKbQuotaUnavailableError,
+    AppException,
+    DuplicateError,
 )
+from consts.error_code import ErrorCode
 
 # Create test client
 app = FastAPI()
+
+
+@app.exception_handler(AppException)
+async def app_exception_handler(request, exc):
+    return JSONResponse(status_code=exc.http_status, content=exc.to_dict())
 
 # Temporarily modify router to disable response model validation
 for route in router.routes:
@@ -162,6 +169,19 @@ def mock_knowledge_base_read_permission():
     with patch(
         "backend.apps.vectordatabase_app.require_knowledge_base_read_permission",
         return_value="READ_ONLY",
+    ):
+        yield
+
+
+@pytest.fixture(autouse=True)
+def mock_current_user_id():
+    """Provide default authenticated user data for endpoints requiring request auth."""
+    with patch(
+        "backend.apps.vectordatabase_app.get_current_user_id",
+        return_value=("test_user", "test_tenant"),
+    ), patch(
+        "backend.apps.vectordatabase_app.get_current_user_context",
+        return_value=("test_user", "test_tenant", "ADMIN"),
     ):
         yield
 
@@ -318,6 +338,27 @@ async def test_create_new_index_error(vdb_core_mock, auth_data):
         assert response.status_code == 500
         assert response.json() == {
             "detail": "Error creating index: Test error"}
+
+
+@pytest.mark.asyncio
+async def test_create_new_index_name_conflict_returns_409(vdb_core_mock, auth_data):
+    with patch(
+        "backend.apps.vectordatabase_app.get_current_user_context",
+        return_value=(auth_data["user_id"], auth_data["tenant_id"], "USER"),
+    ), patch(
+        "backend.apps.vectordatabase_app.ElasticSearchService.create_knowledge_base",
+        side_effect=DuplicateError("Knowledge base name 'test_index' already exists"),
+    ):
+        response = client.post(
+            f"/indices/{auth_data['index_name']}",
+            json={"embedding_model_id": 101},
+            headers=auth_data["auth_header"],
+        )
+
+    assert response.status_code == 409
+    assert response.json() == {
+        "detail": "Knowledge base name 'test_index' already exists"
+    }
 
 
 @pytest.mark.asyncio
@@ -3006,7 +3047,10 @@ async def test_create_index_documents_personal_kb_quota_exceeded(
         return_value={"ingroup_permission": "PRIVATE"},
     ), patch(
         "backend.apps.vectordatabase_app.QuotaService.check_personal_kb_quota",
-        side_effect=PersonalKbQuotaExceededError("quota exceeded"),
+        side_effect=AppException(
+            ErrorCode.TENANT_PERSONAL_KB_QUOTA_EXCEEDED,
+            "quota exceeded",
+        ),
     ), patch(
         "backend.apps.vectordatabase_app.ElasticSearchService.index_documents"
     ) as mock_index:
@@ -3017,7 +3061,8 @@ async def test_create_index_documents_personal_kb_quota_exceeded(
         )
 
     assert response.status_code == 403
-    assert "quota exceeded" in response.json()["detail"]
+    assert "quota exceeded" in response.json()["message"]
+    assert response.json()["code"] == ErrorCode.TENANT_PERSONAL_KB_QUOTA_EXCEEDED.value
     mock_index.assert_not_called()
 
 
@@ -3037,7 +3082,10 @@ async def test_create_index_documents_personal_kb_quota_unavailable(
         return_value={"ingroup_permission": "PRIVATE"},
     ), patch(
         "backend.apps.vectordatabase_app.QuotaService.check_personal_kb_quota",
-        side_effect=PersonalKbQuotaUnavailableError("es down"),
+        side_effect=AppException(
+            ErrorCode.TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE,
+            "es down",
+        ),
     ), patch(
         "backend.apps.vectordatabase_app.ElasticSearchService.index_documents"
     ) as mock_index:
@@ -3045,10 +3093,11 @@ async def test_create_index_documents_personal_kb_quota_unavailable(
             f"/indices/{auth_data['index_name']}/documents",
             json=[{"id": 1, "text": "test doc"}],
             headers=auth_data["auth_header"],
-        )
+    )
 
     assert response.status_code == 503
-    assert "service unavailable" in response.json()["detail"]
+    assert response.json()["message"] == "es down"
+    assert response.json()["code"] == ErrorCode.TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE.value
     mock_index.assert_not_called()
 
 

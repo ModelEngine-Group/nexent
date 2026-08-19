@@ -11,9 +11,11 @@ from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 from starlette.background import BackgroundTask
 
 from consts.exceptions import (
+    AppException,
     FileTooLargeException,
     NotFoundException,
     QuotaExceededError,
+    UnauthorizedError,
     UnsupportedFileTypeException,
 )
 from consts.model import ProcessParams
@@ -140,6 +142,8 @@ async def upload_files(
     except HTTPException:
         raise
     except QuotaExceededError:
+        raise
+    except AppException:
         raise
     except Exception as e:
         logger.error(f"File upload error: {str(e)}")
@@ -280,6 +284,8 @@ async def get_storage_file(
             return await get_file_url_impl(object_name=object_name, expires=expires)
     except HTTPException:
         raise
+    except UnauthorizedError as e:
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logger.error(f"Failed to get file: object_name={object_name}, error={str(e)}")
         raise HTTPException(
@@ -300,13 +306,23 @@ async def storage_upload_files(
 
     - **files**: List of files to upload
     - **folder**: Storage folder path (optional, defaults to 'attachments')
-                   Use 'knowledge_base' for shared files accessible by all users.
-                   Other folders (like 'attachments') will be isolated by user_id.
+                   Knowledge-base source files must use `/file/upload` with an
+                   `index_name` so their storage-ledger ownership is recorded.
+                   Other folders (like 'attachments') are isolated by user_id.
 
     Returns upload results including file information and access URLs
     """
     try:
         user_id, tenant_id = get_current_user_id(authorization)
+
+        if folder == "knowledge_base":
+            raise HTTPException(
+                status_code=HTTPStatus.BAD_REQUEST,
+                detail=(
+                    "Knowledge-base source uploads must specify an index_name "
+                    "through /api/file/upload"
+                ),
+            )
 
         actual_folder = resolve_minio_upload_folder(folder, user_id, tenant_id)
         results = await upload_to_minio(files=files, folder=actual_folder)
@@ -366,10 +382,7 @@ async def get_storage_files(
                 if f.get("key") and check_file_access(f.get("key"), user_id, tenant_id)
             ]
         else:
-            filtered_files = [
-                f for f in files
-                if f.get("key") and f.get("key", "").startswith("knowledge_base/")
-            ]
+            filtered_files = []
 
         files = filtered_files
 
@@ -384,6 +397,8 @@ async def get_storage_files(
         }
     except HTTPException:
         raise
+    except UnauthorizedError as e:
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logger.error(f"Get storage files error: {str(e)}")
         raise HTTPException(
@@ -601,7 +616,8 @@ async def remove_storage_file(
     Delete file from MinIO storage.
 
     Access control:
-    - knowledge-base sources: Require an active ledger row owned by the caller tenant
+    - knowledge-base sources: Require an active ledger row mapped to the requested
+      knowledge base and EDIT/CREATOR permission
     - attachments/{user_id}/*: Only the owner (user_id) can delete
 
     - **object_name**: File object name to delete
@@ -611,7 +627,12 @@ async def remove_storage_file(
     try:
         user_id, tenant_id = get_current_user_id(authorization)
 
-        if not check_file_access(object_name, user_id, tenant_id):
+        if not check_file_access(
+            object_name,
+            user_id,
+            tenant_id,
+            required_permission="DELETE",
+        ):
             logger.warning("[remove_storage_file] Access denied")
             raise HTTPException(
                 status_code=HTTPStatus.FORBIDDEN,
@@ -700,6 +721,8 @@ async def get_storage_file_batch_urls(
         }
     except HTTPException:
         raise
+    except UnauthorizedError as e:
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logger.error(f"Batch URLs error: {str(e)}")
         raise HTTPException(
@@ -758,6 +781,8 @@ async def preview_file(
         )
     except HTTPException:
         raise
+    except UnauthorizedError as e:
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logger.error(f"[preview_file] Unexpected error: object_name={object_name}, error={str(e)}")
         raise HTTPException(

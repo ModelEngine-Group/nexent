@@ -1,5 +1,7 @@
 // Quota management type definitions
 
+import { ErrorCode } from "@/const/errorCode";
+
 // Tenant-level quota configuration
 export interface TenantQuotaConfig {
   hard_limit_bytes: number | null;
@@ -143,6 +145,7 @@ export interface PersonalCapacityUser {
   kb_count: number;
   total_bytes: number;
   total_readable: string | null;
+  usage_rate: number | null;
   quota_limit_bytes: number | null;
   quota_limit_readable: string | null;
   effective_quota_bytes: number | null;
@@ -168,6 +171,10 @@ export interface PersonalKnowledgeBaseItem {
   chunk_count: number;
   store_size: string | null;
   store_size_bytes: number;
+  source_size?: string | null;
+  source_size_bytes?: number;
+  total_size?: string | null;
+  total_size_bytes?: number;
   quota_limit_bytes: number | null;
   quota_limit_readable: string | null;
   updated_at: string | null;
@@ -192,6 +199,30 @@ export interface PersonalDefaultQuota {
   unlimited: boolean;
 }
 
+export interface PersonalCapacitySummary {
+  user_count: number;
+  kb_count: number;
+  total_bytes: number;
+  total_readable: string | null;
+  allocated_quota_bytes: number;
+  allocated_quota_readable: string | null;
+  default_quota_bytes: number | null;
+  default_quota_readable: string | null;
+}
+
+export type PersonalSelfQuotaSource = "individual" | "default" | "unlimited";
+
+export interface PersonalSelfCapacity {
+  used_bytes: number;
+  used_readable: string | null;
+  quota_bytes: number | null;
+  quota_readable: string | null;
+  quota_source: PersonalSelfQuotaSource;
+  usage_rate: number | null;
+  is_over_quota: boolean;
+  kb_count: number;
+}
+
 // ── Error types ──────────────────────────────────────────────
 
 const QUOTA_CONFLICT_TRANSLATION_KEYS: Record<string, string> = {
@@ -199,6 +230,8 @@ const QUOTA_CONFLICT_TRANSLATION_KEYS: Record<string, string> = {
   PlatformCapacityBelowAllocation:
     "quota.error.platformCapacityBelowAllocation",
   TenantQuotaBelowUsage: "quota.error.tenantQuotaBelowUsage",
+  [ErrorCode.TENANT_PERSONAL_KB_QUOTA_BELOW_USAGE]:
+    "tenantResources.personalCapacity.quotaBelowUsageWarning",
 };
 
 /** Return the translation key for a known quota allocation conflict. */

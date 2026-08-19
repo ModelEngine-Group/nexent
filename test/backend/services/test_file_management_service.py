@@ -19,7 +19,8 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 backend_dir = os.path.abspath(os.path.join(current_dir, "../../../backend"))
 sys.path.append(backend_dir)
 
-from consts.exceptions import QuotaExceededError
+from consts.error_code import ErrorCode
+from consts.exceptions import AppException, QuotaExceededError
 
 # Patch environment variables before any imports that might use them
 # Environment variables are now configured in conftest.py
@@ -52,6 +53,10 @@ class _StubElasticSearchService:
     async def list_files(index_name, include_chunks=False, vdb_core=None):
         return {"files": []}
 
+    @staticmethod
+    def resolve_knowledge_base_permission(index_name, user_id, tenant_id):
+        return "EDIT"
+
 
 def _stub_get_vector_db_core():
     return None
@@ -64,6 +69,7 @@ setattr(services_stub, 'vectordatabase_service', vdb_stub)
 
 knowledge_storage_stub = types.ModuleType('services.knowledge_storage_service')
 knowledge_storage_stub.resolve_storage_context = MagicMock(return_value=None)
+knowledge_storage_stub.resolve_storage_object_access = MagicMock(return_value=False)
 knowledge_storage_stub.commit_uploaded_object = MagicMock(return_value={"storage_object_id": 1})
 knowledge_storage_stub.compensate_uploaded_objects = MagicMock()
 sys.modules['services.knowledge_storage_service'] = knowledge_storage_stub
@@ -128,6 +134,11 @@ def reset_knowledge_storage_stub():
         return_value=True,
         side_effect=True,
     )
+    knowledge_storage_stub.resolve_storage_object_access.reset_mock(
+        return_value=True,
+        side_effect=True,
+    )
+    knowledge_storage_stub.resolve_storage_object_access.return_value = False
 
 
 class TestUploadFilesImpl:
@@ -856,6 +867,22 @@ class TestCheckFileAccess:
         assert check_file_access("knowledge_base/subfolder/doc.pdf", "user456") is True
         assert check_file_access("knowledge_base/", "any_user") is True
 
+    def test_check_file_access_knowledge_base_write_uses_storage_resolver(self):
+        from backend.services.file_management_service import check_file_access
+
+        assert check_file_access(
+            "knowledge_base/file.txt",
+            "user123",
+            "tenant-a",
+            required_permission="DELETE",
+        ) is False
+        knowledge_storage_stub.resolve_storage_object_access.assert_called_once_with(
+            object_name="knowledge_base/file.txt",
+            user_id="user123",
+            tenant_id="tenant-a",
+            required_permission="DELETE",
+        )
+
     def test_check_file_access_user_attachment_allows_owner(self):
         """Users can access files in their own attachments folder"""
         from backend.services.file_management_service import check_file_access
@@ -987,6 +1014,47 @@ class TestUploadQuotaEnforcement:
         )
         quota_service.invalidate_usage_cache.assert_called_once_with("tenant-id")
         assert result.quota_status == {"stage": "post"}
+
+    @pytest.mark.asyncio
+    async def test_private_kb_upload_checks_user_quota_before_minio_write(
+        self, monkeypatch
+    ):
+        upload = MagicMock(filename="quota.txt", size=128)
+        context = SimpleNamespace(
+            tenant_id="tenant-id",
+            index_name="kb-index",
+            ingroup_permission="PRIVATE",
+        )
+        knowledge_storage_stub.resolve_storage_context.return_value = context
+        quota_service = MagicMock()
+        quota_error = AppException(
+            ErrorCode.TENANT_PERSONAL_KB_QUOTA_EXCEEDED,
+            "personal quota exceeded",
+        )
+        quota_service.check_personal_user_quota.side_effect = quota_error
+
+        monkeypatch.setitem(
+            sys.modules, "services.quota_service", self._quota_module(quota_service)
+        )
+        with patch(
+            "backend.services.file_management_service.upload_to_minio",
+            new_callable=AsyncMock,
+        ) as upload_to_minio_mock:
+            with pytest.raises(AppException) as raised:
+                await upload_files_impl(
+                    destination="minio",
+                    file=[upload],
+                    folder="knowledge_base",
+                    index_name="kb-index",
+                    user_id="user-id",
+                    uploader_tenant_id="tenant-id",
+                )
+
+        assert raised.value is quota_error
+        quota_service.check_personal_user_quota.assert_called_once_with(
+            "user-id", 128
+        )
+        upload_to_minio_mock.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_missing_sizes_read_complete_batch_and_restore_streams(self, monkeypatch):

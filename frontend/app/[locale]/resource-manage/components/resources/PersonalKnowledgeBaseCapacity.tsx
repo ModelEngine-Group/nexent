@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import {
   Alert,
   Button,
+  ConfigProvider,
   Empty,
   Input,
   InputNumber,
@@ -25,8 +26,11 @@ import { ColumnsType, TableProps } from "antd/es/table";
 import { useAuthorization } from "@/hooks/auth/useAuthorization";
 import { useTenantList } from "@/hooks/tenant/useTenantList";
 import { USER_ROLES } from "@/const/auth";
+import { ErrorCode } from "@/const/errorCode";
 import quotaService from "@/services/quotaService";
+import { ApiError } from "@/services/api";
 import type {
+  PersonalCapacitySummary,
   PersonalCapacityUser,
   PersonalDefaultQuota,
   PersonalKnowledgeBaseItem,
@@ -37,16 +41,26 @@ const GB = 1024 * 1024 * 1024;
 const MB = 1024 * 1024;
 const DEFAULT_PAGE_SIZE = 10;
 const DETAIL_PAGE_SIZE = 100;
-const SEARCH_MAX_PAGES = 20;
 
-type SortField = "user_name" | "kb_count" | "total_bytes" | "quota_limit_bytes";
+const PERSONAL_CAPACITY_TABLE_THEME = {
+  components: {
+    Table: {
+      headerSortActiveBg: "transparent",
+      headerSortHoverBg: "transparent",
+      bodySortBg: "transparent",
+    },
+  },
+};
+
+type SortField =
+  "kb_count" | "total_bytes" | "quota_limit_bytes" | "usage_rate";
 type SortOrder = "asc" | "desc";
 
 const SORT_FIELDS: SortField[] = [
-  "user_name",
   "kb_count",
   "total_bytes",
   "quota_limit_bytes",
+  "usage_rate",
 ];
 
 function isSortField(value: string): value is SortField {
@@ -77,34 +91,98 @@ function getErrorMessage(error: unknown): string {
   return String(error);
 }
 
-function compareUsers(
-  a: PersonalCapacityUser,
-  b: PersonalCapacityUser,
-  field: SortField,
-  order: SortOrder
-): number {
-  let result = 0;
-  switch (field) {
-    case "user_name":
-      result = (a.user_name || "").localeCompare(b.user_name || "");
-      break;
-    case "kb_count":
-      result = (a.kb_count ?? 0) - (b.kb_count ?? 0);
-      break;
-    case "total_bytes":
-      result = (a.total_bytes ?? 0) - (b.total_bytes ?? 0);
-      break;
-    case "quota_limit_bytes":
-      result = (a.quota_limit_bytes ?? -1) - (b.quota_limit_bytes ?? -1);
-      break;
+function getLocalizedQuotaErrorMessage(
+  error: unknown,
+  t: (key: string, options?: Record<string, unknown>) => string
+): string {
+  if (error instanceof ApiError) {
+    const code = String(error.code);
+    if (
+      code === ErrorCode.TENANT_PERSONAL_KB_QUOTA_EXCEEDED ||
+      code === ErrorCode.TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE
+    ) {
+      return t(`errorCode.${code}`);
+    }
   }
-  return order === "asc" ? result : -result;
+  return getErrorMessage(error);
+}
+
+function getQuotaSubmitErrorMessage(
+  error: unknown,
+  t: (key: string, options?: Record<string, unknown>) => string
+): string {
+  if (
+    error instanceof ApiError &&
+    error.code === ErrorCode.TENANT_PERSONAL_KB_QUOTA_BELOW_USAGE
+  ) {
+    const usageBytes = error.details?.usage_bytes;
+    const usage =
+      typeof usageBytes === "number" ? formatBytes(usageBytes) : "-";
+    return t("tenantResources.personalCapacity.quotaBelowUsageWarning", {
+      usage,
+    });
+  }
+  return getLocalizedQuotaErrorMessage(error, t);
+}
+
+function CompactUserSearchFilter({
+  value,
+  onChange,
+  placeholder,
+  close,
+  visible,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  placeholder: string;
+  close: () => void;
+  visible: boolean;
+}) {
+  const { t } = useTranslation("common");
+  const [draft, setDraft] = useState(value);
+
+  useEffect(() => {
+    if (visible) setDraft(value);
+  }, [visible, value]);
+
+  const commit = (next: string) => {
+    onChange(next.trim());
+    close();
+  };
+
+  return (
+    <div className="p-2" onKeyDown={(event) => event.stopPropagation()}>
+      <Input
+        autoFocus
+        allowClear
+        className="w-56"
+        prefix={<Search size={14} className="text-gray-400" aria-hidden />}
+        value={draft}
+        placeholder={placeholder}
+        onChange={(event) => setDraft(event.target.value)}
+        onPressEnter={() => commit(draft)}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") close();
+        }}
+      />
+      <div className="flex items-center justify-end gap-2 pt-2">
+        <Button size="small" onClick={() => commit("")}>
+          {t("tenantResources.personalCapacity.resetSearch")}
+        </Button>
+        <Button type="primary" size="small" onClick={() => commit(draft)}>
+          {t("tenantResources.personalCapacity.confirmSearch")}
+        </Button>
+      </div>
+    </div>
+  );
 }
 
 interface PersonalQuotaModalProps {
   open: boolean;
+  mode: "user" | "default";
   title: string;
   currentBytes: number | null;
+  currentUsageBytes?: number | null;
   currentUsageReadable?: string | null;
   onCancel: () => void;
   onSubmit: (payload: PersonalQuotaPayload) => Promise<void>;
@@ -112,8 +190,10 @@ interface PersonalQuotaModalProps {
 
 function PersonalQuotaModal({
   open,
+  mode,
   title,
   currentBytes,
+  currentUsageBytes,
   currentUsageReadable,
   onCancel,
   onSubmit,
@@ -175,6 +255,16 @@ function PersonalQuotaModal({
     }
   };
 
+  const quotaBytes = value == null ? null : value * (unit === "GB" ? GB : MB);
+  const belowUsage =
+    mode === "user" &&
+    !unlimited &&
+    quotaBytes != null &&
+    currentUsageBytes != null &&
+    currentUsageBytes > 0 &&
+    quotaBytes < currentUsageBytes;
+  const usageText = currentUsageReadable || formatBytes(currentUsageBytes);
+
   return (
     <Modal
       title={title}
@@ -184,20 +274,46 @@ function PersonalQuotaModal({
       confirmLoading={saving}
       okText={t("common.save")}
       cancelText={t("common.cancel")}
-      width={480}
-      destroyOnClose
+      width={520}
+      destroyOnHidden
     >
       <Space direction="vertical" size="middle" style={{ width: "100%" }}>
-        {currentUsageReadable && (
-          <div className="text-sm text-gray-500">
-            {t("tenantResources.personalCapacity.currentUsage")}:{" "}
-            {currentUsageReadable}
+        {mode === "user" && (
+          <div className="text-sm text-gray-600">
+            {t("tenantResources.personalCapacity.userQuotaDesc")}
+          </div>
+        )}
+        {mode === "default" && (
+          <div className="text-sm text-gray-600">
+            {t("tenantResources.personalCapacity.defaultQuotaDesc")}
+          </div>
+        )}
+        {mode === "user" && (
+          <div className="flex items-baseline justify-between">
+            <span className="text-sm text-gray-500">
+              {t("tenantResources.personalCapacity.currentUsage")}
+            </span>
+            <span className="text-xl font-semibold">{usageText}</span>
+          </div>
+        )}
+        {mode === "default" && (
+          <div className="flex items-baseline justify-between">
+            <span className="text-sm text-gray-500">
+              {t("tenantResources.personalCapacity.currentQuota")}
+            </span>
+            <span className="text-xl font-semibold">
+              {currentBytes == null
+                ? t("quota.unlimited")
+                : formatBytes(currentBytes)}
+            </span>
           </div>
         )}
         <div className="flex items-center gap-2">
           <Switch checked={unlimited} onChange={setUnlimited} />
           <span className="text-sm">
-            {t("tenantResources.personalCapacity.unlimitedQuota")}
+            {mode === "default"
+              ? t("tenantResources.personalCapacity.unlimitedDefault")
+              : t("tenantResources.personalCapacity.unlimitedQuota")}
           </span>
         </div>
         {!unlimited && (
@@ -218,13 +334,117 @@ function PersonalQuotaModal({
             />
           </Space>
         )}
-        {currentBytes != null && (
-          <div className="text-sm text-gray-500">
-            {t("tenantResources.personalCapacity.currentQuota")}:{" "}
-            {formatBytes(currentBytes)}
+        {mode === "default" && (
+          <div className="text-xs text-gray-500">
+            {t("tenantResources.personalCapacity.defaultQuotaChangeNote")}
           </div>
         )}
+        {belowUsage && (
+          <Alert
+            type="warning"
+            showIcon
+            title={t(
+              "tenantResources.personalCapacity.quotaBelowUsageWarning",
+              {
+                usage: usageText,
+              }
+            )}
+          />
+        )}
       </Space>
+    </Modal>
+  );
+}
+
+interface KbDetailModalProps {
+  kb: PersonalKnowledgeBaseItem | null;
+  onClose: () => void;
+}
+
+function KbDetailModal({ kb, onClose }: KbDetailModalProps) {
+  const { t } = useTranslation("common");
+  if (!kb) return null;
+
+  const quotaText =
+    kb.quota_limit_bytes == null
+      ? t("quota.unlimited")
+      : kb.quota_limit_readable || formatBytes(kb.quota_limit_bytes);
+  const stats = [
+    {
+      label: t("tenantResources.personalCapacity.storeSizeLabel"),
+      value:
+        kb.total_size ||
+        kb.store_size ||
+        formatBytes(kb.total_size_bytes ?? kb.store_size_bytes),
+    },
+    {
+      label: t("tenantResources.personalCapacity.documents"),
+      value: kb.doc_count ?? 0,
+    },
+    {
+      label: t("tenantResources.personalCapacity.chunks"),
+      value: kb.chunk_count ?? 0,
+    },
+    {
+      label: t("tenantResources.personalCapacity.kbQuota"),
+      value: quotaText,
+    },
+  ];
+  const infoRows = [
+    {
+      label: t("tenantResources.personalCapacity.source"),
+      value: kb.source || t("common.unknown"),
+    },
+    {
+      label: t("tenantResources.personalCapacity.kbQuota"),
+      value: quotaText,
+    },
+    {
+      label: t("tenantResources.personalCapacity.lastUpdated"),
+      value: formatDateTime(kb.updated_at),
+    },
+  ];
+
+  return (
+    <Modal
+      open
+      onCancel={onClose}
+      title={<span className="text-base font-medium">{kb.name || "-"}</span>}
+      footer={
+        <Button type="primary" onClick={onClose}>
+          {t("common.close")}
+        </Button>
+      }
+      width={600}
+      destroyOnHidden
+    >
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+        {stats.map((stat) => (
+          <div
+            key={stat.label}
+            className="border border-gray-200 rounded-md p-3"
+          >
+            <div className="text-sm font-semibold truncate">{stat.value}</div>
+            <div className="text-xs text-gray-500 mt-1">{stat.label}</div>
+          </div>
+        ))}
+      </div>
+      <div className="border border-gray-200 rounded-md overflow-hidden">
+        <div className="px-3 py-2 text-sm font-medium bg-gray-50">
+          {t("tenantResources.personalCapacity.basicInfo")}
+        </div>
+        <div className="divide-y divide-gray-100">
+          {infoRows.map((row) => (
+            <div
+              key={row.label}
+              className="flex items-center justify-between px-3 py-2 text-sm"
+            >
+              <span className="text-gray-500">{row.label}</span>
+              <span className="font-medium text-right">{row.value}</span>
+            </div>
+          ))}
+        </div>
+      </div>
     </Modal>
   );
 }
@@ -245,6 +465,7 @@ export default function PersonalKnowledgeBaseCapacity({
   const { data: tenantData, isLoading: tenantsLoading } = useTenantList({
     page: 1,
     page_size: 100,
+    enabled: isSuperAdmin,
   });
 
   const [viewTenantId, setViewTenantId] = useState<string | null>(tenantId);
@@ -253,12 +474,7 @@ export default function PersonalKnowledgeBaseCapacity({
   }, [tenantId]);
 
   const [search, setSearch] = useState("");
-  const [debouncedSearch, setDebouncedSearch] = useState("");
-  useEffect(() => {
-    const timer = setTimeout(() => setDebouncedSearch(search), 400);
-    return () => clearTimeout(timer);
-  }, [search]);
-  const searchMode = debouncedSearch.trim().length > 0;
+  const keyword = search.trim();
 
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
@@ -269,6 +485,8 @@ export default function PersonalKnowledgeBaseCapacity({
   const [loading, setLoading] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
 
+  const [summary, setSummary] = useState<PersonalCapacitySummary | null>(null);
+  const [summaryLoading, setSummaryLoading] = useState(false);
   const [defaultQuota, setDefaultQuota] = useState<PersonalDefaultQuota | null>(
     null
   );
@@ -281,6 +499,8 @@ export default function PersonalKnowledgeBaseCapacity({
     {}
   );
   const [expandedKeys, setExpandedKeys] = useState<string[]>([]);
+  const [kbDetailTarget, setKbDetailTarget] =
+    useState<PersonalKnowledgeBaseItem | null>(null);
 
   const [quotaModalOpen, setQuotaModalOpen] = useState(false);
   const [quotaModalMode, setQuotaModalMode] = useState<"user" | "default">(
@@ -292,7 +512,7 @@ export default function PersonalKnowledgeBaseCapacity({
 
   useEffect(() => {
     setPage(1);
-  }, [viewTenantId, debouncedSearch]);
+  }, [viewTenantId, search]);
 
   useEffect(() => {
     setDetailMap({});
@@ -301,67 +521,7 @@ export default function PersonalKnowledgeBaseCapacity({
   }, [viewTenantId]);
 
   useEffect(() => {
-    if (!searchMode || !viewTenantId) return;
-    let cancelled = false;
-    setLoading(true);
-    const keyword = debouncedSearch.trim().toLowerCase();
-    (async () => {
-      try {
-        const all: PersonalCapacityUser[] = [];
-        let currentPage = 1;
-        let totalPages = 1;
-        let pageTotal = 0;
-        while (currentPage <= totalPages && currentPage <= SEARCH_MAX_PAGES) {
-          const data = await quotaService.listPersonalCapacityUsers({
-            tenantId: viewTenantId,
-            page: currentPage,
-            page_size: 100,
-            sort_by: "user_name",
-            sort_order: "asc",
-          });
-          all.push(...data.items);
-          totalPages = data.total_pages;
-          pageTotal = data.total;
-          currentPage += 1;
-          if (all.length >= pageTotal) break;
-        }
-        if (cancelled) return;
-        const filtered = all.filter(
-          (userItem) =>
-            (userItem.user_name || "").toLowerCase().includes(keyword) ||
-            (userItem.email || "").toLowerCase().includes(keyword)
-        );
-        const sorted = [...filtered].sort((a, b) =>
-          compareUsers(a, b, sortBy, sortOrder)
-        );
-        setUsers(sorted);
-        setTotal(sorted.length);
-      } catch (err: unknown) {
-        if (!cancelled) {
-          message.error(
-            getErrorMessage(err) ||
-              t("tenantResources.personalCapacity.loadFailed")
-          );
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    viewTenantId,
-    searchMode,
-    debouncedSearch,
-    sortBy,
-    sortOrder,
-    reloadKey,
-    t,
-  ]);
-
-  useEffect(() => {
-    if (searchMode || !viewTenantId) return;
+    if (!viewTenantId) return;
     let cancelled = false;
     setLoading(true);
     quotaService
@@ -371,6 +531,7 @@ export default function PersonalKnowledgeBaseCapacity({
         page_size: pageSize,
         sort_by: sortBy,
         sort_order: sortOrder,
+        keyword,
       })
       .then((data) => {
         if (cancelled) return;
@@ -380,7 +541,7 @@ export default function PersonalKnowledgeBaseCapacity({
       .catch((err: unknown) => {
         if (!cancelled) {
           message.error(
-            getErrorMessage(err) ||
+            getLocalizedQuotaErrorMessage(err, t) ||
               t("tenantResources.personalCapacity.loadFailed")
           );
         }
@@ -391,24 +552,33 @@ export default function PersonalKnowledgeBaseCapacity({
     return () => {
       cancelled = true;
     };
-  }, [
-    viewTenantId,
-    searchMode,
-    page,
-    pageSize,
-    sortBy,
-    sortOrder,
-    reloadKey,
-    t,
-  ]);
+  }, [viewTenantId, keyword, page, pageSize, sortBy, sortOrder, reloadKey, t]);
 
   useEffect(() => {
     if (!viewTenantId) {
+      setSummary(null);
       setDefaultQuota(null);
       return;
     }
     let cancelled = false;
+    setSummaryLoading(true);
     setDefaultQuotaLoading(true);
+    quotaService
+      .getPersonalCapacitySummary(viewTenantId)
+      .then((data) => {
+        if (!cancelled) setSummary(data);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          console.warn(
+            "Failed to fetch personal KB capacity summary:",
+            getErrorMessage(err)
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setSummaryLoading(false);
+      });
     quotaService
       .getPersonalDefaultQuota(viewTenantId)
       .then((data) => {
@@ -456,7 +626,7 @@ export default function PersonalKnowledgeBaseCapacity({
         })
         .catch((err: unknown) => {
           message.error(
-            getErrorMessage(err) ||
+            getLocalizedQuotaErrorMessage(err, t) ||
               t("tenantResources.personalCapacity.detailLoadFailed")
           );
         })
@@ -488,7 +658,7 @@ export default function PersonalKnowledgeBaseCapacity({
         setReloadKey((key) => key + 1);
       } catch (err: unknown) {
         message.error(
-          getErrorMessage(err) ||
+          getQuotaSubmitErrorMessage(err, t) ||
             t("tenantResources.personalCapacity.quotaUpdateFailed")
         );
       }
@@ -511,23 +681,99 @@ export default function PersonalKnowledgeBaseCapacity({
     }
   };
 
-  const displayUsers = useMemo(() => {
-    if (!searchMode) return users;
-    const start = (page - 1) * pageSize;
-    return users.slice(start, start + pageSize);
-  }, [users, searchMode, page, pageSize]);
-  const displayTotal = searchMode ? users.length : total;
-
   const sortOrderFor = (field: SortField): "ascend" | "descend" | null =>
     sortBy === field ? (sortOrder === "asc" ? "ascend" : "descend") : null;
+
+  const defaultQuotaText = useMemo(() => {
+    if (summary?.default_quota_bytes != null) {
+      return (
+        summary.default_quota_readable ||
+        formatBytes(summary.default_quota_bytes)
+      );
+    }
+    if (defaultQuota?.unlimited || defaultQuota?.quota_limit_bytes == null) {
+      return t("quota.unlimited");
+    }
+    return (
+      defaultQuota.quota_limit_readable ||
+      formatBytes(defaultQuota.quota_limit_bytes)
+    );
+  }, [summary, defaultQuota, t]);
+
+  const statCards = useMemo(() => {
+    const cards: Array<{
+      key: string;
+      label: string;
+      value: React.ReactNode;
+      action?: React.ReactNode;
+    }> = [
+      {
+        key: "users",
+        label: t("tenantResources.personalCapacity.usersWithPersonalKb"),
+        value: summary?.user_count ?? 0,
+      },
+      {
+        key: "kbs",
+        label: t("tenantResources.personalCapacity.personalKbTotal"),
+        value: summary?.kb_count ?? 0,
+      },
+      {
+        key: "usage",
+        label: t("tenantResources.personalCapacity.personalKbUsage"),
+        value: summary?.total_readable || formatBytes(summary?.total_bytes),
+      },
+      {
+        key: "allocated",
+        label: t("tenantResources.personalCapacity.allocatedQuota"),
+        value:
+          summary?.allocated_quota_readable ||
+          formatBytes(summary?.allocated_quota_bytes),
+      },
+      {
+        key: "default",
+        label: t("tenantResources.personalCapacity.defaultQuota"),
+        value: defaultQuotaText,
+        action: canManage ? (
+          <Button
+            type="link"
+            size="small"
+            className="h-auto p-0"
+            onClick={() => {
+              setQuotaModalMode("default");
+              setQuotaTarget(null);
+              setQuotaModalOpen(true);
+            }}
+          >
+            {t("tenantResources.personalCapacity.modify")}
+          </Button>
+        ) : undefined,
+      },
+    ];
+    return cards;
+  }, [summary, defaultQuotaText, canManage, t]);
 
   const columns: ColumnsType<PersonalCapacityUser> = [
     {
       title: t("tenantResources.personalCapacity.user"),
+      dataIndex: "user_name",
       key: "user_name",
-      width: 220,
-      sorter: true,
-      sortOrder: sortOrderFor("user_name"),
+      width: 200,
+      filteredValue: search ? [search] : null,
+      filterIcon: (filtered) => (
+        <Search
+          size={14}
+          className={filtered ? "text-blue-600" : "text-gray-500"}
+        />
+      ),
+      filterDropdown: ({ close, visible }) => (
+        <CompactUserSearchFilter
+          value={search}
+          onChange={setSearch}
+          placeholder={t("tenantResources.personalCapacity.searchPlaceholder")}
+          close={close}
+          visible={visible}
+        />
+      ),
       render: (_: unknown, record: PersonalCapacityUser) => (
         <div className="min-w-0">
           <Tooltip title={record.user_name || record.user_id}>
@@ -555,46 +801,17 @@ export default function PersonalKnowledgeBaseCapacity({
     },
     {
       title: t("tenantResources.personalCapacity.used"),
+      dataIndex: "total_bytes",
       key: "total_bytes",
-      width: 180,
+      width: 150,
       sorter: true,
       sortOrder: sortOrderFor("total_bytes"),
-      render: (_: unknown, record: PersonalCapacityUser) => {
-        const usagePct =
-          record.effective_quota_bytes && record.effective_quota_bytes > 0
-            ? Math.min(
-                100,
-                Math.round(
-                  (record.total_bytes / record.effective_quota_bytes) * 100
-                )
-              )
-            : null;
-        return (
-          <div className="min-w-[120px]">
-            <div>
-              {record.total_readable || formatBytes(record.total_bytes)}
-            </div>
-            {usagePct != null && (
-              <Progress
-                percent={usagePct}
-                size="small"
-                strokeColor={
-                  usagePct >= 100
-                    ? "#ff4d4f"
-                    : usagePct >= 80
-                      ? "#faad14"
-                      : "#52c41a"
-                }
-                format={() => ""}
-                style={{ marginBottom: 0, width: 120 }}
-              />
-            )}
-          </div>
-        );
-      },
+      render: (_: unknown, record: PersonalCapacityUser) =>
+        record.total_readable || formatBytes(record.total_bytes),
     },
     {
       title: t("tenantResources.personalCapacity.quota"),
+      dataIndex: "quota_limit_bytes",
       key: "quota_limit_bytes",
       width: 180,
       sorter: true,
@@ -618,6 +835,42 @@ export default function PersonalKnowledgeBaseCapacity({
               </Tag>
             )}
           </Space>
+        );
+      },
+    },
+    {
+      title: t("tenantResources.personalCapacity.usageRate"),
+      dataIndex: "usage_rate",
+      key: "usage_rate",
+      width: 160,
+      sorter: true,
+      sortOrder: sortOrderFor("usage_rate"),
+      render: (_: unknown, record: PersonalCapacityUser) => {
+        const quotaBytes = record.effective_quota_bytes;
+        if (!quotaBytes || quotaBytes <= 0) {
+          return <span>{t("quota.unlimited")}</span>;
+        }
+        const pct =
+          record.usage_rate ??
+          Math.round((record.total_bytes / quotaBytes) * 100);
+        const red = pct > 90;
+        return (
+          <div className="flex items-center gap-2">
+            <Progress
+              percent={Math.min(pct, 100)}
+              size="small"
+              strokeColor={red ? "#ff4d4f" : "#1677ff"}
+              format={() => ""}
+              style={{ margin: 0, width: 90 }}
+            />
+            <span
+              className={`text-xs ${
+                red ? "text-red-500 font-medium" : "text-gray-600"
+              }`}
+            >
+              {pct}%
+            </span>
+          </div>
         );
       },
     },
@@ -650,7 +903,16 @@ export default function PersonalKnowledgeBaseCapacity({
       dataIndex: "name",
       key: "name",
       width: 240,
-      render: (value: string) => value || "-",
+      render: (value: string, record: PersonalKnowledgeBaseItem) => (
+        <Button
+          type="link"
+          size="small"
+          className="h-auto p-0"
+          onClick={() => setKbDetailTarget(record)}
+        >
+          {value || "-"}
+        </Button>
+      ),
     },
     {
       title: t("tenantResources.personalCapacity.source"),
@@ -683,7 +945,9 @@ export default function PersonalKnowledgeBaseCapacity({
       key: "store_size",
       width: 130,
       render: (value: string | null, record: PersonalKnowledgeBaseItem) =>
-        value || formatBytes(record.store_size_bytes),
+        record.total_size ||
+        value ||
+        formatBytes(record.total_size_bytes ?? record.store_size_bytes),
     },
     {
       title: t("tenantResources.personalCapacity.kbQuota"),
@@ -696,7 +960,7 @@ export default function PersonalKnowledgeBaseCapacity({
           : record.quota_limit_readable || formatBytes(value),
     },
     {
-      title: t("common.updated"),
+      title: t("tenantResources.personalCapacity.lastUpdated"),
       dataIndex: "updated_at",
       key: "updated_at",
       width: 160,
@@ -728,6 +992,7 @@ export default function PersonalKnowledgeBaseCapacity({
         dataSource={kbs}
         rowKey="kb_id"
         size="small"
+        rowHoverable={false}
         pagination={{ pageSize: 10, showSizeChanger: false }}
       />
     );
@@ -739,7 +1004,7 @@ export default function PersonalKnowledgeBaseCapacity({
         <Alert
           type="warning"
           showIcon
-          message={t("tenantResources.personalCapacity.noPermission")}
+          title={t("tenantResources.personalCapacity.noPermission")}
         />
       </div>
     );
@@ -747,21 +1012,31 @@ export default function PersonalKnowledgeBaseCapacity({
 
   return (
     <div className="flex flex-col h-full overflow-hidden gap-3">
-      <div className="flex flex-wrap items-center justify-between gap-2 px-1">
-        <div className="flex items-center gap-2">
-          <span className="text-sm text-gray-600">
-            {t("tenantResources.personalCapacity.defaultQuota")}:
-          </span>
-          <Spin spinning={defaultQuotaLoading} size="small">
-            <span className="text-sm font-medium">
-              {defaultQuota?.unlimited ||
-              defaultQuota?.quota_limit_bytes == null
-                ? t("quota.unlimited")
-                : defaultQuota.quota_limit_readable ||
-                  formatBytes(defaultQuota.quota_limit_bytes)}
-            </span>
-          </Spin>
-        </div>
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3 px-1">
+        {statCards.map((card) => (
+          <div
+            key={card.key}
+            className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md p-4 min-w-0"
+          >
+            <div className="text-xs text-gray-500 mb-1 truncate">
+              {card.label}
+            </div>
+            <div className="flex items-center justify-between gap-2">
+              <Spin
+                spinning={summaryLoading || defaultQuotaLoading}
+                size="small"
+              >
+                <span className="text-xl font-semibold truncate">
+                  {card.value}
+                </span>
+              </Spin>
+              {card.action}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="flex flex-wrap items-center justify-end gap-2 px-1">
         <div className="flex flex-wrap items-center gap-2">
           {isSuperAdmin && (
             <Select
@@ -776,16 +1051,6 @@ export default function PersonalKnowledgeBaseCapacity({
               onChange={(value: string) => setViewTenantId(value)}
             />
           )}
-          <Input
-            prefix={<Search className="h-4 w-4 text-gray-400" />}
-            placeholder={t(
-              "tenantResources.personalCapacity.searchPlaceholder"
-            )}
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            allowClear
-            style={{ width: 220 }}
-          />
           {canManage && (
             <Button
               type="primary"
@@ -809,37 +1074,42 @@ export default function PersonalKnowledgeBaseCapacity({
           />
         </div>
       ) : (
-        <Table
-          columns={columns}
-          dataSource={displayUsers}
-          rowKey="user_id"
-          loading={loading}
-          onChange={handleTableChange}
-          locale={{
-            emptyText: t("tenantResources.personalCapacity.noUsers"),
-          }}
-          expandable={{
-            expandedRowRender,
-            expandedRowKeys: expandedKeys,
-            onExpand: handleExpand,
-          }}
-          pagination={{
-            current: page,
-            pageSize,
-            total: displayTotal,
-            showSizeChanger: true,
-            showTotal: (value) =>
-              t("tenantResources.personalCapacity.total", {
-                total: value,
-              }),
-          }}
-          className="flex-1 min-h-0"
-          scroll={{ y: "calc(100vh - 560px)" }}
-        />
+        <ConfigProvider theme={PERSONAL_CAPACITY_TABLE_THEME}>
+          <Table
+            columns={columns}
+            dataSource={users}
+            rowKey="user_id"
+            loading={loading}
+            onChange={handleTableChange}
+            rowHoverable={false}
+            showSorterTooltip={false}
+            locale={{
+              emptyText: t("tenantResources.personalCapacity.noUsers"),
+            }}
+            expandable={{
+              expandedRowRender,
+              expandedRowKeys: expandedKeys,
+              onExpand: handleExpand,
+            }}
+            pagination={{
+              current: page,
+              pageSize,
+              total,
+              showSizeChanger: true,
+              showTotal: (value) =>
+                t("tenantResources.personalCapacity.total", {
+                  total: value,
+                }),
+            }}
+            className="flex-1 min-h-0"
+            scroll={{ y: "calc(100vh - 780px)" }}
+          />
+        </ConfigProvider>
       )}
 
       <PersonalQuotaModal
         open={quotaModalOpen}
+        mode={quotaModalMode}
         title={
           quotaModalMode === "user"
             ? t("tenantResources.personalCapacity.quotaModalTitle")
@@ -850,6 +1120,9 @@ export default function PersonalKnowledgeBaseCapacity({
             ? (quotaTarget?.effective_quota_bytes ?? null)
             : (defaultQuota?.quota_limit_bytes ?? null)
         }
+        currentUsageBytes={
+          quotaModalMode === "user" ? (quotaTarget?.total_bytes ?? null) : null
+        }
         currentUsageReadable={
           quotaModalMode === "user"
             ? (quotaTarget?.total_readable ?? null)
@@ -857,6 +1130,11 @@ export default function PersonalKnowledgeBaseCapacity({
         }
         onCancel={() => setQuotaModalOpen(false)}
         onSubmit={handleQuotaSubmit}
+      />
+
+      <KbDetailModal
+        kb={kbDetailTarget}
+        onClose={() => setKbDetailTarget(null)}
       />
     </div>
   );

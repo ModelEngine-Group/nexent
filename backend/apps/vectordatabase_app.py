@@ -8,9 +8,10 @@ from fastapi.responses import JSONResponse
 import re
 
 from consts.const import ASSET_OWNER_TENANT_ID, PERMISSION_READ
+from consts.error_code import ErrorCode
 from consts.exceptions import (
-    PersonalKbQuotaExceededError,
-    PersonalKbQuotaUnavailableError,
+    AppException,
+    DuplicateError,
 )
 from consts.model import ChunkCreateRequest, ChunkUpdateRequest, HybridSearchRequest, IndexingResponse
 from consts.scheduler import VALID_SUMMARY_FREQUENCIES, SUMMARY_FREQUENCY_OPTIONS_FOR_API
@@ -125,6 +126,11 @@ def create_new_index(
         )
     except HTTPException:
         raise
+    except DuplicateError as e:
+        raise HTTPException(
+            status_code=HTTPStatus.CONFLICT,
+            detail=str(e),
+        ) from e
     except (TypeError, ValueError) as e:
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
@@ -277,7 +283,8 @@ def get_embedding_model_status(
     Note: The path parameter is the internal index_name.
     """
     try:
-        _, tenant_id = get_current_user_id(authorization)
+        user_id, tenant_id = get_current_user_id(authorization)
+        require_knowledge_base_read_permission(index_name, user_id, tenant_id)
 
         # Get the knowledge base record by index_name
         knowledge_record = get_knowledge_record({
@@ -466,6 +473,38 @@ def get_list_indices(
 
 
 # Document Operations
+
+
+def _check_personal_kb_quota_before_indexing(
+    data: List[Dict[str, Any]],
+    knowledge_record: Optional[Dict[str, Any]],
+    tenant_id: str,
+    user_id: str,
+    index_name: str,
+) -> None:
+    """Validate personal quota before indexing documents into a private KB."""
+    if not knowledge_record or knowledge_record.get("ingroup_permission") != "PRIVATE":
+        return
+
+    try:
+        quota_service = QuotaService(tenant_id, user_id)
+        quota_service.check_personal_kb_quota(
+            user_id,
+            quota_service.get_pending_personal_upload_bytes(
+                data, knowledge_record
+            ),
+            kb_record=knowledge_record,
+        )
+    except AppException:
+        raise
+    except Exception as exc:
+        logger.error("Personal KB quota check failed for %s: %s", index_name, exc)
+        raise AppException(
+            ErrorCode.TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE,
+            f"Personal KB quota service unavailable: {str(exc)}",
+        ) from exc
+
+
 @router.post("/{index_name}/documents", response_model=IndexingResponse)
 def create_index_documents(
         index_name: str = Path(..., description="Name of the index"),
@@ -493,32 +532,13 @@ def create_index_documents(
             saved_embedding_model_id = knowledge_record.get(
                 'embedding_model_id')
 
-        if knowledge_record and knowledge_record.get("ingroup_permission") == "PRIVATE":
-            try:
-                QuotaService(tenant_id, user_id).check_personal_kb_quota(
-                    tenant_id,
-                    user_id,
-                    QuotaService.sum_upload_bytes(data),
-                    kb_record=knowledge_record,
-                )
-            except PersonalKbQuotaExceededError as exc:
-                raise HTTPException(
-                    status_code=HTTPStatus.FORBIDDEN,
-                    detail=f"Personal KB quota exceeded: {str(exc)}",
-                )
-            except PersonalKbQuotaUnavailableError as exc:
-                raise HTTPException(
-                    status_code=HTTPStatus.SERVICE_UNAVAILABLE,
-                    detail=f"Personal KB quota service unavailable: {str(exc)}",
-                )
-            except Exception as exc:
-                logger.error(
-                    "Personal KB quota check failed for %s: %s", index_name, exc
-                )
-                raise HTTPException(
-                    status_code=HTTPStatus.SERVICE_UNAVAILABLE,
-                    detail=f"Personal KB quota service unavailable: {str(exc)}",
-                )
+        _check_personal_kb_quota_before_indexing(
+            data,
+            knowledge_record,
+            tenant_id,
+            user_id,
+            index_name,
+        )
 
         # Use the saved model from knowledge base by model_id
         embedding_model, _ = get_embedding_model_by_id(
@@ -533,6 +553,8 @@ def create_index_documents(
             large_mode=large_mode,
             model_id=saved_embedding_model_id,
         )
+    except AppException:
+        raise
     except HTTPException:
         raise
     except Exception as e:
@@ -548,16 +570,21 @@ def create_index_documents(
 @router.get("/{index_name}/files")
 async def get_index_files(
         index_name: str = Path(..., description="Name of the index"),
-        vdb_core: VectorDatabaseCore = Depends(get_vector_db_core)
+        vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
+        authorization: Optional[str] = Header(None),
 ):
     """Get all files from an index, including those that are not yet stored in ES"""
     try:
+        user_id, tenant_id = get_current_user_id(authorization)
+        require_knowledge_base_read_permission(index_name, user_id, tenant_id)
         result = await ElasticSearchService.list_files(index_name, include_chunks=False, vdb_core=vdb_core)
         # Transform result to match frontend expectations
         return {
             "status": "success",
             "files": result.get("files", [])
         }
+    except HTTPException:
+        raise
     except Exception as e:
         error_msg = str(e)
         logger.error(f"Error indexing documents: {error_msg}")
@@ -628,6 +655,10 @@ async def delete_documents(
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST, detail=str(exc)
         )
+    except PermissionError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.FORBIDDEN, detail=str(exc)
+        )
     except HTTPException:
         raise
     except Exception as e:
@@ -646,6 +677,8 @@ async def get_document_error_info(
 ):
     """Get error information for a document"""
     try:
+        user_id, tenant_id = get_current_user_id(authorization)
+        require_knowledge_base_read_permission(index_name, user_id, tenant_id)
         celery_task_files = await get_all_files_status(index_name)
         file_status = celery_task_files.get(path_or_url)
 
@@ -725,6 +758,7 @@ def get_index_chunks(
     """Get chunks from the specified index, with optional pagination support"""
     try:
         user_id, tenant_id = get_current_user_id(authorization)
+        require_knowledge_base_read_permission(index_name, user_id, tenant_id)
 
         if path_or_url is not None and not check_file_access(
             path_or_url, user_id, tenant_id
@@ -747,6 +781,8 @@ def get_index_chunks(
             status_code=HTTPStatus.NOT_FOUND,
             detail=str(e)
         )
+    except HTTPException:
+        raise
     except Exception as e:
         error_msg = str(e)
         raise HTTPException(

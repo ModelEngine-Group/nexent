@@ -54,6 +54,7 @@ minio_config_mock.validate = MagicMock()
 with patch('backend.database.client.MinioClient', return_value=minio_client_mock), \
         patch('nexent.storage.minio_config.MinIOStorageConfig', return_value=minio_config_mock):
     from backend.database.knowledge_db import (
+        _lock_and_check_knowledge_name,
         create_knowledge_record,
         update_knowledge_record,
         delete_knowledge_record,
@@ -188,6 +189,7 @@ sys.modules['backend.database.db_models'] = db_models_mock
 
 # Import backend modules after all patches are applied
 from backend.database.knowledge_db import (
+        _lock_and_check_knowledge_name,
         create_knowledge_record,
         update_knowledge_record,
         delete_knowledge_record,
@@ -210,8 +212,40 @@ def mock_session():
     """Create a mock database session"""
     mock_session = MagicMock()
     mock_query = MagicMock()
+    mock_query.filter.return_value.first.return_value = None
     mock_session.query.return_value = mock_query
     return mock_session, mock_query
+
+
+def test_lock_and_check_knowledge_name_available(mock_session):
+    session, query = mock_session
+
+    _lock_and_check_knowledge_name(session, "tenant-1", "KB One")
+
+    session.execute.assert_called_once()
+    assert session.execute.call_args.args[1] == {
+        "lock_key": "knowledge-name:tenant-1:KB One"
+    }
+    query.filter.return_value.first.assert_called_once_with()
+
+
+def test_lock_and_check_knowledge_name_conflict(mock_session):
+    from consts.exceptions import DuplicateError
+
+    session, query = mock_session
+    query.filter.return_value.first.return_value = object()
+
+    with pytest.raises(DuplicateError, match="already exists"):
+        _lock_and_check_knowledge_name(session, "tenant-1", "KB One")
+
+
+def test_lock_and_check_knowledge_name_skips_legacy_missing_scope(mock_session):
+    session, _ = mock_session
+
+    _lock_and_check_knowledge_name(session, None, "KB One")
+    _lock_and_check_knowledge_name(session, "tenant-1", None)
+
+    session.execute.assert_not_called()
 
 
 def setup_mock_db_session(monkeypatch, session):

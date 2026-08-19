@@ -10,10 +10,18 @@ KnowledgeStorageContext = storage_service.KnowledgeStorageContext
 commit_uploaded_object = storage_service.commit_uploaded_object
 compensate_uploaded_objects = storage_service.compensate_uploaded_objects
 get_committed_bytes_by_kb = storage_service.get_committed_bytes_by_kb
+get_committed_source_bytes_by_paths = storage_service.get_committed_source_bytes_by_paths
 get_tenant_committed_source_bytes = storage_service.get_tenant_committed_source_bytes
 release_storage_charge = storage_service.release_storage_charge
 resolve_storage_context = storage_service.resolve_storage_context
 resolve_storage_reference = storage_service.resolve_storage_reference
+resolve_storage_object_knowledge = storage_service.resolve_storage_object_knowledge
+resolve_storage_object_access = storage_service.resolve_storage_object_access
+
+
+@pytest.fixture(autouse=True)
+def default_bucket(monkeypatch):
+    monkeypatch.setattr(storage_service, "MINIO_DEFAULT_BUCKET", "test-bucket")
 
 
 @pytest.fixture(autouse=True)
@@ -47,7 +55,7 @@ def test_resolve_storage_context_requires_tenant_owned_kb():
         tenant_id="tenant-a",
         knowledge_id=7,
         index_name="kb-a",
-        bucket_name="test-bucket",
+        bucket_name=storage_service.MINIO_DEFAULT_BUCKET,
     )
     get_record.assert_called_once_with({
         "index_name": "kb-a",
@@ -109,11 +117,40 @@ def test_storage_usage_wrappers_normalize_values():
     tenant_total.assert_called_once_with(tenant_id="tenant-a")
 
 
+def test_get_committed_source_bytes_by_paths_batches_by_bucket():
+    with patch.object(
+        storage_service,
+        "get_committed_source_bytes_by_object_names",
+        side_effect=[
+            {"knowledge_base/a.pdf": 300},
+            {"knowledge_base/b.pdf": 450},
+        ],
+    ) as get_committed:
+        result = get_committed_source_bytes_by_paths(
+            tenant_id="tenant-a",
+            knowledge_id=7,
+            paths=[
+                "knowledge_base/a.pdf",
+                "s3://other-bucket/knowledge_base/b.pdf",
+                "https://example.com/not-a-storage-object",
+            ],
+        )
+
+    assert result == {
+        "knowledge_base/a.pdf": 300,
+        "s3://other-bucket/knowledge_base/b.pdf": 450,
+    }
+    assert get_committed.call_count == 2
+
+
 @pytest.mark.parametrize(
     ("path_or_url", "expected"),
     [
-        ("knowledge_base/a.pdf", ("test-bucket", "knowledge_base/a.pdf")),
-        ("attachments/asset_owner/user-a/a.pdf", ("test-bucket", "attachments/asset_owner/user-a/a.pdf")),
+        ("knowledge_base/a.pdf", (storage_service.MINIO_DEFAULT_BUCKET, "knowledge_base/a.pdf")),
+        (
+            "attachments/asset_owner/user-a/a.pdf",
+            (storage_service.MINIO_DEFAULT_BUCKET, "attachments/asset_owner/user-a/a.pdf"),
+        ),
         ("s3://other-bucket/knowledge_base/a.pdf", ("other-bucket", "knowledge_base/a.pdf")),
         ("/other-bucket/knowledge_base/a.pdf", ("other-bucket", "knowledge_base/a.pdf")),
         ("https://example.com/a.pdf", None),
@@ -127,6 +164,76 @@ def test_resolve_storage_reference_normalizes_kb_source_paths(path_or_url, expec
         assert result is None
     else:
         assert (result.bucket_name, result.object_name) == expected
+
+
+def test_resolve_storage_object_knowledge_requires_consistent_active_ledger():
+    ledger = {
+        "tenant_id": "tenant-a",
+        "knowledge_id": 7,
+        "index_name": "kb-a",
+        "bucket_name": "test-bucket",
+        "object_name": "knowledge_base/a.pdf",
+    }
+    knowledge = {
+        "tenant_id": "tenant-a",
+        "knowledge_id": 7,
+        "index_name": "kb-a",
+        "ingroup_permission": "PRIVATE",
+    }
+    with patch.object(storage_service, "get_storage_object_by_identity", return_value=ledger), \
+            patch.object(storage_service, "get_knowledge_record", return_value=knowledge):
+        result = resolve_storage_object_knowledge(
+            "knowledge_base/a.pdf",
+            tenant_id="tenant-a",
+        )
+
+    assert result["ledger"] == ledger
+    assert result["knowledge"] == knowledge
+
+
+@pytest.mark.parametrize(
+    ("permission", "expected"),
+    [("EDIT", True), ("DELETE", True), ("READ", False)],
+)
+def test_resolve_storage_object_access_uses_kb_dac(permission, expected):
+    ownership = {
+        "knowledge": {
+            "tenant_id": "tenant-a",
+            "knowledge_id": 7,
+            "index_name": "kb-a",
+        },
+        "ledger": {"tenant_id": "tenant-a"},
+    }
+    with patch.object(storage_service, "resolve_storage_object_knowledge", return_value=ownership), \
+            patch(
+                "services.vectordatabase_service.ElasticSearchService"
+                ".resolve_knowledge_base_permission",
+                return_value="EDIT",
+            ) as resolve_permission:
+        result = resolve_storage_object_access(
+            "knowledge_base/a.pdf",
+            user_id="user-a",
+            tenant_id="tenant-a",
+            required_permission=permission,
+        )
+
+    assert result is expected
+    if permission != "READ":
+        resolve_permission.assert_called_once_with(
+            index_name="kb-a",
+            user_id="user-a",
+            tenant_id="tenant-a",
+        )
+
+
+def test_resolve_storage_object_access_denies_unresolved_object():
+    with patch.object(storage_service, "resolve_storage_object_knowledge", return_value=None):
+        assert not resolve_storage_object_access(
+            "knowledge_base/legacy.pdf",
+            user_id="user-a",
+            tenant_id="tenant-a",
+            required_permission="DELETE",
+        )
 
 
 def test_release_storage_charge_invalidates_only_after_ledger_release():

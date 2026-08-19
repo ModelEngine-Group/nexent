@@ -12,9 +12,11 @@ import type {
   UpdatePlatformCapacityPayload,
   UpdateTenantHardQuotaPayload,
   PersonalCapacityUsersResponse,
+  PersonalCapacitySummary,
   PersonalDefaultQuota,
   PersonalKbDetailResponse,
   PersonalQuotaPayload,
+  PersonalSelfCapacity,
 } from "@/types/quota";
 
 class QuotaService {
@@ -212,6 +214,7 @@ class QuotaService {
     page_size?: number;
     sort_by?: string;
     sort_order?: string;
+    keyword?: string;
   }): Promise<PersonalCapacityUsersResponse> {
     const url = this.buildPersonalCapacityUrl(
       API_ENDPOINTS.quota.personalUsers,
@@ -221,6 +224,7 @@ class QuotaService {
         page_size: params.page_size,
         sort_by: params.sort_by,
         sort_order: params.sort_order,
+        keyword: params.keyword,
       }
     );
     const response = await fetch(url, {
@@ -281,9 +285,30 @@ class QuotaService {
     });
     const data = await response.json();
     if (!response.ok) {
+      const detail =
+        data.detail && typeof data.detail === "object" ? data.detail : null;
       throw new ApiError(
-        data.error || response.status,
-        data.message || data.detail || "Failed to set personal KB quota"
+        data.code || data.error || detail?.code || response.status,
+        data.message ||
+          detail?.message ||
+          data.detail ||
+          "Failed to set personal KB quota",
+        data.details || detail?.details || null
+      );
+    }
+    return data;
+  }
+
+  async getPersonalSelfCapacity(): Promise<PersonalSelfCapacity> {
+    const response = await fetch(API_ENDPOINTS.quota.personalSelf, {
+      method: "GET",
+      headers: getAuthHeaders(),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new ApiError(
+        data.code || data.error || response.status,
+        data.message || data.detail || "Failed to get personal KB capacity"
       );
     }
     return data;
@@ -305,6 +330,29 @@ class QuotaService {
       throw new ApiError(
         data.error || response.status,
         data.message || data.detail || "Failed to get personal KB default quota"
+      );
+    }
+    return data;
+  }
+
+  async getPersonalCapacitySummary(
+    tenantId?: string | null
+  ): Promise<PersonalCapacitySummary> {
+    const url = this.buildPersonalCapacityUrl(
+      API_ENDPOINTS.quota.personalSummary,
+      { tenant_id: tenantId }
+    );
+    const response = await fetch(url, {
+      method: "GET",
+      headers: getAuthHeaders(),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new ApiError(
+        data.error || response.status,
+        data.message ||
+          data.detail ||
+          "Failed to get personal KB capacity summary"
       );
     }
     return data;

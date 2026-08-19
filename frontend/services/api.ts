@@ -684,6 +684,8 @@ export const API_ENDPOINTS = {
     personalUserQuota: (userId: string) =>
       `${API_BASE_URL}/capacity/personal/users/${userId}/quota`,
     personalDefaultQuota: `${API_BASE_URL}/capacity/personal/default-quota`,
+    personalSummary: `${API_BASE_URL}/capacity/personal/summary`,
+    personalSelf: `${API_BASE_URL}/capacity/personal/me`,
   },
   users: {
     list: `${API_BASE_URL}/users/list`,
@@ -742,7 +744,8 @@ export const API_ENDPOINTS = {
 export class ApiError extends Error {
   constructor(
     public code: string | number,
-    message: string
+    message: string,
+    public details?: Record<string, unknown> | null
   ) {
     super(message);
     this.name = "ApiError";

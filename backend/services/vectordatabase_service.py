@@ -48,6 +48,7 @@ from consts.const import (
     PERMISSION_READ,
     VectorDatabaseType,
 )
+from consts.exceptions import DuplicateError
 from consts.model import ChunkCreateRequest, ChunkUpdateRequest
 from database.attachment_db import delete_file, file_exists, get_file_stream
 from database.knowledge_db import (
@@ -64,6 +65,7 @@ from database.knowledge_db import (
 from database.knowledge_storage_object_db import list_committed_storage_objects
 from services.knowledge_storage_service import (
     release_storage_charge,
+    resolve_storage_object_knowledge,
     resolve_storage_reference,
 )
 from utils.str_utils import convert_list_to_string
@@ -524,9 +526,6 @@ class ElasticSearchService:
         if not record:
             raise ValueError(f"Knowledge base '{index_name}' not found")
 
-        if record.get("knowledge_sources") == "datamate":
-            return PERMISSION_READ
-
         user_tenant = get_user_tenant_by_user_id(user_id)
         if not user_tenant and not IS_SPEED_MODE:
             return None
@@ -932,6 +931,9 @@ class ElasticSearchService:
         with an explicit index_name.
         """
         try:
+            knowledge_name = knowledge_name.strip()
+            if not knowledge_name:
+                raise ValueError("Knowledge base name is required")
             if embedding_model_id is None:
                 raise ValueError("embedding_model_id is required")
 
@@ -991,7 +993,7 @@ class ElasticSearchService:
                 "knowledge_id": record_info["knowledge_id"],
                 "name": record_info.get("knowledge_name", knowledge_name),
             }
-        except ValueError:
+        except (DuplicateError, ValueError):
             raise
         except Exception as e:
             raise Exception(f"Error creating knowledge base: {str(e)}")
@@ -1871,6 +1873,14 @@ class ElasticSearchService:
                 f"Invalid scope '{scope}'. "
                 f"Must be one of: {ElasticSearchService.DOCUMENT_DELETE_SCOPES}"
             )
+
+        source_reference = resolve_storage_reference(path_or_url)
+        if source_reference is not None:
+            ownership = resolve_storage_object_knowledge(path_or_url)
+            if ownership is None or str(ownership["knowledge"].get("index_name")) != str(index_name):
+                raise PermissionError(
+                    "The storage object is not an active source object of this knowledge base"
+                )
 
         if scope == "source_only":
             await ElasticSearchService._assert_source_only_deletable(

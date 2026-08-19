@@ -280,14 +280,6 @@ class QuotaExceededError(Exception):
         self.exceeded_by_bytes = exceeded_by_bytes
 
 
-class PersonalKbQuotaExceededError(Exception):
-    """Raised when a personal KB upload exceeds the effective quota."""
-
-
-class PersonalKbQuotaUnavailableError(Exception):
-    """Raised when personal KB quota usage cannot be verified; uploads fail closed."""
-
-
 class PlatformQuotaConflictError(Exception):
     """Raised when a platform or tenant quota update violates allocation rules."""
 
