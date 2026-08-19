@@ -21,7 +21,13 @@ import { getI18nErrorMessage } from "@/const/errorMessageI18n";
 
 const { Text, Title } = Typography;
 
-export default function LabelsPage() {
+type AnnotationLabelsProps = {
+  embedded?: boolean;
+};
+
+export default function AnnotationLabels({
+  embedded = false,
+}: AnnotationLabelsProps) {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
   const [schemas, setSchemas] = useState<any[]>([]);
@@ -183,18 +189,33 @@ export default function LabelsPage() {
     },
   ];
 
+  const header = embedded ? (
+    <Flex justify="space-between" className="mb-3">
+      <Text strong>{t("agentEvaluation.annotationLabels")}</Text>
+      <Button
+        type="primary"
+        icon={<Plus className="size-4" />}
+        onClick={openCreate}
+      >
+        {t("agentEvaluation.createLabel")}
+      </Button>
+    </Flex>
+  ) : (
+    <Flex justify="space-between" className="mb-4">
+      <Title level={4}>{t("agentEvaluation.annotationLabels")}</Title>
+      <Button
+        type="primary"
+        icon={<Plus className="size-4" />}
+        onClick={openCreate}
+      >
+        {t("agentEvaluation.createLabel")}
+      </Button>
+    </Flex>
+  );
+
   return (
-    <div className="p-4 max-w-4xl mx-auto">
-      <Flex justify="space-between" className="mb-4">
-        <Title level={4}>{t("agentEvaluation.annotationLabels")}</Title>
-        <Button
-          type="primary"
-          icon={<Plus className="size-4" />}
-          onClick={openCreate}
-        >
-          {t("agentEvaluation.createLabel")}
-        </Button>
-      </Flex>
+    <div className={embedded ? "" : "p-4 max-w-4xl mx-auto"}>
+      {header}
       <Table
         columns={cols}
         dataSource={schemas}
@@ -245,6 +266,7 @@ export default function LabelsPage() {
               value={f.annotation_type}
               onChange={(v) => setF({ ...f, annotation_type: v })}
               options={TYPE_OPTIONS}
+              disabled={!!editing}
             />
           </Flex>
           {f.annotation_type === "classification" && (
