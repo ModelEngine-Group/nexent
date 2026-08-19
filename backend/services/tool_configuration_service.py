@@ -405,28 +405,30 @@ def _get_tool_name(tool_id: int) -> Optional[str]:
     return tools[0].get("name") if tools else None
 
 
+def _coerce_param_value(
+    tool_name: str, param_name: str, value_type: str, raw_value: Any
+) -> float:
+    """Coerce a raw parameter value to float, enforcing int-ness when declared."""
+    try:
+        numeric_value = float(raw_value)
+    except (TypeError, ValueError):
+        raise ValidationError(f"{tool_name} {param_name} must be a valid {value_type}")
+    if value_type == "int" and not numeric_value.is_integer():
+        raise ValidationError(f"{tool_name} {param_name} must be an integer")
+    return numeric_value
+
+
 def _validate_tool_param_ranges(tool_name: Optional[str], params: Dict[str, Any]):
     """Validate numeric parameter ranges against the tool's declared constraints."""
     constraints = TOOL_PARAM_RANGE_CONSTRAINTS.get(tool_name or "")
     if not constraints:
         return
     for param_name, (value_type, min_value, max_value) in constraints.items():
-        if param_name not in params:
-            continue
-        raw_value = params[param_name]
+        raw_value = params.get(param_name)
         # None means "not configured"; the DB layer drops it and the SDK falls back to its default.
         if raw_value is None:
             continue
-        try:
-            if value_type == "int":
-                numeric_value = float(raw_value)
-                if not numeric_value.is_integer():
-                    raise ValidationError(f"{tool_name} {param_name} must be an integer")
-                numeric_value = int(numeric_value)
-            else:
-                numeric_value = float(raw_value)
-        except (TypeError, ValueError):
-            raise ValidationError(f"{tool_name} {param_name} must be a valid {value_type}")
+        numeric_value = _coerce_param_value(tool_name, param_name, value_type, raw_value)
         if min_value is not None and numeric_value < min_value:
             raise ValidationError(f"{tool_name} {param_name} must be >= {min_value}")
         if max_value is not None and numeric_value > max_value:
