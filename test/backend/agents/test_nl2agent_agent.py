@@ -12,6 +12,7 @@ from agents.nl2agent_agent import (
 )
 from tool_collection.mcp.local_mcp_service import local_mcp_service
 from tool_collection.mcp.nl2agent_mcp_tools import (
+    FinalConfirmationPayload,
     GeneratedAgentDraft,
     InstalledMcpToolRecommendation,
     NL2A_WRAPPER_NAME,
@@ -153,6 +154,7 @@ def test_build_nl2agent_system_prompt_is_runtime_specific(
     assert "final_answer(" not in prompt
     assert 'subtype="local_mcp_recommendation"' in prompt
     assert 'subtype="installed_resource_binding"' in prompt
+    assert 'subtype="final_confirmation"' in prompt
     assert 'subtype="requirement_clarification"' in prompt
     assert 'subtype="agent_draft"' in prompt
     assert "save_agent_draft_fields" in prompt
@@ -160,7 +162,8 @@ def test_build_nl2agent_system_prompt_is_runtime_specific(
     assert "wrapped = runtime_wrapper(" in prompt
     assert "search_result=result" in prompt
     assert "recommend_resources" in prompt
-    assert "few_shots_prompt" not in prompt
+    assert "few_shots_prompt" in prompt
+    assert "abandoned_requirement_ids" in prompt
     if language == "en":
         assert "one to five schema-driven questions" in prompt
         assert "Prefer at most four focused questions" in prompt
@@ -170,7 +173,7 @@ def test_build_nl2agent_system_prompt_is_runtime_specific(
         assert "优先只问不超过四个聚焦问题" in prompt
         assert "文本题的主文本框已经是开放输入" in prompt
     code_blocks = re.findall(r"<code>\n(.*?)\n</code>", prompt, re.DOTALL)
-    assert len(code_blocks) == 7
+    assert len(code_blocks) == 9
     for code_block in code_blocks:
         ast.parse(code_block)
     assert code_blocks[-1].count('{"user_input":') == 2
@@ -423,6 +426,11 @@ async def test_create_nl2agent_agent_config_has_only_runtime_tools(language):
     wrapper_inputs = json.loads(config.tools[3].inputs)
     assert wrapper_inputs["subtype"] == "str"
     assert wrapper_inputs["search_result"] == "dict | None"
+    assert (
+        wrapper_inputs["requirements"]
+        == "list[FinalConfirmationRequirement] | None"
+    )
+    assert wrapper_inputs["abandoned_requirement_ids"] == "list[str] | None"
     assert wrapper_inputs["language"] == "str | None"
     assert (
         wrapper_inputs["few_shot_examples"]
@@ -529,6 +537,10 @@ def test_agent_draft_rejects_invalid_tool_binding_contract(overrides, message):
             "agent_draft requires parameters",
         ),
         (
+            {"subtype": "final_confirmation"},
+            "final_confirmation requires verified final_payload",
+        ),
+        (
             {"subtype": "unsupported"},
             "unsupported nl2a subtype",
         ),
@@ -537,6 +549,35 @@ def test_agent_draft_rejects_invalid_tool_binding_contract(overrides, message):
 def test_wrapper_rejects_invalid_workflow_contracts(arguments, message):
     with pytest.raises(ValueError, match=message):
         build_nl2a_wrapper(**arguments)
+
+
+def test_final_confirmation_payload_rejects_duplicate_requirement_ids():
+    common = {
+        "agent_id": 42,
+        "agent": {
+            "name": "research_assistant",
+            "display_name": "Research Assistant",
+            "description": "Research help",
+            "business_description": "Verify and summarize sources",
+        },
+        "resources": [],
+        "prompts": {
+            "duty_prompt": "Research",
+            "constraint_prompt": "",
+            "few_shots_prompt": "",
+            "greeting_message": "Hello",
+            "example_questions": ["What should I research?"],
+        },
+    }
+
+    with pytest.raises(ValidationError, match="requirement IDs must be unique"):
+        FinalConfirmationPayload(
+            **common,
+            requirements=[{"requirement_id": "research", "query": "Research"}],
+            abandoned_requirements=[
+                {"requirement_id": "research", "query": "Old research"}
+            ],
+        )
 
 
 def test_wrapper_renders_english_multi_tool_steps_as_executable_few_shots():

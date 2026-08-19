@@ -111,10 +111,16 @@ export interface Nl2AgentCardAction {
   result: Record<string, unknown>;
 }
 
-export interface Nl2AgentStateEvent {
-  event: "agent_draft_created";
-  agent_id: number;
-}
+export type Nl2AgentStateEvent =
+  | {
+      event: "agent_draft_created";
+      agent_id: number;
+    }
+  | {
+      event: "prompt_generation_failed";
+      agent_id: number;
+      failed_fields: Nl2aPromptField[];
+    };
 
 export interface Nl2aRequirementClarificationOption {
   option_id: string;
@@ -203,7 +209,40 @@ export type Nl2aRecommendedResource =
 export interface Nl2aFinalConfirmationPayload {
   subtype: "final_confirmation";
   agent_id: number;
+  agent: {
+    name: string;
+    display_name: string;
+    description: string;
+    business_description: string;
+  };
+  requirements: Nl2aFinalRequirement[];
+  abandoned_requirements: Nl2aFinalRequirement[];
+  resources: Array<{
+    resource_type: "tool" | "skill";
+    resource_id: number;
+    name: string;
+    description: string;
+  }>;
+  prompts: {
+    duty_prompt: string;
+    constraint_prompt: string;
+    few_shots_prompt: string;
+    greeting_message: string;
+    example_questions: string[];
+  };
 }
+
+export interface Nl2aFinalRequirement {
+  requirement_id: string;
+  query: string;
+}
+
+export type Nl2aPromptField =
+  | "duty_prompt"
+  | "constraint_prompt"
+  | "few_shots_prompt"
+  | "greeting_message"
+  | "example_questions";
 
 export type Nl2aPayload =
   | Nl2aRequirementClarificationPayload
@@ -783,6 +822,52 @@ function parseNl2aMessage(chunk: SseChunk): Nl2aMessage | null {
         return null;
       }
     }
+    if (content.subtype === "final_confirmation") {
+      const agent = content.agent as Record<string, unknown> | undefined;
+      const prompts = content.prompts as Record<string, unknown> | undefined;
+      const validRequirements = (value: unknown) =>
+        Array.isArray(value) &&
+        value.length <= 8 &&
+        value.every(
+          (requirement) =>
+            requirement &&
+            typeof requirement.requirement_id === "string" &&
+            typeof requirement.query === "string"
+        );
+      if (
+        !Number.isInteger(content.agent_id) ||
+        content.agent_id <= 0 ||
+        !agent ||
+        !["name", "display_name", "description", "business_description"].every(
+          (field) => typeof agent[field] === "string"
+        ) ||
+        !prompts ||
+        ![
+          "duty_prompt",
+          "constraint_prompt",
+          "few_shots_prompt",
+          "greeting_message",
+        ].every((field) => typeof prompts[field] === "string") ||
+        !Array.isArray(prompts.example_questions) ||
+        prompts.example_questions.some(
+          (question) => typeof question !== "string"
+        ) ||
+        !validRequirements(content.requirements) ||
+        !validRequirements(content.abandoned_requirements) ||
+        !Array.isArray(content.resources) ||
+        content.resources.some(
+          (resource) =>
+            !["tool", "skill"].includes(resource?.resource_type) ||
+            !Number.isInteger(resource?.resource_id) ||
+            resource.resource_id <= 0 ||
+            typeof resource.name !== "string" ||
+            typeof resource.description !== "string"
+        )
+      ) {
+        log.warn("[ChatModelAdapter] Ignored invalid final-card payload");
+        return null;
+      }
+    }
     return {
       type: "nl2a",
       tool_name: chunk.tool_name,
@@ -797,11 +882,33 @@ function parseNl2aMessage(chunk: SseChunk): Nl2aMessage | null {
 export function parseNl2AgentState(content: string): Nl2AgentStateEvent | null {
   try {
     const parsed = JSON.parse(content) as Record<string, unknown>;
+    if (!Number.isInteger(parsed.agent_id) || Number(parsed.agent_id) <= 0) {
+      return null;
+    }
     if (
-      Object.keys(parsed).length !== 2 ||
-      parsed.event !== "agent_draft_created" ||
-      !Number.isInteger(parsed.agent_id) ||
-      Number(parsed.agent_id) <= 0
+      parsed.event === "agent_draft_created" &&
+      Object.keys(parsed).length === 2
+    ) {
+      return parsed as unknown as Nl2AgentStateEvent;
+    }
+    const promptFields = new Set<Nl2aPromptField>([
+      "duty_prompt",
+      "constraint_prompt",
+      "few_shots_prompt",
+      "greeting_message",
+      "example_questions",
+    ]);
+    if (
+      parsed.event !== "prompt_generation_failed" ||
+      Object.keys(parsed).length !== 3 ||
+      !Array.isArray(parsed.failed_fields) ||
+      parsed.failed_fields.length === 0 ||
+      parsed.failed_fields.some(
+        (field) =>
+          typeof field !== "string" ||
+          !promptFields.has(field as Nl2aPromptField)
+      ) ||
+      new Set(parsed.failed_fields).size !== parsed.failed_fields.length
     ) {
       return null;
     }
@@ -1688,7 +1795,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         log.warn("[ChatModelAdapter] Ignored invalid nl2a_state payload");
         return;
       }
-      const eventKey = `${event.event}:${event.agent_id}`;
+      const eventKey = JSON.stringify(event);
       if (deliveredNl2AgentStates.has(eventKey)) return;
       deliveredNl2AgentStates.add(eventKey);
       custom?.onNl2AgentState?.(event);

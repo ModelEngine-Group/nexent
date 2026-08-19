@@ -542,6 +542,8 @@ async def test_mcp_search_registration_has_stable_name_schema_and_marker():
         "agent_id",
         "resource_result",
         "questions",
+        "requirements",
+        "abandoned_requirement_ids",
         "search_result",
         "selected_tool_ids",
         "language",
@@ -558,6 +560,7 @@ async def test_mcp_search_registration_has_stable_name_schema_and_marker():
     assert wrapper_tool.parameters["properties"]["subtype"]["enum"] == [
         "requirement_clarification",
         "installed_resource_binding",
+        "final_confirmation",
         "local_mcp_recommendation",
         "agent_draft",
     ]
@@ -640,6 +643,41 @@ async def test_save_agent_draft_fields_emits_state_only_for_creation(mocker):
     )
     assert "nl2a_state" not in updated_result
     assert json.loads(updated_result)["created"] is False
+
+
+@pytest.mark.asyncio
+async def test_save_agent_draft_fields_emits_prompt_failure_state(mocker):
+    mocker.patch.object(
+        nl2agent_mcp_tools_module,
+        "get_http_request",
+        return_value=SimpleNamespace(headers={"Authorization": "Bearer token"}),
+    )
+    mocker.patch.object(
+        nl2agent_mcp_tools_module,
+        "get_current_user_id",
+        return_value=("user-a", "tenant-a"),
+    )
+    mocker.patch.object(
+        nl2agent_service,
+        "save_agent_draft_fields_impl",
+        side_effect=nl2agent_service.Nl2AgentDraftSaveError(
+            "draft_save_failed",
+            retryable=True,
+        ),
+    )
+
+    result_json, state_wrapper = (
+        await save_agent_draft_fields(1042, {"duty_prompt": "Research"})
+    ).split("\n", 1)
+
+    assert json.loads(result_json)["code"] == "draft_save_failed"
+    assert json.loads(
+        state_wrapper.removeprefix("<nl2a_state>").removesuffix("</nl2a_state>")
+    ) == {
+        "event": "prompt_generation_failed",
+        "agent_id": 1042,
+        "failed_fields": ["duty_prompt"],
+    }
 
 
 @pytest.mark.asyncio
@@ -932,6 +970,65 @@ async def test_installed_binding_wrapper_rechecks_agent_and_candidates(mocker):
         user_id="user-a",
     )
     assert recommend_impl.await_args.kwargs["recommended_refs"] == ["tool:7"]
+
+
+@pytest.mark.asyncio
+async def test_final_confirmation_wrapper_uses_verified_service_payload(mocker):
+    mocker.patch.object(
+        nl2agent_mcp_tools_module,
+        "get_http_request",
+        return_value=SimpleNamespace(headers={"Authorization": "Bearer token"}),
+    )
+    mocker.patch.object(
+        nl2agent_mcp_tools_module,
+        "get_current_user_id",
+        return_value=("user-a", "tenant-a"),
+    )
+    mocker.patch(
+        "services.agent_draft_permission_service.require_agent_draft_edit"
+    )
+    final_payload = {
+        "subtype": "final_confirmation",
+        "agent_id": 42,
+        "agent": {
+            "name": "database_assistant",
+            "display_name": "Database Assistant",
+            "description": "Database description",
+            "business_description": "Database workflow",
+        },
+        "requirements": [
+            {"requirement_id": "research", "query": "Research sources"}
+        ],
+        "abandoned_requirements": [],
+        "resources": [],
+        "prompts": {
+            "duty_prompt": "Research",
+            "constraint_prompt": "",
+            "few_shots_prompt": "",
+            "greeting_message": "Hello",
+            "example_questions": ["What should I research?"],
+        },
+    }
+    build_final = mocker.patch.object(
+        nl2agent_service,
+        "build_final_confirmation_payload_impl",
+        new=AsyncMock(return_value=final_payload),
+    )
+
+    wrapped = await nl2a_wrapper(
+        subtype="final_confirmation",
+        agent_id=42,
+        requirements=[
+            {"requirement_id": "research", "query": "Research sources"}
+        ],
+        abandoned_requirement_ids=[],
+    )
+
+    assert _unwrap_nl2a(wrapped) == final_payload
+    assert build_final.await_args.kwargs["tenant_id"] == "tenant-a"
+    assert build_final.await_args.kwargs["requirements"][0].query == (
+        "Research sources"
+    )
 
 
 @pytest.mark.asyncio

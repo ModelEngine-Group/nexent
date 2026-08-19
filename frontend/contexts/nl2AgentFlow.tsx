@@ -11,7 +11,14 @@ import {
 } from "react";
 
 export type Nl2AgentFlowPhase =
-  "idle" | "clarifying" | "draft_created" | "binding" | "resources_bound";
+  | "idle"
+  | "clarifying"
+  | "draft_created"
+  | "binding"
+  | "generating"
+  | "generation_failed"
+  | "final_review"
+  | "completed";
 
 interface ActiveNl2AgentCard {
   key: string;
@@ -23,7 +30,9 @@ interface Nl2AgentFlowState {
   agentId: number | null;
   activeCard: ActiveNl2AgentCard | null;
   submittedCardKeys: ReadonlySet<string>;
+  failedPromptFields: readonly string[];
   isFormLocked: boolean;
+  isComposerDisabled: boolean;
   sessionGeneration: number;
 }
 
@@ -32,14 +41,18 @@ type Nl2AgentFlowAction =
   | { type: "register_card"; card: ActiveNl2AgentCard }
   | { type: "submit_card"; cardKey: string }
   | { type: "draft_created"; agentId: number }
-  | { type: "resources_bound"; agentId: number };
+  | { type: "resources_bound"; agentId: number }
+  | { type: "prompt_generation_failed"; agentId: number; fields: string[] }
+  | { type: "final_confirmed"; agentId: number };
 
 const INITIAL_STATE: Nl2AgentFlowState = {
   phase: "idle",
   agentId: null,
   activeCard: null,
   submittedCardKeys: new Set(),
+  failedPromptFields: [],
   isFormLocked: false,
+  isComposerDisabled: false,
   sessionGeneration: 0,
 };
 
@@ -63,8 +76,14 @@ function reducer(
             ? "clarifying"
             : action.card.subtype === "installed_resource_binding"
               ? "binding"
-              : state.phase,
+              : action.card.subtype === "final_confirmation"
+                ? "final_review"
+                : state.phase,
         activeCard: action.card,
+        failedPromptFields:
+          action.card.subtype === "final_confirmation"
+            ? []
+            : state.failedPromptFields,
         isFormLocked: state.agentId !== null || state.isFormLocked,
       };
     case "submit_card": {
@@ -84,13 +103,36 @@ function reducer(
         agentId: action.agentId,
         activeCard: null,
         isFormLocked: true,
+        isComposerDisabled: false,
       };
     case "resources_bound":
       return {
         ...state,
-        phase: "resources_bound",
+        phase: "generating",
         agentId: action.agentId,
+        failedPromptFields: [],
         isFormLocked: true,
+      };
+    case "prompt_generation_failed":
+      if (state.agentId !== null && state.agentId !== action.agentId) {
+        return state;
+      }
+      return {
+        ...state,
+        phase: "generation_failed",
+        agentId: action.agentId,
+        failedPromptFields: action.fields,
+        isFormLocked: true,
+      };
+    case "final_confirmed":
+      if (state.agentId !== action.agentId) return state;
+      return {
+        ...state,
+        phase: "completed",
+        activeCard: null,
+        failedPromptFields: [],
+        isFormLocked: false,
+        isComposerDisabled: true,
       };
   }
 }
@@ -101,6 +143,8 @@ interface Nl2AgentFlowContextValue extends Nl2AgentFlowState {
   submitCard: (key: string) => void;
   markDraftCreated: (agentId: number) => void;
   markResourcesBound: (agentId: number) => void;
+  markPromptGenerationFailed: (agentId: number, fields: string[]) => void;
+  markFinalConfirmed: (agentId: number) => void;
   isCardInteractive: (key: string) => boolean;
 }
 
@@ -131,6 +175,15 @@ export const Nl2AgentFlowProvider: FC<PropsWithChildren> = ({ children }) => {
     (agentId: number) => dispatch({ type: "resources_bound", agentId }),
     []
   );
+  const markPromptGenerationFailed = useCallback(
+    (agentId: number, fields: string[]) =>
+      dispatch({ type: "prompt_generation_failed", agentId, fields }),
+    []
+  );
+  const markFinalConfirmed = useCallback(
+    (agentId: number) => dispatch({ type: "final_confirmed", agentId }),
+    []
+  );
   const isCardInteractive = useCallback(
     (key: string) =>
       state.activeCard?.key === key && !state.submittedCardKeys.has(key),
@@ -144,11 +197,15 @@ export const Nl2AgentFlowProvider: FC<PropsWithChildren> = ({ children }) => {
       submitCard,
       markDraftCreated,
       markResourcesBound,
+      markPromptGenerationFailed,
+      markFinalConfirmed,
       isCardInteractive,
     }),
     [
       isCardInteractive,
       markDraftCreated,
+      markFinalConfirmed,
+      markPromptGenerationFailed,
       markResourcesBound,
       registerCard,
       resetFlow,

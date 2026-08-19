@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useId, useReducer, useState, type FC } from "react";
-import { useAui } from "@assistant-ui/react";
+import { useAui, useAuiState } from "@assistant-ui/react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
@@ -227,11 +227,19 @@ export const InstalledResourceBindingCard: FC<{
 }> = ({ payload, disabled = false }) => {
   const { t } = useTranslation("common");
   const aui = useAui();
+  const isRunning = useAuiState((state) => state.thread.isRunning);
   const queryClient = useQueryClient();
   const reactId = useId();
   const cardKey = `installed_resource_binding:${payload.agent_id}:${reactId}`;
-  const { registerCard, submitCard, markResourcesBound, isCardInteractive } =
-    useNl2AgentFlow();
+  const {
+    agentId: flowAgentId,
+    failedPromptFields,
+    phase,
+    registerCard,
+    submitCard,
+    markResourcesBound,
+    isCardInteractive,
+  } = useNl2AgentFlow();
   const [items, dispatch] = useReducer(
     reducer,
     payload.resources,
@@ -262,6 +270,11 @@ export const InstalledResourceBindingCard: FC<{
   const configuringItem = items.find(
     (item) => candidateRef(item) === configuringRef
   );
+  const canRetryGeneration =
+    isSubmitted &&
+    !isRunning &&
+    phase === "generation_failed" &&
+    flowAgentId === payload.agent_id;
 
   const reloadAgentSnapshot = async (
     expectedBindings: BindingItemState[]
@@ -452,6 +465,32 @@ export const InstalledResourceBindingCard: FC<{
     });
   };
 
+  const retryGeneration = () => {
+    if (!canRetryGeneration || disabled) return;
+    markResourcesBound(payload.agent_id);
+    const action: Nl2AgentCardAction = {
+      type: "nl2agent_card_action",
+      subtype: payload.subtype,
+      agent_id: payload.agent_id,
+      action: "retry_generation",
+      result: { failed_fields: failedPromptFields },
+    };
+    aui.thread().append({
+      role: "user",
+      content: [
+        {
+          type: "text",
+          text: t(
+            "nl2agent.resourceBinding.retryGenerationSummary",
+            "Retrying Prompt generation"
+          ),
+        },
+      ],
+      metadata: { custom: { nl2agentCardAction: action } },
+      startRun: true,
+    });
+  };
+
   const dialogResource = configuringItem?.resource;
   const toolForDialog: Tool | null =
     dialogResource?.candidate.resource_type === "tool"
@@ -579,6 +618,14 @@ export const InstalledResourceBindingCard: FC<{
           </p>
         ) : null}
         <div className="flex flex-wrap justify-end gap-2">
+          {canRetryGeneration ? (
+            <Button disabled={disabled} onClick={retryGeneration}>
+              {t(
+                "nl2agent.resourceBinding.retryGeneration",
+                "Retry Prompt generation"
+              )}
+            </Button>
+          ) : null}
           {!canContinue ? (
             <Button
               disabled={isLocked || isBinding || isSynchronizing}
@@ -593,7 +640,9 @@ export const InstalledResourceBindingCard: FC<{
             </Button>
           ) : null}
           <Button
-            disabled={isLocked || !canContinue || isSynchronizing}
+            disabled={
+              canRetryGeneration || isLocked || !canContinue || isSynchronizing
+            }
             onClick={continueFlow}
           >
             {isSynchronizing ? (

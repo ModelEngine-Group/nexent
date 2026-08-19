@@ -47,6 +47,11 @@ from services.prompt_template_service import (
 )
 from tool_collection.mcp.nl2agent_mcp_tools import (
     AgentDraftFields,
+    FinalConfirmationAgent,
+    FinalConfirmationPayload,
+    FinalConfirmationPrompts,
+    FinalConfirmationRequirement,
+    FinalConfirmationResource,
     InstalledMcpToolRecommendation,
     NL2AGENT_AGENT_ID_HEADER,
     RecommendResourcesOutput,
@@ -92,6 +97,15 @@ class Nl2AgentDraftSaveError(Exception):
         super().__init__(code)
         self.code = code
         self.retryable = retryable
+
+
+class Nl2AgentFinalConfirmationError(Exception):
+    """Stable final-review validation failure consumed by the MCP boundary."""
+
+    def __init__(self, code: str, failed_fields: list[str] | None = None):
+        super().__init__(code)
+        self.code = code
+        self.failed_fields = failed_fields or []
 
 
 def _ordered_updated_fields(fields: AgentDraftFields) -> list[str]:
@@ -776,12 +790,12 @@ def _parse_nl2agent_card_action_agent_id(query: str) -> int | None:
     return agent_id
 
 
-async def _build_verified_bound_resources_context(
+async def _load_verified_nl2agent_state(
     *,
     agent_id: int,
     tenant_id: str,
     user_id: str,
-) -> ContextItemInput:
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     draft = require_agent_draft_edit(
         agent_id=agent_id,
         tenant_id=tenant_id,
@@ -836,6 +850,20 @@ async def _build_verified_bound_resources_context(
             ),
         })
     facts.sort(key=lambda item: (item["resource_type"], item["resource_id"]))
+    return draft, facts
+
+
+async def _build_verified_bound_resources_context(
+    *,
+    agent_id: int,
+    tenant_id: str,
+    user_id: str,
+) -> ContextItemInput:
+    draft, facts = await _load_verified_nl2agent_state(
+        agent_id=agent_id,
+        tenant_id=tenant_id,
+        user_id=user_id,
+    )
     state = {
         "type": "nl2agent_verified_state",
         "agent_id": agent_id,
@@ -860,6 +888,101 @@ async def _build_verified_bound_resources_context(
         source=("database:agent_bindings",),
         priority=85,
         metadata={"authority": "tenant"},
+    )
+
+
+async def build_final_confirmation_payload_impl(
+    *,
+    agent_id: int,
+    requirements: list[FinalConfirmationRequirement],
+    abandoned_requirement_ids: list[str],
+    tenant_id: str,
+    user_id: str,
+) -> FinalConfirmationPayload:
+    """Build the final review exclusively from verified database state."""
+
+    requirement_ids = [item.requirement_id for item in requirements]
+    if len(requirements) > 8 or len(requirement_ids) != len(set(requirement_ids)):
+        raise Nl2AgentFinalConfirmationError("invalid_requirements")
+    abandoned_ids = set(abandoned_requirement_ids)
+    if (
+        len(abandoned_requirement_ids) != len(abandoned_ids)
+        or not abandoned_ids.issubset(requirement_ids)
+    ):
+        raise Nl2AgentFinalConfirmationError("invalid_requirements")
+
+    draft, facts = await _load_verified_nl2agent_state(
+        agent_id=agent_id,
+        tenant_id=tenant_id,
+        user_id=user_id,
+    )
+    basic_fields = ("name", "display_name", "description", "business_description")
+    missing_basic = [
+        field_name
+        for field_name in basic_fields
+        if not isinstance(draft.get(field_name), str)
+        or not draft[field_name].strip()
+    ]
+    if missing_basic:
+        raise Nl2AgentFinalConfirmationError(
+            "basic_fields_incomplete",
+            missing_basic,
+        )
+
+    required_prompt_fields = ["duty_prompt", "greeting_message"]
+    if facts:
+        required_prompt_fields.extend(["constraint_prompt", "few_shots_prompt"])
+    missing_prompts = [
+        field_name
+        for field_name in required_prompt_fields
+        if not isinstance(draft.get(field_name), str)
+        or not draft[field_name].strip()
+    ]
+    example_questions = draft.get("example_questions")
+    if (
+        not isinstance(example_questions, list)
+        or not example_questions
+        or any(not isinstance(item, str) or not item.strip() for item in example_questions)
+    ):
+        missing_prompts.append("example_questions")
+    if missing_prompts:
+        raise Nl2AgentFinalConfirmationError(
+            "prompt_fields_incomplete",
+            missing_prompts,
+        )
+
+    active_requirements = [
+        item for item in requirements if item.requirement_id not in abandoned_ids
+    ]
+    abandoned_requirements = [
+        item for item in requirements if item.requirement_id in abandoned_ids
+    ]
+    return FinalConfirmationPayload(
+        agent_id=agent_id,
+        agent=FinalConfirmationAgent(
+            name=draft["name"].strip(),
+            display_name=draft["display_name"].strip(),
+            description=draft["description"].strip(),
+            business_description=draft["business_description"].strip(),
+        ),
+        requirements=active_requirements,
+        abandoned_requirements=abandoned_requirements,
+        resources=[
+            FinalConfirmationResource(
+                resource_type=fact["resource_type"],
+                resource_id=fact["resource_id"],
+                name=fact["name"],
+                description=fact["description"],
+            )
+            for fact in facts
+        ],
+        prompts=FinalConfirmationPrompts(
+            duty_prompt=draft["duty_prompt"].strip(),
+            constraint_prompt=(draft.get("constraint_prompt") or "").strip(),
+            few_shots_prompt=(draft.get("few_shots_prompt") or "").strip(),
+            greeting_message=draft["greeting_message"].strip(),
+            example_questions=[item.strip() for item in example_questions],
+        ),
     )
 
 

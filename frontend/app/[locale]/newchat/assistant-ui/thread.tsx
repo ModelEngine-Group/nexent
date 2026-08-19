@@ -80,6 +80,7 @@ import { ToolRecommendations } from "../ui/tool-recommendations";
 import { AgentDraftCard } from "../ui/agent-draft-card";
 import { RequirementClarificationCard } from "../ui/requirement-clarification-card";
 import { InstalledResourceBindingCard } from "../ui/installed-resource-binding-card";
+import { FinalConfirmationCard } from "../ui/final-confirmation-card";
 import {
   ToolGroupContent,
   ToolGroupRoot,
@@ -1327,6 +1328,8 @@ const AssistantMessage: FC<{
             payload={nl2a.content}
             disabled={readOnly}
           />
+        ) : nl2a?.content.subtype === "final_confirmation" ? (
+          <FinalConfirmationCard payload={nl2a.content} disabled={readOnly} />
         ) : null}
         {skillFileAttachments?.length ? (
           <AssistantMessageAttachments attachments={skillFileAttachments} />

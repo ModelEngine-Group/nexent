@@ -982,7 +982,7 @@ Prompt 摘要
 2. 从数据库读取 Agent 基本信息。
 3. 读取 enabled ToolInstance/SkillInstance。
 4. 读取这些资源的真实名称、描述、输入和已配置字段名，不把凭据或原始密钥值注入模型。
-5. PR2 将最小 `bound_resources` 作为请求级 NL2Agent 上下文注入 `context_input`，只包含数据库确认的资源身份、说明、输入或配置字段名，不包含任何配置值或默认值；该上下文只用于确认绑定闭环，PR4 再补充 Agent 基本信息并用于 Prompt 生成。
+5. PR2 将最小 `bound_resources` 作为请求级 NL2Agent 上下文注入 `context_input`，只包含数据库确认的资源身份、说明、输入或配置字段名，不包含任何配置值或默认值；该上下文只用于确认绑定闭环，PR3 再补充 Agent 基本信息并用于 Prompt 生成。
 
 模型生成 Prompt 时不再使用搜索阶段的未安装候选或用户未绑定资源。
 
@@ -1123,8 +1123,8 @@ React 中的 `useEffect` 只用于最终卡出现后的外部状态读取同步�
 Gate 0 默认打开 NL2Agent Panel
 → PR1 协议与 Agent 草稿闭环
 → PR2 已安装资源搜索与绑定闭环
-→ PR3 未安装资源搜索与安装闭环
-→ PR4 Prompt 写库与最终确认闭环
+→ PR3 Prompt 写库与最终确认闭环
+→ PR4 未安装资源搜索与安装闭环
 → PR5 完整 E2E 与检索校准
 ```
 
@@ -1190,29 +1190,12 @@ Gate 0 默认打开 NL2Agent Panel
 3. 修改的后端模块单元测试覆盖率达到 90%，并完成绑定 API 验证。
 4. 本阶段按项目决策使用 `npm run check-all` 与桌面、平板、移动端人工验收，不新增或运行 Vitest/Playwright；该例外不延伸到后续阶段。
 
-### 14.6 PR3：未安装资源搜索与安装闭环（P0）
-
-实现范围：
-
-1. 实现 `search_uninstalled_resources(scope=internal)`，聚合 Nexent 官方 Skill、租户 Skill Repository 和租户 MCP Repository。
-2. 实现 `scope=external_registry`，接入 MCP 官方 Registry 的 latest active、双页和可安装性过滤。
-3. 实现未安装候选的 `candidate_ref`、排除列表、统一评分和多需求覆盖。
-4. 扩展 `recommend_resources`，返回 MCP/Skill 安装方式、`form_kind` 和现有配置 Schema。
-5. 实现逐资源安装卡，复用现有 Skill/MCP 安装 API，并支持安装失败重试、显式跳过和安装后真实资源重搜。
-6. 实现未覆盖需求回到澄清卡的分支，要求用户明确放弃、修改或结束流程。
-
-验收门槛：
-
-1. 平台内优先、Registry 按需补充的两阶段搜索顺序不可被模型绕过。
-2. Registry latest active、两页上限、安装方式选择和不可安装条目过滤均有集成测试。
-3. 修改模块单元测试覆盖率达到 90%，并完成安装 API 验证和安装卡 Playwright 验证。
-
-### 14.7 PR4：Prompt 写库与最终确认闭环（P0）
+### 14.6 PR3：Prompt 写库与最终确认闭环（P0）
 
 实现范围：
 
 1. 在 NL2Agent run 构建阶段注入数据库中的 Agent 基本信息和真实绑定资源。
-2. 调整 NL2Agent `max_steps=8`。
+2. 保持 NL2Agent `max_steps=8`。
 3. 实现五组 Prompt 字段分批写库、当前字段一次修正重试和失败后新一轮重试入口。
 4. 实现 final wrapper 的租户、草稿、Prompt 完整性和真实绑定校验。
 5. 实现最终确认卡、明确 `target_fields` 的局部修改以及需求/绑定变化后的全量 Prompt 重建。
@@ -1224,6 +1207,26 @@ Gate 0 默认打开 NL2Agent Panel
 2. 任一字段二次写入失败时不生成最终卡，已成功字段不回滚。
 3. 确认、局部修改、返回需求阶段、返回绑定阶段和完成后 Composer 禁用均有测试。
 4. 修改模块单元测试覆盖率达到 90%，并完成 Prompt 写库 API 验证和最终确认卡 Playwright 验证。
+
+在 PR4 合入前，当前已安装资源无法覆盖的需求仍沿用“明确放弃、修改需求或结束流程”，不得自动生成能力不完整的 Agent。
+
+### 14.7 PR4：未安装资源搜索与安装闭环（P0）
+
+实现范围：
+
+1. 实现 `search_uninstalled_resources(scope=internal)`，聚合 Nexent 官方 Skill、租户 Skill Repository 和租户 MCP Repository。
+2. 实现 `scope=external_registry`，接入 MCP 官方 Registry 的 latest active、双页和可安装性过滤。
+3. 实现未安装候选的 `candidate_ref`、排除列表、统一评分和多需求覆盖。
+4. 扩展 `recommend_resources`，返回 MCP/Skill 安装方式、`form_kind` 和现有配置 Schema。
+5. 实现逐资源安装卡，复用现有 Skill/MCP 安装 API，并支持安装失败重试、显式跳过和安装后真实资源重搜。
+6. 实现未覆盖需求回到澄清卡的分支，要求用户明确放弃、修改或结束流程。
+7. 安装或绑定变化后使当前 Prompt 失效，基于新的数据库事实全量重建 Prompt 并重新输出最终确认卡。
+
+验收门槛：
+
+1. 平台内优先、Registry 按需补充的两阶段搜索顺序不可被模型绕过。
+2. Registry latest active、两页上限、安装方式选择和不可安装条目过滤均有集成测试。
+3. 修改模块单元测试覆盖率达到 90%，并完成安装 API 验证和安装卡 Playwright 验证。
 
 ### 14.8 PR5：完整 E2E 与检索校准（P1/P2）
 

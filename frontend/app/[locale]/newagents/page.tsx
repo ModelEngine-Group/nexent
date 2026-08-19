@@ -70,7 +70,9 @@ function AgentSetupContent() {
   const initializeAgent = useAgentStore((state) => state.initialize);
   const {
     agentId: flowAgentId,
+    isComposerDisabled,
     markDraftCreated,
+    markPromptGenerationFailed,
     resetFlow,
     sessionGeneration,
   } = useNl2AgentFlow();
@@ -154,9 +156,13 @@ function AgentSetupContent() {
 
   const handleStateEvent = useCallback(
     (event: Nl2AgentStateEvent) => {
-      void synchronizeCreatedDraft(event);
+      if (event.event === "agent_draft_created") {
+        void synchronizeCreatedDraft(event);
+        return;
+      }
+      markPromptGenerationFailed(event.agent_id, event.failed_fields);
     },
-    [synchronizeCreatedDraft]
+    [markPromptGenerationFailed, synchronizeCreatedDraft]
   );
 
   return (
@@ -192,6 +198,7 @@ function AgentSetupContent() {
                   key={sessionGeneration}
                   agentId={currentAgentId ?? flowAgentId}
                   disabled={
+                    isComposerDisabled ||
                     isRequestedAgentLoading ||
                     (currentAgentId !== null && permissionReadOnly)
                   }

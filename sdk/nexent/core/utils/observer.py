@@ -125,7 +125,7 @@ class MessageObserver:
         # Control output language
         self.lang = lang
         self.enable_nl2a_wrapper = enable_nl2a_wrapper
-        self._nl2a_state_events: set[tuple[str, int]] = set()
+        self._nl2a_state_events: set[str] = set()
         self._nl2a_state_lock = threading.Lock()
 
         # Thread-local state for stream parsing. Must be created before
@@ -464,14 +464,41 @@ class MessageObserver:
         except (json.JSONDecodeError, TypeError):
             return None, visible_content
 
+        if not isinstance(payload, dict):
+            return None, visible_content
+        agent_id = payload.get("agent_id")
         if (
-            not isinstance(payload, dict)
-            or set(payload) != {"event", "agent_id"}
-            or payload.get("event") != "agent_draft_created"
-            or not isinstance(payload.get("agent_id"), int)
-            or isinstance(payload.get("agent_id"), bool)
-            or payload["agent_id"] <= 0
+            not isinstance(agent_id, int)
+            or isinstance(agent_id, bool)
+            or agent_id <= 0
         ):
+            return None, visible_content
+        event = payload.get("event")
+        if event == "agent_draft_created":
+            valid = set(payload) == {"event", "agent_id"}
+        elif event == "prompt_generation_failed":
+            failed_fields = payload.get("failed_fields")
+            valid = (
+                set(payload) == {"event", "agent_id", "failed_fields"}
+                and isinstance(failed_fields, list)
+                and bool(failed_fields)
+                and all(
+                    isinstance(field_name, str)
+                    and field_name
+                    in {
+                        "duty_prompt",
+                        "constraint_prompt",
+                        "few_shots_prompt",
+                        "greeting_message",
+                        "example_questions",
+                    }
+                    for field_name in failed_fields
+                )
+                and len(failed_fields) == len(set(failed_fields))
+            )
+        else:
+            valid = False
+        if not valid:
             return None, visible_content
         return json.dumps(payload, ensure_ascii=False), visible_content
 
@@ -503,8 +530,7 @@ class MessageObserver:
         active_invocation_id = active[0] if active is not None else None
 
         if nl2a_state_content is not None:
-            state_payload = json.loads(nl2a_state_content)
-            state_key = (state_payload["event"], state_payload["agent_id"])
+            state_key = nl2a_state_content
             with self._nl2a_state_lock:
                 should_emit_state = state_key not in self._nl2a_state_events
                 if should_emit_state:

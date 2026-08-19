@@ -9,6 +9,7 @@ from pydantic import ValidationError
 from consts.model import HistoryItem, NL2AgentRunRequest
 from services.nl2agent_service import (
     Nl2AgentDraftSaveError,
+    Nl2AgentFinalConfirmationError,
     Nl2AgentResourceError,
     _build_verified_bound_resources_context,
     _normalize_skill_config,
@@ -16,6 +17,7 @@ from services.nl2agent_service import (
     _parse_installed_binding_action,
     _resource_similarity,
     build_nl2agent_run_info,
+    build_final_confirmation_payload_impl,
     create_nl2agent_stream,
     recommend_installed_resources_impl,
     save_agent_draft_fields_impl,
@@ -24,6 +26,7 @@ from services.nl2agent_service import (
 )
 from tool_collection.mcp.nl2agent_mcp_tools import (
     AgentDraftFields,
+    FinalConfirmationRequirement,
     NL2AGENT_AGENT_ID_HEADER,
     ResourceCandidate,
     ResourceRequirement,
@@ -865,6 +868,144 @@ async def test_verified_binding_context_rereads_database_without_secret_values(m
     assert "catalog-skill-secret" not in context.content["text"]
     assert "instance-skill-secret" not in context.content["text"]
     assert "999" not in context.content["text"]
+
+
+@pytest.mark.asyncio
+async def test_build_final_confirmation_uses_database_state(mocker):
+    draft = {
+        "name": "database_assistant",
+        "display_name": "Database Assistant",
+        "description": "Database-backed description",
+        "business_description": "Verify and summarize sources",
+        "duty_prompt": "Verify sources and produce a report.",
+        "constraint_prompt": "1. Use weather_forecast for current weather.",
+        "few_shots_prompt": "Task 1: Check the weather.",
+        "greeting_message": "Hello, I can verify information.",
+        "example_questions": ["What is the weather?"],
+    }
+    facts = [
+        {
+            "resource_type": "tool",
+            "resource_id": 7,
+            "name": "weather_forecast",
+            "description": "Weather lookup",
+        }
+    ]
+    load_state = mocker.patch(
+        "services.nl2agent_service._load_verified_nl2agent_state",
+        new_callable=AsyncMock,
+        return_value=(draft, facts),
+    )
+
+    payload = await build_final_confirmation_payload_impl(
+        agent_id=42,
+        requirements=[
+            FinalConfirmationRequirement(
+                requirement_id="weather",
+                query="Check current weather",
+            ),
+            FinalConfirmationRequirement(
+                requirement_id="email",
+                query="Send the report by email",
+            ),
+        ],
+        abandoned_requirement_ids=["email"],
+        tenant_id="tenant-a",
+        user_id="user-a",
+    )
+
+    load_state.assert_awaited_once_with(
+        agent_id=42,
+        tenant_id="tenant-a",
+        user_id="user-a",
+    )
+    assert payload.agent.name == "database_assistant"
+    assert payload.prompts.duty_prompt == draft["duty_prompt"]
+    assert payload.resources[0].name == "weather_forecast"
+    assert [item.requirement_id for item in payload.requirements] == ["weather"]
+    assert [item.requirement_id for item in payload.abandoned_requirements] == [
+        "email"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_build_final_confirmation_allows_empty_resource_prompts(mocker):
+    mocker.patch(
+        "services.nl2agent_service._load_verified_nl2agent_state",
+        new_callable=AsyncMock,
+        return_value=(
+            {
+                "name": "writing_assistant",
+                "display_name": "Writing Assistant",
+                "description": "Improve writing",
+                "business_description": "Draft and revise text",
+                "duty_prompt": "Help users improve their writing.",
+                "constraint_prompt": "",
+                "few_shots_prompt": None,
+                "greeting_message": "Hello, what should we write?",
+                "example_questions": ["Improve this paragraph"],
+            },
+            [],
+        ),
+    )
+
+    payload = await build_final_confirmation_payload_impl(
+        agent_id=42,
+        requirements=[
+            FinalConfirmationRequirement(
+                requirement_id="writing",
+                query="Improve writing",
+            )
+        ],
+        abandoned_requirement_ids=[],
+        tenant_id="tenant-a",
+        user_id="user-a",
+    )
+
+    assert payload.resources == []
+    assert payload.prompts.constraint_prompt == ""
+    assert payload.prompts.few_shots_prompt == ""
+
+
+@pytest.mark.asyncio
+async def test_build_final_confirmation_rejects_incomplete_resource_prompts(mocker):
+    mocker.patch(
+        "services.nl2agent_service._load_verified_nl2agent_state",
+        new_callable=AsyncMock,
+        return_value=(
+            {
+                "name": "research_assistant",
+                "display_name": "Research Assistant",
+                "description": "Research help",
+                "business_description": "Research sources",
+                "duty_prompt": "Research sources.",
+                "constraint_prompt": "Use search.",
+                "few_shots_prompt": "",
+                "greeting_message": "Hello",
+                "example_questions": ["Research this topic"],
+            },
+            [
+                {
+                    "resource_type": "tool",
+                    "resource_id": 7,
+                    "name": "search",
+                    "description": "Search sources",
+                }
+            ],
+        ),
+    )
+
+    with pytest.raises(Nl2AgentFinalConfirmationError) as exc_info:
+        await build_final_confirmation_payload_impl(
+            agent_id=42,
+            requirements=[],
+            abandoned_requirement_ids=[],
+            tenant_id="tenant-a",
+            user_id="user-a",
+        )
+
+    assert exc_info.value.code == "prompt_fields_incomplete"
+    assert exc_info.value.failed_fields == ["few_shots_prompt"]
 
 
 @pytest.mark.asyncio

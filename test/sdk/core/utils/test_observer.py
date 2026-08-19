@@ -573,6 +573,26 @@ class TestMessageObserver:
         assert messages[1]["content"] == '{"status":"success"}'
         assert messages[2]["content"] == '{"status":"success"}'
 
+    def test_execution_logs_extract_prompt_generation_failure_state(self):
+        observer = MessageObserver(lang="en", enable_nl2a_wrapper=True)
+        content = (
+            '{"status":"error","code":"draft_save_failed"}\n'
+            '<nl2a_state>{"event":"prompt_generation_failed","agent_id":1042,'
+            '"failed_fields":["duty_prompt"]}</nl2a_state>'
+        )
+
+        observer.add_message("nl2agent", ProcessType.EXECUTION_LOGS, content)
+
+        messages = [json.loads(item) for item in observer.get_cached_message()]
+        assert json.loads(messages[0]["content"]) == {
+            "event": "prompt_generation_failed",
+            "agent_id": 1042,
+            "failed_fields": ["duty_prompt"],
+        }
+        assert messages[1]["content"] == (
+            '{"status":"error","code":"draft_save_failed"}'
+        )
+
     @pytest.mark.parametrize(
         "state_payload",
         [
@@ -580,6 +600,10 @@ class TestMessageObserver:
             '{"event":"agent_draft_created","agent_id":0}',
             '{"event":"draft_updated","agent_id":1042}',
             '{"event":"agent_draft_created","agent_id":1042,"extra":true}',
+            '{"event":"prompt_generation_failed","agent_id":1042,'
+            '"failed_fields":["unknown_prompt"]}',
+            '{"event":"prompt_generation_failed","agent_id":1042,'
+            '"failed_fields":[]}',
             '["agent_draft_created",1042]',
         ],
     )
