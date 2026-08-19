@@ -25,6 +25,7 @@ from fastapi.testclient import TestClient
 from consts.const import AGENT_PROMPTS_HIDDEN_FLAG, ASSET_OWNER_TENANT_ID
 from consts.exceptions import UnauthorizedError
 from consts.model import NL2AgentRunRequest
+from http import HTTPStatus
 
 # Filter out deprecation warnings from third-party libraries
 warnings.filterwarnings(
@@ -2342,3 +2343,80 @@ def test_get_agent_knowledge_capabilities_api_internal_error(mocker, mock_auth_h
     )
 
     assert response.status_code == 500
+
+
+# generate_guardrail_rules_api Tests
+# ---------------------------------------------------------------------------
+
+
+def test_generate_guardrail_rules_api_success(mocker, mock_auth_header):
+    """generate_guardrail_rules_api returns the envelope on success."""
+    mocker.patch(
+        "apps.agent_app.get_current_user_info",
+        return_value=("user-1", "tenant-1", "zh"),
+    )
+    mocker.patch(
+        "apps.agent_app.generate_guardrail_rules_impl",
+        return_value={"rules": [{"pattern": ".*", "action": "block"}]},
+    )
+
+    response = config_client.post(
+        "/agent/generate_guardrail_rules",
+        json={
+            "description": "block profanity",
+            "model_id": 1,
+            "language": "zh",
+        },
+        headers=mock_auth_header,
+    )
+
+    assert response.status_code == HTTPStatus.OK
+    body = response.json()
+    assert body["message"] == "Success"
+    assert body["data"]["rules"][0]["action"] == "block"
+
+
+def test_generate_guardrail_rules_api_with_auth_language_fallback(mocker, mock_auth_header):
+    """When language param is empty, auth_language is used as fallback."""
+    mocker.patch(
+        "apps.agent_app.get_current_user_info",
+        return_value=("user-1", "tenant-1", "en"),
+    )
+    mocker.patch(
+        "apps.agent_app.generate_guardrail_rules_impl",
+        return_value={"rules": []},
+    )
+
+    response = config_client.post(
+        "/agent/generate_guardrail_rules",
+        json={"description": "block profanity", "model_id": 1, "language": ""},
+        headers=mock_auth_header,
+    )
+
+    assert response.status_code == HTTPStatus.OK
+
+
+def test_generate_guardrail_rules_api_internal_error(mocker, mock_auth_header):
+    """Generic Exception propagates as HTTP 500."""
+    mocker.patch(
+        "apps.agent_app.get_current_user_info",
+        return_value=("user-1", "tenant-1", "zh"),
+    )
+    mocker.patch(
+        "apps.agent_app.generate_guardrail_rules_impl",
+        side_effect=RuntimeError("unexpected failure"),
+    )
+
+    response = config_client.post(
+        "/agent/generate_guardrail_rules",
+        json={"description": "block profanity", "model_id": 1},
+        headers=mock_auth_header,
+    )
+
+    assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+    body = response.json()
+    assert body["detail"] == "Generate guardrail rules error."
+
+
+if __name__ == "__main__":
+    pytest.main([__file__])

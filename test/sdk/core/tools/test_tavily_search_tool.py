@@ -244,3 +244,65 @@ def test_image_filter_disabled(tavily_search_tool, mock_observer):
     expected_images = ["https://example.com/image0.jpg"]
     mock_observer.add_message.assert_any_call("", ProcessType.PICTURE_WEB,
                                               json.dumps({"images_url": expected_images}, ensure_ascii=False))
+
+
+class TavilyAsyncResponse:
+    def __init__(self, status=200, important=False, error=None):
+        self.status = status
+        self.important = important
+        self.error = error
+
+    async def __aenter__(self):
+        if self.error:
+            raise self.error
+        return self
+
+    async def __aexit__(self, *_):
+        return False
+
+    async def json(self):
+        return {"is_important": self.important}
+
+
+class TavilyAsyncSession:
+    def __init__(self, responses):
+        self.responses = iter(responses)
+        self.headers = []
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_):
+        return False
+
+    def post(self, url, data, headers):
+        self.headers.append(headers)
+        return next(self.responses)
+
+
+def test_filter_images_handles_important_nonimportant_and_errors(tavily_search_tool, mock_observer, mocker):
+    session = TavilyAsyncSession([
+        TavilyAsyncResponse(important=True),
+        TavilyAsyncResponse(important=False),
+        TavilyAsyncResponse(status=500),
+        TavilyAsyncResponse(error=RuntimeError("request failed")),
+    ])
+    mocker.patch.object(mock_aiohttp, "TCPConnector")
+    mocker.patch.object(mock_aiohttp, "ClientTimeout")
+    mocker.patch.object(mock_aiohttp, "ClientSession", return_value=session)
+    mock_observer.authorization = "Bearer test"
+
+    tavily_search_tool._filter_images(["a", "b", "c", "d"], "query")
+
+    assert session.headers[0] == {"Authorization": "Bearer test"}
+    assert json.loads(mock_observer.add_message.call_args[0][2]) == {"images_url": ["a"]}
+
+
+def test_filter_images_falls_back_when_client_setup_fails(tavily_search_tool, mock_observer, mocker):
+    mocker.patch.object(mock_aiohttp, "TCPConnector", side_effect=RuntimeError("setup failed"))
+
+    tavily_search_tool._filter_images(["https://image.test/a"], "query")
+
+    assert json.loads(mock_observer.add_message.call_args[0][2]) == {
+        "images_url": ["https://image.test/a"]
+    }

@@ -3890,5 +3890,45 @@ class TestSkillManagerInitDoubleCheckedLocking:
         assert call_state["count"] >= 2
 
 
+class TestSkillManagerFilePathAndTenantBoundaries:
+    def test_resolve_skill_file_path_rejects_empty_absolute_and_directory_paths(self, tmp_path):
+        skill_dir = str(tmp_path / "skill")
+        with pytest.raises(ValueError, match="non-empty"):
+            SkillManager._resolve_skill_file_path(skill_dir, "")
+        with pytest.raises(ValueError, match="absolute"):
+            SkillManager._resolve_skill_file_path(skill_dir, os.path.abspath("outside.txt"))
+        with pytest.raises(ValueError, match="must point to a file"):
+            SkillManager._resolve_skill_file_path(skill_dir, ".")
+
+    def test_tenant_skills_are_isolated(self):
+        with TempSkillDir() as temp:
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
+            manager.save_skill({"name": "shared", "description": "tenant a", "content": "A"}, tenant_id="a")
+            manager.save_skill({"name": "shared", "description": "tenant b", "content": "B"}, tenant_id="b")
+
+            assert manager.load_skill("shared", tenant_id="a")["description"] == "tenant a"
+            assert manager.load_skill("shared", tenant_id="b")["description"] == "tenant b"
+            assert manager.list_skills(tenant_id="missing") == []
+
+    def test_upload_explicit_md_and_update_bytesio(self):
+        with TempSkillDir() as temp:
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
+            content = """---
+name: explicit
+description: Explicit
+---
+# Body
+"""
+            uploaded = manager.upload_skill_from_file(content, file_type="md", tenant_id=None)
+            assert uploaded["name"] == "explicit"
+            updated = manager.update_skill_from_file(
+                io.BytesIO(content.replace("Explicit", "Updated").encode()),
+                "explicit",
+                file_type="md",
+                tenant_id=None,
+            )
+            assert updated["description"] == "Updated"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
