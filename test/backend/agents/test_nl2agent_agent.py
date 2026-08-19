@@ -158,9 +158,12 @@ def test_build_nl2agent_system_prompt_is_runtime_specific(
     assert 'subtype="requirement_clarification"' in prompt
     assert 'subtype="agent_draft"' in prompt
     assert "save_agent_draft_fields" in prompt
-    assert "result = runtime_search(agent_id=1042, requirements=[" in prompt
+    assert "raw_result = runtime_search(agent_id=1042, requirements=[" in prompt
+    assert "result = json.loads(raw_result)" in prompt
     assert "wrapped = runtime_wrapper(" in prompt
-    assert "search_result=result" in prompt
+    assert "resource_result = json.loads(raw_resource_result)" in prompt
+    assert "search_result = json.loads(result)" in prompt
+    assert "search_result=search_result" in prompt
     assert "recommend_resources" in prompt
     assert "few_shots_prompt" in prompt
     assert "abandoned_requirement_ids" in prompt
@@ -313,6 +316,26 @@ def test_installed_resource_binding_wrapper_preserves_verified_contract():
     assert payload["subtype"] == "installed_resource_binding"
     assert payload["agent_id"] == 42
     assert payload["resources"][0]["candidate"]["candidate_ref"] == "skill:12"
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {
+            "subtype": "installed_resource_binding",
+            "agent_id": 42,
+            "resource_result": '{"status":"success","resources":[]}',
+        },
+        {
+            "subtype": "local_mcp_recommendation",
+            "search_result": '{"status":"success","recommendations":[]}',
+            "selected_tool_ids": [],
+        },
+    ],
+)
+def test_wrapper_rejects_raw_json_string_parameters(arguments):
+    with pytest.raises(ValidationError):
+        build_nl2a_wrapper(**arguments)
 
 
 def test_recommend_resources_input_rejects_duplicates_and_unknown_recommended_refs():

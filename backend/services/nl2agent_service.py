@@ -18,7 +18,7 @@ from nexent.core.agents.context import (
     ContextManagerConfig,
 )
 from nexent.core.agents.run_agent import agent_run
-from nexent.core.utils.observer import MessageObserver
+from nexent.core.utils.observer import MessageObserver, ProcessType
 from rapidfuzz import fuzz
 
 from agents.create_agent_info import (
@@ -88,6 +88,44 @@ AGENT_DRAFT_CREATE_REQUIRED_FIELDS = (
     "description",
     "business_description",
 )
+
+
+class _Nl2AgentBoundaryObserver(MessageObserver):
+    """Stop an NL2Agent run after its first valid interactive payload."""
+
+    _STOP_FINAL_ANSWER = "<user_break>"
+    _STOP_ERROR = "Agent execution interrupted by external stop signal"
+
+    def __init__(self, *, lang: str, stop_event: threading.Event):
+        super().__init__(lang=lang, enable_nl2a_wrapper=True)
+        self._boundary_stop_event = stop_event
+        self._boundary_reached = False
+        self._boundary_lock = threading.Lock()
+
+    @property
+    def boundary_reached(self) -> bool:
+        with self._boundary_lock:
+            return self._boundary_reached
+
+    def add_message(self, agent_name, process_type, content, **kwargs):
+        if self.boundary_reached and (
+            (process_type == ProcessType.FINAL_ANSWER and content == self._STOP_FINAL_ANSWER)
+            or (process_type == ProcessType.ERROR and content == self._STOP_ERROR)
+        ):
+            return
+
+        nl2a_content = None
+        if process_type == ProcessType.EXECUTION_LOGS:
+            nl2a_content, _ = self._extract_nl2a_wrapper(content)
+
+        super().add_message(agent_name, process_type, content, **kwargs)
+
+        if nl2a_content is not None:
+            with self._boundary_lock:
+                if self._boundary_reached:
+                    return
+                self._boundary_reached = True
+            self._boundary_stop_event.set()
 
 
 class Nl2AgentDraftSaveError(Exception):
@@ -1091,17 +1129,18 @@ async def build_nl2agent_run_info(
     if mcp_headers:
         mcp_config["headers"] = mcp_headers
 
+    stop_event = threading.Event()
     run_info = AgentRunInfo(
         query=final_query,
         model_config_list=model_config_list,
-        observer=MessageObserver(
+        observer=_Nl2AgentBoundaryObserver(
             lang=language,
-            enable_nl2a_wrapper=True,
+            stop_event=stop_event,
         ),
         agent_config=agent_config,
         mcp_host=[mcp_config],
         history=_convert_history(request.history),
-        stop_event=threading.Event(),
+        stop_event=stop_event,
         capacity_snapshot=capacity_snapshot,
         safe_input_budget_snapshot=safe_input_budget_snapshot,
         enable_planning=False,
@@ -1128,9 +1167,18 @@ async def create_nl2agent_stream(
     )
 
     async def generate() -> AsyncIterator[str]:
+        boundary_delivered = False
         try:
             async for chunk in agent_run(run_info):
+                if boundary_delivered:
+                    continue
                 yield f"data: {chunk}\n\n"
+                try:
+                    boundary_delivered = (
+                        json.loads(chunk).get("type") == ProcessType.NL2A.value
+                    )
+                except (AttributeError, TypeError, json.JSONDecodeError):
+                    boundary_delivered = False
         except asyncio.CancelledError:
             raise
         except Exception:

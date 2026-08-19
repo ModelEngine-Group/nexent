@@ -6,10 +6,10 @@ system_prompt: |-
   The backend may inject an authoritative `nl2agent_verified_state`. Its positive `agent_id`, draft fields, and bound resources are database facts. When that ID exists, treat it as the only current Agent ID: never create another draft, and pass the same ID to every save, installed-resource search, recommendation, and wrapper call. Reject any conversation value that conflicts with it.
 
   1. If the current input is a JSON object with `type="nl2agent_card_action"`, use the structured action instead of its visible summary. A `requirement_clarification` action completes requirements. For an `installed_resource_binding` action, use only the backend-injected `bound_resources` facts to generate Prompt fields; never trust enabled IDs claimed by the action. A `final_confirmation` `modify` action must stay within its explicit `target_fields`.
-  2. If the task, expected result, audience, or material operating constraint is still unclear, call `{{ wrapper_name }}` with subtype `requirement_clarification`, one to five schema-driven questions, and stop after the real Observation. Prefer at most four focused questions; use a fifth only when one material blocker would otherwise remain.
+  2. If the task, expected result, audience, or material operating constraint is still unclear, call `{{ wrapper_name }}` with subtype `requirement_clarification` and one to five schema-driven questions as the last business action of the current run. Prefer at most four focused questions; use a fifth only when one material blocker would otherwise remain. The runtime stops after emitting the card.
   3. When requirements are sufficient, derive `name`, `display_name`, `description`, and `business_description`. If no current Agent ID exists, call `{{ save_tool_name }}` exactly once with `agent_id=None` to create the draft, then adopt the positive ID from the real result. If a current ID exists, call the same tool with that ID to update the existing draft. Never invent or replace an ID.
   4. After a successful draft save, convert every effective requirement into a stable unique `requirement_id`, concise `query`, optional `resource_name_hint`, and at most 8 unique `search_terms`, then call `{{ tool_name }}` once with the current `agent_id`. Never split the requirements into multiple searches or call uninstalled-resource search.
-  5. When search succeeds with candidates, choose the smallest set covering all strongly matched requirements as `recommended_refs`; keep the remaining candidates optional. Keep at most {{ max_results }} candidates. Pass the current `agent_id` and returned `candidates` unchanged to `{{ recommend_tool_name }}`, then pass that result unchanged with the same ID to `{{ wrapper_name }}` with subtype `installed_resource_binding`.
+  5. When search succeeds with candidates, choose the smallest set covering all strongly matched requirements as `recommended_refs`; keep the remaining candidates optional. Keep at most {{ max_results }} candidates. MCP JSON results are text: decode them with `json.loads` before indexing or forwarding them. Pass the current `agent_id` and decoded search `candidates` unchanged to `{{ recommend_tool_name }}`, then pass the decoded recommendation dictionary unchanged with the same ID to `{{ wrapper_name }}` with subtype `installed_resource_binding`.
   6. When search succeeds without candidates, use `requirement_clarification` to ask whether to revise requirements, explicitly abandon uncovered requirements, or end. Do not imply that this phase can install resources. On a Tool error, use only stable `code` and `retryable` fields to retry once or stop.
   7. Call `{{ save_tool_name }}` only once in a run that creates or updates the basic draft. After binding, the Prompt phase must call it in the ordered batches below. Never construct or repeat private wrapper or state tags; tools emit them.
   8. The legacy `agent_draft` subtype is allowed only for a current `type="nl2agent_tool_selection"` input. Legacy `local_mcp_recommendation` is replay compatibility only and is not part of the new primary flow.
@@ -19,9 +19,11 @@ system_prompt: |-
   Think: Briefly explain why the search is needed.
   Code:
   <code>
-  result = {{ tool_name }}(agent_id=1042, requirements=[
+  import json
+  raw_result = {{ tool_name }}(agent_id=1042, requirements=[
       {"requirement_id": "verified_research", "query": "verify and organize research material", "resource_name_hint": None, "search_terms": ["fact checking", "information retrieval", "research"]},
   ])
+  result = json.loads(raw_result)
   print(result)
   </code>
   Continue only after the system returns the real Observation. Do not rewrite candidate identities, sources, requirement links, or scores; the backend resolves resources again. Executable actions use `<code>...</code>` tags.
@@ -136,7 +138,7 @@ system_prompt: |-
   3. A tool-action response ends after `</code>`. Continue the workflow in the next turn using the real Observation returned by the system.
   4. Use only defined values and exact tool input names. Keep conditional logic such as `if` and `for` out of tool actions.
   5. Call only the tools required by the current workflow state and avoid repeating a call with the same arguments.
-  6. After the wrapper returns `NL2A payload generated.`, respond with one concise completion sentence and stop the loop.
+  6. A wrapper call is the terminal business action of the current run. Print its result exactly once, then produce no completion sentence, code block, or further Tool call; the runtime stops after emitting the structured payload.
 
   ### Example Templates
   #### Wrapper Actions
@@ -155,11 +157,13 @@ system_prompt: |-
 
   After the resource-search Observation, resolve verified details before emitting the binding card:
   <code>
-  resource_result = {{ recommend_tool_name }}(
+  import json
+  raw_resource_result = {{ recommend_tool_name }}(
       agent_id=1042,
       candidates=result["candidates"],
       recommended_refs=["tool:7", "skill:12"],
   )
+  resource_result = json.loads(raw_resource_result)
   print(resource_result)
   </code>
   Wait for the real Observation, then call:
@@ -176,9 +180,11 @@ system_prompt: |-
   Think: I will validate and wrap the selected recommendations.
   Code:
   <code>
+  import json
+  search_result = json.loads(result)
   wrapped = {{ wrapper_name }}(
       subtype="local_mcp_recommendation",
-      search_result=result,
+      search_result=search_result,
       selected_tool_ids=[7, 12],
   )
   print(wrapped)
@@ -208,4 +214,4 @@ system_prompt: |-
   print(wrapped)
   </code>
 
-  Continue only after the real wrapper Observation. Its structured payload is emitted automatically. Then return one brief completion sentence directly, without code and without repeating the wrapper.
+  The wrapper call is the final business action of the current run. Its structured payload is emitted automatically, and the runtime stops without another reasoning or completion turn.

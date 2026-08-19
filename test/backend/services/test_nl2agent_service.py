@@ -1,9 +1,11 @@
 import asyncio
 import json
+from threading import Event
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from nexent.core.agents.context import ContextItemInput, ContextItemType
+from nexent.core.utils.observer import ProcessType
 from pydantic import ValidationError
 
 from consts.model import HistoryItem, NL2AgentRunRequest
@@ -11,6 +13,7 @@ from services.nl2agent_service import (
     Nl2AgentDraftSaveError,
     Nl2AgentFinalConfirmationError,
     Nl2AgentResourceError,
+    _Nl2AgentBoundaryObserver,
     _build_verified_bound_resources_context,
     _normalize_skill_config,
     _normalize_tool_config,
@@ -42,6 +45,59 @@ def _basic_draft_fields(**overrides):
     }
     values.update(overrides)
     return AgentDraftFields(**values)
+
+
+def test_boundary_observer_stops_after_queuing_valid_nl2a_payload():
+    stop_event = Event()
+    observer = _Nl2AgentBoundaryObserver(lang="en", stop_event=stop_event)
+
+    observer.add_message(
+        "nl2agent",
+        ProcessType.EXECUTION_LOGS,
+        '<nl2a>{"subtype":"requirement_clarification","questions":['
+        '{"question_id":"expected_output","question_type":"text",'
+        '"title":"What should the agent produce?","required":true,'
+        '"options":[],"allow_other":false,"other_input_expanded":false}'
+        "]}</nl2a>"
+        "\nNL2A payload generated.",
+    )
+
+    messages = [json.loads(item) for item in observer.get_cached_message()]
+    assert stop_event.is_set()
+    assert observer.boundary_reached is True
+    assert [item["type"] for item in messages] == [
+        ProcessType.NL2A.value,
+        ProcessType.EXECUTION_LOGS.value,
+    ]
+    assert messages[1]["content"] == "NL2A payload generated."
+
+    observer.add_message("nl2agent", ProcessType.FINAL_ANSWER, "<user_break>")
+    observer.add_message(
+        "nl2agent",
+        ProcessType.ERROR,
+        "Agent execution interrupted by external stop signal",
+    )
+    observer.add_message("nl2agent", ProcessType.ERROR, "real runtime failure")
+    terminal_messages = [
+        json.loads(item) for item in observer.get_cached_message()
+    ]
+    assert terminal_messages == [
+        {"type": ProcessType.ERROR.value, "content": "real runtime failure"}
+    ]
+
+
+def test_boundary_observer_does_not_stop_for_invalid_wrapper():
+    stop_event = Event()
+    observer = _Nl2AgentBoundaryObserver(lang="en", stop_event=stop_event)
+
+    observer.add_message(
+        "nl2agent",
+        ProcessType.EXECUTION_LOGS,
+        "<nl2a>{invalid json}</nl2a>\nWrapper failed.",
+    )
+
+    assert stop_event.is_set() is False
+    assert observer.boundary_reached is False
 
 
 def _mock_create_dependencies(mocker, *, existing_agents=None):
@@ -1127,6 +1183,8 @@ async def test_build_run_info_is_ephemeral(mocker):
     assert run_info.redis_client is None
     assert run_info.enable_planning is False
     assert run_info.observer.enable_nl2a_wrapper is True
+    assert isinstance(run_info.observer, _Nl2AgentBoundaryObserver)
+    assert run_info.observer._boundary_stop_event is run_info.stop_event
     join_query.assert_awaited_once_with(
         minio_files=None,
         query='{"type":"nl2agent_tool_selection","tools":[]}',
@@ -1271,6 +1329,8 @@ async def test_create_stream_wraps_sdk_chunks_and_stops_run(mocker):
                 ),
             }
         )
+        yield json.dumps({"type": "execution_logs", "content": "must be hidden"})
+        yield json.dumps({"type": "nl2a", "content": "must also be hidden"})
 
     mocker.patch(
         "services.nl2agent_service.agent_run",

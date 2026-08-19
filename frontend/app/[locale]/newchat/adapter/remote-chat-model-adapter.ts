@@ -1787,6 +1787,22 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     const searchImagesAccumulator: SearchSource[] = [];
     let skillFileAttachments: CompleteAttachment[] = [];
     let nl2a: Nl2aMessage | undefined;
+    const acceptNl2aBoundary = (chunk: SseChunk): boolean => {
+      const parsedNl2a = parseNl2aMessage(chunk);
+      if (!parsedNl2a) return false;
+      if (nl2a) {
+        log.error(
+          "[ChatModelAdapter] Ignored additional NL2Agent card in one run",
+          {
+            acceptedSubtype: nl2a.content.subtype,
+            ignoredSubtype: parsedNl2a.content.subtype,
+          }
+        );
+        return false;
+      }
+      nl2a = parsedNl2a;
+      return true;
+    };
     const deliveredNl2AgentStates = new Set<string>();
     const deliverNl2AgentState = (chunk: SseChunk) => {
       if (!isNl2Agent) return;
@@ -2011,9 +2027,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           }
 
           if (chunk.type === "nl2a") {
-            const parsedNl2a = parseNl2aMessage(chunk);
-            if (parsedNl2a) {
-              nl2a = parsedNl2a;
+            if (acceptNl2aBoundary(chunk)) {
               yield buildStreamResult(contentParts);
             }
             continue;
@@ -2356,9 +2370,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             attachExecutionLogsToTool(contentParts, chunk);
             yield buildStreamResult(contentParts);
           } else if (chunk.type === "nl2a") {
-            const parsedNl2a = parseNl2aMessage(chunk);
-            if (parsedNl2a) {
-              nl2a = parsedNl2a;
+            if (acceptNl2aBoundary(chunk)) {
               yield buildStreamResult(contentParts);
             }
           } else if (chunk.type === "nl2a_state") {
