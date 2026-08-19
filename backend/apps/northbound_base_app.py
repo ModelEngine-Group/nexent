@@ -25,6 +25,11 @@ from services.a2a_server_service import (
 )
 from services.northbound_service import NorthboundContext
 from services.runtime_state_service import runtime_state_service
+from services.runtime_agent_client import (
+    RuntimeServiceError,
+    runtime_agent_client,
+    runtime_service_error_response,
+)
 
 from .northbound_app import router as northbound_router
 from .northbound_knowledge_app import router as northbound_knowledge_router
@@ -32,9 +37,13 @@ from .northbound_knowledge_app import router as northbound_knowledge_router
 
 @asynccontextmanager
 async def northbound_lifespan(_app):
-    """Reject startup when required Redis-backed distributed state is unavailable."""
+    """Verify Redis and own the Runtime proxy client without probing Runtime readiness."""
     await runtime_state_service.ping_async()
-    yield
+    await runtime_agent_client.start()
+    try:
+        yield
+    finally:
+        await runtime_agent_client.close()
 
 
 class A2AServerSettings(BaseModel):
@@ -56,6 +65,12 @@ northbound_app = create_app(
     enable_monitoring=False,  # Disable monitoring for northbound API if not needed
     lifespan=northbound_lifespan,
 )
+
+
+@northbound_app.exception_handler(RuntimeServiceError)
+async def runtime_service_exception_handler(_request: Request, exc: RuntimeServiceError):
+    """Preserve Runtime business errors and stable proxy status mappings."""
+    return runtime_service_error_response(exc)
 
 northbound_app.include_router(northbound_router)
 northbound_app.include_router(northbound_knowledge_router)
@@ -185,6 +200,8 @@ async def jsonrpc_handler(
             "error": {"code": -32004, "message": "Unsupported operation"},
             "id": payload.id
         })
+    except RuntimeServiceError as exc:
+        return runtime_service_error_response(exc)
     except Exception as e:
         logger.error(f"JSON-RPC handler error for endpoint {endpoint_id}: {e}", exc_info=True)
         return JSONResponse({
@@ -213,7 +230,8 @@ async def _handle_jsonrpc_send(endpoint_id: str, params: Dict[str, Any], ctx: No
         message=params,  # Pass full params as message for unified parsing
         token_id=ctx.token_id,
         user_id=ctx.user_id,
-        tenant_id=ctx.tenant_id
+        tenant_id=ctx.tenant_id,
+        request_id=ctx.request_id,
     )
     return result
 
@@ -256,15 +274,22 @@ async def _handle_jsonrpc_stream(endpoint_id: str, params: Dict[str, Any], ctx: 
             "result": event
         }
 
+    event_stream = a2a_server_service.handle_message_stream(
+        endpoint_id=endpoint_id,
+        message=message,
+        token_id=ctx.token_id,
+        user_id=ctx.user_id,
+        tenant_id=ctx.tenant_id,
+        request_id=ctx.request_id,
+    )
+    first_event = await anext(event_stream)
+
     async def generate_sse():
         try:
-            async for event in a2a_server_service.handle_message_stream(
-                endpoint_id=endpoint_id,
-                message=message,
-                token_id=ctx.token_id,
-                user_id=ctx.user_id,
-                tenant_id=ctx.tenant_id
-            ):
+            for event in (first_event,):
+                wrapped = wrap_jsonrpc(event)
+                yield f"data: {json.dumps(wrapped)}\n\n"
+            async for event in event_stream:
                 wrapped = wrap_jsonrpc(event)
                 yield f"data: {json.dumps(wrapped)}\n\n"
         except Exception as e:
@@ -275,6 +300,10 @@ async def _handle_jsonrpc_stream(endpoint_id: str, params: Dict[str, Any], ctx: 
                 "error": {"code": -32603, "message": str(e)}
             }
             yield f"data: {json.dumps(error_event)}\n\n"
+        finally:
+            close = getattr(event_stream, "aclose", None)
+            if close is not None:
+                await close()
 
     return StreamingResponse(
         generate_sse(),
@@ -311,7 +340,8 @@ async def rest_message_send(
             message=message,
             token_id=ctx.token_id,
             user_id=ctx.user_id,
-            tenant_id=ctx.tenant_id
+            tenant_id=ctx.tenant_id,
+            request_id=ctx.request_id,
         )
 
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
@@ -320,6 +350,8 @@ async def rest_message_send(
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(e))
     except AgentNotEnabledError as e:
         raise HTTPException(status_code=HTTPStatus.SERVICE_UNAVAILABLE, detail=str(e))
+    except RuntimeServiceError:
+        raise
     except Exception as e:
         logger.error(f"REST message send failed: {e}", exc_info=True)
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Failed to send message")
@@ -340,15 +372,20 @@ async def rest_message_stream(
         from .northbound_app import _get_northbound_context
         ctx = await _get_northbound_context(request)
 
+        event_stream = a2a_server_service.handle_message_stream(
+            endpoint_id=endpoint_id,
+            message=message,
+            token_id=ctx.token_id,
+            user_id=ctx.user_id,
+            tenant_id=ctx.tenant_id,
+            request_id=ctx.request_id,
+        )
+        first_event = await anext(event_stream)
+
         async def generate_sse():
             try:
-                async for event in a2a_server_service.handle_message_stream(
-                    endpoint_id=endpoint_id,
-                    message=message,
-                    token_id=ctx.token_id,
-                    user_id=ctx.user_id,
-                    tenant_id=ctx.tenant_id
-                ):
+                yield f"data: {json.dumps(first_event)}\n\n"
+                async for event in event_stream:
                     yield f"data: {json.dumps(event)}\n\n"
             except Exception as e:
                 logger.error(f"SSE stream error: {e}", exc_info=True)
@@ -362,6 +399,10 @@ async def rest_message_stream(
                     }
                 })
                 yield f"data: {fail_payload}\n\n"
+            finally:
+                close = getattr(event_stream, "aclose", None)
+                if close is not None:
+                    await close()
 
         return StreamingResponse(
             generate_sse(),
@@ -377,6 +418,8 @@ async def rest_message_stream(
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(e))
     except AgentNotEnabledError as e:
         raise HTTPException(status_code=HTTPStatus.SERVICE_UNAVAILABLE, detail=str(e))
+    except RuntimeServiceError:
+        raise
     except Exception as e:
         logger.error(f"REST message stream failed: {e}", exc_info=True)
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Failed to stream message")

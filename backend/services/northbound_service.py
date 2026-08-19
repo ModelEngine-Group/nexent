@@ -25,11 +25,8 @@ from consts.exceptions import (
 from consts.model import AgentRequest, ToolParamsRequest
 from database.conversation_db import get_conversation_messages
 from database.token_db import log_token_usage
-from services.agent_service import (
-    run_agent_stream,
-    stop_agent_tasks,
-    get_agent_by_name_impl,
-)
+from services.agent_service import get_agent_by_name_impl
+from services.runtime_agent_client import RuntimeServiceError, runtime_agent_client
 from services.runtime_state_service import runtime_state_service
 from services.agent_version_service import list_published_agents_impl
 from services.conversation_management_service import (
@@ -357,13 +354,11 @@ async def start_streaming_chat(
         raise Exception(f"Failed to start streaming chat for conversation_id {conversation_id}: {str(e)}")
 
     try:
-        response = await run_agent_stream(
+        response = await runtime_agent_client.run_agent(
             agent_request=agent_request,
-            http_request=None,
-            authorization=ctx.authorization,
             user_id=ctx.user_id,
             tenant_id=ctx.tenant_id,
-            skip_user_save=False,
+            request_id=ctx.request_id,
         )
     finally:
         if composed_key and idempotency_token:
@@ -391,7 +386,11 @@ async def start_streaming_chat(
 
 async def stop_chat(ctx: NorthboundContext, conversation_id: int, meta_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     try:
-        stop_result = stop_agent_tasks(conversation_id, ctx.user_id)
+        stop_result = await runtime_agent_client.stop_agent(
+            conversation_id=conversation_id,
+            user_id=ctx.user_id,
+            request_id=ctx.request_id,
+        )
 
         # Log token usage
         if ctx.token_id > 0:
@@ -407,6 +406,8 @@ async def stop_chat(ctx: NorthboundContext, conversation_id: int, meta_data: Opt
                 logger.warning(f"Failed to log token usage: {str(e)}")
 
         return {"message": stop_result.get("message", "success"), "data": conversation_id, "requestId": ctx.request_id}
+    except RuntimeServiceError:
+        raise
     except DistributedStateUnavailable:
         raise
     except Exception as e:

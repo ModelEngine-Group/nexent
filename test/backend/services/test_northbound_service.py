@@ -116,9 +116,21 @@ sys.modules["services.runtime_state_service"] = runtime_state_service_mod
 # Mock agent_service
 agent_service_mod = types.ModuleType("services.agent_service")
 agent_service_mod.run_agent_stream = AsyncMock()
-agent_service_mod.stop_agent_tasks = MagicMock(return_value={"message": "stopped"})
+agent_service_mod.stop_agent_tasks = AsyncMock(return_value={"message": "stopped"})
 agent_service_mod.get_agent_by_name_impl = MagicMock(return_value={"agent_id": 1, "latest_version_no": 1})
 sys.modules["services.agent_service"] = agent_service_mod
+
+
+class RuntimeServiceError(Exception):
+    pass
+
+
+runtime_agent_client_mod = types.ModuleType("services.runtime_agent_client")
+runtime_agent_client_mod.RuntimeServiceError = RuntimeServiceError
+runtime_agent_client_mod.runtime_agent_client = MagicMock()
+runtime_agent_client_mod.runtime_agent_client.run_agent = agent_service_mod.run_agent_stream
+runtime_agent_client_mod.runtime_agent_client.stop_agent = agent_service_mod.stop_agent_tasks
+sys.modules["services.runtime_agent_client"] = runtime_agent_client_mod
 
 # Mock conversation_management_service
 conv_mgmt_mod = types.ModuleType("services.conversation_management_service")
@@ -150,6 +162,7 @@ services_package.agent_version_service = agent_version_mod
 services_package.conversation_management_service = conv_mgmt_mod
 services_package.file_management_service = file_mgmt_mod
 services_package.runtime_state_service = runtime_state_service_mod
+services_package.runtime_agent_client = runtime_agent_client_mod
 sys.modules["services"] = services_package
 
 # Mock consts.model - create stub classes
@@ -1016,12 +1029,12 @@ class TestStartStreamingChatErrorHandling:
                 patch.object(ns, 'idempotency_start', new_callable=AsyncMock, return_value="token-1"), \
                 patch.object(ns, 'get_conversation_history_internal', side_effect=mock_get_history), \
                 patch.object(
-                    ns,
-                    'run_agent_stream',
+                    runtime_agent_client_mod.runtime_agent_client,
+                    'run_agent',
                     new_callable=AsyncMock,
-                    side_effect=DistributedStateUnavailable("redis down"),
+                    side_effect=RuntimeServiceError("runtime unavailable"),
                 ):
-            with pytest.raises(DistributedStateUnavailable, match="redis down"):
+            with pytest.raises(RuntimeServiceError, match="runtime unavailable"):
                 await ns.start_streaming_chat(
                     ctx=ctx,
                     conversation_id=123,
@@ -1078,7 +1091,12 @@ class TestStartStreamingChatErrorHandling:
                     "agent_id": 42,
                     "latest_version_no": 5
                 }), \
-                patch.object(ns, 'run_agent_stream', new_callable=AsyncMock, return_value=mock_response) as mock_stream:
+                patch.object(
+                    runtime_agent_client_mod.runtime_agent_client,
+                    'run_agent',
+                    new_callable=AsyncMock,
+                    return_value=mock_response,
+                ) as mock_stream:
             await ns.start_streaming_chat(
                 ctx=ctx,
                 conversation_id=123,
@@ -1105,7 +1123,12 @@ class TestStartStreamingChatErrorHandling:
         with patch.object(ns, 'check_and_consume_rate_limit', new_callable=AsyncMock), \
                 patch.object(ns, 'idempotency_start', new_callable=AsyncMock, return_value="token-1"), \
                 patch.object(ns, 'get_conversation_history_internal', side_effect=mock_get_history), \
-                patch.object(ns, 'run_agent_stream', new_callable=AsyncMock, return_value=mock_response) as mock_stream:
+                patch.object(
+                    runtime_agent_client_mod.runtime_agent_client,
+                    'run_agent',
+                    new_callable=AsyncMock,
+                    return_value=mock_response,
+                ) as mock_stream:
             await ns.start_streaming_chat(
                 ctx=ctx,
                 conversation_id=123,
@@ -1113,7 +1136,9 @@ class TestStartStreamingChatErrorHandling:
                 query="test query"
             )
 
-            assert mock_stream.await_args.kwargs["skip_user_save"] is False
+            assert mock_stream.await_args.kwargs["user_id"] == ctx.user_id
+            assert mock_stream.await_args.kwargs["tenant_id"] == ctx.tenant_id
+            assert mock_stream.await_args.kwargs["request_id"] == ctx.request_id
 
     async def test_start_streaming_chat_get_agent_by_name_impl_error_wrapped(self):
         """Test that get_agent_by_name_impl error is wrapped by outer exception handler.
@@ -1156,7 +1181,12 @@ class TestStopChatErrorHandling:
         ctx = MockNorthboundContext(token_id=1)
         token_db_mod.log_token_usage.side_effect = Exception("Logging failed")
 
-        with patch("backend.services.northbound_service.stop_agent_tasks", return_value={"message": "stopped"}):
+        with patch.object(
+            runtime_agent_client_mod.runtime_agent_client,
+            "stop_agent",
+            new_callable=AsyncMock,
+            return_value={"message": "stopped"},
+        ):
             # Should not raise even if token logging fails
             result = await ns.stop_chat(ctx=ctx, conversation_id=123, meta_data={"key": "value"})
             assert result is not None

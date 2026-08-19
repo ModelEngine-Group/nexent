@@ -17,6 +17,9 @@ from database.client import get_db_session
 from services.a2a_agent_adapter import A2AAgentAdapter, A2AExecutionContext
 from consts.a2a_models import A2AAgentCard, A2AAgentCapabilities, A2AAgentProvider
 from consts.const import NORTHBOUND_EXTERNAL_URL
+from consts.model import AgentRequest
+from services.agent_stream_contract import _is_run_interrupted_event
+from services.runtime_agent_client import RuntimeServiceError, runtime_agent_client
 
 logger = logging.getLogger(__name__)
 RUN_INTERRUPTED_MESSAGE = "The agent run was interrupted. Please start it again."
@@ -71,7 +74,7 @@ class A2AServerService:
     @staticmethod
     def _is_run_interrupted_event(event: Dict[str, Any]) -> bool:
         """Return whether an SSE event represents a terminal runtime interruption."""
-        return event.get("code") == "run_interrupted" or event.get("status") == "run_interrupted"
+        return _is_run_interrupted_event(event)
 
     # =============================================================================
     # Agent Registration
@@ -499,22 +502,54 @@ class A2AServerService:
 
     async def _collect_stream_events(self, stream_response) -> List[Dict[str, Any]]:
         """Collect parsed agent/run SSE payloads without dropping event types."""
-        events = []
+        try:
+            return [event async for event in self._iter_stream_events(stream_response)]
+        finally:
+            await self._close_stream_response(stream_response)
+
+    @staticmethod
+    async def _close_stream_response(stream_response) -> None:
+        """Close a delegated Runtime body iterator after completion or cancellation."""
+        body_iterator = getattr(stream_response, "body_iterator", None)
+        close = getattr(body_iterator, "aclose", None)
+        if close is not None:
+            await close()
+
+    @staticmethod
+    def _decode_sse_event(event_bytes: bytes) -> Optional[Dict[str, Any]]:
+        """Decode one SSE event while supporting comments and multi-line data."""
+        data_lines = []
+        for line in event_bytes.decode("utf-8", errors="replace").splitlines():
+            if line.startswith("data:"):
+                data_lines.append(line[5:].lstrip(" "))
+        if not data_lines:
+            return None
+        try:
+            payload = json.loads("\n".join(data_lines).strip())
+        except json.JSONDecodeError:
+            return None
+        return payload if isinstance(payload, dict) else None
+
+    async def _iter_stream_events(self, stream_response) -> AsyncIterator[Dict[str, Any]]:
+        """Parse SSE independently of HTTP chunk boundaries."""
+        buffer = b""
         async for chunk in stream_response.body_iterator:
-            if isinstance(chunk, bytes):
-                chunk = chunk.decode("utf-8")
-            if not chunk.startswith("data: "):
-                continue
-            data_str = chunk[6:].strip()
-            if not data_str:
-                continue
-            try:
-                event = json.loads(data_str)
-            except json.JSONDecodeError:
-                continue
-            if isinstance(event, dict):
-                events.append(event)
-        return events
+            chunk_bytes = chunk if isinstance(chunk, bytes) else chunk.encode("utf-8")
+            buffer += chunk_bytes
+            while True:
+                lf_index = buffer.find(b"\n\n")
+                crlf_index = buffer.find(b"\r\n\r\n")
+                indexes = [index for index in (lf_index, crlf_index) if index >= 0]
+                if not indexes:
+                    break
+                event_end = min(indexes)
+                separator_length = 4 if crlf_index == event_end else 2
+                event_bytes, buffer = buffer[:event_end], buffer[event_end + separator_length:]
+                if event := self._decode_sse_event(event_bytes):
+                    yield event
+
+        if buffer and (event := self._decode_sse_event(buffer)):
+            yield event
 
     def _extract_final_answer(self, events: List[Dict[str, Any]]) -> str:
         """Extract the final answer for task persistence and completion metadata."""
@@ -630,7 +665,8 @@ class A2AServerService:
         token_id: Optional[int] = None,
         user_id: Optional[str] = None,
         tenant_id: Optional[str] = None,
-        base_url: Optional[str] = None
+        base_url: Optional[str] = None,
+        request_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Handle incoming message:send request.
 
@@ -680,10 +716,6 @@ class A2AServerService:
         runtime_scope_id = f"a2a:{task_id or uuid4().hex}"
 
         try:
-            from services.agent_service import run_agent_stream
-            from consts.model import AgentRequest
-            from starlette.requests import Request
-
             agent_request = AgentRequest(
                 conversation_id=None,
                 agent_id=internal_request["agent_id"],
@@ -693,20 +725,11 @@ class A2AServerService:
                 is_debug=internal_request.get("is_debug", True)
             )
 
-            mock_request = Request({
-                "type": "http",
-                "method": "POST",
-                "path": f"/a2a/{endpoint_id}/message:send",
-                "headers": [],
-                "query_string": b""
-            })
-
-            stream_response = await run_agent_stream(
+            stream_response = await runtime_agent_client.run_agent(
                 agent_request=agent_request,
-                http_request=mock_request,
-                authorization=None,
                 user_id=user_id,
                 tenant_id=tenant_id or server_agent.get("tenant_id"),
+                request_id=request_id or context.correlation_id or uuid4().hex,
                 runtime_scope_id=runtime_scope_id,
             )
 
@@ -736,6 +759,8 @@ class A2AServerService:
                     task_id=task_id
                 )
 
+        except RuntimeServiceError:
+            raise
         except Exception as e:
             logger.error(f"A2A task execution failed: {e}")
             self._store_error_response(task_id, str(e), endpoint_id)
@@ -753,6 +778,7 @@ class A2AServerService:
         token_id: Optional[int] = None,
         user_id: Optional[str] = None,
         tenant_id: Optional[str] = None,
+        request_id: Optional[str] = None,
     ) -> AsyncIterator[Dict[str, Any]]:
         """Handle incoming message:stream request.
 
@@ -794,14 +820,6 @@ class A2AServerService:
 
         self._store_user_message(task_id, message_obj, endpoint_id)
 
-        # Yield initial working status
-        yield self.adapter.build_a2a_task_event(
-            task_id=task_id or "simple",
-            event_type="taskStatusUpdate",
-            data={"status": {"state": "TASK_STATE_WORKING"}},
-            context_id=context_id
-        )
-
         internal_request = self.adapter.build_agent_request(
             parsed_message,
             context,
@@ -809,10 +827,8 @@ class A2AServerService:
         )
         runtime_scope_id = f"a2a:{task_id or uuid4().hex}"
 
+        stream_response = None
         try:
-            from consts.model import AgentRequest
-            from starlette.requests import Request
-
             agent_request = AgentRequest(
                 conversation_id=None,
                 agent_id=internal_request["agent_id"],
@@ -822,41 +838,27 @@ class A2AServerService:
                 is_debug=internal_request.get("is_debug", True)
             )
 
-            mock_request = Request({
-                "type": "http",
-                "method": "POST",
-                "path": f"/a2a/{endpoint_id}/message:stream",
-                "headers": [],
-                "query_string": b""
-            })
-
-            from services.agent_service import run_agent_stream
-            stream_response = await run_agent_stream(
+            stream_response = await runtime_agent_client.run_agent(
                 agent_request=agent_request,
-                http_request=mock_request,
-                authorization=None,
                 user_id=user_id,
                 tenant_id=tenant_id or server_agent.get("tenant_id"),
+                request_id=request_id or context.correlation_id or uuid4().hex,
                 runtime_scope_id=runtime_scope_id,
             )
 
-            events = []
-            async for chunk in stream_response.body_iterator:
-                if isinstance(chunk, bytes):
-                    chunk = chunk.decode("utf-8")
-                if not chunk.startswith("data: "):
-                    continue
-                data_str = chunk[6:].strip()
-                if not data_str:
-                    continue
-                try:
-                    chunk_data = json.loads(data_str)
-                except json.JSONDecodeError:
-                    continue
-                if not isinstance(chunk_data, dict):
-                    continue
+            # Connect to Runtime before exposing the first public SSE event.
+            yield self.adapter.build_a2a_task_event(
+                task_id=task_id or "simple",
+                event_type="taskStatusUpdate",
+                data={"status": {"state": "TASK_STATE_WORKING"}},
+                context_id=context_id
+            )
 
+            events = []
+            async for chunk_data in self._iter_stream_events(stream_response):
                 events.append(chunk_data)
+                if self._is_run_interrupted_event(chunk_data):
+                    raise A2AServerServiceError(RUN_INTERRUPTED_MESSAGE)
                 yield self.adapter.build_a2a_task_event(
                     task_id=task_id or "simple",
                     event_type="taskArtifact",
@@ -867,8 +869,6 @@ class A2AServerService:
                     },
                     context_id=context_id
                 )
-                if self._is_run_interrupted_event(chunk_data):
-                    raise A2AServerServiceError(RUN_INTERRUPTED_MESSAGE)
 
             final_answer = self._extract_final_answer(events)
             self._store_agent_response(task_id, final_answer, endpoint_id)
@@ -897,6 +897,8 @@ class A2AServerService:
                 context_id=context_id
             )
 
+        except RuntimeServiceError:
+            raise
         except Exception as e:
             logger.error(f"A2A streaming task failed: {e}")
             self._store_error_response(task_id, str(e), endpoint_id)
@@ -906,6 +908,9 @@ class A2AServerService:
                 data={"status": {"state": "TASK_STATE_FAILED", "message": str(e)}},
                 context_id=context_id
             )
+        finally:
+            if stream_response is not None:
+                await self._close_stream_response(stream_response)
 
     def get_task(
         self,
@@ -1040,11 +1045,12 @@ class A2AServerService:
         )
         return tasks, next_token
 
-    def cancel_task(
+    async def cancel_task(
         self,
         task_id: str,
         user_id: Optional[str] = None,
-        tenant_id: Optional[str] = None
+        tenant_id: Optional[str] = None,
+        request_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Cancel a task.
 
@@ -1074,9 +1080,11 @@ class A2AServerService:
         if not runtime_user_id:
             raise A2AServerServiceError("Task owner is unavailable; the running task cannot be canceled")
 
-        from services.agent_service import stop_agent_tasks
-
-        stop_agent_tasks(f"a2a:{task_id}", runtime_user_id)
+        await runtime_agent_client.stop_agent(
+            conversation_id=f"a2a:{task_id}",
+            user_id=runtime_user_id,
+            request_id=request_id or uuid4().hex,
+        )
 
         # Cancel task
         result = a2a_agent_db.cancel_task(task_id)

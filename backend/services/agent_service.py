@@ -48,6 +48,11 @@ from consts.model import (
     ToolSourceEnum, ModelConnectStatusEnum
 )
 from services.asset_owner_visibility import resolve_agent_list_permission
+from services.agent_stream_contract import (
+    RUN_INTERRUPTED_MESSAGE,
+    _is_run_interrupted_chunk,
+    _run_interrupted_chunk,
+)
 from database.agent_db import (
     batch_search_agent_display_names,
     create_agent,
@@ -138,7 +143,6 @@ from utils.monitoring import monitoring_manager
 
 logger = logging.getLogger(__name__)
 SAFE_AGENT_STREAM_ERROR_MESSAGE = "Agent execution failed. Please try again later."
-RUN_INTERRUPTED_MESSAGE = "The run was interrupted. Please start it again."
 _channel_cleanup_tasks: set[asyncio.Task[None]] = set()
 
 
@@ -364,29 +368,6 @@ def _safe_agent_stream_error_chunk() -> str:
         ensure_ascii=False,
     )
     return f"data: {error_payload}\n\n"
-
-
-def _run_interrupted_chunk() -> str:
-    """Return the public SSE terminal event for distributed-state interruption."""
-    payload = json.dumps(
-        {
-            "type": "error",
-            "status": "run_interrupted",
-            "code": "run_interrupted",
-            "content": RUN_INTERRUPTED_MESSAGE,
-        },
-        ensure_ascii=False,
-    )
-    return f"data: {payload}\n\n"
-
-
-def _is_run_interrupted_chunk(chunk: str) -> bool:
-    """Return whether an SSE chunk carries the runtime interruption contract."""
-    return any(
-        payload.get("code") == "run_interrupted"
-        or payload.get("status") == "run_interrupted"
-        for payload in _extract_json_objects_from_text(chunk)
-    )
 
 
 async def _interrupt_channel_locally(channel: Any) -> str:
