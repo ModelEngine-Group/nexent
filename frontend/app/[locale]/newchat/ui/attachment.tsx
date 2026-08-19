@@ -155,9 +155,13 @@ const AttachmentPreview: FC<{
   const localImageUrl = useFileSrc(
     isComposer && isImage ? attachment.file : undefined,
   );
-  const remoteFileUrl =
+  const generatedPreviewUrl =
     attachment.preview_url ||
-    attachment.presigned_url ||
+    (attachment.object_name
+      ? storageService.getPreviewUrl(attachment.object_name, attachment.name)
+      : undefined);
+  const remoteFileUrl =
+    generatedPreviewUrl ||
     attachment.url ||
     attachment.content?.[0]?.image ||
     attachment.content?.[0]?.data;
