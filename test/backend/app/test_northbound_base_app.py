@@ -305,6 +305,22 @@ async def _async_iter(items):
         yield item
 
 
+class AsyncIteratorWithoutClose:
+    """Async iterator used to verify optional upstream cleanup hooks."""
+
+    def __init__(self, items):
+        self._items = iter(items)
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        try:
+            return next(self._items)
+        except StopIteration as exc:
+            raise StopAsyncIteration from exc
+
+
 # ---------------------------------------------------------------------------
 # SAFE TO IMPORT THE TARGET MODULE
 # ---------------------------------------------------------------------------
@@ -376,6 +392,114 @@ class TestNorthboundBaseApp(unittest.TestCase):
         self.assertEqual(response.status_code, 403)
         self.assertEqual(response.body, b'{"code":"forbidden"}')
         self.assertEqual(response.headers["content-type"], "application/problem+json")
+
+    def test_jsonrpc_handler_preserves_runtime_service_error_response(self):
+        """JSON-RPC must keep Runtime's HTTP error status and body before streaming."""
+        runtime_error = RuntimeServiceError(
+            status_code=422,
+            content=b'{"code":"invalid_request"}',
+            content_type="application/problem+json",
+        )
+        payload = {
+            "jsonrpc": "2.0",
+            "method": "SendMessage",
+            "params": {"message": {}},
+            "id": "req-runtime-error",
+        }
+
+        with patch.object(
+            a2a_service_module.a2a_server_service,
+            "handle_message_send",
+            new_callable=AsyncMock,
+            side_effect=runtime_error,
+        ):
+            response = self.client.post("/nb/a2a/test-endpoint/v1", json=payload)
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.content, b'{"code":"invalid_request"}')
+        self.assertEqual(response.headers["content-type"], "application/problem+json")
+
+    def test_rest_message_send_preserves_runtime_service_error(self):
+        """REST send must let the Runtime exception handler preserve proxy semantics."""
+        runtime_error = RuntimeServiceError(
+            status_code=503,
+            content=b'{"message":"runtime unavailable"}',
+            content_type="application/problem+json",
+        )
+
+        with patch.object(
+            a2a_service_module.a2a_server_service,
+            "handle_message_send",
+            new_callable=AsyncMock,
+            side_effect=runtime_error,
+        ):
+            response = self.client.post(
+                "/nb/a2a/test-endpoint/message:send",
+                json={"message": {}},
+            )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.content, b'{"message":"runtime unavailable"}')
+
+    def test_jsonrpc_stream_supports_iterator_without_close_hook(self):
+        """JSON-RPC streaming accepts iterators that do not expose aclose."""
+        a2a_service_module.a2a_server_service.handle_message_stream.side_effect = None
+        a2a_service_module.a2a_server_service.handle_message_stream.return_value = AsyncIteratorWithoutClose([
+            {"statusUpdate": {"status": {"state": "TASK_STATE_WORKING"}}},
+            {"statusUpdate": {"status": {"state": "TASK_STATE_COMPLETED"}}},
+        ])
+
+        response = self.client.post(
+            "/nb/a2a/test-endpoint/v1",
+            json={
+                "jsonrpc": "2.0",
+                "method": "SendStreamingMessage",
+                "params": {"message": {}},
+                "id": "req-no-close",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("TASK_STATE_COMPLETED", response.text)
+
+    def test_jsonrpc_stream_emits_error_event_after_stream_failure(self):
+        """A post-connect A2A failure must terminate the JSON-RPC SSE stream."""
+        async def failing_stream():
+            yield {"statusUpdate": {"status": {"state": "TASK_STATE_WORKING"}}}
+            raise RuntimeError("stream broke")
+
+        a2a_service_module.a2a_server_service.handle_message_stream.side_effect = None
+        a2a_service_module.a2a_server_service.handle_message_stream.return_value = failing_stream()
+
+        response = self.client.post(
+            "/nb/a2a/test-endpoint/v1",
+            json={
+                "jsonrpc": "2.0",
+                "method": "SendStreamingMessage",
+                "params": {"message": {}},
+                "id": "req-stream-error",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('"code": -32603', response.text)
+        self.assertIn("stream broke", response.text)
+
+    def test_rest_stream_supports_iterator_without_close_hook(self):
+        """REST streaming accepts iterators that do not expose aclose."""
+        a2a_service_module.a2a_server_service.handle_message_stream.side_effect = None
+        a2a_service_module.a2a_server_service.handle_message_stream.return_value = AsyncIteratorWithoutClose([
+            {"statusUpdate": {"status": {"state": "TASK_STATE_WORKING"}}},
+            {"statusUpdate": {"status": {"state": "TASK_STATE_COMPLETED"}}},
+        ])
+
+        response = self.client.post(
+            "/nb/a2a/test-endpoint/message:stream",
+            json={"message": {}},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("TASK_STATE_COMPLETED", response.text)
 
     def test_rest_message_stream_raises_runtime_error_before_response(self):
         """A Runtime connection error must escape before a StreamingResponse is created."""

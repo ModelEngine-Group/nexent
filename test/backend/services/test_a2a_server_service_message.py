@@ -392,6 +392,19 @@ class TestCollectStreamText:
 
         assert await service._collect_stream_events(mock_stream) == [valid_event]
 
+    @pytest.mark.asyncio
+    async def test_collect_stream_events_decodes_final_event_without_separator(self):
+        """A final SSE event must survive when the upstream closes without a blank line."""
+        from backend.services.a2a_server_service import A2AServerService
+
+        service = A2AServerService()
+        final_event = {"type": "final_answer", "content": "done"}
+        mock_stream = MagicMock(body_iterator=AsyncMockIterator([
+            f"data: {json.dumps(final_event)}",
+        ]))
+
+        assert await service._collect_stream_events(mock_stream) == [final_event]
+
 
 class TestHandleMessageSend:
     """Test successful message:send execution paths."""
@@ -516,6 +529,33 @@ class TestHandleMessageSend:
         assert result == {"failed": True}
         store_response.assert_not_called()
         store_error.assert_called_once_with("task-1", RUN_INTERRUPTED_MESSAGE, "endpoint-1")
+
+    @pytest.mark.asyncio
+    async def test_handle_message_send_preserves_runtime_connection_error(self):
+        """A Runtime connection failure must remain an HTTP-layer proxy error."""
+        from backend.services.a2a_server_service import A2AServerService
+        from services.runtime_agent_client import RuntimeServiceError
+
+        service = A2AServerService()
+        server_agent = {"agent_id": 7, "tenant_id": "agent-tenant", "is_enabled": True}
+        runtime_error = RuntimeServiceError(503, b'{"message":"runtime unavailable"}')
+
+        with patch.object(service, "_validate_endpoint", return_value=server_agent), \
+                patch.object(service.adapter, "parse_a2a_message", return_value={"message": {"parts": []}}), \
+                patch.object(service, "_resolve_task_id", return_value=("task-1", "ctx-1", True)), \
+                patch.object(service, "_store_user_message"), \
+                patch.object(service.adapter, "build_agent_request", return_value={
+                    "agent_id": 7, "query": "", "history": [], "is_debug": True
+                }), \
+                patch(
+                    "backend.services.a2a_server_service.runtime_agent_client.run_agent",
+                    new_callable=AsyncMock,
+                    side_effect=runtime_error,
+                ):
+            with pytest.raises(RuntimeServiceError) as exc_info:
+                await service.handle_message_send("endpoint-1", {"message": {}})
+
+        assert exc_info.value is runtime_error
 
 
 class TestHandleMessageStream:

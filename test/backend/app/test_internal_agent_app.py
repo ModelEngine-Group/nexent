@@ -6,11 +6,13 @@ from unittest.mock import AsyncMock
 
 import httpx
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 
 from apps import internal_agent_app
-from apps.internal_agent_app import router
+from apps.internal_agent_app import InternalAgentRunRequest, router
+from consts.error_code import ErrorCode
+from consts.exceptions import AppException, ForbiddenError
 
 
 app = FastAPI()
@@ -102,6 +104,74 @@ async def test_internal_agent_run_sanitizes_unexpected_failures(mocker):
 
     assert response.status_code == 500
     assert response.json() == {"detail": "Agent run error."}
+
+
+@pytest.mark.asyncio
+async def test_internal_agent_run_maps_forbidden_error(mocker):
+    mocker.patch(
+        "apps.internal_agent_app._run_agent_stream",
+        new_callable=AsyncMock,
+        side_effect=ForbiddenError("access denied"),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await internal_agent_app.internal_agent_run(
+            InternalAgentRunRequest.model_validate(_run_payload())
+        )
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail == "access denied"
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        AppException(ErrorCode.COMMON_VALIDATION_ERROR, "invalid request"),
+        HTTPException(status_code=409, detail="conflict"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_internal_agent_run_preserves_known_application_errors(mocker, error):
+    mocker.patch(
+        "apps.internal_agent_app._run_agent_stream",
+        new_callable=AsyncMock,
+        side_effect=error,
+    )
+
+    with pytest.raises(type(error)) as exc_info:
+        await internal_agent_app.internal_agent_run(
+            InternalAgentRunRequest.model_validate(_run_payload())
+        )
+
+    assert exc_info.value is error
+
+
+@pytest.mark.asyncio
+async def test_internal_agent_endpoints_do_not_fabricate_request_id_header(mocker):
+    async def stream():
+        yield b'data: {"type":"final_answer","content":"done"}\n\n'
+
+    mocker.patch(
+        "apps.internal_agent_app._run_agent_stream",
+        new_callable=AsyncMock,
+        return_value=StreamingResponse(stream(), media_type="text/event-stream"),
+    )
+    mocker.patch(
+        "apps.internal_agent_app._stop_agent_tasks",
+        return_value={"status": "success"},
+    )
+
+    async with _client() as client:
+        run_response = await client.post("/internal/agent/run", json=_run_payload())
+        stop_response = await client.post(
+            "/internal/agent/stop",
+            json={"conversation_id": 42, "user_id": "user-1"},
+        )
+
+    assert run_response.status_code == 200
+    assert stop_response.status_code == 200
+    assert "X-Request-Id" not in run_response.headers
+    assert "X-Request-Id" not in stop_response.headers
 
 
 @pytest.mark.parametrize("conversation_id", [42, "a2a:task-1"])

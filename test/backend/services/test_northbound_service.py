@@ -1493,6 +1493,22 @@ class TestStopChatErrorHandling:
             await ns.stop_chat(ctx=ctx, conversation_id=123)
         assert "Failed to stop chat" in str(exc_info.value)
 
+    async def test_stop_chat_runtime_error_is_not_wrapped(self):
+        """Runtime proxy errors must retain their status mapping at the app boundary."""
+        ctx = MockNorthboundContext(token_id=0)
+        runtime_error = RuntimeServiceError("runtime unavailable")
+
+        with patch.object(
+            runtime_agent_client_mod.runtime_agent_client,
+            "stop_agent",
+            new_callable=AsyncMock,
+            side_effect=runtime_error,
+        ):
+            with pytest.raises(RuntimeServiceError) as exc_info:
+                await ns.stop_chat(ctx=ctx, conversation_id=123)
+
+        assert exc_info.value is runtime_error
+
     async def test_stop_chat_token_logging_failure(self):
         """Test that token logging failure is handled gracefully."""
         ctx = MockNorthboundContext(token_id=1)

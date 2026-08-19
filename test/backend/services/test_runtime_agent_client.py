@@ -1,6 +1,8 @@
 """Tests for the Northbound-to-Runtime HTTP client."""
 
+import asyncio
 import json
+from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
@@ -136,6 +138,44 @@ async def test_run_agent_closes_upstream_when_downstream_stops_consuming():
 
 
 @pytest.mark.asyncio
+async def test_run_agent_skips_empty_upstream_chunks():
+    payload = b'data: {"type":"final_answer","content":"done"}\n\n'
+
+    class EmptyChunkUpstream:
+        status_code = 200
+        headers = {"content-type": "text/event-stream"}
+
+        def __init__(self):
+            self.closed = False
+
+        async def aiter_raw(self):
+            yield b""
+            yield payload
+
+        async def aclose(self):
+            self.closed = True
+
+    upstream = EmptyChunkUpstream()
+    managed_client = MagicMock(is_closed=False)
+    managed_client.build_request.return_value = httpx.Request(
+        "POST", "http://runtime:5014/internal/agent/run"
+    )
+    managed_client.send = AsyncMock(return_value=upstream)
+    managed_client.aclose = AsyncMock()
+    runtime_client = RuntimeAgentClient("http://runtime:5014")
+    runtime_client._client = managed_client
+
+    response = await runtime_client.run_agent(
+        _agent_request(), "user-1", "tenant-1", "req-empty"
+    )
+    chunks = [chunk async for chunk in response.body_iterator]
+
+    assert chunks == [payload]
+    assert upstream.closed is True
+    await runtime_client.close()
+
+
+@pytest.mark.asyncio
 async def test_client_start_and_close_manage_reusable_client(mocker):
     managed_client = httpx.AsyncClient(transport=httpx.MockTransport(lambda _request: httpx.Response(200)))
     create_client = mocker.patch.object(
@@ -152,6 +192,26 @@ async def test_client_start_and_close_manage_reusable_client(mocker):
     create_client.assert_called_once_with(follow_redirects=False)
     await runtime_client.close()
     assert managed_client.is_closed is True
+    await runtime_client.close()
+
+
+@pytest.mark.asyncio
+async def test_ensure_client_reuses_client_created_while_waiting_for_lock(mocker):
+    managed_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda _request: httpx.Response(200))
+    )
+    create_client = mocker.patch.object(runtime_agent_client_module, "create_httpx_client")
+    runtime_client = RuntimeAgentClient("http://runtime:5014")
+
+    await runtime_client._client_lock.acquire()
+    ensure_task = asyncio.create_task(runtime_client._ensure_client())
+    await asyncio.sleep(0)
+    runtime_client._client = managed_client
+    runtime_client._client_lock.release()
+
+    assert await ensure_task is managed_client
+    create_client.assert_not_called()
+    await runtime_client.close()
 
 
 @pytest.mark.asyncio

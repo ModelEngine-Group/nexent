@@ -17,6 +17,7 @@ from consts.exceptions import (
     UnauthorizedError,
     SignatureValidationError,
 )
+from services.runtime_agent_client import RuntimeServiceError
 
 
 app = FastAPI()
@@ -207,6 +208,24 @@ def test_stop_chat_success():
         )
 
         assert resp.status_code == 200
+
+
+def test_stop_chat_preserves_runtime_service_error_status():
+    """Runtime stop failures must not be rewritten as generic 500 responses."""
+    with patch('apps.northbound_app._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('apps.northbound_app.stop_chat', new_callable=AsyncMock) as mock_stop:
+        mock_ctx.return_value = MagicMock()
+        mock_stop.side_effect = RuntimeServiceError(
+            status_code=503,
+            content=b'{"message":"runtime unavailable"}',
+        )
+
+        resp = client.get(
+            "/nb/v1/chat/stop/123",
+            headers=_build_headers(),
+        )
+
+    assert resp.status_code == 503
 
 
 # =============================================================================

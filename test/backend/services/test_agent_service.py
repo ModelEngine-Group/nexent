@@ -5588,6 +5588,114 @@ async def test_generate_stream_fallback_on_failure(monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("runtime_scope_id", ["a2a:task-1", None])
+async def test_generate_stream_handles_runtime_scope_during_memory_fallback(
+    monkeypatch, runtime_scope_id
+):
+    """Memory fallback must preserve an optional Runtime scope."""
+    agent_request = AgentRequest(
+        agent_id=8,
+        conversation_id=None,
+        query="q2",
+        history=[],
+        minio_files=[],
+        is_debug=True,
+    )
+    fake_channel = MagicMock()
+    fake_channel.publish = AsyncMock()
+    fake_run_info = MagicMock()
+    prepare_run = AsyncMock(side_effect=[
+        Exception("prep failed"),
+        (fake_run_info, MagicMock()),
+    ])
+    stream_calls = []
+
+    async def stream_chunks(**kwargs):
+        stream_calls.append(kwargs)
+        yield "data: fallback\n\n"
+
+    monkeypatch.setattr(
+        agent_service,
+        "build_memory_context",
+        MagicMock(return_value=MagicMock(user_config=MagicMock(memory_switch=True))),
+    )
+    monkeypatch.setattr(agent_service, "prepare_agent_run", prepare_run)
+    monkeypatch.setattr(agent_service, "_stream_agent_chunks", stream_chunks)
+    monkeypatch.setattr(
+        agent_service.streaming_channel_manager,
+        "get_or_create_channel",
+        AsyncMock(return_value=fake_channel),
+        raising=False,
+    )
+
+    generate_kwargs = {
+        "user_id": "user-1",
+        "tenant_id": "tenant-1",
+        "enable_memory": True,
+    }
+    if runtime_scope_id is not None:
+        generate_kwargs["runtime_scope_id"] = runtime_scope_id
+    output = [chunk async for chunk in agent_service.generate_stream(
+        agent_request, **generate_kwargs
+    )]
+
+    assert output == ["data: fallback\n\n"]
+    assert prepare_run.await_count == 2
+    if runtime_scope_id is None:
+        assert all("runtime_scope_id" not in call_item.kwargs for call_item in prepare_run.await_args_list)
+        assert "runtime_scope_id" not in stream_calls[0]
+    else:
+        assert all(
+            call_item.kwargs["runtime_scope_id"] == runtime_scope_id
+            for call_item in prepare_run.await_args_list
+        )
+        assert stream_calls[0]["runtime_scope_id"] == runtime_scope_id
+
+
+@pytest.mark.asyncio
+@patch(
+    "backend.services.agent_service._resolve_user_tenant_language",
+    return_value=("user-1", "tenant-1", "en"),
+)
+@patch("backend.services.agent_service.build_memory_context")
+@patch("backend.services.agent_service.save_messages")
+@patch("backend.services.agent_service.generate_stream")
+async def test_run_agent_stream_forwards_runtime_scope(
+    mock_generate_stream,
+    mock_save_messages,
+    mock_build_memory_context,
+    mock_resolve_identity,
+    mock_agent_request,
+    mock_http_request,
+):
+    """The internal Runtime route scope must reach the streaming generator."""
+    async def stream():
+        yield "data: done\n\n"
+
+    mock_generate_stream.return_value = stream()
+    mock_build_memory_context.return_value = MagicMock(
+        user_config=MagicMock(memory_switch=False)
+    )
+
+    response = await run_agent_stream(
+        mock_agent_request,
+        mock_http_request,
+        "Bearer token",
+        runtime_scope_id="a2a:task-1",
+    )
+
+    assert isinstance(response, StreamingResponse)
+    mock_generate_stream.assert_called_once_with(
+        mock_agent_request,
+        user_id="user-1",
+        tenant_id="tenant-1",
+        language="en",
+        enable_memory=False,
+        runtime_scope_id="a2a:task-1",
+    )
+
+
+@pytest.mark.asyncio
 @pytest.mark.asyncio
 @patch("backend.services.agent_service.get_model_by_model_id")
 @patch("backend.services.agent_service.check_agent_availability")

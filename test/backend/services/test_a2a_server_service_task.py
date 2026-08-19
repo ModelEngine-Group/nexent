@@ -554,3 +554,55 @@ class TestCancelTask:
                 await service.cancel_task("task_123", user_id="user-1")
 
             mock_db.cancel_task.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_cancel_task_rejects_task_without_owner(self):
+        """Cancellation needs an owner identity before calling Runtime."""
+        from backend.services.a2a_server_service import A2AServerService, A2AServerServiceError
+
+        service = A2AServerService()
+        mock_task = {
+            "id": "task_123",
+            "caller_user_id": None,
+            "task_state": "TASK_STATE_WORKING",
+        }
+
+        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db, \
+                patch(
+                    "backend.services.a2a_server_service.runtime_agent_client.stop_agent",
+                    new_callable=AsyncMock,
+                ) as stop_agent:
+            mock_db.get_task.return_value = mock_task
+
+            with pytest.raises(A2AServerServiceError, match="owner is unavailable"):
+                await service.cancel_task("task_123")
+
+            stop_agent.assert_not_awaited()
+            mock_db.cancel_task.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_cancel_task_reports_database_cancellation_race(self):
+        """A task becoming terminal after Runtime stop must return a conflict error."""
+        from backend.services.a2a_server_service import A2AServerService, A2AServerServiceError
+
+        service = A2AServerService()
+        mock_task = {
+            "id": "task_123",
+            "caller_user_id": "user-1",
+            "task_state": "TASK_STATE_WORKING",
+        }
+
+        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db, \
+                patch(
+                    "backend.services.a2a_server_service.runtime_agent_client.stop_agent",
+                    new_callable=AsyncMock,
+                    return_value={"status": "success"},
+                ) as stop_agent:
+            mock_db.get_task.return_value = mock_task
+            mock_db.cancel_task.return_value = False
+
+            with pytest.raises(A2AServerServiceError, match="cannot be canceled"):
+                await service.cancel_task("task_123", user_id="user-1", request_id="req-1")
+
+            stop_agent.assert_awaited_once()
+            mock_db.cancel_task.assert_called_once_with("task_123")

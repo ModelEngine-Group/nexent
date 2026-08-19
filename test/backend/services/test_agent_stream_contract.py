@@ -39,6 +39,15 @@ def test_extract_json_objects_skips_noise_malformed_values_and_non_objects():
     assert _extract_json_objects_from_text("") == []
 
 
+def test_extract_json_objects_ignores_non_object_decoder_result(mocker):
+    mocker.patch(
+        "services.agent_stream_contract.json.JSONDecoder.raw_decode",
+        return_value=(["not-an-object"], 2),
+    )
+
+    assert _extract_json_objects_from_text("{}") == []
+
+
 def test_run_interrupted_chunk_detection_handles_multiple_embedded_events():
     chunk = 'data: {"type":"text"}\n\ndata: {"code":"run_interrupted"}\n\n'
 
