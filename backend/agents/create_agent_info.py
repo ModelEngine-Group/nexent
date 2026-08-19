@@ -760,7 +760,7 @@ def _inject_plan_tools(tools: List[ToolConfig], enable_planning: bool) -> None:
             description="为当前任务创建执行计划。开始执行前调用一次，传入 3-8 个功能块步骤。"
             "每个步骤必须有稳定的 id（step-1、step-2、...）、简短标题和详细描述。"
             "返回创建的计划 id 和步骤数量。",
-            inputs='{"plan_id": "string", "title": "string", "steps": "array"}',
+            inputs='{"title": "string", "steps": "array"}',
             output_type="object",
             params={},
             source="builtin",
