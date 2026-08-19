@@ -72,7 +72,7 @@ class DifySearchTool(Tool):
         dataset_ids: str = Field(
             description="JSON string array of Dify dataset IDs"),
         top_k: int = Field(
-            description="Maximum number of search results per dataset", default=3),
+            description="Maximum number of search results per dataset", default=3, ge=1, le=100),
         search_method: str = Field(
             description="Search method: keyword_search, semantic_search, full_text_search, hybrid_search",
             default="semantic_search",
@@ -132,7 +132,7 @@ class DifySearchTool(Tool):
 
         self.server_url = server_url.rstrip("/")
         self.api_key = api_key
-        self.top_k = top_k
+        self.top_k = max(1, min(int(top_k or 3), 100))
         self.search_method = search_method
         self.observer = observer
         self.rerank = rerank

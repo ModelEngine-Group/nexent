@@ -51,7 +51,7 @@ class ExaSearchTool(Tool):
 
     def __init__(self, exa_api_key:str=Field(description="EXA API key"),
                  observer: MessageObserver=Field(description="Message observer", default=None, exclude=True),
-                 max_results:int=Field(description="Maximum number of search results", default=3),
+                 max_results:int=Field(description="Maximum number of search results", default=3, ge=1, le=100),
                  image_filter: bool = Field(description="Whether to enable image filtering", default=True)
      ):
 
@@ -59,7 +59,7 @@ class ExaSearchTool(Tool):
 
         self.observer = observer
         self.exa = Exa(api_key=exa_api_key)
-        self.max_results = max_results
+        self.max_results = max(1, min(int(max_results or 3), 100))
         self.image_filter = image_filter
         self.record_ops = 1  # Used to record sequence number
 

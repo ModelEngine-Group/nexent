@@ -85,7 +85,7 @@ class KnowledgeBaseSearchTool(Tool):
     def __init__(
         self,
         top_k: int = Field(
-            description="Maximum number of search results", default=3
+            description="Maximum number of search results", default=3, ge=1, le=100
         ),
         index_names: List[str] = Field(
             description="The list of index names to search"
@@ -139,7 +139,7 @@ class KnowledgeBaseSearchTool(Tool):
             ValueError: If language is not supported
         """
         super().__init__()
-        self.top_k = top_k
+        self.top_k = max(1, min(int(_unwrap_field_info(top_k) or 3), 100))
         self.observer = observer
         self.vdb_core = vdb_core
         self.index_names = [] if index_names is None else index_names
@@ -195,12 +195,7 @@ class KnowledgeBaseSearchTool(Tool):
         Returns:
             List of actual index_names for ES queries
         """
-        display_map = self.display_name_to_index_map
-        if isinstance(display_map, FieldInfo):
-            if display_map.default_factory is not None:
-                display_map = display_map.default_factory()
-            else:
-                display_map = display_map.default
+        display_map = _unwrap_field_info(self.display_name_to_index_map)
         if not display_map:
             return names
 
@@ -283,18 +278,8 @@ class KnowledgeBaseSearchTool(Tool):
         # Compute effective top_k for initial search:
         # When rerank is enabled, retrieve more candidates to allow rerank to select the best ones.
         # Note: smolagents Tool may not expand Field defaults, so use getattr with FieldInfo fallback.
-        effective_top_k = self.top_k
-        is_rerank = self.rerank
-        if isinstance(effective_top_k, FieldInfo):
-            if effective_top_k.default_factory is not None:
-                effective_top_k = effective_top_k.default_factory()
-            else:
-                effective_top_k = effective_top_k.default
-        if isinstance(is_rerank, FieldInfo):
-            if is_rerank.default_factory is not None:
-                is_rerank = is_rerank.default_factory()
-            else:
-                is_rerank = is_rerank.default
+        effective_top_k = _unwrap_field_info(self.top_k)
+        is_rerank = _unwrap_field_info(self.rerank)
         if is_rerank:
             effective_top_k = effective_top_k * RERANK_OVERSEARCH_MULTIPLIER
 

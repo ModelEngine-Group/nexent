@@ -106,12 +106,12 @@ class RAGFlowSearchTool(Tool):
         server_url: str = Field(description="RAGFlow API base URL (e.g., 'http://localhost:9380')"),
         api_key: str = Field(description="RAGFlow API key"),
         dataset_ids: str = Field(description="JSON string array of RAGFlow dataset IDs", default="[]"),
-        top_k: int = Field(description="Maximum number of search results to return to the LLM", default=3),
+        top_k: int = Field(description="Maximum number of search results to return to the LLM", default=3, ge=1, le=100),
         similarity_threshold: float = Field(
-            description="Minimum similarity score threshold for results", default=0.2
+            description="Minimum similarity score threshold for results", default=0.2, ge=0.0, le=1.0
         ),
         vector_similarity_weight: float = Field(
-            description="Weight of vector similarity in hybrid search (0.0-1.0)", default=0.3
+            description="Weight of vector similarity in hybrid search (0.0-1.0)", default=0.3, ge=0.0, le=1.0
         ),
         keyword: bool = Field(description="Whether to enable keyword search in hybrid mode", default=False),
         highlight: bool = Field(description="Whether to enable highlight in search results", default=True),
@@ -156,9 +156,9 @@ class RAGFlowSearchTool(Tool):
 
         self.server_url = server_url.rstrip("/")
         self.api_key = api_key
-        self.top_k = top_k
-        self.similarity_threshold = similarity_threshold
-        self.vector_similarity_weight = vector_similarity_weight
+        self.top_k = max(1, min(int(top_k or 3), 100))
+        self.similarity_threshold = max(0.0, min(float(similarity_threshold if similarity_threshold is not None else 0.2), 1.0))
+        self.vector_similarity_weight = max(0.0, min(float(vector_similarity_weight if vector_similarity_weight is not None else 0.3), 1.0))
         self.keyword = keyword
         self.highlight = highlight
         self.observer = observer

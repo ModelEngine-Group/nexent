@@ -78,14 +78,14 @@ class GetEmailTool(Tool):
                  username: str=Field(description="IMAP Server Username"), 
                  password: str=Field(description="IMAP Server Password"), 
                  use_ssl: bool=Field(description="Use SSL", default=True),
-                 timeout: int = Field(description="Timeout", default=30)):
+                 timeout: int = Field(description="Timeout", default=30, ge=1)):
         super().__init__()
         self.imap_server = imap_server
         self.imap_port = imap_port
         self.username = username
         self.password = password
         self.use_ssl = use_ssl
-        self.timeout = timeout
+        self.timeout = max(1, int(timeout or 30))
 
     def _decode_subject(self, subject):
         """Decode email subject, fallback to utf-8 or latin1 for unknown encodings"""

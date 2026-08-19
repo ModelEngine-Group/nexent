@@ -45,13 +45,13 @@ class IdataSearchTool(Tool):
             description="JSON string array of iData knowledge base IDs"),
         rerank_model_id: str = Field(description="Rerank model ID"),
         top_k: int = Field(
-            description="Maximum number of search results", default=10),
+            description="Maximum number of search results", default=10, ge=1, le=100),
         similarity_threshold: float = Field(
-            description="Rerank similarity threshold score", default=-10.0),
+            description="Rerank similarity threshold score", default=-10.0, le=1.0),
         keyword_similarity_weight: float = Field(
-            description="Keyword similarity weight", default=0.10),
+            description="Keyword similarity weight", default=0.10, ge=0.0, le=1.0),
         vector_similarity_weight: float = Field(
-            description="Vector similarity weight", default=0.3),
+            description="Vector similarity weight", default=0.3, ge=0.0, le=1.0),
         observer: MessageObserver = Field(
             description="Message observer", default=None, exclude=True),
     ):
@@ -120,10 +120,10 @@ class IdataSearchTool(Tool):
         self.user_id = user_id
         self.knowledge_space_id = knowledge_space_id
         self.rerank_model_id = rerank_model_id
-        self.top_k = top_k
-        self.similarity_threshold = similarity_threshold
-        self.keyword_similarity_weight = keyword_similarity_weight
-        self.vector_similarity_weight = vector_similarity_weight
+        self.top_k = max(1, min(int(top_k or 10), 100))
+        self.similarity_threshold = min(float(similarity_threshold if similarity_threshold is not None else -10.0), 1.0)
+        self.keyword_similarity_weight = max(0.0, min(float(keyword_similarity_weight if keyword_similarity_weight is not None else 0.10), 1.0))
+        self.vector_similarity_weight = max(0.0, min(float(vector_similarity_weight if vector_similarity_weight is not None else 0.3), 1.0))
         self.observer = observer
 
         # Cache HTTP client for reuse (uses shared HttpClientManager internally)

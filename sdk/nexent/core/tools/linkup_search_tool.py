@@ -51,13 +51,13 @@ class LinkupSearchTool(Tool):
         self,
         linkup_api_key: str = Field(description="Linkup API key"),
         observer: MessageObserver = Field(description="Message observer", default=None, exclude=True),
-        max_results: int = Field(description="Maximum number of search results", default=3),
+        max_results: int = Field(description="Maximum number of search results", default=3, ge=1, le=100),
         image_filter: bool = Field(description="Whether to enable image filtering", default=True)
     ):
         super().__init__()
         self.observer = observer
         self.client = LinkupClient(api_key=linkup_api_key)
-        self.max_results = max_results
+        self.max_results = max(1, min(int(max_results or 3), 100))
         self.record_ops = 1
         self.image_filter = image_filter
         self.data_process_service = os.getenv("DATA_PROCESS_SERVICE")
