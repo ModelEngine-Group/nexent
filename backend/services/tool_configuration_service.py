@@ -23,6 +23,7 @@ from consts.const import (
 from consts.exceptions import MCPConnectionError, NotFoundException, ToolExecutionException, ValidationError
 from consts.model import ToolInstanceInfoRequest, ToolInfo, ToolSourceEnum, ToolValidateRequest
 from consts.tool_labels import SYSTEM_MANAGED_TOOL_NAMES
+from consts.tool_param_constraints import TOOL_PARAM_RANGE_CONSTRAINTS
 from database.outer_api_tool_db import (
     upsert_openapi_service,
     query_openapi_services_by_tenant,
@@ -394,6 +395,44 @@ def search_tool_info_impl(
         }
 
 
+def _get_tool_name(tool_id: int) -> Optional[str]:
+    """Resolve a tool's canonical name from the DB.
+
+    The DB ``ag_tool_info_t.name`` value matches the SDK tool ``name`` attribute,
+    which is exactly the key used by ``TOOL_PARAM_RANGE_CONSTRAINTS``.
+    """
+    tools = query_tools_by_ids([tool_id])
+    return tools[0].get("name") if tools else None
+
+
+def _validate_tool_param_ranges(tool_name: Optional[str], params: Dict[str, Any]):
+    """Validate numeric parameter ranges against the tool's declared constraints."""
+    constraints = TOOL_PARAM_RANGE_CONSTRAINTS.get(tool_name or "")
+    if not constraints:
+        return
+    for param_name, (value_type, min_value, max_value) in constraints.items():
+        if param_name not in params:
+            continue
+        raw_value = params[param_name]
+        # None means "not configured"; the DB layer drops it and the SDK falls back to its default.
+        if raw_value is None:
+            continue
+        try:
+            if value_type == "int":
+                numeric_value = float(raw_value)
+                if not numeric_value.is_integer():
+                    raise ValidationError(f"{tool_name} {param_name} must be an integer")
+                numeric_value = int(numeric_value)
+            else:
+                numeric_value = float(raw_value)
+        except (TypeError, ValueError):
+            raise ValidationError(f"{tool_name} {param_name} must be a valid {value_type}")
+        if min_value is not None and numeric_value < min_value:
+            raise ValidationError(f"{tool_name} {param_name} must be >= {min_value}")
+        if max_value is not None and numeric_value > max_value:
+            raise ValidationError(f"{tool_name} {param_name} must be <= {max_value}")
+
+
 def update_tool_info_impl(tool_info: ToolInstanceInfoRequest, tenant_id: str, user_id: str):
     """
     Update tool configuration information
@@ -456,6 +495,11 @@ def update_tool_info_impl(tool_info: ToolInstanceInfoRequest, tenant_id: str, us
                 ]
                 params["kds_list"] = list(dict.fromkeys(hidden_existing + visible_submitted))
         tool_info.params = params
+
+    _validate_tool_param_ranges(
+        _get_tool_name(tool_info.tool_id),
+        dict(tool_info.params or {}),
+    )
 
     tool_instance = create_or_update_tool_by_tool_info(
         tool_info, tenant_id, user_id, version_no=version_no)

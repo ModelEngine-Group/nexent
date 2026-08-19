@@ -11,6 +11,7 @@ import {
   searchAgentInfo,
 } from "@/services/agentConfigService";
 import { Agent } from "@/types/agentConfig";
+import { getToolParamConstraint } from "@/const/toolParamConstraints";
 import log from "@/lib/logger";
 
 /**
@@ -55,6 +56,35 @@ function isValueCompatibleWithType(
       // we already filtered those above.
       return true;
   }
+}
+
+/**
+ * Check a numeric value against the declared range constraint for a
+ * tool parameter. Returns true when no constraint is declared.
+ */
+function isValueWithinRange(
+  value: unknown,
+  toolName: string,
+  paramName: string
+): boolean {
+  const constraint = getToolParamConstraint(toolName, paramName);
+  if (!constraint) return true;
+
+  const numericValue =
+    typeof value === "string" ? Number(value.trim()) : (value as number);
+  if (typeof numericValue !== "number" || !Number.isFinite(numericValue)) {
+    return false;
+  }
+  if (constraint.type === "int" && !Number.isInteger(numericValue)) {
+    return false;
+  }
+  if (constraint.min !== null && numericValue < constraint.min) {
+    return false;
+  }
+  if (constraint.max !== null && numericValue > constraint.max) {
+    return false;
+  }
+  return true;
 }
 
 /**
@@ -103,6 +133,9 @@ async function batchUpdateToolConfigs(
             param.type &&
             !isValueCompatibleWithType(param.value, param.type)
           ) {
+            return acc;
+          }
+          if (!isValueWithinRange(param.value, tool.name, param.name)) {
             return acc;
           }
           acc[param.name] = param.value;

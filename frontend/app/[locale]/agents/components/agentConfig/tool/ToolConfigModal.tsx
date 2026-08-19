@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
@@ -28,6 +28,7 @@ import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import { CloseOutlined } from "@ant-design/icons";
 
 import { TOOL_PARAM_TYPES, getToolParamOptions } from "@/const/agentConfig";
+import { getToolParamConstraint } from "@/const/toolParamConstraints";
 import { ToolParam, Tool } from "@/types/agentConfig";
 import { KnowledgeBase } from "@/types/knowledgeBase";
 import ToolTestPanel from "./ToolTestPanel";
@@ -2030,7 +2031,8 @@ export default function ToolConfigModal({
       }
 
       switch (param.type) {
-        case TOOL_PARAM_TYPES.NUMBER:
+        case TOOL_PARAM_TYPES.NUMBER: {
+          const constraint = getToolParamConstraint(tool.name, param.name);
           return (
             <InputNumber
               placeholder={t("toolConfig.input.string.placeholder", {
@@ -2039,8 +2041,12 @@ export default function ToolConfigModal({
                   param.description_zh
                 ),
               })}
+              min={constraint?.min ?? undefined}
+              max={constraint?.max ?? undefined}
+              precision={constraint?.type === "int" ? 0 : undefined}
             />
           );
+        }
 
         case TOOL_PARAM_TYPES.BOOLEAN:
           return <Switch />;
