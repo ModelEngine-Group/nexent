@@ -46,7 +46,8 @@ class StoreMemoryTool(Tool):
 
     name = "store_memory"
     description = (
-        "Save important information to the current agent's short-term memory. "
+        "Save important information as short-term memory evidence for future "
+        "recall and autonomous Dreaming consolidation. "
         "Use this when the user shares personal preferences, facts about "
         "themselves, project context, or instructions that should persist "
         "across the current conversation. Do NOT store transient information "
@@ -54,7 +55,7 @@ class StoreMemoryTool(Tool):
         "base, or data the user explicitly says to forget."
     )
     description_zh = (
-        "将重要信息保存到当前智能体的短期记忆中。"
+        "将重要信息保存为短期记忆素材，以便未来回忆并由 Dreaming 自主整合。"
         "当用户分享个人偏好、关于自己的事实、项目上下文或应在本对话中保留的指令时使用此工具。"
         "不要存储临时信息，如临时计算结果、知识库中已有的信息或用户明确要求遗忘的数据。"
     )

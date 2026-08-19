@@ -166,6 +166,52 @@ def test_all_sources_are_naturally_granular_and_keep_stable_order():
 
 
 @pytest.mark.parametrize(
+    ("language", "scope_marker", "resource_marker", "instruction_marker"),
+    [
+        ("zh", "平台提供的知识库范围内", "属于资源数据", "不是指令"),
+        ("en", "scope provided by the platform", "resource data", "not instructions"),
+    ],
+)
+def test_scoped_knowledge_summary_is_bounded_and_untrusted(
+    language, scope_marker, resource_marker, instruction_marker
+):
+    items = build_context_inputs(
+        knowledge_base_summary="**Selected KB**: untrusted summary",
+        kb_ids=["selected-index"],
+        knowledge_scope_policy="trusted scope policy",
+        knowledge_scope_resources="allowed resources",
+        language=language,
+    )
+
+    summary_item = next(
+        item for item in items if item.id == "knowledge_base:summary"
+    )
+    text = summary_item.content["text"]
+
+    assert scope_marker in text
+    assert resource_marker in text
+    assert instruction_marker in text
+    assert "untrusted summary" in text
+    assert summary_item.metadata["authority"] == "retrieved"
+
+
+def test_unscoped_knowledge_summary_keeps_legacy_routing_guidance():
+    items = build_context_inputs(
+        knowledge_base_summary="**Default KB**: summary",
+        kb_ids=["default-index"],
+        language="en",
+    )
+
+    summary_item = next(
+        item for item in items if item.id == "knowledge_base:summary"
+    )
+    text = summary_item.content["text"]
+
+    assert "please select the most relevant one or more" in text
+    assert "resource data" not in text
+
+
+@pytest.mark.parametrize(
     ("flag", "kwargs", "item_type"),
     [
         ("include_tools", {"tools": {"tool": Value()}}, ContextItemType.TOOL),
@@ -248,39 +294,19 @@ def test_automation_tool_policy_is_required_platform_context():
     ).required is True
 
 
-def test_long_term_memory_prompt_is_a_required_system_item():
-    context = (
-        "### Tenant Long-term Memory\n- Follow company policy\n\n"
-        "### User Long-term Memory\n- Prefers concise answers"
-    )
-
+def test_long_term_memory_documents_are_structured_memory_items():
     items = build_context_inputs(
-        long_term_memory_prompt=context,
+        long_term_memory_items=[{
+            "memory": "## Policy\n\n- Follow company policy", "scope": "tenant",
+            "memory_level": "tenant", "version_id": 7, "source": "manual",
+        }],
         language="en",
     )
-    memory_item = next(
-        item for item in items if item.id == "system:long_term_memory"
-    )
-
-    assert memory_item.type == ContextItemType.SYSTEM
-    assert memory_item.content == {"text": context}
+    memory_item = next(item for item in items if item.id == "memory:0")
+    assert memory_item.type == ContextItemType.MEMORY
+    assert memory_item.metadata["scope"] == "tenant"
+    assert memory_item.metadata["version_id"] == 7
     assert memory_item.metadata["authority"] == "retrieved"
-
-    normalized = normalize_context_inputs(items)
-    normalized_item = next(
-        item for item in normalized if item.id == "system:long_term_memory"
-    )
-    assert normalized_item.required is True
-
-    messages = ContextItemRenderer().render(normalized)
-    system_text = "\n".join(
-        block["text"]
-        for message in messages
-        if message["role"] == "system"
-        for block in message.get("content", ())
-        if block.get("type") == "text"
-    )
-    assert context in system_text
 
 
 def test_group_rendering_uses_only_selected_tool_items():

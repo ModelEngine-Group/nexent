@@ -448,8 +448,9 @@ function TenantList({
         // Handle empty name error
         message.error(t("tenantResources.tenants.nameRequired"));
       } else {
-        // Show generic error for other cases
-        message.error(t("tenantResources.tenantOperationFailed"));
+        message.error(
+          errorMessage || t("tenantResources.tenantOperationFailed")
+        );
       }
     }
   };

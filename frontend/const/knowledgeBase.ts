@@ -114,36 +114,36 @@ export const NOTIFICATION_TYPES = {
 
 // File extension constants
 export const FILE_EXTENSIONS = {
-  PDF: 'pdf',
-  DOC: 'doc',
-  DOCX: 'docx',
-  XLS: 'xls',
-  XLSX: 'xlsx',
-  PPT: 'ppt',
-  PPTX: 'pptx',
-  TXT: 'txt',
-  MD: 'md',
-  EPUB: 'epub',
-  CSV: 'csv',
-  HTML: 'html',
-  XML: 'xml',
-  JSON: 'json'
+  PDF: "pdf",
+  DOC: "doc",
+  DOCX: "docx",
+  XLS: "xls",
+  XLSX: "xlsx",
+  PPT: "ppt",
+  PPTX: "pptx",
+  TXT: "txt",
+  MD: "md",
+  EPUB: "epub",
+  CSV: "csv",
+  HTML: "html",
+  XML: "xml",
+  JSON: "json",
 } as const;
 
 // File type constants
 export const FILE_TYPES = {
-  PDF: 'PDF',
-  WORD: 'Word',
-  EXCEL: 'Excel',
-  POWERPOINT: 'PowerPoint',
-  TEXT: 'Text',
-  MARKDOWN: 'Markdown',
-  EPUB: 'EPUB',
-  CSV: 'CSV',
-  JSON: 'JSON',
-  HTML: 'HTML',
-  XML: 'XML',
-  UNKNOWN: 'Unknown'
+  PDF: "PDF",
+  WORD: "Word",
+  EXCEL: "Excel",
+  POWERPOINT: "PowerPoint",
+  TEXT: "Text",
+  MARKDOWN: "Markdown",
+  EPUB: "EPUB",
+  CSV: "CSV",
+  JSON: "JSON",
+  HTML: "HTML",
+  XML: "XML",
+  UNKNOWN: "Unknown",
 } as const;
 
 // File extension to type mapping
@@ -161,16 +161,16 @@ export const EXTENSION_TO_TYPE_MAP = {
   [FILE_EXTENSIONS.JSON]: FILE_TYPES.JSON,
   [FILE_EXTENSIONS.HTML]: FILE_TYPES.HTML,
   [FILE_EXTENSIONS.XML]: FILE_TYPES.XML,
-  [FILE_EXTENSIONS.EPUB]: FILE_TYPES.EPUB
+  [FILE_EXTENSIONS.EPUB]: FILE_TYPES.EPUB,
 } as const;
 
 // AIDP supported file extensions, grouped by category
 export const AIDP_FILE_EXTENSIONS = {
-  TEXT: ['txt', 'json', 'md', 'markdown'] as const,
-  WEB: ['html'] as const,
-  DOCUMENT: ['pdf', 'docx', 'doc', 'ppt', 'pptx'] as const,
-  SPREADSHEET: ['xlsx', 'xls', 'csv'] as const,
-  IMAGE: ['png', 'jpeg', 'jpg', 'bmp'] as const,
+  TEXT: ["txt", "json", "md", "markdown"] as const,
+  WEB: ["html"] as const,
+  DOCUMENT: ["pdf", "docx", "doc", "ppt", "pptx"] as const,
+  SPREADSHEET: ["xlsx", "xls", "csv"] as const,
+  IMAGE: ["png", "jpeg", "jpg", "bmp"] as const,
 } as const;
 
 // Flat array of all allowed AIDP extensions (lowercase, no dot)
@@ -184,22 +184,22 @@ export const AIDP_ALLOWED_EXTENSIONS = [
 
 // MIME types accepted by AIDP
 export const AIDP_ALLOWED_MIME_TYPES = new Set<string>([
-  'text/plain',
-  'application/json',
-  'text/markdown',
-  'text/html',
-  'application/pdf',
-  'application/msword',
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  'application/vnd.ms-powerpoint',
-  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  'application/vnd.ms-excel',
-  'text/csv',
-  'application/csv',
-  'image/png',
-  'image/jpeg',
-  'image/bmp',
+  "text/plain",
+  "application/json",
+  "text/markdown",
+  "text/html",
+  "application/pdf",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-powerpoint",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.ms-excel",
+  "text/csv",
+  "application/csv",
+  "image/png",
+  "image/jpeg",
+  "image/bmp",
 ]);
 
 // Dragger `accept` prop value (comma-separated dot-extensions)
@@ -209,7 +209,23 @@ export const AIDP_ACCEPT_STRING = [
   ...AIDP_FILE_EXTENSIONS.DOCUMENT,
   ...AIDP_FILE_EXTENSIONS.SPREADSHEET,
   ...AIDP_FILE_EXTENSIONS.IMAGE,
-].map((ext) => `.${ext}`).join(',');
+]
+  .map((ext) => `.${ext}`)
+  .join(",");
+
+export const AIDP_MAX_UPLOAD_FILE_COUNT = 50;
+export const AIDP_SMALL_FILE_MAX_SIZE_MB = 20;
+export const AIDP_OTHER_FILE_MAX_SIZE_MB = 1024;
+export const AIDP_SMALL_FILE_EXTENSIONS = [
+  "txt",
+  "xls",
+  "xlsx",
+  "csv",
+] as const;
+export const AIDP_SMALL_FILE_MAX_SIZE_BYTES =
+  AIDP_SMALL_FILE_MAX_SIZE_MB * 1024 * 1024;
+export const AIDP_OTHER_FILE_MAX_SIZE_BYTES =
+  AIDP_OTHER_FILE_MAX_SIZE_MB * 1024 * 1024;
 
 export const KNOWLEDGE_BASE_MAX_FILE_SIZE_MB = 20;
 export const KNOWLEDGE_BASE_MAX_FILE_SIZE_BYTES =

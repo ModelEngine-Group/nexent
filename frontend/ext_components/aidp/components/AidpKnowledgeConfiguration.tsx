@@ -194,74 +194,49 @@ const AidpKnowledgeConfiguration: React.FC = () => {
   }, []);
 
   // ---- After update success ----
-  // Simply refresh the current KB page; selected KB stays put because it's
-  // tracked independently of the paginated `kbs` list.
-  const handleUpdateKbSuccess = useCallback(() => {
-    setUpdateModalOpen(false);
-    setEditingKb(null);
-    fetchKbs(kbPage);
-    // If the edited KB is the one currently selected, refresh its cached item
-    // by re-fetching it via KB detail (name/description may have changed).
-    if (selectedKb && activeKbId === selectedKb.kds_id) {
-      aidpKnowledgeService
-        .listKbs(kbPage, KB_PAGE_SIZE)
-        .then((r) => {
-          const refreshed = r.value.find((kb) => kb.kds_id === selectedKb.kds_id);
-          if (refreshed) setSelectedKb(refreshed);
-        })
-        .catch(() => { /* non-fatal; stale item remains visible */ });
-    }
-  }, [fetchKbs, kbPage, selectedKb, activeKbId]);
+  // Apply the returned resource locally instead of reloading the full KB page.
+  const handleUpdateKbSuccess = useCallback(
+    (updatedKb: AidpKnowledgeBaseItem) => {
+      setUpdateModalOpen(false);
+      setEditingKb(null);
+      setKbs((current) =>
+        current.map((kb) => (kb.kds_id === updatedKb.kds_id ? updatedKb : kb))
+      );
+      if (activeKbId === updatedKb.kds_id) {
+        setSelectedKb(updatedKb);
+        setActiveKbDetail(updatedKb);
+      }
+    },
+    [activeKbId]
+  );
 
   // ---- After create success ----
-  // Scan the paginated KB list to find which page the new KB landed on,
-  // switch to that page, and auto-select it so the user stays on their
-  // newly created knowledge base.
+  // The create response already contains the resource. Insert it locally
+  // instead of scanning up to 50 expensive server-side pages.
   const handleCreateKbSuccess = useCallback(
-    async (newKdsId: string) => {
+    (newKb: AidpKnowledgeBaseItem) => {
       setCreateModalOpen(false);
-      if (!newKdsId) {
-        fetchKbs(kbPage);
-        return;
-      }
-
-      const MAX_PAGES = 50; // safety cap to prevent infinite scan
-      for (let p = 1; p <= MAX_PAGES; p++) {
-        try {
-          const result = await aidpKnowledgeService.listKbs(
-            p,
-            KB_PAGE_SIZE,
-          );
-          const found = result.value.find((kb) => kb.kds_id === newKdsId);
-          if (found) {
-            // Switch KB list to the page containing the new KB
-            setKbs(result.value);
-            setKbTotal(result.total_count ?? result.value.length);
-            setKbHasMore(result.has_more ?? false);
-            setKbTotalReliable(result.total_reliable !== false);
-            setKbPage(p);
-            // Auto-select the new KB
-            setActiveKbId(found.kds_id);
-            setSelectedKb(found);
-            // Load its docs (will be empty or pre-uploaded docs)
-            setDocPage(1);
-            setDocHasMore(false);
-            setDocTotalReliable(true);
-            fetchDocs(found.kds_id, 1);
-            return;
-          }
-          // Page didn't contain it — stop if no more pages
-          if (!result.has_more && !result.next_link) break;
-          if (result.value.length < KB_PAGE_SIZE) break;
-        } catch (err) {
-          log.error("Failed scanning KB pages after create:", err);
-          break;
-        }
-      }
-      // Fallback: refresh current KB page if we couldn't locate the new one
-      fetchKbs(kbPage);
+      setKbs((current) =>
+        [newKb, ...current.filter((kb) => kb.kds_id !== newKb.kds_id)].slice(
+          0,
+          KB_PAGE_SIZE
+        )
+      );
+      setKbTotal((current) => {
+        const nextTotal = current + 1;
+        setKbHasMore(kbPage * KB_PAGE_SIZE < nextTotal);
+        return nextTotal;
+      });
+      setKbTotalReliable(true);
+      setActiveKbId(newKb.kds_id);
+      setSelectedKb(newKb);
+      setActiveKbDetail(newKb);
+      setDocPage(1);
+      setDocHasMore(false);
+      setDocTotalReliable(true);
+      void fetchDocs(newKb.kds_id, 1);
     },
-    [kbPage, fetchDocs]
+    [fetchDocs, kbPage]
   );
 
   // ---- After documents uploaded ----
@@ -269,12 +244,27 @@ const AidpKnowledgeConfiguration: React.FC = () => {
     if (activeKbId) {
       // Reset doc pagination to page 1 so data and pagination UI stay in sync
       setDocPage(1);
-      fetchDocs(activeKbId, 1);
-      // Also refresh the KB list to update document_count, but stay on the
-      // current KB page (otherwise user would be jumped back to page 1).
-      fetchKbs(kbPage);
+      void fetchDocs(activeKbId, 1);
+      void aidpKnowledgeService
+        .getKb(activeKbId)
+        .then((detail) => {
+          const refreshed = {
+            ...selectedKb,
+            ...detail,
+            kds_id: activeKbId,
+            kds_name: detail.kds_name || selectedKb?.kds_name || activeKbId,
+          } as AidpKnowledgeBaseItem;
+          setSelectedKb(refreshed);
+          setActiveKbDetail(detail);
+          setKbs((current) =>
+            current.map((kb) => (kb.kds_id === activeKbId ? refreshed : kb))
+          );
+        })
+        .catch((error) =>
+          log.error("Failed to refresh active AIDP KB detail:", error)
+        );
     }
-  }, [activeKbId, fetchDocs, fetchKbs, kbPage]);
+  }, [activeKbId, fetchDocs, selectedKb]);
 
   // Active KB item is stored in `selectedKb` state (not derived from `kbs`),
   // because the KB list is server-paginated and refetching it after upload

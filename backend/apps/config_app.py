@@ -48,6 +48,9 @@ from apps.user_app import router as user_router
 from apps.user_management_app import router as user_management_router
 from apps.vectordatabase_app import router as vectordatabase_router
 from apps.voice_app import voice_config_router as voice_router
+from apps.ind_aidp_app import router as ind_aidp_router
+from apps.memory_long_term_app import router as memory_long_term_router
+from apps.memory_dreaming_app import router as memory_dreaming_router
 from consts.const import (
     AIDP_API_KEY,
     AIDP_SERVER_URL,
@@ -77,6 +80,19 @@ async def sync_default_prompt_template_on_startup():
         logger.info("System default prompt template synced successfully.")
     except Exception as exc:
         logger.error(f"Failed to sync system default prompt template: {str(exc)}")
+
+
+@app.on_event("startup")
+async def start_dreaming_scheduler():
+    from services.memory_dreaming_scheduler import dreaming_scheduler
+    await dreaming_scheduler.start()
+
+
+@app.on_event("shutdown")
+async def stop_dreaming_scheduler():
+    from services.memory_dreaming_scheduler import dreaming_scheduler
+    await dreaming_scheduler.stop()
+
 
 app.include_router(model_manager_router)
 app.include_router(config_sync_router)
@@ -120,6 +136,7 @@ app.include_router(notification_router)
 app.include_router(a2a_client_router)
 app.include_router(a2a_server_router)
 app.include_router(haotian_router)
+app.include_router(ind_aidp_router)
 app.include_router(evaluation_set_router)
 app.include_router(agent_evaluation_router)
 app.include_router(evaluator_router)
@@ -130,6 +147,8 @@ if ENABLE_AIDP_KNOWLEDGE:
 # New memory architecture routers (upstream #3497)
 app.include_router(memory_config_router)
 app.include_router(memory_record_router)
+app.include_router(memory_long_term_router)
 app.include_router(tenant_quota_router)
 app.include_router(platform_quota_router)
 app.include_router(personal_quota_router)
+app.include_router(memory_dreaming_router)

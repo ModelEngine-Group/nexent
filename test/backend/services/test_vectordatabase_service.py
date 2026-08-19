@@ -96,10 +96,15 @@ class ValidationError(Exception):
     pass
 
 
+class TenantResourceLimitError(ValidationError, ValueError):
+    pass
+
+
 consts_exceptions_mod.UnauthorizedError = UnauthorizedError
 consts_exceptions_mod.NotFoundException = NotFoundException
 consts_exceptions_mod.DuplicateError = DuplicateError
 consts_exceptions_mod.ValidationError = ValidationError
+consts_exceptions_mod.TenantResourceLimitError = TenantResourceLimitError
 
 # Use real consts.const/scheduler (env vars are configured in test/conftest.py)
 consts_pkg = importlib.import_module("consts")
@@ -361,6 +366,12 @@ sys.modules['utils.config_utils'] = config_utils_mock
 sys.modules['backend.utils.config_utils'] = config_utils_mock
 setattr(sys.modules['utils'], 'config_utils', config_utils_mock)
 setattr(sys.modules['backend.utils'], 'config_utils', config_utils_mock)
+
+knowledge_telemetry_mock = types.ModuleType('utils.knowledge_telemetry')
+knowledge_telemetry_mock.set_span_attributes = MagicMock()
+knowledge_telemetry_mock.trace_knowledge_operation = MagicMock()
+sys.modules['utils.knowledge_telemetry'] = knowledge_telemetry_mock
+setattr(sys.modules['utils'], 'knowledge_telemetry', knowledge_telemetry_mock)
 
 # Shared mock instances for MinIO
 storage_client_mock = MagicMock()

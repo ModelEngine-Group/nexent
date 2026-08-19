@@ -859,6 +859,49 @@ def test_call_with_reasoning_content_only(openai_model_instance):
             "Final response")
 
 
+def test_call_rejects_reasoning_only_response_and_records_diagnostics(
+    openai_model_instance, caplog
+):
+    """A reasoning stream that exhausts its budget must not become an empty success."""
+    messages = [{"role": "user", "content": [{"text": "Hello"}]}]
+
+    reasoning_chunk = MagicMock()
+    reasoning_chunk.choices = [MagicMock()]
+    reasoning_chunk.choices[0].delta.content = None
+    reasoning_chunk.choices[0].delta.role = "assistant"
+    reasoning_chunk.choices[0].delta.reasoning_content = "Internal reasoning"
+    reasoning_chunk.choices[0].finish_reason = None
+    reasoning_chunk.usage = None
+
+    final_chunk = MagicMock()
+    final_chunk.choices = [MagicMock()]
+    final_chunk.choices[0].delta.content = None
+    final_chunk.choices[0].delta.role = None
+    final_chunk.choices[0].delta.reasoning_content = None
+    final_chunk.choices[0].finish_reason = "length"
+    final_chunk.usage = MagicMock(prompt_tokens=10, completion_tokens=20)
+
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}):
+        openai_model_instance.client.chat.completions.create.return_value = [
+            reasoning_chunk,
+            final_chunk,
+        ]
+
+        with pytest.raises(
+            openai_llm_module.EmptyModelResponseError,
+            match="finish_reason=length",
+        ):
+            openai_model_instance.__call__(messages)
+
+    diagnostics = openai_model_instance.last_response_diagnostics
+    assert diagnostics["finish_reason"] == "length"
+    assert diagnostics["content_char_count"] == 0
+    assert diagnostics["reasoning_chunk_count"] == 1
+    assert diagnostics["reasoning_char_count"] == len("Internal reasoning")
+    assert diagnostics["output_tokens"] == 20
+    assert "event=empty_model_response" in caplog.text
+
+
 def test_call_with_reasoning_content_and_content_together(openai_model_instance):
     """Test __call__ method handles chunks with both reasoning_content and content simultaneously"""
 
@@ -1737,7 +1780,11 @@ def test_provider_adapter_preserves_context_manager_tool_order(openai_model_inst
     openai_model_instance.prompt_cache = {"mode": "openai_automatic", "enabled": True}
 
     mock_chunk = MagicMock()
-    mock_chunk.choices = []
+    mock_chunk.choices = [MagicMock()]
+    mock_chunk.choices[0].delta.content = "ok"
+    mock_chunk.choices[0].delta.role = "assistant"
+    mock_chunk.choices[0].delta.reasoning_content = None
+    mock_chunk.choices[0].finish_reason = "stop"
     mock_chunk.usage = MagicMock(prompt_tokens=1, completion_tokens=1)
     tools = [
         {"type": "function", "function": {"name": "zebra"}},

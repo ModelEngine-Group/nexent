@@ -114,7 +114,7 @@ const ROUTE_CONFIG: RouteConfig[] = [
     parentKey: "/agent-dev",
   },
   {
-    path: "/space/evaluation",
+    path: "/evaluation",
     Icon: LineChart,
     labelKey: "sidebar.agentEvaluation",
     order: 8,

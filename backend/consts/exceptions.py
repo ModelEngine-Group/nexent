@@ -193,6 +193,12 @@ class ValidationError(Exception):
     pass
 
 
+class TenantResourceLimitError(ValidationError, ValueError):
+    """Raised when a platform or tenant hard resource limit is reached."""
+
+    pass
+
+
 class NotFoundException(Exception):
     """Raised when not found exception occurs."""
 

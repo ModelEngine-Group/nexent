@@ -36,7 +36,10 @@ import aidpKnowledgeService from "@/ext_components/aidp/services/aidpKnowledgeSe
  */
 type RcFileLike = File & { uid: string; lastModifiedDate: Date };
 import { AIDP_ACCEPT_STRING } from "@/const/knowledgeBase";
-import { partitionAidpFiles, isAidpFileValid } from "@/services/uploadService";
+import {
+  partitionAidpFiles,
+  validateAidpFiles,
+} from "@/services/uploadService";
 import { useGroupList } from "@/hooks/group/useGroupList";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 
@@ -73,7 +76,7 @@ interface AidpCreateKbModalProps {
   open: boolean;
   existingKbs: AidpKnowledgeBaseItem[];
   onCancel: () => void;
-  onSuccess: (newKdsId: string) => void;
+  onSuccess: (knowledgeBase: AidpKnowledgeBaseItem) => void;
 }
 
 const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
@@ -82,11 +85,16 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
   onCancel,
   onSuccess,
 }) => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [form] = Form.useForm();
   const [current, setCurrent] = useState(0);
   const [loading, setLoading] = useState(false);
   const [fileList, setFileList] = useState<File[]>([]);
+  const fileListRef = useRef<File[]>([]);
+
+  useEffect(() => {
+    fileListRef.current = fileList;
+  }, [fileList]);
 
   // Antd <Dragger> fires beforeUpload once per file in a multi-select batch.
   // The `newFiles` array may-or-may-not be the same reference across the N
@@ -157,7 +165,9 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
     const models: AidpModelItem[] = vlmModelsData?.models ?? [];
     return models
       .map((m) => m.model_name)
-      .filter((name): name is string => typeof name === "string" && name.length > 0);
+      .filter(
+        (name): name is string => typeof name === "string" && name.length > 0
+      );
   }, [vlmModelsData]);
 
   // Resolve the default VLM model: prefer the hardcoded
@@ -166,7 +176,8 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
   // models endpoint returns empty, matching the previous behavior.
   const defaultVlmModel = useMemo(() => {
     if (vlmModelOptions.length === 0) return PREFERRED_VLM_MODEL;
-    if (vlmModelOptions.includes(PREFERRED_VLM_MODEL)) return PREFERRED_VLM_MODEL;
+    if (vlmModelOptions.includes(PREFERRED_VLM_MODEL))
+      return PREFERRED_VLM_MODEL;
     return vlmModelOptions[0];
   }, [vlmModelOptions]);
 
@@ -237,9 +248,10 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
     setCurrent(0);
   };
 
-
-
   const handleSubmit = async (skipUpload: boolean) => {
+    let knowledgeBaseCreated = false;
+    let createdKdsId = "";
+    let createdKnowledgeBase: AidpKnowledgeBaseItem | null = null;
     try {
       if (!formValues.name?.trim()) {
         message.error(t("aidpKnowledge.kbNameRequired"));
@@ -250,12 +262,10 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
 
       // Defense-in-depth: re-validate every file in case beforeUpload was bypassed
       if (!skipUpload && fileList.length > 0) {
-        const invalidFiles = fileList.filter((f) => !isAidpFileValid(f));
-        if (invalidFiles.length > 0) {
+        const validation = validateAidpFiles(fileList);
+        if (validation.valid.length !== fileList.length) {
           setLoading(false);
-          message.error(
-            t("aidpKnowledge.invalidFileType", { count: invalidFiles.length })
-          );
+          partitionAidpFiles(fileList, t, message);
           return;
         }
       }
@@ -282,6 +292,22 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
         ingroup_permission: formValues.ingroup_permission,
         group_ids: formValues.group_ids,
       });
+      knowledgeBaseCreated = true;
+      createdKdsId = String(created.kds_id || "");
+      createdKnowledgeBase = {
+        ...created,
+        kds_id: createdKdsId,
+        kds_name: created.kds_name || formValues.name.trim(),
+        description: created.description ?? formValues.description ?? "",
+        permission: "EDIT",
+        ingroup_permission: formValues.ingroup_permission,
+        group_ids:
+          formValues.ingroup_permission === "PRIVATE"
+            ? []
+            : formValues.group_ids,
+        resource_status: "ACTIVE",
+        is_multimodal: formValues.caption_enable === 1,
+      };
 
       // Step 2: Upload files (if any and not skipped)
       if (!skipUpload && fileList.length > 0 && created.kds_id) {
@@ -290,37 +316,75 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
           fileList
         );
 
-        if (result.failed > 0 && result.success === 0) {
+        const failureDetails = result.failed_list.map((item) => {
+          const reason = i18n.language.startsWith("zh")
+            ? item.reason_zh || item.reason_en
+            : item.reason_en || item.reason_zh;
+          return `${item.file_name}: ${reason || t("aidpKnowledge.uploadFailed")}`;
+        });
+        const failureLines = failureDetails.map((detail, index) => (
+          <div key={`${index}-${detail}`}>{detail}</div>
+        ));
+
+        if (result.summary.failed > 0 && result.summary.success === 0) {
           message.warning(
-            t("aidpKnowledge.createKbSuccess") +
-              " | " +
-              t("aidpKnowledge.uploadFailed")
+            <div className="text-left">
+              <div>{t("aidpKnowledge.createKbSuccess")}</div>
+              {failureLines.length > 0 ? (
+                failureLines
+              ) : (
+                <div>{t("aidpKnowledge.uploadFailed")}</div>
+              )}
+            </div>
           );
-        } else if (result.failed > 0) {
+        } else if (result.summary.failed > 0) {
           message.info(
-            t("aidpKnowledge.createKbSuccess") +
-              " | " +
-              t("aidpKnowledge.uploadPartial", {
-                success: result.success,
-                failed: result.failed,
-              })
+            <div className="text-left">
+              <div>{t("aidpKnowledge.createKbSuccess")}</div>
+              <div>
+                {t("aidpKnowledge.uploadPartial", {
+                  success: result.summary.success,
+                  failed: result.summary.failed,
+                })}
+              </div>
+              {failureLines}
+            </div>
           );
         } else {
           message.success(
             t("aidpKnowledge.createKbSuccess") +
               " | " +
-              t("aidpKnowledge.uploadSuccess", { count: result.success })
+              t("aidpKnowledge.uploadSuccess", {
+                count: result.summary.success,
+              })
           );
         }
       } else {
         message.success(t("aidpKnowledge.createKbSuccess"));
       }
 
-      const newKdsId = created.kds_id;
       handleReset();
-      onSuccess(newKdsId);
+      if (createdKnowledgeBase) {
+        onSuccess(createdKnowledgeBase);
+      }
     } catch (error) {
-      message.error(t("aidpKnowledge.createKbFailed"));
+      const reason =
+        error instanceof Error && error.message.trim()
+          ? error.message
+          : knowledgeBaseCreated
+            ? t("aidpKnowledge.uploadFailed")
+            : t("aidpKnowledge.createKbFailed");
+      message.error(
+        knowledgeBaseCreated
+          ? `${t("aidpKnowledge.createKbSuccess")} | ${reason}`
+          : reason
+      );
+      if (knowledgeBaseCreated) {
+        handleReset();
+        if (createdKnowledgeBase) {
+          onSuccess(createdKnowledgeBase);
+        }
+      }
     } finally {
       setLoading(false);
     }
@@ -364,10 +428,7 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
         >
           <Input placeholder={t("aidpKnowledge.kbNamePlaceholder")} />
         </Form.Item>
-        <Form.Item
-          name="description"
-          label={t("aidpKnowledge.kbDescription")}
-        >
+        <Form.Item name="description" label={t("aidpKnowledge.kbDescription")}>
           <Input.TextArea
             rows={3}
             placeholder={t("aidpKnowledge.kbDescriptionPlaceholder")}
@@ -414,7 +475,8 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
           rules={[
             ({ getFieldValue }) => ({
               validator(_rule, value) {
-                const level = getFieldValue("ingroup_permission") || "READ_ONLY";
+                const level =
+                  getFieldValue("ingroup_permission") || "READ_ONLY";
                 if (level === "PRIVATE") return Promise.resolve();
                 if (Array.isArray(value) && value.length > 0) {
                   return Promise.resolve();
@@ -569,13 +631,19 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
               pendingFilesRef.current = [];
               rafIdRef.current = null;
 
-              const { valid } = partitionAidpFiles(batch, t, message);
+              const currentFiles = fileListRef.current;
+              const existing = new Set(currentFiles.map((file) => file.name));
+              const uniqueBatch = batch.filter(
+                (file) => !existing.has(file.name)
+              );
+              const { valid } = partitionAidpFiles(
+                uniqueBatch,
+                t,
+                message,
+                currentFiles.length
+              );
               if (valid.length > 0) {
-                setFileList((prev) => {
-                  const existing = new Set(prev.map((f) => f.name));
-                  const unique = valid.filter((f) => !existing.has(f.name));
-                  return [...prev, ...unique];
-                });
+                setFileList([...currentFiles, ...valid]);
               }
             });
           }
@@ -590,12 +658,14 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
         <p className="ant-upload-drag-icon">
           <InboxOutlined />
         </p>
-        <p className="ant-upload-text">
-          {t("aidpKnowledge.uploadHint")}
-        </p>
-        <p className="ant-upload-hint">
-          {t("aidpKnowledge.uploadHintDetail")}
-        </p>
+        <p className="ant-upload-text">{t("aidpKnowledge.uploadHint")}</p>
+        <div className="ant-upload-hint mt-2 w-full min-w-0 max-w-full space-y-1 overflow-hidden px-4 whitespace-normal">
+          <div>{t("aidpKnowledge.uploadHintCount")}</div>
+          <div>{t("aidpKnowledge.uploadHintSize")}</div>
+          <div className="w-full min-w-0 break-all leading-5 whitespace-normal">
+            {t("aidpKnowledge.uploadHintFormats")}
+          </div>
+        </div>
       </Dragger>
 
       {fileList.length === 0 && (

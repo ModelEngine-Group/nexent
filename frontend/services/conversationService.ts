@@ -9,6 +9,11 @@ import type {
 } from "@/types/conversation";
 import { getAuthHeaders, fetchWithAuth } from "@/lib/auth";
 import log from "@/lib/logger";
+import type {
+  ConversationKnowledgeScope,
+  KnowledgeCapabilities,
+  KnowledgeScopeUpdateResult,
+} from "@/types/knowledgeScope";
 
 // @ts-ignore
 const fetch = fetchWithAuth;
@@ -93,6 +98,50 @@ export const conversationService = {
     }
 
     throw new ApiError(data.code, data.message);
+  },
+
+  async updateKnowledgeScope(
+    conversationId: number,
+    scope: ConversationKnowledgeScope | null
+  ): Promise<KnowledgeScopeUpdateResult> {
+    const response = await fetch(
+      API_ENDPOINTS.conversation.knowledgeScope(conversationId),
+      {
+        method: "PUT",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ scope }),
+      }
+    );
+    const data = await response.json();
+    if (!response.ok || data.code !== 0) {
+      throw new ApiError(
+        data.code || response.status,
+        data.message || data.detail
+      );
+    }
+    return data.data;
+  },
+
+  async getKnowledgeCapabilities(
+    agentId: number,
+    versionNo?: number
+  ): Promise<KnowledgeCapabilities> {
+    const url = new URL(
+      API_ENDPOINTS.agent.knowledgeCapabilities(agentId),
+      globalThis.location.origin
+    );
+    if (versionNo !== undefined) {
+      url.searchParams.set("version_no", String(versionNo));
+    }
+    const response = await fetch(url.toString(), { headers: getAuthHeaders() });
+    const data = await response.json();
+    if (!response.ok || data.code !== 0) {
+      throw new ApiError(
+        data.code || response.status,
+        data.message || data.detail
+      );
+    }
+    return data.data;
   },
 
   // Get conversation details
@@ -928,6 +977,7 @@ export const conversationService = {
       is_debug?: boolean; // Add debug mode parameter
       is_resume?: boolean; // Add resume mode parameter for streaming recovery
       enable_plan?: boolean;
+      knowledge_scope?: ConversationKnowledgeScope;
       runtime_mode?: "nl2agent" | "nl2skill";
       draft_snapshot?: Record<string, unknown>;
       complexity?: "simple" | "complicated";
@@ -971,6 +1021,9 @@ export const conversationService = {
       }
       if (params.version_no !== undefined && params.version_no !== null) {
         requestParams.version_no = params.version_no;
+      }
+      if (params.knowledge_scope !== undefined) {
+        requestParams.knowledge_scope = params.knowledge_scope;
       }
 
       // Build URL with query parameters for resume mode
