@@ -282,7 +282,7 @@ class SkillManager:
         logger.info(f"Saved skill '{name}' to local storage with {len(extra_files)} extra file(s)")
         return self.load_skill(name, tenant_id=tenant_id)
 
-    def _write_skill_file(
+    def write_skill_file(
         self,
         skill_name: str,
         file_path: str,
@@ -291,15 +291,12 @@ class SkillManager:
         encoding: str = "utf-8",
         tenant_id: Optional[str],
     ) -> None:
-        """Write a single file inside a skill directory.
-
-        Args:
-            skill_name: Skill directory name
-            file_path: Relative path inside the skill (e.g. "scripts/run.py", "README.md")
-            content: File content to write
-        """
+        """Write a file inside a tenant-scoped skill directory."""
         if not self.base_skills_dir:
-            return
+            raise ValueError("base_skills_dir is not configured")
+        if not isinstance(skill_name, str) or not skill_name.strip():
+            raise ValueError("skill_name must be a non-empty string")
+
         local_dir = self.resolve_skill_dir(skill_name, tenant_id=tenant_id)
         local_dir_real = os.path.realpath(local_dir)
         normalized_local_dir = os.path.normcase(local_dir_real)
@@ -310,14 +307,31 @@ class SkillManager:
 
         # Resolve again after creating parent directories so an existing symlink
         # cannot redirect the write outside the skill directory.
-        safe_path = self._resolve_skill_file_path(local_dir, file_path)
-        safe_path = os.path.realpath(safe_path)
+        safe_path = os.path.realpath(self._resolve_skill_file_path(local_dir, file_path))
         normalized_safe_path = os.path.normcase(safe_path)
         if not normalized_safe_path.startswith(normalized_local_dir + os.sep):
             raise ValueError("file_path resolves outside the skill directory")
         with open(safe_path, "w", encoding=encoding) as f:
             f.write(content)
         logger.debug(f"Wrote skill file '{skill_name}/{file_path}'")
+
+    def _write_skill_file(
+        self,
+        skill_name: str,
+        file_path: str,
+        content: str,
+        *,
+        encoding: str = "utf-8",
+        tenant_id: Optional[str],
+    ) -> None:
+        """Write a skill file through the validated public API."""
+        self.write_skill_file(
+            skill_name,
+            file_path,
+            content,
+            encoding=encoding,
+            tenant_id=tenant_id,
+        )
 
     def upload_skill_from_file(
         self,

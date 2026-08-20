@@ -7,6 +7,12 @@ This module contains tests for:
 - handle_message_send, handle_message_stream error cases
 - helper functions
 """
+import importlib
+import sys
+
+import importlib
+import sys
+
 import pytest
 pytest_plugins = ['pytest_asyncio']
 import asyncio
@@ -392,9 +398,10 @@ class TestHandleMessageSend:
                 patch.object(service.adapter, "build_agent_request", return_value={
                     "agent_id": 7, "query": "hello", "history": [], "is_debug": True
                 }), \
-                patch.object(service.adapter, "build_a2a_message_response", return_value={"ok": True}) as build_response, \
-                patch("services.agent_service.run_agent_stream", new_callable=AsyncMock, return_value=stream_response):
-            result = await service.handle_message_send("endpoint-1", {"message": {}})
+                patch.object(service.adapter, "build_a2a_message_response", return_value={"ok": True}) as build_response:
+            agent_service = importlib.import_module("services.agent_service")
+            with patch.object(agent_service, "run_agent_stream", new_callable=AsyncMock, return_value=stream_response):
+                result = await service.handle_message_send("endpoint-1", {"message": {}})
 
         assert result == {"ok": True}
         store_response.assert_called_once_with(None, "done", "endpoint-1")
@@ -423,9 +430,10 @@ class TestHandleMessageSend:
                 patch.object(service.adapter, "build_agent_request", return_value={
                     "agent_id": 7, "query": "", "history": [], "is_debug": True
                 }), \
-                patch.object(service.adapter, "build_a2a_task_response", return_value={"task": True}) as build_response, \
-                patch("services.agent_service.run_agent_stream", new_callable=AsyncMock, return_value=stream_response):
-            result = await service.handle_message_send("endpoint-1", {"message": {}})
+                patch.object(service.adapter, "build_a2a_task_response", return_value={"task": True}) as build_response:
+            agent_service = importlib.import_module("services.agent_service")
+            with patch.object(agent_service, "run_agent_stream", new_callable=AsyncMock, return_value=stream_response):
+                result = await service.handle_message_send("endpoint-1", {"message": {}})
 
         assert result == {"task": True}
         store_response.assert_called_once_with("task-1", "AB", "endpoint-1")
@@ -461,7 +469,8 @@ class TestHandleMessageStream:
                     "agent_id": 7, "query": "", "history": [], "is_debug": True
                 }), \
                 patch.object(service.adapter, "build_a2a_task_event", side_effect=lambda **kwargs: kwargs), \
-                patch("services.agent_service.run_agent_stream", new_callable=AsyncMock, return_value=stream_response):
+        agent_service = importlib.import_module("services.agent_service")
+        with patch.object(agent_service, "run_agent_stream", new_callable=AsyncMock, return_value=stream_response):
             result = [event async for event in service.handle_message_stream("endpoint-1", {"message": {}})]
 
         assert result[0]["event_type"] == "taskStatusUpdate"
