@@ -65,7 +65,6 @@ from database.knowledge_db import (
 from database.knowledge_storage_object_db import list_committed_storage_objects
 from services.knowledge_storage_service import (
     release_storage_charge,
-    resolve_storage_object_knowledge,
     resolve_storage_reference,
 )
 from utils.str_utils import convert_list_to_string
@@ -1873,14 +1872,6 @@ class ElasticSearchService:
                 f"Invalid scope '{scope}'. "
                 f"Must be one of: {ElasticSearchService.DOCUMENT_DELETE_SCOPES}"
             )
-
-        source_reference = resolve_storage_reference(path_or_url)
-        if source_reference is not None:
-            ownership = resolve_storage_object_knowledge(path_or_url)
-            if ownership is None or str(ownership["knowledge"].get("index_name")) != str(index_name):
-                raise PermissionError(
-                    "The storage object is not an active source object of this knowledge base"
-                )
 
         if scope == "source_only":
             await ElasticSearchService._assert_source_only_deletable(

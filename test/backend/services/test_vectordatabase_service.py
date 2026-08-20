@@ -2444,26 +2444,28 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertEqual(result["deleted_es_count"], 0)
         self.mock_vdb_core.delete_documents.assert_not_called()
 
-    def test_delete_document_by_scope_rejects_object_from_another_knowledge_base(self):
-        with patch(
-            'backend.services.vectordatabase_service.resolve_storage_reference',
-            return_value=SimpleNamespace(
-                bucket_name="kb-bucket",
-                object_name="knowledge_base/doc.pdf",
-            ),
-        ), patch(
-            'backend.services.vectordatabase_service.resolve_storage_object_knowledge',
-            return_value={"knowledge": {"index_name": "other-index"}},
-        ):
-            with self.assertRaises(PermissionError):
-                asyncio.run(
-                    ElasticSearchService.delete_document_by_scope(
-                        "test_index",
-                        "knowledge_base/doc.pdf",
-                        "full",
-                        self.mock_vdb_core,
-                    )
-                )
+    @patch.object(
+        ElasticSearchService,
+        'delete_documents',
+        return_value={"status": "success", "deleted_minio": True},
+    )
+    def test_delete_document_by_scope_does_not_require_storage_ledger(
+        self, mock_delete_documents
+    ):
+        result = asyncio.run(
+            ElasticSearchService.delete_document_by_scope(
+                "test_index",
+                "knowledge_base/doc.pdf",
+                "full",
+                self.mock_vdb_core,
+            )
+        )
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["scope"], "full")
+        mock_delete_documents.assert_called_once_with(
+            "test_index", "knowledge_base/doc.pdf", self.mock_vdb_core
+        )
 
     @patch.object(
         ElasticSearchService,
