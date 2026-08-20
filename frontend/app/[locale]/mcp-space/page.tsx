@@ -181,13 +181,16 @@ export default function McpToolsPage() {
     return localList.services.some((localService) => {
       if (localService.permission !== "EDIT") return false;
       if (
-        service.communityId &&
-        localService.communityId === service.communityId
+        localService.crossTenantVisibility &&
+        localService.tenantId !== user?.tenantId
       )
-        return true;
+        return false;
+      if (service.communityId != null) {
+        return localService.communityId === service.communityId;
+      }
       return localService.name === service.name;
     });
-  }, [localList.services]);
+  }, [localList.services, user?.tenantId]);
   const detailMcpIdRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -325,6 +328,7 @@ export default function McpToolsPage() {
                 <RepositoryView
                   browser={repositoryBrowser}
                   localServices={localList.services}
+                  currentTenantId={user?.tenantId}
                   isAdmin={isAdmin}
                   actions={searchActions}
                   onSelect={setSelectedRepository}
@@ -412,6 +416,7 @@ export default function McpToolsPage() {
 function RepositoryView({
   browser,
   localServices,
+  currentTenantId,
   isAdmin,
   actions,
   onSelect,
@@ -420,6 +425,7 @@ function RepositoryView({
 }: {
   browser: ReturnType<typeof useMcpCommunityBrowser>;
   localServices: McpServiceItem[];
+  currentTenantId?: string | null;
   isAdmin: boolean;
   actions: React.ReactNode;
   onSelect: (service: CommunityMcpCard) => void;
@@ -440,10 +446,13 @@ function RepositoryView({
     return localServices.some((localService) => {
       if (localService.permission !== "EDIT") return false;
       if (
-        service.communityId &&
-        localService.communityId === service.communityId
+        localService.crossTenantVisibility &&
+        localService.tenantId !== currentTenantId
       )
-        return true;
+        return false;
+      if (service.communityId != null) {
+        return localService.communityId === service.communityId;
+      }
       return localService.name === service.name;
     });
   };

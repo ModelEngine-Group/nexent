@@ -490,6 +490,7 @@ render_k8s_runtime_config_values() {
     printf '      disableCeleryFlower: %s\n' "$(yaml_quote "$(env_or_default DISABLE_CELERY_FLOWER "true")")"
     printf '      dockerEnvironment: %s\n' "$(yaml_quote "$(env_or_default DOCKER_ENVIRONMENT "false")")"
     printf '      enableUploadImage: %s\n' "$(yaml_quote "$(env_or_default ENABLE_UPLOAD_IMAGE "false")")"
+    printf '      enableMcpCrossTenantVisibility: %s\n' "$(yaml_quote "$(env_or_default ENABLE_MCP_CROSS_TENANT_VISIBILITY "false")")"
     printf '      celeryWorkerPrefetchMultiplier: %s\n' "$(yaml_quote "$(env_or_default CELERY_WORKER_PREFETCH_MULTIPLIER "1")")"
     printf '      celeryTaskTimeLimit: %s\n' "$(yaml_quote "$(env_or_default CELERY_TASK_TIME_LIMIT "3600")")"
     printf '      celeryResultExpires: %s\n' "$(yaml_quote "$(env_or_default CELERY_RESULT_EXPIRES "604800")")"

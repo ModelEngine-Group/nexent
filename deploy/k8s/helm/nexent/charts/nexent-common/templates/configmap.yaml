@@ -112,6 +112,7 @@ data:
   DISABLE_CELERY_FLOWER: {{ .Values.config.dataProcess.disableCeleryFlower | quote }}
   DOCKER_ENVIRONMENT: {{ .Values.config.dataProcess.dockerEnvironment | quote }}
   ENABLE_UPLOAD_IMAGE: {{ .Values.config.dataProcess.enableUploadImage | quote }}
+  ENABLE_MCP_CROSS_TENANT_VISIBILITY: {{ .Values.config.dataProcess.enableMcpCrossTenantVisibility | quote }}
   CELERY_WORKER_PREFETCH_MULTIPLIER: {{ .Values.config.dataProcess.celeryWorkerPrefetchMultiplier | quote }}
   CELERY_TASK_TIME_LIMIT: {{ .Values.config.dataProcess.celeryTaskTimeLimit | quote }}
   CELERY_RESULT_EXPIRES: {{ .Values.config.dataProcess.celeryResultExpires | quote }}

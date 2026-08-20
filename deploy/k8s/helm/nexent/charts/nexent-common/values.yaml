@@ -122,6 +122,7 @@ config:
     disableCeleryFlower: "true"
     dockerEnvironment: "false"
     enableUploadImage: "false"
+    enableMcpCrossTenantVisibility: "false"
     celeryWorkerPrefetchMultiplier: "1"
     celeryTaskTimeLimit: "3600"
     celeryResultExpires: "604800"

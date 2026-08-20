@@ -5,6 +5,7 @@ from sqlalchemy import func, or_, text as sa_text
 
 from database.client import as_dict, filter_property, get_db_session
 from database.db_models import McpMarketRecord
+from consts.const import ENABLE_MCP_CROSS_TENANT_VISIBILITY
 
 logger = logging.getLogger("market_mcp_db")
 
@@ -50,7 +51,7 @@ def get_mcp_market_records(
             McpMarketRecord.review_status == "shared",
         )
 
-        if tenant_id:
+        if tenant_id and not ENABLE_MCP_CROSS_TENANT_VISIBILITY:
             query = query.filter(McpMarketRecord.tenant_id == tenant_id)
 
         if transport_type:
@@ -327,21 +328,22 @@ def increment_mcp_market_download_count(market_id: int) -> None:
         )
 
 
-def get_mcp_market_tag_stats_by_tenant(tenant_id: str) -> List[Dict[str, Any]]:
-    """Tag stats scoped to a specific tenant from shared records only."""
+def get_mcp_market_tag_stats_by_tenant(tenant_id: str | None = None) -> List[Dict[str, Any]]:
+    """Tag stats from shared records, optionally scoped to a tenant."""
     with get_db_session() as session:
-        rows = (
+        query = (
             session.query(
                 func.unnest(McpMarketRecord.tags).label("tag"),
                 func.count(McpMarketRecord.market_id).label("count"),
             )
             .filter(
-                McpMarketRecord.tenant_id == tenant_id,
                 McpMarketRecord.delete_flag != "Y",
                 McpMarketRecord.review_status == "shared",
             )
-            .group_by("tag")
-            .order_by(func.count(McpMarketRecord.market_id).desc(), "tag")
-            .all()
         )
+        if tenant_id is not None:
+            query = query.filter(McpMarketRecord.tenant_id == tenant_id)
+        rows = query.group_by("tag").order_by(
+            func.count(McpMarketRecord.market_id).desc(), "tag"
+        ).all()
         return [{"tag": str(row.tag), "count": int(row.count)} for row in rows if row.tag]

@@ -161,6 +161,8 @@ export interface CommunityMcpCard {
 
 export interface McpServiceItem {
   mcpId: number;
+  tenantId?: string;
+  crossTenantVisibility?: boolean;
   containerId?: string;
   containerPort?: number;
   name: string;

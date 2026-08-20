@@ -290,6 +290,8 @@ export const listMcpTools = async (params?: { tag?: string }) => {
   const items = (res.data || []).map((s: any) => {
     return {
       mcpId: s.mcp_id,
+      tenantId: s.tenant_id ?? undefined,
+      crossTenantVisibility: s.cross_tenant_visibility ?? false,
       containerId: s.container_id,
       containerPort: s.container_port ?? undefined,
       name: s.service_name,

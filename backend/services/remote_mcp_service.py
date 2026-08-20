@@ -6,7 +6,13 @@ import socket
 import random
 from fastmcp import Client
 from fastmcp.client.transports import StreamableHttpTransport, SSETransport
-from consts.const import CAN_EDIT_ALL_USER_ROLES, PERMISSION_EDIT, PERMISSION_READ, NEXENT_MCP_DOCKER_IMAGE
+from consts.const import (
+    CAN_EDIT_ALL_USER_ROLES,
+    ENABLE_MCP_CROSS_TENANT_VISIBILITY,
+    PERMISSION_EDIT,
+    PERMISSION_READ,
+    NEXENT_MCP_DOCKER_IMAGE,
+)
 from consts.exceptions import (
     MCPConnectionError,
     MCPNameIllegal,
@@ -1161,6 +1167,8 @@ async def get_remote_mcp_server_list(
             "status": record.get("status"),
             "permission": permission,
             "mcp_id": record.get("mcp_id"),
+            "tenant_id": record.get("tenant_id"),
+            "cross_tenant_visibility": ENABLE_MCP_CROSS_TENANT_VISIBILITY,
             "container_id": container_id,
             "description": record.get("description"),
             "enabled": record.get("enabled"),
@@ -1178,7 +1186,9 @@ async def get_remote_mcp_server_list(
             "ingroup_permission": record.get("ingroup_permission"),
             "shared_fields": record.get("shared_fields"),
         }
-        if is_need_auth:
+        # Cross-tenant visibility is metadata visibility. Never expose the
+        # owning tenant's credentials to viewers from another tenant.
+        if is_need_auth and str(record.get("tenant_id")) == str(tenant_id):
             record_dict["authorization_token"] = record.get("authorization_token")
             record_dict["custom_headers"] = record.get("custom_headers")
         mcp_records_list.append(record_dict)

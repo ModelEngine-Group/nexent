@@ -115,7 +115,7 @@ def _resolve_author_display_name(user_id: str | None) -> str | None:
     return _resolve_user_email(user_id)
 
 
-def _to_community_card(row: Dict[str, Any]) -> Dict[str, Any]:
+def _to_community_card(row: Dict[str, Any], viewer_tenant_id: str | None = None,) -> Dict[str, Any]:
     raw_status = row.get("review_status") or "not_shared"
     status_map: Dict[str, str] = {
         STATUS_NOT_SHARED: "offline",
@@ -133,9 +133,10 @@ def _to_community_card(row: Dict[str, Any]) -> Dict[str, Any]:
             from database.remote_mcp_db import get_mcp_record_by_id_and_tenant
             mcp_record = get_mcp_record_by_id_and_tenant(mcp_id=source_mcp_id, tenant_id=row.get("tenant_id", ""))
             if mcp_record:
-                source_authorization_token = mcp_record.get("authorization_token")
-                source_custom_headers = mcp_record.get("custom_headers")
                 source_container_port = mcp_record.get("container_port")
+                if str(row.get("tenant_id")) == str(viewer_tenant_id):
+                    source_authorization_token = mcp_record.get("authorization_token")
+                    source_custom_headers = mcp_record.get("custom_headers")
         except Exception:
             pass
     return {
@@ -234,7 +235,7 @@ async def list_community_mcp_services(
     cursor: str | None = None,
     limit: int = 30,
 ) -> Dict[str, Any]:
-    """List shared (approved) community MCP services scoped to a tenant with permission filtering."""
+    """List shared (approved) community MCP services scoped by visibility."""
     user_role = _get_user_role(user_id)
     user_group_ids = None
     if user_role not in CAN_EDIT_ALL_USER_ROLES:
@@ -256,7 +257,8 @@ async def list_community_mcp_services(
     return {
         "count": db_result.get("count", 0),
         "nextCursor": db_result.get("nextCursor"),
-        "items": [_to_community_card(item) for item in db_result.get("items", [])],
+        "items": [_to_community_card(item, viewer_tenant_id=tenant_id) for item in db_result.get("items", [])
+        ],
     }
 
 

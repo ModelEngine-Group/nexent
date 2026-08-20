@@ -3,6 +3,7 @@ from typing import Any, Dict, List
 
 from database.client import as_dict, filter_property, get_db_session
 from database.db_models import McpRecord
+from consts.const import ENABLE_MCP_CROSS_TENANT_VISIBILITY
 
 logger = logging.getLogger("remote_mcp_db")
 
@@ -97,10 +98,9 @@ def get_mcp_records_by_tenant(tenant_id: str, tag: str | None = None) -> List[Di
     :return: List of MCP records
     """
     with get_db_session() as session:
-        query = session.query(McpRecord).filter(
-            McpRecord.tenant_id == tenant_id,
-            McpRecord.delete_flag != 'Y'
-        )
+        query = session.query(McpRecord).filter(McpRecord.delete_flag != 'Y')
+        if not ENABLE_MCP_CROSS_TENANT_VISIBILITY:
+            query = query.filter(McpRecord.tenant_id == tenant_id)
 
         if tag:
             query = query.filter(McpRecord.tags.any(tag))

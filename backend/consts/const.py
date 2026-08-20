@@ -328,6 +328,8 @@ NEXENT_MCP_DOCKER_IMAGE = os.getenv(
     "NEXENT_MCP_DOCKER_IMAGE", "nexent/nexent-mcp:latest")
 ENABLE_UPLOAD_IMAGE = os.getenv(
     "ENABLE_UPLOAD_IMAGE", "false").lower() == "true"
+ENABLE_MCP_CROSS_TENANT_VISIBILITY = os.getenv(
+    "ENABLE_MCP_CROSS_TENANT_VISIBILITY", "false").lower() == "true"
 ENABLE_JIUWEN_SDK = os.getenv("NEXENT_ENABLE_JIUWEN_SDK", "true").lower() == "true"
 
 
