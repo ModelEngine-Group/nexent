@@ -11,7 +11,17 @@ import {
   Segmented,
   Tooltip,
 } from "antd";
-import { Edit, Trash2, RefreshCw, TriangleAlert } from "lucide-react";
+import {
+  CheckCircle,
+  CircleEllipsis,
+  CircleHelp,
+  CircleSlash,
+  Edit,
+  RefreshCw,
+  Trash2,
+  TriangleAlert,
+  XCircle,
+} from "lucide-react";
 import { ColumnsType } from "antd/es/table";
 import type { TablePaginationConfig } from "antd";
 import { FilterValue, SorterResult } from "antd/es/table/interface";
@@ -25,14 +35,6 @@ import { MODEL_TYPES } from "@/const/modelConfig";
 import { ModelAddDialog } from "../../../models/components/model/ModelAddDialog";
 import { ModelEditDialog } from "../../../models/components/model/ModelEditDialog";
 import ModelCapacityCoverageWidget from "./ModelCapacityCoverageWidget";
-import {
-  CheckCircle,
-  CircleSlash,
-  XCircle,
-  CircleEllipsis,
-  CircleHelp,
-} from "lucide-react";
-
 interface UnifiedModelRow extends ModelOption {
   request_count?: number;
   error_rate?: number;
@@ -320,15 +322,15 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
 
         const icon =
           status === "available" ? (
-            <CheckCircle className="w-3 h-3 mr-1" />
+            <CheckCircle className="w-3 h-3" />
           ) : status === "unavailable" ? (
-            <CircleSlash className="w-3 h-3 mr-1" />
+            <CircleSlash className="w-3 h-3" />
           ) : status === "detecting" ? (
-            <CircleEllipsis className="w-3 h-3 mr-1" />
+            <CircleEllipsis className="w-3 h-3" />
           ) : status === "not_detected" ? (
-            <CircleHelp className="w-3.5 h-3.5 mr-1" />
+            <CircleHelp className="w-3.5 h-3.5" />
           ) : (
-            <XCircle className="w-3 h-3 mr-1" />
+            <XCircle className="w-3 h-3" />
           );
         return (
           <Tag
@@ -336,15 +338,13 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
             style={{
               display: "inline-flex",
               alignItems: "center",
-              padding: "2px 8px",
-              lineHeight: "20px",
-              height: "auto",
               whiteSpace: "nowrap",
+              flexShrink: 0,
             }}
             variant="solid"
           >
-            {icon}
-            <span>{t(`tenantResources.models.status.${status}`)}</span>
+            <span className="inline-flex items-center mr-1">{icon}</span>
+            {t(`tenantResources.models.status.${status}`)}
           </Tag>
         );
       },

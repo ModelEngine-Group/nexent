@@ -50,6 +50,22 @@ interface SseChunk {
   // frontend can route streaming content to the matching card even when
   // sibling sub-agents execute in parallel.
   invocation_id?: string;
+  path?: string;
+  block_id?: string;
+  origin_type?: string;
+  sequence?: number;
+  is_new_file?: boolean;
+  paths?: string[];
+}
+
+export type Nl2SkillStreamEvent = SseChunk;
+
+export interface Nl2SkillFileCardData {
+  path: string;
+  content: string;
+  kind: "markdown" | "code" | "generic";
+  language?: "python" | "bash";
+  isStreaming: boolean;
 }
 
 export interface Nl2aToolRecommendation {
@@ -107,7 +123,8 @@ export interface Nl2aAgentDraftPayload {
 }
 
 export type Nl2aPayload =
-  Nl2aLocalMcpRecommendationPayload | Nl2aAgentDraftPayload;
+  | Nl2aLocalMcpRecommendationPayload
+  | Nl2aAgentDraftPayload;
 
 export interface Nl2aMessage {
   type: "nl2a";
@@ -121,7 +138,41 @@ interface NexentRunConfig {
   resume?: boolean;
   agentId?: number | string;
   enablePlan?: boolean;
-  runtimeMode?: "nl2agent";
+  runtimeMode?: "nl2agent" | "nl2skill";
+  knowledgeScope?: import("@/types/knowledgeScope").ConversationKnowledgeScope;
+  onKnowledgeScopeResolved?: (
+    resolution: import("@/types/knowledgeScope").KnowledgeScopeResolution
+  ) => void;
+  draftSnapshot?: Record<string, unknown>;
+  complexity?: "simple" | "complicated";
+  language?: "zh" | "en";
+  onNl2SkillEvent?: (event: Nl2SkillStreamEvent) => void;
+  modelId?: number;
+}
+
+function notifyKnowledgeScopeResolved(
+  content: unknown,
+  callback: NexentRunConfig["onKnowledgeScopeResolved"]
+): void {
+  if (!callback) return;
+  try {
+    const resolution =
+      typeof content === "string" ? JSON.parse(content) : content;
+    if (
+      resolution &&
+      typeof resolution === "object" &&
+      Array.isArray((resolution as { warnings?: unknown }).warnings)
+    ) {
+      callback(
+        resolution as import("@/types/knowledgeScope").KnowledgeScopeResolution
+      );
+    }
+  } catch (error) {
+    log.warn(
+      "[ChatModelAdapter] Failed to parse knowledge_scope_resolved:",
+      error
+    );
+  }
 }
 
 // assistant-ui valid part types referenced by this adapter
@@ -461,7 +512,7 @@ function parseSseChunk(line: string): SseChunk | null {
 
 /**
  * Extracts the agent run start time from an agent_new_run content string.
- * The backend prepends `[Current time: YYYY-MM-DD HH:MM:SS]` to the task text.
+ * The backend prepends `[Current time: YYYY-MM-DD HH:MM:SS±HHMM]` to the task text.
  * Returns undefined when the prefix is absent or unparseable.
  */
 const AGENT_RUN_TIME_PREFIX = "[Current time:";
@@ -470,8 +521,8 @@ function extractAgentRunTime(content: string): string | undefined {
   const closeIdx = content.indexOf("]", AGENT_RUN_TIME_PREFIX.length);
   if (closeIdx < 0) return undefined;
   const raw = content.slice(AGENT_RUN_TIME_PREFIX.length, closeIdx).trim();
-  // Basic format check: "YYYY-MM-DD HH:MM:SS"
-  if (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(raw)) return undefined;
+  // Format check: "YYYY-MM-DD HH:MM:SS" with optional timezone offset "±HHMM"
+  if (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}([+-]\d{4})?$/.test(raw)) return undefined;
   return raw;
 }
 
@@ -513,6 +564,7 @@ export function isReasoningChunkType(type: string): boolean {
   return (
     type === "reasoning" ||
     type === "model_output_thinking" ||
+    type === "model_thinking_output" ||
     type === "model_output_deep_thinking" ||
     type === "model_output_code"
   );
@@ -526,6 +578,7 @@ function mapChunkType(type: string): AssistantPartType | null {
     case "tool":
       return "tool-call";
     case "final_answer":
+    case "model_output":
     case "agent_run_info":
     case "user_input":
     case "agent_finish":
@@ -542,6 +595,7 @@ function mapChunkType(type: string): AssistantPartType | null {
       // runs. Falling through here would push them as plain text parts.
       return null;
     case "conversation_created":
+    case "knowledge_scope_resolved":
     case "other":
     case "agent_new_run":
     case "token_count":
@@ -681,6 +735,12 @@ export function attachSearchContentToTool(
   },
   toolCallId: string | undefined = undefined
 ): boolean {
+  // Images are rendered from the authenticated PICTURE_WEB source in the
+  // answer and sources panel. Attaching SEARCH_CONTENT image metadata here
+  // would render the same image again inside the tool call, and relative AIDP
+  // ViewImage paths would be resolved against the current locale route.
+  if (item.isImage) return false;
+
   const targetToolCall = findMostRecentToolCall(contentParts, toolCallId);
   if (!targetToolCall) return false;
   if (!targetToolCall.searchContent) {
@@ -743,6 +803,8 @@ export const searchImagesRegistry = new Map<
 >();
 
 const AIDP_IMAGE_MARKER_PATTERN = /\/__aidp_image__\/([a-z]+\d+)/gi;
+const MARKDOWN_IMAGE_URL_PATTERN =
+  /!\[[^\]]*\]\(\s*<?([^>\s)]+)>?(?:\s+["'][^)]*["'])?\s*\)/g;
 
 export function extractAidpImageKeys(texts: readonly string[]): string[] {
   const keys: string[] = [];
@@ -758,6 +820,22 @@ export function extractAidpImageKeys(texts: readonly string[]): string[] {
     }
   }
   return keys;
+}
+
+export function extractMarkdownImageUrls(texts: readonly string[]): string[] {
+  const urls: string[] = [];
+  const seen = new Set<string>();
+  for (const text of texts) {
+    MARKDOWN_IMAGE_URL_PATTERN.lastIndex = 0;
+    for (const match of text.matchAll(MARKDOWN_IMAGE_URL_PATTERN)) {
+      const url = match[1];
+      if (!seen.has(url)) {
+        seen.add(url);
+        urls.push(url);
+      }
+    }
+  }
+  return urls;
 }
 
 // Conversation-level search sources registry for historical messages.
@@ -1054,9 +1132,11 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     // when this is the first message in a brand-new thread.
     const custom = runConfig?.custom as NexentRunConfig | undefined;
     const isNl2Agent = custom?.runtimeMode === "nl2agent";
+    const isNl2Skill = custom?.runtimeMode === "nl2skill";
+    const isEphemeralRuntime = isNl2Agent || isNl2Skill;
     const serverThreadId = custom?.threadId;
     const onServerConversationId = custom?.onServerConversationId;
-    const isResume = !isNl2Agent && custom?.resume === true;
+    const isResume = !isEphemeralRuntime && custom?.resume === true;
 
     // Extract user query: last user message text
     let lastUserIndex = -1;
@@ -1073,7 +1153,8 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       isNl2Agent && lastUserIndex >= 0
         ? (
             messages[lastUserIndex].metadata?.custom as
-              { nl2agentToolSelection?: Nl2AgentToolSelection } | undefined
+              | { nl2agentToolSelection?: Nl2AgentToolSelection }
+              | undefined
           )?.nl2agentToolSelection
         : undefined;
     const query = selectionMetadata
@@ -1118,13 +1199,13 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     const numericServerThreadId = Number(serverThreadId);
     const hasServerConversationId =
       Number.isInteger(numericServerThreadId) && numericServerThreadId > 0;
-    if (!isNl2Agent && hasServerConversationId) {
+    if (!isEphemeralRuntime && hasServerConversationId) {
       requestBody.conversation_id = numericServerThreadId;
     }
 
     // Pass selected agent if provided via custom (set by the page wrapper)
     if (
-      !isNl2Agent &&
+      !isEphemeralRuntime &&
       custom?.agentId !== undefined &&
       custom.agentId !== null
     ) {
@@ -1137,10 +1218,13 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       }
     }
     requestBody.enable_plan = custom?.enablePlan === true;
+    if (!isResume && !isEphemeralRuntime && custom?.knowledgeScope) {
+      requestBody.knowledge_scope = custom.knowledgeScope;
+    }
 
     // Pass selected model if provided via ModelContext (registered by ModelSelector)
     const modelName = context.config?.modelName;
-    if (!isNl2Agent && modelName) {
+    if (!isEphemeralRuntime && modelName) {
       requestBody.model_id = Number(modelName);
     }
 
@@ -1149,7 +1233,8 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     );
 
     let agentResponse:
-      ReadableStreamDefaultReader<Uint8Array> | { type: "json"; data: unknown };
+      | ReadableStreamDefaultReader<Uint8Array>
+      | { type: "json"; data: unknown };
     try {
       agentResponse = await conversationService.runAgent(
         {
@@ -1162,11 +1247,23 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           conversation_id: requestBody.conversation_id as number | undefined,
           minio_files: requestBody.minio_files as any,
           agent_id: requestBody.agent_id as number | undefined,
-          model_id: requestBody.model_id as number | undefined,
           is_debug: false,
           is_resume: isResume,
           enable_plan: custom?.enablePlan === true,
-          runtime_mode: isNl2Agent ? "nl2agent" : undefined,
+          knowledge_scope: requestBody.knowledge_scope as
+            | import("@/types/knowledgeScope").ConversationKnowledgeScope
+            | undefined,
+          runtime_mode: isNl2Agent
+            ? "nl2agent"
+            : isNl2Skill
+              ? "nl2skill"
+              : undefined,
+          draft_snapshot: isNl2Skill ? custom?.draftSnapshot : undefined,
+          complexity: isNl2Skill ? custom?.complexity : undefined,
+          language: isNl2Skill ? custom?.language : undefined,
+          model_id: isNl2Skill
+            ? (custom?.modelId ?? (requestBody.model_id as number | undefined))
+            : (requestBody.model_id as number | undefined),
         },
         abortSignal,
         (conversationId) => {
@@ -1220,6 +1317,82 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     };
     const invocationSlots = new Map<string, InvocationSlot>();
     const contentParts: any[] = [];
+    const nl2SkillFilePartIndices = new Map<string, number>();
+    let nl2SkillSummaryPartIndex: number | null = null;
+    const classifyNl2SkillFile = (
+      path: string
+    ): Pick<Nl2SkillFileCardData, "kind" | "language"> => {
+      const extension = path.split(".").pop()?.toLowerCase();
+      if (extension === "md" || extension === "markdown") {
+        return { kind: "markdown" };
+      }
+      if (extension === "py") {
+        return { kind: "code", language: "python" };
+      }
+      if (extension === "sh" || extension === "bash") {
+        return { kind: "code", language: "bash" };
+      }
+      return { kind: "generic" };
+    };
+    const upsertNl2SkillFile = (chunk: SseChunk) => {
+      const path =
+        chunk.type === "skill_body" ? "SKILL.md" : chunk.path || "file.txt";
+      let partIndex = nl2SkillFilePartIndices.get(path);
+      if (partIndex === undefined) {
+        partIndex = contentParts.length;
+        contentParts.push({
+          type: "data",
+          name: "nl2skill-file",
+          data: {
+            path,
+            content: "",
+            ...classifyNl2SkillFile(path),
+            isStreaming: true,
+          },
+        });
+        nl2SkillFilePartIndices.set(path, partIndex);
+      }
+      const currentPart = contentParts[partIndex] as {
+        type: "data";
+        name: "nl2skill-file";
+        data: Nl2SkillFileCardData;
+      };
+      contentParts[partIndex] = {
+        ...currentPart,
+        data: {
+          ...currentPart.data,
+          content: currentPart.data.content + (chunk.content || ""),
+        },
+      };
+    };
+    const finishNl2SkillFiles = () => {
+      for (const partIndex of nl2SkillFilePartIndices.values()) {
+        const currentPart = contentParts[partIndex] as {
+          type: "data";
+          name: "nl2skill-file";
+          data: Nl2SkillFileCardData;
+        };
+        contentParts[partIndex] = {
+          ...currentPart,
+          data: { ...currentPart.data, isStreaming: false },
+        };
+      }
+    };
+    const appendNl2SkillSummary = (content: string) => {
+      if (nl2SkillSummaryPartIndex === null) {
+        nl2SkillSummaryPartIndex = contentParts.length;
+        contentParts.push({ type: "text", text: content });
+        return;
+      }
+      const currentPart = contentParts[nl2SkillSummaryPartIndex] as {
+        type: "text";
+        text: string;
+      };
+      contentParts[nl2SkillSummaryPartIndex] = {
+        ...currentPart,
+        text: currentPart.text + content,
+      };
+    };
     const slotForInvocation = (invocationId: string): InvocationSlot | null =>
       invocationSlots.get(invocationId) ?? null;
     const ensureSlot = (invocationId: string): InvocationSlot => {
@@ -1373,10 +1546,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     let nl2a: Nl2aMessage | undefined;
     let verificationPanel: VerificationPanelPart | null = null;
 
-    const appendSearchImages = (
-      imageUrls: string[],
-      toolCallId: string | undefined = undefined
-    ) => {
+    const appendSearchImages = (imageUrls: string[]) => {
       const imageMetadata = searchSourcesAccumulator.filter(
         (source) => source.isImage
       );
@@ -1399,7 +1569,6 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
               : undefined),
         };
         searchImagesAccumulator.push(imageSource);
-        attachSearchContentToTool(contentParts, imageSource, toolCallId);
       }
     };
 
@@ -1453,6 +1622,36 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
 
           // Internal status / resume events: skip
           if (chunk.type === "status") continue;
+
+          if (chunk.type === "knowledge_scope_resolved") {
+            notifyKnowledgeScopeResolved(
+              chunk.content as unknown,
+              custom?.onKnowledgeScopeResolved
+            );
+            continue;
+          }
+
+          if (isNl2Skill) {
+            custom?.onNl2SkillEvent?.(chunk);
+            if (chunk.type === "skill_body" || chunk.type === "file_content") {
+              flushOpenReasoning();
+              upsertNl2SkillFile(chunk);
+              yield buildStreamResult(contentParts);
+              continue;
+            }
+            if (chunk.type === "summary") {
+              flushOpenReasoning();
+              appendNl2SkillSummary(chunk.content);
+              yield buildStreamResult(contentParts);
+              continue;
+            }
+            if (chunk.type === "done") {
+              flushOpenReasoning();
+              finishNl2SkillFiles();
+              yield buildStreamResult(contentParts);
+              continue;
+            }
+          }
 
           // Handle token_count - store timing for final yield
           if (chunk.type === "token_count") {
@@ -1591,7 +1790,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
               const imageUrls: string[] = Array.isArray(parsed?.images_url)
                 ? parsed.images_url
                 : [];
-              appendSearchImages(imageUrls, chunk.tool_call_id);
+              appendSearchImages(imageUrls);
             } catch (e) {
               log.warn("[ChatModelAdapter] Failed to parse picture_web:", e);
             }
@@ -1807,8 +2006,13 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                 const resolvedUrl = imageMetadata?.image_url || url;
                 const text = imageMetadata ? "" : result.text;
                 const isImage =
-                  result.score_details?.chunk_type === "image" || Boolean(imageMetadata);
-                const title = result.title || filename || imageMetadata?.source_file || resolvedUrl;
+                  result.score_details?.chunk_type === "image" ||
+                  Boolean(imageMetadata);
+                const title =
+                  result.title ||
+                  filename ||
+                  imageMetadata?.source_file ||
+                  resolvedUrl;
                 if (url || filename || title) {
                   searchSourcesAccumulator.push({
                     citeIndex,
@@ -1819,7 +2023,8 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                     searchType: result.search_type,
                     toolSign: result.tool_sign,
                     filename,
-                    sourceFile: result.source_file || imageMetadata?.source_file,
+                    sourceFile:
+                      result.source_file || imageMetadata?.source_file,
                     downloadUrl: result.download_url,
                     objectName: result.object_name,
                     isImage,
@@ -1834,7 +2039,8 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                     text,
                     sourceType: result.source_type,
                     filename,
-                    sourceFile: result.source_file || imageMetadata?.source_file,
+                    sourceFile:
+                      result.source_file || imageMetadata?.source_file,
                     downloadUrl: result.download_url,
                     objectName: result.object_name,
                     citeIndex,
@@ -1858,7 +2064,28 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       if (buffer.trim()) {
         const chunk = parseSseChunk(buffer);
         if (chunk && chunk.type !== "status") {
-          if (chunk.type === "plan") {
+          if (isNl2Skill) custom?.onNl2SkillEvent?.(chunk);
+          if (chunk.type === "knowledge_scope_resolved") {
+            notifyKnowledgeScopeResolved(
+              chunk.content as unknown,
+              custom?.onKnowledgeScopeResolved
+            );
+          } else if (
+            isNl2Skill &&
+            (chunk.type === "skill_body" || chunk.type === "file_content")
+          ) {
+            flushOpenReasoning();
+            upsertNl2SkillFile(chunk);
+            yield buildStreamResult(contentParts);
+          } else if (isNl2Skill && chunk.type === "summary") {
+            flushOpenReasoning();
+            appendNl2SkillSummary(chunk.content);
+            yield buildStreamResult(contentParts);
+          } else if (isNl2Skill && chunk.type === "done") {
+            flushOpenReasoning();
+            finishNl2SkillFiles();
+            yield buildStreamResult(contentParts);
+          } else if (chunk.type === "plan") {
             const plan = parsePlan(chunk.content);
             if (plan) planRegistry.set(plan);
           } else if (chunk.type === "plan_step_update") {
@@ -1907,7 +2134,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
               const imageUrls: string[] = Array.isArray(parsed?.images_url)
                 ? parsed.images_url
                 : [];
-              appendSearchImages(imageUrls, chunk.tool_call_id);
+              appendSearchImages(imageUrls);
             } catch (e) {
               log.warn("[ChatModelAdapter] Failed to parse picture_web:", e);
             }
@@ -2014,8 +2241,13 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                   const resolvedUrl = imageMetadata?.image_url || url;
                   const text = imageMetadata ? "" : result.text;
                   const isImage =
-                    result.score_details?.chunk_type === "image" || Boolean(imageMetadata);
-                  const title = result.title || filename || imageMetadata?.source_file || resolvedUrl;
+                    result.score_details?.chunk_type === "image" ||
+                    Boolean(imageMetadata);
+                  const title =
+                    result.title ||
+                    filename ||
+                    imageMetadata?.source_file ||
+                    resolvedUrl;
                   if (url || filename || title) {
                     searchSourcesAccumulator.push({
                       citeIndex,
@@ -2026,7 +2258,8 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                       searchType: result.search_type,
                       toolSign: result.tool_sign,
                       filename,
-                      sourceFile: result.source_file || imageMetadata?.source_file,
+                      sourceFile:
+                        result.source_file || imageMetadata?.source_file,
                       downloadUrl: result.download_url,
                       objectName: result.object_name,
                       isImage,
@@ -2041,7 +2274,8 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                       text,
                       sourceType: result.source_type,
                       filename,
-                      sourceFile: result.source_file || imageMetadata?.source_file,
+                      sourceFile:
+                        result.source_file || imageMetadata?.source_file,
                       downloadUrl: result.download_url,
                       objectName: result.object_name,
                       citeIndex,
@@ -2065,6 +2299,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
 
       // Finalize any remaining reasoning content at the end
       flushAllOpenReasoning();
+      finishNl2SkillFiles();
       // Defensive: mark any still-open sub-agent instances as no longer
       // running. The streaming adapter expects balanced starts/ends; if
       // upstream failed mid-flight we surface the partial output instead of
@@ -2084,6 +2319,15 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           part?.type === "text" && typeof part.text === "string"
             ? [part.text]
             : []
+        )
+      );
+      const answerImageUrls = new Set(
+        extractMarkdownImageUrls(
+          contentParts.flatMap((part) =>
+            part?.type === "text" && typeof part.text === "string"
+              ? [part.text]
+              : []
+          )
         )
       );
       const imageMetadata = searchSourcesAccumulator.filter(
@@ -2125,6 +2369,26 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         ...searchSourcesAccumulator.filter((source) => !source.isImage),
         ...searchImagesAccumulator,
       ]);
+
+      // Web search tools return verified images through PICTURE_WEB, but the
+      // model does not always include image markdown in its answer. Render
+      // those otherwise-unreferenced images after the answer, outside the
+      // grouped source block. AIDP markers and explicit markdown images keep
+      // their original inline position and are not duplicated here.
+      for (const image of searchImagesAccumulator) {
+        if (
+          answerImageUrls.has(image.url) ||
+          ((image.url.includes("/KnowledgeBase/Tenants/") ||
+            image.url.includes("/ind-aidp/images/")) &&
+            image.imageKey &&
+            answerImageKeys.includes(image.imageKey))
+        ) {
+          continue;
+        }
+        // Use assistant-ui's native image part. Custom fields attached to an
+        // empty text part are not preserved when history is reconstructed.
+        contentParts.push({ type: "image", image: image.url });
+      }
 
       // Emit one contiguous source block after the answer and image cards.
       // Also register it so MarkdownText can resolve citation markers.
@@ -2175,6 +2439,12 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         },
       } as any;
     } finally {
+      if (isNl2Skill) {
+        custom?.onNl2SkillEvent?.({
+          type: "stream_closed",
+          content: "",
+        });
+      }
       reader.releaseLock();
     }
   },

@@ -80,7 +80,7 @@ bash deploy.sh docker --image-source local-latest
 #### ⚠️ 重要提示
 
 1️⃣ **首次部署 v1.8.0 及以上版本时**，系统会创建 `suadmin@nexent.com` 超级管理员账号，默认密码为 `Nexent@123`，无需交互输入，创建成功后会在终端显示。可在首次部署前通过 `deploy/env/.env` 中的 `NEXENT_SUPER_ADMIN_PASSWORD` 覆盖默认值，非交互创建时终端会显示实际使用的密码。使用离线部署包并显式指定 `--config` 时例外：部署脚本会要求输入并确认密码，并以本次输入为准；手动输入的密码不会在终端显示。
-> 该账号仅用于权限管理，无权开发智能体或创建知识库。请登录该账号，依次完成：访问租户资源→创建租户→创建租户管理员，然后使用租户管理员账号登录,即可使用全部功能。角色权限详情参见 [用户管理](../user-guide/user-management)
+> 该账号仅用于权限管理，无权开发智能体或创建知识库。请登录该账号，依次完成：访问租户资源→创建租户→创建租户管理员，然后使用租户管理员账号登录,即可使用全部功能。角色权限详情参见 [用户管理](../user-guide/resource-management)
 
 2️⃣ 如需重建 `suadmin` 账号，请按照以下步骤操作：
 ```bash
@@ -374,10 +374,15 @@ CAS_LOGIN_MODE=force
 CAS_USER_ATTRIBUTE=
 CAS_EMAIL_ATTRIBUTE=email
 CAS_ROLE_ATTRIBUTE=role
+CAS_DEFAULT_ROLE=USER
 CAS_TENANT_ATTRIBUTE=tenant_id
+CAS_DEFAULT_TENANT_ID=tenant_id
 CAS_ROLE_MAP_JSON={"cas-admin":"ADMIN","cas-user":"USER"}
 CAS_SESSION_MAX_AGE_SECONDS=3600
 LOCAL_SESSION_MAX_AGE_SECONDS=3600
+CAS_HEARTBEAT_URL=
+CAS_HEARTBEAT_INTERVAL_SECONDS=300
+CAS_HEARTBEAT_COOKIE_NAME=
 CAS_RENEW_BEFORE_SECONDS=300
 CAS_RENEW_TIMEOUT_SECONDS=10
 CAS_SYNTHETIC_EMAIL_DOMAIN=cas.local
@@ -388,6 +393,12 @@ CAS_LOGOUT_URL=/logout
 CAS_SSL_VERIFY=true
 CAS_CA_BUNDLE=
 ```
+
+CAS 未返回 `CAS_ROLE_ATTRIBUTE` 指定的角色属性、属性为空或映射后的角色不受支持时，使用 `CAS_DEFAULT_ROLE`。支持的默认角色为 `SU`、`ADMIN`、`DEV` 和 `USER`；配置无效时回退到 `USER`。
+
+CAS 未返回 `CAS_TENANT_ATTRIBUTE` 指定的租户属性或属性为空时，使用 `CAS_DEFAULT_TENANT_ID`。
+
+`CAS_HEARTBEAT_URL` 用于启用独立的 CAS 用户活动心跳。页面可见时，首次用户活动立即发送 GET；之后点击、键盘、鼠标、触摸、窗口聚焦或页面可见性变化在所有浏览器标签页中每 `CAS_HEARTBEAT_INTERVAL_SECONDS` 最多发送一次。若配置的 Cookie 可被前端读取，请求会携带 `X-Auth-Token: <cookie-name>=<cookie-value>`；读取不到时仍发送心跳，但不带该 Header。由于浏览器直接访问心跳地址，认证源必须通过 CORS 允许 Nexent Origin、GET、OPTIONS 和 `X-Auth-Token`。心跳只保活认证源会话，现有无感续期仍负责刷新 Nexent 本地会话。
 
 常用 CAS 地址：
 
@@ -426,10 +437,15 @@ CAS_LOGIN_MODE=force
 CAS_USER_ATTRIBUTE=userName
 CAS_EMAIL_ATTRIBUTE=email
 CAS_ROLE_ATTRIBUTE=userType
+CAS_DEFAULT_ROLE=USER
 CAS_TENANT_ATTRIBUTE=tenant_id
+CAS_DEFAULT_TENANT_ID=tenant_id
 CAS_ROLE_MAP_JSON={"1":"ADMIN","3":"DEV"}
 CAS_SESSION_MAX_AGE_SECONDS=3600
 LOCAL_SESSION_MAX_AGE_SECONDS=3600
+CAS_HEARTBEAT_URL=https://<ModelEngine IP>:5443/<heartbeat-path>
+CAS_HEARTBEAT_INTERVAL_SECONDS=300
+CAS_HEARTBEAT_COOKIE_NAME=<cookie-name>
 CAS_RENEW_BEFORE_SECONDS=300
 CAS_RENEW_TIMEOUT_SECONDS=10
 CAS_SYNTHETIC_EMAIL_DOMAIN=cas.local

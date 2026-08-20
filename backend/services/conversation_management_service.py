@@ -8,7 +8,7 @@ from jinja2 import StrictUndefined, Template
 
 from consts.const import LANGUAGE, MODEL_CONFIG_MAPPING, MESSAGE_ROLE, DEFAULT_EN_TITLE, DEFAULT_ZH_TITLE
 from consts.model import AgentRequest, MessageRequest, MessageUnit
-from consts.exceptions import ConversationNotFoundError
+from consts.exceptions import ConversationNotFoundError, ValidationError
 from database.conversation_db import (
     CHAT_MODE_VALUES,
     create_conversation,
@@ -34,6 +34,7 @@ from database.conversation_db import (
     save_history_summary,
     update_conversation_agent_id,
     update_conversation_chat_mode,
+    update_conversation_knowledge_scope,
     update_conversation_message_content,
     update_conversation_message_status,
     update_message_minio_files,
@@ -237,11 +238,20 @@ def save_conversation_user(request: AgentRequest, user_id: str, tenant_id: str) 
     user_role_count = sum(1 for item in getattr(
         request, "history", []) if item.role == MESSAGE_ROLE["USER"])
 
+    # Strip the [Current time: ...] prefix before persisting so historical
+    # messages do not show the time marker. The prefix is injected by
+    # run_agent_stream for the LLM call only.
+    raw_query = request.query
+    if raw_query and raw_query.startswith("[Current time:"):
+        close_idx = raw_query.find("]", len("[Current time:"))
+        if close_idx >= 0:
+            raw_query = raw_query[close_idx + 1:].lstrip("\n").strip()
+
     conversation_req = MessageRequest(
         conversation_id=request.conversation_id,
         message_idx=user_role_count * 2,
         role=MESSAGE_ROLE["USER"],
-        message=[MessageUnit(type="string", content=request.query)],
+        message=[MessageUnit(type="string", content=raw_query)],
         minio_files=request.minio_files,
     )
     save_message(
@@ -345,6 +355,7 @@ def create_new_conversation(
     user_id: str,
     agent_id: Optional[int] = None,
     chat_mode: Optional[str] = None,
+    knowledge_scope: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Create a new conversation
@@ -359,12 +370,13 @@ def create_new_conversation(
         Dict containing conversation data
     """
     try:
-        conversation_data = create_conversation(
-            title,
-            user_id,
-            agent_id=agent_id,
-            chat_mode=chat_mode,
-        )
+        create_kwargs = {
+            "agent_id": agent_id,
+            "chat_mode": chat_mode,
+        }
+        if knowledge_scope is not None:
+            create_kwargs["knowledge_scope"] = knowledge_scope
+        conversation_data = create_conversation(title, user_id, **create_kwargs)
         return conversation_data
     except Exception as e:
         logging.error(f"Failed to create conversation: {str(e)}")
@@ -445,6 +457,94 @@ def update_conversation_chat_mode_service(
     except Exception as e:
         logging.error(f"Failed to update conversation chat mode: {str(e)}")
         raise Exception(str(e))
+
+
+def _resolve_knowledge_scope_for_update(
+    knowledge_scope: Dict[str, Any],
+    **kwargs,
+):
+    """Load the scope resolver lazily to avoid service import cycles."""
+    from consts.model import ConversationKnowledgeScopeRequest
+    from services.knowledge_scope_service import resolve_knowledge_scope
+
+    return resolve_knowledge_scope(
+        scope=ConversationKnowledgeScopeRequest.model_validate(knowledge_scope),
+        **kwargs,
+    )
+
+
+def update_conversation_knowledge_scope_service(
+    conversation_id: int,
+    knowledge_scope: Optional[Dict[str, Any]],
+    user_id: str,
+    tenant_id: str,
+) -> Dict[str, Any]:
+    """Validate, preview, and replace a user-owned conversation knowledge scope."""
+    conversation = get_conversation(
+        conversation_id=conversation_id,
+        user_id=user_id,
+        tenant_id=tenant_id,
+    )
+    if conversation is None:
+        raise ConversationNotFoundError(
+            f"Conversation {conversation_id} does not exist or is not accessible"
+        )
+    effective_preview = None
+    warnings: List[Dict[str, Any]] = []
+    if knowledge_scope is not None and conversation.get("agent_id") is not None:
+        resolved = _resolve_knowledge_scope_for_update(
+            knowledge_scope=knowledge_scope,
+            agent_id=int(conversation["agent_id"]),
+            tenant_id=tenant_id,
+            user_id=user_id,
+            version_no=None,
+            is_debug=False,
+        )
+        unavailable = [
+            warning
+            for warning in resolved.warnings
+            if warning.get("code") == "KNOWLEDGE_SCOPE_ITEM_UNAVAILABLE"
+        ]
+        if unavailable:
+            sources = ", ".join(
+                sorted({str(warning.get("source")) for warning in unavailable})
+            )
+            raise ValidationError(
+                f"Some selected knowledge bases are unavailable or inaccessible: {sources}."
+            )
+        warnings = resolved.warnings
+        effective_preview = {
+            "local": {
+                "disabled": resolved.local_disabled,
+                "knowledge_ids": resolved.local_knowledge_ids,
+                "display_names": resolved.local_display_names,
+            },
+            "aidp": {
+                "disabled": resolved.aidp_disabled,
+                "kds_ids": resolved.aidp_kds_ids,
+                "display_names": resolved.aidp_display_names,
+            },
+        }
+    elif knowledge_scope is not None:
+        warnings.append({
+            "code": "KNOWLEDGE_SCOPE_AGENT_UNASSIGNED",
+            "count": 1,
+        })
+
+    success = update_conversation_knowledge_scope(
+        conversation_id=conversation_id,
+        knowledge_scope=knowledge_scope,
+        user_id=user_id,
+    )
+    if not success:
+        raise ConversationNotFoundError(
+            f"Conversation {conversation_id} does not exist or is not accessible"
+        )
+    return {
+        "desired_scope": knowledge_scope,
+        "effective_preview": effective_preview,
+        "warnings": warnings,
+    }
 
 
 def rename_conversation_service(conversation_id: int, name: str, user_id: str) -> bool:
@@ -737,6 +837,7 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
             'conversation_id': str(history_data['conversation_id']),
             'agent_id': history_data.get('agent_id'),
             'chat_mode': history_data.get('chat_mode') or 'execution',
+            'knowledge_scope': history_data.get('knowledge_scope'),
             'create_time': history_data['create_time'],
             'message': messages
         }

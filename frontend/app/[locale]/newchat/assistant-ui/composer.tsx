@@ -1,6 +1,12 @@
 "use client";
 
-import { useSyncExternalStore, type FC, type ReactNode } from "react";
+import {
+  useMemo,
+  useState,
+  useSyncExternalStore,
+  type FC,
+  type ReactNode,
+} from "react";
 import { useTranslation } from "react-i18next";
 import {
   ArrowUp,
@@ -13,10 +19,15 @@ import {
   Circle,
   ListChecks,
   ChevronDown,
+  Database,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { AuiIf, ComposerPrimitive } from "@assistant-ui/react";
+import { AuiIf, ComposerPrimitive, useAuiState } from "@assistant-ui/react";
+import {
+  LexicalComposerInput,
+  type DirectiveChipProps as LexicalDirectiveChipProps,
+} from "@assistant-ui/react-lexical";
 import {
   Tooltip,
   TooltipContent,
@@ -33,6 +44,19 @@ import {
   planRegistry,
   type PlanData,
 } from "../adapter/remote-chat-model-adapter";
+import type {
+  ConversationKnowledgeScope,
+  KnowledgeCapabilities,
+  KnowledgeScopeEffectivePreview,
+} from "@/types/knowledgeScope";
+import { ConversationKnowledgeScopeModal } from "./conversation-knowledge-scope-modal";
+import type { SkillFileContent } from "@/types/skill";
+import { SkillFileMentionPopover } from "../ui/skill-file-mention";
+import { DirectiveChip } from "../ui/directive-text";
+import {
+  combinedSkillDirectiveFormatter,
+  skillDirectiveIconMap,
+} from "../ui/skill-directives";
 
 export type ChatMode = "planning" | "execution";
 
@@ -44,6 +68,15 @@ export interface ComposerProps {
   onChatModeChange: (mode: ChatMode) => void;
   showModelSelector?: boolean;
   isDictationConfigured?: boolean;
+  knowledgeScope?: ConversationKnowledgeScope | null;
+  knowledgePreview?: KnowledgeScopeEffectivePreview | null;
+  knowledgeCapabilities?: KnowledgeCapabilities | null;
+  onKnowledgeScopeChange?: (
+    scope: ConversationKnowledgeScope | null,
+    preview?: KnowledgeScopeEffectivePreview | null
+  ) => Promise<void> | void;
+  compact?: boolean;
+  skillFiles?: readonly SkillFileContent[];
 }
 
 // Simple tooltip wrapper
@@ -139,6 +172,22 @@ const PlanView: FC = () => {
   );
 };
 
+const SkillComposerDirectiveChip: FC<LexicalDirectiveChipProps> = ({
+  directiveId,
+  directiveType,
+  label,
+}) => (
+  <DirectiveChip
+    segment={{
+      kind: "mention",
+      id: directiveId,
+      type: directiveType,
+      label,
+    }}
+    iconMap={skillDirectiveIconMap}
+  />
+);
+
 export const Composer: FC<ComposerProps> = ({
   models,
   selectedModelId,
@@ -147,124 +196,272 @@ export const Composer: FC<ComposerProps> = ({
   onChatModeChange,
   showModelSelector = true,
   isDictationConfigured = false,
+  knowledgeScope = null,
+  knowledgePreview = null,
+  knowledgeCapabilities = null,
+  onKnowledgeScopeChange,
+  compact = false,
+  skillFiles,
 }) => {
   const { t } = useTranslation();
+  const [knowledgeModalOpen, setKnowledgeModalOpen] = useState(false);
+  const isRunning = useAuiState((state) => state.thread.isRunning);
+
+  const hasIncompatibleScope = Boolean(
+    knowledgeScope &&
+    ((knowledgeScope.local.mode === "override" &&
+      !knowledgeCapabilities?.sources.local.enabled) ||
+      (knowledgeScope.aidp.mode === "override" &&
+        !knowledgeCapabilities?.sources.aidp.enabled))
+  );
+
+  const knowledgeSummary = useMemo(() => {
+    if (!knowledgeScope) return t("chat.knowledgeScope.summaryDefault");
+    const selectedCount =
+      (knowledgeScope.local.mode === "override"
+        ? knowledgeScope.local.knowledge_ids.length
+        : 0) +
+      (knowledgeScope.aidp.mode === "override"
+        ? knowledgeScope.aidp.kds_ids.length
+        : 0);
+    const selectedNames = [
+      ...(knowledgeScope.local.mode === "override"
+        ? (knowledgePreview?.local.display_names ?? [])
+        : []),
+      ...(knowledgeScope.aidp.mode === "override"
+        ? (knowledgePreview?.aidp.display_names ?? [])
+        : []),
+    ];
+    const buildSummary = (value: string) => {
+      const summary = t("chat.knowledgeScope.summary", { value });
+      return hasIncompatibleScope
+        ? `${summary} · ${t("chat.knowledgeScope.incompatibleShort")}`
+        : summary;
+    };
+    if (
+      knowledgeScope.local.mode === "disabled" &&
+      knowledgeScope.aidp.mode === "disabled"
+    ) {
+      return buildSummary(t("chat.knowledgeScope.summaryDisabled"));
+    }
+    if (
+      knowledgeScope.local.mode === "inherit" &&
+      knowledgeScope.aidp.mode === "inherit"
+    ) {
+      return t("chat.knowledgeScope.summaryDefault");
+    }
+    if (selectedCount === 1 && selectedNames.length === 1) {
+      return buildSummary(selectedNames[0]);
+    }
+    if (selectedCount > 1 && selectedNames.length > 0) {
+      return buildSummary(
+        t("chat.knowledgeScope.summaryMultiple", {
+          name: selectedNames[0],
+          count: selectedCount,
+        })
+      );
+    }
+    const parts: string[] = [];
+    if (knowledgeCapabilities?.sources.local.enabled) {
+      parts.push(
+        knowledgeScope.local.mode === "disabled"
+          ? t("chat.knowledgeScope.summaryLocalDisabled")
+          : knowledgeScope.local.mode === "override"
+            ? t("chat.knowledgeScope.summaryLocalOverride", {
+                count: knowledgeScope.local.knowledge_ids.length,
+              })
+            : t("chat.knowledgeScope.summaryLocalDefault")
+      );
+    }
+    if (knowledgeCapabilities?.sources.aidp.enabled) {
+      parts.push(
+        knowledgeScope.aidp.mode === "disabled"
+          ? t("chat.knowledgeScope.summaryAidpDisabled")
+          : knowledgeScope.aidp.mode === "override"
+            ? t("chat.knowledgeScope.summaryAidpOverride", {
+                count: knowledgeScope.aidp.kds_ids.length,
+              })
+            : t("chat.knowledgeScope.summaryAidpDefault")
+      );
+    }
+    return buildSummary(
+      parts.join(" · ") || t("chat.knowledgeScope.unavailable")
+    );
+  }, [
+    knowledgeScope,
+    knowledgePreview,
+    knowledgeCapabilities,
+    hasIncompatibleScope,
+    t,
+  ]);
 
   return (
-    <div className="flex w-full flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
-      <PlanView />
+    <div className="relative flex w-full flex-col overflow-visible rounded-2xl border border-border bg-card shadow-sm">
+      {!compact && <PlanView />}
 
       {/* Mode switcher above input */}
-      <div className="flex items-center justify-between border-b border-border px-3 py-2">
-        {/* Mode switcher */}
-        <div className="flex items-center rounded-lg border border-border bg-muted/50 p-0.5">
-          <Button
-            variant="ghost"
-            size="sm"
-            className={cn(
-              "h-6 gap-1 rounded-md px-2 text-xs transition-colors",
-              chatMode === "planning" &&
-                "bg-blue-50 text-blue-600 hover:bg-blue-50"
-            )}
-            onClick={() => onChatModeChange("planning")}
-          >
-            <Lightbulb
-              className={cn(
-                "size-3",
-                chatMode === "planning" ? "text-blue-600" : ""
-              )}
-            />
-            {t("chat.composer.planning")}
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className={cn(
-              "h-6 gap-1 rounded-md px-2 text-xs transition-colors",
-              chatMode === "execution" &&
-                "bg-blue-50 text-blue-600 hover:bg-blue-50"
-            )}
-            onClick={() => onChatModeChange("execution")}
-          >
-            <Play className="size-3" />
-            {t("chat.composer.execution")}
-          </Button>
-        </div>
-
-        {/* Placeholder for alignment */}
-        <div className="w-16" />
-      </div>
-
-      {/* Composer Primitive Root */}
-      <ComposerPrimitive.Root className="flex w-full flex-col px-1 py-1 outline-none">
-        <ComposerAttachments />
-        <ComposerPrimitive.Input
-          placeholder={t("chat.composer.placeholder")}
-          className="mb-1 max-h-32 min-h-14 w-full resize-none bg-transparent px-3 py-1 text-sm outline-none placeholder:text-muted-foreground"
-          rows={1}
-          submitMode="enter"
-          autoFocus
-        />
-        <div className="relative mx-2 mb-2 flex items-center justify-between gap-2">
-          {showModelSelector && (
-            <ModelSelector
-              models={models}
-              value={selectedModelId}
-              onValueChange={onModelChange}
+      {!compact && (
+        <div className="flex items-center border-b border-border px-3 py-2">
+          {/* Mode switcher */}
+          <div className="flex items-center rounded-lg border border-border bg-muted/50 p-0.5">
+            <Button
               variant="ghost"
               size="sm"
-              className="text-xs"
-            />
-          )}
-          <div className="ml-auto flex items-center gap-1">
-            <ComposerAddAttachment />
-            <AuiIf condition={(s) => !s.composer.dictation}>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span className="inline-flex">
-                    <ComposerPrimitive.Dictate asChild>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        disabled={!isDictationConfigured}
-                        className="size-8 text-muted-foreground"
-                      >
-                        <Mic className="size-4" />
-                      </Button>
-                    </ComposerPrimitive.Dictate>
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent>
-                  {isDictationConfigured
-                    ? t("chat.composer.voiceInput")
-                    : t("chat.composer.voiceInputDisabled")}
-                </TooltipContent>
-              </Tooltip>
-            </AuiIf>
-            <AuiIf condition={(s) => !!s.composer.dictation}>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <ComposerPrimitive.StopDictation asChild>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="size-8 text-destructive hover:text-destructive"
-                    >
-                      <MicOff className="size-4" />
-                    </Button>
-                  </ComposerPrimitive.StopDictation>
-                </TooltipTrigger>
-                <TooltipContent>
-                  {t("chat.composer.stopVoiceInput")}
-                </TooltipContent>
-              </Tooltip>
-            </AuiIf>
-            <ComposerSendOrCancel />
+              className={cn(
+                "h-6 gap-1 rounded-md px-2 text-xs transition-colors",
+                chatMode === "planning" &&
+                  "bg-blue-50 text-blue-600 hover:bg-blue-50"
+              )}
+              onClick={() => onChatModeChange("planning")}
+            >
+              <Lightbulb
+                className={cn(
+                  "size-3",
+                  chatMode === "planning" ? "text-blue-600" : ""
+                )}
+              />
+              {t("chat.composer.planning")}
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className={cn(
+                "h-6 gap-1 rounded-md px-2 text-xs transition-colors",
+                chatMode === "execution" &&
+                  "bg-blue-50 text-blue-600 hover:bg-blue-50"
+              )}
+              onClick={() => onChatModeChange("execution")}
+            >
+              <Play className="size-3" />
+              {t("chat.composer.execution")}
+            </Button>
           </div>
         </div>
-      </ComposerPrimitive.Root>
+      )}
+
+      {/* Composer Primitive Root */}
+      <ComposerPrimitive.Unstable_TriggerPopoverRoot>
+        {skillFiles ? <SkillFileMentionPopover files={skillFiles} /> : null}
+        <ComposerPrimitive.Root className="flex w-full flex-col px-1 py-1 outline-none">
+          {!compact && <ComposerAttachments />}
+          {skillFiles ? (
+            <LexicalComposerInput
+              placeholder={t("chat.composer.placeholder")}
+              className="relative mb-1 max-h-32 min-h-14 w-full bg-transparent px-3 py-1 text-sm outline-none [&_.aui-lexical-input]:min-h-12 [&_.aui-lexical-input]:outline-none [&_.aui-lexical-placeholder]:pointer-events-none [&_.aui-lexical-placeholder]:absolute [&_.aui-lexical-placeholder]:top-1 [&_.aui-lexical-placeholder]:text-muted-foreground"
+              submitMode="enter"
+              autoFocus
+              formatter={combinedSkillDirectiveFormatter}
+              directiveChip={SkillComposerDirectiveChip}
+            />
+          ) : (
+            <ComposerPrimitive.Input
+              placeholder={t("chat.composer.placeholder")}
+              className="mb-1 max-h-32 min-h-14 w-full resize-none bg-transparent px-3 py-1 text-sm outline-none placeholder:text-muted-foreground"
+              rows={1}
+              submitMode="enter"
+              autoFocus
+            />
+          )}
+          <div className="relative mx-2 mb-2 flex items-center justify-between gap-2">
+            <div className="flex min-w-0 items-center gap-1">
+              {showModelSelector && (
+                <ModelSelector
+                  models={models}
+                  value={selectedModelId}
+                  onValueChange={onModelChange}
+                  variant="ghost"
+                  size="sm"
+                  className="shrink-0 text-xs"
+                />
+              )}
+              {!compact &&
+                (knowledgeCapabilities?.sources.local.enabled ||
+                  knowledgeCapabilities?.sources.aidp.enabled ||
+                  knowledgeScope) && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 min-w-0 max-w-64 gap-1.5 px-2 text-xs text-muted-foreground"
+                    onClick={() => setKnowledgeModalOpen(true)}
+                    disabled={isRunning}
+                    title={
+                      isRunning
+                        ? t("chat.knowledgeScope.runningDisabled")
+                        : knowledgeSummary
+                    }
+                  >
+                    <Database className="size-3.5 shrink-0" />
+                    <span className="truncate">{knowledgeSummary}</span>
+                  </Button>
+                )}
+            </div>
+            <div className="ml-auto flex items-center gap-1">
+              {!compact && <ComposerAddAttachment />}
+              {!compact && (
+                <AuiIf condition={(s) => !s.composer.dictation}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="inline-flex">
+                        <ComposerPrimitive.Dictate asChild>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            disabled={!isDictationConfigured}
+                            className="size-8 text-muted-foreground"
+                          >
+                            <Mic className="size-4" />
+                          </Button>
+                        </ComposerPrimitive.Dictate>
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      {isDictationConfigured
+                        ? t("chat.composer.voiceInput")
+                        : t("chat.composer.voiceInputDisabled")}
+                    </TooltipContent>
+                  </Tooltip>
+                </AuiIf>
+              )}
+              {!compact && (
+                <AuiIf condition={(s) => !!s.composer.dictation}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <ComposerPrimitive.StopDictation asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="size-8 text-destructive hover:text-destructive"
+                        >
+                          <MicOff className="size-4" />
+                        </Button>
+                      </ComposerPrimitive.StopDictation>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      {t("chat.composer.stopVoiceInput")}
+                    </TooltipContent>
+                  </Tooltip>
+                </AuiIf>
+              )}
+              <ComposerSendOrCancel />
+            </div>
+          </div>
+        </ComposerPrimitive.Root>
+        {!compact && (
+          <ConversationKnowledgeScopeModal
+            open={knowledgeModalOpen}
+            value={knowledgeScope}
+            capabilities={knowledgeCapabilities}
+            onCancel={() => setKnowledgeModalOpen(false)}
+            onConfirm={async (scope, preview) => {
+              await onKnowledgeScopeChange?.(scope, preview);
+              setKnowledgeModalOpen(false);
+            }}
+          />
+        )}
+      </ComposerPrimitive.Unstable_TriggerPopoverRoot>
     </div>
   );
 };

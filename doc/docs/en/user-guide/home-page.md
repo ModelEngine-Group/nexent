@@ -37,7 +37,18 @@ Taking the administrator account as an example, the left sidebar exposes every m
 
 Use the language switcher in the top-right corner to toggle between Simplified Chinese and English. The lower-left corner shows the running Nexent version to simplify troubleshooting when asking for help.
 
-## 🚀 Quick Start
+## � Account Setup (First Use)
+
+When using Nexent for the first time, you need to create a tenant administrator account before you can integrate models, create agents, and interact via Q&A:
+
+1. Log in with the super administrator account `suadmin@nexent.com` (see the [Installation Guide](../quick-start/installation.md) for the default password);
+2. Go to **Tenant Resources**, create a tenant and a tenant administrator account;
+3. Log out of the super administrator account;
+4. Log in with the newly created tenant administrator account.
+
+Once these steps are complete, you can proceed with configuration and usage. For role and permission details, see [Resource Management](./resource-management.md).
+
+## �🚀 Quick Start
 
 We recommend configuring the platform in this order:
 

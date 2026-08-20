@@ -9,6 +9,8 @@ from consts.const import MINIO_DEFAULT_BUCKET, S3_URL_PREFIX
 from consts.const import NORTHBOUND_EXTERNAL_URL
 from urllib.parse import quote
 
+from utils.knowledge_telemetry import set_span_attributes, trace_knowledge_operation
+
 
 def _normalize_object_and_bucket(object_name: str, bucket: Optional[str] = None) -> Tuple[str, Optional[str]]:
     """
@@ -147,6 +149,7 @@ def upload_file(
     return response
 
 
+@trace_knowledge_operation("knowledge.minio.upload", "minio.upload")
 def upload_fileobj(
         file_obj: BinaryIO,
         file_name: str,
@@ -188,6 +191,7 @@ def upload_fileobj(
     # Upload file
     success, result = minio_client.upload_fileobj(
         file_obj, object_name, bucket)
+    set_span_attributes(file_size_bytes=file_size, stage="minio.upload")
 
     # Restore original position (if file is still open)
     try:
@@ -277,6 +281,15 @@ def get_file_size_from_minio(object_name: str, bucket: Optional[str] = None) -> 
         config = getattr(minio_client, "storage_config", None)
         bucket = config.default_bucket if config else MINIO_DEFAULT_BUCKET
     return minio_client.get_file_size(object_name, bucket)
+
+
+def get_file_size_from_minio_strict(
+    object_name: str,
+    bucket: Optional[str] = None,
+) -> Optional[int]:
+    """Return authoritative size, ``None`` only when MinIO confirms the object is missing."""
+    object_name, bucket = _normalize_object_and_bucket(object_name, bucket)
+    return minio_client.get_file_size_strict(object_name, bucket)
 
 
 def file_exists(object_name: str, bucket: Optional[str] = None) -> bool:

@@ -239,6 +239,8 @@ export interface AidpKnowledgeBaseItem {
   updated_at?: string;
   /** Embedding model name configured for this KB in AIDP. */
   embedding_model?: string;
+  /** Whether this AIDP knowledge base supports multimodal content. */
+  is_multimodal?: boolean;
 }
 
 export interface AidpKnowledgeBaseListResponse {
@@ -552,6 +554,7 @@ export interface McpServer {
   service_name: string;
   mcp_url: string;
   status: boolean;
+  enabled: boolean;
   remote_mcp_server_name?: string;
   remote_mcp_server?: string;
   authorization_token?: string | null;

@@ -351,6 +351,83 @@ class TestGetAccessibleKbs:
         assert svc.count_accessible_kbs("u", "t") == 1
 
 
+class TestIntersectAccessibleKbs:
+    def test_intersects_remote_catalog_and_preserves_remote_order(self, monkeypatch):
+        rows = [
+            _record(kb_id="kb-1", owner_user_id="u"),
+            _record(kb_id="kb-2", owner_user_id="u"),
+            _record(kb_id="local-only", owner_user_id="u"),
+        ]
+        monkeypatch.setattr(
+            svc.aidp_permission_db,
+            "list_all_permissions_by_tenant",
+            lambda tenant_id: rows,
+        )
+        monkeypatch.setattr(svc, "_get_user_groups", lambda u, t: [])
+        monkeypatch.setattr(svc, "_get_user_role", lambda u, t: "USER")
+
+        result = svc.intersect_accessible_kbs(
+            [
+                {"kds_id": "kb-2", "kds_name": "Remote two"},
+                {"kds_id": "remote-only", "kds_name": "Remote only"},
+                {"kds_id": "kb-1", "kds_name": "Remote one"},
+            ],
+            user_id="u",
+            tenant_id="t",
+        )
+
+        assert [item["kb_id"] for item in result] == ["kb-2", "kb-1"]
+        assert [item["kds_name"] for item in result] == ["Remote two", "Remote one"]
+        assert all(item["permission"] == "EDIT" for item in result)
+
+    def test_drops_remote_resource_when_user_has_no_local_access(self, monkeypatch):
+        rows = [
+            _record(
+                kb_id="kb-private",
+                owner_user_id="another-user",
+                ingroup_permission="PRIVATE",
+            ),
+        ]
+        monkeypatch.setattr(
+            svc.aidp_permission_db,
+            "list_all_permissions_by_tenant",
+            lambda tenant_id: rows,
+        )
+        monkeypatch.setattr(svc, "_get_user_groups", lambda u, t: [])
+        monkeypatch.setattr(svc, "_get_user_role", lambda u, t: "USER")
+
+        result = svc.intersect_accessible_kbs(
+            [{"kds_id": "kb-private"}],
+            user_id="u",
+            tenant_id="t",
+        )
+
+        assert result == []
+
+    def test_deduplicates_remote_ids_and_protects_local_permission(self, monkeypatch):
+        rows = [_record(kb_id="kb-1", owner_user_id="u")]
+        monkeypatch.setattr(
+            svc.aidp_permission_db,
+            "list_all_permissions_by_tenant",
+            lambda tenant_id: rows,
+        )
+        monkeypatch.setattr(svc, "_get_user_groups", lambda u, t: [])
+        monkeypatch.setattr(svc, "_get_user_role", lambda u, t: "USER")
+
+        result = svc.intersect_accessible_kbs(
+            [
+                {"kds_id": "kb-1", "permission": "REMOTE", "kds_name": "First"},
+                {"kds_id": "kb-1", "kds_name": "Duplicate"},
+            ],
+            user_id="u",
+            tenant_id="t",
+        )
+
+        assert len(result) == 1
+        assert result[0]["permission"] == "EDIT"
+        assert result[0]["kds_name"] == "First"
+
+
 # ---------------------------------------------------------------------------
 # _parse_group_ids gap coverage (lines 100-108)
 # ---------------------------------------------------------------------------
@@ -620,3 +697,75 @@ class TestGetKdsNameToIdMap:
         result = svc.get_kds_name_to_id_map("u", "t")
         assert result["Alpha"] == "kb-100"
         assert result["Beta"] == "kb-200"
+
+
+# --- intersect_accessible_kbs -------------------------------------------------
+
+
+class TestIntersectAccessibleKbs:
+    def test_order_follows_remote_and_merges_protected_fields(self, patched):
+        local_rows = [
+            {
+                "kb_id": "k1", "kds_name": "Local KB 1", "tenant_id": "t",
+                "owner_user_id": "owner", "ingroup_permission": "READ_ONLY",
+                "group_ids": [1], "permission": "READ",
+            },
+            {
+                "kb_id": "k2", "kds_name": "Local KB 2", "tenant_id": "t",
+                "owner_user_id": "owner", "ingroup_permission": "PRIVATE",
+                "group_ids": [], "permission": "EDIT",
+            },
+        ]
+        with patch.object(svc, "_compute_accessible_rows", return_value=local_rows):
+            remote = [
+                {"kds_id": "k1", "kds_name": "Remote KB 1"},
+                {"kds_id": "k2", "kds_name": "Remote KB 2"},
+            ]
+            result = svc.intersect_accessible_kbs(remote, "u", "t")
+
+        assert [r["kds_id"] for r in result] == ["k1", "k2"]
+        assert result[0]["kds_name"] == "Remote KB 1"
+        assert result[0]["tenant_id"] == "t"
+        assert result[0]["owner_user_id"] == "owner"
+        assert result[0]["kb_id"] == "k1"
+        assert result[0]["kds_id"] == "k1"
+
+    def test_skips_missing_ids_and_permissionless(self, patched):
+        with patch.object(svc, "_compute_accessible_rows", return_value=[]):
+            remote = [
+                None,
+                {"kds_name": "no id"},
+                {"kds_id": "k1"},  # no local permission
+            ]
+            assert svc.intersect_accessible_kbs(remote, "u", "t") == []
+
+    def test_dedupes_remote_ids(self, patched):
+        local_rows = [
+            {
+                "kb_id": "k1", "kds_name": "Local", "tenant_id": "t",
+                "owner_user_id": "o", "ingroup_permission": "PUBLIC",
+                "group_ids": [], "permission": "READ",
+            }
+        ]
+        with patch.object(svc, "_compute_accessible_rows", return_value=local_rows):
+            remote = [
+                {"kds_id": "k1"},
+                {"id": "k1"},
+            ]
+            result = svc.intersect_accessible_kbs(remote, "u", "t")
+
+        assert len(result) == 1
+        assert result[0]["kds_id"] == "k1"
+
+    def test_treats_int_id_as_string(self, patched):
+        local_rows = [
+            {
+                "kb_id": "7", "kds_name": "Local", "tenant_id": "t",
+                "owner_user_id": "o", "ingroup_permission": "PUBLIC",
+                "group_ids": [], "permission": "READ",
+            }
+        ]
+        with patch.object(svc, "_compute_accessible_rows", return_value=local_rows):
+            result = svc.intersect_accessible_kbs([{"kds_id": 7}], "u", "t")
+
+        assert result[0]["kds_id"] == "7"

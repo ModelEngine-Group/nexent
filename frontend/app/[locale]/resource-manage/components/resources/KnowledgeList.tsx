@@ -33,6 +33,7 @@ import type { QuotaUsageResponse, KBQuotaStatus } from "@/types/quota";
 import { KnowledgeBaseEditModal } from "../../../knowledges/components/knowledge/KnowledgeBaseEditModal";
 import { QuotaSettingsModal } from "./QuotaSettingsModal";
 import { SuQuotaModal } from "./SuQuotaModal";
+import { formatDateTime as formatDateTimeUtil } from "@/lib/date";
 
 // Color constants for progress bars
 const STROKE_COLORS = {
@@ -110,10 +111,8 @@ export default function KnowledgeList({
   }, []);
 
   useEffect(() => {
-    if (canManageQuota) {
-      fetchQuotaUsage();
-    }
-  }, [fetchQuotaUsage, canManageQuota]);
+    fetchQuotaUsage();
+  }, [fetchQuotaUsage]);
 
   useEffect(() => {
     window.addEventListener(QUOTA_USAGE_CHANGED_EVENT, fetchQuotaUsage);
@@ -202,15 +201,7 @@ export default function KnowledgeList({
   };
 
   const formatDateTime = (date: string | null | undefined) => {
-    if (!date) return t("common.unknown");
-    const d = new Date(date);
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, "0");
-    const day = String(d.getDate()).padStart(2, "0");
-    const hours = String(d.getHours()).padStart(2, "0");
-    const minutes = String(d.getMinutes()).padStart(2, "0");
-    const seconds = String(d.getSeconds()).padStart(2, "0");
-    return `${year}/${month}/${day} ${hours}:${minutes}:${seconds}`;
+    return formatDateTimeUtil(date) ?? t("common.unknown");
   };
 
   // Inline editing for per-KB quota
@@ -328,15 +319,16 @@ export default function KnowledgeList({
       key: "store_size",
       width: 140,
       render: (_: any, record: KnowledgeBase) => {
-        const displaySize = record.store_size || "0 B";
+        const indexName = record.index_name || record.id;
+        const quotaData = indexName ? quotaMap.get(indexName) : undefined;
+        const displaySize =
+          quotaData?.actual_readable ??
+          (isExternalSource(record) ? record.store_size || "0 B" : "—");
 
-        // Non-admin (SU or other roles): plain text only, no per-KB quota controls
+        // Non-admin roles have read-only composite usage.
         if (!isAdmin) {
           return <span style={{ color: "#666" }}>{displaySize}</span>;
         }
-
-        const indexName = record.index_name || record.id;
-        const quotaData = indexName ? quotaMap.get(indexName) : undefined;
 
         // Inline editing mode
         if (editingQuotaKb === indexName) {

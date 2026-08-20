@@ -53,6 +53,8 @@ export const API_ENDPOINTS = {
     save: `${API_BASE_URL}/conversation/save`,
     rename: `${API_BASE_URL}/conversation/rename`,
     detail: (id: number) => `${API_BASE_URL}/conversation/${id}`,
+    knowledgeScope: (id: number) =>
+      `${API_BASE_URL}/conversation/${id}/knowledge-scope`,
     delete: (id: number) => `${API_BASE_URL}/conversation/${id}`,
     generateTitle: `${API_BASE_URL}/conversation/generate_title`,
     // TODO: Remove this endpoint
@@ -95,6 +97,8 @@ export const API_ENDPOINTS = {
     callRelationship: `${API_BASE_URL}/agent/call_relationship`,
     byName: (agentName: string) =>
       `${API_BASE_URL}/agent/by-name/${encodeURIComponent(agentName)}`,
+    knowledgeCapabilities: (agentId: number) =>
+      `${API_BASE_URL}/agent/${agentId}/knowledge-capabilities`,
     clearNew: (agentId: string | number) =>
       `${API_BASE_URL}/agent/clear_new/${agentId}`,
     generateGuardrailRules: `${API_BASE_URL}/agent/generate_guardrail_rules`,
@@ -174,12 +178,22 @@ export const API_ENDPOINTS = {
   },
   evaluationSets: {
     list: `${API_BASE_URL}/evaluation-sets`,
-    create: `${API_BASE_URL}/evaluation-sets`,
     detail: (id: number) => `${API_BASE_URL}/evaluation-sets/${id}`,
     cases: (id: number) => `${API_BASE_URL}/evaluation-sets/${id}/cases`,
     upload: `${API_BASE_URL}/evaluation-sets/upload`,
     template: `${API_BASE_URL}/evaluation-sets/template`,
+    export: (id: number) => `${API_BASE_URL}/evaluation-sets/${id}/export`,
     delete: (id: number) => `${API_BASE_URL}/evaluation-sets/${id}`,
+  },
+  evaluators: {
+    list: `${API_BASE_URL}/evaluators`,
+    create: `${API_BASE_URL}/evaluators`,
+    detail: (id: number) => `${API_BASE_URL}/evaluators/${id}`,
+    delete: (id: number) => `${API_BASE_URL}/evaluators/${id}`,
+    publish: (id: number) => `${API_BASE_URL}/evaluators/${id}/publish`,
+    export: `${API_BASE_URL}/evaluators/export`,
+    import: `${API_BASE_URL}/evaluators/import`,
+    generate: `${API_BASE_URL}/evaluators/generate`,
   },
   agentEvaluations: {
     create: `${API_BASE_URL}/agent-evaluations`,
@@ -340,6 +354,9 @@ export const API_ENDPOINTS = {
     knowledgeBases: `${API_BASE_URL}/aidp/knowledge-bases`,
     knowledgeBasesAll: `${API_BASE_URL}/aidp/knowledge-bases-all`,
   },
+  independentAidp: {
+    knowledgeBases: `${API_BASE_URL}/ind-aidp/knowledge-bases/list`,
+  },
   aidpMgmt: {
     knowledgeBases: `${API_BASE_URL}/aidp-mgmt/knowledge-bases`,
     kbCount: `${API_BASE_URL}/aidp-mgmt/knowledge-bases/count`,
@@ -445,8 +462,7 @@ export const API_ENDPOINTS = {
     instanceUpdate: `${API_BASE_URL}/skills/instance/update`,
     scan: `${API_BASE_URL}/skills/scan_skill`,
     create: `${API_BASE_URL}/skills`,
-    createStream: `${API_BASE_URL}/skills/create`,
-    stopCreate: (taskId: string) => `${API_BASE_URL}/skills/stop/${taskId}`,
+    nl2skillRun: `${API_BASE_URL}/skills/nl2skill/run`,
     install: `${API_BASE_URL}/skills/install`,
   },
   mcpTools: {
@@ -487,6 +503,16 @@ export const API_ENDPOINTS = {
       delete: (memoryId: string | number) =>
         `${API_BASE_URL}/memory/records/${memoryId}`,
     },
+    longTerm: {
+      active: (scope: "tenant" | "user") =>
+        `${API_BASE_URL}/memory/long-term/${scope}`,
+      versions: (scope: "tenant" | "user") =>
+        `${API_BASE_URL}/memory/long-term/${scope}/versions`,
+      detail: (scope: "tenant" | "user", versionId: number) =>
+        `${API_BASE_URL}/memory/long-term/${scope}/versions/${versionId}`,
+      activate: (scope: "tenant" | "user", versionId: number) =>
+        `${API_BASE_URL}/memory/long-term/${scope}/versions/${versionId}/activate`,
+    },
 
     // ---------------- Memory CRUD ----------------
     entry: {
@@ -496,6 +522,12 @@ export const API_ENDPOINTS = {
       delete: (memoryId: string | number) =>
         `${API_BASE_URL}/memory/delete/${memoryId}`,
       clear: `${API_BASE_URL}/memory/clear`,
+    },
+    dreaming: {
+      parameters: `${API_BASE_URL}/memory/dreaming/parameters`,
+      schedule: `${API_BASE_URL}/memory/dreaming/schedule`,
+      run: `${API_BASE_URL}/memory/dreaming/run`,
+      audits: `${API_BASE_URL}/memory/dreaming/audit`,
     },
   },
   agentRepository: {
@@ -642,11 +674,13 @@ export const API_ENDPOINTS = {
   quota: {
     // Tenant-level quota
     config: (tenantId: string) => `${API_BASE_URL}/tenants/${tenantId}/quota`,
-    usage: (tenantId: string) => `${API_BASE_URL}/tenants/${tenantId}/quota/usage`,
+    usage: (tenantId: string) =>
+      `${API_BASE_URL}/tenants/${tenantId}/quota/usage`,
     // Platform-level quota (SU/ASSET_OWNER/SPEED only)
     platformOverview: `${API_BASE_URL}/platform/quota/overview`,
     platformCapacity: `${API_BASE_URL}/platform/quota/capacity`,
-    platformTenantQuota: (tenantId: string) => `${API_BASE_URL}/platform/quota/tenants/${tenantId}`,
+    platformTenantQuota: (tenantId: string) =>
+      `${API_BASE_URL}/platform/quota/tenants/${tenantId}`,
   },
   users: {
     list: `${API_BASE_URL}/users/list`,
@@ -738,6 +772,10 @@ export const fetchWithErrorHandling = async (
         if (errorDetail?.code) {
           errorCode = errorDetail.code;
           errorMessage = errorDetail.message || errorMessage;
+        } else if (typeof errorData?.detail === "string") {
+          errorMessage = errorData.detail;
+        } else if (typeof errorData?.message === "string") {
+          errorMessage = errorData.message;
         } else {
           errorMessage = errorText || errorMessage;
         }
@@ -778,7 +816,10 @@ export const fetchWithErrorHandling = async (
         try {
           const errorData = JSON.parse(errorText);
           if (errorData?.error === "TenantStorageFull") {
-            throw new ApiError(413, errorData.message || "Tenant storage limit reached");
+            throw new ApiError(
+              413,
+              errorData.message || "Tenant storage limit reached"
+            );
           }
         } catch (error) {
           if (error instanceof ApiError) {

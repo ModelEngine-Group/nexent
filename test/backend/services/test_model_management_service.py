@@ -2144,3 +2144,187 @@ def test_record_capacity_suggestion_accept_labels_counter():
     counter.add.assert_called_once_with(
         1, {"match_kind": "catalog_fuzzy", "provider": "dashscope"}
     )
+
+
+# ---------------------------------------------------------------------------
+# Tests for create_model_for_tenant embedding URL fallback logic (NEW)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_cmt_embedding_original_url_succeeds_no_fallback():
+    """create_model_for_tenant: embedding original URL succeeds -> stored with original URL."""
+    svc = import_svc()
+
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=[]), \
+            mock.patch.object(svc, "embedding_dimension_check", new=mock.AsyncMock(return_value=768)) as mock_dim, \
+            mock.patch.object(svc, "create_model_record") as mock_create, \
+            mock.patch.object(svc, "split_repo_name", return_value=("", "test-emb")), \
+            mock.patch.object(svc, "_infer_model_factory", return_value=None):
+
+        # Use non-localhost URL to avoid automatic replacement
+        model_data = {
+            "model_name": "test-emb",
+            "display_name": "Test Emb",
+            "base_url": "http://proxy.local:8794/embed",
+            "model_type": "embedding",
+            "api_key": "k",
+        }
+
+        await svc.create_model_for_tenant("u1", "t1", model_data)
+
+        # embedding_dimension_check called only once (original URL succeeded)
+        assert mock_dim.call_count == 1
+        # Model stored with original URL
+        created = mock_create.call_args[0][0]
+        assert created["base_url"] == "http://proxy.local:8794/embed"
+        assert created["max_tokens"] == 768
+
+
+@pytest.mark.asyncio
+async def test_cmt_embedding_fallback_to_embeddings_url():
+    """create_model_for_tenant: original URL fails, /embeddings appended succeeds."""
+    svc = import_svc()
+
+    # First call returns None (fail), second call returns dimension
+    mock_dim = mock.AsyncMock(side_effect=[None, 1024])
+
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=[]), \
+            mock.patch.object(svc, "embedding_dimension_check", new=mock_dim), \
+            mock.patch.object(svc, "create_model_record") as mock_create, \
+            mock.patch.object(svc, "split_repo_name", return_value=("", "test-emb")), \
+            mock.patch.object(svc, "_infer_model_factory", return_value=None):
+
+        model_data = {
+            "model_name": "test-emb",
+            "display_name": "Test Emb",
+            "base_url": "https://api.openai.com/v1",
+            "model_type": "embedding",
+            "api_key": "k",
+        }
+
+        await svc.create_model_for_tenant("u1", "t1", model_data)
+
+        # embedding_dimension_check called twice
+        assert mock_dim.call_count == 2
+        # Model stored with /embeddings appended URL
+        created = mock_create.call_args[0][0]
+        assert created["base_url"] == "https://api.openai.com/v1/embeddings"
+        assert created["max_tokens"] == 1024
+
+
+@pytest.mark.asyncio
+async def test_cmt_embedding_url_already_has_embeddings_no_fallback():
+    """create_model_for_tenant: URL already has /embeddings -> no fallback attempted."""
+    svc = import_svc()
+
+    mock_dim = mock.AsyncMock(return_value=512)
+
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=[]), \
+            mock.patch.object(svc, "embedding_dimension_check", new=mock_dim), \
+            mock.patch.object(svc, "create_model_record") as mock_create, \
+            mock.patch.object(svc, "split_repo_name", return_value=("", "test-emb")), \
+            mock.patch.object(svc, "_infer_model_factory", return_value=None):
+
+        model_data = {
+            "model_name": "test-emb",
+            "display_name": "Test Emb",
+            "base_url": "https://api.openai.com/v1/embeddings",
+            "model_type": "embedding",
+            "api_key": "k",
+        }
+
+        await svc.create_model_for_tenant("u1", "t1", model_data)
+
+        # Only one call since URL already has /embeddings
+        assert mock_dim.call_count == 1
+        created = mock_create.call_args[0][0]
+        assert created["base_url"] == "https://api.openai.com/v1/embeddings"
+
+
+@pytest.mark.asyncio
+async def test_cmt_embedding_both_urls_fail_raises():
+    """create_model_for_tenant: both URLs fail -> raises Exception."""
+    svc = import_svc()
+
+    mock_dim = mock.AsyncMock(return_value=None)
+
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=[]), \
+            mock.patch.object(svc, "embedding_dimension_check", new=mock_dim), \
+            mock.patch.object(svc, "split_repo_name", return_value=("", "test-emb")), \
+            mock.patch.object(svc, "_infer_model_factory", return_value=None):
+
+        model_data = {
+            "model_name": "test-emb",
+            "display_name": "Test Emb",
+            "base_url": "https://api.openai.com/v1",
+            "model_type": "embedding",
+            "api_key": "k",
+        }
+
+        with pytest.raises(Exception) as exc:
+            await svc.create_model_for_tenant("u1", "t1", model_data)
+        assert "Failed to get embedding dimension" in str(exc.value)
+        # Called twice: original + fallback
+        assert mock_dim.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_cmt_multi_embedding_fallback_to_embeddings_url():
+    """create_model_for_tenant: multi_embedding fallback to /embeddings works."""
+    svc = import_svc()
+
+    mock_dim = mock.AsyncMock(side_effect=[None, 2048])
+
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=[]), \
+            mock.patch.object(svc, "embedding_dimension_check", new=mock_dim), \
+            mock.patch.object(svc, "create_model_record") as mock_create, \
+            mock.patch.object(svc, "split_repo_name", return_value=("", "clip-emb")), \
+            mock.patch.object(svc, "_infer_model_factory", return_value=None):
+
+        model_data = {
+            "model_name": "clip-emb",
+            "display_name": "Clip Emb",
+            "base_url": "https://api.siliconflow.cn/v1",
+            "model_type": "multi_embedding",
+            "api_key": "k",
+        }
+
+        await svc.create_model_for_tenant("u1", "t1", model_data)
+
+        assert mock_dim.call_count == 2
+        # multi_embedding creates two records
+        assert mock_create.call_count == 2
+        created = mock_create.call_args_list[0][0][0]
+        assert created["base_url"] == "https://api.siliconflow.cn/v1/embeddings"
+        assert created["max_tokens"] == 2048
+
+
+@pytest.mark.asyncio
+async def test_cmt_embedding_fallback_reinfers_model_factory():
+    """create_model_for_tenant: model_factory is re-inferred after URL fallback."""
+    svc = import_svc()
+
+    mock_dim = mock.AsyncMock(side_effect=[None, 1536])
+
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=[]), \
+            mock.patch.object(svc, "embedding_dimension_check", new=mock_dim), \
+            mock.patch.object(svc, "create_model_record"), \
+            mock.patch.object(svc, "split_repo_name", return_value=("", "test-emb")), \
+            mock.patch.object(svc, "_infer_model_factory", side_effect=[None, "dashscope"]) as mock_infer:
+
+        model_data = {
+            "model_name": "test-emb",
+            "display_name": "Test Emb",
+            "base_url": "https://dashscope.aliyuncs.com/v1",
+            "model_type": "embedding",
+            "api_key": "k",
+        }
+
+        await svc.create_model_for_tenant("u1", "t1", model_data)
+
+        # _infer_model_factory called twice: once for original URL, once for fallback URL
+        assert mock_infer.call_count == 2
+        # Second call with fallback URL
+        second_call_url = mock_infer.call_args_list[1][0][1]
+        assert second_call_url == "https://dashscope.aliyuncs.com/v1/embeddings"
+

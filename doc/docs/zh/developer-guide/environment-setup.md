@@ -21,7 +21,7 @@ title: 环境准备
 先启动数据库、缓存、向量库、存储等核心服务。
 
 ```bash
-# 在项目根目录的 docker 目录执行
+# 部署指令在项目根目录执行
 bash deploy.sh docker --components infrastructure --port-policy development
 ```
 

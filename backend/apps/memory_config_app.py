@@ -17,6 +17,7 @@ Routes retained:
 - DELETE `/memory/config/disable_useragent/{agent_id}`: Remove a disabled user-agent id.
 """
 import logging
+from datetime import datetime
 from typing import Any, Optional
 
 from http import HTTPStatus
@@ -26,6 +27,7 @@ from fastapi.responses import JSONResponse
 from consts.const import (
     MEMORY_AGENT_SHARE_KEY,
     MEMORY_SWITCH_KEY,
+    DREAMING_SWITCH_KEY,
     BOOLEAN_TRUE_VALUES,
 )
 from consts.model import MemoryAgentShareMode
@@ -38,7 +40,9 @@ from services.memory_config_service import (
     remove_disabled_useragent_id,
     set_agent_share,
     set_memory_switch,
+    set_dreaming_switch,
 )
+from database import memory_dreaming_db
 from services.memory_record_service import (
     get_tenant_memory_index_name,
     is_tenant_embedding_configured,
@@ -112,6 +116,9 @@ def set_single_config(
             raise HTTPException(status_code=HTTPStatus.NOT_ACCEPTABLE,
                                 detail="Invalid value for MEMORY_AGENT_SHARE (expected always/ask/never)")
         ok = set_agent_share(user_id, mode)
+    elif key == DREAMING_SWITCH_KEY:
+        enabled = bool(value) if isinstance(value, bool) else str(value).lower() in BOOLEAN_TRUE_VALUES
+        ok = set_dreaming_switch(user_id, enabled)
     else:
         raise HTTPException(status_code=HTTPStatus.NOT_ACCEPTABLE,
                             detail="Unsupported configuration key")
@@ -120,6 +127,31 @@ def set_single_config(
         return JSONResponse(status_code=HTTPStatus.OK, content={"success": True})
     raise HTTPException(status_code=HTTPStatus.BAD_REQUEST,
                         detail="Failed to update configuration")
+
+
+@router.post("/config/dreaming")
+def set_dreaming_config(
+    enabled: bool = Body(...),
+    delete_history: bool = Body(False),
+    authorization: Optional[str] = Header(None),
+):
+    user_id, tenant_id = get_current_user_id(authorization)
+    if not set_dreaming_switch(user_id, enabled):
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Failed to update Dreaming")
+    if not enabled:
+        schedule = memory_dreaming_db.get_schedule(tenant_id, user_id, "__user__")
+        if schedule:
+            memory_dreaming_db.upsert_schedule(
+                tenant_id, user_id, "__user__", enabled=False,
+                rule_type=schedule["rule_type"], timezone_name=schedule["timezone"],
+                start_at=datetime.fromisoformat(schedule["start_at"]),
+                cron_expr=schedule["cron_expr"],
+                interval_seconds=schedule["interval_seconds"],
+                next_fire_at=None, actor_user_id=user_id,
+            )
+        if delete_history:
+            memory_dreaming_db.delete_user_dreaming_history(tenant_id, user_id)
+    return {"success": True}
 
 
 @router.post("/config/disable_agent")

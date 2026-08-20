@@ -37,7 +37,25 @@ SAFE_PYTHON_INTERPRETER_IMPORTS = [
     "uuid", "pprint", "operator", "typing",
 ]
 
+
+def get_local_python_authorized_imports() -> List[str]:
+    """Return the imports permitted by Nexent's default local code executor."""
+    from smolagents.local_python_executor import BASE_BUILTIN_MODULES
+
+    return sorted(set(BASE_BUILTIN_MODULES) | set(SAFE_PYTHON_INTERPRETER_IMPORTS))
+
+
 logger = logging.getLogger(__name__)
+
+
+def _ensure_non_empty_final_answer(answer: str, lang: str) -> str:
+    """Return a user-visible fallback when final-answer cleanup removes all content."""
+    if answer.strip():
+        return answer
+    logger.warning("Final answer was empty after removing reasoning content")
+    if lang == "zh":
+        return "智能体未能生成有效的最终回复，请重试或换一种方式描述需求。"
+    return "The agent could not generate a valid final response. Please try again or rephrase your request."
 
 
 def _tool_name(tool_obj: Any) -> str:
@@ -255,6 +273,10 @@ class NexentAgent:
                     tool_config.metadata.get(
                         "document_paths") if tool_config.metadata else None
                 )
+                tools_obj.set_allowed_index_names(
+                    tool_config.metadata.get("allowed_index_names")
+                    if tool_config.metadata else None
+                )
             elif class_name in ["DifySearchTool", "DataMateSearchTool"]:
                 # These parameters have exclude=True and cannot be passed to __init__
                 filtered_params = {k: v for k, v in params.items()
@@ -361,12 +383,24 @@ class NexentAgent:
                     except Exception as exc:
                         logger.warning(
                             "Failed to install Aidp whitelist from metadata: %s; "
-                            "falling back to no-op filtering", exc,
+                            "falling back to an empty whitelist", exc,
                         )
-                        tools_obj.set_allowed_kds(None)
+                        tools_obj.set_allowed_kds([])
                 else:
                     # Whitelist not set by backend → treat as uninstalled.
                     tools_obj.set_allowed_kds(None)
+            elif class_name == "IndependentAidpSearchTool":
+                filtered_params = {
+                    key: value
+                    for key, value in params.items()
+                    if key not in ["observer", "image_url_builder", "rerank_model", "rerank"]
+                }
+                tools_obj = tool_class(**filtered_params)
+                tools_obj.observer = self.observer
+                tools_obj.image_url_builder = (
+                    tool_config.metadata.get("image_url_builder")
+                    if tool_config.metadata else None
+                )
             else:
                 tools_obj = tool_class(**params)
                 if hasattr(tools_obj, 'observer'):
@@ -885,6 +919,10 @@ class NexentAgent:
                     # Remove thinking prefix content (until two newlines)
                     final_answer_str = re.sub(
                         THINK_PREFIX_PATTERN, "", final_answer_str, flags=re.DOTALL)
+                    final_answer_str = _ensure_non_empty_final_answer(
+                        final_answer_str,
+                        getattr(observer, "lang", "en"),
+                    )
                     final_answer_for_trace = final_answer_str
                     monitoring_manager.set_openinference_output(final_answer_str)
                     observer.add_message(self.agent.agent_name,

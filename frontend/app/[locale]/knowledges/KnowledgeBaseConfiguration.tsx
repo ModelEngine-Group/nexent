@@ -876,7 +876,7 @@ function DataConfig({ isActive }: DataConfigProps) {
         setHasClickedUpload(false);
         setNewlyCreatedKbId(newKB.id); // Mark this KB as newly created
 
-        await uploadDocuments(newKB.id, filesToUpload, selectedModelId);
+        await uploadDocuments(newKB.id, filesToUpload);
         setUploadFiles([]);
 
         knowledgeBasePollingService
@@ -924,7 +924,7 @@ function DataConfig({ isActive }: DataConfigProps) {
           : "embedding",
       });
 
-      await uploadDocuments(kbId, filesToUpload, activeKbModelId);
+      await uploadDocuments(kbId, filesToUpload);
       setUploadFiles([]);
 
       knowledgeBasePollingService.triggerKnowledgeBaseListUpdate(true);

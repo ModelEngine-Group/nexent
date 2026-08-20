@@ -69,6 +69,9 @@ export interface ApiConversationDetail {
   conversation_id: number | string;
   agent_id?: number | null;
   chat_mode?: "planning" | "execution";
+  knowledge_scope?:
+    | import("./knowledgeScope").ConversationKnowledgeScope
+    | null;
   message: ApiMessage[];
   streaming_message?: StreamingMessage;
 }

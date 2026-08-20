@@ -362,7 +362,8 @@ with patch.dict("sys.modules", module_mocks):
     from sdk.nexent.core.agents import nexent_agent
     from sdk.nexent.core.agents.nexent_agent import (
         NexentAgent, ActionStep, TaskStep, _has_host_tools, _is_retriever_tool,
-        _build_tool_input, _wrap_tool_with_monitoring, _tool_name
+        _build_tool_input, _wrap_tool_with_monitoring, _tool_name,
+        SAFE_PYTHON_INTERPRETER_IMPORTS, get_local_python_authorized_imports,
     )
     from sdk.nexent.core.agents.agent_model import ToolConfig, ModelConfig, AgentConfig, AgentHistory, ExternalA2AAgentConfig
 
@@ -506,6 +507,17 @@ def mock_core_agent():
 # ----------------------------------------------------------------------------
 # Tests for type-only imports and helper functions
 # ----------------------------------------------------------------------------
+
+
+def test_get_local_python_authorized_imports_matches_executor_defaults(monkeypatch):
+    """The prompt allowlist must mirror the local executor's imports."""
+    executor_module = types.ModuleType("smolagents.local_python_executor")
+    executor_module.BASE_BUILTIN_MODULES = ["json", "queue", "stat"]
+    monkeypatch.setitem(sys.modules, "smolagents.local_python_executor", executor_module)
+
+    assert get_local_python_authorized_imports() == sorted(
+        set(SAFE_PYTHON_INTERPRETER_IMPORTS) | {"json", "queue", "stat"}
+    )
 
 
 def test_type_checking_imports_resolve_context_and_subagent_types(monkeypatch):
@@ -1603,7 +1615,7 @@ def test_agent_run_with_observer_success_with_agent_text(nexent_agent_instance, 
     mock_core_agent.observer.add_message.assert_any_call(
         "", ProcessType.TOKEN_COUNT, ANY)
     mock_core_agent.observer.add_message.assert_any_call(
-        "test_agent", ProcessType.FINAL_ANSWER, " content")
+        "test_agent", ProcessType.FINAL_ANSWER, "Final answer with  content")
 
 
 def test_agent_run_with_observer_emits_model_context_window(nexent_agent_instance, mock_core_agent):
@@ -1762,7 +1774,44 @@ def test_agent_run_with_observer_success_with_string_final_answer(nexent_agent_i
     mock_core_agent.observer.add_message.assert_any_call(
         "", ProcessType.TOKEN_COUNT, ANY)
     mock_core_agent.observer.add_message.assert_any_call(
-        "test_agent", ProcessType.FINAL_ANSWER, "")
+        "test_agent", ProcessType.FINAL_ANSWER, "String final answer with ")
+
+
+@pytest.mark.parametrize(
+    ("raw_final_answer", "lang", "expected"),
+    [
+        (
+            "<think>internal reasoning only</think>",
+            "en",
+            "The agent could not generate a valid final response. Please try again or rephrase your request.",
+        ),
+        (
+            "思考：内部推理内容。\n\n",
+            "zh",
+            "智能体未能生成有效的最终回复，请重试或换一种方式描述需求。",
+        ),
+    ],
+)
+def test_agent_run_with_observer_never_emits_empty_final_answer(
+    nexent_agent_instance, mock_core_agent, raw_final_answer, lang, expected
+):
+    """Reasoning cleanup must not terminate a conversation with an empty final answer."""
+    nexent_agent_instance.agent = mock_core_agent
+    mock_core_agent.observer.lang = lang
+    mock_core_agent.stop_event.is_set.return_value = False
+
+    mock_action_step = MagicMock(spec=ActionStep)
+    mock_action_step.timing = MagicMock(duration=1.0)
+    mock_action_step.step_number = 1
+    mock_action_step.error = None
+    mock_action_step.output = raw_final_answer
+    mock_core_agent.run.return_value = [mock_action_step]
+
+    nexent_agent_instance.agent_run_with_observer("test query")
+
+    mock_core_agent.observer.add_message.assert_any_call(
+        "test_agent", ProcessType.FINAL_ANSWER, expected
+    )
 
 
 def test_agent_run_with_observer_with_error_in_step(nexent_agent_instance, mock_core_agent):
@@ -5148,7 +5197,7 @@ class TestCreateLocalToolAidpSearchTool:
         mock_tool_instance.set_allowed_kds.assert_called_once_with(None)
 
     def test_aidp_search_tool_set_allowed_kds_raises_exception(self, nexent_agent_instance):
-        """When set_allowed_kds raises, falls back to set_allowed_kds(None)."""
+        """When whitelist installation raises, fall back to a deny-all whitelist."""
         mock_tool_class = MagicMock()
         mock_tool_instance = MagicMock()
         mock_tool_instance.set_allowed_kds.side_effect = [RuntimeError("boom"), None]
@@ -5176,10 +5225,10 @@ class TestCreateLocalToolAidpSearchTool:
                 del nexent_agent.__dict__["AidpSearchTool"]
 
         assert result is mock_tool_instance
-        # First call with ["kb1"] raises, fallback call with None
+        # First call with ["kb1"] raises, fallback call installs an empty whitelist.
         assert mock_tool_instance.set_allowed_kds.call_count == 2
         mock_tool_instance.set_allowed_kds.assert_any_call(["kb1"])
-        mock_tool_instance.set_allowed_kds.assert_any_call(None)
+        mock_tool_instance.set_allowed_kds.assert_any_call([])
 
 
 # ----------------------------------------------------------------------------
@@ -5717,3 +5766,88 @@ class TestCreateSingleAgentSandboxAndPlanning:
         assert mock_update_step._on_step_updated is mock_core_agent._on_step_updated
         assert mock_update_step._get_conversation_id is mock_core_agent._get_conversation_id
         assert mock_update_step._get_user_id is mock_core_agent._get_user_id
+
+
+def test_create_local_tool_independent_aidp_search(nexent_agent_instance):
+    """IndependentAidpSearchTool keeps credentials, strips runtime-only params,
+    and receives the image_url_builder from metadata."""
+    mock_tool_class = MagicMock()
+    mock_tool_instance = MagicMock()
+    mock_tool_class.return_value = mock_tool_instance
+
+    builder = lambda _url: "/api/ind-aidp/images/ref"
+    tool_config = ToolConfig(
+        class_name="IndependentAidpSearchTool",
+        name="ind_aidp_search",
+        description="desc",
+        inputs="{}",
+        output_type="string",
+        params={
+            "server_url": "https://independent-aidp.example",
+            "api_key": "instance-secret",
+            "observer": "should-be-replaced",
+            "image_url_builder": "should-be-replaced",
+            "rerank_model": "should-drop",
+            "rerank": "should-drop",
+        },
+        source="local",
+        metadata={"image_url_builder": builder},
+    )
+
+    original_value = nexent_agent.__dict__.get("IndependentAidpSearchTool")
+    nexent_agent.__dict__["IndependentAidpSearchTool"] = mock_tool_class
+    try:
+        result = nexent_agent_instance.create_local_tool(tool_config)
+    finally:
+        if original_value is not None:
+            nexent_agent.__dict__["IndependentAidpSearchTool"] = original_value
+        elif "IndependentAidpSearchTool" in nexent_agent.__dict__:
+            del nexent_agent.__dict__["IndependentAidpSearchTool"]
+
+    mock_tool_class.assert_called_once_with(
+        server_url="https://independent-aidp.example",
+        api_key="instance-secret",
+    )
+    assert result is mock_tool_instance
+    assert result.observer == nexent_agent_instance.observer
+    assert result.image_url_builder is builder
+
+
+def test_create_local_tool_independent_aidp_search_without_metadata(nexent_agent_instance):
+    """IndependentAidpSearchTool with no metadata leaves image_url_builder as None."""
+    mock_tool_class = MagicMock()
+    mock_tool_instance = MagicMock()
+    mock_tool_class.return_value = mock_tool_instance
+    tool_config = ToolConfig(
+        class_name="IndependentAidpSearchTool",
+        name="ind_aidp_search",
+        description="desc",
+        inputs="{}",
+        output_type="string",
+        params={
+            "server_url": "https://independent-aidp.example",
+            "api_key": "instance-secret",
+            "tenant_id": "aidp",
+            "kds_list": ["kb-1"],  # not in the filter list -> other branch of the loop
+        },
+        source="local",
+        metadata={},
+    )
+
+    original_value = nexent_agent.__dict__.get("IndependentAidpSearchTool")
+    nexent_agent.__dict__["IndependentAidpSearchTool"] = mock_tool_class
+    try:
+        result = nexent_agent_instance.create_local_tool(tool_config)
+    finally:
+        if original_value is not None:
+            nexent_agent.__dict__["IndependentAidpSearchTool"] = original_value
+        elif "IndependentAidpSearchTool" in nexent_agent.__dict__:
+            del nexent_agent.__dict__["IndependentAidpSearchTool"]
+
+    mock_tool_class.assert_called_once_with(
+        server_url="https://independent-aidp.example",
+        api_key="instance-secret",
+        tenant_id="aidp",
+        kds_list=["kb-1"],
+    )
+    assert result.image_url_builder is None
