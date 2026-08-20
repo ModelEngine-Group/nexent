@@ -507,7 +507,13 @@ async def test_install_from_gitcode_forwards_skill_and_kb_renames(tmp_path):
     with patch.object(
         official_agent_service, "_resolve_repo_source", return_value=("url", "o", "r", "main")
     ), patch.object(
-        official_agent_service, "_ensure_repo_snapshot", return_value=(str(tmp_path), "abc123")
+        official_agent_service,
+        "_gitcode_file_paths",
+        return_value=["research/agent.json"],
+    ), patch.object(
+        official_agent_service,
+        "_download_gitcode_bundle",
+        return_value=str(tmp_path),
     ), patch.object(
         official_agent_service, "_load_bundle", return_value=bundle
     ), patch.object(
