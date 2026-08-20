@@ -340,7 +340,7 @@ def _normalize_model_type(raw_model_type: Optional[str]) -> Optional[str]:
     return None
 
 def _build_model_config(model: dict) -> dict:
-    return {
+    config = {
         "model_repo": model.get("model_repo", ""),
         "model_name": model["model_name"],
         "api_key": model.get("api_key", ""),
@@ -349,6 +349,11 @@ def _build_model_config(model: dict) -> dict:
         "max_tokens": model.get("max_tokens", 1024),
         "ssl_verify": model.get("ssl_verify", True),
     }
+    # Carry the vendor through so multi_embedding/embedding adapters dispatch
+    # to the right provider instead of silently falling back to the default.
+    if model.get("model_factory"):
+        config["model_factory"] = model["model_factory"]
+    return config
 
 def _create_embedding_model(model: dict) -> Any:
     model_config = _build_model_config(model)

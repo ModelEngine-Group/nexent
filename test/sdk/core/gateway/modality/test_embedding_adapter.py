@@ -1,6 +1,6 @@
 """Unit tests for the embedding modality adapters (base + OpenAI/DashScope/Jina/SiliconFlow)."""
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import requests
@@ -143,6 +143,66 @@ def test_retry_raises_after_all_attempts():
 
     with pytest.raises(requests.exceptions.Timeout):
         adapter._retry(2, 1.0, 1.0, boom, "X")
+
+
+def _http_error(status_code):
+    """Build an HTTPError carrying a response with the given status code."""
+    response = MagicMock()
+    response.status_code = status_code
+    return requests.exceptions.HTTPError("upstream error", response=response)
+
+
+def test_retry_retries_transient_http_error_then_succeeds():
+    """A retryable HTTP error (400) should be retried with a short backoff."""
+    adapter = OpenAICompatibleEmbeddingAdapter(_ctx())
+    attempts = {"n": 0}
+
+    def flaky(timeout):
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            raise _http_error(400)
+        return "ok"
+
+    with patch(
+        "nexent.core.gateway.modality.embedding.embedding_adapter.time.sleep"
+    ) as mock_sleep:
+        out = adapter._retry(3, 1.0, 1.0, flaky, "X")
+
+    assert out == "ok"
+    assert attempts["n"] == 2
+    mock_sleep.assert_called_once_with(1.0)
+
+
+def test_retry_raises_non_retryable_http_error_immediately():
+    """A non-retryable HTTP error should propagate without retrying."""
+    adapter = OpenAICompatibleEmbeddingAdapter(_ctx())
+
+    def boom(timeout):
+        raise _http_error(422)
+
+    with patch(
+        "nexent.core.gateway.modality.embedding.embedding_adapter.time.sleep"
+    ) as mock_sleep:
+        with pytest.raises(requests.exceptions.HTTPError):
+            adapter._retry(3, 1.0, 1.0, boom, "X")
+
+    mock_sleep.assert_not_called()
+
+
+def test_retry_raises_after_retryable_http_errors_exhausted():
+    """A retryable HTTP error still failing after all attempts should raise."""
+    adapter = OpenAICompatibleEmbeddingAdapter(_ctx())
+
+    def boom(timeout):
+        raise _http_error(503)
+
+    with patch(
+        "nexent.core.gateway.modality.embedding.embedding_adapter.time.sleep"
+    ) as mock_sleep:
+        with pytest.raises(requests.exceptions.HTTPError):
+            adapter._retry(2, 1.0, 1.0, boom, "X")
+
+    assert mock_sleep.call_count == 1
 
 
 @pytest.mark.asyncio
@@ -455,3 +515,27 @@ def test_siliconflow_prepare_multimodal_input_passthrough_image_url():
         [{"text": "hi"}, {"image": "https://example.com/a.png"}]
     )
     assert out["input"][1] == {"image": "https://example.com/a.png"}
+
+
+
+# ---- legacy attribute parity (old BaseEmbedding API) ----
+
+
+def test_openai_legacy_attributes():
+    adapter = OpenAICompatibleEmbeddingAdapter(
+        _ctx(embedding_dim=768, model_type="embedding")
+    )
+    assert adapter.embedding_dim == 768
+    assert adapter.model == "embed-model"
+    assert adapter.embedding_model_name == "embed-model"
+    assert adapter.model_type == "embedding"
+
+
+def test_multimodal_legacy_attributes():
+    adapter = JinaEmbeddingAdapter(
+        _mctx(embedding_dim=1024, model_type="multi_embedding")
+    )
+    assert adapter.embedding_dim == 1024
+    assert adapter.model == "mm-model"
+    assert adapter.embedding_model_name == "mm-model"
+    assert adapter.model_type == "multimodal"

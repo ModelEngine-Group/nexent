@@ -1,3 +1,4 @@
+import asyncio
 import json
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -191,6 +192,67 @@ async def test_llm_analyzer_force_mode_checks_trusted_user_message_without_rule_
 
     assert strategy.calls == 1
     assert result["analysis_source"] == "llm"
+
+
+def test_llm_analyzer_generate_sync_invokes_model_as_callable(monkeypatch):
+    """The real _generate_sync must invoke the LLM adapter as a callable (llm([...]))."""
+    from types import SimpleNamespace
+
+    from services.agent_automation.intent_analyzer import (
+        LLMAutomationIntentStrategy,
+        RuleBasedAutomationIntentStrategy,
+    )
+
+    fake_payload = json.dumps({
+        "is_automation_intent": True,
+        "confidence": 0.98,
+        "title": "定时查询",
+        "instruction": "每天早上八点查询状态",
+        "schedule": {
+            "rule_type": "CRON",
+            "timezone": "Asia/Shanghai",
+            "cron_expr": "0 8 * * *",
+            "interval_seconds": None,
+            "start_at": None,
+            "end_at": None,
+            "max_fire_count": None,
+        },
+        "schedule_error": None,
+    }, ensure_ascii=False)
+
+    class FakeModel:
+        def __init__(self):
+            self.calls = None
+
+        def __call__(self, messages):
+            self.calls = messages
+            return SimpleNamespace(content=fake_payload)
+
+    fake_model = FakeModel()
+    monkeypatch.setattr("nexent.core.models.OpenAIModel", lambda **kwargs: fake_model)
+    monkeypatch.setattr(
+        "services.agent_automation.intent_analyzer.get_prompt_template",
+        lambda *a, **k: {
+            "INTENT_ANALYSIS_SYSTEM_PROMPT": "sys",
+            "INTENT_ANALYSIS_USER_PROMPT": "msg: {{message}}",
+        },
+    )
+
+    strategy = LLMAutomationIntentStrategy(MODEL_CONFIG, RuleBasedAutomationIntentStrategy())
+    context = AutomationIntentContext(
+        tenant_id="tenant",
+        message="每天早上八点查询状态",
+        timezone="Asia/Shanghai",
+        reference_time=REFERENCE_TIME,
+        force_llm=True,
+    )
+    result = asyncio.run(strategy.analyze(context))
+
+    assert result["analysis_source"] == "llm"
+    assert result["is_automation_intent"] is True
+    assert result["schedule_trigger"].cron_expr == "0 8 * * *"
+    assert fake_model.calls[0] == {"role": "system", "content": "sys"}
+    assert fake_model.calls[1]["content"].startswith("msg: ")
 
 
 def test_strategy_factory_prefers_selected_llm_model(monkeypatch):

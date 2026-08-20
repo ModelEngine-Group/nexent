@@ -279,6 +279,10 @@ class OpenAIModel(OpenAIServerModel):
         dispatch_kwargs = apply_cache_directives(
             completion_kwargs, cache_advice
         )
+        # The __call__ boundary owns streaming: dispatch below always streams
+        # and assembles the result. Drop a stale construction-time ``stream``
+        # so it cannot collide with the explicit ``stream=True`` at dispatch.
+        dispatch_kwargs.pop("stream", None)
         self._monitoring.set_span_attributes(
             **{
                 "llm.prompt_cache.mode": cache_advice.mode,

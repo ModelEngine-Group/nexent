@@ -82,6 +82,9 @@ def call_llm_for_system_prompt(
         display_name=display_name or None,
         timeout_seconds=timeout_seconds,
     )
+    # The gateway adapter lazily wraps the legacy OpenAIModel; the streaming
+    # completion below reaches the wrapped model's client, so build it first.
+    llm._build_model()
     messages = [
         {"role": MESSAGE_ROLE["SYSTEM"], "content": system_prompt},
         {"role": MESSAGE_ROLE["USER"], "content": user_prompt},

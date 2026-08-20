@@ -268,6 +268,48 @@ def test_long_context_get_model_info():
     assert info.capabilities["text"] is True
     assert info.capabilities["tool_calling"] is True
 
+
+def test_long_context_analyze_long_text_reuses_built_model(monkeypatch):
+    adapter = OpenAILongContextLLMAdapter(_lctx())
+    prebuilt = MagicMock()
+    prebuilt.analyze_long_text.return_value = ("R2", "0%")
+    adapter._model = prebuilt
+    monkeypatch.setattr(
+        "nexent.core.gateway.modality.llm.openai.OpenAILongContextModel", MagicMock()
+    )
+    result, pct = adapter.analyze_long_text(
+        text_content="t",
+        system_prompt="s",
+        user_prompt="u",
+    )
+    assert adapter._model is prebuilt
+    prebuilt.analyze_long_text.assert_called_once_with(
+        text_content="t", system_prompt="s", user_prompt="u"
+    )
+    assert result == "R2"
+    assert pct == "0%"
+
+
+def test_long_context_analyze_long_text_builds_and_delegates(monkeypatch):
+    adapter = OpenAILongContextLLMAdapter(_lctx())
+    fake_model = MagicMock()
+    fake_model.analyze_long_text.return_value = ("RESULT", "100%")
+    monkeypatch.setattr(
+        "nexent.core.gateway.modality.llm.openai.OpenAILongContextModel",
+        MagicMock(return_value=fake_model),
+    )
+    result, pct = adapter.analyze_long_text(
+        text_content="文档内容",
+        system_prompt="sys",
+        user_prompt="usr",
+    )
+    assert adapter._model is fake_model
+    fake_model.analyze_long_text.assert_called_once_with(
+        text_content="文档内容", system_prompt="sys", user_prompt="usr"
+    )
+    assert result == "RESULT"
+    assert pct == "100%"
+
 @pytest.mark.asyncio
 async def test_openai_stream_builds_model_when_missing():
     adapter = OpenAILLMAdapter(_ctx())

@@ -386,6 +386,7 @@ class ElasticSearchCore(VectorDatabaseCore):
                 documents=documents,
                 content_field=content_field,
                 embedding_model=embedding_model,
+                embedding_batch_size=embedding_batch_size,
                 progress_callback=progress_callback,
             )
 
@@ -395,30 +396,73 @@ class ElasticSearchCore(VectorDatabaseCore):
         documents: List[Dict[str, Any]],
         content_field: str,
         embedding_model: EmbeddingAdapter,
+        embedding_batch_size: int = 10,
         progress_callback: Optional[Callable[[int, int], None]] = None,
     ) -> int:
-        """Small batch insertion: real-time"""
+        """Small batch insertion: real-time, with sub-batched embedding calls.
+
+        Splits documents into ``embedding_batch_size`` sub-batches and retries
+        failed embedding calls so a single transient provider error does not
+        fail the whole insert.
+        """
         try:
             processed_docs = self._preprocess_documents(
                 documents, content_field)
+            if embedding_model.model_type != "multimodal":
+                processed_docs = [
+                    doc
+                    for doc in processed_docs
+                    if doc.get("process_source") != "UniversalImageExtractor"
+                ]
 
-            # Preprocess documents
-            processed_docs, embeddings = self._prepare_small_batch_embeddings(
-                processed_docs, content_field, embedding_model
-            )
+            total_docs = len(processed_docs)
+            if total_docs == 0:
+                logger.info("Small batch insert skipped: no documents to index.")
+                return 0
+
+            sub_batch_max_retries = self.max_retries
+            doc_embedding_pairs = []
+
+            # Sub-batch embeddings to reduce provider pressure and isolate a
+            # single transient failure to a small request instead of the batch.
+            for j in range(0, total_docs, embedding_batch_size):
+                embedding_sub_batch = processed_docs[j: j + embedding_batch_size]
+                for retry_attempt in range(sub_batch_max_retries):
+                    try:
+                        sub_docs, embeddings = self._prepare_small_batch_embeddings(
+                            embedding_sub_batch, content_field, embedding_model
+                        )
+                        doc_embedding_pairs.extend(zip(sub_docs, embeddings))
+                        break  # Success, exit retry loop
+                    except Exception as e:
+                        retry_delay = min(1.0 * (2 ** retry_attempt), 30.0)
+                        if retry_attempt < sub_batch_max_retries - 1:
+                            logger.warning(
+                                f"Embedding API error (attempt {retry_attempt + 1}/{sub_batch_max_retries}): "
+                                f"{e}, sub-batch start: {j}, size: {len(embedding_sub_batch)}. Retrying in {retry_delay}s..."
+                            )
+                            time.sleep(retry_delay)
+                        else:
+                            logger.error(
+                                f"Embedding API error after {sub_batch_max_retries} attempts: {e}, "
+                                f"sub-batch start: {j}, size: {len(embedding_sub_batch)}"
+                            )
+                            # Escalate to upper layer retry instead of returning partial success.
+                            raise
+
+            if not doc_embedding_pairs:
+                logger.info("Small batch insert skipped: no documents to index.")
+                return 0
+
+            indexed_count = len(doc_embedding_pairs)
 
             # Prepare bulk operations
             operations = self._build_bulk_operations(
                 index_name=index_name,
-                processed_docs=processed_docs,
-                embeddings=embeddings,
+                processed_docs=[doc for doc, _ in doc_embedding_pairs],
+                embeddings=[emb for _, emb in doc_embedding_pairs],
                 embedding_model=embedding_model,
             )
-
-            indexed_count = len(processed_docs)
-            if indexed_count == 0:
-                logger.info("Small batch insert skipped: no documents to index.")
-                return 0
 
             # Execute bulk insertion, wait for refresh to complete
             response = self.client.bulk(
@@ -450,15 +494,18 @@ class ElasticSearchCore(VectorDatabaseCore):
     ):
         if embedding_model.model_type == "multimodal":
             inputs = []
+            embeddable_docs = []
             for doc in processed_docs:
                 if doc.get("process_source") == "UniversalImageExtractor":
                     img_bytes = doc.pop("image_bytes", "")
                     if len(img_bytes) > 0:
                         inputs.append({"image": img_bytes})
+                        embeddable_docs.append(doc)
                 else:
                     inputs.append({"text": doc[content_field]})
+                    embeddable_docs.append(doc)
             embeddings = embedding_model.get_multimodal_embeddings(inputs)
-            return processed_docs, embeddings
+            return embeddable_docs, embeddings
         else:
             filtered_docs = [
                 doc

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import time
 from abc import abstractmethod
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Union
@@ -19,6 +20,12 @@ from ...transport import HttpTransportMixin
 
 
 DEFAULT_IMAGE_MIME_TYPE = "image/jpeg"
+
+# Status codes that are safe to retry on a provider-side transient failure:
+# 400 covers providers (e.g. SiliconFlow) that intermittently reject a batch
+# with "parameter is invalid" while the same payload succeeds moments later;
+# 408/429/5xx are the standard transient/rate-limit codes.
+_RETRYABLE_HTTP_STATUS = frozenset({400, 408, 429, 500, 502, 503, 504})
 
 ASSETS_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))), "assets"
@@ -117,7 +124,7 @@ class EmbeddingAdapter(MultimodalAdapter, HttpTransportMixin):
 
     @staticmethod
     def _retry(attempts: int, base_timeout: float, step: float, fn, label: str):
-        """Runs ``fn()`` with linear-backoff retries on timeout.
+        """Runs ``fn()`` with retries on timeout and transient HTTP errors.
 
         Args:
             attempts: Total number of attempts.
@@ -133,6 +140,8 @@ class EmbeddingAdapter(MultimodalAdapter, HttpTransportMixin):
         Raises:
             requests.exceptions.Timeout: If ``fn()`` still times out after all
                 retries.
+            requests.HTTPError: If ``fn()`` raises a non-retryable HTTP error,
+                or a retryable HTTP error still fails after all retries.
         """
         for i in range(attempts):
             current = base_timeout + i * step
@@ -143,6 +152,17 @@ class EmbeddingAdapter(MultimodalAdapter, HttpTransportMixin):
                 if i == attempts - 1:
                     logging.error(f"{label} API timed out after all retries.")
                     raise
+            except requests.HTTPError as e:
+                status = getattr(getattr(e, "response", None), "status_code", None)
+                if status not in _RETRYABLE_HTTP_STATUS:
+                    raise
+                logging.warning(
+                    f"{label} API returned HTTP {status} ({i + 1}/{attempts}), retrying..."
+                )
+                if i == attempts - 1:
+                    logging.error(f"{label} API returned HTTP {status} after all retries.")
+                    raise
+                time.sleep(min(1.0 * (2 ** i), 8.0))
         return []
 
     async def health_check(self) -> bool:
@@ -152,6 +172,30 @@ class EmbeddingAdapter(MultimodalAdapter, HttpTransportMixin):
             return True
         except Exception:
             return False
+
+    # ---- legacy attribute parity (old BaseEmbedding API) ----
+    # Knowledge-base / vector-database callers read these attributes directly;
+    # they now map onto the construction context.
+
+    @property
+    def embedding_dim(self) -> int:
+        """Embedding vector dimension from the construction context."""
+        return self._context.embedding_dim
+
+    @property
+    def model(self) -> str:
+        """Model name (legacy `model` attribute)."""
+        return self._context.model_name
+
+    @property
+    def embedding_model_name(self) -> str:
+        """Model name stored on indexed documents."""
+        return self._context.model_name
+
+    @property
+    def model_type(self) -> str:
+        """Legacy category: `embedding` or `multi_embedding`."""
+        return self._context.model_type
 
 
 class _MultimodalEmbeddingAdapter(EmbeddingAdapter):
@@ -171,6 +215,11 @@ class _MultimodalEmbeddingAdapter(EmbeddingAdapter):
     def _test_inputs(self) -> List[Dict[str, Any]]:
         """Returns sample inputs used for connectivity checks."""
         ...
+
+    @property
+    def model_type(self) -> str:
+        """Multimodal adapters keep the legacy `multimodal` category."""
+        return "multimodal"
 
     def get_embeddings(self, inputs, with_metadata=False, timeout=None, retries=3, retry_timeout_step=5.0):
         """Embed text inputs by delegating to the multimodal embedding path.

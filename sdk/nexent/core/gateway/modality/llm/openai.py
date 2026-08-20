@@ -137,6 +137,29 @@ class OpenAILongContextLLMAdapter(OpenAILLMAdapter):
             max_output_tokens=ctx.max_output_tokens,
         )
 
+    def analyze_long_text(
+        self,
+        text_content: str,
+        system_prompt: str,
+        user_prompt: str,
+    ):
+        """Analyze long text via the wrapped long-context model.
+
+        The gateway wrapper keeps the wrapped model unbuilt until first use,
+        so build it lazily before delegating. ``AnalyzeTextFileTool`` calls
+        this method directly on the adapter.
+
+        Returns:
+            tuple[ChatMessage, str]: Model response and truncation percentage.
+        """
+        if self._model is None:
+            self._build_model()
+        return self._model.analyze_long_text(
+            text_content=text_content,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+        )
+
     def get_model_info(self) -> ModelInfo:
         """Return ``ModelInfo`` advertising ``long_context=True``."""
         return ModelInfo(

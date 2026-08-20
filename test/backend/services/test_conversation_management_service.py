@@ -481,7 +481,7 @@ class TestConversationManagementService(unittest.TestCase):
         mock_llm_instance = mock_openai.return_value
         mock_response = MagicMock()
         mock_response.content = "AI Discussion"
-        mock_llm_instance.generate.return_value = mock_response
+        mock_llm_instance.return_value = mock_response
 
         # Execute
         result = call_llm_for_title(
@@ -490,7 +490,7 @@ class TestConversationManagementService(unittest.TestCase):
         # Assert
         self.assertEqual(result, "AI Discussion")
         mock_openai.assert_called_once()
-        mock_llm_instance.generate.assert_called_once()
+        mock_llm_instance.assert_called_once()
         mock_get_prompt_template.assert_called_once_with(language='zh')
 
     @patch('backend.services.conversation_management_service.rename_conversation')
@@ -1051,7 +1051,7 @@ class TestCallLlmForTitleMonitoring(unittest.TestCase):
             "display_name": "GPT-4",
         }
         mock_llm = MagicMock()
-        mock_llm.generate.return_value = MagicMock(content="Title")
+        mock_llm.return_value = MagicMock(content="Title")
         mock_model_cls.return_value = mock_llm
 
         call_llm_for_title("hello?", "tenant-123", "en")
@@ -1070,7 +1070,7 @@ class TestCallLlmForTitleMonitoring(unittest.TestCase):
             "display_name": "GPT-4",
         }
         mock_llm = MagicMock()
-        mock_llm.generate.return_value = MagicMock(content="Title")
+        mock_llm.return_value = MagicMock(content="Title")
         mock_model_cls.return_value = mock_llm
 
         call_llm_for_title("hello?", "tenant-123", "zh")
@@ -1196,13 +1196,13 @@ class TestCallLlmForTitleEdgeCases(unittest.TestCase):
             "USER_PROMPT": "{{question}}"
         }
         mock_llm = MagicMock()
-        mock_llm.generate.return_value = MagicMock(content="Title")
+        mock_llm.return_value = MagicMock(content="Title")
         mock_model.return_value = mock_llm
 
         call_llm_for_title("test question", "tenant-1", "zh")
 
         # Verify messages were flattened
-        call_args = mock_llm.generate.call_args[0][0]
+        call_args = mock_llm.call_args[0][0]
         self.assertIsInstance(call_args, list)
         for msg in call_args:
             self.assertIsInstance(msg, dict)
@@ -1225,7 +1225,7 @@ class TestCallLlmForTitleEdgeCases(unittest.TestCase):
             "USER_PROMPT": "{{question}}"
         }
         mock_llm = MagicMock()
-        mock_llm.generate.return_value = MagicMock(content="  ")  # whitespace only
+        mock_llm.return_value = MagicMock(content="  ")  # whitespace only
         mock_model.return_value = mock_llm
 
         result = call_llm_for_title("test", "tenant-1", "zh")
@@ -1247,7 +1247,7 @@ class TestCallLlmForTitleEdgeCases(unittest.TestCase):
             "USER_PROMPT": "{{question}}"
         }
         mock_llm = MagicMock()
-        mock_llm.generate.return_value = MagicMock(content=None)
+        mock_llm.return_value = MagicMock(content=None)
         mock_model.return_value = mock_llm
 
         result = call_llm_for_title("test", "tenant-1", "zh")
@@ -1269,7 +1269,7 @@ class TestCallLlmForTitleEdgeCases(unittest.TestCase):
             "USER_PROMPT": "{{question}}"
         }
         mock_llm = MagicMock()
-        mock_llm.generate.return_value = MagicMock(content="  ")
+        mock_llm.return_value = MagicMock(content="  ")
         mock_model.return_value = mock_llm
 
         result = call_llm_for_title("test", "tenant-1", "en")
@@ -1291,7 +1291,7 @@ class TestCallLlmForTitleEdgeCases(unittest.TestCase):
             "USER_PROMPT": "{{question}}"
         }
         mock_llm = MagicMock()
-        mock_llm.generate.return_value = MagicMock(content="<think>reasoning</think>Actual Title")
+        mock_llm.return_value = MagicMock(content="<think>reasoning</think>Actual Title")
         mock_model.return_value = mock_llm
 
         result = call_llm_for_title("test", "tenant-1", "zh")
@@ -1308,7 +1308,7 @@ class TestCallLlmForTitleEdgeCases(unittest.TestCase):
             "USER_PROMPT": "{{question}}"
         }
         mock_llm = MagicMock()
-        mock_llm.generate.return_value = MagicMock(content="Title")
+        mock_llm.return_value = MagicMock(content="Title")
         mock_model.return_value = mock_llm
 
         # Note: This test documents that call_llm_for_title crashes when model_config is None
