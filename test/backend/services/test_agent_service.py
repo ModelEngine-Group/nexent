@@ -191,7 +191,9 @@ sys.modules['agents.create_agent_info'].create_agent_info = mock_create_agent_in
 
 # Mock utils submodules
 utils_module = types.ModuleType("utils")
-utils_module.__path__ = []
+utils_module.__path__ = [
+    os.path.join(os.path.dirname(__file__), "../../../backend/utils")
+]
 sys.modules['utils'] = utils_module
 sys.modules['utils.auth_utils'] = MagicMock()
 sys.modules['utils.thread_utils'] = MagicMock()
@@ -374,6 +376,13 @@ sys.modules['backend.database.client'] = mock_backend_database_client
 
 # Mock storage client factory
 sys.modules['nexent.storage.storage_client_factory'].create_storage_client_from_config = MagicMock(return_value=MagicMock())
+
+# Other test modules may have imported the production model module before this
+# file installs its lightweight SDK types. Reload it against this file's
+# ``MockToolConfig`` so model validation uses one consistent class identity.
+sys.modules.pop('consts.model', None)
+if hasattr(sys.modules.get('consts'), 'model'):
+    delattr(sys.modules['consts'], 'model')
 
 # Now import backend modules
 import backend.services.agent_service as agent_service
@@ -810,9 +819,10 @@ async def test_update_agent_info_impl_success(mock_get_current_user_info, mock_u
 @patch('backend.services.agent_service.delete_tools_by_agent_id')
 @patch('backend.services.agent_service.delete_agent_relationship')
 @patch('backend.services.agent_service.delete_agent_by_id')
+@patch('backend.services.agent_service.skill_db.delete_skills_by_agent_id')
 @pytest.mark.asyncio
-async def test_delete_agent_impl_success(mock_delete_agent, mock_delete_related,
-                                         mock_delete_tools):
+async def test_delete_agent_impl_success(mock_delete_skills, mock_delete_agent,
+                                         mock_delete_related, mock_delete_tools):
     """
     Test successful deletion of an agent.
 
@@ -829,6 +839,7 @@ async def test_delete_agent_impl_success(mock_delete_agent, mock_delete_related,
     mock_delete_related.assert_called_once_with(
         123, "test_tenant", "test_user")
     mock_delete_tools.assert_called_once_with(123, "test_tenant", "test_user")
+    mock_delete_skills.assert_called_once_with(123, "test_tenant", "test_user")
 
 
 @patch('backend.services.agent_service.search_agent_info_by_agent_id')
@@ -14132,6 +14143,8 @@ async def test_update_agent_info_impl_self_reference(monkeypatch):
     agent_request = MagicMock()
     agent_request.agent_id = 1
     agent_request.related_agent_ids = [1]  # Self-reference
+    agent_request.enabled_skill_ids = None
+    agent_request.skill_instances = None
 
     with patch("backend.services.agent_service.get_current_user_info") as mock_user:
         mock_user.return_value = ("user1", "tenant1", "en")

@@ -70,7 +70,14 @@ for _name in ("services", "utils", "apps"):
     _safe_import(_name)
 
 for _parent, _children in (
-    ("services", ("agent_evaluation_service", "evaluation_set_service")),
+    (
+        "services",
+        (
+            "agent_evaluation_service",
+            "evaluation_report_service",
+            "evaluation_set_service",
+        ),
+    ),
     ("utils", ("auth_utils", "evaluation_set_excel_utils")),
 ):
     for _child in _children:

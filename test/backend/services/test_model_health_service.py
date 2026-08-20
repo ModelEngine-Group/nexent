@@ -17,6 +17,38 @@ class MockModule(mock.MagicMock):
         return mock.MagicMock()  # Return a regular MagicMock instead of a new MockModule
 
 
+_MOCKED_MODULE_NAMES = (
+    "database",
+    "database.client",
+    "database.model_management_db",
+    "utils",
+    "utils.auth_utils",
+    "utils.config_utils",
+    "utils.memory_utils",
+    "utils.model_name_utils",
+    "consts",
+    "consts.const",
+    "consts.model",
+    "consts.provider",
+    "nexent",
+    "nexent.core",
+    "nexent.core.agents",
+    "nexent.core.agents.agent_model",
+    "nexent.core.models",
+    "nexent.core.models.embedding_model",
+    "nexent.core.models.rerank_model",
+    "nexent.monitor",
+    "services",
+    "services.voice_service",
+    "services.model_gateway_service",
+)
+_MISSING_MODULE = object()
+_SAVED_MODULES = {
+    name: sys.modules.get(name, _MISSING_MODULE)
+    for name in _MOCKED_MODULE_NAMES
+}
+
+
 # Mock required modules before any imports occur
 sys.modules['database'] = MockModule()
 sys.modules['database.client'] = MockModule()
@@ -96,6 +128,14 @@ from backend.services.model_health_service import (
     _embedding_dimension_check,
     embedding_dimension_check,
 )
+
+# Keep the imported service bound to the doubles above, then restore the
+# process-wide module registry so this file cannot alter sibling test modules.
+for _module_name, _saved_module in _SAVED_MODULES.items():
+    if _saved_module is _MISSING_MODULE:
+        sys.modules.pop(_module_name, None)
+    else:
+        sys.modules[_module_name] = _saved_module
 
 
 
@@ -1016,7 +1056,7 @@ async def test_verify_model_config_connectivity_success():
 
         mock_connectivity_check.assert_called_once_with(
             "gpt-4", "llm", "https://api.openai.com", "test-key", True,
-            None, None, None, None, None,
+            "openai", None, None, None, None,
         )
 
 
@@ -1661,9 +1701,9 @@ async def test_verify_model_config_connectivity_ssl_verify_fallback():
         assert mock_connectivity.call_count == 2
         mock_connectivity.assert_any_call(
             "gpt-4", "llm", "https://api.openai.com", "test-key", True,
-            None, None, None, None, None,
+            "openai", None, None, None, None,
         )
         mock_connectivity.assert_any_call(
             "gpt-4", "llm", "https://api.openai.com", "test-key", False,
-            None, None, None, None, None,
+            "openai", None, None, None, None,
         )
