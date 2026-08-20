@@ -436,24 +436,26 @@ export default function AgentConfig({ onToggleDebug }: AgentConfigProps) {
         </TabsContent>
       </Tabs>
       <div className="flex shrink-0 justify-end gap-2 border-t border-gray-200 bg-white pt-3 pb-1">
-        <Button
-          icon={<Bug size={16} />}
-          disabled={agentId === null}
-          onClick={onToggleDebug}
-          variant="solid"
-          type="primary"
-        >
-          {t("agent.config.button.debug")}
-        </Button>
-        <Button
-          icon={<Rocket size={16} />}
-          disabled={agentId === null || isReadOnly}
-          onClick={handlePublish}
-          color="green"
-          variant="solid"
-        >
-          {t("agent.config.button.publish")}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            icon={<Bug size={16} />}
+            disabled={agentId === null}
+            onClick={onToggleDebug}
+            variant="solid"
+            type="primary"
+          >
+            {t("agent.config.button.debug")}
+          </Button>
+          <Button
+            icon={<Rocket size={16} />}
+            disabled={agentId === null || isReadOnly}
+            onClick={handlePublish}
+            color="green"
+            variant="solid"
+          >
+            {t("agent.config.button.publish")}
+          </Button>
+        </div>
       </div>
       <AgentVersionPubulishModal
         open={isPublishModalOpen}

@@ -43,14 +43,13 @@ import { useAgentVersionDetail } from "@/hooks/agent/useAgentVersionDetail";
 import { rollbackVersion, compareVersions, deleteVersion } from "@/services/agentVersionService";
 import { searchAgentInfo } from "@/services/agentConfigService";
 import { useAgentStore } from "@/stores/agentStore"
-import { useAgentReadOnly } from "@/hooks/agent/useAgentReadOnly";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import log from "@/lib/logger";
 import { resolveAgentListTenantKey } from "@/lib/agentListTenant";
 import { message } from "antd";
 import { useQueryClient } from "@tanstack/react-query";
-import AgentVersionCompareModal from "./versions/AgentVersionCompareModal";
-import AgentVersionPubulishModal from "./versions/AgentVersionPubulishModal";
+import AgentVersionCompareModal from "./AgentVersionCompareModal";
+import AgentVersionPubulishModal from "./AgentVersionPubulishModal";
 
 const { Text } = Typography;
 
@@ -157,8 +156,7 @@ export function VersionCardItem({
     return agentList.find((a: Agent) => a.id === String(agentId));
   }, [agentList, agentId]);
 
-  const isReadOnly =
-    useAgentReadOnly() || currentAgent?.permission === "READ_ONLY";
+  const isReadOnly = currentAgent?.permission === "READ_ONLY";
 
   // Modal state
   const [compareModalOpen, setCompareModalOpen] = useState(false);
@@ -328,7 +326,7 @@ export function VersionCardItem({
   ];
 
   return (
-    <div className="pb-6 last:pb-0">
+    <div className="">
       <Card
         className={`w-full transition-all duration-200 ${isExpanded ? "ring-2 ring-blue-100" : ""} ${isCurrentVersion ? "border border-green-400" : ""}`}
         styles={{ body: { padding: "12px 16px" } }}

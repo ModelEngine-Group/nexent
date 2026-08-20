@@ -131,6 +131,7 @@ export interface ThreadProps {
   skillFiles?: readonly SkillFileContent[];
   onSkillFileSelect?: (path: string) => void;
   readOnly?: boolean;
+  showComposer?: boolean;
 }
 
 /**
@@ -193,6 +194,7 @@ export const Thread: FC<ThreadProps> = ({
   skillFiles,
   onSkillFileSelect,
   readOnly = false,
+  showComposer = true,
 }) => {
   const { t } = useTranslation();
   const models = useAgentModels(agent);
@@ -409,6 +411,7 @@ export const Thread: FC<ThreadProps> = ({
         skillFiles={skillFiles}
         onSkillFileSelect={onSkillFileSelect}
         readOnly={readOnly}
+        showComposer={showComposer}
         hasMessages={hasMessages}
         displayName={displayName}
         conversationTitle={conversationTitle}
@@ -520,6 +523,7 @@ interface ThreadViewProps {
   skillFiles?: readonly SkillFileContent[];
   onSkillFileSelect?: (path: string) => void;
   readOnly: boolean;
+  showComposer: boolean;
 }
 
 const ThreadView: FC<ThreadViewProps> = ({
@@ -557,6 +561,7 @@ const ThreadView: FC<ThreadViewProps> = ({
   skillFiles,
   onSkillFileSelect,
   readOnly,
+  showComposer,
 }) => {
   const { t } = useTranslation();
 
@@ -682,30 +687,32 @@ const ThreadView: FC<ThreadViewProps> = ({
           )}
         </ThreadPrimitive.Viewport>
 
-        <ThreadPrimitive.ViewportFooter
-          className={cn(
-            "sticky bottom-0 mx-auto flex w-full max-w-4xl flex-col",
-            variant === "embedded" ? "gap-2 px-4 pb-4" : "gap-4 px-8 pb-8"
-          )}
-        >
-          <ThreadScrollToBottom />
-          <Composer
-            models={models}
-            selectedModelId={selectedModelId}
-            onModelChange={onModelChange}
-            chatMode={chatMode}
-            onChatModeChange={onChatModeChange}
-            showModelSelector={showModelSelector}
-            isDictationConfigured={isDictationConfigured}
-            knowledgeScope={knowledgeScope}
-            knowledgePreview={knowledgePreview}
-            knowledgeCapabilities={knowledgeCapabilities}
-            onKnowledgeScopeChange={onKnowledgeScopeChange}
-            compact={variant === "embedded"}
-            skillFiles={skillFiles}
-            disabled={readOnly}
-          />
-        </ThreadPrimitive.ViewportFooter>
+        {showComposer && (
+          <ThreadPrimitive.ViewportFooter
+            className={cn(
+              "sticky bottom-0 mx-auto flex w-full max-w-4xl flex-col",
+              variant === "embedded" ? "gap-2 px-4 pb-4" : "gap-4 px-8 pb-8"
+            )}
+          >
+            <ThreadScrollToBottom />
+            <Composer
+              models={models}
+              selectedModelId={selectedModelId}
+              onModelChange={onModelChange}
+              chatMode={chatMode}
+              onChatModeChange={onChatModeChange}
+              showModelSelector={showModelSelector}
+              isDictationConfigured={isDictationConfigured}
+              knowledgeScope={knowledgeScope}
+              knowledgePreview={knowledgePreview}
+              knowledgeCapabilities={knowledgeCapabilities}
+              onKnowledgeScopeChange={onKnowledgeScopeChange}
+              compact={variant === "embedded"}
+              skillFiles={skillFiles}
+              disabled={readOnly}
+            />
+          </ThreadPrimitive.ViewportFooter>
+        )}
       </div>
 
       <SourcesPanel

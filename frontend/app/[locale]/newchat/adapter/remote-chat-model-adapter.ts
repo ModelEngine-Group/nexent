@@ -1426,13 +1426,23 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     }
 
     // Pass selected model if provided via ModelContext (registered by ModelSelector)
+    // For agent-debug mode, prefer the model passed via custom (from the compare panel selector)
     const modelName = context.config?.modelName;
-    if (modelName) {
+    const modelIdFromCustom = custom?.modelId;
+
+    if (isAgentDebug && modelIdFromCustom) {
+      // Agent-debug mode: use the model from the compare panel selector
+      requestBody.model_id = Number(modelIdFromCustom);
+    } else if (modelName) {
+      // Normal mode: use the model from ModelContext
       requestBody.model_id = Number(modelName);
     }
 
     log.log(
       "[ChatModelAdapter] Sending agent request through conversation service"
+    );
+    log.log(
+      `[ChatModelAdapter] model_id=${requestBody.model_id}, isAgentDebug=${isAgentDebug}, customModelId=${modelIdFromCustom}`
     );
 
     let agentResponse:

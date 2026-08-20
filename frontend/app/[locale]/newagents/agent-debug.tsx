@@ -18,6 +18,11 @@ import { ServerDictationAdapter } from "../newchat/adapter/server-dictation-adap
 import { remoteChatModelAdapter } from "../newchat/adapter/remote-chat-model-adapter";
 import { Chat } from "../newchat/assistant-ui/chat";
 import type { ChatMode } from "../newchat/assistant-ui/composer";
+import { AgentDebugComparePanel } from "./components/agentInfo/AgentDebugComparePanel";
+
+interface AgentDebugPanelProps {
+  isCompareMode?: boolean;
+}
 
 const agentDebugChatModelAdapter: ChatModelAdapter = {
   run(options) {
@@ -46,12 +51,13 @@ const isDictationConfigured = (config: STTModelConfig | undefined): boolean => {
   return Boolean(config.apiConfig?.apiKey);
 };
 
-const AgentDebugPanel: FC = () => {
+const AgentDebugPanel: FC<AgentDebugPanelProps> = ({ isCompareMode = false }) => {
   const { t } = useTranslation("common");
   const agentId = useAgentStore((state) => state.agentId);
   const editedAgent = useAgentStore((state) => state.editedAgent);
   const { modelConfig } = useConfig();
   const [chatMode, setChatMode] = useState<ChatMode>("execution");
+  const [selectedModelId, setSelectedModelId] = useState<string | undefined>(undefined);
 
   const adapters = useMemo(
     () => ({
@@ -75,14 +81,23 @@ const AgentDebugPanel: FC = () => {
       custom: {
         ...(agentId !== null ? { agentId } : {}),
         enablePlan: chatMode === "planning",
+        modelId: selectedModelId,
       },
     });
-  }, [agentId, runtime, chatMode]);
+  }, [agentId, runtime, chatMode, selectedModelId]);
 
   if (!debugAgent) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
         {t("systemPrompt.nonEditing.subtitle")}
+      </div>
+    );
+  }
+
+  if (isCompareMode) {
+    return (
+      <div className="h-full w-full">
+        <AgentDebugComparePanel agentId={agentId ?? undefined} />
       </div>
     );
   }

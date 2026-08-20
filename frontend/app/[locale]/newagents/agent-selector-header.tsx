@@ -10,25 +10,18 @@ import {
   Tooltip,
   Col,
   Row,
-  Modal,
   Tag,
   theme,
   Input,
 } from "antd";
-import { useMutation } from "@tanstack/react-query";
 import {
   Plus,
   FileInput,
   ChevronDown,
   ChevronLeft,
   Bot,
-  Copy,
-  Network,
-  FileOutput,
-  Trash2,
   Globe,
   GitBranch,
-  History,
   Search,
 } from "lucide-react";
 import { ExclamationCircleOutlined } from "@ant-design/icons";
@@ -39,18 +32,8 @@ import {
   useRouter,
   useSearchParams,
 } from "next/navigation";
-import { StaticScrollArea } from "@/components/ui/scrollArea";
-import AgentCallRelationshipModal from "@/components/agent/AgentCallRelationshipModal";
-import A2AServerSettingsPanel from "./a2a/A2AServerSettingsPanel";
-import { useConfirmModal } from "@/hooks/useConfirmModal";
-import { a2aClientService } from "@/services/a2aService";
-import { useQuery } from "@tanstack/react-query";
 import {
   searchAgentInfo,
-  updateAgentInfo,
-  deleteAgent,
-  exportAgent,
-  updateToolConfig,
   clearAgentNewMark,
 } from "@/services/agentConfigService";
 
@@ -65,9 +48,8 @@ import {
 } from "@/lib/agentImportUtils";
 import log from "@/lib/logger";
 import { useAgentList } from "@/hooks/agent/useAgentList";
-import { useAgentVersionList } from "@/hooks/agent/useAgentVersionList";
-import { useAgentVersionDetail } from "@/hooks/agent/useAgentVersionDetail";
 import { useAgentInfo } from "@/hooks/agent/useAgentInfo";
+import AgentConfigActions from "./components/agent-config-actions";
 
 interface AgentSelectorHeaderProps {
   onToggleVersionManage: () => void;
@@ -91,7 +73,6 @@ export default function AgentSelectorHeader({
   const isSaving = useAgentStore(
     (state) => state.isSaving || state.queue.length > 0
   );
-  const confirm = useConfirmModal();
   const { token } = theme?.useToken?.() || {};
 
   // Resolve tenant from auth (matches AgentManageComp / published_list; keeps ASSET_OWNER merge)
@@ -100,48 +81,13 @@ export default function AgentSelectorHeader({
   // Store state
   const currentAgentId = useAgentStore((state) => state.currentAgentId);
   const initialize = useAgentStore((state) => state.initialize);
-  const reset = useAgentStore((state) => state.reset);
 
   const { agentInfo } = useAgentInfo(currentAgentId);
-  const { agentVersionList, total } = useAgentVersionList(currentAgentId);
-  const { agentVersionDetail } = useAgentVersionDetail(
-    currentAgentId,
-    agentInfo?.current_version_no
-  );
-
-  // Call relationship modal state
-  const [callRelationshipModalVisible, setCallRelationshipModalVisible] =
-    useState(false);
-  const [selectedAgentForRelationship, setSelectedAgentForRelationship] =
-    useState<Agent | null>(null);
-
-  // A2A settings modal state
-  const [showA2ASettings, setShowA2ASettings] = useState(false);
-  const [selectedAgentForA2A, setSelectedAgentForA2A] = useState<Agent | null>(
-    null
-  );
 
   // Dropdown open state
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [agentSearch, setAgentSearch] = useState("");
   const initialUrlAgentIdRef = useRef<number | null>(null);
-
-  // Mutations
-  const updateAgentMutation = useMutation({
-    mutationFn: (payload: any) => updateAgentInfo(payload),
-  });
-
-  const deleteAgentMutation = useMutation({
-    mutationFn: (agentId: number) => deleteAgent(agentId),
-  });
-
-  // Fetch A2A Server Settings when modal opens
-  const { data: a2aSettingsData, isLoading: isLoadingA2ASettings } = useQuery({
-    queryKey: ["a2aServerSettings", selectedAgentForA2A?.id],
-    queryFn: () =>
-      a2aClientService.getServerSettings(Number(selectedAgentForA2A!.id)),
-    enabled: showA2ASettings && !!selectedAgentForA2A,
-  });
 
   // Import wizard state
   const [importWizardVisible, setImportWizardVisible] = useState(false);
@@ -165,226 +111,6 @@ export default function AgentSelectorHeader({
       message: message,
       t: t,
       log: log,
-    });
-  };
-
-  // Handle view call relationship
-  const handleViewCallRelationship = (agent: Agent) => {
-    setSelectedAgentForRelationship(agent);
-    setCallRelationshipModalVisible(true);
-    setDropdownOpen(false);
-  };
-
-  const handleCloseCallRelationshipModal = () => {
-    setCallRelationshipModalVisible(false);
-    setSelectedAgentForRelationship(null);
-  };
-
-  // Handle view A2A agent settings
-  const handleViewA2AAgentSettings = (agent: Agent) => {
-    setSelectedAgentForA2A(agent);
-    setShowA2ASettings(true);
-    setDropdownOpen(false);
-  };
-
-  // Handle export agent
-  const handleExportAgent = async (agent: Agent) => {
-    try {
-      const result = await exportAgent(Number(agent.id));
-      if (!result.success) {
-        message.error(
-          result.message || t("businessLogic.config.error.agentExportFailed")
-        );
-        return;
-      }
-
-      if (result.data) {
-        const blob = new Blob([JSON.stringify(result.data, null, 2)], {
-          type: "application/json",
-        });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement("a");
-        link.href = url;
-        link.download = `${agent.name || "agent"}.json`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(url);
-      }
-
-      message.success(t("businessLogic.config.message.agentExportSuccess"));
-    } catch (error) {
-      message.error(t("businessLogic.config.error.agentExportFailed"));
-    }
-  };
-
-  // Handle copy agent
-  const handleCopyAgent = async (agent: Agent) => {
-    try {
-      const detailResult = await searchAgentInfo(Number(agent.id));
-      if (!detailResult.success || !detailResult.data) {
-        message.error(detailResult.message);
-        return;
-      }
-      const detail = detailResult.data;
-
-      const copyName = `${detail.name || "agent"}_copy`;
-      const copyDisplayName = `${
-        detail.display_name || t("agentConfig.agents.defaultDisplayName")
-      }${t("agent.copySuffix")}`;
-
-      const tools = Array.isArray(detail.tools) ? detail.tools : [];
-      const unavailableTools = tools.filter(
-        (tool: any) => tool && tool.is_available === false
-      );
-      const unavailableToolNames = unavailableTools
-        .map(
-          (tool: any) =>
-            tool?.display_name || tool?.name || tool?.tool_name || ""
-        )
-        .filter((name: string) => Boolean(name));
-
-      const enabledToolIds = tools
-        .filter((tool: any) => tool && tool.is_available !== false)
-        .map((tool: any) => Number(tool.id))
-        .filter((id: number) => Number.isFinite(id));
-
-      const subAgentIds = (
-        Array.isArray(detail.sub_agent_id_list) ? detail.sub_agent_id_list : []
-      )
-        .map((id: any) => Number(id))
-        .filter((id: number) => Number.isFinite(id));
-
-      // Ensure model_ids always has a value - fall back to single-element array
-      // using the agent's first available legacy model_id (single-select) when
-      // model_ids is empty in the response.
-      const modelIdsForCopy = (() => {
-        if (detail.model_ids && detail.model_ids.length > 0)
-          return detail.model_ids;
-        // Legacy payload may only carry model_id (single-select); preserve it
-        const legacySingleId = (detail as { model_id?: number }).model_id;
-        if (legacySingleId) return [legacySingleId];
-        return undefined;
-      })();
-
-      const createResult = await updateAgentMutation.mutateAsync({
-        agent_id: undefined, // create
-        name: copyName,
-        display_name: copyDisplayName,
-        description: detail.description,
-        author: detail.author,
-        model_ids: modelIdsForCopy,
-        max_steps: detail.max_step,
-        requested_output_tokens: detail.requested_output_tokens ?? null,
-        is_main_agent: detail.is_main_agent ?? true,
-        provide_run_summary: detail.provide_run_summary,
-        enabled: detail.enabled,
-        duty_prompt: detail.duty_prompt,
-        constraint_prompt: detail.constraint_prompt,
-        few_shots_prompt: detail.few_shots_prompt,
-        business_logic_model_name:
-          detail.business_logic_model_name ?? undefined,
-        business_logic_model_id: detail.business_logic_model_id ?? undefined,
-        enabled_tool_ids: enabledToolIds,
-        related_agent_ids: subAgentIds,
-      });
-
-      if (!createResult.success || !createResult.data?.agent_id) {
-        message.error(
-          createResult.message || t("agentConfig.agents.copyFailed")
-        );
-        return;
-      }
-      const newAgentId = Number(createResult.data.agent_id);
-
-      // Copy tool configuration
-      for (const tool of tools) {
-        if (!tool || tool.is_available === false) continue;
-        const params =
-          tool.initParams?.reduce((acc: Record<string, any>, param: any) => {
-            acc[param.name] = param.value;
-            return acc;
-          }, {}) || {};
-        try {
-          await updateToolConfig(Number(tool.id), newAgentId, params, true);
-        } catch (error) {
-          log.error("Failed to copy tool configuration:", error);
-          message.error(t("agentConfig.agents.copyFailed"));
-          return;
-        }
-      }
-
-      // Refresh agent list
-      queryClient.invalidateQueries({ queryKey: ["agents"] });
-      message.success(t("agentConfig.agents.copySuccess"));
-
-      if (unavailableTools.length > 0) {
-        const names =
-          unavailableToolNames.join(", ") ||
-          unavailableTools
-            .map((tool: any) => Number(tool?.id))
-            .filter((id: number) => !Number.isNaN(id))
-            .join(", ");
-        message.warning(
-          t("agentConfig.agents.copyUnavailableTools", {
-            count: unavailableTools.length,
-            names,
-          })
-        );
-      }
-    } catch (error) {
-      log.error("Failed to copy agent:", error);
-      message.error(t("agentConfig.agents.copyFailed"));
-    }
-  };
-
-  // Handle copy with confirmation
-  const handleCopyAgentWithConfirm = (agent: Agent) => {
-    confirm.confirm({
-      title: t("agentConfig.agents.copyConfirmTitle"),
-      content: t("agentConfig.agents.copyConfirmContent", {
-        name: agent?.display_name || agent?.name || "",
-      }),
-      onOk: () => handleCopyAgent(agent),
-    });
-  };
-
-  // Handle delete agent
-  const handleDeleteAgent = async (agent: Agent) => {
-    deleteAgentMutation.mutate(Number(agent.id), {
-      onSuccess: () => {
-        message.success(
-          t("businessLogic.config.error.agentDeleteSuccess", {
-            name: agent.display_name || agent.name || "",
-          })
-        );
-
-        // Clear current agent if this was the selected agent
-        if (
-          currentAgentId !== null &&
-          String(currentAgentId) === String(agent.id)
-        ) {
-          reset();
-        }
-
-        // Refresh agent lists
-        queryClient.invalidateQueries({ queryKey: ["agents"] });
-        queryClient.invalidateQueries({ queryKey: ["publishedAgentsList"] });
-      },
-      onError: () => {
-        message.error(t("businessLogic.config.error.agentDeleteFailed"));
-      },
-    });
-  };
-
-  // Handle delete with confirmation
-  const handleDeleteAgentWithConfirm = (agent: Agent) => {
-    confirm.confirm({
-      title: t("businessLogic.config.modal.deleteTitle"),
-      content: t("businessLogic.config.modal.deleteContent", {
-        name: agent.display_name || agent.name || "",
-      }),
-      onOk: () => handleDeleteAgent(agent),
     });
   };
 
@@ -534,81 +260,6 @@ export default function AgentSelectorHeader({
                     )}
                   </Flex>
                   <div>
-                    {agent.is_a2a_server && (
-                      <Tooltip title={t("a2a.agent.viewA2ASettings")}>
-                        <span>
-                          <Button
-                            type="text"
-                            size="small"
-                            icon={<Globe className="w-4 h-4" />}
-                            onClick={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              handleViewA2AAgentSettings(agent);
-                            }}
-                            className="agent-action-button agent-action-button-blue"
-                          />
-                        </span>
-                      </Tooltip>
-                    )}
-                    <Tooltip title={t("agent.contextMenu.copy")}>
-                      <Button
-                        type="text"
-                        size="small"
-                        icon={<Copy className="w-4 h-4" />}
-                        disabled={!isAvailable}
-                        className="agent-action-button agent-action-button-blue"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleCopyAgentWithConfirm(agent);
-                        }}
-                      />
-                    </Tooltip>
-                    <Tooltip title={t("agent.action.viewCallRelationship")}>
-                      <Button
-                        type="text"
-                        size="small"
-                        icon={<Network className="w-4 h-4" />}
-                        disabled={!isAvailable}
-                        className="agent-action-button agent-action-button-blue"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleViewCallRelationship(agent);
-                        }}
-                      />
-                    </Tooltip>
-                    <Tooltip title={t("agent.contextMenu.export")}>
-                      <Button
-                        type="text"
-                        size="small"
-                        icon={<FileOutput className="w-4 h-4" />}
-                        disabled={!isAvailable}
-                        className="agent-action-button agent-action-button-green"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleExportAgent(agent);
-                        }}
-                      />
-                    </Tooltip>
-                    <Tooltip
-                      title={
-                        agent.permission === "READ_ONLY"
-                          ? t("agent.noEditPermission")
-                          : t("agent.contextMenu.delete")
-                      }
-                    >
-                      <Button
-                        type="text"
-                        size="small"
-                        icon={<Trash2 className="w-4 h-4" />}
-                        disabled={agent.permission === "READ_ONLY"}
-                        className="agent-action-button agent-action-button-red"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDeleteAgentWithConfirm(agent);
-                        }}
-                      />
-                    </Tooltip>
                   </div>
                 </div>
               </div>
@@ -665,7 +316,7 @@ export default function AgentSelectorHeader({
       >
         <Row className="h-full" align="middle">
           {/* Left column: Agent Config */}
-          <Col xs={24} sm={24} md={24} lg={12} className="flex min-w-0 lg:pr-4">
+          <Col xs={12} sm={12} md={12} lg={8} className="flex min-w-0 lg:pr-4">
             <Flex align="center" className="min-w-0 w-full" gap={4}>
               {showBackFromRepository ? (
                 <Tooltip title={t("agentRepository.mine.backToRepository")}>
@@ -763,10 +414,10 @@ export default function AgentSelectorHeader({
           </Col>
           {/* Right column: Agent Info */}
           <Col
-            xs={24}
-            sm={24}
-            md={24}
-            lg={12}
+            xs={12}
+            sm={12}
+            md={12}
+            lg={16}
             className="flex justify-end lg:pl-4"
           >
             <Flex
@@ -776,25 +427,8 @@ export default function AgentSelectorHeader({
               justify="flex-end"
               className="w-full mr-6"
             >
-              {currentAgentId != null &&
-                agentInfo?.current_version_no !== 0 &&
-                total > 0 && (
-                  <div className="flex shrink-0 items-center gap-1 py-1.5 px-3 bg-gray-100 rounded-lg text-gray-700">
-                    <History size={16} />
-                    <Tag
-                      color="cyan"
-                      variant="outlined"
-                      className="rounded-md font-mono text-sm"
-                    >
-                      {agentVersionDetail?.version.version_name}
-                    </Tag>
-                    <span className="text-xs text-gray-500">
-                      /{" "}
-                      {t("agent.version.totalVersions", { count: total ?? 0 })}
-                    </span>
-                  </div>
-                )}
               <Flex align="center" gap={12} wrap="wrap">
+                <AgentConfigActions />
                 <Flex align="center" gap={8} wrap="wrap" className="ml-4">
                   <Button
                     size="middle"
@@ -848,49 +482,6 @@ export default function AgentSelectorHeader({
         }}
       />
 
-      {/* Call Relationship Modal */}
-      {selectedAgentForRelationship && (
-        <AgentCallRelationshipModal
-          visible={callRelationshipModalVisible}
-          onClose={handleCloseCallRelationshipModal}
-          agentId={Number(selectedAgentForRelationship.id)}
-          agentName={
-            selectedAgentForRelationship.display_name ||
-            selectedAgentForRelationship.name
-          }
-        />
-      )}
-
-      {/* A2A Server Settings Modal */}
-      <Modal
-        centered
-        width={640}
-        title={t("a2a.server.previewTitle")}
-        open={showA2ASettings}
-        onCancel={() => {
-          setShowA2ASettings(false);
-          setSelectedAgentForA2A(null);
-        }}
-        loading={isLoadingA2ASettings}
-        footer={null}
-        zIndex={1050}
-      >
-        {selectedAgentForA2A && a2aSettingsData?.data ? (
-          <A2AServerSettingsPanel
-            endpointId={a2aSettingsData?.data?.endpoint_id}
-            supportedInterfaces={a2aSettingsData?.data?.supported_interfaces}
-          />
-        ) : (
-          <div
-            style={{ textAlign: "center", padding: "40px 0", color: "#999" }}
-          >
-            {t(
-              "a2a.service.getServerSettingsFailed",
-              "Failed to load A2A settings"
-            )}
-          </div>
-        )}
-      </Modal>
     </>
   );
 }

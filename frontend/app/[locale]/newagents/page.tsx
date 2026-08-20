@@ -13,9 +13,9 @@ import { Button } from "antd";
 import { RefreshCw, Sparkles, X } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 
-import AgentSelectorHeader from "./components/agent-selector-header";
+import AgentSelectorHeader from "./agent-selector-header";
 import AgentConfig from "./agent-config";
-import AgentVersionManage from "./AgentVersionManage";
+import AgentVersion from "./agent-version";
 import AgentDebugPanel from "./agent-debug";
 import { Nl2AgentChatPanel } from "../newchat/assistant-ui/nl2agent-chat-panel";
 import {
@@ -319,9 +319,7 @@ function AgentSetupContent() {
 
         {isShowVersionManagePanel && (
           <aside className="h-full w-[360px] shrink-0 overflow-hidden">
-            <AgentVersionManage
-              onClose={() => setIsShowVersionManagePanel(false)}
-            />
+            <AgentVersion />
           </aside>
         )}
       </main>
