@@ -1,7 +1,7 @@
 "use client";
 
 import { Button, Tag } from "antd";
-import { Bot, Check, Eye, X } from "lucide-react";
+import { Check, Eye, X, Zap } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { AsyncContent, PaginationBar } from "./SkillRepositoryControls";
@@ -100,7 +100,7 @@ export function ReviewSkillList({
                     >
                       <div className="flex min-w-0 items-center gap-3">
                         <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                          <Bot className="size-5" aria-hidden />
+                          <Zap className="size-5" aria-hidden />
                         </div>
                         <div className="min-w-0">
                           <h3 className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">
