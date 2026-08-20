@@ -1,19 +1,23 @@
 "use client";
 import { useState } from "react";
-import { GitBranch, GitCompare, Rocket } from "lucide-react";
+import { GitBranch, GitCompare, Rocket, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Card, Flex, Button, Tag, Empty, Spin, message } from "antd";
 import { useAgentVersionList } from "@/hooks/agent/useAgentVersionList";
 import { useAgentInfo } from "@/hooks/agent/useAgentInfo";
-import { useAgentConfigStore } from "@/stores/agentConfigStore";
-import { VersionCardItem } from "./AgentVersionCard";
+import { useAgentStore } from "@/stores/agentStore"
+import { VersionCardItem } from "./versions/agent-version-card";
 import log from "@/lib/logger";
 import AgentVersionCompareModal from "./versions/AgentVersionCompareModal";
 import { compareVersions, type VersionCompareResponse } from "@/services/agentVersionService";
 
-export default function AgentVersionManage() {
+interface AgentVersionManageProps {
+  onClose?: () => void;
+}
+
+export default function AgentVersionManage({ onClose }: AgentVersionManageProps) {
   const { t } = useTranslation("common");
-  const currentAgentId = useAgentConfigStore((state) => state.currentAgentId);
+  const currentAgentId = useAgentStore((state) => state.currentAgentId);
 
   const { agentVersionList, total, isLoading, invalidate: invalidateAgentVersionList } = useAgentVersionList(currentAgentId);
   const { agentInfo, invalidate: invalidateAgentInfo } = useAgentInfo(currentAgentId);
@@ -111,32 +115,15 @@ export default function AgentVersionManage() {
 
   return (
     <>
-      <Card
-        className="h-full min-h-0"
-        style={{ minHeight: 400, height: "100%" }}
-        title={
-          <Flex align="center" gap={8}>
-            <GitBranch size={16} />
-            {t("agent.version.manage")}
-          </Flex>
-        }
-        actions={footer}
-        styles={{
-          body: {
-            height: "calc(100% - 112px)",
-            overflow: "auto",
-          },
-        }}
-      >
-        {/* Desktop: Timeline style version list */}
-        <div className="w-full h-full">
+      <div className="flex h-full min-h-0 w-full flex-col py-2">
+        <div className="min-h-0 flex-1 overflow-y-auto">
           <Spin spinning={isLoading}>
             {agentVersionList.length === 0 ? (
               <Flex align="center" justify="center" className="h-full">
                 <Empty />
               </Flex>
             ) : (
-              <Flex vertical >
+              <div className="flex flex-col gap-2">
                 {agentVersionList.map((version) => (
                   <VersionCardItem
                     key={version.version_no}
@@ -145,12 +132,21 @@ export default function AgentVersionManage() {
                     currentVersionNo={agentInfo?.current_version_no}
                   />
                 ))}
-              </Flex>
+              </div>
             )}
           </Spin>
         </div>
-      </Card>
-
+        <div className="flex shrink-0 justify-end gap-2 border-t border-gray-200 bg-white pt-3 pb-1">
+          <div className="flex items-center gap-2">
+            <Button
+              icon={<Rocket size={16} />}
+              onClick={handleOpenCompareModal}
+            >
+              {t("agent.version.compare")}
+            </Button>
+          </div>
+        </div>
+      </div>
       <AgentVersionCompareModal
         open={compareModalOpen}
         loading={compareLoading}

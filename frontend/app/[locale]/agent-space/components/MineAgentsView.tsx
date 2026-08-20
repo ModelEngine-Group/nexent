@@ -141,7 +141,7 @@ export function MineAgentsView({
       invalidateAgentRepositoryCaches(queryClient),
       queryClient.invalidateQueries({ queryKey: [AGENTS_LIST_QUERY_KEY] }),
     ]);
-    router.push(`/${locale}/newagents?agent_id=${agentId}`);
+    router.push(`/${locale}/agents?agent_id=${agentId}`);
   };
 
   const handleImportAgent = async () => {
@@ -164,7 +164,7 @@ export function MineAgentsView({
       return;
     }
     router.push(
-      `/${locale}/newagents?agent_id=${agentId}&from=agent-space&tab=mine`
+      `/${locale}/agents?agent_id=${agentId}&from=agent-space&tab=mine`
     );
   };
 

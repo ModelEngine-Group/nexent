@@ -12,8 +12,8 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import ToolConfigModal from "../../newagents/components/agentConfig/tool/ToolConfigModal";
-import SkillConfigModal from "../../newagents/components/agentConfig/skill/SkillConfigModal";
+import ToolConfigModal from "../../agents/components/agentConfig/tool/ToolConfigModal";
+import SkillConfigModal from "../../agents/components/agentConfig/skill/SkillConfigModal";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useNl2AgentFlow } from "@/contexts/nl2AgentFlow";
