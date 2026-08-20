@@ -185,16 +185,15 @@ def _skill_file_preview_status(
         return "readable"
 
     local_root = os.path.realpath(local_skills_dir)
-    skill_root = os.path.realpath(_resolve_local_skill_path(local_skills_dir, skill_name))
+    skill_root = os.path.realpath(
+        _resolve_local_skill_path(local_skills_dir, skill_name)
+    )
     file_path = os.path.realpath(
         _resolve_local_skill_path(local_skills_dir, skill_name, relative_path)
     )
-    normalized_local_root = os.path.normcase(local_root)
-    normalized_skill_root = os.path.normcase(skill_root)
-    normalized_file_path = os.path.normcase(file_path)
     if (
-        not normalized_skill_root.startswith(normalized_local_root + os.sep)
-        or not normalized_file_path.startswith(normalized_skill_root + os.sep)
+        not file_path.startswith(local_root + os.sep)
+        or not file_path.startswith(skill_root + os.sep)
     ):
         raise ForbiddenError("Unsafe local skill path")
     try:
@@ -1120,18 +1119,23 @@ def _resolve_local_skill_path(
     skill_root = os.path.realpath(os.path.join(local_root, name))
     candidate = os.path.realpath(os.path.join(skill_root, *normalized_parts))
 
-    def _is_within(root: str, path: str) -> bool:
-        try:
-            return os.path.normcase(os.path.commonpath([root, path])) == os.path.normcase(root)
-        except ValueError:
-            return False
-
     if CONTAINER_SKILLS_PATH:
         allowed_root = os.path.realpath(CONTAINER_SKILLS_PATH)
-        if not _is_within(allowed_root, local_root):
+        if (
+            local_root != allowed_root
+            and not local_root.startswith(allowed_root + os.sep)
+        ):
             raise SkillException("Unsafe local skills directory")
+        if not candidate.startswith(allowed_root + os.sep):
+            raise ForbiddenError("Unsafe local skill path")
 
-    if not _is_within(local_root, skill_root) or not _is_within(skill_root, candidate):
+    if (
+        not skill_root.startswith(local_root + os.sep)
+        or (
+            candidate != skill_root
+            and not candidate.startswith(skill_root + os.sep)
+        )
+    ):
         raise ForbiddenError("Unsafe local skill path")
     return candidate
 
@@ -1685,7 +1689,8 @@ class SkillService:
         """
         import shutil
 
-        local_dir = os.path.join(self._local_skills_dir(tenant_id), skill_name)
+        local_skills_dir = self._local_skills_dir(tenant_id)
+        local_dir = _resolve_local_skill_path(local_skills_dir, skill_name)
         logger.info("Starting deletion of local files for skill '%s' from '%s'", skill_name, local_dir)
 
         if not os.path.isdir(local_dir):
@@ -1696,7 +1701,10 @@ class SkillService:
             logger.info("Found %d items to delete in '%s'", len(items), local_dir)
 
             for item in items:
-                item_path = os.path.join(local_dir, item)
+                item_path = os.path.realpath(os.path.join(local_dir, item))
+                if not item_path.startswith(os.path.realpath(local_dir) + os.sep):
+                    logger.warning("Skipped unsafe local skill entry: %s", item)
+                    continue
                 if item_path.endswith("/"):
                     continue
                 if os.path.isdir(item_path):
@@ -1785,17 +1793,28 @@ class SkillService:
                     if not relative_path:
                         continue
 
-                    local_path = _resolve_local_skill_path(
+                    _resolve_local_skill_path(
                         self._local_skills_dir(tenant_id),
                         skill_name,
                         relative_path,
                     )
-                    validated_files.append((file_path, local_path))
+                    validated_files.append((file_path, relative_path))
 
                 extracted_count = 0
-                for file_path, local_path in validated_files:
+                for file_path, relative_path in validated_files:
                     file_data = _read_zip_member(zf, file_path)
+                    local_skills_dir = self._local_skills_dir(tenant_id)
+                    local_path = _resolve_local_skill_path(
+                        local_skills_dir,
+                        skill_name,
+                        relative_path,
+                    )
                     os.makedirs(os.path.dirname(local_path), exist_ok=True)
+                    local_path = _resolve_local_skill_path(
+                        local_skills_dir,
+                        skill_name,
+                        relative_path,
+                    )
                     with open(local_path, "wb") as f:
                         f.write(file_data)
                     extracted_count += 1
@@ -2199,7 +2218,10 @@ class SkillService:
             raise SkillException("tenant_id is required")
         try:
             # Delete local skill files from filesystem
-            skill_dir = os.path.join(self._local_skills_dir(effective_tenant_id), skill_name)
+            skill_dir = _resolve_local_skill_path(
+                self._local_skills_dir(effective_tenant_id),
+                skill_name,
+            )
             if os.path.exists(skill_dir):
                 import shutil
                 shutil.rmtree(skill_dir)
@@ -2456,16 +2478,14 @@ class SkillService:
                 skill_name,
                 file_path,
             )
+            local_root = os.path.realpath(local_skills_dir)
             skill_root = os.path.realpath(
                 _resolve_local_skill_path(local_skills_dir, skill_name)
             )
             full_path = os.path.realpath(full_path)
-            normalized_local_root = os.path.normcase(os.path.realpath(local_skills_dir))
-            normalized_skill_root = os.path.normcase(skill_root)
-            normalized_full_path = os.path.normcase(full_path)
             if (
-                not normalized_skill_root.startswith(normalized_local_root + os.sep)
-                or not normalized_full_path.startswith(normalized_skill_root + os.sep)
+                not full_path.startswith(local_root + os.sep)
+                or not full_path.startswith(skill_root + os.sep)
             ):
                 raise ForbiddenError("Unsafe local skill path")
 
@@ -2733,9 +2753,10 @@ class SkillService:
         results: List[Dict[str, str]] = []
 
         for skill_name in skill_names:
-            skill_dir = os.path.join(
-                self._local_skills_dir(effective_tenant_id),
-                skill_name
+            local_skills_dir = self._local_skills_dir(effective_tenant_id)
+            skill_dir = _resolve_local_skill_path(
+                local_skills_dir,
+                skill_name,
             )
             if not os.path.isdir(skill_dir):
                 skill_info = skill_db.get_skill_by_name(skill_name, effective_tenant_id)
@@ -2845,7 +2866,11 @@ async def update_skill_list(tenant_id: str, user_id: str):
                 skill_data["config_schemas"] = parsed
                 logger.debug("Loaded config_schemas from schema.yaml for skill %s", skill_name)
             else:
-                scripts_dir = os.path.join(local_base, skill_name, "scripts")
+                scripts_dir = _resolve_local_skill_path(
+                    local_base,
+                    skill_name,
+                    "scripts",
+                )
                 inputs = _get_skill_inputs_from_code(scripts_dir)
                 if inputs:
                     skill_data["config_schemas"] = inputs

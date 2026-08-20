@@ -468,10 +468,10 @@ class TestHandleMessageStream:
                 patch.object(service.adapter, "build_agent_request", return_value={
                     "agent_id": 7, "query": "", "history": [], "is_debug": True
                 }), \
-                patch.object(service.adapter, "build_a2a_task_event", side_effect=lambda **kwargs: kwargs), \
-        agent_service = importlib.import_module("services.agent_service")
-        with patch.object(agent_service, "run_agent_stream", new_callable=AsyncMock, return_value=stream_response):
-            result = [event async for event in service.handle_message_stream("endpoint-1", {"message": {}})]
+                patch.object(service.adapter, "build_a2a_task_event", side_effect=lambda **kwargs: kwargs):
+            agent_service = importlib.import_module("services.agent_service")
+            with patch.object(agent_service, "run_agent_stream", new_callable=AsyncMock, return_value=stream_response):
+                result = [event async for event in service.handle_message_stream("endpoint-1", {"message": {}})]
 
         assert result[0]["event_type"] == "taskStatusUpdate"
         assert result[1]["data"]["artifact"]["parts"] == [

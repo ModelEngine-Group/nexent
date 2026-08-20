@@ -2041,6 +2041,55 @@ class TestSkillManagerWriteSkillFile:
         assert not outside_path.exists()
 
 
+class TestSkillManagerZipPathSecurity:
+    """Regression tests for path traversal in SDK ZIP extraction."""
+
+    @staticmethod
+    def _archive_with_traversal() -> bytes:
+        archive = io.BytesIO()
+        with zipfile.ZipFile(archive, "w") as zf:
+            zf.writestr(
+                "safe-skill/SKILL.md",
+                "---\nname: safe-skill\ndescription: safe\n---\n",
+            )
+            zf.writestr("../../escape.txt", "escaped")
+        return archive.getvalue()
+
+    def test_upload_zip_rejects_traversal_before_writing(self):
+        with TempSkillDir() as temp:
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
+
+            with pytest.raises(ValueError, match="outside the skill directory"):
+                manager.upload_skill_from_file(
+                    self._archive_with_traversal(),
+                    file_type="zip",
+                    tenant_id=None,
+                )
+
+            assert not os.path.exists(os.path.join(temp.temp_dir, "escape.txt"))
+            assert not os.path.exists(os.path.join(temp.skills_dir, "safe-skill"))
+
+    def test_update_zip_rejects_traversal_before_writing(self):
+        with TempSkillDir() as temp:
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
+            manager.save_skill(
+                {"name": "safe-skill", "description": "safe", "content": "original"},
+                tenant_id=None,
+            )
+
+            with pytest.raises(ValueError, match="outside the skill directory"):
+                manager.update_skill_from_file(
+                    self._archive_with_traversal(),
+                    "safe-skill",
+                    file_type="zip",
+                    tenant_id=None,
+                )
+
+            assert not os.path.exists(os.path.join(temp.temp_dir, "escape.txt"))
+            loaded = manager.load_skill("safe-skill", tenant_id=None)
+            assert loaded["content"] == "original"
+
+
 class TestSkillManagerGetSkillMetadata:
     """Test SkillManager._get_skill_metadata method."""
 
