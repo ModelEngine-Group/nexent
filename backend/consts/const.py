@@ -108,6 +108,10 @@ SERVICE_ROLE_KEY = os.getenv('SERVICE_ROLE_KEY', SUPABASE_KEY)
 # GoTrue uses GOTRUE_JWT_SECRET (= JWT_SECRET in docker setup) to sign tokens.
 SUPABASE_JWT_SECRET = os.getenv(
     'SUPABASE_JWT_SECRET') or os.getenv('JWT_SECRET', '')
+# Dedicated signing key for opaque independent-AIDP image references. The JWT
+# fallback keeps existing deployments functional while allowing key separation.
+IND_AIDP_IMAGE_SIGNING_KEY = os.getenv(
+    'IND_AIDP_IMAGE_SIGNING_KEY') or SUPABASE_JWT_SECRET
 
 
 # OAuth Configuration
@@ -134,10 +138,15 @@ CAS_LOGIN_MODE = os.getenv("CAS_LOGIN_MODE", "disabled").lower()
 CAS_USER_ATTRIBUTE = os.getenv("CAS_USER_ATTRIBUTE", "")
 CAS_EMAIL_ATTRIBUTE = os.getenv("CAS_EMAIL_ATTRIBUTE", "email")
 CAS_ROLE_ATTRIBUTE = os.getenv("CAS_ROLE_ATTRIBUTE", "role")
+CAS_DEFAULT_ROLE = os.getenv("CAS_DEFAULT_ROLE", "USER").strip().upper()
 CAS_TENANT_ATTRIBUTE = os.getenv("CAS_TENANT_ATTRIBUTE", "tenant_id")
+CAS_DEFAULT_TENANT_ID = os.getenv("CAS_DEFAULT_TENANT_ID", "tenant_id")
 CAS_ROLE_MAP_JSON = os.getenv("CAS_ROLE_MAP_JSON", "")
 CAS_SESSION_MAX_AGE_SECONDS = int(os.getenv("CAS_SESSION_MAX_AGE_SECONDS", "3600") or 3600)
 LOCAL_SESSION_MAX_AGE_SECONDS = int(os.getenv("LOCAL_SESSION_MAX_AGE_SECONDS", "3600") or 3600)
+CAS_HEARTBEAT_URL = os.getenv("CAS_HEARTBEAT_URL", "").strip()
+CAS_HEARTBEAT_INTERVAL_SECONDS = int(os.getenv("CAS_HEARTBEAT_INTERVAL_SECONDS", "300") or 300)
+CAS_HEARTBEAT_COOKIE_NAME = os.getenv("CAS_HEARTBEAT_COOKIE_NAME", "").strip()
 CAS_RENEW_BEFORE_SECONDS = int(os.getenv("CAS_RENEW_BEFORE_SECONDS", "300") or 300)
 CAS_RENEW_TIMEOUT_SECONDS = int(os.getenv("CAS_RENEW_TIMEOUT_SECONDS", "10") or 10)
 CAS_SYNTHETIC_EMAIL_DOMAIN = os.getenv("CAS_SYNTHETIC_EMAIL_DOMAIN", "")
@@ -167,6 +176,13 @@ IMAGE_FILTER = os.getenv("IMAGE_FILTER", "false").lower() == "true"
 # Default User and Tenant IDs
 DEFAULT_USER_ID = "user_id"
 DEFAULT_TENANT_ID = "tenant_id"
+
+# Tenant resource hard limits. These values are intentionally not configurable.
+MAX_TENANT_COUNT = 100
+MAX_USERS_PER_TENANT = 10_000
+MAX_GROUPS_PER_TENANT = 1_000
+MAX_SUPER_ADMIN_COUNT = 1
+MAX_ADMINS_PER_TENANT = 1_000
 
 # Invitation code type for asset administrator registration
 ASSET_OWNER_INVITE_CODE_TYPE = "ASSET_OWNER_INVITE"
@@ -262,18 +278,18 @@ FORWARD_REDIS_RETRY_MAX = int(os.getenv("FORWARD_REDIS_RETRY_MAX", "12"))
 
 
 # Ray Configuration
+DP_PART_PROCESSOR_COUNT = int(os.getenv("DP_PART_PROCESSOR_COUNT", "3"))
+DP_FILE_SPLIT_SIZE_MB = int(os.getenv("DP_FILE_SPLIT_SIZE_MB", "5"))
 RAY_ACTOR_NUM_CPUS = int(os.getenv("RAY_ACTOR_NUM_CPUS", "2"))
 RAY_DASHBOARD_PORT = int(os.getenv("RAY_DASHBOARD_PORT", "8265"))
 RAY_DASHBOARD_HOST = os.getenv("RAY_DASHBOARD_HOST", "0.0.0.0")
-RAY_NUM_CPUS = int(os.getenv("RAY_NUM_CPUS", "4"))
-RAY_OBJECT_STORE_MEMORY_GB = float(
-    os.getenv("RAY_OBJECT_STORE_MEMORY_GB", "0.25"))
+RAY_NUM_CPUS = DP_PART_PROCESSOR_COUNT * RAY_ACTOR_NUM_CPUS
+RAY_OBJECT_STORE_MEMORY_GB = float(os.getenv("RAY_OBJECT_STORE_MEMORY_GB", "0.25"))
 RAY_TEMP_DIR = os.getenv("RAY_TEMP_DIR", "/tmp/ray")
 RAY_LOG_LEVEL = os.getenv("RAY_LOG_LEVEL", "INFO").upper()
 # Disable plasma preallocation to reduce idle memory usage
 # When set to false, Ray will allocate object store memory on-demand instead of preallocating
-RAY_preallocate_plasma = os.getenv(
-    "RAY_preallocate_plasma", "false").lower() == "true"
+RAY_preallocate_plasma = os.getenv("RAY_preallocate_plasma", "false").lower() == "true"
 
 
 # Service Control Flags
@@ -302,13 +318,11 @@ RAY_ADDRESS = os.getenv("RAY_ADDRESS", "auto")
 QUEUES = os.getenv("QUEUES", "process_q,process_part_q,forward_q")
 # Will be dynamically set based on PID if not provided
 WORKER_NAME = os.getenv("WORKER_NAME")
-WORKER_CONCURRENCY = int(os.getenv("WORKER_CONCURRENCY", "4"))
+WORKER_CONCURRENCY = DP_PART_PROCESSOR_COUNT + 1
 RAY_WARM_ACTOR_POOL_SIZE_PART = int(
     os.getenv("RAY_WARM_ACTOR_POOL_SIZE_PART", "2"))
 RAY_WARM_ACTOR_POOL_SIZE_PROCESS = int(
     os.getenv("RAY_WARM_ACTOR_POOL_SIZE_PROCESS", "1"))
-# Global Ray actor pool (shared by process_q/process_part_q workers)
-RAY_GLOBAL_ACTOR_POOL_SIZE = int(os.getenv("RAY_GLOBAL_ACTOR_POOL_SIZE", "3"))
 RAY_ACTOR_WARM_TIMEOUT_S = float(os.getenv("RAY_ACTOR_WARM_TIMEOUT_S", "60"))
 RAY_GLOBAL_ACTOR_POOL_NAME = os.getenv(
     "RAY_GLOBAL_ACTOR_POOL_NAME", "nexent_global_data_processor_pool")

@@ -1,7 +1,7 @@
 from enum import Enum
 from typing import Optional, Any, List, Dict, Literal
 
-from pydantic import BaseModel, Field, EmailStr, ConfigDict, field_validator
+from pydantic import BaseModel, Field, EmailStr, ConfigDict, field_validator, model_validator
 from nexent.core.agents.agent_model import AgentVerificationConfig, ToolConfig
 
 from consts.prompt_template import PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP
@@ -323,6 +323,77 @@ class ToolParamsRequest(BaseModel):
     )
 
 
+KnowledgeScopeMode = Literal["inherit", "override", "disabled"]
+
+
+class LocalKnowledgeScopeRequest(BaseModel):
+    """Conversation-scoped selection for local knowledge bases."""
+
+    mode: KnowledgeScopeMode = "inherit"
+    knowledge_ids: List[str] = Field(default_factory=list, max_length=50)
+
+    @field_validator("knowledge_ids")
+    @classmethod
+    def normalize_knowledge_ids(cls, values: List[str]) -> List[str]:
+        normalized = []
+        for value in values:
+            item = str(value).strip()
+            if not item or len(item) > 32:
+                raise ValueError("knowledge_ids must contain non-empty identifiers of at most 32 characters")
+            if item not in normalized:
+                normalized.append(item)
+        return normalized
+
+    @model_validator(mode="after")
+    def validate_mode_and_ids(self):
+        if self.mode == "override" and not self.knowledge_ids:
+            raise ValueError("local override mode requires at least one knowledge_id")
+        if self.mode != "override" and self.knowledge_ids:
+            raise ValueError(f"local {self.mode} mode does not accept knowledge_ids")
+        return self
+
+
+class AidpKnowledgeScopeRequest(BaseModel):
+    """Conversation-scoped selection for AIDP knowledge bases."""
+
+    mode: KnowledgeScopeMode = "inherit"
+    kds_ids: List[str] = Field(default_factory=list, max_length=10)
+
+    @field_validator("kds_ids")
+    @classmethod
+    def normalize_kds_ids(cls, values: List[str]) -> List[str]:
+        normalized = []
+        for value in values:
+            item = str(value).strip()
+            if not item or len(item) > 256:
+                raise ValueError("kds_ids must contain non-empty identifiers of at most 256 characters")
+            if item not in normalized:
+                normalized.append(item)
+        return normalized
+
+    @model_validator(mode="after")
+    def validate_mode_and_ids(self):
+        if self.mode == "override" and not self.kds_ids:
+            raise ValueError("AIDP override mode requires at least one kds_id")
+        if self.mode != "override" and self.kds_ids:
+            raise ValueError(f"AIDP {self.mode} mode does not accept kds_ids")
+        return self
+
+
+class ConversationKnowledgeScopeRequest(BaseModel):
+    """Persisted business policy for conversation-scoped knowledge retrieval."""
+
+    schema_version: Literal[1] = 1
+    local: LocalKnowledgeScopeRequest = Field(default_factory=LocalKnowledgeScopeRequest)
+    aidp: AidpKnowledgeScopeRequest = Field(default_factory=AidpKnowledgeScopeRequest)
+
+
+class ConversationKnowledgeScopeUpdateRequest(BaseModel):
+    """Replace a conversation scope, or clear it with null to restore defaults."""
+
+    scope: Optional[ConversationKnowledgeScopeRequest] = None
+
+
 class AgentRequest(BaseModel):
     query: str
     conversation_id: Optional[int] = None
@@ -335,6 +406,7 @@ class AgentRequest(BaseModel):
     version_no: Optional[int] = None
     is_debug: Optional[bool] = False
     tool_params: Optional[ToolParamsRequest] = None
+    knowledge_scope: Optional[ConversationKnowledgeScopeRequest] = None
     context_policy: Optional[Dict[str, Any]] = Field(
         default=None,
         description="Optional request-scoped context policy override",
@@ -414,6 +486,7 @@ class TaskRequest(BaseModel):
     original_filename: Optional[str] = None
     embedding_model_id: Optional[int] = None
     tenant_id: Optional[str] = None
+    telemetry_context: Dict[str, str] = Field(default_factory=dict)
     additional_params: Dict[str, Any] = Field(default_factory=dict)
 
 
@@ -462,8 +535,12 @@ class HybridSearchRequest(BaseModel):
                                    description="List of index names to search")
     top_k: int = Field(10, ge=1, le=100,
                        description="Number of results to return")
-    weight_accurate: float = Field(0.5, ge=0.0, le=1.0,
-                                   description="Weight applied to accurate search scores")
+    weight_accurate: Optional[float] = Field(
+        None,
+        ge=0.0,
+        le=1.0,
+        description="Optional caller-specified weight applied to accurate search scores",
+    )
 
 
 # Request models
@@ -472,7 +549,6 @@ class ProcessParams(BaseModel):
     source_type: str
     index_name: str
     authorization: Optional[str] = None
-    model_id: Optional[int] = None
 
 
 class OpinionRequest(BaseModel):

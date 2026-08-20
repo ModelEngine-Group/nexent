@@ -105,7 +105,7 @@ class TestFetchAidpKnowledgeBasesImpl:
 
     def test_uses_bearer_auth_header(self, aidp_service_module):
         mock_client = MagicMock()
-        mock_response = MagicMock()
+        mock_response = MagicMock(status_code=200)
         mock_response.json.return_value = {"value": [{"kds_id": "kb-1"}]}
         mock_response.raise_for_status.return_value = None
         mock_client.get.return_value = mock_response
@@ -205,7 +205,7 @@ class TestFetchAidpKnowledgeBasesImpl:
 
     def test_fetch_invalid_json_shape_maps_service_error(self, aidp_service_module):
         mock_client = MagicMock()
-        mock_response = MagicMock()
+        mock_response = MagicMock(status_code=200)
         mock_response.raise_for_status.return_value = None
         mock_response.json.return_value = ["unexpected-list"]
         mock_client.get.return_value = mock_response
@@ -223,8 +223,17 @@ class TestFetchAidpKnowledgeBasesImpl:
 
 
 class TestFetchAllAidpKnowledgeBasesImpl:
-    def test_follows_next_link_for_pagination(self, aidp_service_module):
-        """Follows next_link from response to fetch subsequent pages."""
+    @pytest.fixture(autouse=True)
+    def mock_count(self, aidp_service_module, monkeypatch):
+        monkeypatch.setattr(
+            aidp_service_module,
+            "count_aidp_kbs_impl",
+            MagicMock(return_value=1),
+        )
+
+    def test_fetches_pages_from_count_and_uses_configured_tenant(self, aidp_service_module):
+        """Calculates pages from Count and ignores the tenant in next_link."""
+        aidp_service_module.count_aidp_kbs_impl.return_value = 101
         mock_client = MagicMock()
 
         page1_response = MagicMock()
@@ -262,18 +271,103 @@ class TestFetchAllAidpKnowledgeBasesImpl:
             {"kds_id": "kb-4"},
         ]
         assert mock_client.get.call_count == 2
+        requested_urls = [call.args[0] for call in mock_client.get.call_args_list]
+        assert requested_urls == [
+            "http://127.0.0.1:30081/KnowledgeBase/Tenants/aidp/KnowledgeBases?page=1&page_size=100",
+            "http://127.0.0.1:30081/KnowledgeBase/Tenants/aidp/KnowledgeBases?page=2&page_size=100",
+        ]
 
-    def test_stops_when_next_link_is_null(self, aidp_service_module):
-        """Stops pagination when next_link is null/empty."""
+    def test_deduplicates_kds_ids_across_pages(self, aidp_service_module):
+        aidp_service_module.count_aidp_kbs_impl.return_value = 101
+        page1 = MagicMock(status_code=200)
+        page1.raise_for_status.return_value = None
+        page1.json.return_value = {
+            "value": [{"kds_id": "kb-1"}],
+            "next_link": "/KnowledgeBase/Tenants/aidp/KnowledgeBases?page=2&page_size=100",
+        }
+        page2 = MagicMock(status_code=200)
+        page2.raise_for_status.return_value = None
+        page2.json.return_value = {
+            "value": [{"kds_id": "kb-1"}, {"kds_id": "kb-2"}],
+            "next_link": None,
+        }
         mock_client = MagicMock()
-        single_response = MagicMock()
-        single_response.json.return_value = {
+        mock_client.get.side_effect = [page1, page2]
+        mock_manager = MagicMock()
+        mock_manager.get_sync_client.return_value = mock_client
+        aidp_service_module.http_client_manager = mock_manager
+
+        result = aidp_service_module.fetch_all_aidp_knowledge_bases_impl(
+            server_url="http://127.0.0.1:30081",
+            api_key="jwt-token",
+        )
+
+        assert result["value"] == [{"kds_id": "kb-1"}, {"kds_id": "kb-2"}]
+        assert result["total_count"] == 2
+
+    def test_ignores_repeated_next_link(self, aidp_service_module):
+        aidp_service_module.count_aidp_kbs_impl.return_value = 101
+        repeated_link = "/KnowledgeBase/Tenants/aidp/KnowledgeBases?page=2&page_size=100"
+        page1 = MagicMock(status_code=200)
+        page1.raise_for_status.return_value = None
+        page1.json.return_value = {"value": [{"kds_id": "kb-1"}], "next_link": repeated_link}
+        page2 = MagicMock(status_code=200)
+        page2.raise_for_status.return_value = None
+        page2.json.return_value = {"value": [{"kds_id": "kb-2"}], "next_link": repeated_link}
+        mock_client = MagicMock()
+        mock_client.get.side_effect = [page1, page2]
+        mock_manager = MagicMock()
+        mock_manager.get_sync_client.return_value = mock_client
+        aidp_service_module.http_client_manager = mock_manager
+
+        result = aidp_service_module.fetch_all_aidp_knowledge_bases_impl(
+            server_url="http://127.0.0.1:30081",
+            api_key="jwt-token",
+        )
+
+        assert result["value"] == [{"kds_id": "kb-1"}, {"kds_id": "kb-2"}]
+        assert mock_client.get.call_count == 2
+
+    def test_ignores_next_link_on_different_origin(self, aidp_service_module):
+        page1 = MagicMock(status_code=200)
+        page1.raise_for_status.return_value = None
+        page1.json.return_value = {
+            "value": [{"kds_id": "kb-1"}],
+            "next_link": "https://unexpected.example/KnowledgeBases?page=2",
+        }
+        mock_client = MagicMock()
+        mock_client.get.return_value = page1
+        mock_manager = MagicMock()
+        mock_manager.get_sync_client.return_value = mock_client
+        aidp_service_module.http_client_manager = mock_manager
+
+        result = aidp_service_module.fetch_all_aidp_knowledge_bases_impl(
+            server_url="http://127.0.0.1:30081",
+            api_key="jwt-token",
+        )
+
+        assert result["value"] == [{"kds_id": "kb-1"}]
+        assert mock_client.get.call_count == 1
+
+    def test_fetches_all_counted_pages_when_next_link_is_null(self, aidp_service_module):
+        """Count, rather than next_link, controls the number of pages."""
+        aidp_service_module.count_aidp_kbs_impl.return_value = 101
+        mock_client = MagicMock()
+        page1 = MagicMock()
+        page1.json.return_value = {
             "value": [{"kds_id": "kb-1"}],
             "next_link": None,
         }
-        single_response.status_code = 200
-        single_response.raise_for_status.return_value = None
-        mock_client.get.return_value = single_response
+        page1.status_code = 200
+        page1.raise_for_status.return_value = None
+        page2 = MagicMock()
+        page2.json.return_value = {
+            "value": [{"kds_id": "kb-2"}],
+            "next_link": None,
+        }
+        page2.status_code = 200
+        page2.raise_for_status.return_value = None
+        mock_client.get.side_effect = [page1, page2]
 
         mock_manager = MagicMock()
         mock_manager.get_sync_client.return_value = mock_client
@@ -284,13 +378,32 @@ class TestFetchAllAidpKnowledgeBasesImpl:
             api_key="jwt-token",
         )
 
-        assert result["total_count"] == 1
-        assert mock_client.get.call_count == 1
+        assert result["total_count"] == 2
+        assert mock_client.get.call_count == 2
+
+    def test_zero_count_skips_list_requests(self, aidp_service_module):
+        aidp_service_module.count_aidp_kbs_impl.return_value = 0
+        mock_client = MagicMock()
+        mock_manager = MagicMock()
+        mock_manager.get_sync_client.return_value = mock_client
+        aidp_service_module.http_client_manager = mock_manager
+
+        result = aidp_service_module.fetch_all_aidp_knowledge_bases_impl(
+            server_url="http://127.0.0.1:30081",
+            api_key="jwt-token",
+        )
+
+        assert result == {
+            "value": [],
+            "total_count": 0,
+            "next_link": None,
+        }
+        mock_client.get.assert_not_called()
 
     def test_first_page_uses_page_size_100(self, aidp_service_module):
         """The initial request uses page_size=100."""
         mock_client = MagicMock()
-        empty_response = MagicMock()
+        empty_response = MagicMock(status_code=200)
         empty_response.json.return_value = {"value": [], "next_link": None}
         empty_response.raise_for_status.return_value = None
         mock_client.get.return_value = empty_response
@@ -346,7 +459,7 @@ class TestFetchAllAidpKnowledgeBasesImpl:
 
     def test_invalid_json_shape_maps_service_error(self, aidp_service_module):
         mock_client = MagicMock()
-        mock_response = MagicMock()
+        mock_response = MagicMock(status_code=200)
         mock_response.raise_for_status.return_value = None
         mock_response.json.return_value = ["unexpected-list"]
         mock_client.get.return_value = mock_response
@@ -560,20 +673,29 @@ class TestRequestWithRetry:
         assert request_fn.call_count == 2
         assert sleep_calls == [5.0]
 
-    def test_mixed_status_codes_trigger_retry(self, mod, monkeypatch):
-        """Any non-200 status triggers retry: 400, 404, 500 all treated equally."""
-        resp_400 = self._mock_response(400)
-        resp_404 = self._mock_response(404)
-        resp_200 = self._mock_response(200)
-        request_fn = MagicMock(side_effect=[resp_400, resp_404, resp_200])
+    @pytest.mark.parametrize("status_code", [400, 401, 403, 404])
+    def test_non_retryable_client_error_returns_immediately(self, mod, monkeypatch, status_code):
+        response = self._mock_response(status_code)
+        request_fn = MagicMock(return_value=response)
 
         sleep_calls = []
         monkeypatch.setattr(mod.time, "sleep", lambda s: sleep_calls.append(s))
 
-        result = mod._request_with_retry(request_fn, context="test-mixed")
+        result = mod._request_with_retry(request_fn, context="test-client-error")
 
-        assert result is resp_200
-        assert request_fn.call_count == 3
+        assert result is response
+        assert request_fn.call_count == 1
+        assert sleep_calls == []
+
+    @pytest.mark.parametrize("status_code", [201, 202, 204])
+    def test_any_success_status_returns_immediately(self, mod, status_code):
+        response = self._mock_response(status_code)
+        request_fn = MagicMock(return_value=response)
+
+        result = mod._request_with_retry(request_fn, context="test-success-status")
+
+        assert result is response
+        assert request_fn.call_count == 1
 
     def test_custom_max_attempts(self, mod, monkeypatch):
         """Passing max_attempts=1 disables retry — returns first response immediately."""
@@ -735,6 +857,14 @@ class TestFetchAidpKnowledgeBasesImplGaps:
 class TestFetchAllAidpKnowledgeBasesImplGaps:
     """Cover remaining branches in fetch_all_aidp_knowledge_bases_impl."""
 
+    @pytest.fixture(autouse=True)
+    def mock_count(self, aidp_service_module, monkeypatch):
+        monkeypatch.setattr(
+            aidp_service_module,
+            "count_aidp_kbs_impl",
+            MagicMock(return_value=1),
+        )
+
     def test_non_list_page_items_treated_as_empty(self, aidp_service_module):
         """page_items is not a list (e.g. a string) -> treated as empty list."""
         mock_client = MagicMock()
@@ -820,23 +950,6 @@ class TestApplyCreateDefaultsGaps:
     def test_empty_description_with_name_uses_name(self, aidp_service_module):
         result = aidp_service_module._apply_create_defaults({"name": "my-kb", "description": ""})
         assert result["description"] == "my-kb"
-
-
-# ---------------------------------------------------------------------------
-# _extract_tenant_from_url tests
-# ---------------------------------------------------------------------------
-class TestExtractTenantFromUrl:
-    """Tests for _extract_tenant_from_url helper."""
-
-    def test_extracts_tenant(self, aidp_service_module):
-        result = aidp_service_module._extract_tenant_from_url(
-            "/KnowledgeBase/Tenants/my-tenant-123/KnowledgeBases?page=2"
-        )
-        assert result == "my-tenant-123"
-
-    def test_no_match_returns_none(self, aidp_service_module):
-        result = aidp_service_module._extract_tenant_from_url("/some/other/path")
-        assert result is None
 
 
 # ---------------------------------------------------------------------------
@@ -1510,7 +1623,16 @@ class TestUploadAidpDocsImpl:
         assert exc_info.value.error_code == ErrorCode.AIDP_CONFIG_INVALID
 
     def test_success(self, aidp_service_module, mock_file):
-        mock_resp = _make_success_response({"uploaded": 1, "file_ids": ["f1"]})
+        upload_response = {
+            "summary": {"total": 1, "success": 0, "failed": 1},
+            "success_list": [],
+            "failed_list": [{
+                "file_name": "test.pdf",
+                "reason_zh": "文件内容为空",
+                "reason_en": "File content is empty",
+            }],
+        }
+        mock_resp = _make_success_response(upload_response)
         _setup_mock_client(aidp_service_module, method="post", response=mock_resp)
 
         result = aidp_service_module.upload_aidp_docs_impl(
@@ -1519,7 +1641,7 @@ class TestUploadAidpDocsImpl:
             kds_id="kb-1",
             files=[mock_file],
         )
-        assert result["uploaded"] == 1
+        assert result == upload_response
 
     def test_file_with_no_content_type_uses_octet_stream(self, aidp_service_module, mock_file_no_ct):
         mock_resp = _make_success_response({"uploaded": 1})
@@ -1582,6 +1704,147 @@ class TestUploadAidpDocsImpl:
                 files=[mock_file],
             )
         assert exc_info.value.error_code == ErrorCode.AIDP_SERVICE_ERROR
+
+    def test_service_error_preserves_structured_upstream_reason(self, aidp_service_module, mock_file):
+        request = httpx.Request("POST", "http://127.0.0.1:30081/upload")
+        response = httpx.Response(
+            500,
+            request=request,
+            json={"detail": {"reason_zh": "文件解析服务不可用"}},
+        )
+        error = httpx.HTTPStatusError(
+            "http 500",
+            request=request,
+            response=response,
+        )
+        _setup_mock_client(aidp_service_module, method="post", side_effect=error)
+
+        with pytest.raises(AppException) as exc_info:
+            aidp_service_module.upload_aidp_docs_impl(
+                server_url="http://127.0.0.1:30081",
+                api_key="jwt-token",
+                kds_id="kb-1",
+                files=[mock_file],
+            )
+
+        assert exc_info.value.message == "文件解析服务不可用"
+        assert exc_info.value.details == {
+            "upstream_status": 500,
+            "upstream_reason": "文件解析服务不可用",
+        }
+
+    def test_structured_file_error_returns_localized_failed_list(self, aidp_service_module, mock_file):
+        request = httpx.Request("POST", "http://127.0.0.1:30081/upload")
+        response = httpx.Response(
+            500,
+            request=request,
+            json={
+                "error": {
+                    "code": 1001,
+                    "message": "Upload knowledge files failed",
+                    "details": [
+                        {
+                            "file_name": "test.pdf",
+                            "reason_zh": "文件已存在，请重命名或删除已有文件",
+                            "reason_en": "File already exists. Please rename or delete the existing file.",
+                        }
+                    ],
+                }
+            },
+        )
+        error = httpx.HTTPStatusError(
+            "http 500",
+            request=request,
+            response=response,
+        )
+        _setup_mock_client(aidp_service_module, method="post", side_effect=error)
+
+        result = aidp_service_module.upload_aidp_docs_impl(
+            server_url="http://127.0.0.1:30081",
+            api_key="jwt-token",
+            kds_id="kb-1",
+            files=[mock_file],
+        )
+
+        assert result == {
+            "summary": {"total": 1, "success": 0, "failed": 1},
+            "success_list": [],
+            "failed_list": [
+                {
+                    "file_name": "test.pdf",
+                    "reason_zh": "文件已存在，请重命名或删除已有文件",
+                    "reason_en": "File already exists. Please rename or delete the existing file.",
+                }
+            ],
+        }
+
+    def test_structured_file_error_is_parsed_for_non_server_status(self, aidp_service_module, mock_file):
+        request = httpx.Request("POST", "http://127.0.0.1:30081/upload")
+        response = httpx.Response(
+            409,
+            request=request,
+            json={
+                "error": {
+                    "code": 1001,
+                    "message": "Upload knowledge files failed",
+                    "details": [
+                        {
+                            "file_name": "test.pdf",
+                            "reason_zh": "文件已存在，请重命名或删除已有文件",
+                            "reason_en": "File already exists. Please rename or delete the existing file.",
+                        }
+                    ],
+                }
+            },
+        )
+        error = httpx.HTTPStatusError(
+            "http 409",
+            request=request,
+            response=response,
+        )
+        _setup_mock_client(aidp_service_module, method="post", side_effect=error)
+
+        result = aidp_service_module.upload_aidp_docs_impl(
+            server_url="http://127.0.0.1:30081",
+            api_key="jwt-token",
+            kds_id="kb-1",
+            files=[mock_file],
+        )
+
+        assert result["summary"] == {"total": 1, "success": 0, "failed": 1}
+        assert result["failed_list"] == [
+            {
+                "file_name": "test.pdf",
+                "reason_zh": "文件已存在，请重命名或删除已有文件",
+                "reason_en": "File already exists. Please rename or delete the existing file.",
+            }
+        ]
+
+    def test_service_error_uses_bounded_plain_text_reason(self, aidp_service_module, mock_file):
+        request = httpx.Request("POST", "http://127.0.0.1:30081/upload")
+        response = httpx.Response(
+            500,
+            request=request,
+            headers={"content-type": "text/plain"},
+            text="parser unavailable",
+        )
+        error = httpx.HTTPStatusError(
+            "http 500",
+            request=request,
+            response=response,
+        )
+        _setup_mock_client(aidp_service_module, method="post", side_effect=error)
+
+        with pytest.raises(AppException) as exc_info:
+            aidp_service_module.upload_aidp_docs_impl(
+                server_url="http://127.0.0.1:30081",
+                api_key="jwt-token",
+                kds_id="kb-1",
+                files=[mock_file],
+            )
+
+        assert exc_info.value.message == "parser unavailable"
+        assert exc_info.value.details["upstream_reason"] == "parser unavailable"
 
     def test_connection_error(self, aidp_service_module, mock_file):
         request = httpx.Request("POST", "http://127.0.0.1:30081")

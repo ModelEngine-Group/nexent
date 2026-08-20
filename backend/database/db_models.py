@@ -72,6 +72,11 @@ class ConversationRecord(TableBase):
         server_default=text("'execution'"),
         doc="UI chat mode for the conversation: 'planning' or 'execution'",
     )
+    knowledge_scope = Column(
+        JSONB,
+        nullable=True,
+        doc="Conversation-scoped desired policy for local and AIDP knowledge retrieval",
+    )
 
 
 class ConversationMessage(TableBase):
@@ -1017,7 +1022,7 @@ class MemoryLongTermVersion(TableBase):
     character_count = Column(Integer, nullable=False)
     raw_dreaming_input = Column(Text)
     generation_audit = Column(JSONB, nullable=False, default=dict)
-    evidence_ids = Column(ARRAY(String(100)), nullable=False, default=list)
+    evidence_ids = Column(JSONB, nullable=False, default=list)
     fallback_details = Column(JSONB, nullable=False, default=dict)
     omission_details = Column(JSONB, nullable=False, default=dict)
 

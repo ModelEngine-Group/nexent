@@ -424,6 +424,22 @@ class TestExternalA2AAgentProxy:
         headers = proxy._build_headers()
         assert headers["Authorization"] == "Bearer my-secret"
 
+    def test_build_headers_with_custom_headers(self):
+        """Test _build_headers merges custom_headers."""
+        proxy = ExternalA2AAgentProxy(self._make_info(
+            custom_headers={"X-Custom": "val", "Authorization": "Bearer tok"}
+        ))
+        headers = proxy._build_headers()
+        assert headers["X-Custom"] == "val"
+        assert headers["Authorization"] == "Bearer tok"
+        assert headers["Content-Type"] == "application/json"
+
+    def test_build_headers_without_custom_headers(self):
+        """Test _build_headers works without custom_headers (default None)."""
+        proxy = ExternalA2AAgentProxy(self._make_info())
+        headers = proxy._build_headers()
+        assert "X-Custom" not in headers
+
     def test_build_message_payload_query_only(self):
         """Test _build_message_payload builds correct structure with only query."""
         proxy = ExternalA2AAgentProxy(self._make_info())

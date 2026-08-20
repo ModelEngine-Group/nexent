@@ -38,7 +38,8 @@ from consts.model import (
     SkillInstanceInfoRequest,
     SkillZipEntry,
     ToolInstanceInfoRequest,
-    ToolSourceEnum, ModelConnectStatusEnum
+    ToolSourceEnum, ModelConnectStatusEnum,
+    ConversationKnowledgeScopeRequest,
 )
 from services.asset_owner_visibility import resolve_agent_list_permission
 from database.agent_db import (
@@ -108,6 +109,7 @@ from services.conversation_management_service import (
     save_skill_files_to_conversation,
     update_conversation_agent_id_service,
     update_conversation_chat_mode_service,
+    update_conversation_knowledge_scope_service,
     update_message_content,
     update_message_status,
     update_unit_content,
@@ -2314,6 +2316,10 @@ async def export_agent_by_agent_id(
     for tool in tool_list:
         if tool.class_name in ["KnowledgeBaseSearchTool", "AnalyzeTextFileTool", "AnalyzeImageTool", "AnalyzeAudioTool", "AnalyzeVideoTool", "DataMateSearchTool"]:
             tool.metadata = {}
+        if tool.class_name == "IndependentAidpSearchTool":
+            tool.metadata = {}
+            if isinstance(tool.params, dict) and "api_key" in tool.params:
+                tool.params["api_key"] = ""
 
     # Resolve model display names from model_ids array
     model_ids_list = agent_info.get("model_ids") or []
@@ -2920,6 +2926,9 @@ async def prepare_agent_run(
         "context_policy": agent_request.context_policy,
         "enable_planning": agent_request.enable_plan,
     }
+    runtime_knowledge_context = getattr(agent_request, "_runtime_knowledge_context", None)
+    if isinstance(runtime_knowledge_context, dict):
+        create_run_kwargs["runtime_knowledge_context"] = runtime_knowledge_context
     if not agent_request.enable_automation_tool:
         create_run_kwargs["enable_automation_tool"] = False
     agent_run_info = await create_agent_run_info(
@@ -3209,8 +3218,80 @@ async def run_agent_stream(
     # time-related questions correctly. The SDK strips this prefix before
     # sending AGENT_NEW_RUN to the frontend, so the user message display
     # does not show the time marker.
-    agent_request.query = _inject_user_timezone_time(agent_request.query, http_request)  # pragma: no cover
+    agent_request.query = _inject_user_timezone_time(
+        agent_request.query,
+        http_request,
+    )  # pragma: no cover
 
+    conversation = None
+    if not agent_request.is_debug and agent_request.conversation_id is not None:
+        conversation = get_conversation_service(
+            conversation_id=agent_request.conversation_id,
+            user_id=resolved_user_id,
+            tenant_id=resolved_tenant_id,
+        )
+        if conversation is None:
+            raise ForbiddenError("Conversation is not accessible to the current identity")
+
+    raw_request_scope = None if resume else getattr(agent_request, "knowledge_scope", None)
+    if isinstance(raw_request_scope, ConversationKnowledgeScopeRequest):
+        request_scope = raw_request_scope
+    elif isinstance(raw_request_scope, dict):
+        request_scope = ConversationKnowledgeScopeRequest.model_validate(raw_request_scope)
+    else:
+        request_scope = None
+    stored_scope = conversation.get("knowledge_scope") if conversation else None
+    if not isinstance(stored_scope, dict):
+        stored_scope = None
+    source_scope = request_scope
+    if source_scope is None and stored_scope is not None and not resume:
+        source_scope = ConversationKnowledgeScopeRequest.model_validate(stored_scope)
+
+    resolved_scope = None
+    if source_scope is not None and not resume:
+        from services.knowledge_scope_service import (
+            build_runtime_knowledge_policy,
+            build_runtime_knowledge_resources,
+            resolve_knowledge_scope,
+        )
+
+        if agent_request.agent_id is None:
+            raise ValueError("agent_id is required when knowledge_scope is set")
+        resolved_scope = resolve_knowledge_scope(
+            scope=source_scope,
+            agent_id=agent_request.agent_id,
+            tenant_id=resolved_tenant_id,
+            user_id=resolved_user_id,
+            version_no=agent_request.version_no,
+            is_debug=bool(agent_request.is_debug),
+            request_tool_params=agent_request.tool_params,
+        )
+        agent_request.tool_params = resolved_scope.tool_params
+        agent_request.__dict__["_runtime_knowledge_context"] = {
+            "policy": build_runtime_knowledge_policy(language),
+            "resources": build_runtime_knowledge_resources(resolved_scope, language),
+        }
+        agent_request.__dict__["_resolved_knowledge_scope_event"] = {
+            "effective": {
+                "local": {
+                    "disabled": resolved_scope.local_disabled,
+                    "knowledge_ids": resolved_scope.local_knowledge_ids,
+                    "display_names": resolved_scope.local_display_names,
+                },
+                "aidp": {
+                    "disabled": resolved_scope.aidp_disabled,
+                    "kds_ids": resolved_scope.aidp_kds_ids,
+                    "display_names": resolved_scope.aidp_display_names,
+                },
+            },
+            "warnings": resolved_scope.warnings,
+        }
+        if resolved_scope.warnings:
+            logger.warning(
+                "Knowledge scope resolved with warnings conversation_id=%s warnings=%s",
+                agent_request.conversation_id,
+                resolved_scope.warnings,
+            )
     # Auto-create conversation when conversation_id is not provided.
     # Skip in debug mode: debug runs are ephemeral and must not persist
     # conversations, titles, or messages to the user's history.
@@ -3222,12 +3303,15 @@ async def run_agent_stream(
         )
     elif agent_request.conversation_id is None:
         default_title = DEFAULT_EN_TITLE if language == LANGUAGE["EN"] else DEFAULT_ZH_TITLE
-        conversation_data = create_new_conversation(
-            title=default_title,
-            user_id=resolved_user_id,
-            agent_id=agent_request.agent_id,
-            chat_mode="planning" if agent_request.enable_plan else "execution",
-        )
+        conversation_kwargs = {
+            "title": default_title,
+            "user_id": resolved_user_id,
+            "agent_id": agent_request.agent_id,
+            "chat_mode": "planning" if agent_request.enable_plan else "execution",
+        }
+        if resolved_scope is not None:
+            conversation_kwargs["knowledge_scope"] = resolved_scope.desired_scope
+        conversation_data = create_new_conversation(**conversation_kwargs)
         agent_request.conversation_id = conversation_data["conversation_id"]
         is_new_conversation = True
         logger.info(
@@ -3241,17 +3325,25 @@ async def run_agent_stream(
         and not is_new_conversation
         and agent_request.conversation_id is not None
     ):
-        conversation = get_conversation_service(
-            conversation_id=agent_request.conversation_id,
-            user_id=resolved_user_id,
-            tenant_id=resolved_tenant_id,
-        )
-        if conversation is None:
-            raise ForbiddenError("Conversation is not accessible to the current identity")
         update_conversation_chat_mode_service(
             conversation_id=agent_request.conversation_id,
             chat_mode="planning" if agent_request.enable_plan else "execution",
             user_id=resolved_user_id,
+        )
+
+    if (
+        request_scope is not None
+        and resolved_scope is not None
+        and not agent_request.is_debug
+        and not resume
+        and not is_new_conversation
+        and agent_request.conversation_id is not None
+    ):
+        update_conversation_knowledge_scope_service(
+            conversation_id=agent_request.conversation_id,
+            knowledge_scope=resolved_scope.desired_scope,
+            user_id=resolved_user_id,
+            tenant_id=resolved_tenant_id,
         )
 
     if (
@@ -3493,6 +3585,17 @@ async def run_agent_stream(
             # Emit conversation_created event for new conversations
             if is_new_conversation:
                 yield f'data: {{"type": "conversation_created", "content": {{"conversation_id": {agent_request.conversation_id}}}}}\n\n'
+
+            scope_event = getattr(agent_request, "_resolved_knowledge_scope_event", None)
+            if scope_event is not None:
+                yield (
+                    "data: "
+                    + json.dumps(
+                        {"type": "knowledge_scope_resolved", "content": scope_event},
+                        ensure_ascii=False,
+                    )
+                    + "\n\n"
+                )
 
             with agent_monitoring_context(agent_metadata):
                 async for data_chunk in stream_gen:
