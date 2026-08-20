@@ -968,9 +968,13 @@ async def test_build_run_info_is_ephemeral(mocker):
     assert run_info.history[0].content == (
         "Build an agent that summarizes weather risks."
     )
-    assert len(run_info.context_input.items) == 2
-    assert run_info.context_input.items[0] == verified_context
-    history_item = run_info.context_input.items[1]
+    assert len(run_info.context_input.items) == 3
+    prompt_context = run_info.context_input.items[0]
+    assert prompt_context.id == "system:nl2agent_prompt"
+    assert prompt_context.type == ContextItemType.SYSTEM
+    assert "### Role" in prompt_context.content["text"]
+    assert run_info.context_input.items[1] == verified_context
+    history_item = run_info.context_input.items[2]
     assert history_item.type.value == "conversation_turn"
     assert history_item.content == {
         "user_message": "Build an agent that summarizes weather risks.",
@@ -1173,7 +1177,12 @@ async def test_build_run_info_falls_back_without_capacity_snapshot(mocker):
     assert context_config.hard_input_budget_tokens == 0
     assert run_info.model_config_list == model_configs
     assert run_info.history == []
-    assert run_info.context_input.items == (verified_context,)
+    assert len(run_info.context_input.items) == 2
+    prompt_context = run_info.context_input.items[0]
+    assert prompt_context.id == "system:nl2agent_prompt"
+    assert prompt_context.type == ContextItemType.SYSTEM
+    assert "### Role" in prompt_context.content["text"]
+    assert run_info.context_input.items[1] == verified_context
     assert run_info.mcp_host == [
         {
             "url": "http://local-mcp:5011/base/sse",

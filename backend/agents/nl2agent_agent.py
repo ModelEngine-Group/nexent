@@ -2,6 +2,7 @@
 
 from jinja2 import StrictUndefined, Template
 from nexent.core.agents.agent_model import AgentConfig
+from nexent.core.agents.context import ContextItemInput, ContextItemType
 
 from consts.const import LANGUAGE
 from tool_collection.mcp.nl2agent_mcp_tools import (
@@ -43,6 +44,7 @@ def build_nl2agent_system_prompt(
 def create_nl2agent_agent_config(language: str) -> AgentConfig:
     """Create the in-memory AgentConfig for one NL2Agent request."""
 
+    system_prompt = build_nl2agent_system_prompt(language)
     return AgentConfig(
         name=NL2AGENT_NAME,
         description="Ephemeral natural-language agent builder",
@@ -51,6 +53,15 @@ def create_nl2agent_agent_config(language: str) -> AgentConfig:
         max_steps=8,
         model_name="main_model",
         provide_run_summary=False,
-        instructions=build_nl2agent_system_prompt(language),
+        context_items=[
+            ContextItemInput(
+                id="system:nl2agent_prompt",
+                type=ContextItemType.SYSTEM,
+                content={"text": system_prompt},
+                source=("prompt:nl2agent",),
+                priority=100,
+                metadata={"authority": "platform", "layout_order": -1},
+            )
+        ],
         enable_planning=False,
     )

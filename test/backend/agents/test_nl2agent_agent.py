@@ -1,10 +1,14 @@
 import ast
 import json
 import re
+from unittest.mock import MagicMock
 
 import pytest
 from jinja2 import UndefinedError
+from nexent.core.agents.context import ContextItemInput, ContextManager, ContextManagerConfig
 from pydantic import ValidationError
+from smolagents import CodeAgent
+from smolagents.memory import TaskStep
 
 from agents.nl2agent_agent import (
     build_nl2agent_system_prompt,
@@ -265,6 +269,70 @@ async def test_create_nl2agent_agent_config_has_only_current_runtime_tools(langu
         "requirements",
         "abandoned_requirement_ids",
     }
+    assert config.instructions is None
+    assert len(config.context_items) == 1
+    prompt_context = config.context_items[0]
+    assert prompt_context.id == "system:nl2agent_prompt"
+    assert prompt_context.type.value == "system"
+    assert prompt_context.source == ("prompt:nl2agent",)
+    assert prompt_context.priority == 100
+    assert prompt_context.metadata == {
+        "authority": "platform",
+        "layout_order": -1,
+    }
+    assert prompt_context.content["text"] == build_nl2agent_system_prompt(language)
+
+
+def test_nl2agent_explicit_system_context_reaches_final_model_messages():
+    config = create_nl2agent_agent_config("zh")
+    runtime_agent = CodeAgent(
+        tools=[],
+        model=MagicMock(),
+        instructions=config.instructions,
+    )
+    verified_state = ContextItemInput(
+        id="system:nl2agent_bound_resources",
+        type="system",
+        content={"text": "Verified database binding facts: agent_id=42"},
+        metadata={"authority": "tenant"},
+    )
+    manager = ContextManager(ContextManagerConfig(token_threshold=100000))
+
+    run_context = manager.prepare_run_context(
+        memory=runtime_agent.memory,
+        fallback_system_prompt=runtime_agent.system_prompt,
+        items=[*config.context_items, verified_state],
+    )
+    runtime_agent.memory.steps.append(TaskStep(task="配置这个草稿"))
+    final_context = manager.assemble_final_context(
+        model=None,
+        memory=runtime_agent.memory,
+        current_run_start_idx=0,
+        run_context=run_context,
+    )
+    message_texts = [
+        "".join(
+            part.get("text", "")
+            for part in message["content"]
+            if isinstance(part, dict)
+        )
+        for message in final_context.messages
+    ]
+
+    assert [item.id for item in run_context.items] == [
+        "system:nl2agent_prompt",
+        "system:nl2agent_bound_resources",
+    ]
+    assert all(item.id != "system:fallback" for item in run_context.items)
+    assert [message["role"] for message in final_context.messages] == [
+        "system",
+        "system",
+        "user",
+    ]
+    assert "### 核心职责" in message_texts[0]
+    assert "空描述草稿必须先输出一次 `requirement_clarification` 卡" in message_texts[0]
+    assert message_texts[1] == "Verified database binding facts: agent_id=42"
+    assert message_texts[2] == "配置这个草稿"
 
 
 def test_final_confirmation_payload_rejects_duplicate_requirement_ids():
