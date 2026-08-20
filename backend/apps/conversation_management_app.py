@@ -1,19 +1,17 @@
 import logging
 from http import HTTPStatus
-from typing import Any, Dict, Optional
+from typing import Annotated, Any, Dict, Optional
 
-from fastapi import APIRouter, Header, HTTPException, Request
+from fastapi import APIRouter, Header, HTTPException, Query, Request
 
 from consts.model import (
     ConversationRequest,
-    ConversationKnowledgeScopeUpdateRequest,
     ConversationResponse,
     GenerateTitleRequest,
     MessageIdRequest,
     OpinionRequest,
     RenameRequest,
 )
-from consts.exceptions import ConversationNotFoundError, ValidationError
 from services.conversation_management_service import (
     create_new_conversation,
     delete_conversation_service,
@@ -23,7 +21,6 @@ from services.conversation_management_service import (
     get_sources_service,
     rename_conversation_service,
     update_message_opinion_service, get_message_id_by_index_impl,
-    update_conversation_knowledge_scope_service,
 )
 from utils.auth_utils import get_current_user_id, get_current_user_info
 
@@ -57,7 +54,11 @@ async def create_new_conversation_endpoint(request: ConversationRequest, authori
 
 
 @router.get("/list", response_model=ConversationResponse)
-async def list_conversations_endpoint(authorization: Optional[str] = Header(None)):
+async def list_conversations_endpoint(
+    authorization: Optional[str] = Header(None),
+    offset: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[Optional[int], Query(ge=1, le=100)] = None,
+):
     """
     Get all conversation list
 
@@ -71,7 +72,11 @@ async def list_conversations_endpoint(authorization: Optional[str] = Header(None
         user_id, tenant_id = get_current_user_id(authorization)
         if not user_id:
             raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Unauthorized access, Please login first")
-        conversations = get_conversation_list_service(user_id)
+        conversations = get_conversation_list_service(
+            user_id,
+            limit=limit,
+            offset=offset,
+        )
         return ConversationResponse(code=0, message="success", data=conversations)
     except Exception as e:
         logging.error(f"Failed to get conversation list: {str(e)}")
@@ -143,41 +148,6 @@ async def get_conversation_history_endpoint(conversation_id: int, authorization:
     except Exception as e:
         logging.error(f"Failed to get conversation history: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
-
-
-@router.put("/{conversation_id}/knowledge-scope", response_model=ConversationResponse)
-async def update_conversation_knowledge_scope_endpoint(
-    conversation_id: int,
-    request: ConversationKnowledgeScopeUpdateRequest,
-    authorization: Optional[str] = Header(None),
-):
-    """Replace the desired knowledge scope for an existing conversation."""
-    try:
-        user_id, tenant_id = get_current_user_id(authorization)
-        scope = request.scope.model_dump(mode="json") if request.scope is not None else None
-        result = update_conversation_knowledge_scope_service(
-            conversation_id=conversation_id,
-            knowledge_scope=scope,
-            user_id=user_id,
-            tenant_id=tenant_id,
-        )
-        return ConversationResponse(
-            code=0,
-            message="success",
-            data=result,
-        )
-    except ConversationNotFoundError as exc:
-        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(exc)) from exc
-    except ValidationError as exc:
-        raise HTTPException(
-            status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
-            detail=str(exc),
-        ) from exc
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logging.error("Failed to update conversation knowledge scope: %s", exc)
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
 
 
 @router.post("/sources", response_model=Dict[str, Any])

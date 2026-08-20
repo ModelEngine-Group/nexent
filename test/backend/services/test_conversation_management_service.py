@@ -674,6 +674,32 @@ class TestConversationManagementService(unittest.TestCase):
         self.assertEqual(result[1]["title"], "Chat 2")
         mock_get_conversation_list.assert_called_once_with(self.user_id)
 
+    @patch('backend.services.conversation_management_service.get_conversation_list')
+    def test_get_conversation_list_service_forwards_pagination(self, mock_get_conversation_list):
+        mock_get_conversation_list.return_value = []
+
+        result = get_conversation_list_service(self.user_id, limit=10, offset=20)
+
+        self.assertEqual(result, [])
+        mock_get_conversation_list.assert_called_once_with(
+            self.user_id,
+            limit=10,
+            offset=20,
+        )
+
+    @patch('backend.services.conversation_management_service.get_conversation_list')
+    def test_get_conversation_list_service_forwards_offset_without_limit(self, mock_get_conversation_list):
+        mock_get_conversation_list.return_value = []
+
+        result = get_conversation_list_service(self.user_id, offset=20)
+
+        self.assertEqual(result, [])
+        mock_get_conversation_list.assert_called_once_with(
+            self.user_id,
+            limit=None,
+            offset=20,
+        )
+
     @patch('backend.services.conversation_management_service.get_conversation')
     def test_get_conversation_service_preserves_authorization_scope(self, mock_get_conversation):
         mock_get_conversation.return_value = {"conversation_id": 123}
@@ -715,6 +741,7 @@ class TestConversationManagementService(unittest.TestCase):
         # Setup
         mock_history = {
             "conversation_id": 123,
+            "conversation_title": "AI Chat",
             "agent_id": 7,
             "create_time": "2023-04-01",
             "message_records": [
@@ -747,6 +774,7 @@ class TestConversationManagementService(unittest.TestCase):
         self.assertEqual(len(result), 1)  # Result is wrapped in a list
         self.assertEqual(result[0]["conversation_id"],
                          "123")  # Converted to string
+        self.assertEqual(result[0]["conversation_title"], "AI Chat")
         self.assertEqual(result[0]["agent_id"], 7)
         self.assertEqual(len(result[0]["message"]), 2)
         # Check message structure

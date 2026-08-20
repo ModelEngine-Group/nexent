@@ -23,10 +23,22 @@ import {
   CheckIcon,
   XIcon,
 } from "lucide-react";
-import { Fragment, useCallback, useMemo, useState } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type RefObject,
+} from "react";
 import { useTranslation } from "react-i18next";
 import log from "@/lib/logger";
 import type { FC } from "react";
+import {
+  isConversationListNearBottom,
+  shouldLoadNextConversationPage,
+} from "@/lib/conversationLoadPolicy";
 
 // Conversation status indicator component
 const ConversationStatusIndicator: FC<{
@@ -58,13 +70,99 @@ const ConversationStatusIndicator: FC<{
 
 interface ThreadListProps {
   generatedTitles?: ReadonlyMap<string, string>;
+  scrollContainerRef: RefObject<HTMLDivElement>;
 }
 
-export const ThreadList: FC<ThreadListProps> = ({ generatedTitles }) => {
+export const ThreadList: FC<ThreadListProps> = ({
+  generatedTitles,
+  scrollContainerRef,
+}) => {
   const { t } = useTranslation();
+  const aui = useAui();
+  const hasMore = useAuiState((s) => s.threads.hasMore);
+  const isLoadingRef = useRef(false);
+  const touchStartYRef = useRef<number | null>(null);
+  const pointerIntentRef = useRef(false);
+  const previousScrollTopRef = useRef(0);
 
   // Placeholder for completed set - currently not used since status only has completed/running
   const completedConversations = useMemo(() => new Set<string>(), []);
+
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+
+    const requestNextPage = (hasDownwardUserIntent: boolean) => {
+      if (
+        !shouldLoadNextConversationPage({
+          hasMore,
+          isLoading: isLoadingRef.current,
+          isNearBottom: isConversationListNearBottom(
+            container.scrollHeight,
+            container.scrollTop,
+            container.clientHeight
+          ),
+          hasDownwardUserIntent,
+        })
+      ) {
+        return;
+      }
+      isLoadingRef.current = true;
+      void aui.threads.loadMore().finally(() => {
+        isLoadingRef.current = false;
+      });
+    };
+    const handleWheel = (event: WheelEvent) =>
+      requestNextPage(event.isTrusted && event.deltaY > 0);
+    const handleScroll = () => {
+      requestNextPage(
+        pointerIntentRef.current &&
+          container.scrollTop > previousScrollTopRef.current
+      );
+      previousScrollTopRef.current = container.scrollTop;
+    };
+    const handleTouchStart = (event: TouchEvent) => {
+      touchStartYRef.current = event.touches[0]?.clientY ?? null;
+    };
+    const handleTouchMove = (event: TouchEvent) => {
+      const currentY = event.touches[0]?.clientY;
+      const startY = touchStartYRef.current;
+      requestNextPage(
+        event.isTrusted &&
+          currentY !== undefined &&
+          startY !== null &&
+          currentY < startY
+      );
+      touchStartYRef.current = currentY ?? null;
+    };
+    const handleKeyDown = (event: KeyboardEvent) =>
+      requestNextPage(
+        event.isTrusted && ["ArrowDown", "PageDown", "End"].includes(event.key)
+      );
+    const handlePointerDown = () => {
+      pointerIntentRef.current = true;
+    };
+    const handlePointerUp = () => {
+      pointerIntentRef.current = false;
+    };
+
+    container.addEventListener("wheel", handleWheel, { passive: true });
+    container.addEventListener("scroll", handleScroll, { passive: true });
+    container.addEventListener("touchstart", handleTouchStart, { passive: true });
+    container.addEventListener("touchmove", handleTouchMove, { passive: true });
+    container.addEventListener("keydown", handleKeyDown);
+    container.addEventListener("pointerdown", handlePointerDown);
+    container.addEventListener("pointerup", handlePointerUp);
+    return () => {
+      container.removeEventListener("wheel", handleWheel);
+      container.removeEventListener("scroll", handleScroll);
+      container.removeEventListener("touchstart", handleTouchStart);
+      container.removeEventListener("touchmove", handleTouchMove);
+      container.removeEventListener("keydown", handleKeyDown);
+      container.removeEventListener("pointerdown", handlePointerDown);
+      container.removeEventListener("pointerup", handlePointerUp);
+    };
+  }, [aui, hasMore, scrollContainerRef]);
 
   return (
     <div className="contents p-2">
@@ -315,6 +413,7 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
       onOk: async () => {
         try {
           await threadListItem.delete();
+          await aui.threads.reload();
         } catch (error) {
           log.error("[ThreadList] Failed to delete thread:", error);
           message.error(t("chatInterface.deleteFailed"));
@@ -322,7 +421,7 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
         }
       },
     });
-  }, [confirm, t, threadListItem]);
+  }, [aui, confirm, t, threadListItem]);
 
   return (
     <>
@@ -465,4 +564,3 @@ const InlineRenameEditor: FC<{
     </form>
   );
 };
-

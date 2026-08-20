@@ -6,6 +6,11 @@ export interface ConversationListItem {
   update_time: number;
 }
 
+export interface ConversationListParams {
+  offset: number;
+  limit: number;
+}
+
 export interface ConversationListResponse {
   code: number;
   data: ConversationListItem[];
@@ -67,6 +72,7 @@ export interface ApiConversationDetail {
   // The history endpoint currently serializes this id as a string, while
   // other conversation endpoints return a number.
   conversation_id: number | string;
+  conversation_title?: string;
   agent_id?: number | null;
   chat_mode?: "planning" | "execution";
   knowledge_scope?:

@@ -1,4 +1,12 @@
-import { useState, useMemo } from "react";
+import {
+  useEffect,
+  useState,
+  useMemo,
+  useRef,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type TouchEvent as ReactTouchEvent,
+  type WheelEvent as ReactWheelEvent,
+} from "react";
 import { useRouter } from "next/navigation";
 import {
   Clock,
@@ -18,8 +26,12 @@ import { useConfirmModal } from "@/hooks/useConfirmModal";
 import { conversationService } from "@/services/conversationService";
 import { hasAutomationForConversation } from "@/features/agentAutomation/chatAdapter";
 import { type ConversationManagement } from "@/hooks/chat/useConversationManagement";
-import { ConversationListItem } from "@/types/chat";
+import { ConversationListItem } from "@/types/conversation";
 import log from "@/lib/logger";
+import {
+  isConversationListNearBottom,
+  shouldLoadNextConversationPage,
+} from "@/lib/conversationLoadPolicy";
 
 // conversation status indicator component
 const ConversationStatusIndicator = ({
@@ -98,7 +110,6 @@ export interface ChatSidebarProps {
 }
 
 const CONVERSATION_TITLE_MAX_LENGTH = 100;
-
 export function ChatSidebar({
   streamingConversations,
   completedConversations,
@@ -114,6 +125,12 @@ export function ChatSidebar({
   const [renameError, setRenameError] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState(false);
   const [openDropdownId, setOpenDropdownId] = useState<number | null>(null);
+  const isLoadingNextPageRef = useRef(false);
+  const conversationListRef = useRef<HTMLDivElement>(null);
+  const fetchNextPageRef = useRef(conversationManagement.fetchNextPage);
+  const touchStartYRef = useRef<number | null>(null);
+  const pointerIntentRef = useRef(false);
+  const previousScrollTopRef = useRef(0);
 
   // Memoize conversation categorization to avoid redundant work on unrelated state changes
   const { today, week, older } = useMemo(
@@ -122,6 +139,70 @@ export function ChatSidebar({
   );
 
   const onToggleSidebar = () => setCollapsed((prev) => !prev);
+
+  useEffect(() => {
+    fetchNextPageRef.current = conversationManagement.fetchNextPage;
+  }, [conversationManagement.fetchNextPage]);
+
+  const requestNextPage = (hasDownwardUserIntent: boolean) => {
+    const container = conversationListRef.current;
+    if (
+      !container ||
+      !shouldLoadNextConversationPage({
+        hasMore: conversationManagement.hasNextPage,
+        isLoading: isLoadingNextPageRef.current,
+        isNearBottom: isConversationListNearBottom(
+          container.scrollHeight,
+          container.scrollTop,
+          container.clientHeight
+        ),
+        hasDownwardUserIntent,
+      })
+    ) {
+      return;
+    }
+
+    isLoadingNextPageRef.current = true;
+    void fetchNextPageRef
+      .current()
+      .catch((error) => log.error("Failed to load more conversations", error))
+      .finally(() => {
+        isLoadingNextPageRef.current = false;
+      });
+  };
+
+  const handleScroll = () => {
+    const scrollTop = conversationListRef.current?.scrollTop ?? 0;
+    requestNextPage(
+      pointerIntentRef.current && scrollTop > previousScrollTopRef.current
+    );
+    previousScrollTopRef.current = scrollTop;
+  };
+
+  const handleWheel = (event: ReactWheelEvent<HTMLDivElement>) =>
+    requestNextPage(event.isTrusted && event.deltaY > 0);
+
+  const handleTouchStart = (event: ReactTouchEvent<HTMLDivElement>) => {
+    touchStartYRef.current = event.touches[0]?.clientY ?? null;
+  };
+
+  const handleTouchMove = (event: ReactTouchEvent<HTMLDivElement>) => {
+    const currentY = event.touches[0]?.clientY;
+    const startY = touchStartYRef.current;
+    requestNextPage(
+      event.isTrusted &&
+        currentY !== undefined &&
+        startY !== null &&
+        currentY < startY
+    );
+    touchStartYRef.current = currentY ?? null;
+  };
+
+  const handleKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) =>
+    requestNextPage(
+      event.isTrusted &&
+        ["ArrowDown", "PageDown", "End"].includes(event.key)
+    );
 
   const handleRenameClick = (conversationId: number, currentTitle: string) => {
     setEditingId(conversationId);
@@ -477,7 +558,22 @@ export function ChatSidebar({
           </div>
 
           <div className="flex-1 min-h-0 p-3 pt-0 w-full flex flex-col overflow-hidden">
-            <div className="flex-1 min-h-0 flex flex-col overflow-y-auto">
+            <div
+              ref={conversationListRef}
+              className="flex-1 min-h-0 flex flex-col overflow-y-auto focus:outline-none"
+              tabIndex={0}
+              onScroll={handleScroll}
+              onWheel={handleWheel}
+              onTouchStart={handleTouchStart}
+              onTouchMove={handleTouchMove}
+              onKeyDown={handleKeyDown}
+              onPointerDown={() => {
+                pointerIntentRef.current = true;
+              }}
+              onPointerUp={() => {
+                pointerIntentRef.current = false;
+              }}
+            >
               <div className="flex flex-col gap-4 pb-4">
                 {conversationManagement.conversationList.length > 0 ? (
                   <>

@@ -1,13 +1,20 @@
 import type React from "react";
 import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { UseQueryResult } from "@tanstack/react-query";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { conversationService } from "@/services/conversationService";
-import { ConversationListItem } from "@/types/chat";
+import type {
+  InfiniteData,
+  UseInfiniteQueryResult,
+} from "@tanstack/react-query";
+import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  CONVERSATION_PAGE_SIZE,
+  conversationService,
+} from "@/services/conversationService";
+import { ConversationListItem } from "@/types/conversation";
 import log from "@/lib/logger";
 
-const CONVERSATION_LIST_QUERY_KEY = ["conversations"] as const;
+const CONVERSATION_LIST_QUERY_KEY = ["conversations", "legacy-chat"] as const;
+type ConversationListData = InfiniteData<ConversationListItem[], number>;
 
 /**
  * Return type of useConversationManagement hook.
@@ -19,16 +26,28 @@ export interface ConversationManagement {
   selectedConversationId: number | null;
   isNewConversation: boolean;
   conversationLoadError: Record<number, string>;
-  conversationListQuery: UseQueryResult<ConversationListItem[], Error>;
+  conversationListQuery: UseInfiniteQueryResult<ConversationListData, Error>;
   fetchConversationList: () => Promise<ConversationListItem[]>;
   invalidateConversationList: () => void;
-  prependConversation: (conversationId: number, title: string, agentId?: number | null) => void;
-  updateConversationAgentId: (conversationId: number, agentId: number | null) => void;
+  hasNextPage: boolean;
+  fetchNextPage: () => Promise<void>;
+  prependConversation: (
+    conversationId: number,
+    title: string,
+    agentId?: number | null
+  ) => void;
+  updateConversationAgentId: (
+    conversationId: number,
+    agentId: number | null
+  ) => void;
   handleNewConversation: () => void;
   handleConversationSelect: (conversation: ConversationListItem) => Promise<void>;
   updateConversationTitle: (conversationId: number, title: string) => Promise<void>;
   clearConversationLoadError: (conversationId: number) => void;
-  setConversationLoadErrorForId: (conversationId: number, error: string) => void;
+  setConversationLoadErrorForId: (
+    conversationId: number,
+    error: string
+  ) => void;
   setSelectedConversationId: React.Dispatch<React.SetStateAction<number | null>>;
   setConversationTitle: React.Dispatch<React.SetStateAction<string>>;
   setIsNewConversation: React.Dispatch<React.SetStateAction<boolean>>;
@@ -38,17 +57,38 @@ export const useConversationManagement = (): ConversationManagement => {
   const { t } = useTranslation("common");
   const queryClient = useQueryClient();
 
-  const conversationListQuery = useQuery({
+  const conversationListQuery = useInfiniteQuery<
+    ConversationListItem[],
+    Error,
+    ConversationListData,
+    typeof CONVERSATION_LIST_QUERY_KEY,
+    number
+  >({
     queryKey: CONVERSATION_LIST_QUERY_KEY,
-    queryFn: async (): Promise<ConversationListItem[]> => {
-      const dialogHistory = await conversationService.getList();
+    queryFn: async ({ pageParam }): Promise<ConversationListItem[]> => {
+      const dialogHistory = await conversationService.getList({
+        offset: pageParam,
+        limit: CONVERSATION_PAGE_SIZE,
+      });
       dialogHistory.sort((a, b) => b.create_time - a.create_time);
       return dialogHistory;
     },
+    initialPageParam: 0,
+    getNextPageParam: (lastPage, _allPages, lastPageParam) =>
+      lastPage.length >= CONVERSATION_PAGE_SIZE
+        ? lastPageParam + CONVERSATION_PAGE_SIZE
+        : undefined,
     staleTime: 30_000,
+    gcTime: 0,
   });
 
-  const conversationList = conversationListQuery.data ?? [];
+  const conversationList = Array.from(
+    new Map(
+      (conversationListQuery.data?.pages.flat() ?? [])
+        .sort((a, b) => b.create_time - a.create_time)
+        .map((conversation) => [conversation.conversation_id, conversation])
+    ).values()
+  );
 
   const fetchConversationList = async (): Promise<ConversationListItem[]> => {
     const result = await conversationListQuery.refetch();
@@ -56,16 +96,36 @@ export const useConversationManagement = (): ConversationManagement => {
       log.error(t("chatInterface.errorFetchingConversationList"), result.error);
       throw result.error;
     }
-    return result.data ?? [];
+    return Array.from(
+      new Map(
+        (result.data?.pages.flat() ?? [])
+          .sort((a, b) => b.create_time - a.create_time)
+          .map((conversation) => [conversation.conversation_id, conversation])
+      ).values()
+    );
   };
 
-  const invalidateConversationList = () => queryClient.invalidateQueries({ queryKey: CONVERSATION_LIST_QUERY_KEY });
+  const invalidateConversationList = () =>
+    queryClient.invalidateQueries({ queryKey: CONVERSATION_LIST_QUERY_KEY });
+
+  const fetchNextPage = async (): Promise<void> => {
+    const result = await conversationListQuery.fetchNextPage();
+    if (result.error) {
+      throw result.error;
+    }
+  };
 
   // Conversation state: null = no selection / new conversation, number = current conversation id
-  const [conversationTitle, setConversationTitle] = useState(t("chatInterface.newConversation"));
-  const [selectedConversationId, setSelectedConversationId] = useState<number | null>(null);
+  const [conversationTitle, setConversationTitle] = useState(
+    t("chatInterface.newConversation")
+  );
+  const [selectedConversationId, setSelectedConversationId] = useState<
+    number | null
+  >(null);
   const [isNewConversation, setIsNewConversation] = useState(true);
-  const [conversationLoadError, setConversationLoadError] = useState<{[conversationId: number]: string;}>({});
+  const [conversationLoadError, setConversationLoadError] = useState<{
+    [conversationId: number]: string;
+  }>({});
 
   // Refs
 
@@ -80,13 +140,13 @@ export const useConversationManagement = (): ConversationManagement => {
   // immediately (without waiting for a refetch).
   const prependConversation = useCallback(
     (conversationId: number, title: string, agentId?: number | null) => {
-      queryClient.setQueryData<ConversationListItem[]>(
+      queryClient.setQueryData<ConversationListData>(
         CONVERSATION_LIST_QUERY_KEY,
         (prev) => {
-          const existing = prev ?? [];
+          const existing = prev?.pages.flat() ?? [];
           // Avoid duplicates if the backend has already populated it.
           if (existing.some((c) => c.conversation_id === conversationId)) {
-            return existing;
+            return prev;
           }
           const now = Date.now();
           const newItem: ConversationListItem = {
@@ -96,7 +156,16 @@ export const useConversationManagement = (): ConversationManagement => {
             create_time: now,
             update_time: now,
           };
-          return [newItem, ...existing];
+          if (!prev) {
+            return { pages: [[newItem]], pageParams: [0] };
+          }
+          return {
+            ...prev,
+            pages: [
+              [newItem, ...(prev.pages[0] ?? [])],
+              ...prev.pages.slice(1),
+            ],
+          };
         }
       );
     },
@@ -105,17 +174,22 @@ export const useConversationManagement = (): ConversationManagement => {
 
   const updateConversationAgentId = useCallback(
     (conversationId: number, agentId: number | null) => {
-      queryClient.setQueryData<ConversationListItem[]>(
+      queryClient.setQueryData<ConversationListData>(
         CONVERSATION_LIST_QUERY_KEY,
         (prev) => {
           if (!prev) {
             return prev;
           }
-          return prev.map((conversation) =>
-            conversation.conversation_id === conversationId
-              ? { ...conversation, agent_id: agentId }
-              : conversation
-          );
+          return {
+            ...prev,
+            pages: prev.pages.map((page) =>
+              page.map((conversation) =>
+                conversation.conversation_id === conversationId
+                  ? { ...conversation, agent_id: agentId }
+                  : conversation
+              )
+            ),
+          };
         }
       );
     },
@@ -123,14 +197,19 @@ export const useConversationManagement = (): ConversationManagement => {
   );
 
   // Handle conversation selection
-  const handleConversationSelect = async (conversation: ConversationListItem) => {
+  const handleConversationSelect = async (
+    conversation: ConversationListItem
+  ) => {
     setSelectedConversationId(conversation.conversation_id);
     setConversationTitle(conversation.conversation_title);
     setIsNewConversation(false);
   };
 
   // Update conversation title
-  const updateConversationTitle = async (conversationId: number, title: string) => {
+  const updateConversationTitle = async (
+    conversationId: number,
+    title: string
+  ) => {
     try {
       await conversationService.rename(conversationId, title);
       await fetchConversationList();
@@ -142,8 +221,6 @@ export const useConversationManagement = (): ConversationManagement => {
       log.error(t("chatInterface.errorUpdatingTitle"), error);
     }
   };
-
-
   // Clear conversation load error
   const clearConversationLoadError = (conversationId: number) => {
     setConversationLoadError((prev) => {
@@ -154,7 +231,10 @@ export const useConversationManagement = (): ConversationManagement => {
   };
 
   // Set conversation load error
-  const setConversationLoadErrorForId = (conversationId: number, error: string) => {
+  const setConversationLoadErrorForId = (
+    conversationId: number,
+    error: string
+  ) => {
     setConversationLoadError((prev) => ({
       ...prev,
       [conversationId]: error,
@@ -173,6 +253,8 @@ export const useConversationManagement = (): ConversationManagement => {
     // Methods
     fetchConversationList,
     invalidateConversationList,
+    hasNextPage: conversationListQuery.hasNextPage,
+    fetchNextPage,
     prependConversation,
     updateConversationAgentId,
     handleNewConversation,

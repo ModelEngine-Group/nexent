@@ -4,6 +4,7 @@ import { chatConfig } from "@/const/chatConfig";
 import type {
   ConversationListResponse,
   ConversationListItem,
+  ConversationListParams,
   ApiConversationDetail,
   ApiConversationResponse,
 } from "@/types/conversation";
@@ -18,6 +19,8 @@ import type {
 // @ts-ignore
 const fetch = fetchWithAuth;
 
+export const CONVERSATION_PAGE_SIZE = 20;
+
 // This helper function now ALWAYS connects through the current host and port.
 // This relies on our custom `server.js` to handle the proxying in all environments.
 const getWebSocketUrl = (endpoint: string): string => {
@@ -29,8 +32,16 @@ const getWebSocketUrl = (endpoint: string): string => {
 
 export const conversationService = {
   // Get conversation list
-  async getList(): Promise<ConversationListItem[]> {
-    const response = await fetch(API_ENDPOINTS.conversation.list);
+  async getList(
+    params: ConversationListParams
+  ): Promise<ConversationListItem[]> {
+    const query = new URLSearchParams({
+      offset: String(params.offset),
+      limit: String(params.limit),
+    });
+    const response = await fetch(
+      `${API_ENDPOINTS.conversation.list}?${query.toString()}`
+    );
 
     const data = (await response.json()) as ConversationListResponse;
 
@@ -59,6 +70,58 @@ export const conversationService = {
     }
 
     throw new Error(`Conversation ${conversationId} not found`);
+  },
+  async updateKnowledgeScope(
+    conversationId: number,
+    scope: ConversationKnowledgeScope | null
+  ): Promise<KnowledgeScopeUpdateResult> {
+    const response = await fetch(
+      API_ENDPOINTS.conversation.knowledgeScope(conversationId),
+      {
+        method: "PUT",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ scope }),
+      }
+    );
+
+    const data = await response.json();
+
+    if (!response.ok || data.code !== 0) {
+      throw new ApiError(
+        data.code || response.status,
+        data.message || data.detail
+      );
+    }
+
+    return data.data;
+  },
+
+  async getKnowledgeCapabilities(
+    agentId: number,
+    versionNo?: number
+  ): Promise<KnowledgeCapabilities> {
+    const url = new URL(
+      API_ENDPOINTS.agent.knowledgeCapabilities(agentId),
+      globalThis.location.origin
+    );
+
+    if (versionNo !== undefined) {
+      url.searchParams.set("version_no", String(versionNo));
+    }
+
+    const response = await fetch(url.toString(), {
+      headers: getAuthHeaders(),
+    });
+    const data = await response.json();
+
+    if (!response.ok || data.code !== 0) {
+      throw new ApiError(
+        data.code || response.status,
+        data.message || data.detail
+      );
+    }
+
+    return data.data;
   },
 
   // Create new conversation
@@ -98,50 +161,6 @@ export const conversationService = {
     }
 
     throw new ApiError(data.code, data.message);
-  },
-
-  async updateKnowledgeScope(
-    conversationId: number,
-    scope: ConversationKnowledgeScope | null
-  ): Promise<KnowledgeScopeUpdateResult> {
-    const response = await fetch(
-      API_ENDPOINTS.conversation.knowledgeScope(conversationId),
-      {
-        method: "PUT",
-        headers: getAuthHeaders(),
-        body: JSON.stringify({ scope }),
-      }
-    );
-    const data = await response.json();
-    if (!response.ok || data.code !== 0) {
-      throw new ApiError(
-        data.code || response.status,
-        data.message || data.detail
-      );
-    }
-    return data.data;
-  },
-
-  async getKnowledgeCapabilities(
-    agentId: number,
-    versionNo?: number
-  ): Promise<KnowledgeCapabilities> {
-    const url = new URL(
-      API_ENDPOINTS.agent.knowledgeCapabilities(agentId),
-      globalThis.location.origin
-    );
-    if (versionNo !== undefined) {
-      url.searchParams.set("version_no", String(versionNo));
-    }
-    const response = await fetch(url.toString(), { headers: getAuthHeaders() });
-    const data = await response.json();
-    if (!response.ok || data.code !== 0) {
-      throw new ApiError(
-        data.code || response.status,
-        data.message || data.detail
-      );
-    }
-    return data.data;
   },
 
   // Get conversation details

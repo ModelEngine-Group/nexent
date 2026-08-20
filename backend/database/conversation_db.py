@@ -53,8 +53,8 @@ class ImageRecord(TypedDict):
 
 class ConversationHistory(TypedDict):
     conversation_id: int
+    conversation_title: str
     agent_id: Optional[int]
-    knowledge_scope: Optional[Dict[str, Any]]
     create_time: int
     message_records: List[MessageRecord]
     search_records: List[SearchRecord]
@@ -104,8 +104,7 @@ def _get_effective_tenant_id(user_tenant: Dict[str, Any]) -> str:
 
 def create_conversation(conversation_title: str, user_id: Optional[str] = None,
                         agent_id: Optional[int] = None,
-                        chat_mode: Optional[str] = None,
-                        knowledge_scope: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                        chat_mode: Optional[str] = None) -> Dict[str, Any]:
     """
     Create a new conversation record
 
@@ -126,8 +125,6 @@ def create_conversation(conversation_title: str, user_id: Optional[str] = None,
             data["agent_id"] = agent_id
         if chat_mode is not None:
             data["chat_mode"] = chat_mode
-        if knowledge_scope is not None:
-            data["knowledge_scope"] = knowledge_scope
         if user_id:
             data = add_creation_tracking(data, user_id)
 
@@ -136,7 +133,6 @@ def create_conversation(conversation_title: str, user_id: Optional[str] = None,
             ConversationRecord.conversation_title,
             ConversationRecord.agent_id,
             ConversationRecord.chat_mode,
-            ConversationRecord.knowledge_scope,
             (func.extract('epoch', ConversationRecord.create_time)
              * 1000).label('create_time'),
             (func.extract('epoch', ConversationRecord.update_time)
@@ -151,7 +147,6 @@ def create_conversation(conversation_title: str, user_id: Optional[str] = None,
             "conversation_title": record.conversation_title,
             "agent_id": record.agent_id,
             "chat_mode": record.chat_mode or "execution",
-            "knowledge_scope": record.knowledge_scope,
             "create_time": int(record.create_time),
             "update_time": int(record.update_time)
         }
@@ -509,12 +504,18 @@ def get_message_units(message_id: int) -> List[Dict[str, Any]]:
         return list(map(as_dict, records))
 
 
-def get_conversation_list(user_id: Optional[str] = None) -> List[Dict[str, Any]]:
+def get_conversation_list(
+    user_id: Optional[str] = None,
+    limit: Optional[int] = None,
+    offset: int = 0,
+) -> List[Dict[str, Any]]:
     """
     Get list of all undeleted conversations, sorted by creation time in descending order
 
     Args:
         user_id: Reserved parameter for filtering conversations created by this user
+        limit: Maximum number of conversations to return. None returns all conversations.
+        offset: Number of conversations to skip when limit is provided.
 
     Returns:
         List[Dict[str, Any]]: List of conversations, each containing id, title and timestamp information
@@ -533,12 +534,18 @@ def get_conversation_list(user_id: Optional[str] = None) -> List[Dict[str, Any]]
         ).where(
             ConversationRecord.delete_flag == 'N'
         ).order_by(
-            desc(ConversationRecord.create_time)
+            desc(ConversationRecord.create_time),
+            desc(ConversationRecord.conversation_id),
         )
 
         # If user_id is provided, additional filter conditions can be added here
         if user_id:
             stmt = stmt.where(ConversationRecord.created_by == user_id)
+
+        if limit is not None:
+            stmt = stmt.limit(limit)
+        if offset:
+            stmt = stmt.offset(offset)
 
         # Execute the query
         records = session.execute(stmt)
@@ -625,33 +632,6 @@ def update_conversation_chat_mode(
             ConversationRecord.delete_flag == 'N',
         ).values(update_data)
 
-        result = session.execute(stmt)
-        return result.rowcount > 0
-
-
-def update_conversation_knowledge_scope(
-    conversation_id: int,
-    knowledge_scope: Optional[Dict[str, Any]],
-    user_id: str,
-) -> bool:
-    """Replace the desired knowledge scope for a user-owned conversation."""
-    with get_db_session() as session:
-        update_data = add_update_tracking(
-            {
-                "knowledge_scope": knowledge_scope,
-                "update_time": func.current_timestamp(),
-            },
-            user_id,
-        )
-        stmt = (
-            update(ConversationRecord)
-            .where(
-                ConversationRecord.conversation_id == int(conversation_id),
-                ConversationRecord.created_by == user_id,
-                ConversationRecord.delete_flag == 'N',
-            )
-            .values(update_data)
-        )
         result = session.execute(stmt)
         return result.rowcount > 0
 
@@ -873,9 +853,9 @@ def get_conversation_history(conversation_id: int, user_id: Optional[str] = None
         # First check if conversation exists
         check_stmt = select(
             ConversationRecord.conversation_id,
+            ConversationRecord.conversation_title,
             ConversationRecord.agent_id,
             ConversationRecord.chat_mode,
-            ConversationRecord.knowledge_scope,
             (func.extract('epoch', ConversationRecord.create_time)
              * 1000).label('create_time')
         ).where(
@@ -972,9 +952,9 @@ def get_conversation_history(conversation_id: int, user_id: Optional[str] = None
 
         return {
             'conversation_id': conversation['conversation_id'],
+            'conversation_title': conversation.get('conversation_title'),
             'agent_id': conversation.get('agent_id'),
             'chat_mode': conversation.get('chat_mode') or 'execution',
-            'knowledge_scope': conversation.get('knowledge_scope'),
             'create_time': int(conversation['create_time']),
             'message_records': message_list,
             'search_records': [as_dict(record) for record in search_records],

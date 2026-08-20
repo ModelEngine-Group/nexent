@@ -1,7 +1,7 @@
 import json
 import sys
 import types
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, call
 
 import pytest
 
@@ -104,7 +104,6 @@ class ConversationRecord:
     conversation_title = MagicMock(name="ConversationRecord.conversation_title")
     agent_id = MagicMock(name="ConversationRecord.agent_id")
     chat_mode = MagicMock(name="ConversationRecord.chat_mode")
-    knowledge_scope = MagicMock(name="ConversationRecord.knowledge_scope")
     create_time = MagicMock(name="ConversationRecord.create_time")
     update_time = MagicMock(name="ConversationRecord.update_time")
     created_by = MagicMock(name="ConversationRecord.created_by")
@@ -224,7 +223,6 @@ from backend.database.conversation_db import (
     update_message_opinion,
     update_message_unit_content,
     update_message_unit_status,
-    update_conversation_knowledge_scope,
 )
 
 
@@ -1037,6 +1035,56 @@ def test_get_conversation_list_filtered_by_user(monkeypatch, mock_session_ctx):
 
     assert len(result) == 1
     assert result[0]["agent_id"] == 15
+
+
+def test_get_conversation_list_applies_pagination_with_stable_order(monkeypatch, mock_session_ctx):
+    """get_conversation_list applies limit/offset after deterministic newest-first ordering."""
+    session, ctx = mock_session_ctx
+    session.execute.return_value = []
+
+    select_mock = MagicMock(name="select")
+    desc_mock = MagicMock(name="desc")
+    stmt = MagicMock(name="conversation_list_statement")
+    select_mock.return_value.where.return_value.order_by.return_value = stmt
+    stmt.where.return_value = stmt
+    stmt.limit.return_value = stmt
+    stmt.offset.return_value = stmt
+
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("backend.database.conversation_db.select", select_mock)
+    monkeypatch.setattr("backend.database.conversation_db.desc", desc_mock)
+
+    result = get_conversation_list(user_id="user-1", limit=10, offset=20)
+
+    assert result == []
+    desc_mock.assert_has_calls([
+        call(ConversationRecord.create_time),
+        call(ConversationRecord.conversation_id),
+    ])
+    stmt.limit.assert_called_once_with(10)
+    stmt.offset.assert_called_once_with(20)
+    session.execute.assert_called_once_with(stmt)
+
+
+def test_get_conversation_list_applies_offset_without_limit(monkeypatch, mock_session_ctx):
+    """get_conversation_list supports skipping records without truncating the remainder."""
+    session, ctx = mock_session_ctx
+    session.execute.return_value = []
+
+    select_mock = MagicMock(name="select")
+    stmt = MagicMock(name="conversation_list_statement")
+    select_mock.return_value.where.return_value.order_by.return_value = stmt
+    stmt.offset.return_value = stmt
+
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("backend.database.conversation_db.select", select_mock)
+
+    result = get_conversation_list(offset=20)
+
+    assert result == []
+    stmt.limit.assert_not_called()
+    stmt.offset.assert_called_once_with(20)
+    session.execute.assert_called_once_with(stmt)
 
 
 def test_update_conversation_agent_id_success(monkeypatch, mock_session_ctx):
@@ -2066,7 +2114,12 @@ def test_get_conversation_history_with_messages(monkeypatch, mock_session_ctx):
     session, ctx = mock_session_ctx
 
     # Use SimpleNamespace for accurate attribute checks
-    mock_conv = SimpleNamespace(conversation_id=1, agent_id=9, create_time=1000.0)
+    mock_conv = SimpleNamespace(
+        conversation_id=1,
+        conversation_title="Test Chat",
+        agent_id=9,
+        create_time=1000.0,
+    )
     mock_message = SimpleNamespace(
         message_id=1,
         message_index=0,
@@ -2110,6 +2163,7 @@ def test_get_conversation_history_with_messages(monkeypatch, mock_session_ctx):
         elif hasattr(record, 'conversation_id'):
             return {
                 "conversation_id": record.conversation_id,
+                "conversation_title": record.conversation_title,
                 "agent_id": record.agent_id,
                 "create_time": record.create_time,
             }
@@ -2122,6 +2176,7 @@ def test_get_conversation_history_with_messages(monkeypatch, mock_session_ctx):
 
     assert result is not None
     assert result['conversation_id'] == 1
+    assert result['conversation_title'] == "Test Chat"
     assert result['agent_id'] == 9
 
 
@@ -2637,60 +2692,3 @@ def test_get_historical_context_returns_latest_summary_and_only_new_turns(
         "user_message_id": 31,
         "assistant_message_id": 32,
     }]
-
-# =============================================================================
-# Tests for create_conversation knowledge_scope + update_conversation_knowledge_scope
-# =============================================================================
-
-
-def test_create_conversation_with_knowledge_scope(monkeypatch, mock_session_ctx, fresh_insert_mock):
-    """create_conversation persists the desired knowledge scope."""
-    session, ctx = mock_session_ctx
-    mock_record = MagicMock()
-    mock_record.conversation_id = 43
-    mock_record.conversation_title = "Scoped Title"
-    mock_record.agent_id = None
-    mock_record.create_time = 1000.0
-    mock_record.update_time = 1000.0
-    session.execute.return_value.fetchone.return_value = mock_record
-
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
-
-    scope = {"local": {"mode": "override", "index_names": ["idx-a"]}, "aidp": {"mode": "disabled"}}
-    result = create_conversation(
-        "Scoped Title", user_id="user-1", chat_mode="chat", knowledge_scope=scope
-    )
-
-    assert result["conversation_id"] == 43
-    assert _captured_insert_values["knowledge_scope"] == scope
-    assert _captured_insert_values["chat_mode"] == "chat"
-
-
-def test_update_conversation_knowledge_scope_success(monkeypatch, mock_session_ctx, fresh_update_mock):
-    """update_conversation_knowledge_scope returns True when a row was updated."""
-    session, ctx = mock_session_ctx
-    result_mock = MagicMock()
-    result_mock.rowcount = 1
-    session.execute.return_value = result_mock
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
-
-    scope = {"local": {"mode": "inherit"}}
-    ok = update_conversation_knowledge_scope(999, scope, user_id="user-1")
-
-    assert ok is True
-    session.execute.assert_called_once()
-    assert _captured_update_values["knowledge_scope"] == scope
-
-
-def test_update_conversation_knowledge_scope_missing_row(monkeypatch, mock_session_ctx):
-    """update_conversation_knowledge_scope returns False when no row matches."""
-    session, ctx = mock_session_ctx
-    result_mock = MagicMock()
-    result_mock.rowcount = 0
-    session.execute.return_value = result_mock
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
-
-    ok = update_conversation_knowledge_scope(404, {"local": {"mode": "disabled"}}, user_id="nobody")
-
-    assert ok is False
-    session.execute.assert_called_once()
