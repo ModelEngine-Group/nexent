@@ -1495,7 +1495,7 @@
   "skillManagement.market.updateSuccess": "Skill 更新成功",
   "skillManagement.market.updateFailed": "更新 Skill 失败，请重试",
   "skillManagement.market.detailFailed": "获取 Skill 详情失败",
-  "skillManagement.market.unavailable": "外部市场暂不可用",
+  "skillManagement.market.unavailable": "无法连接 ModelScope，外部市场暂不可用。请检查服务器网络，或通过“上传安装”导入 Skill",
   "skillManagement.market.empty": "没有找到匹配的 Skill",
   "skillManagement.market.retry": "重试",
   "skillManagement.market.license": "许可证",

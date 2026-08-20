@@ -1527,7 +1527,7 @@
   "skillManagement.market.updateSuccess": "Skill updated successfully",
   "skillManagement.market.updateFailed": "Failed to update Skill. Please try again.",
   "skillManagement.market.detailFailed": "Failed to load Skill details",
-  "skillManagement.market.unavailable": "The external market is unavailable",
+  "skillManagement.market.unavailable": "Unable to connect to ModelScope. Check the server network, or import a Skill through Upload Install.",
   "skillManagement.market.empty": "No matching Skills found",
   "skillManagement.market.retry": "Retry",
   "skillManagement.market.license": "License",
