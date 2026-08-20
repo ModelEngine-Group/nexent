@@ -535,8 +535,12 @@ class HybridSearchRequest(BaseModel):
                                    description="List of index names to search")
     top_k: int = Field(10, ge=1, le=100,
                        description="Number of results to return")
-    weight_accurate: float = Field(0.5, ge=0.0, le=1.0,
-                                   description="Weight applied to accurate search scores")
+    weight_accurate: Optional[float] = Field(
+        None,
+        ge=0.0,
+        le=1.0,
+        description="Optional caller-specified weight applied to accurate search scores",
+    )
 
 
 # Request models

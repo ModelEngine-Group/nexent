@@ -2408,7 +2408,7 @@ class ElasticSearchService:
             query: str,
             tenant_id: str,
             top_k: int = 10,
-            weight_accurate: float = 0.5,
+            weight_accurate: Optional[float] = None,
             vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
     ):
         """
@@ -2423,8 +2423,19 @@ class ElasticSearchService:
                 raise ValueError("At least one index name is required")
             if top_k <= 0:
                 raise ValueError("top_k must be greater than 0")
-            if weight_accurate < 0 or weight_accurate > 1:
+            if weight_accurate and (
+                weight_accurate < 0 or weight_accurate > 1
+            ):
                 raise ValueError("weight_accurate must be between 0 and 1")
+
+            # Preserve the REST API's historical 0.5 default for ordinary
+            # queries. When the caller has not supplied a preference, give
+            # digit-containing identifiers more accurate-search influence.
+            effective_weight_accurate = weight_accurate
+            if effective_weight_accurate is None:
+                effective_weight_accurate = (
+                    0.7 if any(char.isdigit() for char in query) else 0.5
+                )
 
             # Get embedding model from the first index's knowledge base record
             if not index_names:
@@ -2450,7 +2461,7 @@ class ElasticSearchService:
                 query_text=query,
                 embedding_model=embedding_model,
                 top_k=top_k,
-                weight_accurate=weight_accurate,
+                weight_accurate=effective_weight_accurate,
             )
             elapsed_ms = int((time.perf_counter() - start_time) * 1000)
 
