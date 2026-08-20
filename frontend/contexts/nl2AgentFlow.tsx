@@ -16,7 +16,7 @@ export type Nl2AgentFlowPhase =
   | "binding"
   | "generating"
   | "generation_failed"
-  | "final_review"
+  | "completing"
   | "completed";
 
 interface ActiveNl2AgentCard {
@@ -30,6 +30,7 @@ interface Nl2AgentFlowState {
   activeCard: ActiveNl2AgentCard | null;
   submittedCardKeys: ReadonlySet<string>;
   failedPromptFields: readonly string[];
+  completionSyncFailed: boolean;
   isFormLocked: boolean;
   isComposerDisabled: boolean;
   sessionGeneration: number;
@@ -41,7 +42,9 @@ type Nl2AgentFlowAction =
   | { type: "submit_card"; cardKey: string }
   | { type: "resources_bound"; agentId: number }
   | { type: "prompt_generation_failed"; agentId: number; fields: string[] }
-  | { type: "final_confirmed"; agentId: number };
+  | { type: "generation_completed"; agentId: number }
+  | { type: "completion_synced"; agentId: number }
+  | { type: "completion_sync_failed"; agentId: number };
 
 const INITIAL_STATE: Nl2AgentFlowState = {
   phase: "idle",
@@ -49,6 +52,7 @@ const INITIAL_STATE: Nl2AgentFlowState = {
   activeCard: null,
   submittedCardKeys: new Set(),
   failedPromptFields: [],
+  completionSyncFailed: false,
   isFormLocked: false,
   isComposerDisabled: false,
   sessionGeneration: 0,
@@ -74,14 +78,8 @@ function reducer(
             ? "clarifying"
             : action.card.subtype === "installed_resource_binding"
               ? "binding"
-              : action.card.subtype === "final_confirmation"
-                ? "final_review"
-                : state.phase,
+              : state.phase,
         activeCard: action.card,
-        failedPromptFields:
-          action.card.subtype === "final_confirmation"
-            ? []
-            : state.failedPromptFields,
         isFormLocked: state.agentId !== null || state.isFormLocked,
       };
     case "submit_card": {
@@ -100,6 +98,7 @@ function reducer(
         phase: "generating",
         agentId: action.agentId,
         failedPromptFields: [],
+        completionSyncFailed: false,
         isFormLocked: true,
       };
     case "prompt_generation_failed":
@@ -111,17 +110,36 @@ function reducer(
         phase: "generation_failed",
         agentId: action.agentId,
         failedPromptFields: action.fields,
+        completionSyncFailed: false,
         isFormLocked: true,
       };
-    case "final_confirmed":
+    case "generation_completed":
+      if (state.agentId !== action.agentId) return state;
+      return {
+        ...state,
+        phase: "completing",
+        activeCard: null,
+        failedPromptFields: [],
+        completionSyncFailed: false,
+        isFormLocked: true,
+        isComposerDisabled: true,
+      };
+    case "completion_synced":
       if (state.agentId !== action.agentId) return state;
       return {
         ...state,
         phase: "completed",
-        activeCard: null,
-        failedPromptFields: [],
+        completionSyncFailed: false,
         isFormLocked: false,
         isComposerDisabled: true,
+      };
+    case "completion_sync_failed":
+      if (state.agentId !== action.agentId || state.phase !== "completing") {
+        return state;
+      }
+      return {
+        ...state,
+        completionSyncFailed: true,
       };
   }
 }
@@ -132,7 +150,9 @@ interface Nl2AgentFlowContextValue extends Nl2AgentFlowState {
   submitCard: (key: string) => void;
   markResourcesBound: (agentId: number) => void;
   markPromptGenerationFailed: (agentId: number, fields: string[]) => void;
-  markFinalConfirmed: (agentId: number) => void;
+  markGenerationCompleted: (agentId: number) => void;
+  markCompletionSynced: (agentId: number) => void;
+  markCompletionSyncFailed: (agentId: number) => void;
   isCardInteractive: (key: string) => boolean;
 }
 
@@ -164,8 +184,16 @@ export const Nl2AgentFlowProvider: FC<PropsWithChildren> = ({ children }) => {
       dispatch({ type: "prompt_generation_failed", agentId, fields }),
     []
   );
-  const markFinalConfirmed = useCallback(
-    (agentId: number) => dispatch({ type: "final_confirmed", agentId }),
+  const markGenerationCompleted = useCallback(
+    (agentId: number) => dispatch({ type: "generation_completed", agentId }),
+    []
+  );
+  const markCompletionSynced = useCallback(
+    (agentId: number) => dispatch({ type: "completion_synced", agentId }),
+    []
+  );
+  const markCompletionSyncFailed = useCallback(
+    (agentId: number) => dispatch({ type: "completion_sync_failed", agentId }),
     []
   );
   const isCardInteractive = useCallback(
@@ -181,12 +209,16 @@ export const Nl2AgentFlowProvider: FC<PropsWithChildren> = ({ children }) => {
       submitCard,
       markResourcesBound,
       markPromptGenerationFailed,
-      markFinalConfirmed,
+      markGenerationCompleted,
+      markCompletionSynced,
+      markCompletionSyncFailed,
       isCardInteractive,
     }),
     [
       isCardInteractive,
-      markFinalConfirmed,
+      markGenerationCompleted,
+      markCompletionSynced,
+      markCompletionSyncFailed,
       markPromptGenerationFailed,
       markResourcesBound,
       registerCard,

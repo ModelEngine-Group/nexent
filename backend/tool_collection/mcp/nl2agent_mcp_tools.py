@@ -47,10 +47,8 @@ NL2A_WRAPPER_DESCRIPTION = (
     "`agent_id` and `subtype`. For `requirement_clarification`, pass structured "
     "`questions`. For `installed_resource_binding`, pass `agent_id` and "
     "the verified `resource_result`. JSON parameters must be decoded dictionaries, "
-    "never raw JSON strings. For `final_confirmation`, pass `agent_id`, "
-    "structured `requirements`, and `abandoned_requirement_ids`; Agent, Prompt, "
-    "and binding data are loaded from the database. Call "
-    "the tool as `result = nl2a_wrapper(...)`, then use `print(result)`."
+    "never raw JSON strings. Call the tool as `result = nl2a_wrapper(...)`, "
+    "then use `print(result)`."
 )
 SAVE_AGENT_DRAFT_FIELDS_DESCRIPTION = (
     "Partially update the current tenant's existing ordinary agent draft. "
@@ -70,13 +68,13 @@ _NL2AGENT_PROMPT_FIELDS = frozenset(
         "example_questions",
     }
 )
+_NL2AGENT_FINAL_PROMPT_BATCH = frozenset({"greeting_message", "example_questions"})
 _NL2AGENT_DRAFT_SYNC_FIELDS = frozenset(
-    {"description", "business_description", *_NL2AGENT_PROMPT_FIELDS}
+    {"description", *_NL2AGENT_PROMPT_FIELDS}
 )
 NL2A_SUBTYPES = Literal[
     "requirement_clarification",
     "installed_resource_binding",
-    "final_confirmation",
 ]
 
 class ResourceRequirement(BaseModel):
@@ -229,81 +227,12 @@ class InstalledResourceBindingPayload(BaseModel):
     resources: list[RecommendedResource] = Field(max_length=12)
 
 
-class FinalConfirmationRequirement(BaseModel):
-    """One normalized user requirement displayed in the final review."""
-
-    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
-
-    requirement_id: str = Field(min_length=1, max_length=100)
-    query: str = Field(min_length=1, max_length=500)
-
-
-class FinalConfirmationAgent(BaseModel):
-    """Database-backed Agent identity displayed in the final review."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    name: str
-    display_name: str
-    description: str
-    business_description: str
-
-
-class FinalConfirmationResource(BaseModel):
-    """Database-backed Tool or Skill binding displayed in the final review."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    resource_type: Literal["tool", "skill"]
-    resource_id: int = Field(gt=0)
-    name: str
-    description: str = ""
-
-
-class FinalConfirmationPrompts(BaseModel):
-    """Exact Prompt fields persisted on the Agent draft."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    duty_prompt: str
-    constraint_prompt: str
-    few_shots_prompt: str
-    greeting_message: str
-    example_questions: list[str]
-
-
-class FinalConfirmationPayload(BaseModel):
-    """Verified NL2A payload for the final confirmation card."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    subtype: Literal["final_confirmation"] = "final_confirmation"
-    agent_id: int = Field(gt=0)
-    agent: FinalConfirmationAgent
-    requirements: list[FinalConfirmationRequirement] = Field(max_length=8)
-    abandoned_requirements: list[FinalConfirmationRequirement] = Field(max_length=8)
-    resources: list[FinalConfirmationResource]
-    prompts: FinalConfirmationPrompts
-
-    @model_validator(mode="after")
-    def validate_requirements(self) -> "FinalConfirmationPayload":
-        requirement_ids = [item.requirement_id for item in self.requirements]
-        abandoned_ids = [
-            item.requirement_id for item in self.abandoned_requirements
-        ]
-        all_ids = [*requirement_ids, *abandoned_ids]
-        if len(all_ids) != len(set(all_ids)):
-            raise ValueError("final confirmation requirement IDs must be unique")
-        return self
-
-
 class AgentDraftFields(BaseModel):
     """Whitelisted partial fields accepted by the database draft tool."""
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     description: str | None = None
-    business_description: str | None = None
     duty_prompt: str | None = None
     constraint_prompt: str | None = None
     few_shots_prompt: str | None = None
@@ -373,6 +302,8 @@ class SaveAgentDraftFieldsError(BaseModel):
         "agent_read_only",
         "agent_context_mismatch",
         "draft_save_failed",
+        "draft_fields_incomplete",
+        "prompt_fields_incomplete",
         "unauthorized",
     ]
     retryable: bool
@@ -474,7 +405,6 @@ def build_nl2a_wrapper(
     subtype: NL2A_SUBTYPES,
     agent_id: int,
     resource_result: dict[str, Any] | RecommendResourcesOutput | None = None,
-    final_payload: dict[str, Any] | FinalConfirmationPayload | None = None,
     questions: list[RequirementClarificationQuestion] | None = None,
 ) -> str:
     """Fill the JSON template selected by subtype and return its wrapper."""
@@ -496,12 +426,6 @@ def build_nl2a_wrapper(
             agent_id=agent_id,
             resources=verified.resources,
         ).model_dump(mode="json")
-    elif subtype == "final_confirmation":
-        if final_payload is None:
-            raise ValueError("final_confirmation requires verified final_payload")
-        output = FinalConfirmationPayload.model_validate(final_payload).model_dump(
-            mode="json"
-        )
     else:
         raise ValueError(f"unsupported nl2a subtype: {subtype}")
 
@@ -559,7 +483,6 @@ def create_nl2agent_mcp_tool_configs() -> list[ToolConfig]:
                         field_name: field_type
                         for field_name, field_type in {
                             "description": "str",
-                            "business_description": "str",
                             "duty_prompt": "str",
                             "constraint_prompt": "str",
                             "few_shots_prompt": "str",
@@ -585,8 +508,6 @@ def create_nl2agent_mcp_tool_configs() -> list[ToolConfig]:
                     "agent_id": "int",
                     "resource_result": "RecommendResourcesOutput | None",
                     "questions": "list[RequirementClarificationQuestion] | None",
-                    "requirements": "list[FinalConfirmationRequirement] | None",
-                    "abandoned_requirement_ids": "list[str] | None",
                 },
                 separators=(",", ":"),
             ),
@@ -840,13 +761,10 @@ async def nl2a_wrapper(
     subtype: Literal[
         "requirement_clarification",
         "installed_resource_binding",
-        "final_confirmation",
     ],
     agent_id: int,
     resource_result: dict[str, Any] | None = None,
     questions: list[RequirementClarificationQuestion] | None = None,
-    requirements: list[FinalConfirmationRequirement] | None = None,
-    abandoned_requirement_ids: list[str] | None = None,
 ) -> str:
     """Return the NL2Agent JSON template selected by subtype in its wrapper."""
 
@@ -895,57 +813,6 @@ async def nl2a_wrapper(
             resource_result=verified,
         )
 
-    if subtype == "final_confirmation":
-        if requirements is None:
-            raise ValueError(
-                "final_confirmation requires agent_id and requirements"
-            )
-        validated_requirements = [
-            FinalConfirmationRequirement.model_validate(requirement)
-            for requirement in requirements
-        ]
-        from services.nl2agent_service import (
-            Nl2AgentFinalConfirmationError,
-            build_final_confirmation_payload_impl,
-        )
-
-        try:
-            final_payload = await build_final_confirmation_payload_impl(
-                agent_id=resolved_agent_id,
-                requirements=validated_requirements,
-                abandoned_requirement_ids=abandoned_requirement_ids or [],
-                tenant_id=tenant_id,
-                user_id=user_id,
-            )
-        except Nl2AgentFinalConfirmationError as exc:
-            error = json.dumps(
-                {
-                    "status": "error",
-                    "code": exc.code,
-                    "failed_fields": exc.failed_fields,
-                    "retryable": exc.code == "prompt_fields_incomplete",
-                },
-                ensure_ascii=False,
-                separators=(",", ":"),
-            )
-            if exc.code != "prompt_fields_incomplete":
-                return error
-            state = json.dumps(
-                {
-                    "event": "prompt_generation_failed",
-                    "agent_id": resolved_agent_id,
-                    "failed_fields": sorted(exc.failed_fields),
-                },
-                ensure_ascii=False,
-                separators=(",", ":"),
-            )
-            return f"{error}\n<nl2a_state>{state}</nl2a_state>"
-        return build_nl2a_wrapper(
-            subtype="final_confirmation",
-            agent_id=resolved_agent_id,
-            final_payload=final_payload,
-        )
-
     return build_nl2a_wrapper(
         subtype=subtype,
         agent_id=resolved_agent_id,
@@ -957,23 +824,33 @@ async def nl2a_wrapper(
 def _serialize_agent_draft_save_result(
     result: SaveAgentDraftFieldsSuccess | SaveAgentDraftFieldsError,
     attempted_fields: list[str] | None = None,
+    failed_fields: list[str] | None = None,
+    generation_completed: bool = False,
 ) -> str:
     payload = result.model_dump(mode="json")
     serialized = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
     if isinstance(result, SaveAgentDraftFieldsSuccess):
-        state = json.dumps(
+        state_payload = (
             {
+                "event": "agent_generation_completed",
+                "agent_id": result.agent_id,
+            }
+            if generation_completed
+            else {
                 "event": "agent_draft_fields_saved",
                 "agent_id": result.agent_id,
                 "updated_fields": result.updated_fields,
-            },
+            }
+        )
+        state = json.dumps(
+            state_payload,
             ensure_ascii=False,
             separators=(",", ":"),
         )
         return f"{serialized}\n<nl2a_state>{state}</nl2a_state>"
 
     prompt_fields = sorted(
-        set(attempted_fields or []) & _NL2AGENT_PROMPT_FIELDS
+        set(failed_fields or attempted_fields or []) & _NL2AGENT_PROMPT_FIELDS
     )
     if (
         isinstance(result, SaveAgentDraftFieldsError)
@@ -1028,8 +905,10 @@ async def save_agent_draft_fields(
 
     try:
         from services.nl2agent_service import (
+            Nl2AgentCompletionError,
             Nl2AgentDraftSaveError,
             save_agent_draft_fields_impl,
+            validate_agent_generation_complete_impl,
         )
 
         authorization = get_http_request().headers.get("Authorization")
@@ -1040,9 +919,28 @@ async def save_agent_draft_fields(
             tenant_id=tenant_id,
             user_id=user_id,
         )
-        return _serialize_agent_draft_save_result(
-            SaveAgentDraftFieldsSuccess.model_validate(result)
-        )
+        success = SaveAgentDraftFieldsSuccess.model_validate(result)
+        if set(success.updated_fields) == _NL2AGENT_FINAL_PROMPT_BATCH:
+            try:
+                await validate_agent_generation_complete_impl(
+                    agent_id=resolved_agent_id,
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                )
+            except Nl2AgentCompletionError as exc:
+                return _serialize_agent_draft_save_result(
+                    SaveAgentDraftFieldsError(
+                        agent_id=resolved_agent_id,
+                        code=exc.code,
+                        retryable=exc.code == "prompt_fields_incomplete",
+                    ),
+                    failed_fields=exc.failed_fields,
+                )
+            return _serialize_agent_draft_save_result(
+                success,
+                generation_completed=True,
+            )
+        return _serialize_agent_draft_save_result(success)
     except Nl2AgentDraftSaveError as exc:
         return _serialize_agent_draft_save_result(
             SaveAgentDraftFieldsError(

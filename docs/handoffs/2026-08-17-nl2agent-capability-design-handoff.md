@@ -1,6 +1,7 @@
 # NL2Agent 能力发现、安装、绑定与 Agent 草稿设计方案
 
 > 日期：2026-08-17  
+> 更新：2026-08-20（最终确认阶段改为总结阶段）
 > 状态：两阶段迁移完成，作为 `/newagents` 当前开发设计基线
 > 历史方案：`2026-08-11-nl2agent-capability-design-handoff.md` 仅保留作决策演进记录  
 > 前端示意：`2026-08-12-nl2agent-card-prototype.html`
@@ -14,7 +15,7 @@
 3. 不持久化 NL2Agent 会话、卡片状态或流程进度。
 4. Agent 数据库草稿是 Agent 配置的唯一事实来源。
 5. 需求澄清结束后立即创建 Agent 草稿，不再等到绑定卡出现时才创建。
-6. Prompt 由模型通过 MCP Tool 分批写入数据库，不再由最终卡携带完整 PromptSet 后交给前端保存。
+6. Prompt 由模型通过 MCP Tool 分批写入数据库；全部字段校验成功后由模型直接输出总结，不生成最终确认卡。
 7. NL2Agent 专用 MCP Tool 从四个调整为五个。
 8. 外部资源来源首版只有 MCP 官方 Registry，不接入 ModelScope 或 MCP.so 搜索适配器。
 9. 安装卡采用逐资源安装；绑定卡采用多选、分项配置、前端批量触发绑定。
@@ -27,7 +28,7 @@
 两阶段前端统一落在 `/newagents`，只使用 `useAgentStore` 和自动保存队列。`/agents` 保持目标分支原状，仅作为回退入口，不承载 NL2Agent 状态、卡片或双 Store 适配。
 
 1. `/newagents` 默认挂载 `Nl2AgentFlowProvider` 和 `Nl2AgentChatPanel`。
-2. 需求澄清、草稿创建、资源发现、配置、绑定和最终确认共享同一个临时对话 Runtime。
+2. 需求澄清、草稿创建、资源发现、配置、绑定和完成总结共享同一个临时对话 Runtime。
 3. 普通表单、旧推荐卡、Draft 卡和新绑定卡统一写 `useAgentStore`；Store 同时维护编辑快照、服务端快照和自动保存队列。
 4. 草稿首次获得真实 ID 时只升级页面身份，不重建 Runtime；选择、新建或删除 Agent 时才重置对话。
 
@@ -50,13 +51,13 @@
 → 重新搜索真实已安装资源
 → 用户配置并批量绑定资源
 → 模型基于数据库中的实际绑定资源分批生成 Prompt
-→ 用户审阅并结束流程
+→ 模型直接输出新智能体总结并结束流程
 ```
 
 ### 1.2 首版包含
 
 1. 一轮一张 `<nl2a>` 交互卡。
-2. 四种卡片 subtype：需求澄清、建议安装、已安装资源绑定、最终确认。
+2. 三种卡片 subtype：需求澄清、建议安装、已安装资源绑定。
 3. 五个 NL2Agent MCP Tool。
 4. 平台内资源优先、MCP 官方 Registry 按需补充的两阶段搜索。
 5. Tool、Skill 和 MCP Server 候选的统一排序与覆盖判断。
@@ -64,9 +65,9 @@
 7. 已安装 Tool/Skill 的多选、分项配置和批量绑定。
 8. 需求澄清后创建 `version_no=0` 的普通 Agent 草稿。
 9. ToolInstance/SkillInstance 绑定成功后立即写库。
-10. 五组 Prompt 字段在最终确认前分批写库。
+10. 五组 Prompt 字段在完成总结前分批写库。
 11. Agent 编辑表单无刷新同步。
-12. 用户最终确认后禁用 NL2Agent 输入，但不关闭对话面板，也不显示额外结束界面或新流程入口。
+12. 完成事件触发后禁用 NL2Agent 输入、刷新并解锁右侧表单，但不关闭对话面板，也不显示额外结束界面或新流程入口。
 
 ### 1.3 首版不包含
 
@@ -92,7 +93,7 @@
 | NL2Agent 运行入口 | `POST /agent/nl2agent/run` | 保留现有临时 Agent 运行链路 |
 | NL2A SSE 提取 | `MessageObserver(enable_nl2a_wrapper=True)` | 继续提取 `<nl2a>` JSON |
 | 前端 NL2A 解析 | `remote-chat-model-adapter.ts` | 扩展 payload 联合类型 |
-| 卡片挂载 | `thread.tsx` | 扩展四种 subtype 分支 |
+| 卡片挂载 | `thread.tsx` | 扩展三种 subtype 分支 |
 | Agent 创建/更新 | `/agent/update` 和 `update_agent_info_impl()` | 由受限 MCP Tool adapter 复用底层能力 |
 | Agent 详情读取 | `searchAgentInfo()` | 用于无刷新同步编辑表单 |
 | Tool 绑定 | `updateToolConfig()` | 前端批量编排现有单资源接口 |
@@ -106,11 +107,11 @@
 
 1. 当前 `search_installed_mcp_tools_by_query()` 只搜索 `source=mcp` 的已安装 Tool，需要扩展到用户可见的 Local Tool、已安装 MCP Tool 和 Skill。
 2. 当前只有 `search_installed_mcp_tools` 与 `nl2a_wrapper` 两个专用 Tool，需要调整为五个 Tool。
-3. 当前前端只有旧推荐工具卡和 Agent Draft 卡，需要替换为四种新卡。
+3. 当前前端只有旧推荐工具卡和 Agent Draft 卡，需要替换为三种新卡。
 4. 当前 `AgentDraftCard` 直接修改前端 Store，新方案改为数据库草稿先写库，再同步 Store。
 5. 当前 NL2Agent `max_steps=5`，新流程同一轮需要多次保存 Prompt，调整为 `max_steps=8`。
 
-整体上可复用约 70% 的现有系统能力；可直接复用的代码约 50%～60%。新增工作集中在流程编排、统一候选 Schema、搜索聚合和四张交互卡。
+整体上可复用约 70% 的现有系统能力；可直接复用的代码约 50%～60%。新增工作集中在流程编排、统一候选 Schema、搜索聚合、三张交互卡和完成总结。
 
 ---
 
@@ -141,25 +142,21 @@ save_agent_draft_fields(
   fields={
     name,
     display_name,
-    description,
-    business_description
+    description
   }
 )
 ```
 
 后端创建普通 `version_no=0` Agent，并返回真实 `agent_id`。名称冲突复用现有后缀生成逻辑，不额外调用 LLM。
 
-两个描述字段都属于现有普通 Agent 契约，语义和前端映射不同：
+新流程只生成并维护 `description`：
 
 ```text
 description
 → /newagents Agent 信息区的 description（Agent 简介）
-
-business_description
-→ /newagents 业务逻辑输入区的 business_description（完整业务流程描述）
 ```
 
-`searchAgentInfo` 和现有保存请求都使用后端 snake_case 字段 `business_description`；不得将它重命名或合并到 `description`。
+`business_description` 是旧前端字段，不进入 NL2Agent Tool 白名单、可信上下文或 `/newagents` 编辑 Store。数据库列和通用 Agent API 暂时保留该字段以兼容旧页面、导入和市场数据，新流程不会读取、写入或清空历史值。
 
 创建时后端补齐：
 
@@ -191,7 +188,7 @@ searchAgentInfo(agent_id)
 
 1. Agent 草稿创建成功后，收到后端生成的 `agent_draft_created` 状态事件时立即同步，不等待下一张资源卡。
 2. 绑定卡成功继续后。
-3. 最终确认卡出现时。
+3. 收到受信任的 `agent_generation_completed` 状态事件时。
 
 Agent 草稿创建后，前端立即从无 ID 状态升级为可编辑草稿。NL2Agent 流程锁与数据库 `READ_ONLY` 权限分别计算，但共同禁用普通表单、Tool/Skill、协作 Agent、知识库和发布操作；只读 Agent 同时禁用 Composer 和交互卡。
 
@@ -222,9 +219,9 @@ Agent 草稿创建后，前端立即从无 ID 状态升级为可编辑草稿。N
 13. 所有勾选项均已绑定，或当前无任何勾选项时，用户才可继续。
 14. 后端根据 `agent_id` 从数据库重新读取实际已绑定资源，并注入下一轮 NL2Agent 上下文。
 15. 模型分批调用 `save_agent_draft_fields` 写入五组 Prompt 字段。
-16. 全部字段成功后，模型调用 `nl2a_wrapper(final_review, agent_id)`。
-17. Wrapper 从数据库读取 Agent 草稿和真实绑定，输出最终确认卡。
-18. 用户在最终卡选择“确认完成”后结束流程并禁用 Composer；选择“需要修改”时，只重新生成受影响字段并再次生成最终确认卡。
+16. 最后一批字段写库后，后端从数据库校验描述、五组 Prompt 和真实绑定资源，并发送 `agent_generation_completed` 状态事件。
+17. 模型收到完成事件后直接输出“生成完成、智能体总结、请在右侧表单更新”三段普通文本，不再调用 wrapper。
+18. 前端禁用 Composer，刷新 Agent Store，刷新成功后解锁右侧表单并结束流程；后续修改只通过右侧表单完成。
 
 ### 4.2 Mermaid 时序图
 
@@ -319,21 +316,13 @@ sequenceDiagram
     LLM->>T: save_agent_draft_fields(agent_id, constraint_prompt)
     LLM->>T: save_agent_draft_fields(agent_id, few_shots_prompt)
     LLM->>T: save_agent_draft_fields(agent_id, greeting + examples)
-    LLM->>T: nl2a_wrapper(final_review, agent_id)
-    T->>DB: 读取最终 Agent 与实际绑定
-    T-->>FE: 最终确认卡
+    T->>DB: 校验最终 Agent 与实际绑定
+    T-->>FE: agent_generation_completed
     FE->>BIZ: searchAgentInfo(agent_id)
     BIZ-->>FE: 最新 Agent 草稿
     FE->>FE: setCurrentAgent()
-
-    alt 用户确认
-        U->>FE: 确认完成
-        FE->>FE: 结束流程、恢复 Agent 编辑并禁用 Composer
-    else 用户要求修改
-        U->>FE: 提交 target_fields 与修改意见
-        FE->>API: final_confirmation modify action
-        API->>LLM: 只修改受影响字段
-    end
+    LLM-->>FE: 普通文本完成总结
+    FE->>FE: 结束流程、恢复 Agent 编辑并禁用 Composer
 ```
 
 ---
@@ -472,7 +461,6 @@ save_agent_draft_fields(agent_id, fields)
 name
 display_name
 description
-business_description
 duty_prompt
 constraint_prompt
 few_shots_prompt
@@ -491,17 +479,9 @@ example_questions
 
 ### 5.5 `nl2a_wrapper`
 
-职责：生成四种 `<nl2a>` payload，并在资源绑定与 `final_review` 时从数据库读取事实。
+职责：生成需求澄清、建议安装和已安装资源绑定三种 `<nl2a>` payload。资源绑定时从数据库重新解析真实资源身份和配置 Schema。
 
-最终校验包括：
-
-1. `agent_id` 对应当前租户普通 Agent 草稿。
-2. 基本信息完整。
-3. 五组 Prompt 已成功写入数据库。
-4. ToolInstance/SkillInstance 与 Agent 的真实绑定关系可读取。
-5. 资源数量允许为零，但仍必须满足用户已经明确放弃相应需求。
-
-Wrapper 不接收模型重新提交的完整 Agent 内容，也不扫描 Prompt 自然语言判断是否提到未绑定资源。
+Wrapper 不负责流程完成或 Prompt 完整性校验，不接收模型重新提交的完整 Agent 内容，也不扫描 Prompt 自然语言判断是否提到未绑定资源。最终数据库校验由最后一批 `save_agent_draft_fields` 成功后触发，不新增完成卡 subtype。
 
 PR2 的 `installed_resource_binding` Wrapper 只接收 `agent_id` 与
 `RecommendResourcesOutput`，验证成功后输出绑定卡；旧
@@ -728,17 +708,16 @@ Agent 草稿创建不是交互卡，使用独立 SSE 类型同步真实身份：
 }
 ```
 
-该事件只能由 `save_agent_draft_fields(agent_id=null)` 成功结果中的专用 `<nl2a_state>` 标记触发。SDK Observer 只从 Tool execution log 提取并移除该标记，拒绝非法结构，并对同一创建事件去重；模型普通输出不能触发事件。更新已有草稿不发送该事件。
+该事件只能由 `save_agent_draft_fields(agent_id=null)` 成功结果中的专用 `<nl2a_state>` 标记触发。最后一批 Prompt 写库并通过数据库校验后，同一可信通道发送 `agent_generation_completed`。SDK Observer 只从 Tool execution log 提取并移除状态标记，拒绝非法结构，并对创建和完成事件去重；模型普通输出不能触发事件。
 
 前端 adapter 校验事件后通过 `Nl2AgentChatPanel` 回调通知 `/newagents` 页面。页面原子刷新 `useAgentStore` 快照并更新 URL，但不重建 Chat Runtime。事件不写入消息卡 metadata，不创建可见消息，也不进入数据库中的流程状态。
 
-### 8.1 四种卡片 subtype
+### 8.1 三种卡片 subtype
 
 ```text
 requirement_clarification
 suggested_resource_installation
 installed_resource_binding
-final_confirmation
 ```
 
 所有 payload 顶层包含：
@@ -752,7 +731,7 @@ final_confirmation
 
 澄清卡 `agent_id=null`；其余卡片 `agent_id` 必须为正整数。
 
-PR1 新增 `requirement_clarification` 渲染和 action；PR2 新增 `installed_resource_binding`。安装卡与最终确认卡仍由后续 PR 实现。旧 `local_mcp_recommendation` 与 `agent_draft` 分支在过渡期继续可解析和渲染。
+PR1 新增 `requirement_clarification` 渲染和 action；PR2 新增 `installed_resource_binding`，安装卡由后续 PR 实现。旧 `local_mcp_recommendation` 与 `agent_draft` 分支在过渡期继续可解析和渲染。
 
 ### 8.2 一轮一张卡
 
@@ -840,69 +819,31 @@ selected_items.every(item => item.binding_status == "bound")
 
 没有任何勾选时按钮显示“跳过”；存在勾选且全部已绑定时显示“继续”；任何勾选项未绑定时禁止推进。
 
-### 8.6 最终确认卡
+### 8.6 完成总结阶段
 
-最终卡出现前，所有 Prompt 已经分批写入数据库。卡片只展示数据库中的最终摘要：
-
-```text
-Agent 基本信息
-用户有效需求
-实际绑定 Tool/Skill
-Prompt 摘要
-已放弃需求（如有）
-```
-
-操作：
-
-1. “确认完成”：结束 NL2Agent 流程、恢复 Agent 编辑、不再写 Prompt，并禁用 NL2Agent Composer。
-2. “需要修改”：在当前卡片内展开轻量修改表单，不打开完整 Agent 编辑表单，也不直接编辑 Prompt 原文。
-3. 不关闭 NL2Agent 对话面板。
-
-轻量修改表单包含：
-
-```text
-修改范围（可多选）
-□ 基本信息
-□ 需求
-□ 绑定资源
-□ duty_prompt
-□ constraint_prompt
-□ few_shots_prompt
-□ greeting_message
-□ example_questions
-
-修改说明（必填）
-[请输入希望如何修改]
-
-[取消] [提交修改]
-```
-
-提交 action：
+最后一批 `greeting_message + example_questions` 写库后，后端从数据库验证 `description` 和五组 Prompt；存在真实绑定资源时，`constraint_prompt` 与 `few_shots_prompt` 也必须非空。验证成功后发送：
 
 ```json
 {
-  "target_fields": ["duty_prompt", "constraint_prompt"],
-  "feedback": "职责更聚焦，禁止发送未经核实的内容"
+  "type": "nl2a_state",
+  "content": {
+    "event": "agent_generation_completed",
+    "agent_id": 1042
+  }
 }
 ```
 
-路由规则：
+该事件不是卡片 subtype。模型收到事件后直接输出三段普通文本：新智能体已完成生成、新智能体职责与真实能力总结、如需更新请在右侧表单修改。总结不得展示 Prompt 原文或声称拥有未绑定能力。
 
-1. 前端必须明确提交 `target_fields`，模型不得自行扩大修改范围。
-2. 选择基本信息或具体 Prompt 字段时，模型只重新生成并通过 `save_agent_draft_fields` 写入选中字段。
-3. 选择需求时返回需求澄清阶段；选择绑定资源时返回资源搜索和绑定阶段。
-4. 需求或实际绑定资源发生变化后，必须基于新事实重新生成全部 Prompt。
-5. 修改提交后当前最终卡锁定并触发下一轮；完成写库和 Wrapper 校验后输出一张新的最终确认卡。
-6. 完整字段的直接编辑继续由同页面 Agent 编辑区承担，最终卡不复制第二套 Agent 编辑状态。
+前端收到完成事件后立即禁用 Composer，并通过 `searchAgentInfo(agent_id) → replaceServerSnapshot()` 刷新右侧表单。刷新成功后解除流程锁；失败时保持表单锁定并显示非卡片式重试提示。
 
-最终确认后的界面规则：
+完成后的界面规则：
 
-1. 保留现有对话历史和最终确认卡。
+1. 保留现有对话历史和普通文本总结，不增加最终确认卡。
 2. Composer 禁止输入、附件、语音和发送操作。
-3. 不增加“流程已结束”提示、完成页或状态入口。
-4. 不提供“开始新流程”或“新建另一个 Agent”按钮。
-5. 不清空或持久化当前内存对话；刷新或组件卸载后历史自然丢失。
-6. 后续修改通过同页面普通 Agent 编辑区完成，首版不支持确认后继续通过 NL2Agent 修改当前 Agent。
+3. 不增加完成页、状态入口、“开始新流程”或“新建另一个 Agent”按钮。
+4. 不清空或持久化当前内存对话；刷新或组件卸载后历史自然丢失。
+5. 后续修改只通过同页面右侧 Agent 编辑表单完成，首版不支持完成后继续通过 NL2Agent 修改当前 Agent。
 
 ---
 
@@ -972,7 +913,7 @@ Prompt 摘要
 
 ---
 
-## 10. Prompt 分批生成、写库与最终校验
+## 10. Prompt 分批生成、写库与完成校验
 
 ### 10.1 绑定后上下文注入
 
@@ -995,7 +936,7 @@ Prompt 摘要
 2. constraint_prompt
 3. few_shots_prompt
 4. greeting_message + example_questions
-5. nl2a_wrapper(final_review, agent_id)
+5. 普通文本完成总结
 ```
 
 `save_agent_draft_fields` 允许同一轮多次调用，避免模型一次生成体量过大的 PromptSet。
@@ -1005,17 +946,17 @@ Prompt 摘要
 1. 当前字段失败时阻塞后续字段。
 2. 已成功写入字段不回滚。
 3. 模型在同一轮最多修正重试一次。
-4. 第二次失败不生成最终卡；绑定卡区域提供“重试生成”入口触发新一轮。
-5. 所有字段成功后才允许调用最终 Wrapper。
+4. 第二次失败不输出完成总结；绑定卡区域提供“重试生成”入口触发新一轮。
+5. 最后一批保存成功且数据库完整性校验通过后，才发送 `agent_generation_completed`。
 
 ### 10.3 校验边界
 
 后端不解析 Prompt 自然语言来判断是否提到未绑定资源。首版通过正确输入边界保证一致性：
 
 1. Prompt 生成前只注入数据库实际绑定资源。
-2. Wrapper 校验 Agent、Prompt 完整性和真实绑定关系。
-3. Wrapper 不做资源名称关键词扫描，不处理别名或间接描述。
-4. 最终卡同时展示实际绑定资源和 Prompt 摘要，由用户确认。
+2. 最后一批保存后，Service 从数据库校验描述、Prompt 完整性和真实绑定关系。
+3. 完成校验不做资源名称关键词扫描，不处理别名或间接描述。
+4. 模型只基于已确认需求与真实绑定资源输出简洁总结，不重新提交 Agent 内容。
 
 该逻辑属于后端业务边界，不属于 React：
 
@@ -1024,7 +965,7 @@ nl2agent_service.py
 → 读取数据库事实并注入模型上下文
 
 nl2agent_mcp_tools.py
-→ MCP 参数边界和 final wrapper
+→ MCP 参数边界、最终批次保存和可信完成事件
 
 observer.py
 → 只提取 <nl2a>
@@ -1033,7 +974,7 @@ React
 → 解析、渲染、交互和 searchAgentInfo/setCurrentAgent 同步
 ```
 
-React 中的 `useEffect` 只用于最终卡出现后的外部状态读取同步；安装和绑定写操作由明确的用户点击 handler 触发，不在渲染副作用中自动执行。
+React 在收到可信完成事件后读取数据库并同步右侧表单；安装和绑定写操作仍由明确的用户点击 handler 触发，不在渲染副作用中自动执行。
 
 ---
 
@@ -1045,7 +986,7 @@ React 中的 `useEffect` 只用于最终卡出现后的外部状态读取同步�
 2. 复用 `requirement_clarification` 卡片，列出所有未覆盖需求。
 3. 用户可以明确放弃需求、修改需求描述或结束流程。
 4. 只有用户明确放弃后，才允许继续绑定和 Prompt 生成。
-5. 最终确认卡必须展示被用户放弃的需求。
+5. 完成总结必须说明被用户明确放弃的范围。
 
 ---
 
@@ -1065,7 +1006,7 @@ React 中的 `useEffect` 只用于最终卡出现后的外部状态读取同步�
 6. 绑定卡统一展示相关资源，用户勾选并配置 GitHub Token、邮箱参数等。
 7. 前端批量绑定；成功项立即写库，失败项保留重试。
 8. 后端从数据库读取真实绑定，模型分批生成 Prompt。
-9. 最终卡展示 Agent 基本信息、绑定资源和 Prompt 摘要，并注明未包含定时调度。
+9. 模型输出普通文本总结，说明 Agent 的职责、真实能力，并注明未包含定时调度；用户后续通过右侧表单修改。
 
 ---
 
@@ -1077,7 +1018,7 @@ React 中的 `useEffect` 只用于最终卡出现后的外部状态读取同步�
 |---|---|
 | `backend/tool_collection/mcp/nl2agent_mcp_tools.py` | 五个 MCP Tool 参数和输出边界 |
 | `backend/tool_collection/mcp/local_mcp_service.py` | 注册五个内部 Tool |
-| `backend/services/nl2agent_service.py` | 搜索编排、统一评分、草稿上下文注入、最终校验编排 |
+| `backend/services/nl2agent_service.py` | 搜索编排、统一评分、草稿上下文注入、完成校验编排 |
 | `backend/agents/nl2agent_agent.py` | Tool 配置、系统 Prompt、`max_steps=8` |
 | `backend/apps/agent_app.py` | 保留现有 NL2Agent SSE HTTP 边界 |
 | `backend/services/agent_service.py` | 复用普通 Agent 创建/更新能力 |
@@ -1091,9 +1032,9 @@ React 中的 `useEffect` 只用于最终卡出现后的外部状态读取同步�
 
 | 文件/目录 | 计划职责 |
 |---|---|
-| `frontend/app/[locale]/newchat/adapter/remote-chat-model-adapter.ts` | 四种 NL2A payload 和 action 类型 |
-| `frontend/app/[locale]/newchat/assistant-ui/thread.tsx` | 四种卡片挂载 |
-| `frontend/app/[locale]/newchat/ui/` | 新增四种卡片组件 |
+| `frontend/app/[locale]/newchat/adapter/remote-chat-model-adapter.ts` | 三种 NL2A payload、action 和可信完成事件类型 |
+| `frontend/app/[locale]/newchat/assistant-ui/thread.tsx` | 三种卡片挂载 |
+| `frontend/app/[locale]/newchat/ui/` | 新增三种卡片组件 |
 | `frontend/services/agentConfigService.ts` | 复用 Tool/Skill 绑定与 Agent 读取；保留结构化错误 |
 | `frontend/services/mcpService.ts` | 复用 MCP 安装和刷新能力 |
 | `frontend/stores/agentConfigStore.ts` | Agent 编辑表单事实同步，不保存 NL2Agent 流程 |
@@ -1123,7 +1064,7 @@ React 中的 `useEffect` 只用于最终卡出现后的外部状态读取同步�
 Gate 0 默认打开 NL2Agent Panel
 → PR1 协议与 Agent 草稿闭环
 → PR2 已安装资源搜索与绑定闭环
-→ PR3 Prompt 写库与最终确认闭环
+→ PR3 Prompt 写库与完成总结闭环
 → PR4 未安装资源搜索与安装闭环
 → PR5 完整 E2E 与检索校准
 ```
@@ -1158,7 +1099,7 @@ Gate 0 默认打开 NL2Agent Panel
 实现范围：
 
 1. 冻结五个 MCP Tool 的 Pydantic 入参和返回类型。
-2. 冻结四种 NL2A payload 和统一 action TypeScript 类型。
+2. 冻结三种 NL2A payload、可信完成事件和统一 action TypeScript 类型。
 3. 实现需求澄清卡及页面级 NL2Agent 流程状态容器。
 4. 实现租户安全的 `save_agent_draft_fields`，复用普通 Agent 创建能力和名称后缀生成逻辑。
 5. 创建草稿时补齐默认 LLM、默认 Prompt 配置、`max_steps=15`、默认分组和其他普通 Agent 默认字段。
@@ -1190,23 +1131,23 @@ Gate 0 默认打开 NL2Agent Panel
 3. 修改的后端模块单元测试覆盖率达到 90%，并完成绑定 API 验证。
 4. 本阶段按项目决策使用 `npm run check-all` 与桌面、平板、移动端人工验收，不新增或运行 Vitest/Playwright；该例外不延伸到后续阶段。
 
-### 14.6 PR3：Prompt 写库与最终确认闭环（P0）
+### 14.6 PR3：Prompt 写库与完成总结闭环（P0）
 
 实现范围：
 
 1. 在 NL2Agent run 构建阶段注入数据库中的 Agent 基本信息和真实绑定资源。
 2. 保持 NL2Agent `max_steps=8`。
 3. 实现五组 Prompt 字段分批写库、当前字段一次修正重试和失败后新一轮重试入口。
-4. 实现 final wrapper 的租户、草稿、Prompt 完整性和真实绑定校验。
-5. 实现最终确认卡、明确 `target_fields` 的局部修改以及需求/绑定变化后的全量 Prompt 重建。
-6. 最终卡出现时再次执行 `searchAgentInfo() → setCurrentAgent()`；确认完成后解除编辑表单流程锁并禁用 NL2Agent Composer。
+4. 在最后一批保存后实现租户、草稿、Prompt 完整性和真实绑定校验，并发送可信 `agent_generation_completed` 事件。
+5. 模型收到完成事件后直接输出本地化普通文本总结，不调用 wrapper 或生成额外卡片。
+6. 前端收到完成事件后禁用 Composer，再次执行 `searchAgentInfo() → replaceServerSnapshot()`，同步成功后解除编辑表单流程锁。
 
 验收门槛：
 
 1. Prompt 生成只使用数据库实际绑定资源，前端无法覆盖该事实。
-2. 任一字段二次写入失败时不生成最终卡，已成功字段不回滚。
-3. 确认、局部修改、返回需求阶段、返回绑定阶段和完成后 Composer 禁用均有测试。
-4. 修改模块单元测试覆盖率达到 90%，并完成 Prompt 写库 API 验证和最终确认卡 Playwright 验证。
+2. 任一字段二次写入或完成校验失败时不输出完成总结，已成功字段不回滚。
+3. 完成事件、普通文本总结、Store 刷新、右侧表单解锁、同步失败重试和 Composer 禁用均有测试。
+4. 修改模块单元测试覆盖率达到 90%，并完成 Prompt 写库 API 验证和完成总结 Playwright 验证。
 
 在 PR4 合入前，当前已安装资源无法覆盖的需求仍沿用“明确放弃、修改需求或结束流程”，不得自动生成能力不完整的 Agent。
 
@@ -1220,7 +1161,7 @@ Gate 0 默认打开 NL2Agent Panel
 4. 扩展 `recommend_resources`，返回 MCP/Skill 安装方式、`form_kind` 和现有配置 Schema。
 5. 实现逐资源安装卡，复用现有 Skill/MCP 安装 API，并支持安装失败重试、显式跳过和安装后真实资源重搜。
 6. 实现未覆盖需求回到澄清卡的分支，要求用户明确放弃、修改或结束流程。
-7. 安装或绑定变化后使当前 Prompt 失效，基于新的数据库事实全量重建 Prompt 并重新输出最终确认卡。
+7. 安装或绑定变化后使当前 Prompt 失效，基于新的数据库事实全量重建 Prompt 并重新输出完成总结。
 
 验收门槛：
 
@@ -1232,9 +1173,9 @@ Gate 0 默认打开 NL2Agent Panel
 
 P1 完整验收：
 
-1. 验证进入流程、草稿创建、编辑区只读、安装、绑定、最终确认和恢复编辑的完整页面生命周期。
-2. 使用 `curl` 验证后端创建、搜索、绑定上下文和 final wrapper 验收路径。
-3. 使用 Playwright 验证默认打开的 Panel、四张卡、批量绑定部分失败、字段错误展开、最终修改和完成后禁用状态。
+1. 验证进入流程、草稿创建、编辑区只读、安装、绑定、完成总结和恢复编辑的完整页面生命周期。
+2. 使用 `curl` 验证后端创建、搜索、绑定上下文、完成校验和可信状态事件路径。
+3. 使用 Playwright 验证默认打开的 Panel、三张卡、批量绑定部分失败、字段错误展开、普通文本总结和完成后禁用状态。
 4. 回归 Gate 0 的桌面和移动端响应式布局，确认后续卡片没有引入重叠或溢出。
 
 P2 校准：
@@ -1253,7 +1194,7 @@ P2 校准：
 4. 需求澄清后立即创建包含基本信息的 Agent，不创建空 Agent。
 5. Tool/Skill 绑定不通过 `save_agent_draft_fields`。
 6. Prompt 允许模型在同一轮多次写入。
-7. 专用 Tool 固定为五个，卡片 subtype 固定为四个。
+7. 专用 Tool 固定为五个，卡片 subtype 固定为三个。
 8. 内部搜索可以使用官方 `parallel_executor`。
 9. 外部来源首版只有 MCP 官方 Registry。
 10. ModelScope 与 MCP.so 暂不适配。
@@ -1270,11 +1211,11 @@ P2 校准：
 21. 批量绑定前校验所有勾选项；存在错误时零请求、汇总警告、展开并标红全部错误表单。
 22. 批量绑定允许部分成功；成功项锁定，失败项可重试。
 23. 只有全部勾选项已绑定或无任何勾选项时才可继续。
-24. 最终卡出现前 Prompt 已全部写库；确认按钮只结束流程并禁用 NL2Agent Composer。
+24. 完成总结前 Prompt 已全部写库并通过数据库校验；流程不再提供最终确认按钮。
 25. Prompt 生成只使用数据库实际绑定资源。
 26. 后端不扫描 Prompt 自然语言中的资源名称。
-27. 最终确认后不关闭 NL2Agent 面板，不显示结束界面或新流程入口。
-28. 最终确认后禁用 NL2Agent Composer，后续修改通过普通 Agent 编辑区完成。
+27. 完成总结后不关闭 NL2Agent 面板，不显示结束界面或新流程入口。
+28. 完成事件后禁用 NL2Agent Composer，后续修改通过右侧普通 Agent 编辑区完成。
 29. 定时任务不参与首版。
 30. Gate 0 恢复并默认打开 Agent 创建页中的 NL2Agent Panel，不在 PR5 增加入口 Cutover 或开关。
 
@@ -1305,7 +1246,7 @@ MCP Registry `stdio Package` 通过 Container 快速安装时，现有分支没�
 → 将缺失依赖与生成 Skill 合并进同一张建议安装卡
 → 先安装依赖，再由用户点击安装生成 Skill
 → 重新搜索已安装资源
-→ 进入既有绑定、Prompt 和最终确认流程
+→ 进入既有绑定、Prompt 和完成总结流程
 ```
 
 新建 Skill 不直接视为匹配度 100%；安装后必须通过真实 `skill_id` 定向进入已安装资源搜索结果，但不再参加普通模糊匹配排序。
@@ -1338,7 +1279,7 @@ sequenceDiagram
     FE->>LLM: 安装完成 action
     LLM->>T: search_installed_resources(含定向 skill_id)
     T-->>LLM: 真实已安装 Tool/Skill
-    Note over LLM,FE: 回到既有绑定、Prompt 和最终确认流程
+    Note over LLM,FE: 回到既有绑定、Prompt 和完成总结流程
 ```
 
 启用该可选项前必须冻结 Skill 草稿 Schema、依赖引用、安装顺序和失败返回契约。

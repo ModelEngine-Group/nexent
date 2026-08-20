@@ -17,7 +17,6 @@ _NL2A_STATE_PATTERN = re.compile(
 _NL2AGENT_DRAFT_SYNC_FIELDS = frozenset(
     {
         "description",
-        "business_description",
         "duty_prompt",
         "constraint_prompt",
         "few_shots_prompt",
@@ -485,7 +484,7 @@ class MessageObserver:
         ):
             return None, visible_content
         event = payload.get("event")
-        if event == "agent_draft_created":
+        if event in {"agent_draft_created", "agent_generation_completed"}:
             valid = set(payload) == {"event", "agent_id"}
         elif event == "agent_draft_fields_saved":
             updated_fields = payload.get("updated_fields")

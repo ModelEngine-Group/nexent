@@ -84,8 +84,7 @@ export interface Nl2aToolRecommendation {
 export type Nl2AgentCardActionSubtype =
   | "requirement_clarification"
   | "suggested_resource_installation"
-  | "installed_resource_binding"
-  | "final_confirmation";
+  | "installed_resource_binding";
 
 export interface Nl2AgentCardAction {
   type: "nl2agent_card_action";
@@ -95,8 +94,7 @@ export interface Nl2AgentCardAction {
   result: Record<string, unknown>;
 }
 
-export type Nl2AgentDraftField =
-  "description" | "business_description" | Nl2aPromptField;
+export type Nl2AgentDraftField = "description" | Nl2aPromptField;
 
 export type Nl2AgentStateEvent =
   | {
@@ -108,6 +106,10 @@ export type Nl2AgentStateEvent =
       event: "prompt_generation_failed";
       agent_id: number;
       failed_fields: Nl2aPromptField[];
+    }
+  | {
+      event: "agent_generation_completed";
+      agent_id: number;
     };
 
 export interface Nl2aRequirementClarificationOption {
@@ -194,37 +196,6 @@ export type Nl2aRecommendedResource =
       config: SkillParam[];
     };
 
-export interface Nl2aFinalConfirmationPayload {
-  subtype: "final_confirmation";
-  agent_id: number;
-  agent: {
-    name: string;
-    display_name: string;
-    description: string;
-    business_description: string;
-  };
-  requirements: Nl2aFinalRequirement[];
-  abandoned_requirements: Nl2aFinalRequirement[];
-  resources: Array<{
-    resource_type: "tool" | "skill";
-    resource_id: number;
-    name: string;
-    description: string;
-  }>;
-  prompts: {
-    duty_prompt: string;
-    constraint_prompt: string;
-    few_shots_prompt: string;
-    greeting_message: string;
-    example_questions: string[];
-  };
-}
-
-export interface Nl2aFinalRequirement {
-  requirement_id: string;
-  query: string;
-}
-
 export type Nl2aPromptField =
   | "duty_prompt"
   | "constraint_prompt"
@@ -237,8 +208,7 @@ export type Nl2aPayload =
   | Nl2aLocalMcpRecommendationPayload
   | Nl2aAgentDraftPayload
   | Nl2aSuggestedResourceInstallationPayload
-  | Nl2aInstalledResourceBindingPayload
-  | Nl2aFinalConfirmationPayload;
+  | Nl2aInstalledResourceBindingPayload;
 
 export interface Nl2aMessage {
   type: "nl2a";
@@ -822,52 +792,6 @@ function parseNl2aMessage(chunk: SseChunk): Nl2aMessage | null {
         return null;
       }
     }
-    if (content.subtype === "final_confirmation") {
-      const agent = content.agent as Record<string, unknown> | undefined;
-      const prompts = content.prompts as Record<string, unknown> | undefined;
-      const validRequirements = (value: unknown) =>
-        Array.isArray(value) &&
-        value.length <= 8 &&
-        value.every(
-          (requirement) =>
-            requirement &&
-            typeof requirement.requirement_id === "string" &&
-            typeof requirement.query === "string"
-        );
-      if (
-        !Number.isInteger(content.agent_id) ||
-        content.agent_id <= 0 ||
-        !agent ||
-        !["name", "display_name", "description", "business_description"].every(
-          (field) => typeof agent[field] === "string"
-        ) ||
-        !prompts ||
-        ![
-          "duty_prompt",
-          "constraint_prompt",
-          "few_shots_prompt",
-          "greeting_message",
-        ].every((field) => typeof prompts[field] === "string") ||
-        !Array.isArray(prompts.example_questions) ||
-        prompts.example_questions.some(
-          (question) => typeof question !== "string"
-        ) ||
-        !validRequirements(content.requirements) ||
-        !validRequirements(content.abandoned_requirements) ||
-        !Array.isArray(content.resources) ||
-        content.resources.some(
-          (resource) =>
-            !["tool", "skill"].includes(resource?.resource_type) ||
-            !Number.isInteger(resource?.resource_id) ||
-            resource.resource_id <= 0 ||
-            typeof resource.name !== "string" ||
-            typeof resource.description !== "string"
-        )
-      ) {
-        log.warn("[ChatModelAdapter] Ignored invalid final-card payload");
-        return null;
-      }
-    }
     return {
       type: "nl2a",
       tool_name: chunk.tool_name,
@@ -892,6 +816,11 @@ export function parseNl2AgentState(content: string): Nl2AgentStateEvent | null {
       "greeting_message",
       "example_questions",
     ]);
+    if (parsed.event === "agent_generation_completed") {
+      return Object.keys(parsed).length === 2
+        ? (parsed as unknown as Nl2AgentStateEvent)
+        : null;
+    }
     if (parsed.event === "prompt_generation_failed") {
       if (
         Object.keys(parsed).length !== 3 ||
@@ -911,7 +840,6 @@ export function parseNl2AgentState(content: string): Nl2AgentStateEvent | null {
 
     const draftFields = new Set<Nl2AgentDraftField>([
       "description",
-      "business_description",
       ...promptFields,
     ]);
     if (

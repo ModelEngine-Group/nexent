@@ -39,11 +39,6 @@ from services.agent_draft_permission_service import (
 )
 from tool_collection.mcp.nl2agent_mcp_tools import (
     AgentDraftFields,
-    FinalConfirmationAgent,
-    FinalConfirmationPayload,
-    FinalConfirmationPrompts,
-    FinalConfirmationRequirement,
-    FinalConfirmationResource,
     InstalledMcpToolRecommendation,
     NL2AGENT_AGENT_ID_HEADER,
     RecommendResourcesOutput,
@@ -67,7 +62,6 @@ AGENT_DRAFT_FIELD_ORDER = (
     "name",
     "display_name",
     "description",
-    "business_description",
     "duty_prompt",
     "constraint_prompt",
     "few_shots_prompt",
@@ -123,8 +117,8 @@ class Nl2AgentDraftSaveError(Exception):
         self.retryable = retryable
 
 
-class Nl2AgentFinalConfirmationError(Exception):
-    """Stable final-review validation failure consumed by the MCP boundary."""
+class Nl2AgentCompletionError(Exception):
+    """Stable persisted-state validation failure at generation completion."""
 
     def __init__(self, code: str, failed_fields: list[str] | None = None):
         super().__init__(code)
@@ -808,43 +802,22 @@ async def _build_verified_bound_resources_context(
     )
 
 
-async def build_final_confirmation_payload_impl(
+async def validate_agent_generation_complete_impl(
     *,
     agent_id: int,
-    requirements: list[FinalConfirmationRequirement],
-    abandoned_requirement_ids: list[str],
     tenant_id: str,
     user_id: str,
-) -> FinalConfirmationPayload:
-    """Build the final review exclusively from verified database state."""
-
-    requirement_ids = [item.requirement_id for item in requirements]
-    if len(requirements) > 8 or len(requirement_ids) != len(set(requirement_ids)):
-        raise Nl2AgentFinalConfirmationError("invalid_requirements")
-    abandoned_ids = set(abandoned_requirement_ids)
-    if (
-        len(abandoned_requirement_ids) != len(abandoned_ids)
-        or not abandoned_ids.issubset(requirement_ids)
-    ):
-        raise Nl2AgentFinalConfirmationError("invalid_requirements")
+) -> None:
+    """Verify the final NL2Agent fields directly from persisted database state."""
 
     draft, facts = await _load_verified_nl2agent_state(
         agent_id=agent_id,
         tenant_id=tenant_id,
         user_id=user_id,
     )
-    basic_fields = ("name", "display_name", "description", "business_description")
-    missing_basic = [
-        field_name
-        for field_name in basic_fields
-        if not isinstance(draft.get(field_name), str)
-        or not draft[field_name].strip()
-    ]
-    if missing_basic:
-        raise Nl2AgentFinalConfirmationError(
-            "basic_fields_incomplete",
-            missing_basic,
-        )
+    description = draft.get("description")
+    if not isinstance(description, str) or not description.strip():
+        raise Nl2AgentCompletionError("draft_fields_incomplete", ["description"])
 
     required_prompt_fields = ["duty_prompt", "greeting_message"]
     if facts:
@@ -863,44 +836,10 @@ async def build_final_confirmation_payload_impl(
     ):
         missing_prompts.append("example_questions")
     if missing_prompts:
-        raise Nl2AgentFinalConfirmationError(
+        raise Nl2AgentCompletionError(
             "prompt_fields_incomplete",
             missing_prompts,
         )
-
-    active_requirements = [
-        item for item in requirements if item.requirement_id not in abandoned_ids
-    ]
-    abandoned_requirements = [
-        item for item in requirements if item.requirement_id in abandoned_ids
-    ]
-    return FinalConfirmationPayload(
-        agent_id=agent_id,
-        agent=FinalConfirmationAgent(
-            name=draft["name"].strip(),
-            display_name=draft["display_name"].strip(),
-            description=draft["description"].strip(),
-            business_description=draft["business_description"].strip(),
-        ),
-        requirements=active_requirements,
-        abandoned_requirements=abandoned_requirements,
-        resources=[
-            FinalConfirmationResource(
-                resource_type=fact["resource_type"],
-                resource_id=fact["resource_id"],
-                name=fact["name"],
-                description=fact["description"],
-            )
-            for fact in facts
-        ],
-        prompts=FinalConfirmationPrompts(
-            duty_prompt=draft["duty_prompt"].strip(),
-            constraint_prompt=(draft.get("constraint_prompt") or "").strip(),
-            few_shots_prompt=(draft.get("few_shots_prompt") or "").strip(),
-            greeting_message=draft["greeting_message"].strip(),
-            example_questions=[item.strip() for item in example_questions],
-        ),
-    )
 
 
 def _convert_history(history: list[HistoryItem] | None) -> list[AgentHistory]:

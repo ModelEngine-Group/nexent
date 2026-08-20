@@ -593,6 +593,28 @@ class TestMessageObserver:
             '{"status":"error","code":"draft_save_failed"}'
         )
 
+    def test_execution_logs_extract_and_deduplicate_generation_completed_state(self):
+        observer = MessageObserver(lang="en", enable_nl2a_wrapper=True)
+        content = (
+            '{"status":"success"}\n'
+            '<nl2a_state>{"event":"agent_generation_completed",'
+            '"agent_id":1042}</nl2a_state>'
+        )
+
+        observer.add_message("nl2agent", ProcessType.EXECUTION_LOGS, content)
+        observer.add_message("nl2agent", ProcessType.EXECUTION_LOGS, content)
+
+        messages = [json.loads(item) for item in observer.get_cached_message()]
+        assert [item["type"] for item in messages] == [
+            ProcessType.NL2A_STATE.value,
+            ProcessType.EXECUTION_LOGS.value,
+            ProcessType.EXECUTION_LOGS.value,
+        ]
+        assert json.loads(messages[0]["content"]) == {
+            "event": "agent_generation_completed",
+            "agent_id": 1042,
+        }
+
     def test_execution_logs_emit_every_saved_fields_state(self):
         observer = MessageObserver(lang="en", enable_nl2a_wrapper=True)
         content = (
@@ -625,6 +647,8 @@ class TestMessageObserver:
             '{"event":"agent_draft_created","agent_id":0}',
             '{"event":"draft_updated","agent_id":1042}',
             '{"event":"agent_draft_created","agent_id":1042,"extra":true}',
+            '{"event":"agent_generation_completed","agent_id":1042,'
+            '"extra":true}',
             '{"event":"prompt_generation_failed","agent_id":1042,'
             '"failed_fields":["unknown_prompt"]}',
             '{"event":"prompt_generation_failed","agent_id":1042,'
@@ -633,6 +657,8 @@ class TestMessageObserver:
             '"updated_fields":[]}',
             '{"event":"agent_draft_fields_saved","agent_id":1042,'
             '"updated_fields":["unknown_prompt"]}',
+            '{"event":"agent_draft_fields_saved","agent_id":1042,'
+            '"updated_fields":["business_description"]}',
             '{"event":"agent_draft_fields_saved","agent_id":1042,'
             '"updated_fields":["description","description"]}',
             '["agent_draft_created",1042]',

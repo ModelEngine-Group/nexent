@@ -10,7 +10,7 @@ import {
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "antd";
-import { Sparkles, X } from "lucide-react";
+import { RefreshCw, Sparkles, X } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 
 import AgentSelectorHeader from "./components/agent-selector-header";
@@ -59,7 +59,7 @@ function AgentSetupContent() {
   const { t } = useTranslation("common");
   const queryClient = useQueryClient();
   const searchParams = useSearchParams();
-  const snapshotRefreshQueue = useRef<Promise<void>>(Promise.resolve());
+  const snapshotRefreshQueue = useRef<Promise<boolean>>(Promise.resolve(true));
   const [isGenerationVisible, setIsGenerationVisible] = useState(true);
   const [isDebugVisible, setIsDebugVisible] = useState(false);
   const [isShowVersionManagePanel, setIsShowVersionManagePanel] =
@@ -68,6 +68,10 @@ function AgentSetupContent() {
   const permissionReadOnly = useAgentStore((state) => state.isReadOnly);
   const {
     isComposerDisabled,
+    completionSyncFailed,
+    markCompletionSynced,
+    markCompletionSyncFailed,
+    markGenerationCompleted,
     markPromptGenerationFailed,
     resetFlow,
     sessionGeneration,
@@ -88,35 +92,48 @@ function AgentSetupContent() {
       snapshotRefreshQueue.current = snapshotRefreshQueue.current
         .then(async () => {
           const initialState = useAgentStore.getState();
-          if (initialState.currentAgentId !== agentId) return;
+          if (initialState.currentAgentId !== agentId) return false;
 
           const autosaveSucceeded = await initialState.waitForIdle();
           if (!autosaveSucceeded) {
             throw new Error("Pending Agent edits could not be saved");
           }
-          if (useAgentStore.getState().currentAgentId !== agentId) return;
+          if (useAgentStore.getState().currentAgentId !== agentId) return false;
 
           const result = await searchAgentInfo(agentId, undefined, 0);
           if (!result.success || !result.data) {
             throw new Error(result.message);
           }
           const currentState = useAgentStore.getState();
-          if (currentState.currentAgentId !== agentId) return;
+          if (currentState.currentAgentId !== agentId) return false;
           if (!currentState.replaceServerSnapshot(agentId, result.data)) {
             throw new Error("Agent context changed during synchronization");
           }
 
           queryClient.setQueryData(["agentInfo", agentId], result.data);
           await queryClient.invalidateQueries({ queryKey: ["agents"] });
+          return true;
         })
         .catch((error) => {
           log.warn("[NL2Agent] Failed to refresh saved draft fields", {
             agentId,
             error,
           });
+          return false;
         });
+      return snapshotRefreshQueue.current;
     },
     [queryClient]
+  );
+
+  const synchronizeCompletion = useCallback(
+    (agentId: number) => {
+      void enqueueSnapshotRefresh(agentId).then((synchronized) => {
+        if (synchronized) markCompletionSynced(agentId);
+        else markCompletionSyncFailed(agentId);
+      });
+    },
+    [enqueueSnapshotRefresh, markCompletionSyncFailed, markCompletionSynced]
   );
 
   const handleStateEvent = useCallback(
@@ -125,10 +142,24 @@ function AgentSetupContent() {
         markPromptGenerationFailed(event.agent_id, event.failed_fields);
         return;
       }
-      enqueueSnapshotRefresh(event.agent_id);
+      if (event.event === "agent_generation_completed") {
+        markGenerationCompleted(event.agent_id);
+        synchronizeCompletion(event.agent_id);
+        return;
+      }
+      void enqueueSnapshotRefresh(event.agent_id);
     },
-    [enqueueSnapshotRefresh, markPromptGenerationFailed]
+    [
+      enqueueSnapshotRefresh,
+      markGenerationCompleted,
+      markPromptGenerationFailed,
+      synchronizeCompletion,
+    ]
   );
+
+  const retryCompletionSync = useCallback(() => {
+    if (currentAgentId !== null) synchronizeCompletion(currentAgentId);
+  }, [currentAgentId, synchronizeCompletion]);
 
   return (
     <div className="flex h-full w-full min-h-0 flex-col bg-gray-50">
@@ -168,6 +199,26 @@ function AgentSetupContent() {
                       "nl2agent.unavailable",
                       "Create or select an editable Agent first."
                     )}
+                  </div>
+                ) : null}
+                {completionSyncFailed ? (
+                  <div
+                    className="flex shrink-0 items-center justify-between gap-3 border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900"
+                    role="alert"
+                  >
+                    <span>
+                      {t(
+                        "nl2agent.completion.syncFailed",
+                        "The Agent was generated, but the form could not be refreshed."
+                      )}
+                    </span>
+                    <Button
+                      icon={<RefreshCw size={14} />}
+                      onClick={retryCompletionSync}
+                      size="small"
+                    >
+                      {t("nl2agent.completion.retry", "Retry")}
+                    </Button>
                   </div>
                 ) : null}
                 <Nl2AgentChatPanel

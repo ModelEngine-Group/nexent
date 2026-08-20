@@ -288,13 +288,10 @@ async def test_mcp_search_registration_has_stable_name_schema_and_marker():
         "agent_id",
         "resource_result",
         "questions",
-        "requirements",
-        "abandoned_requirement_ids",
     }
     assert wrapper_tool.parameters["properties"]["subtype"]["enum"] == [
         "requirement_clarification",
         "installed_resource_binding",
-        "final_confirmation",
     ]
     assert wrapper_tool.meta["nexent_internal"] is True
 
@@ -322,13 +319,11 @@ async def test_save_agent_draft_fields_emits_saved_fields_state(
             "created": False,
             "updated_fields": [
                 "description",
-                "business_description",
             ],
         },
     )
     fields = {
         "description": "Researches a topic.",
-        "business_description": "Research and summarize.",
     }
 
     result = await save_agent_draft_fields(1042, fields)
@@ -340,7 +335,6 @@ async def test_save_agent_draft_fields_emits_saved_fields_state(
         "created": False,
         "updated_fields": [
             "description",
-            "business_description",
         ],
     }
     assert json.loads(
@@ -348,7 +342,7 @@ async def test_save_agent_draft_fields_emits_saved_fields_state(
     ) == {
         "event": "agent_draft_fields_saved",
         "agent_id": 1042,
-        "updated_fields": ["description", "business_description"],
+        "updated_fields": ["description"],
     }
     assert "agent_draft_created" not in result
     save_impl.assert_called_once()
@@ -361,6 +355,7 @@ async def test_save_agent_draft_fields_emits_saved_fields_state(
         (None, {"description": "Missing ID"}),
         (1042, {"name": "renamed_agent"}),
         (1042, {"display_name": "Renamed Agent"}),
+        (1042, {"business_description": "Removed field"}),
         (1042, {}),
     ],
 )
@@ -739,7 +734,7 @@ async def test_installed_binding_wrapper_rechecks_agent_and_candidates(mocker):
 
 
 @pytest.mark.asyncio
-async def test_final_confirmation_wrapper_uses_verified_service_payload(mocker):
+async def test_final_prompt_batch_emits_generation_completed_state(mocker):
     mocker.patch.object(
         nl2agent_mcp_tools_module,
         "get_http_request",
@@ -750,51 +745,112 @@ async def test_final_confirmation_wrapper_uses_verified_service_payload(mocker):
         "get_current_user_id",
         return_value=("user-a", "tenant-a"),
     )
-    mocker.patch(
-        "services.agent_draft_permission_service.require_agent_draft_edit"
-    )
-    final_payload = {
-        "subtype": "final_confirmation",
-        "agent_id": 42,
-        "agent": {
-            "name": "database_assistant",
-            "display_name": "Database Assistant",
-            "description": "Database description",
-            "business_description": "Database workflow",
-        },
-        "requirements": [
-            {"requirement_id": "research", "query": "Research sources"}
-        ],
-        "abandoned_requirements": [],
-        "resources": [],
-        "prompts": {
-            "duty_prompt": "Research",
-            "constraint_prompt": "",
-            "few_shots_prompt": "",
-            "greeting_message": "Hello",
-            "example_questions": ["What should I research?"],
-        },
-    }
-    build_final = mocker.patch.object(
+    save_impl = mocker.patch.object(
         nl2agent_service,
-        "build_final_confirmation_payload_impl",
-        new=AsyncMock(return_value=final_payload),
+        "save_agent_draft_fields_impl",
+        return_value={
+            "status": "success",
+            "agent_id": 42,
+            "created": False,
+            "updated_fields": ["greeting_message", "example_questions"],
+        },
+    )
+    validate_complete = mocker.patch.object(
+        nl2agent_service,
+        "validate_agent_generation_complete_impl",
+        new=AsyncMock(),
     )
 
-    wrapped = await nl2a_wrapper(
-        subtype="final_confirmation",
+    result_json, state_wrapper = (
+        await save_agent_draft_fields(
+            42,
+            {
+                "greeting_message": "Hello",
+                "example_questions": ["What should I research?"],
+            },
+        )
+    ).split("\n", 1)
+
+    assert json.loads(result_json)["updated_fields"] == [
+        "greeting_message",
+        "example_questions",
+    ]
+    assert json.loads(
+        state_wrapper.removeprefix("<nl2a_state>").removesuffix(
+            "</nl2a_state>"
+        )
+    ) == {
+        "event": "agent_generation_completed",
+        "agent_id": 42,
+    }
+    save_impl.assert_called_once()
+    validate_complete.assert_awaited_once_with(
         agent_id=42,
-        requirements=[
-            {"requirement_id": "research", "query": "Research sources"}
-        ],
-        abandoned_requirement_ids=[],
+        tenant_id="tenant-a",
+        user_id="user-a",
     )
 
-    assert _unwrap_nl2a(wrapped) == final_payload
-    assert build_final.await_args.kwargs["tenant_id"] == "tenant-a"
-    assert build_final.await_args.kwargs["requirements"][0].query == (
-        "Research sources"
+
+@pytest.mark.asyncio
+async def test_final_prompt_batch_emits_failure_when_database_is_incomplete(mocker):
+    mocker.patch.object(
+        nl2agent_mcp_tools_module,
+        "get_http_request",
+        return_value=SimpleNamespace(headers={"Authorization": "Bearer token"}),
     )
+    mocker.patch.object(
+        nl2agent_mcp_tools_module,
+        "get_current_user_id",
+        return_value=("user-a", "tenant-a"),
+    )
+    mocker.patch.object(
+        nl2agent_service,
+        "save_agent_draft_fields_impl",
+        return_value={
+            "status": "success",
+            "agent_id": 42,
+            "created": False,
+            "updated_fields": ["greeting_message", "example_questions"],
+        },
+    )
+    mocker.patch.object(
+        nl2agent_service,
+        "validate_agent_generation_complete_impl",
+        new=AsyncMock(
+            side_effect=nl2agent_service.Nl2AgentCompletionError(
+                "prompt_fields_incomplete",
+                ["few_shots_prompt"],
+            )
+        ),
+    )
+
+    result_json, state_wrapper = (
+        await save_agent_draft_fields(
+            42,
+            {
+                "greeting_message": "Hello",
+                "example_questions": ["What should I research?"],
+            },
+        )
+    ).split("\n", 1)
+
+    assert json.loads(result_json) == {
+        "status": "error",
+        "agent_id": 42,
+        "created": False,
+        "updated_fields": [],
+        "code": "prompt_fields_incomplete",
+        "retryable": True,
+    }
+    assert json.loads(
+        state_wrapper.removeprefix("<nl2a_state>").removesuffix(
+            "</nl2a_state>"
+        )
+    ) == {
+        "event": "prompt_generation_failed",
+        "agent_id": 42,
+        "failed_fields": ["few_shots_prompt"],
+    }
 
 
 @pytest.mark.asyncio

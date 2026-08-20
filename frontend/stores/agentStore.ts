@@ -35,7 +35,6 @@ export type AgentDraft = Pick<
   | "duty_prompt"
   | "constraint_prompt"
   | "few_shots_prompt"
-  | "business_description"
   | "business_logic_model_name"
   | "business_logic_model_id"
   | "prompt_template_id"
@@ -125,7 +124,6 @@ const toDraft = (agent: Agent): AgentDraft => ({
   duty_prompt: agent.duty_prompt || "",
   constraint_prompt: agent.constraint_prompt || "",
   few_shots_prompt: agent.few_shots_prompt || "",
-  business_description: agent.business_description || "",
   business_logic_model_name: agent.business_logic_model_name || "",
   business_logic_model_id: agent.business_logic_model_id || 0,
   prompt_template_id: agent.prompt_template_id ?? 0,
@@ -256,9 +254,6 @@ const toAgentPayload = (agentId: number, patch: AgentDraftPatch) => ({
     : {}),
   ...(patch.verification_config !== undefined
     ? { verification_config: patch.verification_config }
-    : {}),
-  ...(patch.business_description !== undefined
-    ? { business_description: patch.business_description }
     : {}),
   ...(patch.business_logic_model_name !== undefined
     ? { business_logic_model_name: patch.business_logic_model_name }

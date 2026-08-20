@@ -279,7 +279,6 @@ export default function AgentSelectorHeader({
         is_main_agent: detail.is_main_agent ?? true,
         provide_run_summary: detail.provide_run_summary,
         enabled: detail.enabled,
-        business_description: detail.business_description,
         duty_prompt: detail.duty_prompt,
         constraint_prompt: detail.constraint_prompt,
         few_shots_prompt: detail.few_shots_prompt,

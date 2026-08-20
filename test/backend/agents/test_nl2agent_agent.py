@@ -16,7 +16,7 @@ from agents.nl2agent_agent import (
 )
 from tool_collection.mcp.local_mcp_service import local_mcp_service
 from tool_collection.mcp.nl2agent_mcp_tools import (
-    FinalConfirmationPayload,
+    AgentDraftFields,
     NL2A_WRAPPER_NAME,
     RECOMMEND_RESOURCES_NAME,
     RecommendResourcesInput,
@@ -37,13 +37,13 @@ from tool_collection.mcp.nl2agent_mcp_tools import (
             "en",
             "### Role",
             "`name` and `display_name` are immutable",
-            "generate only `description` and `business_description`",
+            "generate only `description`",
         ),
         (
             "zh",
             "### 核心职责",
             "`name` 和 `display_name` 不可修改",
-            "只生成 `description` 和 `business_description`",
+            "只生成 `description`",
         ),
     ],
 )
@@ -71,10 +71,11 @@ def test_build_nl2agent_system_prompt_configures_existing_draft(
     assert "runtime_save" in prompt
     assert "json.loads" in prompt
     assert "bound_resources" in prompt
-    assert "basic_info" in prompt
+    assert "business_description" not in prompt
     assert 'subtype="requirement_clarification"' in prompt
     assert 'subtype="installed_resource_binding"' in prompt
-    assert 'subtype="final_confirmation"' in prompt
+    assert 'subtype="final_confirmation"' not in prompt
+    assert "agent_generation_completed" in prompt
     assert "agent_id=None" not in prompt
     assert "nl2agent_tool_selection" not in prompt
     assert 'subtype="agent_draft"' not in prompt
@@ -86,8 +87,10 @@ def test_build_nl2agent_system_prompt_configures_existing_draft(
         assert "### State And Completion Rules" in prompt
         assert "They never prove that its configuration is complete" in prompt
         assert "an empty-description draft must produce" in prompt
-        assert "Configuration is complete only after descriptions are saved" in prompt
-        assert "Never produce a plain final answer" in prompt
+        assert "Configuration is complete only after the description is saved" in prompt
+        assert "Before receiving `agent_generation_completed`" in prompt
+        assert "### Completion Summary" in prompt
+        assert "New Agent summary:" in prompt
         assert "### Atomic Action Contract" in prompt
         assert "at most one short reasoning sentence" in prompt
         assert 'equal to `["duty_prompt"]`' in prompt
@@ -100,7 +103,9 @@ def test_build_nl2agent_system_prompt_configures_existing_draft(
         assert "不证明该 Agent 已完成配置" in prompt
         assert "空描述草稿必须先输出一次" in prompt
         assert "只有描述已保存、资源需求已绑定或明确放弃" in prompt
-        assert "禁止输出普通最终答案" in prompt
+        assert "收到 `agent_generation_completed` 前，禁止输出普通最终答案" in prompt
+        assert "### 完成总结" in prompt
+        assert "新智能体已完成生成" in prompt
         assert "### 原子动作输出契约" in prompt
         assert "`<code>` 前最多只写一句简短思考" in prompt
         assert '`updated_fields` 是 `["duty_prompt"]`' in prompt
@@ -114,7 +119,7 @@ def test_build_nl2agent_system_prompt_configures_existing_draft(
     assert description_save < resource_search
 
     code_blocks = re.findall(r"<code>\n(.*?)\n</code>", prompt, re.DOTALL)
-    assert len(code_blocks) == 8
+    assert len(code_blocks) == 7
     for code_block in code_blocks:
         ast.parse(code_block)
 
@@ -281,7 +286,6 @@ async def test_create_nl2agent_agent_config_has_only_current_runtime_tools(langu
     assert save_inputs["agent_id"] == "int"
     assert set(save_inputs["fields"]) == {
         "description",
-        "business_description",
         "duty_prompt",
         "constraint_prompt",
         "few_shots_prompt",
@@ -293,8 +297,6 @@ async def test_create_nl2agent_agent_config_has_only_current_runtime_tools(langu
         "agent_id",
         "resource_result",
         "questions",
-        "requirements",
-        "abandoned_requirement_ids",
     }
     assert config.instructions is None
     assert len(config.context_items) == 1
@@ -362,26 +364,9 @@ def test_nl2agent_explicit_system_context_reaches_final_model_messages():
     assert message_texts[2] == "配置这个草稿"
 
 
-def test_final_confirmation_payload_rejects_duplicate_requirement_ids():
-    with pytest.raises(ValidationError, match="requirement IDs must be unique"):
-        FinalConfirmationPayload(
-            agent_id=42,
-            agent={
-                "name": "research_assistant",
-                "display_name": "Research Assistant",
-                "description": "Research help",
-                "business_description": "Verify and summarize sources",
-            },
-            requirements=[{"requirement_id": "research", "query": "Research"}],
-            abandoned_requirements=[
-                {"requirement_id": "research", "query": "Old research"}
-            ],
-            resources=[],
-            prompts={
-                "duty_prompt": "Research",
-                "constraint_prompt": "",
-                "few_shots_prompt": "",
-                "greeting_message": "Hello",
-                "example_questions": ["What should I research?"],
-            },
+def test_agent_draft_fields_rejects_removed_business_description():
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        AgentDraftFields(
+            description="Research help",
+            business_description="Verify and summarize sources",
         )
