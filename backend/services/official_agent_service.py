@@ -19,6 +19,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+from pathlib import Path
 from typing import Dict, List, Optional
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode, urlparse
@@ -65,6 +66,36 @@ _SNAPSHOT_ROOT = os.path.join(tempfile.gettempdir(), "official-agents-repo")
 _KNOWN_GROUPS = frozenset({"行业智能体", "通用智能体"})
 
 
+def _safe_path_under(root: str, *parts: str) -> Optional[str]:
+    """Resolve a path and reject traversal or symlink escapes from ``root``."""
+    if any(
+        not isinstance(part, str)
+        or not part
+        or part in {".", ".."}
+        or "/" in part
+        or "\\" in part
+        for part in parts
+    ):
+        return None
+    root_path = Path(root).resolve()
+    candidate = (root_path.joinpath(*parts)).resolve()
+    try:
+        candidate.relative_to(root_path)
+    except ValueError:
+        return None
+    return str(candidate)
+
+
+def _safe_relative_path_under(root: str, relative_path: str) -> Optional[str]:
+    """Resolve a validated slash-separated repository path under ``root``."""
+    if not isinstance(relative_path, str) or not relative_path:
+        return None
+    parts = relative_path.replace("\\", "/").split("/")
+    if any(not part for part in parts):
+        return None
+    return _safe_path_under(root, *parts)
+
+
 def _list_bundle_files(base_dir: Optional[str] = None) -> List[str]:
     """Return sorted official bundle keys found under ``base_dir``.
 
@@ -82,9 +113,17 @@ def _list_bundle_files(base_dir: Optional[str] = None) -> List[str]:
     try:
         names = set()
         for entry in os.listdir(root):
-            entry_path = os.path.join(root, entry)
-            if os.path.isdir(entry_path) and os.path.isfile(
-                os.path.join(entry_path, "agent.json")
+            entry_path = _safe_path_under(root, entry)
+            agent_json_path = (
+                _safe_path_under(entry_path, "agent.json")
+                if entry_path is not None
+                else None
+            )
+            if (
+                entry_path is not None
+                and os.path.isdir(entry_path)
+                and agent_json_path is not None
+                and os.path.isfile(agent_json_path)
             ):
                 names.add(entry)
             elif entry.lower().endswith(".json") and entry[:-5]:
@@ -101,7 +140,9 @@ def _attach_skills_from_dir(bundle: OfficialAgentBundle, dir_path: str) -> None:
     The authoritative skill list comes from each agent's ``skill_names``; files
     are read by name and base64-encoded, matching the import-agent behaviour.
     """
-    skills_dir = os.path.join(dir_path, "skills")
+    skills_dir = _safe_path_under(dir_path, "skills")
+    if skills_dir is None:
+        return
     skill_names = sorted(
         {
             skill_name
@@ -112,12 +153,19 @@ def _attach_skills_from_dir(bundle: OfficialAgentBundle, dir_path: str) -> None:
     )
     attached: List[SkillZipEntry] = []
     for skill_name in skill_names:
-        zip_path = os.path.join(skills_dir, f"{skill_name}.zip")
+        zip_path = _safe_path_under(skills_dir, f"{skill_name}.zip")
+        md_path = _safe_path_under(skills_dir, f"{skill_name}.md")
+        if zip_path is None or md_path is None:
+            logger.warning(
+                "Official agent '%s' references an unsafe skill name '%s'",
+                bundle.name,
+                skill_name,
+            )
+            continue
         if os.path.isfile(zip_path):
             with open(zip_path, "rb") as f:
                 zip_bytes = f.read()
         else:
-            md_path = os.path.join(skills_dir, f"{skill_name}.md")
             if not os.path.isfile(md_path):
                 logger.warning(
                     "Official agent '%s' references skill '%s' but %s is missing",
@@ -158,17 +206,33 @@ def _attach_kb_docs_from_dir(bundle: OfficialAgentBundle, dir_path: str) -> None
     are kept as ``file_path`` pointing at the real file so the install pipeline
     can upload and process them like a normal knowledge base document.
     """
-    kb_dir = os.path.join(dir_path, "kb")
+    kb_dir = _safe_path_under(dir_path, "kb")
+    if kb_dir is None:
+        return
     if not os.path.isdir(kb_dir):
         return
     for kb in bundle.knowledge_bases or []:
-        logical_dir = os.path.join(kb_dir, kb.logical_index_name)
+        logical_dir = _safe_path_under(kb_dir, kb.logical_index_name)
+        if logical_dir is None:
+            logger.warning(
+                "Official agent '%s' references an unsafe knowledge-base name '%s'",
+                bundle.name,
+                kb.logical_index_name,
+            )
+            continue
         if not os.path.isdir(logical_dir):
             continue
         docs: List[KnowledgeBaseSeedDoc] = []
         try:
             for file_name in sorted(os.listdir(logical_dir)):
-                file_path = os.path.join(logical_dir, file_name)
+                file_path = _safe_path_under(logical_dir, file_name)
+                if file_path is None:
+                    logger.warning(
+                        "Skipping unsafe KB file '%s' for official agent '%s'",
+                        file_name,
+                        bundle.name,
+                    )
+                    continue
                 if not os.path.isfile(file_path):
                     continue
                 suffix = os.path.splitext(file_name)[1].lower()
@@ -214,12 +278,18 @@ def _load_bundle(
     with skills/documents inline. The key is treated as the authoritative name.
     """
     root = base_dir if base_dir is not None else OFFICIAL_AGENTS_PATH
-    dir_path = os.path.join(root, name)
-    if os.path.isdir(dir_path) and os.path.isfile(
-        os.path.join(dir_path, "agent.json")
+    dir_path = _safe_relative_path_under(root, name)
+    agent_json_path = (
+        _safe_path_under(dir_path, "agent.json") if dir_path is not None else None
+    )
+    if (
+        dir_path is not None
+        and os.path.isdir(dir_path)
+        and agent_json_path is not None
+        and os.path.isfile(agent_json_path)
     ):
         try:
-            with open(os.path.join(dir_path, "agent.json"), encoding="utf-8") as f:
+            with open(agent_json_path, encoding="utf-8") as f:
                 data = json.load(f)
             bundle = OfficialAgentBundle.model_validate(data)
         except (OSError, json.JSONDecodeError, ValueError) as e:
@@ -230,8 +300,8 @@ def _load_bundle(
         _attach_kb_docs_from_dir(bundle, dir_path)
         return bundle
 
-    single_path = os.path.join(root, f"{name}.json")
-    if os.path.isfile(single_path):
+    single_path = _safe_relative_path_under(root, f"{name}.json")
+    if single_path is not None and os.path.isfile(single_path):
         try:
             with open(single_path, encoding="utf-8") as f:
                 data = json.load(f)
@@ -1383,8 +1453,8 @@ def _download_gitcode_bundle(
                     "bundle_too_large",
                     f"智能体包大小超过上限 {SNAPSHOT_MAX_BYTES} 字节",
                 )
-            target = os.path.abspath(os.path.join(staging_dir, path))
-            if os.path.commonpath((staging_dir, target)) != os.path.abspath(staging_dir):
+            target = _safe_relative_path_under(staging_dir, path)
+            if target is None:
                 raise RepoSourceError("repo_api_failed", "智能体文件路径无效")
             os.makedirs(os.path.dirname(target), exist_ok=True)
             with open(target, "wb") as file:
