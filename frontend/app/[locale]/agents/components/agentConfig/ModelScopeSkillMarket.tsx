@@ -48,6 +48,19 @@ const MAX_BROWSE_PAGES = Math.floor(MODELSCOPE_MAX_RESULT_WINDOW / PAGE_SIZE);
 
 type PaginationItem = number | "start-ellipsis" | "end-ellipsis";
 
+const CATEGORY_COLORS = [
+  { background: "#eff6ff", color: "#2563eb" },
+  { background: "#fdf2f8", color: "#db2777" },
+  { background: "#f0fdf4", color: "#16a34a" },
+  { background: "#fff7ed", color: "#ea580c" },
+  { background: "#ecfeff", color: "#0891b2" },
+  { background: "#f7fee7", color: "#65a30d" },
+  { background: "#faf5ff", color: "#9333ea" },
+  { background: "#fffbeb", color: "#d97706" },
+  { background: "#fff1f2", color: "#e11d48" },
+  { background: "#eef2ff", color: "#4f46e5" },
+];
+
 interface ModelScopeSkillMarketProps {
   groupSelectOptions: Array<{ label: string; value: number }>;
   defaultGroupIds: number[];
@@ -56,13 +69,19 @@ interface ModelScopeSkillMarketProps {
 }
 
 function getAuthor(skill: ModelScopeMarketSkill) {
-  return (
-    String(skill.skill_id).split("/")[0]?.replace(/^@/, "") || "ModelScope"
-  );
+  return String(skill.skill_id).split("/")[0]?.replace(/^@/, "") || "ModelScope";
 }
 
 function formatCategoryLabel(category: string | undefined) {
   return category?.replaceAll("-", " ").trim() || "";
+}
+
+function getCategoryStyle(category: string) {
+  const index = Array.from(category).reduce(
+    (sum, character) => sum + character.charCodeAt(0),
+    0
+  );
+  return CATEGORY_COLORS[index % CATEGORY_COLORS.length];
 }
 
 function mergeMarketSkillDetail(
@@ -327,7 +346,8 @@ export default function ModelScopeSkillMarket({
           </h3>
           {categoryLabel ? (
             <span
-              className="max-w-[50%] shrink-0 truncate rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium capitalize text-blue-600 dark:bg-blue-950/50 dark:text-blue-300"
+              className="max-w-[50%] shrink-0 truncate rounded-full px-2.5 py-1 text-xs font-medium capitalize"
+              style={getCategoryStyle(categoryLabel)}
               title={categoryLabel}
             >
               {categoryLabel}
@@ -481,7 +501,8 @@ export default function ModelScopeSkillMarket({
                   </span>
                   {detailCategory ? (
                     <span
-                      className="max-w-[50%] shrink-0 truncate rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium capitalize text-blue-600 dark:bg-blue-950/50 dark:text-blue-300"
+                      className="max-w-[50%] shrink-0 truncate rounded-full px-2.5 py-1 text-xs font-medium capitalize"
+                      style={getCategoryStyle(detailCategory)}
                       title={detailCategory}
                     >
                       {detailCategory}
