@@ -1,4 +1,4 @@
-import { API_ENDPOINTS } from "./api";
+import { API_ENDPOINTS, parseApiErrorResponse } from "./api";
 
 import { NAME_CHECK_STATUS } from "@/const/agentConfig";
 import { getAuthHeaders } from "@/lib/auth";
@@ -250,7 +250,7 @@ export const getCreatingSubAgentId = async () => {
     });
 
     if (!response.ok) {
-      throw new Error(`Request failed: ${response.status}`);
+      throw await parseApiErrorResponse(response);
     }
 
     const data = await response.json();
@@ -281,6 +281,7 @@ export const getCreatingSubAgentId = async () => {
       success: false,
       data: null,
       message: "agentConfig.agents.createSubAgentIdFailed",
+      error,
     };
   }
 };
@@ -467,7 +468,7 @@ export const updateAgentInfo = async (payload: UpdateAgentInfoPayload) => {
     });
 
     if (!response.ok) {
-      throw new Error(`Request failed: ${response.status}`);
+      throw await parseApiErrorResponse(response);
     }
 
     const data = await response.json();
@@ -481,7 +482,11 @@ export const updateAgentInfo = async (payload: UpdateAgentInfoPayload) => {
     return {
       success: false,
       data: null,
-      message: "Failed to update Agent, please try again later",
+      message:
+        error instanceof Error
+          ? error.message
+          : "Failed to update Agent, please try again later",
+      error,
     };
   }
 };

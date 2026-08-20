@@ -29,6 +29,43 @@ app.include_router(router)
 client = TestClient(app)
 
 
+def test_generate_prompt_api_rejects_an_overlong_work_description():
+    response = client.post(
+        "/prompt/generate",
+        json={
+            "task_description": "中" * 5001,
+            "agent_id": 1,
+            "model_id": 1,
+        },
+    )
+
+    assert response.status_code == 429
+    assert "maximum 10000 display characters" in response.json()["detail"]
+
+
+@patch("apps.prompt_app.gen_system_prompt_streamable")
+@patch("apps.prompt_app.get_current_user_info")
+def test_generate_prompt_api_accepts_a_valid_work_description(
+    mock_get_current_user_info, mock_gen_system_prompt_streamable
+):
+    mock_get_current_user_info.return_value = ("user-1", "tenant-1", "en")
+    mock_gen_system_prompt_streamable.return_value = iter(["data: generated\n\n"])
+
+    response = client.post(
+        "/prompt/generate",
+        json={
+            "task_description": "Build an agent",
+            "agent_id": 1,
+            "model_id": 1,
+        },
+        headers={"Authorization": "Bearer token"},
+    )
+
+    assert response.status_code == 200
+    assert "generated" in response.text
+    mock_gen_system_prompt_streamable.assert_called_once()
+
+
 @patch("apps.prompt_app.get_current_user_info")
 @patch("apps.prompt_app.PromptOptimizationService")
 def test_optimize_prompt_section_api_success(mock_service_cls, mock_get_current_user_info):

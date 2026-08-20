@@ -23,7 +23,7 @@ from fastapi.responses import StreamingResponse
 from fastapi.testclient import TestClient
 
 from consts.const import AGENT_PROMPTS_HIDDEN_FLAG, ASSET_OWNER_TENANT_ID
-from consts.exceptions import UnauthorizedError
+from consts.exceptions import TenantResourceLimitError, UnauthorizedError
 from consts.model import NL2AgentRunRequest
 
 # Filter out deprecation warnings from third-party libraries
@@ -723,6 +723,46 @@ def test_get_creating_sub_agent_info_api_exception(mocker, mock_auth_header):
     assert "Agent create error" in response.json()["detail"]
 
 
+def test_get_creating_sub_agent_info_api_returns_validation_error(mocker, mock_auth_header):
+    """The sub-agent creation endpoint must preserve limit failures."""
+    from consts.exceptions import ValidationError
+
+    mock_get_creating_agent = mocker.patch(
+        "apps.agent_app.get_creating_sub_agent_info_impl", new_callable=AsyncMock)
+    mock_get_creating_agent.side_effect = ValidationError(
+        "Tenant agent limit reached: maximum 1000 agents per tenant")
+
+    response = config_client.get(
+        "/agent/get_creating_sub_agent_id",
+        headers=mock_auth_header,
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Tenant agent limit reached: maximum 1000 agents per tenant"
+
+
+def test_get_creating_sub_agent_info_api_returns_structured_tenant_limit(mocker, mock_auth_header):
+    mock_get_creating_agent = mocker.patch(
+        "apps.agent_app.get_creating_sub_agent_info_impl", new_callable=AsyncMock)
+    mock_get_creating_agent.side_effect = TenantResourceLimitError(
+        "Tenant agent limit reached: maximum 1 agents per tenant",
+        resource="agent",
+        limit=1,
+    )
+
+    response = config_client.get(
+        "/agent/get_creating_sub_agent_id",
+        headers=mock_auth_header,
+    )
+
+    assert response.status_code == 429
+    assert response.json()["detail"] == {
+        "code": "120104",
+        "message": "Tenant agent limit reached: maximum 1 agents per tenant",
+        "data": {"resource": "agent", "limit": 1},
+    }
+
+
 # update_agent_info_api Tests
 # ---------------------------------------------------------------------------
 
@@ -775,6 +815,48 @@ def test_update_agent_info_api_exception(mocker, mock_auth_header):
 
     assert response.status_code == 500
     assert "Agent update error" in response.json()["detail"]
+
+
+def test_update_agent_info_api_returns_validation_error(mocker, mock_auth_header):
+    """Validation failures must remain visible to the frontend."""
+    from consts.exceptions import ValidationError
+
+    mock_update_agent = mocker.patch(
+        "apps.agent_app.update_agent_info_impl", new_callable=AsyncMock)
+    mock_update_agent.side_effect = ValidationError(
+        "Tenant agent limit reached: maximum 1000 agents per tenant")
+
+    response = config_client.post(
+        "/agent/update",
+        json={"name": "Updated Agent"},
+        headers=mock_auth_header,
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Tenant agent limit reached: maximum 1000 agents per tenant"
+
+
+def test_update_agent_info_returns_structured_agent_limit_error(mocker, mock_auth_header):
+    mock_update_agent = mocker.patch(
+        "apps.agent_app.update_agent_info_impl", new_callable=AsyncMock)
+    mock_update_agent.side_effect = TenantResourceLimitError(
+        "Tenant agent limit reached: maximum 1 agents per tenant",
+        resource="agent",
+        limit=1,
+    )
+
+    response = config_client.post(
+        "/agent/update",
+        json={"name": "Updated Agent"},
+        headers=mock_auth_header,
+    )
+
+    assert response.status_code == 429
+    assert response.json()["detail"] == {
+        "code": "120104",
+        "message": "Tenant agent limit reached: maximum 1 agents per tenant",
+        "data": {"resource": "agent", "limit": 1},
+    }
 
 
 # delete_agent_api Tests

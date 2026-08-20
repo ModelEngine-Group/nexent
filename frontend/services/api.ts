@@ -735,12 +735,104 @@ export const API_ENDPOINTS = {
 export class ApiError extends Error {
   constructor(
     public code: string | number,
-    message: string
+    message: string,
+    public data?: Record<string, unknown>
   ) {
     super(message);
     this.name = "ApiError";
   }
 }
+
+type ErrorPayload = Record<string, unknown>;
+
+function isErrorPayload(value: unknown): value is ErrorPayload {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function createApiErrorFromPayload(
+  payload: unknown,
+  fallbackCode: string | number,
+  fallbackMessage: string
+): ApiError {
+  let code = fallbackCode;
+  let message = fallbackMessage;
+  let data: ErrorPayload | undefined;
+
+  const rootPayload = isErrorPayload(payload) ? payload : undefined;
+  let errorDetail: ErrorPayload | undefined;
+  if (rootPayload && isErrorPayload(rootPayload.detail)) {
+    errorDetail = rootPayload.detail;
+  } else if (rootPayload && isErrorPayload(rootPayload.message)) {
+    errorDetail = rootPayload.message;
+  } else {
+    errorDetail = rootPayload;
+  }
+
+  if (errorDetail) {
+    const detailCode = errorDetail.code;
+    if (typeof detailCode === "string" || typeof detailCode === "number") {
+      code = detailCode;
+    }
+    if (typeof errorDetail.message === "string" && errorDetail.message) {
+      message = errorDetail.message;
+    }
+    if (isErrorPayload(errorDetail.data)) {
+      data = errorDetail.data;
+    }
+  } else if (typeof payload === "string" && payload) {
+    message = payload;
+  }
+
+  if (
+    message === fallbackMessage &&
+    rootPayload &&
+    typeof rootPayload.detail === "string" &&
+    rootPayload.detail
+  ) {
+    message = rootPayload.detail;
+  } else if (
+    message === fallbackMessage &&
+    rootPayload &&
+    typeof rootPayload.message === "string" &&
+    rootPayload.message
+  ) {
+    message = rootPayload.message;
+  }
+
+  return new ApiError(code, message, data);
+}
+
+type ParsedErrorResponse = {
+  error: ApiError;
+  payload: unknown;
+};
+
+export const readApiErrorResponse = async (
+  response: Response
+): Promise<ParsedErrorResponse> => {
+  const errorText = await response.text();
+  let payload: unknown = errorText;
+  try {
+    payload = JSON.parse(errorText);
+  } catch {
+    // Keep the raw response text as the error payload.
+  }
+  return {
+    error: createApiErrorFromPayload(
+      payload,
+      response.status,
+      `Request failed: ${response.status}`
+    ),
+    payload,
+  };
+};
+
+export const parseApiErrorResponse = async (
+  response: Response
+): Promise<ApiError> => {
+  const { error } = await readApiErrorResponse(response);
+  return error;
+};
 
 // API request interceptor
 export const fetchWithErrorHandling = async (
@@ -752,33 +844,11 @@ export const fetchWithErrorHandling = async (
 
     // Handle HTTP errors
     if (!response.ok) {
-      // Try to parse JSON response for business error code first
-      let errorCode = response.status;
-      let errorMessage = `Request failed: ${response.status}`;
-      const errorText = await response.text();
-
-      try {
-        const errorData = JSON.parse(errorText);
-        const errorDetail =
-          errorData?.detail && typeof errorData.detail === "object"
-            ? errorData.detail
-            : errorData?.message && typeof errorData.message === "object"
-              ? errorData.message
-              : errorData;
-        if (errorDetail?.code) {
-          errorCode = errorDetail.code;
-          errorMessage = errorDetail.message || errorMessage;
-        } else if (typeof errorData?.detail === "string") {
-          errorMessage = errorData.detail;
-        } else if (typeof errorData?.message === "string") {
-          errorMessage = errorData.message;
-        } else {
-          errorMessage = errorText || errorMessage;
-        }
-      } catch {
-        // Not JSON, use text as message
-        errorMessage = errorText || errorMessage;
-      }
+      const { error: parsedApiError, payload: parsedErrorData } =
+        await readApiErrorResponse(response);
+      const errorCode = parsedApiError.code;
+      const errorMessage = parsedApiError.message;
+      const errorData = parsedApiError.data;
 
       // Check if it's a session expiration error based on business error code
       // TOKEN_EXPIRED = "000203", TOKEN_INVALID = "000204"
@@ -788,13 +858,13 @@ export const fetchWithErrorHandling = async (
         errorCodeStr === ErrorCode.TOKEN_INVALID
       ) {
         handleSessionExpired();
-        throw new ApiError(errorCode, errorMessage);
+        throw new ApiError(errorCode, errorMessage, errorData);
       }
 
       // Handle HTTP 401 - trigger session expired modal for all unauthorized errors
       if (response.status === 401) {
         handleSessionExpired();
-        throw new ApiError(errorCode, errorMessage);
+        throw new ApiError(errorCode, errorMessage, errorData);
       }
 
       // Handle custom 499 error code (client closed connection)
@@ -808,27 +878,22 @@ export const fetchWithErrorHandling = async (
 
       // Preserve the tenant storage quota error so upload callers can present
       // the correct recovery action instead of treating it as a per-file limit.
-      if (response.status === 413) {
-        try {
-          const errorData = JSON.parse(errorText);
-          if (errorData?.error === "TenantStorageFull") {
-            throw new ApiError(
-              413,
-              errorData.message || "Tenant storage limit reached"
-            );
-          }
-        } catch (error) {
-          if (error instanceof ApiError) {
-            throw error;
-          }
+      if (
+        response.status === 413 &&
+        isErrorPayload(parsedErrorData) &&
+        parsedErrorData.error === "TenantStorageFull"
+      ) {
+        let storageMessage = "Tenant storage limit reached";
+        if (typeof parsedErrorData.message === "string" && parsedErrorData.message) {
+          storageMessage = parsedErrorData.message;
         }
-        throw new ApiError(
-          ErrorCode.FILE_TOO_LARGE,
-          "File size exceeds limit."
-        );
+        throw new ApiError(413, storageMessage, errorData);
+      }
+      if (response.status === 413) {
+        throw new ApiError(ErrorCode.FILE_TOO_LARGE, "File size exceeds limit.");
       }
 
-      throw new ApiError(errorCode, errorMessage);
+      throw new ApiError(errorCode, errorMessage, errorData);
     }
 
     return response;

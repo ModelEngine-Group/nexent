@@ -170,6 +170,35 @@ class TestLegacyExceptions:
         exc = DataMateConnectionError("DataMate connection failed")
         assert str(exc) == "DataMate connection failed"
 
+    def test_tenant_resource_limit_error_uses_standard_detail(self):
+        """Tenant quota errors expose the standard code and limit metadata."""
+        from backend.consts.exceptions import TenantResourceLimitError
+
+        exc = TenantResourceLimitError(
+            "Tenant agent limit reached: maximum 1 agents per tenant",
+            resource="agent",
+            limit=1,
+        )
+
+        assert exc.code == ErrorCode.TENANT_RESOURCE_EXCEEDED.value
+        assert exc.to_detail() == {
+            "code": "120104",
+            "message": "Tenant agent limit reached: maximum 1 agents per tenant",
+            "data": {"resource": "agent", "limit": 1},
+        }
+
+    def test_tenant_resource_limit_error_supports_legacy_message_only(self):
+        """Existing call sites may still construct the exception with one argument."""
+        from backend.consts.exceptions import TenantResourceLimitError
+
+        exc = TenantResourceLimitError("Tenant limit reached")
+
+        assert exc.to_detail() == {
+            "code": "120104",
+            "message": "Tenant limit reached",
+            "data": {},
+        }
+
 
 class TestLegacyAliases:
     """Test class for legacy exception aliases."""

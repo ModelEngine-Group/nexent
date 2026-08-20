@@ -50,8 +50,12 @@ import PromptOptimizeModal from "./PromptOptimizeModal";
 import GuardrailConfigContent from "./GuardrailConfigContent";
 import type { GuardrailConfigContentRef } from "./GuardrailConfigContent";
 import { isAgentPromptsHidden } from "@/lib/agentPromptVisibility";
+import { getDisplayWidth } from "@/lib/textDisplayWidth";
 
 const { TextArea } = Input;
+const AGENT_NAME_DISPLAY_WIDTH_LIMIT = 60;
+const AGENT_DESCRIPTION_DISPLAY_WIDTH_LIMIT = 1000;
+const AGENT_BUSINESS_DESCRIPTION_DISPLAY_WIDTH_LIMIT = 10000;
 
 /** Roles that can edit group settings for any agent (mirrors backend CAN_EDIT_ALL_USER_ROLES). */
 const CAN_EDIT_ALL_ROLES: ReadonlySet<string> = new Set([
@@ -733,6 +737,17 @@ export default function AgentGenerateDetail({}) {
     return validateAgentFieldUnique(_, value, "display_name", "displayNameExists");
   };
 
+  const validateAgentDisplayWidth = async (
+    _: any,
+    value: string | undefined,
+    limit: number,
+    errorKey: string
+  ) => {
+    if (value && getDisplayWidth(value) > limit) {
+      throw new Error(t(errorKey));
+    }
+  };
+
   // Select options for available models
   // Bare-capacity rows (`context_window_tokens IS NULL OR max_output_tokens IS
   // NULL`) stay selectable per W11 spec; the warning is the inline subtitle
@@ -826,7 +841,23 @@ export default function AgentGenerateDetail({}) {
               styles={{ body: { padding: "16px" } }}
             >
               <Form form={form}>
-                <Form.Item name="businessDescription" className="mb-2">
+                <Form.Item
+                  name="businessDescription"
+                  className="mb-2"
+                  rules={[
+                    {
+                      validator: (_: any, value: string) =>
+                        validateAgentDisplayWidth(
+                          _,
+                          value,
+                          AGENT_BUSINESS_DESCRIPTION_DISPLAY_WIDTH_LIMIT,
+                          "businessLogic.config.error.businessDescriptionDisplayWidth"
+                        ),
+                    },
+                  ]}
+                  validateTrigger={["onChange", "onBlur"]}
+                  extra={t("businessLogic.config.hint.businessDescriptionLimit")}
+                >
                   <Input.TextArea
                     placeholder={t("businessLogic.placeholder")}
                     className="w-full resize-none text-sm"
@@ -842,7 +873,8 @@ export default function AgentGenerateDetail({}) {
                     }}
                     autoSize={false}
                     disabled={!editable || isGenerating}
-                    onBlur={(e) => handleBusinessDescriptionChange(e.target.value)}
+                    maxLength={AGENT_BUSINESS_DESCRIPTION_DISPLAY_WIDTH_LIMIT}
+                    onChange={(e) => handleBusinessDescriptionChange(e.target.value)}
                   />
                 </Form.Item>
 
@@ -1002,8 +1034,13 @@ export default function AgentGenerateDetail({}) {
                             message: t("agent.info.name.error.empty"),
                           },
                           {
-                            max: 50,
-                            message: t("agent.info.name.error.length"),
+                            validator: (_: any, value: string) =>
+                              validateAgentDisplayWidth(
+                                _,
+                                value,
+                                AGENT_NAME_DISPLAY_WIDTH_LIMIT,
+                                "agent.info.name.error.displayWidth"
+                              ),
                           },
                           { validator: validateAgentDisplayNameUnique },
                         ]}
@@ -1012,6 +1049,7 @@ export default function AgentGenerateDetail({}) {
                       >
                         <Input
                           placeholder={t("agent.displayNamePlaceholder")}
+                          maxLength={AGENT_NAME_DISPLAY_WIDTH_LIMIT}
                           onChange={(e) =>
                             updateAgentConfig({ display_name: e.target.value })
                           }
@@ -1026,7 +1064,15 @@ export default function AgentGenerateDetail({}) {
                             required: true,
                             message: t("agent.info.name.error.empty"),
                           },
-                          { max: 50, message: t("agent.info.name.error.length") },
+                          {
+                            validator: (_: any, value: string) =>
+                              validateAgentDisplayWidth(
+                                _,
+                                value,
+                                AGENT_NAME_DISPLAY_WIDTH_LIMIT,
+                                "agent.info.name.error.displayWidth"
+                              ),
+                          },
                           {
                             pattern: /^[a-zA-Z_][a-zA-Z0-9_]*$/,
                             message: t("agent.info.name.error.format"),
@@ -1038,6 +1084,7 @@ export default function AgentGenerateDetail({}) {
                       >
                         <Input
                           placeholder={t("agent.namePlaceholder")}
+                          maxLength={AGENT_NAME_DISPLAY_WIDTH_LIMIT}
                           onChange={(e) =>
                             updateAgentConfig({ name: e.target.value })
                           }
@@ -1115,10 +1162,23 @@ export default function AgentGenerateDetail({}) {
                       <Form.Item
                         name="agentDescription"
                         label={t("agent.description")}
+                        rules={[
+                          {
+                            validator: (_: any, value: string) =>
+                              validateAgentDisplayWidth(
+                                _,
+                                value,
+                                AGENT_DESCRIPTION_DISPLAY_WIDTH_LIMIT,
+                                "agent.description.error.displayWidth"
+                              ),
+                          },
+                        ]}
+                        validateTrigger={["onChange", "onBlur"]}
                         className="mb-3"
                       >
                         <TextArea
                           placeholder={t("agent.descriptionPlaceholder")}
+                          maxLength={AGENT_DESCRIPTION_DISPLAY_WIDTH_LIMIT}
                           rows={6}
                           style={{ minHeight: "140px" }}
                           onBlur={(e) =>

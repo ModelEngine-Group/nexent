@@ -34,6 +34,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import AgentImportWizard from "@/components/agent/AgentImportWizard";
 import { ImportAgentData, openImportWizardWithFile } from "@/lib/agentImportUtils";
 import log from "@/lib/logger";
+import { getTenantResourceLimitMessage } from "@/const/errorMessageI18n";
 import { useAgentList } from "@/hooks/agent/useAgentList";
 import { useAgentVersionList } from "@/hooks/agent/useAgentVersionList";
 import { useAgentVersionDetail } from "@/hooks/agent/useAgentVersionDetail";
@@ -282,7 +283,9 @@ export default function AgentSelectorHeader({
 
       if (!createResult.success || !createResult.data?.agent_id) {
         message.error(
-          createResult.message || t("agentConfig.agents.copyFailed")
+          getTenantResourceLimitMessage(createResult.error, t) ||
+            createResult.message ||
+            t("agentConfig.agents.copyFailed")
         );
         return;
       }

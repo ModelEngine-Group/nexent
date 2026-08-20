@@ -212,6 +212,10 @@ class TestErrorCodeHttpStatusMapping:
         """Test COMMON_RATE_LIMIT_EXCEEDED maps to HTTP 429."""
         assert ERROR_CODE_HTTP_STATUS[ErrorCode.COMMON_RATE_LIMIT_EXCEEDED] == 429
 
+    def test_tenant_resource_exceeded_maps_to_429(self):
+        """Tenant hard resource limits use the standard quota response status."""
+        assert ERROR_CODE_HTTP_STATUS[ErrorCode.TENANT_RESOURCE_EXCEEDED] == 429
+
     def test_common_validation_error_maps_to_400(self):
         """Test COMMON_VALIDATION_ERROR maps to HTTP 400."""
         assert ERROR_CODE_HTTP_STATUS[ErrorCode.COMMON_VALIDATION_ERROR] == 400

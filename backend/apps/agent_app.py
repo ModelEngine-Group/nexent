@@ -31,6 +31,7 @@ from consts.exceptions import (
     SkillDuplicateError,
     AppException,
     UnauthorizedError,
+    TenantResourceLimitError,
     ValidationError,
 )
 from services.asset_owner_visibility import apply_agent_detail_prompt_visibility
@@ -229,12 +230,24 @@ async def get_agent_by_name_api(
 
 
 @agent_config_router.get("/get_creating_sub_agent_id")
-async def get_creating_sub_agent_info_api(authorization: Optional[str] = Header(None)):
+async def get_creating_sub_agent_info_api(
+    authorization: Optional[str] = Header(None),
+):
     """
     Create a new sub agent, return agent_ID
     """
     try:
         return await get_creating_sub_agent_info_impl(authorization)
+    except TenantResourceLimitError as e:
+        logger.warning(f"Sub-agent creation validation error: {str(e)}")
+        raise HTTPException(
+            status_code=HTTPStatus.TOO_MANY_REQUESTS,
+            detail=e.to_detail(),
+        ) from e
+    except (ValidationError, ValueError) as e:
+        logger.warning(f"Sub-agent creation validation error: {str(e)}")
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
     except Exception as e:
         logger.error(f"Agent create error: {str(e)}")
         raise HTTPException(
@@ -242,13 +255,27 @@ async def get_creating_sub_agent_info_api(authorization: Optional[str] = Header(
 
 
 @agent_config_router.post("/update")
-async def update_agent_info_api(request: AgentInfoRequest, authorization: Optional[str] = Header(None)):
+async def update_agent_info_api(
+    request: AgentInfoRequest,
+    authorization: Optional[str] = Header(None),
+    http_request: Request = None,
+):
     """
     Update an existing agent
     """
     try:
         result = await update_agent_info_impl(request, authorization)
         return result or {}
+    except TenantResourceLimitError as e:
+        logger.warning(f"Agent update validation error: {str(e)}")
+        raise HTTPException(
+            status_code=HTTPStatus.TOO_MANY_REQUESTS,
+            detail=e.to_detail(),
+        ) from e
+    except (ValidationError, ValueError) as e:
+        logger.warning(f"Agent update validation error: {str(e)}")
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
     except Exception as e:
         logger.error(f"Agent update error: {str(e)}")
         raise HTTPException(

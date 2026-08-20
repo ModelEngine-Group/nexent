@@ -43,6 +43,44 @@ export const getI18nErrorMessage = (
   );
 };
 
+const TENANT_RESOURCE_LIMIT_TRANSLATION_KEYS: Record<string, string> = {
+  agent: "agent.error.tenantLimitExceeded",
+};
+
+/**
+ * Translate a structured tenant resource limit error for the active UI locale.
+ * Returns null for errors that do not carry the tenant resource limit code.
+ */
+export const getTenantResourceLimitMessage = (
+  error: unknown,
+  t: (key: string, options?: Record<string, unknown>) => string
+): string | null => {
+  if (!error || typeof error !== "object") {
+    return null;
+  }
+
+  const apiError = error as {
+    code?: unknown;
+    data?: { resource?: unknown; limit?: unknown };
+  };
+  if (String(apiError.code) !== ErrorCode.TENANT_RESOURCE_EXCEEDED) {
+    return null;
+  }
+
+  const resource =
+    typeof apiError.data?.resource === "string" ? apiError.data.resource : "";
+  const limit = apiError.data?.limit;
+  const translationKey = TENANT_RESOURCE_LIMIT_TRANSLATION_KEYS[resource];
+  if (
+    !translationKey ||
+    (typeof limit !== "number" && typeof limit !== "string")
+  ) {
+    return null;
+  }
+
+  return t(translationKey, { limit });
+};
+
 /**
  * Hook to get error message with i18n support.
  *

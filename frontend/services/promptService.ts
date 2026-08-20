@@ -32,6 +32,13 @@ export const generatePromptStream = async (
       body: JSON.stringify(params),
     });
 
+    if (!response.ok) {
+      const errorPayload = await response.json().catch(() => null);
+      throw new Error(
+        errorPayload?.detail || errorPayload?.message || `Request failed: ${response.status}`
+      );
+    }
+
     if (!response.body) throw new Error('No response body');
 
     const reader = response.body.getReader();
@@ -67,7 +74,6 @@ export const generatePromptStream = async (
     if (!hasError && onComplete) onComplete();
   } catch (err) {
     if (onError) onError(err);
-    if (onComplete) onComplete();
   }
 };
 

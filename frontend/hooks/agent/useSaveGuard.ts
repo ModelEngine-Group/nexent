@@ -12,6 +12,7 @@ import {
 } from "@/services/agentConfigService";
 import { Agent } from "@/types/agentConfig";
 import log from "@/lib/logger";
+import { getTenantResourceLimitMessage } from "@/const/errorMessageI18n";
 
 /**
  * Coarse type check used to reject values that obviously don't match the
@@ -355,7 +356,9 @@ export const useSaveGuard = () => {
         return true;
       } else {
         message.error(
-          result.message || t("businessLogic.config.error.saveFailed")
+          getTenantResourceLimitMessage(result.error, t) ||
+            result.message ||
+            t("businessLogic.config.error.saveFailed")
         );
         return false;
       }

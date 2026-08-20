@@ -1,14 +1,77 @@
 import logging
 from typing import List, Optional
-from sqlalchemy import or_, update
+from sqlalchemy import or_, text, update
 
 from database.client import get_db_session, as_dict, filter_property
 from database.db_models import AgentInfo, ToolInstance, AgentRelation
 from database.agent_version_db import query_current_version_no
-from consts.const import ASSET_OWNER_TENANT_ID
+from consts.const import (
+    ASSET_OWNER_TENANT_ID,
+    MAX_AGENTS_PER_TENANT,
+    MAX_AGENT_BUSINESS_DESCRIPTION_DISPLAY_WIDTH,
+    MAX_AGENT_DESCRIPTION_DISPLAY_WIDTH,
+    MAX_AGENT_NAME_DISPLAY_WIDTH,
+)
+from consts.exceptions import TenantResourceLimitError, ValidationError
 from utils.str_utils import convert_list_to_string
+from utils.text_length_utils import get_display_width
 
 logger = logging.getLogger("agent_db")
+
+
+_get_display_width = get_display_width
+
+
+def _validate_agent_text_limits(agent_info) -> None:
+    """Validate Agent text fields that have display-width limits."""
+    if isinstance(agent_info, dict):
+        values = agent_info
+    else:
+        values = vars(agent_info)
+
+    for field_name, label in (("name", "Agent name"), ("display_name", "Agent display name")):
+        value = values.get(field_name)
+        if value is not None and _get_display_width(str(value)) > MAX_AGENT_NAME_DISPLAY_WIDTH:
+            raise ValidationError(
+                f"{label} exceeds the maximum {MAX_AGENT_NAME_DISPLAY_WIDTH} display characters "
+                "(30 Chinese characters or 60 ASCII characters)"
+            )
+
+    description = values.get("description")
+    if description is not None and _get_display_width(str(description)) > MAX_AGENT_DESCRIPTION_DISPLAY_WIDTH:
+        raise ValidationError(
+            f"Agent description exceeds the maximum {MAX_AGENT_DESCRIPTION_DISPLAY_WIDTH} display characters "
+            "(500 Chinese characters or 1000 ASCII characters)"
+        )
+
+    business_description = values.get("business_description")
+    if (
+        business_description is not None
+        and _get_display_width(str(business_description)) > MAX_AGENT_BUSINESS_DESCRIPTION_DISPLAY_WIDTH
+    ):
+        raise ValidationError(
+            f"Agent work description exceeds the maximum {MAX_AGENT_BUSINESS_DESCRIPTION_DISPLAY_WIDTH} display characters "
+            "(5000 Chinese characters or 10000 ASCII characters)"
+        )
+
+
+def _enforce_tenant_agent_limit(session, tenant_id: str) -> None:
+    """Serialize active draft-agent creation and enforce the tenant limit."""
+    session.execute(
+        text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
+        {"lock_key": f"tenant-agent-limit:{tenant_id}"},
+    )
+    agent_count = session.query(AgentInfo.agent_id).filter(
+        AgentInfo.tenant_id == tenant_id,
+        AgentInfo.version_no == 0,
+        AgentInfo.delete_flag == "N",
+    ).count()
+    if agent_count >= MAX_AGENTS_PER_TENANT:
+        raise TenantResourceLimitError(
+            f"Tenant agent limit reached: maximum {MAX_AGENTS_PER_TENANT} agents per tenant",
+            resource="agent",
+            limit=MAX_AGENTS_PER_TENANT,
+        )
 
 
 def search_agent_info_by_agent_id(agent_id: int, tenant_id: str, version_no: int = 0):
@@ -196,6 +259,7 @@ def create_agent(agent_info, tenant_id: str, user_id: str):
     :param user_id:
     :return: Created agent object
     """
+    _validate_agent_text_limits(agent_info)
     info_with_metadata = dict(agent_info)
     info_with_metadata.setdefault("max_steps", 15)
     info_with_metadata.setdefault("is_main_agent", True)
@@ -209,6 +273,7 @@ def create_agent(agent_info, tenant_id: str, user_id: str):
         "is_new": True,  # Mark new agents as new
     })
     with get_db_session() as session:
+        _enforce_tenant_agent_limit(session, tenant_id)
         new_agent = AgentInfo(**filter_property(info_with_metadata, AgentInfo))
         new_agent.delete_flag = 'N'
         session.add(new_agent)
@@ -266,6 +331,7 @@ def update_agent(agent_id, agent_info, user_id, version_no: int = 0):
     Returns:
         Updated agent object
     """
+    _validate_agent_text_limits(agent_info)
     with (get_db_session() as session):
         # update ag_tenant_agent_t
         agent = session.query(AgentInfo).filter(

@@ -306,7 +306,7 @@ AGENT_DESCRIPTION_SYSTEM_PROMPT: |-
   You can refer to the task description, combined with tool and assistant information, to generate a task description for the current Agent application.
   ### Requirements:
   1. Only display the Agent description content, do not display irrelevant content or irrelevant formatting.
-  2. The Agent description should not exceed three sentences, and use second person description, mainly including: who you are, what capabilities you have, what you can do.
+  2. The Agent description should not exceed three sentences or 500 Chinese characters / 1000 ASCII characters, and use second person description, mainly including: who you are, what capabilities you have, what you can do.
   3. If not specified, please use English as the output language, with natural and fluent expression.
 
   ### Reference Examples:

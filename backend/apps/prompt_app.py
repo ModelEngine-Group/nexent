@@ -1,9 +1,11 @@
 import logging
 from http import HTTPStatus
 from typing import Optional
-from fastapi import APIRouter, Header, Request
+from fastapi import APIRouter, Header, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
+from adapters.exception import NexentCapabilityError
+from consts.const import MAX_AGENT_BUSINESS_DESCRIPTION_DISPLAY_WIDTH
 from consts.model import (
     GeneratePromptRequest,
     OptimizePromptSectionRequest,
@@ -16,8 +18,8 @@ from services.prompt_service import (
     OptimizeResult,
     PromptOptimizationService,
 )
-from adapters.exception import NexentCapabilityError
 from utils.auth_utils import get_current_user_info
+from utils.text_length_utils import get_display_width
 
 router = APIRouter(prefix="/prompt")
 logger = logging.getLogger("prompt_app")
@@ -29,6 +31,15 @@ async def generate_and_save_system_prompt_api(
         http_request: Request,
         authorization: Optional[str] = Header(None)
 ):
+    if get_display_width(prompt_request.task_description) > MAX_AGENT_BUSINESS_DESCRIPTION_DISPLAY_WIDTH:
+        raise HTTPException(
+            status_code=HTTPStatus.TOO_MANY_REQUESTS,
+            detail=(
+                "Agent work description exceeds the maximum "
+                f"{MAX_AGENT_BUSINESS_DESCRIPTION_DISPLAY_WIDTH} display characters "
+                "(5000 Chinese characters or 10000 ASCII characters)"
+            ),
+        )
     try:
         user_id, tenant_id, language = get_current_user_info(
             authorization, http_request)
