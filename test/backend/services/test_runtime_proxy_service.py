@@ -7,6 +7,7 @@ import pytest
 
 from consts.exceptions import (
     RuntimeServiceTimeoutError,
+    RuntimeServiceUnavailableError,
     RuntimeUpstreamError,
 )
 from consts.model import AgentRequest
@@ -24,6 +25,20 @@ class TrackingStream(httpx.AsyncByteStream):
 
     async def aclose(self):
         self.closed = True
+
+
+def test_authorization_headers_maps_missing_jwt_configuration(monkeypatch):
+    monkeypatch.setattr(
+        proxy,
+        "generate_internal_runtime_jwt",
+        lambda *_: (_ for _ in ()).throw(ValueError("missing secret")),
+    )
+
+    with pytest.raises(
+        RuntimeServiceUnavailableError,
+        match="Internal runtime authentication is not configured",
+    ):
+        proxy._authorization_headers("user-a", "tenant-a")
 
 
 @pytest.mark.asyncio
@@ -102,6 +117,44 @@ async def test_forward_agent_run_maps_timeout(monkeypatch):
     monkeypatch.setattr(proxy, "create_httpx_client", lambda **_: client)
 
     with pytest.raises(RuntimeServiceTimeoutError):
+        await proxy.forward_agent_run(
+            AgentRequest(query="hello"),
+            user_id="user-a",
+            tenant_id="tenant-a",
+        )
+    assert client.is_closed is True
+
+
+@pytest.mark.asyncio
+async def test_forward_agent_run_maps_request_error(monkeypatch):
+    async def handler(request: httpx.Request):
+        raise httpx.ConnectError("connection failed", request=request)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    monkeypatch.setattr(proxy, "generate_internal_runtime_jwt", lambda *_: "jwt")
+    monkeypatch.setattr(proxy, "create_httpx_client", lambda **_: client)
+
+    with pytest.raises(RuntimeServiceUnavailableError, match="unavailable"):
+        await proxy.forward_agent_run(
+            AgentRequest(query="hello"),
+            user_id="user-a",
+            tenant_id="tenant-a",
+        )
+    assert client.is_closed is True
+
+
+@pytest.mark.asyncio
+async def test_forward_agent_run_closes_client_on_unexpected_error(monkeypatch):
+    client = httpx.AsyncClient(transport=httpx.MockTransport(lambda _: None))
+    monkeypatch.setattr(proxy, "generate_internal_runtime_jwt", lambda *_: "jwt")
+    monkeypatch.setattr(proxy, "create_httpx_client", lambda **_: client)
+
+    async def raise_unexpected(*args, **kwargs):
+        raise RuntimeError("unexpected")
+
+    monkeypatch.setattr(client, "send", raise_unexpected)
+
+    with pytest.raises(RuntimeError, match="unexpected"):
         await proxy.forward_agent_run(
             AgentRequest(query="hello"),
             user_id="user-a",
@@ -210,3 +263,60 @@ async def test_forward_agent_stop_preserves_upstream_error(monkeypatch):
     assert exc_info.value.content == b'{"message":"forbidden"}'
     assert exc_info.value.headers["content-type"] == "application/json"
     assert "connection" not in exc_info.value.headers
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("transport_error", "expected_error"),
+    [
+        (httpx.ReadTimeout("timed out"), RuntimeServiceTimeoutError),
+        (httpx.ConnectError("connection failed"), RuntimeServiceUnavailableError),
+    ],
+)
+async def test_forward_agent_stop_maps_transport_errors(
+    monkeypatch,
+    transport_error,
+    expected_error,
+):
+    async def handler(request: httpx.Request):
+        transport_error.request = request
+        raise transport_error
+
+    transport = httpx.MockTransport(handler)
+    monkeypatch.setattr(proxy, "generate_internal_runtime_jwt", lambda *_: "jwt")
+    monkeypatch.setattr(
+        proxy,
+        "create_httpx_client",
+        lambda **_: httpx.AsyncClient(transport=transport),
+    )
+
+    with pytest.raises(expected_error):
+        await proxy.forward_agent_stop(123, "user-a", "tenant-a")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("response_kwargs", "expected_message"),
+    [
+        ({"content": b"not-json"}, "not valid JSON"),
+        ({"json": ["not", "an", "object"]}, "not a JSON object"),
+    ],
+)
+async def test_forward_agent_stop_rejects_invalid_success_payload(
+    monkeypatch,
+    response_kwargs,
+    expected_message,
+):
+    async def handler(request: httpx.Request):
+        return httpx.Response(200, **response_kwargs)
+
+    transport = httpx.MockTransport(handler)
+    monkeypatch.setattr(proxy, "generate_internal_runtime_jwt", lambda *_: "jwt")
+    monkeypatch.setattr(
+        proxy,
+        "create_httpx_client",
+        lambda **_: httpx.AsyncClient(transport=transport),
+    )
+
+    with pytest.raises(RuntimeServiceUnavailableError, match=expected_message):
+        await proxy.forward_agent_stop(123, "user-a", "tenant-a")

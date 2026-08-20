@@ -277,6 +277,27 @@ def test_northbound_agent_run_api_maps_domain_errors(
     assert response.status_code == expected_status
 
 
+def test_northbound_agent_run_api_maps_unexpected_error(mocker):
+    mocker.patch(
+        "apps.agent_app.verify_internal_runtime_jwt",
+        return_value=("user-a", "tenant-a"),
+    )
+    mocker.patch(
+        "apps.agent_app.run_agent_stream",
+        new_callable=AsyncMock,
+        side_effect=RuntimeError("unexpected"),
+    )
+
+    response = runtime_client.post(
+        "/agent/internal/northbound/run",
+        json={"agent_id": 1, "conversation_id": 123, "query": "hello"},
+        headers={"Authorization": "Bearer internal-token"},
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Agent run error."
+
+
 @pytest.mark.asyncio
 async def test_northbound_agent_stop_api_uses_internal_identity(mocker):
     mocker.patch(
@@ -296,6 +317,21 @@ async def test_northbound_agent_stop_api_uses_internal_identity(mocker):
     assert response.status_code == 200
     assert response.json() == {"message": "stopped"}
     stop_agent.assert_called_once_with(123, "user-a")
+
+
+def test_northbound_agent_stop_api_rejects_invalid_token(mocker):
+    mocker.patch(
+        "apps.agent_app.verify_internal_runtime_jwt",
+        side_effect=UnauthorizedError("Invalid internal runtime token"),
+    )
+
+    response = runtime_client.post(
+        "/agent/internal/northbound/stop/123",
+        headers={"Authorization": "Bearer invalid"},
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Invalid internal runtime token"
 
 
 @pytest.mark.asyncio

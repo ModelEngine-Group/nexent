@@ -436,6 +436,68 @@ def test_internal_runtime_jwt_requires_configured_secret(monkeypatch):
         au.verify_internal_runtime_jwt("Bearer token")
 
 
+@pytest.mark.parametrize(
+    ("user_id", "tenant_id"),
+    [
+        ("", "tenant-1"),
+        ("user-1", ""),
+    ],
+)
+def test_internal_runtime_jwt_requires_user_and_tenant(
+    monkeypatch,
+    user_id,
+    tenant_id,
+):
+    monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+
+    with pytest.raises(ValueError, match="user_id and tenant_id are required"):
+        au.generate_internal_runtime_jwt(user_id, tenant_id)
+
+
+@pytest.mark.parametrize("authorization", [None, "   "])
+def test_verify_internal_runtime_jwt_requires_authorization(
+    monkeypatch,
+    authorization,
+):
+    monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+
+    with pytest.raises(UnauthorizedError, match="No authorization header provided"):
+        au.verify_internal_runtime_jwt(authorization)
+
+
+@pytest.mark.parametrize(
+    ("claim_name", "claim_value", "expected_message"),
+    [
+        ("sub", 123, "missing user identity"),
+        ("sub", "   ", "missing user identity"),
+        ("tenant_id", 123, "missing tenant identity"),
+        ("tenant_id", "   ", "missing tenant identity"),
+    ],
+)
+def test_verify_internal_runtime_jwt_requires_string_identities(
+    monkeypatch,
+    claim_name,
+    claim_value,
+    expected_message,
+):
+    monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+    now = int(time.time())
+    claims = {
+        "sub": "user-1",
+        "tenant_id": "tenant-1",
+        "scope": au.INTERNAL_RUNTIME_JWT_SCOPE,
+        "iss": au.INTERNAL_RUNTIME_JWT_ISSUER,
+        "aud": au.INTERNAL_RUNTIME_JWT_AUDIENCE,
+        "iat": now,
+        "exp": now + 60,
+    }
+    claims[claim_name] = claim_value
+    monkeypatch.setattr(au.jwt, "decode", lambda *args, **kwargs: claims)
+
+    with pytest.raises(UnauthorizedError, match=expected_message):
+        au.verify_internal_runtime_jwt("internal-token")
+
+
 def test_get_jwt_expiry_seconds_rejects_forged_far_future_token(monkeypatch):
     """Expiry seconds must not trust JWT claims from tokens with invalid signatures."""
     now = int(time.time())

@@ -264,6 +264,32 @@ def test_stop_chat_preserves_runtime_error_response():
     assert response.json() == {"message": "forbidden"}
 
 
+@pytest.mark.parametrize(
+    ("error", "expected_status"),
+    [
+        (RuntimeServiceUnavailableError("unavailable"), 502),
+        (RuntimeServiceTimeoutError("timed out"), 504),
+    ],
+)
+def test_stop_chat_maps_runtime_transport_errors(error, expected_status):
+    with patch(
+        "apps.northbound_app._get_northbound_context",
+        new_callable=AsyncMock,
+    ) as mock_ctx, patch(
+        "apps.northbound_app.stop_chat",
+        new_callable=AsyncMock,
+        side_effect=error,
+    ):
+        mock_ctx.return_value = MagicMock()
+
+        response = client.get(
+            "/nb/v1/chat/stop/123",
+            headers=_build_headers(),
+        )
+
+    assert response.status_code == expected_status
+
+
 # =============================================================================
 # Get Conversation Tests
 # =============================================================================

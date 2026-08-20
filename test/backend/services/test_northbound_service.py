@@ -817,6 +817,23 @@ class TestStopChat:
 
         token_db_mod.log_token_usage.assert_not_called()
 
+    @pytest.mark.parametrize(
+        "runtime_error",
+        [
+            RuntimeServiceTimeoutError("timed out"),
+            RuntimeServiceUnavailableError("unavailable"),
+            RuntimeUpstreamError("upstream error"),
+        ],
+    )
+    async def test_stop_chat_preserves_runtime_errors(self, runtime_error):
+        ctx = MockNorthboundContext(token_id=0)
+        runtime_proxy_mod.forward_agent_stop.side_effect = runtime_error
+
+        with pytest.raises(type(runtime_error)) as exc_info:
+            await ns.stop_chat(ctx=ctx, conversation_id=123)
+
+        assert exc_info.value is runtime_error
+
 
 @pytest.mark.asyncio
 class TestListConversations:

@@ -363,6 +363,66 @@ class TestCollectStreamText:
 
         assert await service._collect_stream_events(mock_stream) == [valid_event]
 
+    @pytest.mark.asyncio
+    async def test_runtime_error_body_read_failure_still_closes_stream(self, caplog):
+        """Test runtime error body failures are logged and resources are closed."""
+        from consts.exceptions import RuntimeUpstreamError
+        from backend.services.a2a_server_service import A2AServerService
+
+        class FailingBodyIterator:
+            def __init__(self):
+                self.closed = False
+
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                raise RuntimeError("body read failed")
+
+            async def aclose(self):
+                self.closed = True
+
+        service = A2AServerService()
+        body_iterator = FailingBodyIterator()
+        mock_stream = MagicMock(
+            status_code=502,
+            headers={"content-type": "application/json"},
+            body_iterator=body_iterator,
+        )
+
+        with pytest.raises(RuntimeUpstreamError) as exc_info:
+            await service._ensure_runtime_stream_success(mock_stream)
+
+        assert exc_info.value.content == b""
+        assert body_iterator.closed is True
+        assert "Failed to read runtime error response body" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_close_stream_response_ignores_iterator_without_aclose(self):
+        """Test response iterators without aclose remain compatible."""
+        from backend.services.a2a_server_service import A2AServerService
+
+        mock_stream = MagicMock()
+        mock_stream.body_iterator = object()
+
+        await A2AServerService._close_stream_response(mock_stream)
+
+    @pytest.mark.asyncio
+    async def test_close_stream_response_logs_close_failure(self, caplog):
+        """Test close failures do not replace the A2A protocol response."""
+        from backend.services.a2a_server_service import A2AServerService
+
+        class FailingCloseIterator:
+            async def aclose(self):
+                raise RuntimeError("close failed")
+
+        mock_stream = MagicMock()
+        mock_stream.body_iterator = FailingCloseIterator()
+
+        await A2AServerService._close_stream_response(mock_stream)
+
+        assert "Failed to close runtime response stream" in caplog.text
+
 
 class TestHandleMessageSend:
     """Test successful message:send execution paths."""
