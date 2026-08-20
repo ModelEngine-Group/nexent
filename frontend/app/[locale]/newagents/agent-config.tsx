@@ -320,17 +320,7 @@ export default function AgentConfig({ onToggleDebug }: AgentConfigProps) {
             onOpenChange={(open) => handleSectionOpenChange("role_model", open)}
             containerRef={roleModelSectionRef}
           >
-            <AgentPrmopt
-              focusRequest={
-                configFocusRequest?.agentId === agentId &&
-                configFocusRequest.target.section === "role_model"
-                  ? {
-                      requestId: configFocusRequest.requestId,
-                      promptTab: configFocusRequest.target.promptTab,
-                    }
-                  : null
-              }
-            />
+            <AgentPrmopt />
           </ConfigSection>
 
           {/* 3. 工具与技能 */}

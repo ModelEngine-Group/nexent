@@ -9,6 +9,7 @@ import { useModelList } from "@/hooks/model/useModelList";
 import { canManageModels } from "@/lib/auth";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useDeployment } from "@/components/providers/deploymentProvider";
+import { useNl2AgentFlow } from "@/contexts/nl2AgentFlow";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import ExpandEditModal from "./basic/ExpandEditModal";
@@ -17,14 +18,7 @@ const { TextArea } = Input;
 
 type PromptTab = "duty" | "constraint" | "few-shots";
 
-interface AgentPromptProps {
-  focusRequest?: {
-    requestId: number;
-    promptTab: PromptTab;
-  } | null;
-}
-
-export default function AgentPrompt({ focusRequest = null }: AgentPromptProps) {
+export default function AgentPrompt() {
   const { t } = useTranslation("common");
   const { user } = useAuthorizationContext();
   const { llmModels } = useModelList();
@@ -35,11 +29,15 @@ export default function AgentPrompt({ focusRequest = null }: AgentPromptProps) {
   const updateAgent = useAgentStore((state) => state.updateAgentConfig);
   const agentId = useAgentStore((state) => state.agentId);
   const defaultLlmConfig = useAgentStore((state) => state.defaultLlmConfig);
+  const { configFocusRequest } = useNl2AgentFlow();
 
   const [expandedPrompt, setExpandedPrompt] = useState<PromptTab | null>(null);
   const [activePromptTab, setActivePromptTab] = useState<PromptTab>("duty");
-  const requestedPromptTab = focusRequest?.promptTab;
-  const focusRequestId = focusRequest?.requestId;
+  const requestedPromptTab =
+    configFocusRequest?.agentId === agentId &&
+    configFocusRequest.target.section === "role_model"
+      ? configFocusRequest.target.promptTab
+      : null;
 
   useEffect(() => {
     setActivePromptTab("duty");
@@ -47,7 +45,7 @@ export default function AgentPrompt({ focusRequest = null }: AgentPromptProps) {
 
   useEffect(() => {
     if (requestedPromptTab) setActivePromptTab(requestedPromptTab);
-  }, [focusRequestId, requestedPromptTab]);
+  }, [requestedPromptTab]);
 
   const handlePromptTabChange = useCallback(
     (value: string) => {

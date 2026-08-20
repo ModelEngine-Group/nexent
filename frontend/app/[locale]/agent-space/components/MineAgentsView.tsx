@@ -202,7 +202,7 @@ export function MineAgentsView({
     if (versionNo <= 0) {
       return;
     }
-    router.push(`/${locale}/space/evaluation?agent_id=${agent.agent_id}`);
+    router.push(`/${locale}/evaluation?agent_id=${agent.agent_id}`);
   };
 
   const closeReviewModal = () => {

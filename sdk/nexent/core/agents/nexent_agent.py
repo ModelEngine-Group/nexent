@@ -48,6 +48,16 @@ def get_local_python_authorized_imports() -> List[str]:
 logger = logging.getLogger(__name__)
 
 
+def _ensure_non_empty_final_answer(answer: str, lang: str) -> str:
+    """Return a user-visible fallback when final-answer cleanup removes all content."""
+    if answer.strip():
+        return answer
+    logger.warning("Final answer was empty after removing reasoning content")
+    if lang == "zh":
+        return "智能体未能生成有效的最终回复，请重试或换一种方式描述需求。"
+    return "The agent could not generate a valid final response. Please try again or rephrase your request."
+
+
 def _tool_name(tool_obj: Any) -> str:
     """Return the most useful tool name for monitoring."""
     return (
@@ -909,6 +919,10 @@ class NexentAgent:
                     # Remove thinking prefix content (until two newlines)
                     final_answer_str = re.sub(
                         THINK_PREFIX_PATTERN, "", final_answer_str, flags=re.DOTALL)
+                    final_answer_str = _ensure_non_empty_final_answer(
+                        final_answer_str,
+                        getattr(observer, "lang", "en"),
+                    )
                     final_answer_for_trace = final_answer_str
                     monitoring_manager.set_openinference_output(final_answer_str)
                     observer.add_message(self.agent.agent_name,

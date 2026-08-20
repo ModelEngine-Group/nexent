@@ -415,7 +415,14 @@ export const InstalledResourceBindingCard: FC<{
       if (!synchronized) {
         showSynchronizationError();
       } else {
-        requestConfigFocus(payload.agent_id, { section: "tools_skills" });
+        requestConfigFocus(payload.agent_id, {
+          section: "tools_skills",
+          capabilityTab: boundItems.some(
+            (item) => item.resource.candidate.resource_type === "tool"
+          )
+            ? "tools"
+            : "skills",
+        });
       }
     }
   };

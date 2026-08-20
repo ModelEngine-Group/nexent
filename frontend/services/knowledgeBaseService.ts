@@ -1780,7 +1780,9 @@ class KnowledgeBaseService {
           query,
           index_names: [indexName],
           top_k: options?.topK ?? 10,
-          weight_accurate: options?.weightAccurate ?? 0.5,
+          ...(options?.weightAccurate !== undefined
+            ? { weight_accurate: options.weightAccurate }
+            : {}),
         }),
       });
 

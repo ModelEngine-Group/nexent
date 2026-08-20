@@ -51,14 +51,15 @@ const isDictationConfigured = (config: STTModelConfig | undefined): boolean => {
   return Boolean(config.apiConfig?.apiKey);
 };
 
-const AgentDebugPanel: FC<AgentDebugPanelProps> = ({ isCompareMode = false }) => {
-  const { t } = useTranslation("common");
-  const agentId = useAgentStore((state) => state.agentId);
-  const editedAgent = useAgentStore((state) => state.editedAgent);
+interface AgentDebugChatProps {
+  agent: Agent;
+  agentId: number;
+}
+
+const AgentDebugChat: FC<AgentDebugChatProps> = ({ agent, agentId }) => {
   const { modelConfig } = useConfig();
   const [chatMode, setChatMode] = useState<ChatMode>("execution");
   const [selectedModelId, setSelectedModelId] = useState<string | undefined>(undefined);
-
   const adapters = useMemo(
     () => ({
       attachments: compositeAttachmentAdapter,
@@ -67,10 +68,6 @@ const AgentDebugPanel: FC<AgentDebugPanelProps> = ({ isCompareMode = false }) =>
     [modelConfig?.stt]
   );
   const runtime = useLocalRuntime(agentDebugChatModelAdapter, { adapters });
-  const debugAgent = useMemo(
-    () => (agentId !== null && editedAgent ? toDebugAgent(agentId, editedAgent) : null),
-    [agentId, editedAgent]
-  );
 
   const handleChatModeChange = useCallback((mode: ChatMode) => {
     setChatMode(mode);
@@ -79,35 +76,19 @@ const AgentDebugPanel: FC<AgentDebugPanelProps> = ({ isCompareMode = false }) =>
   useEffect(() => {
     runtime.thread.composer.setRunConfig({
       custom: {
-        ...(agentId !== null ? { agentId } : {}),
+        agentId,
         enablePlan: chatMode === "planning",
         modelId: selectedModelId,
       },
     });
   }, [agentId, runtime, chatMode, selectedModelId]);
 
-  if (!debugAgent) {
-    return (
-      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-        {t("systemPrompt.nonEditing.subtitle")}
-      </div>
-    );
-  }
-
-  if (isCompareMode) {
-    return (
-      <div className="h-full w-full">
-        <AgentDebugComparePanel agentId={agentId ?? undefined} />
-      </div>
-    );
-  }
-
   return (
     <AssistantRuntimeProvider runtime={runtime}>
       <TooltipProvider>
         <div className="h-full w-full">
           <Chat
-            selectedAgent={debugAgent}
+            selectedAgent={agent}
             isLoadingAgents={false}
             chatMode={chatMode}
             onChatModeChange={handleChatModeChange}
@@ -120,6 +101,34 @@ const AgentDebugPanel: FC<AgentDebugPanelProps> = ({ isCompareMode = false }) =>
       </TooltipProvider>
     </AssistantRuntimeProvider>
   );
+};
+
+const AgentDebugPanel: FC<AgentDebugPanelProps> = ({ isCompareMode = false }) => {
+  const { t } = useTranslation("common");
+  const agentId = useAgentStore((state) => state.agentId);
+  const editedAgent = useAgentStore((state) => state.editedAgent);
+  const debugAgent = useMemo(
+    () => (agentId !== null && editedAgent ? toDebugAgent(agentId, editedAgent) : null),
+    [agentId, editedAgent]
+  );
+
+  if (!debugAgent || agentId === null) {
+    return (
+      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+        {t("systemPrompt.nonEditing.subtitle")}
+      </div>
+    );
+  }
+
+  if (isCompareMode) {
+    return (
+      <div className="h-full w-full">
+        <AgentDebugComparePanel agentId={agentId} />
+      </div>
+    );
+  }
+
+  return <AgentDebugChat agent={debugAgent} agentId={agentId} />;
 };
 
 export default AgentDebugPanel;

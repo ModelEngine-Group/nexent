@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { App, Button, Row, Col, Flex, Tooltip, Badge } from "antd";
 import { Wrench, RefreshCw, Plug, BlocksIcon } from "lucide-react";
@@ -9,6 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { updateToolList } from "@/services/mcpService";
 import { useAgentStore } from "@/stores/agentStore";
 import { useAgentReadOnly } from "@/hooks/agent/useAgentReadOnly";
+import { useNl2AgentFlow } from "@/contexts/nl2AgentFlow";
 import { useToolList } from "@/hooks/agent/useToolList";
 import { useSkillList } from "@/hooks/agent/useSkillList";
 import type { Skill } from "@/types/agentConfig";
@@ -27,6 +28,7 @@ export default function AgentCapability() {
   const { message } = App.useApp();
 
   const currentAgentId = useAgentStore((state) => state.agentId);
+  const { configFocusRequest } = useNl2AgentFlow();
   const isReadOnly = useAgentReadOnly();
   const selectedTools = useAgentStore(
     (state) => state.editedAgent?.tools ?? []
@@ -46,6 +48,25 @@ export default function AgentCapability() {
   const [editingSkill, setEditingSkill] = useState<MyEditableSkillItem | null>(
     null
   );
+  const [activeCapabilityTab, setActiveCapabilityTab] = useState<
+    "tools" | "skills"
+  >("tools");
+
+  const requestedCapabilityTab =
+    configFocusRequest?.agentId === currentAgentId &&
+    configFocusRequest.target.section === "tools_skills"
+      ? configFocusRequest.target.capabilityTab
+      : null;
+
+  useEffect(() => {
+    setActiveCapabilityTab("tools");
+  }, [currentAgentId]);
+
+  useEffect(() => {
+    if (requestedCapabilityTab) {
+      setActiveCapabilityTab(requestedCapabilityTab);
+    }
+  }, [requestedCapabilityTab]);
 
   const { invalidate, availableTools, isUserSelectable } = useToolList();
   const { invalidate: invalidateSkills } = useSkillList();
@@ -110,7 +131,15 @@ export default function AgentCapability() {
 
   return (
     <>
-      <Tabs defaultValue="tools" className="w-full">
+      <Tabs
+        value={activeCapabilityTab}
+        onValueChange={(value) =>
+          value === "tools" || value === "skills"
+            ? setActiveCapabilityTab(value)
+            : undefined
+        }
+        className="w-full"
+      >
         <TabsList className="grid w-full grid-cols-2">
           <TabsTrigger value="tools">
             <span className="inline-flex items-center gap-1">

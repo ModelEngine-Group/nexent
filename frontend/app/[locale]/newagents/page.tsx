@@ -9,8 +9,8 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
-import { Button } from "antd";
-import { RefreshCw, Sparkles, X } from "lucide-react";
+import { Button, Switch } from "antd";
+import { Maximize2, Minimize2, RefreshCw, Sparkles, X } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 
 import AgentSelectorHeader from "./agent-selector-header";
@@ -59,7 +59,8 @@ interface PanelCardProps {
   title: string;
   children: ReactNode;
   className?: string;
-  action?: ReactNode;
+  leftAction?: ReactNode;
+  rightAction?: ReactNode;
   icon?: ReactNode;
 }
 
@@ -67,19 +68,21 @@ function PanelCard({
   title,
   children,
   className = "",
-  action,
+  leftAction,
+  rightAction,
   icon,
 }: PanelCardProps) {
   return (
     <section
       className={`flex min-h-0 flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm ${className}`}
     >
-      <div className="flex min-h-12 shrink-0 items-center justify-between border-b border-gray-200 px-4">
-        <div className="flex items-center gap-2">
-          {icon}
-          <h3 className="text-base font-medium text-gray-900">{title}</h3>
-        </div>
-        {action}
+        <div className="flex min-h-12 shrink-0 items-center justify-between border-b border-gray-200 px-4">
+          <div className="flex items-center gap-2">
+            {icon}
+            <h3 className="text-base font-medium text-gray-900">{title}</h3>
+            {leftAction}
+          </div>
+          {rightAction}
       </div>
       {children}
     </section>
@@ -93,6 +96,8 @@ function AgentSetupContent() {
   const snapshotRefreshQueue = useRef<Promise<boolean>>(Promise.resolve(true));
   const [isGenerationVisible, setIsGenerationVisible] = useState(true);
   const [isDebugVisible, setIsDebugVisible] = useState(false);
+  const [isCompareMode, setIsCompareMode] = useState(false);
+  const [isDebugFullscreen, setIsDebugFullscreen] = useState(false);
   const [isShowVersionManagePanel, setIsShowVersionManagePanel] =
     useState(false);
   const currentAgentId = useAgentStore((state) => state.currentAgentId);
@@ -216,7 +221,7 @@ function AgentSetupContent() {
             <PanelCard
               title={t("agent.page.panel.nl2agent")}
               className={isDebugVisible ? "flex-1" : "flex-[1]"}
-              action={
+              rightAction={
                 <button
                   type="button"
                   aria-label={t("agent.page.panel.nl2agent.closeAria")}
@@ -275,10 +280,8 @@ function AgentSetupContent() {
 
           <PanelCard
             title={t("agent.page.panel.config")}
-            className={
-              !isGenerationVisible && isDebugVisible ? "flex-[1]" : "flex-[2]"
-            }
-            action={
+            className={isDebugFullscreen ? "flex-1" : "flex-[2]"}
+            rightAction={
               <Button
                 icon={<Sparkles size={16} />}
                 onClick={() => setIsGenerationVisible((visible) => !visible)}
@@ -298,12 +301,73 @@ function AgentSetupContent() {
           {isDebugVisible && (
             <PanelCard
               title={t("agent.page.panel.debug")}
-              className={!isGenerationVisible ? "flex-1" : "flex-[1]"}
-              action={
+              className={isDebugFullscreen ? "flex-[2]" : "flex-1"}
+              leftAction={
+                <div className="flex items-center gap-2 text-sm text-gray-600">
+                  <span>{t("agent.debug.compareMode")}</span>
+                  <Switch
+                    checked={isCompareMode}
+                    onChange={setIsCompareMode}
+                    size="small"
+                  />
+                </div>
+              }
+              rightAction={
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    aria-label={
+                      isDebugFullscreen
+                        ? "Restore debug panel size"
+                        : "Maximize debug panel"
+                    }
+                    onClick={() => {
+                      if (isDebugFullscreen) {
+                        setIsDebugFullscreen(false);
+                        return;
+                      }
+
+                      setIsGenerationVisible(false);
+                      setIsShowVersionManagePanel(false);
+                      setIsDebugFullscreen(true);
+                    }}
+                    className="rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+                  >
+                    {isDebugFullscreen ? (
+                      <Minimize2 size={18} />
+                    ) : (
+                      <Maximize2 size={18} />
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={t("agent.page.panel.debug.closeAria")}
+                    onClick={() => {
+                      setIsDebugVisible(false);
+                      setIsDebugFullscreen(false);
+                    }}
+                    className="rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+              }
+            >
+              <div className="min-h-0 flex-1 overflow-hidden">
+                <AgentDebugPanel isCompareMode={isCompareMode} />
+              </div>
+            </PanelCard>
+          )}
+
+          {isShowVersionManagePanel && (
+            <PanelCard
+              title={t("agent.version.manage")}
+              className="flex-1"
+              rightAction={
                 <button
                   type="button"
                   aria-label={t("agent.page.panel.debug.closeAria")}
-                  onClick={() => setIsDebugVisible(false)}
+                  onClick={() => setIsShowVersionManagePanel(false)}
                   className="rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
                 >
                   <X size={18} />
@@ -311,17 +375,11 @@ function AgentSetupContent() {
               }
             >
               <div className="min-h-0 flex-1 overflow-hidden">
-                <AgentDebugPanel />
+                <AgentVersion />
               </div>
             </PanelCard>
           )}
         </div>
-
-        {isShowVersionManagePanel && (
-          <aside className="h-full w-[360px] shrink-0 overflow-hidden">
-            <AgentVersion />
-          </aside>
-        )}
       </main>
     </div>
   );

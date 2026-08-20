@@ -64,7 +64,7 @@ export default function SelectedSkillManagement({
     (state) => state.editedAgent?.skills ?? []
   );
   const updateSkills = useAgentStore((state) => state.updateSkills);
-  const { skills: catalogSkillData } = useSkillList({ enabled: true });
+  const { availableSkills: catalogSkillData } = useSkillList({ enabled: true });
   const catalogSkills = catalogSkillData as Skill[];
   const [detailSkill, setDetailSkill] = useState<Skill | null>(null);
   const [configSkill, setConfigSkill] = useState<Skill | null>(null);

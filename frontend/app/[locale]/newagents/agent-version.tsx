@@ -115,7 +115,7 @@ export default function AgentVersionManage({ onClose }: AgentVersionManageProps)
 
   return (
     <>
-      <div className="flex h-full min-h-0 w-full flex-col">
+      <div className="flex h-full min-h-0 w-full flex-col py-2">
         <div className="min-h-0 flex-1 overflow-y-auto">
           <Spin spinning={isLoading}>
             {agentVersionList.length === 0 ? (

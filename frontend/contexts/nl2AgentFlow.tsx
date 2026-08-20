@@ -25,7 +25,10 @@ export type Nl2AgentConfigFocusTarget =
       section: "role_model";
       promptTab: "duty" | "constraint" | "few-shots";
     }
-  | { section: "tools_skills" }
+  | {
+      section: "tools_skills";
+      capabilityTab: "tools" | "skills";
+    }
   | { section: "conversation_guide" };
 
 export interface Nl2AgentConfigFocusRequest {
