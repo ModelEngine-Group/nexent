@@ -109,7 +109,10 @@ consts_mock = types.ModuleType('consts')
 consts_exceptions_mock = types.ModuleType('consts.exceptions')
 consts_model_mock = types.ModuleType('consts.model')
 consts_const_mock = types.ModuleType('consts.const')
+consts_agent_mock = types.ModuleType('consts.agent')
+consts_agent_mock.SAFE_AGENT_STREAM_ERROR_MESSAGE = "Agent execution failed. Please try again later."
 sys.modules['consts'] = consts_mock
+sys.modules['consts.agent'] = consts_agent_mock
 sys.modules['consts.exceptions'] = consts_exceptions_mock
 sys.modules['consts.model'] = consts_model_mock
 sys.modules['consts.const'] = consts_const_mock
@@ -183,7 +186,9 @@ consts_model_mock.NL2SkillRunRequest = MockNL2SkillRunRequest
 
 # Mock services
 services_mock = types.ModuleType('services')
-services_mock.__path__ = []  # Make it a package so submodules can be imported
+services_mock.__path__ = [
+    os.path.join(os.path.dirname(__file__), "../../../backend/services")
+]  # Keep real service submodules importable
 services_skill_service_mock = types.ModuleType('services.skill_service')
 services_nl2skill_service_mock = types.ModuleType('services.nl2skill_service')
 services_asset_owner_visibility_mock = types.ModuleType('services.asset_owner_visibility')
@@ -200,6 +205,9 @@ class MockSkillService:
         self.repository = MagicMock()
         self.skill_manager = MagicMock()
 services_skill_service_mock.SkillService = MockSkillService
+services_skill_service_mock.UnsupportedSkillFilePreview = type(
+    "UnsupportedSkillFilePreview", (SkillException,), {}
+)
 services_skill_service_mock.get_skill_manager = MagicMock()
 services_skill_service_mock.update_skill_list = MagicMock()
 services_skill_service_mock.get_official_skills_with_status = MagicMock(return_value=[])

@@ -112,7 +112,9 @@ sys.modules['backend.database.client'] = _mock_db_client
 
 # Mock services submodules
 services_module = types.ModuleType("services")
-services_module.__path__ = []
+services_module.__path__ = [
+    os.path.join(os.path.dirname(__file__), "../../../backend/services")
+]
 sys.modules['services'] = services_module
 
 runtime_state_service_module = types.ModuleType("services.runtime_state_service")
