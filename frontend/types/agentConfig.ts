@@ -215,6 +215,18 @@ export interface ToolParam {
   description_zh?: string;
   default?: string;
   depends_on?: string;
+  /** Pydantic Field validation constraints (ge/le/gt/lt/...) persisted by the backend. */
+  constraints?: ToolParamConstraints;
+}
+
+export interface ToolParamConstraints {
+  ge?: number;
+  gt?: number;
+  le?: number;
+  lt?: number;
+  multiple_of?: number;
+  min_length?: number;
+  max_length?: number;
 }
 
 export interface AidpKnowledgeBaseItem {
