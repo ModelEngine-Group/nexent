@@ -1,9 +1,8 @@
+
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock
-
 import pytest
-
 from services.memory_dreaming_service import (
     DreamingConflictError,
     DreamingRunError,
@@ -47,6 +46,7 @@ def test_ac001_ac006_full_run_and_idempotency_key(monkeypatch):
         "content": "Always prefer stable transaction rollback behavior",
         "create_time": (now - timedelta(days=1)).isoformat(),
         "update_time": now.isoformat(),
+
         "recall_count": 3,
         "daily_count": 2,
         "grounded_count": 1,
