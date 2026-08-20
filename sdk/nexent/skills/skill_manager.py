@@ -301,17 +301,19 @@ class SkillManager:
         if not self.base_skills_dir:
             return
         local_dir = self.resolve_skill_dir(skill_name, tenant_id=tenant_id)
-        full_path = self._resolve_skill_file_path(local_dir, file_path)
+        local_dir_real = os.path.realpath(local_dir)
+        normalized_local_dir = os.path.normcase(local_dir_real)
+        full_path = os.path.realpath(self._resolve_skill_file_path(local_dir, file_path))
+        if not os.path.normcase(full_path).startswith(normalized_local_dir + os.sep):
+            raise ValueError("file_path resolves outside the skill directory")
         os.makedirs(os.path.dirname(full_path), exist_ok=True)
 
         # Resolve again after creating parent directories so an existing symlink
         # cannot redirect the write outside the skill directory.
         safe_path = self._resolve_skill_file_path(local_dir, file_path)
-        local_dir_real = os.path.realpath(local_dir)
-        if (
-            os.path.normcase(os.path.commonpath([local_dir_real, safe_path]))
-            != os.path.normcase(local_dir_real)
-        ):
+        safe_path = os.path.realpath(safe_path)
+        normalized_safe_path = os.path.normcase(safe_path)
+        if not normalized_safe_path.startswith(normalized_local_dir + os.sep):
             raise ValueError("file_path resolves outside the skill directory")
         with open(safe_path, "w", encoding=encoding) as f:
             f.write(content)

@@ -2018,6 +2018,28 @@ class TestSkillManagerWriteSkillFile:
         manager = SkillManager(base_skills_dir=None)
         manager._write_skill_file("any-skill", "file.txt", "content", tenant_id=None)
 
+    def test_write_skill_file_rechecks_containment_before_open(self, mocker, tmp_path):
+        """Reject a path redirected outside the skill directory before opening it."""
+        manager = SkillManager(base_skills_dir=str(tmp_path))
+        skill_dir = tmp_path / "safe-skill"
+        initial_path = skill_dir / "nested" / "file.txt"
+        outside_path = tmp_path.parent / "outside.txt"
+        mocker.patch.object(
+            manager,
+            "_resolve_skill_file_path",
+            side_effect=[str(initial_path), str(outside_path)],
+        )
+
+        with pytest.raises(ValueError, match="file_path resolves outside the skill directory"):
+            manager._write_skill_file(
+                "safe-skill",
+                "nested/file.txt",
+                "content",
+                tenant_id=None,
+            )
+
+        assert not outside_path.exists()
+
 
 class TestSkillManagerGetSkillMetadata:
     """Test SkillManager._get_skill_metadata method."""

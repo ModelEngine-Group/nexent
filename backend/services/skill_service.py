@@ -184,10 +184,21 @@ def _skill_file_preview_status(
     if extension in _TEXT_PREVIEW_EXTENSIONS:
         return "readable"
 
-    file_path = _resolve_local_skill_path(local_skills_dir, skill_name, relative_path)
+    local_root = os.path.realpath(local_skills_dir)
+    skill_root = os.path.realpath(_resolve_local_skill_path(local_skills_dir, skill_name))
+    file_path = os.path.realpath(
+        _resolve_local_skill_path(local_skills_dir, skill_name, relative_path)
+    )
+    normalized_local_root = os.path.normcase(local_root)
+    normalized_skill_root = os.path.normcase(skill_root)
+    normalized_file_path = os.path.normcase(file_path)
+    if (
+        not normalized_skill_root.startswith(normalized_local_root + os.sep)
+        or not normalized_file_path.startswith(normalized_skill_root + os.sep)
+    ):
+        raise ForbiddenError("Unsafe local skill path")
     try:
-        # The resolver returns a real path contained by the validated skill root.
-        with open(file_path, "rb") as file_obj:  # lgtm[py/path-injection]
+        with open(file_path, "rb") as file_obj:
             return "unsupported" if _is_obviously_binary(file_obj.read(4096)) else "readable"
     except OSError:
         return "readable"
@@ -2445,18 +2456,23 @@ class SkillService:
                 skill_name,
                 file_path,
             )
-            skill_root = _resolve_local_skill_path(local_skills_dir, skill_name)
+            skill_root = os.path.realpath(
+                _resolve_local_skill_path(local_skills_dir, skill_name)
+            )
+            full_path = os.path.realpath(full_path)
+            normalized_local_root = os.path.normcase(os.path.realpath(local_skills_dir))
+            normalized_skill_root = os.path.normcase(skill_root)
+            normalized_full_path = os.path.normcase(full_path)
             if (
-                os.path.normcase(os.path.commonpath([skill_root, full_path]))
-                != os.path.normcase(skill_root)
+                not normalized_skill_root.startswith(normalized_local_root + os.sep)
+                or not normalized_full_path.startswith(normalized_skill_root + os.sep)
             ):
                 raise ForbiddenError("Unsafe local skill path")
 
             try:
                 if _skill_file_preview_status(local_skills_dir, skill_name, file_path) == "unsupported":
                     raise UnsupportedSkillFilePreview(f"Unsupported skill file preview: {file_path}")
-                # The resolver and the adjacent commonpath check constrain this path.
-                with open(full_path, "rb") as f:  # lgtm[py/path-injection]
+                with open(full_path, "rb") as f:
                     raw = f.read()
                 if isinstance(raw, str):
                     return DecodedSkillFile(raw, "utf-8")

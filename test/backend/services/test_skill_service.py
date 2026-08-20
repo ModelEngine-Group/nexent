@@ -6427,3 +6427,21 @@ class TestLocalSkillPathSecurity:
 
         with pytest.raises(skill_service.ForbiddenError, match="Unsafe local skill path"):
             service.get_skill_file_content("safe-skill", "README.md")
+
+    def test_preview_rejects_sibling_directory_with_shared_prefix(self, mocker, tmp_path):
+        skill_root = tmp_path / "safe-skill"
+        sibling_file = tmp_path / "safe-skill-copy" / "payload.custom"
+        skill_root.mkdir()
+        sibling_file.parent.mkdir()
+        sibling_file.write_text("payload", encoding="utf-8")
+        mocker.patch(
+            "backend.services.skill_service._resolve_local_skill_path",
+            side_effect=[str(skill_root), str(sibling_file)],
+        )
+
+        with pytest.raises(skill_service.ForbiddenError, match="Unsafe local skill path"):
+            skill_service._skill_file_preview_status(
+                str(tmp_path),
+                "safe-skill",
+                "payload.custom",
+            )
