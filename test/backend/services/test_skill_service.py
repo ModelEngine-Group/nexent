@@ -396,6 +396,11 @@ from backend.services.skill_service import (
     get_skill_manager,
 )
 
+# The full suite may import this module before the local ``consts`` stubs above
+# are installed.  Pin the module-level safety root to the test-owned directory
+# so path validation remains deterministic regardless of collection order.
+skill_service.CONTAINER_SKILLS_PATH = TEST_LOCAL_SKILLS_DIR
+
 # Create a mock get_skill_manager to avoid calling the real function
 _mock_skill_manager_instance = MockSkillManager(local_skills_dir=TEST_LOCAL_SKILLS_DIR)
 skill_service.get_skill_manager = lambda tenant_id=None: _mock_skill_manager_instance
@@ -1054,6 +1059,7 @@ class TestSkillServiceCreateSkill:
 
         mock_manager = MagicMock()
         mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
+        mock_manager.resolve_tenant_dir.return_value = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService(tenant_id="test-tenant")
         service.skill_manager = mock_manager
@@ -1311,6 +1317,7 @@ class TestSkillServiceDeleteSkill:
 
         mock_manager = MagicMock()
         mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
+        mock_manager.resolve_tenant_dir.return_value = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService(tenant_id="test-tenant")
         service.skill_manager = mock_manager
@@ -1336,14 +1343,14 @@ class TestSkillServiceDeleteSkill:
 
         mock_manager = MagicMock()
         mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
+        mock_manager.resolve_tenant_dir.return_value = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService(tenant_id="test-tenant")
         service.skill_manager = mock_manager
 
         with patch('os.path.isfile', return_value=True):
-            with patch('os.path.join', return_value="/tmp/skills/del_skill"):
-                with patch('shutil.rmtree'):
-                    result = service.delete_skill("del_skill", tenant_id="test-tenant", user_id="user123")
+            with patch('shutil.rmtree'):
+                result = service.delete_skill("del_skill", tenant_id="test-tenant", user_id="user123")
 
         assert result is True
 
@@ -2382,6 +2389,7 @@ description: Updated via MD
         )
         service = SkillService(tenant_id="test-tenant")
         service.skill_manager = MagicMock()
+        service.skill_manager.resolve_tenant_dir.return_value = TEST_LOCAL_SKILLS_DIR
         service._enrich_configs_from_yaml = lambda result: result
         service.update_skill_from_file(
             "existing",
@@ -3188,6 +3196,7 @@ class TestDeleteSkillFilePathTraversal:
 
         mock_manager = MagicMock()
         mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
+        mock_manager.resolve_tenant_dir.return_value = TEST_LOCAL_SKILLS_DIR
         mock_manager.delete_skill_file = MagicMock(return_value=True)
 
         mocker.patch(
@@ -3300,6 +3309,7 @@ class TestSkillServiceDeleteLocalSkillFiles:
         """Test deletion when directory doesn't exist."""
         mock_manager = MagicMock()
         mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
+        mock_manager.resolve_tenant_dir.return_value = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.skill_manager = mock_manager
@@ -3311,6 +3321,7 @@ class TestSkillServiceDeleteLocalSkillFiles:
         """Test deletion with files and subdirectories."""
         mock_manager = MagicMock()
         mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
+        mock_manager.resolve_tenant_dir.return_value = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.skill_manager = mock_manager
@@ -3328,6 +3339,7 @@ class TestSkillServiceDeleteLocalSkillFiles:
         """Test deletion with items ending in slash."""
         mock_manager = MagicMock()
         mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
+        mock_manager.resolve_tenant_dir.return_value = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.skill_manager = mock_manager
@@ -3948,6 +3960,7 @@ class TestSkillServiceDeleteWithLocalDir:
 
         mock_manager = MagicMock()
         mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
+        mock_manager.resolve_tenant_dir.return_value = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService(tenant_id="test-tenant")
         service.skill_manager = mock_manager
@@ -3979,15 +3992,13 @@ class TestSkillServiceDeleteWithNoLocalDir:
 
         mock_manager = MagicMock()
         mock_manager.local_skills_dir = None
+        mock_manager.resolve_tenant_dir.return_value = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService(tenant_id="test-tenant")
         service.skill_manager = mock_manager
 
-        # The service joins local_skills_dir with skill_name, so os.path.join(None, x) would fail
-        # We need to patch os.path.exists to handle the joined path check
         with patch('os.path.isfile', return_value=False):
-            with patch('os.path.join', return_value="/nonexistent/path/to_delete"):
-                result = service.delete_skill("to_delete", tenant_id="test-tenant", user_id="user123")
+            result = service.delete_skill("to_delete", tenant_id="test-tenant", user_id="user123")
 
         assert result is True
 
@@ -4723,8 +4734,10 @@ class TestSkillServiceExportSkillsByNames:
 
         service = SkillService()
         service.skill_manager = MagicMock(local_skills_dir=str(tmp_path))
+        service.skill_manager.resolve_tenant_dir.return_value = str(tmp_path)
 
-        result = service.export_skills_by_names(["missing-skill"], tenant_id="tenant-1")
+        with patch.object(skill_service, "CONTAINER_SKILLS_PATH", str(tmp_path)):
+            result = service.export_skills_by_names(["missing-skill"], tenant_id="tenant-1")
 
         assert result == []
 
@@ -4757,7 +4770,8 @@ class TestSkillServiceExportSkillsByNames:
         service = SkillService()
         service.skill_manager = FakeSkillManager()
 
-        result = service.export_skills_by_names(["missing-skill"], tenant_id="tenant-1")
+        with patch.object(skill_service, "CONTAINER_SKILLS_PATH", str(tmp_path)):
+            result = service.export_skills_by_names(["missing-skill"], tenant_id="tenant-1")
 
         assert len(result) == 1
         zip_bytes = base64.b64decode(result[0]["skill_zip_base64"])
@@ -4777,11 +4791,13 @@ class TestSkillServiceExportSkillsByNames:
         )
 
         skill_manager = MagicMock(local_skills_dir=str(tmp_path))
+        skill_manager.resolve_tenant_dir.return_value = str(tmp_path)
         skill_manager.save_skill.return_value = None
         service = SkillService()
         service.skill_manager = skill_manager
 
-        result = service.export_skills_by_names(["missing-skill"], tenant_id="tenant-1")
+        with patch.object(skill_service, "CONTAINER_SKILLS_PATH", str(tmp_path)):
+            result = service.export_skills_by_names(["missing-skill"], tenant_id="tenant-1")
 
         assert result == []
         skill_manager.save_skill.assert_called_once()

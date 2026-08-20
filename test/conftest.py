@@ -31,6 +31,16 @@ if _backend_dir not in sys.path:
 if _sdk_dir not in sys.path:
     sys.path.insert(0, _sdk_dir)
 
+# Some test modules replace the ``consts`` package in ``sys.modules`` with a
+# lightweight stub during collection.  Keep the agent-stream constant
+# available as a fully-qualified module so later imports do not depend on the
+# replacement parent still behaving like a package.
+_agent_consts_stub = types.ModuleType("consts.agent")
+_agent_consts_stub.SAFE_AGENT_STREAM_ERROR_MESSAGE = (
+    "Agent execution failed. Please try again later."
+)
+sys.modules.setdefault("consts.agent", _agent_consts_stub)
+
 # Stub xlrd — only required when tests exercise ``evaluation_set_excel_utils``
 # in environments where the optional SDK is not installed.  We register a
 # permissive module-like object that exposes ``open_workbook`` so the .xls

@@ -60,7 +60,8 @@ def _ensure_attr(parent_name: str, child_name: str):
     if parent is None:
         return
     if not hasattr(parent, child_name):
-        child = _safe_import(f"{parent_name}.{child_name}")
+        qualified_name = f"{parent_name}.{child_name}"
+        child = sys.modules.get(qualified_name) or _safe_import(qualified_name)
         if child is not None:
             setattr(parent, child_name, child)
 
