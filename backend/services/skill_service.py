@@ -169,7 +169,11 @@ def _is_obviously_binary(raw: bytes) -> bool:
     return control_count / len(raw) > 0.1
 
 
-def _skill_file_preview_status(file_path: str, relative_path: str) -> str:
+def _skill_file_preview_status(
+    local_skills_dir: str,
+    skill_name: str,
+    relative_path: str,
+) -> str:
     """Classify whether a local skill file may be exposed as editable text."""
     parts = [part.casefold() for part in relative_path.replace("\\", "/").split("/")]
     if any(part in _UNSUPPORTED_PREVIEW_DIRECTORIES for part in parts[:-1]):
@@ -179,6 +183,8 @@ def _skill_file_preview_status(file_path: str, relative_path: str) -> str:
         return "unsupported"
     if extension in _TEXT_PREVIEW_EXTENSIONS:
         return "readable"
+
+    file_path = _resolve_local_skill_path(local_skills_dir, skill_name, relative_path)
     try:
         with open(file_path, "rb") as file_obj:
             return "unsupported" if _is_obviously_binary(file_obj.read(4096)) else "readable"
@@ -2400,8 +2406,11 @@ class SkillService:
                     f"{parent_path}/{node.get('name')}" if parent_path else str(node.get("name") or "")
                 )
                 if node.get("type") == "file":
-                    full_path = _resolve_local_skill_path(local_skills_dir, skill_name, relative_path)
-                    node["preview_status"] = _skill_file_preview_status(full_path, relative_path)
+                    node["preview_status"] = _skill_file_preview_status(
+                        local_skills_dir,
+                        skill_name,
+                        relative_path,
+                    )
                 for child in node.get("children") or []:
                     annotate(child, relative_path)
 
@@ -2436,14 +2445,12 @@ class SkillService:
                 file_path,
             )
 
-            # Keep the containment check next to the file access so static analysis and
-            # future callers can verify that user-controlled paths stay below the root.
-            local_root = os.path.realpath(local_skills_dir)
-            if not full_path.startswith(local_root + os.sep):
+            skill_root = _resolve_local_skill_path(local_skills_dir, skill_name)
+            if os.path.normcase(os.path.commonpath([skill_root, full_path])) != os.path.normcase(skill_root):
                 raise ForbiddenError("Unsafe local skill path")
 
             try:
-                if _skill_file_preview_status(full_path, file_path) == "unsupported":
+                if _skill_file_preview_status(local_skills_dir, skill_name, file_path) == "unsupported":
                     raise UnsupportedSkillFilePreview(f"Unsupported skill file preview: {file_path}")
                 with open(full_path, "rb") as f:
                     raw = f.read()
@@ -2952,24 +2959,52 @@ def install_skills_from_zip_for_tenant(
 
     installed: List[str] = []
     service = SkillService(tenant_id=tenant_id)
+    zip_root = os.path.realpath(zip_dir)
+    available_zip_paths: Dict[str, str] = {}
+    try:
+        for entry in os.scandir(zip_root):
+            if not entry.name.casefold().endswith(".zip") or not entry.is_file(follow_symlinks=False):
+                continue
+            candidate = os.path.realpath(entry.path)
+            if os.path.normcase(os.path.dirname(candidate)) != os.path.normcase(zip_root):
+                logger.warning("Skipped unsafe official skill ZIP entry: %s", entry.name)
+                continue
+            available_zip_paths[entry.name[:-4]] = candidate
+    except OSError as exc:
+        logger.warning("Failed to scan official skills zip directory %s: %s", zip_root, exc)
+        return []
 
     for skill_name in skill_names:
-        zip_filename = f"{skill_name}.zip"
-        zip_path = os.path.join(zip_dir, zip_filename)
+        name = str(skill_name or "").strip()
+        if (
+            not name
+            or name in {".", ".."}
+            or "/" in name
+            or "\\" in name
+            or "\x00" in name
+            or os.path.basename(name) != name
+            or os.path.isabs(name)
+            or ntpath.isabs(name)
+            or bool(ntpath.splitdrive(name)[0])
+        ):
+            logger.warning("Rejected unsafe official skill name: %r", skill_name)
+            continue
 
-        if not os.path.isfile(zip_path):
+        zip_filename = f"{name}.zip"
+        zip_path = available_zip_paths.get(name)
+        if zip_path is None:
             logger.warning(
-                f"ZIP file not found for skill '{skill_name}': {zip_path}"
+                f"ZIP file not found for skill '{name}': expected '{zip_filename}' in '{zip_root}'"
             )
             continue
 
         try:
-            existing = skill_db.get_skill_by_name(skill_name, tenant_id)
+            existing = skill_db.get_skill_by_name(name, tenant_id)
             if existing:
                 logger.info(
-                    f"Skill '{skill_name}' already exists for tenant {tenant_id}, skipping"
+                    f"Skill '{name}' already exists for tenant {tenant_id}, skipping"
                 )
-                installed.append(skill_name)
+                installed.append(name)
                 continue
 
             with open(zip_path, "rb") as f:
@@ -2977,7 +3012,7 @@ def install_skills_from_zip_for_tenant(
 
             result = service.create_skill_from_file(
                 file_content=zip_content,
-                skill_name=skill_name,
+                skill_name=name,
                 file_type="zip",
                 source="official",
                 tenant_id=tenant_id,

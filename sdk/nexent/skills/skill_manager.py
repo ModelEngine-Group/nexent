@@ -3,6 +3,7 @@
 import io
 import json
 import logging
+import ntpath
 import os
 import shlex
 import shutil
@@ -69,10 +70,27 @@ class SkillManager:
             return self.base_skills_dir
         if not isinstance(tenant_id, str) or not tenant_id.strip():
             raise ValueError("tenant_id must be a non-empty string or explicit None")
-        if os.path.isabs(tenant_id):
+        if (
+            os.path.isabs(tenant_id)
+            or ntpath.isabs(tenant_id)
+            or bool(ntpath.splitdrive(tenant_id)[0])
+        ):
             raise ValueError("tenant_id must not be an absolute path")
-        tenant_dir = os.path.abspath(os.path.join(self.base_skills_dir, tenant_id))
-        if os.path.commonpath([self.base_skills_dir, tenant_dir]) != self.base_skills_dir:
+        if (
+            tenant_id in {".", ".."}
+            or "/" in tenant_id
+            or "\\" in tenant_id
+            or "\x00" in tenant_id
+            or os.path.basename(tenant_id) != tenant_id
+        ):
+            raise ValueError("tenant_id resolves outside base_skills_dir")
+
+        base_skills_dir_real = os.path.realpath(self.base_skills_dir)
+        tenant_dir = os.path.realpath(os.path.join(base_skills_dir_real, tenant_id))
+        if (
+            os.path.normcase(os.path.commonpath([base_skills_dir_real, tenant_dir]))
+            != os.path.normcase(base_skills_dir_real)
+        ):
             raise ValueError("tenant_id resolves outside base_skills_dir")
         return tenant_dir
 
@@ -80,11 +98,27 @@ class SkillManager:
         """Resolve a skill directory and reject names that escape the tenant root."""
         if not isinstance(skill_name, str) or not skill_name.strip():
             raise ValueError("skill_name must be a non-empty string")
-        if os.path.isabs(skill_name):
+        if (
+            os.path.isabs(skill_name)
+            or ntpath.isabs(skill_name)
+            or bool(ntpath.splitdrive(skill_name)[0])
+        ):
             raise ValueError("skill_name must not be an absolute path")
+        if (
+            skill_name in {".", ".."}
+            or "/" in skill_name
+            or "\\" in skill_name
+            or "\x00" in skill_name
+            or os.path.basename(skill_name) != skill_name
+        ):
+            raise ValueError("skill_name resolves outside the tenant directory")
         tenant_dir = self.resolve_tenant_dir(tenant_id=tenant_id)
-        skill_dir = os.path.abspath(os.path.join(tenant_dir, skill_name))
-        if os.path.commonpath([tenant_dir, skill_dir]) != tenant_dir:
+        tenant_dir_real = os.path.realpath(tenant_dir)
+        skill_dir = os.path.realpath(os.path.join(tenant_dir_real, skill_name))
+        if (
+            os.path.normcase(os.path.commonpath([tenant_dir_real, skill_dir]))
+            != os.path.normcase(tenant_dir_real)
+        ):
             raise ValueError("skill_name resolves outside the tenant directory")
         return skill_dir
 
@@ -94,12 +128,24 @@ class SkillManager:
         if not isinstance(file_path, str) or not file_path.strip():
             raise ValueError("file_path must be a non-empty relative path")
 
-        normalized_path = file_path.replace("/", os.sep).replace("\\", os.sep)
-        if os.path.isabs(normalized_path):
+        if "\x00" in file_path:
+            raise ValueError("file_path contains a null byte")
+        if (
+            os.path.isabs(file_path)
+            or ntpath.isabs(file_path)
+            or bool(ntpath.splitdrive(file_path)[0])
+        ):
             raise ValueError("file_path must not be an absolute path")
 
+        path_segments = file_path.replace("\\", "/").split("/")
+        if any(segment == ".." for segment in path_segments):
+            raise ValueError("file_path must not contain parent-directory segments")
+        normalized_segments = [segment for segment in path_segments if segment not in {"", "."}]
+        if not normalized_segments:
+            raise ValueError("file_path must point to a file inside the skill directory")
+
         skill_dir_real = os.path.realpath(skill_dir)
-        target_path = os.path.realpath(os.path.join(skill_dir_real, normalized_path))
+        target_path = os.path.realpath(os.path.join(skill_dir_real, *normalized_segments))
         try:
             common_path = os.path.commonpath([skill_dir_real, target_path])
         except ValueError as exc:
@@ -257,7 +303,17 @@ class SkillManager:
         local_dir = self.resolve_skill_dir(skill_name, tenant_id=tenant_id)
         full_path = self._resolve_skill_file_path(local_dir, file_path)
         os.makedirs(os.path.dirname(full_path), exist_ok=True)
-        with open(full_path, "w", encoding=encoding) as f:
+
+        # Resolve again after creating parent directories so an existing symlink
+        # cannot redirect the write outside the skill directory.
+        safe_path = self._resolve_skill_file_path(local_dir, file_path)
+        local_dir_real = os.path.realpath(local_dir)
+        if (
+            os.path.normcase(os.path.commonpath([local_dir_real, safe_path]))
+            != os.path.normcase(local_dir_real)
+        ):
+            raise ValueError("file_path resolves outside the skill directory")
+        with open(safe_path, "w", encoding=encoding) as f:
             f.write(content)
         logger.debug(f"Wrote skill file '{skill_name}/{file_path}'")
 
