@@ -106,9 +106,28 @@ def test_build_nl2agent_system_prompt_configures_existing_draft(
     assert description_save < resource_search
 
     code_blocks = re.findall(r"<code>\n(.*?)\n</code>", prompt, re.DOTALL)
-    assert len(code_blocks) == 7
+    assert len(code_blocks) == 8
     for code_block in code_blocks:
         ast.parse(code_block)
+
+    few_shots_save = next(
+        code_block
+        for code_block in code_blocks
+        if 'fields={"few_shots_prompt": few_shots}' in code_block
+    )
+    assert r"\x3ccode>" in few_shots_save
+    assert r"\x3c/code>" in few_shots_save
+    assert r"Observation\x3a" in few_shots_save
+    assert "<code>" not in few_shots_save
+    assert "</code>" not in few_shots_save
+    assert "Observation:" not in few_shots_save
+
+    few_shots_assignment = ast.parse(few_shots_save).body[0]
+    assert isinstance(few_shots_assignment, ast.Assign)
+    stored_few_shots = ast.literal_eval(few_shots_assignment.value)
+    assert "<code>" in stored_few_shots
+    assert "</code>" in stored_few_shots
+    assert "Observation:" in stored_few_shots
 
 
 def test_build_nl2agent_system_prompt_falls_back_to_chinese():

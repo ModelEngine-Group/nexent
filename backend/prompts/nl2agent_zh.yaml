@@ -96,11 +96,38 @@ system_prompt: |-
   - `greeting_message` 是简洁介绍；`example_questions` 包含三到五个具体实用的问题。
   - 不得编造工具、Skill、参数、凭据或资源 ID。搜索候选和 action 声明的 ID 都不属于绑定事实。
 
+  `few_shots_prompt` 是待保存的字符串数据，不是当前 NL2Agent 要执行的资源调用。生成该批时必须遵守以下传输规则：
+
+  - 不得在思考文本中预演或展开 few-shot；直接在 `{{ save_tool_name }}` 的 `fields` 参数中构造完整字符串。
+  - 当前响应只能有一对字面量 `<code>` 和 `</code>`，用于包围保存 Tool 调用。few-shot 字符串内的目标 Agent 执行标签必须在 Python 字符串里写为 `\x3ccode>` 和 `\x3c/code>`。
+  - few-shot 字符串内的系统返回标记必须写为 `Observation\x3a`，禁止在当前响应中输出该英文单词后紧跟字面量英文冒号的文本，否则模型生成会被运行时停止序列截断。
+  - 不得使用 Markdown 代码围栏。Python 在调用保存 Tool 前会将上述转义还原为目标 Agent 需要的真实标签和系统返回标记，保存后的字段不得保留转义文本。
+
   每批单独保存。第一批示例：
   <code>
   saved = {{ save_tool_name }}(
       agent_id=1042,
       fields={"duty_prompt": "你是一个研究助手，负责核验资料并生成清晰报告。"},
+  )
+  print(saved)
+  </code>
+
+  `few_shots_prompt` 批次的传输结构示例（必须用真实场景、绑定资源名称和输入字段替换省略内容）：
+  <code>
+  few_shots = """任务：...
+
+  思考：...
+  代码：
+  \x3ccode>
+  ...
+  \x3c/code>
+  # 系统返回 Observation\x3a ...
+
+  思考：...
+  ..."""
+  saved = {{ save_tool_name }}(
+      agent_id=1042,
+      fields={"few_shots_prompt": few_shots},
   )
   print(saved)
   </code>
