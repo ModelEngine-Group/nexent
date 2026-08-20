@@ -5,7 +5,7 @@ import types
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Event
-from unittest.mock import MagicMock, patch, ANY
+from unittest.mock import ANY, MagicMock, call, patch
 
 import pytest
 
@@ -4310,8 +4310,129 @@ class TestCreateBuiltinTool:
 
 
 class TestCreateBuiltinToolAndFileWorkspaceLifecycle:
-    def test_download_finalize_emit_and_cleanup(self, nexent_agent_instance, tmp_path):
+    def test_grant_sandbox_output_access_uses_sandbox_group(self, tmp_path):
         workspace = tmp_path / "tenant" / "user" / "run-1"
+        input_dir = workspace / "inputs"
+        output_dir = workspace / "outputs"
+        input_dir.mkdir(parents=True)
+        output_dir.mkdir(parents=True)
+        container = MagicMock()
+        container.exec_run.side_effect = [
+            MagicMock(exit_code=0, output=b"1000\n"),
+            MagicMock(exit_code=0, output=b""),
+            MagicMock(exit_code=0, output=b""),
+            MagicMock(exit_code=0, output=b""),
+        ]
+
+        NexentAgent._grant_sandbox_output_access(container, workspace)
+
+        assert container.exec_run.call_args_list == [
+            call(["id", "-g"]),
+            call(["chgrp", "-R", "1000", str(workspace)], user="0"),
+            call(["chmod", "-R", "g+rwX", str(workspace)], user="0"),
+            call(
+                ["find", str(workspace), "-type", "d", "-exec", "chmod", "g+s", "{}", "+"],
+                user="0",
+            ),
+        ]
+
+    def test_shared_workspace_skips_archive_copy(self, nexent_agent_instance, tmp_path):
+        workspace = MagicMock()
+        workspace.resolve.return_value = workspace
+        workspace.exists.return_value = True
+        workspace.drive = ""
+        container = MagicMock()
+        nexent_agent_instance.workspace_path = "/mnt/nexent/workdir/user/run-1"
+        nexent_agent_instance.sandbox_config = MagicMock(
+            extra_kwargs={
+                "shared_workspace": True,
+                "workspace_volume_name": "nexent-agent-workspace",
+            }
+        )
+        nexent_agent_instance.agent = MagicMock(
+            python_executor=MagicMock(container=container)
+        )
+
+        with patch.object(nexent_agent, "Path", return_value=workspace), patch.object(
+            nexent_agent_instance, "_grant_sandbox_output_access"
+        ) as grant_access:
+            nexent_agent_instance._push_file_workspace_to_sandbox()
+
+        container.put_archive.assert_not_called()
+        grant_access.assert_called_once_with(container, workspace)
+
+    def test_shared_workspace_skips_archive_pull(self, nexent_agent_instance, tmp_path):
+        workspace = tmp_path / "user" / "run-1"
+        workspace.mkdir(parents=True)
+        container = MagicMock()
+        nexent_agent_instance.workspace_path = str(workspace)
+        nexent_agent_instance.sandbox_config = MagicMock(
+            extra_kwargs={
+                "shared_workspace": True,
+                "workspace_volume_name": "nexent-agent-workspace",
+            }
+        )
+        nexent_agent_instance.agent = MagicMock(
+            python_executor=MagicMock(container=container)
+        )
+
+        nexent_agent_instance._pull_file_workspace_from_sandbox()
+
+        container.get_archive.assert_not_called()
+
+    def test_grant_sandbox_output_access_rejects_invalid_gid(self, tmp_path):
+        container = MagicMock()
+        container.exec_run.return_value = MagicMock(exit_code=0, output=b"sandbox\n")
+
+        with pytest.raises(RuntimeError, match="invalid group ID"):
+            NexentAgent._grant_sandbox_output_access(container, tmp_path)
+
+    def test_cleanup_removes_exact_sandbox_run_directory_as_root(
+        self, nexent_agent_instance, tmp_path
+    ):
+        workspace_root = tmp_path / "workdir"
+        workspace = workspace_root / "user" / "run-1"
+        (workspace / "outputs").mkdir(parents=True)
+        (workspace / "outputs" / "result.txt").write_text("result", encoding="utf-8")
+        container = MagicMock()
+        container.exec_run.return_value = MagicMock(exit_code=0, output=b"")
+        nexent_agent_instance.workspace_path = str(workspace)
+        nexent_agent_instance.workspace_run_id = "run-1"
+        nexent_agent_instance.agent = MagicMock(
+            python_executor=MagicMock(container=container)
+        )
+
+        nexent_agent_instance._cleanup_file_workspace()
+
+        container.exec_run.assert_called_once_with(
+            ["rm", "-rf", "--", str(workspace.resolve())],
+            user="0",
+        )
+        assert not workspace.exists()
+        assert not workspace.parent.exists()
+        assert workspace_root.exists()
+
+    def test_cleanup_removes_sandbox_directory_when_host_copy_is_missing(
+        self, nexent_agent_instance, tmp_path
+    ):
+        workspace = tmp_path / "workdir" / "user" / "run-1"
+        container = MagicMock()
+        container.exec_run.return_value = MagicMock(exit_code=0, output=b"")
+        nexent_agent_instance.workspace_path = str(workspace)
+        nexent_agent_instance.workspace_run_id = "run-1"
+        nexent_agent_instance.agent = MagicMock(
+            python_executor=MagicMock(container=container)
+        )
+
+        nexent_agent_instance._cleanup_file_workspace()
+
+        container.exec_run.assert_called_once_with(
+            ["rm", "-rf", "--", str(workspace.resolve())],
+            user="0",
+        )
+
+    def test_download_finalize_emit_and_cleanup(self, nexent_agent_instance, tmp_path):
+        workspace = tmp_path / "user" / "run-1"
         nexent_agent_instance.workspace_path = str(workspace)
         nexent_agent_instance.workspace_run_id = "run-1"
         nexent_agent_instance.minio_files = [
@@ -4333,7 +4454,7 @@ class TestCreateBuiltinToolAndFileWorkspaceLifecycle:
 
         def upload_file(file_path, _target_filename):
             payload = {
-                "object_name": "workspace/tenant/user/run-1/outputs/result.txt",
+                "object_name": "workspace/user/run-1/outputs/result.txt",
                 "name": Path(file_path).name,
                 "file_size_bytes": Path(file_path).stat().st_size,
             }

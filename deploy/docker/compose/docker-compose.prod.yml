@@ -106,6 +106,7 @@ services:
     restart: always
     volumes:
       - ${NEXENT_USER_DIR:-$HOME/nexent}:/mnt/nexent
+      - nexent_agent_workspace:/mnt/nexent/workdir
       - ../../sql:/opt/nexent/sql:ro
       - ${ROOT_DIR}/skills:/mnt/nexent-data/skills
       - ${ROOT_DIR}/openssh-server/ssh-keys:/opt/ssh-keys:ro
@@ -324,3 +325,5 @@ networks:
 
 volumes:
   redis_data:
+  nexent_agent_workspace:
+    name: ${NEXENT_SANDBOX_WORKSPACE_VOLUME:-nexent-agent-workspace}

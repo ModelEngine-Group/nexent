@@ -134,6 +134,7 @@ def check_file_access(
     - knowledge_base/*: All authenticated users can access
     - attachments/{user_id}/*: Only the owner (user_id) can access
     - images_in_attachments/*: All authenticated users can access
+    - workspace/{user_id}/{run_id}/outputs/*: Only the owner can access
 
     Args:
         object_name: File object name in storage
@@ -162,14 +163,11 @@ def check_file_access(
         return object_name.startswith(f"skill-files/{user_id}/")
 
     if object_name.startswith("workspace/"):
-        # Generated agent artifacts are isolated by both tenant and user:
-        # workspace/{tenant_id}/{user_id}/{run_id}/outputs/{file}
         parts = object_name.split("/")
         return (
             len(parts) >= 5
-            and bool(caller_tenant_id)
-            and parts[1] == caller_tenant_id
-            and parts[2] == user_id
+            and parts[1] == user_id
+            and parts[3] == "outputs"
         )
 
     # Check if file is in user's attachments folder

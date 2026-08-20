@@ -75,6 +75,7 @@ from consts.const import (
     LOCAL_MCP_SERVER,
     MINIO_DEFAULT_BUCKET,
     MODEL_CONFIG_MAPPING,
+    NEXENT_SANDBOX_WORKSPACE_VOLUME,
 )
 from consts.model import ToolParamsRequest
 from consts.exceptions import ValidationError
@@ -450,17 +451,16 @@ def _build_internal_s3_url(file: dict) -> str:
 
 
 def _safe_workspace_segment(value: Any, fallback: str) -> str:
-    """Return a filesystem-safe tenant or user path segment."""
+    """Return a filesystem-safe user path segment."""
     normalized = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(value or "")).strip("._")
     return normalized or fallback
 
 
-def _build_run_workspace(tenant_id: str, user_id: str, run_id: str) -> str:
+def _build_run_workspace(user_id: str, run_id: str) -> str:
     """Build an isolated workspace path without creating persistent state yet."""
     root = Path(AGENT_WORKSPACE_ROOT).resolve()
     return str(
         root
-        / _safe_workspace_segment(tenant_id, "default_tenant")
         / _safe_workspace_segment(user_id, "anonymous")
         / run_id
     )
@@ -2004,7 +2004,7 @@ async def create_agent_run_info(
     enable_automation_tool: bool = True,
 ):
     workspace_run_id = uuid.uuid4().hex
-    workspace_path = _build_run_workspace(tenant_id, user_id, workspace_run_id)
+    workspace_path = _build_run_workspace(user_id, workspace_run_id)
     _validate_run_minio_files(minio_files, user_id, tenant_id)
     runtime_file_context = {
         "workspace_path": workspace_path,
@@ -2127,6 +2127,14 @@ async def create_agent_run_info(
             "workspace_root": str(Path(AGENT_WORKSPACE_ROOT).resolve()),
             "workspace_path": workspace_path,
         }
+        if (
+            getattr(sandbox_config.level, "value", sandbox_config.level) == "docker"
+            and getattr(sandbox_config.scope, "value", sandbox_config.scope) == "system"
+        ):
+            sandbox_config.extra_kwargs.update({
+                "workspace_volume_name": NEXENT_SANDBOX_WORKSPACE_VOLUME,
+                "shared_workspace": True,
+            })
 
     agent_run_info = AgentRunInfo(
         query=final_query,

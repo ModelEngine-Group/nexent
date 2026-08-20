@@ -522,6 +522,18 @@ from backend.agents.create_agent_info import (
     _resolve_safe_input_budget,
 )
 
+
+def test_build_run_workspace_uses_user_and_run_only(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        create_agent_info_module,
+        "AGENT_WORKSPACE_ROOT",
+        str(tmp_path),
+    )
+
+    workspace = create_agent_info_module._build_run_workspace("user-1", "run-1")
+
+    assert Path(workspace) == tmp_path.resolve() / "user-1" / "run-1"
+
 # Import HistoryItem for testing (from mocked consts.model)
 HistoryItem = sys.modules["consts.model"].HistoryItem
 

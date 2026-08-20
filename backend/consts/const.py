@@ -699,6 +699,11 @@ NEXENT_SANDBOX_DOCKER_IMAGE = os.getenv(
 )
 """Docker image used when level is 'docker'."""
 
+NEXENT_SANDBOX_WORKSPACE_VOLUME = os.getenv(
+    "NEXENT_SANDBOX_WORKSPACE_VOLUME", "nexent-agent-workspace"
+)
+"""Docker named volume shared by the runtime and the system-scoped sandbox."""
+
 NEXENT_SANDBOX_MEMORY_LIMIT_MB = int(os.getenv("NEXENT_SANDBOX_MEMORY_LIMIT_MB", "512"))
 
 NEXENT_SANDBOX_CPU_QUOTA = float(os.getenv("NEXENT_SANDBOX_CPU_QUOTA", "1.0"))

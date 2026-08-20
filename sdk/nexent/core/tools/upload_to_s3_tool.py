@@ -112,7 +112,7 @@ class UploadToS3Tool(Tool):
     def _build_s3_key(self, filename: str) -> str:
         """Build the S3 object key for the uploaded file.
 
-        Files are stored under: workspace/{tenant_id}/{user_id}/outputs/{filename}
+        Files are stored under: workspace/{user_id}/{run_id}/outputs/{filename}
         """
         target_path = PurePosixPath(str(filename).replace("\\", "/"))
         if target_path.is_absolute() or ".." in target_path.parts:
@@ -123,19 +123,17 @@ class UploadToS3Tool(Tool):
         if not target_parts:
             raise ValueError("Target filename cannot be empty")
         safe_name = "/".join(target_parts)
-        safe_tenant = self.tenant_id.strip()
         safe_user = self.user_id.strip()
         safe_run = self.run_id.strip()
-        if not safe_tenant or not safe_user:
-            raise ValueError("Tenant and user IDs are required for isolated uploads")
+        if not safe_user or not safe_run:
+            raise ValueError("User and run IDs are required for isolated uploads")
         if any(
             separator in value
-            for value in (safe_tenant, safe_user, safe_run)
+            for value in (safe_user, safe_run)
             for separator in ("/", "\\")
         ):
-            raise ValueError("Tenant, user, and run IDs must be single path segments")
-        run_segment = f"/{safe_run}" if safe_run else ""
-        return f"workspace/{safe_tenant}/{safe_user}{run_segment}/outputs/{safe_name}"
+            raise ValueError("User and run IDs must be single path segments")
+        return f"workspace/{safe_user}/{safe_run}/outputs/{safe_name}"
 
     def forward(self, file_path: str, target_filename: str = None) -> str:
         try:
@@ -152,9 +150,6 @@ class UploadToS3Tool(Tool):
 
             if not self.user_id:
                 raise Exception("User authentication required for uploading files to S3.")
-            if not self.tenant_id:
-                raise Exception("Tenant context required for uploading files to S3.")
-
             # 2. Validate local path
             abs_path = self._validate_path(file_path)
 

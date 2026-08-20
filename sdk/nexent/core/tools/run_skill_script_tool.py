@@ -33,6 +33,7 @@ class RunSkillScriptTool(Tool):
         version_no: int = 0,
         observer: Optional[Any] = None,
         workspace_path: Optional[str] = None,
+        on_complete: Optional[Any] = None,
     ):
         """Initialize the tool with local skills directory and agent context.
         Args:
@@ -42,6 +43,7 @@ class RunSkillScriptTool(Tool):
             version_no: Version number for filtering available skills.
             observer: Message observer used to publish structured skill artifacts.
             workspace_path: Optional run-scoped working directory for script files.
+            on_complete: Optional callback invoked after the script finishes successfully.
         """
         super().__init__()
         self.skill_manager = None
@@ -51,6 +53,7 @@ class RunSkillScriptTool(Tool):
         self.version_no = version_no
         self.observer = observer
         self.workspace_path = workspace_path
+        self.on_complete = on_complete
 
     def _get_skill_manager(self):
         """Lazy load skill manager."""
@@ -193,6 +196,8 @@ class RunSkillScriptTool(Tool):
                 params,
                 **run_kwargs,
             )
+            if self.on_complete is not None:
+                self.on_complete(result)
             artifacts = self._extract_file_artifacts(manager, skill_name, script_path, result)
             self._publish_artifacts(skill_name, script_path, artifacts)
             return str(result)

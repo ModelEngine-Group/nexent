@@ -125,7 +125,7 @@ class DownloadFromS3Tool(Tool):
         - images_in_attachments/*: all authenticated users
         - attachments/{user_id}/*: only the owner
         - skill-files/{user_id}/*: only the owner
-        - workspace/{tenant_id}/{user_id}/*: only the owner
+        - workspace/{user_id}/*: only the owner
         - attachments/asset_owner/*: only asset_owner tenant
         """
         if not self.user_id:
@@ -147,11 +147,12 @@ class DownloadFromS3Tool(Tool):
             return key.startswith(f"skill-files/{self.user_id}/")
 
         if key.startswith("workspace/"):
-            # workspace/{tenant_id}/{user_id}/...
-            parts = key.split("/", 2)
-            if len(parts) >= 3:
-                return parts[1] == self.tenant_id and parts[2].startswith(f"{self.user_id}/")
-            return False
+            parts = key.split("/")
+            return (
+                len(parts) >= 5
+                and parts[1] == self.user_id
+                and parts[3] == "outputs"
+            )
 
         # attachments/{user_id}/...
         if key.startswith("attachments/"):

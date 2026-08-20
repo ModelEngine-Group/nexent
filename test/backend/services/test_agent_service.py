@@ -13299,10 +13299,15 @@ async def test_stream_agent_chunks_captures_structured_skill_artifacts(monkeypat
         yield json.dumps({"type": "final_answer", "content": "done"})
 
     uploaded_payloads = []
+    upload_result = {
+        "status": "success",
+        "object_name": "skill-files/user/first.py",
+        "file_name": "first.py",
+    }
 
     async def fake_process_skill_file_uploads(payloads, user_id, tenant_id):
         uploaded_payloads.extend(payloads)
-        return []
+        return [upload_result]
 
     monkeypatch.setattr(
         "backend.services.agent_service.agent_run", fake_agent_run, raising=False
@@ -13310,6 +13315,10 @@ async def test_stream_agent_chunks_captures_structured_skill_artifacts(monkeypat
     monkeypatch.setattr(
         "backend.services.agent_service._process_skill_file_uploads",
         fake_process_skill_file_uploads,
+    )
+    monkeypatch.setattr(
+        "backend.services.agent_service.save_skill_files_to_conversation",
+        MagicMock(return_value=True),
     )
 
     collected = []
@@ -13319,8 +13328,11 @@ async def test_stream_agent_chunks_captures_structured_skill_artifacts(monkeypat
         collected.append(chunk)
 
     assert uploaded_payloads == [first_artifact, second_artifact]
-    assert len(collected) == 1
+    assert len(collected) == 2
     assert "final_answer" in collected[0]
+    event = json.loads(collected[1].removeprefix("data: ").strip())
+    assert event["type"] == "files"
+    assert json.loads(event["content"]) == {"file_uploads": [upload_result]}
 
 
 @pytest.mark.asyncio
@@ -13336,7 +13348,7 @@ async def test_stream_agent_chunks_emits_uploaded_workspace_artifacts(monkeypatc
         is_debug=True,
     )
     artifact = {
-        "object_name": "workspace/tenant/user/run/outputs/report.pdf",
+        "object_name": "workspace/user/run/outputs/report.pdf",
         "name": "report.pdf",
         "size": 123,
         "presigned_url": "https://example.test/report.pdf",
@@ -13362,7 +13374,10 @@ async def test_stream_agent_chunks_emits_uploaded_workspace_artifacts(monkeypatc
 
     assert len(collected) == 2
     assert "final_answer" in collected[0]
-    assert "workspace/tenant/user/run/outputs/report.pdf" in collected[1]
+    event = json.loads(collected[1].removeprefix("data: ").strip())
+    assert event["type"] == "files"
+    content = json.loads(event["content"])
+    assert content == {"file_uploads": [artifact]}
 
 
 @pytest.mark.asyncio

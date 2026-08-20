@@ -23,7 +23,7 @@ def mock_minio_client():
     client.default_bucket = "nexent-bucket"
     client.get_file_size.return_value = 1024
     client.download_file.return_value = (True, "Downloaded successfully")
-    client.upload_file.return_value = (True, "/nexent-bucket/workspace/t1/u1/outputs/test.txt")
+    client.upload_file.return_value = (True, "/nexent-bucket/workspace/u1/outputs/test.txt")
     client.get_file_url.return_value = (True, "https://minio.example.com/presigned-url")
     return client
 
@@ -112,13 +112,11 @@ class TestDownloadFromS3ToolAccessControl:
         assert tool._check_access("skill-files/user2/doc.pdf") is False
 
     def test_own_workspace_allowed(self, tool):
-        assert tool._check_access("workspace/tenant1/user1/outputs/file.pdf") is True
+        assert tool._check_access("workspace/user1/run1/outputs/file.pdf") is True
 
     def test_other_workspace_denied(self, tool):
-        assert tool._check_access("workspace/tenant1/user2/outputs/file.pdf") is False
-
-    def test_other_tenant_workspace_denied(self, tool):
-        assert tool._check_access("workspace/tenant2/user1/outputs/file.pdf") is False
+        assert tool._check_access("workspace/user2/run1/outputs/file.pdf") is False
+        assert tool._check_access("workspace/tenant1/user1/run1/outputs/file.pdf") is False
 
     def test_arbitrary_object_key_denied(self, tool):
         assert tool._check_access("private/user1/secret.txt") is False
@@ -244,7 +242,12 @@ class TestUploadToS3ToolInit:
 class TestUploadToS3ToolPathValidation:
     @pytest.fixture
     def tool(self, temp_workspace):
-        return UploadToS3Tool(workspace_path=temp_workspace, user_id="user1", tenant_id="tenant1")
+        return UploadToS3Tool(
+            workspace_path=temp_workspace,
+            user_id="user1",
+            tenant_id="tenant1",
+            run_id="run1",
+        )
 
     def test_validate_relative_path(self, tool, temp_workspace):
         abs_path = tool._validate_path("outputs/report.pdf")
@@ -261,11 +264,17 @@ class TestUploadToS3ToolPathValidation:
 
     def test_build_s3_key(self, tool):
         key = tool._build_s3_key("report.pdf")
-        assert key == "workspace/tenant1/user1/outputs/report.pdf"
+        assert key == "workspace/user1/run1/outputs/report.pdf"
 
     def test_build_s3_key_preserves_nested_output_path(self, tool):
         key = tool._build_s3_key("outputs/charts/report.pdf")
-        assert key == "workspace/tenant1/user1/outputs/charts/report.pdf"
+        assert key == "workspace/user1/run1/outputs/charts/report.pdf"
+
+    def test_build_s3_key_requires_run_id(self, temp_workspace):
+        tool = UploadToS3Tool(workspace_path=temp_workspace, user_id="user1")
+
+        with pytest.raises(ValueError, match="run IDs are required"):
+            tool._build_s3_key("report.pdf")
 
 
 class TestUploadToS3ToolForward:
@@ -277,6 +286,7 @@ class TestUploadToS3ToolForward:
             minio_client=mock_minio_client,
             user_id="user1",
             tenant_id="tenant1",
+            run_id="run1",
             observer=mock_observer,
         )
         # Create a test file
@@ -320,7 +330,7 @@ class TestUploadToS3ToolForward:
 
         data = json.loads(tool.forward("result.txt"))
 
-        assert data["object_name"] == "workspace/tenant1/user1/run-123/outputs/result.txt"
+        assert data["object_name"] == "workspace/user1/run-123/outputs/result.txt"
         assert data["name"] == "result.txt"
         callback.assert_called_once_with(data)
 

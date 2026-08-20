@@ -1057,6 +1057,26 @@ class SandboxPoolManager:
                 logger_.warning("Persisted sandbox container is not running (status=%s)", container.status)
                 return None
 
+            workspace_volume_name = config.extra_kwargs.get("workspace_volume_name")
+            workspace_root = config.extra_kwargs.get("workspace_root")
+            if workspace_volume_name and workspace_root:
+                expected_destination = str(Path(workspace_root).resolve())
+                mounts = container.attrs.get("Mounts") or []
+                has_expected_mount = any(
+                    mount.get("Type") == "volume"
+                    and mount.get("Name") == workspace_volume_name
+                    and mount.get("Destination") == expected_destination
+                    and mount.get("RW") is not False
+                    for mount in mounts
+                )
+                if not has_expected_mount:
+                    logger_.warning(
+                        "Persisted sandbox container does not use workspace volume %s at %s",
+                        workspace_volume_name,
+                        expected_destination,
+                    )
+                    return None
+
             networks = (container.attrs.get("NetworkSettings") or {}).get("Networks") or {}
             if SANDBOX_NETWORK_NAME not in networks:
                 logger_.warning("Persisted sandbox container is not attached to network %s", SANDBOX_NETWORK_NAME)
@@ -1228,9 +1248,11 @@ class SandboxPoolManager:
         workspace_root = config.extra_kwargs.get("workspace_root")
         if workspace_root:
             resolved_workspace_root = str(Path(workspace_root).resolve())
-            Path(resolved_workspace_root).mkdir(parents=True, exist_ok=True)
+            workspace_volume_name = config.extra_kwargs.get("workspace_volume_name")
+            if not workspace_volume_name:
+                Path(resolved_workspace_root).mkdir(parents=True, exist_ok=True)
             container_run_kwargs["volumes"] = {
-                resolved_workspace_root: {
+                (workspace_volume_name or resolved_workspace_root): {
                     "bind": resolved_workspace_root,
                     "mode": "rw",
                 }

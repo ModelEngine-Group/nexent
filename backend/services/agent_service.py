@@ -1443,13 +1443,12 @@ async def _stream_agent_chunks(
                     len(skill_file_uploads), skill_file_uploads
                 )
                 if skill_file_uploads:
-                    # Keep original format for real-time SSE display
-                    skill_files_payload = json.dumps(
-                        {"skill_file_uploads": skill_file_uploads},
+                    files_payload = json.dumps(
+                        {"file_uploads": skill_file_uploads},
                         ensure_ascii=False,
                     )
                     try:
-                        yield f"data: {json.dumps({'type': 'skill_files', 'content': skill_files_payload}, ensure_ascii=False)}\n\n"
+                        yield f"data: {json.dumps({'type': 'files', 'content': files_payload}, ensure_ascii=False)}\n\n"
                     except RuntimeError:
                         # Stream is closing (e.g., client disconnect). Avoid raising during generator teardown.
                         pass
@@ -1474,11 +1473,11 @@ async def _stream_agent_chunks(
         if workspace_file_uploads:
             uploaded_files = list(workspace_file_uploads.values())
             files_payload = json.dumps(
-                {"skill_file_uploads": uploaded_files},
+                {"file_uploads": uploaded_files},
                 ensure_ascii=False,
             )
             try:
-                yield f"data: {json.dumps({'type': 'skill_files', 'content': files_payload}, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps({'type': 'files', 'content': files_payload}, ensure_ascii=False)}\n\n"
             except RuntimeError:
                 pass
             if not agent_request.is_debug:

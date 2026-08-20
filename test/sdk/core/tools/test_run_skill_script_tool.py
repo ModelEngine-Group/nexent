@@ -283,6 +283,21 @@ class TestExecute:
             working_directory="/mnt/nexent/workdir/t/u/run",
         )
 
+    def test_execute_invokes_completion_callback(self, temp_skills_dir):
+        on_complete = MagicMock()
+        tool = RunSkillScriptTool(
+            local_skills_dir=temp_skills_dir,
+            on_complete=on_complete,
+        )
+        mock_manager = MagicMock()
+        mock_manager.run_skill_script.return_value = "Result"
+        mock_manager.load_skill.return_value = {}
+        tool.skill_manager = mock_manager
+
+        tool.execute("test-skill", "script.py")
+
+        on_complete.assert_called_once_with("Result")
+
     def test_execute_handles_skill_not_found(self, temp_skills_dir):
         """Test execute handles SkillNotFoundError."""
         tool = RunSkillScriptTool(local_skills_dir=temp_skills_dir)

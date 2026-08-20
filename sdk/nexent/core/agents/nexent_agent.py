@@ -464,6 +464,7 @@ class NexentAgent:
             )
             if params.get("workspace_path"):
                 kwargs["workspace_path"] = params["workspace_path"]
+                kwargs["on_complete"] = lambda _result: self._push_file_workspace_to_sandbox()
             return RunSkillScriptTool(**kwargs)
         elif class_name == "ReadSkillMdTool":
             from nexent.core.tools.read_skill_md_tool import ReadSkillMdTool
@@ -1030,6 +1031,14 @@ class NexentAgent:
         executor = getattr(self.agent, "python_executor", None)
         return getattr(executor, "container", None) if executor is not None else None
 
+    def _uses_shared_file_workspace(self) -> bool:
+        """Return whether the runtime and sandbox use the same workspace volume."""
+        extra_kwargs = getattr(self.sandbox_config, "extra_kwargs", {}) or {}
+        return bool(
+            extra_kwargs.get("shared_workspace")
+            and extra_kwargs.get("workspace_volume_name")
+        )
+
     def _push_file_workspace_to_sandbox(self) -> None:
         """Copy the prepared host workspace into a Docker sandbox."""
         container = self._sandbox_container()
@@ -1038,17 +1047,52 @@ class NexentAgent:
         workspace = Path(self.workspace_path).resolve()
         if not workspace.exists() or workspace.drive:
             return
-        archive = io.BytesIO()
-        with tarfile.open(fileobj=archive, mode="w") as tar:
-            tar.add(workspace, arcname=str(workspace).lstrip("/"), recursive=True)
-        archive.seek(0)
-        if not container.put_archive("/", archive.getvalue()):
-            raise RuntimeError("Failed to copy run workspace into the sandbox")
+        if not self._uses_shared_file_workspace():
+            archive = io.BytesIO()
+            with tarfile.open(fileobj=archive, mode="w") as tar:
+                tar.add(workspace, arcname=str(workspace).lstrip("/"), recursive=True)
+            archive.seek(0)
+            if not container.put_archive("/", archive.getvalue()):
+                raise RuntimeError("Failed to copy run workspace into the sandbox")
+        self._grant_sandbox_output_access(container, workspace)
+
+    @staticmethod
+    def _grant_sandbox_output_access(container: Any, workspace: Path) -> None:
+        """Allow the sandbox user to read and write the exact run workspace."""
+        gid_result = container.exec_run(["id", "-g"])
+        gid_exit_code = getattr(gid_result, "exit_code", None)
+        gid_output = getattr(gid_result, "output", b"")
+        if gid_exit_code != 0:
+            raise RuntimeError("Failed to determine the sandbox user's group")
+
+        if isinstance(gid_output, bytes):
+            gid_output = gid_output.decode("utf-8", errors="replace")
+        sandbox_gid = str(gid_output).strip()
+        if not sandbox_gid.isdigit():
+            raise RuntimeError("Sandbox user returned an invalid group ID")
+
+        workspace_dir = str(workspace)
+        commands = (
+            ["chgrp", "-R", sandbox_gid, workspace_dir],
+            ["chmod", "-R", "g+rwX", workspace_dir],
+            ["find", workspace_dir, "-type", "d", "-exec", "chmod", "g+s", "{}", "+"],
+        )
+        for command in commands:
+            result = container.exec_run(command, user="0")
+            if getattr(result, "exit_code", None) != 0:
+                output = getattr(result, "output", b"")
+                if isinstance(output, bytes):
+                    output = output.decode("utf-8", errors="replace")
+                raise RuntimeError(
+                    f"Failed to grant sandbox output access: {str(output).strip()}"
+                )
 
     def _pull_file_workspace_from_sandbox(self) -> None:
         """Copy sandbox outputs back to the host workspace with safe extraction."""
         container = self._sandbox_container()
         if container is None or not self.workspace_path:
+            return
+        if self._uses_shared_file_workspace():
             return
         workspace = Path(self.workspace_path).resolve()
         if workspace.drive:
@@ -1111,22 +1155,33 @@ class NexentAgent:
         if not self.workspace_path or not self.workspace_run_id:
             return
         workspace = Path(self.workspace_path).resolve()
-        if workspace.name != self.workspace_run_id or not workspace.exists():
+        if workspace.name != self.workspace_run_id:
             return
         try:
             container = self._sandbox_container()
             if container is not None:
                 try:
-                    container.exec_run(["rm", "-rf", "--", str(workspace)])
+                    result = container.exec_run(
+                        ["rm", "-rf", "--", str(workspace)],
+                        user="0",
+                    )
+                    if getattr(result, "exit_code", None) != 0:
+                        output = getattr(result, "output", b"")
+                        if isinstance(output, bytes):
+                            output = output.decode("utf-8", errors="replace")
+                        logger.warning(
+                            "Failed to clean sandbox run workspace %s: %s",
+                            workspace,
+                            str(output).strip(),
+                        )
                 except Exception as exc:
                     logger.warning("Failed to clean sandbox run workspace %s: %s", workspace, exc)
             if workspace.exists():
                 shutil.rmtree(workspace)
-            for parent in (workspace.parent, workspace.parent.parent):
-                try:
-                    parent.rmdir()
-                except OSError:
-                    break
+            try:
+                workspace.parent.rmdir()
+            except OSError:
+                pass
         except Exception as exc:
             logger.error("Failed to clean run workspace %s: %s", workspace, exc)
 
