@@ -1217,3 +1217,142 @@ class TestPersonalCapacityAPI:
         mock_quota_service.set_personal_default_quota.assert_called_once_with(
             quota_limit_bytes=4096, unlimited=False
         )
+
+    def test_list_users_rejects_unknown_sort_field(self, client, mock_personal_auth):
+        mock_personal_auth()
+
+        response = client.get(
+            "/api/capacity/personal/users",
+            params={"sort_by": "created_at"},
+        )
+
+        assert response.status_code == 400
+        assert "sort_by must be one of" in response.json()["message"]
+
+    def test_list_users_rejects_unknown_sort_order(self, client, mock_personal_auth):
+        mock_personal_auth()
+
+        response = client.get(
+            "/api/capacity/personal/users",
+            params={"sort_order": "sideways"},
+        )
+
+        assert response.status_code == 400
+        assert "sort_order must be asc or desc" in response.json()["message"]
+
+    def test_get_user_kbs_maps_unexpected_service_error(
+        self, client, mock_personal_auth, mock_quota_service
+    ):
+        mock_personal_auth()
+        mock_quota_service.get_personal_kb_details.side_effect = RuntimeError("db down")
+
+        response = client.get("/api/capacity/personal/users/user-1/kbs")
+
+        assert response.status_code == 500
+        assert "Error getting personal KB details" in response.json()["message"]
+
+    def test_get_summary_maps_unexpected_service_error(
+        self, client, mock_personal_auth, mock_quota_service
+    ):
+        mock_personal_auth()
+        mock_quota_service.get_personal_capacity_summary.side_effect = RuntimeError(
+            "db down"
+        )
+
+        response = client.get("/api/capacity/personal/summary")
+
+        assert response.status_code == 500
+        assert "Error getting personal KB capacity summary" in response.json()["message"]
+
+    def test_set_user_quota_unlimited_clears_quota(
+        self, client, mock_personal_auth, mock_quota_service
+    ):
+        mock_personal_auth()
+        mock_quota_service.set_personal_user_quota.return_value = {
+            "user_id": "user-1",
+            "quota_limit_bytes": None,
+        }
+
+        response = client.put(
+            "/api/capacity/personal/users/user-1/quota",
+            json={"unlimited": True},
+        )
+
+        assert response.status_code == 200
+        mock_quota_service.set_personal_user_quota.assert_called_once_with(
+            "user-1", quota_limit_bytes=None, unlimited=True
+        )
+
+    def test_set_user_quota_maps_unexpected_service_error(
+        self, client, mock_personal_auth, mock_quota_service
+    ):
+        mock_personal_auth()
+        mock_quota_service.set_personal_user_quota.side_effect = RuntimeError("db down")
+
+        response = client.put(
+            "/api/capacity/personal/users/user-1/quota",
+            json={"quota_limit_bytes": 1024},
+        )
+
+        assert response.status_code == 500
+        assert "Error setting personal KB quota" in response.json()["message"]
+
+    def test_get_default_quota_maps_unexpected_service_error(
+        self, client, mock_personal_auth, mock_quota_service
+    ):
+        mock_personal_auth()
+        mock_quota_service.get_personal_default_quota.side_effect = RuntimeError(
+            "db down"
+        )
+
+        response = client.get("/api/capacity/personal/default-quota")
+
+        assert response.status_code == 500
+        assert "Error getting personal KB default quota" in response.json()["message"]
+
+    def test_set_default_quota_unlimited_clears_quota(
+        self, client, mock_personal_auth, mock_quota_service
+    ):
+        mock_personal_auth()
+        mock_quota_service.set_personal_default_quota.return_value = {
+            "quota_limit_bytes": None,
+        }
+
+        response = client.put(
+            "/api/capacity/personal/default-quota",
+            json={"unlimited": True},
+        )
+
+        assert response.status_code == 200
+        mock_quota_service.set_personal_default_quota.assert_called_once_with(
+            quota_limit_bytes=None, unlimited=True
+        )
+
+    def test_set_default_quota_maps_unexpected_service_error(
+        self, client, mock_personal_auth, mock_quota_service
+    ):
+        mock_personal_auth()
+        mock_quota_service.set_personal_default_quota.side_effect = RuntimeError(
+            "db down"
+        )
+
+        response = client.put(
+            "/api/capacity/personal/default-quota",
+            json={"quota_limit_bytes": 1024},
+        )
+
+        assert response.status_code == 500
+        assert "Error setting personal KB default quota" in response.json()["message"]
+
+    def test_get_personal_self_capacity_maps_unexpected_service_error(
+        self, client, mock_personal_auth, mock_quota_service
+    ):
+        mock_personal_auth(role="USER", user_id="user-1")
+        mock_quota_service.get_personal_self_capacity.side_effect = RuntimeError(
+            "db down"
+        )
+
+        response = client.get("/api/capacity/personal/me")
+
+        assert response.status_code == 500
+        assert "Error getting personal KB capacity" in response.json()["message"]

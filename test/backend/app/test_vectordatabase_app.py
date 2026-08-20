@@ -3139,3 +3139,123 @@ async def test_create_index_documents_skips_personal_quota_for_shared_kb(
     assert response.status_code == 200
     mock_quota_class.assert_not_called()
     mock_index.assert_called_once()
+
+
+def test_personal_quota_helper_skips_missing_and_shared_records(mocker):
+    from backend.apps import vectordatabase_app as vdb_app
+
+    check_quota = mocker.patch(
+        "backend.apps.vectordatabase_app.QuotaService.check_personal_kb_quota"
+    )
+
+    vdb_app._check_personal_kb_quota_before_indexing(
+        data=[], knowledge_record=None, tenant_id="tenant-1", user_id="user-1"
+    )
+    vdb_app._check_personal_kb_quota_before_indexing(
+        data=[],
+        knowledge_record={"ingroup_permission": "EDIT"},
+        tenant_id="tenant-1",
+        user_id="user-1",
+    )
+
+    check_quota.assert_not_called()
+
+
+def test_personal_quota_helper_converts_unexpected_error_to_unavailable(mocker):
+    from backend.apps import vectordatabase_app as vdb_app
+
+    mocker.patch(
+        "backend.apps.vectordatabase_app.QuotaService.get_pending_personal_upload_bytes",
+        side_effect=RuntimeError("ledger unavailable"),
+    )
+
+    with pytest.raises(AppException) as raised:
+        vdb_app._check_personal_kb_quota_before_indexing(
+            data=[{"path_or_url": "knowledge_base/a.txt", "file_size": 10}],
+            knowledge_record={"ingroup_permission": "PRIVATE"},
+            tenant_id="tenant-1",
+            user_id="user-1",
+        )
+
+    assert raised.value.error_code == ErrorCode.TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE
+
+
+@pytest.mark.asyncio
+async def test_get_index_files_preserves_read_permission_error(vdb_core_mock, auth_data):
+    with patch(
+        "backend.apps.vectordatabase_app.get_vector_db_core",
+        return_value=vdb_core_mock,
+    ), patch(
+        "backend.apps.vectordatabase_app.require_knowledge_base_read_permission",
+        side_effect=HTTPException(status_code=403, detail="private KB"),
+    ), patch(
+        "backend.apps.vectordatabase_app.ElasticSearchService.list_files"
+    ) as mock_list_files:
+        response = client.get(
+            f"/indices/{auth_data['index_name']}/files",
+            headers=auth_data["auth_header"],
+        )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "private KB"
+    mock_list_files.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_get_embedding_model_status_preserves_read_permission_error(auth_data):
+    with patch(
+        "backend.apps.vectordatabase_app.require_knowledge_base_read_permission",
+        side_effect=HTTPException(status_code=403, detail="private KB"),
+    ), patch(
+        "backend.apps.vectordatabase_app.get_knowledge_record"
+    ) as mock_get_record:
+        response = client.get(
+            "/indices/private-kb/embedding-model-status",
+            headers=auth_data["auth_header"],
+        )
+
+    assert response.status_code == 403
+    mock_get_record.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_get_index_chunks_preserves_read_permission_error(vdb_core_mock, auth_data):
+    with patch(
+        "backend.apps.vectordatabase_app.get_vector_db_core",
+        return_value=vdb_core_mock,
+    ), patch(
+        "backend.apps.vectordatabase_app.require_knowledge_base_read_permission",
+        side_effect=HTTPException(status_code=403, detail="private KB"),
+    ), patch(
+        "backend.apps.vectordatabase_app.ElasticSearchService.get_index_chunks"
+    ) as mock_get_chunks:
+        response = client.post(
+            f"/indices/{auth_data['index_name']}/chunks",
+            headers=auth_data["auth_header"],
+        )
+
+    assert response.status_code == 403
+    mock_get_chunks.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_delete_documents_maps_storage_permission_error(vdb_core_mock, auth_data):
+    with patch(
+        "backend.apps.vectordatabase_app.get_vector_db_core",
+        return_value=vdb_core_mock,
+    ), patch(
+        "backend.apps.vectordatabase_app.require_knowledge_base_edit_permission",
+        side_effect=PermissionError("read-only KB"),
+    ), patch(
+        "backend.apps.vectordatabase_app.ElasticSearchService.delete_document_by_scope",
+        new_callable=AsyncMock,
+    ) as mock_delete:
+        response = client.delete(
+            f"/indices/{auth_data['index_name']}/documents",
+            params={"path_or_url": "knowledge_base/doc.txt", "scope": "full"},
+            headers=auth_data["auth_header"],
+        )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "read-only KB"
+    mock_delete.assert_not_called()

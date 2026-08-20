@@ -301,6 +301,32 @@ def test_create_knowledge_record_success(monkeypatch, mock_session):
     session.commit.assert_called_once()
 
 
+def test_create_knowledge_record_normalizes_knowledge_name(monkeypatch, mock_session):
+    session, _ = mock_session
+    setup_mock_db_session(monkeypatch, session)
+    mock_record = MockKnowledgeRecord(knowledge_name="Trimmed KB")
+    mock_record.knowledge_id = 124
+    mock_record.index_name = "idx-124"
+
+    with patch(
+        "backend.database.knowledge_db.KnowledgeRecord",
+        return_value=mock_record,
+    ) as mock_constructor:
+        result = create_knowledge_record(
+            {
+                "knowledge_name": "  Trimmed KB  ",
+                "tenant_id": "tenant-1",
+                "user_id": "user-1",
+            }
+        )
+
+    assert result["knowledge_name"] == "Trimmed KB"
+    assert mock_constructor.call_args.kwargs["knowledge_name"] == "Trimmed KB"
+    assert session.execute.call_args.args[1] == {
+        "lock_key": "knowledge-name:tenant-1:Trimmed KB"
+    }
+
+
 def test_create_knowledge_record_with_group_ids_list(monkeypatch, mock_session):
     """Test successful creation of knowledge record with group IDs as list"""
     session, _ = mock_session
@@ -2338,3 +2364,39 @@ def test_get_knowledge_info_by_ids_and_tenant_preserves_order(monkeypatch, mock_
     assert result[0]["embedding_model_id"] == 10
     assert result[1]["knowledge_name"] == "KB B"
     assert result[1]["embedding_model_id"] == 9
+
+
+def test_private_knowledge_queries_filter_and_serialize(monkeypatch, mock_session):
+    from backend.database import knowledge_db as knowledge_db_module
+
+    session, query = mock_session
+    setup_mock_db_session(monkeypatch, session)
+    records = [
+        MockKnowledgeRecord(
+            knowledge_id=1,
+            index_name="private-a",
+            knowledge_name="Private A",
+            created_by="user-a",
+            ingroup_permission="PRIVATE",
+        )
+    ]
+    query.filter.return_value.all.return_value = records
+    monkeypatch.setattr(
+        knowledge_db_module,
+        "as_dict",
+        lambda record: {
+            "knowledge_id": record.knowledge_id,
+            "index_name": record.index_name,
+            "created_by": record.created_by,
+        },
+    )
+
+    assert knowledge_db_module.get_private_knowledge_info_by_tenant_id("tenant-a") == [
+        {"knowledge_id": 1, "index_name": "private-a", "created_by": "user-a"}
+    ]
+    assert knowledge_db_module.get_private_knowledge_info_by_creator(
+        "tenant-a", "user-a"
+    ) == [
+        {"knowledge_id": 1, "index_name": "private-a", "created_by": "user-a"}
+    ]
+    assert query.filter.call_count == 2

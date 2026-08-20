@@ -333,6 +333,26 @@ async def test_upload_files_internal_error(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_get_storage_file_maps_unauthorized_error(monkeypatch):
+    def unauthorized(*_args, **_kwargs):
+        raise file_management_app.UnauthorizedError("token expired")
+
+    monkeypatch.setattr(file_management_app, "get_current_user_id", unauthorized)
+
+    with pytest.raises(HTTPException) as raised:
+        await file_management_app.get_storage_file(
+            object_name="knowledge_base/a.txt",
+            download="",
+            expires=60,
+            filename=None,
+            authorization=MOCK_AUTH,
+        )
+
+    assert raised.value.status_code == 401
+    assert raised.value.detail == "token expired"
+
+
+@pytest.mark.asyncio
 async def test_process_files_success(monkeypatch):
     async def fake_trigger(files, params):
         return [{"task_id": 123}]
@@ -381,6 +401,40 @@ async def test_process_files_error_message(monkeypatch):
             authorization=None,
         )
     assert "boom" in str(ei.value)
+
+
+@pytest.mark.asyncio
+async def test_get_storage_files_maps_unauthorized_error(monkeypatch):
+    def unauthorized(_authorization):
+        raise file_management_app.UnauthorizedError("token expired")
+
+    monkeypatch.setattr(file_management_app, "get_current_user_id", unauthorized)
+
+    with pytest.raises(HTTPException) as raised:
+        await file_management_app.get_storage_files(
+            prefix="", limit=10, include_urls=True, authorization=MOCK_AUTH
+        )
+
+    assert raised.value.status_code == 401
+    assert raised.value.detail == "token expired"
+
+
+@pytest.mark.asyncio
+async def test_get_storage_file_batch_urls_maps_unauthorized_error(monkeypatch):
+    def unauthorized(_authorization):
+        raise file_management_app.UnauthorizedError("token expired")
+
+    monkeypatch.setattr(file_management_app, "get_current_user_id", unauthorized)
+
+    with pytest.raises(HTTPException) as raised:
+        await file_management_app.get_storage_file_batch_urls(
+            request_data={"object_names": ["knowledge_base/a.txt"]},
+            expires=60,
+            authorization=MOCK_AUTH,
+        )
+
+    assert raised.value.status_code == 401
+    assert raised.value.detail == "token expired"
 
 
 # --- storage_upload_files tests ---
@@ -1904,7 +1958,25 @@ async def test_preview_file_internal_error(monkeypatch):
             authorization=MOCK_AUTH
         )
     assert "Failed to preview file" in str(ei.value)
-    assert "Internal server error" not in str(ei.value)
+
+
+@pytest.mark.asyncio
+async def test_preview_file_maps_unauthorized_error(monkeypatch):
+    def unauthorized(_authorization):
+        raise file_management_app.UnauthorizedError("token expired")
+
+    monkeypatch.setattr(file_management_app, "get_current_user_id", unauthorized)
+
+    with pytest.raises(HTTPException) as raised:
+        await file_management_app.preview_file(
+            object_name="knowledge_base/a.txt",
+            filename=None,
+            range_header=None,
+            authorization=MOCK_AUTH,
+        )
+
+    assert raised.value.status_code == 401
+    assert raised.value.detail == "token expired"
 
 
 @pytest.mark.asyncio

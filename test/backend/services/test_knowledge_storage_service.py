@@ -192,6 +192,70 @@ def test_resolve_storage_object_knowledge_requires_consistent_active_ledger():
 
 
 @pytest.mark.parametrize(
+    "ledger",
+    [
+        None,
+        {"tenant_id": "tenant-a", "knowledge_id": 7},
+        {
+            "tenant_id": "tenant-b",
+            "knowledge_id": 7,
+            "index_name": "kb-a",
+        },
+    ],
+)
+def test_resolve_storage_object_knowledge_rejects_invalid_ledger(ledger):
+    with patch.object(
+        storage_service,
+        "get_storage_object_by_identity",
+        return_value=ledger,
+    ), patch.object(
+        storage_service,
+        "get_knowledge_record",
+        return_value={
+            "tenant_id": "tenant-a",
+            "knowledge_id": 7,
+            "index_name": "kb-a",
+        },
+    ) as get_record:
+        result = resolve_storage_object_knowledge(
+            "knowledge_base/a.pdf",
+            tenant_id="tenant-a",
+        )
+
+    assert result is None
+    if ledger is None or ledger.get("tenant_id") != "tenant-a":
+        get_record.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "knowledge",
+    [
+        None,
+        {"tenant_id": "tenant-a", "knowledge_id": 8, "index_name": "kb-a"},
+        {"tenant_id": "tenant-a", "knowledge_id": 7, "index_name": "kb-b"},
+        {"tenant_id": "tenant-b", "knowledge_id": 7, "index_name": "kb-a"},
+    ],
+)
+def test_resolve_storage_object_knowledge_rejects_mismatched_knowledge(knowledge):
+    ledger = {
+        "tenant_id": "tenant-a",
+        "knowledge_id": 7,
+        "index_name": "kb-a",
+    }
+    with patch.object(
+        storage_service, "get_storage_object_by_identity", return_value=ledger
+    ), patch.object(
+        storage_service, "get_knowledge_record", return_value=knowledge
+    ):
+        assert (
+            resolve_storage_object_knowledge(
+                "knowledge_base/a.pdf", tenant_id="tenant-a"
+            )
+            is None
+        )
+
+
+@pytest.mark.parametrize(
     ("permission", "expected"),
     [("EDIT", True), ("DELETE", True), ("READ", False)],
 )
@@ -234,6 +298,100 @@ def test_resolve_storage_object_access_denies_unresolved_object():
             tenant_id="tenant-a",
             required_permission="DELETE",
         )
+
+
+@pytest.mark.parametrize(
+    ("user_id", "tenant_id", "required_permission"),
+    [
+        (None, "tenant-a", "DELETE"),
+        ("user-a", None, "DELETE"),
+        ("user-a", "tenant-a", "READ"),
+        ("user-a", "tenant-a", ""),
+    ],
+)
+def test_resolve_storage_object_access_rejects_invalid_request(
+    user_id, tenant_id, required_permission
+):
+    with patch.object(
+        storage_service, "resolve_storage_object_knowledge"
+    ) as resolve_ownership:
+        assert not resolve_storage_object_access(
+            "knowledge_base/a.pdf",
+            user_id=user_id,
+            tenant_id=tenant_id,
+            required_permission=required_permission,
+        )
+
+    resolve_ownership.assert_not_called()
+
+
+def test_resolve_storage_object_access_fails_closed_when_resolution_raises():
+    with patch.object(
+        storage_service,
+        "resolve_storage_object_knowledge",
+        side_effect=RuntimeError("ledger unavailable"),
+    ):
+        assert not resolve_storage_object_access(
+            "knowledge_base/a.pdf",
+            user_id="user-a",
+            tenant_id="tenant-a",
+            required_permission="DELETE",
+        )
+
+
+@pytest.mark.parametrize(
+    "permission_error",
+    [PermissionError("denied"), ValueError("invalid KB"), RuntimeError("DAC down")],
+)
+def test_resolve_storage_object_access_fails_closed_when_dac_raises(permission_error):
+    ownership = {
+        "knowledge": {"index_name": "kb-a"},
+        "ledger": {"tenant_id": "tenant-a"},
+    }
+    with patch.object(
+        storage_service, "resolve_storage_object_knowledge", return_value=ownership
+    ), patch(
+        "services.vectordatabase_service.ElasticSearchService"
+        ".resolve_knowledge_base_permission",
+        side_effect=permission_error,
+    ):
+        assert not resolve_storage_object_access(
+            "knowledge_base/a.pdf",
+            user_id="user-a",
+            tenant_id="tenant-a",
+            required_permission="DELETE",
+        )
+
+
+def test_resolve_storage_object_access_allows_creator_and_editor_only():
+    ownership = {
+        "knowledge": {"index_name": "kb-a"},
+        "ledger": {"tenant_id": "tenant-a"},
+    }
+    with patch.object(
+        storage_service, "resolve_storage_object_knowledge", return_value=ownership
+    ), patch(
+        "services.vectordatabase_service.ElasticSearchService"
+        ".resolve_knowledge_base_permission",
+        side_effect=["READ_ONLY", "CREATOR"],
+    ):
+        assert not resolve_storage_object_access(
+            "knowledge_base/a.pdf", "user-a", "tenant-a", "DELETE"
+        )
+        assert resolve_storage_object_access(
+            "knowledge_base/a.pdf", "user-a", "tenant-a", "DELETE"
+        )
+
+
+def test_get_committed_source_bytes_by_paths_skips_unsupported_paths():
+    with patch.object(
+        storage_service, "get_committed_source_bytes_by_object_names"
+    ) as get_committed:
+        assert get_committed_source_bytes_by_paths(
+            "tenant-a", 7, ["https://example.com/file.txt", ""]
+        ) == {}
+
+    get_committed.assert_not_called()
 
 
 def test_release_storage_charge_invalidates_only_after_ledger_release():
@@ -404,3 +562,26 @@ def test_compensation_tolerates_missing_row_and_cleanup_exception(storage_contex
         )
 
     mark_deleted.assert_called_once()
+
+
+def test_compensation_logs_when_retry_charge_also_fails(storage_context):
+    with patch.object(
+        storage_service,
+        "delete_file",
+        return_value={"success": False, "error": "still present"},
+    ), patch.object(
+        storage_service,
+        "commit_uploaded_object",
+        side_effect=RuntimeError("ledger unavailable"),
+    ) as retry_commit:
+        compensate_uploaded_objects(
+            context=storage_context,
+            object_names=["failed-delete"],
+            updated_by="user-a",
+        )
+
+    retry_commit.assert_called_once_with(
+        context=storage_context,
+        object_name="failed-delete",
+        created_by="user-a",
+    )

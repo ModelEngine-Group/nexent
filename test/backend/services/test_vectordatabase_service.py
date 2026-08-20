@@ -8058,6 +8058,34 @@ def test_resolve_knowledge_base_permission_datamate_creator_is_read_only(monkeyp
     assert permission == "READ_ONLY"
 
 
+def test_resolve_knowledge_base_permission_speed_mode_uses_record_tenant_when_user_has_no_tenant(
+    monkeypatch,
+):
+    _patch_kb_permission_context(
+        monkeypatch,
+        record={
+            "index_name": "kb",
+            "knowledge_sources": "elasticsearch",
+            "tenant_id": "tenant-from-record",
+            "created_by": "other-user",
+            "ingroup_permission": "EDIT",
+        },
+        user_tenant=None,
+        speed_mode=True,
+    )
+    monkeypatch.setattr(
+        "backend.services.vectordatabase_service.ResourceAccessControl.check",
+        lambda resource, **kwargs: SimpleNamespace(permission_label="EDIT"),
+    )
+
+    assert (
+        ElasticSearchService.resolve_knowledge_base_permission(
+            "kb", "speed-user", tenant_id=None
+        )
+        == "EDIT"
+    )
+
+
 def test_resolve_knowledge_base_permission_datamate_cross_tenant_denied(monkeypatch):
     _patch_kb_permission_context(
         monkeypatch,
@@ -8265,6 +8293,68 @@ def test_resolve_knowledge_base_permission_private_dev_creator_ignores_groups(mo
         ElasticSearchService.resolve_knowledge_base_permission("kb", "dev-user", "tenant-1")
         == ElasticSearchService.CREATOR_PERMISSION
     )
+
+
+def test_create_knowledge_base_forces_user_to_private_without_groups(monkeypatch):
+    model = {
+        "model_id": 1,
+        "model_name": "embedding-model",
+        "display_name": "Embedding model",
+        "model_type": "embedding",
+    }
+    monkeypatch.setattr(
+        "backend.services.vectordatabase_service.get_model_by_model_id",
+        lambda model_id, tenant_id: model,
+    )
+    record = {
+        "knowledge_id": 7,
+        "index_name": "7-abc",
+        "knowledge_name": "personal-kb",
+    }
+    create_record = MagicMock(return_value=record)
+    monkeypatch.setattr(
+        "backend.services.vectordatabase_service.create_knowledge_record",
+        create_record,
+    )
+    monkeypatch.setattr(
+        "backend.services.vectordatabase_service._create_embedding_model",
+        lambda _model: object(),
+    )
+    vdb_core = MagicMock()
+    vdb_core.create_index.return_value = True
+
+    result = ElasticSearchService.create_knowledge_base(
+        knowledge_name="personal-kb",
+        embedding_dim=128,
+        vdb_core=vdb_core,
+        user_id="user-1",
+        tenant_id="tenant-1",
+        ingroup_permission="EDIT",
+        group_ids=[1, 2],
+        embedding_model_id=1,
+        user_role="USER",
+    )
+
+    assert result["status"] == "success"
+    data = create_record.call_args.args[0]
+    assert data["ingroup_permission"] == "PRIVATE"
+    assert data["group_ids"] is None
+    vdb_core.create_index.assert_called_once_with("7-abc", embedding_dim=128)
+
+
+def test_update_knowledge_base_user_rejects_shared_record(monkeypatch):
+    monkeypatch.setattr(
+        "backend.services.vectordatabase_service.get_knowledge_record",
+        lambda _filters: {"ingroup_permission": "EDIT"},
+    )
+
+    with pytest.raises(PermissionError, match="only manage PRIVATE"):
+        ElasticSearchService.update_knowledge_base(
+            index_name="shared-kb",
+            knowledge_name="renamed",
+            user_id="user-1",
+            user_role="USER",
+        )
 
 
 @pytest.mark.parametrize("permission", ["EDIT", "CREATOR"])

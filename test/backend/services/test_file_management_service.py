@@ -883,6 +883,85 @@ class TestCheckFileAccess:
             required_permission="DELETE",
         )
 
+    @pytest.mark.parametrize("permission", ["READ", "READ_ONLY", None])
+    def test_check_file_access_knowledge_base_reads_keep_compatibility(self, permission):
+        from backend.services.file_management_service import check_file_access
+
+        assert check_file_access(
+            "knowledge_base/file.txt",
+            "user123",
+            "tenant-a",
+            required_permission=permission,
+        ) is True
+        knowledge_storage_stub.resolve_storage_object_access.assert_not_called()
+
+    def test_check_file_access_asset_owner_write_uses_storage_resolver(self):
+        from backend.services.file_management_service import check_file_access
+        from consts.const import ASSET_OWNER_TENANT_ID
+
+        knowledge_storage_stub.resolve_storage_object_access.return_value = True
+
+        assert check_file_access(
+            "attachments/asset_owner/user1/doc.pdf",
+            "user1",
+            ASSET_OWNER_TENANT_ID,
+            required_permission="EDIT",
+        ) is True
+        knowledge_storage_stub.resolve_storage_object_access.assert_called_once_with(
+            object_name="attachments/asset_owner/user1/doc.pdf",
+            user_id="user1",
+            tenant_id=ASSET_OWNER_TENANT_ID,
+            required_permission="EDIT",
+        )
+
+    def test_check_file_access_denies_asset_owner_write_for_wrong_tenant(self):
+        from backend.services.file_management_service import check_file_access
+        from consts.const import ASSET_OWNER_TENANT_ID
+
+        assert check_file_access(
+            "attachments/asset_owner/user1/doc.pdf",
+            "user1",
+            "regular-tenant",
+            required_permission="DELETE",
+        ) is False
+        knowledge_storage_stub.resolve_storage_object_access.assert_called_once_with(
+            object_name="attachments/asset_owner/user1/doc.pdf",
+            user_id="user1",
+            tenant_id="regular-tenant",
+            required_permission="DELETE",
+        )
+
+    def test_check_file_access_image_and_skill_file_rules(self):
+        from backend.services.file_management_service import check_file_access
+
+        assert check_file_access("images_in_attachments/page.png", "user123") is True
+        assert check_file_access(
+            "images_in_attachments/page.png", "user123", required_permission="DELETE"
+        ) is False
+        assert check_file_access("skill-files/user123/result.docx", "user123") is True
+        assert check_file_access("skill-files/user123/result.docx", "user456") is False
+
+    def test_check_file_access_batch_forwards_required_permission(self, mocker):
+        from backend.services.file_management_service import check_file_access_batch
+
+        check = mocker.patch(
+            "backend.services.file_management_service.check_file_access",
+            side_effect=[True, False],
+        )
+
+        result = check_file_access_batch(
+            ["knowledge_base/a.txt", "knowledge_base/b.txt"],
+            "user123",
+            "tenant-a",
+            required_permission="DELETE",
+        )
+
+        assert result == {
+            "knowledge_base/a.txt": True,
+            "knowledge_base/b.txt": False,
+        }
+        assert check.call_args_list[0].kwargs["required_permission"] == "DELETE"
+
     def test_check_file_access_user_attachment_allows_owner(self):
         """Users can access files in their own attachments folder"""
         from backend.services.file_management_service import check_file_access
