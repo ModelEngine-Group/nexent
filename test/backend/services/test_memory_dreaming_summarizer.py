@@ -84,7 +84,7 @@ def test_ac078_small_chunk_set_is_returned_without_repartitioning():
 def test_ac057_under_limit_uses_exactly_one_model_call():
     class Model:
         def __init__(self): self.calls = []
-        def generate(self, messages):
+        def __call__(self, messages):
             self.calls.append(messages)
             return SimpleNamespace(content="<summary>## Work Preferences\n\n- old\n- new</summary>")
     model = Model()
@@ -103,7 +103,7 @@ def test_ac058_large_input_map_reduce_is_bounded_parallel_and_ordered():
     task_modes = []
 
     class Model:
-        def generate(self, messages):
+        def __call__(self, messages):
             nonlocal active, maximum, reduce_prompt
             prompt = messages[1]["content"]
             task_modes.append(next(line for line in prompt.splitlines() if line.startswith("Task mode:")))
