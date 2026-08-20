@@ -35,7 +35,7 @@ from nexent.core.agents.nexent_agent import get_local_python_authorized_imports
 
 from consts.capability_profiles import CATALOG as CAPABILITY_CATALOG
 
-from services.file_management_service import get_llm_model, validate_urls_access
+from services.file_management_service import validate_urls_access
 from services.vectordatabase_service import (
     ElasticSearchService,
     get_vector_db_core,
@@ -47,7 +47,7 @@ from services.remote_mcp_service import get_remote_mcp_server_list
 from database.a2a_agent_db import PROTOCOL_JSONRPC
 from services.memory_config_service import build_memory_context
 from services.ind_aidp_service import create_ind_aidp_image_url_builder
-from services.model_gateway_service import get_vlm_adapter
+from services.model_gateway_service import get_llm_adapter, get_vlm_adapter
 from database.agent_db import (
     search_agent_info_by_agent_id,
     query_sub_agent_relations,
@@ -1786,7 +1786,7 @@ async def create_tool_config_list(
         elif tool_config.class_name == "AnalyzeTextFileTool":
             selected_model_id = param_dict.get("selected_model_id")
             tool_config.metadata = {
-                "llm_model": get_llm_model(tenant_id=tenant_id, model_id=selected_model_id),
+                "llm_model": get_llm_adapter(tenant_id, selected_model_id, modality="llm_long_context"),
                 "storage_client": minio_client,
                 "data_process_service_url": DATA_PROCESS_SERVICE,
                 "validate_url_access": lambda urls: validate_urls_access(urls, user_id)

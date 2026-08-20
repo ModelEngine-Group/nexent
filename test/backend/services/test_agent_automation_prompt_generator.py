@@ -270,7 +270,7 @@ def test_llm_strategy_builds_model_request_from_tenant_configuration(monkeypatch
         def __init__(self, **kwargs):
             captured["config"] = kwargs
 
-        def generate(self, messages):
+        def __call__(self, messages):
             captured["messages"] = messages
             return SimpleNamespace(content='{"title":"A","instruction":"B"}')
 
