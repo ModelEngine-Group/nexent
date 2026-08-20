@@ -18,11 +18,42 @@ import AgentConfig from "./agent-config";
 import AgentVersionManage from "./AgentVersionManage";
 import AgentDebugPanel from "./agent-debug";
 import { Nl2AgentChatPanel } from "../newchat/assistant-ui/nl2agent-chat-panel";
-import { Nl2AgentFlowProvider, useNl2AgentFlow } from "@/contexts/nl2AgentFlow";
+import {
+  Nl2AgentFlowProvider,
+  useNl2AgentFlow,
+  type Nl2AgentConfigFocusTarget,
+} from "@/contexts/nl2AgentFlow";
 import { useAgentStore } from "@/stores/agentStore";
 import { searchAgentInfo } from "@/services/agentConfigService";
 import log from "@/lib/logger";
-import type { Nl2AgentStateEvent } from "../newchat/adapter/remote-chat-model-adapter";
+import type {
+  Nl2AgentDraftField,
+  Nl2AgentStateEvent,
+} from "../newchat/adapter/remote-chat-model-adapter";
+
+function resolveDraftFocusTarget(
+  updatedFields: readonly Nl2AgentDraftField[]
+): Nl2AgentConfigFocusTarget | null {
+  if (
+    updatedFields.includes("greeting_message") ||
+    updatedFields.includes("example_questions")
+  ) {
+    return { section: "conversation_guide" };
+  }
+  if (updatedFields.includes("few_shots_prompt")) {
+    return { section: "role_model", promptTab: "few-shots" };
+  }
+  if (updatedFields.includes("constraint_prompt")) {
+    return { section: "role_model", promptTab: "constraint" };
+  }
+  if (updatedFields.includes("duty_prompt")) {
+    return { section: "role_model", promptTab: "duty" };
+  }
+  if (updatedFields.includes("description")) {
+    return { section: "display_info" };
+  }
+  return null;
+}
 
 interface PanelCardProps {
   title: string;
@@ -73,6 +104,7 @@ function AgentSetupContent() {
     markCompletionSyncFailed,
     markGenerationCompleted,
     markPromptGenerationFailed,
+    requestConfigFocus,
     resetFlow,
     sessionGeneration,
   } = useNl2AgentFlow();
@@ -88,7 +120,7 @@ function AgentSetupContent() {
   }, [currentAgentId, resetFlow]);
 
   const enqueueSnapshotRefresh = useCallback(
-    (agentId: number) => {
+    (agentId: number, focusTarget: Nl2AgentConfigFocusTarget | null = null) => {
       snapshotRefreshQueue.current = snapshotRefreshQueue.current
         .then(async () => {
           const initialState = useAgentStore.getState();
@@ -112,6 +144,7 @@ function AgentSetupContent() {
 
           queryClient.setQueryData(["agentInfo", agentId], result.data);
           await queryClient.invalidateQueries({ queryKey: ["agents"] });
+          if (focusTarget) requestConfigFocus(agentId, focusTarget);
           return true;
         })
         .catch((error) => {
@@ -123,12 +156,14 @@ function AgentSetupContent() {
         });
       return snapshotRefreshQueue.current;
     },
-    [queryClient]
+    [queryClient, requestConfigFocus]
   );
 
   const synchronizeCompletion = useCallback(
     (agentId: number) => {
-      void enqueueSnapshotRefresh(agentId).then((synchronized) => {
+      void enqueueSnapshotRefresh(agentId, {
+        section: "conversation_guide",
+      }).then((synchronized) => {
         if (synchronized) markCompletionSynced(agentId);
         else markCompletionSyncFailed(agentId);
       });
@@ -147,7 +182,10 @@ function AgentSetupContent() {
         synchronizeCompletion(event.agent_id);
         return;
       }
-      void enqueueSnapshotRefresh(event.agent_id);
+      void enqueueSnapshotRefresh(
+        event.agent_id,
+        resolveDraftFocusTarget(event.updated_fields)
+      );
     },
     [
       enqueueSnapshotRefresh,
@@ -252,7 +290,6 @@ function AgentSetupContent() {
           >
             <div className="min-h-0 flex-1 overflow-auto px-4 py-2">
               <AgentConfig
-                isDebugVisible={isDebugVisible}
                 onToggleDebug={() => setIsDebugVisible((visible) => !visible)}
               />
             </div>

@@ -19,6 +19,21 @@ export type Nl2AgentFlowPhase =
   | "completing"
   | "completed";
 
+export type Nl2AgentConfigFocusTarget =
+  | { section: "display_info" }
+  | {
+      section: "role_model";
+      promptTab: "duty" | "constraint" | "few-shots";
+    }
+  | { section: "tools_skills" }
+  | { section: "conversation_guide" };
+
+export interface Nl2AgentConfigFocusRequest {
+  agentId: number;
+  target: Nl2AgentConfigFocusTarget;
+  requestId: number;
+}
+
 interface ActiveNl2AgentCard {
   key: string;
   subtype: string;
@@ -30,6 +45,7 @@ interface Nl2AgentFlowState {
   activeCard: ActiveNl2AgentCard | null;
   submittedCardKeys: ReadonlySet<string>;
   failedPromptFields: readonly string[];
+  configFocusRequest: Nl2AgentConfigFocusRequest | null;
   completionSyncFailed: boolean;
   isFormLocked: boolean;
   isComposerDisabled: boolean;
@@ -42,6 +58,11 @@ type Nl2AgentFlowAction =
   | { type: "submit_card"; cardKey: string }
   | { type: "resources_bound"; agentId: number }
   | { type: "prompt_generation_failed"; agentId: number; fields: string[] }
+  | {
+      type: "request_config_focus";
+      agentId: number;
+      target: Nl2AgentConfigFocusTarget;
+    }
   | { type: "generation_completed"; agentId: number }
   | { type: "completion_synced"; agentId: number }
   | { type: "completion_sync_failed"; agentId: number };
@@ -52,6 +73,7 @@ const INITIAL_STATE: Nl2AgentFlowState = {
   activeCard: null,
   submittedCardKeys: new Set(),
   failedPromptFields: [],
+  configFocusRequest: null,
   completionSyncFailed: false,
   isFormLocked: false,
   isComposerDisabled: false,
@@ -113,6 +135,18 @@ function reducer(
         completionSyncFailed: false,
         isFormLocked: true,
       };
+    case "request_config_focus":
+      if (state.agentId !== null && state.agentId !== action.agentId) {
+        return state;
+      }
+      return {
+        ...state,
+        configFocusRequest: {
+          agentId: action.agentId,
+          target: action.target,
+          requestId: (state.configFocusRequest?.requestId ?? 0) + 1,
+        },
+      };
     case "generation_completed":
       if (state.agentId !== action.agentId) return state;
       return {
@@ -150,6 +184,10 @@ interface Nl2AgentFlowContextValue extends Nl2AgentFlowState {
   submitCard: (key: string) => void;
   markResourcesBound: (agentId: number) => void;
   markPromptGenerationFailed: (agentId: number, fields: string[]) => void;
+  requestConfigFocus: (
+    agentId: number,
+    target: Nl2AgentConfigFocusTarget
+  ) => void;
   markGenerationCompleted: (agentId: number) => void;
   markCompletionSynced: (agentId: number) => void;
   markCompletionSyncFailed: (agentId: number) => void;
@@ -184,6 +222,11 @@ export const Nl2AgentFlowProvider: FC<PropsWithChildren> = ({ children }) => {
       dispatch({ type: "prompt_generation_failed", agentId, fields }),
     []
   );
+  const requestConfigFocus = useCallback(
+    (agentId: number, target: Nl2AgentConfigFocusTarget) =>
+      dispatch({ type: "request_config_focus", agentId, target }),
+    []
+  );
   const markGenerationCompleted = useCallback(
     (agentId: number) => dispatch({ type: "generation_completed", agentId }),
     []
@@ -209,6 +252,7 @@ export const Nl2AgentFlowProvider: FC<PropsWithChildren> = ({ children }) => {
       submitCard,
       markResourcesBound,
       markPromptGenerationFailed,
+      requestConfigFocus,
       markGenerationCompleted,
       markCompletionSynced,
       markCompletionSyncFailed,
@@ -222,6 +266,7 @@ export const Nl2AgentFlowProvider: FC<PropsWithChildren> = ({ children }) => {
       markPromptGenerationFailed,
       markResourcesBound,
       registerCard,
+      requestConfigFocus,
       resetFlow,
       state,
       submitCard,

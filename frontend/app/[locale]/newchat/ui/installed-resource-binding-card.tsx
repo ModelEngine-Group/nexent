@@ -238,6 +238,7 @@ export const InstalledResourceBindingCard: FC<{
     registerCard,
     submitCard,
     markResourcesBound,
+    requestConfigFocus,
     isCardInteractive,
   } = useNl2AgentFlow();
   const [items, dispatch] = useReducer(
@@ -411,7 +412,11 @@ export const InstalledResourceBindingCard: FC<{
           ...items.filter((item) => item.bindingStatus === "bound"),
           ...boundItems,
         ]));
-      if (!synchronized) showSynchronizationError();
+      if (!synchronized) {
+        showSynchronizationError();
+      } else {
+        requestConfigFocus(payload.agent_id, { section: "tools_skills" });
+      }
     }
   };
 

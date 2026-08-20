@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { App, Button, Form } from "antd";
 import {
@@ -12,6 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { useAgentStore } from "@/stores/agentStore";
 import { useAgentReadOnly } from "@/hooks/agent/useAgentReadOnly";
+import { useNl2AgentFlow } from "@/contexts/nl2AgentFlow";
 
 import AgentInfo from "./components/agent-info";
 import AgentPrmopt from "./components/agent-prompt";
@@ -44,11 +45,37 @@ import {
   Rocket,
 } from "lucide-react";
 
+type AgentConfigTab = "basic" | "advanced";
+type ConfigSectionKey =
+  | "display_info"
+  | "role_model"
+  | "tools_skills"
+  | "run_strategy"
+  | "publish_attributes"
+  | "collaborative_agents"
+  | "knowledge_base"
+  | "conversation_guide"
+  | "guardrail";
+
+const DEFAULT_OPEN_SECTIONS: Record<ConfigSectionKey, boolean> = {
+  display_info: true,
+  role_model: true,
+  tools_skills: false,
+  run_strategy: false,
+  publish_attributes: false,
+  collaborative_agents: false,
+  knowledge_base: false,
+  conversation_guide: false,
+  guardrail: false,
+};
+
 interface ConfigSectionProps {
   title: string;
   description: string;
   icon: React.ReactNode;
-  defaultOpen?: boolean;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  containerRef?: React.Ref<HTMLDivElement>;
   headerActions?: React.ReactNode;
   children: React.ReactNode;
 }
@@ -57,54 +84,66 @@ function ConfigSection({
   title,
   description,
   icon,
-  defaultOpen = false,
+  open,
+  onOpenChange,
+  containerRef,
   headerActions,
   children,
 }: ConfigSectionProps) {
   return (
-    <Collapsible
-      defaultOpen={defaultOpen}
-      className="overflow-hidden rounded-lg border border-gray-200 bg-white"
-    >
-      <div className="flex items-center gap-4  transition-colors hover:bg-gray-50 px-2">
-        <CollapsibleTrigger className="flex min-w-0 flex-1 items-center px-2 py-4 gap-4 text-left">
-          <div className="flex min-w-0 items-center gap-2">
-            <ChevronDown className="h-4 w-4 text-gray-400 transition-transform group-data-[state=open]:rotate-180" />
+    <div ref={containerRef}>
+      <Collapsible
+        open={open}
+        onOpenChange={onOpenChange}
+        className="overflow-hidden rounded-lg border border-gray-200 bg-white"
+      >
+        <div className="flex items-center gap-4  transition-colors hover:bg-gray-50 px-2">
+          <CollapsibleTrigger className="flex min-w-0 flex-1 items-center px-2 py-4 gap-4 text-left">
+            <div className="flex min-w-0 items-center gap-2">
+              <ChevronDown className="h-4 w-4 text-gray-400 transition-transform group-data-[state=open]:rotate-180" />
 
-            <div className="flex shrink-0 items-center gap-2 text-sm font-medium text-gray-900">
-              {icon}
-              <span>{title}</span>
+              <div className="flex shrink-0 items-center gap-2 text-sm font-medium text-gray-900">
+                {icon}
+                <span>{title}</span>
+              </div>
+              <p className="min-w-0 truncate text-xs text-gray-500">
+                {description}
+              </p>
             </div>
-            <p className="min-w-0 truncate text-xs text-gray-500">
-              {description}
-            </p>
-          </div>
-        </CollapsibleTrigger>
-        {headerActions && (
-          <div className="flex shrink-0 items-center gap-2">
-            {headerActions}
-          </div>
-        )}
-      </div>
-      <CollapsibleContent className="border-t border-gray-200 bg-gray-50/70 px-4 py-4">
-        {children}
-      </CollapsibleContent>
-    </Collapsible>
+          </CollapsibleTrigger>
+          {headerActions && (
+            <div className="flex shrink-0 items-center gap-2">
+              {headerActions}
+            </div>
+          )}
+        </div>
+        <CollapsibleContent className="border-t border-gray-200 bg-gray-50/70 px-4 py-4">
+          {children}
+        </CollapsibleContent>
+      </Collapsible>
+    </div>
   );
 }
 
 interface AgentConfigProps {
-  isDebugVisible: boolean;
   onToggleDebug: () => void;
 }
 
-export default function AgentConfig({
-  isDebugVisible,
-  onToggleDebug,
-}: AgentConfigProps) {
+export default function AgentConfig({ onToggleDebug }: AgentConfigProps) {
   const { t } = useTranslation("common");
   const [form] = Form.useForm();
   const [isPublishModalOpen, setIsPublishModalOpen] = useState(false);
+  const [activeConfigTab, setActiveConfigTab] =
+    useState<AgentConfigTab>("basic");
+  const [openSections, setOpenSections] = useState<
+    Record<ConfigSectionKey, boolean>
+  >(() => ({ ...DEFAULT_OPEN_SECTIONS }));
+  const displayInfoSectionRef = useRef<HTMLDivElement>(null);
+  const roleModelSectionRef = useRef<HTMLDivElement>(null);
+  const toolsSkillsSectionRef = useRef<HTMLDivElement>(null);
+  const conversationGuideSectionRef = useRef<HTMLDivElement>(null);
+  const lastScrolledRequestRef = useRef<string | null>(null);
+  const { configFocusRequest } = useNl2AgentFlow();
 
   const isReadOnly = useAgentReadOnly();
   const agentId = useAgentStore((state) => state.agentId);
@@ -116,6 +155,13 @@ export default function AgentConfig({
   const { message } = App.useApp();
   const saveError = useAgentStore((state) => state.saveError);
   const clearSaveError = useAgentStore((state) => state.clearSaveError);
+
+  useEffect(() => {
+    setActiveConfigTab("basic");
+    setOpenSections({ ...DEFAULT_OPEN_SECTIONS });
+    lastScrolledRequestRef.current = null;
+  }, [agentId]);
+
   useEffect(() => {
     form.resetFields();
     const serverSnapshot = useAgentStore.getState().editedAgent;
@@ -124,9 +170,62 @@ export default function AgentConfig({
     }
   }, [agentId, form, serverSnapshotRevision]);
 
-  const handleTabChange = useCallback(() => {
-    flushDraft();
-  }, [flushDraft]);
+  useEffect(() => {
+    if (!configFocusRequest || configFocusRequest.agentId !== agentId) return;
+
+    const { requestId, target } = configFocusRequest;
+    setActiveConfigTab(
+      target.section === "conversation_guide" ? "advanced" : "basic"
+    );
+    setOpenSections((current) =>
+      current[target.section] ? current : { ...current, [target.section]: true }
+    );
+
+    const frameId = window.requestAnimationFrame(() => {
+      const requestKey = `${configFocusRequest.agentId}:${requestId}`;
+      if (lastScrolledRequestRef.current === requestKey) return;
+
+      const sectionElement =
+        target.section === "display_info"
+          ? displayInfoSectionRef.current
+          : target.section === "role_model"
+            ? roleModelSectionRef.current
+            : target.section === "tools_skills"
+              ? toolsSkillsSectionRef.current
+              : conversationGuideSectionRef.current;
+      if (!sectionElement) return;
+
+      const prefersReducedMotion = window.matchMedia(
+        "(prefers-reduced-motion: reduce)"
+      ).matches;
+      sectionElement.scrollIntoView({
+        behavior: prefersReducedMotion ? "auto" : "smooth",
+        block: "nearest",
+      });
+      lastScrolledRequestRef.current = requestKey;
+    });
+
+    return () => window.cancelAnimationFrame(frameId);
+  }, [agentId, configFocusRequest]);
+
+  const handleTabChange = useCallback(
+    (value: string) => {
+      flushDraft();
+      if (value === "basic" || value === "advanced") {
+        setActiveConfigTab(value);
+      }
+    },
+    [flushDraft]
+  );
+
+  const handleSectionOpenChange = useCallback(
+    (section: ConfigSectionKey, open: boolean) => {
+      setOpenSections((current) =>
+        current[section] === open ? current : { ...current, [section]: open }
+      );
+    },
+    []
+  );
 
   const handlePublish = async () => {
     try {
@@ -175,7 +274,7 @@ export default function AgentConfig({
       className="flex h-full min-h-0 flex-col"
     >
       <Tabs
-        defaultValue="basic"
+        value={activeConfigTab}
         onValueChange={handleTabChange}
         className="flex min-h-0 flex-1 flex-col"
       >
@@ -203,7 +302,11 @@ export default function AgentConfig({
             title={t("agent.config.section.displayInfo.title")}
             description={t("agent.config.section.displayInfo.description")}
             icon={<Info className="h-4 w-4 shrink-0 text-blue-500" />}
-            defaultOpen
+            open={openSections.display_info}
+            onOpenChange={(open) =>
+              handleSectionOpenChange("display_info", open)
+            }
+            containerRef={displayInfoSectionRef}
           >
             <AgentInfo />
           </ConfigSection>
@@ -213,9 +316,21 @@ export default function AgentConfig({
             title={t("agent.config.section.roleModel.title")}
             description={t("agent.config.section.roleModel.description")}
             icon={<Cpu className="h-4 w-4 shrink-0 text-blue-500" />}
-            defaultOpen
+            open={openSections.role_model}
+            onOpenChange={(open) => handleSectionOpenChange("role_model", open)}
+            containerRef={roleModelSectionRef}
           >
-            <AgentPrmopt />
+            <AgentPrmopt
+              focusRequest={
+                configFocusRequest?.agentId === agentId &&
+                configFocusRequest.target.section === "role_model"
+                  ? {
+                      requestId: configFocusRequest.requestId,
+                      promptTab: configFocusRequest.target.promptTab,
+                    }
+                  : null
+              }
+            />
           </ConfigSection>
 
           {/* 3. 工具与技能 */}
@@ -223,6 +338,11 @@ export default function AgentConfig({
             title={t("agent.config.section.toolsSkills.title")}
             description={t("agent.config.section.toolsSkills.description")}
             icon={<Wrench className="h-4 w-4 shrink-0 text-blue-500" />}
+            open={openSections.tools_skills}
+            onOpenChange={(open) =>
+              handleSectionOpenChange("tools_skills", open)
+            }
+            containerRef={toolsSkillsSectionRef}
           >
             <AgentCapability />
           </ConfigSection>
@@ -232,6 +352,10 @@ export default function AgentConfig({
             title={t("agent.config.section.runStrategy.title")}
             description={t("agent.config.section.runStrategy.description")}
             icon={<Play className="h-4 w-4 shrink-0 text-blue-500" />}
+            open={openSections.run_strategy}
+            onOpenChange={(open) =>
+              handleSectionOpenChange("run_strategy", open)
+            }
           >
             <AgentRunPolicy />
           </ConfigSection>
@@ -243,6 +367,10 @@ export default function AgentConfig({
               "agent.config.section.publishAttributes.description"
             )}
             icon={<Globe className="h-4 w-4 shrink-0 text-blue-500" />}
+            open={openSections.publish_attributes}
+            onOpenChange={(open) =>
+              handleSectionOpenChange("publish_attributes", open)
+            }
           >
             <AgentDeployment />
           </ConfigSection>
@@ -258,6 +386,10 @@ export default function AgentConfig({
               "agent.config.section.collaborativeAgents.description"
             )}
             icon={<Cpu className="h-4 w-4 shrink-0 text-blue-500" />}
+            open={openSections.collaborative_agents}
+            onOpenChange={(open) =>
+              handleSectionOpenChange("collaborative_agents", open)
+            }
             headerActions={<CollaborativeAgentActions />}
           >
             <CollaborativeAgent />
@@ -267,6 +399,10 @@ export default function AgentConfig({
             title={t("agent.config.section.knowledgeBase.title")}
             description={t("agent.config.section.knowledgeBase.description")}
             icon={<Database className="h-4 w-4 shrink-0 text-blue-500" />}
+            open={openSections.knowledge_base}
+            onOpenChange={(open) =>
+              handleSectionOpenChange("knowledge_base", open)
+            }
             headerActions={<KnowledgeBaseConfigActions />}
           >
             <KnowledgeBaseConfig />
@@ -278,6 +414,11 @@ export default function AgentConfig({
               "agent.config.section.conversationGuide.description"
             )}
             icon={<MessageSquare className="h-4 w-4 shrink-0 text-blue-500" />}
+            open={openSections.conversation_guide}
+            onOpenChange={(open) =>
+              handleSectionOpenChange("conversation_guide", open)
+            }
+            containerRef={conversationGuideSectionRef}
           >
             <AgentGuide />
           </ConfigSection>
@@ -286,6 +427,8 @@ export default function AgentConfig({
             title={t("agent.config.section.guardrail.title")}
             description={t("agent.config.section.guardrail.description")}
             icon={<ShieldCheck className="h-4 w-4 shrink-0 text-blue-500" />}
+            open={openSections.guardrail}
+            onOpenChange={(open) => handleSectionOpenChange("guardrail", open)}
             headerActions={<GuardrailConfigActions />}
           >
             <GuardrailConfigContent />

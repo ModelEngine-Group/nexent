@@ -9,13 +9,22 @@ import { useModelList } from "@/hooks/model/useModelList";
 import { canManageModels } from "@/lib/auth";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useDeployment } from "@/components/providers/deploymentProvider";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import ExpandEditModal from "./basic/ExpandEditModal";
 
 const { TextArea } = Input;
 
-export default function AgentPrompt() {
+type PromptTab = "duty" | "constraint" | "few-shots";
+
+interface AgentPromptProps {
+  focusRequest?: {
+    requestId: number;
+    promptTab: PromptTab;
+  } | null;
+}
+
+export default function AgentPrompt({ focusRequest = null }: AgentPromptProps) {
   const { t } = useTranslation("common");
   const { user } = useAuthorizationContext();
   const { llmModels } = useModelList();
@@ -24,22 +33,36 @@ export default function AgentPrompt() {
   const updateDraft = useAgentStore((state) => state.updateDraft);
   const flushDraft = useAgentStore((state) => state.flushDraft);
   const updateAgent = useAgentStore((state) => state.updateAgentConfig);
-  const defaultLlmConfig = useAgentStore(
-    (state) => state.defaultLlmConfig
+  const agentId = useAgentStore((state) => state.agentId);
+  const defaultLlmConfig = useAgentStore((state) => state.defaultLlmConfig);
+
+  const [expandedPrompt, setExpandedPrompt] = useState<PromptTab | null>(null);
+  const [activePromptTab, setActivePromptTab] = useState<PromptTab>("duty");
+  const requestedPromptTab = focusRequest?.promptTab;
+  const focusRequestId = focusRequest?.requestId;
+
+  useEffect(() => {
+    setActivePromptTab("duty");
+  }, [agentId]);
+
+  useEffect(() => {
+    if (requestedPromptTab) setActivePromptTab(requestedPromptTab);
+  }, [focusRequestId, requestedPromptTab]);
+
+  const handlePromptTabChange = useCallback(
+    (value: string) => {
+      flushDraft();
+      if (value === "duty" || value === "constraint" || value === "few-shots") {
+        setActivePromptTab(value);
+      }
+    },
+    [flushDraft]
   );
 
-  const [expandedPrompt, setExpandedPrompt] = useState<
-    "duty" | "constraint" | "few-shots" | null
-  >(null);
-
-  const handlePromptTabChange = useCallback(() => {
-    flushDraft();
-  }, [flushDraft]);
-
   const modelOptions = useMemo(() => {
-    return (llmModels ?? []).map((m: any) => ({
+    return (llmModels ?? []).map((m) => ({
       value: m.id,
-      label: m.display_name ?? m.name,
+      label: m.displayName ?? m.name,
       model_name: m.name,
     }));
   }, [llmModels]);
@@ -64,9 +87,7 @@ export default function AgentPrompt() {
     },
   };
 
-  const renderExpandButton = (
-    prompt: "duty" | "constraint" | "few-shots"
-  ) => (
+  const renderExpandButton = (prompt: PromptTab) => (
     <Tooltip title={t("systemPrompt.button.expand")}>
       <Button
         type="text"
@@ -134,7 +155,7 @@ export default function AgentPrompt() {
       </Row>
 
       <Tabs
-        defaultValue="duty"
+        value={activePromptTab}
         onValueChange={handlePromptTabChange}
         className="w-full"
       >
@@ -155,7 +176,12 @@ export default function AgentPrompt() {
                 placeholder={t("agent.field.dutyPromptPlaceholder")}
                 rows={6}
                 value={editedAgent.duty_prompt}
-                style={{ paddingTop: 8, paddingBottom: 8, paddingLeft: 12, paddingRight: 20 }}
+                style={{
+                  paddingTop: 8,
+                  paddingBottom: 8,
+                  paddingLeft: 12,
+                  paddingRight: 20,
+                }}
                 onChange={(event) =>
                   updateDraft({ duty_prompt: event.target.value })
                 }
@@ -174,7 +200,12 @@ export default function AgentPrompt() {
                 placeholder={t("agent.field.constraintPromptPlaceholder")}
                 rows={6}
                 value={editedAgent.constraint_prompt}
-                style={{ paddingTop: 8, paddingBottom: 8, paddingLeft: 12, paddingRight: 20 }}
+                style={{
+                  paddingTop: 8,
+                  paddingBottom: 8,
+                  paddingLeft: 12,
+                  paddingRight: 20,
+                }}
                 onChange={(event) =>
                   updateDraft({ constraint_prompt: event.target.value })
                 }
@@ -193,7 +224,12 @@ export default function AgentPrompt() {
                 placeholder={t("agent.field.fewShotsPromptPlaceholder")}
                 rows={6}
                 value={editedAgent.few_shots_prompt}
-                style={{ paddingTop: 8, paddingBottom: 8, paddingLeft: 12, paddingRight: 20 }}
+                style={{
+                  paddingTop: 8,
+                  paddingBottom: 8,
+                  paddingLeft: 12,
+                  paddingRight: 20,
+                }}
                 onChange={(event) =>
                   updateDraft({ few_shots_prompt: event.target.value })
                 }
@@ -212,7 +248,9 @@ export default function AgentPrompt() {
           title={expandedPromptConfig[expandedPrompt].title}
           content={expandedPromptConfig[expandedPrompt].content}
           onClose={() => setExpandedPrompt(null)}
-          onSave={(content) => expandedPromptConfig[expandedPrompt].save(content)}
+          onSave={(content) =>
+            expandedPromptConfig[expandedPrompt].save(content)
+          }
         />
       )}
     </div>
