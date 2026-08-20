@@ -1136,7 +1136,7 @@ class ElasticSearchCore(VectorDatabaseCore):
         query_text: str,
         embedding_model: BaseEmbedding,
         top_k: int = 5,
-        weight_accurate: float = 0.3,
+        weight_accurate: Optional[float] = None,
         filter: Optional[Any] = None,
     ) -> List[Dict[str, Any]]:
         """
@@ -1147,7 +1147,10 @@ class ElasticSearchCore(VectorDatabaseCore):
             query_text: The text query to search for
             embedding_model: The embedding model to use
             top_k: Number of results to return
-            weight_accurate: The weight of the accurate matching score (0-1), the semantic search weight is 1-weight_accurate
+            weight_accurate: The weight of the accurate matching score (0-1),
+                with semantic weight ``1 - weight_accurate``. When omitted,
+                queries containing digits prefer accurate matching (0.7);
+                all other queries retain the SDK default (0.3).
             filter: Optional Elasticsearch filter clause applied to both the
                 accurate and semantic sub-queries. When ``None`` (the default),
                 no extra filter is applied and legacy behaviour is preserved.
@@ -1155,6 +1158,14 @@ class ElasticSearchCore(VectorDatabaseCore):
         Returns:
             List of search results sorted by combined score
         """
+        if weight_accurate is None:
+            # Identifiers such as alert numbers and IPs are poorly served by a
+            # semantic-heavy ranking. Keep the existing retrieval requests and
+            # only adjust their fusion weight when no caller preference exists.
+            weight_accurate = (
+                0.7 if any(char.isdigit() for char in query_text) else 0.3
+            )
+
         # Get results from both searches
         accurate_results = self.accurate_search(
             index_names, query_text, top_k=top_k, filter=filter)
