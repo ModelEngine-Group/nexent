@@ -208,6 +208,7 @@ from backend.services.conversation_management_service import (
         create_new_conversation,
         get_conversation_service,
         get_conversation_list_service,
+        get_conversation_list_metadata_service,
         rename_conversation_service,
         delete_conversation_service,
         get_conversation_history_service,
@@ -698,6 +699,21 @@ class TestConversationManagementService(unittest.TestCase):
             self.user_id,
             limit=None,
             offset=20,
+        )
+
+    @patch('backend.services.conversation_management_service.get_conversation_list_metadata')
+    def test_get_conversation_list_metadata_service(self, mock_get_metadata):
+        mock_get_metadata.return_value = {
+            "total": 30, "today": 3, "last_7_days": 7, "older": 20
+        }
+
+        result = get_conversation_list_metadata_service(
+            self.user_id, today_start_ms=2000, week_start_ms=1000
+        )
+
+        self.assertEqual(result["total"], 30)
+        mock_get_metadata.assert_called_once_with(
+            self.user_id, today_start_ms=2000, week_start_ms=1000
         )
 
     @patch('backend.services.conversation_management_service.get_conversation')
@@ -1724,8 +1740,8 @@ class TestGetSourcesServiceEdgeCases(unittest.TestCase):
         self.assertEqual(search_item["message_id"], 1)
 
     @patch('backend.services.conversation_management_service.get_conversation')
-    @patch('backend.services.conversation_management_service.get_source_searches_by_message')
-    @patch('backend.services.conversation_management_service.get_source_images_by_message')
+    @patch('backend.services.conversation_management_service.get_source_searches_by_conversation')
+    @patch('backend.services.conversation_management_service.get_source_images_by_conversation')
     def test_no_message_id_uses_conversation_id(self, mock_get_images, mock_get_searches, mock_get_conv):
         """When message_id is None but conversation_id is provided."""
         mock_get_conv.return_value = {"conversation_id": 123}

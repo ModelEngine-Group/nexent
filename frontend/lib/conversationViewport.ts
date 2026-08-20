@@ -77,15 +77,34 @@ export const getConversationDateBoundaries = (): {
 export class ConversationViewportCoordinator {
   private metadata: ConversationListMetadata | null = null;
   private initialLimit: number | null = null;
+  private listeners = new Set<() => void>();
+
+  private notify(): void {
+    this.listeners.forEach((listener) => listener());
+  }
 
   setMetadata(metadata: ConversationListMetadata): void {
     this.metadata = metadata;
     this.initialLimit = null;
+    this.notify();
+  }
+
+  reset(): void {
+    this.metadata = null;
+    this.initialLimit = null;
+    this.notify();
   }
 
   getMetadata(): ConversationListMetadata | null {
     return this.metadata;
   }
+
+  getSnapshot = (): ConversationListMetadata | null => this.metadata;
+
+  subscribe = (listener: () => void): (() => void) => {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  };
 
   resolveInitialLimit(limit: number): void {
     this.initialLimit = Math.max(1, Math.ceil(limit));

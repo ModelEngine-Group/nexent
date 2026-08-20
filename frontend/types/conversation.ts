@@ -17,6 +17,19 @@ export interface ConversationListResponse {
   message: string;
 }
 
+export interface ConversationListMetadata {
+  total: number;
+  today: number;
+  last_7_days: number;
+  older: number;
+}
+
+export interface ConversationListMetadataResponse {
+  code: number;
+  data: ConversationListMetadata;
+  message: string;
+}
+
 export interface ApiMessageItem {
   type: string;
   content: string;

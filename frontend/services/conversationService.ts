@@ -3,6 +3,8 @@ import { API_ENDPOINTS, ApiError } from "./api";
 import { chatConfig } from "@/const/chatConfig";
 import type {
   ConversationListResponse,
+  ConversationListMetadata,
+  ConversationListMetadataResponse,
   ConversationListItem,
   ConversationListParams,
   ApiConversationDetail,
@@ -31,6 +33,22 @@ const getWebSocketUrl = (endpoint: string): string => {
 };
 
 export const conversationService = {
+  async getListMetadata(
+    todayStartMs: number,
+    weekStartMs: number
+  ): Promise<ConversationListMetadata> {
+    const query = new URLSearchParams({
+      today_start_ms: String(todayStartMs),
+      week_start_ms: String(weekStartMs),
+    });
+    const response = await fetch(
+      `${API_ENDPOINTS.conversation.listMetadata}?${query.toString()}`
+    );
+    const data = (await response.json()) as ConversationListMetadataResponse;
+    if (data.code === 0) return data.data;
+    throw new ApiError(data.code, data.message);
+  },
+
   // Get conversation list
   async getList(
     params: ConversationListParams

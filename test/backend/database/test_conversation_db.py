@@ -202,6 +202,7 @@ from backend.database.conversation_db import (
     get_conversation_history,
     get_historical_context,
     get_conversation_list,
+    get_conversation_list_metadata,
     get_conversation_messages,
     get_last_unit_for_message,
     get_latest_assistant_message,
@@ -1087,6 +1088,38 @@ def test_get_conversation_list_applies_offset_without_limit(monkeypatch, mock_se
     stmt.limit.assert_not_called()
     stmt.offset.assert_called_once_with(20)
     session.execute.assert_called_once_with(stmt)
+
+
+def test_get_conversation_list_metadata_returns_bucket_counts(monkeypatch, mock_session_ctx):
+    session, ctx = mock_session_ctx
+
+    class ComparableTimestamp:
+        def __ge__(self, _value):
+            return MagicMock()
+
+        def __lt__(self, _value):
+            return MagicMock()
+
+    from backend.database import conversation_db
+
+    monkeypatch.setattr(
+        conversation_db.func.extract.return_value.__mul__,
+        "return_value",
+        ComparableTimestamp(),
+    )
+    session.execute.return_value.one.return_value = types.SimpleNamespace(
+        total=30,
+        today=3,
+        last_7_days=7,
+        older=20,
+    )
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    result = get_conversation_list_metadata(
+        "user-1", today_start_ms=2000, week_start_ms=1000
+    )
+
+    assert result == {"total": 30, "today": 3, "last_7_days": 7, "older": 20}
 
 
 def test_update_conversation_agent_id_success(monkeypatch, mock_session_ctx):

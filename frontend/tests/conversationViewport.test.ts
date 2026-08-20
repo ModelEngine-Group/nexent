@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   calculateConversationViewport,
+  ConversationViewportCoordinator,
   // @ts-ignore -- Node requires the extension for this standalone test.
 } from "../lib/conversationViewport.ts";
 
@@ -29,4 +30,29 @@ test("falls back to 20 when DOM measurements are invalid", () => {
     }).initialLimit,
     20
   );
+});
+
+test("publishes metadata and consumes the dynamic first-page limit once", () => {
+  const coordinator = new ConversationViewportCoordinator();
+  let notifications = 0;
+  const unsubscribe = coordinator.subscribe(() => {
+    notifications += 1;
+  });
+
+  coordinator.setMetadata({
+    total: 35,
+    today: 5,
+    last_7_days: 10,
+    older: 20,
+  });
+  coordinator.resolveInitialLimit(29);
+
+  assert.equal(notifications, 1);
+  assert.equal(coordinator.getSnapshot()?.total, 35);
+  assert.equal(coordinator.takePageLimit(), 29);
+  assert.equal(coordinator.takePageLimit(), 20);
+  coordinator.reset();
+  assert.equal(coordinator.getSnapshot(), null);
+  assert.equal(notifications, 2);
+  unsubscribe();
 });

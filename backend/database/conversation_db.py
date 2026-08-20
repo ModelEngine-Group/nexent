@@ -568,6 +568,35 @@ def get_conversation_list(
         return result
 
 
+def get_conversation_list_metadata(
+    user_id: str,
+    today_start_ms: int,
+    week_start_ms: int,
+) -> Dict[str, int]:
+    """Return conversation counts for the browser's recency buckets."""
+    with get_db_session() as session:
+        created_ms = func.extract('epoch', ConversationRecord.create_time) * 1000
+        stmt = select(
+            func.count().label('total'),
+            func.count().filter(created_ms >= today_start_ms).label('today'),
+            func.count().filter(
+                created_ms < today_start_ms,
+                created_ms >= week_start_ms,
+            ).label('last_7_days'),
+            func.count().filter(created_ms < week_start_ms).label('older'),
+        ).where(
+            ConversationRecord.delete_flag == 'N',
+            ConversationRecord.created_by == user_id,
+        )
+        row = session.execute(stmt).one()
+        return {
+            'total': int(row.total or 0),
+            'today': int(row.today or 0),
+            'last_7_days': int(row.last_7_days or 0),
+            'older': int(row.older or 0),
+        }
+
+
 def update_conversation_agent_id(conversation_id: int, agent_id: int, user_id: Optional[str] = None) -> bool:
     """
     Update the agent associated with a conversation.

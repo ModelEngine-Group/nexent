@@ -30,6 +30,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type RefObject,
 } from "react";
 import { useTranslation } from "react-i18next";
@@ -39,6 +40,10 @@ import {
   isConversationListNearBottom,
   shouldLoadNextConversationPage,
 } from "@/lib/conversationLoadPolicy";
+import {
+  calculateConversationViewport,
+  newChatConversationViewport,
+} from "@/lib/conversationViewport";
 
 // Conversation status indicator component
 const ConversationStatusIndicator: FC<{
@@ -80,13 +85,83 @@ export const ThreadList: FC<ThreadListProps> = ({
   const { t } = useTranslation();
   const aui = useAui();
   const hasMore = useAuiState((s) => s.threads.hasMore);
+  const threadCount = useAuiState((s) => s.threads.threadIds.length);
+  const conversationMetadata = useSyncExternalStore(
+    newChatConversationViewport.subscribe,
+    newChatConversationViewport.getSnapshot,
+    newChatConversationViewport.getSnapshot
+  );
   const isLoadingRef = useRef(false);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const measurementRowRef = useRef<HTMLDivElement>(null);
+  const measurementHeaderRef = useRef<HTMLDivElement>(null);
   const touchStartYRef = useRef<number | null>(null);
   const pointerIntentRef = useRef(false);
   const previousScrollTopRef = useRef(0);
+  const [totalVirtualHeight, setTotalVirtualHeight] = useState(0);
+  const [rowHeight, setRowHeight] = useState(36);
+  const [headerHeight, setHeaderHeight] = useState(32);
+  const [renderedHeaderCount, setRenderedHeaderCount] = useState(0);
 
   // Placeholder for completed set - currently not used since status only has completed/running
   const completedConversations = useMemo(() => new Set<string>(), []);
+
+  useEffect(() => {
+    if (
+      !conversationMetadata ||
+      conversationMetadata.total <= 0 ||
+      threadCount > 0 ||
+      isLoadingRef.current
+    )
+      return;
+    let cancelled = false;
+    void document.fonts.ready.then(() => {
+      requestAnimationFrame(() => {
+        if (cancelled) return;
+        const container = scrollContainerRef.current;
+        const measuredRow = measurementRowRef.current;
+        const measuredHeader = measurementHeaderRef.current;
+        if (!container || !measuredRow || !measuredHeader) return;
+        const nextRowHeight = measuredRow.getBoundingClientRect().height;
+        const nextHeaderHeight = measuredHeader.getBoundingClientRect().height;
+        const viewport = calculateConversationViewport({
+          containerHeight: container.clientHeight,
+          rowHeight: nextRowHeight,
+          groupHeaderHeight: nextHeaderHeight,
+          contentPadding: 16,
+          groupCounts: [
+            conversationMetadata.today,
+            conversationMetadata.last_7_days,
+            conversationMetadata.older,
+          ],
+        });
+        setRowHeight(nextRowHeight);
+        setHeaderHeight(nextHeaderHeight);
+        setTotalVirtualHeight(viewport.totalHeight);
+        newChatConversationViewport.resolveInitialLimit(viewport.initialLimit);
+        isLoadingRef.current = true;
+        void aui.threads
+          .loadMore()
+          .catch((error) =>
+            log.error("Failed to load initial conversations", error)
+          )
+          .finally(() => {
+            isLoadingRef.current = false;
+          });
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [aui, conversationMetadata, scrollContainerRef, threadCount]);
+
+  useEffect(() => {
+    setRenderedHeaderCount(
+      contentRef.current?.querySelectorAll(
+        '[data-slot="aui_thread-list-group-label"]'
+      ).length ?? 0
+    );
+  }, [threadCount]);
 
   useEffect(() => {
     const container = scrollContainerRef.current;
@@ -98,7 +173,7 @@ export const ThreadList: FC<ThreadListProps> = ({
           hasMore,
           isLoading: isLoadingRef.current,
           isNearBottom: isConversationListNearBottom(
-            container.scrollHeight,
+            contentRef.current?.scrollHeight ?? container.scrollHeight,
             container.scrollTop,
             container.clientHeight
           ),
@@ -165,19 +240,59 @@ export const ThreadList: FC<ThreadListProps> = ({
   }, [aui, hasMore, scrollContainerRef]);
 
   return (
-    <div className="contents p-2">
-      <AuiIf condition={(s) => s.threads.isLoading}>
-        <ThreadListSkeleton />
-      </AuiIf>
-      <AuiIf condition={(s) => !s.threads.isLoading && s.threads.threadIds.length === 0}>
-        <ThreadListEmpty />
-      </AuiIf>
-      <AuiIf condition={(s) => !s.threads.isLoading && s.threads.threadIds.length > 0}>
-        <ThreadListItems
-          completedConversations={completedConversations}
-          generatedTitles={generatedTitles}
-        />
-      </AuiIf>
+    <div className="flex flex-col p-2">
+      <div
+        aria-hidden="true"
+        className="fixed invisible pointer-events-none -z-10"
+      >
+        <div
+          ref={measurementRowRef}
+          className="flex h-9 items-center rounded-lg px-3 text-sm"
+        >
+          Conversation
+        </div>
+        <div
+          ref={measurementHeaderRef}
+          className="px-3 pt-3 pb-1 text-xs font-medium"
+        >
+          {t("chat.threadList.today")}
+        </div>
+      </div>
+      <div ref={contentRef} className="flex flex-col">
+        <AuiIf condition={(s) => s.threads.isLoading}>
+          <ThreadListSkeleton />
+        </AuiIf>
+        <AuiIf
+          condition={(s) =>
+            !s.threads.isLoading && s.threads.threadIds.length === 0
+          }
+        >
+          <ThreadListEmpty />
+        </AuiIf>
+        <AuiIf
+          condition={(s) =>
+            !s.threads.isLoading && s.threads.threadIds.length > 0
+          }
+        >
+          <ThreadListItems
+            completedConversations={completedConversations}
+            generatedTitles={generatedTitles}
+          />
+        </AuiIf>
+      </div>
+      <div
+        aria-hidden="true"
+        className="shrink-0 w-full"
+        style={{
+          height: Math.max(
+            0,
+            totalVirtualHeight -
+              threadCount * rowHeight -
+              renderedHeaderCount * headerHeight -
+              16
+          ),
+        }}
+      />
     </div>
   );
 };

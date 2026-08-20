@@ -1,17 +1,21 @@
 import type React from "react";
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type {
   InfiniteData,
   UseInfiniteQueryResult,
 } from "@tanstack/react-query";
-import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   CONVERSATION_PAGE_SIZE,
   conversationService,
 } from "@/services/conversationService";
-import { ConversationListItem } from "@/types/conversation";
+import {
+  ConversationListItem,
+  ConversationListMetadata,
+} from "@/types/conversation";
 import log from "@/lib/logger";
+import { getConversationDateBoundaries } from "@/lib/conversationViewport";
 
 const CONVERSATION_LIST_QUERY_KEY = ["conversations", "legacy-chat"] as const;
 type ConversationListData = InfiniteData<ConversationListItem[], number>;
@@ -31,6 +35,8 @@ export interface ConversationManagement {
   invalidateConversationList: () => void;
   hasNextPage: boolean;
   fetchNextPage: () => Promise<void>;
+  conversationMetadata?: ConversationListMetadata;
+  resolveInitialPageSize: (limit: number) => void;
   prependConversation: (
     conversationId: number,
     title: string,
@@ -56,28 +62,52 @@ export interface ConversationManagement {
 export const useConversationManagement = (): ConversationManagement => {
   const { t } = useTranslation("common");
   const queryClient = useQueryClient();
+  const [dateBoundaries] = useState(getConversationDateBoundaries);
+  const [initialPageSize, setInitialPageSize] = useState<number | null>(null);
+  const resolveInitialPageSize = useCallback(
+    (limit: number) => setInitialPageSize(limit),
+    []
+  );
+  const conversationListQueryKey = useMemo(
+    () => [...CONVERSATION_LIST_QUERY_KEY, initialPageSize] as const,
+    [initialPageSize]
+  );
+  const metadataQuery = useQuery({
+    queryKey: ["conversation-list-metadata", dateBoundaries],
+    queryFn: () =>
+      conversationService.getListMetadata(
+        dateBoundaries.todayStartMs,
+        dateBoundaries.weekStartMs
+      ),
+    staleTime: 30_000,
+    gcTime: 0,
+  });
 
   const conversationListQuery = useInfiniteQuery<
     ConversationListItem[],
     Error,
     ConversationListData,
-    typeof CONVERSATION_LIST_QUERY_KEY,
+    typeof conversationListQueryKey,
     number
   >({
-    queryKey: CONVERSATION_LIST_QUERY_KEY,
+    queryKey: conversationListQueryKey,
     queryFn: async ({ pageParam }): Promise<ConversationListItem[]> => {
       const dialogHistory = await conversationService.getList({
         offset: pageParam,
-        limit: CONVERSATION_PAGE_SIZE,
+        limit: pageParam === 0 ? initialPageSize! : CONVERSATION_PAGE_SIZE,
       });
       dialogHistory.sort((a, b) => b.create_time - a.create_time);
       return dialogHistory;
     },
     initialPageParam: 0,
-    getNextPageParam: (lastPage, _allPages, lastPageParam) =>
-      lastPage.length >= CONVERSATION_PAGE_SIZE
-        ? lastPageParam + CONVERSATION_PAGE_SIZE
-        : undefined,
+    getNextPageParam: (_lastPage, allPages) => {
+      const loaded = allPages.reduce((count, page) => count + page.length, 0);
+      return loaded < (metadataQuery.data?.total ?? 0) ? loaded : undefined;
+    },
+    enabled:
+      initialPageSize !== null &&
+      metadataQuery.isSuccess &&
+      (metadataQuery.data?.total ?? 0) > 0,
     staleTime: 30_000,
     gcTime: 0,
   });
@@ -91,6 +121,7 @@ export const useConversationManagement = (): ConversationManagement => {
   );
 
   const fetchConversationList = async (): Promise<ConversationListItem[]> => {
+    await metadataQuery.refetch();
     const result = await conversationListQuery.refetch();
     if (result.error) {
       log.error(t("chatInterface.errorFetchingConversationList"), result.error);
@@ -105,8 +136,12 @@ export const useConversationManagement = (): ConversationManagement => {
     );
   };
 
-  const invalidateConversationList = () =>
-    queryClient.invalidateQueries({ queryKey: CONVERSATION_LIST_QUERY_KEY });
+  const invalidateConversationList = () => {
+    void queryClient.invalidateQueries({
+      queryKey: ["conversation-list-metadata"],
+    });
+    void queryClient.invalidateQueries({ queryKey: CONVERSATION_LIST_QUERY_KEY });
+  };
 
   const fetchNextPage = async (): Promise<void> => {
     const result = await conversationListQuery.fetchNextPage();
@@ -141,7 +176,7 @@ export const useConversationManagement = (): ConversationManagement => {
   const prependConversation = useCallback(
     (conversationId: number, title: string, agentId?: number | null) => {
       queryClient.setQueryData<ConversationListData>(
-        CONVERSATION_LIST_QUERY_KEY,
+        conversationListQueryKey,
         (prev) => {
           const existing = prev?.pages.flat() ?? [];
           // Avoid duplicates if the backend has already populated it.
@@ -169,13 +204,13 @@ export const useConversationManagement = (): ConversationManagement => {
         }
       );
     },
-    [queryClient]
+    [conversationListQueryKey, queryClient]
   );
 
   const updateConversationAgentId = useCallback(
     (conversationId: number, agentId: number | null) => {
       queryClient.setQueryData<ConversationListData>(
-        CONVERSATION_LIST_QUERY_KEY,
+        conversationListQueryKey,
         (prev) => {
           if (!prev) {
             return prev;
@@ -193,7 +228,7 @@ export const useConversationManagement = (): ConversationManagement => {
         }
       );
     },
-    [queryClient]
+    [conversationListQueryKey, queryClient]
   );
 
   // Handle conversation selection
@@ -255,6 +290,8 @@ export const useConversationManagement = (): ConversationManagement => {
     invalidateConversationList,
     hasNextPage: conversationListQuery.hasNextPage,
     fetchNextPage,
+    conversationMetadata: metadataQuery.data,
+    resolveInitialPageSize,
     prependConversation,
     updateConversationAgentId,
     handleNewConversation,

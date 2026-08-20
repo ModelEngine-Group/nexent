@@ -21,6 +21,7 @@ from database.conversation_db import (
     get_conversation_history,
     get_historical_context,
     get_conversation_list,
+    get_conversation_list_metadata,
     get_latest_assistant_message,  # noqa: F401 - service boundary re-export
     get_latest_assistant_message_id,
     get_latest_user_message_id,
@@ -407,6 +408,19 @@ def get_conversation_list_service(
     except Exception as e:
         logging.error(f"Failed to get conversation list: {str(e)}")
         raise Exception(str(e))
+
+
+def get_conversation_list_metadata_service(
+    user_id: str,
+    today_start_ms: int,
+    week_start_ms: int,
+) -> Dict[str, int]:
+    """Get total and date-group counts without loading conversation rows."""
+    return get_conversation_list_metadata(
+        user_id,
+        today_start_ms=today_start_ms,
+        week_start_ms=week_start_ms,
+    )
 
 
 def get_conversation_service(

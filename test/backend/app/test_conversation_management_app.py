@@ -41,6 +41,7 @@ patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 from backend.apps.conversation_management_app import (
     create_new_conversation_endpoint,
     list_conversations_endpoint,
+    conversation_list_metadata_endpoint,
     rename_conversation_endpoint,
     delete_conversation_endpoint,
     get_conversation_history_endpoint,
@@ -211,6 +212,26 @@ async def test_list_conversations_forwards_offset_without_limit(conversation_moc
     assert result.data == []
     conversation_mocks['get_conversation_list'].assert_called_once_with(
         "user_id", limit=None, offset=20)
+
+
+@pytest.mark.asyncio
+async def test_conversation_list_metadata_endpoint(conversation_mocks):
+    conversation_mocks['get_current_user_id'].return_value = ("user_id", "tenant_id")
+    expected = {"total": 30, "today": 3, "last_7_days": 7, "older": 20}
+    with patch(
+        'backend.apps.conversation_management_app.get_conversation_list_metadata_service',
+        return_value=expected,
+    ) as metadata_service:
+        result = await conversation_list_metadata_endpoint(
+            today_start_ms=2000,
+            week_start_ms=1000,
+            authorization="Bearer test-token",
+        )
+
+    assert result.data == expected
+    metadata_service.assert_called_once_with(
+        "user_id", today_start_ms=2000, week_start_ms=1000
+    )
 
 
 @pytest.mark.parametrize("query", ["offset=-1", "limit=0", "limit=101"])

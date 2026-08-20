@@ -32,6 +32,7 @@ import {
   isConversationListNearBottom,
   shouldLoadNextConversationPage,
 } from "@/lib/conversationLoadPolicy";
+import { calculateConversationViewport } from "@/lib/conversationViewport";
 
 // conversation status indicator component
 const ConversationStatusIndicator = ({
@@ -127,10 +128,19 @@ export function ChatSidebar({
   const [openDropdownId, setOpenDropdownId] = useState<number | null>(null);
   const isLoadingNextPageRef = useRef(false);
   const conversationListRef = useRef<HTMLDivElement>(null);
+  const conversationContentRef = useRef<HTMLDivElement>(null);
+  const measurementRowRef = useRef<HTMLDivElement>(null);
+  const measurementSecondRowRef = useRef<HTMLDivElement>(null);
+  const measurementHeaderRef = useRef<HTMLParagraphElement>(null);
   const fetchNextPageRef = useRef(conversationManagement.fetchNextPage);
   const touchStartYRef = useRef<number | null>(null);
   const pointerIntentRef = useRef(false);
   const previousScrollTopRef = useRef(0);
+  const [totalVirtualHeight, setTotalVirtualHeight] = useState(0);
+  const [rowHeight, setRowHeight] = useState(40);
+  const [headerHeight, setHeaderHeight] = useState(28);
+  const conversationMetadata = conversationManagement.conversationMetadata;
+  const resolveInitialPageSize = conversationManagement.resolveInitialPageSize;
 
   // Memoize conversation categorization to avoid redundant work on unrelated state changes
   const { today, week, older } = useMemo(
@@ -144,6 +154,42 @@ export function ChatSidebar({
     fetchNextPageRef.current = conversationManagement.fetchNextPage;
   }, [conversationManagement.fetchNextPage]);
 
+  useEffect(() => {
+    const metadata = conversationMetadata;
+    if (!metadata || collapsed) return;
+    let cancelled = false;
+    void document.fonts.ready.then(() => {
+      requestAnimationFrame(() => {
+        if (cancelled) return;
+        const container = conversationListRef.current;
+        const measuredRow = measurementRowRef.current;
+        const measuredSecondRow = measurementSecondRowRef.current;
+        const measuredHeader = measurementHeaderRef.current;
+        if (!container || !measuredRow || !measuredSecondRow || !measuredHeader)
+          return;
+        const nextRowHeight =
+          measuredSecondRow.getBoundingClientRect().top -
+          measuredRow.getBoundingClientRect().top;
+        const nextHeaderHeight = measuredHeader.getBoundingClientRect().height;
+        const viewport = calculateConversationViewport({
+          containerHeight: container.clientHeight,
+          rowHeight: nextRowHeight,
+          groupHeaderHeight: nextHeaderHeight,
+          groupGap: 16,
+          contentPadding: 16,
+          groupCounts: [metadata.today, metadata.last_7_days, metadata.older],
+        });
+        setRowHeight(nextRowHeight);
+        setHeaderHeight(nextHeaderHeight);
+        setTotalVirtualHeight(viewport.totalHeight);
+        resolveInitialPageSize(viewport.initialLimit);
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [collapsed, conversationMetadata, resolveInitialPageSize]);
+
   const requestNextPage = (hasDownwardUserIntent: boolean) => {
     const container = conversationListRef.current;
     if (
@@ -152,7 +198,7 @@ export function ChatSidebar({
         hasMore: conversationManagement.hasNextPage,
         isLoading: isLoadingNextPageRef.current,
         isNearBottom: isConversationListNearBottom(
-          container.scrollHeight,
+          conversationContentRef.current?.scrollHeight ?? container.scrollHeight,
           container.scrollTop,
           container.clientHeight
         ),
@@ -574,7 +620,32 @@ export function ChatSidebar({
                 pointerIntentRef.current = false;
               }}
             >
-              <div className="flex flex-col gap-4 pb-4">
+              <div
+                aria-hidden="true"
+                className="fixed invisible pointer-events-none -z-10"
+              >
+                <div className="space-y-1">
+                  <p
+                    ref={measurementHeaderRef}
+                    className="px-3 py-1.5 text-s font-medium tracking-wide"
+                  >
+                    {t("chatLeftSidebar.today")}
+                  </p>
+                  <div
+                    ref={measurementRowRef}
+                    className="flex items-center min-h-10 px-3 py-1"
+                  >
+                    <span className="text-base font-normal font-sans">Conversation</span>
+                  </div>
+                  <div
+                    ref={measurementSecondRowRef}
+                    className="flex items-center min-h-10 px-3 py-1"
+                  >
+                    <span className="text-base font-normal font-sans">Conversation</span>
+                  </div>
+                </div>
+              </div>
+              <div ref={conversationContentRef} className="flex flex-col gap-4 pb-4">
                 {conversationManagement.conversationList.length > 0 ? (
                   <>
                     {renderConversationList(today, t("chatLeftSidebar.today"))}
@@ -600,6 +671,23 @@ export function ChatSidebar({
                   </div>
                 )}
               </div>
+              <div
+                aria-hidden="true"
+                className="shrink-0 w-full"
+                style={{
+                  height: Math.max(
+                    0,
+                    totalVirtualHeight -
+                      conversationManagement.conversationList.length * rowHeight -
+                      [today, week, older].filter((group) => group.length > 0).length * headerHeight -
+                      Math.max(
+                        0,
+                        [today, week, older].filter((group) => group.length > 0).length - 1
+                      ) * 16 -
+                      16
+                  ),
+                }}
+              />
             </div>
           </div>
 

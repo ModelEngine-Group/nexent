@@ -20,6 +20,7 @@ from services.conversation_management_service import (
     generate_conversation_title_service,
     get_conversation_history_service,
     get_conversation_list_service,
+    get_conversation_list_metadata_service,
     get_sources_service,
     rename_conversation_service,
     update_conversation_knowledge_scope_service,
@@ -84,6 +85,24 @@ async def list_conversations_endpoint(
     except Exception as e:
         logging.error(f"Failed to get conversation list: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.get("/list/metadata", response_model=ConversationResponse)
+async def conversation_list_metadata_endpoint(
+    today_start_ms: Annotated[int, Query(ge=0)],
+    week_start_ms: Annotated[int, Query(ge=0)],
+    authorization: Optional[str] = Header(None),
+):
+    """Return list size and date bucket counts without conversation rows."""
+    user_id, _tenant_id = get_current_user_id(authorization)
+    if not user_id:
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Unauthorized access, Please login first")
+    metadata = get_conversation_list_metadata_service(
+        user_id,
+        today_start_ms=today_start_ms,
+        week_start_ms=week_start_ms,
+    )
+    return ConversationResponse(code=0, message="success", data=metadata)
 
 
 @router.post("/rename", response_model=ConversationResponse)
