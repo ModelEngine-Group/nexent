@@ -9,6 +9,7 @@ import re
 import shutil
 import tarfile
 import time
+import os
 from dataclasses import replace
 from pathlib import Path
 from threading import Event
