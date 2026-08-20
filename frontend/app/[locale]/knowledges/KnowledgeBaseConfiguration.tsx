@@ -27,7 +27,6 @@ import log from "@/lib/logger";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
 import knowledgeBasePollingService from "@/services/knowledgeBasePollingService";
 import { isKnowledgeBaseFileSizeValid } from "@/services/uploadService";
-import { ApiError } from "@/services/api";
 import { KnowledgeBase } from "@/types/knowledgeBase";
 import { useConfig } from "@/hooks/useConfig";
 import { useModelList } from "@/hooks/model/useModelList";
@@ -52,6 +51,12 @@ import { useUIContext, UIProvider } from "./contexts/UIStateContext";
 const EMBEDDING_MODEL_OPTION_DELIMITER = "::";
 const normalizeEmbeddingModelType = (type: string) =>
   (type || "").trim().toLowerCase();
+
+const isApiErrorCode = (error: unknown, code: string | number): boolean =>
+  typeof error === "object" &&
+  error !== null &&
+  "code" in error &&
+  String((error as { code?: unknown }).code) === String(code);
 
 const toEmbeddingModelOptionValue = (displayName: string, type: string) =>
   `${displayName}${EMBEDDING_MODEL_OPTION_DELIMITER}${type}`;
@@ -896,17 +901,21 @@ function DataConfig({ isActive }: DataConfigProps) {
       } catch (error) {
         log.error(t("knowledgeBase.error.createUpload"), error);
         message.error(
-          error instanceof ApiError && error.code === 409
+          isApiErrorCode(error, 409)
             ? t("knowledgeBase.message.nameExists", {
                 name: newKbName.trim(),
               })
-            : error instanceof ApiError &&
-                error.code === ErrorCode.TENANT_PERSONAL_KB_QUOTA_EXCEEDED
+            : isApiErrorCode(
+                  error,
+                  ErrorCode.TENANT_PERSONAL_KB_QUOTA_EXCEEDED
+                )
               ? t("quota.personalKbUploadBlocked")
-              : error instanceof ApiError &&
-                  error.code === ErrorCode.TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE
+              : isApiErrorCode(
+                    error,
+                    ErrorCode.TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE
+                  )
                 ? t(`errorCode.${ErrorCode.TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE}`)
-              : error instanceof ApiError && error.code === 413
+              : isApiErrorCode(error, 413)
                 ? t("quota.uploadBlocked")
                 : t("knowledgeBase.message.createUploadError")
         );
@@ -952,13 +961,14 @@ function DataConfig({ isActive }: DataConfigProps) {
     } catch (error) {
       log.error(t("document.error.upload"), error);
       message.error(
-        error instanceof ApiError &&
-          error.code === ErrorCode.TENANT_PERSONAL_KB_QUOTA_EXCEEDED
+        isApiErrorCode(error, ErrorCode.TENANT_PERSONAL_KB_QUOTA_EXCEEDED)
           ? t("quota.personalKbUploadBlocked")
-          : error instanceof ApiError &&
-              error.code === ErrorCode.TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE
+          : isApiErrorCode(
+                error,
+                ErrorCode.TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE
+              )
             ? t(`errorCode.${ErrorCode.TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE}`)
-          : error instanceof ApiError && error.code === 413
+          : isApiErrorCode(error, 413)
             ? t("quota.uploadBlocked")
             : t("document.message.uploadError")
       );
