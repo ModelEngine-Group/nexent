@@ -13,8 +13,6 @@ import SkillConfigModal from "./skill/SkillConfigModal";
 
 type SkillSourceKey = "official" | "custom";
 
-const OFFICIAL_SKILL_SOURCES = new Set(["official", "官方"]);
-
 const SOURCE_META: Record<
   SkillSourceKey,
   { label: string; dot: string; accentClass: string }
@@ -43,9 +41,7 @@ type PersistedSkill = Skill & {
 };
 
 function toSourceKey(source?: string): SkillSourceKey {
-  return OFFICIAL_SKILL_SOURCES.has((source || "").trim())
-    ? "official"
-    : "custom";
+  return (source || "").trim() === "official" ? "official" : "custom";
 }
 
 interface SelectedSkillManagementProps {

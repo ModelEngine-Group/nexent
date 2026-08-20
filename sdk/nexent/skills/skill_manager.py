@@ -88,6 +88,29 @@ class SkillManager:
             raise ValueError("skill_name resolves outside the tenant directory")
         return skill_dir
 
+    @staticmethod
+    def _resolve_skill_file_path(skill_dir: str, file_path: str) -> str:
+        """Resolve a relative skill file path and keep it inside ``skill_dir``."""
+        if not isinstance(file_path, str) or not file_path.strip():
+            raise ValueError("file_path must be a non-empty relative path")
+
+        normalized_path = file_path.replace("/", os.sep).replace("\\", os.sep)
+        if os.path.isabs(normalized_path):
+            raise ValueError("file_path must not be an absolute path")
+
+        skill_dir_real = os.path.realpath(skill_dir)
+        target_path = os.path.realpath(os.path.join(skill_dir_real, normalized_path))
+        try:
+            common_path = os.path.commonpath([skill_dir_real, target_path])
+        except ValueError as exc:
+            raise ValueError("file_path resolves outside the skill directory") from exc
+
+        if os.path.normcase(common_path) != os.path.normcase(skill_dir_real):
+            raise ValueError("file_path resolves outside the skill directory")
+        if os.path.normcase(target_path) == os.path.normcase(skill_dir_real):
+            raise ValueError("file_path must point to a file inside the skill directory")
+        return target_path
+
     def list_skills(self, *, tenant_id: Optional[str]) -> List[Dict[str, str]]:
         """List all available skills from local storage.
 
@@ -180,6 +203,19 @@ class SkillManager:
         content = SkillLoader.to_skill_md(skill_data)
 
         local_dir = self.resolve_skill_dir(name, tenant_id=tenant_id)
+        extra_files = skill_data.get("files") or []
+        files_to_write = []
+        for file_entry in extra_files:
+            file_path = file_entry.get("path") or file_entry.get("file_path") or ""
+            if not file_path or file_path.lower() == SKILL_FILE_NAME.lower():
+                continue
+            self._resolve_skill_file_path(local_dir, file_path)
+            files_to_write.append((
+                file_path,
+                file_entry.get("content", ""),
+                file_entry.get("encoding") or "utf-8",
+            ))
+
         os.makedirs(local_dir, exist_ok=True)
 
         # Write SKILL.md
@@ -188,19 +224,26 @@ class SkillManager:
             f.write(content)
 
         # Write additional files
-        extra_files = skill_data.get("files") or []
-        for file_entry in extra_files:
-            file_path = file_entry.get("path") or file_entry.get("file_path") or ""
-            file_content = file_entry.get("content", "")
-            if not file_path or file_path.lower() == SKILL_FILE_NAME.lower():
-                continue
-            self._write_skill_file(name, file_path, file_content, tenant_id=tenant_id)
+        for file_path, file_content, file_encoding in files_to_write:
+            self._write_skill_file(
+                name,
+                file_path,
+                file_content,
+                encoding=file_encoding,
+                tenant_id=tenant_id,
+            )
 
         logger.info(f"Saved skill '{name}' to local storage with {len(extra_files)} extra file(s)")
         return self.load_skill(name, tenant_id=tenant_id)
 
     def _write_skill_file(
-        self, skill_name: str, file_path: str, content: str, *, tenant_id: Optional[str]
+        self,
+        skill_name: str,
+        file_path: str,
+        content: str,
+        *,
+        encoding: str = "utf-8",
+        tenant_id: Optional[str],
     ) -> None:
         """Write a single file inside a skill directory.
 
@@ -212,10 +255,9 @@ class SkillManager:
         if not self.base_skills_dir:
             return
         local_dir = self.resolve_skill_dir(skill_name, tenant_id=tenant_id)
-        normalized_path = file_path.replace("/", os.sep).replace("\\", os.sep)
-        full_path = os.path.normpath(os.path.join(local_dir, normalized_path))
+        full_path = self._resolve_skill_file_path(local_dir, file_path)
         os.makedirs(os.path.dirname(full_path), exist_ok=True)
-        with open(full_path, "w", encoding="utf-8") as f:
+        with open(full_path, "w", encoding=encoding) as f:
             f.write(content)
         logger.debug(f"Wrote skill file '{skill_name}/{file_path}'")
 

@@ -2160,6 +2160,51 @@ class TestSkillManagerSaveSkillExtraFiles:
             skill_dir = os.path.join(temp.skills_dir, "dict-files-skill")
             assert os.path.exists(os.path.join(skill_dir, "data.json"))
 
+    def test_save_skill_preserves_extra_file_encoding(self):
+        """Write each additional file once using its declared encoding."""
+        with TempSkillDir() as temp:
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
+            skill_data = {
+                "name": "encoded-files-skill",
+                "description": "With encoded file",
+                "content": "# Content",
+                "files": [
+                    {
+                        "path": "references/chinese.txt",
+                        "content": "中文内容",
+                        "encoding": "utf-16",
+                    },
+                ],
+            }
+
+            manager.save_skill(skill_data, tenant_id=None)
+
+            file_path = os.path.join(
+                temp.skills_dir,
+                "encoded-files-skill",
+                "references",
+                "chinese.txt",
+            )
+            with open(file_path, "r", encoding="utf-16") as file_obj:
+                assert file_obj.read() == "中文内容"
+
+    def test_save_skill_validates_extra_files_before_writing(self):
+        """Reject an escaping extra file before creating the skill directory."""
+        with TempSkillDir() as temp:
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
+            skill_data = {
+                "name": "unsafe-skill",
+                "description": "Unsafe extra file",
+                "content": "# Content",
+                "files": [{"path": "../outside.txt", "content": "escaped"}],
+            }
+
+            with pytest.raises(ValueError, match="outside the skill directory"):
+                manager.save_skill(skill_data, tenant_id=None)
+
+            assert not os.path.exists(os.path.join(temp.skills_dir, "unsafe-skill"))
+            assert not os.path.exists(os.path.join(temp.skills_dir, "outside.txt"))
+
     def test_save_skill_skips_skill_md_in_files(self):
         """Test that SKILL.md in files list is skipped."""
         with TempSkillDir() as temp:

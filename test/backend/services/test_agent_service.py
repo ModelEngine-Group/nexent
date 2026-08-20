@@ -11695,10 +11695,10 @@ def test_format_existing_values_with_values():
 
 
 @pytest.mark.asyncio
-@patch("backend.services.agent_service.upload_fileobj")
-@patch("backend.services.agent_service.is_allowed_skill_upload_path")
-@patch("backend.services.agent_service.os.path.exists")
-@patch("backend.services.agent_service.os.path.getsize")
+@patch("utils.agent_stream_utils.upload_fileobj")
+@patch("utils.agent_stream_utils.is_allowed_skill_upload_path")
+@patch("utils.agent_stream_utils.os.path.exists")
+@patch("utils.agent_stream_utils.os.path.getsize")
 @patch("builtins.open", new_callable=MagicMock)
 async def test_process_skill_file_uploads_success(
     mock_open, mock_getsize, mock_exists, mock_allowed, mock_upload
@@ -11722,10 +11722,10 @@ async def test_process_skill_file_uploads_success(
 
 
 @pytest.mark.asyncio
-@patch("backend.services.agent_service.upload_fileobj")
-@patch("backend.services.agent_service.is_allowed_skill_upload_path")
-@patch("backend.services.agent_service.os.path.exists")
-@patch("backend.services.agent_service.os.path.getsize")
+@patch("utils.agent_stream_utils.upload_fileobj")
+@patch("utils.agent_stream_utils.is_allowed_skill_upload_path")
+@patch("utils.agent_stream_utils.os.path.exists")
+@patch("utils.agent_stream_utils.os.path.getsize")
 @patch("builtins.open", new_callable=MagicMock)
 async def test_process_skill_file_uploads_uses_structured_payloads(
     mock_open, mock_getsize, mock_exists, mock_allowed, mock_upload
@@ -11751,9 +11751,9 @@ async def test_process_skill_file_uploads_uses_structured_payloads(
 
 
 @pytest.mark.asyncio
-@patch("backend.services.agent_service.upload_fileobj")
-@patch("backend.services.agent_service.is_allowed_skill_upload_path")
-@patch("backend.services.agent_service.os.path.exists")
+@patch("utils.agent_stream_utils.upload_fileobj")
+@patch("utils.agent_stream_utils.is_allowed_skill_upload_path")
+@patch("utils.agent_stream_utils.os.path.exists")
 async def test_process_skill_file_uploads_rejected_path(mock_exists, mock_allowed, mock_upload):
     """_process_skill_file_uploads should reject unsafe paths."""
     from backend.services.agent_service import _process_skill_file_uploads
@@ -11770,9 +11770,9 @@ async def test_process_skill_file_uploads_rejected_path(mock_exists, mock_allowe
 
 
 @pytest.mark.asyncio
-@patch("backend.services.agent_service.upload_fileobj")
-@patch("backend.services.agent_service.is_allowed_skill_upload_path")
-@patch("backend.services.agent_service.os.path.exists")
+@patch("utils.agent_stream_utils.upload_fileobj")
+@patch("utils.agent_stream_utils.is_allowed_skill_upload_path")
+@patch("utils.agent_stream_utils.os.path.exists")
 async def test_process_skill_file_uploads_file_not_exists(mock_exists, mock_allowed, mock_upload):
     """_process_skill_file_uploads should skip files that don't exist."""
     from backend.services.agent_service import _process_skill_file_uploads
@@ -11789,10 +11789,10 @@ async def test_process_skill_file_uploads_file_not_exists(mock_exists, mock_allo
 
 
 @pytest.mark.asyncio
-@patch("backend.services.agent_service.upload_fileobj")
-@patch("backend.services.agent_service.is_allowed_skill_upload_path")
-@patch("backend.services.agent_service.os.path.exists")
-@patch("backend.services.agent_service.os.path.getsize")
+@patch("utils.agent_stream_utils.upload_fileobj")
+@patch("utils.agent_stream_utils.is_allowed_skill_upload_path")
+@patch("utils.agent_stream_utils.os.path.exists")
+@patch("utils.agent_stream_utils.os.path.getsize")
 @patch("builtins.open", new_callable=MagicMock)
 async def test_process_skill_file_uploads_upload_failure(
     mock_open, mock_getsize, mock_exists, mock_allowed, mock_upload
@@ -11813,10 +11813,10 @@ async def test_process_skill_file_uploads_upload_failure(
 
 
 @pytest.mark.asyncio
-@patch("backend.services.agent_service.upload_fileobj")
-@patch("backend.services.agent_service.is_allowed_skill_upload_path")
-@patch("backend.services.agent_service.os.path.exists")
-@patch("backend.services.agent_service.os.path.getsize")
+@patch("utils.agent_stream_utils.upload_fileobj")
+@patch("utils.agent_stream_utils.is_allowed_skill_upload_path")
+@patch("utils.agent_stream_utils.os.path.exists")
+@patch("utils.agent_stream_utils.os.path.getsize")
 @patch("builtins.open", new_callable=MagicMock)
 async def test_process_skill_file_uploads_exception(
     mock_open, mock_getsize, mock_exists, mock_allowed, mock_upload
@@ -11837,10 +11837,10 @@ async def test_process_skill_file_uploads_exception(
 
 
 @pytest.mark.asyncio
-@patch("backend.services.agent_service.upload_fileobj")
-@patch("backend.services.agent_service.is_allowed_skill_upload_path")
-@patch("backend.services.agent_service.os.path.exists")
-@patch("backend.services.agent_service.os.path.getsize")
+@patch("utils.agent_stream_utils.upload_fileobj")
+@patch("utils.agent_stream_utils.is_allowed_skill_upload_path")
+@patch("utils.agent_stream_utils.os.path.exists")
+@patch("utils.agent_stream_utils.os.path.getsize")
 @patch("builtins.open", new_callable=MagicMock)
 async def test_process_skill_file_uploads_uses_content_type(
     mock_open, mock_getsize, mock_exists, mock_allowed, mock_upload
@@ -11922,10 +11922,10 @@ def test_insert_related_agent_impl_returns_response():
 
 
 @pytest.mark.asyncio
-@patch("backend.services.agent_service.upload_fileobj")
-@patch("backend.services.agent_service.is_allowed_skill_upload_path")
-@patch("backend.services.agent_service.os.path.exists")
-@patch("backend.services.agent_service.os.path.getsize")
+@patch("utils.agent_stream_utils.upload_fileobj")
+@patch("utils.agent_stream_utils.is_allowed_skill_upload_path")
+@patch("utils.agent_stream_utils.os.path.exists")
+@patch("utils.agent_stream_utils.os.path.getsize")
 @patch("builtins.open", new_callable=MagicMock)
 async def test_process_skill_file_uploads_empty_filename_uses_basename(
     mock_open, mock_getsize, mock_exists, mock_allowed, mock_upload
@@ -12542,7 +12542,7 @@ def test_transform_skill_files_missing_url_fields():
 
 
 @pytest.mark.asyncio
-@patch("backend.services.agent_service.is_allowed_skill_upload_path")
+@patch("utils.agent_stream_utils.is_allowed_skill_upload_path")
 async def test_process_skill_file_uploads_empty_absolute_path(mock_allowed):
     """_process_skill_file_uploads should skip when absolute_path is empty."""
     from backend.services.agent_service import _process_skill_file_uploads
@@ -13224,7 +13224,7 @@ async def test_stream_agent_chunks_skill_file_extraction(monkeypatch, tmp_path):
         return {"success": True, "object_name": "test_obj", "url": "http://example.com/file"}
 
     monkeypatch.setattr(
-        "backend.services.agent_service.upload_fileobj",
+        "utils.agent_stream_utils.upload_fileobj",
         fake_upload,
         raising=False,
     )
@@ -13234,7 +13234,7 @@ async def test_stream_agent_chunks_skill_file_extraction(monkeypatch, tmp_path):
         return True
 
     monkeypatch.setattr(
-        "backend.services.agent_service.is_allowed_skill_upload_path",
+        "utils.agent_stream_utils.is_allowed_skill_upload_path",
         fake_is_allowed,
         raising=False,
     )

@@ -411,6 +411,27 @@ def create_test_service(tenant_id="test-tenant"):
 
 # ===== Helper Functions Tests =====
 class TestSkillGroupPermissions:
+    def test_official_skill_is_visible_to_all_tenant_users(self):
+        official_skill = {
+            "source": "official",
+            "created_by": "another-user",
+            "group_ids": [],
+            "ingroup_permission": "PRIVATE",
+        }
+
+        assert skill_service.can_view_skill(
+            skill=official_skill,
+            user_id="user-1",
+            user_role="USER",
+            user_group_ids=set(),
+        ) is True
+        assert skill_service.can_view_skill(
+            skill=official_skill,
+            user_id="dev-1",
+            user_role="DEV",
+            user_group_ids=set(),
+        ) is True
+
     def test_group_permission_helpers_handle_edit_read_only_and_private(self):
         group_skill = {
             "created_by": "creator",

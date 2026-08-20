@@ -21,6 +21,7 @@ from services.asset_owner_visibility import can_view_skill
 from services.nl2skill_service import create_nl2skill_stream
 from services.skill_service import (
     SkillService,
+    UnsupportedSkillFilePreview,
     get_official_skills_with_status,
     install_skills_from_zip_for_tenant,
     update_skill_list,
@@ -312,13 +313,19 @@ async def get_skill_file_content(
         if content is None:
             raise HTTPException(
                 status_code=404, detail=f"File not found: {file_path}")
-        return JSONResponse(content={"content": content})
+        return JSONResponse(content={
+            "status": "readable",
+            "content": str(content),
+            "encoding": getattr(content, "encoding", "utf-8"),
+        })
     except HTTPException:
         raise
     except UnauthorizedError as e:
         raise HTTPException(status_code=401, detail=str(e))
     except ForbiddenError as e:
         raise HTTPException(status_code=403, detail=str(e))
+    except UnsupportedSkillFilePreview as e:
+        raise HTTPException(status_code=415, detail=str(e))
     except SkillException as e:
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:

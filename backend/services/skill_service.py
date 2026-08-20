@@ -14,6 +14,7 @@ import re
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import yaml
+from charset_normalizer import from_bytes
 
 from nexent.skills import SkillManager
 from nexent.skills.skill_loader import SkillLoader
@@ -37,6 +38,152 @@ _SKILL_UPDATE_FORBIDDEN_MESSAGE = "Not authorized to update this skill"
 _SKILL_ACCESS_UPDATE_FORBIDDEN_MESSAGE = "Not authorized to update skill access"
 
 _skill_manager: Optional[SkillManager] = None
+
+_UNSUPPORTED_PREVIEW_DIRECTORIES = frozenset({
+    "__macosx",
+    "__pycache__",
+    ".git",
+    ".svn",
+    ".hg",
+})
+_UNSUPPORTED_PREVIEW_EXTENSIONS = frozenset({
+    ".7z", ".a", ".avi", ".bin", ".bmp", ".class", ".dll", ".dylib",
+    ".eot", ".exe", ".gif", ".gz", ".ico", ".jar", ".jpeg", ".jpg",
+    ".mov", ".mp3", ".mp4", ".o", ".obj", ".otf", ".pdf", ".png",
+    ".pyc", ".pyo", ".so", ".tar", ".ttf", ".wav", ".webm", ".webp",
+    ".woff", ".woff2", ".xls", ".xlsx", ".zip",
+})
+_TEXT_PREVIEW_EXTENSIONS = frozenset({
+    "", ".bash", ".c", ".cc", ".cfg", ".conf", ".cpp", ".css", ".csv",
+    ".dockerfile", ".env", ".go", ".h", ".hpp", ".html", ".ini", ".java",
+    ".js", ".json", ".jsx", ".log", ".md", ".mdx", ".php", ".properties",
+    ".py", ".rb", ".rs", ".rst", ".sh", ".sql", ".svg", ".toml", ".ts",
+    ".tsx", ".txt", ".xml", ".yaml", ".yml", ".zsh",
+})
+
+
+class UnsupportedSkillFilePreview(SkillException):
+    """Raised when a skill file is intentionally excluded from text preview."""
+
+
+class DecodedSkillFile(str):
+    """String content carrying the source character encoding."""
+
+    encoding: str
+
+    def __new__(cls, content: str, encoding: str):
+        value = super().__new__(cls, content)
+        value.encoding = encoding
+        return value
+
+
+def _decode_text_bytes(raw: bytes) -> DecodedSkillFile:
+    """Decode text bytes without silently replacing undecodable characters."""
+    if raw.startswith(b"\xef\xbb\xbf"):
+        return DecodedSkillFile(raw.decode("utf-8-sig"), "utf-8-sig")
+    if raw.startswith((b"\xff\xfe\x00\x00", b"\x00\x00\xfe\xff")):
+        return DecodedSkillFile(raw.decode("utf-32"), "utf-32")
+    if raw.startswith((b"\xff\xfe", b"\xfe\xff")):
+        return DecodedSkillFile(raw.decode("utf-16"), "utf-16")
+    if raw and raw.count(b"\x00") / len(raw) > 0.2:
+        even_nuls = raw[0::2].count(0)
+        odd_nuls = raw[1::2].count(0)
+        if odd_nuls > len(raw) / 4:
+            return DecodedSkillFile(raw.decode("utf-16-le"), "utf-16-le")
+        if even_nuls > len(raw) / 4:
+            return DecodedSkillFile(raw.decode("utf-16-be"), "utf-16-be")
+
+    try:
+        return DecodedSkillFile(raw.decode("utf-8"), "utf-8")
+    except UnicodeDecodeError:
+        pass
+
+    for encoding in ("gb18030", "big5"):
+        try:
+            decoded = raw.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+        if any("\u3400" <= char <= "\u9fff" for char in decoded):
+            return DecodedSkillFile(decoded, encoding)
+
+    match = from_bytes(raw).best()
+    if match is None or match.encoding is None or match.chaos > 0.3:
+        raise UnicodeDecodeError("unknown", raw, 0, len(raw), "Unable to detect a reliable text encoding")
+    return DecodedSkillFile(str(match), match.encoding.lower())
+
+
+def _decode_zip_member_name(info: zipfile.ZipInfo) -> str:
+    """Recover legacy ZIP member names written without the UTF-8 flag."""
+    name = info.filename
+    if info.flag_bits & 0x800 or name.isascii():
+        return name
+    try:
+        raw_name = name.encode("cp437")
+    except UnicodeEncodeError:
+        return name
+    for encoding in ("utf-8", "gb18030"):
+        try:
+            candidate = raw_name.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+        if encoding == "utf-8" or any("\u3400" <= char <= "\u9fff" for char in candidate):
+            return candidate
+    return name
+
+
+def _zip_members(zf: zipfile.ZipFile) -> List[Tuple[zipfile.ZipInfo, str]]:
+    """Return ZIP entries paired with their normalized display paths."""
+    members = [(info, _decode_zip_member_name(info)) for info in zf.infolist()]
+    seen: Dict[str, str] = {}
+    for info, decoded_name in members:
+        normalized = _normalize_zip_entry_path(decoded_name)
+        collision_key = normalized.casefold()
+        previous = seen.get(collision_key)
+        if previous is not None and previous != info.filename:
+            raise SkillException(f"ZIP entries resolve to the same path: {decoded_name}")
+        seen[collision_key] = info.filename
+    return members
+
+
+def _zip_file_list(zf: zipfile.ZipFile) -> List[str]:
+    return [decoded_name for _, decoded_name in _zip_members(zf)]
+
+
+def _read_zip_member(zf: zipfile.ZipFile, decoded_name: str) -> bytes:
+    for info, candidate in _zip_members(zf):
+        if candidate == decoded_name:
+            return zf.read(info)
+    raise KeyError(decoded_name)
+
+
+def _is_obviously_binary(raw: bytes) -> bool:
+    if not raw:
+        return False
+    if b"\x00" in raw:
+        even_nuls = raw[0::2].count(0)
+        odd_nuls = raw[1::2].count(0)
+        if max(even_nuls, odd_nuls) > len(raw) / 4:
+            return False
+        return True
+    control_count = sum(byte < 9 or 13 < byte < 32 for byte in raw)
+    return control_count / len(raw) > 0.1
+
+
+def _skill_file_preview_status(file_path: str, relative_path: str) -> str:
+    """Classify whether a local skill file may be exposed as editable text."""
+    parts = [part.casefold() for part in relative_path.replace("\\", "/").split("/")]
+    if any(part in _UNSUPPORTED_PREVIEW_DIRECTORIES for part in parts[:-1]):
+        return "unsupported"
+    extension = os.path.splitext(relative_path)[1].casefold()
+    if extension in _UNSUPPORTED_PREVIEW_EXTENSIONS:
+        return "unsupported"
+    if extension in _TEXT_PREVIEW_EXTENSIONS:
+        return "readable"
+    try:
+        with open(file_path, "rb") as file_obj:
+            return "unsupported" if _is_obviously_binary(file_obj.read(4096)) else "readable"
+    except OSError:
+        return "readable"
 
 
 def _to_group_id_set(group_ids: Any) -> set[int]:
@@ -63,6 +210,8 @@ def can_view_skill(
     user_group_ids: set[int],
 ) -> bool:
     """Return whether a skill is available to the current user."""
+    if skill.get("source") == "official":
+        return True
     if user_role in CAN_EDIT_ALL_USER_ROLES:
         return True
     if str(skill.get("created_by")) == str(user_id):
@@ -671,7 +820,7 @@ def _parse_yaml_fallback_pyyaml(text: str) -> Dict[str, Any]:
 
 def _parse_skill_params_from_config_bytes(raw: bytes) -> Dict[str, Any]:
     """Parse JSON or YAML from config/config.yaml bytes (DB upload path; scalar ``#`` tips merged when possible)."""
-    text = raw.decode("utf-8-sig").strip()
+    text = str(_decode_text_bytes(raw)).strip()
     if not text:
         return {}
     try:
@@ -712,7 +861,7 @@ def _parse_skill_schema_from_yaml_bytes(raw: bytes) -> List[Dict[str, Any]]:
     Returns a list of param dicts with name, type, required, description_en,
     description_zh, depends_on — matching frontend SkillParam interface.
     """
-    text = raw.decode("utf-8-sig").strip()
+    text = str(_decode_text_bytes(raw)).strip()
     if not text:
         logger.warning("[schema] Empty raw bytes for schema.yaml")
         return []
@@ -768,12 +917,12 @@ def _read_params_from_zip_config_yaml(
     zip_stream = io.BytesIO(zip_bytes)
     with zipfile.ZipFile(zip_stream, "r") as zf:
         member = _find_zip_member_config_yaml(
-            zf.namelist(),
+            _zip_file_list(zf),
             preferred_skill_root=preferred_skill_root,
         )
         if not member:
             return None
-        raw = zf.read(member)
+        raw = _read_zip_member(zf, member)
     params = _parse_skill_params_from_config_bytes(raw)
     logger.info("Loaded skill params from ZIP member %s", member)
     return params
@@ -809,12 +958,12 @@ def _read_schema_yaml_from_zip(
     zip_stream = io.BytesIO(zip_bytes)
     with zipfile.ZipFile(zip_stream, "r") as zf:
         member = _find_zip_member_schema_yaml(
-            zf.namelist(),
+            _zip_file_list(zf),
             preferred_skill_root=preferred_skill_root,
         )
         if not member:
             return None
-        raw = zf.read(member)
+        raw = _read_zip_member(zf, member)
     parsed = _parse_skill_schema_from_yaml_bytes(raw)
     if not parsed:
         logger.debug("[schema] Parsed result is empty from ZIP member %s", member)
@@ -842,7 +991,7 @@ def _get_skill_inputs_from_zip(
 
     try:
         with zipfile.ZipFile(zip_stream, "r") as zf:
-            file_list = zf.namelist()
+            file_list = _zip_file_list(zf)
             scripts_root = preferred_skill_root or ""
 
             for member in file_list:
@@ -857,7 +1006,7 @@ def _get_skill_inputs_from_zip(
                         continue
 
                 try:
-                    source = zf.read(member).decode("utf-8")
+                    source = _decode_text_bytes(_read_zip_member(zf, member))
                 except (OSError, UnicodeDecodeError):
                     continue
 
@@ -1322,7 +1471,7 @@ class SkillService:
         tenant_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """Create skill from SKILL.md content."""
-        content_str = content_bytes.decode("utf-8")
+        content_str = str(_decode_text_bytes(content_bytes))
 
         try:
             skill_data = SkillLoader.parse(content_str)
@@ -1393,7 +1542,7 @@ class SkillService:
 
         try:
             with zipfile.ZipFile(zip_stream, "r") as zf:
-                file_list = zf.namelist()
+                file_list = _zip_file_list(zf)
         except zipfile.BadZipFile:
             raise SkillException("Invalid ZIP archive")
 
@@ -1441,7 +1590,7 @@ class SkillService:
             raise SkillException(f"Skill '{name}' already exists")
 
         with zipfile.ZipFile(zip_stream, "r") as zf:
-            skill_content = zf.read(skill_md_path).decode("utf-8")
+            skill_content = str(_decode_text_bytes(_read_zip_member(zf, skill_md_path)))
 
         try:
             skill_data = SkillLoader.parse(skill_content)
@@ -1563,7 +1712,7 @@ class SkillService:
 
         try:
             with zipfile.ZipFile(zip_stream, "r") as zf:
-                file_list = zf.namelist()
+                file_list = _zip_file_list(zf)
         except zipfile.BadZipFile:
             raise SkillException("Invalid ZIP archive")
 
@@ -1604,7 +1753,12 @@ class SkillService:
                     # (SKILL.md is inside a folder, not at root level)
                     if needs_rename and len(parts) >= 2 and parts[0] == original_folder_name:
                         relative_path = "/".join(parts[1:])
-                    elif len(parts) >= 2 and not has_root_skill_md:
+                    elif (
+                        len(parts) >= 2
+                        and not has_root_skill_md
+                        and original_folder_name is not None
+                        and parts[0] == original_folder_name
+                    ):
                         # Strip first component (ZIP has subdirectory structure without root SKILL.md)
                         relative_path = "/".join(parts[1:])
                     else:
@@ -1622,7 +1776,7 @@ class SkillService:
 
                 extracted_count = 0
                 for file_path, local_path in validated_files:
-                    file_data = zf.read(file_path)
+                    file_data = _read_zip_member(zf, file_path)
                     os.makedirs(os.path.dirname(local_path), exist_ok=True)
                     with open(local_path, "wb") as f:
                         f.write(file_data)
@@ -1750,7 +1904,7 @@ class SkillService:
         original_folder_name = None
 
         with zipfile.ZipFile(zip_stream, "r") as zf:
-            file_list = zf.namelist()
+            file_list = _zip_file_list(zf)
 
             for file_path in file_list:
                 normalized_path = file_path.replace("\\", "/")
@@ -1763,7 +1917,7 @@ class SkillService:
 
             skill_content = None
             if skill_md_path:
-                skill_content = zf.read(skill_md_path).decode("utf-8")
+                skill_content = str(_decode_text_bytes(_read_zip_member(zf, skill_md_path)))
 
         # Reset stream position before _upload_zip_files reads it
         zip_stream.seek(0)
@@ -2232,9 +2386,27 @@ class SkillService:
         """
         try:
             effective_tenant_id = tenant_id or self.tenant_id
-            return self.skill_manager.get_skill_file_tree(
+            tree = self.skill_manager.get_skill_file_tree(
                 skill_name, tenant_id=effective_tenant_id
             )
+            if not tree:
+                return tree
+
+            local_skills_dir = self._local_skills_dir(effective_tenant_id)
+
+            def annotate(node: Dict[str, Any], parent_path: str = "") -> None:
+                is_root = not parent_path and node.get("type") == "directory" and node.get("name") == skill_name
+                relative_path = parent_path if is_root else (
+                    f"{parent_path}/{node.get('name')}" if parent_path else str(node.get("name") or "")
+                )
+                if node.get("type") == "file":
+                    full_path = _resolve_local_skill_path(local_skills_dir, skill_name, relative_path)
+                    node["preview_status"] = _skill_file_preview_status(full_path, relative_path)
+                for child in node.get("children") or []:
+                    annotate(child, relative_path)
+
+            annotate(tree)
+            return tree
         except Exception as e:
             logger.error(f"Error getting skill file tree: {e}")
             raise SkillException(f"Failed to get skill file tree: {str(e)}") from e
@@ -2244,7 +2416,7 @@ class SkillService:
         skill_name: str,
         file_path: str,
         tenant_id: Optional[str] = None
-    ) -> Optional[str]:
+    ) -> Optional[DecodedSkillFile]:
         """Get content of a specific file within a skill.
 
         Args:
@@ -2271,13 +2443,24 @@ class SkillService:
                 raise ForbiddenError("Unsafe local skill path")
 
             try:
-                with open(full_path, "r", encoding="utf-8") as f:
-                    return f.read()
+                if _skill_file_preview_status(full_path, file_path) == "unsupported":
+                    raise UnsupportedSkillFilePreview(f"Unsupported skill file preview: {file_path}")
+                with open(full_path, "rb") as f:
+                    raw = f.read()
+                if isinstance(raw, str):
+                    return DecodedSkillFile(raw, "utf-8")
+                if _is_obviously_binary(raw):
+                    raise UnsupportedSkillFilePreview(f"Unsupported skill file preview: {file_path}")
+                return _decode_text_bytes(raw)
             except FileNotFoundError:
                 logger.warning("Skill file not found: %s/%s", skill_name, file_path)
                 return None
+            except UnsupportedSkillFilePreview:
+                raise
         except ForbiddenError:
             logger.warning("Rejected unsafe file read for skill '%s'", skill_name)
+            raise
+        except UnsupportedSkillFilePreview:
             raise
         except Exception as e:
             logger.error(f"Error reading skill file {skill_name}/{file_path}: {e}")
@@ -2754,8 +2937,7 @@ def install_skills_from_zip_for_tenant(
         skill_names: List of skill names to install (e.g. ["search-knowledge-base"]).
         tenant_id: Target tenant ID to install skills into.
         user_id: User ID for created_by/updated_by audit fields.
-        locale: Frontend locale (e.g. "zh" or "en"). Determines the source label:
-            "zh" → "官方", other locales → "official".
+        locale: Frontend locale (e.g. "zh" or "en").
 
     Returns:
         List of skill names that were successfully installed.
@@ -2767,9 +2949,6 @@ def install_skills_from_zip_for_tenant(
     if not os.path.isdir(zip_dir):
         logger.warning(f"Official skills zip directory not found: {zip_dir}")
         return []
-
-    # Derive source label from locale: zh → "官方", otherwise "official"
-    source = "官方" if locale == "zh" else "official"
 
     installed: List[str] = []
     service = SkillService(tenant_id=tenant_id)
@@ -2800,7 +2979,7 @@ def install_skills_from_zip_for_tenant(
                 file_content=zip_content,
                 skill_name=skill_name,
                 file_type="zip",
-                source=source,
+                source="official",
                 tenant_id=tenant_id,
                 user_id=user_id,
             )
