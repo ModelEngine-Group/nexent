@@ -88,6 +88,10 @@ def test_build_nl2agent_system_prompt_configures_existing_draft(
         assert "an empty-description draft must produce" in prompt
         assert "Configuration is complete only after descriptions are saved" in prompt
         assert "Never produce a plain final answer" in prompt
+        assert "### Atomic Action Contract" in prompt
+        assert "at most one short reasoning sentence" in prompt
+        assert 'equal to `["duty_prompt"]`' in prompt
+        assert "exactly one concise Think-Code-Observation example" in prompt
         assert "Weather Assistant" not in prompt
         assert "Describe the tasks this Agent must perform" not in prompt
         assert '"question_id": "expected_output"' in prompt
@@ -97,6 +101,10 @@ def test_build_nl2agent_system_prompt_configures_existing_draft(
         assert "空描述草稿必须先输出一次" in prompt
         assert "只有描述已保存、资源需求已绑定或明确放弃" in prompt
         assert "禁止输出普通最终答案" in prompt
+        assert "### 原子动作输出契约" in prompt
+        assert "`<code>` 前最多只写一句简短思考" in prompt
+        assert '`updated_fields` 是 `["duty_prompt"]`' in prompt
+        assert "只编写一个紧凑的“思考-代码-Observation”示例" in prompt
         assert "天气助手" not in prompt
         assert "请详细说明这个智能体需要完成的任务" not in prompt
         assert '"question_id": "expected_output"' in prompt
