@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Button,
   Col,
@@ -37,14 +38,19 @@ import {
 } from "@/services/modelscopeSkillService";
 import type {
   InstalledMarketSkill,
-  ModelScopeMarketListResponse,
   ModelScopeMarketSkill,
   ModelScopeSkillInstallPayload,
 } from "@/types/skill";
 
 const PAGE_SIZE = 12;
+const MARKET_CACHE_STALE_TIME = 60_000;
+const MARKET_CACHE_GC_TIME = 10 * 60_000;
 const MODELSCOPE_MAX_RESULT_WINDOW = 2_400;
 const MAX_BROWSE_PAGES = Math.floor(MODELSCOPE_MAX_RESULT_WINDOW / PAGE_SIZE);
+
+function getMarketListQueryKey(search: string, page: number) {
+  return ["modelscopeSkillMarket", "list", search, page, PAGE_SIZE] as const;
+}
 
 type PaginationItem = number | "start-ellipsis" | "end-ellipsis";
 
@@ -173,14 +179,25 @@ export default function ModelScopeSkillMarket({
   onOpenInstalledSkill,
 }: ModelScopeSkillMarketProps) {
   const { t, i18n } = useTranslation("common");
+  const queryClient = useQueryClient();
   const [installForm] = Form.useForm<ModelScopeSkillInstallPayload>();
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
-  const [retryToken, setRetryToken] = useState(0);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(false);
-  const [data, setData] = useState<ModelScopeMarketListResponse | null>(null);
+  const {
+    data,
+    isPending: loading,
+    isError: error,
+    refetch,
+  } = useQuery({
+    queryKey: getMarketListQueryKey(search, page),
+    queryFn: () =>
+      fetchModelScopeSkills({ search, pageNumber: page, pageSize: PAGE_SIZE }),
+    staleTime: MARKET_CACHE_STALE_TIME,
+    gcTime: MARKET_CACHE_GC_TIME,
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
   const [detail, setDetail] = useState<ModelScopeMarketSkill | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [installedSkill, setInstalledSkill] =
@@ -191,26 +208,6 @@ export default function ModelScopeSkillMarket({
   const [installing, setInstalling] = useState(false);
   const [updating, setUpdating] = useState(false);
   const showUpdateButton = shouldShowUpdateButton(detail, installedSkill);
-
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setError(false);
-    fetchModelScopeSkills({ search, pageNumber: page, pageSize: PAGE_SIZE })
-      .then((result) => {
-        if (!cancelled) setData(result);
-      })
-      .catch((requestError) => {
-        log.error("Failed to load ModelScope Skills", requestError);
-        if (!cancelled) setError(true);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [page, retryToken, search]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -354,7 +351,7 @@ export default function ModelScopeSkillMarket({
             </span>
           ) : null}
         </div>
-        <p className="mt-3 line-clamp-2 min-h-11 text-sm leading-6 text-slate-500 dark:text-slate-400">
+        <p className="mt-3 line-clamp-2 min-h-11 text-sm leading-6 text-slate-600 dark:text-slate-300">
           {skill.description || t("skillPool.noDescription")}
         </p>
         <div className="mt-3 flex min-h-7 flex-wrap gap-2">
@@ -390,6 +387,24 @@ export default function ModelScopeSkillMarket({
   const accessibleTotalPages = Math.min(providerTotalPages, MAX_BROWSE_PAGES);
   const paginationItems = getPaginationItems(page, accessibleTotalPages);
 
+  useEffect(() => {
+    if (!data?.has_next || page >= accessibleTotalPages) return;
+
+    const nextPage = page + 1;
+    void queryClient.prefetchQuery({
+      queryKey: getMarketListQueryKey(search, nextPage),
+      queryFn: () =>
+        fetchModelScopeSkills({
+          search,
+          pageNumber: nextPage,
+          pageSize: PAGE_SIZE,
+        }),
+      staleTime: MARKET_CACHE_STALE_TIME,
+      gcTime: MARKET_CACHE_GC_TIME,
+      retry: false,
+    });
+  }, [accessibleTotalPages, data, page, queryClient, search]);
+
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-white dark:bg-slate-950">
       <div className="shrink-0 border-b border-slate-200 pb-4 dark:border-slate-700">
@@ -423,7 +438,7 @@ export default function ModelScopeSkillMarket({
         ) : error ? (
           <div className="flex h-full items-center justify-center">
             <Empty description={t("skillManagement.market.unavailable")}>
-              <Button onClick={() => setRetryToken((value) => value + 1)}>
+              <Button onClick={() => void refetch()}>
                 {t("skillManagement.market.retry")}
               </Button>
             </Empty>
