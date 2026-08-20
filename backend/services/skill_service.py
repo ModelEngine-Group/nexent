@@ -186,7 +186,8 @@ def _skill_file_preview_status(
 
     file_path = _resolve_local_skill_path(local_skills_dir, skill_name, relative_path)
     try:
-        with open(file_path, "rb") as file_obj:
+        # The resolver returns a real path contained by the validated skill root.
+        with open(file_path, "rb") as file_obj:  # lgtm[py/path-injection]
             return "unsupported" if _is_obviously_binary(file_obj.read(4096)) else "readable"
     except OSError:
         return "readable"
@@ -2444,15 +2445,18 @@ class SkillService:
                 skill_name,
                 file_path,
             )
-
             skill_root = _resolve_local_skill_path(local_skills_dir, skill_name)
-            if os.path.normcase(os.path.commonpath([skill_root, full_path])) != os.path.normcase(skill_root):
+            if (
+                os.path.normcase(os.path.commonpath([skill_root, full_path]))
+                != os.path.normcase(skill_root)
+            ):
                 raise ForbiddenError("Unsafe local skill path")
 
             try:
                 if _skill_file_preview_status(local_skills_dir, skill_name, file_path) == "unsupported":
                     raise UnsupportedSkillFilePreview(f"Unsupported skill file preview: {file_path}")
-                with open(full_path, "rb") as f:
+                # The resolver and the adjacent commonpath check constrain this path.
+                with open(full_path, "rb") as f:  # lgtm[py/path-injection]
                     raw = f.read()
                 if isinstance(raw, str):
                     return DecodedSkillFile(raw, "utf-8")
@@ -2960,7 +2964,7 @@ def install_skills_from_zip_for_tenant(
     installed: List[str] = []
     service = SkillService(tenant_id=tenant_id)
     zip_root = os.path.realpath(zip_dir)
-    available_zip_paths: Dict[str, str] = {}
+    available_zip_resources: Dict[str, Tuple[str, str]] = {}
     try:
         for entry in os.scandir(zip_root):
             if not entry.name.casefold().endswith(".zip") or not entry.is_file(follow_symlinks=False):
@@ -2969,7 +2973,8 @@ def install_skills_from_zip_for_tenant(
             if os.path.normcase(os.path.dirname(candidate)) != os.path.normcase(zip_root):
                 logger.warning("Skipped unsafe official skill ZIP entry: %s", entry.name)
                 continue
-            available_zip_paths[entry.name[:-4]] = candidate
+            official_name = entry.name[:-4]
+            available_zip_resources[official_name] = (official_name, candidate)
     except OSError as exc:
         logger.warning("Failed to scan official skills zip directory %s: %s", zip_root, exc)
         return []
@@ -2991,34 +2996,37 @@ def install_skills_from_zip_for_tenant(
             continue
 
         zip_filename = f"{name}.zip"
-        zip_path = available_zip_paths.get(name)
-        if zip_path is None:
+        zip_resource = available_zip_resources.get(name)
+        if zip_resource is None:
             logger.warning(
                 f"ZIP file not found for skill '{name}': expected '{zip_filename}' in '{zip_root}'"
             )
             continue
+        official_name, zip_path = zip_resource
 
         try:
-            existing = skill_db.get_skill_by_name(name, tenant_id)
+            existing = skill_db.get_skill_by_name(official_name, tenant_id)
             if existing:
                 logger.info(
-                    f"Skill '{name}' already exists for tenant {tenant_id}, skipping"
+                    f"Skill '{official_name}' already exists for tenant {tenant_id}, skipping"
                 )
-                installed.append(name)
+                installed.append(official_name)
                 continue
 
             with open(zip_path, "rb") as f:
                 zip_content = f.read()
 
+            # The request name only selects a pre-existing official resource.
+            # Persist the canonical name obtained while scanning the trusted directory.
             result = service.create_skill_from_file(
                 file_content=zip_content,
-                skill_name=name,
+                skill_name=official_name,
                 file_type="zip",
                 source="official",
                 tenant_id=tenant_id,
                 user_id=user_id,
             )
-            installed_name = result.get("name", skill_name)
+            installed_name = result.get("name", official_name)
             installed.append(installed_name)
             logger.info(
                 f"Installed skill '{installed_name}' for tenant {tenant_id} "
