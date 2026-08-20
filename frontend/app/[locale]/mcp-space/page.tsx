@@ -497,9 +497,11 @@ function RepositoryView({
         <McpToolsPagination
           mode="cursor"
           page={browser.page}
+          pageCount={browser.pageCount}
           resultCount={filteredServices.length}
           hasPrevPage={browser.hasPrevPage}
           hasNextPage={browser.hasNextPage}
+          onPage={browser.goToPage}
           onPrevPage={browser.prevPage}
           onNextPage={browser.nextPage}
         />
@@ -1256,9 +1258,11 @@ function ReviewCenterView({
       <McpToolsPagination
         mode="cursor"
         page={browser.page}
+        pageCount={browser.pageCount}
         resultCount={browser.services.length}
         hasPrevPage={browser.hasPrevPage}
         hasNextPage={browser.hasNextPage}
+        onPage={browser.goToPage}
         onPrevPage={browser.prevPage}
         onNextPage={browser.nextPage}
       />

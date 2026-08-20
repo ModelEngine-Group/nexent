@@ -13,9 +13,11 @@ interface OffsetPaginationProps {
 interface CursorPaginationProps {
   mode: "cursor";
   page: number;
+  pageCount: number;
   resultCount: number;
   hasPrevPage: boolean;
   hasNextPage: boolean;
+  onPage: (page: number) => void;
   onPrevPage: () => void;
   onNextPage: () => void;
 }
@@ -69,14 +71,9 @@ export default function McpToolsPagination(props: McpToolsPaginationProps) {
     // Hide pagination when there is only one page
     if (props.page === 1 && !props.hasPrevPage && !props.hasNextPage) return null;
 
+    const visiblePageCount = props.pageCount + (props.hasNextPage ? 1 : 0);
     return (
-    <div className="flex items-center justify-center gap-2 pt-2">
-      <span className="text-sm text-slate-600">
-        {t("mcpTools.community.pageResult", {
-          page: props.page,
-          count: props.resultCount,
-        })}
-      </span>
+    <div className="flex items-center justify-center gap-1.5 pt-4">
       <Button
         type="default"
         className="flex size-9 items-center justify-center rounded-lg p-0"
@@ -86,6 +83,23 @@ export default function McpToolsPagination(props: McpToolsPaginationProps) {
       >
         <ChevronLeft className="size-4" />
       </Button>
+      {Array.from({ length: visiblePageCount }, (_, index) => index + 1).map(
+        (pageNumber) => (
+          <Button
+            key={pageNumber}
+            type={pageNumber === props.page ? "primary" : "default"}
+            className="flex size-9 items-center justify-center rounded-lg p-0"
+            onClick={() =>
+              pageNumber > props.pageCount && props.hasNextPage
+                ? props.onNextPage()
+                : props.onPage(pageNumber)
+            }
+            aria-current={pageNumber === props.page ? "page" : undefined}
+          >
+            {pageNumber}
+          </Button>
+        )
+      )}
       <Button
         type="default"
         className="flex size-9 items-center justify-center rounded-lg p-0"

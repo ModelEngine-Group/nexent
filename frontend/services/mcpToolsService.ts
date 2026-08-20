@@ -121,7 +121,7 @@ export const fetchCommunityMcpCards = async (params: {
     cursor: params.cursor || undefined,
     transport_type: params.transportType,
     tag: params.tag?.trim() || undefined,
-    limit: params.limit ?? 30,
+    limit: params.limit ?? 6,
   });
 
   return {

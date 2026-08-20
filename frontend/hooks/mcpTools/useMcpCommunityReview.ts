@@ -81,6 +81,10 @@ export function useMcpCommunityReview(enabled: boolean) {
     setPageIndex((prev) => Math.max(0, prev - 1));
   }, []);
 
+  const goToPage = useCallback((page: number) => {
+    setPageIndex((prev) => Math.max(0, Math.min(page - 1, cursorHistory.length - 1)));
+  }, [cursorHistory.length]);
+
   const updateFilter = <K extends keyof CommunityReviewFilters>(
     key: K,
     value: CommunityReviewFilters[K]
@@ -95,10 +99,12 @@ export function useMcpCommunityReview(enabled: boolean) {
       filters,
       updateFilter,
       page: pageIndex + 1,
+      pageCount: cursorHistory.length,
       hasPrevPage,
       hasNextPage,
       nextPage,
       prevPage,
+      goToPage,
       refetch: query.refetch,
     }),
     [
@@ -107,10 +113,12 @@ export function useMcpCommunityReview(enabled: boolean) {
       query.isFetching,
       filters,
       pageIndex,
+      cursorHistory.length,
       hasPrevPage,
       hasNextPage,
       nextPage,
       prevPage,
+      goToPage,
       query.refetch,
     ]
   );
