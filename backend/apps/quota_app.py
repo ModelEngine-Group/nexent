@@ -35,6 +35,11 @@ platform_quota_router = APIRouter(prefix="/platform/quota")
 # Personal KB capacity router
 personal_quota_router = APIRouter(prefix="/capacity/personal")
 
+QUOTA_PAYLOAD_DESCRIPTION = "Quota payload"
+PERSONAL_KB_CAPACITY_READ_PERMISSION = "kb.capacity:read"
+PERSONAL_KB_CAPACITY_MANAGE_PERMISSION = "kb.capacity:manage"
+TARGET_TENANT_ID_DESCRIPTION = "Target tenant ID (SU/SPEED only)"
+
 
 def _platform_quota_conflict_response(exc: PlatformQuotaConflictError) -> JSONResponse:
     """Serialize allocation conflicts consistently for quota clients."""
@@ -512,8 +517,8 @@ def get_personal_self_capacity(
 
 @personal_quota_router.get("/users")
 def list_personal_capacity_users(
-    current_user: CurrentUser = Depends(require("kb.capacity:read")),
-    tenant_id: Optional[str] = Query(None, description="Target tenant ID (SU/SPEED only)"),
+    current_user: CurrentUser = Depends(require(PERSONAL_KB_CAPACITY_READ_PERMISSION)),
+    tenant_id: Optional[str] = Query(None, description=TARGET_TENANT_ID_DESCRIPTION),
     page: int = Query(1, ge=1, description="Page number starting from 1"),
     page_size: int = Query(20, ge=1, le=100, description="Page size from 1 to 100"),
     sort_by: str = Query(
@@ -574,8 +579,8 @@ def list_personal_capacity_users(
 @personal_quota_router.get("/users/{user_id}/kbs")
 def get_personal_capacity_kbs(
     user_id: str = Path(..., description="User ID"),
-    current_user: CurrentUser = Depends(require("kb.capacity:read")),
-    tenant_id: Optional[str] = Query(None, description="Target tenant ID (SU/SPEED only)"),
+    current_user: CurrentUser = Depends(require(PERSONAL_KB_CAPACITY_READ_PERMISSION)),
+    tenant_id: Optional[str] = Query(None, description=TARGET_TENANT_ID_DESCRIPTION),
     page: int = Query(1, ge=1, description="Page number starting from 1"),
     page_size: int = Query(20, ge=1, le=100, description="Page size from 1 to 100"),
 ):
@@ -603,8 +608,8 @@ def get_personal_capacity_kbs(
 
 @personal_quota_router.get("/summary")
 def get_personal_capacity_summary(
-    current_user: CurrentUser = Depends(require("kb.capacity:read")),
-    tenant_id: Optional[str] = Query(None, description="Target tenant ID (SU/SPEED only)"),
+    current_user: CurrentUser = Depends(require(PERSONAL_KB_CAPACITY_READ_PERMISSION)),
+    tenant_id: Optional[str] = Query(None, description=TARGET_TENANT_ID_DESCRIPTION),
 ):
     """Return aggregate personal KB capacity stats for a tenant."""
     try:
@@ -627,9 +632,9 @@ def get_personal_capacity_summary(
 @personal_quota_router.put("/users/{user_id}/quota")
 def set_personal_user_quota(
     user_id: str = Path(..., description="User ID"),
-    payload: Dict[str, Any] = Body(..., description="Quota payload"),
-    current_user: CurrentUser = Depends(require("kb.capacity:manage")),
-    tenant_id: Optional[str] = Query(None, description="Target tenant ID (SU/SPEED only)"),
+    payload: Dict[str, Any] = Body(..., description=QUOTA_PAYLOAD_DESCRIPTION),
+    current_user: CurrentUser = Depends(require(PERSONAL_KB_CAPACITY_MANAGE_PERMISSION)),
+    tenant_id: Optional[str] = Query(None, description=TARGET_TENANT_ID_DESCRIPTION),
 ):
     """Set or clear a user's personal KB quota."""
     try:
@@ -664,8 +669,8 @@ def set_personal_user_quota(
 
 @personal_quota_router.get("/default-quota")
 def get_personal_default_quota(
-    current_user: CurrentUser = Depends(require("kb.capacity:read")),
-    tenant_id: Optional[str] = Query(None, description="Target tenant ID (SU/SPEED only)"),
+    current_user: CurrentUser = Depends(require(PERSONAL_KB_CAPACITY_READ_PERMISSION)),
+    tenant_id: Optional[str] = Query(None, description=TARGET_TENANT_ID_DESCRIPTION),
 ):
     """Get the tenant default personal KB quota."""
     try:
@@ -694,9 +699,9 @@ def get_personal_default_quota(
 
 @personal_quota_router.put("/default-quota")
 def set_personal_default_quota(
-    payload: Dict[str, Any] = Body(..., description="Quota payload"),
-    current_user: CurrentUser = Depends(require("kb.capacity:manage")),
-    tenant_id: Optional[str] = Query(None, description="Target tenant ID (SU/SPEED only)"),
+    payload: Dict[str, Any] = Body(..., description=QUOTA_PAYLOAD_DESCRIPTION),
+    current_user: CurrentUser = Depends(require(PERSONAL_KB_CAPACITY_MANAGE_PERMISSION)),
+    tenant_id: Optional[str] = Query(None, description=TARGET_TENANT_ID_DESCRIPTION),
 ):
     """Set or clear the tenant default personal KB quota."""
     try:

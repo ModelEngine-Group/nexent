@@ -1,11 +1,11 @@
 -- ============================================================
 -- v2.5.0_0820: Personal knowledge base permissions
---  1. Remove legacy USER KB / KB.GROUPS resource permissions.
---  2. Restore USER KB access:
---       LEFT_NAV_MENU /knowledges (1705), /agent-dev (1714)
---       KB:CREATE/READ/UPDATE/DELETE (1706-1709)
---  3. Add ADMIN/SU capacity permissions:
---       KB.CAPACITY:READ/MANAGE (1710-1713)
+--  1. Restore USER KB access:
+--       LEFT_NAV_MENU /agent-dev (1307), /knowledges (1308)
+--       KB:CREATE/READ/UPDATE/DELETE (1309-1312)
+--  2. Add ADMIN/SU capacity permissions:
+--       ADMIN KB.CAPACITY:READ/MANAGE (1117-1118)
+--       SU KB.CAPACITY:READ/MANAGE (1004-1005)
 -- No DDL changes. deploy/sql/init.sql keeps the table-structure baseline;
 -- role_permission_t seeds are applied as incremental migrations.
 -- ============================================================
@@ -14,27 +14,79 @@ SET search_path TO nexent;
 
 BEGIN;
 
--- Remove legacy USER KB permissions if they still exist in inconsistent
--- environments. USER access is re-seeded below with the new ID range.
-DELETE FROM nexent.role_permission_t
-WHERE user_role = 'USER'
-  AND permission_category = 'RESOURCE'
-  AND permission_type IN ('KB', 'KB.GROUPS');
+WITH permission_constants AS (
+    SELECT
+        'USER'::VARCHAR AS user_role,
+        'ADMIN'::VARCHAR AS admin_role,
+        'SU'::VARCHAR AS su_role,
+        'VISIBILITY'::VARCHAR AS visibility_category,
+        'RESOURCE'::VARCHAR AS resource_category,
+        'LEFT_NAV_MENU'::VARCHAR AS menu_type,
+        'KB'::VARCHAR AS kb_type,
+        'KB.CAPACITY'::VARCHAR AS capacity_type,
+        'CREATE'::VARCHAR AS create_action,
+        'READ'::VARCHAR AS read_action,
+        'UPDATE'::VARCHAR AS update_action,
+        'DELETE'::VARCHAR AS delete_action,
+        'MANAGE'::VARCHAR AS manage_action,
+        '/agent-dev'::VARCHAR AS agent_dev_path
+), permission_rows AS (
+    SELECT menu.permission_id,
+           constants.user_role,
+           constants.visibility_category,
+           constants.menu_type,
+           menu.permission_subtype,
+           menu.parent_key
+    FROM permission_constants AS constants
+    CROSS JOIN LATERAL (VALUES
+        (1307, constants.agent_dev_path, NULL::VARCHAR),
+        (1308, '/knowledges'::VARCHAR, constants.agent_dev_path)
+    ) AS menu(permission_id, permission_subtype, parent_key)
 
--- Remove an old USER /knowledges nav entry if present, then insert 1705.
-DELETE FROM nexent.role_permission_t
-WHERE user_role = 'USER'
-  AND permission_category = 'VISIBILITY'
-  AND permission_type = 'LEFT_NAV_MENU'
-  AND permission_subtype = '/knowledges';
+    UNION ALL
 
--- Remove an old USER /agent-dev nav entry if present, then insert 1714.
-DELETE FROM nexent.role_permission_t
-WHERE user_role = 'USER'
-  AND permission_category = 'VISIBILITY'
-  AND permission_type = 'LEFT_NAV_MENU'
-  AND permission_subtype = '/agent-dev';
+    SELECT kb.permission_id,
+           constants.user_role,
+           constants.resource_category,
+           constants.kb_type,
+           kb.permission_subtype,
+           NULL::VARCHAR
+    FROM permission_constants AS constants
+    CROSS JOIN LATERAL (VALUES
+        (1309, constants.create_action),
+        (1310, constants.read_action),
+        (1311, constants.update_action),
+        (1312, constants.delete_action)
+    ) AS kb(permission_id, permission_subtype)
 
+    UNION ALL
+
+    SELECT capacity.permission_id,
+           constants.admin_role,
+           constants.resource_category,
+           constants.capacity_type,
+           capacity.permission_subtype,
+           NULL::VARCHAR
+    FROM permission_constants AS constants
+    CROSS JOIN LATERAL (VALUES
+        (1117, constants.read_action),
+        (1118, constants.manage_action)
+    ) AS capacity(permission_id, permission_subtype)
+
+    UNION ALL
+
+    SELECT capacity.permission_id,
+           constants.su_role,
+           constants.resource_category,
+           constants.capacity_type,
+           capacity.permission_subtype,
+           NULL::VARCHAR
+    FROM permission_constants AS constants
+    CROSS JOIN LATERAL (VALUES
+        (1004, constants.read_action),
+        (1005, constants.manage_action)
+    ) AS capacity(permission_id, permission_subtype)
+)
 INSERT INTO nexent.role_permission_t (
     role_permission_id,
     user_role,
@@ -43,17 +95,13 @@ INSERT INTO nexent.role_permission_t (
     permission_subtype,
     parent_key
 )
-VALUES
-    (1705, 'USER',  'VISIBILITY', 'LEFT_NAV_MENU', '/knowledges', '/agent-dev'),
-    (1706, 'USER',  'RESOURCE',   'KB',            'CREATE',      NULL),
-    (1707, 'USER',  'RESOURCE',   'KB',            'READ',        NULL),
-    (1708, 'USER',  'RESOURCE',   'KB',            'UPDATE',      NULL),
-    (1709, 'USER',  'RESOURCE',   'KB',            'DELETE',      NULL),
-    (1710, 'ADMIN', 'RESOURCE',   'KB.CAPACITY',   'READ',        NULL),
-    (1711, 'ADMIN', 'RESOURCE',   'KB.CAPACITY',   'MANAGE',      NULL),
-    (1712, 'SU',    'RESOURCE',   'KB.CAPACITY',   'READ',        NULL),
-    (1713, 'SU',    'RESOURCE',   'KB.CAPACITY',   'MANAGE',      NULL),
-    (1714, 'USER',  'VISIBILITY', 'LEFT_NAV_MENU', '/agent-dev',  NULL)
+SELECT permission_id,
+       user_role,
+       visibility_category,
+       menu_type,
+       permission_subtype,
+       parent_key
+FROM permission_rows
 ON CONFLICT (role_permission_id) DO UPDATE SET
     user_role = EXCLUDED.user_role,
     permission_category = EXCLUDED.permission_category,

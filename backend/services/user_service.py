@@ -2,7 +2,7 @@
 User service layer - handles user-related business logic
 """
 import logging
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, Optional
 
 from database.user_tenant_db import (
     get_users_by_tenant_id, update_user_tenant_role, get_user_tenant_by_user_id,
@@ -167,6 +167,54 @@ async def update_user_for_requester(
     return await update_user(user_id, update_data, updated_by)
 
 
+async def _delete_private_knowledge_bases(user_id: str, tenant_id: str) -> Optional[Dict[str, int]]:
+    """Delete PRIVATE knowledge bases created by a user."""
+    private_kbs = get_private_knowledge_info_by_creator(tenant_id, user_id)
+    if not private_kbs:
+        return None
+
+    from services.vectordatabase_service import (
+        ElasticSearchService,
+        get_vector_db_core,
+    )
+
+    vdb_core = get_vector_db_core()
+    succeeded = 0
+    failed = 0
+    for kb in private_kbs:
+        index_name = kb.get("index_name")
+        kb_id = kb.get("knowledge_id")
+        if not index_name:
+            failed += 1
+            logger.error(
+                "Personal KB %s for user %s has no index_name",
+                kb_id,
+                user_id,
+            )
+            continue
+        try:
+            await ElasticSearchService.full_delete_knowledge_base(
+                index_name, vdb_core, user_id
+            )
+            succeeded += 1
+        except Exception:
+            failed += 1
+            logger.exception(
+                "Failed deleting personal KB for user %s kb_id %s index_name %s",
+                user_id,
+                kb_id,
+                index_name,
+            )
+
+    cleanup_result = {
+        "total": len(private_kbs),
+        "succeeded": succeeded,
+        "failed": failed,
+    }
+    logger.info("Personal KB cleanup for user %s: %s", user_id, cleanup_result)
+    return cleanup_result
+
+
 async def delete_user_and_cleanup(user_id: str, tenant_id: str) -> None:
     """
     Permanently delete user account and all related data.
@@ -236,54 +284,9 @@ async def delete_user_and_cleanup(user_id: str, tenant_id: str) -> None:
         # created by the user are intentionally left untouched.
         cleanup_result = None
         try:
-            private_kbs = get_private_knowledge_info_by_creator(tenant_id, user_id)
-            if private_kbs:
-                from services.vectordatabase_service import (
-                    ElasticSearchService,
-                    get_vector_db_core,
-                )
-
-                vdb_core = get_vector_db_core()
-                succeeded = 0
-                failed = 0
-                for kb in private_kbs:
-                    index_name = kb.get("index_name")
-                    kb_id = kb.get("knowledge_id")
-                    if not index_name:
-                        failed += 1
-                        logger.error(
-                            "Personal KB %s for user %s has no index_name",
-                            kb_id,
-                            user_id,
-                        )
-                        continue
-                    try:
-                        await ElasticSearchService.full_delete_knowledge_base(
-                            index_name, vdb_core, user_id
-                        )
-                        succeeded += 1
-                    except Exception as exc:
-                        failed += 1
-                        logger.error(
-                            "Failed deleting personal KB for user %s kb_id %s "
-                            "index_name %s: %s",
-                            user_id,
-                            kb_id,
-                            index_name,
-                            exc,
-                        )
-                cleanup_result = {
-                    "total": len(private_kbs),
-                    "succeeded": succeeded,
-                    "failed": failed,
-                }
-                logger.info(
-                    "Personal KB cleanup for user %s: %s", user_id, cleanup_result
-                )
-        except Exception as exc:
-            logger.error(
-                "Failed personal KB cleanup for user %s: %s", user_id, exc
-            )
+            cleanup_result = await _delete_private_knowledge_bases(user_id, tenant_id)
+        except Exception:
+            logger.exception("Failed personal KB cleanup for user %s", user_id)
 
         logger.info(f"Permanently deleted user {user_id} and all related data.")
         return cleanup_result
