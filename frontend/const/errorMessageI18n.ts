@@ -43,6 +43,112 @@ export const getI18nErrorMessage = (
   );
 };
 
+const CONVERSATION_RESOURCE_LIMIT_TRANSLATION_KEYS: Record<string, string> = {
+  conversations: "chatInterface.conversationLimitExceeded",
+  conversation_turns: "chatInterface.turnLimitExceeded",
+};
+
+const CONVERSATION_RESOURCE_LIMIT_PATTERNS: Array<{
+  resource: keyof typeof CONVERSATION_RESOURCE_LIMIT_TRANSLATION_KEYS;
+  pattern: RegExp;
+}> = [
+  {
+    resource: "conversations",
+    pattern:
+      /Conversation history limit reached:\s*maximum\s+(\d+)\s+conversations?\s+per user/i,
+  },
+  {
+    resource: "conversation_turns",
+    pattern:
+      /Conversation turn limit reached:\s*maximum\s+(\d+)\s+turns?\s+per conversation/i,
+  },
+];
+
+type ConversationResourceLimitData = {
+  resource?: unknown;
+  limit?: unknown;
+};
+
+function getConversationErrorFields(error: unknown): {
+  code?: unknown;
+  message?: string;
+  data?: ConversationResourceLimitData;
+} {
+  if (typeof error === "string") {
+    return { message: error };
+  }
+
+  if (!error || typeof error !== "object") {
+    return {};
+  }
+
+  const candidate = error as {
+    code?: unknown;
+    message?: unknown;
+    data?: unknown;
+    details?: unknown;
+  };
+  const data =
+    candidate.data && typeof candidate.data === "object"
+      ? (candidate.data as ConversationResourceLimitData)
+      : candidate.details && typeof candidate.details === "object"
+        ? (candidate.details as ConversationResourceLimitData)
+        : undefined;
+
+  return {
+    code: candidate.code,
+    message:
+      typeof candidate.message === "string" ? candidate.message : undefined,
+    data,
+  };
+}
+
+/**
+ * Translate conversation resource-limit errors for both chat implementations.
+ *
+ * The legacy chat receives the original ApiError, while assistant-ui may
+ * normalize it to an Error-like object and retain only the backend message.
+ * Handle both shapes so the user-facing language does not depend on the chat
+ * implementation that initiated the request.
+ */
+export const getConversationResourceLimitMessage = (
+  error: unknown,
+  t: (key: string, options?: Record<string, unknown>) => string
+): string | null => {
+  const {
+    code,
+    message: errorMessage,
+    data,
+  } = getConversationErrorFields(error);
+  if (String(code) === ErrorCode.TENANT_RESOURCE_EXCEEDED) {
+    const resource = typeof data?.resource === "string" ? data.resource : "";
+    const limit = data?.limit;
+    const translationKey =
+      CONVERSATION_RESOURCE_LIMIT_TRANSLATION_KEYS[resource];
+    if (
+      translationKey &&
+      (typeof limit === "number" || typeof limit === "string")
+    ) {
+      return t(translationKey, { limit });
+    }
+  }
+
+  if (!errorMessage) {
+    return null;
+  }
+
+  for (const { resource, pattern } of CONVERSATION_RESOURCE_LIMIT_PATTERNS) {
+    const match = errorMessage.match(pattern);
+    if (match) {
+      return t(CONVERSATION_RESOURCE_LIMIT_TRANSLATION_KEYS[resource], {
+        limit: match[1],
+      });
+    }
+  }
+
+  return null;
+};
+
 /**
  * Hook to get error message with i18n support.
  *

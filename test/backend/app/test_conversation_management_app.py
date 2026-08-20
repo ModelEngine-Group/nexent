@@ -49,7 +49,8 @@ from backend.apps.conversation_management_app import (
     get_message_id_endpoint,
     update_conversation_knowledge_scope_endpoint,
 )
-from consts.exceptions import ValidationError
+from consts.error_code import ErrorCode
+from consts.exceptions import AppException, ValidationError
 
 
 # -----------------------------
@@ -149,6 +150,25 @@ async def test_create_new_conversation_failure(conversation_mocks):
     assert exc_info.value.status_code == 500
     assert "creation error" in str(exc_info.value.detail)
     conversation_mocks['logging'].error.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_create_new_conversation_resource_limit_preserves_structured_error(conversation_mocks):
+    conversation_mocks['get_current_user_id'].return_value = ("user_id", "tenant_id")
+    conversation_mocks['create_new_convo'].side_effect = AppException(
+        ErrorCode.TENANT_RESOURCE_EXCEEDED,
+        "Conversation history limit reached",
+        details={"resource": "conversations", "limit": 1_000},
+    )
+
+    request_obj = MagicMock()
+    request_obj.title = "New Conversation"
+
+    with pytest.raises(AppException) as exc_info:
+        await create_new_conversation_endpoint(request_obj, authorization="Bearer token")
+
+    assert exc_info.value.http_status == 429
+    assert exc_info.value.details == {"resource": "conversations", "limit": 1_000}
 
 
 @pytest.mark.asyncio

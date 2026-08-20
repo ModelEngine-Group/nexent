@@ -127,6 +127,8 @@ async def agent_run_api(
         )
     except ForbiddenError as e:
         raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(e)) from e
+    except AppException:
+        raise
     except ValidationError as e:
         raise HTTPException(
             status_code=HTTPStatus.UNPROCESSABLE_ENTITY,

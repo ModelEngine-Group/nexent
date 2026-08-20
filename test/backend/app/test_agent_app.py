@@ -435,6 +435,38 @@ async def test_agent_run_api_maps_scope_validation_to_422(mocker):
     assert exc_info.value.detail == "Selected knowledge bases are incompatible"
 
 
+@pytest.mark.asyncio
+async def test_agent_run_api_preserves_conversation_resource_limit(mocker):
+    from consts.error_code import ErrorCode
+    from consts.exceptions import AppException
+    from consts.model import AgentRequest
+    from starlette.requests import Request
+
+    from apps.agent_app import agent_run_api
+
+    mocker.patch(
+        "apps.agent_app.run_agent_stream",
+        new_callable=AsyncMock,
+        side_effect=AppException(
+            ErrorCode.TENANT_RESOURCE_EXCEEDED,
+            "Conversation turn limit reached",
+            details={"resource": "conversation_turns", "limit": 100},
+        ),
+    )
+    request = AgentRequest(agent_id=1, conversation_id=123, query="test query", history=[])
+
+    with pytest.raises(AppException) as exc_info:
+        await agent_run_api(
+            agent_request=request,
+            http_request=Request({"type": "http", "headers": []}),
+            authorization="Bearer token",
+            resume=False,
+        )
+
+    assert exc_info.value.http_status == 429
+    assert exc_info.value.details == {"resource": "conversation_turns", "limit": 100}
+
+
 def test_agent_stop_api_success(mocker, mock_conversation_id):
     """Test agent_stop_api success case."""
     mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")

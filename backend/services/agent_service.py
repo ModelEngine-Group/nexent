@@ -94,6 +94,7 @@ from services.prompt_template_service import (
 from utils.str_utils import convert_list_to_string, convert_string_to_list
 from services.conversation_management_service import (
     create_new_conversation,
+    ensure_conversation_turn_capacity,
     generate_conversation_title_service,  # noqa: F401 - compatibility patch point
     get_conversation_service,
     get_current_run_user_message_id,
@@ -3318,6 +3319,18 @@ async def run_agent_stream(
             "Auto-created conversation_id=%s for user=%s (new conversation)",
             agent_request.conversation_id,
             resolved_user_id,
+        )
+
+    if (
+        not agent_request.is_debug
+        and not resume
+        and not skip_user_save
+        and not is_new_conversation
+        and agent_request.conversation_id is not None
+    ):
+        ensure_conversation_turn_capacity(
+            conversation_id=agent_request.conversation_id,
+            user_id=resolved_user_id,
         )
 
     if (
