@@ -318,6 +318,124 @@ def test_generate_session_jwt_uses_runtime_configured_expiry(monkeypatch):
     assert claims["exp"] - claims["iat"] == 5432
 
 
+def test_internal_runtime_jwt_round_trip(monkeypatch):
+    monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+
+    token = au.generate_internal_runtime_jwt("user-1", "tenant-1")
+
+    assert au.verify_internal_runtime_jwt(f"Bearer {token}") == (
+        "user-1",
+        "tenant-1",
+    )
+
+
+def test_internal_runtime_jwt_rejects_expired_token(monkeypatch):
+    monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+    token = au.generate_internal_runtime_jwt(
+        "user-1",
+        "tenant-1",
+        expires_in=-1,
+    )
+
+    with pytest.raises(UnauthorizedError, match="expired"):
+        au.verify_internal_runtime_jwt(token)
+
+
+def test_internal_runtime_jwt_rejects_wrong_scope(monkeypatch):
+    monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+    now = int(time.time())
+    token = au.jwt.encode(
+        {
+            "sub": "user-1",
+            "tenant_id": "tenant-1",
+            "scope": "wrong-scope",
+            "iss": au.INTERNAL_RUNTIME_JWT_ISSUER,
+            "aud": au.INTERNAL_RUNTIME_JWT_AUDIENCE,
+            "iat": now,
+            "exp": now + 60,
+        },
+        au.MOCK_JWT_SECRET_KEY,
+        algorithm="HS256",
+    )
+
+    with pytest.raises(UnauthorizedError, match="scope"):
+        au.verify_internal_runtime_jwt(token)
+
+
+@pytest.mark.parametrize(
+    ("claim_name", "claim_value"),
+    [
+        ("iss", "wrong-issuer"),
+        ("aud", "wrong-audience"),
+    ],
+)
+def test_internal_runtime_jwt_rejects_wrong_issuer_or_audience(
+    monkeypatch,
+    claim_name,
+    claim_value,
+):
+    monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+    now = int(time.time())
+    claims = {
+        "sub": "user-1",
+        "tenant_id": "tenant-1",
+        "scope": au.INTERNAL_RUNTIME_JWT_SCOPE,
+        "iss": au.INTERNAL_RUNTIME_JWT_ISSUER,
+        "aud": au.INTERNAL_RUNTIME_JWT_AUDIENCE,
+        "iat": now,
+        "exp": now + 60,
+    }
+    claims[claim_name] = claim_value
+    token = au.jwt.encode(
+        claims,
+        au.MOCK_JWT_SECRET_KEY,
+        algorithm="HS256",
+    )
+
+    with pytest.raises(UnauthorizedError, match="Invalid internal runtime token"):
+        au.verify_internal_runtime_jwt(token)
+
+
+def test_internal_runtime_jwt_rejects_tampered_signature(monkeypatch):
+    monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+    now = int(time.time())
+    token = au.jwt.encode(
+        {
+            "sub": "user-1",
+            "tenant_id": "tenant-1",
+            "scope": au.INTERNAL_RUNTIME_JWT_SCOPE,
+            "iss": au.INTERNAL_RUNTIME_JWT_ISSUER,
+            "aud": au.INTERNAL_RUNTIME_JWT_AUDIENCE,
+            "iat": now,
+            "exp": now + 60,
+        },
+        "attacker-secret",
+        algorithm="HS256",
+    )
+
+    with pytest.raises(UnauthorizedError, match="Invalid internal runtime token"):
+        au.verify_internal_runtime_jwt(token)
+
+
+def test_internal_runtime_jwt_rejects_regular_session_token(monkeypatch):
+    monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+    monkeypatch.setattr(au, "SUPABASE_URL", "http://localhost:54321")
+    monkeypatch.setattr(au, "JWT_EXPIRY_SECONDS", 3600)
+    token = au.generate_session_jwt("user-1")
+
+    with pytest.raises(UnauthorizedError, match="Invalid internal runtime token"):
+        au.verify_internal_runtime_jwt(token)
+
+
+def test_internal_runtime_jwt_requires_configured_secret(monkeypatch):
+    monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", "")
+
+    with pytest.raises(ValueError, match="not configured"):
+        au.generate_internal_runtime_jwt("user-1", "tenant-1")
+    with pytest.raises(UnauthorizedError, match="not configured"):
+        au.verify_internal_runtime_jwt("Bearer token")
+
+
 def test_get_jwt_expiry_seconds_rejects_forged_far_future_token(monkeypatch):
     """Expiry seconds must not trust JWT claims from tokens with invalid signatures."""
     now = int(time.time())

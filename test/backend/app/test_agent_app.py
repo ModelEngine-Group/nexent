@@ -23,7 +23,7 @@ from fastapi.responses import StreamingResponse
 from fastapi.testclient import TestClient
 
 from consts.const import AGENT_PROMPTS_HIDDEN_FLAG, ASSET_OWNER_TENANT_ID
-from consts.exceptions import UnauthorizedError
+from consts.exceptions import ForbiddenError, UnauthorizedError, ValidationError
 from consts.model import NL2AgentRunRequest
 
 # Filter out deprecation warnings from third-party libraries
@@ -196,6 +196,106 @@ async def test_agent_run_api(mocker, mock_auth_header):
     content = response.content.decode()
     assert "data: chunk1" in content
     assert "data: chunk2" in content
+
+
+@pytest.mark.asyncio
+async def test_northbound_agent_run_api_uses_internal_identity(mocker):
+    mocker.patch(
+        "apps.agent_app.verify_internal_runtime_jwt",
+        return_value=("user-a", "tenant-a"),
+    )
+    run_agent = mocker.patch(
+        "apps.agent_app.run_agent_stream",
+        new_callable=AsyncMock,
+    )
+
+    async def mock_stream():
+        yield b"data: done\n\n"
+
+    run_agent.return_value = StreamingResponse(
+        mock_stream(),
+        media_type="text/event-stream",
+    )
+    response = runtime_client.post(
+        "/agent/internal/northbound/run",
+        json={"agent_id": 1, "conversation_id": 123, "query": "hello"},
+        headers={"Authorization": "Bearer internal-token"},
+    )
+
+    assert response.status_code == 200
+    call_kwargs = run_agent.call_args.kwargs
+    assert call_kwargs["user_id"] == "user-a"
+    assert call_kwargs["tenant_id"] == "tenant-a"
+    assert call_kwargs["skip_user_save"] is True
+    assert call_kwargs["http_request"] is None
+
+
+@pytest.mark.asyncio
+async def test_northbound_agent_run_api_rejects_invalid_token(mocker):
+    mocker.patch(
+        "apps.agent_app.verify_internal_runtime_jwt",
+        side_effect=UnauthorizedError("Invalid internal runtime token"),
+    )
+
+    response = runtime_client.post(
+        "/agent/internal/northbound/run",
+        json={"agent_id": 1, "conversation_id": 123, "query": "hello"},
+        headers={"Authorization": "Bearer invalid"},
+    )
+
+    assert response.status_code == 401
+
+
+@pytest.mark.parametrize(
+    ("error", "expected_status"),
+    [
+        (ForbiddenError("forbidden"), 403),
+        (ValidationError("invalid"), 422),
+    ],
+)
+def test_northbound_agent_run_api_maps_domain_errors(
+    mocker,
+    error,
+    expected_status,
+):
+    mocker.patch(
+        "apps.agent_app.verify_internal_runtime_jwt",
+        return_value=("user-a", "tenant-a"),
+    )
+    mocker.patch(
+        "apps.agent_app.run_agent_stream",
+        new_callable=AsyncMock,
+        side_effect=error,
+    )
+
+    response = runtime_client.post(
+        "/agent/internal/northbound/run",
+        json={"agent_id": 1, "conversation_id": 123, "query": "hello"},
+        headers={"Authorization": "Bearer internal-token"},
+    )
+
+    assert response.status_code == expected_status
+
+
+@pytest.mark.asyncio
+async def test_northbound_agent_stop_api_uses_internal_identity(mocker):
+    mocker.patch(
+        "apps.agent_app.verify_internal_runtime_jwt",
+        return_value=("user-a", "tenant-a"),
+    )
+    stop_agent = mocker.patch(
+        "apps.agent_app.stop_agent_tasks",
+        return_value={"message": "stopped"},
+    )
+
+    response = runtime_client.post(
+        "/agent/internal/northbound/stop/123",
+        headers={"Authorization": "Bearer internal-token"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"message": "stopped"}
+    stop_agent.assert_called_once_with(123, "user-a")
 
 
 @pytest.mark.asyncio
