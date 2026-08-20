@@ -536,7 +536,7 @@ class ElasticSearchService:
         if user_id == user_tenant_id:
             effective_user_role = "ADMIN"
             logger.info(f"User {user_id} identified as legacy admin")
-        elif IS_SPEED_MODE:
+        elif IS_SPEED_MODE and not user_role:
             effective_user_role = "SPEED"
             logger.info("User under SPEED version is treated as admin")
 
@@ -1265,7 +1265,7 @@ class ElasticSearchService:
             if user_id == user_tenant_id:
                 effective_user_role = "ADMIN"
                 logger.info(f"User {user_id} identified as legacy admin")
-            elif IS_SPEED_MODE:
+            elif IS_SPEED_MODE and not user_role:
                 effective_user_role = "SPEED"
                 logger.info("User under SPEED version is treated as admin")
 
