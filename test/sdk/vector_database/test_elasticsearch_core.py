@@ -1608,6 +1608,52 @@ def test_hybrid_search_success(elasticsearch_core_instance):
         mock_semantic.assert_called_once()
 
 
+@pytest.mark.parametrize(
+    ("query_text", "weight_accurate", "expected_first_id"),
+    [
+        ("记录01999", None, "accurate_doc"),
+        ("记录01999", 0.3, "semantic_doc"),
+        ("显示全部告警", None, "semantic_doc"),
+    ],
+)
+def test_hybrid_search_adapts_only_unspecified_numeric_weights(
+    elasticsearch_core_instance,
+    query_text,
+    weight_accurate,
+    expected_first_id,
+):
+    """Numeric queries only prefer accurate results when callers omit a weight."""
+    mock_embedding_model = MagicMock()
+    mock_embedding_model.model_type = "text"
+
+    with patch.object(elasticsearch_core_instance, "accurate_search") as mock_accurate, \
+            patch.object(elasticsearch_core_instance, "semantic_search") as mock_semantic:
+        mock_accurate.return_value = [
+            {
+                "score": 1.0,
+                "document": {"id": "accurate_doc", "content": "记录01999"},
+                "index": "test_index",
+            }
+        ]
+        mock_semantic.return_value = [
+            {
+                "score": 1.0,
+                "document": {"id": "semantic_doc", "content": "相关告警"},
+                "index": "test_index",
+            }
+        ]
+
+        results = elasticsearch_core_instance.hybrid_search(
+            ["test_index"],
+            query_text,
+            mock_embedding_model,
+            top_k=2,
+            weight_accurate=weight_accurate,
+        )
+
+    assert results[0]["document"]["id"] == expected_first_id
+
+
 def test_get_indices_detail_success(elasticsearch_core_instance):
     """Test getting index statistics."""
     with patch.object(elasticsearch_core_instance.client.indices, 'stats') as mock_stats, \

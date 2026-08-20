@@ -6,8 +6,15 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 import pytest
 from unittest.mock import MagicMock
 
-# First mock the consts module to avoid ModuleNotFoundError
-consts_mock = MagicMock()
+# First mock the consts package to avoid ModuleNotFoundError.
+# ``consts`` must be a real package-like module (i.e. carry ``__path__``) so
+# that child imports such as ``from consts.exceptions import ...`` resolve
+# through sys.modules instead of failing with "not a package". ``const``
+# stays a MagicMock so tests can attach whatever constants they need.
+from types import ModuleType
+
+consts_mock = ModuleType("consts")
+consts_mock.__path__ = []
 consts_mock.const = MagicMock()
 # Set required constants in consts.const
 consts_mock.const.MINIO_ENDPOINT = "http://localhost:9000"
@@ -23,9 +30,20 @@ consts_mock.const.POSTGRES_PORT = 5432
 consts_mock.const.DEFAULT_TENANT_ID = "default_tenant"
 consts_mock.const.TENANT_ID = "tenant_id"
 
+# Provide the exceptions submodule used by tenant_config_db at import time.
+consts_exceptions_mock = ModuleType("consts.exceptions")
+
+
+class TenantResourceLimitError(Exception):
+    pass
+
+
+consts_exceptions_mock.TenantResourceLimitError = TenantResourceLimitError
+
 # Add the mocked consts module to sys.modules
 sys.modules['consts'] = consts_mock
 sys.modules['consts.const'] = consts_mock.const
+sys.modules['consts.exceptions'] = consts_exceptions_mock
 
 exceptions_mock = types.ModuleType("consts.exceptions")
 

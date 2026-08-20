@@ -109,6 +109,10 @@ SERVICE_ROLE_KEY = os.getenv('SERVICE_ROLE_KEY', SUPABASE_KEY)
 # GoTrue uses GOTRUE_JWT_SECRET (= JWT_SECRET in docker setup) to sign tokens.
 SUPABASE_JWT_SECRET = os.getenv(
     'SUPABASE_JWT_SECRET') or os.getenv('JWT_SECRET', '')
+# Dedicated signing key for opaque independent-AIDP image references. The JWT
+# fallback keeps existing deployments functional while allowing key separation.
+IND_AIDP_IMAGE_SIGNING_KEY = os.getenv(
+    'IND_AIDP_IMAGE_SIGNING_KEY') or SUPABASE_JWT_SECRET
 
 
 # OAuth Configuration

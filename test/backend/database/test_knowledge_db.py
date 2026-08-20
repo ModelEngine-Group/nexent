@@ -64,6 +64,7 @@ with patch('backend.database.client.MinioClient', return_value=minio_client_mock
         update_model_name_by_index_name,
         get_index_name_by_knowledge_name,
         get_knowledge_info_by_tenant_and_source,
+        get_knowledge_info_by_ids_and_tenant,
         upsert_knowledge_record,
         _generate_index_name,
         get_knowledge_name_map_by_index_names,
@@ -2249,6 +2250,7 @@ def test_update_last_times_and_get_auto_summary(monkeypatch, mock_session):
         ("update_last_summary_time", ("i1",), {}),
         ("update_last_doc_update_time", ("i1",), {}),
         ("get_knowledge_bases_for_auto_summary", tuple(), {}),
+        ("get_knowledge_info_by_ids_and_tenant", ([1], "t1"), {}),
     ],
 )
 def test_sqlalchemy_error_paths_raise(monkeypatch, func_name, args, kwargs):
@@ -2266,3 +2268,39 @@ def test_sqlalchemy_error_paths_raise(monkeypatch, func_name, args, kwargs):
     target = getattr(knowledge_db_module, func_name)
     with pytest.raises(MockSQLAlchemyError, match="db-error"):
         target(*args, **kwargs)
+
+def test_get_knowledge_info_by_ids_and_tenant_empty(monkeypatch, mock_session):
+    """Empty id list short-circuits without touching the DB."""
+    session, _ = mock_session
+    setup_mock_db_session(monkeypatch, session)
+
+    assert get_knowledge_info_by_ids_and_tenant([], "t1") == []
+    session.query.assert_not_called()
+
+
+def test_get_knowledge_info_by_ids_and_tenant_preserves_order(monkeypatch, mock_session):
+    """Results follow the requested id order and skip ids missing from the DB."""
+    session, mock_query = mock_session
+    setup_mock_db_session(monkeypatch, session)
+
+    rec_b = MockKnowledgeRecord(
+        knowledge_id=2, index_name="idx_b", knowledge_name="KB B",
+        knowledge_sources="elasticsearch", embedding_model_name="model-b",
+        embedding_model_id=9,
+    )
+    rec_a = MockKnowledgeRecord(
+        knowledge_id=1, index_name="idx_a", knowledge_name="KB A",
+        knowledge_sources="elasticsearch", embedding_model_name="model-a",
+        embedding_model_id=10,
+    )
+    # The DB layer returns records in arbitrary order; the function must
+    # re-order them according to the requested ids.
+    mock_query.filter.return_value.all.return_value = [rec_b, rec_a]
+
+    result = get_knowledge_info_by_ids_and_tenant([1, 2, 3], "t1")
+
+    assert [item["knowledge_id"] for item in result] == [1, 2]
+    assert result[0]["index_name"] == "idx_a"
+    assert result[0]["embedding_model_id"] == 10
+    assert result[1]["knowledge_name"] == "KB B"
+    assert result[1]["embedding_model_id"] == 9

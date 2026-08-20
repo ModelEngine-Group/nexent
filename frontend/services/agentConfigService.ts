@@ -312,7 +312,18 @@ export const updateToolConfig = async (
     });
 
     if (!response.ok) {
-      throw new Error(`Request failed: ${response.status}`);
+      let reason = `Request failed: ${response.status}`;
+      try {
+        const errorBody = await response.json();
+        reason =
+          errorBody?.message ||
+          errorBody?.detail?.message ||
+          errorBody?.detail ||
+          reason;
+      } catch {
+        // Keep the HTTP status fallback when the response is not JSON.
+      }
+      throw new Error(String(reason));
     }
 
     const data = await response.json();
@@ -323,11 +334,7 @@ export const updateToolConfig = async (
     };
   } catch (error) {
     log.error("Failed to update tool configuration:", error);
-    return {
-      success: false,
-      data: null,
-      message: "Failed to update tool configuration, please try again later",
-    };
+    throw error;
   }
 };
 

@@ -401,6 +401,40 @@ async def test_agent_run_api_maps_forbidden_conversation_to_403(mocker):
     assert exc_info.value.detail == "Conversation is not accessible"
 
 
+@pytest.mark.asyncio
+async def test_agent_run_api_maps_scope_validation_to_422(mocker):
+    from consts.exceptions import ValidationError
+    from consts.model import AgentRequest
+    from starlette.requests import Request
+
+    from apps.agent_app import agent_run_api
+
+    mock_run_agent_stream = mocker.patch(
+        "apps.agent_app.run_agent_stream",
+        new_callable=AsyncMock,
+        side_effect=ValidationError("Selected knowledge bases are incompatible"),
+    )
+    request = AgentRequest(
+        agent_id=1,
+        query="test query",
+        knowledge_scope={
+            "local": {"mode": "disabled", "knowledge_ids": []},
+            "aidp": {"mode": "disabled", "kds_ids": []},
+        },
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await agent_run_api(
+            agent_request=request,
+            http_request=Request({"type": "http", "headers": []}),
+            authorization="Bearer token",
+            resume=False,
+        )
+
+    assert exc_info.value.status_code == 422
+    assert exc_info.value.detail == "Selected knowledge bases are incompatible"
+
+
 def test_agent_stop_api_success(mocker, mock_conversation_id):
     """Test agent_stop_api success case."""
     mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
@@ -2225,3 +2259,86 @@ def test_list_published_agents_api_exception(mocker, mock_auth_header):
 
     assert response.status_code == 500
     assert "Published agents list error" in response.json()["detail"]
+
+# ---------------------------------------------------------------------------
+# get_agent_knowledge_capabilities_api Tests
+# ---------------------------------------------------------------------------
+
+
+def test_get_agent_knowledge_capabilities_api_success(mocker, mock_auth_header):
+    """get_agent_knowledge_capabilities_api returns the resolved capability tree."""
+    mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
+    mock_caps = mocker.patch(
+        "apps.agent_app.get_agent_knowledge_capabilities")
+    mock_get_user_id.return_value = ("user-1", "tenant-1")
+    mock_caps.return_value = {
+        "local": [{"index_name": "idx-a"}],
+        "aidp": [],
+    }
+
+    response = config_client.get(
+        "/agent/7/knowledge-capabilities",
+        headers=mock_auth_header,
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["code"] == 0
+    assert body["message"] == "success"
+    assert body["data"] == mock_caps.return_value
+    mock_caps.assert_called_once_with(
+        agent_id=7, tenant_id="tenant-1", version_no=None, user_id="user-1")
+
+
+def test_get_agent_knowledge_capabilities_api_with_version(mocker, mock_auth_header):
+    """version_no query parameter is forwarded to the resolver."""
+    mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
+    mock_caps = mocker.patch(
+        "apps.agent_app.get_agent_knowledge_capabilities")
+    mock_get_user_id.return_value = ("user-1", "tenant-1")
+    mock_caps.return_value = {}
+
+    response = config_client.get(
+        "/agent/7/knowledge-capabilities",
+        params={"version_no": 3},
+        headers=mock_auth_header,
+    )
+
+    assert response.status_code == 200
+    mock_caps.assert_called_once_with(
+        agent_id=7, tenant_id="tenant-1", version_no=3, user_id="user-1")
+
+
+def test_get_agent_knowledge_capabilities_api_value_error(mocker, mock_auth_header):
+    """ValueError from the resolver maps to 404."""
+    mocker.patch("apps.agent_app.get_current_user_id",
+                 return_value=("user-1", "tenant-1"))
+    mocker.patch(
+        "apps.agent_app.get_agent_knowledge_capabilities",
+        side_effect=ValueError("agent not found"),
+    )
+
+    response = config_client.get(
+        "/agent/404/knowledge-capabilities",
+        headers=mock_auth_header,
+    )
+
+    assert response.status_code == 404
+    assert "agent not found" in response.json()["detail"]
+
+
+def test_get_agent_knowledge_capabilities_api_internal_error(mocker, mock_auth_header):
+    """Unexpected resolver failures map to 500."""
+    mocker.patch("apps.agent_app.get_current_user_id",
+                 return_value=("user-1", "tenant-1"))
+    mocker.patch(
+        "apps.agent_app.get_agent_knowledge_capabilities",
+        side_effect=RuntimeError("boom"),
+    )
+
+    response = config_client.get(
+        "/agent/7/knowledge-capabilities",
+        headers=mock_auth_header,
+    )
+
+    assert response.status_code == 500

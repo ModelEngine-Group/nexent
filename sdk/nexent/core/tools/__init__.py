@@ -6,6 +6,7 @@ from .dify_search_tool import DifySearchTool
 from .datamate_search_tool import DataMateSearchTool
 from .idata_search_tool import IdataSearchTool
 from .haotian_search_tool import HaotianSearchTool
+from .ind_aidp_search_tool import IndependentAidpSearchTool
 from .ragflow_search_tool import RAGFlowSearchTool
 from ..ext_components.aidp.aidp_search_tool import AidpSearchTool
 from .send_email_tool import SendEmailTool
@@ -40,6 +41,7 @@ __all__ = [
     "DataMateSearchTool",
     "IdataSearchTool",
     "HaotianSearchTool",
+    "IndependentAidpSearchTool",
     "RAGFlowSearchTool",
     "AidpSearchTool",
     "SendEmailTool",

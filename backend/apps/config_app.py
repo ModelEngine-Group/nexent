@@ -36,6 +36,7 @@ from apps.a2a_client_app import router as a2a_client_router
 from apps.monitoring_app import router as monitoring_router
 from apps.a2a_server_app import router as a2a_server_router
 from apps.haotian_app import router as haotian_router
+from apps.ind_aidp_app import router as ind_aidp_router
 from apps.evaluation_set_app import router as evaluation_set_router
 from apps.agent_evaluation_app import router as agent_evaluation_router
 from apps.evaluator_app import router as evaluator_router
@@ -130,6 +131,7 @@ app.include_router(notification_router)
 app.include_router(a2a_client_router)
 app.include_router(a2a_server_router)
 app.include_router(haotian_router)
+app.include_router(ind_aidp_router)
 app.include_router(evaluation_set_router)
 app.include_router(agent_evaluation_router)
 app.include_router(evaluator_router)
