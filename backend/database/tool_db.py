@@ -287,13 +287,26 @@ def update_tool_table_from_scan_tool_list(
                 key = f"{tool.name}&{tool.source}"
             existing_tool_dict[key] = tool
 
+        # MCP names that actually produced tools in this scan. When an enabled
+        # MCP was reachable, its tool set is authoritative: tools of the same
+        # name that no longer appear (e.g. after the MCP url changed) are stale
+        # and must be hidden. Only MCPs that returned no tools this scan (a
+        # transient connection failure) keep their previous availability.
+        scanned_mcp_names = {
+            (tool.usage or "")
+            for tool in tool_list
+            if tool.source == ToolSourceEnum.MCP.value and (tool.usage or "")
+        }
+
         # Set tools to unavailable. Tools belonging to enabled MCPs keep their
-        # previous availability so a transient fetch failure this scan does not
-        # remove a healthy MCP's tools from the tool list.
+        # previous availability only when that MCP did not respond this scan
+        # (transient failure), so a single fetch hiccup does not remove a
+        # healthy MCP's tools from the tool list.
         for tool in existing_tools:
             if (
                 tool.source == ToolSourceEnum.MCP.value
                 and (tool.usage or "") in enabled_mcp_names
+                and (tool.usage or "") not in scanned_mcp_names
             ):
                 continue
             tool.is_available = False

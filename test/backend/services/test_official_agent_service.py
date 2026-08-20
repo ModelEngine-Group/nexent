@@ -1736,51 +1736,54 @@ def test_group_and_categorize_derives_groups():
 
 
 async def test_discover_from_gitcode_groups_and_status(tmp_path):
-    _write_remote_snapshot(
-        tmp_path,
-        [
-            "行业智能体/医疗/体检报告解读助手/agent.json",
-            "通用智能体/内容创作/文案创作者/agent.json",
-        ],
-    )
-    fake_item = _OfficialAgentListItem(
-        name="k",
-        display_name="D",
-        status="installable",
-        has_knowledge=False,
-        mcp_count=0,
-        skill_count=0,
-        kb_count=0,
-    )
     with patch.object(
         official_agent_service, "OFFICIAL_AGENTS_REPO_URL", "https://gitcode.com/ModelEngine/AgentsHub"
     ), patch.object(official_agent_service, "OFFICIAL_AGENTS_REPO_REF", "main"), patch.object(
-        official_agent_service, "_ensure_repo_snapshot", return_value=(str(tmp_path), "abc123")
+        official_agent_service,
+        "_ensure_repo_snapshot",
+    ) as mock_snapshot, patch.object(
+        official_agent_service,
+        "_gitcode_file_paths",
+        return_value=[
+            "行业智能体/医疗/体检报告解读助手/agent.json",
+            "通用智能体/内容创作/文案创作者/agent.json",
+        ],
     ), patch.object(
         official_agent_service,
-        "_status_item_for_bundle",
-        new_callable=AsyncMock,
-        return_value=fake_item,
-    ) as mock_status:
+        "_is_remote_bundle_installed_with_names",
+        return_value=False,
+    ):
         result = await official_agent_service.discover_from_gitcode("tenant-1")
 
+    mock_snapshot.assert_not_called()
     assert result.repo == "ModelEngine/AgentsHub"
     assert result.ref == "main"
-    assert result.commit == "abc123"
+    assert result.commit is None
     groups = {g.name: g for g in result.groups}
     assert set(groups) == {"行业智能体", "通用智能体"}
     assert {c.name for c in groups["行业智能体"].categories} == {"医疗"}
     assert len(groups["行业智能体"].categories[0].bundles) == 1
-    assert mock_status.await_count == 2
+    assert groups["行业智能体"].categories[0].bundles[0].name == "行业智能体/医疗/体检报告解读助手"
 
 
 async def test_install_from_gitcode_success(tmp_path):
     bundle = _make_bundle(name="research")
     fake_item = _OfficialAgentInstallItem(name="k", status="installed")
+    staging_dir = tmp_path / "staging"
+    staging_dir.mkdir()
     with patch.object(
         official_agent_service, "OFFICIAL_AGENTS_REPO_URL", "https://gitcode.com/ModelEngine/AgentsHub"
     ), patch.object(
-        official_agent_service, "_ensure_repo_snapshot", return_value=(str(tmp_path), "abc123")
+        official_agent_service,
+        "_gitcode_file_paths",
+        return_value=[
+            "行业智能体/医疗/a/agent.json",
+            "行业智能体/医疗/a/skills/example.zip",
+        ],
+    ), patch.object(
+        official_agent_service,
+        "_download_gitcode_bundle",
+        return_value=str(staging_dir),
     ), patch.object(
         official_agent_service, "_load_bundle", return_value=bundle
     ), patch.object(
@@ -1797,16 +1800,16 @@ async def test_install_from_gitcode_success(tmp_path):
         )
 
     assert result.repo == "ModelEngine/AgentsHub"
-    assert result.commit == "abc123"
+    assert result.commit is None
     assert result.results[0].status == "installed"
     assert mock_install.await_args.args[:2] == (bundle, "行业智能体/医疗/a")
 
 
 async def test_install_from_gitcode_not_found(tmp_path):
     with patch.object(
-        official_agent_service, "_ensure_repo_snapshot", return_value=(str(tmp_path), "abc")
-    ), patch.object(
-        official_agent_service, "_load_bundle", return_value=None
+        official_agent_service,
+        "_gitcode_file_paths",
+        return_value=["行业智能体/医疗/existing/agent.json"],
     ):
         result = await official_agent_service.install_from_gitcode(
             ["行业智能体/医疗/ghost"],

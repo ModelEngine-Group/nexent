@@ -20,7 +20,9 @@ import shutil
 import subprocess
 import tempfile
 from typing import Dict, List, Optional
-from urllib.parse import urlparse
+from urllib.error import HTTPError, URLError
+from urllib.parse import quote, urlencode, urlparse
+from urllib.request import Request, urlopen
 
 from consts.const import (
     OFFICIAL_AGENTS_PATH,
@@ -1232,30 +1234,205 @@ def _group_and_categorize(bundle_keys: List[str]):
     return grouped
 
 
+def _gitcode_api_base(owner: str, repo: str) -> str:
+    """Return the GitCode v5 API base for a repository."""
+    return f"https://api.gitcode.com/api/v5/repos/{quote(owner)}/{quote(repo)}"
+
+
+def _gitcode_api_get(path: str, params: Dict[str, str]):
+    """GET and decode a public GitCode API response.
+
+    This intentionally uses the repository API instead of cloning the repo. A
+    token can be added later at the HTTP boundary if the repository becomes
+    private; discovery itself remains path-only.
+    """
+    query = urlencode(params)
+    request = Request(
+        f"{path}?{query}",
+        headers={"Accept": "application/json", "User-Agent": "Nexent"},
+    )
+    try:
+        with urlopen(request, timeout=30) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except (HTTPError, URLError, TimeoutError, json.JSONDecodeError) as exc:
+        logger.warning("GitCode API request failed for %s: %s", path, exc)
+        raise RepoSourceError("repo_api_failed", f"仓库目录读取失败: {exc}") from exc
+
+
+def _gitcode_file_paths(owner: str, repo: str, ref: str) -> List[str]:
+    """List all repository file paths without downloading file contents."""
+    payload = _gitcode_api_get(
+        f"{_gitcode_api_base(owner, repo)}/file_list", {"ref_name": ref}
+    )
+    entries = payload
+    if isinstance(payload, dict):
+        entries = (
+            payload.get("data")
+            or payload.get("files")
+            or payload.get("tree")
+            or []
+        )
+    if not isinstance(entries, list):
+        raise RepoSourceError("repo_api_failed", "仓库目录读取失败: 返回格式无效")
+
+    paths: List[str] = []
+    for entry in entries:
+        path = (
+            entry.get("path") or entry.get("file_name") or entry.get("name")
+            if isinstance(entry, dict)
+            else entry
+        )
+        if isinstance(path, str) and path:
+            paths.append(path.strip("/"))
+    return sorted(paths)
+
+
+def _gitcode_bundle_keys(repo_paths: List[str]) -> List[str]:
+    """Derive bundle directories from the repository file paths."""
+    bundle_keys = {
+        os.path.dirname(path).replace("\\", "/")
+        for path in repo_paths
+        if path.lower().endswith("/agent.json")
+        and os.path.dirname(path) not in ("", ".")
+    }
+    return sorted(bundle_keys)
+
+
+def _is_remote_bundle_installed(bundle_key: str, tenant_id: str) -> bool:
+    """Check installation state using the folder name."""
+    from database.agent_db import search_agent_id_by_agent_name
+
+    agent_name = os.path.basename(bundle_key)
+    try:
+        search_agent_id_by_agent_name(agent_name, tenant_id)
+        return True
+    except ValueError:
+        return False
+
+
+def _gitcode_agent_names(owner: str, repo: str, ref: str, bundle_key: str) -> List[str]:
+    """Read only one bundle's metadata to resolve its installed root name."""
+    try:
+        raw = _gitcode_raw_file(owner, repo, ref, f"{bundle_key}/agent.json")
+        payload = json.loads(raw.decode("utf-8"))
+        agent_info = payload.get("agent_info", {})
+        if not isinstance(agent_info, dict):
+            return []
+        return [
+            str(agent.get("name"))
+            for agent in agent_info.values()
+            if isinstance(agent, dict) and agent.get("name")
+        ]
+    except (RepoSourceError, UnicodeDecodeError, json.JSONDecodeError, AttributeError):
+        logger.warning("Unable to read metadata for remote bundle '%s'", bundle_key)
+        return []
+
+
+def _is_remote_bundle_installed_with_names(
+    bundle_key: str, tenant_id: str, agent_names: List[str]
+) -> bool:
+    """Check a remote bundle using both folder and serialized agent names."""
+    from database.agent_db import search_agent_id_by_agent_name
+
+    candidates = [os.path.basename(bundle_key), *agent_names]
+    for agent_name in dict.fromkeys(candidates):
+        try:
+            search_agent_id_by_agent_name(agent_name, tenant_id)
+            return True
+        except ValueError:
+            continue
+    return False
+
+
+def _gitcode_raw_file(owner: str, repo: str, ref: str, path: str) -> bytes:
+    """Download one selected bundle file from GitCode."""
+    endpoint = f"{_gitcode_api_base(owner, repo)}/raw/{quote(path, safe='/')}"
+    query = urlencode({"ref": ref})
+    request = Request(
+        f"{endpoint}?{query}",
+        headers={"Accept": "application/octet-stream", "User-Agent": "Nexent"},
+    )
+    try:
+        with urlopen(request, timeout=60) as response:
+            return response.read()
+    except (HTTPError, URLError, TimeoutError) as exc:
+        logger.warning("GitCode raw file request failed for %s: %s", path, exc)
+        raise RepoSourceError("repo_api_failed", f"智能体文件下载失败: {path}") from exc
+
+
+def _download_gitcode_bundle(
+    owner: str, repo: str, ref: str, bundle_key: str, repo_paths: List[str]
+) -> str:
+    """Download one bundle into a temporary directory and return its root."""
+    bundle_paths = [
+        path
+        for path in repo_paths
+        if path == bundle_key or path.startswith(f"{bundle_key}/")
+    ]
+    if not bundle_paths:
+        raise FileNotFoundError(bundle_key)
+
+    staging_dir = tempfile.mkdtemp(prefix="official-agent-")
+    try:
+        total_bytes = 0
+        for path in bundle_paths:
+            content = _gitcode_raw_file(owner, repo, ref, path)
+            total_bytes += len(content)
+            if total_bytes > SNAPSHOT_MAX_BYTES:
+                raise RepoSourceError(
+                    "bundle_too_large",
+                    f"智能体包大小超过上限 {SNAPSHOT_MAX_BYTES} 字节",
+                )
+            target = os.path.abspath(os.path.join(staging_dir, path))
+            if os.path.commonpath((staging_dir, target)) != os.path.abspath(staging_dir):
+                raise RepoSourceError("repo_api_failed", "智能体文件路径无效")
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            with open(target, "wb") as file:
+                file.write(content)
+        return staging_dir
+    except Exception:
+        shutil.rmtree(staging_dir, ignore_errors=True)
+        raise
+
+
 async def discover_from_gitcode(
     tenant_id: str, ref: Optional[str] = None
 ) -> OfficialAgentGithubDiscoverResult:
     """Discover the fixed GitCode repo into a group -> category -> bundle catalog.
 
-    Clones the snapshot on first call (cached thereafter), scans only
-    directories containing ``agent.json``, and reuses the local status logic for
-    every bundle.
+    Only the repository file list is requested. The UI currently needs the
+    bundle directory name, so downloading every agent.json (or cloning the
+    repository) during discovery is unnecessary.
     """
-    url, owner, repo, effective_ref = _resolve_repo_source(ref)
-    snapshot_dir, commit = _ensure_repo_snapshot(url, effective_ref)
-    keys = _discover_bundles_in_dir(snapshot_dir)
+    _, owner, repo, effective_ref = _resolve_repo_source(ref)
+    repo_paths = _gitcode_file_paths(owner, repo, effective_ref)
+    keys = _gitcode_bundle_keys(repo_paths)
     grouped = _group_and_categorize(keys)
 
     groups: List[OfficialAgentGithubGroup] = []
     for group_name in sorted(grouped):
         categories: List[OfficialAgentGithubCategory] = []
         for cat_name in sorted(grouped[group_name]):
-            bundles: List[OfficialAgentListItem] = []
-            for key in grouped[group_name][cat_name]:
-                bundle = _load_bundle(key, snapshot_dir)
-                if bundle is None:
-                    continue
-                bundles.append(await _status_item_for_bundle(bundle, tenant_id))
+            bundles = [
+                OfficialAgentListItem(
+                    name=key,
+                    display_name=os.path.basename(key),
+                    status=(
+                        "installed"
+                        if _is_remote_bundle_installed_with_names(
+                            key,
+                            tenant_id,
+                            _gitcode_agent_names(owner, repo, effective_ref, key),
+                        )
+                        else "installable"
+                    ),
+                    has_knowledge=False,
+                    mcp_count=0,
+                    skill_count=0,
+                    kb_count=0,
+                )
+                for key in grouped[group_name][cat_name]
+            ]
             categories.append(
                 OfficialAgentGithubCategory(name=cat_name, bundles=bundles)
             )
@@ -1264,7 +1441,7 @@ async def discover_from_gitcode(
     return OfficialAgentGithubDiscoverResult(
         repo=f"{owner}/{repo}",
         ref=effective_ref,
-        commit=commit,
+        commit=None,
         groups=groups,
     )
 
@@ -1285,17 +1462,16 @@ async def install_from_gitcode(
 ) -> OfficialAgentGithubInstallResult:
     """Install remote official agents by their relative bundle keys.
 
-    Reuses the same snapshot cache as discovery, so install operates on the
-    commit the user saw. Each bundle is installed through the shared
-    ``_install_one_bundle`` pipeline.
+    Downloads only the selected bundle and installs it through the shared
+    ``_install_one_bundle`` pipeline. The repository itself is never cloned.
     """
-    url, owner, repo, effective_ref = _resolve_repo_source(ref)
-    snapshot_dir, commit = _ensure_repo_snapshot(url, effective_ref)
+    _, owner, repo, effective_ref = _resolve_repo_source(ref)
+    repo_paths = _gitcode_file_paths(owner, repo, effective_ref)
+    available = set(_gitcode_bundle_keys(repo_paths))
 
     results: List[OfficialAgentInstallItem] = []
     for name in agent_names:
-        bundle = _load_bundle(name, snapshot_dir)
-        if bundle is None:
+        if name not in available:
             results.append(
                 OfficialAgentInstallItem(
                     name=name,
@@ -1304,22 +1480,38 @@ async def install_from_gitcode(
                 )
             )
             continue
-        results.append(
-            await _install_one_bundle(
-                bundle,
-                name,
-                tenant_id,
-                user_id,
-                authorization,
-                renames=renames,
-                model_ids=model_ids,
-                embedding_model_ids=embedding_model_ids,
-                skill_renames=skill_renames,
-                kb_renames=kb_renames,
-                mcp_renames=mcp_renames,
-                mcp_skips=mcp_skips,
-            )
+        staging_dir = _download_gitcode_bundle(
+            owner, repo, effective_ref, name, repo_paths
         )
+        try:
+            bundle = _load_bundle(name, staging_dir)
+            if bundle is None:
+                results.append(
+                    OfficialAgentInstallItem(
+                        name=name,
+                        status="not_found",
+                        message=f"Remote agent bundle '{name}' is invalid",
+                    )
+                )
+                continue
+            results.append(
+                await _install_one_bundle(
+                    bundle,
+                    name,
+                    tenant_id,
+                    user_id,
+                    authorization,
+                    renames=renames,
+                    model_ids=model_ids,
+                    embedding_model_ids=embedding_model_ids,
+                    skill_renames=skill_renames,
+                    kb_renames=kb_renames,
+                    mcp_renames=mcp_renames,
+                    mcp_skips=mcp_skips,
+                )
+            )
+        finally:
+            shutil.rmtree(staging_dir, ignore_errors=True)
     return OfficialAgentGithubInstallResult(
-        repo=f"{owner}/{repo}", commit=commit, results=results
+        repo=f"{owner}/{repo}", commit=None, results=results
     )

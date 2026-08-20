@@ -24,9 +24,9 @@ export function useMcpServiceToggle() {
   const { t } = useTranslation("common");
   const queryClient = useQueryClient();
   const [toggling, setToggling] = useState<Record<number, boolean>>({});
-  const [refreshingTools, setRefreshingTools] = useState<Record<number, boolean>>(
-    {}
-  );
+  const [refreshingTools, setRefreshingTools] = useState<
+    Record<number, boolean>
+  >({});
 
   const isToggling = (mcpId?: number) =>
     typeof mcpId === "number" ? Boolean(toggling[mcpId]) : false;
@@ -55,7 +55,9 @@ export function useMcpServiceToggle() {
           ? t("mcpTools.service.enabled")
           : t("mcpTools.service.disabled")
       );
-      const nextStatus = nextEnabled ? McpServiceStatus.ENABLED : McpServiceStatus.DISABLED;
+      const nextStatus = nextEnabled
+        ? McpServiceStatus.ENABLED
+        : McpServiceStatus.DISABLED;
 
       // Fire-and-forget tool scan / refresh. UI should update immediately after
       // enable/disable succeeds, without waiting for scan_tools.
@@ -64,11 +66,24 @@ export function useMcpServiceToggle() {
         message,
         t,
         toastKey: `mcp-tools-refresh-${service.mcpId}`,
+        mcpId: service.mcpId,
       })
         .then(() => {
           queryClient.invalidateQueries({ queryKey: ["tools"] });
           queryClient.invalidateQueries({ queryKey: ["agents"] });
           queryClient.invalidateQueries({ queryKey: MCP_SERVERS_QUERY_KEY });
+          queryClient.invalidateQueries({
+            queryKey: ["mcp-tools", "community"],
+          });
+          queryClient.invalidateQueries({
+            queryKey: ["mcp-tools", "community-tags"],
+          });
+          queryClient.invalidateQueries({
+            queryKey: ["mcp-tools", "my-community"],
+          });
+          queryClient.invalidateQueries({
+            queryKey: ["mcp-tools", "community-review"],
+          });
         })
         .finally(() => {
           setRefreshingTools((prev) => ({ ...prev, [service.mcpId]: false }));

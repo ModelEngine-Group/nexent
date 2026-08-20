@@ -295,8 +295,8 @@ async def get_all_mcp_tools(tenant_id: str) -> List[ToolInfo]:
     mcp_info = get_mcp_records_by_tenant(tenant_id=tenant_id)
     tools_info = []
     for record in mcp_info:
-        # Only scan MCP services that are explicitly enabled and currently healthy.
-        if bool(record.get("enabled")) and bool(record.get("status")):
+        # Status is a cached health result; it must not prevent a refresh pass.
+        if bool(record.get("enabled")):
             try:
                 tools_info.extend(await get_tool_from_remote_mcp_server(
                     mcp_server_name=record["mcp_name"],

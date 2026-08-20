@@ -1970,7 +1970,8 @@ class TestRefreshMcpServiceToolCount(unittest.IsolatedAsyncioTestCase):
     @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
     @patch('backend.services.remote_mcp_service._mcp_protocol_health_check')
     @patch('backend.services.remote_mcp_service.update_mcp_record_registry_json_by_id')
-    async def test_success(self, mock_update, mock_health, mock_get):
+    @patch('backend.services.remote_mcp_service.update_mcp_record_status_by_id')
+    async def test_success(self, mock_update_status, mock_update, mock_health, mock_get):
         """Tool names fetched and persisted successfully."""
         mock_get.return_value = {
             "mcp_server": "https://srv/mcp",
@@ -1988,6 +1989,37 @@ class TestRefreshMcpServiceToolCount(unittest.IsolatedAsyncioTestCase):
         mock_update.assert_called_once_with(
             mcp_id=1, tenant_id="tid", user_id="uid",
             registry_json={"_toolNames": ["tool1", "tool2"]},
+        )
+
+    @patch('backend.services.remote_mcp_service.update_mcp_market_record')
+    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    @patch('backend.services.remote_mcp_service._mcp_protocol_health_check')
+    @patch('backend.services.remote_mcp_service.update_mcp_record_registry_json_by_id')
+    @patch('backend.services.remote_mcp_service.update_mcp_record_status_by_id')
+    async def test_success_syncs_linked_repository_snapshot(
+        self, mock_update_status, mock_update_remote, mock_health, mock_get, mock_update_market
+    ):
+        """A refreshed local MCP also updates its linked repository snapshot."""
+        mock_get.return_value = {
+            "mcp_server": "https://srv/mcp",
+            "authorization_token": None,
+            "custom_headers": None,
+            "registry_json": {"description": "keep"},
+            "market_id": 7,
+        }
+        mock_health.return_value = ["new_tool"]
+
+        result = await refresh_mcp_service_tool_count(
+            tenant_id="tid", user_id="uid", mcp_id=1,
+        )
+
+        self.assertEqual(result, ["new_tool"])
+        expected_registry = {"description": "keep", "_toolNames": ["new_tool"]}
+        mock_update_remote.assert_called_once_with(
+            mcp_id=1, tenant_id="tid", user_id="uid", registry_json=expected_registry,
+        )
+        mock_update_market.assert_called_once_with(
+            market_id=7, user_id="uid", registry_json=expected_registry,
         )
 
     @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
@@ -2033,7 +2065,8 @@ class TestRefreshMcpServiceToolCount(unittest.IsolatedAsyncioTestCase):
     @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
     @patch('backend.services.remote_mcp_service._mcp_protocol_health_check')
     @patch('backend.services.remote_mcp_service.update_mcp_record_registry_json_by_id')
-    async def test_with_auth_token_and_custom_headers(self, mock_update, mock_health, mock_get):
+    @patch('backend.services.remote_mcp_service.update_mcp_record_status_by_id')
+    async def test_with_auth_token_and_custom_headers(self, mock_update_status, mock_update, mock_health, mock_get):
         """Auth token and custom headers are passed to health check."""
         mock_get.return_value = {
             "mcp_server": "https://srv/mcp",
@@ -2670,4 +2703,3 @@ class TestUploadAndStartMcpImageCleanupOnFailure(unittest.IsolatedAsyncioTestCas
             )
 
         mock_mgr_cls.assert_not_called()
-

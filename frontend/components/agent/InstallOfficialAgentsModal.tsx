@@ -156,6 +156,9 @@ export function InstallOfficialAgentsModal({
   const [gcResults, setGcResults] = useState<
     OfficialAgentInstallItem[] | null
   >(null);
+  const [gcInstalledNamesState, setGcInstalledNamesState] = useState<
+    Set<string>
+  >(new Set());
 
   const { data: agents, isLoading } = useOfficialAgents(open, tenantId);
   const installMutation = useInstallOfficialAgents(tenantId);
@@ -164,12 +167,48 @@ export function InstallOfficialAgentsModal({
   const gitcodeCatalog = useOfficialAgentsFromGitcode(open, tenantId);
   const gitcodeInstallMutation = useInstallOfficialAgentsFromGitcode(tenantId);
 
+  const gcInstalledStorageKey = `nexent:official-gitcode-installed:${tenantId ?? "default"}`;
+
+  useEffect(() => {
+    if (!open || typeof window === "undefined") return;
+    try {
+      const stored = window.localStorage.getItem(gcInstalledStorageKey);
+      const names = stored ? JSON.parse(stored) : [];
+      setGcInstalledNamesState(new Set(Array.isArray(names) ? names : []));
+    } catch {
+      setGcInstalledNamesState(new Set());
+    }
+  }, [gcInstalledStorageKey, open]);
+
+  const gcInstalledNames = useMemo(
+    () =>
+      new Set(
+        [
+          ...gcInstalledNamesState,
+          ...(gcResults ?? [])
+            .filter(
+              (result) =>
+                result.status === "installed" ||
+                result.status === "already_installed"
+            )
+            .map((result) => result.name),
+        ]
+      ),
+    [gcInstalledNamesState, gcResults]
+  );
+
   const gcAllBundles = useMemo(
     () =>
       (gitcodeCatalog.data?.groups ?? []).flatMap((group) =>
-        group.categories.flatMap((cat) => cat.bundles)
+        group.categories.flatMap((cat) =>
+          cat.bundles.map((bundle) =>
+            gcInstalledNames.has(bundle.name)
+              ? { ...bundle, status: "installed" as const }
+              : bundle
+          )
+        )
       ),
-    [gitcodeCatalog.data]
+    [gitcodeCatalog.data, gcInstalledNames]
   );
   const gcInstallableBundles = useMemo(
     () => gcAllBundles.filter((b) => b.status === "installable"),
@@ -238,7 +277,6 @@ export function InstallOfficialAgentsModal({
     setGcKbResolutions({});
     setGcMcpResolutions({});
     setGcInstalling(false);
-    setGcResults(null);
   }, [open]);
 
   const allAgents = useMemo(() => agents ?? [], [agents]);
@@ -546,6 +584,23 @@ export function InstallOfficialAgentsModal({
         mcp_skips: gcMcpSkips.length ? gcMcpSkips : undefined,
       });
       setGcResults(res);
+      const successfulNames = res
+        .filter(
+          (result) =>
+            result.status === "installed" ||
+            result.status === "already_installed"
+        )
+        .map((result) => result.name);
+      if (successfulNames.length > 0) {
+        setGcInstalledNamesState((previous) => {
+          const merged = new Set([...previous, ...successfulNames]);
+          window.localStorage.setItem(
+            gcInstalledStorageKey,
+            JSON.stringify([...merged])
+          );
+          return merged;
+        });
+      }
       setGcStage("done");
       onInstalled?.();
     } catch (error) {
@@ -1014,7 +1069,6 @@ export function InstallOfficialAgentsModal({
               refreshing={gitcodeCatalog.isFetching}
               onBackToCatalog={() => {
                 setGcStage("catalog");
-                setGcResults(null);
                 setGcSelected(new Set());
               }}
               results={gcResults}
