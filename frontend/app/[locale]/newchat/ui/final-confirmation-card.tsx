@@ -45,6 +45,7 @@ export const FinalConfirmationCard: FC<{
   const replaceServerSnapshot = useAgentStore(
     (state) => state.replaceServerSnapshot
   );
+  const waitForAutosave = useAgentStore((state) => state.waitForIdle);
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [isModifying, setIsModifying] = useState(false);
   const [selectedTargets, setSelectedTargets] = useState<Set<string>>(
@@ -65,6 +66,9 @@ export const FinalConfirmationCard: FC<{
       setIsSynchronizing(true);
       setSyncFailed(false);
       try {
+        if (!(await waitForAutosave())) {
+          throw new Error("Pending Agent edits could not be saved");
+        }
         const result = await searchAgentInfo(payload.agent_id, undefined, 0);
         if (!result.success || !result.data) throw new Error(result.message);
         if (!replaceServerSnapshot(payload.agent_id, result.data)) {
@@ -86,7 +90,13 @@ export const FinalConfirmationCard: FC<{
     return () => {
       active = false;
     };
-  }, [payload.agent_id, queryClient, replaceServerSnapshot, syncAttempt]);
+  }, [
+    payload.agent_id,
+    queryClient,
+    replaceServerSnapshot,
+    syncAttempt,
+    waitForAutosave,
+  ]);
 
   const isLocked = disabled || isSubmitted || !isCardInteractive(cardKey);
   const canSubmitModification =

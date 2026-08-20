@@ -1270,6 +1270,16 @@ async def test_create_stream_yields_process_chunks_without_waiting_for_later_out
         {"type": "parse", "content": "parsed"},
         {"type": "tool", "content": "call"},
         {"type": "execution_logs", "content": "observation"},
+        {
+            "type": "nl2a_state",
+            "content": json.dumps(
+                {
+                    "event": "agent_draft_fields_saved",
+                    "agent_id": 42,
+                    "updated_fields": ["duty_prompt"],
+                }
+            ),
+        },
         {"type": "final_answer", "content": "plain answer"},
     ]
     release_next = [asyncio.Event() for _ in process_chunks]

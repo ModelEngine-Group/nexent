@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { App, Button, Form } from "antd";
 import {
@@ -109,23 +109,20 @@ export default function AgentConfig({
   const isReadOnly = useAgentReadOnly();
   const agentId = useAgentStore((state) => state.agentId);
   const editedAgent = useAgentStore((state) => state.editedAgent);
+  const serverSnapshotRevision = useAgentStore(
+    (state) => state.serverSnapshotRevision
+  );
   const flushDraft = useAgentStore((state) => state.flushDraft);
   const { message } = App.useApp();
   const saveError = useAgentStore((state) => state.saveError);
   const clearSaveError = useAgentStore((state) => state.clearSaveError);
-  const initializedAgentIdRef = useRef<number | null>(null);
-
   useEffect(() => {
-    if (agentId === initializedAgentIdRef.current) {
-      return;
-    }
-
-    initializedAgentIdRef.current = agentId;
     form.resetFields();
-    if (editedAgent) {
-      form.setFieldsValue(editedAgent);
+    const serverSnapshot = useAgentStore.getState().editedAgent;
+    if (serverSnapshot) {
+      form.setFieldsValue(serverSnapshot);
     }
-  }, [agentId, editedAgent, form]);
+  }, [agentId, form, serverSnapshotRevision]);
 
   const handleTabChange = useCallback(() => {
     flushDraft();

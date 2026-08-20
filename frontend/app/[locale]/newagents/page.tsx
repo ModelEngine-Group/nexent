@@ -1,7 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { useTranslation } from "react-i18next";
+import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "antd";
 import { Sparkles, X } from "lucide-react";
 import { useSearchParams } from "next/navigation";
@@ -13,6 +20,8 @@ import AgentDebugPanel from "./agent-debug";
 import { Nl2AgentChatPanel } from "../newchat/assistant-ui/nl2agent-chat-panel";
 import { Nl2AgentFlowProvider, useNl2AgentFlow } from "@/contexts/nl2AgentFlow";
 import { useAgentStore } from "@/stores/agentStore";
+import { searchAgentInfo } from "@/services/agentConfigService";
+import log from "@/lib/logger";
 import type { Nl2AgentStateEvent } from "../newchat/adapter/remote-chat-model-adapter";
 
 interface PanelCardProps {
@@ -48,7 +57,9 @@ function PanelCard({
 
 function AgentSetupContent() {
   const { t } = useTranslation("common");
+  const queryClient = useQueryClient();
   const searchParams = useSearchParams();
+  const snapshotRefreshQueue = useRef<Promise<void>>(Promise.resolve());
   const [isGenerationVisible, setIsGenerationVisible] = useState(true);
   const [isDebugVisible, setIsDebugVisible] = useState(false);
   const [isShowVersionManagePanel, setIsShowVersionManagePanel] =
@@ -72,11 +83,51 @@ function AgentSetupContent() {
     resetFlow(currentAgentId);
   }, [currentAgentId, resetFlow]);
 
+  const enqueueSnapshotRefresh = useCallback(
+    (agentId: number) => {
+      snapshotRefreshQueue.current = snapshotRefreshQueue.current
+        .then(async () => {
+          const initialState = useAgentStore.getState();
+          if (initialState.currentAgentId !== agentId) return;
+
+          const autosaveSucceeded = await initialState.waitForIdle();
+          if (!autosaveSucceeded) {
+            throw new Error("Pending Agent edits could not be saved");
+          }
+          if (useAgentStore.getState().currentAgentId !== agentId) return;
+
+          const result = await searchAgentInfo(agentId, undefined, 0);
+          if (!result.success || !result.data) {
+            throw new Error(result.message);
+          }
+          const currentState = useAgentStore.getState();
+          if (currentState.currentAgentId !== agentId) return;
+          if (!currentState.replaceServerSnapshot(agentId, result.data)) {
+            throw new Error("Agent context changed during synchronization");
+          }
+
+          queryClient.setQueryData(["agentInfo", agentId], result.data);
+          await queryClient.invalidateQueries({ queryKey: ["agents"] });
+        })
+        .catch((error) => {
+          log.warn("[NL2Agent] Failed to refresh saved draft fields", {
+            agentId,
+            error,
+          });
+        });
+    },
+    [queryClient]
+  );
+
   const handleStateEvent = useCallback(
     (event: Nl2AgentStateEvent) => {
-      markPromptGenerationFailed(event.agent_id, event.failed_fields);
+      if (event.event === "prompt_generation_failed") {
+        markPromptGenerationFailed(event.agent_id, event.failed_fields);
+        return;
+      }
+      enqueueSnapshotRefresh(event.agent_id);
     },
-    [markPromptGenerationFailed]
+    [enqueueSnapshotRefresh, markPromptGenerationFailed]
   );
 
   return (

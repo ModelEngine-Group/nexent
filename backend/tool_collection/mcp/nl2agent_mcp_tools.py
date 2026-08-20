@@ -61,6 +61,18 @@ SAVE_AGENT_DRAFT_FIELDS_DESCRIPTION = (
 NL2AGENT_MCP_TOOL_META = {"nexent_internal": True}
 MAX_BINDING_CANDIDATES = 12
 MAX_REQUIREMENT_CLARIFICATION_QUESTIONS = 5
+_NL2AGENT_PROMPT_FIELDS = frozenset(
+    {
+        "duty_prompt",
+        "constraint_prompt",
+        "few_shots_prompt",
+        "greeting_message",
+        "example_questions",
+    }
+)
+_NL2AGENT_DRAFT_SYNC_FIELDS = frozenset(
+    {"description", "business_description", *_NL2AGENT_PROMPT_FIELDS}
+)
 NL2A_SUBTYPES = Literal[
     "requirement_clarification",
     "installed_resource_binding",
@@ -330,6 +342,19 @@ class SaveAgentDraftFieldsSuccess(BaseModel):
     agent_id: int = Field(gt=0)
     created: Literal[False] = False
     updated_fields: list[str]
+
+    @model_validator(mode="after")
+    def validate_updated_fields(self) -> "SaveAgentDraftFieldsSuccess":
+        if (
+            not self.updated_fields
+            or len(self.updated_fields) != len(set(self.updated_fields))
+            or any(
+                field_name not in _NL2AGENT_DRAFT_SYNC_FIELDS
+                for field_name in self.updated_fields
+            )
+        ):
+            raise ValueError("updated_fields must be non-empty, unique draft fields")
+        return self
 
 
 class SaveAgentDraftFieldsError(BaseModel):
@@ -935,15 +960,20 @@ def _serialize_agent_draft_save_result(
 ) -> str:
     payload = result.model_dump(mode="json")
     serialized = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    if isinstance(result, SaveAgentDraftFieldsSuccess):
+        state = json.dumps(
+            {
+                "event": "agent_draft_fields_saved",
+                "agent_id": result.agent_id,
+                "updated_fields": result.updated_fields,
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        return f"{serialized}\n<nl2a_state>{state}</nl2a_state>"
+
     prompt_fields = sorted(
-        set(attempted_fields or [])
-        & {
-            "duty_prompt",
-            "constraint_prompt",
-            "few_shots_prompt",
-            "greeting_message",
-            "example_questions",
-        }
+        set(attempted_fields or []) & _NL2AGENT_PROMPT_FIELDS
     )
     if (
         isinstance(result, SaveAgentDraftFieldsError)

@@ -67,6 +67,7 @@ interface AgentStoreState {
   isReadOnly: boolean;
   editedAgent: AgentDraft | null;
   savedAgent: AgentDraft | null;
+  serverSnapshotRevision: number;
   queue: AgentSaveTask[];
   isSaving: boolean;
   isGenerating: boolean;
@@ -476,6 +477,7 @@ export const useAgentStore = create<AgentStoreState>((set) => {
     isReadOnly: true,
     editedAgent: null,
     savedAgent: null,
+    serverSnapshotRevision: 0,
     queue: [],
     isSaving: false,
     isGenerating: false,
@@ -487,18 +489,19 @@ export const useAgentStore = create<AgentStoreState>((set) => {
       clearPendingDraftSave();
       const agentId = Number(agent.id);
       const draft = toDraft(agent);
-      set({
+      set((state) => ({
         agentId,
         currentAgentId: agentId,
         isReadOnly: agent.permission === "READ_ONLY",
         editedAgent: cloneDraft(draft),
         savedAgent: cloneDraft(draft),
+        serverSnapshotRevision: state.serverSnapshotRevision + 1,
         queue: [],
         isSaving: false,
         isGenerating: false,
         saveError: null,
         lastSaveFailed: false,
-      });
+      }));
     },
 
     updateDraft: (patch) => {
@@ -590,6 +593,7 @@ export const useAgentStore = create<AgentStoreState>((set) => {
           isReadOnly: agent.permission === "READ_ONLY",
           editedAgent: cloneDraft(draft),
           savedAgent: cloneDraft(draft),
+          serverSnapshotRevision: state.serverSnapshotRevision + 1,
           saveError: null,
           lastSaveFailed: false,
         };
@@ -618,18 +622,19 @@ export const useAgentStore = create<AgentStoreState>((set) => {
     clearSaveError: () => set({ saveError: null }),
     reset: () => {
       clearPendingDraftSave();
-      set({
+      set((state) => ({
         agentId: null,
         currentAgentId: null,
         isReadOnly: true,
         editedAgent: null,
         savedAgent: null,
+        serverSnapshotRevision: state.serverSnapshotRevision + 1,
         queue: [],
         isSaving: false,
         isGenerating: false,
         saveError: null,
         lastSaveFailed: false,
-      });
+      }));
     },
   };
 });

@@ -593,6 +593,31 @@ class TestMessageObserver:
             '{"status":"error","code":"draft_save_failed"}'
         )
 
+    def test_execution_logs_emit_every_saved_fields_state(self):
+        observer = MessageObserver(lang="en", enable_nl2a_wrapper=True)
+        content = (
+            '{"status":"success"}\n'
+            '<nl2a_state>{"event":"agent_draft_fields_saved","agent_id":1042,'
+            '"updated_fields":["duty_prompt"]}</nl2a_state>'
+        )
+
+        observer.add_message("nl2agent", ProcessType.EXECUTION_LOGS, content)
+        observer.add_message("nl2agent", ProcessType.EXECUTION_LOGS, content)
+
+        messages = [json.loads(item) for item in observer.get_cached_message()]
+        assert [item["type"] for item in messages] == [
+            ProcessType.NL2A_STATE.value,
+            ProcessType.EXECUTION_LOGS.value,
+            ProcessType.NL2A_STATE.value,
+            ProcessType.EXECUTION_LOGS.value,
+        ]
+        assert json.loads(messages[0]["content"]) == {
+            "event": "agent_draft_fields_saved",
+            "agent_id": 1042,
+            "updated_fields": ["duty_prompt"],
+        }
+        assert messages[0]["content"] == messages[2]["content"]
+
     @pytest.mark.parametrize(
         "state_payload",
         [
@@ -604,6 +629,12 @@ class TestMessageObserver:
             '"failed_fields":["unknown_prompt"]}',
             '{"event":"prompt_generation_failed","agent_id":1042,'
             '"failed_fields":[]}',
+            '{"event":"agent_draft_fields_saved","agent_id":1042,'
+            '"updated_fields":[]}',
+            '{"event":"agent_draft_fields_saved","agent_id":1042,'
+            '"updated_fields":["unknown_prompt"]}',
+            '{"event":"agent_draft_fields_saved","agent_id":1042,'
+            '"updated_fields":["description","description"]}',
             '["agent_draft_created",1042]',
         ],
     )

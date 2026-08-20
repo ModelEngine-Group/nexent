@@ -14,6 +14,17 @@ _NL2A_STATE_PATTERN = re.compile(
     r"<nl2a_state>\s*(.*?)\s*</nl2a_state>",
     re.DOTALL,
 )
+_NL2AGENT_DRAFT_SYNC_FIELDS = frozenset(
+    {
+        "description",
+        "business_description",
+        "duty_prompt",
+        "constraint_prompt",
+        "few_shots_prompt",
+        "greeting_message",
+        "example_questions",
+    }
+)
 
 
 class ProcessType(Enum):
@@ -38,7 +49,7 @@ class ProcessType(Enum):
     CARD = "card"  # content that needs to be rendered by the front end using cards
     TOOL = "tool"  # tool name
     NL2A = "nl2a"  # structured NL2Agent runtime output
-    NL2A_STATE = "nl2a_state"  # trusted NL2Agent workflow identity update
+    NL2A_STATE = "nl2a_state"  # trusted NL2Agent workflow state update
     SKILL_ARTIFACT = "skill_artifact"  # structured file output from a skill script
     MEMORY_SEARCH = "memory_search"  # memory search status
     MAX_STEPS_REACHED = "max_steps_reached"  # agent reached maximum steps limit
@@ -476,6 +487,19 @@ class MessageObserver:
         event = payload.get("event")
         if event == "agent_draft_created":
             valid = set(payload) == {"event", "agent_id"}
+        elif event == "agent_draft_fields_saved":
+            updated_fields = payload.get("updated_fields")
+            valid = (
+                set(payload) == {"event", "agent_id", "updated_fields"}
+                and isinstance(updated_fields, list)
+                and bool(updated_fields)
+                and all(
+                    isinstance(field_name, str)
+                    and field_name in _NL2AGENT_DRAFT_SYNC_FIELDS
+                    for field_name in updated_fields
+                )
+                and len(updated_fields) == len(set(updated_fields))
+            )
         elif event == "prompt_generation_failed":
             failed_fields = payload.get("failed_fields")
             valid = (
@@ -531,10 +555,13 @@ class MessageObserver:
 
         if nl2a_state_content is not None:
             state_key = nl2a_state_content
-            with self._nl2a_state_lock:
-                should_emit_state = state_key not in self._nl2a_state_events
-                if should_emit_state:
-                    self._nl2a_state_events.add(state_key)
+            state_event = json.loads(nl2a_state_content).get("event")
+            should_emit_state = state_event == "agent_draft_fields_saved"
+            if not should_emit_state:
+                with self._nl2a_state_lock:
+                    should_emit_state = state_key not in self._nl2a_state_events
+                    if should_emit_state:
+                        self._nl2a_state_events.add(state_key)
             if should_emit_state:
                 self._append_message(
                     Message(

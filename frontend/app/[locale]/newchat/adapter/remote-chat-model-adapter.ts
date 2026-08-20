@@ -95,11 +95,20 @@ export interface Nl2AgentCardAction {
   result: Record<string, unknown>;
 }
 
-export type Nl2AgentStateEvent = {
-  event: "prompt_generation_failed";
-  agent_id: number;
-  failed_fields: Nl2aPromptField[];
-};
+export type Nl2AgentDraftField =
+  "description" | "business_description" | Nl2aPromptField;
+
+export type Nl2AgentStateEvent =
+  | {
+      event: "agent_draft_fields_saved";
+      agent_id: number;
+      updated_fields: Nl2AgentDraftField[];
+    }
+  | {
+      event: "prompt_generation_failed";
+      agent_id: number;
+      failed_fields: Nl2aPromptField[];
+    };
 
 export interface Nl2aRequirementClarificationOption {
   option_id: string;
@@ -883,17 +892,39 @@ export function parseNl2AgentState(content: string): Nl2AgentStateEvent | null {
       "greeting_message",
       "example_questions",
     ]);
+    if (parsed.event === "prompt_generation_failed") {
+      if (
+        Object.keys(parsed).length !== 3 ||
+        !Array.isArray(parsed.failed_fields) ||
+        parsed.failed_fields.length === 0 ||
+        parsed.failed_fields.some(
+          (field) =>
+            typeof field !== "string" ||
+            !promptFields.has(field as Nl2aPromptField)
+        ) ||
+        new Set(parsed.failed_fields).size !== parsed.failed_fields.length
+      ) {
+        return null;
+      }
+      return parsed as unknown as Nl2AgentStateEvent;
+    }
+
+    const draftFields = new Set<Nl2AgentDraftField>([
+      "description",
+      "business_description",
+      ...promptFields,
+    ]);
     if (
-      parsed.event !== "prompt_generation_failed" ||
+      parsed.event !== "agent_draft_fields_saved" ||
       Object.keys(parsed).length !== 3 ||
-      !Array.isArray(parsed.failed_fields) ||
-      parsed.failed_fields.length === 0 ||
-      parsed.failed_fields.some(
+      !Array.isArray(parsed.updated_fields) ||
+      parsed.updated_fields.length === 0 ||
+      parsed.updated_fields.some(
         (field) =>
           typeof field !== "string" ||
-          !promptFields.has(field as Nl2aPromptField)
+          !draftFields.has(field as Nl2AgentDraftField)
       ) ||
-      new Set(parsed.failed_fields).size !== parsed.failed_fields.length
+      new Set(parsed.updated_fields).size !== parsed.updated_fields.length
     ) {
       return null;
     }
@@ -1812,8 +1843,10 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         return;
       }
       const eventKey = JSON.stringify(event);
-      if (deliveredNl2AgentStates.has(eventKey)) return;
-      deliveredNl2AgentStates.add(eventKey);
+      if (event.event !== "agent_draft_fields_saved") {
+        if (deliveredNl2AgentStates.has(eventKey)) return;
+        deliveredNl2AgentStates.add(eventKey);
+      }
       custom?.onNl2AgentState?.(event);
     };
     let verificationPanel: VerificationPanelPart | null = null;

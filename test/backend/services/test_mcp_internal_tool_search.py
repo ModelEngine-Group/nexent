@@ -300,7 +300,7 @@ async def test_mcp_search_registration_has_stable_name_schema_and_marker():
 
 
 @pytest.mark.asyncio
-async def test_save_agent_draft_fields_updates_existing_draft_without_creation_state(
+async def test_save_agent_draft_fields_emits_saved_fields_state(
     mocker,
 ):
     mocker.patch.object(
@@ -333,7 +333,8 @@ async def test_save_agent_draft_fields_updates_existing_draft_without_creation_s
 
     result = await save_agent_draft_fields(1042, fields)
 
-    assert json.loads(result) == {
+    result_json, state_wrapper = result.split("\n", 1)
+    assert json.loads(result_json) == {
         "status": "success",
         "agent_id": 1042,
         "created": False,
@@ -342,7 +343,14 @@ async def test_save_agent_draft_fields_updates_existing_draft_without_creation_s
             "business_description",
         ],
     }
-    assert "nl2a_state" not in result
+    assert json.loads(
+        state_wrapper.removeprefix("<nl2a_state>").removesuffix("</nl2a_state>")
+    ) == {
+        "event": "agent_draft_fields_saved",
+        "agent_id": 1042,
+        "updated_fields": ["description", "business_description"],
+    }
+    assert "agent_draft_created" not in result
     save_impl.assert_called_once()
 
 
@@ -447,9 +455,16 @@ async def test_save_agent_draft_fields_reuses_trusted_context_across_rounds(mock
     )
 
     assert [call.kwargs["agent_id"] for call in save.call_args_list] == [1042, 1042]
-    assert all("<nl2a_state>" not in result for result in (first, second))
-    assert json.loads(first)["created"] is False
-    assert json.loads(second)["created"] is False
+    first_result, first_state = first.split("\n", 1)
+    second_result, second_state = second.split("\n", 1)
+    assert json.loads(first_result)["created"] is False
+    assert json.loads(second_result)["created"] is False
+    assert json.loads(
+        first_state.removeprefix("<nl2a_state>").removesuffix("</nl2a_state>")
+    )["updated_fields"] == ["description"]
+    assert json.loads(
+        second_state.removeprefix("<nl2a_state>").removesuffix("</nl2a_state>")
+    )["updated_fields"] == ["duty_prompt"]
 
 
 @pytest.mark.asyncio
