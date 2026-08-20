@@ -374,6 +374,26 @@ You can use a source link to view the original web page.
 - Click an image to preview it at full size.
 - Displays the title of the web page where the image was found.
 
+### 3. Citation Markers and Hit Fragment Highlighting
+
+When the response uses retrieved results, circular citation numbers (such as `1` and `4`) appear at the end of the relevant sentences. When a single sentence references multiple sources, multiple numbers are shown consecutively.
+
+- **Hover over** a citation number to view a summary card with the source title, matched text fragment, and source information.
+- **Click** a citation number to locate the corresponding source card in the right-side panel and expand the exact chunk matched during retrieval.
+
+Key terms in the matched chunk are highlighted in two colors:
+
+| Highlight color | Meaning |
+| --------------- | ------- |
+| Blue | Words exactly matched by the retrieval engine in the original text |
+| Yellow | Words that appear in both the cited sentence and the matched chunk |
+
+With highlighting, you can see the exact fragments a response is based on without reading the entire source document. Knowledge base files can still be previewed or downloaded, and web sources can still be opened via the original link.
+
+![Citation markers and matched fragment example](./assets/start-chat/retrieval-citation-sentence-scope.png)
+
+> **Note**: Clicking a citation number to locate and highlight the matched fragment is disabled by default; deployers can enable it by setting `ENABLE_CITATION_CLICK_HIGHLIGHT` (`frontend/const/citation.ts`) to `true`.
+
 ## 5. Image Processing
 
 When a vision model and image parsing tools are configured for the agent, you can upload images and ask the agent to analyze them.
