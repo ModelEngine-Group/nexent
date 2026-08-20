@@ -34,7 +34,7 @@ consts_const_module.MODEL_CONFIG_MAPPING = {"vlm": "vlm_config_key", "vlm3": "vl
 sys.modules['consts.const'] = consts_const_module
 
 from nexent import MessageObserver
-from nexent.core.gateway import VLMContext
+from nexent.core.gateway import ModelContext, VLMContext
 
 from backend.services import model_gateway_service as mgs
 
@@ -185,6 +185,24 @@ def test_build_adapter_fresh_constructs_without_gateway_cache():
     assert result == dummy_class.return_value
     dummy_class.assert_called_once()
     assert dummy_class.call_args.args[0].factory == "openai"
+
+
+
+def test_get_adapter_from_config_rerank_builds_model_context():
+    gateway = mock.MagicMock()
+    gateway.get_adapter.return_value = "adapter"
+    with mock.patch.object(mgs, "get_gateway", return_value=gateway):
+        result = mgs.get_adapter_from_config(
+            {"model_factory": "openai", "base_url": "u", "api_key": "k"},
+            "rerank", "rerank", "t1",
+        )
+
+    assert result == "adapter"
+    ctx = gateway.get_adapter.call_args.args[0]
+    assert isinstance(ctx, ModelContext)
+    assert ctx.modality == "rerank"
+    assert ctx.factory == "openai"
+    assert ctx.tenant_id == "t1"
 
 
 # _fetch_slot_config
