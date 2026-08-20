@@ -90,6 +90,8 @@ def resolve_skill_permission(
     user_group_ids: set[int],
 ) -> str:
     """Resolve whether the current user can edit or only use a visible skill."""
+    if skill.get("source") == "official":
+        return True
     if user_role in CAN_EDIT_ALL_USER_ROLES:
         return PERMISSION_EDIT
     if str(skill.get("created_by")) == str(user_id):
