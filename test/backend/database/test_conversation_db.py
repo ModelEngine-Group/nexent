@@ -1,7 +1,7 @@
 import json
 import sys
 import types
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, call
 
 import pytest
 

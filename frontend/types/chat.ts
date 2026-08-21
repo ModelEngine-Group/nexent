@@ -187,6 +187,7 @@ export interface ChatMessageType {
   content: string;
   opinion_flag?: string;
   timestamp?: Date;
+  databaseCreateTime?: Date;
   sources?: {
     id: string;
     title: string;

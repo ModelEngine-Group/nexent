@@ -66,8 +66,7 @@ type HistoricalChatMode = "planning" | "execution";
 let activeHistoricalConversationId: string | undefined;
 let activeHistoricalChatModeConversationId: string | undefined;
 let historicalChatModeListener:
-  | ((mode: HistoricalChatMode) => void)
-  | undefined;
+  ((mode: HistoricalChatMode) => void) | undefined;
 const historicalChatModeCache = new Map<string, HistoricalChatMode>();
 
 export const restoreHistoricalPlan = (conversationId?: string): void => {
@@ -224,7 +223,7 @@ const buildBranchableHistory = (
   const branchableMessages: BranchableHistoryMessage[] = [];
   let visibleHeadId: string | null = null;
 
-  for (let groupStart = 0; groupStart < messages.length; ) {
+  for (let groupStart = 0; groupStart < messages.length;) {
     const role = messages[groupStart].role;
     let groupEnd = groupStart + 1;
     while (groupEnd < messages.length && messages[groupEnd].role === role) {
@@ -633,7 +632,6 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
           if (part.type === "picture_web") {
             for (const imageUrl of parseSearchImageUrls(part.content)) {
               appendHistoricalImage(imageUrl);
-
             }
             continue;
           }
@@ -948,8 +946,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
             if (typeof searchItem === "object" && searchItem !== null) {
               const item = searchItem as Record<string, unknown>;
               const scoreDetails = item.score_details as
-                | Record<string, unknown>
-                | undefined;
+                Record<string, unknown> | undefined;
               const searchImageKey = `${item.tool_sign ?? ""}${item.cite_index ?? ""}`;
               if (
                 scoreDetails?.chunk_type === "image" ||
@@ -1411,7 +1408,6 @@ export const conversationThreadListAdapter: RemoteThreadListAdapter = {
         update_time: detail.create_time,
       }
     );
-
   },
 
   async generateTitle(_remoteId, _messages) {

@@ -428,13 +428,15 @@ export function extractAssistantMsgFromResponse(
     });
   }
 
+  const databaseCreateTime = toMessageCreatedAt(dialog_msg.create_time);
   const formattedAssistantMsg: ChatMessageType = {
     id: `assistant-${index}-${Date.now()}`,
     role: MESSAGE_ROLES.ASSISTANT,
     message_id: dialog_msg.message_id,
     content: "",
     opinion_flag: dialog_msg.opinion_flag,
-    timestamp: toMessageCreatedAt(dialog_msg.create_time),
+    timestamp: databaseCreateTime,
+    databaseCreateTime,
     steps: steps,
     finalAnswer: finalAnswer,
     agentRun: "",
@@ -488,13 +490,15 @@ export function extractUserMsgFromResponse(
     });
   }
 
+  const databaseCreateTime = toMessageCreatedAt(dialog_msg.create_time);
   const formattedUserMsg: ChatMessageType = {
     id: `user-${index}-${Date.now()}`,
     role: MESSAGE_ROLES.USER,
     message_id: dialog_msg.message_id,
     content: userContent,
     opinion_flag: dialog_msg.opinion_flag,
-    timestamp: toMessageCreatedAt(dialog_msg.create_time),
+    timestamp: databaseCreateTime,
+    databaseCreateTime,
     showRawContent: true,
     isComplete: true,
     attachments: userAttachments.length > 0 ? userAttachments : undefined,
