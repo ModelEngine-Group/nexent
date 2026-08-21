@@ -18,13 +18,16 @@ import types
 import warnings
 
 import pytest
+import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from fastapi.testclient import TestClient
 
 from consts.const import AGENT_PROMPTS_HIDDEN_FLAG, ASSET_OWNER_TENANT_ID
-from consts.exceptions import UnauthorizedError
+from consts.exceptions import ForbiddenError, UnauthorizedError, ValidationError
 from consts.model import NL2AgentRunRequest
+from services.agent_draft_permission_service import AgentDraftEditError
+from services.nl2agent_service import Nl2AgentDraftSaveError
 
 # Filter out deprecation warnings from third-party libraries
 warnings.filterwarnings(
@@ -199,6 +202,188 @@ async def test_agent_run_api(mocker, mock_auth_header):
 
 
 @pytest.mark.asyncio
+async def test_nl2agent_run_api_streams_for_existing_draft(
+    mocker, mock_auth_header
+):
+    mocker.patch(
+        "apps.agent_app.get_current_user_info",
+        return_value=("user-a", "tenant-a", "en"),
+    )
+
+    async def mock_stream():
+        yield 'data: {"type":"final_answer","content":"done"}\n\n'
+
+    create_stream = mocker.patch(
+        "apps.agent_app.create_nl2agent_stream",
+        new_callable=AsyncMock,
+        return_value=mock_stream(),
+    )
+
+    response = await nl2agent_run_api(
+        nl2agent_request=NL2AgentRunRequest(
+            query="Build a weather agent",
+            history=[],
+            minio_files=[],
+            agent_id=42,
+        ),
+        http_request=MagicMock(),
+        authorization=mock_auth_header["Authorization"],
+    )
+
+    chunks = [chunk async for chunk in response.body_iterator]
+
+    assert response.status_code == 200
+    assert response.media_type == "text/event-stream"
+    assert "final_answer" in "".join(chunks)
+    request = create_stream.call_args.kwargs["request"]
+    assert request.query == "Build a weather agent"
+    assert request.agent_id == 42
+    assert (
+        create_stream.call_args.kwargs["authorization"]
+        == mock_auth_header["Authorization"]
+    )
+    assert not hasattr(request, "conversation_id")
+    assert create_stream.call_args.kwargs["tenant_id"] == "tenant-a"
+    assert create_stream.call_args.kwargs["language"] == "en"
+
+
+@pytest.mark.asyncio
+async def test_northbound_agent_run_api_uses_internal_identity(mocker):
+    mocker.patch(
+        "apps.agent_app.verify_internal_runtime_jwt",
+        return_value=("user-a", "tenant-a"),
+    )
+    run_agent = mocker.patch(
+        "apps.agent_app.run_agent_stream",
+        new_callable=AsyncMock,
+    )
+
+    async def mock_stream():
+        yield b"data: done\n\n"
+
+    run_agent.return_value = StreamingResponse(
+        mock_stream(),
+        media_type="text/event-stream",
+    )
+    response = runtime_client.post(
+        "/agent/internal/northbound/run",
+        json={"agent_id": 1, "conversation_id": 123, "query": "hello"},
+        headers={"Authorization": "Bearer internal-token"},
+    )
+
+    assert response.status_code == 200
+    call_kwargs = run_agent.call_args.kwargs
+    assert call_kwargs["user_id"] == "user-a"
+    assert call_kwargs["tenant_id"] == "tenant-a"
+    assert call_kwargs["skip_user_save"] is True
+    assert call_kwargs["http_request"] is None
+
+
+@pytest.mark.asyncio
+async def test_northbound_agent_run_api_rejects_invalid_token(mocker):
+    mocker.patch(
+        "apps.agent_app.verify_internal_runtime_jwt",
+        side_effect=UnauthorizedError("Invalid internal runtime token"),
+    )
+
+    response = runtime_client.post(
+        "/agent/internal/northbound/run",
+        json={"agent_id": 1, "conversation_id": 123, "query": "hello"},
+        headers={"Authorization": "Bearer invalid"},
+    )
+
+    assert response.status_code == 401
+
+
+@pytest.mark.parametrize(
+    ("error", "expected_status"),
+    [
+        (ForbiddenError("forbidden"), 403),
+        (ValidationError("invalid"), 422),
+    ],
+)
+def test_northbound_agent_run_api_maps_domain_errors(
+    mocker,
+    error,
+    expected_status,
+):
+    mocker.patch(
+        "apps.agent_app.verify_internal_runtime_jwt",
+        return_value=("user-a", "tenant-a"),
+    )
+    mocker.patch(
+        "apps.agent_app.run_agent_stream",
+        new_callable=AsyncMock,
+        side_effect=error,
+    )
+
+    response = runtime_client.post(
+        "/agent/internal/northbound/run",
+        json={"agent_id": 1, "conversation_id": 123, "query": "hello"},
+        headers={"Authorization": "Bearer internal-token"},
+    )
+
+    assert response.status_code == expected_status
+
+
+def test_northbound_agent_run_api_maps_unexpected_error(mocker):
+    mocker.patch(
+        "apps.agent_app.verify_internal_runtime_jwt",
+        return_value=("user-a", "tenant-a"),
+    )
+    mocker.patch(
+        "apps.agent_app.run_agent_stream",
+        new_callable=AsyncMock,
+        side_effect=RuntimeError("unexpected"),
+    )
+
+    response = runtime_client.post(
+        "/agent/internal/northbound/run",
+        json={"agent_id": 1, "conversation_id": 123, "query": "hello"},
+        headers={"Authorization": "Bearer internal-token"},
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Agent run error."
+
+
+@pytest.mark.asyncio
+async def test_northbound_agent_stop_api_uses_internal_identity(mocker):
+    mocker.patch(
+        "apps.agent_app.verify_internal_runtime_jwt",
+        return_value=("user-a", "tenant-a"),
+    )
+    stop_agent = mocker.patch(
+        "apps.agent_app.stop_agent_tasks",
+        return_value={"message": "stopped"},
+    )
+
+    response = runtime_client.post(
+        "/agent/internal/northbound/stop/123",
+        headers={"Authorization": "Bearer internal-token"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"message": "stopped"}
+    stop_agent.assert_called_once_with(123, "user-a")
+
+
+def test_northbound_agent_stop_api_rejects_invalid_token(mocker):
+    mocker.patch(
+        "apps.agent_app.verify_internal_runtime_jwt",
+        side_effect=UnauthorizedError("Invalid internal runtime token"),
+    )
+
+    response = runtime_client.post(
+        "/agent/internal/northbound/stop/123",
+        headers={"Authorization": "Bearer invalid"},
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Invalid internal runtime token"
+
+
+@pytest.mark.asyncio
 async def test_nl2agent_run_api_streams_without_persistent_ids(
     mocker, mock_auth_header
 ):
@@ -221,6 +406,7 @@ async def test_nl2agent_run_api_streams_without_persistent_ids(
             query="Build a weather agent",
             history=[],
             minio_files=[],
+            agent_id=42,
         ),
         http_request=MagicMock(),
         authorization=mock_auth_header["Authorization"],
@@ -233,7 +419,7 @@ async def test_nl2agent_run_api_streams_without_persistent_ids(
     assert "final_answer" in "".join(chunks)
     request = create_stream.call_args.kwargs["request"]
     assert request.query == "Build a weather agent"
-    assert not hasattr(request, "agent_id")
+    assert request.agent_id == 42
     assert (
         create_stream.call_args.kwargs["authorization"]
         == mock_auth_header["Authorization"]
@@ -256,7 +442,10 @@ async def test_nl2agent_run_api_maps_authentication_failure_to_401(mocker):
 
     with pytest.raises(HTTPException) as exc_info:
         await nl2agent_run_api(
-            nl2agent_request=NL2AgentRunRequest(query="Build an assistant"),
+            nl2agent_request=NL2AgentRunRequest(
+                query="Build an assistant",
+                agent_id=42,
+            ),
             http_request=MagicMock(),
             authorization="Bearer invalid-token",
         )
@@ -280,7 +469,10 @@ async def test_nl2agent_run_api_hides_internal_startup_errors(mocker):
 
     with pytest.raises(HTTPException) as exc_info:
         await nl2agent_run_api(
-            nl2agent_request=NL2AgentRunRequest(query="Build an assistant"),
+            nl2agent_request=NL2AgentRunRequest(
+                query="Build an assistant",
+                agent_id=42,
+            ),
             http_request=MagicMock(),
             authorization="Bearer tenant-token",
         )
@@ -288,6 +480,66 @@ async def test_nl2agent_run_api_hides_internal_startup_errors(mocker):
     assert exc_info.value.status_code == 500
     assert exc_info.value.detail == "NL2Agent run error."
     assert "private model configuration" not in exc_info.value.detail
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("error", "expected_status", "expected_code"),
+    [
+        (AgentDraftEditError("agent_not_found"), 404, "agent_not_found"),
+        (AgentDraftEditError("agent_not_draft"), 400, "agent_not_draft"),
+        (AgentDraftEditError("agent_deleted"), 403, "agent_deleted"),
+        (AgentDraftEditError("agent_read_only"), 403, "agent_read_only"),
+        (
+            Nl2AgentDraftSaveError("agent_context_mismatch"),
+            400,
+            "agent_context_mismatch",
+        ),
+    ],
+)
+async def test_nl2agent_run_api_maps_draft_identity_errors(
+    mocker,
+    error,
+    expected_status,
+    expected_code,
+):
+    mocker.patch(
+        "apps.agent_app.get_current_user_info",
+        return_value=("user-a", "tenant-a", "en"),
+    )
+    mocker.patch(
+        "apps.agent_app.create_nl2agent_stream",
+        new_callable=AsyncMock,
+        side_effect=error,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await nl2agent_run_api(
+            nl2agent_request=NL2AgentRunRequest(
+                query="Continue configuring the Agent",
+                agent_id=42,
+            ),
+            http_request=MagicMock(),
+            authorization="Bearer tenant-token",
+        )
+
+    assert exc_info.value.status_code == expected_status
+    assert exc_info.value.detail["code"] == expected_code
+
+
+@pytest.mark.asyncio
+async def test_nl2agent_run_api_requires_agent_id():
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=runtime_app),
+        base_url="http://test",
+    ) as client:
+        response = await client.post(
+            "/agent/nl2agent/run",
+            json={"query": "Build an assistant"},
+        )
+
+    assert response.status_code == 422
+    assert response.json()["detail"][0]["loc"][-1] == "agent_id"
 
 
 async def test_agent_run_api_error_debug_mode(mocker, mock_auth_header):
@@ -1549,14 +1801,13 @@ def test_publish_version_api_success(mocker, mock_auth_header):
         tenant_id="test_tenant_id",
         user_id="test_user_id",
         version_name="v1.0.0",
-        release_note="Initial release",
-        publish_as_a2a=False
+        release_note="Initial release"
     )
     assert response.json()["success"] is True
 
 
-def test_publish_version_api_success_with_a2a(mocker, mock_auth_header):
-    """Test publish_version_api with publish_as_a2a=True."""
+def test_publish_version_api_ignores_publish_as_a2a_request_field(mocker, mock_auth_header):
+    """Test publish_version_api does not accept publish_as_a2a as an API option."""
     mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
     mock_publish_version = mocker.patch("apps.agent_app.publish_version_impl")
 
@@ -1574,8 +1825,8 @@ def test_publish_version_api_success_with_a2a(mocker, mock_auth_header):
     )
 
     assert response.status_code == 200
-    args, kwargs = mock_publish_version.call_args
-    assert kwargs["publish_as_a2a"] is True
+    _, kwargs = mock_publish_version.call_args
+    assert "publish_as_a2a" not in kwargs
 
 
 def test_publish_version_api_bad_request(mocker, mock_auth_header):
@@ -2327,18 +2578,99 @@ def test_get_agent_knowledge_capabilities_api_value_error(mocker, mock_auth_head
     assert "agent not found" in response.json()["detail"]
 
 
-def test_get_agent_knowledge_capabilities_api_internal_error(mocker, mock_auth_header):
-    """Unexpected resolver failures map to 500."""
-    mocker.patch("apps.agent_app.get_current_user_id",
-                 return_value=("user-1", "tenant-1"))
-    mocker.patch(
-        "apps.agent_app.get_agent_knowledge_capabilities",
-        side_effect=RuntimeError("boom"),
-    )
+@pytest.mark.parametrize(
+    ("error", "expected_status", "detail"),
+    [
+        (ForbiddenError("You do not have permission"), 403, "You do not have permission"),
+        (ValueError("Agent icon is invalid"), 400, "Agent icon is invalid"),
+        (RuntimeError("storage unavailable"), 500, "Agent icon upload error."),
+    ],
+)
+def test_upload_agent_icon_api_error_mapping(mocker, mock_auth_header, error, expected_status, detail):
+    mocker.patch("apps.agent_app.get_current_user_id", return_value=("user-1", "tenant-1"))
+    mocker.patch("apps.agent_app.upload_agent_icon_impl", new_callable=AsyncMock, side_effect=error)
 
-    response = config_client.get(
-        "/agent/7/knowledge-capabilities",
+    response = config_client.post(
+        "/agent/7/icon",
+        files={"file": ("icon.png", b"png-content", "image/png")},
         headers=mock_auth_header,
     )
 
+    assert response.status_code == expected_status
+    assert response.json()["detail"] == detail
+
+
+def test_upload_agent_icon_api_success(mocker, mock_auth_header):
+    mocker.patch("apps.agent_app.get_current_user_id", return_value=("user-1", "tenant-1"))
+    upload_impl = mocker.patch(
+        "apps.agent_app.upload_agent_icon_impl",
+        new_callable=AsyncMock,
+        return_value={"icon_url": "/api/agent/7/icon", "content_type": "image/png"},
+    )
+
+    response = config_client.post(
+        "/agent/7/icon",
+        files={"file": ("icon.png", b"png-content", "image/png")},
+        headers=mock_auth_header,
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "icon_url": "/api/agent/7/icon",
+        "content_type": "image/png",
+    }
+    upload_impl.assert_awaited_once_with(
+        agent_id=7,
+        content=b"png-content",
+        tenant_id="tenant-1",
+        user_id="user-1",
+    )
+
+
+def test_get_agent_icon_api_success(mocker, mock_auth_header):
+    mocker.patch("apps.agent_app.get_current_user_id", return_value=("user-1", "tenant-1"))
+    get_impl = mocker.patch(
+        "apps.agent_app.get_agent_icon_impl",
+        new_callable=AsyncMock,
+        return_value=(b"image-bytes", "image/webp"),
+    )
+
+    response = config_client.get("/agent/7/icon", headers=mock_auth_header)
+
+    assert response.status_code == 200
+    assert response.content == b"image-bytes"
+    assert response.headers["content-type"] == "image/webp"
+    assert response.headers["cache-control"] == "private, max-age=3600"
+    get_impl.assert_awaited_once_with(
+        agent_id=7,
+        tenant_id="tenant-1",
+        user_id="user-1",
+    )
+
+
+def test_get_agent_icon_api_not_found(mocker, mock_auth_header):
+    mocker.patch("apps.agent_app.get_current_user_id", return_value=("user-1", "tenant-1"))
+    mocker.patch(
+        "apps.agent_app.get_agent_icon_impl",
+        new_callable=AsyncMock,
+        side_effect=FileNotFoundError("Agent icon not found"),
+    )
+
+    response = config_client.get("/agent/7/icon", headers=mock_auth_header)
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Agent icon not found"
+
+
+def test_get_agent_icon_api_internal_error(mocker, mock_auth_header):
+    mocker.patch("apps.agent_app.get_current_user_id", return_value=("user-1", "tenant-1"))
+    mocker.patch(
+        "apps.agent_app.get_agent_icon_impl",
+        new_callable=AsyncMock,
+        side_effect=RuntimeError("storage unavailable"),
+    )
+
+    response = config_client.get("/agent/7/icon", headers=mock_auth_header)
+
     assert response.status_code == 500
+    assert response.json()["detail"] == "Agent icon retrieval error."

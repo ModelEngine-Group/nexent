@@ -301,7 +301,7 @@ class LLMAutomationIntentStrategy(AutomationIntentAnalysisStrategy):
             timeout_seconds=self._model_config.get("timeout_seconds"),
             stream=False,
         )
-        response = llm.generate([
+        response = llm([
             {
                 "role": MESSAGE_ROLE["SYSTEM"],
                 "content": prompt_template["INTENT_ANALYSIS_SYSTEM_PROMPT"],

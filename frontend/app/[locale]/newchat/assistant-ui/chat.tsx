@@ -24,6 +24,7 @@ export interface ChatProps {
   chatMode?: ChatMode;
   onChatModeChange?: (mode: ChatMode) => void;
   showModelSelector?: boolean;
+  showConversationTitle?: boolean;
   isDictationConfigured?: boolean;
   knowledgeScope?: ConversationKnowledgeScope | null;
   knowledgePreview?: KnowledgeScopeEffectivePreview | null;
@@ -35,6 +36,7 @@ export interface ChatProps {
   variant?: "default" | "embedded";
   skillFiles?: readonly SkillFileContent[];
   onSkillFileSelect?: (path: string) => void;
+  readOnly?: boolean;
 }
 
 const AgentsLoadingState: FC = () => {
@@ -62,6 +64,7 @@ export const Chat: FC<ChatProps> = ({
   chatMode = "execution",
   onChatModeChange = () => undefined,
   showModelSelector = true,
+  showConversationTitle = true,
   isDictationConfigured = false,
   knowledgeScope = null,
   knowledgePreview = null,
@@ -70,6 +73,7 @@ export const Chat: FC<ChatProps> = ({
   variant = "default",
   skillFiles,
   onSkillFileSelect,
+  readOnly = false,
 }) => {
   const handleSelectAgent = useCallback(
     (agent: Agent) => {
@@ -98,6 +102,7 @@ export const Chat: FC<ChatProps> = ({
       chatMode={chatMode}
       onChatModeChange={onChatModeChange}
       showModelSelector={showModelSelector}
+      showConversationTitle={showConversationTitle}
       isDictationConfigured={isDictationConfigured}
       knowledgeScope={knowledgeScope}
       knowledgePreview={knowledgePreview}
@@ -106,6 +111,7 @@ export const Chat: FC<ChatProps> = ({
       variant={variant}
       skillFiles={skillFiles}
       onSkillFileSelect={onSkillFileSelect}
+      readOnly={readOnly}
     />
   );
 };

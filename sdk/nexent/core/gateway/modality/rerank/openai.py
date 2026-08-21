@@ -1,0 +1,217 @@
+"""OpenAI-compatible rerank adapter (flat OpenAI or DashScope wrapper format)."""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from typing import Any, Dict, List, Optional
+
+import requests
+
+from ...model_context import ModelContext
+from ...multimodal_adapter import ModelInfo, MultimodalAdapter
+from ...registry import register_adapter
+from ...transport import HttpTransportMixin
+from .rerank_adapter import RerankAdapter, RerankRequest
+
+
+@register_adapter("openai", "rerank")
+class OpenAICompatibleRerankAdapter(RerankAdapter, HttpTransportMixin):
+    """OpenAI-compatible rerank — supports any OpenAI-rerank-format API.
+
+    DashScope is auto-detected by URL (``dashscope`` in base_url) and uses the
+    ``input``/``parameters`` wrapper; otherwise the flat OpenAI format is used.
+
+    Attributes:
+        modality: ``"rerank"``.
+        factory: ``"openai"``.
+        _headers: HTTP auth headers built from the API key.
+    """
+
+    factory = "openai"
+
+    def __init__(self, context: ModelContext) -> None:
+        MultimodalAdapter.__init__(self, context)
+        HttpTransportMixin.__init__(
+            self,
+            base_url=context.base_url,
+            api_key=context.api_key,
+            ssl_verify=context.ssl_verify,
+            timeout=context.timeout_seconds if context.timeout_seconds is not None else 30.0,
+        )
+        self._headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self._api_key}",
+        }
+
+    # ---- protocol (moved from OpenAICompatibleRerank) ----
+
+    @property
+    def _model_name(self) -> str:
+        """The model name from the construction context."""
+        return self._context.model_name
+
+    def _prepare_request(
+        self, query: str, documents: List[str], top_n: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """Build the rerank request payload.
+
+        DashScope is auto-detected by URL (``dashscope`` in base_url) and uses
+        the ``input``/``parameters`` wrapper; otherwise the flat OpenAI format
+        is used.
+        """
+        if "dashscope" in (self._base_url or "").lower():
+            return {
+                "model": self._model_name,
+                "input": {"query": query, "documents": documents},
+                "parameters": {"top_n": top_n or len(documents)},
+            }
+        return {
+            "model": self._model_name,
+            "query": query,
+            "documents": documents,
+            "top_n": top_n or len(documents),
+        }
+
+    def _make_request(
+        self, data: Dict[str, Any], timeout: Optional[float] = None
+    ) -> Dict[str, Any]:
+        """POST the payload to the rerank endpoint and return the JSON.
+
+        Raises:
+            requests.exceptions.RequestException: If the HTTP request fails.
+        """
+        response = requests.post(
+            self._base_url,
+            headers=self._headers,
+            json=data,
+            timeout=timeout,
+            verify=self._ssl_verify,
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def rerank(
+        self, query: str, documents: List[str], top_n: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
+        """Rerank documents against a query, retrying on timeout.
+
+        Empty document lists short-circuit to an empty result. Timeouts are
+        retried with increasing timeouts (30s base, +10s per attempt, up to 4
+        attempts); other request errors fail immediately.
+
+        Args:
+            query: The query to rerank documents against.
+            documents: The documents to rerank.
+            top_n: Optional limit on the number of returned documents.
+
+        Returns:
+            A list of ``{"index", "relevance_score", "document"}`` dicts.
+
+        Raises:
+            requests.exceptions.Timeout: If all timeout retries are exhausted.
+            requests.exceptions.RequestException: If the request fails.
+        """
+        if not documents:
+            return []
+        data = self._prepare_request(query, documents, top_n)
+        base_timeout = 30.0
+        attempts = 4
+        last_exception: Optional[requests.exceptions.Timeout] = None
+        for attempt_index in range(attempts):
+            current_timeout = base_timeout + attempt_index * 10.0
+            try:
+                response = self._make_request(data, timeout=current_timeout)
+                return self._normalize_results(response)
+            except requests.exceptions.Timeout as e:
+                logging.warning(
+                    f"Rerank API timed out in {current_timeout}s (attempt {attempt_index + 1}/{attempts})"
+                )
+                last_exception = e
+                continue
+            except requests.exceptions.RequestException:
+                logging.exception("Rerank API request failed")
+                raise
+        logging.error("Rerank API timed out after all retries.")
+        raise last_exception
+
+    def _normalize_results(self, response: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Normalize provider rerank responses into the common result shape.
+
+        Handles both the flat ``{"results": [...]}`` payload and the nested
+        ``{"output": {"results": [...]}}`` payload, unwrapping document dicts
+        into their text form.
+        """
+        results = response.get("results") or response.get("output", {}).get("results", [])
+        reranked = []
+        for r in results:
+            doc = r.get("document")
+            doc_text = doc.get("text") if isinstance(doc, dict) else doc
+            reranked.append(
+                {
+                    "index": r.get("index"),
+                    "relevance_score": r.get("relevance_score"),
+                    "document": doc_text,
+                }
+            )
+        return reranked
+
+    async def rerank_async(
+        self, query: str, documents: List[str], top_n: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
+        """Rerank documents against a query, offloaded to a worker thread.
+
+        Args:
+            query: The query to rerank documents against.
+            documents: The documents to rerank.
+            top_n: Optional limit on the number of returned documents.
+
+        Returns:
+            A list of rerank result dicts (see :meth:`rerank`).
+        """
+        return await asyncio.to_thread(self.rerank, query, documents, top_n)
+
+    async def connectivity_check(self, timeout: float = 5.0) -> bool:
+        """Verify the rerank endpoint is reachable with a probe rerank call.
+
+        Args:
+            timeout: Timeout in seconds for the probe.
+
+        Returns:
+            True if the probe succeeds, False on timeout/connection/other error.
+        """
+        try:
+            await asyncio.to_thread(
+                self.rerank, "test query", ["test document"], top_n=1
+            )
+            return True
+        except requests.exceptions.Timeout:
+            logging.error(f"Rerank API connection test timed out ({timeout} seconds)")
+            return False
+        except requests.exceptions.ConnectionError:
+            logging.error("Rerank API connection error, unable to establish connection")
+            return False
+        except Exception:
+            logging.exception("Rerank API connectivity check failed")
+            return False
+
+    # ---- adapter interface ----
+
+    async def invoke(self, request: RerankRequest) -> List[Dict[str, Any]]:
+        """Rerank ``request.documents`` offloaded to a worker thread."""
+        return await asyncio.to_thread(
+            self.rerank, request.query, request.documents, request.top_n
+        )
+
+    async def health_check(self) -> bool:
+        """Delegate to :meth:`connectivity_check`."""
+        return await self.connectivity_check()
+
+    def get_model_info(self) -> ModelInfo:
+        """Return ``ModelInfo`` with the ``rerank`` capability."""
+        return ModelInfo(
+            model_id=self._context.model_name,
+            display_name=self._context.display_name or "",
+            provider=self.factory,
+            capabilities={"rerank": True},
+        )

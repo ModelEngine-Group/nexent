@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import imghdr
 from http import HTTPStatus
 import io
 import json
@@ -22,6 +23,7 @@ from utils.prompt_template_utils import normalize_prompt_generate_template_conte
 from consts.const import TOOL_TYPE_MAPPING, \
     LANGUAGE, MESSAGE_ROLE, MODEL_CONFIG_MAPPING, CAN_EDIT_ALL_USER_ROLES, PERMISSION_PRIVATE, STREAM_STATUS_EVENT, \
     DEFAULT_EN_TITLE, DEFAULT_ZH_TITLE, RUNTIME_CANCEL_POLL_INTERVAL_SECONDS
+from consts.agent import SAFE_AGENT_STREAM_ERROR_MESSAGE
 from consts.exceptions import AppException, ForbiddenError, MemoryPreparationException, SkillDuplicateError
 from consts.error_code import ErrorCode
 from consts.agent_unavailable_reasons import AgentUnavailableReason
@@ -57,6 +59,7 @@ from database.agent_db import (
     search_agent_info_by_agent_id,
     search_blank_sub_agent_by_main_agent_id,
     update_agent,
+    update_agent_icon,
     update_related_agents,
     clear_agent_new_mark
 )
@@ -79,9 +82,13 @@ from database.tool_db import (
     search_tools_for_sub_agent
 )
 from database import skill_db
-from database.attachment_db import upload_fileobj
+from database.attachment_db import (
+    delete_file,
+    get_content_type,
+    get_file_stream,
+)
+from database.client import minio_client
 from services.skill_service import SkillService
-from services.file_management_service import is_allowed_skill_upload_path
 from database.agent_version_db import query_version_list, query_current_version_no, batch_search_version_names, batch_query_current_version_nos
 from database.group_db import query_group_ids_by_user
 from database.user_tenant_db import get_user_tenant_by_user_id
@@ -119,6 +126,14 @@ from services.memory_config_service import build_memory_context
 from services.streaming_channel import streaming_channel_manager
 from services.runtime_state_service import runtime_state_service
 from utils.auth_utils import get_current_user_info, get_user_language
+from utils.agent_stream_utils import (
+    extract_json_objects_from_text as _extract_json_objects_from_text,
+    extract_skill_file_upload_payloads as _extract_skill_file_upload_payloads,
+    process_skill_file_uploads as _process_skill_file_uploads,
+    safe_agent_stream_error_chunk as _safe_agent_stream_error_chunk,
+    serialize_stream_unit_content as _serialize_stream_unit_content,
+    transform_skill_files_to_standard_format as _transform_skill_files_to_standard_format,
+)
 from utils.config_utils import tenant_config_manager
 from utils.context_utils import build_authorized_context_input
 from utils.thread_utils import submit
@@ -132,8 +147,78 @@ from nexent.monitor import AgentRunMetadata, agent_monitoring_context
 from utils.monitoring import monitoring_manager
 
 logger = logging.getLogger(__name__)
-SAFE_AGENT_STREAM_ERROR_MESSAGE = "Agent execution failed. Please try again later."
+AGENT_ICON_MAX_BYTES = 2 * 1024 * 1024
+AGENT_ICON_CONTENT_TYPES = {
+    "gif": "image/gif",
+    "jpeg": "image/jpeg",
+    "png": "image/png",
+    "webp": "image/webp",
+}
 _channel_cleanup_tasks: set[asyncio.Task[None]] = set()
+
+
+def _agent_icon_object_name(agent_id: int, tenant_id: str) -> str:
+    return f"agent-icons/{tenant_id}/{agent_id}/icon"
+
+
+def _detect_agent_icon_content_type(content: bytes) -> str | None:
+    image_type = imghdr.what(None, content)
+    return AGENT_ICON_CONTENT_TYPES.get(image_type)
+
+
+async def upload_agent_icon_impl(
+    agent_id: int,
+    content: bytes,
+    tenant_id: str,
+    user_id: str,
+) -> dict:
+    """Validate, store, and attach a user-supplied image to an editable agent."""
+    if not content:
+        raise ValueError("Agent icon file is empty")
+    if len(content) > AGENT_ICON_MAX_BYTES:
+        raise ValueError("Agent icon must not exceed 2 MB")
+
+    content_type = _detect_agent_icon_content_type(content)
+    if content_type is None:
+        raise ValueError("Agent icon must be a PNG, JPEG, GIF, or WebP image")
+
+    agent = await get_agent_info_impl(agent_id, tenant_id, user_id=user_id)
+    if agent.get("permission") != "EDIT":
+        raise ForbiddenError("You do not have permission to edit this agent")
+
+    owner_tenant_id = agent.get("tenant_id") or tenant_id
+    object_name = _agent_icon_object_name(agent_id, owner_tenant_id)
+    success, error = minio_client.upload_fileobj(io.BytesIO(content), object_name)
+    if not success:
+        raise ValueError(f"Failed to upload agent icon: {error}")
+
+    icon_url = f"/api/agent/{agent_id}/icon"
+    update_agent_icon(
+        agent_id=agent_id,
+        tenant_id=owner_tenant_id,
+        icon_url=icon_url,
+        user_id=user_id,
+    )
+    return {"icon_url": icon_url, "content_type": content_type}
+
+
+async def get_agent_icon_impl(agent_id: int, tenant_id: str, user_id: str) -> tuple[bytes, str]:
+    """Return a stored agent icon after applying normal agent visibility rules."""
+    agent = await get_agent_info_impl(agent_id, tenant_id, user_id=user_id)
+    if not agent.get("icon_url"):
+        raise FileNotFoundError("Agent icon not found")
+
+    owner_tenant_id = agent.get("tenant_id") or tenant_id
+    stream = get_file_stream(_agent_icon_object_name(agent_id, owner_tenant_id))
+    if stream is None:
+        raise FileNotFoundError("Agent icon not found")
+
+    content = stream.read()
+    content_type = _detect_agent_icon_content_type(content)
+    if content_type is None:
+        raise FileNotFoundError("Agent icon is invalid")
+    return content, content_type
+
 
 
 async def _cleanup_channel_later(conversation_id: int, user_id: str, delay: float = 5.0):
@@ -171,167 +256,6 @@ async def _cancel_task_on_runtime_signal(conversation_id: int, user_id: str, tas
             )
             return
         await asyncio.sleep(RUNTIME_CANCEL_POLL_INTERVAL_SECONDS)
-
-
-def _extract_json_objects_from_text(text: str) -> list[dict]:
-    """Extract all JSON objects embedded in a text blob."""
-    if not text:
-        return []
-
-    decoder = json.JSONDecoder()
-    results: list[dict] = []
-    index = 0
-
-    while index < len(text):
-        start_index = text.find("{", index)
-        if start_index < 0:
-            break
-
-        try:
-            payload, end_index = decoder.raw_decode(text, start_index)
-        except json.JSONDecodeError:
-            index = start_index + 1
-            continue
-
-        if isinstance(payload, dict):
-            results.append(payload)
-        index = max(end_index, start_index + 1)
-
-    return results
-
-
-def _extract_skill_file_upload_payloads(content: str) -> list[dict]:
-    """Extract JSON payloads containing absolute_path from streamed tool output."""
-    payloads: list[dict] = []
-    for payload in _extract_json_objects_from_text(content):
-        if payload.get("absolute_path"):
-            payloads.append(payload)
-    return payloads
-
-
-def _serialize_stream_unit_content(data: Dict[str, Any], content: str) -> str:
-    """Preserve tool metadata in the existing message-unit content column."""
-    if data.get("type") not in {"tool", "tool-call"}:
-        return content
-
-    payload: Dict[str, Any] = {"content": content}
-    for field in ("tool_name", "tool_arguments", "role"):
-        if field in data:
-            payload[field] = data[field]
-    return json.dumps(payload, ensure_ascii=False)
-
-
-def _transform_skill_files_to_standard_format(upload_results: list[dict]) -> list[dict]:
-    """
-    Transform skill file upload results to match the frontend attachment format.
-
-    Skill upload format:
-        {file_name, absolute_path, object_name, preview_url, url, presigned_url, mime_type, file_size, status}
-    Frontend format:
-        {object_name, name, type, size, url, presigned_url, description}
-    """
-    frontend_files = []
-    for result in upload_results:
-        frontend_files.append({
-            "object_name": result.get("object_name", ""),
-            "name": result.get("file_name", result.get("name", "")),
-            "type": "file",
-            "size": result.get("file_size", result.get("size", 0)),
-            "url": result.get("url", ""),
-            "presigned_url": result.get("presigned_url", result.get("preview_url", "")),
-            "description": "",
-        })
-    return frontend_files
-
-
-async def _process_skill_file_uploads(
-    payloads: list[dict] | str,
-    user_id: str,
-    tenant_id: str,
-) -> list[dict]:
-    """Upload generated skill files to storage and return upload metadata."""
-
-    upload_results: list[dict] = []
-    structured_payloads = (
-        payloads
-        if isinstance(payloads, list)
-        else _extract_skill_file_upload_payloads(payloads)
-    )
-    for payload in structured_payloads:
-        absolute_path = str(payload.get("absolute_path") or "").strip()
-        file_name = str(
-            payload.get("file_name")
-            or payload.get("file_path")
-            or os.path.basename(absolute_path)
-        )
-        mime_type = str(payload.get("mime_type") or payload.get("content_type") or "application/octet-stream")
-        if not absolute_path:
-            continue
-
-        if not is_allowed_skill_upload_path(absolute_path):
-            logger.warning(
-                "[skill-file] rejected unsafe path absolute_path=%s",
-                absolute_path,
-            )
-            continue
-
-        if not file_name:
-            file_name = os.path.basename(absolute_path)
-
-        if not os.path.exists(absolute_path):
-            continue
-
-        try:
-            file_size = os.path.getsize(absolute_path)
-            actual_prefix = f"skill-files/{user_id}" if user_id else "skill-files"
-            with open(absolute_path, "rb") as file_obj:
-                upload_result = upload_fileobj(
-                    file_obj=file_obj,
-                    file_name=file_name,
-                    prefix=actual_prefix,
-                    generate_presigned_url=True,
-                    file_size=file_size,
-                )
-
-            if upload_result.get("success"):
-                upload_results.append(
-                    {
-                        "status": "success",
-                        "file_name": file_name,
-                        "absolute_path": absolute_path,
-                        "object_name": upload_result.get("object_name"),
-                        "preview_url": upload_result.get("presigned_url") or upload_result.get("url"),
-                        "url": upload_result.get("url"),
-                        "presigned_url": upload_result.get("presigned_url"),
-                        "mime_type": mime_type,
-                        "file_size": upload_result.get("file_size", file_size),
-                    }
-                )
-            else:
-                error_message = upload_result.get("error") or "Upload failed"
-                logger.warning(
-                    "[skill-file] upload failed file_name=%s absolute_path=%s error=%s",
-                    file_name,
-                    absolute_path,
-                    error_message,
-                )
-        except Exception:
-            logger.exception(
-                "[skill-file] failed to upload file file_name=%s absolute_path=%s",
-                file_name,
-                absolute_path,
-            )
-
-    return upload_results
-
-
-def _safe_agent_stream_error_chunk() -> str:
-    """Return a sanitized SSE error chunk without internal exception details."""
-    error_payload = json.dumps(
-        {"type": "error", "content": SAFE_AGENT_STREAM_ERROR_MESSAGE},
-        ensure_ascii=False,
-    )
-    return f"data: {error_payload}\n\n"
 
 
 def _resolve_user_tenant_language(
@@ -965,6 +889,7 @@ async def _stream_agent_chunks(
 
     captured_skill_files: dict[str, dict] = {}
     skill_file_uploads: list[dict] = []
+    workspace_file_uploads: dict[str, dict] = {}
 
     # Determine if we're in resume mode
     is_resume_mode = resume_from_unit_index > 0
@@ -1094,6 +1019,26 @@ async def _stream_agent_chunks(
                     len(artifacts),
                     len(captured_skill_files),
                 )
+                continue
+
+            if chunk_type == ProcessType.FILE_ARTIFACT.value:
+                artifact_content = data.get("content")
+                if isinstance(artifact_content, str):
+                    try:
+                        artifact_content = json.loads(artifact_content)
+                    except json.JSONDecodeError:
+                        artifact_content = {}
+                artifacts = (
+                    artifact_content.get("artifacts", [])
+                    if isinstance(artifact_content, dict)
+                    else []
+                )
+                for artifact in artifacts:
+                    if not isinstance(artifact, dict):
+                        continue
+                    object_name = str(artifact.get("object_name") or "").strip()
+                    if object_name:
+                        workspace_file_uploads[object_name] = artifact
                 continue
 
             should_parse_skill_file = (
@@ -1414,13 +1359,12 @@ async def _stream_agent_chunks(
                     len(skill_file_uploads), skill_file_uploads
                 )
                 if skill_file_uploads:
-                    # Keep original format for real-time SSE display
-                    skill_files_payload = json.dumps(
-                        {"skill_file_uploads": skill_file_uploads},
+                    files_payload = json.dumps(
+                        {"file_uploads": skill_file_uploads},
                         ensure_ascii=False,
                     )
                     try:
-                        yield f"data: {json.dumps({'type': 'skill_files', 'content': skill_files_payload}, ensure_ascii=False)}\n\n"
+                        yield f"data: {json.dumps({'type': 'files', 'content': files_payload}, ensure_ascii=False)}\n\n"
                     except RuntimeError:
                         # Stream is closing (e.g., client disconnect). Avoid raising during generator teardown.
                         pass
@@ -1441,6 +1385,29 @@ async def _stream_agent_chunks(
                         )
         except Exception:
             logger.exception("Failed to process skill file uploads")
+
+        if workspace_file_uploads:
+            uploaded_files = list(workspace_file_uploads.values())
+            files_payload = json.dumps(
+                {"file_uploads": uploaded_files},
+                ensure_ascii=False,
+            )
+            try:
+                yield f"data: {json.dumps({'type': 'files', 'content': files_payload}, ensure_ascii=False)}\n\n"
+            except RuntimeError:
+                pass
+            if not agent_request.is_debug:
+                try:
+                    save_skill_files_to_conversation(
+                        conversation_id=agent_request.conversation_id,
+                        skill_file_uploads=_transform_skill_files_to_standard_format(uploaded_files),
+                        user_id=user_id,
+                    )
+                except Exception:
+                    logger.exception(
+                        "Failed to persist workspace file uploads for conversation=%s",
+                        agent_request.conversation_id,
+                    )
 
         # Memory recording is now handled by the agent-side ``StoreMemoryTool``
         # (which delegates to the new ``MemoryService`` facade). The legacy
@@ -1825,6 +1792,7 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
                 "requested_output_tokens": request.requested_output_tokens,
                 "is_main_agent": request.is_main_agent if request.is_main_agent is not None else True,
                 "provide_run_summary": request.provide_run_summary,
+                "is_a2a": request.is_a2a if request.is_a2a is not None else False,
                 "verification_config": request.verification_config,
                 "context_policy": request.context_policy,
                 "duty_prompt": request.duty_prompt,
@@ -1832,6 +1800,7 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
                 "few_shots_prompt": request.few_shots_prompt,
                 "greeting_message": request.greeting_message,
                 "example_questions": request.example_questions,
+                "icon_url": request.icon_url,
                 "enabled": request.enabled if request.enabled is not None else True,
                 "group_ids": convert_list_to_string(request.group_ids) if request.group_ids else user_group_ids,
                 "ingroup_permission": request.ingroup_permission

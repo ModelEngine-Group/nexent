@@ -121,6 +121,7 @@ services:
       - "5014:5014" # Runtime service port
     volumes:
       - ${NEXENT_USER_DIR:-$HOME/nexent}:/mnt/nexent
+      - nexent_agent_workspace:/mnt/nexent/workdir
       - ../../sql:/opt/nexent/sql:ro
       - ${ROOT_DIR}/skills:/mnt/nexent-data/skills
       - ${ROOT_DIR}/openssh-server/ssh-keys:/opt/ssh-keys:ro
@@ -293,7 +294,7 @@ services:
   nexent-minio:
     image: ${MINIO_IMAGE}
     container_name: nexent-minio
-    command: server /data
+    command: []
     ports:
       - "9010:9000" # MinIO API port
       - "9011:9001" # MinIO Console port
@@ -302,7 +303,7 @@ services:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
     volumes:
-      - ${ROOT_DIR}/minio/data:/etc/minio/data
+      - ${ROOT_DIR}/minio/data:/data
     networks:
       - nexent
     restart: always
@@ -311,19 +312,38 @@ services:
       options:
         max-size: "100m" # Maximum size of a single log file
         max-file: "3" # Maximum number of log files to keep
-    entrypoint: >
-      /bin/sh -c "
-        minio server /etc/minio/data --address ':9000' --console-address ':9001' &
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        minio server /data --address ':9000' --console-address ':9001' &
         MINIO_PID=$$!
-        sleep 3
-        mc alias set myadmin http://localhost:9000 $MINIO_ROOT_USER $MINIO_ROOT_PASSWORD
-        mc admin user add myadmin $MINIO_ACCESS_KEY $MINIO_SECRET_KEY
-        mc admin policy attach myadmin readwrite --user=$MINIO_ACCESS_KEY
-        mc mb myadmin/$MINIO_DEFAULT_BUCKET
-        mc anonymous set download myadmin/$MINIO_DEFAULT_BUCKET
-        mc ilm rule add myadmin/$MINIO_DEFAULT_BUCKET --prefix 'preview/' --expiry-days 7 --id expire-converted-pdfs
+        for attempt in $$(seq 1 30); do
+          if mc alias set myadmin http://localhost:9000 $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD} >/dev/null 2>&1; then
+            break
+          fi
+          if [ $$attempt -eq 30 ]; then
+            echo 'MinIO did not become ready in time.' >&2
+            kill $$MINIO_PID
+            wait $$MINIO_PID || true
+            exit 1
+          fi
+          sleep 2
+        done
+        mc admin user add myadmin $${MINIO_ACCESS_KEY} $${MINIO_SECRET_KEY}
+        USER_INFO="$$(mc admin user info myadmin $${MINIO_ACCESS_KEY} --json 2>/dev/null || true)"
+        case "$$USER_INFO" in
+          *'"policyName":"readwrite"'*) ;;
+          *) mc admin policy attach myadmin readwrite --user=$${MINIO_ACCESS_KEY} ;;
+        esac
+        mc stat myadmin/$${MINIO_DEFAULT_BUCKET} >/dev/null 2>&1 || mc mb myadmin/$${MINIO_DEFAULT_BUCKET}
+        mc anonymous set download myadmin/$${MINIO_DEFAULT_BUCKET}
+        ILM_RULES="$$(mc ilm rule ls myadmin/$${MINIO_DEFAULT_BUCKET} --json 2>/dev/null || true)"
+        case "$$ILM_RULES" in
+          *'"Expiration":{"Days":7}'*'"Filter":{"Prefix":"preview/"}'*) ;;
+          *) mc ilm rule add myadmin/$${MINIO_DEFAULT_BUCKET} --prefix 'preview/' --expire-days 7 ;;
+        esac
         wait $$MINIO_PID
-      "
 
   nexent-openssh-server:
     image: ${OPENSSH_SERVER_IMAGE}
@@ -354,3 +374,5 @@ networks:
 
 volumes:
   redis_data:
+  nexent_agent_workspace:
+    name: ${NEXENT_SANDBOX_WORKSPACE_VOLUME:-nexent-agent-workspace}

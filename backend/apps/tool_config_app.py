@@ -19,6 +19,10 @@ from services.tool_configuration_service import (
     delete_openapi_service,
     _refresh_openapi_services_in_mcp,
 )
+from services.agent_draft_permission_service import (
+    AgentDraftEditError,
+    ResourceBindingError,
+)
 from database.user_tenant_db import get_user_email_map
 from utils.auth_utils import get_current_user_id
 
@@ -65,14 +69,31 @@ async def update_tool_info_api(request: ToolInstanceInfoRequest, authorization: 
     try:
         user_id, tenant_id = get_current_user_id(authorization)
         return update_tool_info_impl(request, tenant_id, user_id)
-    except ValidationError as e:
-        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
+    except ValidationError as exc:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc)) from exc
+    except (AgentDraftEditError, ResourceBindingError) as exc:
+        status_code = (
+            HTTPStatus.FORBIDDEN
+            if exc.code in {"agent_read_only", "agent_deleted"}
+            else HTTPStatus.NOT_FOUND
+            if exc.code in {"agent_not_found", "resource_not_visible"}
+            else HTTPStatus.BAD_REQUEST
+        )
+        raise HTTPException(
+            status_code=status_code,
+            detail={
+                "code": exc.code,
+                "message": "The requested draft resource cannot be updated.",
+            },
+        ) from exc
     except (HTTPException, AppException):
         raise
     except Exception as e:
-        logging.error(f"Failed to update tool, error in: {str(e)}")
+        logging.exception("Failed to update tool")
         raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Failed to update tool, error in: {str(e)}")
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Failed to update tool",
+        ) from e
 
 
 @router.get("/scan_tool")
