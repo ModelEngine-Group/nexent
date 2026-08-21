@@ -3940,5 +3940,47 @@ class TestSkillManagerInitDoubleCheckedLocking:
         assert call_state["count"] >= 2
 
 
+class TestSkillManagerResolveSkillFilePathValidation:
+    """Exercise file-path guards before any filesystem write occurs."""
+
+    @pytest.mark.parametrize(
+        ("file_path", "message"),
+        [
+            ("bad\x00name.py", "null byte"),
+            (os.path.abspath(os.sep + "tmp" + os.sep + "script.py"), "absolute path"),
+            ("./", "must point to a file"),
+        ],
+    )
+    def test_rejects_invalid_file_paths(self, file_path, message):
+        with TempSkillDir() as temp:
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
+            skill_dir = manager.resolve_skill_dir("demo", tenant_id=None)
+
+            with pytest.raises(ValueError, match=message):
+                manager._resolve_skill_file_path(skill_dir, file_path)
+
+    def test_rejects_when_base_skills_dir_is_unconfigured(self):
+        manager = SkillManager(base_skills_dir=None)
+
+        with pytest.raises(ValueError, match="base_skills_dir is not configured"):
+            manager._resolve_skill_file_path(os.path.abspath("demo"), "script.py")
+
+    def test_rejects_skill_directory_outside_configured_root(self, tmp_path):
+        with TempSkillDir() as temp:
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
+            outside_skill_dir = os.path.join(str(tmp_path), "outside-skill")
+
+            with pytest.raises(ValueError, match="outside the skill directory"):
+                manager._resolve_skill_file_path(outside_skill_dir, "script.py")
+
+    def test_rejects_target_that_traverses_outside_skill_directory(self):
+        with TempSkillDir() as temp:
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
+            skill_dir = manager.resolve_skill_dir("demo", tenant_id=None)
+
+            with pytest.raises(ValueError, match="outside the skill directory"):
+                manager._resolve_skill_file_path(skill_dir, "../other/script.py")
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

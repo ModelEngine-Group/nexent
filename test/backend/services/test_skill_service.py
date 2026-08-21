@@ -6461,3 +6461,50 @@ class TestLocalSkillPathSecurity:
                 "safe-skill",
                 "payload.custom",
             )
+
+
+class TestSkillServicePureHelpers:
+    def test_decode_text_bytes_handles_bom_variants(self):
+        for encoding, expected_encoding in (
+            ("utf-8-sig", "utf-8-sig"),
+            ("utf-16", "utf-16"),
+            ("utf-32", "utf-32"),
+        ):
+            result = skill_service._decode_text_bytes("hello".encode(encoding))
+            assert str(result) == "hello"
+            assert result.encoding == expected_encoding
+
+    def test_decode_text_bytes_handles_utf16_without_bom(self):
+        result = skill_service._decode_text_bytes("hello".encode("utf-16-le"))
+
+        assert str(result) == "hello"
+        assert result.encoding == "utf-16-le"
+
+    def test_binary_detection_distinguishes_text_and_binary(self):
+        assert skill_service._is_obviously_binary(b"plain text") is False
+        assert skill_service._is_obviously_binary(b"\x00\x01\x02\x03") is True
+        assert skill_service._is_obviously_binary("wide text".encode("utf-16-le")) is False
+        assert skill_service._is_obviously_binary(b"") is False
+
+    def test_preview_status_classifies_directories_extensions_and_text(self, tmp_path):
+        assert skill_service._skill_file_preview_status(
+            str(tmp_path), "skill", "README.md"
+        ) == "readable"
+        assert skill_service._skill_file_preview_status(
+            str(tmp_path), "skill", "image.png"
+        ) == "unsupported"
+        assert skill_service._skill_file_preview_status(
+            str(tmp_path), "skill", ".git/config"
+        ) == "unsupported"
+
+    def test_zip_members_reject_case_insensitive_collisions(self):
+        import zipfile
+
+        archive = io.BytesIO()
+        with zipfile.ZipFile(archive, "w") as zf:
+            zf.writestr("Skill/SKILL.md", "first")
+            zf.writestr("skill/skill.md", "second")
+
+        with zipfile.ZipFile(io.BytesIO(archive.getvalue())) as zf:
+            with pytest.raises(skill_service.SkillException, match="same path"):
+                skill_service._zip_members(zf)
