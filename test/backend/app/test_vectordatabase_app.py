@@ -20,6 +20,9 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 backend_dir = os.path.abspath(os.path.join(current_dir, "../../../backend"))
 sys.path.insert(0, backend_dir)
 
+from consts.error_code import ErrorCode
+from consts.exceptions import AppException
+
 # Environment variables are now configured in conftest.py
 
 boto3_module = types.ModuleType("boto3")
@@ -103,7 +106,7 @@ ElasticSearchService = MagicMock()
 RedisService = MagicMock()
 
 # Import routes and services
-from backend.apps.vectordatabase_app import router
+from backend.apps.vectordatabase_app import create_new_index, router
 from nexent.vector_database.elasticsearch_core import ElasticSearchCore
 
 # Create test client
@@ -310,6 +313,33 @@ async def test_create_new_index_error(vdb_core_mock, auth_data):
         assert response.status_code == 500
         assert response.json() == {
             "detail": "Error creating index: Test error"}
+
+@pytest.mark.asyncio
+async def test_create_new_index_propagates_app_exception(vdb_core_mock, auth_data):
+    """Structured knowledge-limit errors must not be wrapped as generic 500 errors."""
+    app_exception = AppException(
+        ErrorCode.KNOWLEDGE_RESOURCE_EXCEEDED,
+        "Knowledge base tenant limit reached",
+        details={"limit": 1},
+    )
+
+    with patch(
+        "backend.apps.vectordatabase_app.get_current_user_id",
+        return_value=(auth_data["user_id"], auth_data["tenant_id"]),
+    ), patch(
+        "backend.apps.vectordatabase_app.ElasticSearchService.create_knowledge_base",
+        side_effect=app_exception,
+    ):
+        with pytest.raises(AppException) as exc_info:
+            create_new_index(
+                index_name=auth_data["index_name"],
+                embedding_dim=768,
+                request={"embedding_model_id": 101},
+                vdb_core=vdb_core_mock,
+                authorization=auth_data["auth_header"]["Authorization"],
+            )
+
+    assert exc_info.value is app_exception
 
 
 @pytest.mark.asyncio

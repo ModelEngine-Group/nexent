@@ -594,6 +594,25 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertIn("already exists", str(context.exception))
         mock_create_knowledge.assert_not_called()
 
+    @patch('backend.services.vectordatabase_service.create_knowledge_record')
+    def test_create_index_propagates_app_exception(self, mock_create_knowledge):
+        """Resource-limit errors from record creation are not wrapped as generic errors."""
+        self.mock_vdb_core.check_index_exists.return_value = False
+        self.mock_vdb_core.create_index.return_value = True
+        app_exception = AppException("knowledge base limit reached")
+        mock_create_knowledge.side_effect = app_exception
+
+        with self.assertRaises(AppException) as context:
+            ElasticSearchService.create_index(
+                index_name="test_index",
+                embedding_dim=768,
+                vdb_core=self.mock_vdb_core,
+                user_id="test_user",
+                tenant_id="test_tenant",
+            )
+
+        self.assertIs(context.exception, app_exception)
+
     @patch('backend.services.vectordatabase_service.get_embedding_model')
     @patch('backend.services.vectordatabase_service.create_knowledge_record')
     def test_create_knowledge_base_generates_index(self, mock_create_knowledge, mock_get_embedding):
@@ -5395,6 +5414,35 @@ class TestRethrowOrPlain(unittest.TestCase):
             )
 
         self.assertIn("Failed to create index", str(exc.exception))
+
+    @patch('backend.services.vectordatabase_service._create_embedding_model')
+    @patch('backend.services.vectordatabase_service.get_model_by_model_id')
+    @patch('backend.services.vectordatabase_service.create_knowledge_record')
+    def test_create_knowledge_base_propagates_app_exception(
+        self, mock_create_record, mock_get_model, mock_create_embedding
+    ):
+        """Knowledge-base resource-limit errors are preserved for the API handler."""
+        mock_get_model.return_value = {
+            "model_id": 1,
+            "model_name": "test-model",
+            "display_name": "Test model",
+            "model_type": "embedding",
+        }
+        mock_create_embedding.return_value = MagicMock(embedding_dim=128)
+        app_exception = AppException("knowledge base limit reached")
+        mock_create_record.side_effect = app_exception
+
+        with self.assertRaises(AppException) as context:
+            ElasticSearchService.create_knowledge_base(
+                knowledge_name="kb-limit",
+                embedding_dim=128,
+                vdb_core=self.mock_vdb_core,
+                user_id="user-1",
+                tenant_id="tenant-1",
+                embedding_model_id=1,
+            )
+
+        self.assertIs(context.exception, app_exception)
 
     @patch('backend.services.vectordatabase_service.create_knowledge_record')
     def test_create_knowledge_base_raises_on_exception(self, mock_create_record):

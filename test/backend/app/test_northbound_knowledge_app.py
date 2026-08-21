@@ -180,7 +180,7 @@ sys.modules["apps.file_management_app"] = file_management_app_module
 
 from apps.northbound_knowledge_app import router  # noqa: E402
 from consts.const import ASSET_OWNER_TENANT_ID  # noqa: E402
-from consts.exceptions import LimitExceededError, UnauthorizedError  # noqa: E402
+from consts.exceptions import AppException, LimitExceededError, UnauthorizedError  # noqa: E402
 
 ASSET_CTX = NorthboundContext(
     request_id="req-1",
@@ -272,6 +272,30 @@ class TestUploadFiles:
             with pytest.raises(HTTPException) as exc_info:
                 await upload_files(request=request, file=[], index_name="kb1")
         assert exc_info.value.status_code == 400
+
+    @pytest.mark.asyncio
+    async def test_app_exception_is_propagated(self, mock_northbound_context):
+        """Structured upload errors must reach the global AppException handler unchanged."""
+        from apps.northbound_knowledge_app import upload_files
+
+        mock_northbound_context.return_value = ASSET_CTX
+        app_exception = AppException("knowledge file limit reached")
+        request = MagicMock()
+        upload = MagicMock()
+
+        with patch(
+            "apps.northbound_knowledge_app._require_asset_owner_context",
+            new_callable=AsyncMock,
+            return_value=ASSET_CTX,
+        ):
+            file_mgmt_module.upload_files_impl.side_effect = app_exception
+            try:
+                with pytest.raises(AppException) as exc_info:
+                    await upload_files(request=request, file=[upload], index_name="kb1")
+            finally:
+                file_mgmt_module.upload_files_impl.side_effect = None
+
+        assert exc_info.value is app_exception
 
     def test_no_valid_uploads_returns_400(self, client, mock_northbound_context):
         mock_northbound_context.return_value = ASSET_CTX

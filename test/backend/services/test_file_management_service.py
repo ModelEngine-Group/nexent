@@ -330,6 +330,82 @@ class TestUploadFilesImpl:
         mock_file.seek.assert_any_await(0)
 
     @pytest.mark.asyncio
+    async def test_knowledge_file_size_limit_rejects_local_upload(self):
+        """The local knowledge-base path applies the same size limit before saving."""
+        mock_file = MagicMock()
+        mock_file.filename = "local-oversized.pdf"
+        mock_file.size = file_management_service.MAX_KNOWLEDGE_FILE_SIZE_BYTES + 1
+
+        with patch(
+            "backend.services.file_management_service.save_upload_file",
+            AsyncMock(),
+        ) as mock_save:
+            with pytest.raises(AppException) as exc_info:
+                await upload_files_impl(
+                    destination="local",
+                    file=[mock_file],
+                    folder="knowledge_base",
+                    index_name="kb-1",
+                )
+
+        assert exc_info.value.details["file_name"] == "local-oversized.pdf"
+        mock_save.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_knowledge_file_size_limit_falls_back_after_spooled_file_error(self, monkeypatch):
+        """A broken spooled-file object falls back to reading the UploadFile body."""
+        monkeypatch.setattr(
+            file_management_service,
+            "MAX_KNOWLEDGE_FILE_SIZE_BYTES",
+            4,
+        )
+        mock_file = MagicMock()
+        mock_file.filename = "broken-spool.pdf"
+        mock_file.size = 0
+        mock_file.file = SimpleNamespace(tell=Mock(side_effect=OSError("closed")))
+        mock_file.seek = AsyncMock()
+        mock_file.read = AsyncMock(return_value=b"12345")
+
+        with pytest.raises(AppException) as exc_info:
+            await file_management_service._validate_knowledge_file_sizes([mock_file])
+
+        assert exc_info.value.details["actual_bytes"] == 5
+        mock_file.read.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_get_upload_size_logs_when_original_position_cannot_be_restored(self):
+        """Size measurement still succeeds when restoring the stream position fails."""
+        class RestoreFailFile(BytesIO):
+            def seek(self, offset, whence=0):
+                if offset == 2 and whence == 0:
+                    raise OSError("restore failed")
+                return super().seek(offset, whence)
+
+        mock_file = MagicMock()
+        mock_file.size = 0
+        mock_file.file = RestoreFailFile(b"12345")
+        mock_file.file.read(2)
+
+        size = await file_management_service._get_upload_size(mock_file)
+
+        assert size == 5
+        file_management_service.logger.warning.assert_called_with(
+            "Failed to restore upload file position"
+        )
+
+    @pytest.mark.asyncio
+    async def test_validate_knowledge_file_sizes_skips_empty_entries(self):
+        """Optional empty entries from multipart parsing do not cause validation errors."""
+        await file_management_service._validate_knowledge_file_sizes([None])
+
+    def test_knowledge_base_upload_scope_detection(self):
+        """Only knowledge-base storage contexts receive the document-size policy."""
+        assert file_management_service._is_knowledge_base_upload("knowledge_base", None)
+        assert file_management_service._is_knowledge_base_upload(None, "kb-1")
+        assert not file_management_service._is_knowledge_base_upload(None, None)
+        assert not file_management_service._is_knowledge_base_upload("attachments", "kb-1")
+
+    @pytest.mark.asyncio
     async def test_upload_files_impl_minio_failure(self):
         """Test MinIO file upload failure"""
         # Create mock UploadFile
