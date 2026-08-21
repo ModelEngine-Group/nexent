@@ -278,6 +278,8 @@ ERROR_CODE_HTTP_STATUS = {
     ErrorCode.COMMON_MISSING_REQUIRED_FIELD: 400,
     # Common - Rate Limit
     ErrorCode.COMMON_RATE_LIMIT_EXCEEDED: 429,
+    # Tenant resources
+    ErrorCode.TENANT_RESOURCE_EXCEEDED: 429,
     # Common - Resource
     ErrorCode.COMMON_RESOURCE_NOT_FOUND: 404,
     ErrorCode.COMMON_RESOURCE_ALREADY_EXISTS: 409,

@@ -59,6 +59,8 @@
   "chatInterface.fileProcessingStopped": "File parsing stopped",
   "chatInterface.conversationStopped": "Conversation stopped",
   "chatInterface.errorProcessingRequest": "An error occurred while processing the request",
+  "chatInterface.conversationLimitExceeded": "Conversation history has reached the limit of {{limit}} per user",
+  "chatInterface.turnLimitExceeded": "This conversation has reached the limit of {{limit}} turns",
   "chatInterface.errorFetchingConversationList": "Failed to fetch conversation list during initialization:",
   "chatInterface.errorFetchingConversationDetailsError": "Error fetching conversation details:",
   "chatInterface.errorFetchingAttachmentUrl": "Failed to fetch attachment URL: {{object_name}}",

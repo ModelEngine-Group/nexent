@@ -27,6 +27,7 @@ sa_mod.asc = MagicMock(name="asc")
 sa_mod.desc = MagicMock(name="desc")
 sa_mod.func = MagicMock(name="func")
 sa_mod.select = MagicMock(name="select")
+sa_mod.text = MagicMock(name="text")
 
 
 def _create_insert_mock():
@@ -226,6 +227,9 @@ from backend.database.conversation_db import (
     update_message_unit_status,
     update_conversation_knowledge_scope,
 )
+import backend.database.conversation_db as conversation_db
+from consts.error_code import ErrorCode
+from consts.exceptions import AppException
 
 
 @pytest.fixture(autouse=True)
@@ -506,7 +510,7 @@ def test_create_conversation_success(monkeypatch, mock_session_ctx):
     assert result["agent_id"] == 7
     assert result["create_time"] == 1234567890
     assert result["update_time"] == 1234567890
-    session.execute.assert_called_once()
+    assert session.execute.call_count == 3
     assert _captured_insert_values["agent_id"] == 7
 
 
@@ -527,6 +531,54 @@ def test_create_conversation_without_user_id(monkeypatch, mock_session_ctx):
 
     assert result["conversation_id"] == 1
     session.execute.assert_called_once()
+
+
+def test_user_conversation_limit_allows_value_below_limit():
+    session = MagicMock()
+    count_result = MagicMock()
+    count_result.scalar_one.return_value = 999
+    session.execute.side_effect = [MagicMock(), count_result]
+
+    conversation_db._enforce_user_conversation_limit(session, "user-1")
+
+
+def test_user_conversation_limit_rejects_value_at_limit():
+    session = MagicMock()
+    count_result = MagicMock()
+    count_result.scalar_one.return_value = 1_000
+    session.execute.side_effect = [MagicMock(), count_result]
+
+    with pytest.raises(AppException) as exc_info:
+        conversation_db._enforce_user_conversation_limit(session, "user-1")
+
+    assert exc_info.value.error_code == ErrorCode.TENANT_RESOURCE_EXCEEDED
+    assert exc_info.value.details == {"resource": "conversations", "limit": 1_000}
+
+
+def test_conversation_turn_limit_allows_value_below_limit():
+    session = MagicMock()
+    count_result = MagicMock()
+    count_result.scalar_one.return_value = 99
+    session.execute.side_effect = [MagicMock(), count_result]
+
+    conversation_db._enforce_conversation_turn_limit(
+        session, conversation_id=1, message_role="user", user_id="user-1"
+    )
+
+
+def test_conversation_turn_limit_rejects_value_at_limit():
+    session = MagicMock()
+    count_result = MagicMock()
+    count_result.scalar_one.return_value = 100
+    session.execute.side_effect = [MagicMock(), count_result]
+
+    with pytest.raises(AppException) as exc_info:
+        conversation_db._enforce_conversation_turn_limit(
+            session, conversation_id=1, message_role="user", user_id="user-1"
+        )
+
+    assert exc_info.value.error_code == ErrorCode.TENANT_RESOURCE_EXCEEDED
+    assert exc_info.value.details == {"resource": "conversation_turns", "limit": 100}
 
 
 # =============================================================================

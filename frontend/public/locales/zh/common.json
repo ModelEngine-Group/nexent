@@ -59,6 +59,8 @@
   "chatInterface.fileProcessingStopped": "文件解析已停止",
   "chatInterface.conversationStopped": "对话已停止",
   "chatInterface.errorProcessingRequest": "处理请求时发生错误",
+  "chatInterface.conversationLimitExceeded": "历史会话数量已达到上限：每位用户最多 {{limit}} 个",
+  "chatInterface.turnLimitExceeded": "当前会话对话轮数已达到上限：每个会话最多 {{limit}} 轮",
   "chatInterface.errorFetchingConversationList": "初始化时获取对话列表失败:",
   "chatInterface.errorFetchingConversationDetailsError": "获取对话详情错误:",
   "chatInterface.errorFetchingAttachmentUrl": "获取附件URL失败: {{object_name}}",

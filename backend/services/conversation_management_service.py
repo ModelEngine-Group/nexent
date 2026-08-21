@@ -6,11 +6,20 @@ from typing import Any, Dict, List, Optional
 
 from jinja2 import StrictUndefined, Template
 
-from consts.const import LANGUAGE, MODEL_CONFIG_MAPPING, MESSAGE_ROLE, DEFAULT_EN_TITLE, DEFAULT_ZH_TITLE
+from consts.const import (
+    DEFAULT_EN_TITLE,
+    DEFAULT_ZH_TITLE,
+    LANGUAGE,
+    MAX_CONVERSATION_TURNS,
+    MESSAGE_ROLE,
+    MODEL_CONFIG_MAPPING,
+)
+from consts.error_code import ErrorCode
 from consts.model import AgentRequest, MessageRequest, MessageUnit
-from consts.exceptions import ConversationNotFoundError, ValidationError
+from consts.exceptions import AppException, ConversationNotFoundError, ValidationError
 from database.conversation_db import (
     CHAT_MODE_VALUES,
+    count_user_turns,
     create_conversation,
     create_conversation_message,
     create_message_unit,
@@ -104,6 +113,21 @@ def save_message(request: MessageRequest, user_id: str, tenant_id: str,
         'minio_files': message_data.get('minio_files'),
     }
     return create_conversation_message(message_data_copy, user_id, status=status)
+
+
+def ensure_conversation_turn_capacity(conversation_id: int, user_id: str) -> None:
+    """Reject a new turn before streaming starts when the conversation is full."""
+    if not user_id:
+        return
+
+    turn_count = count_user_turns(conversation_id)
+    if turn_count >= MAX_CONVERSATION_TURNS:
+        raise AppException(
+            ErrorCode.TENANT_RESOURCE_EXCEEDED,
+            "Conversation turn limit reached: "
+            f"maximum {MAX_CONVERSATION_TURNS} turns per conversation",
+            details={"resource": "conversation_turns", "limit": MAX_CONVERSATION_TURNS},
+        )
 
 
 def save_message_unit(message_id: int, conversation_id: int, unit_index: int,
@@ -376,6 +400,8 @@ def create_new_conversation(
             create_kwargs["knowledge_scope"] = knowledge_scope
         conversation_data = create_conversation(title, user_id, **create_kwargs)
         return conversation_data
+    except AppException:
+        raise
     except Exception as e:
         logging.error(f"Failed to create conversation: {str(e)}")
         raise Exception(str(e))

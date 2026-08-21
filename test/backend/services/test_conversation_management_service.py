@@ -206,6 +206,7 @@ from backend.services.conversation_management_service import (
         call_llm_for_title,
         update_conversation_title,
         create_new_conversation,
+        ensure_conversation_turn_capacity,
         get_conversation_service,
         get_conversation_list_service,
         rename_conversation_service,
@@ -218,6 +219,8 @@ from backend.services.conversation_management_service import (
         update_message_opinion_service,
         get_message_id_by_index_impl
     )
+from consts.error_code import ErrorCode
+from consts.exceptions import AppException
 
 
 class TestConversationManagementService(unittest.TestCase):
@@ -520,6 +523,30 @@ class TestConversationManagementService(unittest.TestCase):
         self.assertEqual(result["title"], "New Chat")
         mock_create_conversation.assert_called_once_with(
             "New Chat", self.user_id, agent_id=None, chat_mode=None)
+
+    @patch('backend.services.conversation_management_service.count_user_turns', return_value=99)
+    def test_ensure_conversation_turn_capacity_allows_below_limit(self, mock_count_user_turns):
+        ensure_conversation_turn_capacity(123, self.user_id)
+
+        mock_count_user_turns.assert_called_once_with(123)
+
+    @patch('backend.services.conversation_management_service.count_user_turns')
+    def test_ensure_conversation_turn_capacity_skips_missing_user(self, mock_count_user_turns):
+        ensure_conversation_turn_capacity(123, "")
+
+        mock_count_user_turns.assert_not_called()
+
+    @patch('backend.services.conversation_management_service.count_user_turns', return_value=100)
+    def test_ensure_conversation_turn_capacity_rejects_at_limit(self, mock_count_user_turns):
+        with self.assertRaises(AppException) as exc_info:
+            ensure_conversation_turn_capacity(123, self.user_id)
+
+        self.assertEqual(exc_info.exception.error_code, ErrorCode.TENANT_RESOURCE_EXCEEDED)
+        self.assertEqual(
+            exc_info.exception.details,
+            {"resource": "conversation_turns", "limit": 100},
+        )
+        mock_count_user_turns.assert_called_once_with(123)
 
     @patch('backend.services.conversation_management_service.create_conversation')
     def test_create_new_conversation_with_agent_id(self, mock_create_conversation):

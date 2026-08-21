@@ -13,7 +13,11 @@ from consts.model import (
     OpinionRequest,
     RenameRequest,
 )
-from consts.exceptions import ConversationNotFoundError, ValidationError
+from consts.exceptions import (
+    AppException,
+    ConversationNotFoundError,
+    ValidationError,
+)
 from services.conversation_management_service import (
     create_new_conversation,
     delete_conversation_service,
@@ -51,6 +55,8 @@ async def create_new_conversation_endpoint(request: ConversationRequest, authori
         user_id, tenant_id = get_current_user_id(authorization)
         conversation_data = create_new_conversation(request.title, user_id)
         return ConversationResponse(code=0, message="success", data=conversation_data)
+    except AppException:
+        raise
     except Exception as e:
         logging.error(f"Failed to create conversation: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
