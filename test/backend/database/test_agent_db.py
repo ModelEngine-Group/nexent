@@ -378,8 +378,12 @@ def test_create_agent_success(monkeypatch, mock_session):
 
 def test_update_agent_success(monkeypatch, mock_session):
     """测试成功更新agent"""
+    from backend.database import agent_db as agent_db_module
+
     session, query = mock_session
     mock_agent = MockAgent()
+    tenant_column = agent_db_module.AgentInfo.tenant_id
+    tenant_column.reset_mock()
 
     mock_first = MagicMock()
     mock_first.return_value = mock_agent
@@ -396,9 +400,10 @@ def test_update_agent_success(monkeypatch, mock_session):
     agent_info = MagicMock()
     agent_info.__dict__ = {"name": "updated_agent", "description": "updated description"}
 
-    update_agent(1, agent_info, "user1")
+    update_agent(1, agent_info, "tenant1", "user1")
 
     assert mock_agent.updated_by == "user1"
+    tenant_column.__eq__.assert_called_once_with("tenant1")
 
 def test_update_agent_skips_none_and_converts_group_ids(monkeypatch, mock_session):
     """update_agent should skip None values and convert group_ids list to string."""
@@ -429,7 +434,7 @@ def test_update_agent_skips_none_and_converts_group_ids(monkeypatch, mock_sessio
         "group_ids": [1, 2],
     }
 
-    update_agent(1, agent_info, "user1")
+    update_agent(1, agent_info, "tenant1", "user1")
 
     # name should remain unchanged because None is skipped
     assert mock_agent.name == "test_agent"
@@ -463,7 +468,7 @@ def test_update_agent_allows_explicit_requested_output_tokens_null(monkeypatch, 
 
     agent_info = AgentInfoUpdate()
 
-    update_agent(1, agent_info, "user1")
+    update_agent(1, agent_info, "tenant1", "user1")
 
     assert mock_agent.requested_output_tokens is None
     assert mock_agent.updated_by == "user1"
@@ -485,8 +490,8 @@ def test_update_agent_not_found(monkeypatch, mock_session):
     agent_info = MagicMock()
     agent_info.__dict__ = {"name": "updated_agent"}
 
-    with pytest.raises(ValueError, match="ag_tenant_agent_t Agent not found"):
-        update_agent(999, agent_info, "user1")
+    with pytest.raises(ValueError, match="agent not found"):
+        update_agent(999, agent_info, "tenant1", "user1")
 
 def test_delete_agent_by_id_success(monkeypatch, mock_session):
     """测试成功删除agent"""
@@ -1299,7 +1304,7 @@ def test_update_agent_pops_requested_output_tokens_when_not_in_fields_set(monkey
 
     agent_info = AgentInfoUpdate()
 
-    update_agent(1, agent_info, "user1")
+    update_agent(1, agent_info, "tenant1", "user1")
 
     # requested_output_tokens should be popped from agent_data, so it's not set on mock_agent
     assert mock_agent.name == "updated_name"

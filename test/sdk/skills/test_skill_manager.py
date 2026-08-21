@@ -353,6 +353,23 @@ class TestSkillManagerSaveSkill:
             with pytest.raises(ValueError, match="Skill name is required"):
                 manager.save_skill(skill_data, tenant_id=None)
 
+    def test_save_skill_validates_extra_files_before_writing(self):
+        """Reject an escaping extra file before creating the skill directory."""
+        with TempSkillDir() as temp:
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
+            skill_data = {
+                "name": "unsafe-skill",
+                "description": "Unsafe extra file",
+                "content": "# Content",
+                "files": [{"path": "../outside.txt", "content": "escaped"}],
+            }
+
+            with pytest.raises(ValueError, match="outside the skill directory"):
+                manager.save_skill(skill_data, tenant_id=None)
+
+            assert not os.path.exists(os.path.join(temp.skills_dir, "unsafe-skill"))
+            assert not os.path.exists(os.path.join(temp.skills_dir, "outside.txt"))
+
     def test_save_skill_overwrites_existing(self):
         """Test that saving existing skill overwrites it."""
         with TempSkillDir() as temp:
@@ -480,6 +497,26 @@ description: From ZIP
             # Verify skill directory contents
             skill_dir = os.path.join(temp.skills_dir, "my-zip-skill")
             assert os.path.exists(os.path.join(skill_dir, "scripts", "helper.py"))
+
+    def test_upload_from_zip_rejects_path_traversal_before_writing(self):
+        """Reject an escaping ZIP member without partially creating the skill."""
+        with TempSkillDir() as temp:
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
+            zip_buffer = io.BytesIO()
+            with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+                zf.writestr("safe-skill/SKILL.md", """---
+name: safe-skill
+description: Safe skill
+---
+# Content
+""")
+                zf.writestr("safe-skill/../../outside.txt", "escaped")
+
+            with pytest.raises(ValueError, match="outside the skill directory"):
+                manager.upload_skill_from_file(zip_buffer.getvalue(), tenant_id=None)
+
+            assert not os.path.exists(os.path.join(temp.skills_dir, "safe-skill"))
+            assert not os.path.exists(os.path.join(temp.skills_dir, "outside.txt"))
 
     def test_upload_from_zip_auto_detect(self):
         """Test that ZIP is auto-detected from magic bytes."""
@@ -2017,6 +2054,35 @@ class TestSkillManagerWriteSkillFile:
         """Test writing file when local_skills_dir is None."""
         manager = SkillManager(base_skills_dir=None)
         manager._write_skill_file("any-skill", "file.txt", "content", tenant_id=None)
+
+    @pytest.mark.parametrize(
+        "file_path",
+        ["../outside.txt", "scripts/../../outside.txt", "..\\outside.txt"],
+    )
+    def test_write_skill_file_rejects_path_traversal(self, file_path):
+        """Reject traversal paths and leave files outside the skill untouched."""
+        with TempSkillDir() as temp:
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
+
+            with pytest.raises(ValueError, match="outside the skill directory"):
+                manager._write_skill_file(
+                    "test-skill", file_path, "escaped", tenant_id=None
+                )
+
+            assert not os.path.exists(os.path.join(temp.skills_dir, "outside.txt"))
+
+    def test_write_skill_file_rejects_absolute_path(self):
+        """Reject absolute file paths."""
+        with TempSkillDir() as temp:
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
+            outside_path = os.path.abspath(os.path.join(temp.skills_dir, "outside.txt"))
+
+            with pytest.raises(ValueError, match="absolute path"):
+                manager._write_skill_file(
+                    "test-skill", outside_path, "escaped", tenant_id=None
+                )
+
+            assert not os.path.exists(outside_path)
 
 
 class TestSkillManagerGetSkillMetadata:
@@ -3822,6 +3888,46 @@ class TestSkillManagerInitDoubleCheckedLocking:
         # NOT the second caller's "/late/caller/path".
         assert manager.base_skills_dir == os.path.abspath("/initial/path")
         assert call_state["count"] >= 2
+
+
+class TestSkillManagerFilePathAndTenantBoundaries:
+    def test_resolve_skill_file_path_rejects_empty_absolute_and_directory_paths(self, tmp_path):
+        skill_dir = str(tmp_path / "skill")
+        with pytest.raises(ValueError, match="non-empty"):
+            SkillManager._resolve_skill_file_path(skill_dir, "")
+        with pytest.raises(ValueError, match="absolute"):
+            SkillManager._resolve_skill_file_path(skill_dir, os.path.abspath("outside.txt"))
+        with pytest.raises(ValueError, match="must point to a file"):
+            SkillManager._resolve_skill_file_path(skill_dir, ".")
+
+    def test_tenant_skills_are_isolated(self):
+        with TempSkillDir() as temp:
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
+            manager.save_skill({"name": "shared", "description": "tenant a", "content": "A"}, tenant_id="a")
+            manager.save_skill({"name": "shared", "description": "tenant b", "content": "B"}, tenant_id="b")
+
+            assert manager.load_skill("shared", tenant_id="a")["description"] == "tenant a"
+            assert manager.load_skill("shared", tenant_id="b")["description"] == "tenant b"
+            assert manager.list_skills(tenant_id="missing") == []
+
+    def test_upload_explicit_md_and_update_bytesio(self):
+        with TempSkillDir() as temp:
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
+            content = """---
+name: explicit
+description: Explicit
+---
+# Body
+"""
+            uploaded = manager.upload_skill_from_file(content, file_type="md", tenant_id=None)
+            assert uploaded["name"] == "explicit"
+            updated = manager.update_skill_from_file(
+                io.BytesIO(content.replace("Explicit", "Updated").encode()),
+                "explicit",
+                file_type="md",
+                tenant_id=None,
+            )
+            assert updated["description"] == "Updated"
 
 
 if __name__ == "__main__":

@@ -3,11 +3,13 @@ import base64
 from urllib.parse import unquote
 from io import BytesIO
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Header, HTTPException
 from fastapi.responses import StreamingResponse
 from http import HTTPStatus
 
-from services.image_service import proxy_image_impl
+from services.image_service import _is_aidp_url, proxy_image_impl
+from utils.auth_utils import get_current_user_id
+from utils.ssrf_utils import UnsafeOutboundURLError, validate_public_url
 
 # Create router
 router = APIRouter()
@@ -17,7 +19,11 @@ logger = logging.getLogger("image_app")
 
 
 @router.get("/image")
-async def proxy_image(url: str, format: str = "json"):
+async def proxy_image(
+    url: str,
+    format: str = "json",
+    authorization: str | None = Header(None),
+):
     """
     Image proxy service that fetches remote images
     
@@ -29,12 +35,19 @@ async def proxy_image(url: str, format: str = "json"):
         JSON object containing base64 encoded image (format=json) or image stream (format=stream)
     """
     try:
+        get_current_user_id(authorization)
+    except Exception:
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Authentication required")
+
+    try:
         # URL decode
         decoded_url = unquote(url)
+        if not _is_aidp_url(decoded_url):
+            await validate_public_url(decoded_url)
         
         if format == "stream":
             # Return image as stream for direct use in <img> tags
-            result = await proxy_image_impl(decoded_url)
+            result = await proxy_image_impl(decoded_url, authorization)
             if not result.get("success"):
                 raise HTTPException(
                     status_code=HTTPStatus.BAD_GATEWAY,
@@ -56,7 +69,11 @@ async def proxy_image(url: str, format: str = "json"):
             )
         else:
             # Return JSON with base64 (default behavior for backward compatibility)
-            return await proxy_image_impl(decoded_url)
+            return await proxy_image_impl(decoded_url, authorization)
+    except UnsafeOutboundURLError as e:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(
             f"Error occurred while proxying image: {str(e)}, URL: {url[:50]}...")

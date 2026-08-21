@@ -59,6 +59,7 @@ from services.model_management_service import (
     _record_capacity_suggestion_accept,
 )
 from utils.auth_utils import get_current_user_id
+from utils.ssrf_utils import UnsafeOutboundURLError, validate_public_url
 
 
 router = APIRouter(prefix="/model")
@@ -466,13 +467,28 @@ async def check_model_health(
 
 
 @router.post("/temporary_healthcheck")
-async def check_temporary_model_health(request: ModelRequest):
+async def check_temporary_model_health(
+    request: ModelRequest,
+    authorization: Optional[str] = Header(None),
+):
     """Verify connectivity for the provided model configuration without persisting it.
 
     Args:
         request: Model configuration to verify.
     """
     try:
+        get_current_user_id(authorization)
+    except Exception:
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Authentication required")
+
+    try:
+        if request.base_url:
+            await validate_public_url(
+                request.base_url,
+                allowed_schemes=("http", "https", "ws", "wss"),
+                allow_local_networks=True,
+            )
+
         result = await verify_model_config_connectivity(request.model_dump())
         result["capacity_suggestion"] = (
             _capacity_suggestion_for_model_request(request)
@@ -484,6 +500,10 @@ async def check_temporary_model_health(request: ModelRequest):
             "data": result
         },
         )
+    except UnsafeOutboundURLError as e:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
+    except HTTPException:
+        raise
     except Exception as e:
         logging.error(f"Failed to verify model connectivity: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,

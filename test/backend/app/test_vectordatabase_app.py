@@ -932,13 +932,14 @@ async def test_create_index_documents_validation_exception(vdb_core_mock, auth_d
 
 
 @pytest.mark.asyncio
-async def test_get_index_files_success(vdb_core_mock):
+async def test_get_index_files_success(vdb_core_mock, auth_data):
     """
     Test listing index files successfully.
     Using pytest-asyncio to properly handle async operations.
     """
     # Setup mocks
     with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+            patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
             patch("backend.apps.vectordatabase_app.ElasticSearchService.list_files") as mock_list_files:
 
         index_name = "test_index"
@@ -951,7 +952,8 @@ async def test_get_index_files_success(vdb_core_mock):
         mock_list_files.return_value = expected_files
 
         # Execute request
-        response = client.get(f"/indices/{index_name}/files")
+        response = client.get(
+            f"/indices/{index_name}/files", headers=auth_data["auth_header"])
 
         # With proper pytest-asyncio setup, we should get a successful response
         # But in TestClient environment, we'll likely still get a 500 due to
@@ -963,14 +965,97 @@ async def test_get_index_files_success(vdb_core_mock):
             assert mock_list_files.called
 
 
+@pytest.mark.parametrize(
+    ("method", "url", "kwargs", "service_method"),
+    [
+        ("get", "/indices/test_index/files", {}, "list_files"),
+        (
+            "delete",
+            "/indices/test_index/documents",
+            {"params": {"path_or_url": "secret.pdf", "scope": "full"}},
+            "delete_document_by_scope",
+        ),
+        (
+            "get",
+            "/indices/test_index/documents/secret.pdf/error-info",
+            {},
+            None,
+        ),
+        ("post", "/indices/test_index/chunks", {}, "get_index_chunks"),
+    ],
+)
+def test_document_endpoints_require_authentication(
+    method,
+    url,
+    kwargs,
+    service_method,
+):
+    """Document metadata and mutation endpoints reject missing credentials."""
+    target = (
+        f"backend.apps.vectordatabase_app.ElasticSearchService.{service_method}"
+        if service_method
+        else "backend.apps.vectordatabase_app.get_all_files_status"
+    )
+    with patch(target) as protected_operation:
+        response = getattr(client, method)(url, **kwargs)
+
+    assert response.status_code == 401
+    protected_operation.assert_not_called()
+
+
+def test_get_index_files_checks_authenticated_tenant_read_permission(
+    vdb_core_mock,
+    auth_data,
+):
+    """File listing authorizes the knowledge base with the token tenant."""
+    with patch(
+        "backend.apps.vectordatabase_app.get_current_user_id",
+        return_value=(auth_data["user_id"], auth_data["tenant_id"]),
+    ), patch(
+        "backend.apps.vectordatabase_app.require_knowledge_base_read_permission"
+    ) as require_read, patch(
+        "backend.apps.vectordatabase_app.ElasticSearchService.list_files",
+        new=AsyncMock(return_value={"files": []}),
+    ):
+        response = client.get(
+            f"/indices/{auth_data['index_name']}/files",
+            headers=auth_data["auth_header"],
+        )
+
+    assert response.status_code == 200
+    require_read.assert_called_once_with(
+        auth_data["index_name"], auth_data["user_id"], auth_data["tenant_id"]
+    )
+
+
+def test_get_index_files_rejects_invalid_credentials(auth_data):
+    """Invalid credentials return 401 before file metadata is loaded."""
+    from consts.exceptions import UnauthorizedError
+
+    with patch(
+        "backend.apps.vectordatabase_app.get_current_user_id",
+        side_effect=UnauthorizedError("Invalid authentication token"),
+    ), patch(
+        "backend.apps.vectordatabase_app.ElasticSearchService.list_files"
+    ) as list_files:
+        response = client.get(
+            f"/indices/{auth_data['index_name']}/files",
+            headers=auth_data["auth_header"],
+        )
+
+    assert response.status_code == 401
+    list_files.assert_not_called()
+
+
 @pytest.mark.asyncio
-async def test_get_index_files_exception(vdb_core_mock):
+async def test_get_index_files_exception(vdb_core_mock, auth_data):
     """
     Test listing index files with exception.
     Verifies that the endpoint returns an appropriate error response when an exception occurs during file listing.
     """
     # Setup mocks
     with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+            patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
             patch("backend.apps.vectordatabase_app.ElasticSearchService.list_files") as mock_list_files:
 
         index_name = "test_index"
@@ -980,7 +1065,8 @@ async def test_get_index_files_exception(vdb_core_mock):
             "Elasticsearch connection failed")
 
         # Execute request
-        response = client.get(f"/indices/{index_name}/files")
+        response = client.get(
+            f"/indices/{index_name}/files", headers=auth_data["auth_header"])
 
         # Verify expected 500 status code
         assert response.status_code == 500
@@ -996,13 +1082,14 @@ async def test_get_index_files_exception(vdb_core_mock):
 
 
 @pytest.mark.asyncio
-async def test_get_index_files_validation_exception(vdb_core_mock):
+async def test_get_index_files_validation_exception(vdb_core_mock, auth_data):
     """
     Test listing index files with validation exception.
     Verifies that the endpoint returns an appropriate error response when index validation fails.
     """
     # Setup mocks
     with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+            patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
             patch("backend.apps.vectordatabase_app.ElasticSearchService.list_files") as mock_list_files:
 
         index_name = "test_index"
@@ -1011,7 +1098,8 @@ async def test_get_index_files_validation_exception(vdb_core_mock):
         mock_list_files.side_effect = ValueError("Invalid index name format")
 
         # Execute request
-        response = client.get(f"/indices/{index_name}/files")
+        response = client.get(
+            f"/indices/{index_name}/files", headers=auth_data["auth_header"])
 
         # Verify expected 500 status code
         assert response.status_code == 500
@@ -1025,13 +1113,14 @@ async def test_get_index_files_validation_exception(vdb_core_mock):
 
 
 @pytest.mark.asyncio
-async def test_get_index_files_timeout_exception(vdb_core_mock):
+async def test_get_index_files_timeout_exception(vdb_core_mock, auth_data):
     """
     Test listing index files with timeout exception.
     Verifies that the endpoint returns an appropriate error response when operation times out.
     """
     # Setup mocks
     with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+            patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
             patch("backend.apps.vectordatabase_app.ElasticSearchService.list_files") as mock_list_files:
 
         index_name = "test_index"
@@ -1040,7 +1129,8 @@ async def test_get_index_files_timeout_exception(vdb_core_mock):
         mock_list_files.side_effect = TimeoutError("Operation timed out")
 
         # Execute request
-        response = client.get(f"/indices/{index_name}/files")
+        response = client.get(
+            f"/indices/{index_name}/files", headers=auth_data["auth_header"])
 
         # Verify expected 500 status code
         assert response.status_code == 500
@@ -1054,13 +1144,14 @@ async def test_get_index_files_timeout_exception(vdb_core_mock):
 
 
 @pytest.mark.asyncio
-async def test_get_index_files_permission_exception(vdb_core_mock):
+async def test_get_index_files_permission_exception(vdb_core_mock, auth_data):
     """
     Test listing index files with permission exception.
     Verifies that the endpoint returns an appropriate error response when permission is denied.
     """
     # Setup mocks
     with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+            patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
             patch("backend.apps.vectordatabase_app.ElasticSearchService.list_files") as mock_list_files:
 
         index_name = "test_index"
@@ -1069,7 +1160,8 @@ async def test_get_index_files_permission_exception(vdb_core_mock):
         mock_list_files.side_effect = PermissionError("Access denied to index")
 
         # Execute request
-        response = client.get(f"/indices/{index_name}/files")
+        response = client.get(
+            f"/indices/{index_name}/files", headers=auth_data["auth_header"])
 
         # Verify expected 500 status code
         assert response.status_code == 500
@@ -2183,7 +2275,10 @@ async def test_get_document_error_info_not_found(vdb_core_mock, auth_data):
     """
     Test document error info when document is not found.
     """
-    with patch("backend.apps.vectordatabase_app.get_all_files_status", new=AsyncMock(return_value={})):
+    with patch(
+        "backend.apps.vectordatabase_app.get_current_user_id",
+        return_value=(auth_data["user_id"], auth_data["tenant_id"]),
+    ), patch("backend.apps.vectordatabase_app.get_all_files_status", new=AsyncMock(return_value={})):
         response = client.get(
             f"/indices/{auth_data['index_name']}/documents/missing_doc/error-info",
             headers=auth_data["auth_header"],
@@ -2199,6 +2294,9 @@ async def test_get_document_error_info_no_task_id(auth_data):
     Test document error info when task id is empty.
     """
     with patch(
+        "backend.apps.vectordatabase_app.get_current_user_id",
+        return_value=(auth_data["user_id"], auth_data["tenant_id"]),
+    ), patch(
         "backend.apps.vectordatabase_app.get_all_files_status",
         new=AsyncMock(
             return_value={
@@ -2227,6 +2325,9 @@ async def test_get_document_error_info_json_error_code(auth_data):
     redis_mock.get_error_info.return_value = '{"error_code": "INVALID_FORMAT"}'
 
     with patch(
+        "backend.apps.vectordatabase_app.get_current_user_id",
+        return_value=(auth_data["user_id"], auth_data["tenant_id"]),
+    ), patch(
         "backend.apps.vectordatabase_app.get_all_files_status",
         new=AsyncMock(
             return_value={
@@ -2258,6 +2359,9 @@ async def test_get_document_error_info_regex_error_code(auth_data):
     redis_mock.get_error_info.return_value = "oops {'error_code': 'TIMEOUT_ERROR'}"
 
     with patch(
+        "backend.apps.vectordatabase_app.get_current_user_id",
+        return_value=(auth_data["user_id"], auth_data["tenant_id"]),
+    ), patch(
         "backend.apps.vectordatabase_app.get_all_files_status",
         new=AsyncMock(
             return_value={
@@ -2858,7 +2962,8 @@ async def test_update_embedding_model_endpoint_branches(auth_data):
 
 @pytest.mark.asyncio
 async def test_get_document_error_info_regex_fallback(auth_data):
-    with patch("backend.apps.vectordatabase_app.get_all_files_status", new=AsyncMock(return_value={"docA": {"latest_task_id": "tid1"}})), \
+    with patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.get_all_files_status", new=AsyncMock(return_value={"docA": {"latest_task_id": "tid1"}})), \
             patch("backend.apps.vectordatabase_app.get_redis_service") as mock_redis:
         mock_redis.return_value.get_error_info.return_value = '{"bad":1, "error_code":"E123"'
         response = client.get(f"/indices/i1/documents/docA/error-info", headers=auth_data["auth_header"])
@@ -2868,7 +2973,8 @@ async def test_get_document_error_info_regex_fallback(auth_data):
 
 @pytest.mark.asyncio
 async def test_get_document_error_info_regex_failure_returns_none(auth_data):
-    with patch("backend.apps.vectordatabase_app.get_all_files_status", new=AsyncMock(return_value={"docA": {"latest_task_id": "tid1"}})), \
+    with patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.get_all_files_status", new=AsyncMock(return_value={"docA": {"latest_task_id": "tid1"}})), \
             patch("backend.apps.vectordatabase_app.get_redis_service") as mock_redis, \
             patch("backend.apps.vectordatabase_app.re.search", side_effect=RuntimeError("regex boom")):
         mock_redis.return_value.get_error_info.return_value = "not-json"

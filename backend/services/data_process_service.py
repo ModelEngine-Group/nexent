@@ -27,6 +27,7 @@ from utils.file_management_utils import convert_office_to_pdf
 from data_process.app import app as celery_app
 from data_process.tasks import submit_process_forward_chain
 from data_process.utils import get_task_info, get_all_task_ids_from_redis
+from utils.ssrf_utils import validate_public_url
 
 # Limit concurrent LibreOffice processes to avoid resource exhaustion
 _conversion_semaphore = asyncio.Semaphore(MAX_CONCURRENT_CONVERSIONS)
@@ -314,7 +315,7 @@ class DataProcessService:
         """
         connector = aiohttp.TCPConnector()
         timeout = aiohttp.ClientTimeout(total=5)
-        async with aiohttp.ClientSession(connector=connector, trust_env=True, timeout=timeout) as session:
+        async with aiohttp.ClientSession(connector=connector, trust_env=False, timeout=timeout) as session:
             return await self._load_image(session, image_url)
 
     async def _load_image(self, session: aiohttp.ClientSession, path: str) -> Optional[Image.Image]:
@@ -348,31 +349,13 @@ class DataProcessService:
 
                 return image
 
-            # Check if the path is a local file
-            if os.path.isfile(path):
-                try:
-                    image = Image.open(path)
-
-                    # Convert RGBA to RGB if necessary
-                    if image.mode == 'RGBA':
-                        background = Image.new(
-                            'RGB', image.size, (255, 255, 255))
-                        background.paste(image, mask=image.split()[3])
-                        image = background
-                    elif image.mode != 'RGB':
-                        image = image.convert('RGB')
-
-                    return image
-                except Exception as e:
-                    logger.info(f"Failed to load local image: {str(e)}")
-                    return None
-
-            # If not a local file or base64, treat as URL
+            # If not an S3 object or base64 payload, treat it as a public URL.
             # If the file ends in SVG, filter it.
             if path.lower().endswith('.svg'):
                 return None
 
-            async with session.get(path) as response:
+            safe_url = await validate_public_url(path)
+            async with session.get(safe_url, allow_redirects=False) as response:
                 if response.status != 200:
                     return None
 
@@ -393,23 +376,7 @@ class DataProcessService:
 
                     return image
                 except Exception:
-                    # If direct loading fails, try downloading to a temporary file first
-                    with tempfile.NamedTemporaryFile(suffix=os.path.splitext(path)[1], delete=False) as temp_file:
-                        temp_file.write(image_data)
-                        temp_file.flush()
-                        try:
-                            image = Image.open(temp_file.name)
-
-                            if image.mode == 'RGBA':
-                                background = Image.new(
-                                    'RGB', image.size, (255, 255, 255))
-                                background.paste(image, mask=image.split()[3])
-                                image = background
-                            elif image.mode != 'RGB':
-                                image = image.convert('RGB')
-                            return image
-                        finally:
-                            os.unlink(temp_file.name)
+                    return None
 
         except Exception as e:
             logger.info(f"Error loading {path}: {str(e)}")

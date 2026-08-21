@@ -737,6 +737,11 @@ async def test_check_model_health_lookup_error(client, auth_header, user_credent
 @pytest.mark.asyncio
 async def test_verify_model_config_success(client, auth_header, sample_model_data, mocker):
     """Test successful model config verification."""
+    mocker.patch(
+        'backend.apps.model_managment_app.get_current_user_id',
+        return_value=("test_user", "test_tenant"),
+    )
+    mock_validate_url = mocker.patch('backend.apps.model_managment_app.validate_public_url')
     mock_verify = mocker.patch(
         'backend.apps.model_managment_app.verify_model_config_connectivity', 
         return_value={"connectivity": True, "model_name": "gpt-4"}
@@ -750,7 +755,7 @@ async def test_verify_model_config_success(client, auth_header, sample_model_dat
     )
     
     response = client.post(
-        "/model/temporary_healthcheck", json=sample_model_data)
+        "/model/temporary_healthcheck", json=sample_model_data, headers=auth_header)
     
     assert response.status_code == HTTPStatus.OK
     data = response.json()
@@ -761,11 +766,21 @@ async def test_verify_model_config_success(client, auth_header, sample_model_dat
     assert "error" not in data["data"]
     mock_verify.assert_called_once()
     mock_suggest.assert_called_once()
+    mock_validate_url.assert_awaited_once_with(
+        sample_model_data["base_url"],
+        allowed_schemes=("http", "https", "ws", "wss"),
+        allow_local_networks=True,
+    )
 
 
 @pytest.mark.asyncio
 async def test_verify_model_config_failure_with_error(client, auth_header, sample_model_data, mocker):
     """Test model config verification failure with detailed error message."""
+    mocker.patch(
+        'backend.apps.model_managment_app.get_current_user_id',
+        return_value=("test_user", "test_tenant"),
+    )
+    mocker.patch('backend.apps.model_managment_app.validate_public_url')
     mock_verify = mocker.patch(
         'backend.apps.model_managment_app.verify_model_config_connectivity', 
         return_value={
@@ -777,7 +792,7 @@ async def test_verify_model_config_failure_with_error(client, auth_header, sampl
     mock_suggest = mocker.patch('backend.apps.model_managment_app._capacity_suggestion_for_model_request')
     
     response = client.post(
-        "/model/temporary_healthcheck", json=sample_model_data)
+        "/model/temporary_healthcheck", json=sample_model_data, headers=auth_header)
     
     assert response.status_code == HTTPStatus.OK
     data = response.json()
@@ -796,13 +811,52 @@ async def test_verify_model_config_failure_with_error(client, auth_header, sampl
 async def test_verify_model_config_exception(client, auth_header, sample_model_data, mocker):
     """Test model config verification with exception."""
     mocker.patch(
+        'backend.apps.model_managment_app.get_current_user_id',
+        return_value=("test_user", "test_tenant"),
+    )
+    mocker.patch('backend.apps.model_managment_app.validate_public_url')
+    mocker.patch(
         'backend.apps.model_managment_app.verify_model_config_connectivity', 
         side_effect=Exception("err")
     )
     
     response = client.post(
-        "/model/temporary_healthcheck", json=sample_model_data)
+        "/model/temporary_healthcheck", json=sample_model_data, headers=auth_header)
     assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+
+
+def test_temporary_healthcheck_requires_authentication(client, sample_model_data, mocker):
+    mocker.patch(
+        'backend.apps.model_managment_app.get_current_user_id',
+        side_effect=RuntimeError("No authorization header provided"),
+    )
+    response = client.post("/model/temporary_healthcheck", json=sample_model_data)
+    assert response.status_code == HTTPStatus.UNAUTHORIZED
+
+
+def test_temporary_healthcheck_rejects_private_target(client, auth_header, sample_model_data, mocker):
+    from backend.apps import model_managment_app as app_module
+
+    mocker.patch(
+        'backend.apps.model_managment_app.get_current_user_id',
+        return_value=("test_user", "test_tenant"),
+    )
+    mocker.patch(
+        'backend.apps.model_managment_app.validate_public_url',
+        side_effect=app_module.UnsafeOutboundURLError("unsafe target"),
+    )
+    verify_spy = mocker.patch(
+        'backend.apps.model_managment_app.verify_model_config_connectivity'
+    )
+
+    response = client.post(
+        "/model/temporary_healthcheck",
+        json=sample_model_data,
+        headers=auth_header,
+    )
+
+    assert response.status_code == HTTPStatus.BAD_REQUEST
+    verify_spy.assert_not_called()
 
 
 # Tests for /model/update endpoint
@@ -1837,5 +1891,313 @@ async def test_manage_provider_create_empty(client, auth_header, user_credential
     assert len(data["data"]) == 0
 
 
+# Tests for /model/provider/list endpoint
+@pytest.mark.asyncio
+async def test_provider_list_success(client, auth_header, user_credentials, mocker):
+    """Test successful provider model list retrieval."""
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+
+    async def mock_list_provider(*args, **kwargs):
+        return [
+            {
+                "id": "openai/gpt-4",
+                "object": "model",
+                "created": 1699900000,
+                "owned_by": "openai",
+                "max_tokens": 8192,
+            }
+        ]
+
+    mock_list = mocker.patch(
+        'backend.apps.model_managment_app.list_provider_models_for_tenant',
+        side_effect=mock_list_provider,
+    )
+
+    request_data = {"provider": "openai", "model_type": "llm"}
+    response = client.post("/model/provider/list", json=request_data, headers=auth_header)
+
+    assert response.status_code == HTTPStatus.OK
+    data = response.json()
+    assert "Successfully retrieved provider list" in data["message"]
+    assert len(data["data"]) == 1
+    assert data["data"][0]["id"] == "openai/gpt-4"
+    mock_list.assert_called_once_with(user_credentials[1], "openai", "llm")
+
+
+@pytest.mark.asyncio
+async def test_provider_list_exception(client, auth_header, user_credentials, mocker):
+    """Test provider model list retrieval with exception."""
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+
+    mocker.patch(
+        'backend.apps.model_managment_app.list_provider_models_for_tenant',
+        side_effect=Exception("Provider API unavailable"),
+    )
+
+    response = client.post(
+        "/model/provider/list",
+        json={"provider": "openai", "model_type": "llm"},
+        headers=auth_header,
+    )
+
+    assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+    assert "Provider API unavailable" in response.json().get("detail", "")
+
+
+# Tests for _capacity_suggestion_for_model_request internal branches
+@pytest.mark.asyncio
+async def test_temporary_healthcheck_skips_suggestion_when_disabled(
+    client, auth_header, sample_model_data, mocker
+):
+    """When CAPACITY_SUGGESTION_ENABLED is False, capacity suggestion is None."""
+    mocker.patch(
+        'backend.apps.model_managment_app.get_current_user_id',
+        return_value=("test_user", "test_tenant"),
+    )
+    mocker.patch('backend.apps.model_managment_app.validate_public_url')
+    mocker.patch(
+        'backend.apps.model_managment_app.verify_model_config_connectivity',
+        return_value={"connectivity": True},
+    )
+    mocker.patch(
+        'backend.apps.model_managment_app.CAPACITY_SUGGESTION_ENABLED', False
+    )
+    mocker.patch(
+        'backend.apps.model_managment_app._capacity_suggestion_for_model_request',
+        return_value=None,
+    )
+
+    response = client.post(
+        "/model/temporary_healthcheck", json=sample_model_data, headers=auth_header
+    )
+
+    assert response.status_code == HTTPStatus.OK
+    assert response.json()["data"]["capacity_suggestion"] is None
+
+
+@pytest.mark.asyncio
+async def test_temporary_healthcheck_suggestion_returns_none_on_value_error(
+    client, auth_header, sample_model_data, mocker
+):
+    """When _suggest_capacity_for_request raises ValueError, suggestion is None."""
+    mocker.patch(
+        'backend.apps.model_managment_app.get_current_user_id',
+        return_value=("test_user", "test_tenant"),
+    )
+    mocker.patch('backend.apps.model_managment_app.validate_public_url')
+    mocker.patch(
+        'backend.apps.model_managment_app.verify_model_config_connectivity',
+        return_value={"connectivity": True},
+    )
+    mocker.patch(
+        'backend.apps.model_managment_app.CAPACITY_SUGGESTION_ENABLED', True
+    )
+    mocker.patch(
+        'backend.apps.model_managment_app._suggest_capacity_for_request',
+        side_effect=ValueError("unsupported model"),
+    )
+
+    response = client.post(
+        "/model/temporary_healthcheck", json=sample_model_data, headers=auth_header
+    )
+
+    assert response.status_code == HTTPStatus.OK
+    assert response.json()["data"]["capacity_suggestion"] is None
+
+
+@pytest.mark.asyncio
+async def test_temporary_healthcheck_suggestion_returns_none_on_exception(
+    client, auth_header, sample_model_data, mocker
+):
+    """When _suggest_capacity_for_request raises generic Exception, suggestion is None."""
+    mocker.patch(
+        'backend.apps.model_managment_app.get_current_user_id',
+        return_value=("test_user", "test_tenant"),
+    )
+    mocker.patch('backend.apps.model_managment_app.validate_public_url')
+    mocker.patch(
+        'backend.apps.model_managment_app.verify_model_config_connectivity',
+        return_value={"connectivity": True},
+    )
+    mocker.patch(
+        'backend.apps.model_managment_app.CAPACITY_SUGGESTION_ENABLED', True
+    )
+    mocker.patch(
+        'backend.apps.model_managment_app._suggest_capacity_for_request',
+        side_effect=RuntimeError("catalog service down"),
+    )
+
+    response = client.post(
+        "/model/temporary_healthcheck", json=sample_model_data, headers=auth_header
+    )
+
+    assert response.status_code == HTTPStatus.OK
+    assert response.json()["data"]["capacity_suggestion"] is None
+
+
+# Tests for _capacity_suggestion_for_model_request with connectivity=False
+@pytest.mark.asyncio
+async def test_temporary_healthcheck_skips_suggestion_when_connectivity_false(
+    client, auth_header, sample_model_data, mocker
+):
+    """When connectivity check fails, capacity_suggestion key is absent."""
+    mocker.patch(
+        'backend.apps.model_managment_app.get_current_user_id',
+        return_value=("test_user", "test_tenant"),
+    )
+    mocker.patch('backend.apps.model_managment_app.validate_public_url')
+    mocker.patch(
+        'backend.apps.model_managment_app.verify_model_config_connectivity',
+        return_value={"connectivity": False, "error": "timeout"},
+    )
+
+    response = client.post(
+        "/model/temporary_healthcheck", json=sample_model_data, headers=auth_header
+    )
+
+    assert response.status_code == HTTPStatus.OK
+    data = response.json()["data"]
+    assert data["connectivity"] is False
+    assert data.get("capacity_suggestion") is None
+
+
+@pytest.mark.asyncio
+async def test_temporary_healthcheck_skips_suggestion_when_connectivity_missing(
+    client, auth_header, sample_model_data, mocker
+):
+    """When connectivity field is absent from result, capacity_suggestion is skipped."""
+    mocker.patch(
+        'backend.apps.model_managment_app.get_current_user_id',
+        return_value=("test_user", "test_tenant"),
+    )
+    mocker.patch('backend.apps.model_managment_app.validate_public_url')
+    mocker.patch(
+        'backend.apps.model_managment_app.verify_model_config_connectivity',
+        return_value={},
+    )
+
+    response = client.post(
+        "/model/temporary_healthcheck", json=sample_model_data, headers=auth_header
+    )
+
+    assert response.status_code == HTTPStatus.OK
+    assert response.json()["data"].get("capacity_suggestion") is None
+
+
+# Remaining error paths
+@pytest.mark.asyncio
+async def test_check_model_health_bad_request(client, auth_header, user_credentials, mocker):
+    """Test model health check maps ValueError to 400."""
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+    mocker.patch(
+        'backend.apps.model_managment_app.check_model_connectivity',
+        side_effect=ValueError("Invalid model type"),
+    )
+
+    response = client.post(
+        "/model/healthcheck",
+        params={"display_name": "X", "model_type": "llm"},
+        headers=auth_header,
+    )
+    assert response.status_code == HTTPStatus.BAD_REQUEST
+    assert "Invalid model type" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_check_model_health_exception(client, auth_header, user_credentials, mocker):
+    """Test model health check maps generic Exception to 500."""
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+    mocker.patch(
+        'backend.apps.model_managment_app.check_model_connectivity',
+        side_effect=RuntimeError("DB unreachable"),
+    )
+
+    response = client.post(
+        "/model/healthcheck",
+        params={"display_name": "X", "model_type": "llm"},
+        headers=auth_header,
+    )
+    assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+
+
+@pytest.mark.asyncio
+async def test_delete_model_exception(client, auth_header, user_credentials, mocker):
+    """Test model deletion maps generic Exception to 500."""
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+    mocker.patch(
+        'backend.apps.model_managment_app.delete_model_for_tenant',
+        side_effect=RuntimeError("DB failure"),
+    )
+
+    response = client.post(
+        "/model/delete", params={"display_name": "X"}, headers=auth_header
+    )
+    assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+
+
+@pytest.mark.asyncio
+async def test_get_model_list_exception(client, auth_header, user_credentials, mocker):
+    """Test model list maps generic Exception to 500."""
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+    mocker.patch(
+        'backend.apps.model_managment_app.list_models_for_tenant',
+        side_effect=RuntimeError("DB connection lost"),
+    )
+
+    response = client.get("/model/list", headers=auth_header)
+    assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+
+
+@pytest.mark.asyncio
+async def test_update_single_model_lookup_error(client, auth_header, user_credentials, mocker):
+    """Test single model update maps LookupError to 404."""
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+    mocker.patch(
+        'backend.apps.model_managment_app.update_single_model_for_tenant',
+        side_effect=LookupError("Model not found: stale"),
+    )
+
+    response = client.post(
+        "/model/update",
+        params={"display_name": "Stale"},
+        json={"display_name": "Stale", "model_name": "x"},
+        headers=auth_header,
+    )
+    assert response.status_code == HTTPStatus.NOT_FOUND
+    assert "stale" in response.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_update_single_model_records_accept_signal(client, auth_header, user_credentials, mocker):
+    """Accept signal recorder fires with model_factory on single update."""
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+
+    async def _update(*args, **kwargs):
+        return None
+
+    mocker.patch('backend.apps.model_managment_app.update_single_model_for_tenant', side_effect=_update)
+    mock_record = mocker.patch(
+        'backend.apps.model_managment_app._record_capacity_suggestion_accept'
+    )
+
+    payload = {
+        "display_name": "Old",
+        "model_name": "x",
+        "model_factory": "anthropic",
+        "accepted_suggestion_match_kind": "catalog_exact",
+        "accepted_capability_profile_version": "anthropic/claude-3@1",
+    }
+    response = client.post(
+        "/model/update",
+        params={"display_name": "Old"},
+        json=payload,
+        headers=auth_header,
+    )
+
+    assert response.status_code == HTTPStatus.OK
+    mock_record.assert_called_once_with("catalog_exact", "anthropic")
+
+
 if __name__ == "__main__":
     pytest.main([__file__])
+

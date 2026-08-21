@@ -243,3 +243,65 @@ def test_image_filter_disabled(exa_search_tool, mock_observer):
     expected_images = ["https://example.com/image0.jpg"]
     mock_observer.add_message.assert_any_call("", ProcessType.PICTURE_WEB,
                                               json.dumps({"images_url": expected_images}, ensure_ascii=False))
+
+
+class AsyncResponse:
+    def __init__(self, status=200, payload=None, error=None):
+        self.status = status
+        self.payload = payload or {}
+        self.error = error
+
+    async def __aenter__(self):
+        if self.error:
+            raise self.error
+        return self
+
+    async def __aexit__(self, exc_type, exc, traceback):
+        return False
+
+    async def json(self):
+        return self.payload
+
+
+class AsyncSession:
+    def __init__(self, responses):
+        self.responses = iter(responses)
+        self.requests = []
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, traceback):
+        return False
+
+    def post(self, url, data, headers):
+        self.requests.append((url, data, headers))
+        return next(self.responses)
+
+
+def test_filter_images_processes_success_and_failure_cases(exa_search_tool, mock_observer, mocker):
+    session = AsyncSession([
+        AsyncResponse(payload={"is_important": True}),
+        AsyncResponse(payload={"is_important": False}),
+        AsyncResponse(status=503),
+        AsyncResponse(error=RuntimeError("connection failed")),
+    ])
+    mocker.patch.object(mock_aiohttp, "TCPConnector")
+    mocker.patch.object(mock_aiohttp, "ClientTimeout")
+    mocker.patch.object(mock_aiohttp, "ClientSession", return_value=session)
+    mock_observer.authorization = "Bearer test"
+
+    exa_search_tool._filter_images(["a", "b", "c", "d"], "query")
+
+    assert session.requests[0][2] == {"Authorization": "Bearer test"}
+    assert json.loads(mock_observer.add_message.call_args[0][2]) == {"images_url": ["a"]}
+
+
+def test_filter_images_falls_back_to_original_urls_on_setup_error(exa_search_tool, mock_observer, mocker):
+    mocker.patch.object(mock_aiohttp, "TCPConnector", side_effect=RuntimeError("setup failed"))
+
+    exa_search_tool._filter_images(["https://image.test/a"], "query")
+
+    assert json.loads(mock_observer.add_message.call_args[0][2]) == {
+        "images_url": ["https://image.test/a"]
+    }

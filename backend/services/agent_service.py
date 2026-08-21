@@ -1841,7 +1841,20 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
             # Update agent
             request.prompt_template_id = prompt_template_id
             request.prompt_template_name = prompt_template_name
-            update_agent(agent_id, request, user_id)
+            try:
+                update_agent(
+                    agent_id=agent_id,
+                    agent_info=request,
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                )
+            except ValueError as exc:
+                raise AppException(
+                    ErrorCode.COMMON_RESOURCE_NOT_FOUND,
+                    "Agent not found",
+                ) from exc
+    except AppException:
+        raise
     except Exception as e:
         logger.error(f"Failed to update agent info: {str(e)}")
         raise ValueError(f"Failed to update agent info: {str(e)}")
@@ -2900,6 +2913,7 @@ async def prepare_agent_run(
     tenant_id: str,
     language: str = LANGUAGE["ZH"],
     allow_memory_search: bool = True,
+    authorization: Optional[str] = None,
 ):
     """
     Prepare for an agent run by creating context and run info, and registering the run.
@@ -2926,6 +2940,8 @@ async def prepare_agent_run(
         "context_policy": agent_request.context_policy,
         "enable_planning": agent_request.enable_plan,
     }
+    if authorization:
+        create_run_kwargs["authorization"] = authorization
     runtime_knowledge_context = getattr(agent_request, "_runtime_knowledge_context", None)
     if isinstance(runtime_knowledge_context, dict):
         create_run_kwargs["runtime_knowledge_context"] = runtime_knowledge_context
@@ -2999,6 +3015,7 @@ async def generate_stream(
     language: str = LANGUAGE["ZH"],
     enable_memory: bool = False,
     channel: Optional[Any] = None,
+    authorization: Optional[str] = None,
 ):
     """Unified streaming entry point.
 
@@ -3049,13 +3066,16 @@ async def generate_stream(
         # Prepare the agent with or without memory. The preparation path runs
         # fixed retrieval before the model loop and exposes only store_memory.
         try:
-            agent_run_info, memory_context = await prepare_agent_run(
-                agent_request=agent_request,
-                user_id=user_id,
-                tenant_id=tenant_id,
-                language=language,
-                allow_memory_search=memory_enabled_runtime,
-            )
+            prepare_kwargs = {
+                "agent_request": agent_request,
+                "user_id": user_id,
+                "tenant_id": tenant_id,
+                "language": language,
+                "allow_memory_search": memory_enabled_runtime,
+            }
+            if authorization:
+                prepare_kwargs["authorization"] = authorization
+            agent_run_info, memory_context = await prepare_agent_run(**prepare_kwargs)
         except Exception as prep_err:
             # Normalize any preparation error to MemoryPreparationException so
             # the memory-enabled path can decide between retry-without-memory
@@ -3092,6 +3112,7 @@ async def generate_stream(
                 language=language,
                 enable_memory=False,
                 channel=channel,
+                authorization=authorization,
             ):
                 yield data_chunk
         except Exception as run_exc:
@@ -3578,6 +3599,7 @@ async def run_agent_stream(
         tenant_id=resolved_tenant_id,
         language=language,
         enable_memory=use_memory_stream,
+        authorization=authorization,
     )
 
     async def stream_with_agent_context():

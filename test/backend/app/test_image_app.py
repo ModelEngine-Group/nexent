@@ -1,5 +1,6 @@
 import sys
 from pathlib import Path
+from http import HTTPStatus
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -19,12 +20,55 @@ mock_const = helpers_env["mock_const"]
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from backend.apps.image_app import router
+from backend.apps import image_app as image_app_module
+
+router = image_app_module.router
 
 # Create a FastAPI app and include the router for testing
 app = FastAPI()
 app.include_router(router)
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def mock_image_security_checks(monkeypatch):
+    monkeypatch.setattr(
+        image_app_module,
+        "get_current_user_id",
+        lambda authorization=None: ("user", "tenant"),
+    )
+
+    async def allow_public_url(url, allowed_schemes=("http", "https")):
+        return None
+
+    monkeypatch.setattr(image_app_module, "validate_public_url", allow_public_url)
+
+
+def test_proxy_image_requires_authentication(monkeypatch):
+    def reject_auth(authorization=None):
+        raise RuntimeError("No authorization header provided")
+
+    monkeypatch.setattr(image_app_module, "get_current_user_id", reject_auth)
+    response = client.get(f"/image?url={encoded_test_url}")
+    assert response.status_code == HTTPStatus.UNAUTHORIZED
+
+
+def test_proxy_image_rejects_private_target(monkeypatch):
+    async def reject_url(url, allowed_schemes=("http", "https")):
+        raise image_app_module.UnsafeOutboundURLError("unsafe target")
+
+    proxy_spy = AsyncMock()
+    monkeypatch.setattr(image_app_module, "validate_public_url", reject_url)
+    monkeypatch.setattr(image_app_module, "proxy_image_impl", proxy_spy)
+
+    response = client.get(
+        "/image",
+        params={"url": "http://127.0.0.1/image.png"},
+        headers={"Authorization": "Bearer t"},
+    )
+
+    assert response.status_code == HTTPStatus.BAD_REQUEST
+    proxy_spy.assert_not_called()
 
 # Sample test data
 test_url = "https://example.com/image.jpg"
@@ -170,8 +214,9 @@ async def test_proxy_image_with_special_chars(monkeypatch):
 
         # Verify URL was correctly passed
         mock_session.get.assert_called_once()
-        called_args = mock_session.get.call_args[0][0]
-        assert special_url in called_args or encoded_special_url in called_args
+        called_args, called_kwargs = mock_session.get.call_args
+        assert called_args[0] == "http://mock-data-process-service/tasks/load_image"
+        assert called_kwargs["params"]["url"] == special_url
 
 
 @pytest.mark.asyncio
@@ -220,7 +265,7 @@ async def test_proxy_image_stream_format(monkeypatch):
         "content_type": "image/png"
     }
     
-    async def fake_proxy_image_impl(decoded_url):
+    async def fake_proxy_image_impl(decoded_url, authorization=None):
         return success_response_stream
     
     from backend.apps import image_app
@@ -249,7 +294,7 @@ async def test_proxy_image_stream_format_error(monkeypatch):
         "error": "Failed to fetch image"
     }
     
-    async def fake_proxy_image_impl(decoded_url):
+    async def fake_proxy_image_impl(decoded_url, authorization=None):
         return error_response
     
     from backend.apps import image_app
@@ -276,7 +321,7 @@ async def test_proxy_image_stream_format_base64_decode_error(monkeypatch):
         "content_type": "image/png"
     }
     
-    async def fake_proxy_image_impl(decoded_url):
+    async def fake_proxy_image_impl(decoded_url, authorization=None):
         return success_response_invalid
     
     from backend.apps import image_app
@@ -293,7 +338,7 @@ async def test_proxy_image_stream_format_base64_decode_error(monkeypatch):
 @pytest.mark.asyncio
 async def test_proxy_image_stream_format_exception(monkeypatch):
     """Test proxy_image with format=stream when exception occurs"""
-    async def fake_proxy_image_impl(decoded_url):
+    async def fake_proxy_image_impl(decoded_url, authorization=None):
         raise ValueError("Unexpected error")
     
     from backend.apps import image_app
@@ -311,7 +356,7 @@ async def test_proxy_image_stream_format_exception(monkeypatch):
 @pytest.mark.asyncio
 async def test_proxy_image_json_format_default(monkeypatch):
     """Test proxy_image with format=json (default)"""
-    async def fake_proxy_image_impl(decoded_url):
+    async def fake_proxy_image_impl(decoded_url, authorization=None):
         return success_response
     
     from backend.apps import image_app
@@ -326,7 +371,7 @@ async def test_proxy_image_json_format_default(monkeypatch):
 @pytest.mark.asyncio
 async def test_proxy_image_json_format_exception(monkeypatch):
     """Test proxy_image with format=json when exception occurs"""
-    async def fake_proxy_image_impl(decoded_url):
+    async def fake_proxy_image_impl(decoded_url, authorization=None):
         raise RuntimeError("Service unavailable")
     
     from backend.apps import image_app
@@ -346,7 +391,7 @@ async def test_proxy_image_url_decoding(monkeypatch):
     encoded_special_url = "https%3A%2F%2Fexample.com%2Fimage%20with%20spaces.jpg"
     
     call_urls = []
-    async def fake_proxy_image_impl(decoded_url):
+    async def fake_proxy_image_impl(decoded_url, authorization=None):
         call_urls.append(decoded_url)
         return success_response
     

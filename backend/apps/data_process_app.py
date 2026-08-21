@@ -14,6 +14,8 @@ from consts.model import (
 from consts.exceptions import OfficeConversionException
 from data_process.tasks import process_and_forward, process_sync
 from services.data_process_service import get_data_process_service
+from utils.auth_utils import get_current_user_id
+from utils.ssrf_utils import UnsafeOutboundURLError, validate_public_url
 
 logger = logging.getLogger("data_process.app")
 
@@ -144,7 +146,7 @@ async def create_batch_tasks(request: BatchTaskRequest, authorization: Optional[
 
 
 @router.get("/load_image")
-async def load_image(url: str):
+async def load_image(url: str, authorization: Optional[str] = Header(None)):
     """
     Load an image from URL and return it as base64 encoded data
 
@@ -155,6 +157,13 @@ async def load_image(url: str):
         JSON object containing base64 encoded image data and content type
     """
     try:
+        get_current_user_id(authorization)
+    except Exception:
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Authentication required")
+
+    try:
+        await validate_public_url(url)
+
         # Use the service to load the image
         image = await service.load_image(url)
 
@@ -167,6 +176,8 @@ async def load_image(url: str):
                             content={"success": True, "base64": image_data, "content_type": content_type})
     except HTTPException:
         raise
+    except UnsafeOutboundURLError as e:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
     except Exception as e:
         logger.error(f"Error loading image: {str(e)}")
         raise HTTPException(
@@ -231,7 +242,8 @@ async def get_task_details(task_id: str):
 async def filter_important_image(
         image_url: str = Form(...),
         positive_prompt: str = Form("an important image"),
-        negative_prompt: str = Form("an unimportant image")
+        negative_prompt: str = Form("an unimportant image"),
+        authorization: Optional[str] = Header(None),
 ):
     """
     Check if an image is important
@@ -240,6 +252,13 @@ async def filter_important_image(
     Returns importance score and confidence level.
     """
     try:
+        get_current_user_id(authorization)
+    except Exception:
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Authentication required")
+
+    try:
+        await validate_public_url(image_url)
+
         result = await service.filter_important_image(
             image_url=image_url,
             positive_prompt=positive_prompt,
@@ -251,6 +270,8 @@ async def filter_important_image(
         )
     except HTTPException:
         raise
+    except UnsafeOutboundURLError as e:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
     except Exception as e:
         logger.error(f"Error processing image: {str(e)}")
         raise HTTPException(

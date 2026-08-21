@@ -112,7 +112,7 @@ class MessageObserver:
     # set the maximum buffer size, can be adjusted according to needs
     MAX_TOKEN_BUFFER_SIZE = 10
 
-    def __init__(self, lang="zh", enable_nl2a_wrapper=False):
+    def __init__(self, lang="zh", enable_nl2a_wrapper=False, authorization=None):
         # Unified output queue consumed by the agent streaming bridge.
         self.message_query = []
         self._message_query_lock = threading.Lock()
@@ -120,6 +120,7 @@ class MessageObserver:
         # Control output language
         self.lang = lang
         self.enable_nl2a_wrapper = enable_nl2a_wrapper
+        self.authorization = authorization
 
         # Thread-local state for stream parsing. Must be created before
         # ``_init_message_transformers()`` because that call triggers setters
