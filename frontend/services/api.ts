@@ -776,7 +776,7 @@ export const fetchWithErrorHandling = async (
       // Try to parse JSON response for business error code first
       let errorCode = response.status;
       let errorMessage = `Request failed: ${response.status}`;
-      let errorDetails: unknown;
+      let errorDetails: Record<string, unknown> | null | undefined;
       const errorText = await response.text();
 
       try {
