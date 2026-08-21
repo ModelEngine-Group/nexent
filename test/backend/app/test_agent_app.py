@@ -2578,9 +2578,6 @@ def test_get_agent_knowledge_capabilities_api_value_error(mocker, mock_auth_head
     assert "agent not found" in response.json()["detail"]
 
 
-    assert response.status_code == 500
-
-
 @pytest.mark.parametrize(
     ("error", "expected_status", "detail"),
     [

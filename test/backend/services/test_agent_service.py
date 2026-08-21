@@ -1,6 +1,7 @@
 import sys
 import asyncio
 import json
+import io
 import types
 from contextlib import contextmanager
 from unittest.mock import patch, MagicMock, mock_open, call, Mock, AsyncMock
