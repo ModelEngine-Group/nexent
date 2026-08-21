@@ -24,7 +24,7 @@ function safeSetFieldValue(form: FormInstance, field: string, value: unknown) {
   });
 }
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useAgentConfigStore } from "@/stores/agentConfigStore";
+import { useAgentStore } from "@/stores/agentStore";
 import { CloseOutlined } from "@ant-design/icons";
 
 import { TOOL_PARAM_TYPES, getToolParamOptions } from "@/const/agentConfig";
@@ -66,8 +66,8 @@ export interface ToolConfigModalProps {
   tool: Tool;
   initialParams: ToolParam[];
   selectedTool?: Tool | null;
-  isCreatingMode?: boolean;
   currentAgentId?: number;
+  localOnly?: boolean;
 }
 
 // Tool types that require knowledge base selection
@@ -187,15 +187,15 @@ export default function ToolConfigModal({
   tool,
   initialParams,
   selectedTool,
-  isCreatingMode,
   currentAgentId,
+  localOnly = false,
 }: ToolConfigModalProps) {
   const [currentParams, setCurrentParams] = useState<ToolParam[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const { t } = useTranslation("common");
   const [form] = Form.useForm();
   const queryClient = useQueryClient();
-  const updateTools = useAgentConfigStore((state) => state.updateTools);
+  const updateTools = useAgentStore((state) => state.updateTools);
   const { message } = App.useApp();
 
   // Tool test panel visibility state
@@ -1471,7 +1471,7 @@ export default function ToolConfigModal({
           ? { display_names: selectedKbDisplayNames }
           : {}),
       };
-      const currentTools = useAgentConfigStore.getState().editedAgent.tools;
+      const currentTools = useAgentStore.getState().editedAgent?.tools ?? [];
 
       // Check if tool already exists, if so replace it, otherwise add it
       const existingToolIndex = currentTools.findIndex(
@@ -1488,15 +1488,16 @@ export default function ToolConfigModal({
         newSelectedTools = [...currentTools, updatedTool];
       }
 
-      // Update local state only - actual save will happen when user clicks "Save Agent"
-      updateTools(newSelectedTools);
+      if (!localOnly) {
+        updateTools(newSelectedTools);
+      }
 
       message.success(t("toolConfig.message.saveSuccess"));
       handleClose(); // Close modal
 
       // Call original onSave if provided
       if (onSave) {
-        onSave(currentParams);
+        onSave(syncedParams);
       }
     } catch {
       // Form validation failed, error will be shown by antd Form
@@ -1933,13 +1934,17 @@ export default function ToolConfigModal({
     if (param.name === "selected_model_id" && isAnalyzeToolWithModelSelection) {
       return (
         <Select
-          placeholder="未选择时使用默认模型"
+          placeholder={t("toolConfig.placeholder.useDefaultModel")}
           options={analyzeToolModelOptions}
           loading={registeredModelsLoading}
           allowClear
           showSearch
           optionFilterProp="label"
-          notFoundContent={registeredModelsLoading ? undefined : "暂无可选模型"}
+          notFoundContent={
+            registeredModelsLoading
+              ? undefined
+              : t("toolConfig.placeholder.noAvailableModels")
+          }
         />
       );
     }

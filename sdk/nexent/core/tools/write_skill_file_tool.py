@@ -70,14 +70,10 @@ class WriteSkillFileTool(Tool):
         if not file_path:
             return "[Error] file_path is required"
 
-        normalized_path = file_path.replace("\\", "/")
-        if "/" in normalized_path or normalized_path != file_path.lstrip("/"):
-            pass
-        normalized_path = normalized_path.lstrip("/")
+        if not skill_name or not isinstance(skill_name, str) or not skill_name.strip():
+            return "[Error] skill_name is required"
 
-        # If skill_name is empty, write directly to local_skills_dir
-        if not skill_name:
-            return self._write_direct_file(normalized_path, content)
+        normalized_path = file_path.replace("\\", "/").lstrip("/")
 
         try:
             manager = self._get_skill_manager()
@@ -87,8 +83,7 @@ class WriteSkillFileTool(Tool):
         try:
             if normalized_path.lower() == "skill.md":
                 return self._write_skill_md(manager, skill_name, content)
-            else:
-                return self._write_arbitrary_file(manager, skill_name, normalized_path, content)
+            return self._write_arbitrary_file(manager, skill_name, normalized_path, content)
         except Exception as e:
             logger.error(f"Failed to write skill file: {e}")
             return f"[Error] Failed to write file: {type(e).__name__}: {str(e)}"
@@ -96,30 +91,6 @@ class WriteSkillFileTool(Tool):
     def forward(self, skill_name: str, file_path: str, content: str) -> str:
         """Write a tenant-scoped skill file."""
         return self.execute(skill_name, file_path, content)
-
-    def _write_direct_file(self, relative_path: str, content: str) -> str:
-        """Write a file directly to local_skills_dir.
-
-        Args:
-            relative_path: Path relative to local_skills_dir
-            content: File content
-
-        Returns:
-            Success or error message
-        """
-        manager = self._get_skill_manager()
-        file_path = os.path.join(
-            manager.resolve_tenant_dir(tenant_id=self.tenant_id),
-            *relative_path.split("/"),
-        )
-        os.makedirs(os.path.dirname(file_path), exist_ok=True)
-
-        try:
-            with open(file_path, "w", encoding="utf-8") as f:
-                f.write(content)
-            return f"Successfully wrote '{relative_path}' to local_skills_dir"
-        except Exception as e:
-            return f"[Error] Failed to write '{relative_path}': {e}"
 
     def _write_skill_md(self, manager, skill_name: str, content: str) -> str:
         """Write SKILL.md using SkillManager.save_skill().
@@ -151,29 +122,14 @@ class WriteSkillFileTool(Tool):
         relative_path: str,
         content: str,
     ) -> str:
-        """Write an arbitrary file to the skill directory.
-
-        Args:
-            manager: SkillManager instance
-            skill_name: Name of the skill
-            relative_path: Path relative to skill root
-            content: File content
-
-        Returns:
-            Success or error message
-        """
-        skill_dir = manager.resolve_skill_dir(skill_name, tenant_id=self.tenant_id)
-        os.makedirs(skill_dir, exist_ok=True)
-
-        file_path = os.path.join(skill_dir, *relative_path.split("/"))
-        os.makedirs(os.path.dirname(file_path), exist_ok=True)
-
-        try:
-            with open(file_path, "w", encoding="utf-8") as f:
-                f.write(content)
-            return f"Successfully wrote '{relative_path}' for skill '{skill_name}'"
-        except Exception as e:
-            return f"[Error] Failed to write '{relative_path}': {e}"
+        """Write an arbitrary file through SkillManager's validated API."""
+        manager.write_skill_file(
+            skill_name,
+            relative_path,
+            content,
+            tenant_id=self.tenant_id,
+        )
+        return f"Successfully wrote '{relative_path}' for skill '{skill_name}'"
 
 
 def _uncached_write_skill_file_tool(
@@ -197,37 +153,6 @@ def _uncached_write_skill_file_tool(
 
 
 def _write_skill_file_without_context(skill_name: str, file_path: str, content: str) -> str:
-    """Write a file to a skill directory in local storage.
-
-    Use this tool when you need to create or update skill files (SKILL.md,
-    scripts, examples, etc.). The skill root directory is determined by the
-    agent's local_skills_dir configuration.
-
-    Args:
-        skill_name: Name of the skill (e.g., "code-reviewer", "my-new-skill").
-            If empty, writes directly to local_skills_dir.
-        file_path: Relative path within the skill directory. Use forward slashes.
-            - "SKILL.md" for the main skill file
-            - "scripts/analyze.py" for Python scripts
-            - "scripts/run.sh" for shell scripts
-            - "examples.md", "reference.md" for supporting documentation
-        content: The full file content to write
-
-    Returns:
-        Success or error message
-
-    Examples:
-        # Write the main SKILL.md
-        write_skill_file("code-reviewer", "SKILL.md", "---\\nname: code-reviewer\\n...")
-
-        # Write a Python script
-        write_skill_file("code-reviewer", "scripts/analyze.py", "import sys\\n...")
-
-        # Write supporting documentation
-        write_skill_file("code-reviewer", "examples.md", "# Examples\\n...")
-
-        # Write directly to local_skills_dir (when skill_name is empty)
-        write_skill_file("", "my-file.txt", "file content")
-    """
+    """Write a file to a tenant-scoped skill directory."""
     tool_instance = _uncached_write_skill_file_tool()
     return tool_instance.execute(skill_name, file_path, content)

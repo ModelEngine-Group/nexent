@@ -14,6 +14,7 @@ import re
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import yaml
+from charset_normalizer import from_bytes
 
 from nexent.skills import SkillManager
 from nexent.skills.skill_loader import SkillLoader
@@ -37,6 +38,169 @@ _SKILL_UPDATE_FORBIDDEN_MESSAGE = "Not authorized to update this skill"
 _SKILL_ACCESS_UPDATE_FORBIDDEN_MESSAGE = "Not authorized to update skill access"
 
 _skill_manager: Optional[SkillManager] = None
+
+_UNSUPPORTED_PREVIEW_DIRECTORIES = frozenset({
+    "__macosx",
+    "__pycache__",
+    ".git",
+    ".svn",
+    ".hg",
+})
+_UNSUPPORTED_PREVIEW_EXTENSIONS = frozenset({
+    ".7z", ".a", ".avi", ".bin", ".bmp", ".class", ".dll", ".dylib",
+    ".eot", ".exe", ".gif", ".gz", ".ico", ".jar", ".jpeg", ".jpg",
+    ".mov", ".mp3", ".mp4", ".o", ".obj", ".otf", ".pdf", ".png",
+    ".pyc", ".pyo", ".so", ".tar", ".ttf", ".wav", ".webm", ".webp",
+    ".woff", ".woff2", ".xls", ".xlsx", ".zip",
+})
+_TEXT_PREVIEW_EXTENSIONS = frozenset({
+    "", ".bash", ".c", ".cc", ".cfg", ".conf", ".cpp", ".css", ".csv",
+    ".dockerfile", ".env", ".go", ".h", ".hpp", ".html", ".ini", ".java",
+    ".js", ".json", ".jsx", ".log", ".md", ".mdx", ".php", ".properties",
+    ".py", ".rb", ".rs", ".rst", ".sh", ".sql", ".svg", ".toml", ".ts",
+    ".tsx", ".txt", ".xml", ".yaml", ".yml", ".zsh",
+})
+
+
+class UnsupportedSkillFilePreview(SkillException):
+    """Raised when a skill file is intentionally excluded from text preview."""
+
+
+class DecodedSkillFile(str):
+    """String content carrying the source character encoding."""
+
+    encoding: str
+
+    def __new__(cls, content: str, encoding: str):
+        value = super().__new__(cls, content)
+        value.encoding = encoding
+        return value
+
+
+def _decode_text_bytes(raw: bytes) -> DecodedSkillFile:
+    """Decode text bytes without silently replacing undecodable characters."""
+    if raw.startswith(b"\xef\xbb\xbf"):
+        return DecodedSkillFile(raw.decode("utf-8-sig"), "utf-8-sig")
+    if raw.startswith((b"\xff\xfe\x00\x00", b"\x00\x00\xfe\xff")):
+        return DecodedSkillFile(raw.decode("utf-32"), "utf-32")
+    if raw.startswith((b"\xff\xfe", b"\xfe\xff")):
+        return DecodedSkillFile(raw.decode("utf-16"), "utf-16")
+    if raw and raw.count(b"\x00") / len(raw) > 0.2:
+        even_nuls = raw[0::2].count(0)
+        odd_nuls = raw[1::2].count(0)
+        if odd_nuls > len(raw) / 4:
+            return DecodedSkillFile(raw.decode("utf-16-le"), "utf-16-le")
+        if even_nuls > len(raw) / 4:
+            return DecodedSkillFile(raw.decode("utf-16-be"), "utf-16-be")
+
+    try:
+        return DecodedSkillFile(raw.decode("utf-8"), "utf-8")
+    except UnicodeDecodeError:
+        pass
+
+    for encoding in ("gb18030", "big5"):
+        try:
+            decoded = raw.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+        if any("\u3400" <= char <= "\u9fff" for char in decoded):
+            return DecodedSkillFile(decoded, encoding)
+
+    match = from_bytes(raw).best()
+    if match is None or match.encoding is None or match.chaos > 0.3:
+        raise UnicodeDecodeError("unknown", raw, 0, len(raw), "Unable to detect a reliable text encoding")
+    return DecodedSkillFile(str(match), match.encoding.lower())
+
+
+def _decode_zip_member_name(info: zipfile.ZipInfo) -> str:
+    """Recover legacy ZIP member names written without the UTF-8 flag."""
+    name = info.filename
+    if info.flag_bits & 0x800 or name.isascii():
+        return name
+    try:
+        raw_name = name.encode("cp437")
+    except UnicodeEncodeError:
+        return name
+    for encoding in ("utf-8", "gb18030"):
+        try:
+            candidate = raw_name.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+        if encoding == "utf-8" or any("\u3400" <= char <= "\u9fff" for char in candidate):
+            return candidate
+    return name
+
+
+def _zip_members(zf: zipfile.ZipFile) -> List[Tuple[zipfile.ZipInfo, str]]:
+    """Return ZIP entries paired with their normalized display paths."""
+    members = [(info, _decode_zip_member_name(info)) for info in zf.infolist()]
+    seen: Dict[str, str] = {}
+    for info, decoded_name in members:
+        normalized = _normalize_zip_entry_path(decoded_name)
+        collision_key = normalized.casefold()
+        previous = seen.get(collision_key)
+        if previous is not None and previous != info.filename:
+            raise SkillException(f"ZIP entries resolve to the same path: {decoded_name}")
+        seen[collision_key] = info.filename
+    return members
+
+
+def _zip_file_list(zf: zipfile.ZipFile) -> List[str]:
+    return [decoded_name for _, decoded_name in _zip_members(zf)]
+
+
+def _read_zip_member(zf: zipfile.ZipFile, decoded_name: str) -> bytes:
+    for info, candidate in _zip_members(zf):
+        if candidate == decoded_name:
+            return zf.read(info)
+    raise KeyError(decoded_name)
+
+
+def _is_obviously_binary(raw: bytes) -> bool:
+    if not raw:
+        return False
+    if b"\x00" in raw:
+        even_nuls = raw[0::2].count(0)
+        odd_nuls = raw[1::2].count(0)
+        if max(even_nuls, odd_nuls) > len(raw) / 4:
+            return False
+        return True
+    control_count = sum(byte < 9 or 13 < byte < 32 for byte in raw)
+    return control_count / len(raw) > 0.1
+
+
+def _skill_file_preview_status(
+    local_skills_dir: str,
+    skill_name: str,
+    relative_path: str,
+) -> str:
+    """Classify whether a local skill file may be exposed as editable text."""
+    parts = [part.casefold() for part in relative_path.replace("\\", "/").split("/")]
+    if any(part in _UNSUPPORTED_PREVIEW_DIRECTORIES for part in parts[:-1]):
+        return "unsupported"
+    extension = os.path.splitext(relative_path)[1].casefold()
+    if extension in _UNSUPPORTED_PREVIEW_EXTENSIONS:
+        return "unsupported"
+    if extension in _TEXT_PREVIEW_EXTENSIONS:
+        return "readable"
+
+    local_root = os.path.realpath(local_skills_dir)
+    skill_root = os.path.realpath(
+        _resolve_local_skill_path(local_skills_dir, skill_name)
+    )
+    file_path = os.path.realpath(
+        _resolve_local_skill_path(local_skills_dir, skill_name, relative_path)
+    )
+    if (
+        not file_path.startswith(local_root + os.sep)
+        or not file_path.startswith(skill_root + os.sep)
+    ):
+        raise ForbiddenError("Unsafe local skill path")
+    try:
+        with open(file_path, "rb") as file_obj:
+            return "unsupported" if _is_obviously_binary(file_obj.read(4096)) else "readable"
+    except OSError:
+        return "readable"
 
 
 def _to_group_id_set(group_ids: Any) -> set[int]:
@@ -63,6 +227,8 @@ def can_view_skill(
     user_group_ids: set[int],
 ) -> bool:
     """Return whether a skill is available to the current user."""
+    if skill.get("source") == "official":
+        return True
     if user_role in CAN_EDIT_ALL_USER_ROLES:
         return True
     if str(skill.get("created_by")) == str(user_id):
@@ -671,7 +837,7 @@ def _parse_yaml_fallback_pyyaml(text: str) -> Dict[str, Any]:
 
 def _parse_skill_params_from_config_bytes(raw: bytes) -> Dict[str, Any]:
     """Parse JSON or YAML from config/config.yaml bytes (DB upload path; scalar ``#`` tips merged when possible)."""
-    text = raw.decode("utf-8-sig").strip()
+    text = str(_decode_text_bytes(raw)).strip()
     if not text:
         return {}
     try:
@@ -712,7 +878,7 @@ def _parse_skill_schema_from_yaml_bytes(raw: bytes) -> List[Dict[str, Any]]:
     Returns a list of param dicts with name, type, required, description_en,
     description_zh, depends_on — matching frontend SkillParam interface.
     """
-    text = raw.decode("utf-8-sig").strip()
+    text = str(_decode_text_bytes(raw)).strip()
     if not text:
         logger.warning("[schema] Empty raw bytes for schema.yaml")
         return []
@@ -768,12 +934,12 @@ def _read_params_from_zip_config_yaml(
     zip_stream = io.BytesIO(zip_bytes)
     with zipfile.ZipFile(zip_stream, "r") as zf:
         member = _find_zip_member_config_yaml(
-            zf.namelist(),
+            _zip_file_list(zf),
             preferred_skill_root=preferred_skill_root,
         )
         if not member:
             return None
-        raw = zf.read(member)
+        raw = _read_zip_member(zf, member)
     params = _parse_skill_params_from_config_bytes(raw)
     logger.info("Loaded skill params from ZIP member %s", member)
     return params
@@ -809,12 +975,12 @@ def _read_schema_yaml_from_zip(
     zip_stream = io.BytesIO(zip_bytes)
     with zipfile.ZipFile(zip_stream, "r") as zf:
         member = _find_zip_member_schema_yaml(
-            zf.namelist(),
+            _zip_file_list(zf),
             preferred_skill_root=preferred_skill_root,
         )
         if not member:
             return None
-        raw = zf.read(member)
+        raw = _read_zip_member(zf, member)
     parsed = _parse_skill_schema_from_yaml_bytes(raw)
     if not parsed:
         logger.debug("[schema] Parsed result is empty from ZIP member %s", member)
@@ -842,7 +1008,7 @@ def _get_skill_inputs_from_zip(
 
     try:
         with zipfile.ZipFile(zip_stream, "r") as zf:
-            file_list = zf.namelist()
+            file_list = _zip_file_list(zf)
             scripts_root = preferred_skill_root or ""
 
             for member in file_list:
@@ -857,7 +1023,7 @@ def _get_skill_inputs_from_zip(
                         continue
 
                 try:
-                    source = zf.read(member).decode("utf-8")
+                    source = _decode_text_bytes(_read_zip_member(zf, member))
                 except (OSError, UnicodeDecodeError):
                     continue
 
@@ -953,18 +1119,23 @@ def _resolve_local_skill_path(
     skill_root = os.path.realpath(os.path.join(local_root, name))
     candidate = os.path.realpath(os.path.join(skill_root, *normalized_parts))
 
-    def _is_within(root: str, path: str) -> bool:
-        try:
-            return os.path.normcase(os.path.commonpath([root, path])) == os.path.normcase(root)
-        except ValueError:
-            return False
-
     if CONTAINER_SKILLS_PATH:
         allowed_root = os.path.realpath(CONTAINER_SKILLS_PATH)
-        if not _is_within(allowed_root, local_root):
+        if (
+            local_root != allowed_root
+            and not local_root.startswith(allowed_root + os.sep)
+        ):
             raise SkillException("Unsafe local skills directory")
+        if not candidate.startswith(allowed_root + os.sep):
+            raise ForbiddenError("Unsafe local skill path")
 
-    if not _is_within(local_root, skill_root) or not _is_within(skill_root, candidate):
+    if (
+        not skill_root.startswith(local_root + os.sep)
+        or (
+            candidate != skill_root
+            and not candidate.startswith(skill_root + os.sep)
+        )
+    ):
         raise ForbiddenError("Unsafe local skill path")
     return candidate
 
@@ -1322,7 +1493,7 @@ class SkillService:
         tenant_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """Create skill from SKILL.md content."""
-        content_str = content_bytes.decode("utf-8")
+        content_str = str(_decode_text_bytes(content_bytes))
 
         try:
             skill_data = SkillLoader.parse(content_str)
@@ -1393,7 +1564,7 @@ class SkillService:
 
         try:
             with zipfile.ZipFile(zip_stream, "r") as zf:
-                file_list = zf.namelist()
+                file_list = _zip_file_list(zf)
         except zipfile.BadZipFile:
             raise SkillException("Invalid ZIP archive")
 
@@ -1441,7 +1612,7 @@ class SkillService:
             raise SkillException(f"Skill '{name}' already exists")
 
         with zipfile.ZipFile(zip_stream, "r") as zf:
-            skill_content = zf.read(skill_md_path).decode("utf-8")
+            skill_content = str(_decode_text_bytes(_read_zip_member(zf, skill_md_path)))
 
         try:
             skill_data = SkillLoader.parse(skill_content)
@@ -1518,7 +1689,8 @@ class SkillService:
         """
         import shutil
 
-        local_dir = os.path.join(self._local_skills_dir(tenant_id), skill_name)
+        local_skills_dir = self._local_skills_dir(tenant_id)
+        local_dir = _resolve_local_skill_path(local_skills_dir, skill_name)
         logger.info("Starting deletion of local files for skill '%s' from '%s'", skill_name, local_dir)
 
         if not os.path.isdir(local_dir):
@@ -1529,7 +1701,10 @@ class SkillService:
             logger.info("Found %d items to delete in '%s'", len(items), local_dir)
 
             for item in items:
-                item_path = os.path.join(local_dir, item)
+                item_path = os.path.realpath(os.path.join(local_dir, item))
+                if not item_path.startswith(os.path.realpath(local_dir) + os.sep):
+                    logger.warning("Skipped unsafe local skill entry: %s", item)
+                    continue
                 if item_path.endswith("/"):
                     continue
                 if os.path.isdir(item_path):
@@ -1563,7 +1738,7 @@ class SkillService:
 
         try:
             with zipfile.ZipFile(zip_stream, "r") as zf:
-                file_list = zf.namelist()
+                file_list = _zip_file_list(zf)
         except zipfile.BadZipFile:
             raise SkillException("Invalid ZIP archive")
 
@@ -1604,7 +1779,12 @@ class SkillService:
                     # (SKILL.md is inside a folder, not at root level)
                     if needs_rename and len(parts) >= 2 and parts[0] == original_folder_name:
                         relative_path = "/".join(parts[1:])
-                    elif len(parts) >= 2 and not has_root_skill_md:
+                    elif (
+                        len(parts) >= 2
+                        and not has_root_skill_md
+                        and original_folder_name is not None
+                        and parts[0] == original_folder_name
+                    ):
                         # Strip first component (ZIP has subdirectory structure without root SKILL.md)
                         relative_path = "/".join(parts[1:])
                     else:
@@ -1613,17 +1793,28 @@ class SkillService:
                     if not relative_path:
                         continue
 
-                    local_path = _resolve_local_skill_path(
+                    _resolve_local_skill_path(
                         self._local_skills_dir(tenant_id),
                         skill_name,
                         relative_path,
                     )
-                    validated_files.append((file_path, local_path))
+                    validated_files.append((file_path, relative_path))
 
                 extracted_count = 0
-                for file_path, local_path in validated_files:
-                    file_data = zf.read(file_path)
+                for file_path, relative_path in validated_files:
+                    file_data = _read_zip_member(zf, file_path)
+                    local_skills_dir = self._local_skills_dir(tenant_id)
+                    local_path = _resolve_local_skill_path(
+                        local_skills_dir,
+                        skill_name,
+                        relative_path,
+                    )
                     os.makedirs(os.path.dirname(local_path), exist_ok=True)
+                    local_path = _resolve_local_skill_path(
+                        local_skills_dir,
+                        skill_name,
+                        relative_path,
+                    )
                     with open(local_path, "wb") as f:
                         f.write(file_data)
                     extracted_count += 1
@@ -1750,7 +1941,7 @@ class SkillService:
         original_folder_name = None
 
         with zipfile.ZipFile(zip_stream, "r") as zf:
-            file_list = zf.namelist()
+            file_list = _zip_file_list(zf)
 
             for file_path in file_list:
                 normalized_path = file_path.replace("\\", "/")
@@ -1763,7 +1954,7 @@ class SkillService:
 
             skill_content = None
             if skill_md_path:
-                skill_content = zf.read(skill_md_path).decode("utf-8")
+                skill_content = str(_decode_text_bytes(_read_zip_member(zf, skill_md_path)))
 
         # Reset stream position before _upload_zip_files reads it
         zip_stream.seek(0)
@@ -2027,7 +2218,10 @@ class SkillService:
             raise SkillException("tenant_id is required")
         try:
             # Delete local skill files from filesystem
-            skill_dir = os.path.join(self._local_skills_dir(effective_tenant_id), skill_name)
+            skill_dir = _resolve_local_skill_path(
+                self._local_skills_dir(effective_tenant_id),
+                skill_name,
+            )
             if os.path.exists(skill_dir):
                 import shutil
                 shutil.rmtree(skill_dir)
@@ -2232,9 +2426,30 @@ class SkillService:
         """
         try:
             effective_tenant_id = tenant_id or self.tenant_id
-            return self.skill_manager.get_skill_file_tree(
+            tree = self.skill_manager.get_skill_file_tree(
                 skill_name, tenant_id=effective_tenant_id
             )
+            if not tree:
+                return tree
+
+            local_skills_dir = self._local_skills_dir(effective_tenant_id)
+
+            def annotate(node: Dict[str, Any], parent_path: str = "") -> None:
+                is_root = not parent_path and node.get("type") == "directory" and node.get("name") == skill_name
+                relative_path = parent_path if is_root else (
+                    f"{parent_path}/{node.get('name')}" if parent_path else str(node.get("name") or "")
+                )
+                if node.get("type") == "file":
+                    node["preview_status"] = _skill_file_preview_status(
+                        local_skills_dir,
+                        skill_name,
+                        relative_path,
+                    )
+                for child in node.get("children") or []:
+                    annotate(child, relative_path)
+
+            annotate(tree)
+            return tree
         except Exception as e:
             logger.error(f"Error getting skill file tree: {e}")
             raise SkillException(f"Failed to get skill file tree: {str(e)}") from e
@@ -2244,7 +2459,7 @@ class SkillService:
         skill_name: str,
         file_path: str,
         tenant_id: Optional[str] = None
-    ) -> Optional[str]:
+    ) -> Optional[DecodedSkillFile]:
         """Get content of a specific file within a skill.
 
         Args:
@@ -2263,21 +2478,36 @@ class SkillService:
                 skill_name,
                 file_path,
             )
-
-            # Keep the containment check next to the file access so static analysis and
-            # future callers can verify that user-controlled paths stay below the root.
             local_root = os.path.realpath(local_skills_dir)
-            if not full_path.startswith(local_root + os.sep):
+            skill_root = os.path.realpath(
+                _resolve_local_skill_path(local_skills_dir, skill_name)
+            )
+            full_path = os.path.realpath(full_path)
+            if (
+                not full_path.startswith(local_root + os.sep)
+                or not full_path.startswith(skill_root + os.sep)
+            ):
                 raise ForbiddenError("Unsafe local skill path")
 
             try:
-                with open(full_path, "r", encoding="utf-8") as f:
-                    return f.read()
+                if _skill_file_preview_status(local_skills_dir, skill_name, file_path) == "unsupported":
+                    raise UnsupportedSkillFilePreview(f"Unsupported skill file preview: {file_path}")
+                with open(full_path, "rb") as f:
+                    raw = f.read()
+                if isinstance(raw, str):
+                    return DecodedSkillFile(raw, "utf-8")
+                if _is_obviously_binary(raw):
+                    raise UnsupportedSkillFilePreview(f"Unsupported skill file preview: {file_path}")
+                return _decode_text_bytes(raw)
             except FileNotFoundError:
                 logger.warning("Skill file not found: %s/%s", skill_name, file_path)
                 return None
+            except UnsupportedSkillFilePreview:
+                raise
         except ForbiddenError:
             logger.warning("Rejected unsafe file read for skill '%s'", skill_name)
+            raise
+        except UnsupportedSkillFilePreview:
             raise
         except Exception as e:
             logger.error(f"Error reading skill file {skill_name}/{file_path}: {e}")
@@ -2523,9 +2753,10 @@ class SkillService:
         results: List[Dict[str, str]] = []
 
         for skill_name in skill_names:
-            skill_dir = os.path.join(
-                self._local_skills_dir(effective_tenant_id),
-                skill_name
+            local_skills_dir = self._local_skills_dir(effective_tenant_id)
+            skill_dir = _resolve_local_skill_path(
+                local_skills_dir,
+                skill_name,
             )
             if not os.path.isdir(skill_dir):
                 skill_info = skill_db.get_skill_by_name(skill_name, effective_tenant_id)
@@ -2635,7 +2866,11 @@ async def update_skill_list(tenant_id: str, user_id: str):
                 skill_data["config_schemas"] = parsed
                 logger.debug("Loaded config_schemas from schema.yaml for skill %s", skill_name)
             else:
-                scripts_dir = os.path.join(local_base, skill_name, "scripts")
+                scripts_dir = _resolve_local_skill_path(
+                    local_base,
+                    skill_name,
+                    "scripts",
+                )
                 inputs = _get_skill_inputs_from_code(scripts_dir)
                 if inputs:
                     skill_data["config_schemas"] = inputs
@@ -2754,8 +2989,7 @@ def install_skills_from_zip_for_tenant(
         skill_names: List of skill names to install (e.g. ["search-knowledge-base"]).
         tenant_id: Target tenant ID to install skills into.
         user_id: User ID for created_by/updated_by audit fields.
-        locale: Frontend locale (e.g. "zh" or "en"). Determines the source label:
-            "zh" → "官方", other locales → "official".
+        locale: Frontend locale (e.g. "zh" or "en").
 
     Returns:
         List of skill names that were successfully installed.
@@ -2768,43 +3002,72 @@ def install_skills_from_zip_for_tenant(
         logger.warning(f"Official skills zip directory not found: {zip_dir}")
         return []
 
-    # Derive source label from locale: zh → "官方", otherwise "official"
-    source = "官方" if locale == "zh" else "official"
-
     installed: List[str] = []
     service = SkillService(tenant_id=tenant_id)
+    zip_root = os.path.realpath(zip_dir)
+    available_zip_resources: Dict[str, Tuple[str, str]] = {}
+    try:
+        for entry in os.scandir(zip_root):
+            if not entry.name.casefold().endswith(".zip") or not entry.is_file(follow_symlinks=False):
+                continue
+            candidate = os.path.realpath(entry.path)
+            if os.path.normcase(os.path.dirname(candidate)) != os.path.normcase(zip_root):
+                logger.warning("Skipped unsafe official skill ZIP entry: %s", entry.name)
+                continue
+            official_name = entry.name[:-4]
+            available_zip_resources[official_name] = (official_name, candidate)
+    except OSError as exc:
+        logger.warning("Failed to scan official skills zip directory %s: %s", zip_root, exc)
+        return []
 
     for skill_name in skill_names:
-        zip_filename = f"{skill_name}.zip"
-        zip_path = os.path.join(zip_dir, zip_filename)
-
-        if not os.path.isfile(zip_path):
-            logger.warning(
-                f"ZIP file not found for skill '{skill_name}': {zip_path}"
-            )
+        name = str(skill_name or "").strip()
+        if (
+            not name
+            or name in {".", ".."}
+            or "/" in name
+            or "\\" in name
+            or "\x00" in name
+            or os.path.basename(name) != name
+            or os.path.isabs(name)
+            or ntpath.isabs(name)
+            or bool(ntpath.splitdrive(name)[0])
+        ):
+            logger.warning("Rejected unsafe official skill name: %r", skill_name)
             continue
 
+        zip_filename = f"{name}.zip"
+        zip_resource = available_zip_resources.get(name)
+        if zip_resource is None:
+            logger.warning(
+                f"ZIP file not found for skill '{name}': expected '{zip_filename}' in '{zip_root}'"
+            )
+            continue
+        official_name, zip_path = zip_resource
+
         try:
-            existing = skill_db.get_skill_by_name(skill_name, tenant_id)
+            existing = skill_db.get_skill_by_name(official_name, tenant_id)
             if existing:
                 logger.info(
-                    f"Skill '{skill_name}' already exists for tenant {tenant_id}, skipping"
+                    f"Skill '{official_name}' already exists for tenant {tenant_id}, skipping"
                 )
-                installed.append(skill_name)
+                installed.append(official_name)
                 continue
 
             with open(zip_path, "rb") as f:
                 zip_content = f.read()
 
+            # The request name only selects a pre-existing official resource.
+            # Persist the canonical name obtained while scanning the trusted directory.
             result = service.create_skill_from_file(
                 file_content=zip_content,
-                skill_name=skill_name,
+                skill_name=official_name,
                 file_type="zip",
-                source=source,
+                source="official",
                 tenant_id=tenant_id,
                 user_id=user_id,
             )
-            installed_name = result.get("name", skill_name)
+            installed_name = result.get("name", official_name)
             installed.append(installed_name)
             logger.info(
                 f"Installed skill '{installed_name}' for tenant {tenant_id} "

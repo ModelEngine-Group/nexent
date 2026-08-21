@@ -86,7 +86,6 @@ export default function ExpandEditModal({
               minHeight: "400px",
               resize: "vertical"
             }}
-            bordered={true}
             readOnly={readOnly}
           />
         </div>

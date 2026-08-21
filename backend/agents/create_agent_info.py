@@ -65,6 +65,7 @@ from utils.config_utils import tenant_config_manager, get_model_name_from_config
 from utils.memory_tool_prompt import build_memory_tool_policy
 from utils.automation_tool_prompt import build_automation_tool_policy
 from utils.context_utils import build_context_inputs
+from utils.http_client_utils import create_httpx_client
 from utils.redis_utils import get_redis_client
 from consts.const import (
     AGENT_WORKSPACE_ROOT,
@@ -2173,6 +2174,8 @@ async def create_agent_run_info(
                 "url": url,
                 "transport": "sse" if url.endswith("/sse") else "streamable-http"
             }
+            if url == default_mcp_url:
+                mcp_config["httpx_client_factory"] = create_httpx_client
             headers = {}
             auth_token = mcp_record.get("authorization_token")
             if auth_token:
