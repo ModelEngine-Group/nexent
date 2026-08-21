@@ -79,6 +79,12 @@ def build_content_disposition_header(filename: Optional[str], inline: bool = Fal
         )
         return f'{disposition}; filename="download"'
 
+
+def _build_object_etag(object_name: str) -> str:
+    """Build a latin-1-safe ETag from a MinIO object name."""
+    return f'"{quote(object_name, safe="/")}"'
+
+
 # Create API router
 file_management_runtime_router = APIRouter(prefix="/file")
 file_management_config_router = APIRouter(prefix="/file")
@@ -256,7 +262,7 @@ async def get_storage_file(
                 headers={
                     "Content-Disposition": content_disposition,
                     "Cache-Control": "public, max-age=3600",
-                    "ETag": f'"{object_name}"',
+                    "ETag": _build_object_etag(object_name),
                 }
             )
         elif download == "base64":
@@ -797,7 +803,7 @@ async def preview_file(
         "Content-Disposition": content_disposition,
         "Accept-Ranges": "bytes",
         "Cache-Control": "public, max-age=3600",
-        "ETag": f'"{object_name}"',
+        "ETag": _build_object_etag(object_name),
     }
 
     if total_size == 0:

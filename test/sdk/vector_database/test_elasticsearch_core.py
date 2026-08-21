@@ -26,6 +26,19 @@ vector_pkg = _pkg("sdk.nexent.vector_database", REPO_ROOT / "sdk" / "nexent" / "
 sdk_pkg.nexent = nexent_pkg
 nexent_pkg.core = core_pkg
 nexent_pkg.vector_database = vector_pkg
+
+# Stub the gateway bridge: ``elasticsearch_core`` only uses ``EmbeddingAdapter``
+# as a type annotation, but the real gateway eagerly registers every vendor
+# adapter and pulls absolute ``nexent.*`` imports that break under the manual
+# ``sdk.nexent.*`` module graph below.
+gateway_mod = types.ModuleType("sdk.nexent.core.gateway")
+gateway_mod.__path__ = []
+modality_mod = types.ModuleType("sdk.nexent.core.gateway.modality")
+modality_mod.__path__ = []
+modality_mod.EmbeddingAdapter = MagicMock(name="gateway.modality.EmbeddingAdapter")
+gateway_mod.modality = modality_mod
+sys.modules["sdk.nexent.core.gateway"] = gateway_mod
+sys.modules["sdk.nexent.core.gateway.modality"] = modality_mod
 core_pkg.models = models_pkg
 core_pkg.nlp = nlp_pkg
 
@@ -960,6 +973,119 @@ def test_small_batch_error_path_logs_and_raises(elasticsearch_core_instance, cap
             )
 
     assert any("Small batch insert failed: bulk boom" in m for m in caplog.messages)
+
+
+def test_small_batch_insert_embeds_in_sub_batches(elasticsearch_core_instance):
+    """Embedding calls should be split into embedding_batch_size sub-batches."""
+    mock_embedding_model = MagicMock()
+    mock_embedding_model.model_type = "text"
+    mock_embedding_model.get_embeddings.side_effect = lambda inputs: [[0.1] * 4 for _ in inputs]
+    mock_embedding_model.embedding_model_name = "m"
+
+    documents = [{"content": c} for c in ["a", "b", "c", "d", "e"]]
+
+    with patch.object(elasticsearch_core_instance.client, "bulk") as mock_bulk, \
+         patch("time.strftime", lambda *a, **k: "2025-01-15T10:30:00"), \
+         patch("time.time", lambda: 1642234567):
+        mock_bulk.return_value = {"errors": False, "items": []}
+        result = elasticsearch_core_instance._small_batch_insert(
+            "idx", documents, "content", mock_embedding_model, embedding_batch_size=2
+        )
+
+    assert result == 5
+    assert mock_embedding_model.get_embeddings.call_count == 3
+    called_inputs = [c.args[0] for c in mock_embedding_model.get_embeddings.call_args_list]
+    assert called_inputs == [["a", "b"], ["c", "d"], ["e"]]
+
+
+def test_small_batch_insert_multimodal_skips_empty_images_and_returns_zero(elasticsearch_core_instance):
+    """Empty multimodal image docs are filtered out, leaving no embeddings to index."""
+    mock_embedding_model = MagicMock()
+    mock_embedding_model.model_type = "multimodal"
+    mock_embedding_model.embedding_model_name = "m"
+    mock_embedding_model.get_multimodal_embeddings.return_value = []
+
+    documents = [
+        {"content": "img", "process_source": "UniversalImageExtractor", "image_bytes": b""},
+    ]
+
+    with patch.object(elasticsearch_core_instance.client, "bulk") as mock_bulk:
+        result = elasticsearch_core_instance._small_batch_insert(
+            "idx", documents, "content", mock_embedding_model, embedding_batch_size=2
+        )
+
+    assert result == 0
+    mock_bulk.assert_not_called()
+    mock_embedding_model.get_multimodal_embeddings.assert_called_once_with([])
+
+
+def test_small_batch_insert_with_zero_max_retries_returns_zero(elasticsearch_core_instance):
+    """With max_retries=0 no embedding sub-batch runs; insert reports zero indexed docs."""
+    mock_embedding_model = MagicMock()
+    mock_embedding_model.model_type = "text"
+    mock_embedding_model.embedding_model_name = "m"
+    elasticsearch_core_instance.max_retries = 0
+
+    documents = [{"content": "a"}]
+
+    with patch.object(elasticsearch_core_instance.client, "bulk") as mock_bulk:
+        result = elasticsearch_core_instance._small_batch_insert(
+            "idx", documents, "content", mock_embedding_model, embedding_batch_size=1
+        )
+
+    assert result == 0
+    mock_bulk.assert_not_called()
+
+
+def test_small_batch_insert_retries_transient_embedding_error(elasticsearch_core_instance, caplog):
+    """A transient embedding failure should be retried before failing the insert."""
+    mock_embedding_model = MagicMock()
+    mock_embedding_model.model_type = "text"
+    mock_embedding_model.embedding_model_name = "m"
+    attempts = {"n": 0}
+
+    def flaky(inputs):
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            raise RuntimeError("provider hiccup")
+        return [[0.1] * 4 for _ in inputs]
+
+    mock_embedding_model.get_embeddings.side_effect = flaky
+    documents = [{"content": "x"}]
+
+    with patch.object(elasticsearch_core_instance.client, "bulk") as mock_bulk, \
+         patch("time.strftime", lambda *a, **k: "2025-01-15T10:30:00"), \
+         patch("time.time", lambda: 1642234567), \
+         patch("time.sleep") as mock_sleep:
+        mock_bulk.return_value = {"errors": False, "items": []}
+        result = elasticsearch_core_instance._small_batch_insert(
+            "idx", documents, "content", mock_embedding_model
+        )
+
+    assert result == 1
+    assert attempts["n"] == 2
+    mock_sleep.assert_called_once()
+    assert any("Embedding API error" in m for m in caplog.messages)
+
+
+def test_small_batch_insert_embedding_error_exhausts_raises(elasticsearch_core_instance, caplog):
+    """Embedding failures exhausting all retries should raise before any bulk insert."""
+    mock_embedding_model = MagicMock()
+    mock_embedding_model.model_type = "text"
+    mock_embedding_model.get_embeddings.side_effect = RuntimeError("provider hiccup")
+    documents = [{"content": "x"}]
+
+    with patch.object(elasticsearch_core_instance.client, "bulk") as mock_bulk, \
+         patch("time.strftime", lambda *a, **k: "2025-01-15T10:30:00"), \
+         patch("time.time", lambda: 1642234567), \
+         patch("time.sleep"):
+        with pytest.raises(RuntimeError):
+            elasticsearch_core_instance._small_batch_insert(
+                "idx", documents, "content", mock_embedding_model
+            )
+
+    mock_bulk.assert_not_called()
+    assert any("Embedding API error after 3 attempts" in m for m in caplog.messages)
 
 
 def test_vectorize_documents_large_batch(elasticsearch_core_instance):

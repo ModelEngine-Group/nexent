@@ -23,14 +23,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import Body, Depends, Path, Query
 from fastapi.responses import StreamingResponse
-from nexent.core.models.embedding_model import (
-    BaseEmbedding,
-    DashScopeMultimodalEmbedding,
-    JinaEmbedding,
-    OpenAICompatibleEmbedding,
-    SiliconflowMultimodalEmbedding,
-)
-from nexent.core.models.rerank_model import OpenAICompatibleRerank, BaseRerank
+from nexent.core.gateway.modality import EmbeddingAdapter
 from nexent.vector_database.base import VectorDatabaseCore
 from nexent.vector_database.elasticsearch_core import ElasticSearchCore
 from nexent.vector_database.datamate_core import DataMateCore
@@ -76,7 +69,8 @@ from permissions.models import Resource
 from services.redis_service import get_redis_service
 from services.group_service import get_tenant_default_group_id
 from services.asset_owner_visibility import postprocess_knowledge_visibility
-from utils.config_utils import tenant_config_manager, get_model_name_from_config
+from utils.config_utils import tenant_config_manager
+from services.model_gateway_service import build_adapter_fresh
 from utils.file_management_utils import get_all_files_status, get_file_size
 from utils.str_utils import convert_string_to_list
 
@@ -349,7 +343,7 @@ def _normalize_model_type(raw_model_type: Optional[str]) -> Optional[str]:
     return None
 
 def _build_model_config(model: dict) -> dict:
-    return {
+    config = {
         "model_repo": model.get("model_repo", ""),
         "model_name": model["model_name"],
         "api_key": model.get("api_key", ""),
@@ -358,34 +352,32 @@ def _build_model_config(model: dict) -> dict:
         "max_tokens": model.get("max_tokens", 1024),
         "ssl_verify": model.get("ssl_verify", True),
     }
+    # Carry the vendor through so multi_embedding/embedding adapters dispatch
+    # to the right provider instead of silently falling back to the default.
+    if model.get("model_factory"):
+        config["model_factory"] = model["model_factory"]
+    return config
 
 def _create_embedding_model(model: dict) -> Any:
     model_config = _build_model_config(model)
-    model_type = model.get("model_type", "embedding")
-    common_kwargs = {
-        "api_key": model_config.get("api_key", ""),
-        "base_url": model_config.get("base_url", ""),
-        "model_name": get_model_name_from_config(model_config) or "",
-        "embedding_dim": model_config.get("max_tokens", 1024),
-        "ssl_verify": model_config.get("ssl_verify", True),
-    }
+    model_type = model_config.get("model_type", "embedding")
 
     if model_type == "multi_embedding":
-        model_factory = model.get("model_factory", "").lower()
-        if model_factory == "dashscope":
-            return DashScopeMultimodalEmbedding(**common_kwargs)
-        if model_factory == "silicon":
-            return SiliconflowMultimodalEmbedding(**common_kwargs)
-        return JinaEmbedding(**common_kwargs)
-
-    if model_type != "embedding":
+        modality, slot = "multi_embedding", "multiEmbedding"
+    elif model_type == "embedding":
+        modality, slot = "embedding", "embedding"
+    else:
         raise ValueError(
-            f"Invalid model_type '{model_type}' for model '{common_kwargs['model_name']}'. "
+            f"Invalid model_type '{model_type}' for model '{model_config.get('model_name')}'. "
             f"Expected 'embedding' or 'multi_embedding', got '{model_type}'. "
             f"Please check the model configuration in the model management page."
         )
 
-    return OpenAICompatibleEmbedding(**common_kwargs)
+    # Vendor dispatch (DashScope/Siliconflow/Jina/OpenAI) is resolved by the
+    # adapter registry; per-vendor request-body formatting lives in the
+    # embedding adapters. Built fresh (no gateway cache). Returns the adapter;
+    # callers use adapter.get_embeddings / adapter.dimension_check unchanged.
+    return build_adapter_fresh(model_config, modality, slot, None)
 
 def get_embedding_model(
         tenant_id: str,
@@ -484,12 +476,11 @@ def get_rerank_model(tenant_id: str, model_name: Optional[str] = None):
             for model in models:
                 model_display_name = model.get("model_repo") + "/" + model["model_name"] if model.get("model_repo") else model["model_name"]
                 if model_display_name == model_name:
-                    # Found the model, create rerank model instance
-                    return OpenAICompatibleRerank(
-                        model_name=get_model_name_from_config(model) or "",
-                        base_url=model.get("base_url", ""),
-                        api_key=model.get("api_key", ""),
-                        ssl_verify=model.get("ssl_verify", True),
+                    # Found the model; vendor dispatch via the adapter registry.
+                    # The adapter IS the rerank implementation (protocol sunk in
+                    # 67a628cad) — return it directly, not a wrapped _inner.
+                    return build_adapter_fresh(
+                        model, "rerank", "rerank", tenant_id
                     )
         except Exception as e:
             logger.warning(f"Failed to get rerank model by name {model_name}: {e}")
@@ -501,11 +492,8 @@ def get_rerank_model(tenant_id: str, model_name: Optional[str] = None):
     model_type = model_config.get("model_type", "")
 
     if model_type == "rerank":
-        return OpenAICompatibleRerank(
-            model_name=get_model_name_from_config(model_config) or "",
-            base_url=model_config.get("base_url", ""),
-            api_key=model_config.get("api_key", ""),
-            ssl_verify=model_config.get("ssl_verify", True),
+        return build_adapter_fresh(
+            model_config, "rerank", "rerank", tenant_id
         )
     else:
         return None
@@ -1386,7 +1374,7 @@ class ElasticSearchService:
 
     @staticmethod
     def index_documents(
-            embedding_model: BaseEmbedding,
+            embedding_model: EmbeddingAdapter,
             index_name: str = Path(..., description="Name of the index"),
             data: List[Dict[str, Any]
                        ] = Body(..., description="Document List to process"),
