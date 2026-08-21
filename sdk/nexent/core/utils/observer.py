@@ -50,6 +50,7 @@ class ProcessType(Enum):
     NL2A = "nl2a"  # structured NL2Agent runtime output
     NL2A_STATE = "nl2a_state"  # trusted NL2Agent workflow state update
     SKILL_ARTIFACT = "skill_artifact"  # structured file output from a skill script
+    FILE_ARTIFACT = "file_artifact"  # files already uploaded from the run workspace
     MEMORY_SEARCH = "memory_search"  # memory search status
     MAX_STEPS_REACHED = "max_steps_reached"  # agent reached maximum steps limit
     VERIFICATION = "verification"  # layered ReAct self-verification status
@@ -236,6 +237,7 @@ class MessageObserver:
             ProcessType.NL2A: default_transformer,
             ProcessType.NL2A_STATE: default_transformer,
             ProcessType.SKILL_ARTIFACT: default_transformer,
+            ProcessType.FILE_ARTIFACT: default_transformer,
             ProcessType.MEMORY_SEARCH: default_transformer,
             ProcessType.VERIFICATION: default_transformer,
             ProcessType.MAX_STEPS_REACHED: default_transformer,
