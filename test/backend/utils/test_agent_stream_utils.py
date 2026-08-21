@@ -2,14 +2,30 @@
 
 import json
 import os
+import sys
+import types
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+# Keep these utility tests isolated from database and file-service import chains.
+# The functions are patched at their import site by individual tests below.
+attachment_db = types.ModuleType("database.attachment_db")
+attachment_db.upload_fileobj = MagicMock()
+sys.modules["database.attachment_db"] = attachment_db
+
+file_management_service = types.ModuleType("services.file_management_service")
+file_management_service.is_allowed_skill_upload_path = MagicMock(return_value=True)
+sys.modules["services.file_management_service"] = file_management_service
 
 from backend.utils import agent_stream_utils
 
 
 class TestJsonExtraction:
+    @pytest.mark.parametrize("text", ["", "plain text without JSON"])
+    def test_returns_empty_when_no_json_object_exists(self, text):
+        assert agent_stream_utils.extract_json_objects_from_text(text) == []
+
     def test_extracts_nested_objects_and_skips_invalid_fragments(self):
         text = 'prefix {"outer":{"value":1}} broken {not-json} [1,2] {"ok":true}'
 
@@ -88,6 +104,7 @@ async def test_process_uploads_skips_unsafe_missing_and_failed_files(tmp_path):
 
     assert result == []
     upload.assert_called_once()
+    assert not safe_file.exists()
 
 
 @pytest.mark.asyncio
@@ -125,6 +142,7 @@ async def test_process_uploads_success_and_string_payload(tmp_path):
         "file_size": 6,
     }]
     assert upload.call_args.kwargs["prefix"] == "skill-files/user-1"
+    assert not file_path.exists()
 
 
 def test_process_uploads_handles_storage_exception(tmp_path):
@@ -140,6 +158,50 @@ def test_process_uploads_handles_storage_exception(tmp_path):
 
     import asyncio
     assert asyncio.run(run_test()) == []
+    assert not file_path.exists()
+
+
+@pytest.mark.asyncio
+async def test_process_uploads_skips_empty_path_and_logs_cleanup_failure(tmp_path):
+    file_path = tmp_path / "cleanup.txt"
+    file_path.write_text("cleanup", encoding="utf-8")
+
+    with patch.object(agent_stream_utils, "is_allowed_skill_upload_path", return_value=True), \
+            patch.object(agent_stream_utils, "upload_fileobj", return_value={"success": False}), \
+            patch.object(agent_stream_utils.os, "remove", side_effect=OSError("locked")), \
+            patch.object(agent_stream_utils.logger, "exception") as log_exception:
+        result = await agent_stream_utils.process_skill_file_uploads(
+            [{"absolute_path": ""}, {"absolute_path": str(file_path)}],
+            user_id="user-1",
+            tenant_id="tenant-1",
+        )
+
+    assert result == []
+    log_exception.assert_called_once_with(
+        "[skill-file] failed to delete local artifact absolute_path=%s",
+        str(file_path),
+    )
+
+
+@pytest.mark.asyncio
+async def test_process_uploads_recovers_empty_derived_file_name(tmp_path):
+    file_path = tmp_path / "fallback.txt"
+    file_path.write_text("fallback", encoding="utf-8")
+
+    with patch.object(agent_stream_utils, "is_allowed_skill_upload_path", return_value=True), \
+            patch.object(agent_stream_utils.os.path, "basename", side_effect=["", "fallback.txt"]), \
+            patch.object(
+                agent_stream_utils,
+                "upload_fileobj",
+                return_value={"success": True, "object_name": "fallback"},
+            ) as upload:
+        await agent_stream_utils.process_skill_file_uploads(
+            [{"absolute_path": str(file_path)}],
+            user_id="user-1",
+            tenant_id="tenant-1",
+        )
+
+    assert upload.call_args.kwargs["file_name"] == "fallback.txt"
 
 
 def test_safe_agent_stream_error_chunk_is_sanitized():

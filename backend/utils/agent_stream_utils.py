@@ -82,6 +82,7 @@ async def process_skill_file_uploads(
     tenant_id: str,
 ) -> list[dict]:
     """Upload generated skill files to storage and return upload metadata."""
+
     upload_results: list[dict] = []
     structured_payloads = (
         payloads
@@ -136,11 +137,12 @@ async def process_skill_file_uploads(
                     }
                 )
             else:
+                error_message = upload_result.get("error") or "Upload failed"
                 logger.warning(
                     "[skill-file] upload failed file_name=%s absolute_path=%s error=%s",
                     file_name,
                     absolute_path,
-                    upload_result.get("error") or "Upload failed",
+                    error_message,
                 )
         except Exception:
             logger.exception(
@@ -148,6 +150,16 @@ async def process_skill_file_uploads(
                 file_name,
                 absolute_path,
             )
+        finally:
+            # Declared skill artifacts are ephemeral. MinIO is the sole durable store.
+            try:
+                if os.path.isfile(absolute_path):
+                    os.remove(absolute_path)
+            except OSError:
+                logger.exception(
+                    "[skill-file] failed to delete local artifact absolute_path=%s",
+                    absolute_path,
+                )
 
     return upload_results
 

@@ -8,6 +8,7 @@ import json
 import base64
 import types
 import ast
+import zipfile
 
 # Python 3.14 removed the legacy AST alias still referenced by the service.
 if not hasattr(ast, "Num"):
@@ -6508,3 +6509,288 @@ class TestSkillServicePureHelpers:
         with zipfile.ZipFile(io.BytesIO(archive.getvalue())) as zf:
             with pytest.raises(skill_service.SkillException, match="same path"):
                 skill_service._zip_members(zf)
+
+
+class TestSkillServiceReportedCoverageGaps:
+    """Target branches called out by the service coverage report."""
+
+    def test_decode_text_bytes_covers_big_endian_legacy_and_detector_paths(self, mocker):
+        big_endian = skill_service._decode_text_bytes("hello".encode("utf-16-be"))
+        assert str(big_endian) == "hello"
+        assert big_endian.encoding == "utf-16-be"
+
+        chinese = skill_service._decode_text_bytes("中文".encode("gb18030"))
+        assert str(chinese) == "中文"
+
+        detected = MagicMock(encoding="windows-1252", chaos=0.1)
+        detected.__str__.return_value = "café"
+        result_set = MagicMock()
+        result_set.best.return_value = detected
+        mocker.patch.object(skill_service, "from_bytes", return_value=result_set)
+        detected_result = skill_service._decode_text_bytes(b"caf\xe9")
+        assert str(detected_result) == "café"
+        assert detected_result.encoding == "windows-1252"
+
+        result_set.best.return_value = None
+        with pytest.raises(UnicodeDecodeError, match="Unable to detect"):
+            skill_service._decode_text_bytes(b"\x80")
+
+    def test_decode_zip_member_name_covers_legacy_names_and_fallbacks(self):
+        ascii_info = MagicMock(filename="README.md", flag_bits=0)
+        assert skill_service._decode_zip_member_name(ascii_info) == "README.md"
+
+        utf8_name = "中文.md"
+        mojibake = utf8_name.encode("utf-8").decode("cp437")
+        utf8_info = MagicMock(filename=mojibake, flag_bits=0)
+        assert skill_service._decode_zip_member_name(utf8_info) == utf8_name
+
+        gb_name = "中文.txt"
+        gb_mojibake = gb_name.encode("gb18030").decode("cp437")
+        gb_info = MagicMock(filename=gb_mojibake, flag_bits=0)
+        assert skill_service._decode_zip_member_name(gb_info) == gb_name
+
+        unencodable = MagicMock(filename="😀.txt", flag_bits=0)
+        assert skill_service._decode_zip_member_name(unencodable) == "😀.txt"
+
+        fallback = MagicMock(filename="é", flag_bits=0)
+        assert skill_service._decode_zip_member_name(fallback) == "é"
+
+    def test_read_zip_member_returns_match_and_raises_for_missing(self):
+        archive = io.BytesIO()
+        with zipfile.ZipFile(archive, "w") as zf:
+            zf.writestr("file.txt", b"content")
+
+        with zipfile.ZipFile(io.BytesIO(archive.getvalue())) as zf:
+            assert skill_service._read_zip_member(zf, "file.txt") == b"content"
+            with pytest.raises(KeyError, match="missing.txt"):
+                skill_service._read_zip_member(zf, "missing.txt")
+
+    def test_preview_status_reads_unknown_extensions_and_handles_io_error(self, mocker, tmp_path):
+        mocker.patch.object(skill_service, "CONTAINER_SKILLS_PATH", str(tmp_path))
+        skill_dir = tmp_path / "demo"
+        skill_dir.mkdir()
+        text_file = skill_dir / "payload.custom"
+        text_file.write_text("plain text", encoding="utf-8")
+        binary_file = skill_dir / "payload.data"
+        binary_file.write_bytes(b"\x00\x01\x02\x03")
+
+        assert skill_service._skill_file_preview_status(
+            str(tmp_path), "demo", "payload.custom"
+        ) == "readable"
+        assert skill_service._skill_file_preview_status(
+            str(tmp_path), "demo", "payload.data"
+        ) == "unsupported"
+
+        mocker.patch("builtins.open", side_effect=OSError("unavailable"))
+        assert skill_service._skill_file_preview_status(
+            str(tmp_path), "demo", "missing.unknown"
+        ) == "readable"
+
+    def test_schema_helpers_cover_empty_and_empty_zip_results(self, mocker):
+        assert skill_service._parse_skill_schema_from_yaml_bytes(b"   ") == []
+
+        archive = io.BytesIO()
+        with zipfile.ZipFile(archive, "w") as zf:
+            zf.writestr("README.md", "no schema")
+        assert skill_service._read_schema_yaml_from_zip(archive.getvalue()) is None
+
+        archive = io.BytesIO()
+        with zipfile.ZipFile(archive, "w") as zf:
+            zf.writestr("demo/config/schema.yaml", "   ")
+        assert skill_service._read_schema_yaml_from_zip(archive.getvalue()) == []
+
+    def test_zip_input_scanner_skips_wrong_paths_and_unreadable_sources(self, mocker):
+        archive = io.BytesIO()
+        with zipfile.ZipFile(archive, "w") as zf:
+            zf.writestr("other/tool.py", "print('ignored')")
+            zf.writestr("demo/scripts/bad.py", b"\x80")
+            zf.writestr("demo/scripts/syntax.py", "def broken(")
+
+        mocker.patch.object(skill_service, "_decode_text_bytes", side_effect=[UnicodeDecodeError(
+            "unknown", b"\x80", 0, 1, "bad encoding"
+        ), "def broken("])
+        assert skill_service._get_skill_inputs_from_zip(
+            archive.getvalue(), preferred_skill_root="demo"
+        ) == []
+
+        plain_archive = io.BytesIO()
+        with zipfile.ZipFile(plain_archive, "w") as zf:
+            zf.writestr("other/tool.py", "print('ignored')")
+        assert skill_service._get_skill_inputs_from_zip(plain_archive.getvalue()) == []
+
+    def test_delete_local_files_skips_unsafe_resolved_entry(self, mocker, tmp_path):
+        mocker.patch.object(skill_service, "CONTAINER_SKILLS_PATH", str(tmp_path))
+        service = TestLocalSkillPathSecurity._service_for_path(tmp_path)
+        skill_dir = tmp_path / "demo"
+        skill_dir.mkdir()
+        outside = tmp_path.parent / "outside.txt"
+        mocker.patch("os.listdir", return_value=["unsafe"])
+        real_realpath = os.path.realpath
+        mocker.patch(
+            "os.path.realpath",
+            side_effect=lambda path: str(outside) if str(path).endswith("unsafe") else real_realpath(path),
+        )
+        remove = mocker.patch("os.remove")
+
+        service._delete_local_skill_files("demo", tenant_id="tenant-1")
+
+        remove.assert_not_called()
+
+    def test_upload_zip_rejects_bad_archive_and_empty_relative_member(self, tmp_path):
+        service = TestLocalSkillPathSecurity._service_for_path(tmp_path)
+        with pytest.raises(skill_service.SkillException, match="Invalid ZIP archive"):
+            service._upload_zip_files(b"not-a-zip", "demo", tenant_id="tenant-1")
+
+        archive = io.BytesIO()
+        with zipfile.ZipFile(archive, "w") as zf:
+            zf.writestr("placeholder.txt", b"")
+        with patch.object(skill_service, "_zip_file_list", return_value=["original\\"]):
+            service._upload_zip_files(
+                archive.getvalue(),
+                "renamed",
+                original_folder_name="original",
+                tenant_id="tenant-1",
+            )
+
+    def test_delete_skill_requires_tenant(self):
+        service = SkillService(skill_manager=MagicMock(), tenant_id=None)
+        with pytest.raises(skill_service.SkillException, match="tenant_id is required"):
+            service.delete_skill("demo")
+
+    def test_file_tree_returns_empty_and_annotates_nested_files(self, mocker, tmp_path):
+        manager = MagicMock()
+        service = SkillService(skill_manager=manager, tenant_id="tenant-1")
+        manager.resolve_tenant_dir.return_value = str(tmp_path)
+        manager.get_skill_file_tree.return_value = None
+        assert service.get_skill_file_tree("demo") is None
+
+        manager.get_skill_file_tree.return_value = {
+            "name": "demo",
+            "type": "directory",
+            "children": [
+                {"name": "README.md", "type": "file"},
+                {
+                    "name": "assets",
+                    "type": "directory",
+                    "children": [{"name": "logo.png", "type": "file"}],
+                },
+            ],
+        }
+        preview = mocker.patch.object(
+            skill_service,
+            "_skill_file_preview_status",
+            side_effect=["readable", "unsupported"],
+        )
+
+        tree = service.get_skill_file_tree("demo")
+
+        assert tree["children"][0]["preview_status"] == "readable"
+        assert tree["children"][1]["children"][0]["preview_status"] == "unsupported"
+        assert [call.args[2] for call in preview.call_args_list] == ["README.md", "assets/logo.png"]
+
+    def test_file_content_covers_text_binary_and_unsupported_preview(self, mocker, tmp_path):
+        mocker.patch.object(skill_service, "CONTAINER_SKILLS_PATH", str(tmp_path))
+        manager = MagicMock()
+        manager.resolve_tenant_dir.return_value = str(tmp_path)
+        service = SkillService(skill_manager=manager, tenant_id="tenant-1")
+        skill_dir = tmp_path / "demo"
+        skill_dir.mkdir()
+        text_file = skill_dir / "README.md"
+        text_file.write_text("hello", encoding="utf-8")
+        binary_file = skill_dir / "payload.custom"
+        binary_file.write_bytes(b"\x00\x01\x02\x03")
+
+        result = service.get_skill_file_content("demo", "README.md")
+        assert str(result) == "hello"
+        assert result.encoding == "utf-8"
+
+        with pytest.raises(skill_service.UnsupportedSkillFilePreview):
+            with mocker.patch.object(
+                skill_service, "_skill_file_preview_status", return_value="readable"
+            ):
+                service.get_skill_file_content("demo", "payload.custom")
+
+        mocker.patch.object(skill_service, "_skill_file_preview_status", return_value="unsupported")
+        with pytest.raises(skill_service.UnsupportedSkillFilePreview):
+            service.get_skill_file_content("demo", "README.md")
+
+    @pytest.mark.asyncio
+    async def test_update_skill_list_loads_schema_and_script_inputs(self, mocker, tmp_path):
+        mocker.patch.object(skill_service, "CONTAINER_SKILLS_PATH", str(tmp_path))
+        schema_path = tmp_path / "schema-skill" / "config" / "schema.yaml"
+        schema_path.parent.mkdir(parents=True)
+        schema_path.write_text("query:\n  type: string\n", encoding="utf-8")
+        manager = MagicMock()
+        manager.resolve_tenant_dir.return_value = str(tmp_path)
+        manager.list_skills.return_value = [
+            {"name": "schema-skill"},
+            {"name": "script-skill"},
+        ]
+        manager.load_skill.side_effect = [
+            {"content": "schema content"},
+            {"content": "script content"},
+        ]
+        mocker.patch.object(skill_service, "get_skill_manager", return_value=manager)
+        mocker.patch.object(
+            skill_service,
+            "_get_skill_inputs_from_code",
+            return_value=[{"name": "query", "type": "string"}],
+        )
+        mocker.patch.object(
+            skill_service.aiofiles,
+            "open",
+            new=lambda *args, **kwargs: MockAiofilesContextManager(
+                b"query:\n  type: string\n"
+            ),
+        )
+        upsert = mocker.patch.object(skill_service.skill_db, "upsert_scanned_skills")
+
+        await skill_service.update_skill_list("tenant-1", "user-1")
+
+        skills = upsert.call_args.args[0]
+        assert skills[0]["config_schemas"][0]["name"] == "query"
+        assert skills[1]["config_schemas"] == [{"name": "query", "type": "string"}]
+
+    def test_install_skills_from_zip_covers_validation_existing_and_new(self, mocker, tmp_path):
+        (tmp_path / "existing.zip").write_bytes(b"existing")
+        (tmp_path / "new.zip").write_bytes(b"new")
+        mocker.patch.object(skill_service, "OFFICIAL_SKILLS_ZIP_PATH", str(tmp_path))
+        mocker.patch.object(
+            skill_service.skill_db,
+            "get_skill_by_name",
+            side_effect=lambda name, tenant: {"skill_id": 1} if name == "existing" else None,
+        )
+        service = MagicMock()
+        service.create_skill_from_file.return_value = {"name": "new"}
+        mocker.patch.object(skill_service, "SkillService", return_value=service)
+
+        result = skill_service.install_skills_from_zip_for_tenant(
+            ["", "../unsafe", "missing", "existing", "new"],
+            "tenant-1",
+            "user-1",
+        )
+
+        assert result == ["existing", "new"]
+        service.create_skill_from_file.assert_called_once()
+
+    def test_install_skills_from_zip_handles_missing_directory_and_scan_error(self, mocker, tmp_path):
+        missing = tmp_path / "missing"
+        mocker.patch.object(skill_service, "OFFICIAL_SKILLS_ZIP_PATH", str(missing))
+        assert skill_service.install_skills_from_zip_for_tenant(["demo"], "tenant-1") == []
+
+        mocker.patch.object(skill_service, "OFFICIAL_SKILLS_ZIP_PATH", str(tmp_path))
+        mocker.patch("os.scandir", side_effect=OSError("scan failed"))
+        assert skill_service.install_skills_from_zip_for_tenant(["demo"], "tenant-1") == []
+
+    def test_install_skills_from_zip_skips_non_zip_and_unsafe_entries(self, mocker, tmp_path):
+        outside_dir = tmp_path.parent / "outside"
+        regular_entry = MagicMock(name="notes.txt", path=str(tmp_path / "notes.txt"))
+        regular_entry.name = "notes.txt"
+        unsafe_entry = MagicMock(name="unsafe.zip", path=str(outside_dir / "unsafe.zip"))
+        unsafe_entry.name = "unsafe.zip"
+        unsafe_entry.is_file.return_value = True
+        mocker.patch.object(skill_service, "OFFICIAL_SKILLS_ZIP_PATH", str(tmp_path))
+
+        with patch("os.scandir", return_value=[regular_entry, unsafe_entry]):
+            assert skill_service.install_skills_from_zip_for_tenant(["unsafe"], "tenant-1") == []
+        regular_entry.is_file.assert_not_called()
