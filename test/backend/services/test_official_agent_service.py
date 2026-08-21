@@ -2036,8 +2036,8 @@ async def test_upload_binary_docs_skips_empty_upload_result(tmp_path):
         },
     ):
         await official_agent_service._index_binary_docs(
-            [_KnowledgeBaseSeedDoc(file_name="a.pdf", file_path=str(doc))],
             "idx",
+            [_KnowledgeBaseSeedDoc(file_name="a.pdf", file_path=str(doc))],
             tenant_id="tenant",
             user_id="user",
             embedding_model_id=3,
