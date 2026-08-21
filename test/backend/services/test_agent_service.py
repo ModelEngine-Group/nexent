@@ -12863,6 +12863,67 @@ async def test_stream_agent_chunks_search_content_chunk(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_stream_agent_chunks_buffers_valid_automation_proposals(monkeypatch, caplog):
+    """Only valid automation proposal payloads are linked by the final batch."""
+    from backend.services import agent_service
+
+    agent_request = AgentRequest(
+        agent_id=1,
+        conversation_id=999,
+        query="schedule a report",
+        history=[],
+        minio_files=[],
+        is_debug=False,
+    )
+    agent_run_info = MagicMock()
+    agent_run_info.stop_event = asyncio.Event()
+
+    async def fake_agent_run(*_, **__):
+        yield json.dumps({
+            "type": "automation_proposal",
+            "content": json.dumps({"proposal_id": 77}),
+        })
+        yield json.dumps({
+            "type": "automation_proposal",
+            "content": "invalid proposal payload",
+        })
+
+    persisted_batches = []
+    channel = MagicMock()
+    channel.publish = AsyncMock()
+    monkeypatch.setattr(agent_service, "agent_run", fake_agent_run)
+    monkeypatch.setattr(agent_service, "save_message", MagicMock(return_value=4242))
+    monkeypatch.setattr(
+        agent_service,
+        "persist_assistant_run_batch",
+        lambda **kwargs: persisted_batches.append(kwargs),
+    )
+    monkeypatch.setattr(agent_service.agent_run_manager, "unregister_agent_run", MagicMock())
+    monkeypatch.setattr(agent_service.streaming_channel_manager, "complete_channel", AsyncMock())
+    monkeypatch.setattr(agent_service, "_cleanup_channel_later", AsyncMock())
+
+    with caplog.at_level("WARNING", logger=agent_service.logger.name):
+        chunks = [
+            chunk
+            async for chunk in agent_service._stream_agent_chunks(
+                agent_request,
+                "user1",
+                "tenant1",
+                agent_run_info,
+                MagicMock(),
+                channel=channel,
+            )
+        ]
+
+    assert len(chunks) == 2
+    assert len(persisted_batches) == 1
+    batch = persisted_batches[0]
+    assert [unit["unit_index"] for unit in batch["message_units"]] == [0, 1]
+    assert batch["automation_proposals"] == [{"unit_index": 0, "proposal_id": 77}]
+    assert "Invalid persisted automation proposal event payload" in caplog.text
+
+
+@pytest.mark.asyncio
 async def test_stream_agent_chunks_logs_search_placeholder_persistence_failure(monkeypatch, caplog):
     """A failed final batch rolls back search placeholder persistence."""
     from backend.services import agent_service
