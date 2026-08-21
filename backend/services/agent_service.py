@@ -100,20 +100,16 @@ from services.conversation_management_service import (
     get_latest_assistant_message,
     get_last_unit_for_message,
     load_historical_context,
+    persist_assistant_run_batch,
     persist_history_summary_candidate,
     save_conversation_user,
     save_message,
-    save_message_unit,
-    save_source_image,
-    save_source_search,
-    save_skill_files_to_conversation,
+    save_message_unit,  # noqa: F401 - retained as a compatibility re-export
     update_conversation_agent_id_service,
     update_conversation_chat_mode_service,
     update_conversation_knowledge_scope_service,
-    update_message_content,
     update_message_status,
-    update_unit_content,
-    update_unit_status,
+    update_unit_status,  # noqa: F401 - retained as a compatibility re-export
 )
 from services.memory_config_service import build_memory_context
 from services.streaming_channel import streaming_channel_manager
@@ -121,7 +117,6 @@ from services.runtime_state_service import runtime_state_service
 from utils.auth_utils import get_current_user_info, get_user_language
 from utils.config_utils import tenant_config_manager
 from utils.context_utils import build_authorized_context_input
-from utils.thread_utils import submit
 from utils.prompt_template_utils import get_prompt_generate_prompt_template
 from utils.llm_utils import call_llm_for_system_prompt
 
@@ -955,7 +950,7 @@ async def _stream_agent_chunks(
     channel: Optional[Any] = None,
 ):
     """
-    Yield SSE chunks from agent_run while persisting messages incrementally.
+    Yield SSE chunks from agent_run while buffering assistant persistence.
 
     Args:
         resume_from_unit_index: If > 0, we're in resume mode and should start
@@ -976,12 +971,19 @@ async def _stream_agent_chunks(
     captured_skill_files: dict[str, dict] = {}
     skill_file_uploads: list[dict] = []
     workspace_file_uploads: dict[str, dict] = {}
+    frontend_skill_files: list[dict] = []
+    buffered_units: list[dict[str, Any]] = []
+    buffered_search_records: list[dict[str, Any]] = []
+    buffered_image_urls: list[str] = []
+    buffered_image_url_set: set[str] = set()
+    buffered_automation_proposals: list[dict[str, Any]] = []
+    final_answer_content = ""
 
     # Determine if we're in resume mode
     is_resume_mode = resume_from_unit_index > 0
 
     # Persist the parent ConversationMessage row up front with status='streaming'
-    # so that units saved incrementally have a valid message_id to reference.
+    # so history and recovery can observe the active assistant run.
     streaming_message_id: Optional[int] = resume_message_id
     if not is_resume_mode and not agent_request.is_debug:
         user_role_count = sum(
@@ -1006,8 +1008,9 @@ async def _stream_agent_chunks(
             logger.error(
                 "Failed to create streaming message row: %r", msg_exc, exc_info=True)
 
-    # Tracks the unit currently being accumulated in memory. Each entry is
-    # a dict with keys: type, content, unit_id, unit_index, mergeable.
+    # Tracks the unit currently being accumulated in memory. Assistant output
+    # is written to PostgreSQL only once, after the stream reaches a terminal
+    # state. Redis/channel publication remains per chunk.
     current_unit: Optional[Dict[str, Any]] = None
     # The next unit_index to assign to a brand-new (non-merge) unit.
     # In resume mode, start from the position after the last persisted unit.
@@ -1163,9 +1166,9 @@ async def _stream_agent_chunks(
                         len(captured_skill_files),
                     )
 
-            # Incremental unit persistence: when a new chunk belongs to a different
-            # unit than the one currently being buffered, flush the previous unit
-            # and insert a fresh row for the new chunk.
+            # Buffer assistant persistence in memory. Redis/channel publication
+            # below remains per chunk; PostgreSQL is touched only once after the
+            # stream reaches a terminal state.
             if streaming_message_id is not None and chunk_type:
                 mergeable = chunk_type in _MERGEABLE_TYPES
                 is_continuation = (
@@ -1175,98 +1178,44 @@ async def _stream_agent_chunks(
                 )
 
                 if is_continuation:
-                    # Same mergeable unit: append to the in-memory buffer and
-                    # update the DB row to keep content in sync.
-                    # Use synchronous write to prevent race condition: the async submit()
-                    # approach has a critical bug where concurrent submits can read stale
-                    # content and overwrite the DB with incomplete data. Since the main
-                    # loop is async but the DB operations are I/O-bound with network
-                    # latency, synchronous writes here are acceptably fast and guarantee
-                    # that each chunk is fully persisted before the next chunk arrives.
                     current_unit["content"] += chunk_content
-                    update_unit_content(
-                        current_unit["unit_id"],
-                        current_unit["content"],
-                        user_id,
-                    )
+                    current_unit["unit_content"] = current_unit["content"]
                 else:
-                    # Boundary detected: close the previous unit (if any) and
-                    # open a new one for this chunk.
-                    if current_unit is not None:
-                        submit(
-                            update_unit_status,
-                            current_unit["unit_id"],
-                            "completed",
-                            user_id,
-                        )
-
-                    # Special-case: final_answer also updates message_content
                     if chunk_type == "final_answer":
-                        submit(
-                            update_message_content,
-                            streaming_message_id,
-                            chunk_content,
-                            user_id,
-                        )
+                        final_answer_content = chunk_content
 
-                    # Special-case: picture_web saves image source references
                     if chunk_type == "picture_web":
                         try:
                             content_json = json.loads(chunk_content)
                             if isinstance(content_json, dict) and "images_url" in content_json:
-                                seen_urls: set[str] = set()
-                                unique_urls: list[str] = []
                                 for image_url in content_json["images_url"]:
-                                    if image_url not in seen_urls:
-                                        seen_urls.add(image_url)
-                                        unique_urls.append(image_url)
-                                for image_url in unique_urls:
-                                    submit(
-                                        save_source_image,
-                                        {
-                                            "message_id": streaming_message_id,
-                                            "conversation_id": agent_request.conversation_id,
-                                            "image_url": image_url,
-                                        },
-                                    )
+                                    if image_url and image_url not in buffered_image_url_set:
+                                        buffered_image_url_set.add(image_url)
+                                        buffered_image_urls.append(image_url)
                         except Exception as img_exc:
                             logger.error(
-                                "Failed to persist picture_web unit: %r", img_exc, exc_info=True
+                                "Failed to buffer picture_web sources: %r", img_exc, exc_info=True
                             )
 
-                    # Special-case: search_content creates a placeholder unit
-                    # and inserts each search result as a source_search row
-                    # linked back to the unit_id we just created.
                     if chunk_type == "search_content":
-                        try:
-                            placeholder_unit_id = submit(
-                                save_message_unit,
-                                message_id=streaming_message_id,
-                                conversation_id=agent_request.conversation_id,
-                                unit_index=next_unit_index,
-                                unit_type="search_content_placeholder",
-                                unit_content='{"placeholder": true}',
-                                user_id=user_id,
-                                unit_status="completed",
-                                tool_call_id=data.get("tool_call_id"),
-                                invocation_id=data.get("invocation_id"),
-                            ).result()
-                        except Exception as persistence_exc:
-                            logger.error(
-                                "Failed to persist search_content placeholder: %r",
-                                persistence_exc,
-                                exc_info=True,
-                            )
-                            placeholder_unit_id = None
+                        placeholder_index = next_unit_index
+                        buffered_units.append({
+                            "type": "search_content_placeholder",
+                            "content": '{"placeholder": true}',
+                            "unit_index": placeholder_index,
+                            "unit_type": "search_content_placeholder",
+                            "unit_content": '{"placeholder": true}',
+                            "tool_call_id": data.get("tool_call_id"),
+                            "invocation_id": data.get("invocation_id"),
+                            "mergeable": False,
+                        })
                         try:
                             search_results = json.loads(chunk_content)
                             if not isinstance(search_results, list):
                                 search_results = [search_results]
                             for result in search_results:
-                                search_data = {
-                                    "message_id": streaming_message_id,
-                                    "conversation_id": agent_request.conversation_id,
-                                    "unit_id": placeholder_unit_id,
+                                buffered_search_records.append({
+                                    "unit_index": placeholder_index,
                                     "source_type": result.get("source_type", ""),
                                     "source_title": result.get("title", ""),
                                     "source_location": result.get("url", ""),
@@ -1290,11 +1239,10 @@ async def _stream_agent_chunks(
                                     if result.get("search_type")
                                     else None,
                                     "tool_sign": result.get("tool_sign", ""),
-                                }
-                                submit(save_source_search, search_data, user_id)
+                                })
                         except Exception as src_exc:
                             logger.error(
-                                "Failed to persist search_content unit: %r", src_exc, exc_info=True
+                                "Failed to buffer search_content sources: %r", src_exc, exc_info=True
                             )
                         current_unit = None
                         next_unit_index += 1
@@ -1302,7 +1250,6 @@ async def _stream_agent_chunks(
                         yield f"data: {chunk}\n\n"
                         continue
 
-                    # Default path: insert a new unit row with unit_status='streaming'.
                     # history_summary is already persisted once by the canonical
                     # checkpoint sink on its covered assistant message. The stream
                     # event is display-only and must not create a duplicate unit on
@@ -1315,52 +1262,29 @@ async def _stream_agent_chunks(
                         persisted_content = _serialize_stream_unit_content(
                             data, chunk_content
                         )
-                        try:
-                            new_unit_id = submit(
-                                save_message_unit,
-                                message_id=streaming_message_id,
-                                conversation_id=agent_request.conversation_id,
-                                unit_index=next_unit_index,
-                                unit_type=chunk_type,
-                                unit_content=persisted_content,
-                                user_id=user_id,
-                                unit_status="streaming",
-                                tool_call_id=data.get("tool_call_id"),
-                                invocation_id=data.get("invocation_id"),
-                            ).result()
-                        except Exception as persistence_exc:
-                            logger.error(
-                                "Failed to persist streaming message unit: %r",
-                                persistence_exc,
-                                exc_info=True,
-                            )
-                        else:
-                            current_unit = {
-                                "type": chunk_type,
-                                "content": persisted_content,
-                                "unit_id": new_unit_id,
-                                "unit_index": next_unit_index,
-                                "mergeable": mergeable,
-                            }
-                            if chunk_type == "automation_proposal":
-                                try:
-                                    from services.agent_automation.tool_adapter import (
-                                        link_persisted_proposal_card,
-                                    )
-
-                                    link_persisted_proposal_card(
-                                        persisted_content,
-                                        tenant_id,
-                                        user_id,
-                                        streaming_message_id,
-                                        new_unit_id,
-                                    )
-                                except Exception:
-                                    logger.warning(
-                                        "Failed to link persisted automation proposal card",
-                                        exc_info=True,
-                                    )
-                            next_unit_index += 1
+                        current_unit = {
+                            "type": chunk_type,
+                            "content": persisted_content,
+                            "unit_index": next_unit_index,
+                            "unit_type": chunk_type,
+                            "unit_content": persisted_content,
+                            "tool_call_id": data.get("tool_call_id"),
+                            "invocation_id": data.get("invocation_id"),
+                            "mergeable": mergeable,
+                        }
+                        buffered_units.append(current_unit)
+                        if chunk_type == "automation_proposal":
+                            try:
+                                proposal_payload = json.loads(persisted_content)
+                                buffered_automation_proposals.append({
+                                    "unit_index": next_unit_index,
+                                    "proposal_id": int(proposal_payload["proposal_id"]),
+                                })
+                            except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+                                logger.warning(
+                                    "Invalid persisted automation proposal event payload"
+                                )
+                        next_unit_index += 1
 
             await channel.publish(f"data: {chunk}\n\n")
             yield f"data: {chunk}\n\n"
@@ -1370,66 +1294,11 @@ async def _stream_agent_chunks(
         await channel.publish(_safe_agent_stream_error_chunk())
         yield _safe_agent_stream_error_chunk()
     finally:
-        # Finalize any in-flight unit and transition the parent message to its
-        # terminal status before releasing the agent run slot.
-        if streaming_message_id is not None:
-            if current_unit is not None:
-                try:
-                    # First update the content to ensure the last chunk is persisted
-                    # This must be done synchronously before updating status
-                    final_content = current_unit["content"]
-                    update_unit_content(
-                        current_unit["unit_id"],
-                        final_content,
-                        user_id,
-                    )
-                except Exception:
-                    logger.exception("Failed to update last unit content")
-                try:
-                    update_unit_status(
-                        current_unit["unit_id"],
-                        "completed",
-                        user_id,
-                    )
-                except Exception:
-                    logger.exception("Failed to mark last unit as completed")
-
-            was_stopped = getattr(agent_run_info, "stop_event", None) and agent_run_info.stop_event.is_set()
-            terminal_status = "stopped" if was_stopped else "completed" if stream_completed_normally else "failed"
-            try:
-                update_message_status(
-                    streaming_message_id,
-                    terminal_status,
-                    user_id,
-                )
-            except Exception:
-                logger.exception("Failed to mark assistant message as %s", terminal_status)
-
         if not cancel_poll_task.done():
             cancel_poll_task.cancel()
 
         was_stopped = getattr(agent_run_info, "stop_event", None) and agent_run_info.stop_event.is_set()
         terminal_status = 'stopped' if was_stopped else 'completed' if stream_completed_normally else 'failed'
-
-        agent_run_manager.unregister_agent_run(
-            agent_request.conversation_id, user_id, status=terminal_status)
-
-        # Mark channel as completed and schedule cleanup
-        if channel is not None:
-            await streaming_channel_manager.complete_channel(
-                conversation_id=agent_request.conversation_id,
-                user_id=user_id,
-                status=terminal_status
-            )
-            # Schedule channel removal (give subscribers time to receive final chunks)
-            cleanup_task = asyncio.create_task(
-                _cleanup_channel_later(
-                    conversation_id=agent_request.conversation_id,
-                    user_id=user_id
-                )
-            )
-            _channel_cleanup_tasks.add(cleanup_task)
-            cleanup_task.add_done_callback(_channel_cleanup_tasks.discard)
 
         try:
             skill_file_payloads = list(captured_skill_files.values())
@@ -1454,21 +1323,9 @@ async def _stream_agent_chunks(
                     except RuntimeError:
                         # Stream is closing (e.g., client disconnect). Avoid raising during generator teardown.
                         pass
-                    # Persist skill file uploads to the conversation history so they
-                    # appear in subsequent GET /conversation/{id} calls.
-                    # Transform to frontend attachment format (object_name, name, type, size, etc.)
-                    try:
-                        frontend_files = _transform_skill_files_to_standard_format(skill_file_uploads)
-                        save_skill_files_to_conversation(
-                            conversation_id=agent_request.conversation_id,
-                            skill_file_uploads=frontend_files,
-                            user_id=user_id,
-                        )
-                    except Exception:
-                        logger.exception(
-                            "[skill-file] failed to persist skill file uploads to conversation=%s",
-                            agent_request.conversation_id,
-                        )
+                    frontend_skill_files.extend(
+                        _transform_skill_files_to_standard_format(skill_file_uploads)
+                    )
         except Exception:
             logger.exception("Failed to process skill file uploads")
 
@@ -1482,19 +1339,72 @@ async def _stream_agent_chunks(
                 yield f"data: {json.dumps({'type': 'files', 'content': files_payload}, ensure_ascii=False)}\n\n"
             except RuntimeError:
                 pass
-            if not agent_request.is_debug:
+            frontend_skill_files.extend(
+                _transform_skill_files_to_standard_format(uploaded_files)
+            )
+
+        persistence_failed = False
+        if streaming_message_id is not None:
+            try:
+                await asyncio.to_thread(
+                    persist_assistant_run_batch,
+                    message_id=streaming_message_id,
+                    conversation_id=agent_request.conversation_id,
+                    message_content=final_answer_content,
+                    terminal_status=terminal_status,
+                    message_units=buffered_units,
+                    search_records=buffered_search_records,
+                    image_urls=buffered_image_urls,
+                    skill_files=frontend_skill_files,
+                    automation_proposals=buffered_automation_proposals,
+                    user_id=user_id,
+                    tenant_id=tenant_id,
+                )
+            except Exception:
+                persistence_failed = True
+                terminal_status = "failed"
+                logger.exception(
+                    "Failed to persist assistant stream batch conversation=%s message=%s",
+                    agent_request.conversation_id,
+                    streaming_message_id,
+                )
                 try:
-                    save_skill_files_to_conversation(
-                        conversation_id=agent_request.conversation_id,
-                        skill_file_uploads=_transform_skill_files_to_standard_format(uploaded_files),
-                        user_id=user_id,
+                    await asyncio.to_thread(
+                        update_message_status,
+                        streaming_message_id,
+                        "failed",
+                        user_id,
                     )
                 except Exception:
                     logger.exception(
-                        "Failed to persist workspace file uploads for conversation=%s",
-                        agent_request.conversation_id,
+                        "Failed to mark assistant message as failed after batch rollback"
                     )
 
+        if persistence_failed and channel is not None:
+            persistence_error_chunk = _safe_agent_stream_error_chunk()
+            await channel.publish(persistence_error_chunk)
+            try:
+                yield persistence_error_chunk
+            except RuntimeError:
+                pass
+
+        agent_run_manager.unregister_agent_run(
+            agent_request.conversation_id, user_id, status=terminal_status)
+
+        if channel is not None:
+            await streaming_channel_manager.complete_channel(
+                conversation_id=agent_request.conversation_id,
+                user_id=user_id,
+                status=terminal_status
+            )
+            cleanup_task = asyncio.create_task(
+                _cleanup_channel_later(
+                    conversation_id=agent_request.conversation_id,
+                    user_id=user_id
+                )
+            )
+            _channel_cleanup_tasks.add(cleanup_task)
+            cleanup_task.add_done_callback(_channel_cleanup_tasks.discard)
         # Memory recording is now handled by the agent-side ``StoreMemoryTool``
         # (which delegates to the new ``MemoryService`` facade). The legacy
         # background ``add_memory_in_levels`` call has been removed because
@@ -3023,8 +2933,8 @@ async def prepare_agent_run(
 
 
 # Helper function for run_agent_stream, used to save the user-side message
-# before streaming begins. Assistant-side persistence is handled incrementally
-# inside _stream_agent_chunks (see save_message / save_message_unit).
+# before streaming begins. Assistant output is buffered by _stream_agent_chunks
+# and finalized through persist_assistant_run_batch.
 def save_messages(agent_request, target: str, user_id: str, tenant_id: str, messages=None):
     if target == MESSAGE_ROLE["USER"]:
         if messages is not None:
@@ -3036,8 +2946,7 @@ def save_messages(agent_request, target: str, user_id: str, tenant_id: str, mess
     if target == MESSAGE_ROLE["ASSISTANT"]:
         raise ValueError(
             "save_messages no longer persists the assistant message; "
-            "_stream_agent_chunks persists units incrementally via "
-            "save_message_unit."
+            "_stream_agent_chunks persists the assistant run as a final batch."
         )
 
     raise ValueError(f"Unsupported target for save_messages: {target!r}")

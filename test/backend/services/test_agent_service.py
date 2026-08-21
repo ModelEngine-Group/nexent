@@ -4251,9 +4251,8 @@ def test_save_messages(mock_save_user, mock_agent_request):
     save_messages(mock_agent_request, "user", user_id="u", tenant_id="t")
     mock_save_user.assert_called_once_with(mock_agent_request, "u", "t")
 
-    # Test assistant message saving now raises because incremental
-    # persistence has replaced the old batch path.
-    with pytest.raises(ValueError, match="incremental"):
+    # Assistant output is finalized by the stream-level batch path.
+    with pytest.raises(ValueError, match="final batch"):
         save_messages(
             mock_agent_request,
             "assistant",
@@ -4854,7 +4853,7 @@ def test_get_agent_call_relationship_impl_tool_name_fallback(mock_query_sub_agen
 
 @pytest.mark.asyncio
 async def test__stream_agent_chunks_persists_and_unregisters(monkeypatch):
-    """Ensure _stream_agent_chunks yields chunks and completes without errors."""
+    """Chunks stay real-time while PostgreSQL receives one final batch."""
     # Prepare fake AgentRequest
     agent_request = AgentRequest(
         agent_id=1,
@@ -4889,6 +4888,12 @@ async def test__stream_agent_chunks_persists_and_unregisters(monkeypatch):
         fake_save_message,
         raising=False,
     )
+    persisted_batches = []
+    monkeypatch.setattr(
+        "backend.services.agent_service.persist_assistant_run_batch",
+        lambda **kwargs: persisted_batches.append(kwargs),
+        raising=False,
+    )
 
     unregister_called = {}
 
@@ -4902,10 +4907,15 @@ async def test__stream_agent_chunks_persists_and_unregisters(monkeypatch):
         raising=False,
     )
 
+    channel = MagicMock()
+    channel.publish = AsyncMock()
+    agent_run_info = MagicMock()
+    agent_run_info.stop_event = asyncio.Event()
+
     # Collect streamed chunks
     collected = []
     async for out in agent_service._stream_agent_chunks(
-        agent_request, "u", "t", MagicMock(), MagicMock()
+        agent_request, "u", "t", agent_run_info, MagicMock(), channel=channel
     ):
         collected.append(out)
 
@@ -4916,10 +4926,21 @@ async def test__stream_agent_chunks_persists_and_unregisters(monkeypatch):
     assert 'pass' in collected[1]
     assert 'final_answer' in collected[2]
     assert 'All done.' in collected[2]
+    assert channel.publish.await_count == 3
 
     # Verify save_message was called to create the streaming message row
     assert len(save_message_calls) == 1
     assert save_message_calls[0][3] == "streaming"
+
+    assert len(persisted_batches) == 1
+    persisted = persisted_batches[0]
+    assert persisted["terminal_status"] == "completed"
+    assert persisted["message_content"] == "All done."
+    assert [unit["unit_type"] for unit in persisted["message_units"]] == [
+        "model_output_code",
+        "final_answer",
+    ]
+    assert persisted["message_units"][0]["unit_content"] == "def f(): pass"
 
     # Verify unregister was called
     assert unregister_called.get("conv_id") == 999
@@ -4955,24 +4976,14 @@ async def test__stream_agent_chunks_persists_tool_metadata(monkeypatch):
         })
         yield json.dumps({"type": "plan", "content": plan_content})
 
-    class ImmediateFuture:
-        def __init__(self, value):
-            self.value = value
-
-        def result(self):
-            return self.value
-
-    save_unit = MagicMock(return_value=4243)
+    persisted_batches = []
     monkeypatch.setattr("backend.services.agent_service.agent_run", fake_agent_run, raising=False)
     monkeypatch.setattr("backend.services.agent_service.save_message", MagicMock(return_value=4242), raising=False)
-    monkeypatch.setattr("backend.services.agent_service.save_message_unit", save_unit, raising=False)
     monkeypatch.setattr(
-        "backend.services.agent_service.submit",
-        lambda fn, *args, **kwargs: ImmediateFuture(fn(*args, **kwargs)),
+        "backend.services.agent_service.persist_assistant_run_batch",
+        lambda **kwargs: persisted_batches.append(kwargs),
         raising=False,
     )
-    monkeypatch.setattr("backend.services.agent_service.update_unit_content", MagicMock(), raising=False)
-    monkeypatch.setattr("backend.services.agent_service.update_unit_status", MagicMock(), raising=False)
     monkeypatch.setattr("backend.services.agent_service.update_message_status", MagicMock(), raising=False)
     monkeypatch.setattr(
         "backend.services.agent_service.agent_run_manager.unregister_agent_run",
@@ -4986,11 +4997,11 @@ async def test__stream_agent_chunks_persists_tool_metadata(monkeypatch):
         agent_request, "u", "t", MagicMock(), memory_context
     )]
 
-    tool_call = next(
-        call_item for call_item in save_unit.call_args_list
-        if call_item.kwargs["unit_type"] == "tool"
+    tool_unit = next(
+        unit for unit in persisted_batches[0]["message_units"]
+        if unit["unit_type"] == "tool"
     )
-    persisted = json.loads(tool_call.kwargs["unit_content"])
+    persisted = json.loads(tool_unit["unit_content"])
     assert persisted == {
         "content": "",
         "tool_name": "create_plan",
@@ -11190,7 +11201,7 @@ def test_save_messages_assistant_without_messages_error():
 
     agent_request = MagicMock()
 
-    with pytest.raises(ValueError, match="incremental"):
+    with pytest.raises(ValueError, match="final batch"):
         save_messages(agent_request, MESSAGE_ROLE["ASSISTANT"], "user_1", "tenant_1")
 
 
@@ -12710,7 +12721,7 @@ async def test_stream_agent_chunks_malformed_json(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_stream_agent_chunks_picture_web_chunk(monkeypatch):
-    """_stream_agent_chunks should handle picture_web chunks."""
+    """Picture sources are deduplicated and passed to the final batch."""
     from backend.services import agent_service
 
     agent_request = MagicMock()
@@ -12725,7 +12736,11 @@ async def test_stream_agent_chunks_picture_web_chunk(monkeypatch):
     async def fake_agent_run(*_, **__):
         yield json.dumps({
             "type": "picture_web",
-            "content": json.dumps({"images_url": ["http://example.com/img1.jpg", "http://example.com/img2.jpg"]})
+            "content": json.dumps({"images_url": [
+                "http://example.com/img1.jpg",
+                "http://example.com/img2.jpg",
+                "http://example.com/img1.jpg",
+            ]})
         })
 
     monkeypatch.setattr(
@@ -12741,15 +12756,11 @@ async def test_stream_agent_chunks_picture_web_chunk(monkeypatch):
         raising=False,
     )
 
-    save_source_image_calls = []
-
-    def fake_save_source_image(data, user_id=None):
-        save_source_image_calls.append(data)
-        return None
-
+    persisted_batches = []
     monkeypatch.setattr(
-        "backend.services.agent_service.save_source_image",
-        fake_save_source_image,
+        agent_service,
+        "persist_assistant_run_batch",
+        lambda **kwargs: persisted_batches.append(kwargs),
         raising=False,
     )
 
@@ -12774,11 +12785,15 @@ async def test_stream_agent_chunks_picture_web_chunk(monkeypatch):
     # Should have picture_web chunk
     assert len(collected) >= 1
     assert "picture_web" in collected[0]
+    assert persisted_batches[0]["image_urls"] == [
+        "http://example.com/img1.jpg",
+        "http://example.com/img2.jpg",
+    ]
 
 
 @pytest.mark.asyncio
 async def test_stream_agent_chunks_search_content_chunk(monkeypatch):
-    """_stream_agent_chunks should handle search_content chunks."""
+    """Search results reference the buffered placeholder unit index."""
     from backend.services import agent_service
 
     agent_request = MagicMock()
@@ -12812,15 +12827,11 @@ async def test_stream_agent_chunks_search_content_chunk(monkeypatch):
         raising=False,
     )
 
-    save_source_search_calls = []
-
-    def fake_save_source_search(data, user_id=None):
-        save_source_search_calls.append(data)
-        return None
-
+    persisted_batches = []
     monkeypatch.setattr(
-        "backend.services.agent_service.save_source_search",
-        fake_save_source_search,
+        agent_service,
+        "persist_assistant_run_batch",
+        lambda **kwargs: persisted_batches.append(kwargs),
         raising=False,
     )
 
@@ -12844,11 +12855,16 @@ async def test_stream_agent_chunks_search_content_chunk(monkeypatch):
 
     # Should have search_content chunk
     assert len(collected) >= 1
+    batch = persisted_batches[0]
+    assert batch["message_units"][0]["unit_type"] == "search_content_placeholder"
+    assert batch["message_units"][0]["unit_index"] == 0
+    assert len(batch["search_records"]) == 2
+    assert {record["unit_index"] for record in batch["search_records"]} == {0}
 
 
 @pytest.mark.asyncio
 async def test_stream_agent_chunks_logs_search_placeholder_persistence_failure(monkeypatch, caplog):
-    """_stream_agent_chunks should continue when search placeholders cannot persist."""
+    """A failed final batch rolls back search placeholder persistence."""
     from backend.services import agent_service
 
     agent_request = AgentRequest(
@@ -12866,13 +12882,15 @@ async def test_stream_agent_chunks_logs_search_placeholder_persistence_failure(m
             "content": json.dumps([{"title": "Result", "url": "https://example.com"}]),
         })
 
-    class FailingFuture:
-        def result(self):
-            raise RuntimeError("placeholder write failed")
-
     monkeypatch.setattr(agent_service, "agent_run", fake_agent_run, raising=False)
     monkeypatch.setattr(agent_service, "save_message", lambda *args, **kwargs: 4242, raising=False)
-    monkeypatch.setattr(agent_service, "submit", lambda *args, **kwargs: FailingFuture(), raising=False)
+    monkeypatch.setattr(
+        agent_service,
+        "persist_assistant_run_batch",
+        MagicMock(side_effect=RuntimeError("placeholder batch write failed")),
+        raising=False,
+    )
+    monkeypatch.setattr(agent_service, "update_message_status", MagicMock(), raising=False)
 
     with caplog.at_level("ERROR", logger=agent_service.logger.name):
         collected = [
@@ -12881,14 +12899,15 @@ async def test_stream_agent_chunks_logs_search_placeholder_persistence_failure(m
             )
         ]
 
-    assert len(collected) == 1
+    assert len(collected) == 2
     assert "search_content" in collected[0]
-    assert "Failed to persist search_content placeholder" in caplog.text
+    assert agent_service.SAFE_AGENT_STREAM_ERROR_MESSAGE in collected[-1]
+    assert "Failed to persist assistant stream batch" in caplog.text
 
 
 @pytest.mark.asyncio
 async def test_stream_agent_chunks_logs_streaming_unit_persistence_failure(monkeypatch, caplog):
-    """_stream_agent_chunks should continue when a streaming unit cannot persist."""
+    """A failed final batch emits a safe error and marks the message failed."""
     from backend.services import agent_service
 
     agent_request = AgentRequest(
@@ -12903,13 +12922,16 @@ async def test_stream_agent_chunks_logs_streaming_unit_persistence_failure(monke
     async def fake_agent_run(*_, **__):
         yield json.dumps({"type": "final_answer", "content": "done"})
 
-    class FailingFuture:
-        def result(self):
-            raise RuntimeError("unit write failed")
-
     monkeypatch.setattr(agent_service, "agent_run", fake_agent_run, raising=False)
     monkeypatch.setattr(agent_service, "save_message", lambda *args, **kwargs: 4242, raising=False)
-    monkeypatch.setattr(agent_service, "submit", lambda *args, **kwargs: FailingFuture(), raising=False)
+    monkeypatch.setattr(
+        agent_service,
+        "persist_assistant_run_batch",
+        MagicMock(side_effect=RuntimeError("unit batch write failed")),
+        raising=False,
+    )
+    fallback_status = MagicMock()
+    monkeypatch.setattr(agent_service, "update_message_status", fallback_status, raising=False)
 
     with caplog.at_level("ERROR", logger=agent_service.logger.name):
         collected = [
@@ -12918,9 +12940,11 @@ async def test_stream_agent_chunks_logs_streaming_unit_persistence_failure(monke
             )
         ]
 
-    assert len(collected) == 1
+    assert len(collected) == 2
     assert "final_answer" in collected[0]
-    assert "Failed to persist streaming message unit" in caplog.text
+    assert agent_service.SAFE_AGENT_STREAM_ERROR_MESSAGE in collected[-1]
+    assert "Failed to persist assistant stream batch" in caplog.text
+    fallback_status.assert_called_once_with(4242, "failed", "user")
 
 
 @pytest.mark.asyncio
@@ -13316,10 +13340,6 @@ async def test_stream_agent_chunks_captures_structured_skill_artifacts(monkeypat
         "backend.services.agent_service._process_skill_file_uploads",
         fake_process_skill_file_uploads,
     )
-    monkeypatch.setattr(
-        "backend.services.agent_service.save_skill_files_to_conversation",
-        MagicMock(return_value=True),
-    )
 
     collected = []
     async for chunk in agent_service._stream_agent_chunks(
@@ -13415,8 +13435,16 @@ async def test_stream_agent_chunks_parses_string_workspace_artifacts_and_handles
         "backend.services.agent_service.agent_run", fake_agent_run, raising=False
     )
     monkeypatch.setattr(
-        "backend.services.agent_service.save_skill_files_to_conversation",
+        "backend.services.agent_service.save_message",
+        MagicMock(return_value=4242),
+    )
+    monkeypatch.setattr(
+        "backend.services.agent_service.persist_assistant_run_batch",
         persist,
+    )
+    monkeypatch.setattr(
+        "backend.services.agent_service.update_message_status",
+        MagicMock(),
     )
 
     collected = [
@@ -13426,9 +13454,21 @@ async def test_stream_agent_chunks_parses_string_workspace_artifacts_and_handles
         )
     ]
 
-    event = json.loads(collected[-1].removeprefix("data: ").strip())
+    files_chunk = next(chunk for chunk in collected if '"type": "files"' in chunk)
+    event = json.loads(files_chunk.removeprefix("data: ").strip())
     assert json.loads(event["content"]) == {"file_uploads": [artifact]}
     persist.assert_called_once()
+    assert persist.call_args.kwargs["skill_files"] == [
+        {
+            "object_name": artifact["object_name"],
+            "name": artifact["name"],
+            "type": "file",
+            "size": 0,
+            "url": "",
+            "presigned_url": "",
+            "description": "",
+        }
+    ]
 
 
 @pytest.mark.asyncio
@@ -14628,7 +14668,7 @@ async def test_cancel_task_on_runtime_signal_skips_done_task(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_stream_agent_chunks_marks_stopped_when_stop_event_set(monkeypatch):
-    """_stream_agent_chunks should persist stopped terminal status when cancellation wins."""
+    """_stream_agent_chunks should batch partial output with stopped status."""
     from backend.services import agent_service
 
     agent_request = MagicMock()
@@ -14661,7 +14701,7 @@ async def test_stream_agent_chunks_marks_stopped_when_stop_event_set(monkeypatch
     def fake_submit(fn, *args, **kwargs):
         return FakeFuture(777)
 
-    statuses = []
+    persisted_batches = []
     unregister_calls = []
 
     monkeypatch.setattr(agent_service, "agent_run", fake_agent_run, raising=False)
@@ -14672,8 +14712,8 @@ async def test_stream_agent_chunks_marks_stopped_when_stop_event_set(monkeypatch
     monkeypatch.setattr(agent_service, "_cleanup_channel_later", AsyncMock(), raising=False)
     monkeypatch.setattr(
         agent_service,
-        "update_message_status",
-        lambda message_id, status, user_id: statuses.append((message_id, status, user_id)),
+        "persist_assistant_run_batch",
+        lambda **kwargs: persisted_batches.append(kwargs),
         raising=False,
     )
     monkeypatch.setattr(
@@ -14694,8 +14734,302 @@ async def test_stream_agent_chunks_marks_stopped_when_stop_event_set(monkeypatch
         collected.append(chunk)
 
     assert collected
-    assert statuses[-1] == (4242, "stopped", "user1")
+    assert persisted_batches[-1]["message_id"] == 4242
+    assert persisted_batches[-1]["terminal_status"] == "stopped"
+    assert persisted_batches[-1]["message_content"] == "done"
     assert unregister_calls[-1] == (999, "user1", "stopped")
+
+
+@pytest.mark.asyncio
+async def test_stream_agent_chunks_debug_run_skips_conversation_persistence(monkeypatch):
+    """Debug runs stream normally without creating or finalizing chat rows."""
+    from backend.services import agent_service
+
+    agent_request = AgentRequest(
+        agent_id=1,
+        conversation_id=999,
+        query="debug",
+        history=[],
+        minio_files=[],
+        is_debug=True,
+    )
+    agent_run_info = MagicMock()
+    agent_run_info.stop_event = asyncio.Event()
+
+    async def fake_agent_run(*_, **__):
+        yield json.dumps({"type": "final_answer", "content": "debug result"})
+
+    save_message_mock = MagicMock()
+    persist_batch_mock = MagicMock()
+    channel = MagicMock()
+    channel.publish = AsyncMock()
+
+    monkeypatch.setattr(agent_service, "agent_run", fake_agent_run)
+    monkeypatch.setattr(agent_service, "save_message", save_message_mock)
+    monkeypatch.setattr(agent_service, "persist_assistant_run_batch", persist_batch_mock)
+    monkeypatch.setattr(agent_service.agent_run_manager, "unregister_agent_run", MagicMock())
+    monkeypatch.setattr(agent_service.streaming_channel_manager, "complete_channel", AsyncMock())
+    monkeypatch.setattr(agent_service, "_cleanup_channel_later", AsyncMock())
+
+    chunks = [
+        chunk
+        async for chunk in agent_service._stream_agent_chunks(
+            agent_request,
+            "user1",
+            "tenant1",
+            agent_run_info,
+            MagicMock(),
+            channel=channel,
+        )
+    ]
+
+    assert len(chunks) == 1
+    assert "debug result" in chunks[0]
+    save_message_mock.assert_not_called()
+    persist_batch_mock.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_stream_agent_chunks_skill_files_join_final_batch(monkeypatch):
+    """Successful skill uploads are attached by the final database transaction."""
+    from backend.services import agent_service
+
+    agent_request = AgentRequest(
+        agent_id=1,
+        conversation_id=999,
+        query="create a report",
+        history=[],
+        minio_files=[],
+        is_debug=False,
+    )
+    agent_run_info = MagicMock()
+    agent_run_info.stop_event = asyncio.Event()
+    artifact = {"absolute_path": "/tmp/report.csv", "file_name": "report.csv"}
+
+    async def fake_agent_run(*_, **__):
+        yield json.dumps({
+            "type": MockProcessType.SKILL_ARTIFACT.value,
+            "content": {"artifacts": [artifact]},
+        })
+        yield json.dumps({"type": "final_answer", "content": "created"})
+
+    upload_result = {
+        "object_name": "skill/user1/report.csv",
+        "file_name": "report.csv",
+        "file_size": 12,
+        "url": "https://example.com/report.csv",
+        "presigned_url": "https://example.com/report.csv?token=test",
+    }
+    process_uploads = AsyncMock(return_value=[upload_result])
+    persisted_batches = []
+    channel = MagicMock()
+    channel.publish = AsyncMock()
+
+    monkeypatch.setattr(agent_service, "agent_run", fake_agent_run)
+    monkeypatch.setattr(agent_service, "save_message", MagicMock(return_value=4242))
+    monkeypatch.setattr(agent_service, "_process_skill_file_uploads", process_uploads)
+    monkeypatch.setattr(
+        agent_service,
+        "persist_assistant_run_batch",
+        lambda **kwargs: persisted_batches.append(kwargs),
+    )
+    monkeypatch.setattr(agent_service.agent_run_manager, "unregister_agent_run", MagicMock())
+    monkeypatch.setattr(agent_service.streaming_channel_manager, "complete_channel", AsyncMock())
+    monkeypatch.setattr(agent_service, "_cleanup_channel_later", AsyncMock())
+
+    chunks = [
+        chunk
+        async for chunk in agent_service._stream_agent_chunks(
+            agent_request,
+            "user1",
+            "tenant1",
+            agent_run_info,
+            MagicMock(),
+            channel=channel,
+        )
+    ]
+
+    process_uploads.assert_awaited_once_with(
+        payloads=[artifact],
+        user_id="user1",
+        tenant_id="tenant1",
+    )
+    assert len(persisted_batches) == 1
+    assert persisted_batches[0]["skill_files"] == [{
+        "object_name": "skill/user1/report.csv",
+        "name": "report.csv",
+        "type": "file",
+        "size": 12,
+        "url": "https://example.com/report.csv",
+        "presigned_url": "https://example.com/report.csv?token=test",
+        "description": "",
+    }]
+    assert any('"type": "files"' in chunk for chunk in chunks)
+
+
+@pytest.mark.asyncio
+async def test_stream_agent_chunks_client_close_persists_partial_output(monkeypatch):
+    """Closing the response iterator finalizes buffered output as failed."""
+    from backend.services import agent_service
+
+    agent_request = AgentRequest(
+        agent_id=1,
+        conversation_id=999,
+        query="long request",
+        history=[],
+        minio_files=[],
+        is_debug=False,
+    )
+    agent_run_info = MagicMock()
+    agent_run_info.stop_event = asyncio.Event()
+
+    async def fake_agent_run(*_, **__):
+        yield json.dumps({"type": "model_output_thinking", "content": "partial"})
+        await asyncio.Event().wait()
+
+    persisted_batches = []
+    channel = MagicMock()
+    channel.publish = AsyncMock()
+
+    monkeypatch.setattr(agent_service, "agent_run", fake_agent_run)
+    monkeypatch.setattr(agent_service, "save_message", MagicMock(return_value=4242))
+    monkeypatch.setattr(
+        agent_service,
+        "persist_assistant_run_batch",
+        lambda **kwargs: persisted_batches.append(kwargs),
+    )
+    monkeypatch.setattr(agent_service.agent_run_manager, "unregister_agent_run", MagicMock())
+    monkeypatch.setattr(agent_service.streaming_channel_manager, "complete_channel", AsyncMock())
+    monkeypatch.setattr(agent_service, "_cleanup_channel_later", AsyncMock())
+
+    stream = agent_service._stream_agent_chunks(
+        agent_request,
+        "user1",
+        "tenant1",
+        agent_run_info,
+        MagicMock(),
+        channel=channel,
+    )
+    first_chunk = await anext(stream)
+    await stream.aclose()
+
+    assert "partial" in first_chunk
+    assert len(persisted_batches) == 1
+    assert persisted_batches[0]["terminal_status"] == "failed"
+    assert persisted_batches[0]["message_units"][0]["unit_content"] == "partial"
+
+
+@pytest.mark.asyncio
+async def test_stream_agent_chunks_task_cancellation_persists_partial_output(monkeypatch):
+    """Task cancellation cannot skip the final partial-output transaction."""
+    from backend.services import agent_service
+
+    agent_request = AgentRequest(
+        agent_id=1,
+        conversation_id=999,
+        query="long request",
+        history=[],
+        minio_files=[],
+        is_debug=False,
+    )
+    agent_run_info = MagicMock()
+    agent_run_info.stop_event = asyncio.Event()
+    first_chunk_seen = asyncio.Event()
+
+    async def fake_agent_run(*_, **__):
+        yield json.dumps({"type": "model_output_thinking", "content": "partial"})
+        await asyncio.Event().wait()
+
+    persisted_batches = []
+    channel = MagicMock()
+    channel.publish = AsyncMock()
+
+    monkeypatch.setattr(agent_service, "agent_run", fake_agent_run)
+    monkeypatch.setattr(agent_service, "save_message", MagicMock(return_value=4242))
+    monkeypatch.setattr(
+        agent_service,
+        "persist_assistant_run_batch",
+        lambda **kwargs: persisted_batches.append(kwargs),
+    )
+    monkeypatch.setattr(agent_service.agent_run_manager, "unregister_agent_run", MagicMock())
+    monkeypatch.setattr(agent_service.streaming_channel_manager, "complete_channel", AsyncMock())
+    monkeypatch.setattr(agent_service, "_cleanup_channel_later", AsyncMock())
+
+    async def consume_stream():
+        async for _ in agent_service._stream_agent_chunks(
+            agent_request,
+            "user1",
+            "tenant1",
+            agent_run_info,
+            MagicMock(),
+            channel=channel,
+        ):
+            first_chunk_seen.set()
+
+    consumer_task = asyncio.create_task(consume_stream())
+    await first_chunk_seen.wait()
+    await asyncio.sleep(0)
+    consumer_task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await consumer_task
+
+    assert len(persisted_batches) == 1
+    assert persisted_batches[0]["terminal_status"] == "failed"
+    assert persisted_batches[0]["message_units"][0]["unit_content"] == "partial"
+
+
+@pytest.mark.asyncio
+async def test_stream_agent_chunks_run_failure_persists_partial_output(monkeypatch):
+    """A controlled execution failure stores buffered units with failed status."""
+    from backend.services import agent_service
+
+    agent_request = AgentRequest(
+        agent_id=1,
+        conversation_id=999,
+        query="failing request",
+        history=[],
+        minio_files=[],
+        is_debug=False,
+    )
+    agent_run_info = MagicMock()
+    agent_run_info.stop_event = asyncio.Event()
+
+    async def fake_agent_run(*_, **__):
+        yield json.dumps({"type": "model_output_thinking", "content": "partial"})
+        raise RuntimeError("model failed")
+
+    persisted_batches = []
+    channel = MagicMock()
+    channel.publish = AsyncMock()
+
+    monkeypatch.setattr(agent_service, "agent_run", fake_agent_run)
+    monkeypatch.setattr(agent_service, "save_message", MagicMock(return_value=4242))
+    monkeypatch.setattr(
+        agent_service,
+        "persist_assistant_run_batch",
+        lambda **kwargs: persisted_batches.append(kwargs),
+    )
+    monkeypatch.setattr(agent_service.agent_run_manager, "unregister_agent_run", MagicMock())
+    monkeypatch.setattr(agent_service.streaming_channel_manager, "complete_channel", AsyncMock())
+    monkeypatch.setattr(agent_service, "_cleanup_channel_later", AsyncMock())
+
+    chunks = [
+        chunk
+        async for chunk in agent_service._stream_agent_chunks(
+            agent_request,
+            "user1",
+            "tenant1",
+            agent_run_info,
+            MagicMock(),
+            channel=channel,
+        )
+    ]
+
+    assert len(chunks) == 2
+    assert agent_service.SAFE_AGENT_STREAM_ERROR_MESSAGE in chunks[-1]
+    assert len(persisted_batches) == 1
+    assert persisted_batches[0]["terminal_status"] == "failed"
+    assert persisted_batches[0]["message_units"][0]["unit_content"] == "partial"
 
 
 @pytest.mark.asyncio
@@ -16185,11 +16519,7 @@ class TestInsertRelatedAgentImpl:
 
 @pytest.mark.asyncio
 async def test_stream_agent_chunks_tool_call_merge(monkeypatch):
-    """TOOL + EXECUTION_LOGS chunks should each produce their own row in the
-    current implementation. Earlier iterations merged them into a single
-    ``tool_call`` row, but that path was removed; ``_stream_agent_chunks``
-    now persists each chunk as its own ``conversation_message_unit_t`` row.
-    """
+    """TOOL and EXECUTION_LOGS chunks are buffered as separate batch units."""
     from backend.services import agent_service
 
     agent_request = MagicMock()
@@ -16216,7 +16546,7 @@ async def test_stream_agent_chunks_tool_call_merge(monkeypatch):
         raising=False,
     )
 
-    saved_units = []
+    persisted_batches = []
 
     class FakeFuture:
         def __init__(self, unit_id):
@@ -16237,6 +16567,12 @@ async def test_stream_agent_chunks_tool_call_merge(monkeypatch):
 
     monkeypatch.setattr(
         "backend.services.agent_service.submit", fake_submit, raising=False
+    )
+    monkeypatch.setattr(
+        agent_service,
+        "persist_assistant_run_batch",
+        lambda **kwargs: persisted_batches.append(kwargs),
+        raising=False,
     )
 
     monkeypatch.setattr(
@@ -16276,7 +16612,8 @@ async def test_stream_agent_chunks_tool_call_merge(monkeypatch):
     ):
         collected.append(out)
 
-    # Current implementation stores TOOL and EXECUTION_LOGS as separate rows.
+    assert len(persisted_batches) == 1
+    saved_units = persisted_batches[0]["message_units"]
     standalone_tools = [u for u in saved_units if u["unit_type"] == "tool"]
     standalone_logs = [u for u in saved_units if u["unit_type"] == "execution_logs"]
     assert len(standalone_tools) == 1, f"Expected 1 tool row, got {len(standalone_tools)}: {saved_units}"
@@ -16291,7 +16628,7 @@ async def test_stream_agent_chunks_tool_call_merge(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_stream_agent_chunks_orphaned_tool_flush(monkeypatch):
-    """Orphaned TOOL chunk (no EXECUTION_LOGS) should be flushed as standalone 'tool' row at end of stream."""
+    """An orphaned TOOL chunk is included in the final batch."""
     from backend.services import agent_service
 
     agent_request = MagicMock()
@@ -16337,6 +16674,13 @@ async def test_stream_agent_chunks_orphaned_tool_flush(monkeypatch):
     monkeypatch.setattr(
         "backend.services.agent_service.submit", fake_submit, raising=False
     )
+    persisted_batches = []
+    monkeypatch.setattr(
+        agent_service,
+        "persist_assistant_run_batch",
+        lambda **kwargs: persisted_batches.append(kwargs),
+        raising=False,
+    )
 
     monkeypatch.setattr(
         "backend.services.agent_service.update_unit_status",
@@ -16375,6 +16719,7 @@ async def test_stream_agent_chunks_orphaned_tool_flush(monkeypatch):
     ):
         collected.append(out)
 
+    saved_units = persisted_batches[0]["message_units"]
     standalone_tools = [u for u in saved_units if u["unit_type"] == "tool"]
     assert len(standalone_tools) == 1, f"Expected 1 standalone tool, got: {saved_units}"
     persisted_tool_content = standalone_tools[0]["unit_content"]
@@ -16387,7 +16732,7 @@ async def test_stream_agent_chunks_orphaned_tool_flush(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_stream_agent_chunks_multiple_tool_calls(monkeypatch):
-    """Multiple TOOL + EXECUTION_LOGS pairs should each produce one tool_call row."""
+    """Multiple TOOL and EXECUTION_LOGS events retain batch boundaries."""
     from backend.services import agent_service
 
     agent_request = MagicMock()
@@ -16437,6 +16782,13 @@ async def test_stream_agent_chunks_multiple_tool_calls(monkeypatch):
     monkeypatch.setattr(
         "backend.services.agent_service.submit", fake_submit, raising=False
     )
+    persisted_batches = []
+    monkeypatch.setattr(
+        agent_service,
+        "persist_assistant_run_batch",
+        lambda **kwargs: persisted_batches.append(kwargs),
+        raising=False,
+    )
 
     monkeypatch.setattr(
         "backend.services.agent_service.update_unit_status",
@@ -16475,7 +16827,7 @@ async def test_stream_agent_chunks_multiple_tool_calls(monkeypatch):
     ):
         collected.append(out)
 
-    # Current implementation persists TOOL and EXECUTION_LOGS as separate rows.
+    saved_units = persisted_batches[0]["message_units"]
     standalone_tools = [u for u in saved_units if u["unit_type"] == "tool"]
     standalone_logs = [u for u in saved_units if u["unit_type"] == "execution_logs"]
     assert len(standalone_tools) == 2, f"Expected 2 tool rows, got {len(standalone_tools)}: {saved_units}"

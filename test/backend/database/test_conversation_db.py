@@ -122,6 +122,7 @@ class ConversationMessage:
     status = MagicMock(name="ConversationMessage.status")
     minio_files = MagicMock(name="ConversationMessage.minio_files")
     opinion_flag = MagicMock(name="ConversationMessage.opinion_flag")
+    created_by = MagicMock(name="ConversationMessage.created_by")
 
 
 class ConversationMessageUnit:
@@ -152,11 +153,19 @@ class ConversationSourceImage:
     delete_flag = MagicMock(name="ConversationSourceImage.delete_flag")
 
 
+class AgentAutomationProposal:
+    proposal_id = MagicMock(name="AgentAutomationProposal.proposal_id")
+    tenant_id = MagicMock(name="AgentAutomationProposal.tenant_id")
+    user_id = MagicMock(name="AgentAutomationProposal.user_id")
+    delete_flag = MagicMock(name="AgentAutomationProposal.delete_flag")
+
+
 db_models_mod.ConversationRecord = ConversationRecord
 db_models_mod.ConversationMessage = ConversationMessage
 db_models_mod.ConversationMessageUnit = ConversationMessageUnit
 db_models_mod.ConversationSourceSearch = ConversationSourceSearch
 db_models_mod.ConversationSourceImage = ConversationSourceImage
+db_models_mod.AgentAutomationProposal = AgentAutomationProposal
 
 sys.modules["database.db_models"] = db_models_mod
 sys.modules["backend.database.db_models"] = db_models_mod
@@ -213,6 +222,7 @@ from backend.database.conversation_db import (
     get_source_images_by_message,
     get_source_searches_by_conversation,
     get_source_searches_by_message,
+    persist_assistant_run_batch,
     rename_conversation,
     save_history_summary,
     soft_delete_all_conversations_by_user,
@@ -732,6 +742,118 @@ def test_create_message_units_empty_list(monkeypatch):
     result = create_message_units([], message_id=1, conversation_id=2)
 
     assert result == []
+
+
+def test_persist_assistant_run_batch_uses_one_transaction(monkeypatch):
+    """Assistant units and sources are finalized through one session scope."""
+    parent = MagicMock(status="streaming", minio_files=None)
+    parent_result = MagicMock()
+    parent_result.scalar_one_or_none.return_value = parent
+    unit_result = MagicMock()
+    unit_result.all.return_value = [
+        MagicMock(unit_id=101, unit_index=0),
+        MagicMock(unit_id=102, unit_index=1),
+    ]
+    proposal = MagicMock(proposed_task={"name": "daily report"})
+    proposal_result = MagicMock()
+    proposal_result.scalar_one_or_none.return_value = proposal
+
+    session = MagicMock()
+    session.execute.side_effect = [
+        parent_result,
+        unit_result,
+        MagicMock(),
+        MagicMock(),
+        proposal_result,
+    ]
+    ctx = MagicMock()
+    ctx.__enter__.return_value = session
+    ctx.__exit__.return_value = None
+    session_factory = MagicMock(return_value=ctx)
+    monkeypatch.setattr(
+        "backend.database.conversation_db.get_db_session",
+        session_factory,
+    )
+
+    result = persist_assistant_run_batch(
+        message_id=10,
+        conversation_id=20,
+        message_content="done",
+        terminal_status="completed",
+        message_units=[
+            {
+                "unit_index": 0,
+                "unit_type": "search_content_placeholder",
+                "unit_content": '{"placeholder": true}',
+            },
+            {
+                "unit_index": 1,
+                "unit_type": "final_answer",
+                "unit_content": "done",
+            },
+        ],
+        search_records=[{
+            "unit_index": 0,
+            "source_type": "url",
+            "source_title": "Result",
+            "source_location": "https://example.com",
+            "source_content": "content",
+            "cite_index": 1,
+            "search_type": "web_search",
+            "tool_sign": "web",
+        }],
+        image_urls=["https://example.com/image.png", "https://example.com/image.png"],
+        skill_files=[{"object_name": "generated/report.docx"}],
+        automation_proposals=[{"unit_index": 1, "proposal_id": 77}],
+        user_id="user-1",
+        tenant_id="tenant-1",
+    )
+
+    assert result == {0: 101, 1: 102}
+    session_factory.assert_called_once_with()
+    ctx.__enter__.assert_called_once()
+    ctx.__exit__.assert_called_once()
+    assert session.execute.call_count == 5
+    assert parent.message_content == "done"
+    assert parent.status == "completed"
+    assert json.loads(parent.minio_files) == [
+        {"object_name": "generated/report.docx"}
+    ]
+    assert proposal.proposed_task["_conversation_message_id"] == 10
+    assert proposal.proposed_task["_conversation_unit_id"] == 102
+
+
+def test_persist_assistant_run_batch_rejects_finalized_parent(monkeypatch):
+    """A second finalization cannot duplicate message units."""
+    parent_result = MagicMock()
+    parent_result.scalar_one_or_none.return_value = MagicMock(
+        status="completed",
+        minio_files=None,
+    )
+    session = MagicMock()
+    session.execute.return_value = parent_result
+    ctx = MagicMock()
+    ctx.__enter__.return_value = session
+    ctx.__exit__.return_value = None
+    monkeypatch.setattr(
+        "backend.database.conversation_db.get_db_session",
+        lambda: ctx,
+    )
+
+    with pytest.raises(ValueError, match="already finalized"):
+        persist_assistant_run_batch(
+            message_id=10,
+            conversation_id=20,
+            message_content="done",
+            terminal_status="completed",
+            message_units=[],
+            search_records=[],
+            image_urls=[],
+            skill_files=[],
+            automation_proposals=[],
+            user_id="user-1",
+            tenant_id="tenant-1",
+        )
 
 
 # =============================================================================
