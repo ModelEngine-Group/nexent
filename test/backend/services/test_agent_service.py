@@ -10451,7 +10451,6 @@ async def test_import_agent_with_skills_impl_duplicate_returns_suggestions_befor
     mock_get_user_info,
 ):
     """Duplicate skills should return deterministic suggestions before creating data."""
-    from consts.exceptions import SkillDuplicateError
     from backend.services.agent_service import import_agent_with_skills_impl
     from backend.services import agent_service as ag_svc
 
@@ -10475,7 +10474,7 @@ async def test_import_agent_with_skills_impl_duplicate_returns_suggestions_befor
         'import_agent_impl',
         new_callable=AsyncMock,
     ) as mock_import:
-        with pytest.raises(SkillDuplicateError) as exc_info:
+        with pytest.raises(ag_svc.SkillDuplicateError) as exc_info:
             await import_agent_with_skills_impl(
                 agent_info=agent_info,
                 skills=skills,
@@ -10590,7 +10589,7 @@ async def test_import_agent_with_skills_impl_resolves_existing_and_renamed_per_a
         agent_id=1,
         agent_info={
             "1": types.SimpleNamespace(agent_id=1, skill_names=["ExistingSkill"]),
-            "2": types.SimpleNamespace(agent_id=2, skill_names=["RenamedSkill", "NewSkill"]),
+            "2": types.SimpleNamespace(agent_id=2, skill_names=["RenamedSkill", "NewSkill", "MissingSkill"]),
         },
     )
     skills = [

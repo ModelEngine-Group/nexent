@@ -4641,6 +4641,7 @@ class TestUploadZipFilesWithZipError:
 
     def test_copy_name_generator_avoids_existing_and_reserved_names(self):
         """Copy naming should keep the repository convention and avoid bundle names."""
+        assert skill_service.generate_available_copy_skill_name("AvailableSkill") == "AvailableSkill"
         assert skill_service.generate_available_copy_skill_name(
             "SkillA",
             {"SkillA", "SkillA 副本"},
@@ -4652,6 +4653,19 @@ class TestUploadZipFilesWithZipError:
         )
         assert generated_name == f"{'A' * 97} 副本"
         assert len(generated_name) == 100
+
+    @pytest.mark.parametrize(
+        ("content", "error"),
+        [
+            ("# No frontmatter", "must have YAML frontmatter"),
+            ("---\n: invalid\n---\nbody", "Invalid SKILL.md frontmatter"),
+            ("---\nplain value\n---\nbody", "frontmatter must be a mapping"),
+        ],
+    )
+    def test_frontmatter_name_replacement_rejects_invalid_frontmatter(self, content, error):
+        """Renaming requires valid mapping-style SKILL.md frontmatter."""
+        with pytest.raises(skill_service.SkillException, match=error):
+            skill_service._replace_skill_frontmatter_name(content, "new-skill")
 
     def test_frontmatter_name_replacement_preserves_metadata_and_body(self):
         """Renaming should preserve custom frontmatter fields and the body."""

@@ -1995,7 +1995,7 @@ export default function AgentImportWizard({
                 className="rounded-lg border border-gray-200 dark:border-gray-700 p-4"
               >
                 <div className="mb-3">
-                  <Tag color="orange">{conflict.skill_name}</Tag>
+                  <Tag color="orange" style={{ fontSize: 14 }}>{conflict.skill_name}</Tag>
                 </div>
                 <Radio.Group
                   value={skillResolutionActions[conflict.skill_name] ?? "rename"}
