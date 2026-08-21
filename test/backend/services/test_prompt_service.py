@@ -1024,6 +1024,11 @@ class TestPromptService(unittest.TestCase):
 
         # Assert
         self.assertEqual(result, "Rendered content")
+        template_vars = mock_template_instance.render.call_args[0][0]
+        self.assertIn("tool1", template_vars["tool_description"])
+        self.assertNotIn("知识库工具仅代表检索能力", template_vars["tool_description"])
+        self.assertFalse(template_vars["has_local_knowledge_tool"])
+        self.assertFalse(template_vars["has_aidp_knowledge_tool"])
         mock_template.assert_called_once_with(
             mock_prompt_for_generate["user_prompt"], undefined=StrictUndefined)
         mock_template_instance.render.assert_called_once()
@@ -1443,6 +1448,11 @@ class TestPromptService(unittest.TestCase):
 
         # Assert
         self.assertEqual(result, "Rendered content")
+        template_vars = mock_template_instance.render.call_args[0][0]
+        self.assertIn("tool1", template_vars["tool_description"])
+        self.assertNotIn("Knowledge tools represent capabilities only", template_vars["tool_description"])
+        self.assertFalse(template_vars["has_local_knowledge_tool"])
+        self.assertFalse(template_vars["has_aidp_knowledge_tool"])
         # Check that English labels are used
         call_args = mock_template_instance.render.call_args[0][0]
         self.assertEqual(call_args["task_description"], mock_task_description)
@@ -1467,6 +1477,10 @@ class TestPromptService(unittest.TestCase):
 
         # Assert
         self.assertEqual(result, "Rendered content")
+        template_vars = mock_template_instance.render.call_args[0][0]
+        self.assertEqual(template_vars["tool_description"], "")
+        self.assertFalse(template_vars["has_local_knowledge_tool"])
+        self.assertFalse(template_vars["has_aidp_knowledge_tool"])
 
     @patch('backend.services.prompt_service.Template')
     def test_join_info_for_generate_system_prompt_with_knowledge_base_names(self, mock_template):
@@ -1496,6 +1510,7 @@ class TestPromptService(unittest.TestCase):
         template_vars = mock_template_instance.render.call_args[0][0]
         self.assertIn("knowledge_base_names", template_vars)
         self.assertEqual(template_vars["knowledge_base_names"], "")
+        self.assertIn("知识库工具仅代表检索能力", template_vars["tool_description"])
 
     @patch('backend.services.prompt_service.Template')
     def test_join_info_for_generate_system_prompt_without_knowledge_base_names(self, mock_template):
@@ -1523,6 +1538,8 @@ class TestPromptService(unittest.TestCase):
         # knowledge_base_names is always present but empty when not provided
         self.assertIn("knowledge_base_names", template_vars)
         self.assertEqual(template_vars["knowledge_base_names"], "")
+        self.assertNotIn("知识库工具仅代表检索能力", template_vars["tool_description"])
+        self.assertNotIn("当前会话允许的知识库范围", template_vars["tool_description"])
 
     @patch('backend.services.prompt_service.get_knowledge_name_map_by_index_names')
     @patch('backend.services.prompt_service.query_tool_instances_by_id')
@@ -4153,10 +4170,35 @@ def test_join_info_for_optimize_prompt_section_english_scope_instruction(mocker)
             task_description="task",
             current_content="c",
             feedback="f",
-            tool_info_list=[{"name": "t1", "description": "d", "inputs": "{}", "output_type": "string"}],
+            tool_info_list=[{"name": "knowledge_base_search", "description": "d", "inputs": "{}", "output_type": "string"}],
             sub_agent_info_list=[],
             language="en",
         )
 
     assert "Inputs" in render_kwargs["tool_description"]
     assert "must not add or retain concrete knowledge base names" in render_kwargs["tool_description"]
+
+
+def test_join_info_for_optimize_prompt_section_without_knowledge_tool_omits_scope_instruction(mocker):
+    render_kwargs = {}
+    mocked_template = MagicMock()
+    mocked_template.render = MagicMock(
+        side_effect=lambda *args, **kwargs: render_kwargs.update(kwargs or (args[0] if args else {})) or "ok"
+    )
+
+    with mocker.patch("backend.services.prompt_service.Template", return_value=mocked_template):
+        join_info_for_optimize_prompt_section(
+            prompt_for_optimize={"OPTIMIZE_USER_PROMPT": "{{ tool_description }}"},
+            section_type="constraint",
+            section_title="t",
+            task_description="task",
+            current_content="c",
+            feedback="f",
+            tool_info_list=[{"name": "web_search", "description": "d", "inputs": "{}", "output_type": "string"}],
+            sub_agent_info_list=[],
+            language="zh",
+        )
+
+    assert "web_search" in render_kwargs["tool_description"]
+    assert "优化后的内容不得新增或保留具体知识库名称" not in render_kwargs["tool_description"]
+    assert "当前会话允许的知识库范围" not in render_kwargs["tool_description"]

@@ -716,6 +716,8 @@ class TestConversationManagementService(unittest.TestCase):
         mock_history = {
             "conversation_id": 123,
             "agent_id": 7,
+            "runtime_metadata": {"tenant": {"region": "cn"}},
+            "runtime_metadata_version": 3,
             "create_time": "2023-04-01",
             "message_records": [
                 {
@@ -748,6 +750,11 @@ class TestConversationManagementService(unittest.TestCase):
         self.assertEqual(result[0]["conversation_id"],
                          "123")  # Converted to string
         self.assertEqual(result[0]["agent_id"], 7)
+        self.assertEqual(
+            result[0]["runtime_metadata"],
+            {"tenant": {"region": "cn"}},
+        )
+        self.assertEqual(result[0]["runtime_metadata_version"], 3)
         self.assertEqual(len(result[0]["message"]), 2)
         # Check message structure
         user_message = result[0]["message"][0]
