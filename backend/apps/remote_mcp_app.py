@@ -964,9 +964,11 @@ if ENABLE_UPLOAD_IMAGE:
                 yield f"data: {json.dumps({'status': 'container_started', 'data': container_info}, ensure_ascii=False)}\n\n"
                 result = await deployment_task
                 yield f"data: {json.dumps({'status': 'success', 'data': result}, ensure_ascii=False)}\n\n"
-            except Exception as exc:
-                logger.error(f"Failed to upload and start MCP container: {exc}")
-                yield f"data: {json.dumps({'status': 'error', 'detail': str(exc)}, ensure_ascii=False)}\n\n"
+            except Exception:
+                # Keep internal exception details out of the externally visible SSE
+                # payload; the server log retains the traceback for diagnostics.
+                logger.exception("Failed to upload and start MCP container")
+                yield f"data: {json.dumps({'status': 'error', 'detail': 'Failed to upload and start MCP container'}, ensure_ascii=False)}\n\n"
 
         return StreamingResponse(
             generate_deployment_stream(),
