@@ -35,6 +35,8 @@ export interface ChatProps {
   variant?: "default" | "embedded";
   skillFiles?: readonly SkillFileContent[];
   onSkillFileSelect?: (path: string) => void;
+  runtimeMetadata?: Record<string, unknown>;
+  onRuntimeMetadataChange?: (value: Record<string, unknown>) => void;
 }
 
 const AgentsLoadingState: FC = () => {
@@ -70,6 +72,8 @@ export const Chat: FC<ChatProps> = ({
   variant = "default",
   skillFiles,
   onSkillFileSelect,
+  runtimeMetadata = {},
+  onRuntimeMetadataChange,
 }) => {
   const handleSelectAgent = useCallback(
     (agent: Agent) => {
@@ -106,6 +110,8 @@ export const Chat: FC<ChatProps> = ({
       variant={variant}
       skillFiles={skillFiles}
       onSkillFileSelect={onSkillFileSelect}
+      runtimeMetadata={runtimeMetadata}
+      onRuntimeMetadataChange={onRuntimeMetadataChange}
     />
   );
 };

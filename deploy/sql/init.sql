@@ -68,6 +68,8 @@ CREATE TABLE IF NOT EXISTS "conversation_record_t" (
   "create_time" timestamp(0) DEFAULT CURRENT_TIMESTAMP,
   "updated_by" varchar(100) COLLATE "pg_catalog"."default",
   "created_by" varchar(100) COLLATE "pg_catalog"."default",
+  "runtime_metadata" jsonb NOT NULL DEFAULT '{}'::jsonb,
+  "runtime_metadata_version" integer NOT NULL DEFAULT 0,
   CONSTRAINT "conversation_record_t_pk" PRIMARY KEY ("conversation_id")
 );
 ALTER TABLE "conversation_record_t" OWNER TO "root";
@@ -324,6 +326,7 @@ CREATE TABLE IF NOT EXISTS nexent.ag_tenant_agent_t (
     tenant_id VARCHAR(100),
     enabled BOOLEAN DEFAULT FALSE,
     provide_run_summary BOOLEAN DEFAULT FALSE,
+    allow_chat_metadata BOOLEAN NOT NULL DEFAULT FALSE,
     context_policy JSONB,
     create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     update_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,

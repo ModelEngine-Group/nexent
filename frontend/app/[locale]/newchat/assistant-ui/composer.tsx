@@ -57,6 +57,7 @@ import {
   combinedSkillDirectiveFormatter,
   skillDirectiveIconMap,
 } from "../ui/skill-directives";
+import { RuntimeMetadataEditor } from "@/components/chat/RuntimeMetadataEditor";
 
 export type ChatMode = "planning" | "execution";
 
@@ -77,6 +78,9 @@ export interface ComposerProps {
   ) => Promise<void> | void;
   compact?: boolean;
   skillFiles?: readonly SkillFileContent[];
+  runtimeMetadata?: Record<string, unknown>;
+  onRuntimeMetadataChange?: (value: Record<string, unknown>) => void;
+  allowRuntimeMetadata?: boolean;
 }
 
 // Simple tooltip wrapper
@@ -202,6 +206,9 @@ export const Composer: FC<ComposerProps> = ({
   onKnowledgeScopeChange,
   compact = false,
   skillFiles,
+  runtimeMetadata = {},
+  onRuntimeMetadataChange,
+  allowRuntimeMetadata = false,
 }) => {
   const { t } = useTranslation();
   const [knowledgeModalOpen, setKnowledgeModalOpen] = useState(false);
@@ -395,6 +402,13 @@ export const Composer: FC<ComposerProps> = ({
                     <span className="truncate">{knowledgeSummary}</span>
                   </Button>
                 )}
+              {!compact && allowRuntimeMetadata && onRuntimeMetadataChange && (
+                <RuntimeMetadataEditor
+                  value={runtimeMetadata}
+                  onChange={onRuntimeMetadataChange}
+                  disabled={isRunning}
+                />
+              )}
             </div>
             <div className="ml-auto flex items-center gap-1">
               {!compact && <ComposerAddAttachment />}

@@ -91,13 +91,13 @@ export const fetchTools = async () => {
         ? tool.labels
         : typeof tool.labels === "string"
           ? (() => {
-            try {
-              const p = JSON.parse(tool.labels);
-              return Array.isArray(p) ? p : [];
-            } catch {
-              return [];
-            }
-          })()
+              try {
+                const p = JSON.parse(tool.labels);
+                return Array.isArray(p) ? p : [];
+              } catch {
+                return [];
+              }
+            })()
           : [],
       updated_by: tool.updated_by || "",
       updated_by_name: tool.updated_by_name || "",
@@ -166,6 +166,7 @@ export const fetchAgentList = async (tenantId?: string) => {
       is_published: agent.is_published,
       current_version_no: agent.current_version_no,
       is_a2a_server: agent.is_a2a_server || false,
+      allow_chat_metadata: agent.allow_chat_metadata ?? false,
     }));
 
     return {
@@ -220,6 +221,7 @@ export const fetchPublishedAgentList = async () => {
       version_name: agent.version_name,
       greeting_message: agent.greeting_message,
       example_questions: agent.example_questions || [],
+      allow_chat_metadata: agent.allow_chat_metadata ?? false,
     }));
 
     return {
@@ -435,6 +437,7 @@ export interface UpdateAgentInfoPayload {
   requested_output_tokens?: number | null;
   is_main_agent?: boolean;
   provide_run_summary?: boolean;
+  allow_chat_metadata?: boolean;
   enable_context_manager?: boolean;
   verification_config?: Record<string, any>;
   enabled?: boolean;
@@ -542,7 +545,9 @@ export const exportAgent = async (agentId: number) => {
     if (contentType.includes("application/zip")) {
       const blob = await response.blob();
       const contentDisposition = response.headers.get("Content-Disposition");
-      const filename = extractFilenameFromContentDisposition(contentDisposition) || `agent_${agentId}.zip`;
+      const filename =
+        extractFilenameFromContentDisposition(contentDisposition) ||
+        `agent_${agentId}.zip`;
       downloadBlob(blob, filename);
       return {
         success: true,
@@ -582,7 +587,9 @@ export const exportAgent = async (agentId: number) => {
  * @param contentDisposition The Content-Disposition header value
  * @returns Extracted filename or null if not found
  */
-const extractFilenameFromContentDisposition = (contentDisposition: string | null): string | null => {
+const extractFilenameFromContentDisposition = (
+  contentDisposition: string | null
+): string | null => {
   if (!contentDisposition) {
     return null;
   }
@@ -897,6 +904,7 @@ export const searchAgentInfo = async (
       greeting_message: data.greeting_message || "",
       example_questions: data.example_questions || [],
       current_version_no: data.current_version_no,
+      allow_chat_metadata: data.allow_chat_metadata ?? false,
     };
 
     return {
@@ -1565,8 +1573,8 @@ export const createSkillFromFile = async (
           ? errorData.detail
           : Array.isArray(errorData.detail)
             ? errorData.detail
-              .map((e: any) => e.msg || JSON.stringify(e))
-              .join("; ")
+                .map((e: any) => e.msg || JSON.stringify(e))
+                .join("; ")
             : JSON.stringify(errorData.detail);
       throw new Error(errorMessage || `Request failed: ${response.status}`);
     }

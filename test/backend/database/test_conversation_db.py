@@ -105,6 +105,8 @@ class ConversationRecord:
     agent_id = MagicMock(name="ConversationRecord.agent_id")
     chat_mode = MagicMock(name="ConversationRecord.chat_mode")
     knowledge_scope = MagicMock(name="ConversationRecord.knowledge_scope")
+    runtime_metadata = MagicMock(name="ConversationRecord.runtime_metadata")
+    runtime_metadata_version = MagicMock(name="ConversationRecord.runtime_metadata_version")
     create_time = MagicMock(name="ConversationRecord.create_time")
     update_time = MagicMock(name="ConversationRecord.update_time")
     created_by = MagicMock(name="ConversationRecord.created_by")
@@ -214,6 +216,8 @@ from backend.database.conversation_db import (
     get_source_searches_by_conversation,
     get_source_searches_by_message,
     rename_conversation,
+    resolve_conversation_runtime_metadata,
+    RuntimeMetadataVersionConflict,
     save_history_summary,
     soft_delete_all_conversations_by_user,
     update_conversation_agent_id,
@@ -493,6 +497,10 @@ def test_create_conversation_success(monkeypatch, mock_session_ctx):
     mock_record.conversation_id = 42
     mock_record.conversation_title = "Test Title"
     mock_record.agent_id = 7
+    mock_record.chat_mode = "execution"
+    mock_record.knowledge_scope = None
+    mock_record.runtime_metadata = {}
+    mock_record.runtime_metadata_version = 0
     mock_record.create_time = 1234567890.123
     mock_record.update_time = 1234567890.456
     session.execute.return_value.fetchone.return_value = mock_record
@@ -517,6 +525,10 @@ def test_create_conversation_without_user_id(monkeypatch, mock_session_ctx):
     mock_record.conversation_id = 1
     mock_record.conversation_title = "No User Title"
     mock_record.agent_id = None
+    mock_record.chat_mode = "execution"
+    mock_record.knowledge_scope = None
+    mock_record.runtime_metadata = {}
+    mock_record.runtime_metadata_version = 0
     mock_record.create_time = 1000.0
     mock_record.update_time = 1000.0
     session.execute.return_value.fetchone.return_value = mock_record
@@ -527,6 +539,83 @@ def test_create_conversation_without_user_id(monkeypatch, mock_session_ctx):
 
     assert result["conversation_id"] == 1
     session.execute.assert_called_once()
+
+
+def test_resolve_runtime_metadata_replaces_and_increments(monkeypatch, mock_session_ctx):
+    session, ctx = mock_session_ctx
+    record = MagicMock()
+    record.runtime_metadata = {"old": True}
+    record.runtime_metadata_version = 3
+    session.scalars.return_value.first.return_value = record
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    request_metadata = {"nested": {"value": 1}}
+    result = resolve_conversation_runtime_metadata(
+        conversation_id=9,
+        user_id="user-1",
+        request_metadata=request_metadata,
+        update_requested=True,
+        expected_version=3,
+    )
+
+    assert result == {
+        "runtime_metadata": {"nested": {"value": 1}},
+        "runtime_metadata_version": 4,
+    }
+    assert record.runtime_metadata == request_metadata
+    assert record.runtime_metadata is not request_metadata
+    session.flush.assert_called_once()
+
+
+def test_create_conversation_with_runtime_metadata_starts_at_version_one(
+    monkeypatch, mock_session_ctx
+):
+    session, ctx = mock_session_ctx
+    record = MagicMock()
+    record.conversation_id = 44
+    record.conversation_title = "Metadata Title"
+    record.agent_id = 2
+    record.chat_mode = "execution"
+    record.knowledge_scope = None
+    record.runtime_metadata = {"region": "cn"}
+    record.runtime_metadata_version = 1
+    record.create_time = 1000.0
+    record.update_time = 1000.0
+    session.execute.return_value.fetchone.return_value = record
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    result = create_conversation(
+        "Metadata Title",
+        user_id="user-1",
+        agent_id=2,
+        runtime_metadata={"region": "cn"},
+    )
+
+    assert _captured_insert_values["runtime_metadata"] == {"region": "cn"}
+    assert _captured_insert_values["runtime_metadata_version"] == 1
+    assert result["runtime_metadata_version"] == 1
+
+
+def test_resolve_runtime_metadata_rejects_stale_version(monkeypatch, mock_session_ctx):
+    session, ctx = mock_session_ctx
+    record = MagicMock()
+    record.runtime_metadata = {"current": True}
+    record.runtime_metadata_version = 4
+    session.scalars.return_value.first.return_value = record
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    with pytest.raises(RuntimeMetadataVersionConflict) as exc_info:
+        resolve_conversation_runtime_metadata(
+            conversation_id=9,
+            user_id="user-1",
+            request_metadata={},
+            update_requested=True,
+            expected_version=3,
+        )
+
+    assert exc_info.value.current_version == 4
+    assert record.runtime_metadata == {"current": True}
+    session.flush.assert_not_called()
 
 
 # =============================================================================
@@ -2650,6 +2739,10 @@ def test_create_conversation_with_knowledge_scope(monkeypatch, mock_session_ctx,
     mock_record.conversation_id = 43
     mock_record.conversation_title = "Scoped Title"
     mock_record.agent_id = None
+    mock_record.chat_mode = "chat"
+    mock_record.knowledge_scope = None
+    mock_record.runtime_metadata = {}
+    mock_record.runtime_metadata_version = 0
     mock_record.create_time = 1000.0
     mock_record.update_time = 1000.0
     session.execute.return_value.fetchone.return_value = mock_record

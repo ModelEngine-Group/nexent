@@ -1361,6 +1361,7 @@ async def create_agent_config(
         requested_output_tokens=requested_output_tokens,
         model_name=model_name,
         provide_run_summary=agent_info.get("provide_run_summary", False),
+        allow_chat_metadata=agent_info.get("allow_chat_metadata", False),
         managed_agents=managed_agents,
         external_a2a_agents=external_a2a_agents,
         context_manager_config=cm_config,

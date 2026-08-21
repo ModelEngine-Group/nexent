@@ -660,7 +660,7 @@ class A2AServerService:
             user_id=user_id,
             tenant_id=tenant_id or server_agent.get("tenant_id"),
             correlation_id=message.get("correlationId"),
-            metadata=message.get("metadata", {}),
+            metadata=self.adapter.extract_runtime_metadata(parsed_message),
             is_debug=True
         )
 
@@ -683,8 +683,10 @@ class A2AServerService:
                 query=internal_request["query"],
                 history=internal_request.get("history", []),
                 minio_files=None,
-                is_debug=internal_request.get("is_debug", True)
+                is_debug=internal_request.get("is_debug", True),
+                metadata=internal_request.get("metadata", {}),
             )
+            agent_request.__dict__["_runtime_metadata_entrypoint"] = "a2a"
 
             mock_request = Request({
                 "type": "http",
@@ -778,7 +780,7 @@ class A2AServerService:
             user_id=user_id,
             tenant_id=tenant_id or server_agent.get("tenant_id"),
             correlation_id=message.get("correlationId"),
-            metadata=message.get("metadata", {}),
+            metadata=self.adapter.extract_runtime_metadata(parsed_message),
             is_debug=True
         )
 
@@ -808,8 +810,10 @@ class A2AServerService:
                 query=internal_request["query"],
                 history=internal_request.get("history", []),
                 minio_files=None,
-                is_debug=internal_request.get("is_debug", True)
+                is_debug=internal_request.get("is_debug", True),
+                metadata=internal_request.get("metadata", {}),
             )
+            agent_request.__dict__["_runtime_metadata_entrypoint"] = "a2a"
 
             mock_request = Request({
                 "type": "http",

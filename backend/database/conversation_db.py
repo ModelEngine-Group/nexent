@@ -1,4 +1,5 @@
 import json
+from copy import deepcopy
 from datetime import datetime
 from typing import Any, Dict, List, Optional, TypedDict
 
@@ -55,6 +56,8 @@ class ConversationHistory(TypedDict):
     conversation_id: int
     agent_id: Optional[int]
     knowledge_scope: Optional[Dict[str, Any]]
+    runtime_metadata: Dict[str, Any]
+    runtime_metadata_version: int
     create_time: int
     message_records: List[MessageRecord]
     search_records: List[SearchRecord]
@@ -105,7 +108,8 @@ def _get_effective_tenant_id(user_tenant: Dict[str, Any]) -> str:
 def create_conversation(conversation_title: str, user_id: Optional[str] = None,
                         agent_id: Optional[int] = None,
                         chat_mode: Optional[str] = None,
-                        knowledge_scope: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                        knowledge_scope: Optional[Dict[str, Any]] = None,
+                        runtime_metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """
     Create a new conversation record
 
@@ -128,6 +132,9 @@ def create_conversation(conversation_title: str, user_id: Optional[str] = None,
             data["chat_mode"] = chat_mode
         if knowledge_scope is not None:
             data["knowledge_scope"] = knowledge_scope
+        if runtime_metadata is not None:
+            data["runtime_metadata"] = deepcopy(runtime_metadata)
+            data["runtime_metadata_version"] = 1
         if user_id:
             data = add_creation_tracking(data, user_id)
 
@@ -137,6 +144,8 @@ def create_conversation(conversation_title: str, user_id: Optional[str] = None,
             ConversationRecord.agent_id,
             ConversationRecord.chat_mode,
             ConversationRecord.knowledge_scope,
+            ConversationRecord.runtime_metadata,
+            ConversationRecord.runtime_metadata_version,
             (func.extract('epoch', ConversationRecord.create_time)
              * 1000).label('create_time'),
             (func.extract('epoch', ConversationRecord.update_time)
@@ -152,6 +161,8 @@ def create_conversation(conversation_title: str, user_id: Optional[str] = None,
             "agent_id": record.agent_id,
             "chat_mode": record.chat_mode or "execution",
             "knowledge_scope": record.knowledge_scope,
+            "runtime_metadata": record.runtime_metadata or {},
+            "runtime_metadata_version": record.runtime_metadata_version or 0,
             "create_time": int(record.create_time),
             "update_time": int(record.update_time)
         }
@@ -453,6 +464,53 @@ def get_conversation(
         # Execute the query
         record = session.scalars(stmt).first()
         return None if record is None else as_dict(record)
+
+
+class RuntimeMetadataVersionConflict(ValueError):
+    """Raised when a conversation metadata optimistic-lock check fails."""
+
+    def __init__(self, current_version: int):
+        super().__init__("Runtime metadata version conflict")
+        self.current_version = current_version
+
+
+def resolve_conversation_runtime_metadata(
+    conversation_id: int,
+    user_id: str,
+    request_metadata: Optional[Dict[str, Any]],
+    update_requested: bool,
+    expected_version: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Atomically resolve and optionally replace conversation runtime metadata."""
+
+    with get_db_session() as session:
+        stmt = (
+            select(ConversationRecord)
+            .where(
+                ConversationRecord.conversation_id == int(conversation_id),
+                ConversationRecord.created_by == user_id,
+                ConversationRecord.delete_flag == 'N',
+            )
+            .with_for_update()
+        )
+        record = session.scalars(stmt).first()
+        if record is None:
+            raise ValueError("Conversation not found")
+
+        current_version = int(record.runtime_metadata_version or 0)
+        if update_requested:
+            if expected_version is not None and expected_version != current_version:
+                raise RuntimeMetadataVersionConflict(current_version)
+            record.runtime_metadata = deepcopy(request_metadata or {})
+            record.runtime_metadata_version = current_version + 1
+            record.updated_by = user_id
+            record.update_time = func.current_timestamp()
+            session.flush()
+
+        return {
+            "runtime_metadata": deepcopy(record.runtime_metadata or {}),
+            "runtime_metadata_version": int(record.runtime_metadata_version or 0),
+        }
 
 
 def get_conversation_messages(conversation_id: int) -> List[Dict[str, Any]]:
@@ -876,6 +934,8 @@ def get_conversation_history(conversation_id: int, user_id: Optional[str] = None
             ConversationRecord.agent_id,
             ConversationRecord.chat_mode,
             ConversationRecord.knowledge_scope,
+            ConversationRecord.runtime_metadata,
+            ConversationRecord.runtime_metadata_version,
             (func.extract('epoch', ConversationRecord.create_time)
              * 1000).label('create_time')
         ).where(
@@ -975,6 +1035,8 @@ def get_conversation_history(conversation_id: int, user_id: Optional[str] = None
             'agent_id': conversation.get('agent_id'),
             'chat_mode': conversation.get('chat_mode') or 'execution',
             'knowledge_scope': conversation.get('knowledge_scope'),
+            'runtime_metadata': conversation.get('runtime_metadata') or {},
+            'runtime_metadata_version': int(conversation.get('runtime_metadata_version') or 0),
             'create_time': int(conversation['create_time']),
             'message_records': message_list,
             'search_records': [as_dict(record) for record in search_records],

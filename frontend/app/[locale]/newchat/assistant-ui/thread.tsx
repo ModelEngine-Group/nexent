@@ -127,6 +127,8 @@ export interface ThreadProps {
   variant?: "default" | "embedded";
   skillFiles?: readonly SkillFileContent[];
   onSkillFileSelect?: (path: string) => void;
+  runtimeMetadata?: Record<string, unknown>;
+  onRuntimeMetadataChange?: (value: Record<string, unknown>) => void;
 }
 
 /**
@@ -181,6 +183,8 @@ export const Thread: FC<ThreadProps> = ({
   variant = "default",
   skillFiles,
   onSkillFileSelect,
+  runtimeMetadata = {},
+  onRuntimeMetadataChange,
 }) => {
   const { t } = useTranslation();
   const models = useAgentModels(agent);
@@ -395,6 +399,8 @@ export const Thread: FC<ThreadProps> = ({
         variant={variant}
         skillFiles={skillFiles}
         onSkillFileSelect={onSkillFileSelect}
+        runtimeMetadata={runtimeMetadata}
+        onRuntimeMetadataChange={onRuntimeMetadataChange}
         hasMessages={hasMessages}
         displayName={displayName}
         conversationTitle={conversationTitle}
@@ -504,6 +510,8 @@ interface ThreadViewProps {
   variant: "default" | "embedded";
   skillFiles?: readonly SkillFileContent[];
   onSkillFileSelect?: (path: string) => void;
+  runtimeMetadata: Record<string, unknown>;
+  onRuntimeMetadataChange?: (value: Record<string, unknown>) => void;
 }
 
 const ThreadView: FC<ThreadViewProps> = ({
@@ -539,6 +547,8 @@ const ThreadView: FC<ThreadViewProps> = ({
   variant,
   skillFiles,
   onSkillFileSelect,
+  runtimeMetadata,
+  onRuntimeMetadataChange,
 }) => {
   const { t } = useTranslation();
 
@@ -682,6 +692,9 @@ const ThreadView: FC<ThreadViewProps> = ({
             onKnowledgeScopeChange={onKnowledgeScopeChange}
             compact={variant === "embedded"}
             skillFiles={skillFiles}
+            runtimeMetadata={runtimeMetadata}
+            onRuntimeMetadataChange={onRuntimeMetadataChange}
+            allowRuntimeMetadata={agent.allow_chat_metadata === true}
           />
         </ThreadPrimitive.ViewportFooter>
       </div>

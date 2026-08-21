@@ -18,6 +18,7 @@ export type AgentConfigUpdate = Partial<
     | "requested_output_tokens"
     | "is_main_agent"
     | "provide_run_summary"
+    | "allow_chat_metadata"
     | "description"
     | "duty_prompt"
     | "constraint_prompt"
@@ -128,6 +129,7 @@ export interface PublishedAgent {
   current_version_no?: number;
   greeting_message?: string;
   example_questions?: string[];
+  allow_chat_metadata?: boolean;
 }
 
 export interface Agent {
@@ -146,6 +148,7 @@ export interface Agent {
   requested_output_tokens?: number | null;
   is_main_agent?: boolean;
   provide_run_summary: boolean;
+  allow_chat_metadata?: boolean;
   enable_context_manager?: boolean;
   verification_config?: AgentVerificationConfig;
   tools: Tool[];
@@ -161,7 +164,12 @@ export interface Agent {
   is_available?: boolean;
   is_new?: boolean;
   sub_agent_id_list?: number[];
-  sub_agent_relations?: Array<{ agent_id: number; agent_name?: string; version_no: number | null; version_name?: string }>;
+  sub_agent_relations?: Array<{
+    agent_id: number;
+    agent_name?: string;
+    version_no: number | null;
+    version_name?: string;
+  }>;
   external_sub_agent_id_list?: number[]; // External A2A agent IDs
   group_ids?: number[];
   ingroup_permission?: "EDIT" | "READ_ONLY" | "PRIVATE";
@@ -232,7 +240,12 @@ export interface AidpKnowledgeBaseItem {
   /** Nexent user_id of the KB creator (owner). */
   created_by?: string;
   /** Lifecycle status; non-ACTIVE rows are still rendered but flagged. */
-  resource_status?: "ACTIVE" | "CREATING" | "DELETE_PENDING" | "ORPHANED" | "UNAVAILABLE";
+  resource_status?:
+    | "ACTIVE"
+    | "CREATING"
+    | "DELETE_PENDING"
+    | "ORPHANED"
+    | "UNAVAILABLE";
   /** ISO-8601 creation timestamp from AIDP (normalized from ``create_time``). */
   created_at?: string;
   /** ISO-8601 last-modified timestamp from AIDP (normalized from ``update_time``). */
@@ -316,7 +329,9 @@ export interface SkillGroup {
 
 // Skill with installation status for tenant creation flow
 export type SkillInstallStatus =
-  "installable" | "installed" | "resource_missing";
+  | "installable"
+  | "installed"
+  | "resource_missing";
 
 export interface InstallableSkill {
   skill_id: number;

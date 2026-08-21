@@ -501,6 +501,8 @@ def mock_core_agent():
     agent.observer = MagicMock()
     agent.stop_event = MagicMock()
     agent.run = MagicMock()  # Ensure .run exists and is mockable
+    agent.state = {}
+    agent.managed_agents = {}
     return agent
 
 
@@ -1616,6 +1618,41 @@ def test_agent_run_with_observer_success_with_agent_text(nexent_agent_instance, 
         "", ProcessType.TOKEN_COUNT, ANY)
     mock_core_agent.observer.add_message.assert_any_call(
         "test_agent", ProcessType.FINAL_ANSWER, "Final answer with  content")
+
+
+def test_runtime_metadata_isolated_across_full_agent_tree(nexent_agent_instance, mock_core_agent):
+    child = mock_core_agent_class()
+    child.state = {}
+    child.managed_agents = {}
+    child_wrapper = MagicMock()
+    child_wrapper._inner = child
+    external_agent = MagicMock()
+    external_agent.get_runtime_metadata.return_value = {"external": "previous"}
+    external_wrapper = MagicMock()
+    external_wrapper._inner = external_agent
+    mock_core_agent.state = {"metadata": {"previous": True}}
+    mock_core_agent.managed_agents = {
+        "child": child_wrapper,
+        "external": external_wrapper,
+    }
+
+    snapshots = nexent_agent_instance._set_runtime_metadata_for_agent_tree(
+        mock_core_agent,
+        {"request": {"id": 7}},
+    )
+
+    assert mock_core_agent.state["metadata"] == {"request": {"id": 7}}
+    assert child.state["metadata"] == {"request": {"id": 7}}
+    assert child.state["metadata"] is not mock_core_agent.state["metadata"]
+    external_agent.set_runtime_metadata.assert_called_once_with({"request": {"id": 7}})
+
+    nexent_agent_instance._restore_runtime_metadata_for_agent_tree(snapshots)
+
+    assert mock_core_agent.state["metadata"] == {"previous": True}
+    assert "metadata" not in child.state
+    assert external_agent.set_runtime_metadata.call_args_list[-1].args[0] == {
+        "external": "previous"
+    }
 
 
 def test_agent_run_with_observer_emits_model_context_window(nexent_agent_instance, mock_core_agent):

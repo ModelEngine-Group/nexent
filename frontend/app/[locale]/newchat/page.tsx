@@ -157,6 +157,11 @@ const HomeContent: FC<{
     useState<KnowledgeScopeEffectivePreview | null>(null);
   const [knowledgeCapabilities, setKnowledgeCapabilities] =
     useState<KnowledgeCapabilities | null>(null);
+  const [runtimeMetadata, setRuntimeMetadata] = useState<
+    Record<string, unknown>
+  >({});
+  const [runtimeMetadataVersion, setRuntimeMetadataVersion] = useState(0);
+  const [runtimeMetadataDirty, setRuntimeMetadataDirty] = useState(false);
   const knowledgeScopesRef = useRef<
     Map<string, ConversationKnowledgeScope | null>
   >(new Map());
@@ -331,6 +336,54 @@ const HomeContent: FC<{
     };
   }, [activeConversationId, activeThreadId]);
 
+  useEffect(() => {
+    const numericConversationId = Number(activeConversationId);
+    setRuntimeMetadata({});
+    setRuntimeMetadataVersion(0);
+    setRuntimeMetadataDirty(false);
+    if (
+      !Number.isInteger(numericConversationId) ||
+      numericConversationId <= 0
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+    void conversationService
+      .getById(String(numericConversationId))
+      .then((conversation) => {
+        if (cancelled) return;
+        setRuntimeMetadata(conversation.runtime_metadata ?? {});
+        setRuntimeMetadataVersion(conversation.runtime_metadata_version ?? 0);
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          log.error("[HomeContent] Failed to restore runtime metadata:", error);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeConversationId]);
+
+  const handleRuntimeMetadataChange = useCallback(
+    (value: Record<string, unknown>) => {
+      setRuntimeMetadata(value);
+      setRuntimeMetadataDirty(true);
+    },
+    []
+  );
+
+  const handleRuntimeMetadataSent = useCallback((version?: number) => {
+    setRuntimeMetadataDirty(false);
+    if (version !== undefined) {
+      setRuntimeMetadataVersion(version);
+    } else {
+      setRuntimeMetadataVersion((currentVersion) => currentVersion + 1);
+    }
+  }, []);
+
   const showKnowledgeScopeWarnings = useCallback(
     (warnings: KnowledgeScopeWarning[]) => {
       warnings.forEach((warning) => {
@@ -459,8 +512,19 @@ const HomeContent: FC<{
     runtime.thread.composer.setRunConfig({
       custom: {
         ...(selectedAgent?.id ? { agentId: selectedAgent.id } : {}),
+        ...((selectedAgent as PublishedAgent | null)?.current_version_no
+          ? {
+              agentVersionNo: (selectedAgent as PublishedAgent)
+                .current_version_no,
+            }
+          : {}),
         ...(activeConversationId ? { threadId: activeConversationId } : {}),
         ...(knowledgeScope ? { knowledgeScope } : {}),
+        ...(runtimeMetadataDirty ? { runtimeMetadata } : {}),
+        ...(runtimeMetadataDirty && Number(activeConversationId) > 0
+          ? { runtimeMetadataVersion }
+          : {}),
+        onRuntimeMetadataSent: handleRuntimeMetadataSent,
         onKnowledgeScopeResolved: handleKnowledgeScopeResolved,
         enablePlan: chatMode === "planning",
         ...(activeThreadId
@@ -485,6 +549,10 @@ const HomeContent: FC<{
     activeThreadId,
     chatMode,
     knowledgeScope,
+    runtimeMetadata,
+    runtimeMetadataDirty,
+    runtimeMetadataVersion,
+    handleRuntimeMetadataSent,
     handleKnowledgeScopeResolved,
     handleServerConversationId,
   ]);
@@ -588,6 +656,8 @@ const HomeContent: FC<{
           knowledgePreview={knowledgePreview}
           knowledgeCapabilities={knowledgeCapabilities}
           onKnowledgeScopeChange={handleKnowledgeScopeChange}
+          runtimeMetadata={runtimeMetadata}
+          onRuntimeMetadataChange={handleRuntimeMetadataChange}
         />
       </div>
     </div>

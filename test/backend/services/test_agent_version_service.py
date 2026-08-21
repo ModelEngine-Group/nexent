@@ -1611,6 +1611,7 @@ def test_list_published_agents_impl_success(monkeypatch):
                 "model_ids": [1],
                 "description": "Test",
                 "is_main_agent": False,
+                "allow_chat_metadata": True,
             },
             [{"tool_id": 1, "enabled": True}],
             [],
@@ -1633,6 +1634,7 @@ def test_list_published_agents_impl_success(monkeypatch):
     assert result[0]["model_ids"] == [1]
     assert result[0]["model_names"] == ["Test Model"]
     assert result[0]["is_main_agent"] is False
+    assert result[0]["allow_chat_metadata"] is True
 
 
 def test_list_published_agents_impl_no_published_version(monkeypatch):

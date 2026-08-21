@@ -137,6 +137,7 @@ interface NexentRunConfig {
   onServerConversationId?: (serverId: string, initialQuestion?: string) => void;
   resume?: boolean;
   agentId?: number | string;
+  agentVersionNo?: number;
   enablePlan?: boolean;
   runtimeMode?: "nl2agent" | "nl2skill";
   knowledgeScope?: import("@/types/knowledgeScope").ConversationKnowledgeScope;
@@ -148,6 +149,9 @@ interface NexentRunConfig {
   language?: "zh" | "en";
   onNl2SkillEvent?: (event: Nl2SkillStreamEvent) => void;
   modelId?: number;
+  runtimeMetadata?: Record<string, unknown>;
+  runtimeMetadataVersion?: number;
+  onRuntimeMetadataSent?: (version?: number) => void;
 }
 
 function notifyKnowledgeScopeResolved(
@@ -1235,6 +1239,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     let agentResponse:
       | ReadableStreamDefaultReader<Uint8Array>
       | { type: "json"; data: unknown };
+    let returnedRuntimeMetadataVersion: number | undefined;
     try {
       agentResponse = await conversationService.runAgent(
         {
@@ -1247,6 +1252,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           conversation_id: requestBody.conversation_id as number | undefined,
           minio_files: requestBody.minio_files as any,
           agent_id: requestBody.agent_id as number | undefined,
+          version_no: custom?.agentVersionNo,
           is_debug: false,
           is_resume: isResume,
           enable_plan: custom?.enablePlan === true,
@@ -1264,6 +1270,8 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           model_id: isNl2Skill
             ? (custom?.modelId ?? (requestBody.model_id as number | undefined))
             : (requestBody.model_id as number | undefined),
+          metadata: custom?.runtimeMetadata,
+          expected_metadata_version: custom?.runtimeMetadataVersion,
         },
         abortSignal,
         (conversationId) => {
@@ -1278,8 +1286,14 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
               !isResume && !hasServerConversationId ? query : undefined
             );
           }
+        },
+        (version) => {
+          returnedRuntimeMetadataVersion = version;
         }
       );
+      if (custom?.runtimeMetadata !== undefined) {
+        custom.onRuntimeMetadataSent?.(returnedRuntimeMetadataVersion);
+      }
     } catch (error: unknown) {
       if (
         error instanceof Error &&

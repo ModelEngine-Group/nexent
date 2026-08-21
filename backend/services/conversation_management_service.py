@@ -356,6 +356,7 @@ def create_new_conversation(
     agent_id: Optional[int] = None,
     chat_mode: Optional[str] = None,
     knowledge_scope: Optional[Dict[str, Any]] = None,
+    runtime_metadata: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Create a new conversation
@@ -376,6 +377,8 @@ def create_new_conversation(
         }
         if knowledge_scope is not None:
             create_kwargs["knowledge_scope"] = knowledge_scope
+        if runtime_metadata is not None:
+            create_kwargs["runtime_metadata"] = runtime_metadata
         conversation_data = create_conversation(title, user_id, **create_kwargs)
         return conversation_data
     except Exception as e:

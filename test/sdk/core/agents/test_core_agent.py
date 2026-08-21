@@ -3007,6 +3007,27 @@ class TestLogModelCallParameters:
         content = call_args[1]["content"]
         assert "REDACTED" in content
 
+    def test_log_model_call_parameters_redacts_runtime_metadata(self):
+        agent, _ = self._create_agent_for_log_params_test()
+        mock_msg = MagicMock()
+        mock_msg.model_dump.return_value = {
+            "role": "user",
+            "content": (
+                'question\n<runtime_metadata trust="untrusted-data">'
+                '{"secret":"must-not-leak"}</runtime_metadata>'
+            ),
+        }
+
+        agent._log_model_call_parameters(
+            [mock_msg],
+            [],
+            {"metadata": {"secret": "must-not-leak"}},
+        )
+
+        content = agent.logger.log_markdown.call_args.kwargs["content"]
+        assert "must-not-leak" not in content
+        assert "REDACTED" in content
+
     def test_log_model_call_parameters_exception_handling(self):
         """Test _log_model_call_parameters handles exceptions gracefully."""
         agent, module = self._create_agent_for_log_params_test()

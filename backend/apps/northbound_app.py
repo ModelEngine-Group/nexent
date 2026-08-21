@@ -215,6 +215,12 @@ async def run_chat(
                     "model so different models can be used for Q&A on the same agent.",
         examples=[123],
     ),
+    metadata: Optional[Dict[str, Any]] = Body(
+        None,
+        embed=True,
+        description="Optional runtime metadata available to the agent. This is separate from meta_data.",
+        examples=[{"project_id": "P001", "manager": "Alice"}],
+    ),
     meta_data: Optional[Dict[str, Any]] = Body(
         None,
         embed=True,
@@ -262,6 +268,7 @@ async def run_chat(
             agent_name=agent_name,
             query=query,
             attachments=attachments,
+            metadata=metadata,
             meta_data=meta_data,
             tool_params=tool_params,
             model_id=model_id,
