@@ -435,7 +435,11 @@ def _get_tool_record(tool_id: int) -> Optional[Dict[str, Any]]:
     Returns:
         Tool info dict
     """
-    tools = query_tools_by_ids([tool_id])
+    try:
+        tools = query_tools_by_ids([tool_id])
+    except Exception:
+        logger.warning("Failed to load tool %s for constraint validation; skipping", tool_id)
+        return None
     return tools[0] if tools else None
 
 
