@@ -17464,3 +17464,126 @@ async def test_run_agent_stream_emits_knowledge_scope_resolved_event(
     assert "knowledge_scope_resolved" in body
     assert '"local"' in body
     assert '"KB A"' in body
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("content", "message"),
+    [
+        (b"", "Agent icon file is empty"),
+        (b"x" * (agent_service.AGENT_ICON_MAX_BYTES + 1), "Agent icon must not exceed 2 MB"),
+        (b"not an image", "Agent icon must be a PNG, JPEG, GIF, or WebP image"),
+    ],
+)
+async def test_upload_agent_icon_impl_rejects_invalid_content(content, message):
+    with pytest.raises(ValueError, match=message):
+        await agent_service.upload_agent_icon_impl(123, content, "tenant", "user")
+
+
+@pytest.mark.asyncio
+async def test_upload_agent_icon_impl_rejects_without_edit_permission(mocker):
+    mocker.patch.object(agent_service, "_detect_agent_icon_content_type", return_value="image/png")
+    mocker.patch.object(agent_service, "get_agent_info_impl", return_value={"permission": "VIEW"})
+    upload = mocker.patch.object(agent_service.minio_client, "upload_fileobj")
+
+    with pytest.raises(agent_service.ForbiddenError, match="permission to edit"):
+        await agent_service.upload_agent_icon_impl(123, b"png", "tenant", "user")
+
+    upload.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_upload_agent_icon_impl_upload_failure(mocker):
+    mocker.patch.object(agent_service, "_detect_agent_icon_content_type", return_value="image/png")
+    mocker.patch.object(
+        agent_service,
+        "get_agent_info_impl",
+        return_value={"permission": "EDIT", "tenant_id": "owner-tenant"},
+    )
+    mocker.patch.object(agent_service.minio_client, "upload_fileobj", return_value=(False, "storage error"))
+
+    with pytest.raises(ValueError, match="Failed to upload agent icon: storage error"):
+        await agent_service.upload_agent_icon_impl(123, b"png", "tenant", "user")
+
+
+@pytest.mark.asyncio
+async def test_upload_agent_icon_impl_success(mocker):
+    mocker.patch.object(agent_service, "_detect_agent_icon_content_type", return_value="image/png")
+    mocker.patch.object(
+        agent_service,
+        "get_agent_info_impl",
+        return_value={"permission": "EDIT", "tenant_id": "owner-tenant"},
+    )
+    upload = mocker.patch.object(agent_service.minio_client, "upload_fileobj", return_value=(True, None))
+    update = mocker.patch.object(agent_service, "update_agent_icon")
+
+    result = await agent_service.upload_agent_icon_impl(123, b"png", "tenant", "user")
+
+    assert result == {"icon_url": "/api/agent/123/icon", "content_type": "image/png"}
+    upload.assert_called_once()
+    assert upload.call_args.args[1] == "agent-icons/owner-tenant/123/icon"
+    update.assert_called_once_with(
+        agent_id=123,
+        tenant_id="owner-tenant",
+        icon_url="/api/agent/123/icon",
+        user_id="user",
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "agent", [
+        {},
+        {"icon_url": ""},
+    ],
+)
+async def test_get_agent_icon_impl_requires_icon_url(mocker, agent):
+    mocker.patch.object(agent_service, "get_agent_info_impl", return_value=agent)
+
+    with pytest.raises(FileNotFoundError, match="Agent icon not found"):
+        await agent_service.get_agent_icon_impl(123, "tenant", "user")
+
+
+@pytest.mark.asyncio
+async def test_get_agent_icon_impl_raises_when_object_missing(mocker):
+    mocker.patch.object(
+        agent_service,
+        "get_agent_info_impl",
+        return_value={"icon_url": "/api/agent/123/icon", "tenant_id": "owner-tenant"},
+    )
+    get_stream = mocker.patch.object(agent_service, "get_file_stream", return_value=None)
+
+    with pytest.raises(FileNotFoundError, match="Agent icon not found"):
+        await agent_service.get_agent_icon_impl(123, "tenant", "user")
+
+    get_stream.assert_called_once_with("agent-icons/owner-tenant/123/icon")
+
+
+@pytest.mark.asyncio
+async def test_get_agent_icon_impl_rejects_invalid_stored_content(mocker):
+    mocker.patch.object(
+        agent_service,
+        "get_agent_info_impl",
+        return_value={"icon_url": "/api/agent/123/icon", "tenant_id": "tenant"},
+    )
+    mocker.patch.object(agent_service, "get_file_stream", return_value=io.BytesIO(b"invalid"))
+    mocker.patch.object(agent_service, "_detect_agent_icon_content_type", return_value=None)
+
+    with pytest.raises(FileNotFoundError, match="Agent icon is invalid"):
+        await agent_service.get_agent_icon_impl(123, "tenant", "user")
+
+
+@pytest.mark.asyncio
+async def test_get_agent_icon_impl_success(mocker):
+    content = b"png content"
+    mocker.patch.object(
+        agent_service,
+        "get_agent_info_impl",
+        return_value={"icon_url": "/api/agent/123/icon", "tenant_id": "owner-tenant"},
+    )
+    mocker.patch.object(agent_service, "get_file_stream", return_value=io.BytesIO(content))
+    mocker.patch.object(agent_service, "_detect_agent_icon_content_type", return_value="image/webp")
+
+    result = await agent_service.get_agent_icon_impl(123, "tenant", "user")
+
+    assert result == (content, "image/webp")

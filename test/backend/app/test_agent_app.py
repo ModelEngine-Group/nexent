@@ -2578,18 +2578,102 @@ def test_get_agent_knowledge_capabilities_api_value_error(mocker, mock_auth_head
     assert "agent not found" in response.json()["detail"]
 
 
-def test_get_agent_knowledge_capabilities_api_internal_error(mocker, mock_auth_header):
-    """Unexpected resolver failures map to 500."""
-    mocker.patch("apps.agent_app.get_current_user_id",
-                 return_value=("user-1", "tenant-1"))
-    mocker.patch(
-        "apps.agent_app.get_agent_knowledge_capabilities",
-        side_effect=RuntimeError("boom"),
-    )
+    assert response.status_code == 500
 
-    response = config_client.get(
-        "/agent/7/knowledge-capabilities",
+
+@pytest.mark.parametrize(
+    ("error", "expected_status", "detail"),
+    [
+        (ForbiddenError("You do not have permission"), 403, "You do not have permission"),
+        (ValueError("Agent icon is invalid"), 400, "Agent icon is invalid"),
+        (RuntimeError("storage unavailable"), 500, "Agent icon upload error."),
+    ],
+)
+def test_upload_agent_icon_api_error_mapping(mocker, mock_auth_header, error, expected_status, detail):
+    mocker.patch("apps.agent_app.get_current_user_id", return_value=("user-1", "tenant-1"))
+    mocker.patch("apps.agent_app.upload_agent_icon_impl", new_callable=AsyncMock, side_effect=error)
+
+    response = config_client.post(
+        "/agent/7/icon",
+        files={"file": ("icon.png", b"png-content", "image/png")},
         headers=mock_auth_header,
     )
 
+    assert response.status_code == expected_status
+    assert response.json()["detail"] == detail
+
+
+def test_upload_agent_icon_api_success(mocker, mock_auth_header):
+    mocker.patch("apps.agent_app.get_current_user_id", return_value=("user-1", "tenant-1"))
+    upload_impl = mocker.patch(
+        "apps.agent_app.upload_agent_icon_impl",
+        new_callable=AsyncMock,
+        return_value={"icon_url": "/api/agent/7/icon", "content_type": "image/png"},
+    )
+
+    response = config_client.post(
+        "/agent/7/icon",
+        files={"file": ("icon.png", b"png-content", "image/png")},
+        headers=mock_auth_header,
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "icon_url": "/api/agent/7/icon",
+        "content_type": "image/png",
+    }
+    upload_impl.assert_awaited_once_with(
+        agent_id=7,
+        content=b"png-content",
+        tenant_id="tenant-1",
+        user_id="user-1",
+    )
+
+
+def test_get_agent_icon_api_success(mocker, mock_auth_header):
+    mocker.patch("apps.agent_app.get_current_user_id", return_value=("user-1", "tenant-1"))
+    get_impl = mocker.patch(
+        "apps.agent_app.get_agent_icon_impl",
+        new_callable=AsyncMock,
+        return_value=(b"image-bytes", "image/webp"),
+    )
+
+    response = config_client.get("/agent/7/icon", headers=mock_auth_header)
+
+    assert response.status_code == 200
+    assert response.content == b"image-bytes"
+    assert response.headers["content-type"] == "image/webp"
+    assert response.headers["cache-control"] == "private, max-age=3600"
+    get_impl.assert_awaited_once_with(
+        agent_id=7,
+        tenant_id="tenant-1",
+        user_id="user-1",
+    )
+
+
+def test_get_agent_icon_api_not_found(mocker, mock_auth_header):
+    mocker.patch("apps.agent_app.get_current_user_id", return_value=("user-1", "tenant-1"))
+    mocker.patch(
+        "apps.agent_app.get_agent_icon_impl",
+        new_callable=AsyncMock,
+        side_effect=FileNotFoundError("Agent icon not found"),
+    )
+
+    response = config_client.get("/agent/7/icon", headers=mock_auth_header)
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Agent icon not found"
+
+
+def test_get_agent_icon_api_internal_error(mocker, mock_auth_header):
+    mocker.patch("apps.agent_app.get_current_user_id", return_value=("user-1", "tenant-1"))
+    mocker.patch(
+        "apps.agent_app.get_agent_icon_impl",
+        new_callable=AsyncMock,
+        side_effect=RuntimeError("storage unavailable"),
+    )
+
+    response = config_client.get("/agent/7/icon", headers=mock_auth_header)
+
     assert response.status_code == 500
+    assert response.json()["detail"] == "Agent icon retrieval error."
