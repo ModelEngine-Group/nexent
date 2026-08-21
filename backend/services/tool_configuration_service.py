@@ -20,12 +20,12 @@ from consts.const import (
     LOCAL_MCP_SERVER,
     MCP_MANAGEMENT_API,
 )
+from consts.error_message import TOOL_PARAM_CONSTRAINT_ERROR_MESSAGES
 from consts.exceptions import MCPConnectionError, NotFoundException, ToolExecutionException, ValidationError
 from consts.model import ToolInstanceInfoRequest, ToolInfo, ToolSourceEnum, ToolValidateRequest
 from consts.tool_labels import SYSTEM_MANAGED_TOOL_NAMES
 from consts.tool_param_constraints import (
     TOOL_PARAM_CONSTRAINT_KEYS,
-    TOOL_PARAM_CONSTRAINT_MESSAGES,
     TOOL_PARAM_CONSTRAINT_RULES,
 )
 from database.outer_api_tool_db import (
@@ -169,6 +169,9 @@ def _extract_field_constraints(field_info: Any) -> Dict[str, Any]:
     in ``FieldInfo.metadata`` as ``annotated_types`` instances (e.g. ``Ge``, ``Le``,
     ``Interval``, ``MinLen``). This helper reads the relevant attributes so the
     constraints can be persisted to the DB ``params`` column.
+
+    Args:
+        field_info: Pydantic FieldInfo to extract constraints from
     """
     constraints: Dict[str, Any] = {}
     for item in getattr(field_info, "metadata", None) or []:
@@ -423,26 +426,55 @@ def search_tool_info_impl(
 
 
 def _get_tool_record(tool_id: int) -> Optional[Dict[str, Any]]:
-    """Resolve a tool's DB record so constraints can be read from its ``params`` column."""
+    """
+    Resolve a tool's DB record so constraints can be read from its ``params`` column.
+
+    Args:
+        tool_id: Tool ID
+
+    Returns:
+        Tool info dict
+    """
     tools = query_tools_by_ids([tool_id])
     return tools[0] if tools else None
 
 
 def _coerce_param_value(tool_name: str, param_name: str, value_type: str, raw_value: Any, constraint_key: str):
-    """在这里对初始值进行转换，并校验数据类型，如果数据类型不匹配，抛出异常。当constraint中有“length”时，需要返回字符串长度，其他情况返回符合type的原始值。"""
+    """
+    Coerce the initial value and validate its data type.
+
+    When the constraint key contains "length", the string length is returned.
+    Otherwise the value is converted to the type expected by the parameter.
+
+    Args:
+        tool_name: Tool name
+        param_name: Parameter name
+        value_type: Expected parameter type
+        raw_value: Raw value to coerce
+        constraint_key: Constraint key being validated
+
+    Returns:
+        The coerced value (string length, string, or numeric value)
+
+    Raises:
+        ValidationError: If the value cannot be coerced to the expected type
+    """
     if "length" in constraint_key:
         return len(str(raw_value))
+    elif value_type == "string":
+        return str(raw_value)
+    
     try:
         numeric_value = float(raw_value)
     except (TypeError, ValueError):
         raise ValidationError(
-            TOOL_PARAM_CONSTRAINT_MESSAGES["valid_type"].format(
+            TOOL_PARAM_CONSTRAINT_ERROR_MESSAGES["valid_type"].format(
                 tool_name=tool_name, param_name=param_name, value_type=value_type
             )
         )
     if value_type == "integer" and not numeric_value.is_integer():
         raise ValidationError(
-            TOOL_PARAM_CONSTRAINT_MESSAGES["integer"].format(
+            TOOL_PARAM_CONSTRAINT_ERROR_MESSAGES["integer"].format(
                 tool_name=tool_name, param_name=param_name
             )
         )
@@ -450,7 +482,7 @@ def _coerce_param_value(tool_name: str, param_name: str, value_type: str, raw_va
 
 def _format_constraint_message(key: str, tool_name: str, param_name: str, value: Any) -> str:
     """Format a tool parameter constraint message from its centralized template."""
-    return TOOL_PARAM_CONSTRAINT_MESSAGES[key].format(
+    return TOOL_PARAM_CONSTRAINT_ERROR_MESSAGES[key].format(
         tool_name=tool_name, param_name=param_name, value=value
     )
 
@@ -458,7 +490,16 @@ def _format_constraint_message(key: str, tool_name: str, param_name: str, value:
 def _apply_param_constraints(
     tool_name: str, param_name: str, value_type: str, raw_value: Any, constraints: Dict[str, Any]
 ):
-    """Apply a parameter's DB-stored constraints to a single configured value."""
+    """
+    Apply a parameter's DB-stored constraints to a single configured value.
+
+    Args:
+        tool_name: Tool name
+        param_name: Parameter name
+        value_type: Expected parameter type
+        raw_value: Raw value to validate
+        constraints: Constraint definitions to apply
+    """
     if any(key in constraints for key in TOOL_PARAM_CONSTRAINT_KEYS):
         for key, check_fn in TOOL_PARAM_CONSTRAINT_RULES:
             if key not in constraints:
@@ -468,7 +509,13 @@ def _apply_param_constraints(
                 raise ValidationError(_format_constraint_message(key, tool_name, param_name, constraints[key]))
 
 def _validate_tool_param_ranges(tool_id: int, params: Dict[str, Any]):
-    """Validate configured parameter values against constraints stored in the DB ``params`` column."""
+    """
+    Validate configured parameter values against constraints stored in the DB ``params`` column.
+
+    Args:
+        tool_id: Tool ID
+        params: Configured parameter values
+    """
     tool = _get_tool_record(tool_id)
     if not tool:
         return
@@ -706,6 +753,10 @@ async def update_tool_list(tenant_id: str, user_id: str):
 async def list_all_tools(tenant_id: str, labels: Optional[List[str]] = None):
     """
     List all tools for a given tenant, optionally filtered by labels (OR match).
+
+    Args:
+        tenant_id: Tenant ID
+        labels: Optional labels to filter tools by (OR match)
     """
     if labels:
         tools_info = query_tools_by_labels(tenant_id, labels)

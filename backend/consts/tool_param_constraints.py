@@ -28,17 +28,3 @@ TOOL_PARAM_CONSTRAINT_RULES = (
     ("min_length", lambda v, c: v < c),
     ("max_length", lambda v, c: v > c),
 )
-
-# Error message templates. Keys mirror the constraint keys plus the
-# type-coercion failures raised during validation.
-TOOL_PARAM_CONSTRAINT_MESSAGES = {
-    "valid_type": "{tool_name} {param_name} must be a valid {value_type}",
-    "integer": "{tool_name} {param_name} must be an integer",
-    "ge": "{tool_name} {param_name} must be >= {value}",
-    "gt": "{tool_name} {param_name} must be > {value}",
-    "le": "{tool_name} {param_name} must be <= {value}",
-    "lt": "{tool_name} {param_name} must be < {value}",
-    "multiple_of": "{tool_name} {param_name} must be a multiple of {value}",
-    "min_length": "{tool_name} {param_name} length must be >= {value}",
-    "max_length": "{tool_name} {param_name} length must be <= {value}",
-}

@@ -10,6 +10,21 @@ from typing import Dict, Tuple
 from .error_code import ErrorCode
 
 
+# Error message templates for tool parameter constraint validation.
+# Keys mirror the constraint keys plus the type-coercion failures.
+TOOL_PARAM_CONSTRAINT_ERROR_MESSAGES = {
+    "valid_type": "{tool_name} {param_name} must be a valid {value_type}",
+    "integer": "{tool_name} {param_name} must be an integer",
+    "ge": "{tool_name} {param_name} must be >= {value}",
+    "gt": "{tool_name} {param_name} must be > {value}",
+    "le": "{tool_name} {param_name} must be <= {value}",
+    "lt": "{tool_name} {param_name} must be < {value}",
+    "multiple_of": "{tool_name} {param_name} must be a multiple of {value}",
+    "min_length": "{tool_name} {param_name} length must be >= {value}",
+    "max_length": "{tool_name} {param_name} length must be <= {value}",
+}
+
+
 class ErrorMessage:
     """Error code to message mapping."""
 
