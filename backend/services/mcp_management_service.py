@@ -131,7 +131,6 @@ def _to_community_card(row: Dict[str, Any]) -> Dict[str, Any]:
     source_mcp_id = row.get("source_mcp_id")
     if source_mcp_id is not None:
         try:
-            from database.remote_mcp_db import get_mcp_record_by_id_and_tenant
             mcp_record = get_mcp_record_by_id_and_tenant(mcp_id=source_mcp_id, tenant_id=row.get("tenant_id", ""))
             if mcp_record:
                 source_authorization_token = mcp_record.get("authorization_token")
