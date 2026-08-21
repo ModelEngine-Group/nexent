@@ -5,7 +5,6 @@ import { App, Button, Dropdown, Input, Tooltip } from "antd";
 import type { MenuProps } from "antd";
 import { useTranslation } from "react-i18next";
 import {
-  Bot,
   ClipboardCheck,
   Clock,
   Eye,
@@ -16,6 +15,7 @@ import {
   Search,
   Share2,
   Trash2,
+  Zap,
 } from "lucide-react";
 
 import { CreateNewSkillCard } from "./CreateNewSkillCard";
@@ -472,7 +472,7 @@ function MineSkillCard({
       <div className="flex items-start justify-between gap-2">
         <div className="flex min-w-0 items-start gap-3">
           <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-            <Bot className="size-5" aria-hidden />
+            <Zap className="size-5" aria-hidden />
           </div>
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-1.5">

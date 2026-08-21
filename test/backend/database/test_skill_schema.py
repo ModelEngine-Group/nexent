@@ -9,6 +9,10 @@ MIGRATION_PATH = Path(
     "deploy/sql/migrations/"
     "v2.4_merged_migrations.sql"
 )
+EXTERNAL_IDENTITY_MIGRATION_PATH = Path(
+    "deploy/sql/migrations/"
+    "v2.5.0_0814_add_skill_external_identity.sql"
+)
 
 
 def test_skill_name_is_not_globally_unique_in_orm():
@@ -38,6 +42,16 @@ def test_skill_name_partial_unique_indexes_exist_in_orm():
     )
 
 
+def test_skill_external_identity_exists_in_orm():
+    assert SkillInfo.__table__.c.unique_id.nullable is True
+    assert str(SkillInfo.__table__.c.unique_id.type) == "VARCHAR(255)"
+    assert SkillInfo.__table__.c.version_update_time.nullable is True
+    assert str(SkillInfo.__table__.c.version_update_time.type) == "TIMESTAMP"
+    assert "uq_skill_info_tenant_source_unique_id_active" not in {
+        item.name for item in SkillInfo.__table__.indexes
+    }
+
+
 def test_skill_name_partial_unique_indexes_exist_in_v240_migration():
     migration_sql = MIGRATION_PATH.read_text(encoding="utf-8")
 
@@ -62,3 +76,11 @@ def test_skill_name_partial_unique_indexes_exist_in_v240_migration():
     assert "WHERE tenant_id IS NULL AND delete_flag = 'N'" in migration_sql
     assert "GROUP BY tenant_id, skill_name" in migration_sql
     assert "GROUP BY skill_name" in migration_sql
+
+
+def test_skill_external_identity_migration_is_idempotent():
+    migration_sql = EXTERNAL_IDENTITY_MIGRATION_PATH.read_text(encoding="utf-8")
+
+    assert "ADD COLUMN IF NOT EXISTS unique_id VARCHAR(255)" in migration_sql
+    assert "ADD COLUMN IF NOT EXISTS version_update_time TIMESTAMPTZ" in migration_sql
+    assert "uq_skill_info_tenant_source_unique_id_active" not in migration_sql

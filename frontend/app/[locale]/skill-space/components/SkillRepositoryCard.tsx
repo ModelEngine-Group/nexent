@@ -3,7 +3,7 @@
 import type { ReactNode } from "react";
 import type { MenuProps } from "antd";
 import { Button, Dropdown, Tag } from "antd";
-import { Bot, Download, MoreHorizontal, PackageX } from "lucide-react";
+import { Download, MoreHorizontal, PackageX, Zap } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import {
@@ -67,7 +67,7 @@ export function SkillRepositoryCard({
       <div className="flex items-start justify-between gap-2">
         <div className="flex min-w-0 items-start gap-3">
           <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-            <Bot className="size-5" aria-hidden />
+            <Zap className="size-5" aria-hidden />
           </div>
           <div className="min-w-0">
             <h3 className="truncate text-base font-semibold text-slate-900 dark:text-slate-100">

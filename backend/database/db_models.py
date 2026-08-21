@@ -1681,7 +1681,13 @@ class SkillInfo(TableBase):
     config_values = Column(
         JSON, doc="Runtime parameter values from config/config.yaml")
     source = Column(String(30), nullable=False, default="official",
-                    doc="Skill source: official, custom, etc.")
+                    doc="Skill source: official, custom, modelscope, etc.")
+    unique_id = Column(String(255), nullable=True,
+                       doc="Stable skill identifier from an external source")
+    version_update_time = Column(
+        TIMESTAMP(timezone=True), nullable=True,
+        doc="External source update time captured when the skill was installed",
+    )
     group_ids = Column(String, doc="Skill group IDs list")
     ingroup_permission = Column(String(30), doc=_INGROUP_PERMISSION_DOC)
 

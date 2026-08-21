@@ -270,6 +270,14 @@ class SkillException(Exception):
     pass
 
 
+class ModelScopeSkillError(SkillException):
+    """Raised when the ModelScope Skill market cannot complete an operation."""
+
+
+class ModelScopeSkillNotFoundError(ModelScopeSkillError):
+    """Raised when a public ModelScope Skill cannot be found."""
+
+
 class QuotaExceededError(Exception):
     """Raised when tenant storage hard limit is exceeded during file upload."""
 

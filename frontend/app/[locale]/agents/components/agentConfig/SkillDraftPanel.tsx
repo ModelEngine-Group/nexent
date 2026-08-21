@@ -257,8 +257,13 @@ export default function SkillDraftPanel({
                 style={{ marginBottom: 10 }}
               >
                 <Select
+                  disabled
                   options={[
                     { label: t("skillPool.group.custom"), value: "custom" },
+                    {
+                      label: t("skillManagement.form.sourceModelScope"),
+                      value: "modelscope",
+                    },
                   ]}
                 />
               </Form.Item>

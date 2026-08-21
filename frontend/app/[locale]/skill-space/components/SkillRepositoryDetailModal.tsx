@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 import { Button, Empty, Modal, Spin } from "antd";
-import { Bot, CalendarDays, Download, UserRound } from "lucide-react";
+import { CalendarDays, Download, UserRound, Zap } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { StatusTag } from "./SkillRepositoryCard";
@@ -62,7 +62,7 @@ export function SkillRepositoryDetailModal({
         <div className={cn("space-y-6 pt-1", isFetching && "opacity-70")}>
           <header className="flex items-start gap-4 pr-8">
             <div className="flex size-14 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-              <Bot className="size-7" aria-hidden />
+              <Zap className="size-7" aria-hidden />
             </div>
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">

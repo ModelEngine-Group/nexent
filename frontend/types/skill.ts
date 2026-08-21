@@ -116,7 +116,55 @@ export type SkillCreationMode = "create" | "update";
 /**
  * Skill build tab type
  */
-export type SkillBuildTab = "interactive" | "upload";
+export type SkillBuildTab = "interactive" | "upload" | "market";
+
+export interface ModelScopeMarketSkill {
+  skill_id: string;
+  name: string;
+  description: string;
+  tags: string[];
+  category: string;
+  downloads: number;
+  likes: number;
+  license: string;
+  last_modified: string | null;
+  private: boolean;
+}
+
+export interface InstalledMarketSkill {
+  skill_id: number;
+  name?: string | null;
+  description?: string | null;
+  source?: string | null;
+  tags?: string[];
+  group_ids?: number[];
+  ingroup_permission?: "EDIT" | "READ_ONLY" | "PRIVATE" | null;
+  created_by?: string | null;
+  version_update_time?: string | null;
+  upstream_last_modified?: string | null;
+}
+
+export interface ModelScopeMarketListResponse {
+  items: ModelScopeMarketSkill[];
+  total_count: number;
+  page_number: number;
+  page_size: number;
+  has_next: boolean;
+}
+
+export interface ModelScopeSkillInstallPayload {
+  unique_id: string;
+  name: string;
+  description: string;
+  tags: string[];
+  group_ids?: number[];
+  ingroup_permission?: "EDIT" | "READ_ONLY" | "PRIVATE";
+}
+
+export interface ModelScopeSkillUpdatePayload {
+  skill_id: number;
+  unique_id: string;
+}
 
 /**
  * Skill file content for tabbed editing

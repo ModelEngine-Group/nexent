@@ -464,6 +464,11 @@ export const API_ENDPOINTS = {
     create: `${API_BASE_URL}/skills`,
     nl2skillRun: `${API_BASE_URL}/skills/nl2skill/run`,
     install: `${API_BASE_URL}/skills/install`,
+    marketList: `${API_BASE_URL}/skills/market/list`,
+    marketDetail: `${API_BASE_URL}/skills/market/detail`,
+    marketHubDetail: `${API_BASE_URL}/skills/market/hub-detail`,
+    marketInstall: `${API_BASE_URL}/skills/market/install`,
+    marketUpdate: `${API_BASE_URL}/skills/market/update`,
   },
   mcpTools: {
     // Community and Registry endpoints remain under /mcp-tools prefix

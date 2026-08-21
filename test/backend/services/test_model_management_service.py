@@ -1287,6 +1287,51 @@ async def test_list_models_for_tenant_exception():
         assert "Failed to retrieve model list" in str(exc.value)
 
 
+async def test_list_northbound_models_for_tenant_projects_fields():
+    svc = import_svc()
+
+    with mock.patch.object(
+        svc,
+        "list_models_for_tenant",
+        new=mock.AsyncMock(
+            return_value=[
+                {
+                    "model_id": 1,
+                    "model_name": "huggingface/llama",
+                    "model_type": "llm",
+                    "display_name": "LLaMA Model",
+                    "connect_status": "operational",
+                    "api_key": "secret",
+                },
+                {
+                    "model_id": 2,
+                    "model_name": "openai/clip",
+                    "model_type": "embedding",
+                    "display_name": "CLIP Model",
+                    "connect_status": "not_detected",
+                    "base_url": "https://example.com",
+                },
+            ]
+        ),
+    ):
+        out = await svc.list_northbound_models_for_tenant("t1")
+
+    assert out == [
+        {
+            "model_id": 1,
+            "model_name": "huggingface/llama",
+            "model_type": "llm",
+            "display_name": "LLaMA Model",
+        },
+        {
+            "model_id": 2,
+            "model_name": "openai/clip",
+            "model_type": "embedding",
+            "display_name": "CLIP Model",
+        },
+    ]
+
+
 async def test_list_llm_models_for_tenant_success():
     """Test list_llm_models_for_tenant returns filtered LLM models."""
     svc = import_svc()
