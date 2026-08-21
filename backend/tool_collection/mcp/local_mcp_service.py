@@ -1,18 +1,18 @@
 from fastmcp import FastMCP
 
-from tool_collection.mcp.nl2agent_mcp_service import (
-    NL2AGENT_MCP_TOOL_NAME_OVERRIDES,
-    nl2agent_mcp_service,
-)
+from tool_collection.mcp.nl2agent_mcp_service import nl2agent_mcp_service
+from tool_collection.mcp.nl2agent_mcp_tools import NL2A_MCP_TOOL_NAMES
 
-LOCAL_MCP_TOOL_NAME_OVERRIDES = dict(NL2AGENT_MCP_TOOL_NAME_OVERRIDES)
+LOCAL_MCP_TOOL_NAME_OVERRIDES = {
+    name: name
+    for name in NL2A_MCP_TOOL_NAMES
+}
 
 # Create MCP server
 local_mcp_service = FastMCP("local")
 local_mcp_service.mount(
     nl2agent_mcp_service,
     nl2agent_mcp_service.name,
-    tool_names=NL2AGENT_MCP_TOOL_NAME_OVERRIDES,
 )
 
 

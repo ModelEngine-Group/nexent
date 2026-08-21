@@ -41,11 +41,14 @@ from tool_collection.mcp.nl2agent_mcp_tools import (
     AgentDraftFields,
     InstalledMcpToolRecommendation,
     NL2AGENT_AGENT_ID_HEADER,
+    NL2A_MCP_LEGACY_TOOL_NAMES,
+    NL2A_MCP_TOOL_NAMES,
     RecommendResourcesOutput,
     RecommendedResource,
     ResourceCandidate,
     ResourceRequirement,
     ResourceSearchOutput,
+    SEARCH_UNINSTALLED_RESOURCES_NAME,
 )
 from utils.auth_utils import get_current_user_id
 from utils.config_utils import tenant_config_manager
@@ -423,12 +426,9 @@ async def _load_installed_resource_catalog(
         user_id=user_id,
     )
     internal_names = {
-        "search_installed_mcp_tools",
-        "search_installed_resources",
-        "search_uninstalled_resources",
-        "recommend_resources",
-        "save_agent_draft_fields",
-        "nl2a_wrapper",
+        *NL2A_MCP_LEGACY_TOOL_NAMES,
+        *NL2A_MCP_TOOL_NAMES,
+        SEARCH_UNINSTALLED_RESOURCES_NAME,
     }
     catalog: list[dict[str, Any]] = []
     for tool in tools:

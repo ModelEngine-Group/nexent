@@ -15,17 +15,49 @@ from utils.auth_utils import get_current_user_id
 
 logger = logging.getLogger(__name__)
 
-SEARCH_INSTALLED_MCP_TOOLS_NAME = "search_installed_mcp_tools"
-SEARCH_INSTALLED_RESOURCES_NAME = "search_installed_resources"
+NL2A_MCP_SERVICE_NAME = "nl2a"
+SEARCH_INSTALLED_MCP_TOOLS_LOCAL_NAME = "search_installed_mcp_tools"
+SEARCH_INSTALLED_RESOURCES_LOCAL_NAME = "search_installed_resources"
 SEARCH_UNINSTALLED_RESOURCES_NAME = "search_uninstalled_resources"
-RECOMMEND_RESOURCES_NAME = "recommend_resources"
-SAVE_AGENT_DRAFT_FIELDS_NAME = "save_agent_draft_fields"
-NL2A_WRAPPER_NAME = "nl2a_wrapper"
+RECOMMEND_RESOURCES_LOCAL_NAME = "recommend_resources"
+SAVE_AGENT_DRAFT_FIELDS_LOCAL_NAME = "save_agent_draft_fields"
+NL2A_WRAPPER_LOCAL_NAME = "wrapper"
+NL2A_MCP_LOCAL_TOOL_NAMES = (
+    SEARCH_INSTALLED_MCP_TOOLS_LOCAL_NAME,
+    SEARCH_INSTALLED_RESOURCES_LOCAL_NAME,
+    RECOMMEND_RESOURCES_LOCAL_NAME,
+    SAVE_AGENT_DRAFT_FIELDS_LOCAL_NAME,
+    NL2A_WRAPPER_LOCAL_NAME,
+)
+(
+    SEARCH_INSTALLED_MCP_TOOLS_NAME,
+    SEARCH_INSTALLED_RESOURCES_NAME,
+    RECOMMEND_RESOURCES_NAME,
+    SAVE_AGENT_DRAFT_FIELDS_NAME,
+    NL2A_WRAPPER_NAME,
+) = tuple(
+    f"{NL2A_MCP_SERVICE_NAME}_{name}"
+    for name in NL2A_MCP_LOCAL_TOOL_NAMES
+)
+NL2A_MCP_TOOL_NAMES = (
+    SEARCH_INSTALLED_MCP_TOOLS_NAME,
+    SEARCH_INSTALLED_RESOURCES_NAME,
+    RECOMMEND_RESOURCES_NAME,
+    SAVE_AGENT_DRAFT_FIELDS_NAME,
+    NL2A_WRAPPER_NAME,
+)
+NL2A_MCP_LEGACY_TOOL_NAMES = (
+    SEARCH_INSTALLED_MCP_TOOLS_LOCAL_NAME,
+    SEARCH_INSTALLED_RESOURCES_LOCAL_NAME,
+    RECOMMEND_RESOURCES_LOCAL_NAME,
+    SAVE_AGENT_DRAFT_FIELDS_LOCAL_NAME,
+    NL2A_WRAPPER_NAME,
+)
 NL2AGENT_AGENT_ID_HEADER = "X-Nexent-NL2Agent-Agent-ID"
 SEARCH_INSTALLED_MCP_TOOLS_DESCRIPTION = (
     "Search the current tenant's installed and available MCP tools using keywords. "
     "Returns JSON text ordered by relevance. Decode the result with json.loads "
-    "before passing it to nl2a_wrapper, preserve the decoded content unchanged, "
+    f"before passing it to {NL2A_WRAPPER_NAME}, preserve the decoded content unchanged, "
     "and use print(result) to expose the decoded observation."
 )
 SEARCH_INSTALLED_RESOURCES_DESCRIPTION = (
@@ -33,28 +65,28 @@ SEARCH_INSTALLED_RESOURCES_DESCRIPTION = (
     "for a structured set of capability requirements. Return no more than 12 "
     "ranked candidates as JSON text. Decode the result with json.loads before "
     "indexing it, and preserve the decoded candidates unchanged when calling "
-    "recommend_resources."
+    f"{RECOMMEND_RESOURCES_NAME}."
 )
 RECOMMEND_RESOURCES_DESCRIPTION = (
     "Resolve installed resource candidates into verified binding-card details. "
-    "Pass the unchanged candidates returned by search_installed_resources and a "
+    f"Pass the unchanged candidates returned by {SEARCH_INSTALLED_RESOURCES_NAME} and a "
     "unique recommended_refs subset. The result is JSON text; decode it with "
     "json.loads, reuse the current agent_id, then pass the decoded "
-    "dictionary unchanged to nl2a_wrapper with subtype installed_resource_binding."
+    f"dictionary unchanged to {NL2A_WRAPPER_NAME} with subtype installed_resource_binding."
 )
 NL2A_WRAPPER_DESCRIPTION = (
     "Build one NL2Agent output for the existing draft. Always pass the current "
     "`agent_id` and `subtype`. For `requirement_clarification`, pass structured "
     "`questions`. For `installed_resource_binding`, pass `agent_id` and "
     "the verified `resource_result`. JSON parameters must be decoded dictionaries, "
-    "never raw JSON strings. Call the tool as `result = nl2a_wrapper(...)`, "
+    f"never raw JSON strings. Call the tool as `result = {NL2A_WRAPPER_NAME}(...)`, "
     "then use `print(result)`."
 )
 SAVE_AGENT_DRAFT_FIELDS_DESCRIPTION = (
     "Partially update the current tenant's existing ordinary agent draft. "
     "Always pass the current agent_id and only whitelisted description or Prompt "
     "fields, never null. Never update name or display_name. Call the tool as "
-    "`result = save_agent_draft_fields(...)`, then use `print(result)` exactly once."
+    f"`result = {SAVE_AGENT_DRAFT_FIELDS_NAME}(...)`, then use `print(result)` exactly once."
 )
 NL2AGENT_MCP_TOOL_META = {"nexent_internal": True}
 MAX_BINDING_CANDIDATES = 12
