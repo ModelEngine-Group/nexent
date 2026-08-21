@@ -2009,7 +2009,7 @@ export default function AgentImportWizard({
                   <Space direction="vertical" size={8}>
                     <Radio value="rename">
                       {t("market.install.skillDuplicate.rename", "Install as a new skill")}
-                      <span className="ml-2 text-xs text-gray-500">
+                      <span className="ml-2 text-sm text-gray-700 dark:text-gray-300">
                         {t("market.install.skillDuplicate.renameTarget", {
                           name: conflict.suggested_new_name,
                           defaultValue: `New name: ${conflict.suggested_new_name}`,
