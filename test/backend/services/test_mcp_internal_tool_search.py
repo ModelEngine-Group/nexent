@@ -16,23 +16,30 @@ from tool_collection.mcp.local_mcp_service import (
     local_mcp_service,
 )
 from tool_collection.mcp.nl2agent_mcp_service import (
-    NL2AGENT_MCP_TOOL_NAME_OVERRIDES,
     nl2agent_mcp_service,
 )
 from tool_collection.mcp.nl2agent_mcp_tools import (
     NL2AGENT_AGENT_ID_HEADER,
     NL2AGENT_MCP_TOOL_META,
+    NL2A_MCP_LOCAL_TOOL_NAMES,
+    NL2A_MCP_SERVICE_NAME,
+    NL2A_MCP_TOOL_NAMES,
     NL2A_WRAPPER_DESCRIPTION,
+    NL2A_WRAPPER_LOCAL_NAME,
     NL2A_WRAPPER_NAME,
     RecommendResourcesOutput,
     RECOMMEND_RESOURCES_DESCRIPTION,
+    RECOMMEND_RESOURCES_LOCAL_NAME,
     RECOMMEND_RESOURCES_NAME,
     RequirementClarificationQuestion,
     SEARCH_INSTALLED_MCP_TOOLS_DESCRIPTION,
+    SEARCH_INSTALLED_MCP_TOOLS_LOCAL_NAME,
     SEARCH_INSTALLED_MCP_TOOLS_NAME,
     SEARCH_INSTALLED_RESOURCES_DESCRIPTION,
+    SEARCH_INSTALLED_RESOURCES_LOCAL_NAME,
     SEARCH_INSTALLED_RESOURCES_NAME,
     SAVE_AGENT_DRAFT_FIELDS_DESCRIPTION,
+    SAVE_AGENT_DRAFT_FIELDS_LOCAL_NAME,
     SAVE_AGENT_DRAFT_FIELDS_NAME,
     nl2a_wrapper,
     recommend_resources,
@@ -233,14 +240,8 @@ async def test_mcp_search_returns_sanitized_contract_errors(mocker):
 async def test_nl2agent_mcp_service_owns_only_nl2agent_tools():
     registered_tools = await nl2agent_mcp_service.get_tools()
 
-    assert NL2AGENT_MCP_TOOL_NAME_OVERRIDES == {
-        SEARCH_INSTALLED_MCP_TOOLS_NAME: SEARCH_INSTALLED_MCP_TOOLS_NAME,
-        SEARCH_INSTALLED_RESOURCES_NAME: SEARCH_INSTALLED_RESOURCES_NAME,
-        RECOMMEND_RESOURCES_NAME: RECOMMEND_RESOURCES_NAME,
-        SAVE_AGENT_DRAFT_FIELDS_NAME: SAVE_AGENT_DRAFT_FIELDS_NAME,
-        NL2A_WRAPPER_NAME: NL2A_WRAPPER_NAME,
-    }
-    assert set(registered_tools) == set(NL2AGENT_MCP_TOOL_NAME_OVERRIDES)
+    assert nl2agent_mcp_service.name == NL2A_MCP_SERVICE_NAME
+    assert set(registered_tools) == set(NL2A_MCP_LOCAL_TOOL_NAMES)
     assert all(
         tool.meta == NL2AGENT_MCP_TOOL_META
         for tool in registered_tools.values()
@@ -264,20 +265,23 @@ async def test_mcp_search_registration_has_stable_name_schema_and_marker():
     save_tool = mounted_tools[SAVE_AGENT_DRAFT_FIELDS_NAME]
 
     assert LOCAL_MCP_TOOL_NAME_OVERRIDES == {
-        SEARCH_INSTALLED_MCP_TOOLS_NAME: SEARCH_INSTALLED_MCP_TOOLS_NAME,
-        SEARCH_INSTALLED_RESOURCES_NAME: SEARCH_INSTALLED_RESOURCES_NAME,
-        RECOMMEND_RESOURCES_NAME: RECOMMEND_RESOURCES_NAME,
-        SAVE_AGENT_DRAFT_FIELDS_NAME: SAVE_AGENT_DRAFT_FIELDS_NAME,
-        NL2A_WRAPPER_NAME: NL2A_WRAPPER_NAME,
+        name: name
+        for name in NL2A_MCP_TOOL_NAMES
     }
-    assert LOCAL_MCP_TOOL_NAME_OVERRIDES == NL2AGENT_MCP_TOOL_NAME_OVERRIDES
     assert set(local_tools) == {
-        *NL2AGENT_MCP_TOOL_NAME_OVERRIDES,
+        *NL2A_MCP_TOOL_NAMES,
         "test_tool_name",
     }
-    assert f"nl2agent_{SEARCH_INSTALLED_MCP_TOOLS_NAME}" not in local_tools
+    assert set(mounted_tools) == {
+        *NL2A_MCP_TOOL_NAMES,
+        "local_test_tool_name",
+    }
+    assert SEARCH_INSTALLED_MCP_TOOLS_LOCAL_NAME not in local_tools
+    assert SEARCH_INSTALLED_RESOURCES_LOCAL_NAME not in local_tools
+    assert RECOMMEND_RESOURCES_LOCAL_NAME not in local_tools
+    assert SAVE_AGENT_DRAFT_FIELDS_LOCAL_NAME not in local_tools
     assert f"local_{SEARCH_INSTALLED_MCP_TOOLS_NAME}" not in mounted_tools
-    assert tool.name == SEARCH_INSTALLED_MCP_TOOLS_NAME
+    assert tool.name == SEARCH_INSTALLED_MCP_TOOLS_LOCAL_NAME
     assert set(tool.parameters["properties"]) == {"keywords"}
     assert tool.parameters["properties"]["keywords"]["type"] == "array"
     assert tool.parameters["properties"]["keywords"]["items"]["type"] == "string"
@@ -286,6 +290,7 @@ async def test_mcp_search_registration_has_stable_name_schema_and_marker():
     assert "print(result)" in tool.description
     assert tool.description == SEARCH_INSTALLED_MCP_TOOLS_DESCRIPTION
     assert resource_search_tool.description == SEARCH_INSTALLED_RESOURCES_DESCRIPTION
+    assert resource_search_tool.name == SEARCH_INSTALLED_RESOURCES_LOCAL_NAME
     assert set(resource_search_tool.parameters["properties"]) == {
         "requirements",
         "agent_id",
@@ -295,6 +300,7 @@ async def test_mcp_search_registration_has_stable_name_schema_and_marker():
         "requirements",
     ]
     assert recommend_tool.description == RECOMMEND_RESOURCES_DESCRIPTION
+    assert recommend_tool.name == RECOMMEND_RESOURCES_LOCAL_NAME
     assert set(recommend_tool.parameters["properties"]) == {
         "candidates",
         "recommended_refs",
@@ -305,10 +311,11 @@ async def test_mcp_search_registration_has_stable_name_schema_and_marker():
         "candidates",
         "recommended_refs",
     ]
-    assert wrapper_tool.name == NL2A_WRAPPER_NAME
+    assert wrapper_tool.name == NL2A_WRAPPER_LOCAL_NAME
     assert wrapper_tool.description == NL2A_WRAPPER_DESCRIPTION
     assert wrapper_tool.meta == NL2AGENT_MCP_TOOL_META
     assert save_tool.description == SAVE_AGENT_DRAFT_FIELDS_DESCRIPTION
+    assert save_tool.name == SAVE_AGENT_DRAFT_FIELDS_LOCAL_NAME
     assert save_tool.parameters["required"] == ["agent_id", "fields"]
     assert set(save_tool.parameters["properties"]) == {"agent_id", "fields"}
     assert wrapper_tool.parameters["required"] == ["subtype", "agent_id"]

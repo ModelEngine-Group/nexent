@@ -15,6 +15,7 @@ from services.nl2agent_service import (
     Nl2AgentResourceError,
     _Nl2AgentBoundaryObserver,
     _build_verified_bound_resources_context,
+    _load_installed_resource_catalog,
     _normalize_skill_config,
     _normalize_tool_config,
     _resource_similarity,
@@ -29,6 +30,8 @@ from services.nl2agent_service import (
 from tool_collection.mcp.nl2agent_mcp_tools import (
     AgentDraftFields,
     NL2AGENT_AGENT_ID_HEADER,
+    NL2A_MCP_LEGACY_TOOL_NAMES,
+    NL2A_MCP_TOOL_NAMES,
     ResourceCandidate,
     ResourceRequirement,
 )
@@ -494,6 +497,26 @@ async def test_search_installed_resources_covers_visible_tools_and_skills(mocker
                     "source": "langchain",
                     "is_available": True,
                 },
+                {
+                    "tool_id": 10,
+                    "name": "wrapper",
+                    "description": "Wrap arbitrary text",
+                    "source": "local",
+                    "is_available": True,
+                },
+                *[
+                    {
+                        "tool_id": tool_id,
+                        "name": name,
+                        "description": "Internal NL2Agent tool",
+                        "source": "local",
+                        "is_available": True,
+                    }
+                    for tool_id, name in enumerate(
+                        (*NL2A_MCP_LEGACY_TOOL_NAMES, *NL2A_MCP_TOOL_NAMES),
+                        start=20,
+                    )
+                ],
             ]
         ),
     )
@@ -510,6 +533,12 @@ async def test_search_installed_resources_covers_visible_tools_and_skills(mocker
             }
         ],
     )
+
+    catalog = await _load_installed_resource_catalog(
+        tenant_id="tenant-a",
+        user_id="user-a",
+    )
+    assert "wrapper" in {item["name"] for item in catalog}
 
     result = await search_installed_resources_impl(
         requirements=[

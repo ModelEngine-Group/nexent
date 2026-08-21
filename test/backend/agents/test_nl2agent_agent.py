@@ -147,6 +147,16 @@ def test_build_nl2agent_system_prompt_falls_back_to_chinese():
     assert build_nl2agent_system_prompt("fr") == build_nl2agent_system_prompt("zh")
 
 
+@pytest.mark.parametrize("language", ["zh", "en"])
+def test_build_nl2agent_system_prompt_uses_mounted_tool_names(language):
+    prompt = build_nl2agent_system_prompt(language)
+
+    assert f"raw_result = {SEARCH_INSTALLED_RESOURCES_NAME}(" in prompt
+    assert f"raw_resource_result = {RECOMMEND_RESOURCES_NAME}(" in prompt
+    assert f"saved = {SAVE_AGENT_DRAFT_FIELDS_NAME}(" in prompt
+    assert f"wrapped = {NL2A_WRAPPER_NAME}(" in prompt
+
+
 def test_build_nl2agent_system_prompt_rejects_unknown_template_variables(mocker):
     prompt_loader = mocker.patch(
         "agents.nl2agent_agent.get_prompt_template",
