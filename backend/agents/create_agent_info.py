@@ -3,7 +3,10 @@ import copy
 import json
 import logging
 import os
+import re
 import threading
+import uuid
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import urljoin
 
@@ -64,6 +67,7 @@ from utils.automation_tool_prompt import build_automation_tool_policy
 from utils.context_utils import build_context_inputs
 from utils.redis_utils import get_redis_client
 from consts.const import (
+    AGENT_WORKSPACE_ROOT,
     AIDP_API_KEY,
     AIDP_SERVER_URL,
     AIDP_TENANT_ID,
@@ -72,6 +76,7 @@ from consts.const import (
     LOCAL_MCP_SERVER,
     MINIO_DEFAULT_BUCKET,
     MODEL_CONFIG_MAPPING,
+    NEXENT_SANDBOX_WORKSPACE_VOLUME,
 )
 from consts.model import ToolParamsRequest
 from consts.exceptions import ValidationError
@@ -494,6 +499,36 @@ def _build_internal_s3_url(file: dict) -> str:
     return "s3:/" + url
 
 
+def _safe_workspace_segment(value: Any, fallback: str) -> str:
+    """Return a filesystem-safe user path segment."""
+    normalized = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(value or "")).strip("._")
+    return normalized or fallback
+
+
+def _build_run_workspace(user_id: str, run_id: str) -> str:
+    """Build an isolated workspace path without creating persistent state yet."""
+    root = Path(AGENT_WORKSPACE_ROOT).resolve()
+    return str(
+        root
+        / _safe_workspace_segment(user_id, "anonymous")
+        / run_id
+    )
+
+
+def _validate_run_minio_files(
+    minio_files: Optional[List[Dict[str, Any]]],
+    user_id: str,
+    tenant_id: str,
+) -> None:
+    """Authorize every current-request MinIO object with the canonical backend policy."""
+    urls = [
+        url
+        for item in (minio_files or [])
+        if isinstance(item, dict) and (url := _build_internal_s3_url(item))
+    ]
+    validate_urls_access(urls, user_id, tenant_id)
+
+
 def _get_skills_for_template(
     agent_id: int,
     tenant_id: str,
@@ -677,7 +712,8 @@ def _get_external_a2a_agents(
 def _get_skill_script_tools(
     agent_id: int,
     tenant_id: str,
-    version_no: int = 0
+    version_no: int = 0,
+    runtime_file_context: Optional[Dict[str, Any]] = None,
 ) -> List[ToolConfig]:
     """Get tool config for skill script execution and skill reading.
 
@@ -696,23 +732,7 @@ def _get_skill_script_tools(
         "tenant_id": tenant_id,
         "version_no": version_no,
     }
-
-    skill_config_values: Dict[str, Dict[str, Any]] = {}
-    try:
-        from services.skill_service import SkillService
-
-        enabled_skills = SkillService(tenant_id=tenant_id).get_enabled_skills_for_agent(
-            agent_id=agent_id,
-            tenant_id=tenant_id,
-            version_no=version_no,
-        )
-        skill_config_values = {
-            skill.get("name", ""): dict(skill.get("config_values") or {})
-            for skill in enabled_skills
-            if skill.get("name")
-        }
-    except Exception as exc:
-        logger.debug("Failed to resolve effective skill configuration: %s", exc)
+    file_context = dict(runtime_file_context or {})
 
     skill_config_values: Dict[str, Dict[str, Any]] = {}
     try:
@@ -739,7 +759,10 @@ def _get_skill_script_tools(
                 description="Execute a skill script with given parameters. Use this to run Python or shell scripts that are part of a skill.",
                 inputs='{"skill_name": "str", "script_path": "str", "params": "dict"}',
                 output_type="string",
-                params={"local_skills_dir": CONTAINER_SKILLS_PATH},
+                params={
+                    "local_skills_dir": CONTAINER_SKILLS_PATH,
+                    "workspace_path": file_context.get("workspace_path"),
+                },
                 source="builtin",
                 usage="builtin",
                 metadata=skill_context,
@@ -779,7 +802,50 @@ def _get_skill_script_tools(
                 source="builtin",
                 usage="builtin",
                 metadata=skill_context,
-            )
+            ),
+            ToolConfig(
+                class_name="DownloadFromS3Tool",
+                name="download_from_s3",
+                description=(
+                    "Download an authorized S3/MinIO object into this run's isolated workspace. "
+                    "Files uploaded with the current request are downloaded automatically."
+                ),
+                inputs=json.dumps({
+                    "s3_path": {"type": "string", "description": "Authorized S3/MinIO path"},
+                    "local_filename": {
+                        "type": "string",
+                        "description": "Optional path relative to the run workspace",
+                        "nullable": True,
+                    },
+                }),
+                output_type="string",
+                params={"workspace_path": file_context.get("workspace_path", "/mnt/nexent/workdir")},
+                source="builtin",
+                usage="builtin",
+                metadata=file_context,
+            ),
+            ToolConfig(
+                class_name="UploadToS3Tool",
+                name="upload_to_s3",
+                description=(
+                    "Upload a generated file from this run's isolated workspace to MinIO and "
+                    "return frontend-compatible download metadata. Remaining output files are "
+                    "uploaded automatically when the run finishes."
+                ),
+                inputs=json.dumps({
+                    "file_path": {"type": "string", "description": "Path inside the run workspace"},
+                    "target_filename": {
+                        "type": "string",
+                        "description": "Optional output filename",
+                        "nullable": True,
+                    },
+                }),
+                output_type="string",
+                params={"workspace_path": file_context.get("workspace_path", "/mnt/nexent/workdir")},
+                source="builtin",
+                usage="builtin",
+                metadata=file_context,
+            ),
         ]
     except Exception as e:
         logger.warning(f"Failed to load skill script tool: {e}")
@@ -900,6 +966,7 @@ async def create_agent_config(
     automation_model_id: Optional[int] = None,
     automation_has_attachments: bool = False,
     runtime_knowledge_context: Optional[Dict[str, str]] = None,
+    runtime_file_context: Optional[Dict[str, Any]] = None,
 ):
     normalized_tool_params = _normalize_tool_params_request(tool_params)
     agent_info = search_agent_info_by_agent_id(
@@ -929,6 +996,7 @@ async def create_agent_config(
             conversation_id=conversation_id,
             include_automation_tool=False,
             runtime_knowledge_context=runtime_knowledge_context,
+            runtime_file_context=runtime_file_context,
         )
         managed_agents.append(sub_agent_config)
 
@@ -1202,7 +1270,12 @@ async def create_agent_config(
     skills = _get_skills_for_template(agent_id, tenant_id, version_no)
 
     is_manager = len(managed_agents) > 0 or len(external_a2a_agents) > 0
-    builtin_tools = _get_skill_script_tools(agent_id, tenant_id, version_no)
+    builtin_tools = _get_skill_script_tools(
+        agent_id,
+        tenant_id,
+        version_no,
+        runtime_file_context=runtime_file_context,
+    )
     available_tools = tool_list + builtin_tools
 
     _inject_plan_tools(available_tools, enable_planning)
@@ -1732,6 +1805,12 @@ async def create_tool_config_list(
                 "storage_client": minio_client,
                 "validate_url_access": lambda urls: validate_urls_access(urls, user_id)
             }
+        elif tool_config.class_name in ["DownloadFromS3Tool", "UploadToS3Tool"]:
+            tool_config.metadata = {
+                "minio_client": minio_client,
+                "user_id": user_id,
+                "tenant_id": tenant_id,
+            }
 
         tool_config_list.append(tool_config)
 
@@ -2005,6 +2084,18 @@ async def create_agent_run_info(
     enable_automation_tool: bool = True,
     runtime_knowledge_context: Optional[Dict[str, str]] = None,
 ):
+    workspace_run_id = uuid.uuid4().hex
+    workspace_path = _build_run_workspace(user_id, workspace_run_id)
+    _validate_run_minio_files(minio_files, user_id, tenant_id)
+    runtime_file_context = {
+        "workspace_path": workspace_path,
+        "minio_client": minio_client,
+        "user_id": user_id,
+        "tenant_id": tenant_id,
+        "run_id": workspace_run_id,
+        "validate_url_access": lambda urls: validate_urls_access(urls, user_id, tenant_id),
+    }
+
     # Determine which version_no to use based on is_debug flag
     # If is_debug=false, use the current published version (current_version_no)
     # If is_debug=true, use version 0 (draft/editing state)
@@ -2034,6 +2125,7 @@ async def create_agent_run_info(
         "version_no": version_no,
         "conversation_id": conversation_id,
         "enable_planning": enable_planning,
+        "runtime_file_context": runtime_file_context,
     }
     if runtime_knowledge_context is not None:
         create_config_kwargs["runtime_knowledge_context"] = runtime_knowledge_context
@@ -2106,7 +2198,26 @@ async def create_agent_run_info(
     agent_db_policy = getattr(agent_config, "sandbox_policy", None)
     merged_policy = sandbox_policy if sandbox_policy else agent_db_policy
     sandbox_config = SandboxConfig.from_dict(merged_policy) if merged_policy else None
-    minio_client = get_sandbox_minio_client() if sandbox_config and sandbox_config.auto_sync_outputs else None
+    sandbox_minio_client = (
+        get_sandbox_minio_client()
+        if sandbox_config and sandbox_config.auto_sync_outputs
+        else None
+    )
+    if sandbox_config is not None:
+        sandbox_config.output_dir = str(Path(workspace_path) / "outputs")
+        sandbox_config.extra_kwargs = {
+            **sandbox_config.extra_kwargs,
+            "workspace_root": str(Path(AGENT_WORKSPACE_ROOT).resolve()),
+            "workspace_path": workspace_path,
+        }
+        if (
+            getattr(sandbox_config.level, "value", sandbox_config.level) == "docker"
+            and getattr(sandbox_config.scope, "value", sandbox_config.scope) == "system"
+        ):
+            sandbox_config.extra_kwargs.update({
+                "workspace_volume_name": NEXENT_SANDBOX_WORKSPACE_VOLUME,
+                "shared_workspace": True,
+            })
 
     agent_run_info = AgentRunInfo(
         query=final_query,
@@ -2123,7 +2234,11 @@ async def create_agent_run_info(
             None,
         ),
         sandbox_config=sandbox_config,
-        minio_client=minio_client,
+        minio_client=sandbox_minio_client,
+        workspace_path=workspace_path,
+        workspace_run_id=workspace_run_id,
+        tenant_id=tenant_id,
+        minio_files=minio_files,
         redis_client=get_redis_client(),
     )
     return agent_run_info

@@ -357,7 +357,7 @@ type MinioFilePayload = UploadedAttachmentMeta & {
   presigned_url?: string;
 };
 
-interface SkillFileUpload {
+interface FileUpload {
   file_name?: string;
   name?: string;
   object_name?: string;
@@ -368,6 +368,7 @@ interface SkillFileUpload {
   mime_type?: string;
   type?: string;
   file_size?: number;
+  file_size_bytes?: number;
   size?: number;
 }
 
@@ -440,52 +441,54 @@ function extractMinioFiles(
   return files;
 }
 
-function parseSkillFileAttachments(
+function parseFileAttachments(
   content: string,
   messageId: string
 ): CompleteAttachment[] {
   try {
     const payload = JSON.parse(content) as {
-      skill_file_uploads?: SkillFileUpload[];
+      file_uploads?: FileUpload[];
+      skill_file_uploads?: FileUpload[];
     };
-    if (!Array.isArray(payload.skill_file_uploads)) return [];
+    const fileUploads = Array.isArray(payload.file_uploads)
+      ? payload.file_uploads
+      : payload.skill_file_uploads;
+    if (!Array.isArray(fileUploads)) return [];
 
-    const attachments: CompleteAttachment[] = payload.skill_file_uploads.map(
-      (file, index) => {
-        const name = file.file_name || file.name || "Generated file";
-        const contentType =
-          file.mime_type || file.type || "application/octet-stream";
-        const url = file.preview_url || file.presigned_url || file.url;
+    const attachments: CompleteAttachment[] = fileUploads.map((file, index) => {
+      const name = file.file_name || file.name || "Generated file";
+      const contentType =
+        file.mime_type || file.type || "application/octet-stream";
+      const url = file.preview_url || file.presigned_url || file.url;
 
-        return {
-          id: `${messageId}-skill-file-${index}`,
-          status: { type: "complete" as const },
-          type: "file" as const,
-          name,
-          contentType,
-          content: url
-            ? [
-                {
-                  type: "file" as const,
-                  filename: name,
-                  data: url,
-                  mimeType: contentType,
-                },
-              ]
-            : [],
-          object_name: file.object_name,
-          preview_url: file.preview_url || file.presigned_url,
-          download_url: file.download_url,
-          url: file.url,
-          presigned_url: file.presigned_url,
-          size: file.file_size ?? file.size,
-        } as unknown as CompleteAttachment;
-      }
-    );
+      return {
+        id: `${messageId}-skill-file-${index}`,
+        status: { type: "complete" as const },
+        type: "file" as const,
+        name,
+        contentType,
+        content: url
+          ? [
+              {
+                type: "file" as const,
+                filename: name,
+                data: url,
+                mimeType: contentType,
+              },
+            ]
+          : [],
+        object_name: file.object_name,
+        preview_url: file.preview_url || file.presigned_url,
+        download_url: file.download_url,
+        url: file.url,
+        presigned_url: file.presigned_url,
+        size: file.file_size ?? file.file_size_bytes ?? file.size,
+      } as unknown as CompleteAttachment;
+    });
 
     return attachments;
   } catch (error) {
-    log.warn("[ChatModelAdapter] Failed to parse skill_file_uploads:", error);
+    log.warn("[ChatModelAdapter] Failed to parse file_uploads:", error);
     return [];
   }
 }
@@ -554,7 +557,7 @@ function extractAgentRunTime(content: string): string | undefined {
  * | memory_search                | text         | Memory search status               |
  * | max_steps_reached            | text         | Max steps limit reached            |
  * | verification                  | text         | ReAct self-verification status     |
- * | skill_file_uploads                  | (attachment) | Skill file upload completion       |
+ * | files                        | (attachment) | File upload completion             |
  * | token_count                  | (internal)   | Token usage data for timing        |
  * | conversation_created          | (skipped)    | Internal event, not surfaced       |
  * | status                       | (skipped)    | Internal status, not surfaced       |
@@ -603,7 +606,8 @@ function mapChunkType(type: string): AssistantPartType | null {
     case "parse":
     case "card":
     case "nl2a":
-    case "skill_files":
+    case "files":
+    case "skill_files": // Backward compatibility during rolling upgrades
     case "memory_search":
     case "plan":
     case "plan_step_update":
@@ -1726,10 +1730,10 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             continue;
           }
 
-          if (chunk.type === "skill_files") {
+          if (chunk.type === "files" || chunk.type === "skill_files") {
             skillFileAttachments = [
               ...skillFileAttachments,
-              ...parseSkillFileAttachments(chunk.content, messageId),
+              ...parseFileAttachments(chunk.content, messageId),
             ];
             skillFileUploadsRegistry.set(messageId, skillFileAttachments);
             flushOpenReasoning();
@@ -2115,10 +2119,10 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
               });
               yield buildStreamResult(contentParts);
             }
-          } else if (chunk.type === "skill_files") {
+          } else if (chunk.type === "files" || chunk.type === "skill_files") {
             skillFileAttachments = [
               ...skillFileAttachments,
-              ...parseSkillFileAttachments(chunk.content, messageId),
+              ...parseFileAttachments(chunk.content, messageId),
             ];
             skillFileUploadsRegistry.set(messageId, skillFileAttachments);
             contentParts.push({

@@ -340,6 +340,10 @@ def test_agent_run_thread_local_flow(basic_agent_run_info, monkeypatch):
         minio_client=None,
         conversation_id=basic_agent_run_info.conversation_id,
         user_id=basic_agent_run_info.user_id,
+        tenant_id=None,
+        workspace_path=None,
+        workspace_run_id=None,
+        minio_files=None,
     )
 
     # Following methods on the NexentAgent instance should be invoked
@@ -445,6 +449,10 @@ def test_agent_run_thread_mcp_flow(basic_agent_run_info, mock_memory_context, mo
         minio_client=None,
         conversation_id=basic_agent_run_info.conversation_id,
         user_id=basic_agent_run_info.user_id,
+        tenant_id=None,
+        workspace_path=None,
+        workspace_run_id=None,
+        minio_files=None,
     )
 
     # Subsequent calls on NexentAgent instance should mirror the local flow
