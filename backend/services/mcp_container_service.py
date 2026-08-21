@@ -184,16 +184,23 @@ class MCPContainerManager:
             # Load image from tar file
             image_name = await self.load_image_from_tar_file(tar_file_path)
 
-            # Start container with the loaded image
+            # Start container with the loaded image. Keep the default
+            # readiness behavior implicit for compatibility with older
+            # adapters, while still forwarding an explicit opt-out.
+            start_kwargs = {
+                "service_name": service_name,
+                "tenant_id": tenant_id,
+                "user_id": user_id,
+                "env_vars": env_vars,
+                "host_port": host_port,
+                "image": image_name,
+                "full_command": full_command,
+            }
+            if not wait_for_ready:
+                start_kwargs["wait_for_ready"] = False
+
             return await self.start_mcp_container(
-                service_name=service_name,
-                tenant_id=tenant_id,
-                user_id=user_id,
-                env_vars=env_vars,
-                host_port=host_port,
-                image=image_name,
-                full_command=full_command,
-                wait_for_ready=wait_for_ready,
+                **start_kwargs,
             )
 
         except Exception as e:

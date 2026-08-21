@@ -250,6 +250,7 @@ class TestGetMcpMarketRecords:
 
         query = MockQuery(rows)
         query.count = lambda: 5
+        query.offset = lambda value: query
         session = MockSession()
         session.query = lambda *args: query
         mock_session.return_value = session
