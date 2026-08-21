@@ -158,14 +158,14 @@ class ModelScopeSkillService:
     def get_market_skill_detail(
         self,
         *,
-        skill_id: str,
+        unique_id: str,
         source: str,
         user_id: str,
         tenant_id: str,
     ) -> dict[str, Any]:
         """Return a locally installed market skill record, or {} if absent."""
         record = skill_db.get_skill_by_unique_id_and_owner(
-            unique_id=skill_id,
+            unique_id=unique_id,
             source=source,
             created_by=user_id,
             tenant_id=tenant_id,
@@ -173,24 +173,6 @@ class ModelScopeSkillService:
         if not record:
             return {}
         return dict(record)
-
-    def get_upstream_last_modified(self, unique_id: str) -> str | None:
-        """Fetch upstream last_modified for a ModelScope skill, or None if unavailable."""
-        normalized_id = unique_id.strip()
-        if not normalized_id:
-            return None
-        try:
-            upstream = self.adapter.get_skill(normalized_id)
-            return upstream.get("last_modified")
-        except ModelScopeSkillNotFoundError:
-            return None
-        except Exception:
-            logger.warning(
-                "Failed to fetch upstream ModelScope Skill metadata for %s",
-                normalized_id,
-                exc_info=True,
-            )
-            return None
 
     def _download_skill_snapshot(
         self,

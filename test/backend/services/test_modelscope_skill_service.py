@@ -376,7 +376,7 @@ def test_get_market_skill_detail_returns_empty_when_not_installed(
     adapter = MagicMock()
 
     result = _service(tmp_path, adapter).get_market_skill_detail(
-        skill_id="@owner/missing",
+        unique_id="@owner/missing",
         source="modelscope",
         user_id="user-a",
         tenant_id="tenant-a",
@@ -404,7 +404,7 @@ def test_get_market_skill_detail_returns_local_record_without_upstream(
     adapter = MagicMock()
 
     result = _service(tmp_path, adapter).get_market_skill_detail(
-        skill_id="@owner/demo",
+        unique_id="@owner/demo",
         source="modelscope",
         user_id="user-a",
         tenant_id="tenant-a",
@@ -412,28 +412,6 @@ def test_get_market_skill_detail_returns_local_record_without_upstream(
 
     assert result == local_record
     assert "upstream_last_modified" not in result
-    adapter.get_skill.assert_not_called()
-
-
-def test_get_upstream_last_modified_returns_hub_timestamp(tmp_path):
-    adapter = MagicMock()
-    adapter.get_skill.return_value = {
-        "skill_id": "@owner/demo",
-        "last_modified": "2026-08-07T06:37:46Z",
-    }
-
-    result = _service(tmp_path, adapter).get_upstream_last_modified("@owner/demo")
-
-    assert result == "2026-08-07T06:37:46Z"
-    adapter.get_skill.assert_called_once_with("@owner/demo")
-
-
-def test_get_upstream_last_modified_returns_none_for_empty_unique_id(tmp_path):
-    adapter = MagicMock()
-
-    result = _service(tmp_path, adapter).get_upstream_last_modified("  ")
-
-    assert result is None
     adapter.get_skill.assert_not_called()
 
 
@@ -454,7 +432,7 @@ def test_get_market_skill_detail_skips_upstream_for_non_modelscope_source(
     adapter = MagicMock()
 
     result = _service(tmp_path, adapter).get_market_skill_detail(
-        skill_id="@owner/demo",
+        unique_id="@owner/demo",
         source="custom",
         user_id="user-a",
         tenant_id="tenant-a",
@@ -463,17 +441,6 @@ def test_get_market_skill_detail_skips_upstream_for_non_modelscope_source(
     assert result == local_record
     assert "upstream_last_modified" not in result
     adapter.get_skill.assert_not_called()
-
-
-def test_get_upstream_last_modified_returns_none_when_hub_missing(tmp_path):
-    from consts.exceptions import ModelScopeSkillNotFoundError
-
-    adapter = MagicMock()
-    adapter.get_skill.side_effect = ModelScopeSkillNotFoundError("missing")
-
-    result = _service(tmp_path, adapter).get_upstream_last_modified("@owner/demo")
-
-    assert result is None
 
 
 def test_update_skill_refreshes_downloaded_content_and_preserves_local_metadata(

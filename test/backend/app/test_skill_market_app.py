@@ -59,23 +59,97 @@ def test_list_market_skills_maps_provider_failure_to_bad_gateway(client, market_
     assert response.json()["detail"] == "market unavailable"
 
 
+def test_hub_detail_returns_upstream_metadata(client, market_service):
+    market_service.get_skill.return_value = {
+        "skill_id": "@owner/demo",
+        "name": "demo",
+        "description": "Hub description",
+        "tags": ["demo"],
+        "category": "tools",
+        "downloads": 10,
+        "likes": 2,
+        "license": "MIT",
+        "last_modified": "2026-08-07T06:37:46Z",
+        "private": False,
+    }
+
+    response = client.get(
+        "/skills/market/hub-detail",
+        params={"unique_id": "@owner/demo"},
+        headers={"Authorization": "Bearer token"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["skill_id"] == "@owner/demo"
+    assert response.json()["name"] == "demo"
+    market_service.get_skill.assert_called_once_with("@owner/demo")
+
+
+def test_hub_detail_maps_not_found_to_404(client, market_service):
+    market_service.get_skill.side_effect = ModelScopeSkillNotFoundError(
+        "ModelScope Skill not found: @owner/missing"
+    )
+
+    response = client.get(
+        "/skills/market/hub-detail",
+        params={"unique_id": "@owner/missing"},
+    )
+
+    assert response.status_code == 404
+    assert "not found" in response.json()["detail"].lower()
+
+
+def test_hub_detail_maps_provider_failure_to_bad_gateway(client, market_service):
+    market_service.get_skill.side_effect = ModelScopeSkillError("hub unavailable")
+
+    response = client.get(
+        "/skills/market/hub-detail",
+        params={"unique_id": "@owner/demo"},
+    )
+
+    assert response.status_code == 502
+    assert response.json()["detail"] == "hub unavailable"
+
+
+def test_hub_detail_rejects_missing_unique_id(client, market_service):
+    response = client.get("/skills/market/hub-detail")
+
+    assert response.status_code == 422
+    market_service.get_skill.assert_not_called()
+
+
+def test_hub_detail_requires_authentication(client, market_service, monkeypatch):
+    monkeypatch.setattr(
+        skill_app,
+        "get_current_user_id",
+        MagicMock(side_effect=UnauthorizedError("No authorization header provided")),
+    )
+
+    response = client.get(
+        "/skills/market/hub-detail",
+        params={"unique_id": "@owner/demo"},
+    )
+
+    assert response.status_code == 401
+    market_service.get_skill.assert_not_called()
+
+
 def test_detail_returns_empty_object_when_not_installed(client, market_service):
     market_service.get_market_skill_detail.return_value = {}
 
     response = client.get(
         "/skills/market/detail",
-        params={"skill_id": "@owner/missing", "source": "modelscope"},
+        params={"unique_id": "@owner/missing", "source": "modelscope"},
     )
 
     assert response.status_code == 200
     assert response.json() == {}
     market_service.get_market_skill_detail.assert_called_once_with(
-        skill_id="@owner/missing",
+        unique_id="@owner/missing",
         source="modelscope",
         user_id="user-a",
         tenant_id="tenant-a",
     )
-    market_service.get_upstream_last_modified.assert_not_called()
 
 
 def test_detail_returns_installed_skill_record(client, market_service):
@@ -85,39 +159,26 @@ def test_detail_returns_installed_skill_record(client, market_service):
         "source": "modelscope",
         "unique_id": "@owner/demo",
     }
-    market_service.get_upstream_last_modified.return_value = "2026-08-07T06:37:46Z"
 
     response = client.get(
         "/skills/market/detail",
-        params={
-            "skill_id": "@owner/demo",
-            "source": "modelscope",
-            "include_upstream_last_modified": "true",
-        },
+        params={"unique_id": "@owner/demo", "source": "modelscope"},
     )
 
+    assert response.status_code == 200
     assert response.json()["skill_id"] == 12
     assert response.json()["name"] == "local-demo"
-    assert response.json()["upstream_last_modified"] == "2026-08-07T06:37:46Z"
-    market_service.get_upstream_last_modified.assert_called_once_with("@owner/demo")
+    assert "upstream_last_modified" not in response.json()
 
 
-def test_detail_skips_upstream_last_modified_by_default(client, market_service):
-    market_service.get_market_skill_detail.return_value = {
-        "skill_id": 12,
-        "name": "local-demo",
-        "source": "modelscope",
-        "unique_id": "@owner/demo",
-    }
-
+def test_detail_rejects_legacy_skill_id_query_param(client, market_service):
     response = client.get(
         "/skills/market/detail",
         params={"skill_id": "@owner/demo", "source": "modelscope"},
     )
 
-    assert response.status_code == 200
-    assert "upstream_last_modified" not in response.json()
-    market_service.get_upstream_last_modified.assert_not_called()
+    assert response.status_code == 422
+    market_service.get_market_skill_detail.assert_not_called()
 
 
 def test_install_market_skill_uses_authenticated_identity(client, market_service):

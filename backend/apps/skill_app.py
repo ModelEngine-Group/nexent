@@ -8,7 +8,6 @@ from fastapi import APIRouter, File, Form, Header, HTTPException, Query, UploadF
 from pydantic import BaseModel, Field
 from starlette.responses import JSONResponse, StreamingResponse
 
-from adapters.modelscope_skill_adapter import MODELSCOPE_SKILL_SOURCE
 from consts.const import APP_VERSION
 from consts.exceptions import (
     ForbiddenError,
@@ -158,32 +157,44 @@ async def list_market_skills(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+@router.get("/market/hub-detail")
+async def get_market_hub_skill_detail(
+    unique_id: str = Query(..., min_length=1, max_length=255),
+    authorization: Optional[str] = Header(None),
+) -> JSONResponse:
+    """Return public ModelScope Hub metadata for one Skill."""
+    try:
+        get_current_user_id(authorization)
+        result = ModelScopeSkillService().get_skill(unique_id)
+        return JSONResponse(content=result)
+    except (
+        UnauthorizedError,
+        ModelScopeSkillNotFoundError,
+        ModelScopeSkillError,
+    ) as exc:
+        _raise_modelscope_http_error(exc)
+    except Exception as exc:
+        logger.error(
+            "Error reading ModelScope Hub Skill detail: %s", exc, exc_info=True
+        )
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
 @router.get("/market/detail")
 async def get_market_skill_detail(
-    skill_id: str = Query(..., min_length=1, max_length=255),
+    unique_id: str = Query(..., min_length=1, max_length=255),
     source: str = Query(..., min_length=1, max_length=30),
-    include_upstream_last_modified: bool = Query(False),
     authorization: Optional[str] = Header(None),
 ) -> JSONResponse:
     """Return a locally installed market skill record for the current user."""
     try:
         user_id, tenant_id = get_current_user_id(authorization)
-        service = ModelScopeSkillService()
-        result = service.get_market_skill_detail(
-            skill_id=skill_id,
+        result = ModelScopeSkillService().get_market_skill_detail(
+            unique_id=unique_id,
             source=source,
             user_id=user_id,
             tenant_id=tenant_id,
         )
-        if (
-            result
-            and source == MODELSCOPE_SKILL_SOURCE
-            and include_upstream_last_modified
-        ):
-            unique_id = str(result.get("unique_id") or skill_id).strip()
-            result["upstream_last_modified"] = service.get_upstream_last_modified(
-                unique_id
-            )
         return JSONResponse(content=result)
     except UnauthorizedError as exc:
         _raise_modelscope_http_error(exc)

@@ -2,6 +2,7 @@ import { getAuthHeaders } from "@/lib/auth";
 import type {
   InstalledMarketSkill,
   ModelScopeMarketListResponse,
+  ModelScopeMarketSkill,
   ModelScopeSkillInstallPayload,
   ModelScopeSkillUpdatePayload,
 } from "@/types/skill";
@@ -25,16 +26,23 @@ export async function fetchModelScopeSkills(params: {
 }
 
 export async function fetchModelScopeSkillDetail(
-  skillId: string,
-  source = "modelscope",
-  includeUpstreamLastModified = false
+  uniqueId: string,
+  source = "modelscope"
 ): Promise<InstalledMarketSkill | Record<string, never>> {
-  const query = new URLSearchParams({ skill_id: skillId, source });
-  if (includeUpstreamLastModified) {
-    query.set("include_upstream_last_modified", "true");
-  }
+  const query = new URLSearchParams({ unique_id: uniqueId, source });
   const response = await fetchWithErrorHandling(
     `${API_ENDPOINTS.skills.marketDetail}?${query.toString()}`,
+    { headers: getAuthHeaders() }
+  );
+  return response.json();
+}
+
+export async function fetchModelScopeHubSkillDetail(
+  uniqueId: string
+): Promise<ModelScopeMarketSkill> {
+  const query = new URLSearchParams({ unique_id: uniqueId });
+  const response = await fetchWithErrorHandling(
+    `${API_ENDPOINTS.skills.marketHubDetail}?${query.toString()}`,
     { headers: getAuthHeaders() }
   );
   return response.json();

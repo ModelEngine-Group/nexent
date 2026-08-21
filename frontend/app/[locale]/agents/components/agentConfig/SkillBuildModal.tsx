@@ -53,8 +53,7 @@ import { normalizeSkillFiles } from "@/lib/skillFileUtils";
 import log from "@/lib/logger";
 import { shouldShowModelScopeUpdate } from "@/lib/modelscopeSkillUpdate";
 import {
-  fetchModelScopeSkillDetail,
-  parseInstalledMarketSkill,
+  fetchModelScopeHubSkillDetail,
   updateModelScopeSkill,
 } from "@/services/modelscopeSkillService";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
@@ -362,6 +361,7 @@ export default function SkillBuildModal({
       skillInfo: {
         source?: string | null;
         unique_id?: string | null;
+        version_update_time?: string | null;
       }
     ) => {
       setModelScopeUpdateAvailable(false);
@@ -373,27 +373,20 @@ export default function SkillBuildModal({
         return;
       }
 
+      setModelScopeUniqueId(uniqueId);
       setModelScopeUpdateChecking(true);
       try {
-        const result = await fetchModelScopeSkillDetail(
-          uniqueId,
-          "modelscope",
-          true
-        );
+        const hub = await fetchModelScopeHubSkillDetail(uniqueId);
         if (cancelled) return;
-        const installed = parseInstalledMarketSkill(result);
-        if (!installed) {
-          return;
-        }
-        setModelScopeUniqueId(uniqueId);
         setModelScopeUpdateAvailable(
           shouldShowModelScopeUpdate(
-            installed.version_update_time,
-            installed.upstream_last_modified
+            skillInfo.version_update_time,
+            hub.last_modified
           )
         );
       } catch (error) {
         if (!cancelled) {
+          setModelScopeUpdateAvailable(false);
           log.error("Failed to check ModelScope Skill update", error);
         }
       } finally {

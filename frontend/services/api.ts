@@ -466,6 +466,7 @@ export const API_ENDPOINTS = {
     install: `${API_BASE_URL}/skills/install`,
     marketList: `${API_BASE_URL}/skills/market/list`,
     marketDetail: `${API_BASE_URL}/skills/market/detail`,
+    marketHubDetail: `${API_BASE_URL}/skills/market/hub-detail`,
     marketInstall: `${API_BASE_URL}/skills/market/install`,
     marketUpdate: `${API_BASE_URL}/skills/market/update`,
   },
