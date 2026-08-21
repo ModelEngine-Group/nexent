@@ -6,7 +6,7 @@ import os
 
 from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from io import BytesIO
 
@@ -922,6 +922,22 @@ def test_list_models_internal_error():
         )
 
         assert resp.status_code == 500
+
+
+def test_list_models_preserves_http_error():
+    """Test list models preserves HTTP errors raised during authentication."""
+    with patch(
+        'apps.northbound_app._get_northbound_context',
+        new_callable=AsyncMock,
+        side_effect=HTTPException(status_code=401, detail="Unauthorized"),
+    ):
+        resp = client.get(
+            "/nb/v1/models",
+            headers=_build_headers(),
+        )
+
+        assert resp.status_code == 401
+        assert resp.json()["detail"] == "Unauthorized"
 
 
 # =============================================================================

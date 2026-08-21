@@ -176,6 +176,22 @@ def test_list_skills_maps_sdk_failure():
         )
 
 
+def test_list_skills_preserves_normalization_error():
+    api = MagicMock()
+    api.list_repos.return_value = SimpleNamespace(
+        items=[SimpleNamespace(repo_id="", id="")],
+        total_count=1,
+        page_number=1,
+        page_size=12,
+        has_next=False,
+    )
+
+    with pytest.raises(ModelScopeSkillError, match="without an id"):
+        ModelScopeSkillAdapter(api).list_skills(
+            search=None, page_number=1, page_size=12
+        )
+
+
 def test_list_skills_maps_malformed_page():
     api = MagicMock()
     api.list_repos.return_value = SimpleNamespace(items=[])

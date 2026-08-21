@@ -181,6 +181,31 @@ def test_detail_rejects_legacy_skill_id_query_param(client, market_service):
     market_service.get_market_skill_detail.assert_not_called()
 
 
+def test_detail_requires_authentication(client, market_service, monkeypatch):
+    monkeypatch.setattr(
+        skill_app,
+        "get_current_user_id",
+        MagicMock(side_effect=UnauthorizedError("Authentication required")),
+    )
+
+    response = client.get(
+        "/skills/market/detail",
+        params={"unique_id": "@owner/demo", "source": "modelscope"},
+    )
+
+    assert response.status_code == 401
+    market_service.get_market_skill_detail.assert_not_called()
+
+
+def test_modelscope_error_mapper_preserves_unknown_exception():
+    error = RuntimeError("unexpected")
+
+    with pytest.raises(RuntimeError, match="unexpected") as exc_info:
+        skill_app._raise_modelscope_http_error(error)
+
+    assert exc_info.value is error
+
+
 def test_install_market_skill_uses_authenticated_identity(client, market_service):
     market_service.install_skill.return_value = {
         "skill_id": 12,
@@ -267,3 +292,113 @@ def test_market_requires_authentication(client, market_service, monkeypatch):
     response = client.get("/skills/market/list")
 
     assert response.status_code == 401
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "service_method", "request_kwargs"),
+    [
+        ("GET", "/skills/market/list", "list_skills", {}),
+        (
+            "GET",
+            "/skills/market/hub-detail",
+            "get_skill",
+            {"params": {"unique_id": "@owner/demo"}},
+        ),
+        (
+            "GET",
+            "/skills/market/detail",
+            "get_market_skill_detail",
+            {"params": {"unique_id": "@owner/demo", "source": "modelscope"}},
+        ),
+        (
+            "POST",
+            "/skills/market/install",
+            "install_skill",
+            {
+                "json": {
+                    "unique_id": "@owner/demo",
+                    "name": "local-demo",
+                    "description": "",
+                    "tags": [],
+                }
+            },
+        ),
+        (
+            "POST",
+            "/skills/market/update",
+            "update_skill",
+            {"json": {"skill_id": 12, "unique_id": "@owner/demo"}},
+        ),
+    ],
+)
+def test_market_endpoints_map_unexpected_errors_to_500(
+    client, market_service, method, path, service_method, request_kwargs
+):
+    getattr(market_service, service_method).side_effect = RuntimeError("unexpected")
+
+    response = client.request(method, path, **request_kwargs)
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Internal server error"
+
+
+def test_update_market_skill_maps_invalid_local_record_to_bad_request(
+    client, market_service
+):
+    market_service.update_skill.side_effect = SkillException(
+        "Skill unique_id does not match installed record"
+    )
+
+    response = client.post(
+        "/skills/market/update",
+        json={"skill_id": 12, "unique_id": "@owner/demo"},
+    )
+
+    assert response.status_code == 400
+    assert "unique_id" in response.json()["detail"]
+
+
+@pytest.mark.parametrize(
+    ("path", "payload"),
+    [
+        (
+            "/skills/market/install",
+            {
+                "unique_id": " ",
+                "name": "local-demo",
+                "description": "",
+                "tags": [],
+            },
+        ),
+        (
+            "/skills/market/install",
+            {
+                "unique_id": "@owner/demo",
+                "name": " ",
+                "description": "",
+                "tags": [],
+            },
+        ),
+        (
+            "/skills/market/install",
+            {
+                "unique_id": "@owner/demo",
+                "name": "local-demo",
+                "description": "",
+                "tags": ["x" * 101],
+            },
+        ),
+        (
+            "/skills/market/update",
+            {"skill_id": 12, "unique_id": " "},
+        ),
+    ],
+)
+def test_market_requests_reject_invalid_normalized_fields(
+    client, market_service, path, payload
+):
+    response = client.post(path, json=payload)
+
+    assert response.status_code == 422
+    market_service.install_skill.assert_not_called()
+    market_service.update_skill.assert_not_called()

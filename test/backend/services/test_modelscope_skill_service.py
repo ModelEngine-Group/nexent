@@ -192,6 +192,34 @@ def test_install_parses_schema_and_config_files(tmp_path, monkeypatch):
     assert data["config_values"] == {"query": "default"}
 
 
+def test_install_skips_group_lookup_without_group_ids(tmp_path, monkeypatch):
+    _mock_create_skill(monkeypatch)
+    _mock_update_skill(monkeypatch)
+    monkeypatch.setattr(
+        module,
+        "_apply_default_skill_permission_fields",
+        MagicMock(),
+    )
+    monkeypatch.setattr(
+        module.skill_db,
+        "get_tool_ids_by_names",
+        MagicMock(return_value=[]),
+    )
+
+    _service(tmp_path).install_skill(
+        skill_id="requested-id",
+        name="local-skill",
+        description="Local description",
+        tags=[],
+        group_ids=None,
+        ingroup_permission=None,
+        tenant_id="tenant-a",
+        user_id="user-a",
+    )
+
+    module.query_groups_by_tenant.assert_not_called()
+
+
 def test_read_directory_normalizes_allowed_tools_and_preserves_script_outputs(
     tmp_path, monkeypatch
 ):
@@ -510,6 +538,284 @@ def test_update_skill_rejects_non_modelscope_skill(tmp_path, monkeypatch):
 
     with pytest.raises(SkillException, match="Only ModelScope skills can be updated"):
         _service(tmp_path).update_skill(
+            skill_id=9,
+            unique_id="@owner/source-skill",
+            tenant_id="tenant-a",
+            user_id="user-a",
+        )
+
+
+def test_read_directory_rejects_invalid_skill_metadata(tmp_path, monkeypatch):
+    skill_dir = tmp_path / "snapshot"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text("invalid", encoding="utf-8")
+    monkeypatch.setattr(
+        module.SkillLoader,
+        "load",
+        MagicMock(side_effect=ValueError("invalid frontmatter")),
+    )
+
+    with pytest.raises(SkillException, match="Invalid downloaded SKILL.md"):
+        _read_directory_skill_data(
+            skill_dir,
+            local_name="local-skill",
+            description="Local description",
+            tags=[],
+            tenant_id="tenant-a",
+        )
+
+
+def test_read_directory_uses_script_schema_for_unsupported_allowed_tools(
+    tmp_path, monkeypatch
+):
+    skill_dir = tmp_path / "snapshot"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text(SKILL_MD, encoding="utf-8")
+    monkeypatch.setattr(
+        module.SkillLoader,
+        "load",
+        MagicMock(return_value={"content": "content", "allowed_tools": 42}),
+    )
+    monkeypatch.setattr(
+        module.SkillLoader,
+        "to_skill_md",
+        MagicMock(return_value=SKILL_MD),
+    )
+    monkeypatch.setattr(
+        module,
+        "_get_skill_inputs_from_code",
+        MagicMock(return_value=[{"name": "query", "type": "string"}]),
+    )
+    get_tool_ids = MagicMock(return_value=[])
+    monkeypatch.setattr(module.skill_db, "get_tool_ids_by_names", get_tool_ids)
+
+    result = _read_directory_skill_data(
+        skill_dir,
+        local_name="local-skill",
+        description="Local description",
+        tags=[],
+        tenant_id="tenant-a",
+    )
+
+    get_tool_ids.assert_called_once_with([], "tenant-a")
+    assert result["config_schemas"] == [{"name": "query", "type": "string"}]
+
+
+def test_read_directory_omits_empty_config_schema(tmp_path, monkeypatch):
+    skill_dir = tmp_path / "snapshot"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text(SKILL_MD, encoding="utf-8")
+    config_dir = skill_dir / "config"
+    config_dir.mkdir()
+    (config_dir / "schema.yaml").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(
+        module,
+        "_parse_skill_schema_from_yaml_bytes",
+        MagicMock(return_value=[]),
+    )
+    monkeypatch.setattr(
+        module.skill_db,
+        "get_tool_ids_by_names",
+        MagicMock(return_value=[]),
+    )
+
+    result = _read_directory_skill_data(
+        skill_dir,
+        local_name="local-skill",
+        description="Local description",
+        tags=[],
+        tenant_id="tenant-a",
+    )
+
+    assert "config_schemas" not in result
+
+
+def test_rollback_created_skill_logs_delete_failure(monkeypatch):
+    monkeypatch.setattr(
+        module.skill_db,
+        "delete_skill",
+        MagicMock(side_effect=RuntimeError("db unavailable")),
+    )
+    log_exception = MagicMock()
+    monkeypatch.setattr(module.logger, "exception", log_exception)
+
+    module._rollback_created_skill("local-skill", "tenant-a", "user-a")
+
+    log_exception.assert_called_once()
+
+
+def test_replace_local_directory_restores_backup_when_move_fails(
+    tmp_path, monkeypatch
+):
+    destination = tmp_path / "local-skill"
+    destination.mkdir()
+    (destination / "old.txt").write_text("old", encoding="utf-8")
+    downloaded = tmp_path / "downloaded"
+    downloaded.mkdir()
+    (downloaded / "new.txt").write_text("new", encoding="utf-8")
+
+    def create_partial_destination_then_fail(source, target):
+        Path(target).mkdir()
+        Path(target, "partial.txt").write_text("partial", encoding="utf-8")
+        raise OSError("locked")
+
+    monkeypatch.setattr(
+        module.shutil,
+        "move",
+        MagicMock(side_effect=create_partial_destination_then_fail),
+    )
+
+    with pytest.raises(OSError, match="locked"):
+        _service(tmp_path)._replace_local_skill_directory(
+            destination=destination,
+            downloaded=downloaded,
+        )
+
+    assert destination.joinpath("old.txt").read_text(encoding="utf-8") == "old"
+
+
+@pytest.mark.parametrize(
+    ("existing_skill", "unique_id", "expected_message"),
+    [
+        (None, "@owner/source-skill", "Skill not found"),
+        (
+            {
+                "skill_id": 9,
+                "name": "local-skill",
+                "source": "modelscope",
+                "unique_id": "@owner/other",
+            },
+            "@owner/source-skill",
+            "unique_id does not match",
+        ),
+        (
+            {
+                "skill_id": 9,
+                "name": " ",
+                "source": "modelscope",
+                "unique_id": "@owner/source-skill",
+            },
+            "@owner/source-skill",
+            "Skill name is missing",
+        ),
+    ],
+)
+def test_update_skill_rejects_invalid_local_record(
+    tmp_path, monkeypatch, existing_skill, unique_id, expected_message
+):
+    monkeypatch.setattr(
+        module.skill_db,
+        "get_skill_by_id",
+        MagicMock(return_value=existing_skill),
+    )
+
+    with pytest.raises(SkillException, match=expected_message):
+        _service(tmp_path).update_skill(
+            skill_id=9,
+            unique_id=unique_id,
+            tenant_id="tenant-a",
+            user_id="user-a",
+        )
+
+
+def test_update_skill_rejects_missing_local_directory(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        module.skill_db,
+        "get_skill_by_id",
+        MagicMock(
+            return_value={
+                "skill_id": 9,
+                "name": "local-skill",
+                "source": "modelscope",
+                "unique_id": "@owner/source-skill",
+            }
+        ),
+    )
+
+    with pytest.raises(SkillException, match="Skill directory not found"):
+        _service(tmp_path).update_skill(
+            skill_id=9,
+            unique_id="@owner/source-skill",
+            tenant_id="tenant-a",
+            user_id="user-a",
+        )
+
+
+def test_update_skill_persists_downloaded_config(tmp_path, monkeypatch):
+    existing_skill = {
+        "skill_id": 9,
+        "name": "local-skill",
+        "description": "Local description",
+        "tags": ["local"],
+        "source": "modelscope",
+        "unique_id": "@owner/source-skill",
+    }
+    monkeypatch.setattr(
+        module.skill_db,
+        "get_skill_by_id",
+        MagicMock(return_value=existing_skill),
+    )
+    update_by_id = _mock_update_skill(monkeypatch)
+    monkeypatch.setattr(
+        module.skill_db,
+        "update_skill_by_id",
+        update_by_id,
+    )
+    monkeypatch.setattr(
+        module.skill_db,
+        "get_tool_ids_by_names",
+        MagicMock(return_value=[]),
+    )
+    destination = tmp_path / "tenant-a" / "local-skill"
+    destination.mkdir(parents=True)
+
+    _service(tmp_path, ConfiguredAdapter()).update_skill(
+        skill_id=9,
+        unique_id="@owner/source-skill",
+        tenant_id="tenant-a",
+        user_id="user-a",
+    )
+
+    updated = update_by_id.call_args.args[1]
+    assert updated["config_schemas"][0]["name"] == "query"
+    assert updated["config_values"] == {"query": "default"}
+
+
+def test_update_skill_maps_local_replace_failure(tmp_path, monkeypatch):
+    existing_skill = {
+        "skill_id": 9,
+        "name": "local-skill",
+        "description": "Local description",
+        "tags": [],
+        "source": "modelscope",
+        "unique_id": "@owner/source-skill",
+    }
+    monkeypatch.setattr(
+        module.skill_db,
+        "get_skill_by_id",
+        MagicMock(return_value=existing_skill),
+    )
+    monkeypatch.setattr(
+        module.skill_db,
+        "update_skill_by_id",
+        MagicMock(return_value=existing_skill),
+    )
+    monkeypatch.setattr(
+        module.skill_db,
+        "get_tool_ids_by_names",
+        MagicMock(return_value=[]),
+    )
+    destination = tmp_path / "tenant-a" / "local-skill"
+    destination.mkdir(parents=True)
+    service = _service(tmp_path)
+    monkeypatch.setattr(
+        service,
+        "_replace_local_skill_directory",
+        MagicMock(side_effect=OSError("locked")),
+    )
+
+    with pytest.raises(SkillException, match="local storage"):
+        service.update_skill(
             skill_id=9,
             unique_id="@owner/source-skill",
             tenant_id="tenant-a",
