@@ -23,6 +23,7 @@ export const MODEL_SOURCES = {
   DASHSCOPE: "dashscope",
   TOKENPONY: "tokenpony",
   VOLCENGINE: "volcengine",
+  ORCAROUTER: "orcarouter",
 } as const;
 
 // Model status constants
@@ -50,6 +51,7 @@ export const MODEL_PROVIDER_KEYS = [
   "tokenpony",
   "dashscope",
   "volcengine",
+  "orcarouter",
 ] as const;
 
 export type ModelProviderKey = (typeof MODEL_PROVIDER_KEYS)[number];
@@ -65,6 +67,7 @@ export const PROVIDER_HINTS: Record<ModelProviderKey, string> = {
   tokenpony: "tokenpony",
   dashscope: "dashscope",
   volcengine: "bytedance",
+  orcarouter: "orcarouter",
 };
 
 // Icon filenames for providers
@@ -78,6 +81,7 @@ export const PROVIDER_ICON_MAP: Record<ModelProviderKey, string> = {
   dashscope: publicAsset("/aliyuncs.png"),
   tokenpony: publicAsset("/tokenpony.png"),
   volcengine: publicAsset("/volcengine.png"),
+  orcarouter: publicAsset("/orcarouter.svg"),
 };
 
 export const OFFICIAL_PROVIDER_ICON = publicAsset("/modelengine-logo.png");
@@ -96,6 +100,7 @@ export const PROVIDER_LINKS: Record<string, string> = {
   dashscope: "https://dashscope.aliyun.com/",
   tokenpony: "https://www.tokenpony.cn/",
   volcengine: "https://www.volcengine.com/",
+  orcarouter: "https://www.orcarouter.ai",
 };
 
 // User role constants

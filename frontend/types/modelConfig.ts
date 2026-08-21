@@ -21,7 +21,8 @@ export type ModelSource =
   | "tokenpony"
   | "OpenAI-API-Compatible"
   | "modelengine"
-  | "volcengine";
+  | "volcengine"
+  | "orcarouter";
 
 // Model type
 export type ModelType =

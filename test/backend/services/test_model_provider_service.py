@@ -195,6 +195,7 @@ class _ProviderEnumStub:
     MODELENGINE = mock.Mock(value="modelengine")
     DASHSCOPE = mock.Mock(value="dashscope")
     TOKENPONY = mock.Mock(value="tokenpony")
+    ORCAROUTER = mock.Mock(value="orcarouter")
 
 
 sys.modules["consts.provider"].ProviderEnum = _ProviderEnumStub
@@ -2645,6 +2646,60 @@ async def test_get_provider_models_tokenpony_empty_result():
 
     with mock.patch(
         "backend.services.model_provider_service.TokenPonyModelProvider"
+    ) as mock_provider_class:
+        mock_provider_instance = mock.AsyncMock()
+        mock_provider_instance.get_models.return_value = []
+        mock_provider_class.return_value = mock_provider_instance
+
+        result = await get_provider_models(model_data)
+
+        assert result == []
+        mock_provider_instance.get_models.assert_called_once_with(model_data)
+
+
+@pytest.mark.asyncio
+async def test_get_provider_models_orcarouter_success():
+    """Should successfully get models from OrcaRouter provider."""
+    model_data = {
+        "provider": "orcarouter",
+        "model_type": "llm",
+        "api_key": "test-key",
+    }
+
+    expected_models = [
+        {
+            "id": "orcarouter/auto",
+            "model_tag": "chat",
+            "model_type": "llm",
+            "max_tokens": sys.modules["consts.const"].DEFAULT_LLM_MAX_TOKENS,
+        }
+    ]
+
+    with mock.patch(
+        "backend.services.model_provider_service.OrcaRouterModelProvider"
+    ) as mock_provider_class:
+        mock_provider_instance = mock.AsyncMock()
+        mock_provider_instance.get_models.return_value = expected_models
+        mock_provider_class.return_value = mock_provider_instance
+
+        result = await get_provider_models(model_data)
+
+        assert result == expected_models
+        mock_provider_class.assert_called_once()
+        mock_provider_instance.get_models.assert_called_once_with(model_data)
+
+
+@pytest.mark.asyncio
+async def test_get_provider_models_orcarouter_empty_result():
+    """Should handle empty result from OrcaRouter provider."""
+    model_data = {
+        "provider": "orcarouter",
+        "model_type": "llm",
+        "api_key": "test-key",
+    }
+
+    with mock.patch(
+        "backend.services.model_provider_service.OrcaRouterModelProvider"
     ) as mock_provider_class:
         mock_provider_instance = mock.AsyncMock()
         mock_provider_instance.get_models.return_value = []

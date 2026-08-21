@@ -156,6 +156,7 @@ class _ProviderEnum:
     MODELENGINE = _EnumItem("modelengine")
     DASHSCOPE = _EnumItem("dashscope")
     TOKENPONY = _EnumItem("tokenpony")
+    ORCAROUTER = _EnumItem("orcarouter")
 
 
 consts_provider_mod.ProviderEnum = _ProviderEnum
@@ -164,6 +165,7 @@ consts_provider_mod.DASHSCOPE_BASE_URL = "https://dashscope.aliyuncs.com/compati
 consts_provider_mod.DASHSCOPE_REALTIME_BASE_URL = "wss://dashscope.aliyuncs.com/api-ws/v1/realtime"
 consts_provider_mod.DASHSCOPE_STT_BASE_URL = consts_provider_mod.DASHSCOPE_REALTIME_BASE_URL
 consts_provider_mod.TOKENPONY_BASE_URL = "https://api.tokenpony.cn/v1/"
+consts_provider_mod.ORCAROUTER_BASE_URL = "https://api.orcarouter.ai/v1/"
 sys.modules["consts.provider"] = consts_provider_mod
 
 # Stub services.model_provider_service used by service

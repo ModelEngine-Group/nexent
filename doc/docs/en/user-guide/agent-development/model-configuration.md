@@ -163,6 +163,7 @@ Nexent supports any **OpenAI-compatible** provider, including:
 - [OpenAI](https://platform.openai.com/)
 - [Anthropic](https://console.anthropic.com/)
 - [Moonshot](https://platform.moonshot.cn/)
+- [OrcaRouter](https://www.orcarouter.ai)
 
 Getting started:
 
@@ -170,6 +171,8 @@ Getting started:
 2. Create and copy an API key.
 3. Locate the API endpoint (usually ending with `/v1`).
 4. Click **Add Custom Model** in Nexent and fill in the required fields.
+
+> **Batch-add OrcaRouter**: in the batch-add dialog, select **OrcaRouter** as the model provider, enter your `sk-orca-…` API key, and click **Fetch Models**. The gateway model catalog is loaded automatically from `https://api.orcarouter.ai/v1/models` (e.g. `orcarouter/auto` for smart routing). OrcaRouter also runs gateway-level, zero-trust security for AI agents on the same endpoint — screening every prompt/response and governing every tool call on a default-deny basis, with no application code changes.
 
 #### Multimodal Models
 

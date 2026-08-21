@@ -8,6 +8,7 @@ class ProviderEnum(str, Enum):
     MODELENGINE = "modelengine"
     DASHSCOPE = "dashscope"
     TOKENPONY = "tokenpony"
+    ORCAROUTER = "orcarouter"
 
 
 # Silicon Flow
@@ -26,3 +27,7 @@ TOKENPONY_GET_URL = "https://api.tokenpony.cn/v1/models"
 
 # ModelEngine
 # Base URL and API key are loaded from environment variables at runtime
+
+# OrcaRouter
+ORCAROUTER_BASE_URL = "https://api.orcarouter.ai/v1/"
+ORCAROUTER_GET_URL = "https://api.orcarouter.ai/v1/models"

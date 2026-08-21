@@ -181,6 +181,7 @@ Nexent 支持任何 **遵循OpenAI API规范** 的大语言模型供应商，包
 - [OpenAI](https://platform.openai.com/)
 - [Anthropic](https://console.anthropic.com/)
 - [月之暗面](https://platform.moonshot.cn/)
+- [OrcaRouter](https://www.orcarouter.ai)
 
 可参考以下步骤进行模型接入：
 
@@ -188,6 +189,8 @@ Nexent 支持任何 **遵循OpenAI API规范** 的大语言模型供应商，包
 2. 创建并复制API Key；
 3. 在文档中查看API端点（即模型URL，一般以`/v1`为结尾）；
 4. 在Nexent模型配置页面点击添加自定义模型，填入必备信息，即可接入。
+
+> **批量接入 OrcaRouter**：在批量添加对话框中，将模型提供商选为 **OrcaRouter**，输入 `sk-orca-…` 开头的 API Key，点击「获取模型」即可自动从 `https://api.orcarouter.ai/v1/models` 拉取网关模型目录（例如智能路由模型 `orcarouter/auto`）。OrcaRouter 还在同一端点提供面向 AI Agent 的网关级零信任安全防护——以默认拒绝（default-deny）的方式审查每次提示词/响应并管控每次工具调用，无需修改任何应用代码。
 
 #### 🎭 多模态模型
 

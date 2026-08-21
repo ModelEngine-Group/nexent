@@ -174,6 +174,8 @@ export const ModelListCard = ({
       return t("model.source.dashscope");
     } else if (model.source === "tokenpony") {
       return t("model.source.tokenpony");
+    } else if (model.source === "orcarouter") {
+      return t("model.source.orcarouter");
     } else if (model.source === "volcengine") {
       return t("model.provider.volcengine");
     } else if (model.source === "OpenAI-API-Compatible") {
@@ -191,6 +193,7 @@ export const ModelListCard = ({
     silicon: filteredModels.filter((m) => m.source === "silicon"),
     dashscope: filteredModels.filter((m) => m.source === "dashscope"),
     tokenpony: filteredModels.filter((m) => m.source === "tokenpony"),
+    orcarouter: filteredModels.filter((m) => m.source === "orcarouter"),
     volcengine: filteredModels.filter((m) => m.source === "volcengine"),
     custom: filteredModels.filter((m) => m.source === "OpenAI-API-Compatible"),
   };
@@ -405,6 +408,54 @@ export const ModelListCard = ({
             {groupedModels.tokenpony.map((model) => (
               <Option
                 key={`${type}-${model.displayName}-tokenpony`}
+                value={model.displayName}
+              >
+                <div
+                  className="flex items-center justify-between"
+                  style={{ minWidth: 0 }}
+                >
+                  <div
+                    className="flex items-center font-medium truncate"
+                    style={{ flex: "1 1 auto", minWidth: 0 }}
+                    title={model.displayName}
+                  >
+                    <img
+                      src={getProviderIconByUrl(model.apiUrl)}
+                      alt="provider"
+                      className="w-4 h-4 rounded mr-2 flex-shrink-0"
+                    />
+                    <span className="truncate">{model.displayName}</span>
+                  </div>
+                  <div
+                    style={{
+                      flex: "0 0 auto",
+                      display: "flex",
+                      alignItems: "center",
+                      marginLeft: "8px",
+                    }}
+                  >
+                    <Tooltip title={t("model.status.tooltip")}>
+                      <span
+                        onClick={(e) => handleStatusClick(e, model.displayName)}
+                        onMouseDown={(e: React.MouseEvent) => {
+                          e.stopPropagation();
+                          e.preventDefault();
+                        }}
+                        style={getStatusStyle(model.connect_status)}
+                        className="status-indicator"
+                      />
+                    </Tooltip>
+                  </div>
+                </div>
+              </Option>
+            ))}
+          </Select.OptGroup>
+        )}
+        {groupedModels.orcarouter.length > 0 && (
+          <Select.OptGroup label={t("model.group.orcarouter")}>
+            {groupedModels.orcarouter.map((model) => (
+              <Option
+                key={`${type}-${model.displayName}-orcarouter`}
                 value={model.displayName}
               >
                 <div
