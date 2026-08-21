@@ -4,6 +4,7 @@ Unit tests for nexent.skills.skill_loader module.
 import sys
 import os
 import importlib.util
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -593,6 +594,53 @@ allowed-tools: [tool1, tool2, tool3]
 """
         with pytest.raises(Exception):
             SkillLoader.parse(content)
+
+
+class TestSkillLoaderFileEncoding:
+    """Test file decoding paths that are not exercised by text-only parsing."""
+
+    def test_load_utf8_bom_file(self, tmp_path):
+        skill_file = tmp_path / "SKILL.md"
+        skill_file.write_bytes(
+            "---\nname: bom-skill\ndescription: bom description\n---\nBody".encode("utf-8-sig")
+        )
+
+        assert SkillLoader.load(str(skill_file))["name"] == "bom-skill"
+
+    def test_load_utf16_file_without_bom(self, tmp_path):
+        skill_file = tmp_path / "SKILL.md"
+        skill_file.write_bytes(
+            "---\nname: utf16-skill\ndescription: utf16 description\n---\nBody".encode("utf-16-le")
+        )
+
+        assert SkillLoader.load(str(skill_file))["description"] == "utf16 description"
+
+    @pytest.mark.parametrize("encoding", ["utf-16", "utf-32"])
+    def test_load_unicode_bom_files(self, tmp_path, encoding):
+        skill_file = tmp_path / "SKILL.md"
+        skill_file.write_bytes(
+            "---\nname: unicode-skill\ndescription: decoded\n---\nBody".encode(encoding)
+        )
+
+        assert SkillLoader.load(str(skill_file))["name"] == "unicode-skill"
+
+    def test_load_gb18030_file(self, tmp_path):
+        skill_file = tmp_path / "SKILL.md"
+        skill_file.write_bytes(
+            "---\nname: chinese-skill\ndescription: 中文说明\n---\n正文".encode("gb18030")
+        )
+
+        assert SkillLoader.load(str(skill_file))["description"] == "中文说明"
+
+    def test_read_rejects_bytes_when_detector_has_no_match(self, tmp_path, mocker):
+        skill_file = tmp_path / "SKILL.md"
+        skill_file.write_bytes(b"\x80")
+        detection = MagicMock()
+        detection.best.return_value = None
+        mocker.patch.object(module, "from_bytes", return_value=detection)
+
+        with pytest.raises(UnicodeDecodeError, match="Unable to detect"):
+            module._read_skill_text(skill_file)
 
 
 if __name__ == "__main__":

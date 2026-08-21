@@ -1,10 +1,16 @@
-import { API_ENDPOINTS } from "./api";
+import {
+  API_ENDPOINTS,
+  fetchWithErrorHandling,
+  toApiError,
+  type ApiError,
+} from "./api";
 
 import { NAME_CHECK_STATUS } from "@/const/agentConfig";
 import { getAuthHeaders } from "@/lib/auth";
 import { convertParamType } from "@/lib/utils";
 import log from "@/lib/logger";
 import yaml from "js-yaml";
+import type { SkillFileNode } from "@/types/skill";
 
 /** Normalize tags field: Ant Design mode="tags" sends a string when only one tag is entered. */
 function normalizeTags(tags: unknown): string[] {
@@ -84,6 +90,7 @@ export const fetchTools = async () => {
       description_zh: tool.description_zh,
       source: tool.source,
       is_available: tool.is_available,
+      is_user_selectable: tool.is_user_selectable !== false,
       create_time: tool.create_time,
       usage: tool.usage, // New: handle usage field
       category: tool.category,
@@ -91,13 +98,13 @@ export const fetchTools = async () => {
         ? tool.labels
         : typeof tool.labels === "string"
           ? (() => {
-            try {
-              const p = JSON.parse(tool.labels);
-              return Array.isArray(p) ? p : [];
-            } catch {
-              return [];
-            }
-          })()
+              try {
+                const p = JSON.parse(tool.labels);
+                return Array.isArray(p) ? p : [];
+              } catch {
+                return [];
+              }
+            })()
           : [],
       updated_by: tool.updated_by || "",
       updated_by_name: tool.updated_by_name || "",
@@ -166,6 +173,7 @@ export const fetchAgentList = async (tenantId?: string) => {
       is_published: agent.is_published,
       current_version_no: agent.current_version_no,
       is_a2a_server: agent.is_a2a_server || false,
+      icon_url: agent.icon_url,
     }));
 
     return {
@@ -220,6 +228,7 @@ export const fetchPublishedAgentList = async () => {
       version_name: agent.version_name,
       greeting_message: agent.greeting_message,
       example_questions: agent.example_questions || [],
+      icon_url: agent.icon_url,
     }));
 
     return {
@@ -298,9 +307,14 @@ export const updateToolConfig = async (
   agentId: number,
   params: Record<string, any>,
   enable: boolean
-) => {
+): Promise<{
+  success: boolean;
+  data: unknown;
+  message: string;
+  error?: ApiError;
+}> => {
   try {
-    const response = await fetch(API_ENDPOINTS.tool.update, {
+    const response = await fetchWithErrorHandling(API_ENDPOINTS.tool.update, {
       method: "POST",
       headers: getAuthHeaders(),
       body: JSON.stringify({
@@ -334,7 +348,16 @@ export const updateToolConfig = async (
     };
   } catch (error) {
     log.error("Failed to update tool configuration:", error);
-    throw error;
+    const apiError = toApiError(
+      error,
+      "Failed to update tool configuration, please try again later"
+    );
+    return {
+      success: false,
+      data: null,
+      message: apiError.message,
+      error: apiError,
+    };
   }
 };
 
@@ -456,6 +479,7 @@ export interface UpdateAgentInfoPayload {
   ingroup_permission?: string;
   greeting_message?: string;
   example_questions?: string[];
+  icon_url?: string;
 }
 
 export const updateAgentInfo = async (payload: UpdateAgentInfoPayload) => {
@@ -542,7 +566,9 @@ export const exportAgent = async (agentId: number) => {
     if (contentType.includes("application/zip")) {
       const blob = await response.blob();
       const contentDisposition = response.headers.get("Content-Disposition");
-      const filename = extractFilenameFromContentDisposition(contentDisposition) || `agent_${agentId}.zip`;
+      const filename =
+        extractFilenameFromContentDisposition(contentDisposition) ||
+        `agent_${agentId}.zip`;
       downloadBlob(blob, filename);
       return {
         success: true,
@@ -582,7 +608,9 @@ export const exportAgent = async (agentId: number) => {
  * @param contentDisposition The Content-Disposition header value
  * @returns Extracted filename or null if not found
  */
-const extractFilenameFromContentDisposition = (contentDisposition: string | null): string | null => {
+const extractFilenameFromContentDisposition = (
+  contentDisposition: string | null
+): string | null => {
   if (!contentDisposition) {
     return null;
   }
@@ -811,6 +839,7 @@ export const searchAgentInfo = async (
       display_name: data.display_name,
       description: data.description,
       author: data.author,
+      icon_url: data.icon_url,
       model:
         data.model_name ||
         (Array.isArray(data.model_names) && data.model_names.length > 0
@@ -1216,7 +1245,12 @@ export const saveSkillInstance = async (
   enabled: boolean,
   versionNo: number = 0,
   params?: Record<string, any>
-) => {
+): Promise<{
+  success: boolean;
+  data: unknown;
+  message: string;
+  error?: ApiError;
+}> => {
   try {
     const requestBody: Record<string, any> = {
       skill_id: skillId,
@@ -1228,18 +1262,17 @@ export const saveSkillInstance = async (
       requestBody.config_values = params;
     }
 
-    const response = await fetch(API_ENDPOINTS.skills.instanceUpdate, {
-      method: "POST",
-      headers: {
-        ...getAuthHeaders(),
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(requestBody),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Request failed: ${response.status}`);
-    }
+    const response = await fetchWithErrorHandling(
+      API_ENDPOINTS.skills.instanceUpdate,
+      {
+        method: "POST",
+        headers: {
+          ...getAuthHeaders(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(requestBody),
+      }
+    );
 
     const data = await response.json();
 
@@ -1250,10 +1283,12 @@ export const saveSkillInstance = async (
     };
   } catch (error) {
     log.error("Error saving skill instance:", error);
+    const apiError = toApiError(error, "agentConfig.skills.saveFailed");
     return {
       success: false,
       data: null,
-      message: "agentConfig.skills.saveFailed",
+      message: apiError.message,
+      error: apiError,
     };
   }
 };
@@ -1565,8 +1600,8 @@ export const createSkillFromFile = async (
           ? errorData.detail
           : Array.isArray(errorData.detail)
             ? errorData.detail
-              .map((e: any) => e.msg || JSON.stringify(e))
-              .join("; ")
+                .map((e: any) => e.msg || JSON.stringify(e))
+                .join("; ")
             : JSON.stringify(errorData.detail);
       throw new Error(errorMessage || `Request failed: ${response.status}`);
     }
@@ -1615,11 +1650,7 @@ export const searchSkillsByName = <T extends { name: string }>(
  * @param skillName skill name
  * @returns file/folder structure
  */
-export interface SkillFileNode {
-  name: string;
-  type: "file" | "directory";
-  children?: SkillFileNode[];
-}
+export type { SkillFileNode } from "@/types/skill";
 
 export class SkillFilesAccessDeniedError extends Error {
   constructor(message: string) {
@@ -1700,24 +1731,33 @@ export const getAgentByName = async (
 export const fetchSkillFileContent = async (
   skillName: string,
   filePath: string
-): Promise<string | null> => {
-  try {
-    const encodedPath = encodeURIComponent(filePath);
-    const response = await fetch(
-      `${API_ENDPOINTS.skills.fileContent(skillName, encodedPath)}`,
-      {
-        headers: getAuthHeaders(),
-      }
-    );
-    if (!response.ok) {
-      throw new Error(`Request failed: ${response.status}`);
+): Promise<{
+  status: "readable" | "unsupported";
+  content: string;
+  encoding?: string;
+}> => {
+  const encodedPath = encodeURIComponent(filePath);
+  const response = await fetch(
+    `${API_ENDPOINTS.skills.fileContent(skillName, encodedPath)}`,
+    {
+      headers: getAuthHeaders(),
     }
-    const data = await response.json();
-    return data.content || data;
-  } catch (error) {
-    log.error("Error fetching skill file content:", error);
-    return null;
+  );
+  if (response.status === 415) {
+    return { status: "unsupported", content: "" };
   }
+  if (!response.ok) {
+    throw new Error(`Request failed: ${response.status}`);
+  }
+  const data = await response.json();
+  if (typeof data === "string") {
+    return { status: "readable", content: data, encoding: "utf-8" };
+  }
+  return {
+    status: data.status === "unsupported" ? "unsupported" : "readable",
+    content: typeof data.content === "string" ? data.content : "",
+    encoding: typeof data.encoding === "string" ? data.encoding : undefined,
+  };
 };
 
 /**

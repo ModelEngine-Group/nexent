@@ -83,6 +83,28 @@ class AgentRunException(Exception):
     pass
 
 
+class RuntimeServiceUnavailableError(Exception):
+    """Raised when northbound cannot connect to the runtime service."""
+
+    pass
+
+
+class RuntimeServiceTimeoutError(Exception):
+    """Raised when a request to the runtime service times out."""
+
+    pass
+
+
+class RuntimeUpstreamError(Exception):
+    """Preserve an explicit error response returned by the runtime service."""
+
+    def __init__(self, status_code: int, content: bytes, headers: dict[str, str]):
+        super().__init__(f"Runtime service returned HTTP {status_code}")
+        self.status_code = status_code
+        self.content = content
+        self.headers = headers
+
+
 class LimitExceededError(Exception):
     """Raised when an outer platform calling too frequently"""
 
