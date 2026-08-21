@@ -15,6 +15,10 @@ from tool_collection.mcp.local_mcp_service import (
     LOCAL_MCP_TOOL_NAME_OVERRIDES,
     local_mcp_service,
 )
+from tool_collection.mcp.nl2agent_mcp_service import (
+    NL2AGENT_MCP_TOOL_NAME_OVERRIDES,
+    nl2agent_mcp_service,
+)
 from tool_collection.mcp.nl2agent_mcp_tools import (
     NL2AGENT_AGENT_ID_HEADER,
     NL2AGENT_MCP_TOOL_META,
@@ -226,7 +230,26 @@ async def test_mcp_search_returns_sanitized_contract_errors(mocker):
 
 
 @pytest.mark.asyncio
+async def test_nl2agent_mcp_service_owns_only_nl2agent_tools():
+    registered_tools = await nl2agent_mcp_service.get_tools()
+
+    assert NL2AGENT_MCP_TOOL_NAME_OVERRIDES == {
+        SEARCH_INSTALLED_MCP_TOOLS_NAME: SEARCH_INSTALLED_MCP_TOOLS_NAME,
+        SEARCH_INSTALLED_RESOURCES_NAME: SEARCH_INSTALLED_RESOURCES_NAME,
+        RECOMMEND_RESOURCES_NAME: RECOMMEND_RESOURCES_NAME,
+        SAVE_AGENT_DRAFT_FIELDS_NAME: SAVE_AGENT_DRAFT_FIELDS_NAME,
+        NL2A_WRAPPER_NAME: NL2A_WRAPPER_NAME,
+    }
+    assert set(registered_tools) == set(NL2AGENT_MCP_TOOL_NAME_OVERRIDES)
+    assert all(
+        tool.meta == NL2AGENT_MCP_TOOL_META
+        for tool in registered_tools.values()
+    )
+
+
+@pytest.mark.asyncio
 async def test_mcp_search_registration_has_stable_name_schema_and_marker():
+    local_tools = await local_mcp_service.get_tools()
     parent = FastMCP("test-parent")
     parent.mount(
         local_mcp_service,
@@ -247,6 +270,12 @@ async def test_mcp_search_registration_has_stable_name_schema_and_marker():
         SAVE_AGENT_DRAFT_FIELDS_NAME: SAVE_AGENT_DRAFT_FIELDS_NAME,
         NL2A_WRAPPER_NAME: NL2A_WRAPPER_NAME,
     }
+    assert LOCAL_MCP_TOOL_NAME_OVERRIDES == NL2AGENT_MCP_TOOL_NAME_OVERRIDES
+    assert set(local_tools) == {
+        *NL2AGENT_MCP_TOOL_NAME_OVERRIDES,
+        "test_tool_name",
+    }
+    assert f"nl2agent_{SEARCH_INSTALLED_MCP_TOOLS_NAME}" not in local_tools
     assert f"local_{SEARCH_INSTALLED_MCP_TOOLS_NAME}" not in mounted_tools
     assert tool.name == SEARCH_INSTALLED_MCP_TOOLS_NAME
     assert set(tool.parameters["properties"]) == {"keywords"}
