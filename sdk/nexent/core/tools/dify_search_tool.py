@@ -8,6 +8,7 @@ from smolagents.tools import Tool
 
 from ..models.rerank_model import BaseRerank
 from ..utils.observer import MessageObserver, ProcessType
+from ..utils.pydantic_utils import unwrap_field_info
 from ..utils.constants import RERANK_OVERSEARCH_MULTIPLIER
 from ..utils.tools_common_message import SearchResultTextMessage, ToolCategory, ToolSign
 from ...utils.http_client_manager import http_client_manager
@@ -132,7 +133,7 @@ class DifySearchTool(Tool):
 
         self.server_url = server_url.rstrip("/")
         self.api_key = api_key
-        self.top_k = max(1, min(int(top_k or 3), 100))
+        self.top_k = max(1, min(int(unwrap_field_info(top_k) or 3), 100))
         self.search_method = search_method
         self.observer = observer
         self.rerank = rerank

@@ -9,6 +9,7 @@ from smolagents.tools import Tool
 import paramiko
 
 from ..utils.observer import MessageObserver, ProcessType
+from ..utils.pydantic_utils import unwrap_field_info
 from ..utils.tools_common_message import ToolSign, ToolCategory
 
 logger = logging.getLogger("terminal_tool")
@@ -91,6 +92,13 @@ class TerminalTool(Tool):
             password (str): SSH password for authentication. Required parameter.
         """
         super().__init__()
+        # smolagents passes Field defaults as FieldInfo when a parameter is not
+        # provided explicitly; unwrap them to their declared default values.
+        init_path = unwrap_field_info(init_path)
+        observer = unwrap_field_info(observer)
+        ssh_host = unwrap_field_info(ssh_host)
+        ssh_port = unwrap_field_info(ssh_port)
+
         # Handle ~ for home directory and None values
         if init_path == "~":
             self.init_path = "~"

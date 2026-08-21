@@ -8,6 +8,7 @@ from smolagents.tools import Tool
 from pydantic import Field
 
 from ..utils.observer import MessageObserver, ProcessType
+from ..utils.pydantic_utils import unwrap_field_info
 from ..utils.tools_common_message import SearchResultTextMessage, ToolSign, ToolCategory
 
 # Get logger instance
@@ -59,7 +60,7 @@ class ExaSearchTool(Tool):
 
         self.observer = observer
         self.exa = Exa(api_key=exa_api_key)
-        self.max_results = max(1, min(int(max_results or 3), 100))
+        self.max_results = max(1, min(int(unwrap_field_info(max_results) or 3), 100))
         self.image_filter = image_filter
         self.record_ops = 1  # Used to record sequence number
 

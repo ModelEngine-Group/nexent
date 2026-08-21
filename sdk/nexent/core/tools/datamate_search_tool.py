@@ -9,6 +9,7 @@ from urllib.parse import urlparse
 from ...vector_database import DataMateCore
 from ..models.rerank_model import BaseRerank
 from ..utils.observer import MessageObserver, ProcessType
+from ..utils.pydantic_utils import unwrap_field_info
 from ..utils.constants import RERANK_OVERSEARCH_MULTIPLIER
 from ..utils.tools_common_message import SearchResultTextMessage, ToolCategory, ToolSign
 
@@ -114,6 +115,11 @@ class DataMateSearchTool(Tool):
             kb_page_size (int, optional): Page size when listing knowledge bases from DataMate. Defaults to 20.
         """
         super().__init__()
+
+        top_k = unwrap_field_info(top_k)
+        threshold = unwrap_field_info(threshold)
+        kb_page = unwrap_field_info(kb_page)
+        kb_page_size = unwrap_field_info(kb_page_size)
 
         if not server_url:
             raise ValueError("server_url is required for DataMateSearchTool")

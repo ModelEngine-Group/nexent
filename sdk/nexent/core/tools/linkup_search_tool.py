@@ -7,9 +7,11 @@ from smolagents.tools import Tool
 from pydantic import Field
 
 from ..utils.observer import MessageObserver, ProcessType
+from ..utils.pydantic_utils import unwrap_field_info
 from ..utils.tools_common_message import SearchResultTextMessage, ToolSign, ToolCategory
 
 logger = logging.getLogger("linkup_search_tool")
+
 
 class LinkupSearchTool(Tool):
     name = "linkup_search"
@@ -57,7 +59,7 @@ class LinkupSearchTool(Tool):
         super().__init__()
         self.observer = observer
         self.client = LinkupClient(api_key=linkup_api_key)
-        self.max_results = max(1, min(int(max_results or 3), 100))
+        self.max_results = max(1, min(int(unwrap_field_info(max_results) or 3), 100))
         self.record_ops = 1
         self.image_filter = image_filter
         self.data_process_service = os.getenv("DATA_PROCESS_SERVICE")

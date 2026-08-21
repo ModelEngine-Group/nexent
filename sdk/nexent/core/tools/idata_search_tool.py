@@ -8,6 +8,7 @@ from pydantic import Field
 from smolagents.tools import Tool
 
 from ..utils.observer import MessageObserver, ProcessType
+from ..utils.pydantic_utils import unwrap_field_info
 from ..utils.tools_common_message import SearchResultTextMessage, ToolCategory, ToolSign
 from ...utils.http_client_manager import http_client_manager
 
@@ -71,6 +72,11 @@ class IdataSearchTool(Tool):
             observer (MessageObserver, optional): Message observer instance. Defaults to None.
         """
         super().__init__()
+
+        top_k = unwrap_field_info(top_k)
+        similarity_threshold = unwrap_field_info(similarity_threshold)
+        keyword_similarity_weight = unwrap_field_info(keyword_similarity_weight)
+        vector_similarity_weight = unwrap_field_info(vector_similarity_weight)
 
         # Validate server_url
         if not server_url or not isinstance(server_url, str):

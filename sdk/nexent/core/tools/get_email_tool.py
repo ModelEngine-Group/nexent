@@ -9,9 +9,11 @@ from typing import List
 from smolagents.tools import Tool
 from pydantic import Field
 
+from ..utils.pydantic_utils import unwrap_field_info
 from ..utils.tools_common_message import ToolCategory
 
 logger = logging.getLogger("get_email_tool")
+
 
 class GetEmailTool(Tool):
     name = "get_email"
@@ -85,7 +87,7 @@ class GetEmailTool(Tool):
         self.username = username
         self.password = password
         self.use_ssl = use_ssl
-        self.timeout = max(1, int(timeout or 30))
+        self.timeout = max(1, int(unwrap_field_info(timeout) or 30))
 
     def _decode_subject(self, subject):
         """Decode email subject, fallback to utf-8 or latin1 for unknown encodings"""

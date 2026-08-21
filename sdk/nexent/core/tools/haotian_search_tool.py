@@ -8,6 +8,7 @@ from smolagents.tools import Tool
 
 from ..models.rerank_model import BaseRerank
 from ..utils.observer import MessageObserver, ProcessType
+from ..utils.pydantic_utils import unwrap_field_info
 from ..utils.tools_common_message import SearchResultTextMessage, ToolCategory, ToolSign
 from ...utils.http_client_manager import http_client_manager
 
@@ -157,6 +158,11 @@ class HaotianSearchTool(Tool):
         ),
     ):
         super().__init__()
+
+        top_k = unwrap_field_info(top_k)
+        keyword_weight = unwrap_field_info(keyword_weight)
+        vector_weight = unwrap_field_info(vector_weight)
+        score_threshold = unwrap_field_info(score_threshold)
 
         if not retrieve_url or not isinstance(retrieve_url, str):
             raise ValueError("retrieve_url is required and must be a non-empty string")
