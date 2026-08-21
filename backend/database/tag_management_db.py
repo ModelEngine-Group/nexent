@@ -896,6 +896,53 @@ class TagManagementDB:
             return {resource_id: int(count) for resource_id, count in rows}
 
     @staticmethod
+    def list_resource_assignment_display_values_by_ids(
+        tenant_id: str, resource_type: str, resource_ids: list[str]
+    ) -> dict[str, list[str]]:
+        """Return assignment display values for multiple resources in one query."""
+
+        candidate_ids = list(
+            dict.fromkeys(str(resource_id) for resource_id in resource_ids)
+        )
+        if not candidate_ids:
+            return {}
+        with get_db_session() as session:
+            rows = (
+                session.query(
+                    ResourceTagAssignment.resource_id,
+                    TagValue.display_value,
+                )
+                .join(
+                    TagValue,
+                    and_(
+                        TagValue.tenant_id
+                        == ResourceTagAssignment.tenant_id,
+                        TagValue.definition_id
+                        == ResourceTagAssignment.definition_id,
+                        TagValue.value_id == ResourceTagAssignment.value_id,
+                    ),
+                )
+                .filter(
+                    ResourceTagAssignment.tenant_id == tenant_id,
+                    ResourceTagAssignment.resource_type == resource_type,
+                    ResourceTagAssignment.resource_id.in_(candidate_ids),
+                    ResourceTagAssignment.delete_flag == ACTIVE_DELETE_FLAG,
+                )
+                .order_by(
+                    ResourceTagAssignment.resource_id,
+                    ResourceTagAssignment.assignment_id,
+                )
+                .all()
+            )
+            values_by_resource: dict[str, list[str]] = defaultdict(list)
+            for resource_id, display_value in rows:
+                if display_value:
+                    values_by_resource[str(resource_id)].append(
+                        str(display_value)
+                    )
+            return dict(values_by_resource)
+
+    @staticmethod
     def soft_delete_resource_assignments(
         tenant_id: str,
         resource_type: str,

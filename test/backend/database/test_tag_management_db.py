@@ -25,6 +25,7 @@ def query(*, one=None, all_=None, count=0):
     item.all.return_value = [] if all_ is None else all_
     item.count.return_value = count
     item.filter.return_value = item
+    item.join.return_value = item
     item.order_by.return_value = item
     item.group_by.return_value = item
     item.having.return_value = item
@@ -147,6 +148,32 @@ def test_list_definitions_handles_empty_definition_bucket(monkeypatch):
     _session, context = db_context(bucket_query, definition_query)
     install_context(monkeypatch, context)
     assert TagManagementDB.list_definitions("tenant-a", 1) == []
+
+
+def test_list_resource_assignment_display_values_by_ids_batches_resources(monkeypatch):
+    assignment_query = query(
+        all_=[
+            ("1", "Finance"),
+            ("1", "Production"),
+            ("2", "Education"),
+        ]
+    )
+    _session, context = db_context(assignment_query)
+    install_context(monkeypatch, context)
+
+    result = TagManagementDB.list_resource_assignment_display_values_by_ids(
+        "tenant-a",
+        "agent",
+        ["1", "2", "1"],
+    )
+
+    assert result == {
+        "1": ["Finance", "Production"],
+        "2": ["Education"],
+    }
+    assert ("tenant_id", "tenant-a") in filter_keys(assignment_query)
+    assert ("resource_type", "agent") in filter_keys(assignment_query)
+    assert ("resource_id", ("1", "2")) in filter_keys(assignment_query)
 
 
 def test_create_definition_rejects_duplicate_normalization_and_reports_capacity(monkeypatch):

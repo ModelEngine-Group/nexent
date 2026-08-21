@@ -29,9 +29,6 @@ import { SkillCodePreview } from "./SkillCodePreview";
 import { isCodeFile, resolveLanguageFromPath } from "./skillFileLanguage";
 
 const { TextArea } = Input;
-const MAX_SKILL_TAGS = 5;
-const MAX_SKILL_TAG_LENGTH = 20;
-
 interface SkillDraftPanelProps {
   form: FormInstance<SkillFormData>;
   skillTabs: SkillFileContent[];
@@ -222,20 +219,6 @@ export default function SkillDraftPanel({
     );
   };
 
-  const handleTagInputKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
-    if (event.key !== "Enter") return;
-
-    const tags = form.getFieldValue("tags");
-    if (Array.isArray(tags) && tags.length >= MAX_SKILL_TAGS) {
-      form.setFields([
-        {
-          name: "tags",
-          errors: [t("skillManagement.form.tagsMaxCount")],
-        },
-      ]);
-    }
-  };
-
   return (
     <div
       className={`flex h-full min-h-0 flex-col gap-2 overflow-hidden ${className || ""}`}
@@ -363,46 +346,6 @@ export default function SkillDraftPanel({
               placeholder={t("skillManagement.form.descriptionPlaceholder")}
               readOnly={readOnly}
               style={{ resize: "none" }}
-            />
-          </Form.Item>
-
-          <Form.Item
-            name="tags"
-            label={t("skillManagement.form.tags")}
-            style={{ marginBottom: 8 }}
-            rules={[
-              {
-                validator: (_, value?: string[]) => {
-                  const tags = Array.isArray(value) ? value : [];
-                  if (tags.length > MAX_SKILL_TAGS) {
-                    return Promise.reject(
-                      new Error(t("skillManagement.form.tagsMaxCount"))
-                    );
-                  }
-                  if (tags.some((tag) => tag.length > MAX_SKILL_TAG_LENGTH)) {
-                    return Promise.reject(
-                      new Error(t("skillManagement.form.tagMaxLength"))
-                    );
-                  }
-                  return Promise.resolve();
-                },
-              },
-            ]}
-          >
-            <Select
-              mode="tags"
-              maxCount={MAX_SKILL_TAGS}
-              suffixIcon={null}
-              placeholder={
-                readOnly ? "-" : t("skillManagement.form.tagsPlaceholder")
-              }
-              open={false}
-              onInputKeyDown={handleTagInputKeyDown}
-              onChange={() => {
-                form.validateFields(["tags"]).catch(() => undefined);
-              }}
-              style={{ width: "100%" }}
-              popupMatchSelectWidth={false}
             />
           </Form.Item>
         </Form>

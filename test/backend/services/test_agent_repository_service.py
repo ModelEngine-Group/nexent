@@ -828,6 +828,53 @@ async def test_list_my_editable_agents_impl_filters_by_search_before_pagination(
 
 
 @pytest.mark.asyncio
+async def test_list_my_editable_agents_impl_searches_structured_and_listing_tags():
+    agents = [
+        _list_all_agent_record(agent_id=1, display_name="Alpha Agent"),
+        _list_all_agent_record(agent_id=2, display_name="Beta Agent"),
+    ]
+    meta_by_id = {
+        1: _mine_metadata_record(agent_id=1, created_by="user_a"),
+        2: _mine_metadata_record(agent_id=2, created_by="user_a"),
+    }
+    repository_records = [
+        {
+            "agent_id": 2,
+            "agent_repository_id": 22,
+            "status": "shared",
+            "tags": ["Published Category"],
+        }
+    ]
+
+    with patch.object(
+        ars, "list_all_agent_info_impl", new_callable=AsyncMock, return_value=agents
+    ), patch.object(
+        ars, "fetch_draft_agent_mine_metadata", return_value=meta_by_id
+    ), patch.object(
+        ars,
+        "list_agent_repository_by_agent_ids",
+        return_value=repository_records,
+    ), patch.object(
+        ars,
+        "_merge_agent_tag_values",
+        return_value={1: ["Structured Finance"], 2: ["Published Category"]},
+    ):
+        structured_result = await ars.list_my_editable_agents_impl(
+            tenant_id="tenant_a",
+            user_id="user_a",
+            search="finance",
+        )
+        listing_result = await ars.list_my_editable_agents_impl(
+            tenant_id="tenant_a",
+            user_id="user_a",
+            search="category",
+        )
+
+    assert [item["agent_id"] for item in structured_result["items"]] == [1]
+    assert [item["agent_id"] for item in listing_result["items"]] == [2]
+
+
+@pytest.mark.asyncio
 async def test_list_my_editable_agents_impl_rejects_invalid_ownership():
     with patch.object(
         ars, "list_all_agent_info_impl", new_callable=AsyncMock

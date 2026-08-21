@@ -2,7 +2,16 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { App, Modal, Progress, Select, Table, Typography } from "antd";
+import {
+  App,
+  Button,
+  Empty,
+  Modal,
+  Progress,
+  Select,
+  Table,
+  Typography,
+} from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useTranslation } from "react-i18next";
 
@@ -24,6 +33,7 @@ interface ResourceTagAssignmentModalProps {
   provider?: string | null;
   knowledgeBaseId?: string | null;
   bulkResourceIds?: string[];
+  onManageDefinitions?: () => void;
 }
 
 interface BulkTarget {
@@ -42,6 +52,7 @@ export default function ResourceTagAssignmentModal({
   provider,
   knowledgeBaseId,
   bulkResourceIds,
+  onManageDefinitions,
 }: ResourceTagAssignmentModalProps) {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
@@ -243,7 +254,20 @@ export default function ResourceTagAssignmentModal({
           size="small"
           format={() => `${totalSelected}/100`}
         />
-        {activeDefinitions.map(renderDefinitionControl)}
+        {activeDefinitions.length > 0 ? (
+          activeDefinitions.map(renderDefinitionControl)
+        ) : (
+          <Empty
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+            description={t("tagManagement.empty.noActiveDefinitions")}
+          >
+            {canEdit && onManageDefinitions ? (
+              <Button type="primary" onClick={onManageDefinitions}>
+                {t("tagManagement.action.manageDefinitions")}
+              </Button>
+            ) : null}
+          </Empty>
+        )}
         {bulkOutcomes.length > 0 && (
           <Table
             rowKey="resource_id"

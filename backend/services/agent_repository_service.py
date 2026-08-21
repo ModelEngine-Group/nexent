@@ -313,14 +313,58 @@ def _compute_mine_ownership_counts(
     }
 
 
-def _matches_mine_search_filter(agent: dict, search: str) -> bool:
-    """Return whether an agent matches a case-insensitive name/description search."""
+def _matches_mine_search_filter(
+    agent: dict,
+    search: str,
+    tags: Collection[str] = (),
+) -> bool:
+    """Match a mine agent by name, description, or visible tag value."""
     query = search.strip().lower()
     if not query:
         return True
     name = str(agent.get("display_name") or agent.get("name") or "").lower()
     description = str(agent.get("description") or "").lower()
-    return query in name or query in description
+    return (
+        query in name
+        or query in description
+        or any(query in str(tag).lower() for tag in tags)
+    )
+
+
+def _merge_agent_tag_values(
+    agent_ids: Collection[int],
+    tenant_id: str,
+    repository_records: Collection[Dict[str, Any]],
+) -> Dict[int, List[str]]:
+    """Merge canonical agent assignments with publisher-owned listing tags."""
+
+    try:
+        from database.tag_management_db import TagManagementDB
+
+        structured = (
+            TagManagementDB.list_resource_assignment_display_values_by_ids(
+                tenant_id,
+                "agent",
+                [str(agent_id) for agent_id in agent_ids],
+            )
+        )
+    except Exception as error:  # noqa: BLE001 - repository search keeps legacy fallback
+        logger.warning("Failed to load structured agent tags for search: %s", error)
+        structured = {}
+    merged: Dict[int, List[str]] = {
+        int(agent_id): list(structured.get(str(agent_id), []))
+        for agent_id in agent_ids
+    }
+    for record in repository_records:
+        record_agent_id = record.get("agent_id")
+        if record_agent_id is None:
+            continue
+        target = merged.setdefault(int(record_agent_id), [])
+        for value in record.get("tags") or []:
+            normalized = str(value).strip()
+            if normalized and normalized not in target:
+                target.append(normalized)
+    return merged
 
 
 def _paginate_mine_agents_with_optional_padding(
@@ -373,6 +417,20 @@ async def list_my_editable_agents_impl(
     meta_by_id = fetch_draft_agent_mine_metadata(tenant_id, agent_ids)
     counts = _compute_mine_ownership_counts(all_agents, meta_by_id, user_id)
 
+    repository_records_for_search: List[Dict[str, Any]] = []
+    tags_by_agent_id: Dict[int, List[str]] = {}
+    if search and search.strip() and agent_ids:
+        repository_records_for_search = list_agent_repository_by_agent_ids(
+            agent_ids,
+            statuses=_MY_AGENT_REPOSITORY_STATUSES,
+            publisher_tenant_id=tenant_id,
+        )
+        tags_by_agent_id = _merge_agent_tag_values(
+            agent_ids,
+            tenant_id,
+            repository_records_for_search,
+        )
+
     filtered_agents = []
     for agent in all_agents:
         current_agent_id = agent.get("agent_id")
@@ -391,7 +449,11 @@ async def list_my_editable_agents_impl(
         filtered_agents = [
             (agent, meta)
             for agent, meta in filtered_agents
-            if _matches_mine_search_filter(agent, search)
+            if _matches_mine_search_filter(
+                agent,
+                search,
+                tags_by_agent_id.get(int(agent["agent_id"]), []),
+            )
         ]
 
     if agent_id is not None:
@@ -421,11 +483,20 @@ async def list_my_editable_agents_impl(
 
     repository_by_agent_id: Dict[int, List[Dict[str, Any]]] = {}
     if paged_agent_ids:
-        repository_records = list_agent_repository_by_agent_ids(
-            paged_agent_ids,
-            statuses=_MY_AGENT_REPOSITORY_STATUSES,
-            publisher_tenant_id=tenant_id,
-        )
+        if repository_records_for_search:
+            paged_id_set = set(paged_agent_ids)
+            repository_records = [
+                record
+                for record in repository_records_for_search
+                if record.get("agent_id") is not None
+                and int(record["agent_id"]) in paged_id_set
+            ]
+        else:
+            repository_records = list_agent_repository_by_agent_ids(
+                paged_agent_ids,
+                statuses=_MY_AGENT_REPOSITORY_STATUSES,
+                publisher_tenant_id=tenant_id,
+            )
         for record in repository_records:
             record_agent_id = record.get("agent_id")
             if record_agent_id is None:
@@ -455,6 +526,7 @@ async def list_my_editable_agents_impl(
                 ),
                 "permission": agent.get("permission"),
                 "downloads": download_totals.get(entry_agent_id, 0),
+                "tags": tags_by_agent_id.get(entry_agent_id, []),
                 "repository_info": repository_by_agent_id.get(entry_agent_id, []),
             }
         )

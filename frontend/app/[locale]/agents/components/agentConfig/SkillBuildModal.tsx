@@ -20,7 +20,7 @@ import {
   Spin,
   Tooltip,
 } from "antd";
-import { Upload as UploadIcon, Trash2, MessageCircle, Box } from "lucide-react";
+import { Upload as UploadIcon, Trash2, MessageCircle, Box, Tags } from "lucide-react";
 import { extractSkillInfo } from "@/lib/skillFileUtils";
 import yaml from "js-yaml";
 import { type SkillFormData, type SkillFileContent } from "@/types/skill";
@@ -45,6 +45,8 @@ import { useAuthorizationContext } from "@/components/providers/AuthorizationPro
 import { USER_ROLES } from "@/const/auth";
 import { useGroupDetails, useGroupList } from "@/hooks/group/useGroupList";
 import SkillDraftPanel from "./SkillDraftPanel";
+import ResourceTagAssignmentModal from "@/components/tag/ResourceTagAssignmentModal";
+import { useTagDefinitions, useTagLibraries } from "@/hooks/useTagManagement";
 import { Nl2SkillChatPanel } from "../../../newchat/assistant-ui/nl2skill-chat-panel";
 import type { Nl2SkillStreamEvent } from "../../../newchat/adapter/remote-chat-model-adapter";
 
@@ -200,6 +202,14 @@ export default function SkillBuildModal({
   const [uploadExtractedSkillName, setUploadExtractedSkillName] =
     useState<string>("");
   const [uploadExtractingName, setUploadExtractingName] = useState(false);
+  const [assignTagsOpen, setAssignTagsOpen] = useState(false);
+  const { data: tagLibraries } = useTagLibraries();
+  const defaultTagLibrary =
+    tagLibraries?.find((library) => library.bucket_key === "default_resource") ??
+    null;
+  const { data: tagDefinitions } = useTagDefinitions(
+    defaultTagLibrary?.bucket_id ?? null
+  );
 
   const [interactiveSkillName, setInteractiveSkillName] = useState<string>("");
 
@@ -483,6 +493,9 @@ export default function SkillBuildModal({
       await submitSkillForm(
         {
           ...values,
+          // Legacy flat tags are compatibility-only. Existing values are
+          // preserved on edit; new assignments use the structured modal.
+          tags: isEditMode ? editingSkill?.tags ?? [] : [],
           content,
           files: extraFiles.length > 0 ? extraFiles : undefined,
         } as SkillData,
@@ -922,6 +935,7 @@ export default function SkillBuildModal({
   };
 
   return (
+    <>
     <Modal
       title={
         <div>
@@ -961,6 +975,16 @@ export default function SkillBuildModal({
         },
       }}
       footer={[
+        isEditMode && editingSkill?.skill_id ? (
+          <Button
+            key="assign-tags"
+            icon={<Tags size={15} />}
+            onClick={() => setAssignTagsOpen(true)}
+            disabled={editingSkill.permission === "READ_ONLY"}
+          >
+            {t("tagManagement.title.assignTags")}
+          </Button>
+        ) : null,
         <Button key="cancel" onClick={handleModalClose}>
           {t("common.cancel")}
         </Button>,
@@ -1040,5 +1064,14 @@ export default function SkillBuildModal({
         }
       `}</style>
     </Modal>
+    <ResourceTagAssignmentModal
+      open={assignTagsOpen}
+      onClose={() => setAssignTagsOpen(false)}
+      resourceType="skill"
+      resourceId={String(editingSkill?.skill_id ?? "")}
+      definitions={tagDefinitions ?? []}
+      canEdit={editingSkill?.permission !== "READ_ONLY"}
+    />
+    </>
   );
 }
