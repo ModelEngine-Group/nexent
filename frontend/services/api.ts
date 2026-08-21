@@ -735,7 +735,8 @@ export const API_ENDPOINTS = {
 export class ApiError extends Error {
   constructor(
     public code: string | number,
-    message: string
+    message: string,
+    public data?: Record<string, unknown>
   ) {
     super(message);
     this.name = "ApiError";
@@ -755,6 +756,7 @@ export const fetchWithErrorHandling = async (
       // Try to parse JSON response for business error code first
       let errorCode = response.status;
       let errorMessage = `Request failed: ${response.status}`;
+      let errorDetails: Record<string, unknown> | undefined;
       const errorText = await response.text();
 
       try {
@@ -768,6 +770,9 @@ export const fetchWithErrorHandling = async (
         if (errorDetail?.code) {
           errorCode = errorDetail.code;
           errorMessage = errorDetail.message || errorMessage;
+          if (errorDetail.data && typeof errorDetail.data === "object") {
+            errorDetails = errorDetail.data;
+          }
         } else if (typeof errorData?.detail === "string") {
           errorMessage = errorData.detail;
         } else if (typeof errorData?.message === "string") {
@@ -828,7 +833,7 @@ export const fetchWithErrorHandling = async (
         );
       }
 
-      throw new ApiError(errorCode, errorMessage);
+      throw new ApiError(errorCode, errorMessage, errorDetails);
     }
 
     return response;

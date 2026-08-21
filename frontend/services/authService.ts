@@ -198,12 +198,30 @@ export const authService = {
       const data = await response.json();
 
       if (!response.ok) {
+        // The backend's common HTTPException handler currently wraps the
+        // structured detail under `message`; older responses may use `detail`.
+        // Normalize both envelopes so callers always receive a string message
+        // together with the structured resource-limit metadata.
+        const rawErrorDetail = data?.detail ?? data?.message;
+        const errorDetail =
+          rawErrorDetail &&
+          typeof rawErrorDetail === "object" &&
+          !Array.isArray(rawErrorDetail)
+            ? rawErrorDetail
+            : undefined;
+        const errorMessage =
+          typeof errorDetail?.message === "string"
+            ? errorDetail.message
+            : typeof rawErrorDetail === "string"
+              ? rawErrorDetail
+              : typeof data?.message === "string"
+                ? data.message
+                : "Registration failed";
         return {
           error: {
-            message:
-              data.detail || data.message || "Registration failed",
-            code: response.status,
-            data: data.data || null,
+            message: errorMessage,
+            code: errorDetail?.code || response.status,
+            data: errorDetail?.data || data?.data || null,
           },
         };
       }

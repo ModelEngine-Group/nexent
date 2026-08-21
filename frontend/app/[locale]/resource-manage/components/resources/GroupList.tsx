@@ -12,7 +12,7 @@ import {
   Popconfirm,
   message,
   Select,
-  Tooltip
+  Tooltip,
 } from "antd";
 import { Edit, Trash2 } from "lucide-react";
 import { ColumnsType } from "antd/es/table";
@@ -31,6 +31,7 @@ import {
   type UpdateGroupRequest,
 } from "@/services/groupService";
 import { type User } from "@/services/userService";
+import { getTenantResourceLimitMessage } from "@/const/errorMessageI18n";
 
 export default function GroupList({ tenantId }: { tenantId: string | null }) {
   const { t } = useTranslation("common");
@@ -143,7 +144,8 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
   const handleSubmit = async () => {
     try {
       const values = await form.validateFields();
-      if (!tenantId) throw new Error(t("tenantResources.groups.noTenantSelected"));
+      if (!tenantId)
+        throw new Error(t("tenantResources.groups.noTenantSelected"));
 
       if (editingGroup) {
         const updateData: UpdateGroupRequest = {
@@ -165,10 +167,14 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
       queryClient.invalidateQueries({ queryKey: ["groups"] });
     } catch (err: any) {
       const errorMessage = err?.response?.data?.message || err?.message || "";
-      const nameConflictMatch = errorMessage.match(/Group with name '(.*)' already exists/i) ||
-                                errorMessage.match(/Group name '(.*)' already exists/i);
+      const resourceLimitMessage = getTenantResourceLimitMessage(err, t);
+      const nameConflictMatch =
+        errorMessage.match(/Group with name '(.*)' already exists/i) ||
+        errorMessage.match(/Group name '(.*)' already exists/i);
 
-      if (nameConflictMatch && nameConflictMatch[1]) {
+      if (resourceLimitMessage) {
+        message.error(resourceLimitMessage);
+      } else if (nameConflictMatch && nameConflictMatch[1]) {
         message.error(t("tenantResources.groups.duplicateName"));
       } else {
         message.error(errorMessage || t("common.unknownError"));
@@ -201,8 +207,9 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
       await refetchUsers();
     } catch (err: any) {
       const errorMessage = err?.response?.data?.message || err?.message || "";
-      const nameConflictMatch = errorMessage.match(/Group with name '(.*)' already exists/i) ||
-                                errorMessage.match(/Group name '(.*)' already exists/i);
+      const nameConflictMatch =
+        errorMessage.match(/Group with name '(.*)' already exists/i) ||
+        errorMessage.match(/Group name '(.*)' already exists/i);
 
       if (nameConflictMatch && nameConflictMatch[1]) {
         message.error(t("tenantResources.groups.duplicateName"));
@@ -216,13 +223,23 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
 
   const columns: ColumnsType<Group> = useMemo(
     () => [
-      { title: t("tenantResources.groups.name"), dataIndex: "group_name", key: "group_name" },
+      {
+        title: t("tenantResources.groups.name"),
+        dataIndex: "group_name",
+        key: "group_name",
+      },
       {
         title: t("common.description"),
         dataIndex: "group_description",
         key: "group_description",
         render: (description: string) =>
-          description ? description : <span className="text-gray-400">{t("tenantResources.groups.noDescription")}</span>,
+          description ? (
+            description
+          ) : (
+            <span className="text-gray-400">
+              {t("tenantResources.groups.noDescription")}
+            </span>
+          ),
       },
       {
         title: t("tenantResources.groups.members"),
@@ -340,7 +357,10 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
             <Form.Item name="description" label={t("common.description")}>
               <Input.TextArea placeholder={t("common.description")} rows={3} />
             </Form.Item>
-            <Form.Item name="members" label={t("tenantResources.groups.members")}>
+            <Form.Item
+              name="members"
+              label={t("tenantResources.groups.members")}
+            >
               <Select
                 mode="multiple"
                 placeholder={t("tenantResources.groups.selectUsers")}
@@ -373,10 +393,7 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
               <Input placeholder={t("tenantResources.groups.enterName")} />
             </Form.Item>
             <Form.Item name="description" label={t("common.description")}>
-              <Input.TextArea
-                placeholder={t("common.description")}
-                rows={3}
-              />
+              <Input.TextArea placeholder={t("common.description")} rows={3} />
             </Form.Item>
           </Form>
         </div>

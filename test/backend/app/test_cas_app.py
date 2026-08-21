@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from consts.exceptions import TenantResourceLimitError
 
 test_dir = os.path.dirname(__file__)
 backend_dir = os.path.abspath(os.path.join(test_dir, "../../../backend"))
@@ -131,6 +132,22 @@ class TestCasApp(unittest.TestCase):
         self.assertEqual(response.status_code, HTTPStatus.UNAUTHORIZED)
         self.assertEqual(response.json()["detail"], "CAS authentication failed")
         self.assertNotIn("bad ticket", response.text)
+
+    def test_callback_resource_limit_returns_structured_detail(self):
+        cas_service_mock.login_with_ticket.side_effect = TenantResourceLimitError(
+            "Tenant user limit reached: maximum 10000 users per tenant",
+            "user",
+            10_000,
+        )
+
+        response = client.get("/user/cas/callback?ticket=limit")
+
+        self.assertEqual(response.status_code, HTTPStatus.TOO_MANY_REQUESTS)
+        self.assertEqual(response.json()["detail"], {
+            "code": "120104",
+            "message": "Tenant user limit reached: maximum 10000 users per tenant",
+            "data": {"resource": "user", "limit": 10_000},
+        })
 
     def test_renew_does_not_expose_cas_configuration_exception(self):
         cas_service_mock.build_renew_url.side_effect = _CasAuthenticationError("internal CAS config path")

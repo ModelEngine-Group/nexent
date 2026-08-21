@@ -7,7 +7,14 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from database.client import get_db_session
 from database.db_models import TenantConfig, TenantGroupInfo
-from consts.const import DEFAULT_GROUP_ID, MAX_TENANT_COUNT, TENANT_ID, TENANT_NAME
+from consts.const import (
+    ASSET_OWNER_TENANT_ID,
+    DEFAULT_GROUP_ID,
+    DEFAULT_TENANT_ID,
+    MAX_TENANT_COUNT,
+    TENANT_ID,
+    TENANT_NAME,
+)
 from consts.exceptions import TenantResourceLimitError
 
 
@@ -79,10 +86,13 @@ def insert_config(insert_data: Dict[str, Any]):
                 tenant_count = session.query(TenantConfig.tenant_id).filter(
                     TenantConfig.config_key == TENANT_ID,
                     TenantConfig.delete_flag == "N",
+                    TenantConfig.tenant_id.notin_((DEFAULT_TENANT_ID, ASSET_OWNER_TENANT_ID)),
                 ).distinct().count()
                 if tenant_count >= MAX_TENANT_COUNT:
                     raise TenantResourceLimitError(
-                        f"Tenant limit reached: maximum {MAX_TENANT_COUNT} tenants"
+                        f"Tenant limit reached: maximum {MAX_TENANT_COUNT} tenants",
+                        "tenant",
+                        MAX_TENANT_COUNT,
                     )
             session.add(TenantConfig(**insert_data))
             session.commit()
@@ -107,10 +117,13 @@ def create_tenant_with_default_group(
         tenant_count = session.query(TenantConfig.tenant_id).filter(
             TenantConfig.config_key == TENANT_ID,
             TenantConfig.delete_flag == "N",
+            TenantConfig.tenant_id.notin_((DEFAULT_TENANT_ID, ASSET_OWNER_TENANT_ID)),
         ).distinct().count()
         if tenant_count >= MAX_TENANT_COUNT:
             raise TenantResourceLimitError(
-                f"Tenant limit reached: maximum {MAX_TENANT_COUNT} tenants"
+                f"Tenant limit reached: maximum {MAX_TENANT_COUNT} tenants",
+                "tenant",
+                MAX_TENANT_COUNT,
             )
 
         session.add(TenantConfig(

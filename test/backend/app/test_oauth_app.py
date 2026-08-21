@@ -58,7 +58,19 @@ class _UnauthorizedError(Exception):
 
 
 class _TenantResourceLimitError(Exception):
-    pass
+    code = "120104"
+
+    def __init__(self, message, resource="user", limit=10_000):
+        super().__init__(message)
+        self.resource = resource
+        self.limit = limit
+
+    def to_detail(self):
+        return {
+            "code": self.code,
+            "message": str(self),
+            "data": {"resource": self.resource, "limit": self.limit},
+        }
 
 
 exceptions_mock = MagicMock()
@@ -369,9 +381,11 @@ class TestCallback(unittest.TestCase):
 
         response = client.get("/user/oauth/callback?provider=github&code=limit_code")
 
-        self.assertEqual(response.status_code, HTTPStatus.BAD_REQUEST)
+        self.assertEqual(response.status_code, HTTPStatus.TOO_MANY_REQUESTS)
         data = response.json()
+        self.assertEqual(data["code"], "120104")
         self.assertEqual(data["data"]["oauth_error"], "tenant_resource_limit_exceeded")
+        self.assertEqual(data["data"]["resource_limit"], {"resource": "user", "limit": 10_000})
         self.assertIn("maximum 10000", data["message"])
 
     def test_new_unbound_oauth_requires_account_completion(self):
@@ -938,6 +952,31 @@ class TestCompleteOAuth(unittest.TestCase):
             )
 
         self.assertEqual(response.status_code, HTTPStatus.CONFLICT)
+
+    def test_complete_returns_structured_error_for_tenant_limit(self):
+        complete_mock = AsyncMock(
+            side_effect=_TenantResourceLimitError(
+                "Tenant user limit reached: maximum 1 users per tenant",
+                resource="user",
+                limit=1,
+            )
+        )
+
+        with patch("apps.oauth_app.complete_pending_oauth_account", new=complete_mock):
+            response = client.post(
+                "/user/oauth/complete",
+                headers={"X-OAuth-Pending-Token": "pending.jwt"},
+                json={
+                    "email": "limit@example.com",
+                    "password": "secret1",
+                    "invite_code": "ABC123",
+                },
+            )
+
+        self.assertEqual(response.status_code, HTTPStatus.TOO_MANY_REQUESTS)
+        detail = response.json()["detail"]
+        self.assertEqual(detail["code"], "120104")
+        self.assertEqual(detail["data"], {"resource": "user", "limit": 1})
 
 
 class TestGetAccounts(unittest.TestCase):

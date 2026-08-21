@@ -15,6 +15,7 @@ from consts.exceptions import (
     IncorrectInviteCodeException,
     UserRegistrationException,
     AppException,
+    TenantResourceLimitError,
     UnauthorizedError,
     ValidationError,
 )
@@ -71,6 +72,9 @@ async def signup(request: UserSignUpRequest):
         logging.error(f"User registration failed by invite code: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
                             detail="INVITE_CODE_INVALID")
+    except TenantResourceLimitError as e:
+        logging.warning(f"User registration rejected by resource limit: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.TOO_MANY_REQUESTS, detail=e.to_detail())
     except ValidationError as e:
         detail = str(e)
         if detail == ASSET_OWNER_SIGNUP_USE_OAUTH_DETAIL:

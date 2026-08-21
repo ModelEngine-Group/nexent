@@ -39,6 +39,7 @@ from consts.exceptions import (
     UserRegistrationException,
     UnauthorizedError,
     AppException,
+    TenantResourceLimitError,
     ValidationError,
 )
 from consts.error_code import ErrorCode
@@ -278,6 +279,30 @@ class TestUserSignup:
 
             assert response.status_code == HTTPStatus.BAD_REQUEST
             assert "ASSET_OWNER feature is not enabled" in response.json()["detail"]
+
+    def test_signup_resource_limit_returns_structured_detail(self):
+        with patch("apps.user_management_app.signup_user_with_invitation") as mock_signup:
+            mock_signup.side_effect = TenantResourceLimitError(
+                "Tenant user limit reached: maximum 10000 users per tenant",
+                "user",
+                10_000,
+            )
+
+            response = client.post(
+                "/user/signup",
+                json={
+                    "email": "user@example.com",
+                    "password": "password123",
+                    "invite_code": "INVITE123",
+                },
+            )
+
+        assert response.status_code == HTTPStatus.TOO_MANY_REQUESTS
+        assert response.json()["detail"] == {
+            "code": "120104",
+            "message": "Tenant user limit reached: maximum 10000 users per tenant",
+            "data": {"resource": "user", "limit": 10_000},
+        }
 
     def test_signup_registration_service_exception(self):
         """Test registration fails due to service error"""
