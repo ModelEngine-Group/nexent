@@ -194,6 +194,8 @@ async def upload_files(
             )
     except HTTPException:
         raise
+    except AppException:
+        raise
     except QuotaExceededError:
         raise
     except AppException:

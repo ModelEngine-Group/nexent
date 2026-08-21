@@ -12,6 +12,53 @@ import { handleSessionExpired } from "@/lib/session";
 import { isSessionExpired } from "./errorCode";
 import log from "@/lib/logger";
 
+type TranslationFunction = (
+  key: string,
+  options?: Record<string, unknown>
+) => string;
+
+/**
+ * Resolve knowledge-base quota errors while retaining the server-provided limit.
+ * The backend returns the standard business code plus structured scope details;
+ * this helper keeps those details out of generic error handling and localizes them
+ * at the point where the user can take action.
+ */
+export const getKnowledgeResourceLimitMessage = (
+  error: unknown,
+  t: TranslationFunction
+): string | undefined => {
+  if (!error || typeof error !== "object") return undefined;
+
+  const candidate = error as {
+    code?: string | number;
+    details?: Record<string, unknown>;
+  };
+  const code = String(candidate.code ?? "");
+  const details = candidate.details || {};
+
+  if (code === ErrorCode.KNOWLEDGE_RESOURCE_EXCEEDED) {
+    const limit = Number(details.limit);
+    const limitValue = Number.isFinite(limit) ? limit : 0;
+    const key =
+      details.scope === "tenant"
+        ? "knowledgeBase.message.tenantLimitExceeded"
+        : "knowledgeBase.message.userLimitExceeded";
+    return t(key, { limit: limitValue });
+  }
+
+  if (
+    code === ErrorCode.FILE_TOO_LARGE &&
+    details.resource === "knowledge_file"
+  ) {
+    const limit = Number(details.limit_mb);
+    return t("knowledgeBase.upload.fileTooLarge", {
+      limit: Number.isFinite(limit) ? limit : 100,
+    });
+  }
+
+  return undefined;
+};
+
 /**
  * Get error message by error code with i18n support.
  *

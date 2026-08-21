@@ -527,6 +527,8 @@ async def upload_files(
             status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except HTTPException:
         raise
+    except AppException:
+        raise
     except Exception:
         logger.exception("File upload error")
         raise HTTPException(
