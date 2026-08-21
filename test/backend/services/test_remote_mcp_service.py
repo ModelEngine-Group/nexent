@@ -2734,3 +2734,27 @@ class TestUploadAndStartMcpImageCleanupOnFailure(unittest.IsolatedAsyncioTestCas
             )
 
         mock_mgr_cls.assert_not_called()
+
+    @patch('backend.services.remote_mcp_service.asyncio.sleep', new_callable=AsyncMock)
+    @patch('backend.services.remote_mcp_service.mcp_server_health')
+    @patch('backend.services.remote_mcp_service.add_remote_mcp_server_list')
+    @patch('backend.services.remote_mcp_service.MCPContainerManager')
+    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
+    async def test_upload_notifies_and_retries_readiness(
+        self, mock_check_name, mock_mgr_cls, mock_add, mock_health, mock_sleep,
+    ):
+        mock_check_name.return_value = False
+        mock_mgr = self._mock_container_manager(mock_mgr_cls)
+        mock_health.side_effect = [MCPConnectionError("starting"), True]
+        on_started = AsyncMock()
+
+        result = await upload_and_start_mcp_image(
+            tenant_id='tid', user_id='uid', file_content=b'dummy tar bytes',
+            filename='test.tar', port=8080, env_vars='{"authorization_token": "tok"}',
+            wait_for_ready=False, on_container_started=on_started,
+        )
+
+        assert result["status"] == "success"
+        on_started.assert_awaited_once_with(mock_mgr.start_mcp_container_from_tar.return_value)
+        assert mock_health.await_count == 2
+        mock_sleep.assert_awaited_once_with(5)

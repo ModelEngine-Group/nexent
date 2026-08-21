@@ -1568,6 +1568,21 @@ class TestStartMCPContainerFromTar:
         )
 
     @pytest.mark.asyncio
+    async def test_start_mcp_container_from_tar_forwards_explicit_readiness_opt_out(self, mock_manager):
+        mock_manager.load_image_from_tar_file = AsyncMock(return_value="loaded-image:latest")
+        mock_manager.start_mcp_container = AsyncMock(return_value={
+            "container_id": "container-123", "mcp_url": "http://localhost:5020/mcp",
+            "host_port": "5020", "status": "started",
+        })
+
+        await mock_manager.start_mcp_container_from_tar(
+            tar_file_path="/path/to/image.tar", service_name="test-service",
+            tenant_id="tenant123", user_id="user12345", wait_for_ready=False,
+        )
+
+        assert mock_manager.start_mcp_container.call_args.kwargs["wait_for_ready"] is False
+
+    @pytest.mark.asyncio
     async def test_start_mcp_container_from_tar_load_image_error(self, mock_manager):
         """Test starting container when load_image_from_tar_file fails (covers lines 178-181)"""
         # Mock load_image_from_tar_file to raise error
