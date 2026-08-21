@@ -1933,3 +1933,205 @@ async def test_create_knowledge_bases_rename_new_binary_docs(tmp_path):
     _, pp = fake_utils.trigger_data_process.await_args.args
     assert pp.index_name == "new-abc"
     assert pp.source_type == "minio"
+
+
+@pytest.mark.parametrize("part", [None, "", ".", "..", "a/b", r"a\\b"])
+def test_safe_path_under_rejects_unsafe_parts(tmp_path, part):
+    assert official_agent_service._safe_path_under(str(tmp_path), part) is None
+
+
+def test_safe_path_under_rejects_resolved_path_escape(tmp_path):
+    root = Path(tmp_path)
+    outside = root.parent / "outside"
+    with patch.object(
+        official_agent_service.Path,
+        "resolve",
+        side_effect=[root, outside],
+    ):
+        assert official_agent_service._safe_path_under(str(root), "safe") is None
+
+
+@pytest.mark.parametrize("relative_path", [None, "", "a//b", r"a\\b"])
+def test_safe_relative_path_under_rejects_invalid_paths(tmp_path, relative_path):
+    assert official_agent_service._safe_relative_path_under(str(tmp_path), relative_path) is None
+
+
+def test_list_bundle_files_handles_missing_and_oserror(tmp_path):
+    with patch.object(official_agent_service.os.path, "isdir", return_value=False):
+        assert official_agent_service._list_bundle_files(str(tmp_path)) == []
+    with patch.object(official_agent_service.os, "listdir", side_effect=OSError("denied")):
+        assert official_agent_service._list_bundle_files(str(tmp_path)) == []
+
+
+def test_attach_skills_skips_unsafe_and_missing_skill_files(tmp_path):
+    bundle = _make_bundle(name="agent", skill_count=0)
+    bundle.agent_info[str(bundle.agent_id)].skill_names = ["../bad", "missing"]
+    skills_dir = tmp_path / "skills"
+    skills_dir.mkdir()
+    official_agent_service._attach_skills_from_dir(bundle, str(tmp_path))
+    assert bundle.skills is None
+
+
+def test_attach_kb_docs_skips_invalid_kb_dir(tmp_path):
+    bundle = _make_bundle(name="agent", has_knowledge=True)
+    official_agent_service._attach_kb_docs_from_dir(bundle, "../unsafe")
+    official_agent_service._attach_kb_docs_from_dir(bundle, str(tmp_path))
+    (tmp_path / "kb").mkdir()
+    bundle.knowledge_bases[0].logical_index_name = "../bad"
+    official_agent_service._attach_kb_docs_from_dir(bundle, str(tmp_path))
+    assert bundle.knowledge_bases[0].documents == []
+
+
+def test_attach_kb_docs_skips_unsafe_file_and_non_file(tmp_path):
+    bundle = _make_bundle(name="agent", has_knowledge=True)
+    logical = tmp_path / "kb" / "kb-1"
+    logical.mkdir(parents=True)
+    (logical / "ok.md").write_text("ok", encoding="utf-8")
+    (logical / "subdir").mkdir()
+    with patch.object(
+        official_agent_service.os,
+        "listdir",
+        return_value=["../escape", "subdir", "ok.md"],
+    ):
+        official_agent_service._attach_kb_docs_from_dir(bundle, str(tmp_path))
+    assert [doc.file_name for doc in bundle.knowledge_bases[0].documents] == ["ok.md"]
+
+
+def test_attach_kb_docs_handles_oserror(tmp_path):
+    bundle = _make_bundle(name="agent", has_knowledge=True)
+    (tmp_path / "kb" / "kb-1").mkdir(parents=True)
+    with patch.object(official_agent_service.os, "listdir", side_effect=OSError("denied")):
+        official_agent_service._attach_kb_docs_from_dir(bundle, str(tmp_path))
+    assert bundle.knowledge_bases[0].documents == []
+
+
+@pytest.mark.parametrize("payload", ["{invalid", {"agent_id": "not-an-int"}])
+def test_load_bundle_invalid_json_or_model_returns_none(tmp_path, payload):
+    path = tmp_path / "broken.json"
+    path.write_text(payload if isinstance(payload, str) else json.dumps(payload), encoding="utf-8")
+    assert official_agent_service._load_bundle("broken", str(tmp_path)) is None
+
+
+def test_load_bundle_invalid_directory_bundle_returns_none(tmp_path):
+    bundle_dir = tmp_path / "broken"
+    bundle_dir.mkdir()
+    (bundle_dir / "agent.json").write_text("{invalid", encoding="utf-8")
+    assert official_agent_service._load_bundle("broken", str(tmp_path)) is None
+
+
+async def test_upload_binary_docs_skips_empty_upload_result(tmp_path):
+    doc = tmp_path / "a.pdf"
+    doc.write_bytes(b"pdf")
+    fake_file_svc = types.ModuleType("services.file_management_service")
+    fake_file_svc.upload_files_impl = AsyncMock(return_value=([], [], []))
+    fake_utils = types.ModuleType("utils.file_management_utils")
+    fake_utils.trigger_data_process = AsyncMock()
+    with patch.dict(
+        sys.modules,
+        {
+            "services.file_management_service": fake_file_svc,
+            "utils.file_management_utils": fake_utils,
+        },
+    ):
+        await official_agent_service._index_binary_docs(
+            [_KnowledgeBaseSeedDoc(file_name="a.pdf", file_path=str(doc))],
+            "idx", "tenant", "user", 3, "auth",
+        )
+    fake_utils.trigger_data_process.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "error,code",
+    [(subprocess.TimeoutExpired(["git"], 1), "repo_network_error"), (OSError("down"), "repo_network_error")],
+)
+def test_git_clone_snapshot_handles_network_errors(tmp_path, error, code):
+    with patch.object(official_agent_service.shutil, "which", return_value="git"), patch.object(
+        official_agent_service.subprocess, "run", side_effect=error
+    ):
+        with pytest.raises(RepoSourceError) as exc:
+            official_agent_service._git_clone_snapshot("url", "main", str(tmp_path / "d"))
+    assert exc.value.code == code
+
+
+def test_snapshot_size_and_commit_file_ignore_oserrors(tmp_path):
+    (tmp_path / "x").write_text("x", encoding="utf-8")
+    with patch.object(official_agent_service.os.path, "getsize", side_effect=OSError):
+        assert official_agent_service._snapshot_size_bytes(str(tmp_path)) == 0
+    snapshot_root = tmp_path / "snap"
+    snapshot_root.mkdir()
+    key = __import__("hashlib").sha1(b"url@main").hexdigest()[:16]
+    (snapshot_root / key).mkdir()
+    with patch.object(official_agent_service, "_SNAPSHOT_ROOT", str(snapshot_root)), patch.object(
+        official_agent_service, "_git_clone_snapshot", return_value="commit"
+    ), patch.object(official_agent_service, "open", side_effect=OSError("read-only"), create=True):
+        result = official_agent_service._ensure_repo_snapshot("url", "main")
+    assert result[1] == "commit"
+
+
+def test_gitcode_api_get_decodes_response_and_maps_errors():
+    class Response:
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        def read(self): return b'{"ok": true}'
+    with patch.object(official_agent_service, "urlopen", return_value=Response()) as mock_open:
+        assert official_agent_service._gitcode_api_get("https://example.test", {"ref": "main"}) == {"ok": True}
+    assert "ref=main" in mock_open.call_args.args[0]
+    with patch.object(official_agent_service, "urlopen", side_effect=official_agent_service.URLError("offline")):
+        with pytest.raises(RepoSourceError) as exc:
+            official_agent_service._gitcode_api_get("https://example.test", {})
+    assert exc.value.code == "repo_api_failed"
+
+
+@pytest.mark.parametrize("payload", [[{"path": "/a"}, {"file_name": "b"}, {"name": "c"}, 3], {"bad": True}])
+def test_gitcode_file_paths_normalizes_payloads(payload):
+    with patch.object(official_agent_service, "_gitcode_api_get", return_value=payload):
+        if isinstance(payload, dict):
+            with pytest.raises(RepoSourceError):
+                official_agent_service._gitcode_file_paths("o", "r", "main")
+        else:
+            assert official_agent_service._gitcode_file_paths("o", "r", "main") == ["a", "b", "c"]
+
+
+def test_gitcode_agent_metadata_and_installed_checks(monkeypatch):
+    with patch.object(official_agent_service, "_gitcode_raw_file", return_value=b'{"agent_info": {"1": {"name": "real"}}}'):
+        assert official_agent_service._gitcode_agent_names("o", "r", "main", "group/a") == ["real"]
+    with patch.object(
+        official_agent_service,
+        "_gitcode_raw_file",
+        side_effect=RepoSourceError("repo_api_failed", "x"),
+    ):
+        assert official_agent_service._gitcode_agent_names("o", "r", "main", "group/a") == []
+    db = types.ModuleType("database.agent_db")
+    db.search_agent_id_by_agent_name = MagicMock(side_effect=[ValueError(), 7])
+    with patch.dict(sys.modules, {"database.agent_db": db}):
+        assert official_agent_service._is_remote_bundle_installed_with_names("group/a", "t", ["real"])
+
+
+def test_is_remote_bundle_installed_checks_folder_name():
+    db = types.ModuleType("database.agent_db")
+    db.search_agent_id_by_agent_name = MagicMock(return_value=7)
+    with patch.dict(sys.modules, {"database.agent_db": db}):
+        assert official_agent_service._is_remote_bundle_installed("group/a", "t") is True
+    db.search_agent_id_by_agent_name.side_effect = ValueError()
+    with patch.dict(sys.modules, {"database.agent_db": db}):
+        assert official_agent_service._is_remote_bundle_installed("group/a", "t") is False
+
+
+def test_gitcode_raw_file_maps_http_errors():
+    with patch.object(official_agent_service, "urlopen", side_effect=official_agent_service.URLError("offline")):
+        with pytest.raises(RepoSourceError) as exc:
+            official_agent_service._gitcode_raw_file("o", "r", "main", "a/agent.json")
+    assert exc.value.code == "repo_api_failed"
+
+
+def test_download_gitcode_bundle_validates_missing_path_and_size(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        official_agent_service._download_gitcode_bundle("o", "r", "main", "missing", [])
+    with patch.object(official_agent_service, "SNAPSHOT_MAX_BYTES", 1), patch.object(
+        official_agent_service, "_gitcode_raw_file", return_value=b"xx"
+    ):
+        with pytest.raises(RepoSourceError) as exc:
+            official_agent_service._download_gitcode_bundle(
+                "o", "r", "main", "group/a", ["group/a/agent.json"]
+            )
+    assert exc.value.code == "bundle_too_large"
