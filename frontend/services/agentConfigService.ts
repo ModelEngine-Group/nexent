@@ -10,6 +10,7 @@ import { getAuthHeaders } from "@/lib/auth";
 import { convertParamType } from "@/lib/utils";
 import log from "@/lib/logger";
 import yaml from "js-yaml";
+import type { SkillFileNode } from "@/types/skill";
 
 /** Normalize tags field: Ant Design mode="tags" sends a string when only one tag is entered. */
 function normalizeTags(tags: unknown): string[] {
@@ -1649,11 +1650,7 @@ export const searchSkillsByName = <T extends { name: string }>(
  * @param skillName skill name
  * @returns file/folder structure
  */
-export interface SkillFileNode {
-  name: string;
-  type: "file" | "directory";
-  children?: SkillFileNode[];
-}
+export type { SkillFileNode } from "@/types/skill";
 
 export class SkillFilesAccessDeniedError extends Error {
   constructor(message: string) {
@@ -1734,24 +1731,33 @@ export const getAgentByName = async (
 export const fetchSkillFileContent = async (
   skillName: string,
   filePath: string
-): Promise<string | null> => {
-  try {
-    const encodedPath = encodeURIComponent(filePath);
-    const response = await fetch(
-      `${API_ENDPOINTS.skills.fileContent(skillName, encodedPath)}`,
-      {
-        headers: getAuthHeaders(),
-      }
-    );
-    if (!response.ok) {
-      throw new Error(`Request failed: ${response.status}`);
+): Promise<{
+  status: "readable" | "unsupported";
+  content: string;
+  encoding?: string;
+}> => {
+  const encodedPath = encodeURIComponent(filePath);
+  const response = await fetch(
+    `${API_ENDPOINTS.skills.fileContent(skillName, encodedPath)}`,
+    {
+      headers: getAuthHeaders(),
     }
-    const data = await response.json();
-    return data.content || data;
-  } catch (error) {
-    log.error("Error fetching skill file content:", error);
-    return null;
+  );
+  if (response.status === 415) {
+    return { status: "unsupported", content: "" };
   }
+  if (!response.ok) {
+    throw new Error(`Request failed: ${response.status}`);
+  }
+  const data = await response.json();
+  if (typeof data === "string") {
+    return { status: "readable", content: data, encoding: "utf-8" };
+  }
+  return {
+    status: data.status === "unsupported" ? "unsupported" : "readable",
+    content: typeof data.content === "string" ? data.content : "",
+    encoding: typeof data.encoding === "string" ? data.encoding : undefined,
+  };
 };
 
 /**
