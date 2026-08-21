@@ -1376,6 +1376,24 @@ export default function ToolConfigModal({
 
   // Watch all form values and sync to currentParams
   const formValues = Form.useWatch([], form);
+
+  // Detect required fields that are still empty so the save/test buttons stay
+  // disabled until they are filled in. Uses currentParams.value instead of
+  // formValues because the KB selector fields (index_names/dataset_ids/
+  // kds_list) have no Form.Item name and are not tracked by useWatch.
+  const hasEmptyRequired = useMemo(() => {
+    return currentParams.some((param) => {
+      if (!param.required) return false;
+      const value = param.value;
+      return (
+        value === undefined ||
+        value === null ||
+        value === "" ||
+        (Array.isArray(value) && value.length === 0)
+      );
+    });
+  }, [currentParams]);
+
   useEffect(() => {
     if (formValues) {
       const newParams = [...currentParams];
@@ -2191,7 +2209,7 @@ export default function ToolConfigModal({
               </button>
               <button
                 onClick={handleSave}
-                disabled={isLoading || hasFormErrors}
+                disabled={isLoading || hasFormErrors || hasEmptyRequired}
                 className="flex items-center justify-center px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200 h-8"
               >
                 {isLoading
@@ -2562,6 +2580,7 @@ export default function ToolConfigModal({
                 onTestPanelKbIdsChange={handleTestPanelKbIdsChange}
                 testPanelKbIds={testPanelKbIds}
                 testPanelKbDisplayNames={testPanelKbDisplayNames}
+                configInvalid={hasFormErrors || hasEmptyRequired}
                 toolKbType={toolKbType}
                 haotianKnowledgeSets={haotianKnowledgeSets}
               />
