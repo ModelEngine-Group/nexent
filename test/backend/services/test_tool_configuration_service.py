@@ -64,12 +64,14 @@ class MockFastMcpClient:
 
 class MockSSETransport:
     def __init__(self, *args, **kwargs):
-        pass
+        self.url = kwargs.get("url", args[0] if args else None)
+        self.headers = kwargs.get("headers", args[1] if len(args) > 1 else {})
 
 
 class MockStreamableHttpTransport:
     def __init__(self, *args, **kwargs):
-        pass
+        self.url = kwargs.get("url", args[0] if args else None)
+        self.headers = kwargs.get("headers", args[1] if len(args) > 1 else {})
 
 
 fastmcp_mock.Client = MockFastMcpClient
@@ -1203,7 +1205,7 @@ class TestGetAllMcpTools:
     @patch('backend.services.tool_configuration_service.urljoin')
     async def test_get_all_mcp_tools_success(self, mock_urljoin, mock_get_tools, mock_get_records):
         """Test successfully getting all MCP tools"""
-        # Mock MCP records - must include "enabled" field as implementation checks both enabled AND status
+        # Status is a cached health result and must not prevent refresh discovery.
         mock_get_records.return_value = [
             {"mcp_name": "server1", "mcp_server": "http://server1.com", "enabled": True, "status": True},
             {"mcp_name": "server2", "mcp_server": "http://server2.com",
@@ -1216,7 +1218,7 @@ class TestGetAllMcpTools:
             ToolInfo(name="tool1", description="Tool 1", params=[], source=ToolSourceEnum.MCP.value,
                      inputs="{}", output_type="string", class_name="Tool1", usage="server1")
         ]
-        mock_tools2 = [
+        mock_tools3 = [
             ToolInfo(name="tool2", description="Tool 2", params=[], source=ToolSourceEnum.MCP.value,
                      inputs="{}", output_type="string", class_name="Tool2", usage="server3")
         ]
@@ -1225,9 +1227,13 @@ class TestGetAllMcpTools:
                      inputs="{}", output_type="string", class_name="DefaultTool", usage="nexent")
         ]
 
-        # Call order: server1, server3 (server2 is skipped due to status=False), default server
+        mock_tools2 = [
+            ToolInfo(name="tool2b", description="Tool 2b", params=[], source=ToolSourceEnum.MCP.value,
+                     inputs="{}", output_type="string", class_name="Tool2b", usage="server2")
+        ]
+        # Call order: server1, server2, server3, default server
         mock_get_tools.side_effect = [
-            mock_tools1, mock_tools2, mock_default_tools]
+            mock_tools1, mock_tools2, mock_tools3, mock_default_tools]
         mock_urljoin.return_value = "http://default-server.com/sse"
 
         from backend.services.tool_configuration_service import get_all_mcp_tools
@@ -1235,16 +1241,17 @@ class TestGetAllMcpTools:
         result = await get_all_mcp_tools("test_tenant")
 
         # Verify results
-        assert len(result) == 3  # 2 connected server tools + 1 default tool
+        assert len(result) == 4  # 3 enabled MCP tools + 1 default tool
         assert result[0].name == "tool1"
         assert result[0].usage == "server1"
-        assert result[1].name == "tool2"
-        assert result[1].usage == "server3"
-        assert result[2].name == "default_tool"
-        assert result[2].usage == "nexent"
+        assert result[1].name == "tool2b"
+        assert result[1].usage == "server2"
+        assert result[2].usage == "server3"
+        assert result[3].name == "default_tool"
+        assert result[3].usage == "nexent"
 
         # Verify calls
-        assert mock_get_tools.call_count == 3
+        assert mock_get_tools.call_count == 4
 
     @patch('backend.services.tool_configuration_service.get_mcp_records_by_tenant')
     @patch('backend.services.tool_configuration_service.get_tool_from_remote_mcp_server')
@@ -1284,17 +1291,17 @@ class TestGetAllMcpTools:
             ToolInfo(name="default_tool", description="Default Tool", params=[], source=ToolSourceEnum.MCP.value,
                      inputs="{}", output_type="string", class_name="DefaultTool", usage="nexent")
         ]
-        mock_get_tools.return_value = mock_default_tools
+        mock_get_tools.side_effect = [Exception("server1 unavailable"), Exception("server2 unavailable"), mock_default_tools]
         mock_urljoin.return_value = "http://default-server.com/sse"
 
         from backend.services.tool_configuration_service import get_all_mcp_tools
 
         result = await get_all_mcp_tools("test_tenant")
 
-        # Should only return default tools
+        # Failed enabled MCPs do not block the default tools.
         assert len(result) == 1
         assert result[0].name == "default_tool"
-        assert mock_get_tools.call_count == 1  # Only call default server once
+        assert mock_get_tools.call_count == 3  # Two enabled MCPs plus default server
 
     @patch('backend.services.tool_configuration_service.get_mcp_records_by_tenant')
     @patch('backend.services.tool_configuration_service.get_tool_from_remote_mcp_server')

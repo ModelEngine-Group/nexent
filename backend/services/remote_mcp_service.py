@@ -35,6 +35,7 @@ from database.remote_mcp_db import (
     get_mcp_record_by_id_and_tenant,
     get_mcp_custom_headers_by_name_and_url,
 )
+from database.market_mcp_db import update_mcp_market_record
 from database.user_tenant_db import get_user_tenant_by_user_id
 from database.group_db import query_group_ids_by_user
 from database.tool_db import set_mcp_tools_unavailable
@@ -1468,8 +1469,20 @@ async def refresh_mcp_service_tool_count(
 
     # Skip MCP protocol check for API-type MCPs (they use OpenAPI JSON, not MCP)
     config_json = record.get("config_json")
+    registry_json = dict(record.get("registry_json") or {})
     if isinstance(config_json, dict) and "openapi" in config_json:
-        return
+        tool_names = registry_json.get("_toolNames")
+        if not isinstance(tool_names, list):
+            tool_names = []
+        _persist_refreshed_mcp_tool_names(
+            mcp_id=mcp_id,
+            record=record,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            tool_names=tool_names,
+            registry_json=registry_json,
+        )
+        return tool_names
 
     headers = {}
     if authorization_token:
@@ -1481,16 +1494,50 @@ async def refresh_mcp_service_tool_count(
     if not tool_names:
         raise MCPConnectionError("MCP server is unreachable or does not support MCP protocol")
 
-    registry_json = record.get("registry_json") or {}
     registry_json["_toolNames"] = tool_names
 
+    _persist_refreshed_mcp_tool_names(
+        mcp_id=mcp_id,
+        record=record,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        tool_names=tool_names,
+        registry_json=registry_json,
+    )
+    return tool_names
+
+
+def _persist_refreshed_mcp_tool_names(
+    *,
+    mcp_id: int,
+    record: dict,
+    tenant_id: str,
+    user_id: str,
+    tool_names: list[str],
+    registry_json: dict,
+) -> None:
+    """Persist the refreshed MCP snapshot and its linked repository listing."""
+    registry_json["_toolNames"] = tool_names
     update_mcp_record_registry_json_by_id(
         mcp_id=mcp_id,
         tenant_id=tenant_id,
         user_id=user_id,
         registry_json=registry_json,
     )
-    return tool_names
+    update_mcp_record_status_by_id(
+        mcp_id=mcp_id,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        status=True,
+    )
+
+    market_id = record.get("market_id")
+    if market_id is not None:
+        update_mcp_market_record(
+            market_id=int(market_id),
+            user_id=user_id,
+            registry_json=registry_json,
+        )
 
 
 # ---------------------------------------------------------------------------

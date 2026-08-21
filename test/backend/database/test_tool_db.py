@@ -660,6 +660,96 @@ def test_update_tool_table_mcp_tools_same_name_same_usage(monkeypatch, mock_sess
     assert existing_tool.is_available is True
 
 
+def test_update_tool_table_mcp_stale_tools_hidden_after_url_change(monkeypatch, mock_session):
+    """MCP url changed: old tools not in this scan's result are hidden, new tool stays.
+
+    Regression: previously any tool belonging to an *enabled* MCP kept its
+    availability forever, so after changing an MCP's url the old tools
+    (a,b,c,d) remained listed alongside the new one (e) -> 5 tools shown.
+    """
+    session, query = mock_session
+
+    # Existing tools from the MCP's previous url: a, b, c, d (all available)
+    existing_tools = []
+    for tool_name in ["a", "b", "c", "d"]:
+        t = MockToolInfo()
+        t.name = tool_name
+        t.source = "mcp"
+        t.usage = "mcp_server_1"
+        t.is_available = True
+        existing_tools.append(t)
+
+    mock_all = MagicMock()
+    mock_all.return_value = existing_tools
+    mock_filter = MagicMock()
+    mock_filter.all = mock_all
+    query.filter.return_value = mock_filter
+
+    session.add = MagicMock()
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr(
+        "backend.database.tool_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr(
+        "backend.database.tool_db.filter_property", lambda data, model: data)
+
+    # This scan reached the MCP (still enabled) but only returns the new tool e
+    new_tool = MockToolInfo()
+    new_tool.name = "e"
+    new_tool.source = "mcp"
+    new_tool.usage = "mcp_server_1"
+    tool_list = [new_tool]
+
+    update_tool_table_from_scan_tool_list(
+        "tenant1", "user1", tool_list, enabled_mcp_names={"mcp_server_1"}
+    )
+
+    # Stale old tools hidden, new tool created/available
+    for t in existing_tools:
+        assert t.is_available is False, f"{t.name} should be hidden after url change"
+    session.add.assert_called()
+
+
+def test_update_tool_table_mcp_tools_preserved_when_unreachable(monkeypatch, mock_session):
+    """Enabled MCP not reached this scan: its tools keep availability.
+
+    Ensures the fix for url-change cleanup does not break the existing
+    "transient connection failure must not hide a healthy MCP's tools" rule.
+    """
+    session, query = mock_session
+
+    existing_tool = MockToolInfo()
+    existing_tool.name = "get_tickets"
+    existing_tool.source = "mcp"
+    existing_tool.usage = "mcp_server_1"
+    existing_tool.is_available = True
+
+    mock_all = MagicMock()
+    mock_all.return_value = [existing_tool]
+    mock_filter = MagicMock()
+    mock_filter.all = mock_all
+    query.filter.return_value = mock_filter
+
+    session.add = MagicMock()
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr(
+        "backend.database.tool_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr(
+        "backend.database.tool_db.filter_property", lambda data, model: data)
+
+    # MCP did not respond this scan -> tool_list has nothing for it
+    update_tool_table_from_scan_tool_list(
+        "tenant1", "user1", [], enabled_mcp_names={"mcp_server_1"}
+    )
+
+    assert existing_tool.is_available is True
+
+
 def test_update_tool_table_mcp_tools_empty_usage(monkeypatch, mock_session):
     """Test MCP tools with empty/null usage should be handled correctly"""
     session, query = mock_session

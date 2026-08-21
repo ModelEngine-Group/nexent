@@ -14,6 +14,10 @@ import type {
   AgentRepositoryListingStatus,
   MyEditableAgentListParams,
   MyEditableAgentListResponse,
+  OfficialAgentGithubDiscoverResult,
+  OfficialAgentInstallItem,
+  OfficialAgentInstallOptions,
+  OfficialAgentItem,
   RepositoryImportPrecheckResponse,
 } from "@/types/agentRepository";
 
@@ -212,6 +216,160 @@ export async function importAgentFromRepository(
   }
 }
 
+export async function fetchOfficialAgentsWithStatus(
+  tenantId?: string
+): Promise<OfficialAgentItem[]> {
+  try {
+    const url = tenantId
+      ? `${API_ENDPOINTS.agentRepository.official}?tenant_id=${encodeURIComponent(tenantId)}`
+      : API_ENDPOINTS.agentRepository.official;
+    const response = await fetchWithErrorHandling(url, {
+      method: "GET",
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      throw new Error(
+        `Failed to fetch official agents: ${response.statusText}`
+      );
+    }
+
+    const data = await response.json();
+    return data.agents ?? [];
+  } catch (error) {
+    log.error("Error fetching official agents:", error);
+    throw error;
+  }
+}
+
+export async function installOfficialAgents(
+  agentNames: string[],
+  options?: OfficialAgentInstallOptions,
+  tenantId?: string
+): Promise<OfficialAgentInstallItem[]> {
+  try {
+    const url = tenantId
+      ? `${API_ENDPOINTS.agentRepository.officialInstall}?tenant_id=${encodeURIComponent(tenantId)}`
+      : API_ENDPOINTS.agentRepository.officialInstall;
+    const response = await fetchWithErrorHandling(url, {
+      method: "POST",
+      headers: {
+        ...getAuthHeaders(),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        agent_names: agentNames,
+        ...(options?.renames ? { renames: options.renames } : {}),
+        ...(options?.model_ids ? { model_ids: options.model_ids } : {}),
+        ...(options?.embedding_model_ids
+          ? { embedding_model_ids: options.embedding_model_ids }
+          : {}),
+        ...(options?.skill_renames
+          ? { skill_renames: options.skill_renames }
+          : {}),
+        ...(options?.kb_renames ? { kb_renames: options.kb_renames } : {}),
+        ...(options?.mcp_renames
+          ? { mcp_renames: options.mcp_renames }
+          : {}),
+        ...(options?.mcp_skips ? { mcp_skips: options.mcp_skips } : {}),
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(
+        `Failed to install official agents: ${response.statusText}`
+      );
+    }
+
+    const data = await response.json();
+    return data.results ?? [];
+  } catch (error) {
+    log.error("Error installing official agents:", error);
+    throw error;
+  }
+}
+
+/** Discover the fixed GitCode AgentsHub repo into a grouped catalog. */
+export async function fetchOfficialAgentsFromGitcode(
+  tenantId?: string,
+  ref?: string
+): Promise<OfficialAgentGithubDiscoverResult> {
+  const params = new URLSearchParams();
+  if (tenantId) params.set("tenant_id", tenantId);
+  if (ref) params.set("ref", ref);
+  const query = params.toString();
+  const url = query
+    ? `${API_ENDPOINTS.agentRepository.officialGitcode}?${query}`
+    : API_ENDPOINTS.agentRepository.officialGitcode;
+  try {
+    const response = await fetchWithErrorHandling(url, {
+      method: "GET",
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      throw new Error(
+        `Failed to fetch GitCode agents: ${response.statusText}`
+      );
+    }
+    return (await response.json()) as OfficialAgentGithubDiscoverResult;
+  } catch (error) {
+    log.error("Error fetching GitCode agents:", error);
+    throw error;
+  }
+}
+
+/** Install remote official agents (from the fixed GitCode source) by bundle key. */
+export async function installOfficialAgentsFromGitcode(
+  agentNames: string[],
+  options?: OfficialAgentInstallOptions,
+  tenantId?: string
+): Promise<OfficialAgentInstallItem[]> {
+  const params = new URLSearchParams();
+  if (tenantId) params.set("tenant_id", tenantId);
+  const query = params.toString();
+  const url = query
+    ? `${API_ENDPOINTS.agentRepository.officialGitcodeInstall}?${query}`
+    : API_ENDPOINTS.agentRepository.officialGitcodeInstall;
+  try {
+    const response = await fetchWithErrorHandling(url, {
+      method: "POST",
+      headers: {
+        ...getAuthHeaders(),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        agent_names: agentNames,
+        ...(options?.renames ? { renames: options.renames } : {}),
+        ...(options?.model_ids ? { model_ids: options.model_ids } : {}),
+        ...(options?.embedding_model_ids
+          ? { embedding_model_ids: options.embedding_model_ids }
+          : {}),
+        ...(options?.skill_renames
+          ? { skill_renames: options.skill_renames }
+          : {}),
+        ...(options?.kb_renames ? { kb_renames: options.kb_renames } : {}),
+        ...(options?.mcp_renames
+          ? { mcp_renames: options.mcp_renames }
+          : {}),
+        ...(options?.mcp_skips ? { mcp_skips: options.mcp_skips } : {}),
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(
+        `Failed to install GitCode agents: ${response.statusText}`
+      );
+    }
+
+    const data = await response.json();
+    return data.results ?? [];
+  } catch (error) {
+    log.error("Error installing GitCode agents:", error);
+    throw error;
+  }
+}
+
 const agentRepositoryService = {
   fetchAgentRepositoryListings,
   fetchAgentRepositoryListingDetail,
@@ -220,6 +378,10 @@ const agentRepositoryService = {
   updateAgentRepositoryStatus,
   fetchRepositoryImportPrecheck,
   importAgentFromRepository,
+  fetchOfficialAgentsWithStatus,
+  installOfficialAgents,
+  fetchOfficialAgentsFromGitcode,
+  installOfficialAgentsFromGitcode,
 };
 
 export default agentRepositoryService;

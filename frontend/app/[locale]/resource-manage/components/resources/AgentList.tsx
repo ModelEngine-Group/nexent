@@ -23,8 +23,11 @@ import {
   CircleSlash,
   Clock,
   Eye,
+  Download,
 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
+
+import { InstallOfficialAgentsModal } from "@/components/agent/InstallOfficialAgentsModal";
 
 import { useAgentList } from "@/hooks/agent/useAgentList";
 import { useGroupList } from "@/hooks/group/useGroupList";
@@ -87,6 +90,9 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
   const [selectedVersions, setSelectedVersions] = useState<Map<number, number>>(new Map());
 
   const { agents, isLoading, refetch } = useAgentList(tenantId);
+
+  // Official agent install modal state
+  const [installModalOpen, setInstallModalOpen] = useState(false);
 
   // Incremented on every component mount so version fetching always runs
   const [mountKey, setMountKey] = useState(0);
@@ -467,6 +473,15 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
+      <div className="flex justify-end mb-2 flex-shrink-0">
+        <Button
+          type="primary"
+          icon={<Download className="h-4 w-4" />}
+          onClick={() => setInstallModalOpen(true)}
+        >
+          {t("officialAgent.install.button")}
+        </Button>
+      </div>
       <div className="flex-1 overflow-hidden">
         <Table
           columns={columns}
@@ -687,6 +702,13 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
         onClose={() => setFullscreenEdit({ visible: false, field: null, title: "", value: "" })}
         onSave={handleFullscreenSave}
         readOnly={true}
+      />
+
+      {/* Official Agent Install Modal */}
+      <InstallOfficialAgentsModal
+        open={installModalOpen}
+        onClose={() => setInstallModalOpen(false)}
+        tenantId={tenantId ?? undefined}
       />
     </div>
   );

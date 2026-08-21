@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Any, BinaryIO, Dict, List, Optional, Tuple
 
 from .client import minio_client
-from consts.const import S3_URL_PREFIX
+from consts.const import MINIO_DEFAULT_BUCKET, S3_URL_PREFIX
 from consts.const import NORTHBOUND_EXTERNAL_URL
 from urllib.parse import quote
 
@@ -277,7 +277,9 @@ def get_file_size_from_minio(object_name: str, bucket: Optional[str] = None) -> 
     object_name, bucket = _normalize_object_and_bucket(object_name, bucket)
     # Ensure minio_client is initialized before accessing storage_config
     minio_client._ensure_initialized()
-    bucket = bucket or minio_client.storage_config.default_bucket
+    if not bucket:
+        config = getattr(minio_client, "storage_config", None)
+        bucket = config.default_bucket if config else MINIO_DEFAULT_BUCKET
     return minio_client.get_file_size(object_name, bucket)
 
 

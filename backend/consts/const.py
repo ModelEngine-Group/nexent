@@ -77,7 +77,24 @@ AGENT_AUTOMATION_MIN_INTERVAL_SECONDS = int(
 CONTAINER_SKILLS_PATH = os.getenv("SKILLS_PATH")
 
 # Container-internal official skills ZIP directory
-OFFICIAL_SKILLS_ZIP_PATH = "/mnt/nexent/official-skills-zip"
+OFFICIAL_SKILLS_ZIP_PATH = os.getenv(
+    "OFFICIAL_SKILLS_ZIP_PATH", "/mnt/nexent/official-skills-zip"
+)
+
+# Container-internal official agents bundle directory (one JSON per agent)
+OFFICIAL_AGENTS_PATH = os.getenv(
+    "OFFICIAL_AGENTS_PATH", "/mnt/nexent/official-agents"
+)
+
+# GitCode 固定源：远程官方智能体仓库（唯一远程源，前端无需输入 URL）
+OFFICIAL_AGENTS_REPO_URL = os.getenv(
+    "OFFICIAL_AGENTS_REPO_URL", "https://gitcode.com/ModelEngine/AgentsHub"
+)
+OFFICIAL_AGENTS_REPO_REF = os.getenv("OFFICIAL_AGENTS_REPO_REF", "main")
+# 远程官方智能体下载体积上限（兼容旧快照缓存逻辑，默认 100MB）
+SNAPSHOT_MAX_BYTES = int(
+    os.getenv("SNAPSHOT_MAX_BYTES", str(100 * 1024 * 1024))
+)
 
 
 # Preview Configuration

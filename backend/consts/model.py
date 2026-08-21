@@ -851,6 +851,237 @@ class AgentRepositorySnapshot(ExportAndImportDataFormat):
     skills: Optional[List["SkillZipEntry"]] = None
 
 
+# ---------------------------------------------------------------------------
+# Official agent bundles (platform-provided, mirroring official skills)
+# ---------------------------------------------------------------------------
+
+
+class KnowledgeBaseSeedDoc(BaseModel):
+    """A seed document in an official agent bundle's knowledge base.
+
+    Text seeds carry ``content``; binary seeds (docx/pdf/...) carry ``file_path``
+    pointing at the real file on disk (set by the loader for directory layouts,
+    so the install pipeline can upload it like a normal KB document). At least
+    one of the two is set.
+    """
+    file_name: str
+    content: Optional[str] = None
+    file_path: Optional[str] = None
+
+
+class KnowledgeBaseSeed(BaseModel):
+    """Knowledge base declaration inside an official agent bundle.
+
+    ``logical_index_name`` is the bundle-local reference that agent tools point
+    to; it is remapped to the tenant's real generated index name on install.
+    """
+    logical_index_name: str
+    display_name: Optional[str] = None
+    description: Optional[str] = None
+    documents: List[KnowledgeBaseSeedDoc] = []
+
+
+class OfficialAgentBundle(AgentRepositorySnapshot):
+    """Official agent bundle: marketplace snapshot plus official card fields.
+
+    Reuses AgentRepositorySnapshot (agent_info / mcp_info / skills) and adds
+    official card metadata plus optional knowledge base seed documents.
+    An empty ``knowledge_bases`` list means the agent has no KB dependency.
+
+    Card fields are optional: when omitted they are derived from the root agent
+    (name / display_name) or sensible defaults (icon, version_label), so a bare
+    export can be used directly as a bundle without manual card editing.
+    """
+    name: Optional[str] = None
+    display_name: Optional[str] = None
+    description: Optional[str] = None
+    icon: Optional[str] = None
+    tags: List[str] = []
+    version_label: Optional[str] = None
+    knowledge_bases: List[KnowledgeBaseSeed] = []
+
+    @model_validator(mode="after")
+    def _derive_card_fields(self) -> "OfficialAgentBundle":
+        root_agent = self.agent_info.get(str(self.agent_id))
+        root_name = getattr(root_agent, "name", None) if root_agent else None
+        root_display_name = (
+            getattr(root_agent, "display_name", None) if root_agent else None
+        )
+        if not self.name:
+            self.name = root_name or "agent"
+        if not self.display_name:
+            self.display_name = root_display_name or self.name
+        if not self.icon:
+            self.icon = "🤖"
+        if not self.version_label:
+            self.version_label = "V1"
+        return self
+
+
+OfficialAgentStatus = Literal[
+    "installed", "needs_model", "installable"
+]
+
+
+class OfficialAgentAgentInfo(BaseModel):
+    """An agent inside an official bundle (root or sub-agent) for conflict pre-check."""
+    name: str
+    display_name: Optional[str] = None
+
+
+class OfficialAgentMcpPreview(BaseModel):
+    """MCP server declaration inside an official bundle, with per-tenant install state.
+
+    ``installed`` is True when a server with the same name AND url already exists
+    (reuse). ``conflict`` is True when the name is taken by a different url (the
+    user must rename or skip during install). Both False = no conflict.
+    """
+    mcp_server_name: str
+    mcp_url: str
+    installed: bool = False
+    conflict: bool = False
+
+
+class OfficialAgentSkillPreview(BaseModel):
+    """A skill bundled in an official agent, with per-tenant name-conflict state."""
+    name: str
+    exists: bool = False
+
+
+class OfficialAgentKbPreview(BaseModel):
+    """A knowledge base declared in an official agent, with per-tenant name-conflict state."""
+    logical_index_name: str
+    display_name: Optional[str] = None
+    exists: bool = False
+
+
+class OfficialAgentListItem(BaseModel):
+    """Single item in the GET /repository/agent/official response."""
+    name: str
+    display_name: Optional[str] = None
+    description: Optional[str] = None
+    icon: Optional[str] = None
+    tags: List[str] = []
+    version_label: Optional[str] = None
+    status: OfficialAgentStatus
+    has_knowledge: bool
+    mcp_count: int
+    skill_count: int
+    kb_count: int
+    missing_models: List[str] = []
+    agents: List[OfficialAgentAgentInfo] = []
+    mcps: List[OfficialAgentMcpPreview] = []
+    skills: List[OfficialAgentSkillPreview] = []
+    knowledge_bases: List[OfficialAgentKbPreview] = []
+
+
+OfficialAgentInstallStatus = Literal[
+    "installed", "needs_model", "already_installed", "not_found", "failed"
+]
+
+OfficialAgentInstallStepStatus = Literal["ok", "failed"]
+
+
+class OfficialAgentInstallStep(BaseModel):
+    """One step of an official agent install (mcp / tools / knowledge_base / agent).
+
+    ``status`` is "ok" when the step completed, "failed" when it raised (the
+    install aborts and the failed step's message explains why).
+    """
+    name: str
+    status: OfficialAgentInstallStepStatus
+    message: Optional[str] = None
+
+
+class OfficialAgentInstallRequest(BaseModel):
+    """Request body for installing official agents.
+
+    ``renames`` maps an existing agent name inside a bundle to a new name
+    (used to resolve name conflicts before import). ``model_ids`` maps a bundle
+    key to a tenant LLM model_id applied to the bundle's root agent on install.
+    """
+    agent_names: List[str] = Field(
+        ..., min_length=1, description="Official agent bundle names to install"
+    )
+    renames: Optional[Dict[str, str]] = None
+    model_ids: Optional[Dict[str, int]] = None
+    embedding_model_ids: Optional[Dict[str, int]] = None
+    skill_renames: Optional[Dict[str, str]] = None
+    kb_renames: Optional[Dict[str, str]] = None
+    mcp_renames: Optional[Dict[str, str]] = None
+    mcp_skips: Optional[List[str]] = None
+
+
+class OfficialAgentInstallItem(BaseModel):
+    """Per-agent result of an official agent install request."""
+    name: str
+    status: OfficialAgentInstallStatus
+    message: Optional[str] = None
+    steps: Optional[List[OfficialAgentInstallStep]] = None
+    missing_models: List[str] = []
+    agent_id: Optional[int] = None
+
+
+class OfficialAgentInstallResponse(BaseModel):
+    """Response payload for POST /repository/agent/official/install."""
+    results: List[OfficialAgentInstallItem]
+
+
+# ---------------------------------------------------------------------------
+# GitCode 固定源（远程官方智能体仓库）
+# ---------------------------------------------------------------------------
+
+
+class OfficialAgentGithubCategory(BaseModel):
+    """A sub-category (second level) in the remote AgentsHub catalog."""
+    name: str
+    bundles: List[OfficialAgentListItem] = []
+
+
+class OfficialAgentGithubGroup(BaseModel):
+    """A top-level group (first level) in the remote AgentsHub catalog."""
+    name: str
+    categories: List[OfficialAgentGithubCategory] = []
+
+
+class OfficialAgentGithubDiscoverResult(BaseModel):
+    """Catalog of remote official agents grouped by group -> category.
+
+    ``commit`` identifies the repository snapshot the catalog was built from;
+    ``repo`` is the ``owner/repo`` of the fixed GitCode source.
+    """
+    repo: str
+    ref: str
+    commit: Optional[str] = None
+    groups: List[OfficialAgentGithubGroup] = []
+
+
+class OfficialAgentGithubInstallRequest(BaseModel):
+    """Request body for installing remote official agents by bundle key.
+
+    ``agent_names`` are relative bundle keys inside the remote repo (e.g.
+    ``行业智能体/医疗/体检报告解读助手``); ``renames``/``model_ids``/
+    ``embedding_model_ids`` mirror the local official install options.
+    """
+    agent_names: List[str] = Field(
+        ..., min_length=1, description="Remote official agent bundle keys to install"
+    )
+    renames: Optional[Dict[str, str]] = None
+    model_ids: Optional[Dict[str, int]] = None
+    embedding_model_ids: Optional[Dict[str, int]] = None
+    skill_renames: Optional[Dict[str, str]] = None
+    kb_renames: Optional[Dict[str, str]] = None
+    mcp_renames: Optional[Dict[str, str]] = None
+    mcp_skips: Optional[List[str]] = None
+
+
+class OfficialAgentGithubInstallResult(BaseModel):
+    """Response payload for POST .../official/gitcode/install."""
+    repo: str
+    commit: Optional[str] = None
+    results: List[OfficialAgentInstallItem]
+
+
 RepositoryImportRequirementType = Literal[
     "model", "knowledge_base", "mcp", "skill", "tool"
 ]
