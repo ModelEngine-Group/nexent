@@ -603,7 +603,7 @@ def update_tool_info_impl(tool_info: ToolInstanceInfoRequest, tenant_id: str, us
 
     _validate_tool_param_ranges(
         tool_info.tool_id,
-        dict(tool_info.params or {}),
+        dict(getattr(tool_info, "params", None) or {}),
     )
 
     tool_instance = create_or_update_tool_by_tool_info(
