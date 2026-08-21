@@ -5,10 +5,12 @@ import i18n from "i18next";
 import { API_ENDPOINTS, ApiError } from "./api";
 
 import { NAME_CHECK_STATUS } from "@/const/agentConfig";
+import { ErrorCode } from "@/const/errorCode";
 import {
   FILE_TYPES,
   EXTENSION_TO_TYPE_MAP,
   KNOWLEDGE_BASE_MAX_FILE_SIZE_BYTES,
+  KNOWLEDGE_BASE_MAX_FILE_SIZE_MB,
 } from "@/const/knowledgeBase";
 import {
   Document,
@@ -1233,7 +1235,15 @@ class KnowledgeBaseService {
       if (
         files.some((file) => file.size > KNOWLEDGE_BASE_MAX_FILE_SIZE_BYTES)
       ) {
-        throw new Error(i18n.t("knowledgeBase.upload.fileTooLarge"));
+        throw new ApiError(
+          ErrorCode.FILE_TOO_LARGE,
+          "Knowledge base file exceeds the maximum size",
+          {
+            resource: "knowledge_file",
+            limit_bytes: KNOWLEDGE_BASE_MAX_FILE_SIZE_BYTES,
+            limit_mb: KNOWLEDGE_BASE_MAX_FILE_SIZE_MB,
+          }
+        );
       }
 
       // Create FormData object

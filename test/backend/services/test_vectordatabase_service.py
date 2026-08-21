@@ -80,6 +80,10 @@ embedding_model_module = types.ModuleType('nexent.core.models.embedding_model')
 consts_exceptions_mod = types.ModuleType("consts.exceptions")
 
 
+class AppException(Exception):
+    pass
+
+
 class UnauthorizedError(Exception):
     pass
 
@@ -101,6 +105,7 @@ class TenantResourceLimitError(ValidationError, ValueError):
 
 
 consts_exceptions_mod.UnauthorizedError = UnauthorizedError
+consts_exceptions_mod.AppException = AppException
 consts_exceptions_mod.NotFoundException = NotFoundException
 consts_exceptions_mod.DuplicateError = DuplicateError
 consts_exceptions_mod.ValidationError = ValidationError

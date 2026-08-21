@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 from starlette.background import BackgroundTask
 
 from consts.exceptions import (
+    AppException,
     FileTooLargeException,
     NotFoundException,
     QuotaExceededError,
@@ -138,6 +139,8 @@ async def upload_files(
             raise HTTPException(status_code=HTTPStatus.BAD_REQUEST,
                                 detail="No valid files uploaded")
     except HTTPException:
+        raise
+    except AppException:
         raise
     except QuotaExceededError:
         raise

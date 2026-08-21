@@ -41,6 +41,7 @@ from consts.const import (
     PERMISSION_READ,
     VectorDatabaseType,
 )
+from consts.exceptions import AppException
 from consts.model import ChunkCreateRequest, ChunkUpdateRequest
 from database.attachment_db import delete_file, file_exists, get_file_stream
 from database.knowledge_db import (
@@ -901,6 +902,8 @@ class ElasticSearchService:
                               "embedding_model_id": actual_model_id}
             create_knowledge_record(knowledge_data)
             return {"status": "success", "message": f"Index {index_name} created successfully"}
+        except AppException:
+            raise
         except Exception as e:
             raise Exception(f"Error creating index: {str(e)}")
 
@@ -996,6 +999,8 @@ class ElasticSearchService:
                 "knowledge_id": record_info["knowledge_id"],
                 "name": record_info.get("knowledge_name", knowledge_name),
             }
+        except AppException:
+            raise
         except ValueError:
             raise
         except Exception as e:

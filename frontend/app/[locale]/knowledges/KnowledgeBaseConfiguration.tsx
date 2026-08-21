@@ -20,6 +20,7 @@ import {
 import {
   DOCUMENT_ACTION_TYPES,
   KNOWLEDGE_BASE_ACTION_TYPES,
+  KNOWLEDGE_BASE_MAX_FILE_SIZE_MB,
 } from "@/const/knowledgeBase";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 import log from "@/lib/logger";
@@ -27,6 +28,7 @@ import knowledgeBaseService from "@/services/knowledgeBaseService";
 import knowledgeBasePollingService from "@/services/knowledgeBasePollingService";
 import { isKnowledgeBaseFileSizeValid } from "@/services/uploadService";
 import { ApiError } from "@/services/api";
+import { getKnowledgeResourceLimitMessage } from "@/const/errorMessageI18n";
 import { KnowledgeBase } from "@/types/knowledgeBase";
 import { useConfig } from "@/hooks/useConfig";
 import { useModelList } from "@/hooks/model/useModelList";
@@ -536,7 +538,11 @@ function DataConfig({ isActive }: DataConfigProps) {
       const files = Array.from(e.dataTransfer.files);
       const validFiles = files.filter(isKnowledgeBaseFileSizeValid);
       if (validFiles.length !== files.length) {
-        message.error(t("knowledgeBase.upload.fileTooLarge"));
+        message.error(
+          t("knowledgeBase.upload.fileTooLarge", {
+            limit: KNOWLEDGE_BASE_MAX_FILE_SIZE_MB,
+          })
+        );
       }
       if (validFiles.length > 0) {
         setUploadFiles(validFiles);
@@ -899,10 +905,12 @@ function DataConfig({ isActive }: DataConfigProps) {
           });
       } catch (error) {
         log.error(t("knowledgeBase.error.createUpload"), error);
+        const resourceLimitMessage = getKnowledgeResourceLimitMessage(error, t);
         message.error(
-          error instanceof ApiError && error.code === 413
-            ? t("quota.uploadBlocked")
-            : t("knowledgeBase.message.createUploadError")
+          resourceLimitMessage ||
+            (error instanceof ApiError && error.code === 413
+              ? t("quota.uploadBlocked")
+              : t("knowledgeBase.message.createUploadError"))
         );
         setHasClickedUpload(false);
         throw error;
@@ -942,10 +950,12 @@ function DataConfig({ isActive }: DataConfigProps) {
       );
     } catch (error) {
       log.error(t("document.error.upload"), error);
+      const resourceLimitMessage = getKnowledgeResourceLimitMessage(error, t);
       message.error(
-        error instanceof ApiError && error.code === 413
-          ? t("quota.uploadBlocked")
-          : t("document.message.uploadError")
+        resourceLimitMessage ||
+          (error instanceof ApiError && error.code === 413
+            ? t("quota.uploadBlocked")
+            : t("document.message.uploadError"))
       );
       throw error;
     }

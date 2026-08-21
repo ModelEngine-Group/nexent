@@ -19,7 +19,7 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 backend_dir = os.path.abspath(os.path.join(current_dir, "../../../backend"))
 sys.path.append(backend_dir)
 
-from consts.exceptions import QuotaExceededError
+from consts.exceptions import AppException, QuotaExceededError
 
 # Patch environment variables before any imports that might use them
 # Environment variables are now configured in conftest.py
@@ -68,6 +68,23 @@ knowledge_storage_stub.commit_uploaded_object = MagicMock(return_value={"storage
 knowledge_storage_stub.compensate_uploaded_objects = MagicMock()
 sys.modules['services.knowledge_storage_service'] = knowledge_storage_stub
 setattr(services_stub, 'knowledge_storage_service', knowledge_storage_stub)
+
+# The service imports telemetry through the real ``utils`` package path, while
+# this test intentionally replaces ``utils`` with a lightweight module.
+knowledge_telemetry_stub = types.ModuleType('utils.knowledge_telemetry')
+knowledge_telemetry_stub.set_span_attributes = MagicMock()
+knowledge_telemetry_stub.inject_trace_context = MagicMock(return_value={})
+
+
+def _identity_trace_knowledge_operation(*args, **kwargs):
+    def decorator(function):
+        return function
+
+    return decorator
+
+
+knowledge_telemetry_stub.trace_knowledge_operation = _identity_trace_knowledge_operation
+sys.modules['utils.knowledge_telemetry'] = knowledge_telemetry_stub
 
 # Import the service module after mocking external dependencies
 file_management_service = importlib.import_module(
@@ -218,6 +235,99 @@ class TestUploadFilesImpl:
             assert uploaded_paths[0] == "folder/test.txt"
             mock_upload.assert_called_once_with(
                 files=[mock_file], folder="folder")
+
+    @pytest.mark.asyncio
+    async def test_knowledge_file_size_limit_accepts_exact_boundary(self):
+        """A knowledge-base file exactly at 100 MB remains uploadable."""
+        mock_file = MagicMock()
+        mock_file.filename = "boundary.pdf"
+        mock_file.size = file_management_service.MAX_KNOWLEDGE_FILE_SIZE_BYTES
+
+        with patch(
+            "backend.services.file_management_service.upload_to_minio",
+            AsyncMock(
+                return_value=[
+                    {
+                        "success": True,
+                        "file_name": "boundary.pdf",
+                        "object_name": "knowledge_base/boundary.pdf",
+                    }
+                ]
+            ),
+        ) as mock_upload:
+            result = await upload_files_impl(
+                destination="minio",
+                file=[mock_file],
+                folder="knowledge_base",
+                index_name="kb-1",
+            )
+
+        assert result[0] == []
+        assert result[2] == ["boundary.pdf"]
+        mock_upload.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_knowledge_file_size_limit_rejects_over_boundary(self):
+        """An oversized knowledge-base file is rejected before storage is called."""
+        mock_file = MagicMock()
+        mock_file.filename = "oversized.pdf"
+        mock_file.size = file_management_service.MAX_KNOWLEDGE_FILE_SIZE_BYTES + 1
+
+        with patch(
+            "backend.services.file_management_service.upload_to_minio",
+            AsyncMock(),
+        ) as mock_upload:
+            with pytest.raises(AppException) as exc_info:
+                await upload_files_impl(
+                    destination="minio",
+                    file=[mock_file],
+                    folder="knowledge_base",
+                    index_name="kb-1",
+                )
+
+        assert exc_info.value.error_code.value == "000403"
+        assert exc_info.value.details["resource"] == "knowledge_file"
+        assert exc_info.value.details["limit_mb"] == 100
+        mock_upload.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_knowledge_file_size_limit_checks_zero_declared_size(self, monkeypatch):
+        """A zero multipart size does not bypass validation of the actual stream."""
+        monkeypatch.setattr(
+            file_management_service,
+            "MAX_KNOWLEDGE_FILE_SIZE_BYTES",
+            4,
+        )
+        mock_file = MagicMock()
+        mock_file.filename = "actual-size.pdf"
+        mock_file.size = 0
+        mock_file.file = BytesIO(b"12345")
+
+        with pytest.raises(AppException) as exc_info:
+            await file_management_service._validate_knowledge_file_sizes([mock_file])
+
+        assert exc_info.value.details["actual_bytes"] == 5
+
+    @pytest.mark.asyncio
+    async def test_knowledge_file_size_limit_reads_when_no_spooled_file(self, monkeypatch):
+        """Uploads without a seekable spooled file are measured from their body."""
+        monkeypatch.setattr(
+            file_management_service,
+            "MAX_KNOWLEDGE_FILE_SIZE_BYTES",
+            4,
+        )
+        mock_file = MagicMock()
+        mock_file.filename = "stream.pdf"
+        mock_file.size = 0
+        mock_file.file = None
+        mock_file.seek = AsyncMock()
+        mock_file.read = AsyncMock(return_value=b"12345")
+
+        with pytest.raises(AppException) as exc_info:
+            await file_management_service._validate_knowledge_file_sizes([mock_file])
+
+        assert exc_info.value.details["actual_bytes"] == 5
+        mock_file.seek.assert_any_await(0)
 
     @pytest.mark.asyncio
     async def test_upload_files_impl_minio_failure(self):

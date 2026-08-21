@@ -78,6 +78,7 @@ export const DEFAULT_ERROR_MESSAGES: Record<string, string> = {
   [ErrorCode.KNOWLEDGE_SYNC_FAILED]: "Failed to sync knowledge base.",
   [ErrorCode.INDEX_NOT_FOUND]: "Search index not found.",
   [ErrorCode.KNOWLEDGE_SEARCH_FAILED]: "Knowledge search failed.",
+  [ErrorCode.KNOWLEDGE_RESOURCE_EXCEEDED]: "Knowledge resource limit exceeded.",
 
   // ==================== 07 MCPTools / MCP 工具 ====================
   // 01 - Tool

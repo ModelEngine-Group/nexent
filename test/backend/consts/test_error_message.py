@@ -84,6 +84,11 @@ class TestErrorMessageGetMessage:
         msg = ErrorMessage.get_message(ErrorCode.KNOWLEDGE_NOT_FOUND)
         assert "Knowledge" in msg
 
+    def test_get_message_knowledge_resource_exceeded(self):
+        """Test getting the default message for knowledge resource limits."""
+        msg = ErrorMessage.get_message(ErrorCode.KNOWLEDGE_RESOURCE_EXCEEDED)
+        assert "limit" in msg.lower()
+
     def test_get_message_memory_not_found(self):
         """Test getting message for MEMORY_NOT_FOUND."""
         msg = ErrorMessage.get_message(ErrorCode.MEMORY_NOT_FOUND)

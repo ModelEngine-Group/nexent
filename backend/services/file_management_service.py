@@ -14,12 +14,15 @@ from consts.const import (
     ASSET_OWNER_TENANT_ID,
     DATA_PROCESS_SERVICE,
     FILE_PREVIEW_SIZE_LIMIT,
+    MAX_KNOWLEDGE_FILE_SIZE_BYTES,
     MAX_CONCURRENT_UPLOADS,
     MODEL_CONFIG_MAPPING,
     OFFICE_MIME_TYPES,
     UPLOAD_FOLDER,
 )
+from consts.error_code import ErrorCode
 from consts.exceptions import (
+    AppException,
     FileTooLargeException,
     NotFoundException,
     OfficeConversionException,
@@ -327,6 +330,73 @@ async def _get_complete_upload_batch_size(files: List[UploadFile]) -> int:
     return total_size
 
 
+async def _get_upload_size(upload: UploadFile) -> int:
+    """Return one upload's size without changing its stream position."""
+    declared_size = getattr(upload, "size", None)
+    if isinstance(declared_size, int) and not isinstance(declared_size, bool) and declared_size > 0:
+        return declared_size
+
+    file_object = getattr(upload, "file", None)
+    if file_object is not None:
+        original_position = None
+        try:
+            original_position = file_object.tell()
+            file_object.seek(0, os.SEEK_END)
+            measured_size = file_object.tell()
+            if isinstance(measured_size, int) and measured_size >= 0:
+                return measured_size
+        except (AttributeError, OSError, TypeError, ValueError):
+            pass
+        finally:
+            if original_position is not None:
+                try:
+                    file_object.seek(original_position)
+                except (AttributeError, OSError, TypeError, ValueError):
+                    logger.warning("Failed to restore upload file position")
+
+    await upload.seek(0)
+    try:
+        content = await upload.read()
+        return len(content)
+    finally:
+        await upload.seek(0)
+
+
+def _is_knowledge_base_upload(folder: Optional[str], index_name: Optional[str]) -> bool:
+    """Identify uploads that belong to the local knowledge-base document flow."""
+    # The browser path uses the explicit knowledge_base folder. Northbound
+    # uploads omit the folder but always provide an index_name. Other callers
+    # may use an index_name for filename conflict resolution in an arbitrary
+    # storage folder, which must not inherit the KB document-size policy.
+    return folder == "knowledge_base" or (folder is None and bool(index_name))
+
+
+async def _validate_knowledge_file_sizes(
+    files: List[UploadFile],
+) -> None:
+    """Reject oversized KB documents before any file is written to storage."""
+    for upload in files:
+        if not upload:
+            continue
+        file_size = await _get_upload_size(upload)
+        if file_size <= MAX_KNOWLEDGE_FILE_SIZE_BYTES:
+            continue
+
+        filename = upload.filename or "unknown"
+        limit_mb = MAX_KNOWLEDGE_FILE_SIZE_BYTES // (1024 * 1024)
+        raise AppException(
+            ErrorCode.FILE_TOO_LARGE,
+            f"Knowledge base file '{filename}' exceeds the {limit_mb} MB limit",
+            details={
+                "resource": "knowledge_file",
+                "limit_bytes": MAX_KNOWLEDGE_FILE_SIZE_BYTES,
+                "limit_mb": limit_mb,
+                "file_name": filename,
+                "actual_bytes": file_size,
+            },
+        )
+
+
 async def upload_files_impl(
     destination: str,
     file: List[UploadFile],
@@ -354,6 +424,8 @@ async def upload_files_impl(
     errors = []
     quota_status = None
     if destination == "local":
+        if _is_knowledge_base_upload(folder, index_name):
+            await _validate_knowledge_file_sizes(file)
         async with upload_semaphore:
             for f in file:
                 if not f:
@@ -372,6 +444,8 @@ async def upload_files_impl(
                     errors.append(f"Failed to save file: {f.filename}")
 
     elif destination == "minio":
+        if _is_knowledge_base_upload(folder, index_name):
+            await _validate_knowledge_file_sizes(file)
         actual_folder = resolve_minio_upload_folder(
             folder, user_id, uploader_tenant_id)
 

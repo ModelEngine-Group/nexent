@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 import re
 
 from consts.const import ASSET_OWNER_TENANT_ID, PERMISSION_READ
+from consts.exceptions import AppException
 from consts.model import ChunkCreateRequest, ChunkUpdateRequest, HybridSearchRequest, IndexingResponse
 from consts.scheduler import VALID_SUMMARY_FREQUENCIES, SUMMARY_FREQUENCY_OPTIONS_FOR_API
 from nexent.vector_database.base import VectorDatabaseCore
@@ -118,6 +119,8 @@ def create_new_index(
             quota_limit_bytes=quota_limit_bytes,
         )
     except HTTPException:
+        raise
+    except AppException:
         raise
     except (TypeError, ValueError) as e:
         raise HTTPException(

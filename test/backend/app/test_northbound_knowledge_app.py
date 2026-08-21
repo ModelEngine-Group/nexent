@@ -125,6 +125,7 @@ consts_module.__path__ = [os.path.join(backend_dir, "consts")]
 sys.modules["consts"] = consts_module
 
 consts_exceptions_module = types.ModuleType("consts.exceptions")
+consts_exceptions_module.AppException = type("AppException", (Exception,), {})
 consts_exceptions_module.LimitExceededError = type("LimitExceededError", (Exception,), {})
 consts_exceptions_module.UnauthorizedError = type("UnauthorizedError", (Exception,), {})
 sys.modules["consts.exceptions"] = consts_exceptions_module
