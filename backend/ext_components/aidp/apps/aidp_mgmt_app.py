@@ -120,6 +120,20 @@ def _validate_upload_files(files: List[UploadFile]) -> tuple[List[UploadFile], l
     return valid_files, failed_files
 
 
+def _cleanup_document_assignments_for_deleted_knowledge_base(
+    tenant_id: str,
+    knowledge_base_id: str,
+    user_id: str,
+) -> None:
+    """Keep document assignment usage in sync after AIDP confirms knowledge-base deletion."""
+
+    from services.tag_management_service import TagManagementService
+
+    TagManagementService.cleanup_document_assignments_for_knowledge_base(
+        tenant_id, "aidp", knowledge_base_id, user_id
+    )
+
+
 # ---------------------------------------------------------------------------
 # Request Models
 # ---------------------------------------------------------------------------
@@ -632,6 +646,7 @@ async def delete_knowledge_base(
         invalidate_aidp_catalog_cache(server_url, api_key)
         invalidate_aidp_kb_detail_cache(server_url, api_key, kds_id)
         invalidate_aidp_doc_count_cache(server_url, api_key, kds_id)
+        _cleanup_document_assignments_for_deleted_knowledge_base(tenant_id, kds_id, user_id)
     return JSONResponse(status_code=HTTPStatus.OK, content={"success": success})
 
 

@@ -6,11 +6,11 @@ import { ChevronDown, Share2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
   AGENT_REPOSITORY_ICONS,
-  AGENT_REPOSITORY_PRESET_TAGS,
 } from "@/const/agentRepository";
 import { useAgentRepositoryListings } from "@/hooks/agentRepository/useAgentRepositoryListings";
 import { getAgentRepositoryTagLabel, resolveAgentRepositoryTagForSubmit } from "@/lib/agentRepositoryLabels";
 import { isSingleSimpleEmoji } from "@/lib/agentRepositoryIcon";
+import { useTagDefinitions, useTagLibraries } from "@/hooks/useTagManagement";
 import {
   buildApplyListingFormPrefill,
   pickApplyListingPrefillSource,
@@ -43,7 +43,30 @@ export function MineApplyListingModal({
   const { message } = App.useApp();
 
   const icons = AGENT_REPOSITORY_ICONS;
-  const presetTags = AGENT_REPOSITORY_PRESET_TAGS;
+  // Resolve the preset tag candidates from the unified tag library so the
+  // publish flow shares one source of truth with the rest of the platform.
+  // The "agent_category" multi-select definition is seeded per tenant (see
+  // deploy/sql/migrations/v2.5.3_0819_agent_category_preset_tags.sql and the
+  // provision function in deploy/sql/init.sql). Its values use stable keys as
+  // normalized_value/display_value; the frontend still resolves localized
+  // labels via i18n for backwards-compatible marketplace persistence.
+  const { data: tagLibraries } = useTagLibraries();
+  const defaultResourceLibrary = useMemo(
+    () =>
+      (tagLibraries ?? []).find(
+        (library) => library.bucket_key === "default_resource"
+      ) ?? null,
+    [tagLibraries]
+  );
+  const { data: tagDefinitions } = useTagDefinitions(
+    defaultResourceLibrary?.bucket_id ?? null
+  );
+  const presetTags = useMemo(() => {
+    const agentCategory = (tagDefinitions ?? []).find(
+      (definition) => definition.definition_key === "agent_category"
+    );
+    return (agentCategory?.values ?? []).map((value) => value.normalized_value);
+  }, [tagDefinitions]);
 
   const [selectedIcon, setSelectedIcon] = useState<string | null>(null);
   const [iconInput, setIconInput] = useState("");

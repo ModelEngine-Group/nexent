@@ -2118,10 +2118,23 @@ async def delete_agent_impl(agent_id: int, tenant_id: str, user_id: str):
         user_id: User ID performing the deletion
     """
     try:
+        try:
+            agent = search_agent_info_by_agent_id(agent_id, tenant_id)
+        except ValueError:
+            agent = None
+        is_tenant_owned_agent = bool(
+            agent and str(agent.get("tenant_id") or "") == str(tenant_id)
+        )
         delete_agent_by_id(agent_id, tenant_id, user_id)
         delete_agent_relationship(agent_id, tenant_id, user_id)
         delete_tools_by_agent_id(agent_id, tenant_id, user_id)
         skill_db.delete_skills_by_agent_id(agent_id, tenant_id, user_id)
+        if is_tenant_owned_agent:
+            from services.tag_management_service import TagManagementService
+
+            TagManagementService.cleanup_resource_assignments(
+                tenant_id, "agent", str(agent_id), user_id
+            )
     except Exception as e:
         logger.error(f"Failed to delete agent: {str(e)}")
         raise ValueError(f"Failed to delete agent: {str(e)}")
