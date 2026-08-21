@@ -2055,56 +2055,55 @@ class TestCreateSkillEndpointExtended:
 class TestUpdateSkillInstanceEndpointErrorHandling:
     """Error handling tests for POST /skills/instance/update endpoint."""
 
-    def test_update_instance_http_exception_propagation(self, mocker):
-        """Test HTTPException is propagated from get_skill_by_id."""
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
-            with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
-                mock_auth.return_value = ("user123", "tenant123")
-                mock_service = MagicMock()
-                mock_service_class.return_value = mock_service
-                # When get_skill_by_id returns None, HTTPException 404 is raised
-                mock_service.get_skill_by_id.return_value = None
+    @pytest.mark.asyncio
+    async def test_update_instance_http_exception_propagation(self):
+        """Test HTTPException is propagated unchanged."""
+        expected_exception = skill_app.HTTPException(
+            status_code=409,
+            detail="Conflict",
+        )
 
-                app = FastAPI()
-                app.include_router(skill_app.router)
-                client = TestClient(app)
-
-                response = client.post(
-                    "/skills/instance/update",
-                    json={
-                        "skill_id": 999,
-                        "agent_id": 1,
-                        "enabled": True
-                    },
-                    headers={"Authorization": "Bearer token123"}
+        with patch(
+            'backend.apps.skill_app.get_current_user_id',
+            side_effect=expected_exception,
+        ):
+            with pytest.raises(skill_app.HTTPException) as exc_info:
+                await skill_app.update_skill_instance(
+                    SkillInstanceInfoRequest(
+                        skill_id=1,
+                        agent_id=1,
+                        enabled=True,
+                    ),
+                    authorization="Bearer token123",
                 )
 
-                assert response.status_code == 404
+        assert exc_info.value is expected_exception
 
-    def test_update_instance_unexpected_error(self, mocker):
+    @pytest.mark.asyncio
+    @patch('backend.apps.skill_app.require_agent_draft_edit')
+    async def test_update_instance_unexpected_error(self, mock_require_edit, mocker):
         """Test update instance with unexpected error."""
         with patch('backend.apps.skill_app.SkillService') as mock_service_class:
             with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
                 mock_auth.return_value = ("user123", "tenant123")
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
-                mock_service.get_skill_by_id.side_effect = Exception("Unexpected error")
-
-                app = FastAPI()
-                app.include_router(skill_app.router)
-                client = TestClient(app)
-
-                response = client.post(
-                    "/skills/instance/update",
-                    json={
-                        "skill_id": 1,
-                        "agent_id": 1,
-                        "enabled": True
-                    },
-                    headers={"Authorization": "Bearer token123"}
+                mock_service.list_visible_skills.side_effect = Exception(
+                    "Unexpected error"
                 )
 
-                assert response.status_code == 500
+                with pytest.raises(skill_app.HTTPException) as exc_info:
+                    await skill_app.update_skill_instance(
+                        SkillInstanceInfoRequest(
+                            skill_id=1,
+                            agent_id=1,
+                            enabled=True,
+                        ),
+                        authorization="Bearer token123",
+                    )
+
+                assert exc_info.value.status_code == 500
+                assert exc_info.value.detail == "Internal server error"
 
 
 # ===== List Skill Instances Endpoint Error Handling Tests =====
