@@ -847,10 +847,9 @@ def test_version_management_requests():
     publish_req = model_consts.VersionPublishRequest(
         version_name="v1.0.0",
         release_note="Initial release",
-        publish_as_a2a=True
     )
     assert publish_req.version_name == "v1.0.0"
-    assert publish_req.publish_as_a2a is True
+    assert publish_req.release_note == "Initial release"
 
     rollback_req = model_consts.VersionRollbackRequest(
         version_name="Rollback v1",

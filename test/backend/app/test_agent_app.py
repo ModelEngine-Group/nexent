@@ -1619,14 +1619,13 @@ def test_publish_version_api_success(mocker, mock_auth_header):
         tenant_id="test_tenant_id",
         user_id="test_user_id",
         version_name="v1.0.0",
-        release_note="Initial release",
-        publish_as_a2a=False
+        release_note="Initial release"
     )
     assert response.json()["success"] is True
 
 
-def test_publish_version_api_success_with_a2a(mocker, mock_auth_header):
-    """Test publish_version_api with publish_as_a2a=True."""
+def test_publish_version_api_ignores_publish_as_a2a_request_field(mocker, mock_auth_header):
+    """Test publish_version_api does not accept publish_as_a2a as an API option."""
     mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
     mock_publish_version = mocker.patch("apps.agent_app.publish_version_impl")
 
@@ -1644,8 +1643,8 @@ def test_publish_version_api_success_with_a2a(mocker, mock_auth_header):
     )
 
     assert response.status_code == 200
-    args, kwargs = mock_publish_version.call_args
-    assert kwargs["publish_as_a2a"] is True
+    _, kwargs = mock_publish_version.call_args
+    assert "publish_as_a2a" not in kwargs
 
 
 def test_publish_version_api_bad_request(mocker, mock_auth_header):
