@@ -899,7 +899,6 @@ function DataConfig({ isActive }: DataConfigProps) {
             setNewlyCreatedKbId(null);
           });
       } catch (error) {
-        log.error(t("knowledgeBase.error.createUpload"), error);
         message.error(
           isApiErrorCode(error, 409)
             ? t("knowledgeBase.message.nameExists", {
@@ -959,7 +958,6 @@ function DataConfig({ isActive }: DataConfigProps) {
         }
       );
     } catch (error) {
-      log.error(t("document.error.upload"), error);
       message.error(
         isApiErrorCode(error, ErrorCode.TENANT_PERSONAL_KB_QUOTA_EXCEEDED)
           ? t("quota.personalKbUploadBlocked")

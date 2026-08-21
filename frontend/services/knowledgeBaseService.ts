@@ -1336,7 +1336,6 @@ class KnowledgeBaseService {
 
       throw new Error("Unknown response status during processing");
     } catch (error) {
-      log.error("Failed to upload and process files:", error);
       throw error;
     }
   }
