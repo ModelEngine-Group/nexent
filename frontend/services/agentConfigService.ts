@@ -670,6 +670,114 @@ export const importAgent = async (
 };
 
 /**
+ * Batch export result item returned by /agent/import/batch
+ */
+export interface AgentBatchImportResultItem {
+  name: string;
+  display_name?: string | null;
+  success: boolean;
+  error?: string | null;
+}
+
+export interface AgentBatchImportResult {
+  total: number;
+  success_count: number;
+  failed_count: number;
+  items: AgentBatchImportResultItem[];
+}
+
+/**
+ * Batch export multiple agents into a single ZIP archive.
+ * Triggers a browser download of the resulting ZIP file.
+ * @param agentIds list of agent ids to export
+ */
+export const exportAgentsBatch = async (agentIds: number[]) => {
+  try {
+    const response = await fetch(API_ENDPOINTS.agent.exportBatch, {
+      method: "POST",
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ agent_ids: agentIds }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Request failed: ${response.status}`);
+    }
+
+    const blob = await response.blob();
+    const contentDisposition = response.headers.get("Content-Disposition");
+    const filename =
+      extractFilenameFromContentDisposition(contentDisposition) ||
+      "agents_batch_export.zip";
+    downloadBlob(blob, filename);
+
+    return {
+      success: true,
+      data: null,
+      message: "Agents batch exported as ZIP",
+    };
+  } catch (error) {
+    log.error("Failed to batch export agents:", error);
+    return {
+      success: false,
+      data: null,
+      message: "Failed to batch export agents, please try again later",
+    };
+  }
+};
+
+/**
+ * Batch import agents from a ZIP archive produced by exportAgentsBatch.
+ * @param file ZIP file containing multiple agent exports
+ */
+export const importAgentsBatch = async (
+  file: File
+): Promise<{
+  success: boolean;
+  data: AgentBatchImportResult | null;
+  message: string;
+}> => {
+  try {
+    const formData = new FormData();
+    formData.append("file", file);
+
+    // Do not set Content-Type for FormData; browser sets multipart boundary.
+    const headers: Record<string, string> = {
+      "User-Agent": "AgentFrontEnd/1.0",
+    };
+
+    const response = await fetch(API_ENDPOINTS.agent.importBatch, {
+      method: "POST",
+      headers,
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(
+        errorData?.detail || `Request failed: ${response.status}`
+      );
+    }
+
+    const data = await response.json();
+    return {
+      success: true,
+      data: data as AgentBatchImportResult,
+      message: "Agents batch imported successfully",
+    };
+  } catch (error) {
+    log.error("Failed to batch import agents:", error);
+    return {
+      success: false,
+      data: null,
+      message:
+        error instanceof Error
+          ? error.message
+          : "Failed to batch import agents, please try again later",
+    };
+  }
+};
+
+/**
  * Clear NEW mark for an agent
  */
 export const clearAgentNewMark = async (agentId: string | number) => {

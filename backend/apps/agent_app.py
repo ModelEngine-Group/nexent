@@ -3,7 +3,7 @@ import logging
 from http import HTTPStatus
 from typing import Optional
 
-from fastapi import APIRouter, Body, Header, HTTPException, Request, Query
+from fastapi import APIRouter, Body, File, Header, HTTPException, Request, Query, UploadFile
 from fastapi.encoders import jsonable_encoder
 from starlette.responses import JSONResponse, Response, StreamingResponse
 
@@ -14,6 +14,8 @@ from consts.model import (
     AgentIDRequest,
     ConversationResponse,
     AgentImportRequest,
+    AgentBatchExportRequest,
+    AgentBatchImportResult,
     AgentNameBatchCheckRequest,
     AgentNameBatchRegenerateRequest,
     VersionPublishRequest,
@@ -52,6 +54,8 @@ from services.agent_service import (
     get_agent_by_name_impl,
     export_agent_with_skills_impl,
     import_agent_with_skills_impl,
+    export_agents_batch_impl,
+    import_agents_batch_impl,
 )
 from services.prompt_service import generate_guardrail_rules_impl
 from services.knowledge_scope_service import get_agent_knowledge_capabilities
@@ -388,6 +392,70 @@ async def import_agent_api(request: AgentImportRequest, authorization: Optional[
         logger.error(f"Agent import error: {str(e)}")
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Agent import error.")
+
+
+@agent_config_router.post("/export/batch")
+async def export_agents_batch_api(
+    request: AgentBatchExportRequest,
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Batch export multiple agents into a single ZIP archive.
+
+    The archive contains ``manifest.json`` plus one folder per agent, each
+    holding the standard ``agent.json`` (and optional ``skills/*.zip``).
+    """
+    try:
+        if not request.agent_ids:
+            raise HTTPException(
+                status_code=HTTPStatus.BAD_REQUEST,
+                detail="At least one agent_id is required for batch export.")
+        result = await export_agents_batch_impl(
+            request.agent_ids, authorization)
+        return Response(
+            content=result["data"],
+            media_type="application/zip",
+            headers={
+                "Content-Disposition": f"attachment; filename=\"{result.get('filename', 'agents_batch_export.zip')}\""
+            }
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Agent batch export error: {str(e)}")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Agent batch export error.")
+
+
+@agent_config_router.post("/import/batch", response_model=AgentBatchImportResult)
+async def import_agents_batch_api(
+    file: UploadFile = File(...),
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Batch import agents from a ZIP archive produced by /agent/export/batch.
+
+    Each agent in the archive is imported independently; per-agent failures are
+    captured in the returned summary instead of aborting the whole request.
+    """
+    try:
+        zip_bytes = await file.read()
+        if not zip_bytes:
+            raise HTTPException(
+                status_code=HTTPStatus.BAD_REQUEST,
+                detail="Empty ZIP file received.")
+        summary = await import_agents_batch_impl(zip_bytes, authorization)
+        return JSONResponse(status_code=HTTPStatus.OK, content=summary)
+    except ValueError as e:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Agent batch import error: {str(e)}")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Agent batch import error.")
 
 
 @agent_config_router.put("/clear_new/{agent_id}")

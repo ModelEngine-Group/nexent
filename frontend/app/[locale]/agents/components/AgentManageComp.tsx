@@ -12,9 +12,11 @@ import { useAuthorizationContext } from "@/components/providers/AuthorizationPro
 import log from "@/lib/logger";
 import { useState } from "react";
 import {
-  openImportWizardWithFile,
+  parseAgentImportFile,
+  selectImportFile,
   type ImportAgentData,
 } from "@/lib/agentImportUtils";
+import { importAgentsBatch } from "@/services/agentConfigService";
 import AgentImportWizard from "@/components/agent/AgentImportWizard";
 
 
@@ -32,21 +34,67 @@ export default function AgentManageComp() {
   const [importWizardVisible, setImportWizardVisible] = useState(false);
   const [importWizardData, setImportWizardData] =
     useState<ImportAgentData | null>(null);
+  const [isBatchImporting, setIsBatchImporting] = useState(false);
 
   // Always resolve tenant from auth on the agent dev page (matches published_list; avoids stale/wrong tenant_id query params)
   const { agents: agentList, isLoading: loading, refetch } = useAgentList("");
 
   // Handle import agent for space view - open wizard instead of direct import
   const handleImportAgent = async () => {
-    await openImportWizardWithFile({
-      onSuccess: (agentData) => {
-        setImportWizardData(agentData);
-        setImportWizardVisible(true);
+    const showImportSuccess = (successCount: number, failedCount: number) => {
+      message.success(
+        t("agentRepository.mine.batchImport.success", {
+          success: successCount,
+          failed: failedCount,
+        })
+      );
+    };
+
+    const showImportError = (msg: string) => {
+      message.error(msg);
+    };
+
+    const selection = await selectImportFile();
+
+    if (selection.type === "cancelled") {
+      return;
+    }
+
+    if (selection.type === "batch") {
+      setIsBatchImporting(true);
+      try {
+        const result = await importAgentsBatch(selection.file);
+        if (result.success && result.data) {
+          const data = result.data;
+          showImportSuccess(data.success_count, data.failed_count);
+          refetch();
+        } else {
+          showImportError(result.message || t("agentRepository.mine.batchImport.failed"));
+        }
+      } finally {
+        setIsBatchImporting(false);
+      }
+      return;
+    }
+
+    // Single agent path: parse and open the wizard.
+    const data = await parseAgentImportFile(selection.file, {
+      onParseError: (msgKey) => {
+        showImportError(t(msgKey) || msgKey);
       },
-      message: message,
-      t: t,
-      log: log,
+      onValidationError: (msgKey) => {
+        showImportError(t(msgKey) || msgKey);
+      },
+      onGenericError: (error) => {
+        log.error("Failed to read import file:", error);
+        showImportError(t("businessLogic.config.error.agentImportFailed") || "Failed to import agent");
+      },
     });
+
+    if (data) {
+      setImportWizardData(data);
+      setImportWizardVisible(true);
+    }
   };
 
   return (
@@ -129,7 +177,9 @@ export default function AgentManageComp() {
           <Col xs={24} sm={12}>
             <Tooltip title={t("subAgentPool.description.importAgent")}>
               <div
-                className="rounded-md p-3 cursor-pointer transition-all duration-200 bg-white hover:bg-green-50 hover:shadow-sm"
+                className={`rounded-md p-3 cursor-pointer transition-all duration-200 bg-white hover:bg-green-50 hover:shadow-sm ${
+                  isBatchImporting ? "opacity-60 pointer-events-none" : ""
+                }`}
                 onClick={() => void handleImportAgent()}
               >
                 <Flex align="center" gap={12} className="text-green-600">

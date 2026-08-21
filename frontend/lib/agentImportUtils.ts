@@ -40,6 +40,34 @@ export const extractSkillNameFromPath = (path: string): string => {
   return filename.replace(/\.zip$/i, "");
 };
 
+/**
+ * Check whether a ZIP file is a batch agent export (contains manifest.json
+ * at the archive root and at least one agents/<folder>/agent.json entry).
+ *
+ * Returns false for plain single-agent export ZIPs (which contain agent.json
+ * at the archive root and no manifest).
+ */
+export const isBatchExportZip = async (file: File): Promise<boolean> => {
+  if (!file.name.toLowerCase().endsWith(".zip")) {
+    return false;
+  }
+  try {
+    const zip = await JSZip.loadAsync(file);
+    const manifestFile = zip.file("manifest.json");
+    if (!manifestFile) {
+      return false;
+    }
+    const manifest = JSON.parse(await manifestFile.async("string"));
+    return Boolean(
+      manifest &&
+        Array.isArray(manifest.agents) &&
+        manifest.agents.length > 0
+    );
+  } catch {
+    return false;
+  }
+};
+
 export interface ParseAgentFileOptions {
   onFileNotFound?: (message: string) => void;
   onParseError?: (message: string) => void;
@@ -142,6 +170,33 @@ export function selectFile(
 
     fileInput.click();
   });
+}
+
+/**
+ * Result of selecting an import file with batch detection.
+ * - "cancelled": no file selected
+ * - "batch": file is a batch agent export ZIP (multiple agents)
+ * - "single": file is a single-agent JSON/ZIP that should go through the wizard
+ */
+export type SelectImportFileResult =
+  | { type: "cancelled" }
+  | { type: "batch"; file: File }
+  | { type: "single"; file: File };
+
+/**
+ * Select an import file and detect whether it is a batch agent export ZIP.
+ * Batch ZIPs (containing manifest.json + agents/*) are routed to the batch
+ * import endpoint; everything else falls back to the single-agent wizard.
+ */
+export async function selectImportFile(): Promise<SelectImportFileResult> {
+  const file = await selectFile(".json,.zip");
+  if (!file) {
+    return { type: "cancelled" };
+  }
+  if (await isBatchExportZip(file)) {
+    return { type: "batch", file };
+  }
+  return { type: "single", file };
 }
 
 /**

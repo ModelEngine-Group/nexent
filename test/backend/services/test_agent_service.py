@@ -11641,7 +11641,8 @@ async def test_cleanup_channel_later():
     from backend.services.agent_service import _cleanup_channel_later
     from backend.services.agent_service import streaming_channel_manager
 
-    with patch.object(streaming_channel_manager, 'remove_channel', new_callable=AsyncMock) as mock_remove:
+    with patch("backend.services.agent_service.asyncio.sleep", new=AsyncMock()), \
+         patch.object(streaming_channel_manager, 'remove_channel', new_callable=AsyncMock) as mock_remove:
         await _cleanup_channel_later(conversation_id=123, user_id="user1", delay=0.01)
         mock_remove.assert_called_once_with(123, "user1")
 
