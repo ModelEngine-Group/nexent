@@ -1216,6 +1216,50 @@ def test_export_agent_api_exception(mocker, mock_auth_header):
 # ---------------------------------------------------------------------------
 
 
+def test_check_skills_api_returns_conflicts(mocker, mock_auth_header):
+    """Skill conflict precheck returns service results without importing data."""
+    mock_check = mocker.patch("apps.agent_app.check_skill_conflicts_impl")
+    mock_check.return_value = [{
+        "skill_name": "SkillA",
+        "suggested_new_name": "SkillA 副本",
+    }]
+
+    response = config_client.post(
+        "/agent/check_skills",
+        json={"skill_names": ["SkillA", "SkillB"]},
+        headers=mock_auth_header,
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "skill_conflicts": [{
+            "skill_name": "SkillA",
+            "suggested_new_name": "SkillA 副本",
+        }]
+    }
+    mock_check.assert_called_once_with(
+        ["SkillA", "SkillB"],
+        mock_auth_header["Authorization"],
+    )
+
+
+def test_check_skills_api_error(mocker, mock_auth_header):
+    """Skill conflict precheck maps unexpected failures to a server error."""
+    mocker.patch(
+        "apps.agent_app.check_skill_conflicts_impl",
+        side_effect=Exception("database unavailable"),
+    )
+
+    response = config_client.post(
+        "/agent/check_skills",
+        json={"skill_names": ["SkillA"]},
+        headers=mock_auth_header,
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Agent skill conflict check error."
+
+
 def test_import_agent_api_success_without_skills(mocker, mock_auth_header):
     """Test import_agent_api success case without skills."""
     mock_import_agent = mocker.patch(
@@ -1278,6 +1322,11 @@ def test_import_agent_api_success_with_skills(mocker, mock_auth_header):
                 "mcp_info": []
             },
             "skills": [{"skill_name": "test_skill", "skill_zip_base64": "dGVzdA=="}],
+            "skill_resolutions": [{
+                "skill_name": "test_skill",
+                "action": "rename",
+                "new_name": "test_skill 副本"
+            }],
             "force_import": True
         },
         headers=mock_auth_header
@@ -1287,6 +1336,7 @@ def test_import_agent_api_success_with_skills(mocker, mock_auth_header):
     mock_import_with_skills.assert_called_once()
     args, kwargs = mock_import_with_skills.call_args
     assert kwargs["force_import"] is True
+    assert kwargs["skill_resolutions"][0].new_name == "test_skill 副本"
 
 
 def test_import_agent_api_duplicate_error(mocker, mock_auth_header):
@@ -1295,7 +1345,12 @@ def test_import_agent_api_duplicate_error(mocker, mock_auth_header):
     mock_import_agent = mocker.patch(
         "apps.agent_app.import_agent_impl", new_callable=AsyncMock)
     mock_import_agent.side_effect = SkillDuplicateError(
-        duplicate_names=["skill1", "skill2"])
+        duplicate_names=["skill1", "skill2"],
+        skill_conflicts=[{
+            "skill_name": "skill1",
+            "suggested_new_name": "skill1 副本",
+        }],
+    )
 
     response = config_client.post(
         "/agent/import",
@@ -1324,6 +1379,7 @@ def test_import_agent_api_duplicate_error(mocker, mock_auth_header):
     assert response.status_code == 409
     assert response.json()["detail"]["type"] == "skill_duplicate"
     assert "skill1" in response.json()["detail"]["duplicate_skills"]
+    assert response.json()["detail"]["skill_conflicts"][0]["suggested_new_name"] == "skill1 副本"
 
 
 def test_import_agent_api_exception(mocker, mock_auth_header):

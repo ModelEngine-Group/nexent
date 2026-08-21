@@ -35,8 +35,64 @@ from utils.str_utils import convert_list_to_string
 logger = logging.getLogger(__name__)
 _SKILL_UPDATE_FORBIDDEN_MESSAGE = "Not authorized to update this skill"
 _SKILL_ACCESS_UPDATE_FORBIDDEN_MESSAGE = "Not authorized to update skill access"
+_MAX_SKILL_NAME_LENGTH = 100
 
 _skill_manager: Optional[SkillManager] = None
+
+
+def _truncate_skill_copy_base_name(base_name: str, suffix: str) -> str:
+    """Trim a copied skill base name so the final name fits the database limit."""
+    max_base_length = max(_MAX_SKILL_NAME_LENGTH - len(suffix), 1)
+    if len(base_name) <= max_base_length:
+        return base_name
+    return base_name[:max_base_length].rstrip() or base_name[:max_base_length]
+
+
+def generate_available_copy_skill_name(
+    base_name: str,
+    unavailable_names: Optional[set[str]] = None,
+) -> str:
+    """Generate the first available copy name using the repository naming convention."""
+    normalized_base = (base_name or "Skill").strip() or "Skill"
+    unavailable = unavailable_names or set()
+    if normalized_base not in unavailable:
+        return normalized_base
+
+    index = 1
+    while True:
+        suffix = " 副本" if index == 1 else f" 副本 {index}"
+        candidate = f"{_truncate_skill_copy_base_name(normalized_base, suffix)}{suffix}"
+        if candidate not in unavailable:
+            return candidate
+        index += 1
+
+
+def _replace_skill_frontmatter_name(content: str, new_name: str) -> str:
+    """Replace only the name value in SKILL.md frontmatter and preserve the body."""
+    match = re.match(
+        r"\A---[ \t]*\r?\n(?P<frontmatter>.*?)(?P<closing>\r?\n---[ \t]*\r?\n)(?P<body>[\s\S]*)\Z",
+        content,
+        re.DOTALL,
+    )
+    if not match:
+        raise SkillException("SKILL.md must have YAML frontmatter")
+
+    try:
+        frontmatter = yaml.safe_load(match.group("frontmatter"))
+    except yaml.YAMLError as exc:
+        raise SkillException(f"Invalid SKILL.md frontmatter: {exc}") from exc
+    if not isinstance(frontmatter, dict):
+        raise SkillException("SKILL.md frontmatter must be a mapping")
+
+    frontmatter["name"] = new_name
+    yaml_content = yaml.safe_dump(
+        frontmatter,
+        allow_unicode=True,
+        sort_keys=False,
+        default_flow_style=False,
+        width=float("inf"),
+    )
+    return f"---\n{yaml_content}---\n{match.group('body')}"
 
 
 def _to_group_id_set(group_ids: Any) -> set[int]:
@@ -1549,6 +1605,7 @@ class SkillService:
         original_folder_name: Optional[str] = None,
         *,
         tenant_id: Optional[str],
+        file_overrides: Optional[Dict[str, bytes]] = None,
     ) -> None:
         """Extract ZIP files to local storage only.
 
@@ -1622,7 +1679,11 @@ class SkillService:
 
                 extracted_count = 0
                 for file_path, local_path in validated_files:
-                    file_data = zf.read(file_path)
+                    file_data = (
+                        file_overrides[file_path]
+                        if file_overrides and file_path in file_overrides
+                        else zf.read(file_path)
+                    )
                     os.makedirs(os.path.dirname(local_path), exist_ok=True)
                     with open(local_path, "wb") as f:
                         f.write(file_data)
@@ -2443,6 +2504,11 @@ class SkillService:
         except ValueError as e:
             raise SkillException(f"Invalid SKILL.md in ZIP: {e}")
 
+        original_skill_name = str(skill_data.get("name") or "")
+        skill_md_override = None
+        if original_skill_name != name:
+            skill_md_override = _replace_skill_frontmatter_name(skill_content, name).encode("utf-8")
+
         if not name:
             name = skill_data.get("name")
 
@@ -2495,7 +2561,11 @@ class SkillService:
 
         self.skill_manager.save_skill(skill_dict, tenant_id=tenant_id)
         self._upload_zip_files(
-            zip_bytes, name, detected_skill_name, tenant_id=tenant_id
+            zip_bytes,
+            name,
+            detected_skill_name,
+            tenant_id=tenant_id,
+            file_overrides={skill_md_path: skill_md_override} if skill_md_override else None,
         )
 
         return self._enrich_configs_from_yaml(result)

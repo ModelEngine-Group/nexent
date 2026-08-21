@@ -37,6 +37,7 @@ from consts.model import (
     MCPInfo,
     MessageRequest,
     SkillInstanceInfoRequest,
+    SkillResolution,
     SkillZipEntry,
     ToolInstanceInfoRequest,
     ToolSourceEnum, ModelConnectStatusEnum,
@@ -88,7 +89,7 @@ from database.attachment_db import (
     upload_fileobj,
 )
 from database.client import minio_client
-from services.skill_service import SkillService
+from services.skill_service import SkillService, generate_available_copy_skill_name
 from services.file_management_service import is_allowed_skill_upload_path
 from database.agent_version_db import query_version_list, query_current_version_no, batch_search_version_names, batch_query_current_version_nos
 from database.group_db import query_group_ids_by_user
@@ -4081,46 +4082,82 @@ async def import_agent_with_skills_impl(
     agent_info: "ExportAndImportDataFormat",
     skills: List[SkillZipEntry],
     authorization: str,
-    force_import: bool = False
+    force_import: bool = False,
+    skill_resolutions: Optional[List[SkillResolution]] = None,
 ):
     """Import an agent with skills bundled from a ZIP export.
 
-    For each skill in the bundle:
-      1. Check if a skill with the same name already exists in the target tenant.
-      2. If duplicates exist, raise SkillDuplicateError (do not create anything).
-      3. If no duplicates, create the skill from ZIP bytes via SkillService.
-      4. Create a SkillInstance linking the new skill_id to the new agent_id.
-
-    Then proceeds with the standard agent import flow using the mapped skill IDs.
+    Duplicate skills require an explicit rename or use-existing resolution. New
+    and renamed skills share the same ZIP creation path, while imported agent
+    skill names are resolved to tenant-local skill IDs before creating instances.
     """
-    from services.skill_service import SkillService
-
     user_id, tenant_id, _ = get_current_user_info(authorization)
 
     skill_name_to_zip_base64 = {
         entry.skill_name: entry.skill_zip_base64 for entry in skills}
 
     existing_skills = skill_db.list_skills(tenant_id)
-    existing_skill_names = {s.get("name") for s in existing_skills}
+    existing_skills_by_name = {
+        skill.get("name"): skill
+        for skill in existing_skills
+        if skill.get("name")
+    }
+    existing_skill_names = set(existing_skills_by_name)
 
-    import_skill_names = set(skill_name_to_zip_base64.keys())
-    duplicate_names = list(import_skill_names & existing_skill_names)
+    skill_conflicts = build_skill_import_conflicts(
+        list(skill_name_to_zip_base64),
+        existing_skill_names,
+    )
+    duplicate_names = [conflict["skill_name"] for conflict in skill_conflicts]
+    resolutions_by_name = {
+        resolution.skill_name: resolution
+        for resolution in skill_resolutions or []
+    }
 
-    if duplicate_names:
-        raise SkillDuplicateError(duplicate_names)
+    conflict_by_name = {
+        conflict["skill_name"]: conflict
+        for conflict in skill_conflicts
+    }
+    has_unresolved_conflict = any(
+        (
+            (resolution := resolutions_by_name.get(skill_name)) is None
+            or (
+                resolution.action == "rename"
+                and str(resolution.new_name or "").strip()
+                != conflict_by_name[skill_name]["suggested_new_name"]
+            )
+        )
+        for skill_name in duplicate_names
+    )
+    if has_unresolved_conflict:
+        raise SkillDuplicateError(duplicate_names, skill_conflicts)
 
     skill_name_to_id: Dict[str, int] = {}
     skill_service = SkillService(tenant_id=tenant_id)
 
     for skill_name, zip_base64 in skill_name_to_zip_base64.items():
+        resolution = (
+            resolutions_by_name.get(skill_name)
+            if skill_name in existing_skills_by_name
+            else None
+        )
+        if skill_name in existing_skills_by_name and resolution and resolution.action == "use_existing":
+            skill_name_to_id[skill_name] = existing_skills_by_name[skill_name]["skill_id"]
+            continue
+
+        target_name = (
+            str(resolution.new_name).strip()
+            if resolution and resolution.action == "rename"
+            else skill_name
+        )
         zip_bytes = base64.b64decode(zip_base64)
         result = skill_service.create_skill_from_zip_bytes(
             zip_bytes=zip_bytes,
-            skill_name=skill_name,
+            skill_name=target_name,
             source="导入",
             user_id=user_id,
             tenant_id=tenant_id,
-            skip_duplicate_check=True
+            skip_duplicate_check=False,
         )
         skill_name_to_id[skill_name] = result.get("skill_id")
 
@@ -4129,13 +4166,18 @@ async def import_agent_with_skills_impl(
         skill_name_to_id=skill_name_to_id
     )
 
-    main_agent_id = agent_id_mapping.get(agent_info.agent_id)
-    if main_agent_id:
-        for skill_name, new_skill_id in skill_name_to_id.items():
+    for imported_agent in agent_info.agent_info.values():
+        new_agent_id = agent_id_mapping.get(imported_agent.agent_id)
+        if not new_agent_id:
+            continue
+        for skill_name in imported_agent.skill_names or []:
+            resolved_skill_id = skill_name_to_id.get(skill_name)
+            if resolved_skill_id is None:
+                continue
             skill_db.create_or_update_skill_by_skill_info(
                 skill_info=SkillInstanceInfoRequest(
-                    skill_id=new_skill_id,
-                    agent_id=main_agent_id,
+                    skill_id=resolved_skill_id,
+                    agent_id=new_agent_id,
                     enabled=True,
                     version_no=0
                 ),
@@ -4145,6 +4187,45 @@ async def import_agent_with_skills_impl(
             )
 
     return agent_id_mapping
+
+
+def build_skill_import_conflicts(
+    skill_names: List[str],
+    existing_skill_names: set[str],
+) -> List[Dict[str, str]]:
+    """Build duplicate skill resolutions without creating any data."""
+    ordered_skill_names = list(dict.fromkeys(skill_names))
+    unavailable_names = existing_skill_names | set(ordered_skill_names)
+    conflicts: List[Dict[str, str]] = []
+
+    for skill_name in ordered_skill_names:
+        if skill_name not in existing_skill_names:
+            continue
+        suggested_name = generate_available_copy_skill_name(
+            skill_name,
+            unavailable_names,
+        )
+        unavailable_names.add(suggested_name)
+        conflicts.append({
+            "skill_name": skill_name,
+            "suggested_new_name": suggested_name,
+        })
+
+    return conflicts
+
+
+def check_skill_conflicts_impl(
+    skill_names: List[str],
+    authorization: str,
+) -> List[Dict[str, str]]:
+    """Check agent import skill names against the current tenant."""
+    _, tenant_id, _ = get_current_user_info(authorization)
+    existing_skill_names = {
+        skill.get("name")
+        for skill in skill_db.list_skills(tenant_id)
+        if skill.get("name")
+    }
+    return build_skill_import_conflicts(skill_names, existing_skill_names)
 
 
 # =============================================================================

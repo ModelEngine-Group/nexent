@@ -22,7 +22,7 @@ The exception handler automatically maps legacy exception class names to ErrorCo
 
 from .error_code import ErrorCode, ERROR_CODE_HTTP_STATUS
 from .error_message import ErrorMessage
-from typing import List
+from typing import Dict, List, Optional
 
 
 # ==================== New Framework: AppException with ErrorCode ====================
@@ -283,8 +283,14 @@ class DataMateConnectionError(Exception):
 
 class SkillDuplicateError(Exception):
     """Raised when importing an agent with skills that have duplicate names in target tenant."""
-    def __init__(self, duplicate_names: List[str]):
+    def __init__(
+        self,
+        duplicate_names: List[str],
+        skill_conflicts: Optional[List[Dict[str, str]]] = None,
+    ):
         self.duplicate_names = duplicate_names
+        self.skill_conflicts = skill_conflicts or []
+        super().__init__(f"Duplicate skills: {', '.join(duplicate_names)}")
 
 
 class SkillException(Exception):

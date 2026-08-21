@@ -14,6 +14,7 @@ from consts.model import (
     AgentIDRequest,
     ConversationResponse,
     AgentImportRequest,
+    SkillConflictCheckRequest,
     AgentNameBatchCheckRequest,
     AgentNameBatchRegenerateRequest,
     VersionPublishRequest,
@@ -54,6 +55,7 @@ from services.agent_service import (
     get_agent_by_name_impl,
     export_agent_with_skills_impl,
     import_agent_with_skills_impl,
+    check_skill_conflicts_impl,
 )
 from services.prompt_service import generate_guardrail_rules_impl
 from services.knowledge_scope_service import get_agent_knowledge_capabilities
@@ -516,7 +518,8 @@ async def import_agent_api(request: AgentImportRequest, authorization: Optional[
                 request.agent_info,
                 request.skills,
                 authorization,
-                force_import=request.force_import
+                force_import=request.force_import,
+                skill_resolutions=request.skill_resolutions,
             )
         else:
             await import_agent_impl(
@@ -528,12 +531,34 @@ async def import_agent_api(request: AgentImportRequest, authorization: Optional[
     except SkillDuplicateError as exc:
         raise HTTPException(status_code=409, detail={
             "type": "skill_duplicate",
-            "duplicate_skills": exc.duplicate_names
+            "duplicate_skills": exc.duplicate_names,
+            "skill_conflicts": exc.skill_conflicts,
         })
     except Exception as e:
         logger.error(f"Agent import error: {str(e)}")
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Agent import error.")
+
+
+@agent_config_router.post("/check_skills")
+async def check_skills_api(
+    request: SkillConflictCheckRequest,
+    authorization: Optional[str] = Header(None),
+):
+    """Check bundled skill names before agent import without creating data."""
+    try:
+        return {
+            "skill_conflicts": check_skill_conflicts_impl(
+                request.skill_names,
+                authorization,
+            )
+        }
+    except Exception as exc:
+        logger.error(f"Agent skill conflict check error: {str(exc)}")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Agent skill conflict check error.",
+        ) from exc
 
 
 @agent_config_router.put("/clear_new/{agent_id}")
