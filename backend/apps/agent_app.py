@@ -70,7 +70,11 @@ from services.agent_version_service import (
     compare_versions_impl,
     list_published_agents_impl,
 )
-from utils.auth_utils import get_current_user_info, get_current_user_id
+from utils.auth_utils import (
+    get_current_user_info,
+    get_current_user_id,
+    verify_internal_runtime_jwt,
+)
 
 agent_runtime_router = APIRouter(prefix="/agent")
 agent_config_router = APIRouter(prefix="/agent")
@@ -141,6 +145,48 @@ async def agent_run_api(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=error_detail)
 
 
+@agent_runtime_router.post(
+    "/internal/northbound/run",
+    include_in_schema=False,
+)
+async def northbound_agent_run_api(
+    agent_request: AgentRequest,
+    authorization: Optional[str] = Header(None),
+):
+    """Run a northbound-prepared agent request inside the runtime service."""
+    try:
+        user_id, tenant_id = verify_internal_runtime_jwt(authorization)
+        return await run_agent_stream(
+            agent_request=agent_request,
+            http_request=None,
+            authorization=authorization,
+            user_id=user_id,
+            tenant_id=tenant_id,
+            skip_user_save=True,
+        )
+    except UnauthorizedError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.UNAUTHORIZED,
+            detail=str(exc),
+        ) from exc
+    except ForbiddenError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.FORBIDDEN,
+            detail=str(exc),
+        ) from exc
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+    except Exception as exc:
+        logger.error("Northbound agent run error: %s", exc)
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Agent run error.",
+        ) from exc
+
+
 @agent_runtime_router.post("/nl2agent/run")
 async def nl2agent_run_api(
     nl2agent_request: NL2AgentRunRequest,
@@ -180,6 +226,25 @@ async def agent_stop_api(conversation_id: int, authorization: Optional[str] = He
     """
     user_id, _ = get_current_user_id(authorization)
     return stop_agent_tasks(conversation_id, user_id)
+
+
+@agent_runtime_router.post(
+    "/internal/northbound/stop/{conversation_id}",
+    include_in_schema=False,
+)
+async def northbound_agent_stop_api(
+    conversation_id: int,
+    authorization: Optional[str] = Header(None),
+):
+    """Stop a northbound agent run inside the runtime service."""
+    try:
+        user_id, _ = verify_internal_runtime_jwt(authorization)
+        return stop_agent_tasks(conversation_id, user_id)
+    except UnauthorizedError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.UNAUTHORIZED,
+            detail=str(exc),
+        ) from exc
 
 
 @agent_config_router.post("/search_info")
