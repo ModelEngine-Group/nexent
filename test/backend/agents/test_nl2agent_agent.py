@@ -147,6 +147,57 @@ def test_build_nl2agent_system_prompt_falls_back_to_chinese():
     assert build_nl2agent_system_prompt("fr") == build_nl2agent_system_prompt("zh")
 
 
+@pytest.mark.parametrize(
+    (
+        "language",
+        "boundary_heading",
+        "deferred_rule",
+        "resource_rule",
+        "empty_resource_rule",
+        "single_invocation_rule",
+        "summary_rule",
+    ),
+    [
+        (
+            "en",
+            "### Scheduled-task Boundary",
+            "this workflow does not create the scheduled task",
+            "Never search for a scheduled-task resource",
+            'resource_result={"status": "success", "resources": []}',
+            "Every Prompt field describes one invocation",
+            "open [Scheduled tasks](/agent-tasks)",
+        ),
+        (
+            "zh",
+            "### 定时任务边界",
+            "本流程不创建定时任务",
+            "不得搜索定时任务资源",
+            'resource_result={"status": "success", "resources": []}',
+            "所有 Prompt 字段只描述 Agent 单次被调用时的行为",
+            "前往[定时任务](/agent-tasks)",
+        ),
+    ],
+)
+def test_build_nl2agent_system_prompt_defers_scheduled_tasks_until_agent_chat(
+    language,
+    boundary_heading,
+    deferred_rule,
+    resource_rule,
+    empty_resource_rule,
+    single_invocation_rule,
+    summary_rule,
+):
+    prompt = build_nl2agent_system_prompt(language)
+
+    assert boundary_heading in prompt
+    assert deferred_rule in prompt
+    assert resource_rule in prompt
+    assert empty_resource_rule in prompt
+    assert single_invocation_rule in prompt
+    assert summary_rule in prompt
+    assert prompt.count("(/agent-tasks)") == 1
+
+
 @pytest.mark.parametrize("language", ["zh", "en"])
 def test_build_nl2agent_system_prompt_uses_mounted_tool_names(language):
     prompt = build_nl2agent_system_prompt(language)
@@ -245,6 +296,20 @@ def test_installed_resource_binding_wrapper_preserves_verified_contract():
 
     assert payload["agent_id"] == 42
     assert payload["resources"][0]["candidate"]["candidate_ref"] == "skill:12"
+
+    empty_wrapped = build_nl2a_wrapper(
+        subtype="installed_resource_binding",
+        agent_id=42,
+        resource_result={"status": "success", "resources": []},
+    )
+    empty_payload = json.loads(
+        empty_wrapped.split("<nl2a>", 1)[1].split("</nl2a>", 1)[0]
+    )
+    assert empty_payload == {
+        "subtype": "installed_resource_binding",
+        "agent_id": 42,
+        "resources": [],
+    }
 
 
 def test_requirement_clarification_accepts_at_most_five_questions():
