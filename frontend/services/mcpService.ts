@@ -491,6 +491,71 @@ export const addMcpFromConfig = async (mcpConfig: { mcpServers: Record<string, {
 };
 
 /**
+ * Add a container MCP through an SSE response. The callback receives the
+ * container metadata as soon as it has been created; the promise resolves
+ * only after the MCP is ready and its tools have been scanned.
+ */
+export const addMcpFromConfigStream = async (
+  mcpConfig: { mcpServers: Record<string, { command: string; args?: string[]; env?: Record<string, string>; port?: number; image?: string }> },
+  tenantId: string | null | undefined,
+  onContainerStarted: (container: { container_id: string; container_name?: string; host_port?: number; mcp_url?: string }) => void,
+) => {
+  try {
+    const url = tenantId
+      ? `${API_ENDPOINTS.mcp.addFromConfigStream}?tenant_id=${encodeURIComponent(tenantId)}`
+      : API_ENDPOINTS.mcp.addFromConfigStream;
+    const response = await fetch(url, {
+      method: "POST",
+      headers: getAuthHeaders(),
+      body: JSON.stringify(mcpConfig),
+    });
+    if (!response.ok || !response.body) {
+      const data = await response.json().catch(() => ({}));
+      return {
+        success: false,
+        data: null,
+        message: data.detail || data.message || t("mcpService.message.addFromConfigFailed"),
+      };
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder("utf-8");
+    let buffer = "";
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const events = buffer.split("\n\n");
+        buffer = events.pop() || "";
+        for (const event of events) {
+          if (!event.startsWith("data: ")) continue;
+          const message = JSON.parse(event.slice(6));
+          if (message.status === "container_started") {
+            onContainerStarted(message.data);
+          } else if (message.status === "success") {
+            return { success: true, data: message.data };
+          } else if (message.status === "error") {
+            return { success: false, data: null, message: message.detail };
+          }
+        }
+      }
+    } finally {
+      await reader.cancel().catch(() => undefined);
+    }
+    return { success: false, data: null, message: t("mcpService.message.addFromConfigFailed") };
+  } catch (error) {
+    log.error(t("mcpService.debug.addFromConfigFailed"), error);
+    return {
+      success: false,
+      data: null,
+      message: t("mcpService.message.networkError"),
+      messageKey: "mcpService.message.networkError",
+    };
+  }
+};
+
+/**
  * Get MCP container list
  */
 export const getMcpContainers = async (tenantId?: string | null) => {
@@ -596,7 +661,8 @@ export const streamMcpContainerLogs = async (
   onData?: (logLine: string) => void,
   onError?: (error: any) => void,
   onComplete?: () => void,
-  abortSignal?: AbortSignal
+  abortSignal?: AbortSignal,
+  onConnected?: () => void
 ): Promise<AbortController> => {
   const abortController = new AbortController();
   const signal = abortSignal || abortController.signal;
@@ -622,6 +688,8 @@ export const streamMcpContainerLogs = async (
       if (!response.body) {
         throw new Error('No response body');
       }
+
+      onConnected?.();
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder('utf-8');

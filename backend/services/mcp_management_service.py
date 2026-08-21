@@ -123,7 +123,8 @@ def _to_community_card(row: Dict[str, Any]) -> Dict[str, Any]:
         STATUS_SHARED: "approved",
         STATUS_REJECTED: "rejected",
     }
-    # Look up authorization_token and custom_headers from the source MCP record
+    shared_fields = row.get("shared_fields") if isinstance(row.get("shared_fields"), dict) else {}
+    # Only expose connection credentials that the publisher explicitly shared.
     source_authorization_token = None
     source_custom_headers = None
     source_container_port = None
@@ -143,9 +144,9 @@ def _to_community_card(row: Dict[str, Any]) -> Dict[str, Any]:
         "marketId": row.get("market_id"),
         "reviewId": row.get("market_id"),
         "sourceMcpId": source_mcp_id,
-        "sharedFields": row.get("shared_fields"),
-        "authorizationToken": source_authorization_token,
-        "customHeaders": source_custom_headers,
+        "sharedFields": shared_fields,
+        "authorizationToken": source_authorization_token if shared_fields.get("authorizationToken") else None,
+        "customHeaders": source_custom_headers if shared_fields.get("customHeaders") else None,
         "containerPort": source_container_port,
         "name": row.get("mcp_name"),
         "description": row.get("description"),

@@ -2196,6 +2196,7 @@
   "repository.mine.applyError": "Failed to submit listing request",
   "repository.mine.applyForListing": "Apply for listing",
   "repository.mine.applyModal.content": "Listing note",
+  "repository.mine.applyModal.sharedFields": "Select configuration to share",
   "repository.mine.applyModal.contentPlaceholder": "Enter a listing note (optional)",
   "repository.mine.applySuccess": "Listing request submitted",
   "repository.mine.cancelApplyError": "Failed to cancel listing request",

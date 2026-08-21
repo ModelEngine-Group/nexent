@@ -133,13 +133,7 @@ export default function RepositoryMcpDetailModal({
   );
 }
 
-function StatItem({
-  label,
-  value,
-}: {
-  label: string;
-  value: React.ReactNode;
-}) {
+function StatItem({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="flex flex-col">
       <span className="text-xs text-slate-500 mb-1">{label}</span>

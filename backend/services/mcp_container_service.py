@@ -100,6 +100,7 @@ class MCPContainerManager:
         host_port: Optional[int] = None,
         image: Optional[str] = None,
         full_command: Optional[List[str]] = None,
+        wait_for_ready: bool = True,
     ) -> Dict[str, str]:
         """
         Start MCP container and return access URL
@@ -125,6 +126,7 @@ class MCPContainerManager:
                 env_vars=env_vars,
                 host_port=host_port,
                 image=image,
+                wait_for_ready=wait_for_ready,
             )
             # Map SDK response to existing interface (mcp_url instead of service_url)
             return {

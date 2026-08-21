@@ -6,7 +6,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import log from "@/lib/logger";
 import {
-  addContainerMcpToolService,
+  addContainerMcpToolServiceStream,
   addMcpToolService,
   parseContainerMcpConfigJson,
 } from "@/services/mcpToolsService";
@@ -21,13 +21,14 @@ import { useAuthorizationContext } from "@/components/providers/AuthorizationPro
 
 interface UseMcpAddLocalParams {
   onSuccess: () => void;
+  onContainerStarted?: (containerId: string) => void;
 }
 
 /**
  * Submission mutation for the "Add local MCP" form. The component owns the
  * draft; this hook only cares about the network call + cache invalidation.
  */
-export function useMcpAddLocal({ onSuccess }: UseMcpAddLocalParams) {
+export function useMcpAddLocal({ onSuccess, onContainerStarted }: UseMcpAddLocalParams) {
   const { message } = App.useApp();
   const { t } = useTranslation("common");
   const queryClient = useQueryClient();
@@ -134,7 +135,7 @@ export function useMcpAddLocal({ onSuccess }: UseMcpAddLocalParams) {
           return false;
         }
 
-        await addContainerMcpToolService({
+        await addContainerMcpToolServiceStream({
           name: trimmedName,
           description: draft.description ?? "",
           tags: draft.tags,
@@ -146,6 +147,8 @@ export function useMcpAddLocal({ onSuccess }: UseMcpAddLocalParams) {
           group_ids: draft.groupIds?.join(",") ?? undefined,
           ingroup_permission: draft.ingroupPermission ?? undefined,
           shared_fields: draft.sharedFields ?? undefined,
+        }, (result) => {
+          if (result.container_id) onContainerStarted?.(result.container_id);
         });
       } else {
         await addMcpToolService({

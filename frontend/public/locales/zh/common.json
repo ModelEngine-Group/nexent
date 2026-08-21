@@ -2161,6 +2161,7 @@
   "repository.mine.applyError": "提交上架申请失败",
   "repository.mine.applyForListing": "申请上架",
   "repository.mine.applyModal.content": "上架说明",
+  "repository.mine.applyModal.sharedFields": "选择要共享的配置信息",
   "repository.mine.applyModal.contentPlaceholder": "请输入上架说明（选填）",
   "repository.mine.applySuccess": "已提交上架申请",
   "repository.mine.cancelApplyError": "取消上架申请失败",

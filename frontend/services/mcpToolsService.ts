@@ -276,11 +276,71 @@ export const addContainerMcpToolService = async (
     if (data.status !== "success") {
       throw new Error("Failed to add container MCP service");
     }
-    return { success: true, data: data.data } as McpToolsApiResult<unknown>;
+    return { success: true, data: data.data } as McpToolsApiResult<{
+      container_id?: string;
+      container_name?: string;
+      host_port?: number;
+      mcp_url?: string;
+      service_name?: string;
+    }>;
   } catch (error) {
     log.error("addContainerMcpToolService failed", error);
     throw error;
   }
+};
+
+type ContainerMcpDeploymentResult = {
+  container_id?: string;
+  container_name?: string;
+  host_port?: number;
+  mcp_url?: string;
+  service_name?: string;
+};
+
+/**
+ * Add a container MCP through an SSE response. The container ID is emitted as
+ * soon as Docker creates it; the returned promise resolves only after the MCP
+ * health check and tool scan have completed.
+ */
+export const addContainerMcpToolServiceStream = async (
+  payload: AddContainerMcpToolPayload,
+  onContainerStarted: (result: ContainerMcpDeploymentResult) => void,
+): Promise<ContainerMcpDeploymentResult> => {
+  const response = await fetchWithAuth(API_ENDPOINTS.mcp.addFromConfigStream, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok || !response.body) {
+    const errorBody = await parseJson<{ detail?: string }>(response);
+    throw new Error(errorBody.detail || `Request failed (${response.status})`);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder("utf-8");
+  let buffer = "";
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const events = buffer.split("\n\n");
+      buffer = events.pop() || "";
+      for (const event of events) {
+        if (!event.startsWith("data: ")) continue;
+        const message = JSON.parse(event.slice(6));
+        if (message.status === "container_started") {
+          onContainerStarted(message.data || {});
+        } else if (message.status === "success") {
+          return message.data || {};
+        } else if (message.status === "error") {
+          throw new Error(message.detail || "Failed to add container MCP service");
+        }
+      }
+    }
+  } finally {
+    await reader.cancel().catch(() => undefined);
+  }
+  throw new Error("Container MCP deployment ended before completion");
 };
 
 export const listMcpTools = async (params?: { tag?: string }) => {

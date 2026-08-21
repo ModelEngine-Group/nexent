@@ -150,6 +150,19 @@ def get_mcp_market_record_by_id(market_id: int) -> Dict[str, Any] | None:
         return as_dict(record) if record else None
 
 
+def get_mcp_market_record_by_source_mcp_id(
+    *, tenant_id: str, source_mcp_id: int
+) -> Dict[str, Any] | None:
+    """Fetch the active market listing linked to a source MCP record."""
+    with get_db_session() as session:
+        record = session.query(McpMarketRecord).filter(
+            McpMarketRecord.tenant_id == tenant_id,
+            McpMarketRecord.source_mcp_id == source_mcp_id,
+            McpMarketRecord.delete_flag != "Y",
+        ).order_by(McpMarketRecord.market_id.desc()).first()
+        return as_dict(record) if record else None
+
+
 def check_mcp_market_name_exists(mcp_name: str, tenant_id: str) -> bool:
     """Check if a shared market record with the given name already exists in this tenant.
 
