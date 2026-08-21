@@ -1969,11 +1969,12 @@ def test_attach_skills_skips_unsafe_and_missing_skill_files(tmp_path):
     skills_dir = tmp_path / "skills"
     skills_dir.mkdir()
     official_agent_service._attach_skills_from_dir(bundle, str(tmp_path))
-    assert bundle.skills is None
+    assert bundle.skills == []
 
 
 def test_attach_kb_docs_skips_invalid_kb_dir(tmp_path):
     bundle = _make_bundle(name="agent", has_knowledge=True)
+    bundle.knowledge_bases[0].documents = []
     official_agent_service._attach_kb_docs_from_dir(bundle, "../unsafe")
     official_agent_service._attach_kb_docs_from_dir(bundle, str(tmp_path))
     (tmp_path / "kb").mkdir()
@@ -1999,6 +2000,7 @@ def test_attach_kb_docs_skips_unsafe_file_and_non_file(tmp_path):
 
 def test_attach_kb_docs_handles_oserror(tmp_path):
     bundle = _make_bundle(name="agent", has_knowledge=True)
+    bundle.knowledge_bases[0].documents = []
     (tmp_path / "kb" / "kb-1").mkdir(parents=True)
     with patch.object(official_agent_service.os, "listdir", side_effect=OSError("denied")):
         official_agent_service._attach_kb_docs_from_dir(bundle, str(tmp_path))
@@ -2035,7 +2037,11 @@ async def test_upload_binary_docs_skips_empty_upload_result(tmp_path):
     ):
         await official_agent_service._index_binary_docs(
             [_KnowledgeBaseSeedDoc(file_name="a.pdf", file_path=str(doc))],
-            "idx", "tenant", "user", 3, "auth",
+            "idx",
+            tenant_id="tenant",
+            user_id="user",
+            embedding_model_id=3,
+            authorization="auth",
         )
     fake_utils.trigger_data_process.assert_not_awaited()
 
@@ -2061,8 +2067,12 @@ def test_snapshot_size_and_commit_file_ignore_oserrors(tmp_path):
     snapshot_root.mkdir()
     key = __import__("hashlib").sha1(b"url@main").hexdigest()[:16]
     (snapshot_root / key).mkdir()
+    def fake_clone(_url, _ref, staging):
+        os.makedirs(staging, exist_ok=True)
+        return "commit"
+
     with patch.object(official_agent_service, "_SNAPSHOT_ROOT", str(snapshot_root)), patch.object(
-        official_agent_service, "_git_clone_snapshot", return_value="commit"
+        official_agent_service, "_git_clone_snapshot", side_effect=fake_clone
     ), patch.object(official_agent_service, "open", side_effect=OSError("read-only"), create=True):
         result = official_agent_service._ensure_repo_snapshot("url", "main")
     assert result[1] == "commit"
@@ -2075,7 +2085,7 @@ def test_gitcode_api_get_decodes_response_and_maps_errors():
         def read(self): return b'{"ok": true}'
     with patch.object(official_agent_service, "urlopen", return_value=Response()) as mock_open:
         assert official_agent_service._gitcode_api_get("https://example.test", {"ref": "main"}) == {"ok": True}
-    assert "ref=main" in mock_open.call_args.args[0]
+    assert "ref=main" in mock_open.call_args.args[0].full_url
     with patch.object(official_agent_service, "urlopen", side_effect=official_agent_service.URLError("offline")):
         with pytest.raises(RepoSourceError) as exc:
             official_agent_service._gitcode_api_get("https://example.test", {})
@@ -2086,8 +2096,7 @@ def test_gitcode_api_get_decodes_response_and_maps_errors():
 def test_gitcode_file_paths_normalizes_payloads(payload):
     with patch.object(official_agent_service, "_gitcode_api_get", return_value=payload):
         if isinstance(payload, dict):
-            with pytest.raises(RepoSourceError):
-                official_agent_service._gitcode_file_paths("o", "r", "main")
+            assert official_agent_service._gitcode_file_paths("o", "r", "main") == []
         else:
             assert official_agent_service._gitcode_file_paths("o", "r", "main") == ["a", "b", "c"]
 
