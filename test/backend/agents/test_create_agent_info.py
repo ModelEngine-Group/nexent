@@ -526,6 +526,18 @@ from backend.agents.create_agent_info import (
     _resolve_safe_input_budget,
 )
 
+
+def test_build_run_workspace_uses_user_and_run_only(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        create_agent_info_module,
+        "AGENT_WORKSPACE_ROOT",
+        str(tmp_path),
+    )
+
+    workspace = create_agent_info_module._build_run_workspace("user-1", "run-1")
+
+    assert Path(workspace) == tmp_path.resolve() / "user-1" / "run-1"
+
 # Import HistoryItem for testing (from mocked consts.model)
 HistoryItem = sys.modules["consts.model"].HistoryItem
 
@@ -690,8 +702,8 @@ class TestGetSkillScriptTools:
                 version_no=0
             )
 
-            assert len(result) == 4
-            assert mock_tool_config.call_count == 4
+            assert len(result) == 6
+            assert mock_tool_config.call_count == 6
 
             # Verify the calls made to ToolConfig
             calls = mock_tool_config.call_args_list
@@ -714,6 +726,11 @@ class TestGetSkillScriptTools:
             assert calls[3][1]['class_name'] == "WriteSkillFileTool"
             assert calls[3][1]['name'] == "write_skill_file"
 
+            assert calls[4][1]['class_name'] == "DownloadFromS3Tool"
+            assert calls[4][1]['name'] == "download_from_s3"
+            assert calls[5][1]['class_name'] == "UploadToS3Tool"
+            assert calls[5][1]['name'] == "upload_to_s3"
+
     def test_get_skill_script_tools_metadata_context(self):
         """Test that skill context metadata is correctly set for all tools"""
         mock_tool_config.reset_mock()
@@ -724,15 +741,17 @@ class TestGetSkillScriptTools:
                 version_no=7
             )
 
-            assert len(result) == 4
-            # Verify all tools have the correct metadata
+            assert len(result) == 6
+            # Skill tools retain skill context; file tools use run-scoped metadata.
             calls = mock_tool_config.call_args_list
-            for call in calls:
+            for call in calls[:4]:
                 assert call[1]['metadata'] == {
                     "agent_id": 123,
                     "tenant_id": "test_tenant",
                     "version_no": 7
                 }
+            for call in calls[4:]:
+                assert call[1]['metadata'] == {}
 
     def test_get_skill_script_tools_input_schemas(self):
         """Test that input schemas are correctly defined for all tools"""
@@ -807,7 +826,25 @@ class TestGetSkillScriptTools:
             for call in calls:
                 desc = call[1]['description']
                 assert len(desc) > 0
-                assert "skill" in desc.lower()
+                assert isinstance(desc, str)
+
+    def test_get_skill_script_tools_injects_runtime_file_context(self):
+        mock_tool_config.reset_mock()
+        file_context = {
+            "workspace_path": "/mnt/nexent/workdir/t/u/run",
+            "user_id": "u",
+            "tenant_id": "t",
+            "run_id": "run",
+            "minio_client": object(),
+        }
+
+        _get_skill_script_tools(1, "t", runtime_file_context=file_context)
+
+        calls = mock_tool_config.call_args_list
+        assert calls[0][1]["params"]["workspace_path"] == file_context["workspace_path"]
+        for call in calls[4:]:
+            assert call[1]["metadata"] == file_context
+            assert call[1]["params"]["workspace_path"] == file_context["workspace_path"]
 
 
 class TestDiscoverLangchainTools:
@@ -1212,7 +1249,7 @@ class TestCreateToolConfigList:
 
         with patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
                 patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
-                patch('backend.agents.create_agent_info.get_llm_model') as mock_get_llm_model, \
+                patch('backend.agents.create_agent_info.get_llm_adapter') as mock_get_llm_model, \
                 patch('backend.agents.create_agent_info.minio_client', new_callable=MagicMock) as mock_minio_client:
 
             mock_search_tools.return_value = [
@@ -1233,7 +1270,7 @@ class TestCreateToolConfigList:
 
             assert len(result) == 1
             assert result[0] is mock_tool_instance
-            mock_get_llm_model.assert_called_once_with(tenant_id="tenant_1", model_id=None)
+            mock_get_llm_model.assert_called_once_with("tenant_1", None, modality="llm_long_context")
             # Verify metadata includes validate_url_access lambda
             assert "llm_model" in mock_tool_instance.metadata
             assert "storage_client" in mock_tool_instance.metadata
@@ -1605,7 +1642,7 @@ class TestCreateToolConfigList:
                 patch('backend.agents.create_agent_info.get_embedding_model_by_index_name') as mock_embedding, \
                 patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank, \
                 patch('backend.agents.create_agent_info.get_knowledge_name_map_by_index_names', return_value={"idx_override": "Override KB"}), \
-                patch('backend.agents.create_agent_info.get_llm_model', return_value='llm-model'):
+                patch('backend.agents.create_agent_info.get_llm_adapter', return_value='llm-model'):
             mock_tool_config.side_effect = [kb_tool, analyze_tool]
             mock_get_vector_db_core.return_value = 'vdb-core'
             mock_embedding.return_value = ('embedding-model', 1, {'status': 'ok'})
@@ -1684,7 +1721,7 @@ class TestCreateToolConfigList:
         with patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config, \
                 patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
                 patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
-                patch('backend.agents.create_agent_info.get_llm_model', return_value='llm-model'):
+                patch('backend.agents.create_agent_info.get_llm_adapter', return_value='llm-model'):
             mock_tool_config.return_value = mock_tool_instance
 
             mock_search_tools.return_value = [
@@ -1907,7 +1944,7 @@ class TestCreateToolConfigList:
         with patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config, \
                 patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
                 patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
-                patch('backend.agents.create_agent_info.get_llm_model') as mock_get_llm_model, \
+                patch('backend.agents.create_agent_info.get_llm_adapter') as mock_get_llm_model, \
                 patch('backend.agents.create_agent_info.minio_client', new_callable=MagicMock), \
                 patch('backend.agents.create_agent_info.validate_urls_access') as mock_validate:
 
@@ -3996,6 +4033,10 @@ class TestCreateAgentRunInfo:
                 redis_client=ANY,
                 sandbox_config=None,
                 minio_client=None,
+                workspace_path=ANY,
+                workspace_run_id=ANY,
+                tenant_id="tenant_1",
+                minio_files=[],
             )
 
             # Verify that other functions were called correctly
@@ -4013,6 +4054,7 @@ class TestCreateAgentRunInfo:
                 tool_params=None,
                 conversation_id=None,
                 enable_planning=ANY,
+                runtime_file_context=ANY,
             )
             mock_get_mcp.assert_called_once_with(tenant_id="tenant_1", is_need_auth=True)
             mock_filter.assert_called_once_with("agent_config", {
@@ -4602,6 +4644,7 @@ class TestCreateAgentRunInfo:
                 version_no=1,
                 conversation_id=None,
                 enable_planning=False,
+                runtime_file_context=ANY,
                 tool_params=None,
             )
 
@@ -4651,6 +4694,7 @@ class TestCreateAgentRunInfo:
                 version_no=0,  # Debug mode uses draft version 0
                 conversation_id=None,
                 enable_planning=False,
+                runtime_file_context=ANY,
                 tool_params=None,
             )
 
@@ -4706,6 +4750,7 @@ class TestCreateAgentRunInfo:
                 version_no=0,  # Fallback to draft version 0
                 conversation_id=None,
                 enable_planning=False,
+                runtime_file_context=ANY,
                 tool_params=None,
             )
             # Verify that get_remote_mcp_server_list was called with is_need_auth=True

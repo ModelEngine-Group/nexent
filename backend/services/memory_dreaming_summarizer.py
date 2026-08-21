@@ -148,7 +148,7 @@ class TenantDreamingSummarizer:
             max_chars=request.max_chars, attempt=request.attempt,
             validation_feedback=", ".join(request.validation_feedback) or "none", source=source,
         )
-        response = self.model.generate([
+        response = self.model([
             {"role": "system", "content": self.prompt["system"]},
             {"role": "user", "content": user_prompt},
         ])

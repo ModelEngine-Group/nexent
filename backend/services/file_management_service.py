@@ -134,6 +134,7 @@ def check_file_access(
     - knowledge_base/*: All authenticated users can access
     - attachments/{user_id}/*: Only the owner (user_id) can access
     - images_in_attachments/*: All authenticated users can access
+    - workspace/{user_id}/{run_id}/outputs/*: Only the owner can access
 
     Args:
         object_name: File object name in storage
@@ -160,6 +161,14 @@ def check_file_access(
     if object_name.startswith("skill-files/"):
         # Generated documents are private to the uploader and must stay user-scoped.
         return object_name.startswith(f"skill-files/{user_id}/")
+
+    if object_name.startswith("workspace/"):
+        parts = object_name.split("/")
+        return (
+            len(parts) >= 5
+            and parts[1] == user_id
+            and parts[3] == "outputs"
+        )
 
     # Check if file is in user's attachments folder
     # Pattern: attachments/{user_id}/*

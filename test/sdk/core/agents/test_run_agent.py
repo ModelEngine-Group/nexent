@@ -225,6 +225,22 @@ module_mocks = {
     "nexent.skills.skill_manager": MagicMock(),
 }
 
+# Stub the gateway bridge: ``sdk.nexent.memory.embedding_model`` and the vector
+# database core import gateway adapter symbols at module level, and the real
+# gateway eagerly registers every vendor adapter (absolute ``nexent.*`` imports
+# that the mocked environment cannot satisfy). The mocked modules only need the
+# adapter names for typing / construction stubs.
+_gateway_mod = ModuleType("sdk.nexent.core.gateway")
+_gateway_mod.__path__ = []
+_gateway_modality_mod = ModuleType("sdk.nexent.core.gateway.modality")
+_gateway_modality_mod.__path__ = []
+for _name in ("OpenAICompatibleEmbeddingAdapter", "EmbeddingAdapter", "RerankAdapter", "VLMRequest"):
+    setattr(_gateway_modality_mod, _name, MagicMock(name=f"gateway.modality.{_name}"))
+_gateway_mod.modality = _gateway_modality_mod
+_gateway_mod.EmbeddingContext = MagicMock(name="gateway.EmbeddingContext")
+sys.modules["sdk.nexent.core.gateway"] = _gateway_mod
+sys.modules["sdk.nexent.core.gateway.modality"] = _gateway_modality_mod
+
 # ---------------------------------------------------------------------------
 # Import modules under test with patched dependencies in place
 # ---------------------------------------------------------------------------
@@ -324,6 +340,10 @@ def test_agent_run_thread_local_flow(basic_agent_run_info, monkeypatch):
         minio_client=None,
         conversation_id=basic_agent_run_info.conversation_id,
         user_id=basic_agent_run_info.user_id,
+        tenant_id=None,
+        workspace_path=None,
+        workspace_run_id=None,
+        minio_files=None,
     )
 
     # Following methods on the NexentAgent instance should be invoked
@@ -433,6 +453,10 @@ def test_agent_run_thread_mcp_flow(basic_agent_run_info, mock_memory_context, mo
         minio_client=None,
         conversation_id=basic_agent_run_info.conversation_id,
         user_id=basic_agent_run_info.user_id,
+        tenant_id=None,
+        workspace_path=None,
+        workspace_run_id=None,
+        minio_files=None,
     )
 
     # Subsequent calls on NexentAgent instance should mirror the local flow

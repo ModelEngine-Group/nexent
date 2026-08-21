@@ -21,6 +21,9 @@ from consts.const import (
 )
 from consts.exceptions import (
     LimitExceededError,
+    RuntimeServiceTimeoutError,
+    RuntimeServiceUnavailableError,
+    RuntimeUpstreamError,
     UnauthorizedError,
     ConversationNotFoundError,
 )
@@ -29,10 +32,9 @@ from database.knowledge_db import get_knowledge_info_by_tenant_id
 from database.conversation_db import get_conversation_messages
 from database.token_db import log_token_usage, get_latest_usage_metadata
 from services.agent_service import (
-    run_agent_stream,
-    stop_agent_tasks,
     get_agent_by_name_impl,
 )
+from services.runtime_proxy_service import forward_agent_run, forward_agent_stop
 from services.runtime_state_service import runtime_state_service
 from services.agent_version_service import list_published_agents_impl
 from services.knowledge_scope_service import (
@@ -471,13 +473,10 @@ async def start_streaming_chat(
         raise Exception(f"Failed to start streaming chat for conversation_id {conversation_id}: {str(e)}")
 
     try:
-        response = await run_agent_stream(
+        response = await forward_agent_run(
             agent_request=agent_request,
-            http_request=None,
-            authorization=ctx.authorization,
             user_id=ctx.user_id,
             tenant_id=ctx.tenant_id,
-            skip_user_save=True,
         )
     finally:
         if composed_key:
@@ -505,7 +504,11 @@ async def start_streaming_chat(
 
 async def stop_chat(ctx: NorthboundContext, conversation_id: int, meta_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     try:
-        stop_result = stop_agent_tasks(conversation_id, ctx.user_id)
+        stop_result = await forward_agent_stop(
+            conversation_id=conversation_id,
+            user_id=ctx.user_id,
+            tenant_id=ctx.tenant_id,
+        )
 
         # Log token usage
         if ctx.token_id > 0:
@@ -521,6 +524,12 @@ async def stop_chat(ctx: NorthboundContext, conversation_id: int, meta_data: Opt
                 logger.warning(f"Failed to log token usage: {str(e)}")
 
         return {"message": stop_result.get("message", "success"), "data": conversation_id, "requestId": ctx.request_id}
+    except (
+        RuntimeServiceTimeoutError,
+        RuntimeServiceUnavailableError,
+        RuntimeUpstreamError,
+    ):
+        raise
     except Exception as e:
         raise Exception(f"Failed to stop chat for conversation_id {conversation_id}: {str(e)}")
 

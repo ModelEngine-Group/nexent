@@ -3747,7 +3747,7 @@ class TestValidateLocalToolAnalyzeTextFile:
 
     @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
     @patch('backend.services.tool_configuration_service.inspect.signature')
-    @patch('backend.services.tool_configuration_service.get_llm_model')
+    @patch('backend.services.tool_configuration_service.get_llm_adapter')
     @patch('backend.services.tool_configuration_service.minio_client')
     @patch('backend.services.tool_configuration_service.DATA_PROCESS_SERVICE', "http://data-process-service")
     def test_validate_local_tool_analyze_text_file_success(self, mock_minio_client, mock_get_llm_model,
@@ -3800,7 +3800,7 @@ class TestValidateLocalToolAnalyzeTextFile:
         mock_tool_instance.forward.assert_called_once_with(input="test input")
 
         # Verify service calls
-        mock_get_llm_model.assert_called_once_with(tenant_id="tenant1", model_id=None)
+        mock_get_llm_model.assert_called_once_with("tenant1", None, modality="llm_long_context")
 
     @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
     def test_validate_local_tool_analyze_text_file_missing_tenant_id(self, mock_get_class):
@@ -5163,7 +5163,7 @@ class TestValidateLocalToolMonitoring:
     @patch('backend.services.tool_configuration_service.set_monitoring_context')
     @patch('backend.services.tool_configuration_service.minio_client')
     @patch('backend.services.tool_configuration_service.DATA_PROCESS_SERVICE', "http://svc")
-    @patch('backend.services.tool_configuration_service.get_llm_model')
+    @patch('backend.services.tool_configuration_service.get_llm_adapter')
     @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
     @patch('backend.services.tool_configuration_service.inspect.signature')
     def test_analyze_text_file_sets_monitoring_context(
