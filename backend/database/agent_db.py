@@ -239,7 +239,7 @@ def create_agent(agent_info, tenant_id: str, user_id: str):
             "group_ids": new_agent.group_ids,
             "is_new": new_agent.is_new,
             "enable_context_manager": new_agent.enable_context_manager,
-            "is_a2a": new_agent.is_a2a,
+            "is_a2a": getattr(new_agent, "is_a2a", False),
             "requested_output_tokens": new_agent.requested_output_tokens,
             "verification_config": new_agent.verification_config,
             "context_policy": getattr(new_agent, "context_policy", None),
