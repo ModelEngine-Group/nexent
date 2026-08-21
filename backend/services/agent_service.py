@@ -2422,7 +2422,9 @@ async def export_agent_by_agent_id(
                                           skill_names=skill_names,
                                           prompt_template_id=agent_info.get(
                                               "prompt_template_id"),
-                                          prompt_template_name=agent_info.get("prompt_template_name"))
+                                          prompt_template_name=agent_info.get("prompt_template_name"),
+                                          greeting_message=agent_info.get("greeting_message"),
+                                          example_questions=agent_info.get("example_questions"))
     return agent_info
 
 
@@ -2575,7 +2577,9 @@ async def import_agent_by_agent_id(
                                          "constraint_prompt": import_agent_info.constraint_prompt,
                                          "few_shots_prompt": import_agent_info.few_shots_prompt,
                                          "enabled": import_agent_info.enabled,
-                                         "group_ids": user_group_ids},
+                                         "group_ids": user_group_ids,
+                                         "greeting_message": getattr(import_agent_info, "greeting_message", None),
+                                         "example_questions": getattr(import_agent_info, "example_questions", None)},
                              tenant_id=tenant_id,
                              user_id=user_id)
     new_agent_id = new_agent["agent_id"]
