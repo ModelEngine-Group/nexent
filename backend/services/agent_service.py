@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import imghdr
 from http import HTTPStatus
 import io
 import json
@@ -58,6 +59,7 @@ from database.agent_db import (
     search_agent_info_by_agent_id,
     search_blank_sub_agent_by_main_agent_id,
     update_agent,
+    update_agent_icon,
     update_related_agents,
     clear_agent_new_mark
 )
@@ -80,6 +82,12 @@ from database.tool_db import (
     search_tools_for_sub_agent
 )
 from database import skill_db
+from database.attachment_db import (
+    delete_file,
+    get_content_type,
+    get_file_stream,
+)
+from database.client import minio_client
 from services.skill_service import SkillService
 from database.agent_version_db import query_version_list, query_current_version_no, batch_search_version_names, batch_query_current_version_nos
 from database.group_db import query_group_ids_by_user
@@ -139,7 +147,78 @@ from nexent.monitor import AgentRunMetadata, agent_monitoring_context
 from utils.monitoring import monitoring_manager
 
 logger = logging.getLogger(__name__)
+AGENT_ICON_MAX_BYTES = 2 * 1024 * 1024
+AGENT_ICON_CONTENT_TYPES = {
+    "gif": "image/gif",
+    "jpeg": "image/jpeg",
+    "png": "image/png",
+    "webp": "image/webp",
+}
 _channel_cleanup_tasks: set[asyncio.Task[None]] = set()
+
+
+def _agent_icon_object_name(agent_id: int, tenant_id: str) -> str:
+    return f"agent-icons/{tenant_id}/{agent_id}/icon"
+
+
+def _detect_agent_icon_content_type(content: bytes) -> str | None:
+    image_type = imghdr.what(None, content)
+    return AGENT_ICON_CONTENT_TYPES.get(image_type)
+
+
+async def upload_agent_icon_impl(
+    agent_id: int,
+    content: bytes,
+    tenant_id: str,
+    user_id: str,
+) -> dict:
+    """Validate, store, and attach a user-supplied image to an editable agent."""
+    if not content:
+        raise ValueError("Agent icon file is empty")
+    if len(content) > AGENT_ICON_MAX_BYTES:
+        raise ValueError("Agent icon must not exceed 2 MB")
+
+    content_type = _detect_agent_icon_content_type(content)
+    if content_type is None:
+        raise ValueError("Agent icon must be a PNG, JPEG, GIF, or WebP image")
+
+    agent = await get_agent_info_impl(agent_id, tenant_id, user_id=user_id)
+    if agent.get("permission") != "EDIT":
+        raise ForbiddenError("You do not have permission to edit this agent")
+
+    owner_tenant_id = agent.get("tenant_id") or tenant_id
+    object_name = _agent_icon_object_name(agent_id, owner_tenant_id)
+    success, error = minio_client.upload_fileobj(io.BytesIO(content), object_name)
+    if not success:
+        raise ValueError(f"Failed to upload agent icon: {error}")
+
+    icon_url = f"/api/agent/{agent_id}/icon"
+    update_agent_icon(
+        agent_id=agent_id,
+        tenant_id=owner_tenant_id,
+        icon_url=icon_url,
+        user_id=user_id,
+    )
+    return {"icon_url": icon_url, "content_type": content_type}
+
+
+async def get_agent_icon_impl(agent_id: int, tenant_id: str, user_id: str) -> tuple[bytes, str]:
+    """Return a stored agent icon after applying normal agent visibility rules."""
+    agent = await get_agent_info_impl(agent_id, tenant_id, user_id=user_id)
+    if not agent.get("icon_url"):
+        raise FileNotFoundError("Agent icon not found")
+
+    owner_tenant_id = agent.get("tenant_id") or tenant_id
+    stream = get_file_stream(_agent_icon_object_name(agent_id, owner_tenant_id))
+    if stream is None:
+        raise FileNotFoundError("Agent icon not found")
+
+    content = stream.read()
+    content_type = _detect_agent_icon_content_type(content)
+    if content_type is None:
+        raise FileNotFoundError("Agent icon is invalid")
+    return content, content_type
+
 
 
 async def _cleanup_channel_later(conversation_id: int, user_id: str, delay: float = 5.0):
@@ -1713,6 +1792,7 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
                 "requested_output_tokens": request.requested_output_tokens,
                 "is_main_agent": request.is_main_agent if request.is_main_agent is not None else True,
                 "provide_run_summary": request.provide_run_summary,
+                "is_a2a": request.is_a2a if request.is_a2a is not None else False,
                 "verification_config": request.verification_config,
                 "context_policy": request.context_policy,
                 "duty_prompt": request.duty_prompt,
@@ -1720,6 +1800,7 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
                 "few_shots_prompt": request.few_shots_prompt,
                 "greeting_message": request.greeting_message,
                 "example_questions": request.example_questions,
+                "icon_url": request.icon_url,
                 "enabled": request.enabled if request.enabled is not None else True,
                 "group_ids": convert_list_to_string(request.group_ids) if request.group_ids else user_group_ids,
                 "ingroup_permission": request.ingroup_permission

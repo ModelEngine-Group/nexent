@@ -8,16 +8,19 @@ from fastapi import APIRouter, File, Form, Header, HTTPException, Query, UploadF
 from pydantic import BaseModel, Field
 from starlette.responses import JSONResponse, StreamingResponse
 
-from consts.const import APP_VERSION
 from consts.exceptions import ForbiddenError, SkillException, UnauthorizedError
 from consts.model import (
     NL2SkillRunRequest,
     SkillCreateRequest,
     SkillInstanceInfoRequest,
-    SkillResponse,
     SkillUpdateRequest,
 )
 from services.asset_owner_visibility import can_view_skill
+from services.agent_draft_permission_service import (
+    AgentDraftEditError,
+    ResourceBindingError,
+    require_agent_draft_edit,
+)
 from services.nl2skill_service import create_nl2skill_stream
 from services.skill_service import (
     SkillService,
@@ -444,13 +447,28 @@ async def update_skill_instance(
     """
     try:
         user_id, tenant_id = get_current_user_id(authorization)
+        if request.version_no != 0:
+            raise AgentDraftEditError("agent_not_draft")
+        require_agent_draft_edit(
+            agent_id=request.agent_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+        )
 
-        # Validate skill exists
         service = SkillService(tenant_id=tenant_id)
-        skill = service.get_skill_by_id(request.skill_id, tenant_id)
+        skill = next(
+            (
+                item
+                for item in service.list_visible_skills(
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                )
+                if item.get("skill_id") == request.skill_id
+            ),
+            None,
+        )
         if not skill:
-            raise HTTPException(
-                status_code=404, detail=f"Skill with ID {request.skill_id} not found")
+            raise ResourceBindingError("resource_not_visible")
 
         # Create or update skill instance
         instance = service.create_or_update_skill_instance(
@@ -471,6 +489,21 @@ async def update_skill_instance(
         instance["config_values"] = merged
 
         return JSONResponse(content={"message": "Skill instance updated", "instance": instance})
+    except (AgentDraftEditError, ResourceBindingError) as exc:
+        status_code = (
+            HTTPStatus.FORBIDDEN
+            if exc.code in {"agent_read_only", "agent_deleted"}
+            else HTTPStatus.NOT_FOUND
+            if exc.code in {"agent_not_found", "resource_not_visible"}
+            else HTTPStatus.BAD_REQUEST
+        )
+        raise HTTPException(
+            status_code=status_code,
+            detail={
+                "code": exc.code,
+                "message": "The requested draft resource cannot be updated.",
+            },
+        ) from exc
     except UnauthorizedError as e:
         raise HTTPException(status_code=401, detail=str(e))
     except HTTPException:

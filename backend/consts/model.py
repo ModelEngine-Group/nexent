@@ -432,6 +432,7 @@ class NL2AgentRunRequest(BaseModel):
     query: str = Field(min_length=1)
     history: Optional[List[HistoryItem]] = None
     minio_files: Optional[List[Dict[str, Any]]] = None
+    agent_id: int = Field(gt=0)
 
 
 class NL2SkillRunRequest(BaseModel):
@@ -716,11 +717,13 @@ class AgentInfoRequest(BaseModel):
     group_ids: Optional[List[int]] = None
     ingroup_permission: Optional[str] = None
     enable_context_manager: Optional[bool] = None
+    is_a2a: Optional[bool] = None
     verification_config: Optional[Dict[str, Any]] = None
     context_policy: Optional[Dict[str, Any]] = None
 
     greeting_message: Optional[str] = None
     example_questions: Optional[List[str]] = None
+    icon_url: Optional[str] = None
     version_no: int = 0
 
     @field_validator("verification_config", mode="before")
@@ -786,6 +789,7 @@ class ToolInfo(BaseModel):
     origin_name: Optional[str] = None
     category: Optional[str] = None
     labels: Optional[List[str]] = None
+    is_user_selectable: bool = True
 
 
 # used in Knowledge Summary request
@@ -1382,7 +1386,6 @@ class VersionPublishRequest(BaseModel):
     """Request model for publishing a new version"""
     version_name: Optional[str] = Field(None, description="User-defined version name for display")
     release_note: Optional[str] = Field(None, description="Release notes / publish remarks")
-    publish_as_a2a: bool = Field(False, description="Whether to publish this agent as an A2A Server agent")
 
 
 class VersionListItemResponse(BaseModel):
@@ -1394,7 +1397,6 @@ class VersionListItemResponse(BaseModel):
     source_version_no: Optional[int] = Field(None, description="Source version number if rollback")
     source_type: Optional[str] = Field(None, description="Source type: NORMAL / ROLLBACK")
     status: str = Field(..., description="Version status: RELEASED / DISABLED / ARCHIVED")
-    is_a2a: bool = Field(False, description="Whether this version is published as an A2A Server agent")
     created_by: str = Field(..., description="User who published this version")
     create_time: Optional[str] = Field(None, description="Publish timestamp")
 
@@ -1414,7 +1416,6 @@ class VersionDetailResponse(BaseModel):
     source_version_no: Optional[int] = Field(None, description="Source version number")
     source_type: Optional[str] = Field(None, description="Source type")
     status: str = Field(..., description="Version status")
-    is_a2a: bool = Field(False, description="Whether this version is published as an A2A Server agent")
     created_by: str = Field(..., description="User who published this version")
     create_time: Optional[str] = Field(None, description="Publish timestamp")
     agent_info: Optional[dict] = Field(None, description="Agent info snapshot")

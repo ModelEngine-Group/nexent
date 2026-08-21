@@ -6,7 +6,7 @@ import { Tooltip } from "antd";
 import { ChevronRight, Eye, Pencil, Settings, X } from "lucide-react";
 
 import { useSkillList } from "@/hooks/agent/useSkillList";
-import { useAgentConfigStore } from "@/stores/agentConfigStore";
+import { useAgentStore } from "@/stores/agentStore";
 import type { Skill, SkillParam } from "@/types/agentConfig";
 import SkillDetailModal from "./SkillDetailModal";
 import SkillConfigModal from "./skill/SkillConfigModal";
@@ -45,24 +45,23 @@ function toSourceKey(source?: string): SkillSourceKey {
 }
 
 interface SelectedSkillManagementProps {
-  readonly isCreatingMode?: boolean;
   readonly currentAgentId?: number;
   readonly isReadOnly?: boolean;
   readonly onEditSkill?: (skill: Skill) => void;
 }
 
 export default function SelectedSkillManagement({
-  isCreatingMode,
   currentAgentId,
   isReadOnly = false,
   onEditSkill,
 }: SelectedSkillManagementProps) {
   const { t } = useTranslation("common");
-  const selectedSkills = useAgentConfigStore(
-    (state) => state.editedAgent.skills
+  const selectedSkills = useAgentStore(
+    (state) => state.editedAgent?.skills ?? []
   );
-  const updateSkills = useAgentConfigStore((state) => state.updateSkills);
-  const { availableSkills: catalogSkills } = useSkillList({ enabled: true });
+  const updateSkills = useAgentStore((state) => state.updateSkills);
+  const { availableSkills: catalogSkillData } = useSkillList({ enabled: true });
+  const catalogSkills = catalogSkillData as Skill[];
   const [detailSkill, setDetailSkill] = useState<Skill | null>(null);
   const [configSkill, setConfigSkill] = useState<Skill | null>(null);
   const [collapsedGroups, setCollapsedGroups] = useState<
@@ -74,7 +73,7 @@ export default function SelectedSkillManagement({
   // them by ID so an agent reloaded after saving keeps both its selection and
   // the canonical card content.
   const groupedSkills = useMemo<SelectedSkillGroup[]>(() => {
-    const catalogById = new Map<number, Skill>(
+    const catalogById = new Map(
       catalogSkills.map((skill: Skill) => [Number(skill.skill_id), skill])
     );
     const grouped = new Map<SkillSourceKey, Skill[]>([
@@ -302,7 +301,6 @@ export default function SelectedSkillManagement({
           skill={configSkill}
           initialParams={configSkill.config_schemas || []}
           currentAgentId={currentAgentId}
-          isCreatingMode={isCreatingMode}
         />
       ) : null}
     </>

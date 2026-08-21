@@ -40,6 +40,7 @@ class KnowledgeBaseSearchTool(Tool):
     """Knowledge base search tool"""
 
     name = "knowledge_base_search"
+    is_user_selectable: bool = False
     description = (
         "Performs a local knowledge base search based on your query then returns the top search results. "
         "A tool for retrieving domain-specific knowledge, documents, and information stored in the local knowledge base. "
