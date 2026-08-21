@@ -12,7 +12,7 @@ import { useDeployment } from "@/components/providers/deploymentProvider";
 import { useNl2AgentFlow } from "@/contexts/nl2AgentFlow";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import ExpandEditModal from "./basic/ExpandEditModal";
+import ExpandEditModal from "@/components/common/ExpandEditModal";
 
 const { TextArea } = Input;
 
