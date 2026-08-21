@@ -110,7 +110,10 @@ consts_mock = types.ModuleType('consts')
 consts_exceptions_mock = types.ModuleType('consts.exceptions')
 consts_model_mock = types.ModuleType('consts.model')
 consts_const_mock = types.ModuleType('consts.const')
+consts_agent_mock = types.ModuleType('consts.agent')
+consts_agent_mock.SAFE_AGENT_STREAM_ERROR_MESSAGE = "Agent execution failed. Please try again later."
 sys.modules['consts'] = consts_mock
+sys.modules['consts.agent'] = consts_agent_mock
 sys.modules['consts.exceptions'] = consts_exceptions_mock
 sys.modules['consts.model'] = consts_model_mock
 sys.modules['consts.const'] = consts_const_mock
@@ -184,7 +187,9 @@ consts_model_mock.NL2SkillRunRequest = MockNL2SkillRunRequest
 
 # Mock services
 services_mock = types.ModuleType('services')
-services_mock.__path__ = []  # Make it a package so submodules can be imported
+services_mock.__path__ = [
+    os.path.join(os.path.dirname(__file__), "../../../backend/services")
+]  # Keep real service submodules importable
 services_skill_service_mock = types.ModuleType('services.skill_service')
 services_nl2skill_service_mock = types.ModuleType('services.nl2skill_service')
 services_asset_owner_visibility_mock = types.ModuleType('services.asset_owner_visibility')
@@ -218,6 +223,9 @@ class MockSkillService:
         self.repository = MagicMock()
         self.skill_manager = MagicMock()
 services_skill_service_mock.SkillService = MockSkillService
+services_skill_service_mock.UnsupportedSkillFilePreview = type(
+    "UnsupportedSkillFilePreview", (SkillException,), {}
+)
 services_skill_service_mock.get_skill_manager = MagicMock()
 services_skill_service_mock.update_skill_list = MagicMock()
 services_skill_service_mock.get_official_skills_with_status = MagicMock(return_value=[])
@@ -3198,6 +3206,114 @@ class TestSkillAppCoverageGaps:
             "config_schemas": {"key": {"type": "string"}},
             "config_values": {"key": "value"},
         }
+
+
+class TestSkillAppRequestDataCoverage:
+    def test_build_skill_update_data_omits_none_fields_and_keeps_empty_files(self):
+        request = skill_app.SkillUpdateRequest(files=[])
+
+        assert skill_app._build_skill_update_data(request) == {"files": []}
+
+
+class TestSkillAppRemainingExceptionMappings:
+    """Cover endpoint-specific status mappings and early not-found returns."""
+
+    @pytest.mark.asyncio
+    async def test_create_skill_from_file_maps_forbidden_to_403(self, mocker):
+        mocker.patch.object(
+            skill_app, "get_current_user_id", side_effect=skill_app.ForbiddenError("denied")
+        )
+        upload = MagicMock()
+
+        with pytest.raises(skill_app.HTTPException) as exc_info:
+            await skill_app.create_skill_from_file(file=upload, authorization="token")
+
+        assert exc_info.value.status_code == 403
+        assert exc_info.value.detail == "denied"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("endpoint", "service_method"),
+        [
+            (skill_app.get_skill_file_tree, "get_skill_file_tree"),
+            (skill_app.get_skill_file_content, "get_skill_file_content"),
+        ],
+    )
+    async def test_file_endpoints_return_404_when_skill_is_missing(
+        self, mocker, endpoint, service_method
+    ):
+        mocker.patch.object(skill_app, "get_current_user_id", return_value=("user", "tenant"))
+        service = MagicMock()
+        service.get_skill.return_value = None
+        mocker.patch.object(skill_app, "SkillService", return_value=service)
+
+        kwargs = {"skill_name": "missing", "authorization": "token"}
+        if endpoint is skill_app.get_skill_file_content:
+            kwargs["file_path"] = "README.md"
+        with pytest.raises(skill_app.HTTPException) as exc_info:
+            await endpoint(**kwargs)
+
+        assert exc_info.value.status_code == 404
+        getattr(service, service_method).assert_not_called()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("endpoint", "error", "expected_status"),
+        [
+            (skill_app.get_skill_file_tree, skill_app.UnauthorizedError("unauthorized"), 401),
+            (skill_app.get_skill_file_tree, skill_app.ForbiddenError("forbidden"), 403),
+            (skill_app.get_skill_file_content, skill_app.UnauthorizedError("unauthorized"), 401),
+            (
+                skill_app.get_skill_file_content,
+                skill_app.UnsupportedSkillFilePreview("unsupported"),
+                415,
+            ),
+        ],
+    )
+    async def test_file_endpoints_map_expected_errors(
+        self, mocker, endpoint, error, expected_status
+    ):
+        mocker.patch.object(skill_app, "get_current_user_id", side_effect=error)
+
+        kwargs = {"skill_name": "demo", "authorization": "token"}
+        if endpoint is skill_app.get_skill_file_content:
+            kwargs["file_path"] = "README.md"
+        with pytest.raises(skill_app.HTTPException) as exc_info:
+            await endpoint(**kwargs)
+
+        assert exc_info.value.status_code == expected_status
+        assert exc_info.value.detail == str(error)
+
+    @pytest.mark.asyncio
+    async def test_update_skill_maps_forbidden_to_403(self, mocker):
+        mocker.patch.object(
+            skill_app, "get_current_user_id", side_effect=skill_app.ForbiddenError("denied")
+        )
+
+        with pytest.raises(skill_app.HTTPException) as exc_info:
+            await skill_app.update_skill(
+                skill_name="demo",
+                request=skill_app.SkillUpdateRequest(description="updated"),
+                authorization="token",
+            )
+
+        assert exc_info.value.status_code == 403
+
+    @pytest.mark.asyncio
+    async def test_nl2skill_preserves_http_exception(self, mocker):
+        mocker.patch.object(
+            skill_app,
+            "get_current_user_info",
+            return_value=("user", "tenant", "en"),
+        )
+        expected = skill_app.HTTPException(status_code=409, detail="conflict")
+        mocker.patch.object(skill_app, "create_nl2skill_stream", side_effect=expected)
+        request = MagicMock(language=None)
+
+        with pytest.raises(skill_app.HTTPException) as exc_info:
+            await skill_app.nl2skill_run_api(request=request, authorization="token")
+
+        assert exc_info.value is expected
 
 
 if __name__ == "__main__":

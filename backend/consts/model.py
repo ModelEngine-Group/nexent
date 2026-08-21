@@ -1111,9 +1111,7 @@ class TenantCreateRequest(BaseModel):
     )
     locale: Optional[str] = Field(
         default=None,
-        description="Frontend locale when creating the tenant (e.g. 'zh' or 'en'). "
-                    "Determines the source label for auto-installed skills: "
-                    "'zh' → '官方', other locales → 'official'."
+        description="Frontend locale when creating the tenant (e.g. 'zh' or 'en')."
     )
 
 
@@ -1500,6 +1498,8 @@ class SkillFileData(BaseModel):
     """A single file within a skill."""
     path: str = Field(description="Relative file path within the skill (e.g. 'SKILL.md', 'scripts/run.py')")
     content: str = Field(description="Full file content")
+    encoding: Optional[str] = Field(default=None, description="Source character encoding to preserve when writing")
+    encoding: Optional[str] = Field(default=None, description="Source character encoding to preserve when writing")
 
 
 class SkillUpdateRequest(BaseModel):

@@ -105,8 +105,11 @@ function stripLeadingSkillFrontmatter(content: string): string {
 function flattenSkillFiles(
   nodes: SkillFileNode[],
   skillName: string
-): string[] {
-  const paths: string[] = [];
+): Array<{ path: string; previewStatus: "readable" | "unsupported" }> {
+  const paths: Array<{
+    path: string;
+    previewStatus: "readable" | "unsupported";
+  }> = [];
   const walk = (items: SkillFileNode[], parentPath = "") => {
     items.forEach((item) => {
       const isRootSkillDirectory =
@@ -117,7 +120,11 @@ function flattenSkillFiles(
           ? `${parentPath}/${item.name}`
           : item.name;
       if (item.type === "file") {
-        paths.push(path);
+        paths.push({
+          path,
+          previewStatus:
+            item.preview_status === "unsupported" ? "unsupported" : "readable",
+        });
       } else if (item.children?.length) {
         walk(item.children, path);
       }
@@ -359,21 +366,31 @@ export default function SkillBuildModal({
           throw new Error("Skill file tree is empty");
         }
         const tabs = await Promise.all(
-          filePaths.map(async (path) => {
-            const content = await fetchSkillFileContent(
-              resolvedSkillName,
-              path
-            );
-            if (content === null) {
-              throw new Error(`Failed to load skill file: ${path}`);
+          filePaths.map(async ({ path, previewStatus }) => {
+            if (previewStatus === "unsupported") {
+              return { path, content: "", status: "unsupported" as const };
             }
-            return {
-              path,
-              content:
-                path === "SKILL.md"
-                  ? stripLeadingSkillFrontmatter(content)
-                  : content,
-            };
+            try {
+              const result = await fetchSkillFileContent(
+                resolvedSkillName,
+                path
+              );
+              if (result.status === "unsupported") {
+                return { path, content: "", status: "unsupported" as const };
+              }
+              return {
+                path,
+                content:
+                  path === "SKILL.md"
+                    ? stripLeadingSkillFrontmatter(result.content)
+                    : result.content,
+                status: "readable" as const,
+                encoding: result.encoding,
+              };
+            } catch (error) {
+              log.error(`Failed to load skill file ${path}:`, error);
+              return { path, content: "", status: "read_error" as const };
+            }
           })
         );
         if (!cancelled) {
@@ -381,6 +398,13 @@ export default function SkillBuildModal({
           applySkillInfo(skillInfo);
           setSkillTabs(sortedTabs);
           setActiveSkillTab(sortedTabs[0]?.path || "SKILL.md");
+          if (
+            sortedTabs.some(
+              (tab) => tab.path === "SKILL.md" && tab.status === "read_error"
+            )
+          ) {
+            setEditFilesError(t("skillManagement.message.loadFilesFailed"));
+          }
           setLoadedEditSkillId(editingSkill.skill_id);
         }
       } catch (error) {
@@ -444,10 +468,16 @@ export default function SkillBuildModal({
       const content = skillTab?.content || "";
 
       const extraFiles = skillTabs
-        .filter((t) => t.path !== "SKILL.md")
+        .filter(
+          (t) =>
+            t.path !== "SKILL.md" &&
+            t.status !== "unsupported" &&
+            t.status !== "read_error"
+        )
         .map((t) => ({
           path: t.path,
           content: t.content || "",
+          encoding: t.encoding,
         }));
 
       await submitSkillForm(
@@ -531,7 +561,11 @@ export default function SkillBuildModal({
       name: values.name || "",
       description: values.description || "",
       tags: values.tags || [],
-      files: streamingTabsRef.current.map((tab) => ({ ...tab })),
+      files: streamingTabsRef.current
+        .filter(
+          (tab) => tab.status !== "unsupported" && tab.status !== "read_error"
+        )
+        .map((tab) => ({ ...tab })),
     };
   }, [form]);
 
@@ -830,7 +864,9 @@ export default function SkillBuildModal({
       getDraftSnapshot={getDraftSnapshot}
       onStreamEvent={handleNl2SkillStreamEvent}
       language={i18n.language?.startsWith("en") ? "en" : "zh"}
-      availableFiles={skillTabs}
+      availableFiles={skillTabs.filter(
+        (tab) => tab.status !== "unsupported" && tab.status !== "read_error"
+      )}
       onSkillFileSelect={setActiveSkillTab}
     />
   );

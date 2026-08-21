@@ -3,6 +3,7 @@
 import io
 import json
 import logging
+import ntpath
 import os
 import shlex
 import shutil
@@ -65,14 +66,28 @@ class SkillManager:
         """Resolve a tenant directory while preventing escape from the skills root."""
         if not self.base_skills_dir:
             raise ValueError("base_skills_dir is not configured")
+        base_skills_dir_real = os.path.realpath(self.base_skills_dir)
         if tenant_id is None:
-            return self.base_skills_dir
+            return base_skills_dir_real
         if not isinstance(tenant_id, str) or not tenant_id.strip():
             raise ValueError("tenant_id must be a non-empty string or explicit None")
-        if os.path.isabs(tenant_id):
+        if (
+            os.path.isabs(tenant_id)
+            or ntpath.isabs(tenant_id)
+            or bool(ntpath.splitdrive(tenant_id)[0])
+        ):
             raise ValueError("tenant_id must not be an absolute path")
-        tenant_dir = os.path.abspath(os.path.join(self.base_skills_dir, tenant_id))
-        if os.path.commonpath([self.base_skills_dir, tenant_dir]) != self.base_skills_dir:
+        if (
+            tenant_id in {".", ".."}
+            or "/" in tenant_id
+            or "\\" in tenant_id
+            or "\x00" in tenant_id
+            or os.path.basename(tenant_id) != tenant_id
+        ):
+            raise ValueError("tenant_id resolves outside base_skills_dir")
+
+        tenant_dir = os.path.realpath(os.path.join(base_skills_dir_real, tenant_id))
+        if not tenant_dir.startswith(base_skills_dir_real + os.sep):
             raise ValueError("tenant_id resolves outside base_skills_dir")
         return tenant_dir
 
@@ -80,13 +95,64 @@ class SkillManager:
         """Resolve a skill directory and reject names that escape the tenant root."""
         if not isinstance(skill_name, str) or not skill_name.strip():
             raise ValueError("skill_name must be a non-empty string")
-        if os.path.isabs(skill_name):
+        if (
+            os.path.isabs(skill_name)
+            or ntpath.isabs(skill_name)
+            or bool(ntpath.splitdrive(skill_name)[0])
+        ):
             raise ValueError("skill_name must not be an absolute path")
+        if (
+            skill_name in {".", ".."}
+            or "/" in skill_name
+            or "\\" in skill_name
+            or "\x00" in skill_name
+            or os.path.basename(skill_name) != skill_name
+        ):
+            raise ValueError("skill_name resolves outside the tenant directory")
         tenant_dir = self.resolve_tenant_dir(tenant_id=tenant_id)
-        skill_dir = os.path.abspath(os.path.join(tenant_dir, skill_name))
-        if os.path.commonpath([tenant_dir, skill_dir]) != tenant_dir:
+        tenant_dir_real = os.path.realpath(tenant_dir)
+        skill_dir = os.path.realpath(os.path.join(tenant_dir_real, skill_name))
+        if (
+            not skill_dir.startswith(os.path.realpath(self.base_skills_dir) + os.sep)
+            or not skill_dir.startswith(tenant_dir_real + os.sep)
+        ):
             raise ValueError("skill_name resolves outside the tenant directory")
         return skill_dir
+
+    def _resolve_skill_file_path(self, skill_dir: str, file_path: str) -> str:
+        """Resolve a relative skill file path and keep it inside ``skill_dir``."""
+        if not isinstance(file_path, str) or not file_path.strip():
+            raise ValueError("file_path must be a non-empty relative path")
+
+        if "\x00" in file_path:
+            raise ValueError("file_path contains a null byte")
+        if (
+            os.path.isabs(file_path)
+            or ntpath.isabs(file_path)
+            or bool(ntpath.splitdrive(file_path)[0])
+        ):
+            raise ValueError("file_path must not be an absolute path")
+
+        path_segments = file_path.replace("\\", "/").split("/")
+        if any(segment == ".." for segment in path_segments):
+            raise ValueError("file_path resolves outside the skill directory")
+        normalized_segments = [segment for segment in path_segments if segment not in {"", "."}]
+        if not normalized_segments:
+            raise ValueError("file_path must point to a file inside the skill directory")
+
+        if not self.base_skills_dir:
+            raise ValueError("base_skills_dir is not configured")
+        base_skills_dir_real = os.path.realpath(self.base_skills_dir)
+        skill_dir_real = os.path.realpath(skill_dir)
+        target_path = os.path.realpath(os.path.join(skill_dir_real, *normalized_segments))
+        if not skill_dir_real.startswith(base_skills_dir_real + os.sep):
+            raise ValueError("file_path resolves outside the skill directory")
+        if (
+            not target_path.startswith(base_skills_dir_real + os.sep)
+            or not target_path.startswith(skill_dir_real + os.sep)
+        ):
+            raise ValueError("file_path resolves outside the skill directory")
+        return target_path
 
     def list_skills(self, *, tenant_id: Optional[str]) -> List[Dict[str, str]]:
         """List all available skills from local storage.
@@ -179,45 +245,95 @@ class SkillManager:
 
         content = SkillLoader.to_skill_md(skill_data)
 
-        local_dir = self.resolve_skill_dir(name, tenant_id=tenant_id)
+        local_dir = os.path.realpath(self.resolve_skill_dir(name, tenant_id=tenant_id))
+        base_skills_dir_real = os.path.realpath(self.base_skills_dir)
+        if not local_dir.startswith(base_skills_dir_real + os.sep):
+            raise ValueError("skill_name resolves outside base_skills_dir")
+        extra_files = skill_data.get("files") or []
+        files_to_write = []
+        for file_entry in extra_files:
+            file_path = file_entry.get("path") or file_entry.get("file_path") or ""
+            if not file_path or file_path.lower() == SKILL_FILE_NAME.lower():
+                continue
+            self._resolve_skill_file_path(local_dir, file_path)
+            files_to_write.append((
+                file_path,
+                file_entry.get("content", ""),
+                file_entry.get("encoding") or "utf-8",
+            ))
+
         os.makedirs(local_dir, exist_ok=True)
 
         # Write SKILL.md
-        skill_md_path = os.path.join(local_dir, SKILL_FILE_NAME)
+        skill_md_path = os.path.realpath(os.path.join(local_dir, SKILL_FILE_NAME))
+        if not skill_md_path.startswith(base_skills_dir_real + os.sep):
+            raise ValueError("skill_name resolves outside base_skills_dir")
         with open(skill_md_path, "w", encoding="utf-8") as f:
             f.write(content)
 
         # Write additional files
-        extra_files = skill_data.get("files") or []
-        for file_entry in extra_files:
-            file_path = file_entry.get("path") or file_entry.get("file_path") or ""
-            file_content = file_entry.get("content", "")
-            if not file_path or file_path.lower() == SKILL_FILE_NAME.lower():
-                continue
-            self._write_skill_file(name, file_path, file_content, tenant_id=tenant_id)
+        for file_path, file_content, file_encoding in files_to_write:
+            self._write_skill_file(
+                name,
+                file_path,
+                file_content,
+                encoding=file_encoding,
+                tenant_id=tenant_id,
+            )
 
         logger.info(f"Saved skill '{name}' to local storage with {len(extra_files)} extra file(s)")
         return self.load_skill(name, tenant_id=tenant_id)
 
-    def _write_skill_file(
-        self, skill_name: str, file_path: str, content: str, *, tenant_id: Optional[str]
+    def write_skill_file(
+        self,
+        skill_name: str,
+        file_path: str,
+        content: str,
+        *,
+        encoding: str = "utf-8",
+        tenant_id: Optional[str],
     ) -> None:
-        """Write a single file inside a skill directory.
-
-        Args:
-            skill_name: Skill directory name
-            file_path: Relative path inside the skill (e.g. "scripts/run.py", "README.md")
-            content: File content to write
-        """
+        """Write a file inside a tenant-scoped skill directory."""
         if not self.base_skills_dir:
-            return
+            raise ValueError("base_skills_dir is not configured")
+        if not isinstance(skill_name, str) or not skill_name.strip():
+            raise ValueError("skill_name must be a non-empty string")
+
         local_dir = self.resolve_skill_dir(skill_name, tenant_id=tenant_id)
-        normalized_path = file_path.replace("/", os.sep).replace("\\", os.sep)
-        full_path = os.path.normpath(os.path.join(local_dir, normalized_path))
+        base_skills_dir_real = os.path.realpath(self.base_skills_dir)
+        full_path = os.path.realpath(self._resolve_skill_file_path(local_dir, file_path))
+        if not full_path.startswith(base_skills_dir_real + os.sep):
+            raise ValueError("file_path resolves outside the skill directory")
         os.makedirs(os.path.dirname(full_path), exist_ok=True)
-        with open(full_path, "w", encoding="utf-8") as f:
+
+        # Resolve again after creating parent directories so an existing symlink
+        # cannot redirect the write outside the skill directory.
+        safe_path = os.path.realpath(self._resolve_skill_file_path(local_dir, file_path))
+        if not safe_path.startswith(base_skills_dir_real + os.sep):
+            raise ValueError("file_path resolves outside the skill directory")
+        with open(safe_path, "w", encoding=encoding) as f:
             f.write(content)
         logger.debug(f"Wrote skill file '{skill_name}/{file_path}'")
+
+    def _write_skill_file(
+        self,
+        skill_name: str,
+        file_path: str,
+        content: str,
+        *,
+        encoding: str = "utf-8",
+        tenant_id: Optional[str],
+    ) -> None:
+        """Write a skill file through the validated public API."""
+        if not self.base_skills_dir:
+            return
+        self.write_skill_file(
+            skill_name,
+            file_path,
+            content,
+            encoding=encoding,
+            tenant_id=tenant_id,
+        )
 
     def upload_skill_from_file(
         self,
@@ -372,28 +488,31 @@ class SkillManager:
         except Exception as e:
             raise ValueError(f"Failed to parse SKILL.md from ZIP: {e}")
 
+        local_dir = self.resolve_skill_dir(name, tenant_id=tenant_id)
+        validated_files = []
+        for file_path in file_list:
+            if file_path == skill_md_path or file_path.endswith("/"):
+                continue
+            normalized_path = file_path.replace("\\", "/")
+            relative_path = (
+                normalized_path[len(name) + 1:]
+                if normalized_path.startswith(f"{name}/")
+                else normalized_path
+            )
+            if not relative_path:
+                continue
+            self._resolve_skill_file_path(local_dir, relative_path)
+            validated_files.append((file_path, relative_path))
+
         self.save_skill(skill_data, tenant_id=tenant_id)
 
         with zipfile.ZipFile(zip_stream, "r") as zf:
-            for file_path in file_list:
-                if file_path == skill_md_path:
-                    continue
-
-                normalized_path = file_path.replace("\\", "/")
-                if normalized_path.startswith(f"{name}/"):
-                    relative_path = normalized_path[len(name)+1:]
-                else:
-                    relative_path = normalized_path
-
-                if not relative_path:
-                    continue
-
+            for file_path, relative_path in validated_files:
                 file_data = zf.read(file_path)
 
-                local_dir = self.resolve_skill_dir(name, tenant_id=tenant_id)
-                normalized_relative = relative_path.replace("/", os.sep).replace("\\", os.sep)
-                local_path = os.path.normpath(os.path.join(local_dir, normalized_relative))
+                local_path = self._resolve_skill_file_path(local_dir, relative_path)
                 os.makedirs(os.path.dirname(local_path), exist_ok=True)
+                local_path = self._resolve_skill_file_path(local_dir, relative_path)
                 with open(local_path, "wb") as f:
                     f.write(file_data)
 
@@ -506,10 +625,11 @@ class SkillManager:
                 skill_content = zf.read(skill_md_path).decode("utf-8")
                 skill_data = SkillLoader.parse(skill_content)
                 skill_data["name"] = skill_name
-                self.save_skill(skill_data, tenant_id=tenant_id)
 
+            local_dir = self.resolve_skill_dir(skill_name, tenant_id=tenant_id)
+            validated_files = []
             for file_path in file_list:
-                if file_path == skill_md_path:
+                if file_path == skill_md_path or file_path.endswith("/"):
                     continue
 
                 normalized_path = file_path.replace("\\", "/")
@@ -523,12 +643,18 @@ class SkillManager:
                 if not relative_path:
                     continue
 
+                self._resolve_skill_file_path(local_dir, relative_path)
+                validated_files.append((file_path, relative_path))
+
+            if skill_md_path:
+                self.save_skill(skill_data, tenant_id=tenant_id)
+
+            for file_path, relative_path in validated_files:
                 file_data = zf.read(file_path)
 
-                local_dir = self.resolve_skill_dir(skill_name, tenant_id=tenant_id)
-                normalized_relative = relative_path.replace("/", os.sep).replace("\\", os.sep)
-                local_path = os.path.normpath(os.path.join(local_dir, normalized_relative))
+                local_path = self._resolve_skill_file_path(local_dir, relative_path)
                 os.makedirs(os.path.dirname(local_path), exist_ok=True)
+                local_path = self._resolve_skill_file_path(local_dir, relative_path)
                 with open(local_path, "wb") as f:
                     f.write(file_data)
 
@@ -836,10 +962,9 @@ class SkillManager:
             normalised_script_path = normalised_script_path[2:]
         normalised_script_path = normalised_script_path.lstrip("/\\")
         normalised_script_path = normalised_script_path.replace("/", os.sep).replace("\\", os.sep)
-        # Reject obvious path-traversal attempts: the script must live inside
-        # the skill directory. We do this by checking the absolute resolved
-        # path stays under the skill root after normalisation.
-        full_path = os.path.normpath(os.path.join(local_skill_dir, normalised_script_path))
+        full_path = os.path.realpath(
+            os.path.join(local_skill_dir, normalised_script_path)
+        )
 
         # Build the friendly error up-front so we can attach diagnostic info
         # whether the path is missing or escapes the skill root.
@@ -858,11 +983,15 @@ class SkillManager:
                 f"  - available scripts: {available if available else 'none'}"
             )
 
-        # Disallow traversing outside the skill root.
-        skill_root_abs = os.path.abspath(local_skill_dir)
-        full_abs = os.path.abspath(full_path)
-        if not (full_abs == skill_root_abs or full_abs.startswith(skill_root_abs + os.sep)):
+        try:
+            full_path = self._resolve_skill_file_path(
+                local_skill_dir,
+                normalised_script_path,
+            )
+        except ValueError:
             raise _fail("resolved path escapes the skill root directory")
+
+        skill_root_abs = os.path.realpath(local_skill_dir)
 
         if os.path.isfile(full_path):
             pass

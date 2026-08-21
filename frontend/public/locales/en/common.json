@@ -1658,6 +1658,8 @@
   "skillManagement.detail.preview": "Preview",
   "skillManagement.detail.noFiles": "No files",
   "skillManagement.detail.selectFile": "Select a file on the left to preview",
+  "skillManagement.detail.filePreviewUnsupported": "This file cannot be previewed or edited",
+  "skillManagement.detail.fileReadFailed": "Failed to read file",
   "skillManagement.delete.confirmTitle": "Confirm Delete Skill",
   "skillManagement.delete.confirmContent": "Are you sure you want to delete skill 「{{skillName}}」? This action cannot be undone.",
   "skillManagement.delete.success": "Skill deleted successfully",

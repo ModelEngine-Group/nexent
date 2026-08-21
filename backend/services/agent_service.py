@@ -23,6 +23,7 @@ from utils.prompt_template_utils import normalize_prompt_generate_template_conte
 from consts.const import TOOL_TYPE_MAPPING, \
     LANGUAGE, MESSAGE_ROLE, MODEL_CONFIG_MAPPING, CAN_EDIT_ALL_USER_ROLES, PERMISSION_PRIVATE, STREAM_STATUS_EVENT, \
     DEFAULT_EN_TITLE, DEFAULT_ZH_TITLE, RUNTIME_CANCEL_POLL_INTERVAL_SECONDS
+from consts.agent import SAFE_AGENT_STREAM_ERROR_MESSAGE
 from consts.exceptions import AppException, ForbiddenError, MemoryPreparationException, SkillDuplicateError
 from consts.error_code import ErrorCode
 from consts.agent_unavailable_reasons import AgentUnavailableReason
@@ -86,11 +87,9 @@ from database.attachment_db import (
     delete_file,
     get_content_type,
     get_file_stream,
-    upload_fileobj,
 )
 from database.client import minio_client
 from services.skill_service import SkillService, generate_available_copy_skill_name
-from services.file_management_service import is_allowed_skill_upload_path
 from database.agent_version_db import query_version_list, query_current_version_no, batch_search_version_names, batch_query_current_version_nos
 from database.group_db import query_group_ids_by_user
 from database.user_tenant_db import get_user_tenant_by_user_id
@@ -128,6 +127,14 @@ from services.memory_config_service import build_memory_context
 from services.streaming_channel import streaming_channel_manager
 from services.runtime_state_service import runtime_state_service
 from utils.auth_utils import get_current_user_info, get_user_language
+from utils.agent_stream_utils import (
+    extract_json_objects_from_text as _extract_json_objects_from_text,
+    extract_skill_file_upload_payloads as _extract_skill_file_upload_payloads,
+    process_skill_file_uploads as _process_skill_file_uploads,
+    safe_agent_stream_error_chunk as _safe_agent_stream_error_chunk,
+    serialize_stream_unit_content as _serialize_stream_unit_content,
+    transform_skill_files_to_standard_format as _transform_skill_files_to_standard_format,
+)
 from utils.config_utils import tenant_config_manager
 from utils.context_utils import build_authorized_context_input
 from utils.thread_utils import submit
@@ -141,7 +148,6 @@ from nexent.monitor import AgentRunMetadata, agent_monitoring_context
 from utils.monitoring import monitoring_manager
 
 logger = logging.getLogger(__name__)
-SAFE_AGENT_STREAM_ERROR_MESSAGE = "Agent execution failed. Please try again later."
 AGENT_ICON_MAX_BYTES = 2 * 1024 * 1024
 AGENT_ICON_CONTENT_TYPES = {
     "gif": "image/gif",
@@ -251,177 +257,6 @@ async def _cancel_task_on_runtime_signal(conversation_id: int, user_id: str, tas
             )
             return
         await asyncio.sleep(RUNTIME_CANCEL_POLL_INTERVAL_SECONDS)
-
-
-def _extract_json_objects_from_text(text: str) -> list[dict]:
-    """Extract all JSON objects embedded in a text blob."""
-    if not text:
-        return []
-
-    decoder = json.JSONDecoder()
-    results: list[dict] = []
-    index = 0
-
-    while index < len(text):
-        start_index = text.find("{", index)
-        if start_index < 0:
-            break
-
-        try:
-            payload, end_index = decoder.raw_decode(text, start_index)
-        except json.JSONDecodeError:
-            index = start_index + 1
-            continue
-
-        if isinstance(payload, dict):
-            results.append(payload)
-        index = max(end_index, start_index + 1)
-
-    return results
-
-
-def _extract_skill_file_upload_payloads(content: str) -> list[dict]:
-    """Extract JSON payloads containing absolute_path from streamed tool output."""
-    payloads: list[dict] = []
-    for payload in _extract_json_objects_from_text(content):
-        if payload.get("absolute_path"):
-            payloads.append(payload)
-    return payloads
-
-
-def _serialize_stream_unit_content(data: Dict[str, Any], content: str) -> str:
-    """Preserve tool metadata in the existing message-unit content column."""
-    if data.get("type") not in {"tool", "tool-call"}:
-        return content
-
-    payload: Dict[str, Any] = {"content": content}
-    for field in ("tool_name", "tool_arguments", "role"):
-        if field in data:
-            payload[field] = data[field]
-    return json.dumps(payload, ensure_ascii=False)
-
-
-def _transform_skill_files_to_standard_format(upload_results: list[dict]) -> list[dict]:
-    """
-    Transform skill file upload results to match the frontend attachment format.
-
-    Skill upload format:
-        {file_name, absolute_path, object_name, preview_url, url, presigned_url, mime_type, file_size, status}
-    Frontend format:
-        {object_name, name, type, size, url, presigned_url, description}
-    """
-    frontend_files = []
-    for result in upload_results:
-        frontend_files.append({
-            "object_name": result.get("object_name", ""),
-            "name": result.get("file_name", result.get("name", "")),
-            "type": "file",
-            "size": result.get("file_size", result.get("size", 0)),
-            "url": result.get("url", ""),
-            "presigned_url": result.get("presigned_url", result.get("preview_url", "")),
-            "description": "",
-        })
-    return frontend_files
-
-
-async def _process_skill_file_uploads(
-    payloads: list[dict] | str,
-    user_id: str,
-    tenant_id: str,
-) -> list[dict]:
-    """Upload generated skill files to storage and return upload metadata."""
-
-    upload_results: list[dict] = []
-    structured_payloads = (
-        payloads
-        if isinstance(payloads, list)
-        else _extract_skill_file_upload_payloads(payloads)
-    )
-    for payload in structured_payloads:
-        absolute_path = str(payload.get("absolute_path") or "").strip()
-        file_name = str(
-            payload.get("file_name")
-            or payload.get("file_path")
-            or os.path.basename(absolute_path)
-        )
-        mime_type = str(payload.get("mime_type") or payload.get("content_type") or "application/octet-stream")
-        if not absolute_path:
-            continue
-
-        if not is_allowed_skill_upload_path(absolute_path):
-            logger.warning(
-                "[skill-file] rejected unsafe path absolute_path=%s",
-                absolute_path,
-            )
-            continue
-
-        if not file_name:
-            file_name = os.path.basename(absolute_path)
-
-        if not os.path.exists(absolute_path):
-            continue
-
-        try:
-            file_size = os.path.getsize(absolute_path)
-            actual_prefix = f"skill-files/{user_id}" if user_id else "skill-files"
-            with open(absolute_path, "rb") as file_obj:
-                upload_result = upload_fileobj(
-                    file_obj=file_obj,
-                    file_name=file_name,
-                    prefix=actual_prefix,
-                    generate_presigned_url=True,
-                    file_size=file_size,
-                )
-
-            if upload_result.get("success"):
-                upload_results.append(
-                    {
-                        "status": "success",
-                        "file_name": file_name,
-                        "absolute_path": absolute_path,
-                        "object_name": upload_result.get("object_name"),
-                        "preview_url": upload_result.get("presigned_url") or upload_result.get("url"),
-                        "url": upload_result.get("url"),
-                        "presigned_url": upload_result.get("presigned_url"),
-                        "mime_type": mime_type,
-                        "file_size": upload_result.get("file_size", file_size),
-                    }
-                )
-            else:
-                error_message = upload_result.get("error") or "Upload failed"
-                logger.warning(
-                    "[skill-file] upload failed file_name=%s absolute_path=%s error=%s",
-                    file_name,
-                    absolute_path,
-                    error_message,
-                )
-        except Exception:
-            logger.exception(
-                "[skill-file] failed to upload file file_name=%s absolute_path=%s",
-                file_name,
-                absolute_path,
-            )
-        finally:
-            # Declared skill artifacts are ephemeral. MinIO is the sole durable store.
-            try:
-                if os.path.isfile(absolute_path):
-                    os.remove(absolute_path)
-            except OSError:
-                logger.exception(
-                    "[skill-file] failed to delete local artifact absolute_path=%s",
-                    absolute_path,
-                )
-
-    return upload_results
-
-
-def _safe_agent_stream_error_chunk() -> str:
-    """Return a sanitized SSE error chunk without internal exception details."""
-    error_payload = json.dumps(
-        {"type": "error", "content": SAFE_AGENT_STREAM_ERROR_MESSAGE},
-        ensure_ascii=False,
-    )
-    return f"data: {error_payload}\n\n"
 
 
 def _resolve_user_tenant_language(
