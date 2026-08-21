@@ -186,12 +186,14 @@ class TestRunSkillScriptToolInit:
             local_skills_dir="/path/to/skills",
             agent_id=42,
             tenant_id="tenant-123",
-            version_no=5
+            version_no=5,
+            workspace_path="/mnt/nexent/workdir/t/u/run",
         )
         assert tool.local_skills_dir == "/path/to/skills"
         assert tool.agent_id == 42
         assert tool.tenant_id == "tenant-123"
         assert tool.version_no == 5
+        assert tool.workspace_path == "/mnt/nexent/workdir/t/u/run"
         assert tool.skill_manager is None
 
     def test_init_with_minimal_params(self):
@@ -259,6 +261,42 @@ class TestExecute:
 
         call_args = mock_manager.run_skill_script.call_args
         assert call_args[0][2] == params
+
+    def test_execute_passes_run_workspace(self, temp_skills_dir):
+        tool = RunSkillScriptTool(
+            local_skills_dir=temp_skills_dir,
+            tenant_id="test-tenant",
+            workspace_path="/mnt/nexent/workdir/t/u/run",
+        )
+        mock_manager = MagicMock()
+        mock_manager.run_skill_script.return_value = "Result"
+        mock_manager.load_skill.return_value = {}
+        tool.skill_manager = mock_manager
+
+        tool.execute("test-skill", "script.py")
+
+        mock_manager.run_skill_script.assert_called_once_with(
+            "test-skill",
+            "script.py",
+            None,
+            tenant_id="test-tenant",
+            working_directory="/mnt/nexent/workdir/t/u/run",
+        )
+
+    def test_execute_invokes_completion_callback(self, temp_skills_dir):
+        on_complete = MagicMock()
+        tool = RunSkillScriptTool(
+            local_skills_dir=temp_skills_dir,
+            on_complete=on_complete,
+        )
+        mock_manager = MagicMock()
+        mock_manager.run_skill_script.return_value = "Result"
+        mock_manager.load_skill.return_value = {}
+        tool.skill_manager = mock_manager
+
+        tool.execute("test-skill", "script.py")
+
+        on_complete.assert_called_once_with("Result")
 
     def test_execute_handles_skill_not_found(self, temp_skills_dir):
         """Test execute handles SkillNotFoundError."""

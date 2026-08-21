@@ -1010,6 +1010,36 @@ async def test_get_storage_file_stream_without_filename(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_get_storage_file_stream_chinese_object_name_has_ascii_headers(monkeypatch):
+    """Chinese object keys must be encoded before being placed in download headers."""
+    chinese_object_name = "knowledge_base/新员工入职培训手册.docx"
+
+    async def fake_get_stream(object_name):
+        assert object_name == chinese_object_name
+
+        async def gen():
+            yield b"docx-content"
+
+        return gen(), "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+    monkeypatch.setattr(file_management_app, "get_file_stream_impl", fake_get_stream)
+    resp = await file_management_app.get_storage_file(
+        object_name=chinese_object_name,
+        download="stream",
+        expires=60,
+        filename=None,
+        authorization=MOCK_AUTH
+    )
+
+    content_disposition = resp.headers.get("content-disposition", "")
+    etag = resp.headers.get("etag", "")
+    assert "filename*=UTF-8''" in content_disposition
+    assert "%E6%96%B0%E5%91%98%E5%B7%A5" in content_disposition
+    assert "%E6%96%B0%E5%91%98%E5%B7%A5" in etag
+    assert etag.isascii()
+
+
+@pytest.mark.asyncio
 async def test_get_storage_file_stream_error(monkeypatch):
     """Test get_storage_file stream mode error handling"""
     async def fake_get_stream(object_name):
@@ -1554,6 +1584,28 @@ async def test_preview_file_chinese_filename(monkeypatch):
     cd = resp.headers.get("content-disposition", "")
     assert "inline" in cd
     assert "filename*=UTF-8" in cd or "测试文档" in cd
+
+
+@pytest.mark.asyncio
+async def test_preview_file_chinese_object_name_has_ascii_etag(monkeypatch):
+    """Chinese characters in an object key must not leak into ASGI response headers."""
+    object_name = "knowledge_base/新员工入职培训手册.docx"
+    monkeypatch.setattr(file_management_app, "resolve_preview_file",
+                        AsyncMock(return_value=(object_name, "application/pdf", 1024)))
+    monkeypatch.setattr(file_management_app, "get_preview_stream",
+                        MagicMock(return_value=_make_mock_stream()))
+
+    resp = await file_management_app.preview_file(
+        object_name=object_name,
+        filename="新员工入职培训手册.docx",
+        range_header=None,
+        authorization=MOCK_AUTH
+    )
+
+    etag = resp.headers.get("etag", "")
+    assert "新员工" not in etag
+    assert "%E6%96%B0%E5%91%98%E5%B7%A5" in etag
+    assert etag.isascii()
 
 
 @pytest.mark.asyncio

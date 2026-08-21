@@ -307,6 +307,28 @@ def test_build_model_does_not_send_frequency_penalty():
     assert inner.max_tokens == 512
 
 
+def test_modelengine_vlm_disables_message_flattening():
+    """ModelEngine VLM must preserve typed image_url blocks."""
+    from nexent.core.gateway.model_context import VLMContext
+    from nexent.core.gateway.modality import ModelEngineVLMAdapter
+    from nexent.core.utils.observer import MessageObserver
+
+    adapter = ModelEngineVLMAdapter(VLMContext(
+        modality="vlm",
+        factory="modelengine",
+        model_name="modelengine-vlm",
+        base_url="https://modelengine.example.com/v1",
+        api_key="sk-fake",
+        ssl_verify=True,
+        observer=MessageObserver(),
+    ))
+
+    adapter._build_model()
+
+    assert adapter._model.model_factory == "modelengine"
+    assert adapter._model.flatten_messages_as_text is False
+
+
 # get_model_info: the adapter owns the (provider, model) -> capability mapping,
 # replacing analyze_audio_tool's getattr + URL sniffing on the wrapped model.
 

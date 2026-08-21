@@ -33,6 +33,7 @@ ELASTICSEARCH_SERVICE = os.getenv("ELASTICSEARCH_SERVICE")
 
 # Data Processing Service Configuration
 DATA_PROCESS_SERVICE = os.getenv("DATA_PROCESS_SERVICE")
+RUNTIME_SERVICE_URL = os.getenv("RUNTIME_SERVICE_URL", "http://localhost:5014").rstrip("/")
 CLIP_MODEL_PATH = os.getenv("CLIP_MODEL_PATH")
 TABLE_TRANSFORMER_MODEL_PATH = os.getenv("TABLE_TRANSFORMER_MODEL_PATH")
 UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH = os.getenv(
@@ -44,6 +45,7 @@ UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH = os.getenv(
 MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB
 MAX_CONCURRENT_UPLOADS = 5
 UPLOAD_FOLDER = os.getenv('UPLOAD_FOLDER', 'uploads')
+AGENT_WORKSPACE_ROOT = os.getenv('AGENT_WORKSPACE_ROOT', '/mnt/nexent/workdir')
 ROOT_DIR = os.getenv("ROOT_DIR")
 
 PER_WAVE_TIMEOUT = int(os.getenv("DP_SPLIT_WAIT_TIMEOUT_PER_WAVE_S", "30"))
@@ -701,6 +703,11 @@ NEXENT_SANDBOX_DOCKER_IMAGE = os.getenv(
     "NEXENT_SANDBOX_DOCKER_IMAGE", "nexent/nexent-sandbox:latest"
 )
 """Docker image used when level is 'docker'."""
+
+NEXENT_SANDBOX_WORKSPACE_VOLUME = os.getenv(
+    "NEXENT_SANDBOX_WORKSPACE_VOLUME", "nexent-agent-workspace"
+)
+"""Docker named volume shared by the runtime and the system-scoped sandbox."""
 
 NEXENT_SANDBOX_MEMORY_LIMIT_MB = int(os.getenv("NEXENT_SANDBOX_MEMORY_LIMIT_MB", "512"))
 

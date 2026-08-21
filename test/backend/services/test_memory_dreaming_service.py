@@ -44,7 +44,7 @@ def test_ac001_ac006_full_run_and_idempotency_key(monkeypatch):
         "agent_id": "a",
         "conversation_id": "conversation-7",
         "content": "Always prefer stable transaction rollback behavior",
-        "create_time": "2026-07-20T09:00:00",
+        "create_time": datetime.utcnow().isoformat(),
         "update_time": "2026-07-23T10:30:00",
         "recall_count": 3,
         "daily_count": 2,

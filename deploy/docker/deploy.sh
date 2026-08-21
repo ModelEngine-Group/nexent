@@ -1015,7 +1015,7 @@ prepare_directory_and_data() {
   echo "🔧 Creating directory with permission..."
   create_dir_with_permission "$ROOT_DIR/elasticsearch" 775
   create_dir_with_permission "$ROOT_DIR/postgresql" 775
-  create_dir_with_permission "$ROOT_DIR/minio" 775
+  create_dir_with_permission "$ROOT_DIR/minio/data" 775
   create_dir_with_permission "$ROOT_DIR/redis" 775
 
   cp -rn "$DOCKER_ASSETS_DIR/volumes" "$ROOT_DIR"
