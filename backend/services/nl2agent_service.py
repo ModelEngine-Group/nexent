@@ -53,6 +53,7 @@ from tool_collection.mcp.nl2agent_mcp_tools import (
 from utils.auth_utils import get_current_user_id
 from utils.config_utils import tenant_config_manager
 from utils.context_utils import build_authorized_context_input
+from utils.http_client_utils import create_httpx_client
 
 logger = logging.getLogger(__name__)
 
@@ -926,6 +927,7 @@ async def build_nl2agent_run_info(
     mcp_config: dict[str, Any] = {
         "url": urljoin(LOCAL_MCP_SERVER, "sse"),
         "transport": "sse",
+        "httpx_client_factory": create_httpx_client,
     }
     mcp_headers: dict[str, str] = {}
     if authorization:

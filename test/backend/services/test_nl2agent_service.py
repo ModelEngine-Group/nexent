@@ -35,6 +35,7 @@ from tool_collection.mcp.nl2agent_mcp_tools import (
     ResourceCandidate,
     ResourceRequirement,
 )
+from utils.http_client_utils import create_httpx_client
 
 
 def _basic_draft_fields(**overrides):
@@ -1006,6 +1007,7 @@ async def test_build_run_info_is_ephemeral(mocker):
         {
             "url": "http://local-mcp:5011/sse",
             "transport": "sse",
+            "httpx_client_factory": create_httpx_client,
             "headers": {
                 "Authorization": "Bearer tenant-token",
                 NL2AGENT_AGENT_ID_HEADER: "42",
@@ -1205,6 +1207,7 @@ async def test_build_run_info_falls_back_without_capacity_snapshot(mocker):
         {
             "url": "http://local-mcp:5011/base/sse",
             "transport": "sse",
+            "httpx_client_factory": create_httpx_client,
             "headers": {NL2AGENT_AGENT_ID_HEADER: "42"},
         }
     ]
