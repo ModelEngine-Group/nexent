@@ -2281,12 +2281,12 @@ export default function ToolConfigModal({
                     });
                   }
 
-                  // Add numeric constraint validation (ge/gt/le/lt/multiple_of)
+                  // Add numeric constraint validation (ge/gt/le/lt)
                   if (
                     param.type === TOOL_PARAM_TYPES.NUMBER &&
                     param.constraints
                   ) {
-                    const { ge, gt, le, lt, multiple_of } = param.constraints;
+                    const { ge, gt, le, lt } = param.constraints;
                     rules.push({
                       validator: async (_: any, value: any) => {
                         if (
@@ -2322,17 +2322,17 @@ export default function ToolConfigModal({
                             t("toolConfig.validation.number.lt", { value: lt })
                           );
                         }
-                        if (
-                          multiple_of !== undefined &&
-                          multiple_of !== 0 &&
-                          num % multiple_of !== 0
-                        ) {
-                          return Promise.reject(
-                            t("toolConfig.validation.number.multipleOf", {
-                              value: multiple_of,
-                            })
-                          );
-                        }
+                        // if (
+                        //   multiple_of !== undefined &&
+                        //   multiple_of !== 0 &&
+                        //   num % multiple_of !== 0
+                        // ) {
+                        //   return Promise.reject(
+                        //     t("toolConfig.validation.number.multipleOf", {
+                        //       value: multiple_of,
+                        //     })
+                        //   );
+                        // }
                         return Promise.resolve();
                       },
                     });

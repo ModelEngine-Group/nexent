@@ -224,9 +224,9 @@ export interface ToolParamConstraints {
   gt?: number;
   le?: number;
   lt?: number;
-  multiple_of?: number;
   min_length?: number;
   max_length?: number;
+  // multiple_of?: number;
 }
 
 export interface AidpKnowledgeBaseItem {

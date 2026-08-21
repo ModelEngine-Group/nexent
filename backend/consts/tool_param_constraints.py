@@ -12,9 +12,9 @@ TOOL_PARAM_CONSTRAINT_KEYS = (
     "gt",
     "le",
     "lt",
-    "multiple_of",
     "min_length",
     "max_length",
+    # "multiple_of",
 )
 
 # Per-constraint violation checks: (key, check_fn(value, constraint)).
@@ -24,7 +24,7 @@ TOOL_PARAM_CONSTRAINT_RULES = (
     ("gt", lambda v, c: v <= c),
     ("le", lambda v, c: v > c),
     ("lt", lambda v, c: v >= c),
-    ("multiple_of", lambda v, c: c != 0 and v % c != 0),
     ("min_length", lambda v, c: v < c),
     ("max_length", lambda v, c: v > c),
+    # ("multiple_of", lambda v, c: c != 0 and v % c != 0),
 )

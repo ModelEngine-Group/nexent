@@ -19,9 +19,9 @@ TOOL_PARAM_CONSTRAINT_ERROR_MESSAGES = {
     "gt": "{tool_name} {param_name} must be > {value}",
     "le": "{tool_name} {param_name} must be <= {value}",
     "lt": "{tool_name} {param_name} must be < {value}",
-    "multiple_of": "{tool_name} {param_name} must be a multiple of {value}",
     "min_length": "{tool_name} {param_name} length must be >= {value}",
     "max_length": "{tool_name} {param_name} length must be <= {value}",
+    # "multiple_of": "{tool_name} {param_name} must be a multiple of {value}",
 }
 
 
