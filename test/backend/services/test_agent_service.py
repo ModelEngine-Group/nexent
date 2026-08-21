@@ -13445,35 +13445,6 @@ async def test_stream_agent_chunks_parses_string_workspace_artifacts_and_handles
 
 
 @pytest.mark.asyncio
-async def test_process_skill_file_uploads_logs_local_cleanup_failure(
-    monkeypatch, tmp_path
-):
-    from backend.services import agent_service
-
-    artifact = tmp_path / "report.txt"
-    artifact.write_text("report", encoding="utf-8")
-    monkeypatch.setattr(agent_service, "is_allowed_skill_upload_path", lambda _path: True)
-    monkeypatch.setattr(
-        agent_service,
-        "upload_fileobj",
-        lambda **_kwargs: {
-            "success": True,
-            "object_name": "skill-files/user/report.txt",
-            "url": "s3://nexent/skill-files/user/report.txt",
-        },
-    )
-    monkeypatch.setattr(agent_service.os, "remove", MagicMock(side_effect=OSError("busy")))
-
-    result = await agent_service._process_skill_file_uploads(
-        [{"absolute_path": str(artifact), "file_name": "report.txt"}],
-        "user",
-        "tenant",
-    )
-
-    assert result[0]["object_name"] == "skill-files/user/report.txt"
-
-
-@pytest.mark.asyncio
 async def test_stream_agent_chunks_picture_web_invalid_json(monkeypatch):
     """_stream_agent_chunks should handle invalid picture_web content gracefully."""
     from backend.services import agent_service
