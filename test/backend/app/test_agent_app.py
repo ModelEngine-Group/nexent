@@ -24,7 +24,7 @@ from fastapi.responses import StreamingResponse
 from fastapi.testclient import TestClient
 
 from consts.const import AGENT_PROMPTS_HIDDEN_FLAG, ASSET_OWNER_TENANT_ID
-from consts.exceptions import UnauthorizedError
+from consts.exceptions import ForbiddenError, UnauthorizedError, ValidationError
 from consts.model import NL2AgentRunRequest
 from services.agent_draft_permission_service import AgentDraftEditError
 from services.nl2agent_service import Nl2AgentDraftSaveError
@@ -203,6 +203,188 @@ async def test_agent_run_api(mocker, mock_auth_header):
 
 @pytest.mark.asyncio
 async def test_nl2agent_run_api_streams_for_existing_draft(
+    mocker, mock_auth_header
+):
+    mocker.patch(
+        "apps.agent_app.get_current_user_info",
+        return_value=("user-a", "tenant-a", "en"),
+    )
+
+    async def mock_stream():
+        yield 'data: {"type":"final_answer","content":"done"}\n\n'
+
+    create_stream = mocker.patch(
+        "apps.agent_app.create_nl2agent_stream",
+        new_callable=AsyncMock,
+        return_value=mock_stream(),
+    )
+
+    response = await nl2agent_run_api(
+        nl2agent_request=NL2AgentRunRequest(
+            query="Build a weather agent",
+            history=[],
+            minio_files=[],
+            agent_id=42,
+        ),
+        http_request=MagicMock(),
+        authorization=mock_auth_header["Authorization"],
+    )
+
+    chunks = [chunk async for chunk in response.body_iterator]
+
+    assert response.status_code == 200
+    assert response.media_type == "text/event-stream"
+    assert "final_answer" in "".join(chunks)
+    request = create_stream.call_args.kwargs["request"]
+    assert request.query == "Build a weather agent"
+    assert request.agent_id == 42
+    assert (
+        create_stream.call_args.kwargs["authorization"]
+        == mock_auth_header["Authorization"]
+    )
+    assert not hasattr(request, "conversation_id")
+    assert create_stream.call_args.kwargs["tenant_id"] == "tenant-a"
+    assert create_stream.call_args.kwargs["language"] == "en"
+
+
+@pytest.mark.asyncio
+async def test_northbound_agent_run_api_uses_internal_identity(mocker):
+    mocker.patch(
+        "apps.agent_app.verify_internal_runtime_jwt",
+        return_value=("user-a", "tenant-a"),
+    )
+    run_agent = mocker.patch(
+        "apps.agent_app.run_agent_stream",
+        new_callable=AsyncMock,
+    )
+
+    async def mock_stream():
+        yield b"data: done\n\n"
+
+    run_agent.return_value = StreamingResponse(
+        mock_stream(),
+        media_type="text/event-stream",
+    )
+    response = runtime_client.post(
+        "/agent/internal/northbound/run",
+        json={"agent_id": 1, "conversation_id": 123, "query": "hello"},
+        headers={"Authorization": "Bearer internal-token"},
+    )
+
+    assert response.status_code == 200
+    call_kwargs = run_agent.call_args.kwargs
+    assert call_kwargs["user_id"] == "user-a"
+    assert call_kwargs["tenant_id"] == "tenant-a"
+    assert call_kwargs["skip_user_save"] is True
+    assert call_kwargs["http_request"] is None
+
+
+@pytest.mark.asyncio
+async def test_northbound_agent_run_api_rejects_invalid_token(mocker):
+    mocker.patch(
+        "apps.agent_app.verify_internal_runtime_jwt",
+        side_effect=UnauthorizedError("Invalid internal runtime token"),
+    )
+
+    response = runtime_client.post(
+        "/agent/internal/northbound/run",
+        json={"agent_id": 1, "conversation_id": 123, "query": "hello"},
+        headers={"Authorization": "Bearer invalid"},
+    )
+
+    assert response.status_code == 401
+
+
+@pytest.mark.parametrize(
+    ("error", "expected_status"),
+    [
+        (ForbiddenError("forbidden"), 403),
+        (ValidationError("invalid"), 422),
+    ],
+)
+def test_northbound_agent_run_api_maps_domain_errors(
+    mocker,
+    error,
+    expected_status,
+):
+    mocker.patch(
+        "apps.agent_app.verify_internal_runtime_jwt",
+        return_value=("user-a", "tenant-a"),
+    )
+    mocker.patch(
+        "apps.agent_app.run_agent_stream",
+        new_callable=AsyncMock,
+        side_effect=error,
+    )
+
+    response = runtime_client.post(
+        "/agent/internal/northbound/run",
+        json={"agent_id": 1, "conversation_id": 123, "query": "hello"},
+        headers={"Authorization": "Bearer internal-token"},
+    )
+
+    assert response.status_code == expected_status
+
+
+def test_northbound_agent_run_api_maps_unexpected_error(mocker):
+    mocker.patch(
+        "apps.agent_app.verify_internal_runtime_jwt",
+        return_value=("user-a", "tenant-a"),
+    )
+    mocker.patch(
+        "apps.agent_app.run_agent_stream",
+        new_callable=AsyncMock,
+        side_effect=RuntimeError("unexpected"),
+    )
+
+    response = runtime_client.post(
+        "/agent/internal/northbound/run",
+        json={"agent_id": 1, "conversation_id": 123, "query": "hello"},
+        headers={"Authorization": "Bearer internal-token"},
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Agent run error."
+
+
+@pytest.mark.asyncio
+async def test_northbound_agent_stop_api_uses_internal_identity(mocker):
+    mocker.patch(
+        "apps.agent_app.verify_internal_runtime_jwt",
+        return_value=("user-a", "tenant-a"),
+    )
+    stop_agent = mocker.patch(
+        "apps.agent_app.stop_agent_tasks",
+        return_value={"message": "stopped"},
+    )
+
+    response = runtime_client.post(
+        "/agent/internal/northbound/stop/123",
+        headers={"Authorization": "Bearer internal-token"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"message": "stopped"}
+    stop_agent.assert_called_once_with(123, "user-a")
+
+
+def test_northbound_agent_stop_api_rejects_invalid_token(mocker):
+    mocker.patch(
+        "apps.agent_app.verify_internal_runtime_jwt",
+        side_effect=UnauthorizedError("Invalid internal runtime token"),
+    )
+
+    response = runtime_client.post(
+        "/agent/internal/northbound/stop/123",
+        headers={"Authorization": "Bearer invalid"},
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Invalid internal runtime token"
+
+
+@pytest.mark.asyncio
+async def test_nl2agent_run_api_streams_without_persistent_ids(
     mocker, mock_auth_header
 ):
     mocker.patch(
