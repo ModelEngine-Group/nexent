@@ -6,7 +6,7 @@ import httpx
 from pydantic import Field
 from smolagents.tools import Tool
 
-from ..models.rerank_model import BaseRerank
+from ..gateway.modality import RerankAdapter
 from ..utils.observer import MessageObserver, ProcessType
 from ..utils.tools_common_message import SearchResultTextMessage, ToolCategory, ToolSign
 from ...utils.http_client_manager import http_client_manager
@@ -148,7 +148,7 @@ class HaotianSearchTool(Tool):
         observer: MessageObserver = Field(
             description="Message observer", default=None, exclude=True
         ),
-        rerank_model: BaseRerank = Field(
+        rerank_model: RerankAdapter = Field(
             description="Optional local rerank model (not used by Haotian API)",
             default=None,
             exclude=True,

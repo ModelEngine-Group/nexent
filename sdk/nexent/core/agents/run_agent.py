@@ -185,6 +185,10 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
                 minio_client=getattr(agent_run_info, "minio_client", None),
                 conversation_id=agent_run_info.conversation_id,
                 user_id=agent_run_info.user_id,
+                tenant_id=getattr(agent_run_info, "tenant_id", None),
+                workspace_path=getattr(agent_run_info, "workspace_path", None),
+                workspace_run_id=getattr(agent_run_info, "workspace_run_id", None),
+                minio_files=getattr(agent_run_info, "minio_files", None),
             )
             agent = nexent.create_single_agent(  # NOSONAR - constructs the SDK's trusted CoreAgent implementation.
                 agent_run_info.agent_config,
@@ -214,6 +218,10 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
                     minio_client=getattr(agent_run_info, "minio_client", None),
                     conversation_id=agent_run_info.conversation_id,
                     user_id=agent_run_info.user_id,
+                    tenant_id=getattr(agent_run_info, "tenant_id", None),
+                    workspace_path=getattr(agent_run_info, "workspace_path", None),
+                    workspace_run_id=getattr(agent_run_info, "workspace_run_id", None),
+                    minio_files=getattr(agent_run_info, "minio_files", None),
                 )
                 agent = nexent.create_single_agent(  # NOSONAR - constructs the SDK's trusted CoreAgent implementation.
                     agent_run_info.agent_config,

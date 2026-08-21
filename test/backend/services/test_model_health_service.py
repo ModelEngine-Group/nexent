@@ -100,6 +100,11 @@ sys.modules['nexent.core.models.rerank_model'] = rerank_module
 # Mock services packages
 sys.modules['services'] = MockModule()
 sys.modules['services.voice_service'] = MockModule()
+# model_health_service imports build_adapter_fresh
+# from the real services.model_gateway_service since the gateway bridge landed;
+# the blanket ``services`` mock above shadows it, so expose a mock submodule
+# (tests that exercise the VLM/LLM paths patch the name on model_health_service
+# directly, so the mock's attribute values are never used).
 sys.modules['services.model_gateway_service'] = MockModule()
 
 # Define the ModelConnectStatusEnum for testing
@@ -138,420 +143,13 @@ for _module_name, _saved_module in _SAVED_MODULES.items():
         sys.modules[_module_name] = _saved_module
 
 
-
-# ---------------------------------------------------------------------------
-# Tests for _embedding_dimension_check URL fallback logic (NEW)
-# ---------------------------------------------------------------------------
-
-@pytest.mark.asyncio
-async def test_edc_original_url_succeeds_no_fallback():
-    """_embedding_dimension_check: original URL succeeds, no fallback needed."""
-    with mock.patch("backend.services.model_health_service.OpenAICompatibleEmbedding") as mock_cls:
-        mock_inst = mock.MagicMock()
-        mock_inst.dimension_check = mock.AsyncMock(return_value=[[0.1, 0.2, 0.3]])
-        mock_cls.return_value = mock_inst
-
-        dim = await _embedding_dimension_check(
-            "m", "embedding", "http://127.0.0.1:8794/embed", "k")
-
-        assert dim == 3
-        assert mock_cls.call_count == 1
-        mock_cls.assert_called_with(
-            model_name="m", base_url="http://127.0.0.1:8794/embed",
-            api_key="k", embedding_dim=0, ssl_verify=True)
-
-
-@pytest.mark.asyncio
-async def test_edc_fallback_to_embeddings_url():
-    """_embedding_dimension_check: original fails, /embeddings appended succeeds."""
-    with mock.patch("backend.services.model_health_service.OpenAICompatibleEmbedding") as mock_cls:
-        inst_fail = mock.MagicMock()
-        inst_fail.dimension_check = mock.AsyncMock(return_value=[])
-        inst_ok = mock.MagicMock()
-        inst_ok.dimension_check = mock.AsyncMock(return_value=[[0.1, 0.2]])
-        mock_cls.side_effect = [inst_fail, inst_ok]
-
-        dim = await _embedding_dimension_check(
-            "m", "embedding", "https://api.openai.com/v1", "k")
-
-        assert dim == 2
-        assert mock_cls.call_count == 2
-        mock_cls.assert_any_call(
-            model_name="m", base_url="https://api.openai.com/v1",
-            api_key="k", embedding_dim=0, ssl_verify=True)
-        mock_cls.assert_any_call(
-            model_name="m", base_url="https://api.openai.com/v1/embeddings",
-            api_key="k", embedding_dim=0, ssl_verify=True)
-
-
-@pytest.mark.asyncio
-async def test_edc_both_urls_fail_returns_zero():
-    """_embedding_dimension_check: both URLs fail -> returns 0."""
-    with mock.patch("backend.services.model_health_service.OpenAICompatibleEmbedding") as mock_cls:
-        inst = mock.MagicMock()
-        inst.dimension_check = mock.AsyncMock(return_value=[])
-        mock_cls.return_value = inst
-
-        dim = await _embedding_dimension_check(
-            "m", "embedding", "https://api.openai.com/v1", "k")
-
-        assert dim == 0
-        assert mock_cls.call_count == 2
-
-
-@pytest.mark.asyncio
-async def test_edc_url_already_has_embeddings_single_try():
-    """_embedding_dimension_check: URL already has /embeddings -> only one try."""
-    with mock.patch("backend.services.model_health_service.OpenAICompatibleEmbedding") as mock_cls:
-        inst = mock.MagicMock()
-        inst.dimension_check = mock.AsyncMock(return_value=[[0.1, 0.2, 0.3, 0.4]])
-        mock_cls.return_value = inst
-
-        dim = await _embedding_dimension_check(
-            "m", "embedding", "https://api.openai.com/v1/embeddings", "k")
-
-        assert dim == 4
-        assert mock_cls.call_count == 1
-
-
-@pytest.mark.asyncio
-async def test_edc_multi_embedding_fallback():
-    """_embedding_dimension_check multi_embedding: original fails, normalized succeeds."""
-    with mock.patch("backend.services.model_health_service.SiliconflowMultimodalEmbedding") as mock_cls:
-        inst_fail = mock.MagicMock()
-        inst_fail.dimension_check = mock.AsyncMock(return_value=[])
-        inst_ok = mock.MagicMock()
-        inst_ok.dimension_check = mock.AsyncMock(return_value=[[0.1, 0.2, 0.3]])
-        mock_cls.side_effect = [inst_fail, inst_ok]
-
-        dim = await _embedding_dimension_check(
-            "m", "multi_embedding", "https://api.siliconflow.cn/v1", "k",
-            model_factory="silicon")
-
-        assert dim == 3
-        assert mock_cls.call_count == 2
-
-
-@pytest.mark.asyncio
-async def test_edc_multi_embedding_dashscope_fallback():
-    """_embedding_dimension_check multi_embedding dashscope: original fails, normalized succeeds."""
-    with mock.patch("backend.services.model_health_service.DashScopeMultimodalEmbedding") as mock_cls:
-        inst_fail = mock.MagicMock()
-        inst_fail.dimension_check = mock.AsyncMock(return_value=[])
-        inst_ok = mock.MagicMock()
-        inst_ok.dimension_check = mock.AsyncMock(return_value=[[0.1, 0.2]])
-        mock_cls.side_effect = [inst_fail, inst_ok]
-
-        dim = await _embedding_dimension_check(
-            "m", "multi_embedding", "https://dashscope.aliyuncs.com/v1", "k",
-            model_factory="dashscope")
-
-        assert dim == 2
-        assert mock_cls.call_count == 2
-
-
-@pytest.mark.asyncio
-async def test_edc_multi_embedding_both_fail():
-    """_embedding_dimension_check multi_embedding: both URLs fail -> returns 0."""
-    with mock.patch("backend.services.model_health_service.SiliconflowMultimodalEmbedding") as mock_cls:
-        inst = mock.MagicMock()
-        inst.dimension_check = mock.AsyncMock(return_value=[])
-        mock_cls.return_value = inst
-
-        dim = await _embedding_dimension_check(
-            "m", "multi_embedding", "https://api.siliconflow.cn/v1", "k")
-
-        assert dim == 0
-        assert mock_cls.call_count == 2
-
-
-@pytest.mark.asyncio
-async def test_edc_custom_timeout_used():
-    """_embedding_dimension_check: custom timeout_seconds is forwarded."""
-    with mock.patch("backend.services.model_health_service.OpenAICompatibleEmbedding") as mock_cls:
-        inst = mock.MagicMock()
-        inst.dimension_check = mock.AsyncMock(return_value=[[0.1]])
-        mock_cls.return_value = inst
-
-        dim = await _embedding_dimension_check(
-            "m", "embedding", "https://api.openai.com/v1/embeddings", "k",
-            timeout_seconds=15.0)
-
-        assert dim == 1
-        inst.dimension_check.assert_called_once_with(timeout=15.0)
-
-
-@pytest.mark.asyncio
-async def test_edc_unsupported_type_raises():
-    """_embedding_dimension_check: unsupported model_type raises ValueError."""
-    with pytest.raises(ValueError, match="Unsupported model type"):
-        await _embedding_dimension_check(
-            "m", "unsupported", "https://api.example.com", "k")
-
-
-# ---------------------------------------------------------------------------
-# Tests for _perform_connectivity_check URL fallback logic (NEW)
-# ---------------------------------------------------------------------------
-
-@pytest.mark.asyncio
-async def test_pcc_embedding_original_url_succeeds():
-    """_perform_connectivity_check embedding: original URL succeeds, no fallback."""
-    with mock.patch("backend.services.model_health_service.OpenAICompatibleEmbedding") as mock_cls:
-        inst = mock.MagicMock()
-        inst.dimension_check = mock.AsyncMock(return_value=[[0.1, 0.2]])
-        mock_cls.return_value = inst
-
-        result = await _perform_connectivity_check(
-            "m", "embedding", "http://proxy.local:8794/embed", "k")
-
-        assert result is True
-        assert mock_cls.call_count == 1
-        mock_cls.assert_called_with(
-            model_name="m", base_url="http://proxy.local:8794/embed",
-            api_key="k", embedding_dim=0, ssl_verify=True)
-
-
-@pytest.mark.asyncio
-async def test_pcc_embedding_fallback_succeeds():
-    """_perform_connectivity_check embedding: original fails, normalized succeeds."""
-    with mock.patch("backend.services.model_health_service.OpenAICompatibleEmbedding") as mock_cls:
-        inst_fail = mock.MagicMock()
-        inst_fail.dimension_check = mock.AsyncMock(return_value=[])
-        inst_ok = mock.MagicMock()
-        inst_ok.dimension_check = mock.AsyncMock(return_value=[[0.1]])
-        mock_cls.side_effect = [inst_fail, inst_ok]
-
-        result = await _perform_connectivity_check(
-            "m", "embedding", "https://api.openai.com/v1", "k")
-
-        assert result is True
-        assert mock_cls.call_count == 2
-
-
-@pytest.mark.asyncio
-async def test_pcc_embedding_both_urls_fail():
-    """_perform_connectivity_check embedding: both URLs fail -> False."""
-    with mock.patch("backend.services.model_health_service.OpenAICompatibleEmbedding") as mock_cls:
-        inst = mock.MagicMock()
-        inst.dimension_check = mock.AsyncMock(return_value=[])
-        mock_cls.return_value = inst
-
-        result = await _perform_connectivity_check(
-            "m", "embedding", "https://api.openai.com/v1", "k")
-
-        assert result is False
-        assert mock_cls.call_count == 2
-
-
-@pytest.mark.asyncio
-async def test_pcc_embedding_url_already_has_embeddings():
-    """_perform_connectivity_check embedding: URL has /embeddings -> single try."""
-    with mock.patch("backend.services.model_health_service.OpenAICompatibleEmbedding") as mock_cls:
-        inst = mock.MagicMock()
-        inst.dimension_check = mock.AsyncMock(return_value=[[0.1, 0.2]])
-        mock_cls.return_value = inst
-
-        result = await _perform_connectivity_check(
-            "m", "embedding", "https://api.openai.com/v1/embeddings", "k")
-
-        assert result is True
-        assert mock_cls.call_count == 1
-
-
-@pytest.mark.asyncio
-async def test_pcc_multi_embedding_fallback_succeeds():
-    """_perform_connectivity_check multi_embedding: original fails, normalized succeeds."""
-    with mock.patch("backend.services.model_health_service.SiliconflowMultimodalEmbedding") as mock_cls:
-        inst_fail = mock.MagicMock()
-        inst_fail.dimension_check = mock.AsyncMock(return_value=[])
-        inst_ok = mock.MagicMock()
-        inst_ok.dimension_check = mock.AsyncMock(return_value=[[0.1, 0.2]])
-        mock_cls.side_effect = [inst_fail, inst_ok]
-
-        result = await _perform_connectivity_check(
-            "m", "multi_embedding", "https://api.siliconflow.cn/v1", "k")
-
-        assert result is True
-        assert mock_cls.call_count == 2
-
-
-@pytest.mark.asyncio
-async def test_pcc_multi_embedding_both_fail():
-    """_perform_connectivity_check multi_embedding: both URLs fail -> False."""
-    with mock.patch("backend.services.model_health_service.SiliconflowMultimodalEmbedding") as mock_cls:
-        inst = mock.MagicMock()
-        inst.dimension_check = mock.AsyncMock(return_value=[])
-        mock_cls.return_value = inst
-
-        result = await _perform_connectivity_check(
-            "m", "multi_embedding", "https://api.siliconflow.cn/v1", "k")
-
-        assert result is False
-        assert mock_cls.call_count == 2
-
-
-@pytest.mark.asyncio
-async def test_pcc_multi_embedding_dashscope_fallback():
-    """_perform_connectivity_check multi_embedding dashscope: fallback with URL verification."""
-    with mock.patch("backend.services.model_health_service.DashScopeMultimodalEmbedding") as mock_cls:
-        inst_fail = mock.MagicMock()
-        inst_fail.dimension_check = mock.AsyncMock(return_value=[])
-        inst_ok = mock.MagicMock()
-        inst_ok.dimension_check = mock.AsyncMock(return_value=[[0.1, 0.2, 0.3]])
-        mock_cls.side_effect = [inst_fail, inst_ok]
-
-        result = await _perform_connectivity_check(
-            "m", "multi_embedding", "https://dashscope.aliyuncs.com/v1", "k",
-            model_factory="dashscope")
-
-        assert result is True
-        assert mock_cls.call_count == 2
-        calls = mock_cls.call_args_list
-        assert calls[0].kwargs["base_url"] == "https://dashscope.aliyuncs.com/v1"
-        assert calls[1].kwargs["base_url"] == "https://dashscope.aliyuncs.com/v1/embeddings"
-
-
-# ---------------------------------------------------------------------------
-# Tests for embedding_dimension_check public wrapper URL+SSL interaction (NEW)
-# ---------------------------------------------------------------------------
-
-@pytest.mark.asyncio
-async def test_edc_public_url_fallback_via_inner():
-    """embedding_dimension_check: inner handles URL fallback, wrapper gets dimension."""
-    with mock.patch("backend.services.model_health_service._embedding_dimension_check") as mock_inner, \
-            mock.patch("backend.services.model_health_service.get_model_name_from_config") as mock_name:
-        mock_name.return_value = "m"
-        mock_inner.return_value = 1536
-
-        dim = await embedding_dimension_check({
-            "model_name": "m", "model_type": "embedding",
-            "base_url": "https://api.openai.com/v1", "api_key": "k",
-            "ssl_verify": True})
-
-        assert dim == 1536
-        mock_inner.assert_called_once()
-
-
-@pytest.mark.asyncio
-async def test_edc_public_ssl_fallback_after_url_fallback_fails():
-    """embedding_dimension_check: ssl=True returns 0, ssl=False returns dimension."""
-    with mock.patch("backend.services.model_health_service._embedding_dimension_check") as mock_inner, \
-            mock.patch("backend.services.model_health_service.get_model_name_from_config") as mock_name:
-        mock_name.return_value = "m"
-        mock_inner.side_effect = [0, 768]
-
-        dim = await embedding_dimension_check({
-            "model_name": "m", "model_type": "embedding",
-            "base_url": "https://api.openai.com/v1/embeddings", "api_key": "k",
-            "ssl_verify": True})
-
-        assert dim == 768
-        assert mock_inner.call_count == 2
-        mock_inner.assert_any_call(
-            "m", "embedding", "https://api.openai.com/v1/embeddings", "k", True,
-            model_factory=None, timeout_seconds=None)
-        mock_inner.assert_any_call(
-            "m", "embedding", "https://api.openai.com/v1/embeddings", "k", False,
-            model_factory=None, timeout_seconds=None)
-
-
-@pytest.mark.asyncio
-async def test_edc_public_all_fail_returns_none():
-    """embedding_dimension_check: all attempts fail -> None."""
-    with mock.patch("backend.services.model_health_service._embedding_dimension_check") as mock_inner, \
-            mock.patch("backend.services.model_health_service.get_model_name_from_config") as mock_name:
-        mock_name.return_value = "m"
-        mock_inner.return_value = 0
-
-        dim = await embedding_dimension_check({
-            "model_name": "m", "model_type": "embedding",
-            "base_url": "https://api.openai.com/v1/embeddings", "api_key": "k",
-            "ssl_verify": True})
-
-        assert dim is None
-        assert mock_inner.call_count == 2
-
-
-@pytest.mark.asyncio
-async def test_edc_public_no_ssl_fallback_when_ssl_false():
-    """embedding_dimension_check: ssl_verify=False -> single attempt."""
-    with mock.patch("backend.services.model_health_service._embedding_dimension_check") as mock_inner, \
-            mock.patch("backend.services.model_health_service.get_model_name_from_config") as mock_name:
-        mock_name.return_value = "m"
-        mock_inner.return_value = 0
-
-        dim = await embedding_dimension_check({
-            "model_name": "m", "model_type": "embedding",
-            "base_url": "https://api.openai.com/v1/embeddings", "api_key": "k",
-            "ssl_verify": False})
-
-        assert dim is None
-        assert mock_inner.call_count == 1
-
-
-@pytest.mark.asyncio
-async def test_edc_public_value_error_returns_none():
-    """embedding_dimension_check: ValueError -> None."""
-    with mock.patch("backend.services.model_health_service._embedding_dimension_check") as mock_inner, \
-            mock.patch("backend.services.model_health_service.get_model_name_from_config") as mock_name:
-        mock_name.return_value = "m"
-        mock_inner.side_effect = ValueError("bad")
-
-        dim = await embedding_dimension_check({
-            "model_name": "m", "model_type": "embedding",
-            "base_url": "u", "api_key": "k", "ssl_verify": True})
-
-        assert dim is None
-
-
-@pytest.mark.asyncio
-async def test_edc_public_general_exception_returns_none():
-    """embedding_dimension_check: general exception -> None."""
-    with mock.patch("backend.services.model_health_service._embedding_dimension_check") as mock_inner, \
-            mock.patch("backend.services.model_health_service.get_model_name_from_config") as mock_name:
-        mock_name.return_value = "m"
-        mock_inner.side_effect = RuntimeError("boom")
-
-        dim = await embedding_dimension_check({
-            "model_name": "m", "model_type": "embedding",
-            "base_url": "u", "api_key": "k", "ssl_verify": True})
-
-        assert dim is None
-
-
-# ---------------------------------------------------------------------------
-# Tests for verify_model_config_connectivity embedding (NEW)
-# ---------------------------------------------------------------------------
-
-@pytest.mark.asyncio
-async def test_vmcc_embedding_ssl_fallback():
-    """verify_model_config_connectivity: embedding ssl_verify fallback works."""
-    with mock.patch("backend.services.model_health_service._perform_connectivity_check") as mock_conn:
-        mock_conn.side_effect = [False, True]
-
-        result = await verify_model_config_connectivity({
-            "model_name": "emb-model", "model_type": "embedding",
-            "base_url": "https://api.openai.com/v1/embeddings",
-            "api_key": "k", "ssl_verify": True})
-
-        assert result["connectivity"] is True
-        assert mock_conn.call_count == 2
-
-
-# ---------------------------------------------------------------------------
-# End of NEW tests
-# ---------------------------------------------------------------------------
-
 @pytest.mark.asyncio
 async def test_perform_connectivity_check_embedding():
-    # Setup - now tries original URL first, then falls back to /embeddings
-    with mock.patch("backend.services.model_health_service.OpenAICompatibleEmbedding") as mock_embedding:
-        # First call (original URL) fails, second call (/embeddings) succeeds
-        mock_inst_fail = mock.MagicMock()
-        mock_inst_fail.dimension_check = mock.AsyncMock(return_value=[])
-        mock_inst_ok = mock.MagicMock()
-        mock_inst_ok.dimension_check = mock.AsyncMock(return_value=[[1]])
-        mock_embedding.side_effect = [mock_inst_fail, mock_inst_ok]
+    # Setup
+    with mock.patch("backend.services.model_health_service.build_adapter_fresh") as mock_build:
+        mock_adapter = mock.MagicMock()
+        mock_adapter.dimension_check = mock.AsyncMock(return_value=[[1]])
+        mock_build.return_value = mock_adapter
 
         # Execute
         result = await _perform_connectivity_check(
@@ -563,66 +161,51 @@ async def test_perform_connectivity_check_embedding():
 
         # Assert
         assert result is True
-        assert mock_embedding.call_count == 2
-        # First call with original URL
-        mock_embedding.assert_any_call(
-            model_name="text-embedding-ada-002",
-            base_url="https://api.openai.com",
-            api_key="test-key",
-            embedding_dim=0,
-            ssl_verify=True,
+        mock_build.assert_called_once_with(
+            {"base_url": "https://api.openai.com/embeddings", "api_key": "test-key",
+             "ssl_verify": True, "model_type": "embedding"},
+            "embedding", "embedding", None, model_name="text-embedding-ada-002",
         )
-        # Second call with /embeddings appended
-        mock_embedding.assert_any_call(
-            model_name="text-embedding-ada-002",
-            base_url="https://api.openai.com/embeddings",
-            api_key="test-key",
-            embedding_dim=0,
-            ssl_verify=True,
-        )
+        mock_adapter.dimension_check.assert_called_once_with(timeout=5.0)
 
 
 @pytest.mark.asyncio
 async def test_perform_connectivity_check_multi_embedding():
-    # Setup - URL already has /embeddings, so original URL succeeds on first try
-    with mock.patch("backend.services.model_health_service.SiliconflowMultimodalEmbedding") as mock_embedding:
-        mock_embedding_instance = mock.MagicMock()
-        mock_embedding_instance.dimension_check = mock.AsyncMock(return_value=[
-            [1]
-        ])
-        mock_embedding.return_value = mock_embedding_instance
+    # Setup
+    with mock.patch("backend.services.model_health_service.build_adapter_fresh") as mock_build:
+        mock_adapter = mock.MagicMock()
+        mock_adapter.dimension_check = mock.AsyncMock(return_value=[[1]])
+        mock_build.return_value = mock_adapter
 
-        # Execute - use URL that already has /embeddings
+        # Execute
         result = await _perform_connectivity_check(
             "jina-embeddings-v2",
             "multi_embedding",
-            "https://api.jina.ai/embeddings",
+            "https://api.jina.ai",
             "test-key",
         )
 
         # Assert
         assert result is True
-        mock_embedding.assert_called_once_with(
-            api_key="test-key",
-            base_url="https://api.jina.ai/embeddings",
-            model_name="jina-embeddings-v2",
-            embedding_dim=0,
-            ssl_verify=True,
+        mock_build.assert_called_once_with(
+            {"model_factory": None, "base_url": "https://api.jina.ai/embeddings",
+             "api_key": "test-key", "ssl_verify": True, "model_type": "multi_embedding"},
+            "multi_embedding", "multiEmbedding", None, model_name="jina-embeddings-v2",
         )
+        mock_adapter.dimension_check.assert_called_once_with(timeout=5.0)
 
 
 @pytest.mark.asyncio
 async def test_perform_connectivity_check_llm():
     # Setup
     with mock.patch("backend.services.model_health_service.MessageObserver") as mock_observer, \
-            mock.patch("backend.services.model_health_service.OpenAIModel") as mock_model:
+            mock.patch("backend.services.model_health_service.build_adapter_fresh") as mock_build:
         mock_observer_instance = mock.MagicMock()
         mock_observer.return_value = mock_observer_instance
 
-        mock_model_instance = mock.MagicMock()
-        mock_model_instance.check_connectivity = mock.AsyncMock(
-            return_value=True)
-        mock_model.return_value = mock_model_instance
+        mock_adapter = mock.MagicMock()
+        mock_adapter.health_check = mock.AsyncMock(return_value=True)
+        mock_build.return_value = mock_adapter
 
         # Execute
         result = await _perform_connectivity_check(
@@ -634,28 +217,29 @@ async def test_perform_connectivity_check_llm():
 
         # Assert
         assert result is True
-        mock_model.assert_called_once_with(
-            mock_observer_instance,
-            model_id="gpt-4",
-            api_base="https://api.openai.com",
-            api_key="test-key",
-            ssl_verify=True,
+        mock_build.assert_called_once_with(
+            {"base_url": "https://api.openai.com", "api_key": "test-key",
+             "ssl_verify": True, "timeout_seconds": None, "display_name": None},
+            "llm", "llm", None,
+            observer=mock_observer_instance,
+            model_name="gpt-4",
             timeout_seconds=None,
+            display_name=None,
         )
-        mock_model_instance.check_connectivity.assert_called_once()
+        mock_adapter.health_check.assert_called_once()
 
 
 @pytest.mark.asyncio
 async def test_perform_connectivity_check_vlm():
     # Setup
     with mock.patch("backend.services.model_health_service.MessageObserver") as mock_observer, \
-            mock.patch("backend.services.model_health_service.build_adapter_fresh") as mock_adapter_fresh:
+            mock.patch("backend.services.model_health_service.build_adapter_fresh") as mock_build:
         mock_observer_instance = mock.MagicMock()
         mock_observer.return_value = mock_observer_instance
 
         mock_adapter = mock.MagicMock()
         mock_adapter.health_check = mock.AsyncMock(return_value=True)
-        mock_adapter_fresh.return_value = mock_adapter
+        mock_build.return_value = mock_adapter
 
         # Execute
         result = await _perform_connectivity_check(
@@ -667,15 +251,13 @@ async def test_perform_connectivity_check_vlm():
 
         # Assert
         assert result is True
-        mock_adapter_fresh.assert_called_once_with(
+        mock_build.assert_called_once_with(
             {"base_url": "https://api.openai.com", "api_key": "test-key",
              "ssl_verify": True},
-            "vlm", "vlm", None,
-            model_name="gpt-4-vision",
-            observer=mock_observer_instance,
-            display_name=None,
+            "vlm", "vlm", None, model_name="gpt-4-vision",
+            observer=mock_observer_instance, display_name=None,
         )
-        mock_adapter.health_check.assert_awaited_once()
+        mock_adapter.health_check.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -686,7 +268,7 @@ async def test_perform_connectivity_check_dashscope_multimodal_uses_provider_cat
     ])
 
     with mock.patch.dict(sys.modules, {"services.model_provider_service": model_provider_service}), \
-            mock.patch("backend.services.model_health_service.build_adapter_fresh") as mock_adapter_fresh:
+            mock.patch("backend.services.model_health_service.build_adapter_fresh") as mock_build:
         result = await _perform_connectivity_check(
             "qwen-image-max",
             "vlm2",
@@ -701,7 +283,7 @@ async def test_perform_connectivity_check_dashscope_multimodal_uses_provider_cat
         "model_type": "vlm2",
         "api_key": "test-key",
     })
-    mock_adapter_fresh.assert_not_called()
+    mock_build.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -756,12 +338,11 @@ async def test_perform_connectivity_check_stt():
 
 @pytest.mark.asyncio
 async def test_perform_connectivity_check_rerank():
-    # Setup - mock the rerank model
-    with mock.patch("backend.services.model_health_service.OpenAICompatibleRerank") as mock_rerank:
-        mock_rerank_instance = mock.MagicMock()
-        mock_rerank_instance.connectivity_check = mock.AsyncMock(
-            return_value=True)
-        mock_rerank.return_value = mock_rerank_instance
+    # Setup - mock the bridge adapter builder
+    with mock.patch("backend.services.model_health_service.build_adapter_fresh") as mock_build:
+        mock_adapter = mock.MagicMock()
+        mock_adapter.health_check = mock.AsyncMock(return_value=True)
+        mock_build.return_value = mock_adapter
 
         # Execute
         result = await _perform_connectivity_check(
@@ -773,27 +354,25 @@ async def test_perform_connectivity_check_rerank():
 
         # Assert
         assert result is True
-        mock_rerank.assert_called_once_with(
-            model_name="rerank-model",
-            base_url="https://api.example.com",
-            api_key="test-key",
-            ssl_verify=True
+        mock_build.assert_called_once_with(
+            {"base_url": "https://api.example.com", "api_key": "test-key",
+             "ssl_verify": True},
+            "rerank", "rerank", None, model_name="rerank-model",
         )
-        mock_rerank_instance.connectivity_check.assert_called_once()
+        mock_adapter.health_check.assert_called_once()
 
 
 @pytest.mark.asyncio
 async def test_perform_connectivity_check_base_url_normalization_localhost():
     # Setup
     with mock.patch("backend.services.model_health_service.MessageObserver") as mock_observer, \
-            mock.patch("backend.services.model_health_service.OpenAIModel") as mock_model:
+            mock.patch("backend.services.model_health_service.build_adapter_fresh") as mock_build:
         mock_observer_instance = mock.MagicMock()
         mock_observer.return_value = mock_observer_instance
 
-        mock_model_instance = mock.MagicMock()
-        mock_model_instance.check_connectivity = mock.AsyncMock(
-            return_value=True)
-        mock_model.return_value = mock_model_instance
+        mock_adapter = mock.MagicMock()
+        mock_adapter.health_check = mock.AsyncMock(return_value=True)
+        mock_build.return_value = mock_adapter
 
         # Execute with localhost which should be normalized
         result = await _perform_connectivity_check(
@@ -805,14 +384,15 @@ async def test_perform_connectivity_check_base_url_normalization_localhost():
 
         # Assert
         assert result is True
-        # Ensure api_base has been normalized when calling the model
-        mock_model.assert_called_once_with(
-            mock_observer_instance,
-            model_id="gpt-4",
-            api_base="http://host.docker.internal:8080",
-            api_key="test-key",
-            ssl_verify=True,
+        # Ensure api_base has been normalized when calling the adapter builder
+        mock_build.assert_called_once_with(
+            {"base_url": "http://host.docker.internal:8080", "api_key": "test-key",
+             "ssl_verify": True, "timeout_seconds": None, "display_name": None},
+            "llm", "llm", None,
+            observer=mock_observer_instance,
+            model_name="gpt-4",
             timeout_seconds=None,
+            display_name=None,
         )
 
 
@@ -820,14 +400,13 @@ async def test_perform_connectivity_check_base_url_normalization_localhost():
 async def test_perform_connectivity_check_base_url_normalization_127001():
     # Setup
     with mock.patch("backend.services.model_health_service.MessageObserver") as mock_observer, \
-            mock.patch("backend.services.model_health_service.OpenAIModel") as mock_model:
+            mock.patch("backend.services.model_health_service.build_adapter_fresh") as mock_build:
         mock_observer_instance = mock.MagicMock()
         mock_observer.return_value = mock_observer_instance
 
-        mock_model_instance = mock.MagicMock()
-        mock_model_instance.check_connectivity = mock.AsyncMock(
-            return_value=True)
-        mock_model.return_value = mock_model_instance
+        mock_adapter = mock.MagicMock()
+        mock_adapter.health_check = mock.AsyncMock(return_value=True)
+        mock_build.return_value = mock_adapter
 
         # Execute with 127.0.0.1 which should be normalized
         result = await _perform_connectivity_check(
@@ -839,14 +418,15 @@ async def test_perform_connectivity_check_base_url_normalization_127001():
 
         # Assert
         assert result is True
-        # Ensure api_base has been normalized when calling the model
-        mock_model.assert_called_once_with(
-            mock_observer_instance,
-            model_id="gpt-4",
-            api_base="http://host.docker.internal:8000",
-            api_key="test-key",
-            ssl_verify=True,
+        # Ensure api_base has been normalized when calling the adapter builder
+        mock_build.assert_called_once_with(
+            {"base_url": "http://host.docker.internal:8000", "api_key": "test-key",
+             "ssl_verify": True, "timeout_seconds": None, "display_name": None},
+            "llm", "llm", None,
+            observer=mock_observer_instance,
+            model_name="gpt-4",
             timeout_seconds=None,
+            display_name=None,
         )
 
 
@@ -1145,46 +725,42 @@ async def test_save_config_with_error():
 
 @pytest.mark.asyncio
 async def test_embedding_dimension_check_embedding_success():
-    # URL already has /embeddings, so original URL succeeds on first try
-    with mock.patch("backend.services.model_health_service.OpenAICompatibleEmbedding") as mock_embedding:
-        mock_embedding_instance = mock.MagicMock()
-        mock_embedding_instance.dimension_check = mock.AsyncMock(
+    with mock.patch("backend.services.model_health_service.build_adapter_fresh") as mock_build:
+        mock_adapter = mock.MagicMock()
+        mock_adapter.dimension_check = mock.AsyncMock(
             return_value=[[0.1, 0.2, 0.3]])
-        mock_embedding.return_value = mock_embedding_instance
+        mock_build.return_value = mock_adapter
 
         dimension = await _embedding_dimension_check(
-            "test-embedding", "embedding", "http://test.com/embeddings", "test-key"
+            "test-embedding", "embedding", "http://test.com", "test-key"
         )
         assert dimension == 3
-        mock_embedding.assert_called_once_with(
-            model_name="test-embedding",
-            base_url="http://test.com/embeddings",
-            api_key="test-key",
-            embedding_dim=0,
-            ssl_verify=True,
+        mock_build.assert_called_once_with(
+            {"base_url": "http://test.com/embeddings", "api_key": "test-key",
+             "ssl_verify": True, "model_type": "embedding"},
+            "embedding", "embedding", None, model_name="test-embedding",
         )
+        mock_adapter.dimension_check.assert_called_once_with(timeout=5.0)
 
 
 @pytest.mark.asyncio
 async def test_embedding_dimension_check_multi_embedding_success():
-    # URL already has /embeddings, so original URL succeeds on first try
-    with mock.patch("backend.services.model_health_service.SiliconflowMultimodalEmbedding") as mock_embedding:
-        mock_embedding_instance = mock.MagicMock()
-        mock_embedding_instance.dimension_check = mock.AsyncMock(
+    with mock.patch("backend.services.model_health_service.build_adapter_fresh") as mock_build:
+        mock_adapter = mock.MagicMock()
+        mock_adapter.dimension_check = mock.AsyncMock(
             return_value=[[0.1, 0.2, 0.3, 0.4]])
-        mock_embedding.return_value = mock_embedding_instance
+        mock_build.return_value = mock_adapter
 
         dimension = await _embedding_dimension_check(
-            "test-multi-embedding", "multi_embedding", "http://test.com/embeddings", "test-key"
+            "test-multi-embedding", "multi_embedding", "http://test.com", "test-key"
         )
         assert dimension == 4
-        mock_embedding.assert_called_once_with(
-            api_key="test-key",
-            base_url="http://test.com/embeddings",
-            model_name="test-multi-embedding",
-            embedding_dim=0,
-            ssl_verify=True,
+        mock_build.assert_called_once_with(
+            {"model_factory": None, "base_url": "http://test.com/embeddings",
+             "api_key": "test-key", "ssl_verify": True, "model_type": "multi_embedding"},
+            "multi_embedding", "multiEmbedding", None, model_name="test-multi-embedding",
         )
+        mock_adapter.dimension_check.assert_called_once_with(timeout=5.0)
 
 
 @pytest.mark.asyncio
@@ -1197,11 +773,11 @@ async def test_embedding_dimension_check_unsupported_type():
 
 @pytest.mark.asyncio
 async def test_embedding_dimension_check_empty_return():
-    with mock.patch("backend.services.model_health_service.OpenAICompatibleEmbedding") as mock_embedding:
-        mock_embedding_instance = mock.MagicMock()
-        mock_embedding_instance.dimension_check = mock.AsyncMock(
+    with mock.patch("backend.services.model_health_service.build_adapter_fresh") as mock_build:
+        mock_adapter = mock.MagicMock()
+        mock_adapter.dimension_check = mock.AsyncMock(
             return_value=[])
-        mock_embedding.return_value = mock_embedding_instance
+        mock_build.return_value = mock_adapter
 
         dimension = await _embedding_dimension_check(
             "test-embedding", "embedding", "http://test.com", "test-key"
@@ -1253,21 +829,19 @@ async def test_embedding_dimension_check_wrapper_exception():
 
 @pytest.mark.asyncio
 async def test_embedding_dimension_check_multi_embedding_empty_response():
-    """Test multi_embedding dimension check with an empty response - both URLs fail."""
-    with mock.patch("backend.services.model_health_service.SiliconflowMultimodalEmbedding") as mock_embedding, \
+    """Test multi_embedding dimension check with an empty response."""
+    with mock.patch("backend.services.model_health_service.build_adapter_fresh") as mock_build, \
             mock.patch("backend.services.model_health_service.logging") as mock_logging:
-        mock_embedding_instance = mock.MagicMock()
-        mock_embedding_instance.dimension_check = mock.AsyncMock(
+        mock_adapter = mock.MagicMock()
+        mock_adapter.dimension_check = mock.AsyncMock(
             return_value=[])
-        mock_embedding.return_value = mock_embedding_instance
+        mock_build.return_value = mock_adapter
 
         dimension = await _embedding_dimension_check(
             "test-multi-embedding", "multi_embedding", "http://test.com", "test-key"
         )
 
         assert dimension == 0
-        # Now tries both original URL and /embeddings URL
-        assert mock_embedding.call_count == 2
         mock_logging.warning.assert_called_once()
 
 
@@ -1414,15 +988,14 @@ async def test_embedding_dimension_check_fallback_still_fails():
 @pytest.mark.asyncio
 async def test_perform_connectivity_check_llm_sets_monitoring_operation():
     with mock.patch("backend.services.model_health_service.MessageObserver") as mock_observer, \
-            mock.patch("backend.services.model_health_service.OpenAIModel") as mock_model, \
+            mock.patch("backend.services.model_health_service.build_adapter_fresh") as mock_build, \
             mock.patch("backend.services.model_health_service.set_monitoring_operation") as mock_set_op:
         mock_observer_instance = mock.MagicMock()
         mock_observer.return_value = mock_observer_instance
 
-        mock_model_instance = mock.MagicMock()
-        mock_model_instance.check_connectivity = mock.AsyncMock(
-            return_value=True)
-        mock_model.return_value = mock_model_instance
+        mock_adapter = mock.MagicMock()
+        mock_adapter.health_check = mock.AsyncMock(return_value=True)
+        mock_build.return_value = mock_adapter
 
         await _perform_connectivity_check(
             "gpt-4", "llm", "https://api.openai.com", "test-key",
@@ -1437,14 +1010,14 @@ async def test_perform_connectivity_check_llm_sets_monitoring_operation():
 @pytest.mark.asyncio
 async def test_perform_connectivity_check_vlm_sets_monitoring_operation():
     with mock.patch("backend.services.model_health_service.MessageObserver") as mock_observer, \
-            mock.patch("backend.services.model_health_service.build_adapter_fresh") as mock_adapter_fresh, \
+            mock.patch("backend.services.model_health_service.build_adapter_fresh") as mock_build, \
             mock.patch("backend.services.model_health_service.set_monitoring_operation") as mock_set_op:
         mock_observer_instance = mock.MagicMock()
         mock_observer.return_value = mock_observer_instance
 
         mock_adapter = mock.MagicMock()
         mock_adapter.health_check = mock.AsyncMock(return_value=True)
-        mock_adapter_fresh.return_value = mock_adapter
+        mock_build.return_value = mock_adapter
 
         await _perform_connectivity_check(
             "gpt-4-vision", "vlm", "https://api.openai.com", "test-key",
@@ -1476,11 +1049,11 @@ async def test_check_model_connectivity_sets_monitoring_context():
 
 @pytest.mark.asyncio
 async def test_normalize_embedding_url_already_has_suffix():
-    """L34: _normalize_embedding_url returns early when URL already ends with /embeddings"""
-    with mock.patch("backend.services.model_health_service.OpenAICompatibleEmbedding") as mock_embedding:
-        mock_embedding_instance = mock.MagicMock()
-        mock_embedding_instance.dimension_check = mock.AsyncMock(return_value=[[0.1, 0.2]])
-        mock_embedding.return_value = mock_embedding_instance
+    """_normalize_embedding_url returns early when URL already contains /embeddings, so the adapter receives the unmodified URL."""
+    with mock.patch("backend.services.model_health_service.build_adapter_fresh") as mock_build:
+        mock_adapter = mock.MagicMock()
+        mock_adapter.dimension_check = mock.AsyncMock(return_value=[[0.1, 0.2]])
+        mock_build.return_value = mock_adapter
 
         result = await _perform_connectivity_check(
             "text-embedding-ada-002",
@@ -1489,12 +1062,10 @@ async def test_normalize_embedding_url_already_has_suffix():
             "test-key",
         )
         assert result is True
-        mock_embedding.assert_called_once_with(
-            model_name="text-embedding-ada-002",
-            base_url="https://api.openai.com/v1/embeddings",
-            api_key="test-key",
-            embedding_dim=0,
-            ssl_verify=True,
+        mock_build.assert_called_once_with(
+            {"base_url": "https://api.openai.com/v1/embeddings", "api_key": "test-key",
+             "ssl_verify": True, "model_type": "embedding"},
+            "embedding", "embedding", None, model_name="text-embedding-ada-002",
         )
 
 
@@ -1516,11 +1087,11 @@ async def test_infer_model_factory_siliconflow():
 
 @pytest.mark.asyncio
 async def test_perform_connectivity_check_multi_embedding_dashscope():
-    """L181: multi_embedding with model_factory=dasScope uses DashScopeMultimodalEmbedding"""
-    with mock.patch("backend.services.model_health_service.DashScopeMultimodalEmbedding") as mock_dashscope:
-        mock_instance = mock.MagicMock()
-        mock_instance.dimension_check = mock.AsyncMock(return_value=[[0.1, 0.2, 0.3]])
-        mock_dashscope.return_value = mock_instance
+    """multi_embedding with model_factory=dashscope routes through build_adapter_fresh"""
+    with mock.patch("backend.services.model_health_service.build_adapter_fresh") as mock_build:
+        mock_adapter = mock.MagicMock()
+        mock_adapter.dimension_check = mock.AsyncMock(return_value=[[0.1, 0.2, 0.3]])
+        mock_build.return_value = mock_adapter
 
         result = await _perform_connectivity_check(
             "text-embedding-3-large",
@@ -1530,7 +1101,14 @@ async def test_perform_connectivity_check_multi_embedding_dashscope():
             model_factory="dashscope",
         )
         assert result is True
-        mock_dashscope.assert_called_once()
+        mock_build.assert_called_once_with(
+            {"model_factory": "dashscope",
+             "base_url": "https://dashscope.aliyuncs.com/v1/embeddings",
+             "api_key": "test-key", "ssl_verify": True,
+             "model_type": "multi_embedding"},
+            "multi_embedding", "multiEmbedding", None,
+            model_name="text-embedding-3-large",
+        )
 
 
 @pytest.mark.asyncio
@@ -1663,11 +1241,11 @@ async def test_check_model_connectivity_ssl_verify_fallback():
 
 @pytest.mark.asyncio
 async def test_embedding_dimension_check_multi_embedding_dashscope():
-    """L83: _embedding_dimension_check uses DashScopeMultimodalEmbedding for dashscope factory"""
-    with mock.patch("backend.services.model_health_service.DashScopeMultimodalEmbedding") as mock_dashscope:
-        mock_instance = mock.MagicMock()
-        mock_instance.dimension_check = mock.AsyncMock(return_value=[[0.1, 0.2, 0.3, 0.4]])
-        mock_dashscope.return_value = mock_instance
+    """_embedding_dimension_check routes dashscope multi_embedding through build_adapter_fresh"""
+    with mock.patch("backend.services.model_health_service.build_adapter_fresh") as mock_build:
+        mock_adapter = mock.MagicMock()
+        mock_adapter.dimension_check = mock.AsyncMock(return_value=[[0.1, 0.2, 0.3, 0.4]])
+        mock_build.return_value = mock_adapter
 
         dimension = await _embedding_dimension_check(
             "text-embedding-v2", "multi_embedding",
@@ -1676,8 +1254,8 @@ async def test_embedding_dimension_check_multi_embedding_dashscope():
         )
 
         assert dimension == 4
-        mock_dashscope.assert_called_once()
-        mock_instance.dimension_check.assert_called_once()
+        mock_build.assert_called_once()
+        mock_adapter.dimension_check.assert_called_once()
 
 
 @pytest.mark.asyncio

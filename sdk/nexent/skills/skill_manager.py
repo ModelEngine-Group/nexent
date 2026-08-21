@@ -894,6 +894,7 @@ class SkillManager:
         params: Optional[str] = None,
         *,
         tenant_id: Optional[str],
+        working_directory: Optional[str] = None,
     ) -> Any:
         """Execute a skill script with given parameters.
 
@@ -901,9 +902,9 @@ class SkillManager:
         directory** (i.e. ``<local_skills_dir>/<skill_name>``). This applies to
         every caller - including tools that pass paths extracted from SKILL.md
         inline backticks/code fences or `<use_script path="..." />` tags. The
-        agent's current working directory and any absolute filesystem paths
-        are intentionally *not* honoured; use the skill-relative path that the
-        skill guide declares verbatim.
+        The script location never depends on the current working directory.
+        Callers may still provide an isolated ``working_directory`` for input
+        and output files while the executable itself remains skill-relative.
 
         When the requested script cannot be found, the error message lists:
 
@@ -923,6 +924,7 @@ class SkillManager:
             agent_id: Agent ID for DB-based available skills lookup
             tenant_id: Tenant ID for DB-based available skills lookup
             version_no: Version number for DB-based available skills lookup
+            working_directory: Optional isolated directory used as subprocess cwd.
 
         Returns:
             Script execution result as string or parsed JSON
@@ -1016,9 +1018,9 @@ class SkillManager:
                 raise _fail("script file does not exist")
 
         if normalised_script_path.endswith(".py"):
-            return self._run_python_script(full_path, params)
+            return self._run_python_script(full_path, params, working_directory)
         elif normalised_script_path.endswith(".sh"):
-            return self._run_shell_script(full_path, params)
+            return self._run_shell_script(full_path, params, working_directory)
         else:
             raise ValueError(f"Unsupported script type: {normalised_script_path}")
 
@@ -1052,7 +1054,12 @@ class SkillManager:
             unique.append(rel)
         return sorted(unique)
 
-    def _run_python_script(self, script_path: str, params: Optional[str]) -> str:
+    def _run_python_script(
+        self,
+        script_path: str,
+        params: Optional[str],
+        working_directory: Optional[str] = None,
+    ) -> str:
         """Run a Python script with parameters.
 
         Args:
@@ -1069,12 +1076,17 @@ class SkillManager:
         python_executable = sys.executable
 
         try:
+            run_environment = os.environ.copy()
+            if working_directory:
+                os.makedirs(working_directory, exist_ok=True)
+                run_environment["NEXENT_WORKSPACE"] = working_directory
             result = subprocess.run(
                 [python_executable, script_path] + cmd_parts,
                 capture_output=True,
                 text=True,
                 timeout=300,
-                env=os.environ.copy()
+                env=run_environment,
+                cwd=working_directory,
             )
             if result.returncode != 0:
                 logger.error(f"Script error: {result.stderr}")
@@ -1086,7 +1098,12 @@ class SkillManager:
             logger.error(f"Failed to run script: {e}")
             raise
 
-    def _run_shell_script(self, script_path: str, params: Optional[str]) -> str:
+    def _run_shell_script(
+        self,
+        script_path: str,
+        params: Optional[str],
+        working_directory: Optional[str] = None,
+    ) -> str:
         """Run a shell script with parameters.
 
         Args:
@@ -1099,12 +1116,17 @@ class SkillManager:
         cmd_parts = shlex.split(params) if params else []
 
         try:
+            run_environment = os.environ.copy()
+            if working_directory:
+                os.makedirs(working_directory, exist_ok=True)
+                run_environment["NEXENT_WORKSPACE"] = working_directory
             result = subprocess.run(
                 ["bash", script_path] + cmd_parts,
                 capture_output=True,
                 text=True,
                 timeout=300,
-                env=os.environ.copy()
+                env=run_environment,
+                cwd=working_directory,
             )
             if result.returncode != 0:
                 logger.error(f"Script error: {result.stderr}")

@@ -243,7 +243,7 @@ class LLMAutomationPromptStrategy(AutomationPromptStrategy):
             timeout_seconds=self._model_config.get("timeout_seconds"),
             stream=False,
         )
-        response = llm.generate([
+        response = llm([
             {"role": MESSAGE_ROLE["SYSTEM"], "content": prompt_template[system_key]},
             {"role": MESSAGE_ROLE["USER"], "content": user_prompt},
         ])

@@ -31,7 +31,6 @@ import hashlib
 import logging
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
-from ..core.models.embedding_model import OpenAICompatibleEmbedding
 from .embedding_model import EmbeddingModelInfo
 from .models import (
     MemoryLayer,
@@ -80,7 +79,7 @@ class MemoryService:
 
     def __init__(
         self,
-        embedding_model: Optional[OpenAICompatibleEmbedding] = None,
+        embedding_model: Optional[OpenAICompatibleEmbeddingAdapter] = None,
         embedding_model_info: Optional[EmbeddingModelInfo] = None,
         backend_store: Optional[BackendStoreHook] = None,
         backend_search: Optional[BackendSearchHook] = None,

@@ -42,16 +42,6 @@ class EmptyModelResponseError(RuntimeError):
 
 
 class OpenAIModel(OpenAIServerModel):
-    def _prepare_completion_kwargs(self, *args, **kwargs) -> Dict[str, Any]:
-        """
-        Override to force flatten_messages_as_text=False for VLM.
-        VLM content is always a list of typed blocks (e.g. image_url + text).
-        It must never be flattened into a plain string, regardless of the
-        model_factory setting (e.g. "modelengine").
-        """
-        kwargs.setdefault("flatten_messages_as_text", False)
-        return super()._prepare_completion_kwargs(*args, **kwargs)
-
     # Public SDK constructor: keep common kwargs explicit and read extension
     # kwargs below to preserve backward-compatible keyword call sites.
     def __init__(self, observer: MessageObserver = MessageObserver, temperature=0.2, top_p=0.95,
@@ -60,6 +50,7 @@ class OpenAIModel(OpenAIServerModel):
                  extra_body: Optional[Dict[str, Any]] = None,
                  max_output_tokens: Optional[int] = None,
                  max_tokens: Optional[int] = None,
+                 flatten_messages_as_text: Optional[bool] = None,
                  safe_input_budget_snapshot: Optional[SafeInputBudgetSnapshot | Dict[str, Any]] = None,
                  timeout_seconds: Optional[float] = None,
                  *args, **kwargs):
@@ -86,6 +77,10 @@ class OpenAIModel(OpenAIServerModel):
             max_tokens: DEPRECATED alias for max_output_tokens retained during
                        the W1 migration. If max_output_tokens is supplied it
                        wins; otherwise max_tokens is copied into it.
+            flatten_messages_as_text: Override message flattening for this
+                       model instance. Defaults to ModelEngine text-model
+                       behavior; multimodal adapters must pass False to retain
+                       typed media blocks.
             capacity_snapshot: Optional model capacity snapshot accepted via
                        kwargs for backward-compatible keyword call sites.
             prompt_cache: Selected prompt-cache capability profile accepted via
@@ -103,6 +98,7 @@ class OpenAIModel(OpenAIServerModel):
         self.stop_event = threading.Event()
         self._monitoring = get_monitoring_manager()
         self.model_factory = (model_factory or "").lower()
+        self.flatten_messages_as_text = flatten_messages_as_text
         self.display_name = display_name
         self.extra_body = extra_body or None
         self.prompt_cache = prompt_cache or None
@@ -233,7 +229,11 @@ class OpenAIModel(OpenAIServerModel):
                 **{f"llm.param.{k}": v for k, v in kwargs.items() if isinstance(v, (str, int, float, bool))}
             )
 
-        flatten_messages_as_text = self.model_factory == "modelengine"
+        flatten_messages_as_text = (
+            self.model_factory == "modelengine"
+            if self.flatten_messages_as_text is None
+            else self.flatten_messages_as_text
+        )
         messages_for_completion = (
             prepare_messages_for_smolagents_text_flattening(normalized_messages)
             if flatten_messages_as_text
@@ -285,6 +285,10 @@ class OpenAIModel(OpenAIServerModel):
         dispatch_kwargs = apply_cache_directives(
             completion_kwargs, cache_advice
         )
+        # The __call__ boundary owns streaming: dispatch below always streams
+        # and assembles the result. Drop a stale construction-time ``stream``
+        # so it cannot collide with the explicit ``stream=True`` at dispatch.
+        dispatch_kwargs.pop("stream", None)
         self._monitoring.set_span_attributes(
             **{
                 "llm.prompt_cache.mode": cache_advice.mode,

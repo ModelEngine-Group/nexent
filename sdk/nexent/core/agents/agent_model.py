@@ -399,6 +399,22 @@ class AgentRunInfo(BaseModel):
         ),
         default=None,
     )
+    workspace_path: Optional[str] = Field(
+        description="Run-scoped local workspace used for uploaded inputs and generated outputs.",
+        default=None,
+    )
+    workspace_run_id: Optional[str] = Field(
+        description="Opaque run identifier used to isolate workspace files and object keys.",
+        default=None,
+    )
+    tenant_id: Optional[str] = Field(
+        description="Tenant id used for run-scoped file isolation.",
+        default=None,
+    )
+    minio_files: Optional[List[Dict[str, Any]]] = Field(
+        description="Authorized files uploaded with the current run request.",
+        default=None,
+    )
 
     class Config:
         arbitrary_types_allowed = True
