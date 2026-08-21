@@ -39,11 +39,12 @@ def get_mcp_market_records(
     tag: str | None = None,
     transport_type: str | None = None,
     cursor: str | None = None,
+    page: int | None = None,
     limit: int = 30,
     user_id: str | None = None,
     user_group_ids: Optional[List[int]] = None,
 ) -> Dict[str, Any]:
-    """Cursor-paginated listing of shared (approved) market records scoped to a tenant."""
+    """List shared market records using cursor or offset pagination."""
     with get_db_session() as session:
         query = session.query(McpMarketRecord).filter(
             McpMarketRecord.delete_flag != "Y",
@@ -81,6 +82,21 @@ def get_mcp_market_records(
 
         if user_id is not None and user_group_ids is not None:
             query = _apply_group_permission_filter(query, user_id, user_group_ids)
+
+        if page is not None:
+            total = query.count()
+            page_rows: List[McpMarketRecord] = (
+                query.order_by(McpMarketRecord.market_id.desc())
+                .offset((page - 1) * limit)
+                .limit(limit)
+                .all()
+            )
+            return {
+                "count": len(page_rows),
+                "total": total,
+                "page": page,
+                "items": [as_dict(row) for row in page_rows],
+            }
 
         rows: List[McpMarketRecord] = (
             query.order_by(McpMarketRecord.market_id.desc())

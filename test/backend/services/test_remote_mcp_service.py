@@ -6,6 +6,7 @@ functions in the remote_mcp_service module.
 """
 
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch, MagicMock, AsyncMock
 import importlib.machinery
 import types
@@ -1970,15 +1971,21 @@ class TestRefreshMcpServiceToolCount(unittest.IsolatedAsyncioTestCase):
     @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
     @patch('backend.services.remote_mcp_service._mcp_protocol_health_check')
     @patch('backend.services.remote_mcp_service.update_mcp_record_registry_json_by_id')
-    async def test_success(self, mock_update, mock_health, mock_get):
-        """Tool names fetched and persisted successfully."""
+    @patch('services.tool_configuration_service.get_tool_from_remote_mcp_server')
+    async def test_success(self, mock_tools, mock_update, mock_health, mock_get):
+        """Complete tool snapshot is fetched and persisted successfully."""
         mock_get.return_value = {
+            "mcp_name": "example",
             "mcp_server": "https://srv/mcp",
             "authorization_token": None,
             "custom_headers": None,
             "registry_json": {},
         }
         mock_health.return_value = ["tool1", "tool2"]
+        mock_tools.return_value = [
+            SimpleNamespace(name="tool1", description="First tool"),
+            SimpleNamespace(name="tool2", description="Second tool"),
+        ]
 
         result = await refresh_mcp_service_tool_count(
             tenant_id="tid", user_id="uid", mcp_id=1,
@@ -1987,7 +1994,13 @@ class TestRefreshMcpServiceToolCount(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, ["tool1", "tool2"])
         mock_update.assert_called_once_with(
             mcp_id=1, tenant_id="tid", user_id="uid",
-            registry_json={"_toolNames": ["tool1", "tool2"]},
+            registry_json={
+                "_toolNames": ["tool1", "tool2"],
+                "tools": [
+                    {"name": "tool1", "description": "First tool"},
+                    {"name": "tool2", "description": "Second tool"},
+                ],
+            },
         )
 
     @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
@@ -2033,15 +2046,18 @@ class TestRefreshMcpServiceToolCount(unittest.IsolatedAsyncioTestCase):
     @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
     @patch('backend.services.remote_mcp_service._mcp_protocol_health_check')
     @patch('backend.services.remote_mcp_service.update_mcp_record_registry_json_by_id')
-    async def test_with_auth_token_and_custom_headers(self, mock_update, mock_health, mock_get):
+    @patch('services.tool_configuration_service.get_tool_from_remote_mcp_server')
+    async def test_with_auth_token_and_custom_headers(self, mock_tools, mock_update, mock_health, mock_get):
         """Auth token and custom headers are passed to health check."""
         mock_get.return_value = {
+            "mcp_name": "example",
             "mcp_server": "https://srv/mcp",
             "authorization_token": "Bearer tok",
             "custom_headers": {"X-Custom": "val"},
             "registry_json": None,
         }
         mock_health.return_value = ["tool1"]
+        mock_tools.return_value = [SimpleNamespace(name="tool1", description="Tool description")]
 
         result = await refresh_mcp_service_tool_count(
             tenant_id="tid", user_id="uid", mcp_id=1,
@@ -2054,7 +2070,10 @@ class TestRefreshMcpServiceToolCount(unittest.IsolatedAsyncioTestCase):
         )
         mock_update.assert_called_once_with(
             mcp_id=1, tenant_id="tid", user_id="uid",
-            registry_json={"_toolNames": ["tool1"]},
+            registry_json={
+                "_toolNames": ["tool1"],
+                "tools": [{"name": "tool1", "description": "Tool description"}],
+            },
         )
 
 
@@ -2670,4 +2689,3 @@ class TestUploadAndStartMcpImageCleanupOnFailure(unittest.IsolatedAsyncioTestCas
             )
 
         mock_mgr_cls.assert_not_called()
-

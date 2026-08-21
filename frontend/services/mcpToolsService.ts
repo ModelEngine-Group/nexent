@@ -112,6 +112,7 @@ export const fetchRegistryMcpCards = async (params: {
 export const fetchCommunityMcpCards = async (params: {
   search?: string;
   cursor?: string | null;
+  page?: number;
   transportType?: McpTransportType;
   tag?: string;
   limit?: number;
@@ -119,6 +120,7 @@ export const fetchCommunityMcpCards = async (params: {
   const result = await listCommunityMcpTools({
     search: params.search?.trim() || undefined,
     cursor: params.cursor || undefined,
+    page: params.page,
     transport_type: params.transportType,
     tag: params.tag?.trim() || undefined,
     limit: params.limit ?? 30,
@@ -129,10 +131,12 @@ export const fetchCommunityMcpCards = async (params: {
     data: {
       items: result.data.items,
       nextCursor: result.data.nextCursor ?? null,
+      total: result.data.total,
     },
   } as McpToolsApiResult<{
     items: CommunityMcpCard[];
     nextCursor: string | null;
+    total?: number;
   }>;
 };
 
@@ -426,6 +430,7 @@ type CommunityMcpListPayload = {
   tag?: string;
   transport_type?: McpTransportType;
   cursor?: string;
+  page?: number;
   limit?: number;
 };
 
@@ -440,7 +445,11 @@ export const listCommunityMcpTools = async (payload: CommunityMcpListPayload) =>
     );
     const data =
       await parseJson<
-        ApiEnvelope<{ items: CommunityMcpCard[]; nextCursor: string | null }>
+        ApiEnvelope<{
+          items: CommunityMcpCard[];
+          nextCursor: string | null;
+          total?: number;
+        }>
       >(response);
     if (data.status !== "success") {
       throw new Error("Failed to load community mcp list");
@@ -448,6 +457,7 @@ export const listCommunityMcpTools = async (payload: CommunityMcpListPayload) =>
     return { success: true, data: data.data } as McpToolsApiResult<{
       items: CommunityMcpCard[];
       nextCursor: string | null;
+      total?: number;
     }>;
   } catch (error) {
     log.error("listCommunityMcpTools failed", error);
@@ -506,6 +516,7 @@ const buildCommunityMcpListUrl = (
     query.set("transport_type", payload.transport_type.toString());
   if (payload.status) query.set("status", payload.status);
   if (payload.cursor) query.set("cursor", payload.cursor);
+  if (typeof payload.page === "number") query.set("page", String(payload.page));
   if (typeof payload.limit === "number") query.set("limit", String(payload.limit));
 
   const queryString = query.toString();

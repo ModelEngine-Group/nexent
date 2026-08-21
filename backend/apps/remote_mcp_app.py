@@ -326,9 +326,11 @@ async def add_container_mcp_service_stream_endpoint(
 
             result = await deployment_task
             yield f"data: {json.dumps({'status': 'success', 'data': result}, ensure_ascii=False)}\n\n"
-        except Exception as exc:
-            logger.error(f"Failed to add container MCP service: {exc}")
-            yield f"data: {json.dumps({'status': 'error', 'detail': str(exc)}, ensure_ascii=False)}\n\n"
+        except Exception:
+            # Keep internal exception details out of the externally visible SSE
+            # payload; the server log retains the traceback for diagnostics.
+            logger.exception("Failed to add container MCP service")
+            yield f"data: {json.dumps({'status': 'error', 'detail': 'Failed to add container MCP service'}, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(
         generate_deployment_stream(),

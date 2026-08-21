@@ -138,15 +138,18 @@ def _to_community_card(row: Dict[str, Any]) -> Dict[str, Any]:
                 source_custom_headers = mcp_record.get("custom_headers")
                 source_container_port = mcp_record.get("container_port")
         except Exception:
-            pass
+            # Keep the lookup failure distinguishable from a valid empty policy.
+            # Callers can then avoid treating unavailable source data as an
+            # explicit publisher choice to share no fields.
+            shared_fields = None
     return {
         "communityId": row.get("market_id"),
         "marketId": row.get("market_id"),
         "reviewId": row.get("market_id"),
         "sourceMcpId": source_mcp_id,
         "sharedFields": shared_fields,
-        "authorizationToken": source_authorization_token if shared_fields.get("authorizationToken") else None,
-        "customHeaders": source_custom_headers if shared_fields.get("customHeaders") else None,
+        "authorizationToken": source_authorization_token if (shared_fields or {}).get("authorizationToken") else None,
+        "customHeaders": source_custom_headers if (shared_fields or {}).get("customHeaders") else None,
         "containerPort": source_container_port,
         "name": row.get("mcp_name"),
         "description": row.get("description"),
@@ -233,6 +236,7 @@ async def list_community_mcp_services(
     tag: str | None = None,
     transport_type: str | None = None,
     cursor: str | None = None,
+    page: int | None = None,
     limit: int = 30,
 ) -> Dict[str, Any]:
     """List shared (approved) community MCP services scoped to a tenant with permission filtering."""
@@ -244,7 +248,7 @@ async def list_community_mcp_services(
         except Exception as e:
             logger.warning(f"Failed to query user group ids: user_id={user_id}, err={e}")
 
-    db_result = get_mcp_market_records(
+    list_kwargs = dict(
         tenant_id=tenant_id,
         search=search,
         tag=tag,
@@ -254,8 +258,13 @@ async def list_community_mcp_services(
         user_id=user_id if user_role not in CAN_EDIT_ALL_USER_ROLES else None,
         user_group_ids=user_group_ids,
     )
+    if page is not None:
+        list_kwargs["page"] = page
+    db_result = get_mcp_market_records(**list_kwargs)
     return {
         "count": db_result.get("count", 0),
+        "total": db_result.get("total"),
+        "page": db_result.get("page"),
         "nextCursor": db_result.get("nextCursor"),
         "items": [_to_community_card(item) for item in db_result.get("items", [])],
     }

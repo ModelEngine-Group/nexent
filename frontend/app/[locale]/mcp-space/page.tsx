@@ -186,7 +186,8 @@ export default function McpToolsPage() {
     tab === McpToolsServicesTab.MINE || Boolean(reviewDeepLink)
   );
   const repositoryBrowser = useMcpCommunityBrowser(
-    tab === McpToolsServicesTab.REPOSITORY
+    tab === McpToolsServicesTab.REPOSITORY,
+    6
   );
   const reviewBrowser = useMcpCommunityReview(isAdmin);
   const quickAdd = useMcpCommunityQuickAdd({
@@ -526,13 +527,11 @@ function RepositoryView({
 
       {filteredServices.length > 0 ? (
         <McpToolsPagination
-          mode="cursor"
-          page={browser.page}
-          resultCount={filteredServices.length}
-          hasPrevPage={browser.hasPrevPage}
-          hasNextPage={browser.hasNextPage}
-          onPrevPage={browser.prevPage}
-          onNextPage={browser.nextPage}
+          mode="offset"
+          current={browser.page}
+          pageSize={browser.pageSize}
+          total={browser.total}
+          onChange={browser.setPage}
         />
       ) : null}
     </div>

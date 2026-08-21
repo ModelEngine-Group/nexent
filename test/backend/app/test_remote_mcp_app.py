@@ -282,6 +282,21 @@ class TestAddFromConfig:
         assert resp.status_code == HTTPStatus.SERVICE_UNAVAILABLE
         assert resp.json()["detail"] == "MCP protocol or endpoint invalid"
 
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.add_container_mcp_service')
+    def test_add_from_config_stream_does_not_expose_exception_detail(self, mock_add, mock_auth):
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_add.side_effect = RuntimeError("secret database connection details")
+
+        resp = client.post("/mcp/add-from-config/stream", json={
+            "name": "svc", "source": "local", "port": 8080,
+            "mcp_config": {"mcpServers": {"svc": {"command": "echo"}}},
+        }, headers=AUTH_HEADER)
+
+        assert resp.status_code == HTTPStatus.OK
+        assert "secret database connection details" not in resp.text
+        assert '"detail": "Failed to add container MCP service"' in resp.text
+
 
 # ============================================================================
 # PUT /mcp/update

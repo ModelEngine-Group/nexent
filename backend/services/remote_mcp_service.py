@@ -1472,7 +1472,7 @@ async def refresh_mcp_service_tool_count(
     user_id: str,
     mcp_id: int,
 ) -> list[str]:
-    """Connect to the MCP server, fetch tool names, and persist them to the record.
+    """Connect to the MCP server and persist a complete tool snapshot.
 
     Args:
         tenant_id: Tenant ID
@@ -1513,8 +1513,30 @@ async def refresh_mcp_service_tool_count(
     if not tool_names:
         raise MCPConnectionError("MCP server is unreachable or does not support MCP protocol")
 
+    service_name = record.get("mcp_name")
+    if not service_name:
+        raise McpValidationError("MCP record is missing service name")
+
+    from services.tool_configuration_service import get_tool_from_remote_mcp_server
+
+    tools_info = await get_tool_from_remote_mcp_server(
+        mcp_server_name=service_name,
+        remote_mcp_server=server_url,
+        tenant_id=tenant_id,
+        authorization_token=authorization_token,
+        custom_headers=custom_headers,
+    )
+    tool_snapshot = [
+        {"name": tool.name, "description": tool.description or ""}
+        for tool in tools_info
+        if getattr(tool, "name", "")
+    ]
+    if tool_snapshot:
+        tool_names = [tool["name"] for tool in tool_snapshot]
+
     registry_json = record.get("registry_json") or {}
     registry_json["_toolNames"] = tool_names
+    registry_json["tools"] = tool_snapshot
 
     update_mcp_record_registry_json_by_id(
         mcp_id=mcp_id,
@@ -1523,9 +1545,8 @@ async def refresh_mcp_service_tool_count(
         registry_json=registry_json,
     )
 
-    # A published MCP stores a snapshot of the tool names in the market row.
-    # Keep that snapshot in sync with the source MCP so repository cards do not
-    # continue showing the old tool count after a successful refresh.
+    # A published MCP stores the tool snapshot in the market row. Keep it in
+    # sync so repository details show both the current count and descriptions.
     market_id = record.get("market_id")
     if market_id is None:
         market = get_mcp_market_record_by_source_mcp_id(

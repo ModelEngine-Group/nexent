@@ -118,15 +118,22 @@ class MCPContainerManager:
             MCPContainerError: If container startup fails
         """
         try:
+            start_kwargs = {
+                "service_name": service_name,
+                "tenant_id": tenant_id,
+                "user_id": user_id,
+                "full_command": full_command,
+                "env_vars": env_vars,
+                "host_port": host_port,
+                "image": image,
+            }
+            # The SDK defaults to waiting for readiness. Omit the default
+            # keyword to preserve compatibility with older client adapters.
+            if not wait_for_ready:
+                start_kwargs["wait_for_ready"] = False
+
             result = await self.client.start_container(
-                service_name=service_name,
-                tenant_id=tenant_id,
-                user_id=user_id,
-                full_command=full_command,
-                env_vars=env_vars,
-                host_port=host_port,
-                image=image,
-                wait_for_ready=wait_for_ready,
+                **start_kwargs,
             )
             # Map SDK response to existing interface (mcp_url instead of service_url)
             return {
