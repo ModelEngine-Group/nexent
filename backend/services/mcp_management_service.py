@@ -39,7 +39,6 @@ from database.market_mcp_db import (
 )
 from database.remote_mcp_db import (
     clear_mcp_record_market_id,
-    get_mcp_record_by_id_and_tenant,
     update_mcp_record_market_id_by_id,
     update_mcp_record_manage_fields_by_id,
 )
@@ -53,6 +52,13 @@ from services.notification_service import (
 from utils.str_utils import convert_list_to_string, convert_string_to_list
 
 logger = logging.getLogger("mcp_management_service")
+
+
+def get_mcp_record_by_id_and_tenant(*args, **kwargs):
+    """Load a source MCP record through the database module boundary."""
+    from database.remote_mcp_db import get_mcp_record_by_id_and_tenant as load_record
+
+    return load_record(*args, **kwargs)
 
 MCP_REGISTRY_BASE_URL = "https://registry.modelcontextprotocol.io/v0.1/servers"
 ADMIN_ROLES = {"ADMIN", "SUPER_ADMIN", "SU"}
