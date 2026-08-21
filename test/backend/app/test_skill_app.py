@@ -119,7 +119,19 @@ consts_const_mock.STREAMABLE_CONTENT_TYPES = frozenset(["text/event-stream"])
 
 class SkillException(Exception):
     pass
+
+
+class ModelScopeSkillError(SkillException):
+    pass
+
+
+class ModelScopeSkillNotFoundError(ModelScopeSkillError):
+    pass
+
+
 consts_exceptions_mock.SkillException = SkillException
+consts_exceptions_mock.ModelScopeSkillError = ModelScopeSkillError
+consts_exceptions_mock.ModelScopeSkillNotFoundError = ModelScopeSkillNotFoundError
 consts_exceptions_mock.ForbiddenError = type('ForbiddenError', (Exception,), {})
 consts_exceptions_mock.UnauthorizedError = type('UnauthorizedError', (Exception,), {})
 
@@ -176,10 +188,26 @@ class MockNL2SkillRunRequest(BaseModel):
     complexity: str = "complicated"
     language: Optional[str] = None
 
+
+class MockModelScopeSkillInstallRequest(BaseModel):
+    unique_id: str
+    name: str
+    description: str = ""
+    tags: List[str] = []
+    group_ids: Optional[List[int]] = None
+    ingroup_permission: Optional[str] = None
+
+
+class MockModelScopeSkillUpdateRequest(BaseModel):
+    skill_id: int
+    unique_id: str
+
 consts_model_mock.SkillCreateRequest = MockSkillCreateRequest
 consts_model_mock.SkillUpdateRequest = MockSkillUpdateRequest
 consts_model_mock.SkillResponse = MockSkillResponse
 consts_model_mock.NL2SkillRunRequest = MockNL2SkillRunRequest
+consts_model_mock.ModelScopeSkillInstallRequest = MockModelScopeSkillInstallRequest
+consts_model_mock.ModelScopeSkillUpdateRequest = MockModelScopeSkillUpdateRequest
 
 # Mock services
 services_mock = types.ModuleType('services')
@@ -187,19 +215,29 @@ services_mock.__path__ = []  # Make it a package so submodules can be imported
 services_skill_service_mock = types.ModuleType('services.skill_service')
 services_nl2skill_service_mock = types.ModuleType('services.nl2skill_service')
 services_asset_owner_visibility_mock = types.ModuleType('services.asset_owner_visibility')
+services_modelscope_skill_service_mock = types.ModuleType('services.modelscope_skill_service')
 sys.modules['services'] = services_mock
 sys.modules['services.skill_service'] = services_skill_service_mock
 sys.modules['services.nl2skill_service'] = services_nl2skill_service_mock
 sys.modules['services.asset_owner_visibility'] = services_asset_owner_visibility_mock
+sys.modules['services.modelscope_skill_service'] = services_modelscope_skill_service_mock
 setattr(services_mock, 'skill_service', services_skill_service_mock)
 setattr(services_mock, 'nl2skill_service', services_nl2skill_service_mock)
 setattr(services_mock, 'asset_owner_visibility', services_asset_owner_visibility_mock)
+setattr(services_mock, 'modelscope_skill_service', services_modelscope_skill_service_mock)
 
 class MockSkillService:
     def __init__(self):
         self.repository = MagicMock()
         self.skill_manager = MagicMock()
+
+
+class MockModelScopeSkillService:
+    pass
+
+
 services_skill_service_mock.SkillService = MockSkillService
+services_modelscope_skill_service_mock.ModelScopeSkillService = MockModelScopeSkillService
 services_skill_service_mock.get_skill_manager = MagicMock()
 services_skill_service_mock.update_skill_list = MagicMock()
 services_skill_service_mock.get_official_skills_with_status = MagicMock(return_value=[])
@@ -213,6 +251,7 @@ def setup_function():
     sys.modules['services.skill_service'] = services_skill_service_mock
     sys.modules['services.nl2skill_service'] = services_nl2skill_service_mock
     sys.modules['services.asset_owner_visibility'] = services_asset_owner_visibility_mock
+    sys.modules['services.modelscope_skill_service'] = services_modelscope_skill_service_mock
 services_asset_owner_visibility_mock.can_view_skill = MagicMock(return_value=True)
 
 # Mock utils
