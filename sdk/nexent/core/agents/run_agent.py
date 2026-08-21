@@ -130,10 +130,10 @@ def _normalize_mcp_config(mcp_host_item: Union[str, Dict[str, Any]]) -> Dict[str
 
     Args:
         mcp_host_item: Either a string URL or a dict with 'url', optional 'transport',
-                       and optional 'headers' or 'authorization'
+                       'headers', 'authorization', or 'httpx_client_factory'
 
     Returns:
-        Dictionary with 'url', 'transport', and optionally 'headers' keys
+        Dictionary with 'url', 'transport', and supported transport options
     """
     if isinstance(mcp_host_item, str):
         url = mcp_host_item
@@ -159,6 +159,12 @@ def _normalize_mcp_config(mcp_host_item: Union[str, Dict[str, Any]]) -> Dict[str
             result["headers"] = {"Authorization": mcp_host_item["authorization"]}
         elif "headers" in mcp_host_item:
             result["headers"] = mcp_host_item["headers"]
+
+        if "httpx_client_factory" in mcp_host_item:
+            httpx_client_factory = mcp_host_item["httpx_client_factory"]
+            if not callable(httpx_client_factory):
+                raise ValueError("httpx_client_factory must be callable")
+            result["httpx_client_factory"] = httpx_client_factory
 
         return result
     else:

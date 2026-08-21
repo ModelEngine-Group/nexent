@@ -239,6 +239,7 @@ sys.modules['services.vectordatabase_service'].ElasticSearchService.filter_acces
 sys.modules['services.tenant_config_service'] = MagicMock()
 sys.modules['utils.prompt_template_utils'] = MagicMock()
 sys.modules['utils.config_utils'] = MagicMock()
+sys.modules['utils.http_client_utils'] = MagicMock()
 sys.modules['utils.langchain_utils'] = MagicMock()
 sys.modules['utils.model_name_utils'] = MagicMock()
 sys.modules['langchain_core.tools'] = MagicMock()
@@ -525,6 +526,14 @@ from backend.agents.create_agent_info import (
     _resolve_input_budget,
     _resolve_safe_input_budget,
 )
+
+
+@pytest.fixture(autouse=True)
+def run_create_agent_thread_work_inline(monkeypatch):
+    async def run_inline(func, *args, **kwargs):
+        return func(*args, **kwargs)
+
+    monkeypatch.setattr(create_agent_info_module.asyncio, "to_thread", run_inline)
 
 
 def test_build_run_workspace_uses_user_and_run_only(monkeypatch, tmp_path):
@@ -4394,17 +4403,10 @@ class TestCreateAgentRunInfo:
 
             mock_join_query.return_value = "processed_query"
             mock_create_models.return_value = ["model_config"]
-            mock_get_mcp.return_value = [
-                {
-                    "remote_mcp_server_name": "sse_server",
-                    "remote_mcp_server": "http://sse.server/sse",
-                    "status": True,
-                    "authorization_token": None
-                }
-            ]
+            mock_get_mcp.return_value = []
             mock_create_agent.return_value = "agent_config"
             mock_urljoin.return_value = "http://nexent.mcp/sse"
-            mock_filter.return_value = ["http://sse.server/sse"]
+            mock_filter.return_value = ["http://nexent.mcp/sse"]
             mock_threading.Event.return_value = "stop_event"
             mock_version_no.return_value = 1
 
@@ -4424,8 +4426,9 @@ class TestCreateAgentRunInfo:
             mcp_host = call_args[1]["mcp_host"]
             assert len(mcp_host) == 1
             assert mcp_host[0] == {
-                "url": "http://sse.server/sse",
-                "transport": "sse"
+                "url": "http://nexent.mcp/sse",
+                "transport": "sse",
+                "httpx_client_factory": create_agent_info_module.create_httpx_client,
             }
 
     @pytest.mark.asyncio

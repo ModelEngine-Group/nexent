@@ -31,7 +31,7 @@ import { useGroupList } from "@/hooks/group/useGroupList";
 import { deleteAgent, searchAgentInfo } from "@/services/agentConfigService";
 import { fetchAgentVersionList } from "@/services/agentVersionService";
 import { Agent } from "@/types/agentConfig";
-import ExpandEditModal from "@/app/agents/components/agentInfo/ExpandEditModal";
+import ExpandEditModal from "@/components/common/ExpandEditModal";
 import type { AgentVersion } from "@/services/agentVersionService";
 import { getUnavailableReasonLabels } from "@/lib/agentLabelMapper";
 
