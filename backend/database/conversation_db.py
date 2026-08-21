@@ -19,6 +19,7 @@ class MessageRecord(TypedDict):
     message_id: int
     message_index: int
     role: str
+    create_time: Optional[int]
     type: Optional[str]
     content: Optional[str]
     opinion_flag: Optional[str]
@@ -921,6 +922,8 @@ def get_conversation_history(conversation_id: int, user_id: Optional[str] = None
             ConversationMessage.status,
             ConversationMessage.minio_files,
             ConversationMessage.opinion_flag,
+            (func.extract('epoch', ConversationMessage.create_time)
+             * 1000).label('create_time'),
             subquery.label('units')
         ).where(
             ConversationMessage.conversation_id == conversation_id,
@@ -951,6 +954,9 @@ def get_conversation_history(conversation_id: int, user_id: Optional[str] = None
         message_list = []
         for record in message_records:
             message_data = as_dict(record)
+
+            if message_data.get('create_time') is not None:
+                message_data['create_time'] = int(message_data['create_time'])
 
             # Ensure units field is empty list instead of None, then sort by unit_index
             if message_data['units'] is None:

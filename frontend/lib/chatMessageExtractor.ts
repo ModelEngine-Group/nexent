@@ -10,6 +10,7 @@ import {
   MinioFileItem,
 } from "@/types/chat";
 import log from "@/lib/logger";
+import { toMessageCreatedAt } from "@/lib/messageDate";
 import type { TFunction } from "i18next";
 
 // Replace <user_break> tag with the localized natural language string
@@ -62,7 +63,6 @@ const getOrCreateCurrentStep = (
 export function extractAssistantMsgFromResponse(
   dialog_msg: ApiMessage,
   index: number,
-  create_time: number,
   t: TFunction
 ) {
   let searchResultsContent: SearchResult[] = [];
@@ -434,7 +434,7 @@ export function extractAssistantMsgFromResponse(
     message_id: dialog_msg.message_id,
     content: "",
     opinion_flag: dialog_msg.opinion_flag,
-    timestamp: new Date(create_time),
+    timestamp: toMessageCreatedAt(dialog_msg.create_time),
     steps: steps,
     finalAnswer: finalAnswer,
     agentRun: "",
@@ -451,8 +451,7 @@ export function extractAssistantMsgFromResponse(
 
 export function extractUserMsgFromResponse(
   dialog_msg: ApiMessage,
-  index: number,
-  create_time: number
+  index: number
 ) {
   let userContent = "";
   if (Array.isArray(dialog_msg.message)) {
@@ -495,7 +494,7 @@ export function extractUserMsgFromResponse(
     message_id: dialog_msg.message_id,
     content: userContent,
     opinion_flag: dialog_msg.opinion_flag,
-    timestamp: new Date(create_time),
+    timestamp: toMessageCreatedAt(dialog_msg.create_time),
     showRawContent: true,
     isComplete: true,
     attachments: userAttachments.length > 0 ? userAttachments : undefined,
@@ -508,16 +507,15 @@ export function formatConversationMessagesFromResponse(
   t: TFunction
 ): ChatMessageType[] {
   const dialogMessages = conversationData.message || [];
-  const createTime = Number(conversationData.create_time || Date.now());
 
   return dialogMessages
     .map((dialogMsg, index) => {
       if (dialogMsg.role === MESSAGE_ROLES.USER) {
-        return extractUserMsgFromResponse(dialogMsg, index, createTime);
+        return extractUserMsgFromResponse(dialogMsg, index);
       }
 
       if (dialogMsg.role === MESSAGE_ROLES.ASSISTANT) {
-        return extractAssistantMsgFromResponse(dialogMsg, index, createTime, t);
+        return extractAssistantMsgFromResponse(dialogMsg, index, t);
       }
 
       return null;

@@ -556,7 +556,7 @@ export function ChatInterface() {
     const preparingAutomationMessage = shouldAnalyzeAutomation
       ? createPreparingAutomationMessage(
           assistantMessageId,
-          initialAssistantMessage.timestamp
+          initialAssistantMessage.timestamp!
         )
       : null;
 
@@ -943,12 +943,19 @@ export function ChatInterface() {
                 if (title) {
                   conversationManagement.setConversationTitle(title);
                 }
-                void conversationManagement.fetchConversationList().catch((error) => {
-                  log.error(t("chatInterface.refreshDialogListFailedButContinue"), error);
-                });
+                void conversationManagement
+                  .fetchConversationList()
+                  .catch((error) => {
+                    log.error(
+                      t("chatInterface.refreshDialogListFailedButContinue"),
+                      error
+                    );
+                  });
               })
               .catch((error) => {
-                titleGenerationConversationIdsRef.current.delete(conversationId);
+                titleGenerationConversationIdsRef.current.delete(
+                  conversationId
+                );
                 log.error(t("chatStreamHandler.generateTitleFailed"), error);
               });
           }

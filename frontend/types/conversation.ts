@@ -35,6 +35,7 @@ export interface ApiMessage {
   message: ApiMessageItem[] | string;
   message_id?: number;
   message_index?: number;
+  create_time?: number | null;
   picture?: string[];
   search?: any[];
   searchByUnitId?: Record<string, any[]>;
@@ -70,8 +71,7 @@ export interface ApiConversationDetail {
   agent_id?: number | null;
   chat_mode?: "planning" | "execution";
   knowledge_scope?:
-    | import("./knowledgeScope").ConversationKnowledgeScope
-    | null;
+    import("./knowledgeScope").ConversationKnowledgeScope | null;
   message: ApiMessage[];
   streaming_message?: StreamingMessage;
 }

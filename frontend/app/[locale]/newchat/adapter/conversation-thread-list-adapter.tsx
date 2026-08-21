@@ -17,7 +17,10 @@ import type {
   RemoteThreadListAdapter,
   ThreadHistoryAdapter,
 } from "@assistant-ui/react";
+
 import { conversationService } from "@/services/conversationService";
+import { toMessageCreatedAt } from "@/lib/messageDate";
+
 import { storageService } from "@/services/storageService";
 import { parseAutomationProposal } from "@/features/agentAutomation/parseProposal";
 import type { ConversationListItem } from "@/types/conversation";
@@ -630,6 +633,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
           if (part.type === "picture_web") {
             for (const imageUrl of parseSearchImageUrls(part.content)) {
               appendHistoricalImage(imageUrl);
+
             }
             continue;
           }
@@ -1006,14 +1010,19 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
       // requires `metadata.custom` to be present on every message, so we
       // always include the field and only set the token bucket when we have
       // historical step data.
+      const createdAt = toMessageCreatedAt(msg.create_time);
       const metadata = {
-        custom: stepTokenCounts.length > 0 ? { stepTokenCounts } : {},
+        custom: {
+          ...(stepTokenCounts.length > 0 ? { stepTokenCounts } : {}),
+          ...(createdAt ? { databaseCreateTime: createdAt.getTime() } : {}),
+        },
       };
 
       messages.push({
         id: messageId,
         role: msg.role,
         content,
+        ...(createdAt ? { createdAt } : {}),
         ...(msg.role === "user" && attachments.length > 0
           ? { attachments }
           : {}),
@@ -1402,6 +1411,7 @@ export const conversationThreadListAdapter: RemoteThreadListAdapter = {
         update_time: detail.create_time,
       }
     );
+
   },
 
   async generateTitle(_remoteId, _messages) {

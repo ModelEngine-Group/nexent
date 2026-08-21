@@ -122,6 +122,7 @@ class ConversationMessage:
     status = MagicMock(name="ConversationMessage.status")
     minio_files = MagicMock(name="ConversationMessage.minio_files")
     opinion_flag = MagicMock(name="ConversationMessage.opinion_flag")
+    create_time = MagicMock(name="ConversationMessage.create_time")
 
 
 class ConversationMessageUnit:
@@ -2075,6 +2076,7 @@ def test_get_conversation_history_with_messages(monkeypatch, mock_session_ctx):
         status="completed",
         minio_files=None,
         opinion_flag=None,
+        create_time=1700000000123.0,
         units=None,
     )
 
@@ -2105,6 +2107,7 @@ def test_get_conversation_history_with_messages(monkeypatch, mock_session_ctx):
                 "status": record.status,
                 "minio_files": record.minio_files,
                 "opinion_flag": record.opinion_flag,
+                "create_time": record.create_time,
                 "units": getattr(record, 'units', None),
             }
         elif hasattr(record, 'conversation_id'):
@@ -2118,11 +2121,15 @@ def test_get_conversation_history_with_messages(monkeypatch, mock_session_ctx):
     monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
     monkeypatch.setattr("backend.database.conversation_db.as_dict", as_dict_side_effect)
 
+    sa_mod.func.extract.reset_mock()
+
     result = get_conversation_history(1)
 
     assert result is not None
     assert result['conversation_id'] == 1
     assert result['agent_id'] == 9
+    assert result['message_records'][0]['create_time'] == 1700000000123
+    assert call('epoch', ConversationMessage.create_time) in sa_mod.func.extract.call_args_list
 
 
 def test_create_message_units_creates_all_units_with_user_id(monkeypatch):
