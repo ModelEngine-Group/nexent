@@ -65,6 +65,11 @@ class TestDownloadFromS3ToolParsePath:
         assert bucket == "mybucket"
         assert key == "path/to/file.pdf"
 
+    def test_parse_single_slash_s3_url(self):
+        bucket, key = DownloadFromS3Tool._parse_s3_path("s3:/mybucket/path/to/file.pdf")
+        assert bucket == "mybucket"
+        assert key == "path/to/file.pdf"
+
     def test_parse_slash_path(self):
         bucket, key = DownloadFromS3Tool._parse_s3_path("/mybucket/path/to/file.pdf")
         assert bucket == "mybucket"
@@ -121,6 +126,9 @@ class TestDownloadFromS3ToolAccessControl:
     def test_arbitrary_object_key_denied(self, tool):
         assert tool._check_access("private/user1/secret.txt") is False
 
+    def test_asset_owner_attachment_denied_without_backend_validator(self, tool):
+        assert tool._check_access("attachments/asset_owner/secret.txt") is False
+
     def test_legacy_flat_attachment_allowed(self, tool):
         assert tool._check_access("attachments/legacy.txt") is True
 
@@ -154,9 +162,34 @@ class TestDownloadFromS3ToolForward:
         assert data["status"] == "success"
         assert "my_report.pdf" in data["local_path"]
 
+    def test_download_notifies_completion_callback(
+        self, mock_observer, mock_minio_client, temp_workspace
+    ):
+        callback = MagicMock()
+        tool = DownloadFromS3Tool(
+            workspace_path=temp_workspace,
+            minio_client=mock_minio_client,
+            user_id="user1",
+            tenant_id="tenant1",
+            observer=mock_observer,
+            on_download=callback,
+        )
+
+        result = json.loads(tool.forward("attachments/user1/report.pdf"))
+
+        callback.assert_called_once_with(result)
+
     def test_download_empty_path_raises(self, tool):
         with pytest.raises(Exception, match="cannot be empty"):
             tool.forward("")
+
+    def test_download_invalid_s3_path_uses_value_error_mapping(self, tool):
+        with pytest.raises(Exception, match="Invalid S3 path"):
+            tool.forward("s3://missing-object-key")
+
+    def test_download_object_key_without_filename_raises(self, tool):
+        with pytest.raises(Exception, match="Cannot determine filename"):
+            tool.forward("attachments/user1/")
 
     def test_download_no_minio_client_raises(self, temp_workspace):
         tool = DownloadFromS3Tool(workspace_path=temp_workspace, user_id="user1")
@@ -276,6 +309,31 @@ class TestUploadToS3ToolPathValidation:
         with pytest.raises(ValueError, match="run IDs are required"):
             tool._build_s3_key("report.pdf")
 
+    @pytest.mark.parametrize("target_name", ["/absolute.txt", "../escape.txt"])
+    def test_build_s3_key_rejects_unsafe_target(self, tool, target_name):
+        with pytest.raises(ValueError, match="output prefix"):
+            tool._build_s3_key(target_name)
+
+    def test_build_s3_key_rejects_empty_target(self, tool):
+        with pytest.raises(ValueError, match="cannot be empty"):
+            tool._build_s3_key(".")
+
+    @pytest.mark.parametrize(
+        ("user_id", "run_id"),
+        [("user/child", "run1"), ("user1", "run\\child")],
+    )
+    def test_build_s3_key_rejects_multi_segment_identity(
+        self, temp_workspace, user_id, run_id
+    ):
+        tool = UploadToS3Tool(
+            workspace_path=temp_workspace,
+            user_id=user_id,
+            run_id=run_id,
+        )
+
+        with pytest.raises(ValueError, match="single path segments"):
+            tool._build_s3_key("report.pdf")
+
 
 class TestUploadToS3ToolForward:
     @pytest.fixture
@@ -354,6 +412,43 @@ class TestUploadToS3ToolForward:
         with pytest.raises(Exception, match="does not exist"):
             tool.forward("nonexistent.txt")
 
+    def test_upload_uses_local_file_callback_before_existence_check(
+        self, mock_minio_client, temp_workspace
+    ):
+        callback = MagicMock()
+        target_path = os.path.join(temp_workspace, "generated.txt")
+
+        def create_file(_path):
+            with open(target_path, "w", encoding="utf-8") as file_obj:
+                file_obj.write("generated")
+
+        callback.side_effect = create_file
+        tool = UploadToS3Tool(
+            workspace_path=temp_workspace,
+            minio_client=mock_minio_client,
+            user_id="user1",
+            run_id="run1",
+            ensure_local_file=callback,
+        )
+
+        result = json.loads(tool.forward("generated.txt"))
+
+        callback.assert_called_once_with(target_path)
+        assert result["status"] == "success"
+
+    def test_upload_directory_raises(self, mock_minio_client, temp_workspace):
+        directory = os.path.join(temp_workspace, "folder")
+        os.makedirs(directory)
+        tool = UploadToS3Tool(
+            workspace_path=temp_workspace,
+            minio_client=mock_minio_client,
+            user_id="user1",
+            run_id="run1",
+        )
+
+        with pytest.raises(Exception, match="not a regular file"):
+            tool.forward("folder")
+
     def test_upload_path_outside_workspace_raises(self, tool_with_file):
         tool, _ = tool_with_file
         with pytest.raises(Exception, match="Permission denied"):
@@ -392,3 +487,14 @@ class TestUploadToS3ToolForward:
         mock_minio_client.upload_file.return_value = (False, "Upload failed")
         with pytest.raises(Exception, match="Failed to upload"):
             tool.forward("test_report.txt")
+
+    def test_upload_succeeds_when_presigned_url_generation_fails(
+        self, tool_with_file, mock_minio_client
+    ):
+        tool, _ = tool_with_file
+        mock_minio_client.get_file_url.side_effect = RuntimeError("signing failed")
+
+        result = json.loads(tool.forward("test_report.txt"))
+
+        assert result["status"] == "success"
+        assert result["presigned_url"] == ""

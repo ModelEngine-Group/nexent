@@ -1107,6 +1107,23 @@ description: Shell script
 
             assert result == "deployment complete"
 
+    def test_run_shell_script_exports_run_workspace(self, mocker, tmp_path):
+        working_directory = tmp_path / "user" / "run"
+        mock_result = MagicMock(returncode=0, stdout="done", stderr="")
+        run = mocker.patch("subprocess.run", return_value=mock_result)
+        manager = SkillManager(base_skills_dir=str(tmp_path / "skills"))
+
+        result = manager._run_shell_script(
+            "/skills/scripts/create.sh",
+            None,
+            working_directory=str(working_directory),
+        )
+
+        assert result == "done"
+        assert working_directory.is_dir()
+        assert run.call_args.kwargs["cwd"] == str(working_directory)
+        assert run.call_args.kwargs["env"]["NEXENT_WORKSPACE"] == str(working_directory)
+
     def test_run_unsupported_script_type_raises(self):
         """Test running unsupported script type raises ValueError."""
         with TempSkillDir() as temp:
