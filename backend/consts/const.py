@@ -43,6 +43,9 @@ UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH = os.getenv(
 
 # Upload Configuration
 MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB
+# Knowledge-base uploads use the same 100 MB hard ceiling as the general file
+# service, but keep a named constant for the knowledge-specific validation path.
+MAX_KNOWLEDGE_FILE_SIZE_BYTES = MAX_FILE_SIZE
 MAX_CONCURRENT_UPLOADS = 5
 UPLOAD_FOLDER = os.getenv('UPLOAD_FOLDER', 'uploads')
 AGENT_WORKSPACE_ROOT = os.getenv('AGENT_WORKSPACE_ROOT', '/mnt/nexent/workdir')
@@ -185,6 +188,9 @@ MAX_USERS_PER_TENANT = 10_000
 MAX_GROUPS_PER_TENANT = 1_000
 MAX_SUPER_ADMIN_COUNT = 1
 MAX_ADMINS_PER_TENANT = 1_000
+MAX_KNOWLEDGE_BASES_PER_TENANT = 10_000
+MAX_KNOWLEDGE_BASES_PER_USER = 10
+MAX_PRIVILEGED_KNOWLEDGE_BASES_PER_USER = 1_000
 
 # Invitation code type for asset administrator registration
 ASSET_OWNER_INVITE_CODE_TYPE = "ASSET_OWNER_INVITE"

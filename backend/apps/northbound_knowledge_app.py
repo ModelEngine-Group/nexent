@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 
 from consts.const import ASSET_OWNER_TENANT_ID, VectorDatabaseType
 from consts.exceptions import (
+    AppException,
     LimitExceededError,
     UnauthorizedError,
 )
@@ -515,6 +516,8 @@ async def upload_files(
         raise HTTPException(
             status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except HTTPException:
+        raise
+    except AppException:
         raise
     except Exception:
         logger.exception("File upload error")

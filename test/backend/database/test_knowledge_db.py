@@ -202,6 +202,7 @@ from backend.database.knowledge_db import (
         upsert_knowledge_record,
         _generate_index_name,
         get_knowledge_name_map_by_index_names,
+        _enforce_knowledge_limits,
     )
 
 
@@ -227,6 +228,124 @@ def setup_mock_db_session(monkeypatch, session):
     monkeypatch.setattr(
         "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
     return mock_ctx
+
+
+class _LimitQuery:
+    """Small query double that returns deterministic active-record counts."""
+
+    def __init__(self, counts):
+        self._counts = iter(counts)
+
+    def filter(self, *args):
+        return self
+
+    def count(self):
+        return next(self._counts)
+
+
+class _LimitSession:
+    def __init__(self, counts):
+        self.query_calls = 0
+        self.query_result = _LimitQuery(counts)
+        self.execute_calls = []
+
+    def query(self, *args):
+        self.query_calls += 1
+        return self.query_result
+
+    def execute(self, *args):
+        self.execute_calls.append(args)
+
+
+def test_knowledge_tenant_limit_rejects_the_next_active_record(monkeypatch):
+    """The tenant ceiling rejects creation at the boundary with structured details."""
+    from backend.database import knowledge_db
+
+    monkeypatch.setattr(knowledge_db, "MAX_KNOWLEDGE_BASES_PER_TENANT", 1)
+    monkeypatch.setattr(knowledge_db, "MAX_KNOWLEDGE_BASES_PER_USER", 10)
+    monkeypatch.setattr(knowledge_db, "MAX_PRIVILEGED_KNOWLEDGE_BASES_PER_USER", 1000)
+    session = _LimitSession([1])
+
+    with pytest.raises(Exception) as exc_info:
+        _enforce_knowledge_limits(session, "tenant-1", "user-1")
+
+    assert exc_info.value.error_code.value == "060106"
+    assert exc_info.value.details["scope"] == "tenant"
+    assert exc_info.value.details["limit"] == 1
+    assert session.query_calls == 1
+
+
+def test_knowledge_limit_helpers_handle_missing_identity_and_role_lookup(monkeypatch):
+    """Missing identity is ordinary-user safe, while a tenant role is normalized."""
+    from backend.database import knowledge_db
+
+    assert knowledge_db._count_or_zero(3) == 3
+    assert knowledge_db._count_or_zero(MagicMock()) == 0
+    session = MagicMock()
+    assert knowledge_db._get_user_role_in_session(session, None, "tenant-1") == "USER"
+
+    session.query.return_value.filter.return_value.scalar.return_value = "admin"
+    assert knowledge_db._get_user_role_in_session(session, "user-1", "tenant-1") == "ADMIN"
+
+    session.query.side_effect = None
+    session.query.return_value.filter.return_value.scalar.return_value = None
+    assert knowledge_db._get_user_role_in_session(session, "user-1", "tenant-1") == "USER"
+
+    session.query.side_effect = RuntimeError("role lookup failed")
+    assert knowledge_db._get_user_role_in_session(session, "user-1", "tenant-1") == "USER"
+
+
+def test_knowledge_limit_skips_user_scope_without_creator(monkeypatch):
+    """Legacy integrations without a creator still observe the tenant ceiling."""
+    from backend.database import knowledge_db
+
+    monkeypatch.setattr(knowledge_db, "MAX_KNOWLEDGE_BASES_PER_TENANT", 10)
+    session = _LimitSession([0])
+
+    knowledge_db._enforce_knowledge_limits(session, "tenant-1", None)
+
+    assert session.query_calls == 1
+    assert len(session.execute_calls) == 1
+
+
+def test_knowledge_limit_skips_all_scopes_without_tenant():
+    """Records without a tenant are retained for legacy callers without scope."""
+    session = _LimitSession([])
+
+    _enforce_knowledge_limits(session, None, "user-1")
+
+    assert session.query_calls == 0
+    assert session.execute_calls == []
+
+
+@pytest.mark.parametrize(
+    "role, expected_limit",
+    [
+        ("USER", 1),
+        ("DEV", 1000),
+        ("ADMIN", 1000),
+        ("SU", 1000),
+        ("ASSET_OWNER", 1000),
+    ],
+)
+def test_knowledge_user_limit_applies_to_creator_role(monkeypatch, role, expected_limit):
+    """The creator ceiling is checked after the tenant ceiling and includes role details."""
+    from backend.database import knowledge_db
+
+    monkeypatch.setattr(knowledge_db, "MAX_KNOWLEDGE_BASES_PER_TENANT", 10)
+    monkeypatch.setattr(knowledge_db, "MAX_KNOWLEDGE_BASES_PER_USER", 1)
+    monkeypatch.setattr(knowledge_db, "MAX_PRIVILEGED_KNOWLEDGE_BASES_PER_USER", 1000)
+    monkeypatch.setattr(knowledge_db, "_get_user_role_in_session", lambda *_: role)
+    session = _LimitSession([0, expected_limit])
+
+    with pytest.raises(Exception) as exc_info:
+        _enforce_knowledge_limits(session, "tenant-1", "user-1")
+
+    assert exc_info.value.error_code.value == "060106"
+    assert exc_info.value.details["scope"] == "user"
+    assert exc_info.value.details["limit"] == expected_limit
+    assert exc_info.value.details["role"] == role
+    assert session.query_calls == 2
 
 
 def test_create_knowledge_record_success(monkeypatch, mock_session):
@@ -1828,14 +1947,18 @@ def test_upsert_knowledge_record_create_new(monkeypatch, mock_session):
     monkeypatch.setattr(
         "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
 
-    # Mock create_knowledge_record to return expected result
+    # Mock the same-session creator used to keep the existence check and limit
+    # check in one transaction.
     expected_result = {
         "knowledge_id": 123,
         "index_name": "test_index",
         "knowledge_name": "test_kb"
     }
 
-    with patch('backend.database.knowledge_db.create_knowledge_record', return_value=expected_result):
+    with patch(
+        'backend.database.knowledge_db._create_knowledge_record_in_session',
+        return_value=expected_result,
+    ):
         test_query = {
             "index_name": "test_index",
             "tenant_id": "test_tenant",

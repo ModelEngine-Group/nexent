@@ -91,6 +91,7 @@ export const ErrorCode = {
   KNOWLEDGE_SYNC_FAILED: "060103",
   INDEX_NOT_FOUND: "060104",
   KNOWLEDGE_SEARCH_FAILED: "060105",
+  KNOWLEDGE_RESOURCE_EXCEEDED: "060106",
 
   // ==================== 07 MCPTools / MCP 工具 ====================
   // 01 - Tool

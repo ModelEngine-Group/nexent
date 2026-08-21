@@ -68,6 +68,7 @@ class ErrorMessage:
         ErrorCode.KNOWLEDGE_SYNC_FAILED: "Failed to sync knowledge base.",
         ErrorCode.KNOWLEDGE_INDEX_NOT_FOUND: "Search index not found.",
         ErrorCode.KNOWLEDGE_SEARCH_FAILED: "Knowledge search failed.",
+        ErrorCode.KNOWLEDGE_RESOURCE_EXCEEDED: "Knowledge resource limit exceeded.",
 
         # ==================== 07 MCPTools / MCP 工具 ====================
         ErrorCode.MCP_TOOL_NOT_FOUND: "Tool not found.",

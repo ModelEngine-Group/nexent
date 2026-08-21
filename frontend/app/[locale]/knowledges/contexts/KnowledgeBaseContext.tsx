@@ -385,7 +385,9 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
           type: KNOWLEDGE_BASE_ACTION_TYPES.ERROR,
           payload: t("knowledgeBase.error.createRetry"),
         });
-        return null;
+        // Preserve the structured ApiError so the caller can show the
+        // localized resource-limit message and its configured limit.
+        throw error;
       }
     },
     [t]

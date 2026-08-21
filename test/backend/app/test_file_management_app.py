@@ -181,12 +181,14 @@ setattr(consts_pkg, "model", model_stub)
 
 # Stub consts.exceptions with real exception classes so isinstance checks work
 exceptions_stub = types.ModuleType("consts.exceptions")
+class AppException(Exception): pass
 class NotFoundException(Exception): pass
 class OfficeConversionException(Exception): pass
 class UnsupportedFileTypeException(Exception): pass
 class FileTooLargeException(Exception): pass
 class QuotaExceededError(Exception): pass
 exceptions_stub.NotFoundException = NotFoundException
+exceptions_stub.AppException = AppException
 exceptions_stub.OfficeConversionException = OfficeConversionException
 exceptions_stub.UnsupportedFileTypeException = UnsupportedFileTypeException
 exceptions_stub.FileTooLargeException = FileTooLargeException

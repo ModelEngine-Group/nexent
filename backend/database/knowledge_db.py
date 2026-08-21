@@ -2,15 +2,135 @@ from typing import Any, Dict, List, Optional
 
 import logging
 import uuid
-from sqlalchemy import func
+from sqlalchemy import func, text
 from sqlalchemy.exc import SQLAlchemyError
 
+from consts.const import (
+    MAX_KNOWLEDGE_BASES_PER_TENANT,
+    MAX_KNOWLEDGE_BASES_PER_USER,
+    MAX_PRIVILEGED_KNOWLEDGE_BASES_PER_USER,
+)
+from consts.error_code import ErrorCode
+from consts.exceptions import AppException
 from database.client import as_dict, get_db_session
 from database.db_models import KnowledgeRecord
 from utils.str_utils import convert_list_to_string
 from consts.scheduler import VALID_SUMMARY_FREQUENCIES
 
 logger = logging.getLogger("knowledge_db")
+
+_PRIVILEGED_KNOWLEDGE_ROLES = {
+    "DEV",
+    "ADMIN",
+    "SU",
+    "SUPER_ADMIN",
+    "ASSET_OWNER",
+}
+
+
+def _count_or_zero(value: Any) -> int:
+    """Keep lightweight database test doubles harmless while preserving real counts."""
+    return value if isinstance(value, int) else 0
+
+
+def _lock_knowledge_limit_scope(session, lock_key: str) -> None:
+    """Serialize knowledge-base limit checks within the current transaction."""
+    session.execute(
+        text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
+        {"lock_key": lock_key},
+    )
+
+
+def _get_user_role_in_session(session, user_id: Optional[str], tenant_id: Optional[str]) -> str:
+    """Resolve the caller's role from the tenant relationship in the same transaction."""
+    if not user_id or not tenant_id:
+        return "USER"
+
+    try:
+        from database.db_models import UserTenant
+
+        role = session.query(UserTenant.user_role).filter(
+            UserTenant.user_id == user_id,
+            UserTenant.tenant_id == tenant_id,
+            UserTenant.delete_flag == "N",
+        ).scalar()
+    except Exception:
+        logger.exception("Failed to resolve knowledge-base creator role")
+        return "USER"
+
+    return role.upper() if isinstance(role, str) and role else "USER"
+
+
+def _raise_knowledge_limit_error(
+    *,
+    scope: str,
+    limit: int,
+    current_count: int,
+    role: Optional[str] = None,
+) -> None:
+    details = {
+        "resource": "knowledge_bases",
+        "scope": scope,
+        "limit": limit,
+        "current_count": current_count,
+    }
+    if role:
+        details["role"] = role
+
+    subject = "tenant" if scope == "tenant" else "user"
+    raise AppException(
+        ErrorCode.KNOWLEDGE_RESOURCE_EXCEEDED,
+        f"Knowledge base {subject} limit reached: maximum {limit} knowledge bases per {subject}",
+        details=details,
+    )
+
+
+def _enforce_knowledge_limits(
+    session,
+    tenant_id: Optional[str],
+    user_id: Optional[str],
+) -> None:
+    """Enforce active tenant and creator knowledge-base limits before insertion."""
+    if not tenant_id:
+        return
+
+    _lock_knowledge_limit_scope(session, f"knowledge-tenant-limit:{tenant_id}")
+    tenant_count = _count_or_zero(session.query(KnowledgeRecord).filter(
+        KnowledgeRecord.tenant_id == tenant_id,
+        KnowledgeRecord.delete_flag != "Y",
+    ).count())
+    if tenant_count >= MAX_KNOWLEDGE_BASES_PER_TENANT:
+        _raise_knowledge_limit_error(
+            scope="tenant",
+            limit=MAX_KNOWLEDGE_BASES_PER_TENANT,
+            current_count=tenant_count,
+        )
+
+    if not user_id:
+        return
+
+    role = _get_user_role_in_session(session, user_id, tenant_id)
+    user_limit = (
+        MAX_PRIVILEGED_KNOWLEDGE_BASES_PER_USER
+        if role in _PRIVILEGED_KNOWLEDGE_ROLES
+        else MAX_KNOWLEDGE_BASES_PER_USER
+    )
+    _lock_knowledge_limit_scope(
+        session,
+        f"knowledge-user-limit:{tenant_id}:{user_id}",
+    )
+    user_count = _count_or_zero(session.query(KnowledgeRecord).filter(
+        KnowledgeRecord.tenant_id == tenant_id,
+        KnowledgeRecord.created_by == user_id,
+        KnowledgeRecord.delete_flag != "Y",
+    ).count())
+    if user_count >= user_limit:
+        _raise_knowledge_limit_error(
+            scope="user",
+            limit=user_limit,
+            current_count=user_count,
+            role=role,
+        )
 
 
 def _generate_index_name(knowledge_id: int) -> str:
@@ -20,6 +140,59 @@ def _generate_index_name(knowledge_id: int) -> str:
     """
     suffix = uuid.uuid4().hex
     return f"{knowledge_id}-{suffix}"
+
+
+def _create_knowledge_record_in_session(
+    session,
+    query: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Create a knowledge record using an existing transaction."""
+    _enforce_knowledge_limits(
+        session,
+        tenant_id=query.get("tenant_id"),
+        user_id=query.get("user_id"),
+    )
+
+    # Determine user-facing knowledge base name
+    knowledge_name = query.get("knowledge_name") or query.get("index_name")
+
+    # Prepare data dictionary
+    group_ids = query.get("group_ids")
+    data: Dict[str, Any] = {
+        "knowledge_describe": query.get("knowledge_describe", ""),
+        "created_by": query.get("user_id"),
+        "updated_by": query.get("user_id"),
+        "knowledge_sources": query.get("knowledge_sources", "elasticsearch"),
+        "tenant_id": query.get("tenant_id"),
+        "embedding_model_name": query.get("embedding_model_name"),
+        "embedding_model_id": query.get("embedding_model_id"),
+        "knowledge_name": knowledge_name,
+        "group_ids": convert_list_to_string(group_ids) if isinstance(group_ids, list) else group_ids,
+        "ingroup_permission": query.get("ingroup_permission"),
+        "preserve_source_file": query.get("preserve_source_file", True),
+    }
+
+    if "quota_limit_bytes" in query:
+        data["quota_limit_bytes"] = query["quota_limit_bytes"]
+
+    explicit_index_name = query.get("index_name")
+    if explicit_index_name:
+        data["index_name"] = explicit_index_name
+
+    new_record = KnowledgeRecord(**data)
+    session.add(new_record)
+    session.flush()
+
+    if not explicit_index_name:
+        new_record.index_name = _generate_index_name(new_record.knowledge_id)
+        session.flush()
+
+    session.commit()
+    return {
+        "knowledge_id": new_record.knowledge_id,
+        "index_name": new_record.index_name,
+        "knowledge_name": new_record.knowledge_name,
+    }
 
 
 def create_knowledge_record(query: Dict[str, Any]) -> Dict[str, Any]:
@@ -41,54 +214,7 @@ def create_knowledge_record(query: Dict[str, Any]) -> Dict[str, Any]:
     """
     try:
         with get_db_session() as session:
-            # Determine user-facing knowledge base name
-            knowledge_name = query.get(
-                "knowledge_name") or query.get("index_name")
-
-            # Prepare data dictionary
-            group_ids = query.get("group_ids")
-            data: Dict[str, Any] = {
-                "knowledge_describe": query.get("knowledge_describe", ""),
-                "created_by": query.get("user_id"),
-                "updated_by": query.get("user_id"),
-                "knowledge_sources": query.get("knowledge_sources", "elasticsearch"),
-                "tenant_id": query.get("tenant_id"),
-                "embedding_model_name": query.get("embedding_model_name"),
-                "embedding_model_id": query.get("embedding_model_id"),
-                "knowledge_name": knowledge_name,
-                "group_ids": convert_list_to_string(group_ids) if isinstance(group_ids, list) else group_ids,
-                "ingroup_permission": query.get("ingroup_permission"),
-                "preserve_source_file": query.get("preserve_source_file", True),
-            }
-
-            # Per-KB soft quota (optional, null = unlimited)
-            if "quota_limit_bytes" in query:
-                data["quota_limit_bytes"] = query["quota_limit_bytes"]
-
-            # For backward compatibility: if caller explicitly provides index_name,
-            # respect it and do not regenerate; otherwise generate after flush.
-            explicit_index_name = query.get("index_name")
-            if explicit_index_name:
-                data["index_name"] = explicit_index_name
-
-            # Create new record
-            new_record = KnowledgeRecord(**data)
-            session.add(new_record)
-            session.flush()
-
-            # Generate internal index_name for new records when not explicitly provided
-            if not explicit_index_name:
-                generated_index_name = _generate_index_name(
-                    new_record.knowledge_id)
-                new_record.index_name = generated_index_name
-                session.flush()
-
-            session.commit()
-            return {
-                "knowledge_id": new_record.knowledge_id,
-                "index_name": new_record.index_name,
-                "knowledge_name": new_record.knowledge_name,
-            }
+            return _create_knowledge_record_in_session(session, query)
     except SQLAlchemyError as e:
         raise e
 
@@ -148,8 +274,8 @@ def upsert_knowledge_record(query: Dict[str, Any]) -> Dict[str, Any]:
                     "knowledge_name": existing_record.knowledge_name,
                 }
             else:
-                # Create new record
-                return create_knowledge_record(query)
+                # Create new record in the same transaction as the existence check.
+                return _create_knowledge_record_in_session(session, query)
 
     except SQLAlchemyError as e:
         raise e
