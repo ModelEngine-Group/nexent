@@ -144,6 +144,8 @@ class HaotianSearchTool(Tool):
         score_threshold: Optional[float] = Field(
             description="Score threshold",
             default=None,
+            ge=0.0,
+            le=1.0,
         ),
         observer: MessageObserver = Field(
             description="Message observer", default=None, exclude=True
@@ -178,7 +180,7 @@ class HaotianSearchTool(Tool):
         self.embedding_provider_name = embedding_provider_name
         self.embedding_model_name = embedding_model_name
         self.score_threshold_enabled = score_threshold_enabled
-        self.score_threshold = score_threshold
+        self.score_threshold = (None if score_threshold is None else max(0.0, min(float(score_threshold), 1.0)))
         self.observer = observer
         self.rerank_model = rerank_model
 
