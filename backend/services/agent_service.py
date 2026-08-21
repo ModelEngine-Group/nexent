@@ -85,6 +85,7 @@ from database.attachment_db import (
     delete_file,
     get_content_type,
     get_file_stream,
+    upload_fileobj,
 )
 from database.client import minio_client
 from services.skill_service import SkillService
