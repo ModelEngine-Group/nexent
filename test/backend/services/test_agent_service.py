@@ -150,16 +150,63 @@ sys.modules['services.streaming_channel'] = MagicMock()
 # Mock streaming_channel_manager with async methods
 class AsyncChannelMock:
     """Async mock for StreamingChannel that can be awaited."""
-    async def publish(self, *args, **kwargs):
-        pass
+
+    def __init__(self):
+        self._history = []
+        self._completed = False
+        self._event = asyncio.Event()
+
+    @property
+    def is_completed(self):
+        return self._completed
+
+    async def publish(self, chunk, *args, **kwargs):
+        if not self._completed:
+            self._history.append(chunk)
+            self._event.set()
+
+    async def subscribe_with_history(self, start_from_index=0):
+        index = start_from_index
+        while True:
+            while index < len(self._history):
+                chunk = self._history[index]
+                index += 1
+                yield chunk
+            if self._completed:
+                break
+            self._event.clear()
+            await self._event.wait()
+
+    def complete(self, status="completed"):
+        self._completed = True
+        self._event.set()
+
     async def close(self, *args, **kwargs):
         pass
 
 streaming_channel_manager_mock = MagicMock()
-streaming_channel_manager_mock.get_or_create_channel = AsyncMock(return_value=AsyncChannelMock())
+
+
+async def _get_test_streaming_channel(*args, **kwargs):
+    channel = AsyncChannelMock()
+    streaming_channel_manager_mock._latest_channel = channel
+    return channel
+
+
+async def _complete_test_streaming_channel(*args, **kwargs):
+    channel = getattr(streaming_channel_manager_mock, "_latest_channel", None)
+    if isinstance(channel, AsyncChannelMock):
+        channel.complete(kwargs.get("status", "completed"))
+
+
+streaming_channel_manager_mock.get_or_create_channel = AsyncMock(
+    side_effect=_get_test_streaming_channel
+)
 streaming_channel_manager_mock.remove_channel = AsyncMock(return_value=None)
 streaming_channel_manager_mock.publish = AsyncMock(return_value=None)
-streaming_channel_manager_mock.complete_channel = AsyncMock(return_value=None)
+streaming_channel_manager_mock.complete_channel = AsyncMock(
+    side_effect=_complete_test_streaming_channel
+)
 sys.modules['services.streaming_channel'].streaming_channel_manager = streaming_channel_manager_mock
 setattr(services_module, 'skill_service', sys.modules['services.skill_service'])
 
@@ -4350,6 +4397,7 @@ async def test_run_agent_stream(
         tenant_id=None,
         language="en",
         enable_memory=False,
+        channel=streaming_channel_manager_mock._latest_channel,
     )
 
     # Test debug mode
@@ -4467,6 +4515,152 @@ async def test_run_agent_stream_sanitizes_uncaught_stream_exception(
     assert "secret traceback detail" not in chunks[0]
     assert "Agent stream response error: RuntimeError('secret traceback detail')" in caplog.text
     assert "Traceback" in caplog.text
+    assert streaming_channel_manager_mock._latest_channel.is_completed
+    assert streaming_channel_manager_mock.complete_channel.await_args.kwargs == {
+        "conversation_id": mock_agent_request.conversation_id,
+        "user_id": "u",
+        "status": "failed",
+    }
+
+
+@pytest.mark.asyncio
+@patch(
+    "backend.services.agent_service._resolve_user_tenant_language",
+    return_value=("u", "t", "en"),
+)
+@patch("backend.services.agent_service.build_memory_context")
+@patch("backend.services.agent_service.save_messages")
+async def test_non_debug_producer_survives_sse_disconnect(
+    mock_save_messages,
+    mock_build_mem_ctx,
+    mock_resolve,
+    monkeypatch,
+    mock_agent_request,
+    mock_http_request,
+):
+    """Closing a non-debug subscriber must not cancel the agent producer."""
+    channel = AsyncChannelMock()
+    continue_producing = asyncio.Event()
+    producer_finished = asyncio.Event()
+
+    async def complete_channel(*args, **kwargs):
+        channel.complete(kwargs.get("status", "completed"))
+
+    get_channel = AsyncMock(return_value=channel)
+    complete_channel_mock = AsyncMock(side_effect=complete_channel)
+    monkeypatch.setattr(
+        agent_service.streaming_channel_manager,
+        "get_or_create_channel",
+        get_channel,
+    )
+    monkeypatch.setattr(
+        agent_service.streaming_channel_manager,
+        "complete_channel",
+        complete_channel_mock,
+    )
+    mock_build_mem_ctx.return_value = MagicMock(
+        user_config=MagicMock(memory_switch=False)
+    )
+
+    async def stream_chunks():
+        await channel.publish("data: first\n\n")
+        yield "data: first\n\n"
+        await continue_producing.wait()
+        await channel.publish("data: second\n\n")
+        yield "data: second\n\n"
+        await complete_channel_mock(
+            conversation_id=mock_agent_request.conversation_id,
+            user_id="u",
+            status="completed",
+        )
+        producer_finished.set()
+
+    generate_stream_mock = MagicMock(return_value=stream_chunks())
+    monkeypatch.setattr(agent_service, "generate_stream", generate_stream_mock)
+
+    response = await run_agent_stream(
+        mock_agent_request,
+        mock_http_request,
+        "Bearer token",
+    )
+    assert await asyncio.wait_for(anext(response.body_iterator), timeout=1) == "data: first\n\n"
+    assert not producer_finished.is_set()
+    producer_tasks = set(agent_service._agent_stream_producer_tasks)
+    assert len(producer_tasks) == 1
+    assert all(not task.done() for task in producer_tasks)
+
+    await response.body_iterator.aclose()
+    continue_producing.set()
+    await asyncio.wait_for(producer_finished.wait(), timeout=1)
+    await asyncio.sleep(0)
+
+    assert channel._history == ["data: first\n\n", "data: second\n\n"]
+    assert producer_tasks.isdisjoint(agent_service._agent_stream_producer_tasks)
+    complete_channel_mock.assert_awaited_once_with(
+        conversation_id=mock_agent_request.conversation_id,
+        user_id="u",
+        status="completed",
+    )
+    generate_stream_mock.assert_called_once_with(
+        mock_agent_request,
+        user_id="u",
+        tenant_id="t",
+        language="en",
+        enable_memory=False,
+        channel=channel,
+    )
+
+
+@pytest.mark.asyncio
+@patch(
+    "backend.services.agent_service._resolve_user_tenant_language",
+    return_value=("u", "t", "en"),
+)
+@patch("backend.services.agent_service.build_memory_context")
+@patch("backend.services.agent_service.save_messages")
+async def test_debug_stream_keeps_direct_execution_path(
+    mock_save_messages,
+    mock_build_mem_ctx,
+    mock_resolve,
+    monkeypatch,
+    mock_agent_request,
+    mock_http_request,
+):
+    """Debug/A2A execution must not create the detached Chat producer."""
+    mock_agent_request.is_debug = True
+    mock_build_mem_ctx.return_value = MagicMock(
+        user_config=MagicMock(memory_switch=True)
+    )
+    get_channel = AsyncMock()
+    monkeypatch.setattr(
+        agent_service.streaming_channel_manager,
+        "get_or_create_channel",
+        get_channel,
+    )
+
+    async def stream_chunks():
+        yield "data: debug\n\n"
+
+    generate_stream_mock = MagicMock(return_value=stream_chunks())
+    monkeypatch.setattr(agent_service, "generate_stream", generate_stream_mock)
+
+    response = await run_agent_stream(
+        mock_agent_request,
+        mock_http_request,
+        "Bearer token",
+    )
+    chunks = [chunk async for chunk in response.body_iterator]
+
+    assert chunks == ["data: debug\n\n"]
+    get_channel.assert_not_awaited()
+    mock_save_messages.assert_not_called()
+    generate_stream_mock.assert_called_once_with(
+        mock_agent_request,
+        user_id="u",
+        tenant_id="t",
+        language="en",
+        enable_memory=False,
+    )
 
 
 @patch('backend.services.agent_service.agent_run_manager')
@@ -5448,6 +5642,7 @@ async def test_run_agent_stream_no_memory(
         tenant_id=None,
         language="en",
         enable_memory=False,
+        channel=streaming_channel_manager_mock._latest_channel,
     )
 
 
@@ -14273,7 +14468,8 @@ async def test_run_agent_stream_resume_stream_yields_status_and_chunks(monkeypat
                     result = await agent_service.run_agent_stream(
                         agent_request,
                         MagicMock(),
-                        "Bearer token"
+                        "Bearer token",
+                        resume=True,
                     )
 
                     # Should return streaming response
@@ -14329,7 +14525,8 @@ async def test_run_agent_stream_resume_channel_completed(monkeypatch):
                     result = await agent_service.run_agent_stream(
                         agent_request,
                         MagicMock(),
-                        "Bearer token"
+                        "Bearer token",
+                        resume=True,
                     )
 
                     # Should still return streaming response
@@ -14452,7 +14649,8 @@ async def test_run_agent_stream_resume_channel_subscribe(monkeypatch):
                     result = await agent_service.run_agent_stream(
                         agent_request,
                         MagicMock(),
-                        "Bearer token"
+                        "Bearer token",
+                        resume=True,
                     )
 
                     # Should stream successfully
@@ -14487,7 +14685,8 @@ async def test_run_agent_stream_resume_already_finished(monkeypatch):
             result = await agent_service.run_agent_stream(
                 agent_request,
                 MagicMock(),
-                "Bearer token"
+                "Bearer token",
+                resume=True,
             )
 
             assert result.status_code == 200
@@ -14526,7 +14725,8 @@ async def test_run_agent_stream_resume_agent_finished_during_disconnect(monkeypa
                     result = await agent_service.run_agent_stream(
                         agent_request,
                         MagicMock(),
-                        "Bearer token"
+                        "Bearer token",
+                        resume=True,
                     )
 
                     assert result.status_code == 200
@@ -14569,7 +14769,8 @@ async def test_run_agent_stream_resume_no_channel(monkeypatch):
                     result = await agent_service.run_agent_stream(
                         agent_request,
                         MagicMock(),
-                        "Bearer token"
+                        "Bearer token",
+                        resume=True,
                     )
 
                     assert result.status_code == 200
@@ -14621,7 +14822,8 @@ async def test_run_agent_stream_resume_with_chunks(monkeypatch):
                     result = await agent_service.run_agent_stream(
                         agent_request,
                         MagicMock(),
-                        "Bearer token"
+                        "Bearer token",
+                        resume=True,
                     )
 
                     # Should return streaming response

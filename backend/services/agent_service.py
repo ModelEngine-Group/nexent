@@ -129,6 +129,7 @@ from utils.monitoring import monitoring_manager
 logger = logging.getLogger(__name__)
 SAFE_AGENT_STREAM_ERROR_MESSAGE = "Agent execution failed. Please try again later."
 _channel_cleanup_tasks: set[asyncio.Task[None]] = set()
+_agent_stream_producer_tasks: set[asyncio.Task[None]] = set()
 
 
 async def _cleanup_channel_later(conversation_id: int, user_id: str, delay: float = 5.0):
@@ -138,6 +139,77 @@ async def _cleanup_channel_later(conversation_id: int, user_id: str, delay: floa
     """
     await asyncio.sleep(delay)
     await streaming_channel_manager.remove_channel(conversation_id, user_id)
+
+
+async def _consume_agent_stream_producer(
+    stream_gen,
+    channel,
+    agent_metadata,
+    conversation_id: int,
+    user_id: str,
+) -> None:
+    """Consume a non-debug agent stream independently from its SSE subscriber."""
+    producer_error = False
+    try:
+        with agent_monitoring_context(agent_metadata):
+            async for _ in stream_gen:
+                pass
+    except asyncio.CancelledError:
+        raise
+    except Exception as stream_exc:
+        producer_error = True
+        logger.error(
+            "Agent stream response error: %r",
+            stream_exc,
+            exc_info=True,
+        )
+        if not channel.is_completed:
+            try:
+                await channel.publish(_safe_agent_stream_error_chunk())
+            except Exception:
+                logger.exception(
+                    "Failed to publish producer error conversation=%s",
+                    conversation_id,
+                )
+    finally:
+        # _stream_agent_chunks normally owns persistence and terminal state.
+        # This fallback covers failures before that generator is entered.
+        if not channel.is_completed:
+            if not producer_error:
+                logger.error(
+                    "Agent stream producer exited without terminal state conversation=%s",
+                    conversation_id,
+                )
+            try:
+                agent_run_manager.unregister_agent_run(
+                    conversation_id,
+                    user_id,
+                    status="failed",
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to unregister incomplete producer conversation=%s",
+                    conversation_id,
+                )
+            try:
+                await streaming_channel_manager.complete_channel(
+                    conversation_id=conversation_id,
+                    user_id=user_id,
+                    status="failed",
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to complete producer channel conversation=%s",
+                    conversation_id,
+                )
+            cleanup_task = asyncio.create_task(
+                _cleanup_channel_later(
+                    conversation_id=conversation_id,
+                    user_id=user_id,
+                )
+            )
+            _channel_cleanup_tasks.add(cleanup_task)
+            cleanup_task.add_done_callback(_channel_cleanup_tasks.discard)
 
 
 async def _poll_runtime_cancel_signal(conversation_id: int, user_id: str, stop_event) -> None:
@@ -3534,16 +3606,41 @@ async def run_agent_stream(
 
     use_memory_stream = memory_enabled and not agent_request.is_debug
 
-    stream_gen = generate_stream(
-        agent_request,
-        user_id=resolved_user_id,
-        tenant_id=resolved_tenant_id,
-        language=language,
-        enable_memory=use_memory_stream,
-    )
+    channel = None
+    if not agent_request.is_debug:
+        channel = await streaming_channel_manager.get_or_create_channel(
+            conversation_id=agent_request.conversation_id,
+            user_id=resolved_user_id,
+        )
+
+    stream_kwargs = {
+        "user_id": resolved_user_id,
+        "tenant_id": resolved_tenant_id,
+        "language": language,
+        "enable_memory": use_memory_stream,
+    }
+    if channel is not None:
+        stream_kwargs["channel"] = channel
+    stream_gen = generate_stream(agent_request, **stream_kwargs)
 
     async def stream_with_agent_context():
         try:
+            producer_task = None
+            if channel is not None:
+                producer_task = asyncio.create_task(
+                    _consume_agent_stream_producer(
+                        stream_gen=stream_gen,
+                        channel=channel,
+                        agent_metadata=agent_metadata,
+                        conversation_id=agent_request.conversation_id,
+                        user_id=resolved_user_id,
+                    )
+                )
+                _agent_stream_producer_tasks.add(producer_task)
+                producer_task.add_done_callback(
+                    _agent_stream_producer_tasks.discard
+                )
+
             # Emit conversation_created event for new conversations
             if is_new_conversation:
                 yield f'data: {{"type": "conversation_created", "content": {{"conversation_id": {agent_request.conversation_id}}}}}\n\n'
@@ -3559,9 +3656,15 @@ async def run_agent_stream(
                     + "\n\n"
                 )
 
-            with agent_monitoring_context(agent_metadata):
-                async for data_chunk in stream_gen:
+            if channel is not None:
+                async for data_chunk in channel.subscribe_with_history(0):
                     yield data_chunk
+            else:
+                # Debug/A2A streams intentionally retain the direct execution
+                # path and its existing disconnect semantics.
+                with agent_monitoring_context(agent_metadata):
+                    async for data_chunk in stream_gen:
+                        yield data_chunk
         except Exception as stream_exc:
             logger.error(
                 "Agent stream response error: %r",
