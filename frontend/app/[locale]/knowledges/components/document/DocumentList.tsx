@@ -1122,7 +1122,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                                   fileSize: doc.size,
                                 });
                               }}
-                              className={LAYOUT.ACTION_TEXT}
+                              className={LAYOUT.ACTION_PREVIEW_TEXT}
                               title={t("common.preview")}
                             >
                               {t("common.preview")}
@@ -1130,7 +1130,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                             {!isReadOnlyMode && (
                               <button
                                 onClick={() => onDelete(doc.id)}
-                                className={LAYOUT.ACTION_TEXT}
+                                className={LAYOUT.ACTION_DELETE_TEXT}
                                 title={
                                   doc.status === DOCUMENT_STATUS.PROCESSING ||
                                   doc.status === DOCUMENT_STATUS.FORWARDING

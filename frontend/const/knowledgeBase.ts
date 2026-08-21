@@ -92,7 +92,8 @@ export const LAYOUT = {
   // Icons and buttons
   ICON_SIZE: "text-lg", // File icon size
   ICON_MARGIN: "mr-2", // File icon right margin
-  ACTION_TEXT: "text-red-500 hover:text-red-700 font-medium text-xs", // Action button text style
+  ACTION_PREVIEW_TEXT: "text-gray-600 hover:text-blue-600 font-medium text-xs", // Preview action text style
+  ACTION_DELETE_TEXT: "text-red-500 hover:text-red-700 font-medium text-xs", // Destructive action text style
 };
 
 // UI action type constants

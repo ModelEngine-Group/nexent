@@ -665,8 +665,18 @@ async def resolve_preview_file(object_name: str) -> Tuple[str, str, int]:
 
     content_type = get_content_type(object_name)
 
-    # PDF, images, and text files - return directly
-    if content_type == 'application/pdf' or content_type.startswith('image/') or content_type in ['text/plain', 'text/csv', 'text/markdown']:
+    # PDF, images, and directly readable text files - return directly
+    direct_preview_types = {
+        'text/plain',
+        'text/csv',
+        'text/markdown',
+        'application/json',
+    }
+    if (
+        content_type == 'application/pdf'
+        or content_type.startswith('image/')
+        or content_type in direct_preview_types
+    ):
         return object_name, content_type, file_size
 
     # Office documents - convert to PDF with caching
