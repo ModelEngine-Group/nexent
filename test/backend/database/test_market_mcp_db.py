@@ -238,6 +238,28 @@ class TestGetMcpMarketRecords:
         result = get_mcp_market_records(tenant_id="tid", cursor="3", limit=2)
         assert result["count"] <= 2
 
+    @patch('backend.database.market_mcp_db.get_db_session')
+    def test_page_pagination_returns_total_and_page(self, mock_session):
+        rows = []
+        for market_id in (4, 3):
+            row = MagicMock()
+            row.market_id = market_id
+            row.mcp_name = f"svc{market_id}"
+            row.delete_flag = "N"
+            rows.append(row)
+
+        query = MockQuery(rows)
+        query.count = lambda: 5
+        session = MockSession()
+        session.query = lambda *args: query
+        mock_session.return_value = session
+
+        result = get_mcp_market_records(tenant_id="tid", page=2, limit=2)
+
+        assert result["count"] == 2
+        assert result["total"] == 5
+        assert result["page"] == 2
+
 
 class TestCreateMcpMarketRecord:
     """Test create_mcp_market_record."""

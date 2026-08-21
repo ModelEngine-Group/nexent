@@ -1578,6 +1578,8 @@ async def upload_and_start_mcp_image(
     group_ids: str | None = None,
     ingroup_permission: str | None = None,
     shared_fields: dict | None = None,
+    wait_for_ready: bool = True,
+    on_container_started: Callable[[dict], Awaitable[None]] | None = None,
 ) -> dict:
     """Upload MCP Docker image and start container.
 
@@ -1636,6 +1638,7 @@ async def upload_and_start_mcp_image(
             env_vars=parsed_env_vars,
             host_port=port,
             full_command=None,
+            wait_for_ready=wait_for_ready,
         )
     finally:
         try:
@@ -1646,6 +1649,25 @@ async def upload_and_start_mcp_image(
     authorization_token = None
     if parsed_env_vars:
         authorization_token = parsed_env_vars.get("authorization_token")
+
+    if on_container_started:
+        await on_container_started(container_info)
+
+    if not wait_for_ready:
+        readiness_error: MCPConnectionError | None = None
+        for _ in range(30):
+            try:
+                await mcp_server_health(
+                    remote_mcp_server=container_info["mcp_url"],
+                    authorization_token=authorization_token,
+                )
+                readiness_error = None
+                break
+            except MCPConnectionError as exc:
+                readiness_error = exc
+                await asyncio.sleep(5)
+        if readiness_error:
+            raise readiness_error
 
     try:
         await add_remote_mcp_server_list(

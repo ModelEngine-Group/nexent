@@ -16,7 +16,7 @@ import { McpDeploymentType, McpSource, MCP_TOOLS_QUERY_KEYS } from "@/const/mcpT
 import { MCP_SERVERS_QUERY_KEY } from "@/hooks/mcp/useMcpServerList";
 import type { LocalAddMcpDraft } from "@/types/mcpTools";
 import { refreshToolListWithToast } from "./useRefreshToolListWithToast";
-import { uploadMcpImage } from "@/services/mcpService";
+import { uploadMcpImageStream } from "@/services/mcpService";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 
 interface UseMcpAddLocalParams {
@@ -120,10 +120,11 @@ export function useMcpAddLocal({ onSuccess, onContainerStarted }: UseMcpAddLocal
           ? JSON.stringify({ authorization_token: draft.authorizationToken.trim() })
           : undefined;
 
-        const result = await uploadMcpImage(
+        const result = await uploadMcpImageStream(
           file, draft.containerPort, trimmedName, envVars,
           undefined, draft.groupIds?.join(","), draft.ingroupPermission,
           draft.sharedFields ? JSON.stringify(draft.sharedFields) : undefined,
+          (containerId) => onContainerStarted?.(containerId),
         );
         if (!result.success) {
           throw new Error(result.message || t("mcpTools.add.error.imageUploadFailed"));

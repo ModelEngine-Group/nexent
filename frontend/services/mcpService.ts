@@ -829,6 +829,71 @@ export const uploadMcpImage = async (file: File, port: number, serviceName?: str
   }
 };
 
+export const uploadMcpImageStream = async (
+  file: File,
+  port: number,
+  serviceName: string | undefined,
+  envVars: string | undefined,
+  tenantId: string | null | undefined,
+  groupIds: string | undefined,
+  ingroupPermission: string | undefined,
+  sharedFields: string | undefined,
+  onContainerStarted: (containerId: string) => void,
+) => {
+  try {
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("port", port.toString());
+    if (serviceName) formData.append("service_name", serviceName);
+    if (envVars) formData.append("env_vars", envVars);
+    if (tenantId) formData.append("tenant_id", tenantId);
+    if (groupIds) formData.append("group_ids", groupIds);
+    if (ingroupPermission) formData.append("ingroup_permission", ingroupPermission);
+    if (sharedFields) formData.append("shared_fields", sharedFields);
+
+    const { "Content-Type": _, ...headers } = getAuthHeaders();
+    const response = await fetch(API_ENDPOINTS.mcp.uploadImageStream, {
+      method: "POST",
+      headers,
+      body: formData,
+    });
+    if (!response.ok || !response.body) {
+      const data = await response.json().catch(() => ({}));
+      return { success: false, data: null, message: data.detail || data.message };
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder("utf-8");
+    let buffer = "";
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const events = buffer.split("\n\n");
+        buffer = events.pop() || "";
+        for (const event of events) {
+          if (!event.startsWith("data: ")) continue;
+          const message = JSON.parse(event.slice(6));
+          if (message.status === "container_started" && message.data?.container_id) {
+            onContainerStarted(message.data.container_id);
+          } else if (message.status === "success") {
+            return { success: true, data: message.data };
+          } else if (message.status === "error") {
+            return { success: false, data: null, message: message.detail };
+          }
+        }
+      }
+    } finally {
+      await reader.cancel().catch(() => undefined);
+    }
+    return { success: false, data: null, message: t("mcpService.message.uploadImageFailed") };
+  } catch (error) {
+    log.error(t("mcpService.debug.uploadImageFailed"), error);
+    return { success: false, data: null, message: t("mcpService.message.networkError") };
+  }
+};
+
 /**
  * Delete MCP container
  */

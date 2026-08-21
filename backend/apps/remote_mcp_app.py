@@ -912,6 +912,68 @@ async def disable_mcp_service(
 # ---------------------------------------------------------------------------
 
 if ENABLE_UPLOAD_IMAGE:
+    @router.post("/upload-image/stream")
+    async def upload_mcp_image_stream(
+        file: UploadFile = File(..., description="Docker image tar file"),
+        port: int = Form(..., ge=1, le=65535),
+        service_name: Optional[str] = Form(None),
+        env_vars: Optional[str] = Form(None),
+        group_ids: Optional[str] = Form(None),
+        ingroup_permission: Optional[str] = Form(None),
+        shared_fields: Optional[str] = Form(None),
+        tenant_id: Optional[str] = Form(None),
+        authorization: Optional[str] = Header(None),
+        http_request: Request = None,
+    ):
+        """Upload an MCP image while streaming container creation state."""
+        user_id, auth_tenant_id, _ = get_current_user_info(authorization, http_request)
+        effective_tenant_id = tenant_id or auth_tenant_id
+        content = await file.read()
+
+        async def generate_deployment_stream():
+            container_started = asyncio.get_running_loop().create_future()
+
+            async def on_container_started(container_info: dict) -> None:
+                if not container_started.done():
+                    container_started.set_result(container_info)
+
+            deployment_task = asyncio.create_task(
+                upload_and_start_mcp_image(
+                    tenant_id=effective_tenant_id,
+                    user_id=user_id,
+                    file_content=content,
+                    filename=file.filename,
+                    port=port,
+                    service_name=service_name,
+                    env_vars=env_vars,
+                    group_ids=group_ids,
+                    ingroup_permission=ingroup_permission,
+                    shared_fields=json.loads(shared_fields) if shared_fields else None,
+                    wait_for_ready=False,
+                    on_container_started=on_container_started,
+                )
+            )
+            try:
+                done, _ = await asyncio.wait(
+                    {deployment_task, container_started},
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if deployment_task in done:
+                    await deployment_task
+                container_info = container_started.result()
+                yield f"data: {json.dumps({'status': 'container_started', 'data': container_info}, ensure_ascii=False)}\n\n"
+                result = await deployment_task
+                yield f"data: {json.dumps({'status': 'success', 'data': result}, ensure_ascii=False)}\n\n"
+            except Exception as exc:
+                logger.error(f"Failed to upload and start MCP container: {exc}")
+                yield f"data: {json.dumps({'status': 'error', 'detail': str(exc)}, ensure_ascii=False)}\n\n"
+
+        return StreamingResponse(
+            generate_deployment_stream(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+        )
+
     @router.post("/upload-image")
     async def upload_mcp_image(
         file: UploadFile = File(..., description="Docker image tar file"),

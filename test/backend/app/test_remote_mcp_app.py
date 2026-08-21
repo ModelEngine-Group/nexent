@@ -297,6 +297,28 @@ class TestAddFromConfig:
         assert "secret database connection details" not in resp.text
         assert '"detail": "Failed to add container MCP service"' in resp.text
 
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.add_container_mcp_service')
+    def test_add_from_config_stream_emits_started_and_success(self, mock_add, mock_auth):
+        mock_auth.return_value = ("uid", "tid", "en")
+        container_info = {"container_id": "cid", "mcp_url": "http://localhost:8080/mcp"}
+        result = {"mcp_id": 1, "container_id": "cid"}
+
+        async def deploy(**kwargs):
+            await kwargs["on_container_started"](container_info)
+            return result
+
+        mock_add.side_effect = deploy
+
+        resp = client.post("/mcp/add-from-config/stream", json={
+            "name": "svc", "source": "local", "port": 8080,
+            "mcp_config": {"mcpServers": {"svc": {"command": "echo"}}},
+        }, headers=AUTH_HEADER)
+
+        assert resp.status_code == HTTPStatus.OK
+        assert '"status": "container_started"' in resp.text
+        assert '"status": "success"' in resp.text
+
 
 # ============================================================================
 # PUT /mcp/update

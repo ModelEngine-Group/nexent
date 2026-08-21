@@ -160,6 +160,7 @@ class MCPContainerManager:
         env_vars: Optional[Dict[str, str]] = None,
         host_port: Optional[int] = None,
         full_command: Optional[List[str]] = None,
+        wait_for_ready: bool = True,
     ) -> Dict[str, str]:
         """
         Load image from tar file and start MCP container
@@ -192,6 +193,7 @@ class MCPContainerManager:
                 host_port=host_port,
                 image=image_name,
                 full_command=full_command,
+                wait_for_ready=wait_for_ready,
             )
 
         except Exception as e:

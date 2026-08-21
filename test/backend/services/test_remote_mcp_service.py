@@ -1497,6 +1497,18 @@ class TestCheckMcpServiceHealthCustomHeaders(unittest.IsolatedAsyncioTestCase):
             custom_headers=None,
         )
 
+    @patch('backend.services.remote_mcp_service._mcp_protocol_health_check', new_callable=AsyncMock)
+    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    async def test_protocol_health_check_requires_service_name(self, mock_get, mock_protocol):
+        """A healthy protocol response still requires a configured MCP name."""
+        mock_get.return_value = {"mcp_server": "https://srv/mcp", "mcp_name": None}
+        mock_protocol.return_value = ["tool"]
+
+        with self.assertRaises(McpValidationError):
+            await refresh_mcp_service_tool_count(
+                tenant_id='tid', user_id='uid', mcp_id=1,
+            )
+
 
 # ============================================================================
 # list_mcp_service_tools_by_id - custom_headers tests (lines 1024-1025, 1031-1032)
@@ -1623,6 +1635,39 @@ class TestAddContainerMcpServicePortConflict(unittest.IsolatedAsyncioTestCase):
         mock_port_check.assert_called_once_with(port=8080)
         mock_mgr.start_mcp_container.assert_awaited_once()
         mock_add.assert_awaited_once()
+
+    @patch('backend.services.remote_mcp_service.asyncio.sleep', new_callable=AsyncMock)
+    @patch('backend.services.remote_mcp_service.mcp_server_health')
+    @patch('backend.services.remote_mcp_service.add_mcp_service')
+    @patch('backend.services.remote_mcp_service.MCPContainerManager')
+    @patch('backend.services.remote_mcp_service.check_container_port_conflict')
+    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
+    async def test_streaming_deploy_notifies_and_waits_for_readiness(
+        self, mock_check_name, mock_port_check, mock_mgr_cls, mock_add,
+        mock_health, mock_sleep,
+    ):
+        """Streaming deployment invokes the callback and retries readiness checks."""
+        mock_check_name.return_value = False
+        mock_port_check.return_value = True
+        mock_mgr = MagicMock()
+        mock_mgr.start_mcp_container = AsyncMock(return_value={
+            "container_id": "cid", "mcp_url": "https://localhost:8080/mcp",
+            "host_port": 8080, "container_name": "test-svc-xyz",
+        })
+        mock_mgr_cls.return_value = mock_mgr
+        mock_health.side_effect = [MCPConnectionError("starting"), True]
+        on_started = AsyncMock()
+
+        await add_container_mcp_service(
+            tenant_id='tid', user_id='uid', name='test-svc', description='desc',
+            source='local', tags=[], authorization_token=None, registry_json=None,
+            market_id=None, port=8080, mcp_config=self._make_mcp_config(),
+            wait_for_ready=False, on_container_started=on_started,
+        )
+
+        on_started.assert_awaited_once_with(mock_mgr.start_mcp_container.return_value)
+        self.assertEqual(mock_health.await_count, 2)
+        mock_sleep.assert_awaited_once_with(5)
 
 
 # ============================================================================
