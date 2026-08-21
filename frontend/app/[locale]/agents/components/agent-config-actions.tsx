@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useTranslation } from "react-i18next";
 import { App, Button, Modal, Tooltip } from "antd";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -26,6 +27,9 @@ export default function AgentConfigActions() {
   const { message } = App.useApp();
   const confirm = useConfirmModal();
   const queryClient = useQueryClient();
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const agentId = useAgentStore((state) => state.agentId);
   const editedAgent = useAgentStore((state) => state.editedAgent);
   const isReadOnly = useAgentStore((state) => state.isReadOnly);
@@ -194,6 +198,10 @@ export default function AgentConfigActions() {
         message.success(
           t("businessLogic.config.error.agentDeleteSuccess", { name: agentName })
         );
+        const nextSearchParams = new URLSearchParams(searchParams.toString());
+        nextSearchParams.delete("agent_id");
+        const query = nextSearchParams.toString();
+        router.replace(query ? `${pathname}?${query}` : pathname);
         reset();
         queryClient.invalidateQueries({ queryKey: ["agents"] });
         queryClient.invalidateQueries({ queryKey: ["publishedAgentsList"] });

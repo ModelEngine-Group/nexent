@@ -570,7 +570,6 @@
   "agent.description": "Agent Description",
   "agent.validation.displayNameRequired": "Please enter an agent name",
   "agent.validation.displayNameMaxLength": "Agent name cannot exceed {{max}} characters",
-  "agent.validation.nameRequired": "Please enter an agent variable name",
   "agent.validation.nameMaxLength": "Variable name cannot exceed {{max}} characters",
   "agent.validation.namePattern": "Variable name can only contain letters, numbers, and underscores, and must start with a letter or underscore",
   "agent.validation.authorRequired": "Please enter an author name",

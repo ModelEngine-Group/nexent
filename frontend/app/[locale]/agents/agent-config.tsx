@@ -227,6 +227,15 @@ export default function AgentConfig({ onToggleDebug }: AgentConfigProps) {
     []
   );
 
+  const handleDebug = async () => {
+    try {
+      await form.validateFields();
+      onToggleDebug();
+    } catch {
+      // Field validation errors are rendered by Ant Design.
+    }
+  };
+
   const handlePublish = async () => {
     try {
       await form.validateFields();
@@ -430,7 +439,7 @@ export default function AgentConfig({ onToggleDebug }: AgentConfigProps) {
           <Button
             icon={<Bug size={16} />}
             disabled={agentId === null}
-            onClick={onToggleDebug}
+            onClick={handleDebug}
             variant="solid"
             type="primary"
           >

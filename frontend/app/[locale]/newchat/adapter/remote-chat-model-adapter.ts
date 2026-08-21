@@ -1449,6 +1449,33 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       `[ChatModelAdapter] model_id=${requestBody.model_id}, isAgentDebug=${isAgentDebug}, customModelId=${modelIdFromCustom}`
     );
 
+    let backendConversationId = hasServerConversationId
+      ? numericServerThreadId
+      : null;
+    let backendStopPromise: Promise<void> | null = null;
+    const stopBackendConversation = async (conversationId: number) => {
+      if (isEphemeralRuntime || backendStopPromise) return;
+      backendStopPromise = conversationService
+        .stop(conversationId)
+        .then(() => undefined)
+        .catch((error) => {
+          log.error(
+            `[ChatModelAdapter] Failed to stop backend conversation ${conversationId}:`,
+            error
+          );
+        });
+      await backendStopPromise;
+    };
+    const handleAbort = () => {
+      if (backendConversationId !== null) {
+        void stopBackendConversation(backendConversationId);
+      }
+    };
+    abortSignal?.addEventListener("abort", handleAbort, { once: true });
+    const cleanupAbortHandler = () => {
+      abortSignal?.removeEventListener("abort", handleAbort);
+    };
+
     let agentResponse:
       ReadableStreamDefaultReader<Uint8Array> | { type: "json"; data: unknown };
     try {
@@ -1484,11 +1511,13 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         abortSignal,
         (conversationId) => {
           const numericId = Number(conversationId);
-          if (
-            !Number.isNaN(numericId) &&
-            numericId > 0 &&
-            onServerConversationId
-          ) {
+          if (!Number.isNaN(numericId) && numericId > 0) {
+            backendConversationId = numericId;
+            if (abortSignal?.aborted) {
+              void stopBackendConversation(numericId);
+            }
+          }
+          if (numericId > 0 && onServerConversationId) {
             onServerConversationId(
               String(numericId),
               !isResume && !hasServerConversationId ? query : undefined
@@ -1497,10 +1526,12 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         }
       );
     } catch (error: unknown) {
+      cleanupAbortHandler();
       if (
         error instanceof Error &&
         (error.name === "AbortError" || error.message === "请求已被取消")
       ) {
+        await backendStopPromise;
         log.log("[ChatModelAdapter] Request aborted by user");
         return;
       }
@@ -1509,6 +1540,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     }
 
     if ("type" in agentResponse) {
+      cleanupAbortHandler();
       log.log(
         "[ChatModelAdapter] JSON response (resume finished):",
         agentResponse.data
@@ -2689,6 +2721,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         },
       } as any;
     } finally {
+      cleanupAbortHandler();
       if (isNl2Skill) {
         custom?.onNl2SkillEvent?.({
           type: "stream_closed",
