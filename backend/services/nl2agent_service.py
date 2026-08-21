@@ -437,6 +437,7 @@ async def _load_installed_resource_catalog(
         if (
             source not in {ToolSourceEnum.LOCAL.value, ToolSourceEnum.MCP.value}
             or tool.get("is_available") is not True
+            or tool.get("is_user_selectable") is False
             or name in internal_names
         ):
             continue
