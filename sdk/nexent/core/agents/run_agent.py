@@ -6,6 +6,7 @@ from contextvars import copy_context
 from threading import Thread
 from typing import Any, Dict, Union
 
+import httpx
 from smolagents import ToolCollection
 
 from ...monitor import (
@@ -131,6 +132,21 @@ def _detect_transport(url: str) -> str:
     return "streamable-http"
 
 
+def _create_mcp_http_client_without_proxy(
+    headers: dict[str, str] | None = None,
+    timeout: httpx.Timeout | None = None,
+    auth: httpx.Auth | None = None,
+) -> httpx.AsyncClient:
+    """Create an MCP HTTP client that ignores proxy environment variables."""
+    return httpx.AsyncClient(
+        headers=headers,
+        timeout=timeout,
+        auth=auth,
+        follow_redirects=True,
+        trust_env=False,
+    )
+
+
 def _normalize_mcp_config(mcp_host_item: Union[str, Dict[str, Any]]) -> Dict[str, Any]:
     """
     Normalize MCP host configuration to a dictionary format.
@@ -157,6 +173,9 @@ def _normalize_mcp_config(mcp_host_item: Union[str, Dict[str, Any]]) -> Dict[str
             raise ValueError(f"Invalid transport type: {transport}. Must be 'sse' or 'streamable-http'")
 
         result = {"url": url, "transport": transport}
+
+        if mcp_host_item.get("bypass_proxy") is True:
+            result["httpx_client_factory"] = _create_mcp_http_client_without_proxy
 
         if "authorization" in mcp_host_item and "headers" in mcp_host_item:
             headers = mcp_host_item["headers"].copy() if isinstance(mcp_host_item["headers"], dict) else {}

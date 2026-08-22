@@ -1,3 +1,4 @@
+import asyncio
 import types
 import json
 import importlib.machinery
@@ -702,6 +703,35 @@ def test_normalize_mcp_config():
     with pytest.raises(ValueError, match="Invalid MCP host item type"):
         run_agent._normalize_mcp_config(None)
 
+
+def test_normalize_mcp_config_bypasses_proxy_only_when_requested():
+    """Test that proxy bypass is represented as a transport-local factory."""
+    result = run_agent._normalize_mcp_config({
+        "url": "http://localhost:5011/sse",
+        "transport": "sse",
+        "bypass_proxy": True,
+    })
+
+    assert result["url"] == "http://localhost:5011/sse"
+    assert result["transport"] == "sse"
+    assert result["httpx_client_factory"] is run_agent._create_mcp_http_client_without_proxy
+
+    client = result["httpx_client_factory"]()
+    assert client._trust_env is False
+    asyncio.run(client.aclose())
+
+
+def test_normalize_mcp_config_keeps_proxy_by_default():
+    """Test that MCP configurations without the opt-in flag remain unchanged."""
+    result = run_agent._normalize_mcp_config({
+        "url": "https://remote.example.com/mcp",
+        "transport": "streamable-http",
+    })
+
+    assert result == {
+        "url": "https://remote.example.com/mcp",
+        "transport": "streamable-http",
+    }
 
 def test_agent_run_thread_handles_internal_exception(basic_agent_run_info, mock_memory_context, monkeypatch):
     """If an internal error occurs, the observer should be notified and a ValueError propagated."""
