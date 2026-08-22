@@ -517,6 +517,45 @@ class TestRateLimiting:
 class TestStartStreamingChat:
     """Tests for start_streaming_chat function."""
 
+    async def test_start_streaming_chat_rejects_invalid_metadata(self):
+        """Non-object runtime metadata must be rejected with HTTP 422."""
+        from fastapi import HTTPException
+
+        ctx = MockNorthboundContext(token_id=0)
+
+        with pytest.raises(HTTPException) as exc_info:
+            await ns.start_streaming_chat(
+                ctx=ctx,
+                conversation_id=None,
+                agent_name="test_agent",
+                query="test query",
+                metadata=["not", "an", "object"],
+            )
+
+        assert exc_info.value.status_code == 422
+
+    async def test_start_streaming_chat_oversized_metadata_returns_413(self):
+        """METADATA_TOO_LARGE validation failures map to HTTP 413."""
+        from fastapi import HTTPException
+
+        ctx = MockNorthboundContext(token_id=0)
+
+        with patch.object(
+            ns,
+            "validate_runtime_metadata",
+            side_effect=ns.RuntimeMetadataValidationError("METADATA_TOO_LARGE", "too large"),
+        ):
+            with pytest.raises(HTTPException) as exc_info:
+                await ns.start_streaming_chat(
+                    ctx=ctx,
+                    conversation_id=None,
+                    agent_name="test_agent",
+                    query="test query",
+                    metadata={"payload": "x"},
+                )
+
+        assert exc_info.value.status_code == 413
+
     async def test_start_streaming_chat_creates_conversation(self):
         """Test that new conversation is created when conversation_id is None."""
         ctx = MockNorthboundContext(token_id=0)

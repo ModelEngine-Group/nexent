@@ -6,6 +6,7 @@ from utils.runtime_metadata_utils import (
     MAX_RUNTIME_METADATA_ARRAY_ITEMS,
     MAX_RUNTIME_METADATA_BYTES,
     MAX_RUNTIME_METADATA_DEPTH,
+    MAX_RUNTIME_METADATA_KEY_LENGTH,
     MAX_RUNTIME_METADATA_KEYS,
     RuntimeMetadataValidationError,
     canonical_runtime_metadata_json,
@@ -84,4 +85,20 @@ def test_canonical_json_and_hash_are_order_independent():
 
     assert canonical_runtime_metadata_json(left) == canonical_runtime_metadata_json(right)
     assert runtime_metadata_hash(left) == runtime_metadata_hash(right)
+
+
+def test_validate_runtime_metadata_rejects_non_string_key():
+    with pytest.raises(RuntimeMetadataValidationError) as exc_info:
+        validate_runtime_metadata({1: "value"})
+
+    assert exc_info.value.code == "INVALID_METADATA_TYPE"
+
+
+def test_validate_runtime_metadata_rejects_overlong_key():
+    long_key = "k" * (MAX_RUNTIME_METADATA_KEY_LENGTH + 1)
+
+    with pytest.raises(RuntimeMetadataValidationError) as exc_info:
+        validate_runtime_metadata({long_key: "value"})
+
+    assert exc_info.value.code == "METADATA_TOO_MANY_ITEMS"
 

@@ -102,6 +102,13 @@ sys.modules['database.model_management_db'] = MagicMock()
 sys.modules['database.a2a_agent_db'] = MagicMock()
 sys.modules['database.skill_db'] = MagicMock()
 
+# Mock conversation_db and db_models (newly imported by agent_service.py for
+# runtime metadata support) so the real sqlalchemy-based modules are not loaded
+# during collection - the pre-existing sqlalchemy stub conflicts with
+# sqlalchemy.dialects.postgresql.
+sys.modules['database.conversation_db'] = MagicMock()
+sys.modules['database.db_models'] = MagicMock()
+
 # Stub database.client early so real DB modules are not loaded during import
 _mock_db_client = MagicMock()
 _mock_db_client.get_db_session = MagicMock()
@@ -11553,6 +11560,10 @@ async def test_import_agent_by_agent_id_publish_version_error(
     # field-level attributes through dir(), so the access AttributeErrors
     # unless we set it explicitly.
     mock_agent_info.requested_output_tokens = None
+    # Runtime metadata support added `allow_chat_metadata` to
+    # ExportAndImportAgentInfo; import_agent_by_agent_id reads it directly
+    # at agent_service.py:2489. Same Pydantic v2 spec caveat applies.
+    mock_agent_info.allow_chat_metadata = None
 
     # Configure the three patched mocks so the flow reaches the publish branch:
     # - query_all_tools() must return an iterable (empty list -> no tool loop)

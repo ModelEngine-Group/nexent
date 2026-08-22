@@ -1752,6 +1752,13 @@ class TestExternalA2AAgentWrapper:
         metadata["tenant"]["region"] = "changed"
         assert wrapper.get_runtime_metadata() == {"tenant": {"region": "cn"}}
 
+    def test_set_runtime_metadata_rejects_non_dict(self):
+        """set_runtime_metadata must reject values that are not mappings."""
+        wrapper = ExternalA2AAgentWrapper(self._make_info())
+
+        with pytest.raises(TypeError, match="runtime metadata must be a dictionary"):
+            wrapper.set_runtime_metadata("not-a-dict")
+
     def test_init_with_skills_description(self):
         """Test ExternalA2AAgentWrapper uses skills description when raw_card available."""
         raw_card = {"skills": [{"name": "code_gen", "examples": ["write hello"]}]}

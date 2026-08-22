@@ -33,7 +33,7 @@ import { compositeAttachmentAdapter } from "./adapter/attachment-adapter";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Layout, message } from "antd";
-import type { Agent, PublishedAgent } from "@/types/agentConfig";
+import type { Agent } from "@/types/agentConfig";
 import log from "@/lib/logger";
 import { usePublishedAgentList } from "@/hooks/agent/usePublishedAgentList";
 import { useConfig } from "@/hooks/useConfig";
@@ -265,8 +265,7 @@ const HomeContent: FC<{
     }
 
     let cancelled = false;
-    const versionNo = (selectedAgent as unknown as PublishedAgent)
-      .current_version_no;
+    const versionNo = selectedAgent.current_version_no;
     void conversationService
       .getKnowledgeCapabilities(Number(selectedAgent.id), versionNo)
       .then((capabilities) => {
@@ -512,10 +511,9 @@ const HomeContent: FC<{
     runtime.thread.composer.setRunConfig({
       custom: {
         ...(selectedAgent?.id ? { agentId: selectedAgent.id } : {}),
-        ...((selectedAgent as PublishedAgent | null)?.current_version_no
+        ...(selectedAgent?.current_version_no
           ? {
-              agentVersionNo: (selectedAgent as PublishedAgent)
-                .current_version_no,
+              agentVersionNo: selectedAgent.current_version_no,
             }
           : {}),
         ...(activeConversationId ? { threadId: activeConversationId } : {}),
