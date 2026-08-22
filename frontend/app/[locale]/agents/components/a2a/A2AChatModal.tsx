@@ -6,6 +6,7 @@ import { Modal, Button, Input, Tag, Typography } from "antd";
 import { Globe, Send, User, Bot, Loader2 } from "lucide-react";
 import { A2AExternalAgent, a2aClientService } from "@/services/a2aService";
 import log from "@/lib/logger";
+import { RuntimeMetadataEditor } from "@/components/chat/RuntimeMetadataEditor";
 
 const { Text } = Typography;
 
@@ -31,6 +32,9 @@ export default function A2AChatModal({
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputValue, setInputValue] = useState("");
   const [sending, setSending] = useState(false);
+  const [runtimeMetadata, setRuntimeMetadata] = useState<
+    Record<string, unknown>
+  >({});
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -89,6 +93,7 @@ export default function A2AChatModal({
     if (open) {
       setMessages([]);
       setInputValue("");
+      setRuntimeMetadata({});
     }
   }, [open]);
 
@@ -115,7 +120,8 @@ export default function A2AChatModal({
     try {
       const result = await a2aClientService.sendChatMessage(
         String(agent.id),
-        userMessage.content
+        userMessage.content,
+        runtimeMetadata
       );
 
       if (result.success) {
@@ -289,6 +295,14 @@ export default function A2AChatModal({
 
         {/* Input Area */}
         <div className="mt-4 pt-4 border-t">
+          <div className="mb-2 flex justify-start">
+            <RuntimeMetadataEditor
+              value={runtimeMetadata}
+              onChange={setRuntimeMetadata}
+              disabled={sending || !agent.is_available}
+              elevated
+            />
+          </div>
           <div className="flex gap-2">
             <Input.TextArea
               placeholder={t("a2a.chat.placeholder")}

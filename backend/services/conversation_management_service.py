@@ -384,6 +384,7 @@ def create_new_conversation(
     agent_id: Optional[int] = None,
     chat_mode: Optional[str] = None,
     knowledge_scope: Optional[Dict[str, Any]] = None,
+    runtime_metadata: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Create a new conversation
@@ -404,6 +405,8 @@ def create_new_conversation(
         }
         if knowledge_scope is not None:
             create_kwargs["knowledge_scope"] = knowledge_scope
+        if runtime_metadata is not None:
+            create_kwargs["runtime_metadata"] = runtime_metadata
         conversation_data = create_conversation(title, user_id, **create_kwargs)
         return conversation_data
     except Exception as e:
@@ -866,6 +869,8 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
             'agent_id': history_data.get('agent_id'),
             'chat_mode': history_data.get('chat_mode') or 'execution',
             'knowledge_scope': history_data.get('knowledge_scope'),
+            'runtime_metadata': history_data.get('runtime_metadata') or {},
+            'runtime_metadata_version': int(history_data.get('runtime_metadata_version') or 0),
             'create_time': history_data['create_time'],
             'message': messages
         }

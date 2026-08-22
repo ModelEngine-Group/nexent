@@ -92,7 +92,7 @@ const TOOLS_SUPPORTING_RERANK = [
 const ANALYZE_TOOL_MODEL_TYPES: Record<string, ModelType> = {
   analyze_text_file: MODEL_TYPES.LLM,
   analyze_image: MODEL_TYPES.VLM,
-  analyze_audio: MODEL_TYPES.VLM3,
+  analyze_audio: MODEL_TYPES.VLM4,
   analyze_video: MODEL_TYPES.VLM3,
 };
 
@@ -102,7 +102,7 @@ const ANALYZE_TOOL_MODEL_DESCRIPTIONS: Record<string, string> = {
   analyze_image:
     "Optional Nexent image understanding model ID to use for image analysis. If omitted, the default image understanding model is used.",
   analyze_audio:
-    "Optional Nexent video understanding model ID to use for audio analysis. If omitted, the default video understanding model is used.",
+    "Optional Nexent audio understanding model ID to use for audio analysis. If omitted, the default audio understanding model is used.",
   analyze_video:
     "Optional Nexent video understanding model ID to use for video analysis. If omitted, the default video understanding model is used.",
 };

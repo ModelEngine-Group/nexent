@@ -20,7 +20,7 @@ This module provides two types of exceptions:
 The exception handler automatically maps legacy exception class names to ErrorCode.
 """
 
-from .error_code import ErrorCode, ERROR_CODE_HTTP_STATUS
+from .error_code import ErrorCode, ERROR_CODE_HTTP_STATUS, RuntimeMetadataValidationCode
 from .error_message import ErrorMessage
 from typing import Dict, List, Optional
 
@@ -213,6 +213,23 @@ class ValidationError(Exception):
     """Raised when validation fails."""
 
     pass
+
+
+class RuntimeMetadataValidationError(ValueError):
+    """Describe a runtime metadata validation failure without retaining values."""
+
+    def __init__(self, code: RuntimeMetadataValidationCode, message: str):
+        self.code = code
+        self.message = message
+        super().__init__(message)
+
+
+class RuntimeMetadataVersionConflict(ValueError):
+    """Raised when a runtime metadata optimistic-lock check fails."""
+
+    def __init__(self, current_version: int):
+        self.current_version = current_version
+        super().__init__("Runtime metadata version conflict")
 
 
 class TenantResourceLimitError(ValidationError, ValueError):

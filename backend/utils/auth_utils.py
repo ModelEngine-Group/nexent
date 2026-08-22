@@ -224,13 +224,9 @@ def get_user_and_tenant_by_access_key(access_key: str) -> Dict[str, str]:
 
     # Query tenant from user_tenant_t
     user_tenant_record = get_user_tenant_by_user_id(user_id)
-    if user_tenant_record and user_tenant_record.get("tenant_id"):
-        tenant_id = user_tenant_record["tenant_id"]
-    else:
-        tenant_id = DEFAULT_TENANT_ID
-        logger.warning(
-            f"No tenant relationship found for user {user_id}, using default tenant"
-        )
+    if not user_tenant_record or not user_tenant_record.get("tenant_id"):
+        raise UnauthorizedError("No active tenant relationship for this access key")
+    tenant_id = user_tenant_record["tenant_id"]
 
     return {
         "user_id": user_id,

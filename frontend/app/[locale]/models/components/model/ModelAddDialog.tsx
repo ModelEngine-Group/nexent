@@ -103,7 +103,7 @@ const DEFAULT_FORM_STATE = {
 };
 
 const resolveConnectivityModelType = (type: ModelType): ModelType =>
-  type === MODEL_TYPES.VLM2 || type === MODEL_TYPES.VLM3
+  type === MODEL_TYPES.VLM2 || type === MODEL_TYPES.VLM3 || type === MODEL_TYPES.VLM4
     ? (MODEL_TYPES.VLM as ModelType)
     : type;
 
@@ -112,7 +112,8 @@ const resolveConfigKey = (type: ModelType): string => type;
 const isVlmConfigType = (type: ModelType): boolean =>
   type === MODEL_TYPES.VLM ||
   type === MODEL_TYPES.VLM2 ||
-  type === MODEL_TYPES.VLM3;
+  type === MODEL_TYPES.VLM3 ||
+  type === MODEL_TYPES.VLM4;
 
 const emptyModelConfig = {
   modelName: "",
@@ -934,7 +935,7 @@ export const ModelAddDialog = ({
       },
     };
 
-    for (const key of [MODEL_TYPES.VLM, MODEL_TYPES.VLM2, MODEL_TYPES.VLM3]) {
+    for (const key of [MODEL_TYPES.VLM, MODEL_TYPES.VLM2, MODEL_TYPES.VLM3, MODEL_TYPES.VLM4]) {
       if (
         key !== configKey &&
         currentModelConfig?.[key]?.displayName === selectedDisplayName
@@ -1322,11 +1323,13 @@ export const ModelAddDialog = ({
         case MODEL_TYPES.VLM:
         case MODEL_TYPES.VLM2:
         case MODEL_TYPES.VLM3:
+        case MODEL_TYPES.VLM4:
           configUpdate = { [configKey]: modelConfig };
           for (const key of [
             MODEL_TYPES.VLM,
             MODEL_TYPES.VLM2,
             MODEL_TYPES.VLM3,
+            MODEL_TYPES.VLM4,
           ]) {
             if (
               key !== configKey &&
@@ -1502,6 +1505,9 @@ export const ModelAddDialog = ({
             </Option>
             <Option value={MODEL_TYPES.VLM3}>
               {t("model.type.videoUnderstanding")}
+            </Option>
+            <Option value={MODEL_TYPES.VLM4}>
+              {t("model.type.audioUnderstanding")}
             </Option>
             <Option value={MODEL_TYPES.RERANK}>{t("model.type.rerank")}</Option>
             <Option

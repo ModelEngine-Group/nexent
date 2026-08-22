@@ -33,12 +33,12 @@ export default function AgentDeployment() {
         {/* User Groups */}
         <Col xs={24} sm={12}>
           <Form.Item
-            label={t("agent.field.groupIds")}
+            label={t("agent.deployment.groupIds")}
             className="mb-3"
           >
             <Select
               mode="multiple"
-              placeholder={t("agent.field.groupIdsPlaceholder")}
+              placeholder={t("agent.deployment.groupIdsPlaceholder")}
               options={groupOptions}
               value={editedAgent.group_ids ?? []}
               onChange={(vals) => updateAgent({ group_ids: vals })}
@@ -50,11 +50,11 @@ export default function AgentDeployment() {
         {/* In-group Permission */}
         <Col xs={24} sm={12}>
           <Form.Item
-            label={t("agent.field.ingroupPermission")}
+            label={t("agent.deployment.ingroupPermission")}
             className="mb-3"
           >
             <Select
-              placeholder={t("agent.field.ingroupPermissionPlaceholder")}
+              placeholder={t("agent.deployment.ingroupPermissionPlaceholder")}
               options={permissionOptions}
               value={editedAgent.ingroup_permission ?? "READ_ONLY"}
               onChange={(val) => updateAgent({ ingroup_permission: val })}
@@ -67,43 +67,28 @@ export default function AgentDeployment() {
         {/* Is Main Agent */}
         <Col xs={24} sm={12}>
           <Form.Item
-            label={t("agent.field.isMainAgent")}
+            label={t("agent.isMainAgent")}
             className="mb-3"
+            tooltip={t("agent.deployment.isMainAgentTooltip")}
           >
-            <Flex align="center" gap={8}>
-              <Switch
-                checked={editedAgent.is_main_agent ?? false}
-                onChange={(checked) => updateAgent({ is_main_agent: checked })}
-              />
-              <span className="text-xs text-gray-500">
-                {editedAgent.is_main_agent
-                  ? t("agent.mainAgent.enabled")
-                  : t("agent.mainAgent.disabled")}
-              </span>
-            </Flex>
+            <Switch
+              checked={editedAgent.is_main_agent ?? false}
+              onChange={(checked) => updateAgent({ is_main_agent: checked })}
+            />
           </Form.Item>
         </Col>
 
         {/* A2A Enabled */}
         <Col xs={24} sm={12}>
           <Form.Item
-            label={t("agent.field.a2aEnabled")}
+            label={t("agent.deployment.a2aEnabled")}
             className="mb-3"
+            tooltip={t("agent.deployment.a2aEnabledTooltip")}
           >
-            <Flex align="center" gap={8}>
-              <Switch
-                checked={editedAgent.is_a2a ?? false}
-                onChange={(checked) => updateAgent({ is_a2a: checked })}
-              />
-              <Flex align="center" gap={4}>
-                <Globe size={12} className="text-gray-400" />
-                <span className="text-xs text-gray-500">
-                  {editedAgent.is_a2a
-                    ? t("agent.a2a.publishAsA2AAgent")
-                    : t("agent.a2a.notPublished")}
-                </span>
-              </Flex>
-            </Flex>
+            <Switch
+              checked={editedAgent.is_a2a ?? false}
+              onChange={(checked) => updateAgent({ is_a2a: checked })}
+            />
           </Form.Item>
         </Col>
       </Row>
