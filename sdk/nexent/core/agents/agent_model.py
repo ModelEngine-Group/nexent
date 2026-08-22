@@ -356,7 +356,7 @@ class AgentRunInfo(BaseModel):
     agent_config: AgentConfig = Field(description="Detailed Agent configuration")
     mcp_host: Optional[List[Union[str, Dict[str, Any]]]] = Field(
         description="MCP server address(es). Can be a string (URL) or dict with 'url', 'transport', "
-        "and optionally 'authorization' or 'headers' keys. "
+        "and optionally 'authorization', 'headers', or 'httpx_client_factory' keys. "
         "Transport can be 'sse' or 'streamable-http'. If string, transport is auto-detected based on URL ending: "
         "URLs ending with '/sse' use 'sse' transport, URLs ending with '/mcp' use 'streamable-http' transport. "
         "Authorization can be provided as 'authorization' (e.g., 'Bearer token') or as 'headers' dict.",

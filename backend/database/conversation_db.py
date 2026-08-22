@@ -268,6 +268,171 @@ def create_message_units(message_units: List[Dict[str, Any]], message_id: int, c
         return unit_ids
 
 
+def persist_assistant_run_batch(
+    message_id: int,
+    conversation_id: int,
+    message_content: str,
+    terminal_status: str,
+    message_units: List[Dict[str, Any]],
+    search_records: List[Dict[str, Any]],
+    image_urls: List[str],
+    skill_files: List[Dict[str, Any]],
+    automation_proposals: List[Dict[str, Any]],
+    user_id: str,
+    tenant_id: str,
+) -> Dict[int, int]:
+    """Persist one completed assistant stream in a single transaction.
+
+    The assistant parent row is created before streaming starts. This function
+    performs the only normal-path commit after streaming: it inserts all message
+    units and sources, links automation proposal cards, attaches generated files,
+    and moves the parent row to its terminal status.
+
+    Returns:
+        Mapping from unit_index to the generated unit_id.
+    """
+    if terminal_status not in {"completed", "failed", "stopped"}:
+        raise ValueError(f"Unsupported assistant terminal status: {terminal_status}")
+
+    message_id = int(message_id)
+    conversation_id = int(conversation_id)
+
+    with get_db_session() as session:
+        parent = session.execute(
+            select(ConversationMessage).where(
+                ConversationMessage.message_id == message_id,
+                ConversationMessage.conversation_id == conversation_id,
+                ConversationMessage.message_role == "assistant",
+                ConversationMessage.created_by == user_id,
+                ConversationMessage.delete_flag == "N",
+            ).with_for_update()
+        ).scalar_one_or_none()
+        if parent is None:
+            raise ValueError("Assistant streaming message does not exist or is not accessible")
+        if parent.status != "streaming":
+            raise ValueError(
+                f"Assistant message is already finalized with status {parent.status}"
+            )
+
+        unit_rows: List[Dict[str, Any]] = []
+        for unit in message_units:
+            unit_rows.append(add_creation_tracking({
+                "message_id": message_id,
+                "conversation_id": conversation_id,
+                "unit_index": int(unit["unit_index"]),
+                "unit_type": unit["unit_type"],
+                "unit_content": _serialize_unit_content(unit.get("unit_content", "")),
+                "unit_status": "completed",
+                "tool_call_id": unit.get("tool_call_id"),
+                "invocation_id": unit.get("invocation_id"),
+                "delete_flag": "N",
+            }, user_id))
+
+        unit_id_by_index: Dict[int, int] = {}
+        if unit_rows:
+            inserted_units = session.execute(
+                insert(ConversationMessageUnit)
+                .returning(
+                    ConversationMessageUnit.unit_id,
+                    ConversationMessageUnit.unit_index,
+                ),
+                unit_rows,
+            ).all()
+            unit_id_by_index = {
+                int(row.unit_index): int(row.unit_id)
+                for row in inserted_units
+            }
+
+        source_rows: List[Dict[str, Any]] = []
+        for record in search_records:
+            unit_index = int(record["unit_index"])
+            unit_id = unit_id_by_index.get(unit_index)
+            if unit_id is None:
+                raise ValueError(
+                    f"Search source references missing unit_index {unit_index}"
+                )
+            source_rows.append(add_creation_tracking({
+                "message_id": message_id,
+                "conversation_id": conversation_id,
+                "unit_id": unit_id,
+                "source_type": record.get("source_type", ""),
+                "source_title": record.get("source_title", ""),
+                "source_location": record.get("source_location", ""),
+                "source_content": record.get("source_content", ""),
+                "score_overall": record.get("score_overall"),
+                "score_accuracy": record.get("score_accuracy"),
+                "score_semantic": record.get("score_semantic"),
+                "published_date": record.get("published_date"),
+                "cite_index": record.get("cite_index"),
+                "search_type": record.get("search_type"),
+                "tool_sign": record.get("tool_sign", ""),
+                "delete_flag": "N",
+            }, user_id))
+        if source_rows:
+            session.execute(insert(ConversationSourceSearch), source_rows)
+
+        unique_image_urls = list(dict.fromkeys(url for url in image_urls if url))
+        if unique_image_urls:
+            image_rows = [
+                add_creation_tracking({
+                    "message_id": message_id,
+                    "conversation_id": conversation_id,
+                    "image_url": image_url,
+                    "delete_flag": "N",
+                }, user_id)
+                for image_url in unique_image_urls
+            ]
+            session.execute(insert(ConversationSourceImage), image_rows)
+
+        if automation_proposals:
+            from .db_models import AgentAutomationProposal
+
+        for proposal_link in automation_proposals:
+            unit_index = int(proposal_link["unit_index"])
+            unit_id = unit_id_by_index.get(unit_index)
+            if unit_id is None:
+                raise ValueError(
+                    f"Automation proposal references missing unit_index {unit_index}"
+                )
+            proposal = session.execute(
+                select(AgentAutomationProposal).where(
+                    AgentAutomationProposal.proposal_id == int(proposal_link["proposal_id"]),
+                    AgentAutomationProposal.tenant_id == tenant_id,
+                    AgentAutomationProposal.user_id == user_id,
+                    AgentAutomationProposal.delete_flag == "N",
+                ).with_for_update()
+            ).scalar_one_or_none()
+            if proposal is None:
+                raise ValueError("Automation proposal does not exist or is not accessible")
+            proposed_task = dict(proposal.proposed_task or {})
+            proposed_task["_conversation_message_id"] = message_id
+            proposed_task["_conversation_unit_id"] = unit_id
+            proposal.proposed_task = proposed_task
+            proposal.updated_by = user_id
+            proposal.update_time = func.current_timestamp()
+
+        if skill_files:
+            existing_files = parent.minio_files
+            if isinstance(existing_files, str) and existing_files:
+                try:
+                    existing_files = json.loads(existing_files)
+                except (TypeError, json.JSONDecodeError):
+                    existing_files = []
+            if not isinstance(existing_files, list):
+                existing_files = []
+            parent.minio_files = json.dumps(
+                [*existing_files, *skill_files],
+                ensure_ascii=False,
+            )
+
+        parent.message_content = message_content or ""
+        parent.status = terminal_status
+        parent.updated_by = user_id
+        parent.update_time = func.current_timestamp()
+
+        return unit_id_by_index
+
+
 def create_message_unit(message_id: int, conversation_id: int, unit_index: int,
                         unit_type: str, unit_content: Any,
                         user_id: Optional[str] = None,

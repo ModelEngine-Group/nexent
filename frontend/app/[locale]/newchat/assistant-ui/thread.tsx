@@ -78,6 +78,8 @@ import { SingleTurnTokenUsage } from "../ui/token-usage";
 import { ToolFallback } from "../ui/tool-fallback";
 import { ToolRecommendations } from "../ui/tool-recommendations";
 import { AgentDraftCard } from "../ui/agent-draft-card";
+import { RequirementClarificationCard } from "../ui/requirement-clarification-card";
+import { InstalledResourceBindingCard } from "../ui/installed-resource-binding-card";
 import {
   ToolGroupContent,
   ToolGroupRoot,
@@ -116,6 +118,7 @@ export interface ThreadProps {
   chatMode: ChatMode;
   onChatModeChange: (mode: ChatMode) => void;
   showModelSelector?: boolean;
+  showConversationTitle?: boolean;
   isDictationConfigured?: boolean;
   knowledgeScope?: ConversationKnowledgeScope | null;
   knowledgePreview?: KnowledgeScopeEffectivePreview | null;
@@ -129,6 +132,8 @@ export interface ThreadProps {
   onSkillFileSelect?: (path: string) => void;
   runtimeMetadata?: Record<string, unknown>;
   onRuntimeMetadataChange?: (value: Record<string, unknown>) => void;
+  readOnly?: boolean;
+  showComposer?: boolean;
 }
 
 /**
@@ -161,6 +166,12 @@ const useAgentModels = (
       return [{ id: modelName, name: modelName }];
     }
 
+    // Fallback to the single model field (used by AgentDraft / debug panel)
+    const singleModel = (typedAgent as unknown as { model?: string }).model;
+    if (singleModel) {
+      return [{ id: singleModel, name: singleModel }];
+    }
+
     return [];
   }, [agent]);
 };
@@ -175,6 +186,7 @@ export const Thread: FC<ThreadProps> = ({
   chatMode,
   onChatModeChange,
   showModelSelector = true,
+  showConversationTitle = true,
   isDictationConfigured = false,
   knowledgeScope = null,
   knowledgePreview = null,
@@ -185,6 +197,8 @@ export const Thread: FC<ThreadProps> = ({
   onSkillFileSelect,
   runtimeMetadata = {},
   onRuntimeMetadataChange,
+  readOnly = false,
+  showComposer = true,
 }) => {
   const { t } = useTranslation();
   const models = useAgentModels(agent);
@@ -391,6 +405,7 @@ export const Thread: FC<ThreadProps> = ({
         chatMode={chatMode}
         onChatModeChange={onChatModeChange}
         showModelSelector={showModelSelector}
+        showConversationTitle={showConversationTitle}
         isDictationConfigured={isDictationConfigured}
         knowledgeScope={knowledgeScope}
         knowledgePreview={knowledgePreview}
@@ -401,6 +416,8 @@ export const Thread: FC<ThreadProps> = ({
         onSkillFileSelect={onSkillFileSelect}
         runtimeMetadata={runtimeMetadata}
         onRuntimeMetadataChange={onRuntimeMetadataChange}
+        readOnly={readOnly}
+        showComposer={showComposer}
         hasMessages={hasMessages}
         displayName={displayName}
         conversationTitle={conversationTitle}
@@ -483,6 +500,7 @@ interface ThreadViewProps {
   chatMode: ChatMode;
   onChatModeChange: (mode: ChatMode) => void;
   showModelSelector: boolean;
+  showConversationTitle: boolean;
   isDictationConfigured: boolean;
   knowledgeScope: ConversationKnowledgeScope | null;
   knowledgePreview: KnowledgeScopeEffectivePreview | null;
@@ -512,6 +530,8 @@ interface ThreadViewProps {
   onSkillFileSelect?: (path: string) => void;
   runtimeMetadata: Record<string, unknown>;
   onRuntimeMetadataChange?: (value: Record<string, unknown>) => void;
+  readOnly: boolean;
+  showComposer: boolean;
 }
 
 const ThreadView: FC<ThreadViewProps> = ({
@@ -523,6 +543,7 @@ const ThreadView: FC<ThreadViewProps> = ({
   chatMode,
   onChatModeChange,
   showModelSelector,
+  showConversationTitle,
   isDictationConfigured,
   knowledgeScope,
   knowledgePreview,
@@ -549,6 +570,8 @@ const ThreadView: FC<ThreadViewProps> = ({
   onSkillFileSelect,
   runtimeMetadata,
   onRuntimeMetadataChange,
+  readOnly,
+  showComposer,
 }) => {
   const { t } = useTranslation();
 
@@ -561,52 +584,57 @@ const ThreadView: FC<ThreadViewProps> = ({
       )}
     >
       <div className="flex h-full min-w-0 flex-1 flex-col">
-        <header className="flex items-center gap-2 border-b px-3 py-2">
-          {isShareMode ? (
-            <>
-              <div className="flex min-w-0 flex-1 justify-center text-sm font-medium text-foreground">
-                {conversationTitle}
-              </div>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={onLeaveShareMode}
-                aria-label={t("common.close", "关闭")}
-              >
-                <XIcon className="size-4" />
-              </Button>
-            </>
-          ) : (
-            <>
-              {onBack && (
-                <Button variant="ghost" size="icon" onClick={onBack}>
-                  <ArrowLeft className="size-4" />
-                </Button>
-              )}
-              <div className="flex min-w-0 flex-1 flex-col">
-                <span className="text-sm font-medium text-foreground">
-                  {hasMessages ? conversationTitle : displayName}
-                </span>
-                {hasMessages && variant !== "embedded" && (
-                  <span className="text-xs text-muted-foreground">
-                    {t("chat.thread.conversation")}
-                  </span>
-                )}
-              </div>
-              {hasMessages && conversationId && (
+        {showConversationTitle && (
+          <header className="flex items-center gap-2 border-b px-3 py-2">
+            {isShareMode ? (
+              <>
+                <div className="flex min-w-0 flex-1 justify-center text-sm font-medium text-foreground">
+                  {conversationTitle}
+                </div>
                 <Button
                   variant="ghost"
                   size="icon"
-                  aria-label={t("chatInterface.shareConversation", "分享对话")}
-                  disabled={isRunning}
-                  onClick={onEnterShareMode}
+                  onClick={onLeaveShareMode}
+                  aria-label={t("common.close", "关闭")}
                 >
-                  <Share2Icon className="size-4" />
+                  <XIcon className="size-4" />
                 </Button>
-              )}
-            </>
-          )}
-        </header>
+              </>
+            ) : (
+              <>
+                {onBack && (
+                  <Button variant="ghost" size="icon" onClick={onBack}>
+                    <ArrowLeft className="size-4" />
+                  </Button>
+                )}
+                <div className="flex min-w-0 flex-1 flex-col">
+                  <span className="text-sm font-medium text-foreground">
+                    {hasMessages ? conversationTitle : displayName}
+                  </span>
+                  {hasMessages && variant !== "embedded" && (
+                    <span className="text-xs text-muted-foreground">
+                      {t("chat.thread.conversation")}
+                    </span>
+                  )}
+                </div>
+                {hasMessages && conversationId && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    aria-label={t(
+                      "chatInterface.shareConversation",
+                      "分享对话"
+                    )}
+                    disabled={isRunning}
+                    onClick={onEnterShareMode}
+                  >
+                    <Share2Icon className="size-4" />
+                  </Button>
+                )}
+              </>
+            )}
+          </header>
+        )}
 
         {isShareMode && (
           <div className="flex items-center justify-between border-b bg-muted/30 px-4 py-2">
@@ -659,6 +687,7 @@ const ThreadView: FC<ThreadViewProps> = ({
           {hasMessages ? (
             <ThreadMessages
               agent={agent}
+              readOnly={readOnly}
               enableSkillDirectives={Boolean(skillFiles)}
               onSkillFileSelect={onSkillFileSelect}
               shareMode={isShareMode}
@@ -671,32 +700,35 @@ const ThreadView: FC<ThreadViewProps> = ({
           )}
         </ThreadPrimitive.Viewport>
 
-        <ThreadPrimitive.ViewportFooter
-          className={cn(
-            "sticky bottom-0 mx-auto flex w-full max-w-4xl flex-col",
-            variant === "embedded" ? "gap-2 px-4 pb-4" : "gap-4 px-8 pb-8"
-          )}
-        >
-          <ThreadScrollToBottom />
-          <Composer
-            models={models}
-            selectedModelId={selectedModelId}
-            onModelChange={onModelChange}
-            chatMode={chatMode}
-            onChatModeChange={onChatModeChange}
-            showModelSelector={showModelSelector}
-            isDictationConfigured={isDictationConfigured}
-            knowledgeScope={knowledgeScope}
-            knowledgePreview={knowledgePreview}
-            knowledgeCapabilities={knowledgeCapabilities}
-            onKnowledgeScopeChange={onKnowledgeScopeChange}
-            compact={variant === "embedded"}
-            skillFiles={skillFiles}
-            runtimeMetadata={runtimeMetadata}
-            onRuntimeMetadataChange={onRuntimeMetadataChange}
-            allowRuntimeMetadata={agent.allow_chat_metadata === true}
-          />
-        </ThreadPrimitive.ViewportFooter>
+        {showComposer && (
+          <ThreadPrimitive.ViewportFooter
+            className={cn(
+              "sticky bottom-0 mx-auto flex w-full max-w-4xl flex-col",
+              variant === "embedded" ? "gap-2 px-4 pb-4" : "gap-4 px-8 pb-8"
+            )}
+          >
+            <ThreadScrollToBottom />
+            <Composer
+              models={models}
+              selectedModelId={selectedModelId}
+              onModelChange={onModelChange}
+              chatMode={chatMode}
+              onChatModeChange={onChatModeChange}
+              showModelSelector={showModelSelector}
+              isDictationConfigured={isDictationConfigured}
+              knowledgeScope={knowledgeScope}
+              knowledgePreview={knowledgePreview}
+              knowledgeCapabilities={knowledgeCapabilities}
+              onKnowledgeScopeChange={onKnowledgeScopeChange}
+              compact={variant === "embedded"}
+              skillFiles={skillFiles}
+              runtimeMetadata={runtimeMetadata}
+              onRuntimeMetadataChange={onRuntimeMetadataChange}
+              allowRuntimeMetadata={agent.allow_chat_metadata === true}
+              disabled={readOnly}
+            />
+          </ThreadPrimitive.ViewportFooter>
+        )}
       </div>
 
       <SourcesPanel
@@ -1299,10 +1331,20 @@ const AssistantMessage: FC<{
             }
           }}
         </MessagePrimitive.GroupedParts>
-        {nl2a?.content.subtype === "local_mcp_recommendation" ? (
-          <ToolRecommendations payload={nl2a.content} />
+        {nl2a?.content.subtype === "requirement_clarification" ? (
+          <RequirementClarificationCard
+            payload={nl2a.content}
+            disabled={readOnly}
+          />
+        ) : nl2a?.content.subtype === "local_mcp_recommendation" ? (
+          <ToolRecommendations payload={nl2a.content} disabled={readOnly} />
         ) : nl2a?.content.subtype === "agent_draft" ? (
-          <AgentDraftCard draft={nl2a.content} />
+          <AgentDraftCard draft={nl2a.content} disabled={readOnly} />
+        ) : nl2a?.content.subtype === "installed_resource_binding" ? (
+          <InstalledResourceBindingCard
+            payload={nl2a.content}
+            disabled={readOnly}
+          />
         ) : null}
         {skillFileAttachments?.length ? (
           <AssistantMessageAttachments attachments={skillFileAttachments} />

@@ -33,12 +33,15 @@ import {
 } from "lucide-react";
 import type { ColumnsType } from "antd/es/table";
 
-import type {
-  GuardrailConfig,
-  GuardrailRule,
-  GuardrailSeverity,
+import {
+  DEFAULT_AGENT_VERIFICATION_CONFIG,
+  type GuardrailConfig,
+  type GuardrailRule,
+  type GuardrailSeverity,
 } from "@/types/agentConfig";
 import type { ModelOption } from "@/types/modelConfig";
+import { useModelList } from "@/hooks/model/useModelList";
+import { useAgentStore } from "@/stores/agentStore";
 import { generateGuardrailRules } from "@/services/promptService";
 
 const { Text } = Typography;
@@ -129,11 +132,62 @@ export interface GuardrailConfigContentRef {
 }
 
 interface GuardrailConfigContentProps {
-  config: GuardrailConfig;
-  llmModels: ModelOption[];
+  config?: GuardrailConfig;
+  llmModels?: ModelOption[];
   defaultModelId?: number;
   /** Called when draft changes — parent may use this for live preview */
   onDraftChange?: (config: GuardrailConfig) => void;
+}
+
+function useGuardrailConfigState() {
+  const editedAgent = useAgentStore((state) => state.editedAgent);
+  const updateAgentConfig = useAgentStore((state) => state.updateAgentConfig);
+  const { availableLlmModels } = useModelList();
+  const config =
+    editedAgent?.verification_config?.guardrail_config ||
+    DEFAULT_AGENT_VERIFICATION_CONFIG.guardrail_config!;
+  const defaultModelId = editedAgent?.model_ids?.[0];
+
+  const updateConfig = useCallback(
+    (guardrailConfig: GuardrailConfig) => {
+      const verificationConfig = useAgentStore.getState().editedAgent?.verification_config;
+      if (JSON.stringify(verificationConfig?.guardrail_config) === JSON.stringify(guardrailConfig)) {
+        return;
+      }
+
+      updateAgentConfig({
+        verification_config: {
+          ...DEFAULT_AGENT_VERIFICATION_CONFIG,
+          ...verificationConfig,
+          guardrail_config: guardrailConfig,
+        },
+      });
+    },
+    [updateAgentConfig]
+  );
+
+  return { config, llmModels: availableLlmModels, defaultModelId, updateConfig };
+}
+
+export function GuardrailConfigActions() {
+  const { t } = useTranslation("common");
+  const { config, updateConfig } = useGuardrailConfigState();
+
+  return (
+    <Tooltip
+      title={
+        config.enabled
+          ? (t("agent.guardrail.disable") || "Disable")
+          : (t("agent.guardrail.enable") || "Enable")
+      }
+    >
+      <Switch
+        checked={config.enabled}
+        onChange={(enabled) => updateConfig({ ...config, enabled })}
+        size="small"
+      />
+    </Tooltip>
+  );
 }
 
 function AiMultiResult({
@@ -230,17 +284,33 @@ const GuardrailConfigContent = forwardRef<
   GuardrailConfigContentRef,
   GuardrailConfigContentProps
 >(function GuardrailConfigContent({
-  config,
-  llmModels,
-  defaultModelId,
+  config: configProp,
+  llmModels: llmModelsProp,
+  defaultModelId: defaultModelIdProp,
   onDraftChange,
 }, ref) {
+  const storeState = useGuardrailConfigState();
+  const config = configProp ?? storeState.config;
+  const llmModels = llmModelsProp ?? storeState.llmModels;
+  const defaultModelId = defaultModelIdProp ?? storeState.defaultModelId;
+  const onConfigChange = onDraftChange ?? (!configProp ? storeState.updateConfig : undefined);
   const { token } = theme.useToken();
   const { t } = useTranslation("common");
   const { message } = App.useApp();
 
   const [draft, setDraft] = useState<GuardrailConfig>(config);
   const [selectedKeys, setSelectedKeys] = useState<number[]>([]);
+  const isSynchronizingExternalConfig = useRef(false);
+
+  useEffect(() => {
+    setDraft((current) => {
+      if (JSON.stringify(current) === JSON.stringify(config)) {
+        return current;
+      }
+      isSynchronizingExternalConfig.current = true;
+      return config;
+    });
+  }, [config]);
   const [testText, setTestText] = useState("");
   const [highlightedRuleKeys, setHighlightedRuleKeys] = useState<Set<number>>(new Set());
   const [currentPage, setCurrentPage] = useState(1);
@@ -277,10 +347,14 @@ const GuardrailConfigContent = forwardRef<
     getDraft: () => draft,
   }), [draft]);
 
-  // Notify parent of draft changes if callback provided
+  // Do not write an external update back through the previous draft.
   useEffect(() => {
-    onDraftChange?.(draft);
-  }, [draft, onDraftChange]);
+    if (isSynchronizingExternalConfig.current) {
+      isSynchronizingExternalConfig.current = false;
+      return;
+    }
+    onConfigChange?.(draft);
+  }, [draft, onConfigChange]);
 
   // Sync aiModelId with defaultModelId
   useEffect(() => {
@@ -338,10 +412,6 @@ const GuardrailConfigContent = forwardRef<
   const updateDraft = useCallback((updater: (prev: GuardrailConfig) => GuardrailConfig) => {
     setDraft(updater);
   }, []);
-
-  const handleToggle = useCallback((enabled: boolean) => {
-    updateDraft((prev) => ({ ...prev, enabled }));
-  }, [updateDraft]);
 
   const handleAddRule = useCallback(() => {
     const newRule: GuardrailRule = {
@@ -991,8 +1061,8 @@ const GuardrailConfigContent = forwardRef<
               {t("agent.guardrail.ai.try") || "Try:"}
             </Text>
             {[
-              { label: t("agent.guardrail.ai.exSensitive") || "Sensitive·phone", value: "掩码手机号、邮箱、身份证号等个人信息" },
-              { label: t("agent.guardrail.ai.exDanger") || "Danger·rm-rf", value: "拦截 rm -rf 等危险删除命令" },
+              { label: t("agent.guardrail.ai.exSensitive") || "Sensitive·phone", value: t("agent.guardrail.ai.exSensitiveValue") },
+              { label: t("agent.guardrail.ai.exDanger") || "Danger·rm-rf", value: t("agent.guardrail.ai.exDangerValue") },
             ].map((ex, i) => (
               <span
                 key={i}
@@ -1043,49 +1113,6 @@ const GuardrailConfigContent = forwardRef<
 
       {/* --- Section: Rule list --- */}
       <div>
-        {/* Section header with title + switch + add button */}
-        <div style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-          marginBottom: 12,
-        }}>
-          <div
-            style={{
-              width: 3,
-              height: 14,
-              background: token.colorPrimary,
-              borderRadius: 2,
-            }}
-          />
-          <Text strong style={{ fontSize: 13, color: token.colorText }}>
-            {t("agent.guardrail.ruleList") || "Rule List"}
-          </Text>
-          <Tooltip
-            title={
-              draft.enabled
-                ? (t("agent.guardrail.disable") || "Disable")
-                : (t("agent.guardrail.enable") || "Enable")
-            }
-          >
-            <Switch
-              checked={draft.enabled}
-              onChange={handleToggle}
-              size="small"
-              style={{ marginLeft: 4 }}
-            />
-          </Tooltip>
-          <div style={{ flex: 1 }} />
-          <Button
-            size="small"
-            icon={<Plus size={14} />}
-            onClick={handleAddRule}
-            disabled={!draft.enabled}
-          >
-            {t("agent.guardrail.addRule") || "Add Rule"}
-          </Button>
-        </div>
-
         <style>{`
           .guardrule-row-highlight > td {
             background: #E6F1FB !important;
@@ -1095,13 +1122,43 @@ const GuardrailConfigContent = forwardRef<
           }
         `}</style>
 
+        {draft.enabled && (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              marginBottom: 12,
+            }}
+          >
+            <div
+              style={{
+                width: 3,
+                height: 14,
+                background: token.colorPrimary,
+                borderRadius: 2,
+              }}
+            />
+            <Text strong style={{ fontSize: 13, color: token.colorText }}>
+              {t("agent.guardrail.ruleList") || "Rule List"}
+            </Text>
+            <div style={{ flex: 1 }} />
+            <Button size="small" icon={<Plus size={14} />} onClick={handleAddRule}>
+              {t("agent.guardrail.addRule") || "Add Rule"}
+            </Button>
+          </div>
+        )}
+
         {!draft.enabled ? (
           <div style={{
-            padding: "16px 12px",
-            textAlign: "center",
-            background: "#F8FBFE",
-            border: `0.5px solid #E6F1FB`,
-            borderRadius: 10,
+            minHeight: 80,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "12px 16px",
+            background: "#fff",
+            border: "1px dashed #D1D5DB",
+            borderRadius: 6,
           }}>
             <Text type="secondary" style={{ fontSize: 12 }}>
               {t("agent.guardrail.disabledHint") || "Guardrail is disabled. Toggle the switch to enable."}

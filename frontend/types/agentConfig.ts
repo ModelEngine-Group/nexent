@@ -31,6 +31,7 @@ export type AgentConfigUpdate = Partial<
     | "verification_config"
     | "group_ids"
     | "ingroup_permission"
+    | "is_a2a"
     | "greeting_message"
     | "example_questions"
   >
@@ -130,6 +131,7 @@ export interface PublishedAgent {
   greeting_message?: string;
   example_questions?: string[];
   allow_chat_metadata?: boolean;
+  icon_url?: string;
 }
 
 export interface Agent {
@@ -150,6 +152,7 @@ export interface Agent {
   provide_run_summary: boolean;
   allow_chat_metadata?: boolean;
   enable_context_manager?: boolean;
+  is_a2a?: boolean;
   verification_config?: AgentVerificationConfig;
   tools: Tool[];
   skills?: Skill[]; // Skills configured for this agent
@@ -185,6 +188,7 @@ export interface Agent {
   is_a2a_server?: boolean;
   greeting_message?: string;
   example_questions?: string[];
+  icon_url?: string;
 }
 
 export interface Tool {
@@ -196,6 +200,7 @@ export interface Tool {
   source?: string;
   initParams: ToolParam[];
   is_available?: boolean;
+  is_user_selectable?: boolean;
   create_time?: string;
   usage?: string;
   inputs?: string;

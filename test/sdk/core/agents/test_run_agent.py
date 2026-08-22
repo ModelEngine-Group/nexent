@@ -593,6 +593,23 @@ def test_normalize_mcp_config():
     result = run_agent._normalize_mcp_config({"url": "http://server/mcp", "transport": None})
     assert result == {"url": "http://server/mcp", "transport": "streamable-http"}
 
+    httpx_client_factory = MagicMock()
+    result = run_agent._normalize_mcp_config({
+        "url": "http://server/sse",
+        "httpx_client_factory": httpx_client_factory,
+    })
+    assert result == {
+        "url": "http://server/sse",
+        "transport": "sse",
+        "httpx_client_factory": httpx_client_factory,
+    }
+
+    with pytest.raises(ValueError, match="httpx_client_factory must be callable"):
+        run_agent._normalize_mcp_config({
+            "url": "http://server/sse",
+            "httpx_client_factory": "not-callable",
+        })
+
     # Test dict format with only authorization
     result = run_agent._normalize_mcp_config({
         "url": "http://server/mcp",

@@ -30,6 +30,7 @@ from database.conversation_db import (
     get_source_images_by_message,
     get_source_searches_by_conversation,
     get_source_searches_by_message,
+    persist_assistant_run_batch as persist_assistant_run_batch_db,
     rename_conversation,
     save_history_summary,
     update_conversation_agent_id,
@@ -142,6 +143,35 @@ def save_message_unit(message_id: int, conversation_id: int, unit_index: int,
         unit_status=unit_status,
         tool_call_id=tool_call_id,
         invocation_id=invocation_id,
+    )
+
+
+def persist_assistant_run_batch(
+    message_id: int,
+    conversation_id: int,
+    message_content: str,
+    terminal_status: str,
+    message_units: List[Dict[str, Any]],
+    search_records: List[Dict[str, Any]],
+    image_urls: List[str],
+    skill_files: List[Dict[str, Any]],
+    automation_proposals: List[Dict[str, Any]],
+    user_id: str,
+    tenant_id: str,
+) -> Dict[int, int]:
+    """Persist one assistant run and its related records atomically."""
+    return persist_assistant_run_batch_db(
+        message_id=message_id,
+        conversation_id=conversation_id,
+        message_content=message_content,
+        terminal_status=terminal_status,
+        message_units=message_units,
+        search_records=search_records,
+        image_urls=image_urls,
+        skill_files=skill_files,
+        automation_proposals=automation_proposals,
+        user_id=user_id,
+        tenant_id=tenant_id,
     )
 
 

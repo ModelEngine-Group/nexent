@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Tooltip } from "antd";
 import { useToolList } from "@/hooks/agent/useToolList";
-import { useAgentConfigStore } from "@/stores/agentConfigStore";
+import { useAgentStore } from "@/stores/agentStore";
 import { usePrefetchKnowledgeBases } from "@/hooks/useKnowledgeBaseSelector";
 import { useConfig } from "@/hooks/useConfig";
 import { ChevronRight, Settings, X, AlertTriangle } from "lucide-react";
@@ -23,7 +23,11 @@ import log from "@/lib/logger";
 
 // --- Local tool helpers (not in utils) ---
 
-function isToolDisabledDueToVlm(name: string, img: boolean, vid: boolean): boolean {
+function isToolDisabledDueToVlm(
+  name: string,
+  img: boolean,
+  vid: boolean
+): boolean {
   if (TOOLS_REQUIRING_IMAGE_UNDERSTANDING.includes(name)) return !img;
   if (TOOLS_REQUIRING_VIDEO_UNDERSTANDING.includes(name)) return !vid;
   return false;
@@ -39,34 +43,60 @@ const SOURCE_META: Record<
   SourceKey,
   { sourceValue: string; label: string; dot: string; accentClass: string }
 > = {
-  local: { sourceValue: TOOL_SOURCE_TYPES.LOCAL, label: "toolPool.group.local", dot: "bg-emerald-500", accentClass: "bg-emerald-500/10 text-emerald-600" },
-  mcp: { sourceValue: TOOL_SOURCE_TYPES.MCP, label: "toolPool.group.mcp", dot: "bg-sky-500", accentClass: "bg-sky-500/10 text-sky-600" },
-  langchain: { sourceValue: TOOL_SOURCE_TYPES.LANGCHAIN, label: "toolPool.group.langchain", dot: "bg-violet-500", accentClass: "bg-violet-500/10 text-violet-600" },
+  local: {
+    sourceValue: TOOL_SOURCE_TYPES.LOCAL,
+    label: "toolPool.group.local",
+    dot: "bg-emerald-500",
+    accentClass: "bg-emerald-500/10 text-emerald-600",
+  },
+  mcp: {
+    sourceValue: TOOL_SOURCE_TYPES.MCP,
+    label: "toolPool.group.mcp",
+    dot: "bg-sky-500",
+    accentClass: "bg-sky-500/10 text-sky-600",
+  },
+  langchain: {
+    sourceValue: TOOL_SOURCE_TYPES.LANGCHAIN,
+    label: "toolPool.group.langchain",
+    dot: "bg-violet-500",
+    accentClass: "bg-violet-500/10 text-violet-600",
+  },
 };
 
 interface ToolManagementProps {
-  isCreatingMode?: boolean;
   currentAgentId?: number;
 }
 
 /** Display selected tools as grouped, collapsible cards (demo layout). */
-export default function ToolManagement({ isCreatingMode, currentAgentId }: ToolManagementProps) {
+export default function ToolManagement({
+  currentAgentId,
+}: ToolManagementProps) {
   const { t } = useTranslation("common");
   const { prefetchKnowledgeBases } = usePrefetchKnowledgeBases();
-  const { isImageUnderstandingAvailable, isVideoUnderstandingAvailable, isEmbeddingAvailable } = useConfig();
+  const {
+    isImageUnderstandingAvailable,
+    isVideoUnderstandingAvailable,
+    isEmbeddingAvailable,
+  } = useConfig();
 
-  const selectedTools = useAgentConfigStore((state) => state.editedAgent.tools);
-  const updateTools = useAgentConfigStore((state) => state.updateTools);
+  const selectedTools = useAgentStore(
+    (state) => state.editedAgent?.tools ?? []
+  );
+  const updateTools = useAgentStore((state) => state.updateTools);
 
   const [modalOpen, setModalOpen] = useState(false);
   const [configTool, setConfigTool] = useState<Tool | null>(null);
   const [configParams, setConfigParams] = useState<ToolParam[]>([]);
-  const [collapsedCats, setCollapsedCats] = useState<Record<string, boolean>>({});
+  const [collapsedCats, setCollapsedCats] = useState<Record<string, boolean>>(
+    {}
+  );
 
   // Canonical tool list (with `inputs`) — used to backfill any missing
   // fields on the stored tool object so the tool test panel always
   // operates in parsed mode and shows the manual-input toggle.
-  const { availableTools, isSuccess: toolsLoaded } = useToolList({ enabled: true });
+  const { availableTools, isSuccess: toolsLoaded } = useToolList({
+    enabled: true,
+  });
 
   // Reconcile the selected-tools draft against the canonical tool list.
   // When an MCP is deleted, its tools are marked unavailable and dropped from
@@ -77,15 +107,26 @@ export default function ToolManagement({ isCreatingMode, currentAgentId }: ToolM
   useEffect(() => {
     if (!toolsLoaded) return;
     const availableIds = new Set(availableTools.map((t: any) => String(t.id)));
-    const current = useAgentConfigStore.getState().editedAgent.tools;
+    const current = useAgentStore.getState().editedAgent?.tools ?? [];
     const next = current.filter((t) => availableIds.has(String(t.id)));
     if (next.length !== current.length) {
       updateTools(next);
     }
   }, [availableTools, toolsLoaded, selectedTools, updateTools]);
 
+  // Keep system-managed tools in the draft for persistence, but omit them from
+  // the user-facing selected-tools list.
+  const visibleSelectedTools = useMemo(() => {
+    return selectedTools.filter((tool) => {
+      const canonicalTool = availableTools.find(
+        (availableTool: Tool) => String(availableTool.id) === String(tool.id)
+      );
+      return (canonicalTool ?? tool).is_user_selectable !== false;
+    });
+  }, [availableTools, selectedTools]);
+
   // --- Group by source → category ---
-  const grouped = groupToolsBySource(selectedTools);
+  const grouped = groupToolsBySource(visibleSelectedTools);
 
   const mergeParams = useCallback(
     async (tool: Tool, forceFetch?: boolean): Promise<ToolParam[]> => {
@@ -93,21 +134,32 @@ export default function ToolManagement({ isCreatingMode, currentAgentId }: ToolM
       // If tool already has stored params in the agent config store, the user's
       // unsaved modifications are already reflected in those params — skip the
       // API call to avoid overwriting them with stale server data.
-      const hasStoredParams = params.some((p) => p.value !== undefined && p.value !== null && p.value !== "");
+      const hasStoredParams = params.some(
+        (p) => p.value !== undefined && p.value !== null && p.value !== ""
+      );
       if (!forceFetch && hasStoredParams) {
         return params;
       }
       if (!currentAgentId) return params;
       try {
-        const { searchToolConfig } = await import("@/services/agentConfigService");
-        const instance = await searchToolConfig(parseInt(tool.id), currentAgentId);
+        const { searchToolConfig } =
+          await import("@/services/agentConfigService");
+        const instance = await searchToolConfig(
+          parseInt(tool.id),
+          currentAgentId
+        );
         if (instance.success && instance.data) {
           return params.map((p) => ({
             ...p,
-            value: instance.data?.params?.[p.name] !== undefined ? instance.data.params[p.name] : p.value,
+            value:
+              instance.data?.params?.[p.name] !== undefined
+                ? instance.data.params[p.name]
+                : p.value,
           }));
         }
-      } catch (err) { log.error("mergeParams:", err); }
+      } catch (err) {
+        log.error("mergeParams:", err);
+      }
       return params;
     },
     [currentAgentId]
@@ -117,8 +169,10 @@ export default function ToolManagement({ isCreatingMode, currentAgentId }: ToolM
     async (tool: Tool) => {
       const kbType = getToolKbType(tool.name);
       if (kbType) prefetchKnowledgeBases(kbType);
-      const current = useAgentConfigStore.getState().editedAgent.tools;
-      const configured = current.find((t) => parseInt(t.id) === parseInt(tool.id));
+      const current = useAgentStore.getState().editedAgent?.tools ?? [];
+      const configured = current.find(
+        (t) => parseInt(t.id) === parseInt(tool.id)
+      );
       const configuredTool = configured
         ? { ...tool, ...configured, initParams: configured.initParams }
         : tool;
@@ -130,7 +184,11 @@ export default function ToolManagement({ isCreatingMode, currentAgentId }: ToolM
         (t: any) => parseInt(String(t.id)) === parseInt(tool.id)
       );
       const toolToUse = canonical
-        ? { ...configuredTool, ...canonical, initParams: configuredTool.initParams }
+        ? {
+            ...configuredTool,
+            ...canonical,
+            initParams: configuredTool.initParams,
+          }
         : configuredTool;
       const merged = await mergeParams(toolToUse);
       setConfigTool(toolToUse);
@@ -142,13 +200,14 @@ export default function ToolManagement({ isCreatingMode, currentAgentId }: ToolM
 
   const removeTool = useCallback(
     (toolId: string) => {
-      const current = useAgentConfigStore.getState().editedAgent.tools;
+      const current = useAgentStore.getState().editedAgent?.tools ?? [];
       updateTools(current.filter((t) => t.id !== toolId));
     },
     [updateTools]
   );
 
-  const toggleCat = (cat: string) => setCollapsedCats((p) => ({ ...p, [cat]: !p[cat] }));
+  const toggleCat = (cat: string) =>
+    setCollapsedCats((p) => ({ ...p, [cat]: !p[cat] }));
 
   if (grouped.length === 0) {
     return (
@@ -163,7 +222,9 @@ export default function ToolManagement({ isCreatingMode, currentAgentId }: ToolM
       <div className="mb-3 flex items-center gap-1.5">
         <span className="flex items-center gap-1.5 text-sm font-medium text-gray-700">
           {t("toolPool.selectedToolsLabel")}
-          <span className="text-xs text-gray-400">({selectedTools.length})</span>
+          <span className="text-xs text-gray-400">
+            ({visibleSelectedTools.length})
+          </span>
         </span>
       </div>
 
@@ -171,7 +232,9 @@ export default function ToolManagement({ isCreatingMode, currentAgentId }: ToolM
         {grouped.map((src) => (
           <div key={src.key}>
             <div className="mb-2 flex items-center gap-1.5 text-xs font-medium text-gray-500">
-              <span className={`size-1.5 rounded-full ${SOURCE_META[src.key].dot}`} />
+              <span
+                className={`size-1.5 rounded-full ${SOURCE_META[src.key].dot}`}
+              />
               {t(SOURCE_META[src.key].label)}（{src.totalCount}）
             </div>
 
@@ -182,15 +245,22 @@ export default function ToolManagement({ isCreatingMode, currentAgentId }: ToolM
                 const accent = SOURCE_META[src.key].accentClass;
 
                 return (
-                  <div key={catKey} className="overflow-hidden rounded-lg border border-gray-200 bg-white">
+                  <div
+                    key={catKey}
+                    className="overflow-hidden rounded-lg border border-gray-200 bg-white"
+                  >
                     <button
                       onClick={() => toggleCat(catKey)}
                       className={`flex w-full items-center gap-1.5 px-3 py-1.5 text-left transition-colors hover:bg-gray-50 ${
                         !isCollapsed ? "border-b border-gray-100" : ""
                       }`}
                     >
-                      <ChevronRight className={`size-3.5 shrink-0 text-gray-400 transition-transform ${!isCollapsed ? "rotate-90" : ""}`} />
-                      <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${accent}`}>
+                      <ChevronRight
+                        className={`size-3.5 shrink-0 text-gray-400 transition-transform ${!isCollapsed ? "rotate-90" : ""}`}
+                      />
+                      <span
+                        className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${accent}`}
+                      >
                         {t(cat.category)}
                       </span>
                       <span className="text-[10px] text-gray-400">
@@ -202,22 +272,41 @@ export default function ToolManagement({ isCreatingMode, currentAgentId }: ToolM
                       <div className="divide-y divide-gray-100">
                         {cat.tools.map((tool) => {
                           const labels = getToolLabels(tool);
-                          const toolUnavailableReasons = tool.unavailable_reasons || [];
-                          const isModelUnavailable = toolUnavailableReasons.includes("mcp_model_unavailable");
+                          const toolUnavailableReasons =
+                            tool.unavailable_reasons || [];
+                          const isModelUnavailable =
+                            toolUnavailableReasons.includes(
+                              "mcp_model_unavailable"
+                            );
                           const disabled =
-                            isToolDisabledDueToVlm(tool.name, isImageUnderstandingAvailable, isVideoUnderstandingAvailable) ||
-                            isToolDisabledDueToEmbedding(tool.name, isEmbeddingAvailable) ||
+                            isToolDisabledDueToVlm(
+                              tool.name,
+                              isImageUnderstandingAvailable,
+                              isVideoUnderstandingAvailable
+                            ) ||
+                            isToolDisabledDueToEmbedding(
+                              tool.name,
+                              isEmbeddingAvailable
+                            ) ||
                             isModelUnavailable;
 
                           return (
-                            <div key={tool.id} className="group flex items-center gap-2 px-3 py-2">
+                            <div
+                              key={tool.id}
+                              className="group flex items-center gap-2 px-3 py-2"
+                            >
                               <div className="min-w-0 flex-1">
                                 <div className="flex items-center gap-2">
-                                  <span className={`truncate font-mono text-xs font-medium ${isModelUnavailable ? "text-gray-400" : "text-gray-800"}`}>
+                                  <span
+                                    className={`truncate font-mono text-xs font-medium ${isModelUnavailable ? "text-gray-400" : "text-gray-800"}`}
+                                  >
                                     {tool.name}
                                   </span>
                                   {labels.slice(0, 2).map((l) => (
-                                    <span key={l} className="shrink-0 rounded bg-blue-50 px-1.5 py-0.5 text-[10px] text-blue-600">
+                                    <span
+                                      key={l}
+                                      className="shrink-0 rounded bg-blue-50 px-1.5 py-0.5 text-[10px] text-blue-600"
+                                    >
                                       {l}
                                     </span>
                                   ))}
@@ -229,11 +318,23 @@ export default function ToolManagement({ isCreatingMode, currentAgentId }: ToolM
                                     </Tooltip>
                                   )}
                                   {isModelUnavailable && (
-                                    <Tooltip title={t("toolPool.mcpModelUnavailableTooltip")}>
-                                      <AlertTriangle size={14} className="shrink-0 text-orange-400" />
+                                    <Tooltip
+                                      title={t(
+                                        "toolPool.mcpModelUnavailableTooltip"
+                                      )}
+                                    >
+                                      <AlertTriangle
+                                        size={14}
+                                        className="shrink-0 text-orange-400"
+                                      />
                                     </Tooltip>
                                   )}
-                                  {disabled && !isModelUnavailable && <AlertTriangle size={14} className="shrink-0 text-orange-400" />}
+                                  {disabled && !isModelUnavailable && (
+                                    <AlertTriangle
+                                      size={14}
+                                      className="shrink-0 text-orange-400"
+                                    />
+                                  )}
                                 </div>
                               </div>
 
@@ -268,11 +369,14 @@ export default function ToolManagement({ isCreatingMode, currentAgentId }: ToolM
       {modalOpen && (
         <ToolConfigModal
           isOpen={modalOpen}
-          onCancel={() => { setModalOpen(false); setConfigTool(null); setConfigParams([]); }}
+          onCancel={() => {
+            setModalOpen(false);
+            setConfigTool(null);
+            setConfigParams([]);
+          }}
           tool={configTool!}
           initialParams={configParams}
           selectedTool={configTool}
-          isCreatingMode={isCreatingMode}
           currentAgentId={currentAgentId}
         />
       )}
@@ -282,12 +386,22 @@ export default function ToolManagement({ isCreatingMode, currentAgentId }: ToolM
 
 // ─── Pure helper ─────────────────────────────────────────────────────────────
 
-interface CatGroup { category: string; tools: Tool[] }
-interface SourceGroup { key: SourceKey; categories: CatGroup[]; totalCount: number }
+interface CatGroup {
+  category: string;
+  tools: Tool[];
+}
+interface SourceGroup {
+  key: SourceKey;
+  categories: CatGroup[];
+  totalCount: number;
+}
 
 function groupToolsBySource(tools: Tool[]): SourceGroup[] {
   const result: SourceGroup[] = [];
-  for (const [key, meta] of Object.entries(SOURCE_META) as [SourceKey, typeof SOURCE_META[SourceKey]][]) {
+  for (const [key, meta] of Object.entries(SOURCE_META) as [
+    SourceKey,
+    (typeof SOURCE_META)[SourceKey],
+  ][]) {
     const srcTools = tools.filter((t: any) => t.source === meta.sourceValue);
     if (srcTools.length === 0) continue;
     const catMap = new Map<string, Tool[]>();

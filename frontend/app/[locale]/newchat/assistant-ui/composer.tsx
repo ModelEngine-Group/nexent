@@ -81,6 +81,7 @@ export interface ComposerProps {
   runtimeMetadata?: Record<string, unknown>;
   onRuntimeMetadataChange?: (value: Record<string, unknown>) => void;
   allowRuntimeMetadata?: boolean;
+  disabled?: boolean;
 }
 
 // Simple tooltip wrapper
@@ -209,6 +210,7 @@ export const Composer: FC<ComposerProps> = ({
   runtimeMetadata = {},
   onRuntimeMetadataChange,
   allowRuntimeMetadata = false,
+  disabled = false,
 }) => {
   const { t } = useTranslation();
   const [knowledgeModalOpen, setKnowledgeModalOpen] = useState(false);
@@ -303,7 +305,14 @@ export const Composer: FC<ComposerProps> = ({
   ]);
 
   return (
-    <div className="relative flex w-full flex-col overflow-visible rounded-2xl border border-border bg-card shadow-sm">
+    <fieldset
+      disabled={disabled}
+      aria-disabled={disabled}
+      className={cn(
+        "relative m-0 flex min-w-0 w-full flex-col overflow-visible rounded-2xl border border-border bg-card p-0 shadow-sm",
+        disabled && "cursor-not-allowed opacity-60"
+      )}
+    >
       {!compact && <PlanView />}
 
       {/* Mode switcher above input */}
@@ -476,7 +485,7 @@ export const Composer: FC<ComposerProps> = ({
           />
         )}
       </ComposerPrimitive.Unstable_TriggerPopoverRoot>
-    </div>
+    </fieldset>
   );
 };
 

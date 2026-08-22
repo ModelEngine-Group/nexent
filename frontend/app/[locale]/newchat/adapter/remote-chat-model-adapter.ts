@@ -11,6 +11,7 @@ import type {
 import { conversationService } from "@/services/conversationService";
 import log from "@/lib/logger";
 import { parseAutomationProposal } from "@/features/agentAutomation/parseProposal";
+import type { SkillParam, ToolParam } from "@/types/agentConfig";
 
 // Backend SSE chunk format
 interface ImageMetadata {
@@ -80,20 +81,56 @@ export interface Nl2aToolRecommendation {
   score: number;
 }
 
-export interface Nl2AgentSelectedTool {
-  tool_id: number;
-  name: string;
-  origin_name?: string | null;
-  description: string;
-  source: "mcp";
-  usage: string;
-  labels: string[];
-  inputs: string;
+export type Nl2AgentCardActionSubtype =
+  | "requirement_clarification"
+  | "suggested_resource_installation"
+  | "installed_resource_binding";
+
+export interface Nl2AgentCardAction {
+  type: "nl2agent_card_action";
+  subtype: Nl2AgentCardActionSubtype;
+  agent_id: number;
+  action: string;
+  result: Record<string, unknown>;
 }
 
-export interface Nl2AgentToolSelection {
-  type: "nl2agent_tool_selection";
-  tools: Nl2AgentSelectedTool[];
+export type Nl2AgentDraftField = "description" | Nl2aPromptField;
+
+export type Nl2AgentStateEvent =
+  | {
+      event: "agent_draft_fields_saved";
+      agent_id: number;
+      updated_fields: Nl2AgentDraftField[];
+    }
+  | {
+      event: "prompt_generation_failed";
+      agent_id: number;
+      failed_fields: Nl2aPromptField[];
+    }
+  | {
+      event: "agent_generation_completed";
+      agent_id: number;
+    };
+
+export interface Nl2aRequirementClarificationOption {
+  option_id: string;
+  label: string;
+}
+
+export interface Nl2aRequirementClarificationQuestion {
+  question_id: string;
+  question_type: "single_choice" | "multiple_choice" | "text";
+  title: string;
+  required: boolean;
+  options: Nl2aRequirementClarificationOption[];
+  allow_other: boolean;
+  other_input_expanded: boolean;
+}
+
+export interface Nl2aRequirementClarificationPayload {
+  subtype: "requirement_clarification";
+  agent_id: number;
+  questions: Nl2aRequirementClarificationQuestion[];
 }
 
 export type Nl2aLocalMcpRecommendationPayload =
@@ -122,9 +159,56 @@ export interface Nl2aAgentDraftPayload {
   example_questions: string[];
 }
 
+// PR1 freezes the future card identity boundary only. Resource and summary
+// fields are added with their implementations in PR2 through PR4.
+export interface Nl2aSuggestedResourceInstallationPayload {
+  subtype: "suggested_resource_installation";
+  agent_id: number;
+}
+
+export interface Nl2aInstalledResourceBindingPayload {
+  subtype: "installed_resource_binding";
+  agent_id: number;
+  resources: Nl2aRecommendedResource[];
+}
+
+export interface Nl2aResourceCandidate {
+  candidate_ref: string;
+  resource_type: "tool" | "skill";
+  source: "LOCAL_TOOL" | "MCP_TOOL" | "INSTALLED_SKILL";
+  name: string;
+  description: string;
+  requirement_ids: string[];
+  score: number;
+}
+
+export type Nl2aRecommendedResource =
+  | {
+      candidate: Nl2aResourceCandidate & { resource_type: "tool" };
+      recommendation: "recommended" | "optional";
+      form_kind: "TOOL_CONFIG";
+      config: ToolParam[];
+    }
+  | {
+      candidate: Nl2aResourceCandidate & { resource_type: "skill" };
+      recommendation: "recommended" | "optional";
+      form_kind: "SKILL_CONFIG";
+      config: SkillParam[];
+    };
+
+export type Nl2aPromptField =
+  | "duty_prompt"
+  | "constraint_prompt"
+  | "few_shots_prompt"
+  | "greeting_message"
+  | "example_questions";
+
 export type Nl2aPayload =
+  | Nl2aRequirementClarificationPayload
   | Nl2aLocalMcpRecommendationPayload
-  | Nl2aAgentDraftPayload;
+  | Nl2aAgentDraftPayload
+  | Nl2aSuggestedResourceInstallationPayload
+  | Nl2aInstalledResourceBindingPayload;
 
 export interface Nl2aMessage {
   type: "nl2a";
@@ -139,7 +223,7 @@ interface NexentRunConfig {
   agentId?: number | string;
   agentVersionNo?: number;
   enablePlan?: boolean;
-  runtimeMode?: "nl2agent" | "nl2skill";
+  runtimeMode?: "nl2agent" | "nl2skill" | "agent-debug";
   knowledgeScope?: import("@/types/knowledgeScope").ConversationKnowledgeScope;
   onKnowledgeScopeResolved?: (
     resolution: import("@/types/knowledgeScope").KnowledgeScopeResolution
@@ -148,6 +232,7 @@ interface NexentRunConfig {
   complexity?: "simple" | "complicated";
   language?: "zh" | "en";
   onNl2SkillEvent?: (event: Nl2SkillStreamEvent) => void;
+  onNl2AgentState?: (event: Nl2AgentStateEvent) => void;
   modelId?: number;
   runtimeMetadata?: Record<string, unknown>;
   runtimeMetadataVersion?: number;
@@ -529,7 +614,8 @@ function extractAgentRunTime(content: string): string | undefined {
   if (closeIdx < 0) return undefined;
   const raw = content.slice(AGENT_RUN_TIME_PREFIX.length, closeIdx).trim();
   // Format check: "YYYY-MM-DD HH:MM:SS" with optional timezone offset "±HHMM"
-  if (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}([+-]\d{4})?$/.test(raw)) return undefined;
+  if (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}([+-]\d{4})?$/.test(raw))
+    return undefined;
   return raw;
 }
 
@@ -610,6 +696,7 @@ function mapChunkType(type: string): AssistantPartType | null {
     case "parse":
     case "card":
     case "nl2a":
+    case "nl2a_state":
     case "files":
     case "skill_files": // Backward compatibility during rolling upgrades
     case "memory_search":
@@ -682,13 +769,103 @@ function appendToolCallPart(contentParts: any[], toolCallPart: any): any {
  */
 function parseNl2aMessage(chunk: SseChunk): Nl2aMessage | null {
   try {
+    const content = JSON.parse(chunk.content) as Nl2aPayload;
+    if (content.subtype === "requirement_clarification") {
+      if (
+        !Number.isInteger(content.agent_id) ||
+        content.agent_id <= 0 ||
+        !Array.isArray(content.questions) ||
+        content.questions.length === 0 ||
+        content.questions.length > 5
+      ) {
+        log.warn("[ChatModelAdapter] Ignored invalid clarification payload");
+        return null;
+      }
+    }
+    if (content.subtype === "installed_resource_binding") {
+      if (
+        !Number.isInteger(content.agent_id) ||
+        content.agent_id <= 0 ||
+        !Array.isArray(content.resources) ||
+        content.resources.length > 12 ||
+        content.resources.some(
+          (resource) =>
+            !resource?.candidate?.candidate_ref ||
+            !["tool", "skill"].includes(resource.candidate.resource_type) ||
+            !["recommended", "optional"].includes(resource.recommendation) ||
+            !Array.isArray(resource.config)
+        )
+      ) {
+        log.warn("[ChatModelAdapter] Ignored invalid binding-card payload");
+        return null;
+      }
+    }
     return {
       type: "nl2a",
       tool_name: chunk.tool_name,
-      content: JSON.parse(chunk.content) as Nl2aPayload,
+      content,
     };
   } catch (error) {
     log.warn("[ChatModelAdapter] Failed to parse nl2a content:", error);
+    return null;
+  }
+}
+
+export function parseNl2AgentState(content: string): Nl2AgentStateEvent | null {
+  try {
+    const parsed = JSON.parse(content) as Record<string, unknown>;
+    if (!Number.isInteger(parsed.agent_id) || Number(parsed.agent_id) <= 0) {
+      return null;
+    }
+    const promptFields = new Set<Nl2aPromptField>([
+      "duty_prompt",
+      "constraint_prompt",
+      "few_shots_prompt",
+      "greeting_message",
+      "example_questions",
+    ]);
+    if (parsed.event === "agent_generation_completed") {
+      return Object.keys(parsed).length === 2
+        ? (parsed as unknown as Nl2AgentStateEvent)
+        : null;
+    }
+    if (parsed.event === "prompt_generation_failed") {
+      if (
+        Object.keys(parsed).length !== 3 ||
+        !Array.isArray(parsed.failed_fields) ||
+        parsed.failed_fields.length === 0 ||
+        parsed.failed_fields.some(
+          (field) =>
+            typeof field !== "string" ||
+            !promptFields.has(field as Nl2aPromptField)
+        ) ||
+        new Set(parsed.failed_fields).size !== parsed.failed_fields.length
+      ) {
+        return null;
+      }
+      return parsed as unknown as Nl2AgentStateEvent;
+    }
+
+    const draftFields = new Set<Nl2AgentDraftField>([
+      "description",
+      ...promptFields,
+    ]);
+    if (
+      parsed.event !== "agent_draft_fields_saved" ||
+      Object.keys(parsed).length !== 3 ||
+      !Array.isArray(parsed.updated_fields) ||
+      parsed.updated_fields.length === 0 ||
+      parsed.updated_fields.some(
+        (field) =>
+          typeof field !== "string" ||
+          !draftFields.has(field as Nl2AgentDraftField)
+      ) ||
+      new Set(parsed.updated_fields).size !== parsed.updated_fields.length
+    ) {
+      return null;
+    }
+    return parsed as unknown as Nl2AgentStateEvent;
+  } catch {
     return null;
   }
 }
@@ -1141,10 +1318,22 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     const custom = runConfig?.custom as NexentRunConfig | undefined;
     const isNl2Agent = custom?.runtimeMode === "nl2agent";
     const isNl2Skill = custom?.runtimeMode === "nl2skill";
-    const isEphemeralRuntime = isNl2Agent || isNl2Skill;
+    const isAgentDebug = custom?.runtimeMode === "agent-debug";
+    const isEphemeralRuntime = isNl2Agent || isNl2Skill || isAgentDebug;
     const serverThreadId = custom?.threadId;
     const onServerConversationId = custom?.onServerConversationId;
     const isResume = !isEphemeralRuntime && custom?.resume === true;
+    const nl2AgentId =
+      typeof custom?.agentId === "string"
+        ? Number(custom.agentId)
+        : custom?.agentId;
+    if (
+      isNl2Agent &&
+      (!Number.isInteger(nl2AgentId) || Number(nl2AgentId) <= 0)
+    ) {
+      log.warn("[ChatModelAdapter] NL2Agent requires an editable Agent ID");
+      return;
+    }
 
     // Extract user query: last user message text
     let lastUserIndex = -1;
@@ -1157,16 +1346,24 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
 
     const visibleQuery =
       lastUserIndex >= 0 ? extractTextContent([messages[lastUserIndex]]) : "";
-    const selectionMetadata =
+    const lastUserCustom =
       isNl2Agent && lastUserIndex >= 0
-        ? (
-            messages[lastUserIndex].metadata?.custom as
-              | { nl2agentToolSelection?: Nl2AgentToolSelection }
-              | undefined
-          )?.nl2agentToolSelection
+        ? (messages[lastUserIndex].metadata?.custom as
+            | {
+                nl2agentCardAction?: Nl2AgentCardAction;
+              }
+            | undefined)
         : undefined;
-    const query = selectionMetadata
-      ? JSON.stringify(selectionMetadata)
+    const structuredNl2AgentInput = lastUserCustom?.nl2agentCardAction;
+    if (
+      structuredNl2AgentInput &&
+      structuredNl2AgentInput.agent_id !== nl2AgentId
+    ) {
+      log.warn("[ChatModelAdapter] Ignored mismatched NL2Agent action ID");
+      return;
+    }
+    const query = structuredNl2AgentInput
+      ? JSON.stringify(structuredNl2AgentInput)
       : visibleQuery;
 
     if (!isResume && !query) {
@@ -1182,7 +1379,13 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     const historyMessages =
       !isResume && lastUserIndex > 0 ? messages.slice(0, lastUserIndex) : [];
     const history = historyMessages.map((msg) => {
-      const text = extractTextContent([msg]);
+      const customMetadata = isNl2Agent
+        ? (msg.metadata?.custom as
+            { nl2agentCardAction?: Nl2AgentCardAction } | undefined)
+        : undefined;
+      const text = customMetadata?.nl2agentCardAction
+        ? JSON.stringify(customMetadata.nl2agentCardAction)
+        : extractTextContent([msg]);
       return {
         role: msg.role === "user" ? ("user" as const) : ("assistant" as const),
         content: text,
@@ -1202,7 +1405,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       query: isResume ? "" : query,
       history: isResume ? [] : history,
       minio_files: minioFiles.length > 0 ? minioFiles : null,
-      is_debug: false,
+      is_debug: isAgentDebug,
     };
     const numericServerThreadId = Number(serverThreadId);
     const hasServerConversationId =
@@ -1213,7 +1416,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
 
     // Pass selected agent if provided via custom (set by the page wrapper)
     if (
-      !isEphemeralRuntime &&
+      (isAgentDebug || isNl2Agent || !isEphemeralRuntime) &&
       custom?.agentId !== undefined &&
       custom.agentId !== null
     ) {
@@ -1231,14 +1434,51 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     }
 
     // Pass selected model if provided via ModelContext (registered by ModelSelector)
+    // For agent-debug mode, prefer the model passed via custom (from the compare panel selector)
     const modelName = context.config?.modelName;
-    if (!isEphemeralRuntime && modelName) {
+    const modelIdFromCustom = custom?.modelId;
+
+    if (isAgentDebug && modelIdFromCustom) {
+      // Agent-debug mode: use the model from the compare panel selector
+      requestBody.model_id = Number(modelIdFromCustom);
+    } else if (modelName) {
+      // Normal mode: use the model from ModelContext
       requestBody.model_id = Number(modelName);
     }
 
     log.log(
       "[ChatModelAdapter] Sending agent request through conversation service"
     );
+    log.log(
+      `[ChatModelAdapter] model_id=${requestBody.model_id}, isAgentDebug=${isAgentDebug}, customModelId=${modelIdFromCustom}`
+    );
+
+    let backendConversationId = hasServerConversationId
+      ? numericServerThreadId
+      : null;
+    let backendStopPromise: Promise<void> | null = null;
+    const stopBackendConversation = async (conversationId: number) => {
+      if (isEphemeralRuntime || backendStopPromise) return;
+      backendStopPromise = conversationService
+        .stop(conversationId)
+        .then(() => undefined)
+        .catch((error) => {
+          log.error(
+            `[ChatModelAdapter] Failed to stop backend conversation ${conversationId}:`,
+            error
+          );
+        });
+      await backendStopPromise;
+    };
+    const handleAbort = () => {
+      if (backendConversationId !== null) {
+        void stopBackendConversation(backendConversationId);
+      }
+    };
+    abortSignal?.addEventListener("abort", handleAbort, { once: true });
+    const cleanupAbortHandler = () => {
+      abortSignal?.removeEventListener("abort", handleAbort);
+    };
 
     let agentResponse:
       | ReadableStreamDefaultReader<Uint8Array>
@@ -1257,7 +1497,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           minio_files: requestBody.minio_files as any,
           agent_id: requestBody.agent_id as number | undefined,
           version_no: custom?.agentVersionNo,
-          is_debug: false,
+          is_debug: isAgentDebug,
           is_resume: isResume,
           enable_plan: custom?.enablePlan === true,
           knowledge_scope: requestBody.knowledge_scope as
@@ -1280,11 +1520,13 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         abortSignal,
         (conversationId) => {
           const numericId = Number(conversationId);
-          if (
-            !Number.isNaN(numericId) &&
-            numericId > 0 &&
-            onServerConversationId
-          ) {
+          if (!Number.isNaN(numericId) && numericId > 0) {
+            backendConversationId = numericId;
+            if (abortSignal?.aborted) {
+              void stopBackendConversation(numericId);
+            }
+          }
+          if (numericId > 0 && onServerConversationId) {
             onServerConversationId(
               String(numericId),
               !isResume && !hasServerConversationId ? query : undefined
@@ -1299,10 +1541,12 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         custom.onRuntimeMetadataSent?.(returnedRuntimeMetadataVersion);
       }
     } catch (error: unknown) {
+      cleanupAbortHandler();
       if (
         error instanceof Error &&
         (error.name === "AbortError" || error.message === "请求已被取消")
       ) {
+        await backendStopPromise;
         log.log("[ChatModelAdapter] Request aborted by user");
         return;
       }
@@ -1311,6 +1555,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     }
 
     if ("type" in agentResponse) {
+      cleanupAbortHandler();
       log.log(
         "[ChatModelAdapter] JSON response (resume finished):",
         agentResponse.data
@@ -1562,6 +1807,37 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     const searchImagesAccumulator: SearchSource[] = [];
     let skillFileAttachments: CompleteAttachment[] = [];
     let nl2a: Nl2aMessage | undefined;
+    const acceptNl2aBoundary = (chunk: SseChunk): boolean => {
+      const parsedNl2a = parseNl2aMessage(chunk);
+      if (!parsedNl2a) return false;
+      if (nl2a) {
+        log.error(
+          "[ChatModelAdapter] Ignored additional NL2Agent card in one run",
+          {
+            acceptedSubtype: nl2a.content.subtype,
+            ignoredSubtype: parsedNl2a.content.subtype,
+          }
+        );
+        return false;
+      }
+      nl2a = parsedNl2a;
+      return true;
+    };
+    const deliveredNl2AgentStates = new Set<string>();
+    const deliverNl2AgentState = (chunk: SseChunk) => {
+      if (!isNl2Agent) return;
+      const event = parseNl2AgentState(chunk.content);
+      if (!event) {
+        log.warn("[ChatModelAdapter] Ignored invalid nl2a_state payload");
+        return;
+      }
+      const eventKey = JSON.stringify(event);
+      if (event.event !== "agent_draft_fields_saved") {
+        if (deliveredNl2AgentStates.has(eventKey)) return;
+        deliveredNl2AgentStates.add(eventKey);
+      }
+      custom?.onNl2AgentState?.(event);
+    };
     let verificationPanel: VerificationPanelPart | null = null;
 
     const appendSearchImages = (imageUrls: string[]) => {
@@ -1773,11 +2049,14 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           }
 
           if (chunk.type === "nl2a") {
-            const parsedNl2a = parseNl2aMessage(chunk);
-            if (parsedNl2a) {
-              nl2a = parsedNl2a;
+            if (acceptNl2aBoundary(chunk)) {
               yield buildStreamResult(contentParts);
             }
+            continue;
+          }
+
+          if (chunk.type === "nl2a_state") {
+            deliverNl2AgentState(chunk);
             continue;
           }
 
@@ -2113,11 +2392,11 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             attachExecutionLogsToTool(contentParts, chunk);
             yield buildStreamResult(contentParts);
           } else if (chunk.type === "nl2a") {
-            const parsedNl2a = parseNl2aMessage(chunk);
-            if (parsedNl2a) {
-              nl2a = parsedNl2a;
+            if (acceptNl2aBoundary(chunk)) {
               yield buildStreamResult(contentParts);
             }
+          } else if (chunk.type === "nl2a_state") {
+            deliverNl2AgentState(chunk);
           } else if (chunk.type === "automation_proposal") {
             const proposal = parseAutomationProposal(chunk.content);
             if (proposal) {
@@ -2457,6 +2736,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         },
       } as any;
     } finally {
+      cleanupAbortHandler();
       if (isNl2Skill) {
         custom?.onNl2SkillEvent?.({
           type: "stream_closed",
