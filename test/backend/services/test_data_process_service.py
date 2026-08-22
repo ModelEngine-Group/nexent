@@ -652,7 +652,7 @@ class TestDataProcessService(unittest.TestCase):
         # Setup mocks — get_all_tasks creates short-timeout inspectors via celery_app
         mock_inspector = MagicMock()
         mock_inspector.active.return_value = {
-            'worker1': [{'id': 'task1', 'file_id': 'fid-runtime'}, {'id': 'task2'}]
+            'worker1': [{'id': 'task1', 'kwargs': {'file_id': 'fid-runtime'}}, {'id': 'task2'}]
         }
         mock_inspector.reserved.return_value = {
             'worker1': [{'id': 'task3'}]
