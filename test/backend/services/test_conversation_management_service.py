@@ -583,6 +583,31 @@ class TestConversationManagementService(unittest.TestCase):
             "New Chat", self.user_id, agent_id=7, chat_mode="planning"
         )
 
+    @patch('backend.services.conversation_management_service.create_conversation')
+    def test_create_new_conversation_with_runtime_metadata(self, mock_create_conversation):
+        mock_create_conversation.return_value = {
+            "conversation_id": 123,
+            "title": "New Chat",
+            "runtime_metadata": {"session": "s1"},
+        }
+
+        result = create_new_conversation(
+            "New Chat",
+            self.user_id,
+            agent_id=7,
+            chat_mode="planning",
+            runtime_metadata={"session": "s1"},
+        )
+
+        self.assertEqual(result["runtime_metadata"], {"session": "s1"})
+        mock_create_conversation.assert_called_once_with(
+            "New Chat",
+            self.user_id,
+            agent_id=7,
+            chat_mode="planning",
+            runtime_metadata={"session": "s1"},
+        )
+
     @patch('backend.services.conversation_management_service.update_conversation_agent_id')
     def test_update_conversation_agent_id_service_success(self, mock_update_conversation_agent_id):
         # Setup
