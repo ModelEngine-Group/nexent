@@ -1,8 +1,7 @@
 "use client";
 
 import { useTranslation } from "react-i18next";
-import { Form, InputNumber, Switch, Row, Col, Flex, Alert } from "antd";
-import { Info } from "lucide-react";
+import { Form, InputNumber, Switch, Row, Col, Flex } from "antd";
 
 import { useAgentStore } from "@/stores/agentStore";
 import { DEFAULT_AGENT_VERIFICATION_CONFIG } from "@/types/agentConfig";
@@ -25,11 +24,13 @@ export default function AgentRunPolicy() {
             <InputNumber
               min={1}
               max={1000}
-              className="w-full"
+              className="flex-1"
               value={editedAgent.max_step || 10}
               onChange={(val) => updateAgent({ max_step: val ?? 10 })}
-              addonAfter={t("agent.runPolicy.maxStepUnit")}
             />
+            <span className="ant-form-text pl-2">
+              {t("agent.runPolicy.maxStepUnit")}
+            </span>
           </Form.Item>
         </Col>
 
@@ -49,8 +50,10 @@ export default function AgentRunPolicy() {
               onChange={(val) =>
                 updateAgent({ requested_output_tokens: val ?? 4096 })
               }
-              addonAfter="tokens"
             />
+            <span className="ant-form-tex pl-2" >
+              tokens
+            </span>
           </Form.Item>
         </Col>
       </Row>
@@ -63,19 +66,12 @@ export default function AgentRunPolicy() {
             label={t("agent.provideRunSummary")}
             className="mb-3"
           >
-            <Flex align="center" gap={8}>
-              <Switch
-                checked={editedAgent.provide_run_summary}
-                onChange={(checked) =>
-                  updateAgent({ provide_run_summary: checked })
-                }
-              />
-              <span className="text-xs text-gray-500">
-                {editedAgent.provide_run_summary
-                  ? t("common.enabled")
-                  : t("common.disabled")}
-              </span>
-            </Flex>
+            <Switch
+              checked={editedAgent.provide_run_summary}
+              onChange={(checked) =>
+                updateAgent({ provide_run_summary: checked })
+              }
+            />
           </Form.Item>
         </Col>
         {/* Allow Chat Metadata */}
@@ -85,23 +81,20 @@ export default function AgentRunPolicy() {
             tooltip={t("agent.allowChatMetadata.tooltip")}
             className="mb-3"
           >
-            <Flex align="center" gap={8}>
-              <Switch
-                checked={editedAgent.allow_chat_metadata ?? false}
-                onChange={(checked) =>
-                  updateAgent({ allow_chat_metadata: checked })
-                }
-              />
-              <span className="text-xs text-gray-500">
-                {editedAgent.allow_chat_metadata
-                  ? t("common.enabled")
-                  : t("common.disabled")}
-              </span>
-            </Flex>
+            <Switch
+              checked={editedAgent.allow_chat_metadata ?? false}
+              onChange={(checked) =>
+                updateAgent({ allow_chat_metadata: checked })
+              }
+            />
           </Form.Item>
         </Col>
         <Col xs={24} sm={8}>
-          <Form.Item label={t("agent.field.selfValidate")} className="mb-2">
+          <Form.Item
+            label={t("agent.field.selfValidate")}
+            tooltip={t("agent.runPolicy.selfValidateHint")}
+            className="mb-2"
+          >
             <Switch
               checked={editedAgent.verification_config?.enabled ?? false}
               onChange={(checked) =>
@@ -115,14 +108,6 @@ export default function AgentRunPolicy() {
               }
             />
           </Form.Item>
-          {editedAgent.verification_config?.enabled && (
-            <Alert
-              type="info"
-              icon={<Info size={14} />}
-              message={t("agent.runPolicy.selfValidateHint")}
-              className="mt-1"
-            />
-          )}
         </Col>
       </Row>
     </div>

@@ -69,18 +69,12 @@ export default function AgentDeployment() {
           <Form.Item
             label={t("agent.isMainAgent")}
             className="mb-3"
+            tooltip={t("agent.deployment.isMainAgentTooltip")}
           >
-            <Flex align="center" gap={8}>
-              <Switch
-                checked={editedAgent.is_main_agent ?? false}
-                onChange={(checked) => updateAgent({ is_main_agent: checked })}
-              />
-              <span className="text-xs text-gray-500">
-                {editedAgent.is_main_agent
-                  ? t("agent.mainAgent.enabled")
-                  : t("agent.mainAgent.disabled")}
-              </span>
-            </Flex>
+            <Switch
+              checked={editedAgent.is_main_agent ?? false}
+              onChange={(checked) => updateAgent({ is_main_agent: checked })}
+            />
           </Form.Item>
         </Col>
 
@@ -89,21 +83,12 @@ export default function AgentDeployment() {
           <Form.Item
             label={t("agent.deployment.a2aEnabled")}
             className="mb-3"
+            tooltip={t("agent.deployment.a2aEnabledTooltip")}
           >
-            <Flex align="center" gap={8}>
-              <Switch
-                checked={editedAgent.is_a2a ?? false}
-                onChange={(checked) => updateAgent({ is_a2a: checked })}
-              />
-              <Flex align="center" gap={4}>
-                <Globe size={12} className="text-gray-400" />
-                <span className="text-xs text-gray-500">
-                  {editedAgent.is_a2a
-                    ? t("agent.a2a.publishAsA2AAgent")
-                    : t("agent.a2a.notPublished")}
-                </span>
-              </Flex>
-            </Flex>
+            <Switch
+              checked={editedAgent.is_a2a ?? false}
+              onChange={(checked) => updateAgent({ is_a2a: checked })}
+            />
           </Form.Item>
         </Col>
       </Row>
