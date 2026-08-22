@@ -958,10 +958,23 @@ class SkillZipEntry(BaseModel):
     skill_zip_base64: str
 
 
+class SkillResolution(BaseModel):
+    """User-selected resolution for a duplicate skill during agent import."""
+    skill_name: str
+    action: Literal["rename", "use_existing"]
+    new_name: Optional[str] = None
+
+
+class SkillConflictCheckRequest(BaseModel):
+    """Skill names to check before showing the agent import steps."""
+    skill_names: List[str]
+
+
 class AgentImportRequest(BaseModel):
     agent_info: ExportAndImportDataFormat
     force_import: bool = False
     skills: Optional[List[SkillZipEntry]] = None
+    skill_resolutions: Optional[List[SkillResolution]] = None
 
 
 class AgentNameBatchRegenerateItem(BaseModel):

@@ -91,6 +91,7 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/agent/stop/${conversationId}`,
     export: `${API_BASE_URL}/agent/export`,
     import: `${API_BASE_URL}/agent/import`,
+    checkSkills: `${API_BASE_URL}/agent/check_skills`,
     checkNameBatch: `${API_BASE_URL}/agent/check_name`,
     regenerateNameBatch: `${API_BASE_URL}/agent/regenerate_name`,
     searchInfo: `${API_BASE_URL}/agent/search_info`,

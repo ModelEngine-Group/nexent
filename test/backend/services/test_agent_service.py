@@ -10531,6 +10531,65 @@ async def test_run_agent_background_consumes_stream_and_returns_assistant_messag
 # Tests for export_agent_with_skills_impl and import_agent_with_skills_impl
 # =============================================================================
 
+
+def test_build_skill_import_conflicts_avoids_bundle_and_existing_names():
+    """Conflict suggestions should avoid tenant names and names in the upload bundle."""
+    from backend.services import agent_service as ag_svc
+
+    unavailable_snapshots = []
+
+    def generate_name(base_name, unavailable_names):
+        unavailable_snapshots.append((base_name, set(unavailable_names)))
+        return "SkillA 副本 2" if base_name == "SkillA" else "SkillB 副本"
+
+    with patch.object(
+        ag_svc,
+        "generate_available_copy_skill_name",
+        side_effect=generate_name,
+    ):
+        conflicts = ag_svc.build_skill_import_conflicts(
+            ["SkillA", "SkillA 副本", "SkillB", "SkillA"],
+            {"SkillA", "SkillB"},
+        )
+
+    assert conflicts == [
+        {"skill_name": "SkillA", "suggested_new_name": "SkillA 副本 2"},
+        {"skill_name": "SkillB", "suggested_new_name": "SkillB 副本"},
+    ]
+    assert unavailable_snapshots[0] == (
+        "SkillA",
+        {"SkillA", "SkillA 副本", "SkillB"},
+    )
+    assert "SkillA 副本 2" in unavailable_snapshots[1][1]
+
+
+@patch('backend.services.agent_service.get_current_user_info')
+def test_check_skill_conflicts_impl_uses_current_tenant(mock_get_user_info):
+    """Skill precheck should query only the authenticated tenant."""
+    from backend.services import agent_service as ag_svc
+
+    mock_get_user_info.return_value = ("user_123", "tenant_abc", "en")
+    with patch.object(
+        ag_svc.skill_db,
+        "list_skills",
+        return_value=[{"name": "SkillA", "skill_id": 10}],
+    ) as mock_list_skills, patch.object(
+        ag_svc,
+        "generate_available_copy_skill_name",
+        return_value="SkillA 副本",
+    ):
+        conflicts = ag_svc.check_skill_conflicts_impl(
+            ["SkillA", "SkillB"],
+            "Bearer token",
+        )
+
+    assert conflicts == [{
+        "skill_name": "SkillA",
+        "suggested_new_name": "SkillA 副本",
+    }]
+    mock_list_skills.assert_called_once_with("tenant_abc")
+
+
 @pytest.mark.asyncio
 @patch('backend.services.agent_service.collect_skill_zip_entries')
 @patch('backend.services.agent_service.export_agent_dict_impl')
@@ -10605,9 +10664,49 @@ async def test_export_agent_with_skills_impl_with_zip(
         assert "skills/TestSkill.zip" in zf.namelist()
 
 
-# Note: test_import_agent_with_skills_impl_duplicate_skills was removed
-# The functionality is covered by other tests and the duplicate check
-# logic is tested in other test modules.
+@pytest.mark.asyncio
+@patch('backend.services.agent_service.get_current_user_info')
+async def test_import_agent_with_skills_impl_duplicate_returns_suggestions_before_writes(
+    mock_get_user_info,
+):
+    """Duplicate skills should return deterministic suggestions before creating data."""
+    from backend.services.agent_service import import_agent_with_skills_impl
+    from backend.services import agent_service as ag_svc
+
+    mock_get_user_info.return_value = ("user_123", "tenant_abc", "en")
+    agent_info = types.SimpleNamespace(agent_id=1, agent_info={})
+    skills = [
+        types.SimpleNamespace(skill_name="SkillA", skill_zip_base64="eA=="),
+        types.SimpleNamespace(skill_name="SkillA 副本", skill_zip_base64="eA=="),
+    ]
+
+    with patch.object(
+        ag_svc.skill_db,
+        'list_skills',
+        return_value=[{"name": "SkillA", "skill_id": 10}],
+    ), patch.object(
+        ag_svc,
+        'generate_available_copy_skill_name',
+        return_value="SkillA \u526f\u672c 2",
+    ), patch.object(ag_svc, 'SkillService') as mock_skill_service, patch.object(
+        ag_svc,
+        'import_agent_impl',
+        new_callable=AsyncMock,
+    ) as mock_import:
+        with pytest.raises(ag_svc.SkillDuplicateError) as exc_info:
+            await import_agent_with_skills_impl(
+                agent_info=agent_info,
+                skills=skills,
+                authorization="Bearer token",
+            )
+
+    assert exc_info.value.duplicate_names == ["SkillA"]
+    assert exc_info.value.skill_conflicts == [{
+        "skill_name": "SkillA",
+        "suggested_new_name": "SkillA \u526f\u672c 2",
+    }]
+    mock_skill_service.assert_not_called()
+    mock_import.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -10622,16 +10721,23 @@ async def test_import_agent_with_skills_impl_success(mock_get_user_info):
     existing_skills = [{"name": "ExistingSkill"}]
     new_skills = [MagicMock(skill_name="NewSkill", skill_zip_base64="SGVsbG8gV29ybGQ=")]
 
-    mock_agent_info = MagicMock()
-    mock_agent_info.agent_id = 1
+    mock_agent_info = types.SimpleNamespace(
+        agent_id=1,
+        agent_info={
+            "1": types.SimpleNamespace(agent_id=1, skill_names=["NewSkill"]),
+        },
+    )
 
     mock_skill_service = MagicMock()
     mock_skill_service.create_skill_from_zip_bytes.return_value = {"skill_id": 200}
 
     with patch.object(ag_svc.skill_db, 'list_skills', return_value=existing_skills):
         with patch.object(ag_svc, 'import_agent_impl', return_value={1: 100}) as mock_import:
-            with patch.object(ag_svc.skill_db, 'create_or_update_skill_by_skill_info'):
-                with patch('services.skill_service.SkillService', return_value=mock_skill_service):
+            with patch.object(
+                ag_svc.skill_db,
+                'create_or_update_skill_by_skill_info',
+            ) as mock_create_instance:
+                with patch.object(ag_svc, 'SkillService', return_value=mock_skill_service):
                     result = await import_agent_with_skills_impl(
                         agent_info=mock_agent_info,
                         skills=new_skills,
@@ -10641,6 +10747,9 @@ async def test_import_agent_with_skills_impl_success(mock_get_user_info):
     assert result == {1: 100}
     mock_import.assert_called_once()
     mock_skill_service.create_skill_from_zip_bytes.assert_called_once()
+    created_skill_info = mock_create_instance.call_args.kwargs["skill_info"]
+    assert created_skill_info.agent_id == 100
+    assert created_skill_info.skill_id == 200
 
 
 @pytest.mark.asyncio
@@ -10656,24 +10765,113 @@ async def test_import_agent_with_skills_impl_no_main_agent(mock_get_user_info):
     # Use valid base64 encoded string "Hello World"
     new_skills = [MagicMock(skill_name="NewSkill", skill_zip_base64="SGVsbG8gV29ybGQ=")]
 
-    mock_agent_info = MagicMock()
-    mock_agent_info.agent_id = 1
+    mock_agent_info = types.SimpleNamespace(
+        agent_id=1,
+        agent_info={
+            "1": types.SimpleNamespace(agent_id=1, skill_names=["NewSkill"]),
+        },
+    )
 
     mock_skill_service = MagicMock()
     mock_skill_service.create_skill_from_zip_bytes.return_value = {"skill_id": 200}
 
     with patch.object(ag_svc.skill_db, 'list_skills', return_value=existing_skills):
         with patch.object(ag_svc, 'import_agent_impl', return_value={}) as mock_import:
-            with patch('services.skill_service.SkillService', return_value=mock_skill_service):
-                result = await import_agent_with_skills_impl(
-                    agent_info=mock_agent_info,
-                    skills=new_skills,
-                    authorization="Bearer token"
-                )
+            with patch.object(
+                ag_svc.skill_db,
+                'create_or_update_skill_by_skill_info',
+            ) as mock_create_instance:
+                with patch.object(ag_svc, 'SkillService', return_value=mock_skill_service):
+                    result = await import_agent_with_skills_impl(
+                        agent_info=mock_agent_info,
+                        skills=new_skills,
+                        authorization="Bearer token"
+                    )
 
     assert result == {}
     mock_import.assert_called_once()
-    # create_or_update_skill_by_skill_info should NOT be called since main_agent_id is None
+    mock_create_instance.assert_not_called()
+
+
+@pytest.mark.asyncio
+@patch('backend.services.agent_service.get_current_user_info')
+async def test_import_agent_with_skills_impl_resolves_existing_and_renamed_per_agent(
+    mock_get_user_info,
+):
+    """Use-existing and renamed skills should link to their original owning agents."""
+    from consts.model import SkillResolution
+    from backend.services.agent_service import import_agent_with_skills_impl
+    from backend.services import agent_service as ag_svc
+
+    mock_get_user_info.return_value = ("user_123", "tenant_abc", "en")
+    agent_info = types.SimpleNamespace(
+        agent_id=1,
+        agent_info={
+            "1": types.SimpleNamespace(agent_id=1, skill_names=["ExistingSkill"]),
+            "2": types.SimpleNamespace(agent_id=2, skill_names=["RenamedSkill", "NewSkill", "MissingSkill"]),
+        },
+    )
+    skills = [
+        types.SimpleNamespace(skill_name="ExistingSkill", skill_zip_base64="eA=="),
+        types.SimpleNamespace(skill_name="RenamedSkill", skill_zip_base64="eA=="),
+        types.SimpleNamespace(skill_name="NewSkill", skill_zip_base64="eA=="),
+    ]
+    rename_target = "RenamedSkill \u526f\u672c"
+    resolutions = [
+        SkillResolution(skill_name="ExistingSkill", action="use_existing"),
+        SkillResolution(skill_name="RenamedSkill", action="rename", new_name=rename_target),
+    ]
+    mock_skill_service = MagicMock()
+    mock_skill_service.create_skill_from_zip_bytes.side_effect = [
+        {"skill_id": 20},
+        {"skill_id": 30},
+    ]
+
+    with patch.object(
+        ag_svc.skill_db,
+        'list_skills',
+        return_value=[
+            {"name": "ExistingSkill", "skill_id": 10},
+            {"name": "RenamedSkill", "skill_id": 11},
+        ],
+    ), patch.object(
+        ag_svc,
+        'generate_available_copy_skill_name',
+        side_effect=lambda base_name, _: f"{base_name} \u526f\u672c",
+    ), patch.object(
+        ag_svc,
+        'SkillService',
+        return_value=mock_skill_service,
+    ), patch.object(
+        ag_svc,
+        'import_agent_impl',
+        new_callable=AsyncMock,
+        return_value={1: 101, 2: 102},
+    ), patch.object(
+        ag_svc.skill_db,
+        'create_or_update_skill_by_skill_info',
+    ) as mock_create_instance:
+        result = await import_agent_with_skills_impl(
+            agent_info=agent_info,
+            skills=skills,
+            authorization="Bearer token",
+            skill_resolutions=resolutions,
+        )
+
+    assert result == {1: 101, 2: 102}
+    assert [
+        call.kwargs["skill_name"]
+        for call in mock_skill_service.create_skill_from_zip_bytes.call_args_list
+    ] == [rename_target, "NewSkill"]
+    assert all(
+        call.kwargs["skip_duplicate_check"] is False
+        for call in mock_skill_service.create_skill_from_zip_bytes.call_args_list
+    )
+    created_links = {
+        (call.kwargs["skill_info"].agent_id, call.kwargs["skill_info"].skill_id)
+        for call in mock_create_instance.call_args_list
+    }
+    assert created_links == {(101, 10), (102, 20), (102, 30)}
 
 
 # ============================================================================
