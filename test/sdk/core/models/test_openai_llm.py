@@ -1846,5 +1846,120 @@ def test_provider_adapter_preserves_context_manager_tool_order(openai_model_inst
     assert openai_model_instance.last_provider_cache_advice.supported is True
 
 
+# ---------------------------------------------------------------------------
+# Tests for retry-with-exponential-backoff in OpenAIModel.__call__
+# ---------------------------------------------------------------------------
+
+
+class _StatusErr(Exception):
+    """Minimal stand-in for an OpenAI-style error exposing status_code."""
+
+    def __init__(self, status_code: int, message: str = ""):
+        super().__init__(message or f"HTTP {status_code}")
+        self.status_code = status_code
+
+
+def _make_content_chunk(content: str = "hi"):
+    chunk = MagicMock()
+    chunk.choices = [MagicMock()]
+    chunk.choices[0].delta.content = content
+    chunk.choices[0].delta.role = "assistant"
+    chunk.choices[0].delta.reasoning_content = None
+    chunk.usage = MagicMock()
+    chunk.usage.prompt_tokens = 1
+    chunk.usage.completion_tokens = 1
+    return chunk
+
+
+def _retry_model_config(max_attempts: int = 3, backoff_base: float = 0.0):
+    """Build a ModelRetryConfig with no real sleep so tests run fast."""
+    from nexent.core.models.retry import ModelRetryConfig
+
+    return ModelRetryConfig(
+        max_attempts=max_attempts,
+        backoff_base_seconds=backoff_base,
+        max_backoff_seconds=backoff_base,
+        jitter=False,
+    )
+
+
+def test_retry_succeeds_after_transient_failure(openai_model_instance):
+    """A 503 on the first attempt must be retried and succeed on the next."""
+    calls = {"n": 0}
+
+    def fake_create(stream=True, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise _StatusErr(503, "Service Unavailable")
+        return [_make_content_chunk("ok")]
+
+    openai_model_instance.retry_config = _retry_model_config()
+    openai_model_instance.client.chat.completions.create.side_effect = fake_create
+
+    result = openai_model_instance.__call__([{"role": "user", "content": "hello"}])
+
+    assert calls["n"] == 2
+    assert openai_model_instance.last_retry_count == 1
+    assert result is not None
+
+
+def test_retry_exhausts_after_max_attempts(openai_model_instance):
+    """Repeated 503 must exhaust retries and re-raise the last error."""
+    calls = {"n": 0}
+    max_attempts = 3
+
+    def fake_create(stream=True, **kwargs):
+        calls["n"] += 1
+        raise _StatusErr(503, "Service Unavailable")
+
+    openai_model_instance.retry_config = _retry_model_config(max_attempts=max_attempts)
+    openai_model_instance.client.chat.completions.create.side_effect = fake_create
+
+    with pytest.raises(_StatusErr) as exc_info:
+        openai_model_instance.__call__([{"role": "user", "content": "hello"}])
+
+    assert exc_info.value.status_code == 503
+    assert calls["n"] == max_attempts
+    assert openai_model_instance.last_retry_count == max_attempts - 1
+
+
+def test_non_retryable_fails_immediately(openai_model_instance):
+    """A 401 must NOT be retried; the call fails on the first attempt."""
+    calls = {"n": 0}
+
+    def fake_create(stream=True, **kwargs):
+        calls["n"] += 1
+        raise _StatusErr(401, "Unauthorized")
+
+    openai_model_instance.retry_config = _retry_model_config()
+    openai_model_instance.client.chat.completions.create.side_effect = fake_create
+
+    with pytest.raises(_StatusErr) as exc_info:
+        openai_model_instance.__call__([{"role": "user", "content": "hello"}])
+
+    assert exc_info.value.status_code == 401
+    assert calls["n"] == 1
+
+
+def test_empty_response_not_retried(openai_model_instance):
+    """EmptyModelResponseError must propagate without retrying."""
+    calls = {"n": 0}
+
+    def fake_create(stream=True, **kwargs):
+        calls["n"] += 1
+        chunk = _make_content_chunk(None)
+        chunk.choices[0].delta.content = None
+        chunk.usage = MagicMock(prompt_tokens=1, completion_tokens=1)
+        return [chunk]
+
+    openai_model_instance.retry_config = _retry_model_config()
+    openai_model_instance.client.chat.completions.create.side_effect = fake_create
+
+    with pytest.raises(openai_llm_module.EmptyModelResponseError):
+        openai_model_instance.__call__([{"role": "user", "content": "hello"}])
+
+    assert calls["n"] == 1
+
+
 if __name__ == "__main__":
     pytest.main([__file__])

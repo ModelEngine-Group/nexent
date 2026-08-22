@@ -33,6 +33,7 @@ from .prompt_cache import (
     resolve_prompt_cache_profile,
 )
 from .message_utils import prepare_messages_for_smolagents_text_flattening
+from .retry import DEFAULT_MODEL_RETRY, ModelRetryConfig, classify_model_error
 
 logger = logging.getLogger("openai_llm")
 
@@ -53,6 +54,7 @@ class OpenAIModel(OpenAIServerModel):
                  flatten_messages_as_text: Optional[bool] = None,
                  safe_input_budget_snapshot: Optional[SafeInputBudgetSnapshot | Dict[str, Any]] = None,
                  timeout_seconds: Optional[float] = None,
+                 retry_config: Optional["ModelRetryConfig"] = None,
                  *args, **kwargs):
         """
         Initialize OpenAI Model with observer and SSL verification option.
@@ -118,6 +120,8 @@ class OpenAIModel(OpenAIServerModel):
         self.max_output_tokens = max_output_tokens
         # Legacy alias kept readable for any caller still reading .max_tokens.
         self.max_tokens = max_output_tokens
+        self.retry_config = retry_config or DEFAULT_MODEL_RETRY
+        self.last_retry_count = 0
 
         # Create http_client based on ssl_verify parameter and timeout
         if not ssl_verify or timeout_seconds is not None:
@@ -316,239 +320,268 @@ class OpenAIModel(OpenAIServerModel):
                 }
             )
 
-        current_request = self._dispatch_chat_completion(
-            safe_input_budget_snapshot=trusted_budget_snapshot,
-            capacity_snapshot=self.capacity_snapshot,
-            stream=True,
-            **dispatch_kwargs,
-        )
+        for attempt in range(1, self.retry_config.max_attempts + 1):
+            if self.stop_event.is_set():
+                if token_tracker:
+                    self._monitoring.add_span_event("model_stopped", {
+                        "reason": "stop_event_set"})
+                raise RuntimeError("Model is interrupted by stop event")
+            try:
+                current_request = self._dispatch_chat_completion(
+                    safe_input_budget_snapshot=trusted_budget_snapshot,
+                    capacity_snapshot=self.capacity_snapshot,
+                    stream=True,
+                    **dispatch_kwargs,
+                )
 
-        # Validate response type: ensure we got a proper iterator, not error strings or dicts
-        # Some APIs return error strings like "error: rate limit" or JSON dicts on failure
-        if isinstance(current_request, str):
-            raise ValueError(f"LLM API returned error string: {current_request}")
-        if isinstance(current_request, dict):
-            error_msg = current_request.get("error") or current_request.get("message") or str(current_request)
-            raise ValueError(f"LLM API returned error: {error_msg}")
+                # Validate response type: ensure we got a proper iterator, not error strings or dicts
+                # Some APIs return error strings like "error: rate limit" or JSON dicts on failure
+                if isinstance(current_request, str):
+                    raise ValueError(f"LLM API returned error string: {current_request}")
+                if isinstance(current_request, dict):
+                    error_msg = current_request.get("error") or current_request.get("message") or str(current_request)
+                    raise ValueError(f"LLM API returned error: {error_msg}")
 
-        chunk_list = []
-        token_join = []
-        role = None
-        finish_reason = None
-        self.last_finish_reason = None
-        content_chunk_count = 0
-        reasoning_chunk_count = 0
-        reasoning_char_count = 0
-        empty_choices_chunk_count = 0
-        nonstandard_chunk_count = 0
+                chunk_list = []
+                token_join = []
+                role = None
+                finish_reason = None
+                self.last_finish_reason = None
+                content_chunk_count = 0
+                reasoning_chunk_count = 0
+                reasoning_char_count = 0
+                empty_choices_chunk_count = 0
+                nonstandard_chunk_count = 0
 
-        # Reset output mode
-        self.observer.current_mode = ProcessType.MODEL_OUTPUT_THINKING
+                # Reset output mode
+                self.observer.current_mode = ProcessType.MODEL_OUTPUT_THINKING
 
-        # Track streaming metrics
-        stream_start_time = time.time()
-        first_token_received = False
+                # Track streaming metrics
+                stream_start_time = time.time()
+                first_token_received = False
 
-        try:
-            for chunk in current_request:
-                # Safety check: skip non-standard chunks that lack expected attributes
-                # This handles edge cases where API returns error responses as chunks
-                if not hasattr(chunk, 'choices'):
-                    # Log warning and continue processing
-                    if hasattr(chunk, '__str__'):
-                        chunk_str = str(chunk)
-                        logger.warning(f"Received non-standard chunk (no 'choices'): {chunk_str[:200]}")
-                    chunk_list.append(chunk)
-                    nonstandard_chunk_count += 1
-                    continue
+                try:
+                    for chunk in current_request:
+                        # Safety check: skip non-standard chunks that lack expected attributes
+                        # This handles edge cases where API returns error responses as chunks
+                        if not hasattr(chunk, 'choices'):
+                            # Log warning and continue processing
+                            if hasattr(chunk, '__str__'):
+                                chunk_str = str(chunk)
+                                logger.warning(f"Received non-standard chunk (no 'choices'): {chunk_str[:200]}")
+                            chunk_list.append(chunk)
+                            nonstandard_chunk_count += 1
+                            continue
 
-                if not chunk.choices:
-                    chunk_list.append(chunk)
-                    empty_choices_chunk_count += 1
-                    continue
+                        if not chunk.choices:
+                            chunk_list.append(chunk)
+                            empty_choices_chunk_count += 1
+                            continue
 
-                chunk_finish_reason = getattr(chunk.choices[0], "finish_reason", None)
-                if chunk_finish_reason is not None:
-                    finish_reason = str(chunk_finish_reason)
+                        chunk_finish_reason = getattr(chunk.choices[0], "finish_reason", None)
+                        if chunk_finish_reason is not None:
+                            finish_reason = str(chunk_finish_reason)
 
-                new_token = chunk.choices[0].delta.content
-                reasoning_content = getattr(
-                    chunk.choices[0].delta, 'reasoning_content', None)
+                        new_token = chunk.choices[0].delta.content
+                        reasoning_content = getattr(
+                            chunk.choices[0].delta, 'reasoning_content', None)
 
-                # Handle reasoning_content if it exists and is not null
-                if reasoning_content is not None:
-                    reasoning_chunk_count += 1
-                    reasoning_char_count += len(str(reasoning_content))
-                    self.observer.add_model_reasoning_content(
-                        reasoning_content)
-                    if token_tracker and not first_token_received:
-                        token_tracker.record_first_token()
-                        first_token_received = True
+                        # Handle reasoning_content if it exists and is not null
+                        if reasoning_content is not None:
+                            reasoning_chunk_count += 1
+                            reasoning_char_count += len(str(reasoning_content))
+                            self.observer.add_model_reasoning_content(
+                                reasoning_content)
+                            if token_tracker and not first_token_received:
+                                token_tracker.record_first_token()
+                                first_token_received = True
 
-                if new_token is not None:
-                    content_chunk_count += 1
-                    # Record first token timing
-                    if token_tracker and not first_token_received:
-                        token_tracker.record_first_token()
-                        first_token_received = True
+                        if new_token is not None:
+                            content_chunk_count += 1
+                            # Record first token timing
+                            if token_tracker and not first_token_received:
+                                token_tracker.record_first_token()
+                                first_token_received = True
 
-                    # Track each token
+                            # Track each token
+                            if token_tracker:
+                                token_tracker.record_token(new_token)
+
+                            self.observer.add_model_new_token(new_token)
+                            token_join.append(new_token)
+                            role = chunk.choices[0].delta.role
+
+                        chunk_list.append(chunk)
+                        if self.stop_event.is_set():
+                            if token_tracker:
+                                self._monitoring.add_span_event("model_stopped", {
+                                    "reason": "stop_event_set"})
+                            raise RuntimeError(
+                                "Model is interrupted by stop event")
+
+                    # Send end marker
+                    self.observer.flush_remaining_tokens()
+                    model_output = "".join(token_join)
+                    self.last_finish_reason = finish_reason
+                    if finish_reason == "length":
+                        logger.warning(
+                            "Model output reached the configured completion token limit; "
+                            "the answer is incomplete"
+                        )
+                        self._monitoring.add_span_event("completion_truncated", {
+                            "finish_reason": finish_reason,
+                        })
+
+                    # Extract token usage
+                    input_tokens = 0
+                    output_tokens = 0
+                    usage = None
+                    if chunk_list and chunk_list[-1].usage is not None:
+                        usage = chunk_list[-1].usage
+                        input_tokens = usage.prompt_tokens
+                        output_tokens = usage.completion_tokens if hasattr(
+                            usage, 'completion_tokens') else usage.total_tokens
+                        self.last_input_token_count = input_tokens
+                        self.last_output_token_count = output_tokens
+                    else:
+                        input_text = ""
+                        for msg in normalized_messages:
+                            if hasattr(msg, 'content'):
+                                content = msg.content
+                                if isinstance(content, str):
+                                    input_text += content
+                                elif isinstance(content, list):
+                                    for part in content:
+                                        if isinstance(part, dict) and part.get("type") == "text":
+                                            input_text += part.get("text", "")
+                        input_tokens = estimate_tokens_text(input_text)
+                        output_tokens = estimate_tokens_text(model_output)
+                        self.last_input_token_count = input_tokens
+                        self.last_output_token_count = output_tokens
+                        logger.debug(
+                            f"Token usage not returned by API, using estimation: "
+                            f"input_tokens={input_tokens}, output_tokens={output_tokens}"
+                        )
+
+                    cache_usage = extract_prompt_cache_usage(
+                        usage, input_tokens, capability_profile=selected_cache_profile
+                    )
+                    self.last_prompt_cache_usage = cache_usage
+                    self.last_cached_input_token_count = cache_usage.cached_input_tokens
+                    self._monitoring.set_span_attributes(
+                        **{
+                            "llm.prompt_cache.cached_input_tokens": cache_usage.cached_input_tokens,
+                            "llm.prompt_cache.uncached_input_tokens": cache_usage.uncached_input_tokens,
+                            "llm.prompt_cache.provider_cache_hit": cache_usage.provider_cache_hit,
+                            "llm.prompt_cache.hit_ratio": cache_usage.hit_ratio,
+                            "llm.prompt_cache.metrics_source": cache_usage.metrics_source,
+                            "llm.prompt_cache.estimated_saved_input_tokens": cache_usage.estimated_saved_input_tokens,
+                            "llm.prompt_cache.estimated_input_savings_ratio": cache_usage.estimated_input_savings_ratio,
+                        }
+                    )
+
+                    # Record completion metrics
                     if token_tracker:
-                        token_tracker.record_token(new_token)
+                        token_tracker.record_completion(
+                            input_tokens, output_tokens)
 
-                    self.observer.add_model_new_token(new_token)
-                    token_join.append(new_token)
-                    role = chunk.choices[0].delta.role
+                    response_diagnostics = {
+                        "finish_reason": finish_reason,
+                        "chunk_count": len(chunk_list),
+                        "content_chunk_count": content_chunk_count,
+                        "content_char_count": len(model_output),
+                        "reasoning_chunk_count": reasoning_chunk_count,
+                        "reasoning_char_count": reasoning_char_count,
+                        "empty_choices_chunk_count": empty_choices_chunk_count,
+                        "nonstandard_chunk_count": nonstandard_chunk_count,
+                        "input_tokens": input_tokens,
+                        "output_tokens": output_tokens,
+                    }
+                    self.last_response_diagnostics = response_diagnostics
+                    self._monitoring.set_span_attributes(
+                        **{f"llm.response.{key}": value for key, value in response_diagnostics.items()}
+                    )
 
-                chunk_list.append(chunk)
+                    if token_tracker:
+                        total_duration = time.time() - stream_start_time
+                        self._monitoring.set_openinference_output(model_output)
+                        self._monitoring.add_span_event("completion_finished", {
+                            "total_duration": total_duration,
+                            "output_length": len(model_output),
+                            "chunk_count": len(chunk_list)
+                        })
+
+                    if not model_output.strip():
+                        logger.warning(
+                            "event=empty_model_response model_id=%s provider=%s "
+                            "finish_reason=%s chunk_count=%d content_chunk_count=%d "
+                            "reasoning_chunk_count=%d reasoning_char_count=%d "
+                            "empty_choices_chunk_count=%d nonstandard_chunk_count=%d "
+                            "input_tokens=%d output_tokens=%d",
+                            self.model_id,
+                            self.model_factory or "unknown",
+                            finish_reason,
+                            len(chunk_list),
+                            content_chunk_count,
+                            reasoning_chunk_count,
+                            reasoning_char_count,
+                            empty_choices_chunk_count,
+                            nonstandard_chunk_count,
+                            input_tokens,
+                            output_tokens,
+                        )
+                        self._monitoring.add_span_event("empty_model_response", response_diagnostics)
+                        raise EmptyModelResponseError(
+                            "Model stream completed without user-visible content "
+                            f"(finish_reason={finish_reason}, reasoning_chunks={reasoning_chunk_count}, "
+                            f"output_tokens={output_tokens})"
+                        )
+
+                    message = ChatMessage.from_dict(
+                        ChatCompletionMessage(role=role if role else "assistant",  # If there is no explicit role, default to "assistant"
+                                              content=model_output).model_dump(include={"role", "content", "tool_calls"}))
+
+                    from smolagents.monitoring import TokenUsage
+
+                    if input_tokens > 0 or output_tokens > 0:
+                        message.token_usage = TokenUsage(
+                            input_tokens=input_tokens,
+                            output_tokens=output_tokens
+                        )
+                    message.raw = current_request
+                    message.role = MessageRole.ASSISTANT
+                    return message
+
+                except Exception as e:
+                    if token_tracker:
+                        self._monitoring.add_span_event("error_occurred", {"error_type": type(
+                            e).__name__, "error_message": str(e)})
+
+                    if "context_length_exceeded" in str(e):
+                        raise ValueError(f"Token limit exceeded: {str(e)}")
+                    raise e
+            except EmptyModelResponseError:
+                raise
+            except Exception as e:
+                if classify_model_error(e) != "retryable":
+                    raise
+                if attempt >= self.retry_config.max_attempts:
+                    logger.error(
+                        "Model call failed after %d attempts: %s",
+                        attempt, str(e),
+                    )
+                    raise
+                backoff = self.retry_config.calculate_backoff(attempt)
+                logger.warning(
+                    "Model call attempt %d/%d failed with retryable error (%s); "
+                    "retrying after %.2fs",
+                    attempt, self.retry_config.max_attempts, str(e), backoff,
+                )
+                self.last_retry_count = attempt
                 if self.stop_event.is_set():
-                    if token_tracker:
-                        self._monitoring.add_span_event("model_stopped", {
-                            "reason": "stop_event_set"})
-                    raise RuntimeError(
-                        "Model is interrupted by stop event")
-
-            # Send end marker
-            self.observer.flush_remaining_tokens()
-            model_output = "".join(token_join)
-            self.last_finish_reason = finish_reason
-            if finish_reason == "length":
-                logger.warning(
-                    "Model output reached the configured completion token limit; "
-                    "the answer is incomplete"
-                )
-                self._monitoring.add_span_event("completion_truncated", {
-                    "finish_reason": finish_reason,
-                })
-
-            # Extract token usage
-            input_tokens = 0
-            output_tokens = 0
-            usage = None
-            if chunk_list and chunk_list[-1].usage is not None:
-                usage = chunk_list[-1].usage
-                input_tokens = usage.prompt_tokens
-                output_tokens = usage.completion_tokens if hasattr(
-                    usage, 'completion_tokens') else usage.total_tokens
-                self.last_input_token_count = input_tokens
-                self.last_output_token_count = output_tokens
-            else:
-                input_text = ""
-                for msg in normalized_messages:
-                    if hasattr(msg, 'content'):
-                        content = msg.content
-                        if isinstance(content, str):
-                            input_text += content
-                        elif isinstance(content, list):
-                            for part in content:
-                                if isinstance(part, dict) and part.get("type") == "text":
-                                    input_text += part.get("text", "")
-                input_tokens = estimate_tokens_text(input_text)
-                output_tokens = estimate_tokens_text(model_output)
-                self.last_input_token_count = input_tokens
-                self.last_output_token_count = output_tokens
-                logger.debug(
-                    f"Token usage not returned by API, using estimation: "
-                    f"input_tokens={input_tokens}, output_tokens={output_tokens}"
-                )
-
-            cache_usage = extract_prompt_cache_usage(
-                usage, input_tokens, capability_profile=selected_cache_profile
-            )
-            self.last_prompt_cache_usage = cache_usage
-            self.last_cached_input_token_count = cache_usage.cached_input_tokens
-            self._monitoring.set_span_attributes(
-                **{
-                    "llm.prompt_cache.cached_input_tokens": cache_usage.cached_input_tokens,
-                    "llm.prompt_cache.uncached_input_tokens": cache_usage.uncached_input_tokens,
-                    "llm.prompt_cache.provider_cache_hit": cache_usage.provider_cache_hit,
-                    "llm.prompt_cache.hit_ratio": cache_usage.hit_ratio,
-                    "llm.prompt_cache.metrics_source": cache_usage.metrics_source,
-                    "llm.prompt_cache.estimated_saved_input_tokens": cache_usage.estimated_saved_input_tokens,
-                    "llm.prompt_cache.estimated_input_savings_ratio": cache_usage.estimated_input_savings_ratio,
-                }
-            )
-
-            # Record completion metrics
-            if token_tracker:
-                token_tracker.record_completion(
-                    input_tokens, output_tokens)
-
-            response_diagnostics = {
-                "finish_reason": finish_reason,
-                "chunk_count": len(chunk_list),
-                "content_chunk_count": content_chunk_count,
-                "content_char_count": len(model_output),
-                "reasoning_chunk_count": reasoning_chunk_count,
-                "reasoning_char_count": reasoning_char_count,
-                "empty_choices_chunk_count": empty_choices_chunk_count,
-                "nonstandard_chunk_count": nonstandard_chunk_count,
-                "input_tokens": input_tokens,
-                "output_tokens": output_tokens,
-            }
-            self.last_response_diagnostics = response_diagnostics
-            self._monitoring.set_span_attributes(
-                **{f"llm.response.{key}": value for key, value in response_diagnostics.items()}
-            )
-
-            if token_tracker:
-                total_duration = time.time() - stream_start_time
-                self._monitoring.set_openinference_output(model_output)
-                self._monitoring.add_span_event("completion_finished", {
-                    "total_duration": total_duration,
-                    "output_length": len(model_output),
-                    "chunk_count": len(chunk_list)
-                })
-
-            if not model_output.strip():
-                logger.warning(
-                    "event=empty_model_response model_id=%s provider=%s "
-                    "finish_reason=%s chunk_count=%d content_chunk_count=%d "
-                    "reasoning_chunk_count=%d reasoning_char_count=%d "
-                    "empty_choices_chunk_count=%d nonstandard_chunk_count=%d "
-                    "input_tokens=%d output_tokens=%d",
-                    self.model_id,
-                    self.model_factory or "unknown",
-                    finish_reason,
-                    len(chunk_list),
-                    content_chunk_count,
-                    reasoning_chunk_count,
-                    reasoning_char_count,
-                    empty_choices_chunk_count,
-                    nonstandard_chunk_count,
-                    input_tokens,
-                    output_tokens,
-                )
-                self._monitoring.add_span_event("empty_model_response", response_diagnostics)
-                raise EmptyModelResponseError(
-                    "Model stream completed without user-visible content "
-                    f"(finish_reason={finish_reason}, reasoning_chunks={reasoning_chunk_count}, "
-                    f"output_tokens={output_tokens})"
-                )
-
-            message = ChatMessage.from_dict(
-                ChatCompletionMessage(role=role if role else "assistant",  # If there is no explicit role, default to "assistant"
-                                      content=model_output).model_dump(include={"role", "content", "tool_calls"}))
-
-            from smolagents.monitoring import TokenUsage
-
-            if input_tokens > 0 or output_tokens > 0:
-                message.token_usage = TokenUsage(
-                    input_tokens=input_tokens,
-                    output_tokens=output_tokens
-                )
-            message.raw = current_request
-            message.role = MessageRole.ASSISTANT
-            return message
-
-        except Exception as e:
-            if token_tracker:
-                self._monitoring.add_span_event("error_occurred", {"error_type": type(
-                    e).__name__, "error_message": str(e)})
-
-            if "context_length_exceeded" in str(e):
-                raise ValueError(f"Token limit exceeded: {str(e)}")
-            raise e
+                    raise RuntimeError("Model is interrupted by stop event")
+                self.stop_event.wait(backoff)
+                continue
 
     def _dispatch_chat_completion(
         self,

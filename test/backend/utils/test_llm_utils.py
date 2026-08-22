@@ -1237,3 +1237,76 @@ class TestCallLLMForSystemPromptErrorHandling:
             call_llm_for_system_prompt(1, "user prompt", "system prompt")
 
         assert exc_info.value.error_code == ErrorCode.MODEL_PROMPT_GENERATION_FAILED
+
+
+class TestCallLLMForSystemPromptRetry:
+    """Transient-error retry behavior for call_llm_for_system_prompt."""
+
+    def _create_mock_llm_setup(self, mocker: MockFixture):
+        """Helper to setup common mocks for LLM retry tests."""
+        mock_get_model_by_id = mocker.patch('backend.utils.llm_utils.get_model_by_model_id')
+        mock_adapter = mocker.patch('backend.utils.llm_utils.get_llm_adapter_from_config')
+
+        mock_get_model_by_id.return_value = {"base_url": "http://example.com", "api_key": "fake-key"}
+        mock_llm_instance = mock_adapter.return_value
+        mock_llm_instance._prepare_completion_kwargs.return_value = {}
+        return mock_llm_instance
+
+    def test_recovers_after_transient_503(self, mocker: MockFixture):
+        """A transient 503 on the first attempt must be retried and succeed."""
+        mock_llm_instance = self._create_mock_llm_setup(mocker)
+        calls = {"n": 0}
+
+        def fake_create(stream=True, **kwargs):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise Exception("Error 503: Service temporarily unavailable")
+            chunk = MagicMock()
+            chunk.choices = [MagicMock()]
+            chunk.choices[0].delta.content = "Generated prompt"
+            return [chunk]
+
+        mock_llm_instance.client = MagicMock()
+        mock_llm_instance.client.chat.completions.create.side_effect = fake_create
+
+        result = call_llm_for_system_prompt(1, "user prompt", "system prompt")
+
+        assert result == "Generated prompt"
+        assert calls["n"] == 2
+
+    def test_transient_503_exhausts_then_unavailable(self, mocker: MockFixture):
+        """Exhausting retries on 503 must surface MODEL_SERVICE_UNAVAILABLE."""
+        from consts.error_code import ErrorCode
+        from consts.exceptions import AppException
+
+        mock_llm_instance = self._create_mock_llm_setup(mocker)
+        mock_llm_instance.client = MagicMock()
+        mock_llm_instance.client.chat.completions.create.side_effect = Exception(
+            "Error 503: Service temporarily unavailable"
+        )
+
+        with pytest.raises(AppException) as exc_info:
+            call_llm_for_system_prompt(1, "user prompt", "system prompt")
+
+        assert exc_info.value.error_code == ErrorCode.MODEL_SERVICE_UNAVAILABLE
+
+    def test_non_retryable_401_fails_immediately(self, mocker: MockFixture):
+        """A 401 must not be retried; it fails on the first attempt."""
+        from consts.error_code import ErrorCode
+        from consts.exceptions import AppException
+
+        mock_llm_instance = self._create_mock_llm_setup(mocker)
+        calls = {"n": 0}
+
+        def fake_create(stream=True, **kwargs):
+            calls["n"] += 1
+            raise Exception("Error 401: Invalid API key")
+
+        mock_llm_instance.client = MagicMock()
+        mock_llm_instance.client.chat.completions.create.side_effect = fake_create
+
+        with pytest.raises(AppException) as exc_info:
+            call_llm_for_system_prompt(1, "user prompt", "system prompt")
+
+        assert exc_info.value.error_code == ErrorCode.MODEL_API_KEY_INVALID
+        assert calls["n"] == 1
