@@ -3299,3 +3299,33 @@ def test_run_injects_current_time_when_missing():
 
     assert agent.task.startswith("[Current time:")
     assert "What time is it?" in agent.task
+
+
+def test_managed_agent_call_injects_workspace_instructions(tmp_path):
+    """Managed sub-agents receive the run output path in their delegated task."""
+    module = TestRunStreamRealExecution()._load_core_agent_in_isolation()
+    module.RunResult = type("RunResult", (), {})
+    workspace = tmp_path / "user" / "run"
+    agent = module.CoreAgent.__new__(module.CoreAgent)
+    agent.workspace_path = str(workspace)
+    agent.name = "file_generation_assistant"
+    agent.state = {}
+    agent.prompt_templates = {
+        "managed_agent": {
+            "task": "{{ task }}",
+            "report": "{{ final_answer }}",
+        }
+    }
+    agent.run = MagicMock(return_value="done")
+    agent.observer = MagicMock()
+    agent.provide_run_summary = False
+
+    agent("create test.txt")
+
+    render_payload = module.Template.return_value.render.call_args_list[0].args[0]
+    managed_task = render_payload["task"]
+    assert "[Nexent run workspace]" in managed_task
+    assert str(workspace / "outputs") in managed_task
+    assert "current working directory" in managed_task
+    assert "Never prefix a relative output path" in managed_task
+    assert "pass the same bare relative path" in managed_task

@@ -1,6 +1,7 @@
 import json
 import ast
 import logging
+import os
 import re
 import time
 import uuid
@@ -470,6 +471,7 @@ class CoreAgent(CodeAgent):
         redis_client = kwargs.pop("redis_client", None)
         self.conversation_id = kwargs.pop("conversation_id", None)
         self.user_id = kwargs.pop("user_id", None)
+        self.workspace_path = kwargs.pop("workspace_path", None)
 
         context_runtime = kwargs.pop("context_runtime", None)
         super().__init__(prompt_templates=prompt_templates, *args, **kwargs)
@@ -1175,6 +1177,20 @@ You have been provided with these additional arguments, that you can access usin
         """Adds additional prompting for the managed agent, runs it, and wraps the output.
         This method is called only by a managed agent.
         """
+        if self.workspace_path and "[Nexent run workspace]" not in task:
+            output_dir = os.path.join(self.workspace_path, "outputs")
+            task = (
+                f"{task}\n\n[Nexent run workspace]\n"
+                f"Run workspace: {self.workspace_path}\n"
+                f"Write every generated file under: {output_dir}\n"
+                "The code executor's current working directory is this outputs directory. "
+                "Create files with a bare relative path such as 'report.pdf', or use an "
+                "absolute path under NEXENT_OUTPUT_DIR. Never prefix a relative output path "
+                "with 'outputs/', because that would create an outputs/outputs directory. "
+                "Uploaded input files are under "
+                f"{os.path.join(self.workspace_path, 'inputs')}. When calling upload_to_s3, "
+                "pass the same bare relative path used to create the file, or its absolute path."
+            )
         full_task = Template(self.prompt_templates["managed_agent"]["task"], undefined=StrictUndefined).render({
             "name": self.name, "task": task, **self.state
         })

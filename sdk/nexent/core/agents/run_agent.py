@@ -12,7 +12,7 @@ from ...monitor import (
     set_monitoring_safe_input_budget_snapshot,
 )
 from .agent_model import AgentRunInfo
-from .nexent_agent import NexentAgent, ProcessType
+from .nexent_agent import NexentAgent, ProcessType, cleanup_run_workspace
 
 
 logger = logging.getLogger("run_agent")
@@ -251,6 +251,15 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
             agent_run_info.observer.add_message(
                 "", ProcessType.FINAL_ANSWER, f"Run Agent Error: {e}")
         raise ValueError(f"Error in agent_run_thread: {e}")
+    finally:
+        # Agent construction, MCP setup, and executor initialization can fail
+        # before NexentAgent.agent_run_with_observer() enters its own cleanup
+        # block. This idempotent outer guard owns the complete worker lifetime.
+        cleanup_run_workspace(
+            getattr(agent_run_info, "workspace_path", None),
+            getattr(agent_run_info, "workspace_run_id", None),
+            logger,
+        )
 
 
 async def agent_run(agent_run_info: AgentRunInfo):

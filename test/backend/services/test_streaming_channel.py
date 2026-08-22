@@ -251,6 +251,29 @@ class TestStreamingChannelManager:
         assert channel1 is channel2
 
     @pytest.mark.asyncio
+    async def test_completed_channel_is_replaced_for_new_run(self, manager):
+        old_channel = await manager.get_or_create_channel(
+            conversation_id=123,
+            user_id="user1",
+        )
+        old_channel.complete()
+
+        new_channel = await manager.get_or_create_channel(
+            conversation_id=123,
+            user_id="user1",
+        )
+
+        assert new_channel is not old_channel
+        assert new_channel.is_completed is False
+
+        await manager.remove_channel(
+            conversation_id=123,
+            user_id="user1",
+            expected_channel=old_channel,
+        )
+        assert manager.get_channel(123, "user1") is new_channel
+
+    @pytest.mark.asyncio
     async def test_different_users_get_different_channels(self, manager):
         """Test that different users get different channels."""
         channel1 = await manager.get_or_create_channel(

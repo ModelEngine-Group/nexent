@@ -4,7 +4,7 @@ import json
 import io
 import types
 from contextlib import contextmanager
-from unittest.mock import patch, MagicMock, mock_open, call, Mock, AsyncMock
+from unittest.mock import ANY, patch, MagicMock, mock_open, call, Mock, AsyncMock
 import os
 
 import pytest
@@ -4411,6 +4411,7 @@ async def test_run_agent_stream(
         tenant_id=None,
         language="en",
         enable_memory=False,
+        reservation_token=ANY,
         channel=streaming_channel_manager_mock._latest_channel,
     )
 
@@ -4429,6 +4430,51 @@ async def test_run_agent_stream(
     mock_build_mem_ctx.return_value = MagicMock(
         user_config=MagicMock(memory_switch=True)
     )
+
+
+@pytest.mark.asyncio
+async def test_run_agent_stream_rejects_concurrent_run_with_sse_error(
+    monkeypatch,
+    mock_agent_request,
+    mock_http_request,
+):
+    class ActiveRunError(RuntimeError):
+        pass
+
+    monkeypatch.setattr(agent_service, "AgentRunAlreadyActiveError", ActiveRunError)
+    monkeypatch.setattr(
+        agent_service,
+        "_resolve_user_tenant_language",
+        lambda **_kwargs: ("user-a", "tenant-a", "zh"),
+    )
+    monkeypatch.setattr(
+        agent_service,
+        "get_conversation_service",
+        MagicMock(return_value={"conversation_id": mock_agent_request.conversation_id}),
+    )
+    monkeypatch.setattr(
+        agent_service.agent_run_manager,
+        "reserve_agent_run",
+        MagicMock(side_effect=ActiveRunError("active")),
+    )
+    save_user_message = MagicMock()
+    reset_stream = AsyncMock()
+    monkeypatch.setattr(agent_service, "save_messages", save_user_message)
+    monkeypatch.setattr(agent_service.runtime_state_service, "reset_stream_async", reset_stream)
+
+    response = await run_agent_stream(
+        mock_agent_request,
+        mock_http_request,
+        "Bearer token",
+    )
+    chunks = [chunk async for chunk in response.body_iterator]
+    body = "".join(chunk.decode() if isinstance(chunk, bytes) else chunk for chunk in chunks)
+
+    assert response.headers["x-stream-status"] == "conflict"
+    assert '"type": "error"' in body
+    assert "已有智能体任务正在运行" in body
+    save_user_message.assert_not_called()
+    reset_stream.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -4621,6 +4667,7 @@ async def test_non_debug_producer_survives_sse_disconnect(
         tenant_id="t",
         language="en",
         enable_memory=False,
+        reservation_token=ANY,
         channel=channel,
     )
 
@@ -4674,6 +4721,7 @@ async def test_debug_stream_keeps_direct_execution_path(
         tenant_id="t",
         language="en",
         enable_memory=False,
+        reservation_token=ANY,
     )
 
 
@@ -5105,7 +5153,7 @@ async def test__stream_agent_chunks_persists_and_unregisters(monkeypatch):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id, status="completed"):
+    def fake_unregister(conv_id, user_id, status="completed", **_kwargs):
         unregister_called["conv_id"] = conv_id
         unregister_called["user_id"] = user_id
 
@@ -5299,7 +5347,7 @@ async def test__stream_agent_chunks_emits_error_chunk_on_run_failure(monkeypatch
 
     called = {"unregistered": None, "user_id": None}
 
-    def fake_unregister(conv_id, user_id, status="completed"):
+    def fake_unregister(conv_id, user_id, status="completed", **_kwargs):
         called["unregistered"] = conv_id
         called["user_id"] = user_id
 
@@ -5656,6 +5704,7 @@ async def test_run_agent_stream_no_memory(
         tenant_id=None,
         language="en",
         enable_memory=False,
+        reservation_token=ANY,
         channel=streaming_channel_manager_mock._latest_channel,
     )
 
@@ -12854,7 +12903,7 @@ async def test_stream_agent_chunks_save_message_exception(monkeypatch):
     # Track unregister calls
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id, status="completed"):
+    def fake_unregister(conv_id, user_id, status="completed", **_kwargs):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
@@ -12908,7 +12957,7 @@ async def test_stream_agent_chunks_malformed_json(monkeypatch):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id, status="completed"):
+    def fake_unregister(conv_id, user_id, status="completed", **_kwargs):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
@@ -12975,7 +13024,7 @@ async def test_stream_agent_chunks_picture_web_chunk(monkeypatch):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id, status="completed"):
+    def fake_unregister(conv_id, user_id, status="completed", **_kwargs):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
@@ -13046,7 +13095,7 @@ async def test_stream_agent_chunks_search_content_chunk(monkeypatch):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id, status="completed"):
+    def fake_unregister(conv_id, user_id, status="completed", **_kwargs):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
@@ -13281,7 +13330,7 @@ async def test_stream_agent_chunks_update_unit_content_exception(monkeypatch):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id, status="completed"):
+    def fake_unregister(conv_id, user_id, status="completed", **_kwargs):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
@@ -13363,7 +13412,7 @@ async def test_stream_agent_chunks_update_unit_status_exception(monkeypatch):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id, status="completed"):
+    def fake_unregister(conv_id, user_id, status="completed", **_kwargs):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
@@ -13444,7 +13493,7 @@ async def test_stream_agent_chunks_update_message_status_exception(monkeypatch):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id, status="completed"):
+    def fake_unregister(conv_id, user_id, status="completed", **_kwargs):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
@@ -13507,7 +13556,7 @@ async def test_stream_agent_chunks_skill_file_extraction(monkeypatch, tmp_path):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id, status="completed"):
+    def fake_unregister(conv_id, user_id, status="completed", **_kwargs):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
@@ -13611,9 +13660,16 @@ async def test_stream_agent_chunks_captures_structured_skill_artifacts(monkeypat
         fake_process_skill_file_uploads,
     )
 
+    channel = MagicMock()
+    channel.publish = AsyncMock()
     collected = []
     async for chunk in agent_service._stream_agent_chunks(
-        agent_request, "user", "tenant", MagicMock(), MagicMock()
+        agent_request,
+        "user",
+        "tenant",
+        MagicMock(),
+        MagicMock(),
+        channel=channel,
     ):
         collected.append(chunk)
 
@@ -13623,6 +13679,7 @@ async def test_stream_agent_chunks_captures_structured_skill_artifacts(monkeypat
     event = json.loads(collected[1].removeprefix("data: ").strip())
     assert event["type"] == "files"
     assert json.loads(event["content"]) == {"file_uploads": [upload_result]}
+    assert collected[1] in [call.args[0] for call in channel.publish.await_args_list]
 
 
 @pytest.mark.asyncio
@@ -13655,10 +13712,17 @@ async def test_stream_agent_chunks_emits_uploaded_workspace_artifacts(monkeypatc
         "backend.services.agent_service.agent_run", fake_agent_run, raising=False
     )
 
+    channel = MagicMock()
+    channel.publish = AsyncMock()
     collected = [
         chunk
         async for chunk in agent_service._stream_agent_chunks(
-            agent_request, "user", "tenant", MagicMock(), MagicMock()
+            agent_request,
+            "user",
+            "tenant",
+            MagicMock(),
+            MagicMock(),
+            channel=channel,
         )
     ]
 
@@ -13668,6 +13732,7 @@ async def test_stream_agent_chunks_emits_uploaded_workspace_artifacts(monkeypatc
     assert event["type"] == "files"
     content = json.loads(event["content"])
     assert content == {"file_uploads": [artifact]}
+    assert collected[1] in [call.args[0] for call in channel.publish.await_args_list]
 
 
 @pytest.mark.asyncio
@@ -13776,7 +13841,7 @@ async def test_stream_agent_chunks_picture_web_invalid_json(monkeypatch):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id, status="completed"):
+    def fake_unregister(conv_id, user_id, status="completed", **_kwargs):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
@@ -13832,7 +13897,7 @@ async def test_stream_agent_chunks_search_content_invalid_json(monkeypatch):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id, status="completed"):
+    def fake_unregister(conv_id, user_id, status="completed", **_kwargs):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
@@ -13885,7 +13950,7 @@ async def test_stream_agent_chunks_resume_mode(monkeypatch):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id, status="completed"):
+    def fake_unregister(conv_id, user_id, status="completed", **_kwargs):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
@@ -13942,7 +14007,7 @@ async def test_stream_agent_chunks_memory_disabled(monkeypatch):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id, status="completed"):
+    def fake_unregister(conv_id, user_id, status="completed", **_kwargs):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
@@ -14002,7 +14067,7 @@ async def test_stream_agent_chunks_memory_agent_share_never(monkeypatch):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id, status="completed"):
+    def fake_unregister(conv_id, user_id, status="completed", **_kwargs):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
@@ -14063,7 +14128,7 @@ async def test_stream_agent_chunks_memory_agent_disabled(monkeypatch):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id, status="completed"):
+    def fake_unregister(conv_id, user_id, status="completed", **_kwargs):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
@@ -14123,7 +14188,7 @@ async def test_stream_agent_chunks_memory_user_agent_disabled(monkeypatch):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id, status="completed"):
+    def fake_unregister(conv_id, user_id, status="completed", **_kwargs):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
@@ -14969,7 +15034,7 @@ async def test_stream_agent_chunks_marks_stopped_when_stop_event_set(monkeypatch
     monkeypatch.setattr(
         agent_service.agent_run_manager,
         "unregister_agent_run",
-        lambda conv_id, user_id, status="completed": unregister_calls.append((conv_id, user_id, status)),
+        lambda conv_id, user_id, status="completed", **_kwargs: unregister_calls.append((conv_id, user_id, status)),
         raising=False,
     )
 
@@ -16257,6 +16322,18 @@ class TestBuildSandboxPolicy:
 
         assert "tenant_id" in params
         assert "agent_type" in params
+
+    def test_build_sandbox_policy_includes_configurable_host_tool_timeout(self):
+        import consts.const as const_module
+        from backend.services.agent_service import build_sandbox_policy
+
+        with (
+            patch.object(const_module, "NEXENT_SANDBOX_DEFAULT_LEVEL", "docker"),
+            patch.object(const_module, "NEXENT_SANDBOX_HOST_TOOL_TIMEOUT_S", 900),
+        ):
+            policy = build_sandbox_policy("tenant-1", "")
+
+        assert policy["host_tool_timeout_seconds"] == 900
 
 
 class TestGetSandboxMinioClient:

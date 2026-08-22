@@ -32,7 +32,9 @@ app.include_router(skill_creator_router)
 @app.on_event("startup")
 async def start_agent_automation_scheduler():
     from services.agent_automation.scheduler import agent_automation_scheduler
+    from services.workspace_cleanup_service import cleanup_orphaned_agent_workspaces
 
+    cleanup_orphaned_agent_workspaces()
     await agent_automation_scheduler.start()
 
 

@@ -1,6 +1,13 @@
 import threading
 from unittest.mock import Mock
-from backend.agents.agent_run_manager import AgentRunManager, agent_run_manager
+
+import pytest
+
+from backend.agents.agent_run_manager import (
+    AgentRunAlreadyActiveError,
+    AgentRunManager,
+    agent_run_manager,
+)
 
 
 class TestAgentRunManager:
@@ -10,6 +17,7 @@ class TestAgentRunManager:
         self.manager = AgentRunManager()
         # Clear any existing state
         self.manager.agent_runs.clear()
+        self.manager._reservations.clear()
 
     def test_singleton_pattern(self):
         """Test that AgentRunManager is a singleton"""
@@ -194,7 +202,10 @@ class TestAgentRunManager:
         mock_run_info = Mock()
         
         def register_run():
-            self.manager.register_agent_run(conversation_id, mock_run_info, user_id)
+            try:
+                self.manager.register_agent_run(conversation_id, mock_run_info, user_id)
+            except AgentRunAlreadyActiveError:
+                pass
         
         def unregister_run():
             self.manager.unregister_agent_run(conversation_id, user_id)
@@ -295,7 +306,7 @@ class TestAgentRunManager:
         assert key4 == "user1:0"
 
     def test_concurrent_registration_same_key(self):
-        """Test concurrent registration with same key (should overwrite)"""
+        """A second registration must not overwrite the active run."""
         conversation_id = 123
         user_id = "user1"
         mock_run_info1 = Mock()
@@ -304,13 +315,47 @@ class TestAgentRunManager:
         # Register first run
         self.manager.register_agent_run(conversation_id, mock_run_info1, user_id)
         
-        # Register second run with same key (should overwrite)
-        self.manager.register_agent_run(conversation_id, mock_run_info2, user_id)
-        
-        # Should have the second run info
+        with pytest.raises(AgentRunAlreadyActiveError):
+            self.manager.register_agent_run(conversation_id, mock_run_info2, user_id)
+
         retrieved_info = self.manager.get_agent_run_info(conversation_id, user_id)
-        assert retrieved_info == mock_run_info2
-        assert retrieved_info != mock_run_info1
+        assert retrieved_info == mock_run_info1
+
+    def test_reservation_blocks_competing_run_until_registered(self):
+        conversation_id = 123
+        user_id = "user1"
+        run_info = Mock()
+
+        token = self.manager.reserve_agent_run(conversation_id, user_id)
+
+        with pytest.raises(AgentRunAlreadyActiveError):
+            self.manager.reserve_agent_run(conversation_id, user_id)
+        with pytest.raises(AgentRunAlreadyActiveError):
+            self.manager.register_agent_run(conversation_id, Mock(), user_id)
+
+        self.manager.register_agent_run(
+            conversation_id,
+            run_info,
+            user_id,
+            reservation_token=token,
+        )
+        assert self.manager.get_agent_run_info(conversation_id, user_id) is run_info
+
+    def test_stale_run_cannot_unregister_current_owner(self):
+        conversation_id = 123
+        user_id = "user1"
+        current_run = Mock()
+        stale_run = Mock()
+        self.manager.register_agent_run(conversation_id, current_run, user_id)
+
+        removed = self.manager.unregister_agent_run(
+            conversation_id,
+            user_id,
+            agent_run_info=stale_run,
+        )
+
+        assert removed is False
+        assert self.manager.get_agent_run_info(conversation_id, user_id) is current_run
 
     def test_context_manager_lifecycle_is_not_owned_by_run_manager(self):
         """AgentRunManager tracks executions but never constructs mutable context state."""

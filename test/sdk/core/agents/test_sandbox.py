@@ -15,13 +15,14 @@ reachable so the suite remains runnable on developer machines without docker.
 """
 import importlib
 import importlib.util
+import json
 import os
 import sys
 import time
 import threading
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import ANY, MagicMock, patch
+from unittest.mock import ANY, MagicMock, call, patch
 
 import pytest
 
@@ -217,6 +218,25 @@ class TestHostToolBridge:
         finally:
             bridge.close()
 
+    def test_host_tool_proxy_surfaces_runtime_error_body(self):
+        bridge = sandbox_module._ToolBridge(
+            sandbox_module.logging.getLogger("test_sandbox")
+        )
+        try:
+            namespace = {}
+            exec(
+                bridge.proxy_code(
+                    {"missing_tool": object()},
+                    bridge_host="127.0.0.1",
+                ),
+                namespace,
+            )
+
+            with pytest.raises(RuntimeError, match="Unknown local tool: missing_tool"):
+                namespace["missing_tool"]()
+        finally:
+            bridge.close()
+
 
 class TestKernelGatewayConfiguration:
     """Kernel Gateway exposes the APIs required by the sandbox pool."""
@@ -235,6 +255,7 @@ class TestDockerRecovery:
         pm = SandboxPoolManager.get_instance()
         logger = sandbox_module.logging.getLogger("test_sandbox")
         cfg = SandboxConfig(level=SandboxLevel.DOCKER, scope=SandboxScope.SYSTEM)
+        monkeypatch.setattr(sandbox_module, "_is_containerized_runtime", lambda: False)
 
         container = MagicMock()
         container.name = sandbox_module.SANDBOX_CONTAINER_NAME
@@ -481,6 +502,7 @@ class TestPoolManagerLogic:
             level=SandboxLevel.DOCKER,
             scope=SandboxScope.SYSTEM,
             docker_image="img:latest",
+            host_tool_timeout_seconds=600,
         )
 
         class FakeOwner:
@@ -490,20 +512,28 @@ class TestPoolManagerLogic:
             container = MagicMock()
 
         owner = FakeOwner()
-        pm._system_containers.pop("img:latest|host_tools=true", None)
+        pm._system_containers.pop("img:latest", None)
         owner.logger = logger
         owner.container.status = "running"
         owner.container.reload.return_value = None
         leases = iter([MagicMock(kernel_id="kernel-1"), MagicMock(kernel_id="kernel-2")])
         leased_executors = []
+        bridge_timeouts = []
 
-        def install_bridge(executor, logger_):
+        def install_bridge(executor, logger_, request_timeout_seconds=None):
             leased_executors.append(executor)
+            bridge_timeouts.append(request_timeout_seconds)
             return executor
 
         monkeypatch.setattr(pm, "_build_executor", lambda *args: owner)
         monkeypatch.setattr(pm, "_recover_docker_container", lambda *args: None)
-        monkeypatch.setattr(sandbox_module, "_DockerKernelLease", lambda *args: next(leases))
+        lease_timeouts = []
+
+        def create_lease(*args, **kwargs):
+            lease_timeouts.append(kwargs.get("receive_timeout_seconds"))
+            return next(leases)
+
+        monkeypatch.setattr(sandbox_module, "_DockerKernelLease", create_lease)
         monkeypatch.setattr(sandbox_module, "_install_host_tool_bridge", install_bridge)
 
         ex1 = pm.acquire(cfg, logger, host_tools_exist=True)
@@ -511,7 +541,9 @@ class TestPoolManagerLogic:
 
         assert ex1 is not ex2
         assert leased_executors == [ex1, ex2]
-        assert pm._system_containers["img:latest|host_tools=true"] is owner
+        assert bridge_timeouts == [600, 600]
+        assert lease_timeouts == [30, 30]
+        assert pm._system_containers["img:latest"] is owner
         pm.release(ex1, logger)
         pm.release(ex2, logger)
         owner.cleanup = MagicMock()
@@ -792,9 +824,31 @@ class TestToolBridge:
             exec(code, namespace)
             assert "def my_tool(" in code
             assert "_NEXENT_TOOL_BRIDGE_URL" in code
+            assert "_NEXENT_TOOL_BRIDGE_TIMEOUT = None" in code
+            assert "timeout=120" not in code
             assert "def _nexent_call_host_tool(" in code
         finally:
             bridge.close()
+
+    def test_proxy_code_uses_configured_request_timeout(self):
+        """An explicit policy value is injected without a fixed SDK timeout."""
+        bridge = sandbox_module._ToolBridge(
+            sandbox_module.logging.getLogger("test"),
+            request_timeout_seconds=900,
+        )
+        try:
+            code = bridge.proxy_code({"my_tool": object()})
+            assert "_NEXENT_TOOL_BRIDGE_TIMEOUT = 900.0" in code
+        finally:
+            bridge.close()
+
+    @pytest.mark.parametrize("invalid_timeout", [True, 0, -1])
+    def test_rejects_invalid_request_timeout(self, invalid_timeout):
+        with pytest.raises(ValueError, match="positive number or None"):
+            sandbox_module._ToolBridge(
+                sandbox_module.logging.getLogger("test"),
+                request_timeout_seconds=invalid_timeout,
+            )
 
     def test_bridge_host_returns_nexent_runtime_when_containerized(self, monkeypatch):
         """Containerized runtime should use nexent-runtime hostname."""
@@ -1094,6 +1148,353 @@ class TestRecoveredDockerExecutor:
 class TestDockerKernelLease:
     """Test Docker kernel lease management."""
 
+    @staticmethod
+    def _lease():
+        lease = object.__new__(sandbox_module._DockerKernelLease)
+        lease.logger = MagicMock()
+        lease._logger = MagicMock()
+        lease.base_url = "http://sandbox:8888"
+        lease.host = "sandbox"
+        lease.port = 8888
+        lease.kernel_id = "kernel-1"
+        lease._channel_session_id = "session-1"
+        lease.ws_url = (
+            "ws://sandbox:8888/api/kernels/kernel-1/channels?session_id=session-1"
+        )
+        lease._receive_timeout_seconds = 0.25
+        lease._closed = False
+        lease._unhealthy = False
+        lease._nexent_kernel_recovery_supported = True
+        lease._requests = MagicMock()
+        lease._cached_variables = None
+        lease._cached_tools = None
+        lease._kernel_bootstrap_code = []
+        return lease
+
+    def test_busy_kernel_continues_after_receive_timeout(self, monkeypatch):
+        from websocket import ABNF, WebSocketTimeoutException
+
+        lease = self._lease()
+        lease._get_kernel_execution_state = MagicMock(return_value="busy")
+        websocket = MagicMock()
+        websocket.recv_data.side_effect = [
+            WebSocketTimeoutException("poll timeout"),
+            (
+                ABNF.OPCODE_TEXT,
+                json.dumps(
+                    {
+                        "parent_header": {"msg_id": "request-1"},
+                        "msg_type": "stream",
+                        "content": {"text": "done\n"},
+                    }
+                ),
+            ),
+            (
+                ABNF.OPCODE_TEXT,
+                json.dumps(
+                    {
+                        "parent_header": {"msg_id": "request-1"},
+                        "msg_type": "status",
+                        "content": {"execution_state": "idle"},
+                    }
+                ),
+            ),
+        ]
+        create_connection = MagicMock(return_value=websocket)
+        monkeypatch.setattr("websocket.create_connection", create_connection)
+        monkeypatch.setattr(
+            "smolagents.remote_executors._websocket_send_execute_request",
+            lambda code, ws: "request-1",
+        )
+
+        result = lease.run_code_raise_errors("print('done')")
+
+        assert result.logs == "done\n"
+        assert lease._unhealthy is False
+        lease._get_kernel_execution_state.assert_called_once_with()
+        create_connection.assert_called_once_with(lease.ws_url, timeout=0.25)
+        websocket.close.assert_called_once_with()
+
+    def test_kernel_lease_uses_stable_gateway_session_id(self, monkeypatch):
+        container_executor = SimpleNamespace(
+            logger=MagicMock(),
+            additional_imports=[],
+            installed_packages=[],
+            _nexent_backend="docker",
+            base_url="http://sandbox:8888",
+            host="sandbox",
+            port=8888,
+        )
+        monkeypatch.setattr(
+            "smolagents.remote_executors._create_kernel_http",
+            MagicMock(return_value="kernel-1"),
+        )
+        monkeypatch.setattr(sandbox_module.secrets, "token_hex", lambda _size: "stable-session")
+
+        lease = sandbox_module._DockerKernelLease(container_executor, MagicMock())
+
+        assert lease.ws_url == (
+            "ws://sandbox:8888/api/kernels/kernel-1/channels"
+            "?session_id=stable-session"
+        )
+        assert lease._build_channels_url("kernel-1") == lease.ws_url
+
+    def test_idle_kernel_without_terminal_message_fails_and_marks_lease_unhealthy(
+        self,
+        monkeypatch,
+    ):
+        from websocket import WebSocketTimeoutException
+
+        lease = self._lease()
+        lease._get_kernel_execution_state = MagicMock(return_value="idle")
+        websocket = MagicMock()
+        websocket.recv_data.side_effect = WebSocketTimeoutException("terminal message lost")
+        monkeypatch.setattr("websocket.create_connection", MagicMock(return_value=websocket))
+        monkeypatch.setattr(
+            "smolagents.remote_executors._websocket_send_execute_request",
+            lambda code, ws: "request-1",
+        )
+
+        with pytest.raises(RuntimeError, match="kernel channel failed"):
+            lease.run_code_raise_errors("print('done')")
+
+        assert lease._unhealthy is True
+
+    def test_unhealthy_lease_replaces_kernel_before_next_execution(self, monkeypatch):
+        from websocket import ABNF
+
+        lease = self._lease()
+        lease._unhealthy = True
+        lease._replace_unhealthy_kernel = MagicMock(
+            side_effect=lambda: setattr(lease, "_unhealthy", False)
+        )
+        websocket = MagicMock()
+        websocket.recv_data.return_value = (
+            ABNF.OPCODE_TEXT,
+            json.dumps(
+                {
+                    "parent_header": {"msg_id": "request-1"},
+                    "msg_type": "status",
+                    "content": {"execution_state": "idle"},
+                }
+            ),
+        )
+        monkeypatch.setattr("websocket.create_connection", MagicMock(return_value=websocket))
+        monkeypatch.setattr(
+            "smolagents.remote_executors._websocket_send_execute_request",
+            lambda code, ws: "request-1",
+        )
+
+        lease.run_code_raise_errors("print('retry')")
+
+        lease._replace_unhealthy_kernel.assert_called_once_with()
+        assert lease._unhealthy is False
+
+    def test_kernel_replacement_replays_framework_state(self, monkeypatch):
+        from smolagents.remote_executors import RemotePythonExecutor
+
+        lease = self._lease()
+        lease.host = "sandbox"
+        lease.port = 8888
+        lease._unhealthy = True
+        lease._cached_variables = {"document": "input.docx"}
+        lease._cached_tools = {"run_skill_script": object()}
+        lease._kernel_bootstrap_code = ["def upload_to_s3(*args, **kwargs): pass"]
+        lease._requests.delete.return_value = SimpleNamespace(status_code=204)
+        send_variables = MagicMock()
+        send_tools = MagicMock()
+        run_code = MagicMock()
+        monkeypatch.setattr(RemotePythonExecutor, "send_variables", send_variables)
+        monkeypatch.setattr(RemotePythonExecutor, "send_tools", send_tools)
+        monkeypatch.setattr(
+            "smolagents.remote_executors._create_kernel_http",
+            MagicMock(return_value="kernel-2"),
+        )
+        monkeypatch.setattr(lease, "run_code_raise_errors", run_code)
+
+        lease._replace_unhealthy_kernel()
+
+        lease._requests.delete.assert_called_once_with(
+            "http://sandbox:8888/api/kernels/kernel-1",
+            timeout=5,
+        )
+        assert lease.kernel_id == "kernel-2"
+        assert lease.ws_url.startswith(
+            "ws://sandbox:8888/api/kernels/kernel-2/channels?session_id="
+        )
+        assert lease.ws_url.endswith(lease._channel_session_id)
+        assert lease._unhealthy is False
+        send_variables.assert_called_once_with(lease, lease._cached_variables)
+        send_tools.assert_called_once_with(lease, lease._cached_tools)
+        run_code.assert_called_once_with(lease._kernel_bootstrap_code[0])
+
+    @pytest.mark.parametrize("setup_kind", ["variables", "tools"])
+    def test_framework_setup_recovers_unhealthy_kernel_in_same_run(
+        self,
+        monkeypatch,
+        setup_kind,
+    ):
+        from smolagents.remote_executors import RemotePythonExecutor
+
+        lease = self._lease()
+        payload = {"document": "input.docx"}
+
+        def fail_setup(*_args, **_kwargs):
+            lease._unhealthy = True
+            raise RuntimeError("kernel channel failed")
+
+        remote_setup = MagicMock(side_effect=fail_setup)
+        replace_kernel = MagicMock(
+            side_effect=lambda: setattr(lease, "_unhealthy", False)
+        )
+        monkeypatch.setattr(
+            RemotePythonExecutor,
+            "send_variables" if setup_kind == "variables" else "send_tools",
+            remote_setup,
+        )
+        monkeypatch.setattr(lease, "_replace_unhealthy_kernel", replace_kernel)
+
+        if setup_kind == "variables":
+            lease.send_variables(payload)
+            assert lease._cached_variables == payload
+        else:
+            lease.send_tools(payload)
+            assert lease._cached_tools == payload
+
+        remote_setup.assert_called_once_with(lease, payload)
+        replace_kernel.assert_called_once_with()
+        assert lease._unhealthy is False
+
+    def test_bootstrap_registration_recovers_unhealthy_kernel_in_same_run(self):
+        lease = self._lease()
+        code = "os.chdir('/mnt/nexent/workdir/run/outputs')"
+        run_code = MagicMock(
+            side_effect=[
+                RuntimeError("kernel channel failed"),
+                SimpleNamespace(output=None, logs="", is_final_answer=False),
+            ]
+        )
+        replace_kernel = MagicMock(
+            side_effect=lambda: setattr(lease, "_unhealthy", False)
+        )
+        lease._unhealthy = True
+        lease.run_code_raise_errors = run_code
+        lease._replace_unhealthy_kernel = replace_kernel
+
+        lease.register_kernel_bootstrap_code(code)
+
+        assert run_code.call_args_list == [call(code), call(code)]
+        replace_kernel.assert_called_once_with()
+        assert lease._kernel_bootstrap_code == [code]
+
+    def test_unrelated_messages_do_not_postpone_watchdog(self, monkeypatch):
+        from websocket import ABNF
+
+        lease = self._lease()
+        lease._get_kernel_execution_state = MagicMock(return_value="idle")
+        websocket = MagicMock()
+        websocket.recv_data.return_value = (
+            ABNF.OPCODE_TEXT,
+            json.dumps(
+                {
+                    "parent_header": {"msg_id": "another-request"},
+                    "msg_type": "status",
+                    "content": {"execution_state": "idle"},
+                }
+            ),
+        )
+        monotonic = MagicMock(side_effect=[0.0, 0.0, 1.0])
+        monkeypatch.setattr(sandbox_module.time, "monotonic", monotonic)
+        monkeypatch.setattr("websocket.create_connection", MagicMock(return_value=websocket))
+        monkeypatch.setattr(
+            "smolagents.remote_executors._websocket_send_execute_request",
+            lambda code, ws: "request-1",
+        )
+
+        with pytest.raises(RuntimeError, match="watchdog deadline"):
+            lease.run_code_raise_errors("print('done')")
+
+        assert lease._unhealthy is True
+        lease._get_kernel_execution_state.assert_called_once_with()
+        websocket.recv_data.assert_called_once_with(control_frame=True)
+
+    def test_control_frames_do_not_postpone_watchdog(self, monkeypatch):
+        from websocket import ABNF
+
+        lease = self._lease()
+        lease._get_kernel_execution_state = MagicMock(return_value="idle")
+        websocket = MagicMock()
+        websocket.recv_data.return_value = (ABNF.OPCODE_PING, b"heartbeat")
+        monkeypatch.setattr(
+            sandbox_module.time,
+            "monotonic",
+            MagicMock(side_effect=[0.0, 0.0, 1.0]),
+        )
+        monkeypatch.setattr("websocket.create_connection", MagicMock(return_value=websocket))
+        monkeypatch.setattr(
+            "smolagents.remote_executors._websocket_send_execute_request",
+            lambda code, ws: "request-1",
+        )
+
+        with pytest.raises(RuntimeError, match="watchdog deadline"):
+            lease.run_code_raise_errors("print('done')")
+
+        assert lease._unhealthy is True
+        websocket.recv_data.assert_called_once_with(control_frame=True)
+
+    def test_closed_websocket_marks_busy_kernel_lease_unhealthy(self, monkeypatch):
+        from websocket import WebSocketConnectionClosedException
+
+        lease = self._lease()
+        lease._get_kernel_execution_state = MagicMock(return_value="busy")
+        websocket = MagicMock()
+        websocket.recv_data.side_effect = WebSocketConnectionClosedException("channel closed")
+        monkeypatch.setattr("websocket.create_connection", MagicMock(return_value=websocket))
+        monkeypatch.setattr(
+            "smolagents.remote_executors._websocket_send_execute_request",
+            lambda code, ws: "request-1",
+        )
+
+        with pytest.raises(RuntimeError, match="connection closed unexpectedly"):
+            lease.run_code_raise_errors("print('done')")
+
+        assert lease._unhealthy is True
+        lease._get_kernel_execution_state.assert_called_once_with()
+
+    def test_kernel_state_query_is_bounded_and_returns_none_on_error(self):
+        lease = self._lease()
+        lease._requests.get.side_effect = TimeoutError("gateway unavailable")
+
+        assert lease._get_kernel_execution_state() is None
+        lease._requests.get.assert_called_once_with(
+            "http://sandbox:8888/api/kernels/kernel-1",
+            timeout=0.25,
+        )
+        lease._logger.warning.assert_called_once()
+
+    def test_inherits_docker_backend_marker(self, monkeypatch):
+        """System kernel leases must remain identifiable as Docker executors."""
+        from smolagents import remote_executors
+
+        monkeypatch.setattr(remote_executors, "_create_kernel_http", lambda *_args: "kernel-1")
+        owner = SimpleNamespace(
+            logger=MagicMock(),
+            additional_imports=[],
+            installed_packages=[],
+            base_url="http://sandbox:8888",
+            host="sandbox",
+            port=8888,
+            _nexent_backend="docker",
+            container=MagicMock(),
+        )
+
+        lease = sandbox_module._DockerKernelLease(
+            owner,
+            sandbox_module.logging.getLogger("test"),
+        )
+
+        assert lease._nexent_backend == "docker"
+
     def test_send_tools_delegates_to_remote_executor(self, monkeypatch):
         """send_tools should delegate to RemotePythonExecutor."""
         # This test verifies the method exists and has correct signature
@@ -1126,14 +1527,24 @@ class TestWrapExecutor:
 class TestBuildPythonExecutor:
     """Test the main factory function."""
 
-    def test_falls_back_to_local_when_managed_agents_exist(self):
-        """Should fall back to LOCAL when managed_agents_exist is True."""
+    def test_managed_agents_preserve_configured_sandbox(self, mocker):
+        """Managed agents must not force a configured sandbox back to LOCAL."""
         cfg = SandboxConfig(level=SandboxLevel.DOCKER)
         logger = sandbox_module.logging.getLogger("test")
+        expected_executor = MagicMock()
+        pool = SandboxPoolManager.get_instance()
+        acquire = mocker.patch.object(pool, "acquire", return_value=expected_executor)
 
-        executor = sandbox_module.build_python_executor(cfg, logger, managed_agents_exist=True)
+        executor = sandbox_module.build_python_executor(
+            cfg,
+            logger,
+            managed_agents_exist=True,
+            host_tools_exist=True,
+        )
 
-        assert getattr(executor, "_nexent_backend", None) == "local"
+        assert executor is expected_executor
+        assert cfg.level == SandboxLevel.DOCKER
+        acquire.assert_called_once_with(cfg, logger, True)
 
     def test_session_scope_creates_fresh_executor(self):
         """SESSION scope should always create fresh executor."""
@@ -1519,7 +1930,12 @@ class TestAcquireSharedDockerKernel:
 
         monkeypatch.setattr(pm, "_build_executor", mock_build_executor)
         monkeypatch.setattr(pm, "_recover_docker_container", mock_recover)
-        monkeypatch.setattr(sandbox_module, "_DockerKernelLease", lambda *args: MagicMock(kernel_id="test-kernel"))
+        monkeypatch.setattr(pm, "_is_alive", lambda _owner: True)
+        monkeypatch.setattr(
+            sandbox_module,
+            "_DockerKernelLease",
+            lambda *args, **kwargs: MagicMock(kernel_id="test-kernel"),
+        )
         monkeypatch.setattr(sandbox_module, "_install_host_tool_bridge", lambda ex, l: ex)
         monkeypatch.setattr(sandbox_module, "_wrap_executor", lambda ex, c, l: ex)
 
@@ -1558,7 +1974,12 @@ class TestAcquireSharedDockerKernel:
 
         monkeypatch.setattr(pm, "_recover_docker_container", mock_recover)
         monkeypatch.setattr(pm, "_build_executor", mock_build_executor)
-        monkeypatch.setattr(sandbox_module, "_DockerKernelLease", lambda *args: MagicMock(kernel_id="test-kernel"))
+        monkeypatch.setattr(pm, "_is_alive", lambda _owner: True)
+        monkeypatch.setattr(
+            sandbox_module,
+            "_DockerKernelLease",
+            lambda *args, **kwargs: MagicMock(kernel_id="test-kernel"),
+        )
         monkeypatch.setattr(sandbox_module, "_install_host_tool_bridge", lambda ex, l: ex)
         monkeypatch.setattr(sandbox_module, "_wrap_executor", lambda ex, c, l: ex)
 
@@ -1713,6 +2134,7 @@ class TestSandboxConfigDataclass:
         assert cfg.cpu_quota == 1.0
         assert cfg.network_disabled is True
         assert cfg.timeout_seconds == 30
+        assert cfg.host_tool_timeout_seconds is None
         assert cfg.shell_policy == sandbox_module.ShellPolicy.DISABLED
         assert cfg.output_dir == "/home/sandbox/workdir/output"
         assert cfg.auto_sync_outputs is True
@@ -1728,6 +2150,7 @@ class TestSandboxConfigDataclass:
             "cpu_quota": 2.0,
             "network_disabled": False,
             "timeout_seconds": 60,
+            "host_tool_timeout_seconds": 900,
             "shell_policy": "restricted",
             "output_dir": "/custom/output",
             "auto_sync_outputs": False,
@@ -1743,6 +2166,7 @@ class TestSandboxConfigDataclass:
         assert cfg.cpu_quota == 2.0
         assert cfg.network_disabled is False
         assert cfg.timeout_seconds == 60
+        assert cfg.host_tool_timeout_seconds == 900.0
         assert cfg.shell_policy == sandbox_module.ShellPolicy.RESTRICTED
         assert cfg.output_dir == "/custom/output"
         assert cfg.auto_sync_outputs is False
@@ -1752,8 +2176,15 @@ class TestSandboxConfigDataclass:
         """from_dict with empty dict should use defaults."""
         cfg = SandboxConfig.from_dict({})
 
+        assert cfg.host_tool_timeout_seconds is None
         assert cfg.level == sandbox_module.SandboxLevel.LOCAL
         assert cfg.scope == sandbox_module.SandboxScope.SESSION
+
+    @pytest.mark.parametrize("value", [None, "", 0, -1])
+    def test_from_dict_disables_non_positive_host_tool_timeout(self, value):
+        cfg = SandboxConfig.from_dict({"host_tool_timeout_seconds": value})
+
+        assert cfg.host_tool_timeout_seconds is None
 
 
 class TestPoolManagerConstants:
@@ -1908,7 +2339,11 @@ class TestPoolManagerMultipleSystemContainers:
 
         monkeypatch.setattr(pm, "_build_executor", mock_build_executor)
         monkeypatch.setattr(pm, "_recover_docker_container", lambda *args: None)
-        monkeypatch.setattr(sandbox_module, "_DockerKernelLease", lambda *args: MagicMock(kernel_id="test-kernel"))
+        monkeypatch.setattr(
+            sandbox_module,
+            "_DockerKernelLease",
+            lambda *args, **kwargs: MagicMock(kernel_id="test-kernel"),
+        )
         monkeypatch.setattr(sandbox_module, "_install_host_tool_bridge", lambda ex, l: ex)
         monkeypatch.setattr(sandbox_module, "_wrap_executor", lambda ex, c, l: ex)
 
@@ -1929,23 +2364,29 @@ class TestPoolManagerMultipleSystemContainers:
         assert acquired1 is executor1
         assert acquired2 is executor2
 
-    def test_host_tools_affects_pool_key(self, monkeypatch):
-        """Pool key should differ when host_tools_exist changes."""
+    def test_system_host_tools_share_one_container_owner(self, monkeypatch):
+        """Host-tool capability is lease-local and must not split the system owner."""
         pm = SandboxPoolManager.get_instance()
         logger = sandbox_module.logging.getLogger("test")
+        owner = SimpleNamespace(base_url="http://sandbox", container=object())
+        build_owner = MagicMock(return_value=owner)
+        created_leases = []
 
-        executor_with_host = _FakeExecutor(image="shared:latest", alive=True)
-        executor_without_host = _FakeExecutor(image="shared:latest", alive=True)
+        def create_lease(lease_owner, _logger, **_kwargs):
+            lease = MagicMock(kernel_id=f"kernel-{len(created_leases)}")
+            lease.owner = lease_owner
+            created_leases.append(lease)
+            return lease
 
-        def mock_build_executor(config, logger_, host_tools=False):
-            if host_tools:
-                return executor_with_host
-            return executor_without_host
-
-        monkeypatch.setattr(pm, "_build_executor", mock_build_executor)
+        monkeypatch.setattr(pm, "_build_executor", build_owner)
         monkeypatch.setattr(pm, "_recover_docker_container", lambda *args: None)
-        monkeypatch.setattr(sandbox_module, "_DockerKernelLease", lambda *args: MagicMock(kernel_id="test-kernel"))
-        monkeypatch.setattr(sandbox_module, "_install_host_tool_bridge", lambda ex, l: ex)
+        monkeypatch.setattr(pm, "_is_alive", lambda _owner: True)
+        monkeypatch.setattr(sandbox_module, "_DockerKernelLease", create_lease)
+        monkeypatch.setattr(
+            sandbox_module,
+            "_install_host_tool_bridge",
+            lambda ex, _logger, request_timeout_seconds=None: ex,
+        )
         monkeypatch.setattr(sandbox_module, "_wrap_executor", lambda ex, c, l: ex)
 
         cfg = SandboxConfig(
@@ -1957,8 +2398,11 @@ class TestPoolManagerMultipleSystemContainers:
         acquired_with = pm.acquire(cfg, logger, host_tools_exist=True)
         acquired_without = pm.acquire(cfg, logger, host_tools_exist=False)
 
-        assert acquired_with is executor_with_host
-        assert acquired_without is executor_without_host
+        assert acquired_with is not acquired_without
+        assert acquired_with.owner is owner
+        assert acquired_without.owner is owner
+        build_owner.assert_called_once()
+        assert list(pm._system_containers) == ["shared:latest"]
 
 
 class TestBuildExecutorWithWasm:
@@ -2134,13 +2578,18 @@ class TestAcquireSharedDockerKernelHostTools:
 
         bridge_installed = [False]
 
-        def mock_install_bridge(ex, l):
+        def mock_install_bridge(ex, l, request_timeout_seconds=None):
             bridge_installed[0] = True
             return ex
 
         monkeypatch.setattr(pm, "_recover_docker_container", mock_recover)
         monkeypatch.setattr(pm, "_build_executor", mock_build)
-        monkeypatch.setattr(sandbox_module, "_DockerKernelLease", lambda *args: MagicMock(kernel_id="test-kernel"))
+        monkeypatch.setattr(pm, "_is_alive", lambda _owner: True)
+        monkeypatch.setattr(
+            sandbox_module,
+            "_DockerKernelLease",
+            lambda *args, **kwargs: MagicMock(kernel_id="test-kernel"),
+        )
         monkeypatch.setattr(sandbox_module, "_install_host_tool_bridge", mock_install_bridge)
         monkeypatch.setattr(sandbox_module, "_wrap_executor", lambda ex, c, l: ex)
 
@@ -2304,15 +2753,43 @@ class TestTargetedSandboxCoverage:
         container.kill.assert_called_once()
 
     def test_kernel_lease_execution_and_cleanup_paths(self, monkeypatch):
-        remote_run = MagicMock(return_value="result")
+        class FakeABNF:
+            OPCODE_TEXT = 1
+            OPCODE_CLOSE = 8
+            OPCODE_PING = 9
+            OPCODE_PONG = 10
+
         websocket = MagicMock()
-        websocket_module = SimpleNamespace(create_connection=MagicMock(return_value=websocket))
-        remote_module = SimpleNamespace(_websocket_run_code_raise_errors=remote_run)
+        websocket.recv_data.return_value = (
+            FakeABNF.OPCODE_TEXT,
+            json.dumps(
+                {
+                    "parent_header": {"msg_id": "request-id"},
+                    "msg_type": "status",
+                    "content": {"execution_state": "idle"},
+                }
+            ),
+        )
+        websocket_module = SimpleNamespace(
+            ABNF=FakeABNF,
+            create_connection=MagicMock(return_value=websocket),
+            WebSocketConnectionClosedException=ConnectionError,
+            WebSocketTimeoutException=TimeoutError,
+        )
+        code_output = MagicMock(return_value="result")
+        remote_module = SimpleNamespace(
+            AgentError=RuntimeError,
+            CodeOutput=code_output,
+            RemotePythonExecutor=SimpleNamespace(FINAL_ANSWER_EXCEPTION="FinalAnswerException"),
+            _websocket_send_execute_request=MagicMock(return_value="request-id"),
+        )
         monkeypatch.setitem(sys.modules, "websocket", websocket_module)
         monkeypatch.setitem(sys.modules, "smolagents.remote_executors", remote_module)
 
         lease = object.__new__(sandbox_module._DockerKernelLease)
         lease._closed = False
+        lease._unhealthy = False
+        lease._receive_timeout_seconds = 5
         lease.ws_url = "ws://kernel"
         lease.logger = MagicMock()
         lease.base_url = "http://kernel"
@@ -2321,7 +2798,8 @@ class TestTargetedSandboxCoverage:
         lease._requests = SimpleNamespace(delete=MagicMock(return_value=SimpleNamespace(status_code=500)))
 
         assert lease.run_code_raise_errors("1 + 1") == "result"
-        remote_run.assert_called_once_with("1 + 1", websocket, lease.logger)
+        remote_module._websocket_send_execute_request.assert_called_once_with("1 + 1", websocket)
+        websocket_module.create_connection.assert_called_once_with("ws://kernel", timeout=5)
         lease.cleanup()
         lease._logger.warning.assert_called_once()
         lease._requests.delete.assert_called_once()
@@ -2364,7 +2842,10 @@ class TestTargetedSandboxCoverage:
 
         lease = object.__new__(sandbox_module._DockerKernelLease)
         lease._patch_final_answer_with_exception(final_answer)
+        patched_class = final_answer.__class__
+        lease._patch_final_answer_with_exception(final_answer)
 
+        assert final_answer.__class__ is patched_class
         assert final_answer._forward("done") == "done"
         with pytest.raises(Exception) as exc_info:
             final_answer.forward("done")
@@ -2388,7 +2869,12 @@ class TestTargetedSandboxCoverage:
         replacement = SimpleNamespace(base_url="http://new", container=object())
         pool._system_containers["image"] = dead
         monkeypatch.setattr(pool, "_recover_docker_container", MagicMock(return_value=replacement))
-        monkeypatch.setattr(sandbox_module, "_DockerKernelLease", lambda *args: MagicMock(kernel_id="lease"))
+        monkeypatch.setattr(pool, "_is_alive", lambda owner: owner is replacement)
+        monkeypatch.setattr(
+            sandbox_module,
+            "_DockerKernelLease",
+            lambda *args, **kwargs: MagicMock(kernel_id="lease"),
+        )
         monkeypatch.setattr(sandbox_module, "_wrap_executor", lambda executor, *args: executor)
         config = SandboxConfig(level=SandboxLevel.DOCKER, scope=SandboxScope.SYSTEM, docker_image="image")
 
@@ -2413,7 +2899,12 @@ class TestTargetedSandboxCoverage:
 
         pool._system_containers = RacingContainers()
         monkeypatch.setattr(pool, "_recover_docker_container", MagicMock(return_value=built))
-        monkeypatch.setattr(sandbox_module, "_DockerKernelLease", lambda owner, logger: MagicMock(kernel_id="lease", owner=owner))
+        monkeypatch.setattr(pool, "_is_alive", lambda _owner: True)
+        monkeypatch.setattr(
+            sandbox_module,
+            "_DockerKernelLease",
+            lambda owner, logger, **kwargs: MagicMock(kernel_id="lease", owner=owner),
+        )
         monkeypatch.setattr(sandbox_module, "_wrap_executor", lambda executor, *args: executor)
         config = SandboxConfig(level=SandboxLevel.DOCKER, scope=SandboxScope.SYSTEM, docker_image="image")
 
@@ -2421,6 +2912,41 @@ class TestTargetedSandboxCoverage:
 
         built.cleanup.assert_called_once()
         assert lease.owner is winner
+
+    def test_shared_docker_rebuilds_owner_once_when_kernel_lease_fails(
+        self,
+        monkeypatch,
+    ):
+        pool = SandboxPoolManager.get_instance()
+        first_owner = SimpleNamespace(base_url="http://first", container=object())
+        replacement_owner = SimpleNamespace(base_url="http://replacement", container=object())
+        recover = MagicMock(side_effect=[first_owner, replacement_owner])
+        destroy = MagicMock()
+        leases = iter([RuntimeError("gateway disconnected"), MagicMock(kernel_id="lease-2")])
+
+        def create_lease(*_args, **_kwargs):
+            result = next(leases)
+            if isinstance(result, Exception):
+                raise result
+            return result
+
+        monkeypatch.setattr(pool, "_recover_docker_container", recover)
+        monkeypatch.setattr(pool, "_is_alive", lambda _owner: True)
+        monkeypatch.setattr(pool, "_destroy_executor", destroy)
+        monkeypatch.setattr(sandbox_module, "_DockerKernelLease", create_lease)
+        monkeypatch.setattr(sandbox_module, "_wrap_executor", lambda executor, *args: executor)
+        config = SandboxConfig(
+            level=SandboxLevel.DOCKER,
+            scope=SandboxScope.SYSTEM,
+            docker_image="image",
+        )
+
+        lease = pool._acquire_shared_docker_kernel(config, MagicMock(), False)
+
+        assert lease.kernel_id == "lease-2"
+        assert recover.call_count == 2
+        destroy.assert_called_once_with(first_owner, ANY)
+        assert pool._system_containers["image"] is replacement_owner
 
     def test_release_none_is_noop(self):
         SandboxPoolManager.get_instance().release(None, MagicMock())
@@ -2569,7 +3095,11 @@ class TestTargetedSandboxCoverage:
 
         config.scope = SandboxScope.SESSION
         pool._build_docker_executor(config, MagicMock(), True)
-        bridge_installer.assert_called_once_with(executor, ANY)
+        bridge_installer.assert_called_once_with(
+            executor,
+            ANY,
+            request_timeout_seconds=None,
+        )
 
     def test_system_docker_creates_missing_network(self, monkeypatch):
         pool = SandboxPoolManager.get_instance()

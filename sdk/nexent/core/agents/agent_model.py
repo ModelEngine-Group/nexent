@@ -310,7 +310,7 @@ class AgentConfig(BaseModel):
             "scope (session/system), "
             "docker_image, memory_limit_mb, cpu_quota, "
             "network_disabled, timeout_seconds, shell_policy, "
-            "output_dir, auto_sync_outputs.  "
+            "host_tool_timeout_seconds, output_dir, auto_sync_outputs.  "
             'Example: {"level": "docker", "scope": "session", '
             '"docker_image": "nexent/nexent-sandbox:latest"}'
         ),

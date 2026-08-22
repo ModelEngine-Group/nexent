@@ -705,6 +705,56 @@ def test_agent_run_thread_handles_internal_exception(basic_agent_run_info, mock_
     assert "Error in agent_run_thread: Boom" in str(exc_info.value)
 
 
+def test_agent_run_thread_cleans_workspace_when_agent_creation_fails(
+    basic_agent_run_info, tmp_path, monkeypatch
+):
+    workspace_run_id = "run-creation-failed"
+    workspace = tmp_path / "user" / workspace_run_id
+    (workspace / "inputs").mkdir(parents=True)
+    (workspace / "inputs" / "upload.txt").write_text("temporary", encoding="utf-8")
+    basic_agent_run_info.workspace_path = str(workspace)
+    basic_agent_run_info.workspace_run_id = workspace_run_id
+
+    mock_nexent_instance = MagicMock(name="NexentAgentInstance")
+    mock_nexent_instance.create_single_agent.side_effect = RuntimeError("Boom")
+    monkeypatch.setattr(
+        run_agent,
+        "NexentAgent",
+        MagicMock(return_value=mock_nexent_instance),
+    )
+
+    with pytest.raises(ValueError, match="Error in agent_run_thread: Boom"):
+        run_agent.agent_run_thread(basic_agent_run_info)
+
+    assert not workspace.exists()
+
+
+def test_agent_run_thread_cleanup_is_idempotent_after_normal_agent_cleanup(
+    basic_agent_run_info, tmp_path, monkeypatch
+):
+    workspace_run_id = "run-normal-cleanup"
+    workspace = tmp_path / "user" / workspace_run_id
+    workspace.mkdir(parents=True)
+    basic_agent_run_info.workspace_path = str(workspace)
+    basic_agent_run_info.workspace_run_id = workspace_run_id
+
+    mock_nexent_instance = MagicMock(name="NexentAgentInstance")
+
+    def run_and_clean(**_kwargs):
+        run_agent.cleanup_run_workspace(str(workspace), workspace_run_id)
+
+    mock_nexent_instance.agent_run_with_observer.side_effect = run_and_clean
+    monkeypatch.setattr(
+        run_agent,
+        "NexentAgent",
+        MagicMock(return_value=mock_nexent_instance),
+    )
+
+    run_agent.agent_run_thread(basic_agent_run_info)
+
+    assert not workspace.exists()
+
+
 @pytest.mark.asyncio
 async def test_agent_run_streams_messages_while_thread_alive(basic_agent_run_info, monkeypatch):
     """agent_run should yield messages while the thread is alive, then final cache."""
