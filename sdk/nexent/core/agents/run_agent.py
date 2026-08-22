@@ -1,4 +1,5 @@
 import asyncio
+from copy import deepcopy
 import json
 import logging
 from contextvars import copy_context
@@ -17,6 +18,12 @@ from .nexent_agent import NexentAgent, ProcessType
 
 logger = logging.getLogger("run_agent")
 logger.setLevel(logging.DEBUG)
+
+
+def build_run_additional_args(agent_run_info: AgentRunInfo) -> Dict[str, Any]:
+    """Build isolated variables for one agent run, including empty metadata."""
+
+    return {"metadata": deepcopy(agent_run_info.runtime_metadata)}
 
 
 def _get_authorized_context_items(agent_run_info: AgentRunInfo):
@@ -205,7 +212,10 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
             nexent.add_history_to_agent(_get_authorized_history(agent_run_info))
             try:
                 nexent.agent_run_with_observer(
-                    query=agent_run_info.query, reset=False)
+                    query=agent_run_info.query,
+                    reset=False,
+                    additional_args=build_run_additional_args(agent_run_info),
+                )
             finally:
                 _log_memory_value_assessment(agent)
         else:
@@ -238,7 +248,10 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
                 nexent.add_history_to_agent(_get_authorized_history(agent_run_info))
                 try:
                     nexent.agent_run_with_observer(
-                        query=agent_run_info.query, reset=False)
+                        query=agent_run_info.query,
+                        reset=False,
+                        additional_args=build_run_additional_args(agent_run_info),
+                    )
                 finally:
                     _log_memory_value_assessment(agent)
 

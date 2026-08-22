@@ -77,6 +77,18 @@ class ConversationRecord(TableBase):
         nullable=True,
         doc="Conversation-scoped desired policy for local and AIDP knowledge retrieval",
     )
+    runtime_metadata = Column(
+        JSONB,
+        nullable=False,
+        server_default=text("'{}'::jsonb"),
+        doc="Conversation-scoped runtime metadata available to agent runs",
+    )
+    runtime_metadata_version = Column(
+        Integer,
+        nullable=False,
+        server_default=text("0"),
+        doc="Monotonic version of conversation runtime metadata",
+    )
 
 
 class ConversationMessage(TableBase):
@@ -667,6 +679,13 @@ class AgentInfo(TableBase):
     is_a2a = Column(Boolean, default=False, nullable=False, doc="Whether to publish this agent as an A2A Server agent")
     verification_config = Column(JSONB, doc="Layered ReAct self-verification configuration")
     context_policy = Column(JSONB, doc="Agent-level context processing policy override")
+    allow_chat_metadata = Column(
+        Boolean,
+        default=False,
+        nullable=False,
+        server_default=text("false"),
+        doc="Whether Native Chat and Debug users may submit runtime metadata",
+    )
     greeting_message = Column(Text, doc="Agent greeting message displayed on chat initial screen")
     example_questions = Column(JSONB, doc="List of example questions for starting a conversation with this agent")
     icon_url = Column(String(1024), doc="Object storage key for the agent icon")

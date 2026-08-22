@@ -494,6 +494,8 @@
   "agent.iconUploadFailed": "智能体图标上传失败",
   "agent.author.hint": "默认：{{email}}",
   "agent.provideRunSummary": "提供运行摘要",
+  "agent.allowChatMetadata": "允许对话 Metadata",
+  "agent.allowChatMetadata.tooltip": "允许用户在原生对话和调试中提交运行时 Metadata。Metadata 对模型可见，请勿填写密钥。",
   "agent.isMainAgent": "是否为主智能体",
   "agent.isMainAgent.error": "请选择是否为主智能体",
   "agent.provideRunSummary.error": "请选择是否提供运行摘要",
@@ -4660,6 +4662,13 @@
   "memory.longTerm.activateConfirm": "激活此历史版本？",
   "memory.longTerm.activateConfirmDescription": "版本 v{{version}} 将成为后续会话使用的当前记忆。",
   "memory.longTerm.editorLabel": "Markdown 记忆编辑器",
+  "group.deleted": "已删除的用户组",
+  "chat.runtimeMetadata.title": "Metadata",
+  "chat.runtimeMetadata.description": "传递给当前会话智能体运行的 JSON 对象。保存空对象会清除已存储的 Metadata。",
+  "chat.runtimeMetadata.invalidJson": "请输入合法的 JSON。",
+  "chat.runtimeMetadata.objectRequired": "Metadata 必须是 JSON 对象。",
+  "chat.runtimeMetadata.tooLarge": "Metadata 不能超过 64 KiB。",
+  "chat.runtimeMetadata.securityWarning": "Metadata 对模型可见，请勿包含密码、令牌或其他敏感信息。",
   "agent.config.tab.basic": "基本设置",
   "agent.config.tab.advanced": "高级设置",
   "agent.config.section.displayInfo.title": "展示信息",
@@ -4730,6 +4739,5 @@
   "a2a.server.sameUrl": "相同 URL",
   "toolConfig.placeholder.useDefaultModel": "未选择时使用默认模型",
   "toolConfig.placeholder.noAvailableModels": "暂无可选模型",
-  "common.retry": "重试",
-  "group.deleted": "已删除的用户组"
+  "common.retry": "重试"
 }

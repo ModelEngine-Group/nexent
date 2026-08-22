@@ -353,7 +353,11 @@ def test_agent_run_thread_local_flow(basic_agent_run_info, monkeypatch):
     )
     mock_nexent_instance.set_agent.assert_called_once()
     mock_nexent_instance.add_history_to_agent.assert_called_once_with(basic_agent_run_info.history)
-    mock_nexent_instance.agent_run_with_observer.assert_called_once_with(query=basic_agent_run_info.query, reset=False)
+    mock_nexent_instance.agent_run_with_observer.assert_called_once_with(
+        query=basic_agent_run_info.query,
+        reset=False,
+        additional_args={"metadata": {}},
+    )
 
 
 def test_agent_run_thread_binds_capacity_and_budget_snapshots(basic_agent_run_info, monkeypatch):
@@ -462,7 +466,20 @@ def test_agent_run_thread_mcp_flow(basic_agent_run_info, mock_memory_context, mo
     )
     mock_nexent_instance.set_agent.assert_called_once()
     mock_nexent_instance.add_history_to_agent.assert_called_once_with(basic_agent_run_info.history)
-    mock_nexent_instance.agent_run_with_observer.assert_called_once_with(query=basic_agent_run_info.query, reset=False)
+    mock_nexent_instance.agent_run_with_observer.assert_called_once_with(
+        query=basic_agent_run_info.query,
+        reset=False,
+        additional_args={"metadata": {}},
+    )
+
+
+def test_build_run_additional_args_isolates_metadata_snapshot(basic_agent_run_info):
+    basic_agent_run_info.runtime_metadata = {"tenant": {"region": "cn"}}
+
+    additional_args = run_agent.build_run_additional_args(basic_agent_run_info)
+    additional_args["metadata"]["tenant"]["region"] = "us"
+
+    assert basic_agent_run_info.runtime_metadata == {"tenant": {"region": "cn"}}
 
 
 def test_agent_run_thread_mcp_flow_with_explicit_transport(basic_agent_run_info, mock_memory_context, monkeypatch):

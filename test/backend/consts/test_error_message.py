@@ -8,6 +8,19 @@ from backend.consts.error_code import ErrorCode
 from backend.consts.error_message import ErrorMessage
 
 
+@pytest.mark.parametrize(
+    ("error_code", "message"),
+    [
+        (ErrorCode.CHAT_METADATA_NOT_ALLOWED, "Runtime metadata input is disabled for this agent."),
+        (ErrorCode.CHAT_METADATA_INVALID, "Runtime metadata is invalid."),
+        (ErrorCode.CHAT_METADATA_TOO_LARGE, "Runtime metadata exceeds the maximum allowed size."),
+        (ErrorCode.CHAT_METADATA_VERSION_CONFLICT, "Runtime metadata was updated by another request."),
+    ],
+)
+def test_runtime_metadata_error_messages(error_code, message):
+    assert ErrorMessage.get_message(error_code) == message
+
+
 class TestErrorMessageGetMessage:
     """Test class for ErrorMessage.get_message method."""
 

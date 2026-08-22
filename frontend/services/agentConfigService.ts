@@ -173,6 +173,7 @@ export const fetchAgentList = async (tenantId?: string) => {
       is_published: agent.is_published,
       current_version_no: agent.current_version_no,
       is_a2a_server: agent.is_a2a_server || false,
+      allow_chat_metadata: agent.allow_chat_metadata ?? false,
       icon_url: agent.icon_url,
     }));
 
@@ -228,6 +229,7 @@ export const fetchPublishedAgentList = async () => {
       version_name: agent.version_name,
       greeting_message: agent.greeting_message,
       example_questions: agent.example_questions || [],
+      allow_chat_metadata: agent.allow_chat_metadata ?? false,
       icon_url: agent.icon_url,
     }));
 
@@ -458,6 +460,7 @@ export interface UpdateAgentInfoPayload {
   requested_output_tokens?: number | null;
   is_main_agent?: boolean;
   provide_run_summary?: boolean;
+  allow_chat_metadata?: boolean;
   enable_context_manager?: boolean;
   verification_config?: Record<string, any>;
   enabled?: boolean;
@@ -969,6 +972,7 @@ export const searchAgentInfo = async (
       greeting_message: data.greeting_message || "",
       example_questions: data.example_questions || [],
       current_version_no: data.current_version_no,
+      allow_chat_metadata: data.allow_chat_metadata ?? false,
     };
 
     return {

@@ -102,6 +102,20 @@ sys.modules['database.model_management_db'] = MagicMock()
 sys.modules['database.a2a_agent_db'] = MagicMock()
 sys.modules['database.skill_db'] = MagicMock()
 
+# Mock conversation_db and db_models (newly imported by agent_service.py for
+# runtime metadata support) so the real sqlalchemy-based modules are not loaded
+# during collection - the pre-existing sqlalchemy stub conflicts with
+# sqlalchemy.dialects.postgresql.
+sys.modules['database.conversation_db'] = MagicMock()
+sys.modules['database.db_models'] = MagicMock()
+
+# Mock conversation_db and db_models (newly imported by agent_service.py for
+# runtime metadata support) so the real sqlalchemy-based modules are not loaded
+# during collection - the pre-existing sqlalchemy stub conflicts with
+# sqlalchemy.dialects.postgresql.
+sys.modules['database.conversation_db'] = MagicMock()
+sys.modules['database.db_models'] = MagicMock()
+
 # Stub database.client early so real DB modules are not loaded during import
 _mock_db_client = MagicMock()
 _mock_db_client.get_db_session = MagicMock()
@@ -11553,6 +11567,14 @@ async def test_import_agent_by_agent_id_publish_version_error(
     # field-level attributes through dir(), so the access AttributeErrors
     # unless we set it explicitly.
     mock_agent_info.requested_output_tokens = None
+    # Runtime metadata support added `allow_chat_metadata` to
+    # ExportAndImportAgentInfo; import_agent_by_agent_id reads it directly
+    # at agent_service.py:2489. Same Pydantic v2 spec caveat applies.
+    mock_agent_info.allow_chat_metadata = None
+    # Runtime metadata support added `allow_chat_metadata` to
+    # ExportAndImportAgentInfo; import_agent_by_agent_id reads it directly
+    # at agent_service.py:2489. Same Pydantic v2 spec caveat applies.
+    mock_agent_info.allow_chat_metadata = None
 
     # Configure the three patched mocks so the flow reaches the publish branch:
     # - query_all_tools() must return an iterable (empty list -> no tool loop)
@@ -18387,3 +18409,208 @@ async def test_get_agent_icon_impl_success(mocker):
     result = await agent_service.get_agent_icon_impl(123, "tenant", "user")
 
     assert result == (content, "image/webp")
+
+
+# =============================================================================
+# Runtime metadata flow inside run_agent_stream
+# =============================================================================
+
+
+@pytest.mark.asyncio
+@patch("backend.services.agent_service._resolve_user_tenant_language", return_value=("u", "t", "en"))
+async def test_run_agent_stream_rejects_invalid_runtime_metadata(
+    mock_resolve, mock_http_request,
+):
+    """Non-JSON runtime metadata must be rejected with CHAT_METADATA_INVALID."""
+    request = AgentRequest(
+        agent_id=1, conversation_id=123, query="q", history=[], minio_files=[],
+        # A dict that passes model construction but fails validate_runtime_metadata
+        # (NaN is not JSON-serializable).
+        metadata={"bad": float("nan")},
+    )
+    mock_get_conversation = MagicMock(return_value={"knowledge_scope": None})
+    with patch.object(agent_service, "get_conversation_service", mock_get_conversation):
+        with pytest.raises(agent_service.AppException) as exc_info:
+            await run_agent_stream(request, mock_http_request, "Bearer token")
+
+    assert exc_info.value.error_code == agent_service.ErrorCode.CHAT_METADATA_INVALID
+
+
+@pytest.mark.asyncio
+@patch("backend.services.agent_service._resolve_user_tenant_language", return_value=("u", "t", "en"))
+async def test_run_agent_stream_rejects_oversized_runtime_metadata(
+    mock_resolve, mock_http_request,
+):
+    """METADATA_TOO_LARGE validation failures map to CHAT_METADATA_TOO_LARGE."""
+    request = AgentRequest(
+        agent_id=1, conversation_id=123, query="q", history=[], minio_files=[],
+        metadata={"payload": "x" * (64 * 1024 + 1)},
+    )
+    mock_get_conversation = MagicMock(return_value={"knowledge_scope": None})
+    with patch.object(agent_service, "get_conversation_service", mock_get_conversation):
+        with pytest.raises(agent_service.AppException) as exc_info:
+            await run_agent_stream(request, mock_http_request, "Bearer token")
+
+    assert exc_info.value.error_code == agent_service.ErrorCode.CHAT_METADATA_TOO_LARGE
+
+
+@pytest.mark.asyncio
+@patch("backend.services.agent_service._resolve_user_tenant_language", return_value=("u", "t", "en"))
+async def test_run_agent_stream_rejects_metadata_when_agent_disallows(
+    mock_resolve, mock_http_request,
+):
+    """Metadata input for an agent with allow_chat_metadata=False is rejected."""
+    request = AgentRequest(
+        agent_id=1, conversation_id=123, query="q", history=[], minio_files=[],
+        metadata={"session": "s1"},
+    )
+    mock_get_conversation = MagicMock(return_value={"knowledge_scope": None})
+    with patch.object(agent_service, "get_conversation_service", mock_get_conversation), \
+            patch.object(
+                agent_service, "search_agent_info_by_agent_id",
+                return_value={"allow_chat_metadata": False},
+            ):
+        with pytest.raises(agent_service.AppException) as exc_info:
+            await run_agent_stream(request, mock_http_request, "Bearer token")
+
+    assert exc_info.value.error_code == agent_service.ErrorCode.CHAT_METADATA_NOT_ALLOWED
+
+
+@pytest.mark.asyncio
+@patch("backend.services.agent_service._resolve_user_tenant_language", return_value=("u", "t", "en"))
+@patch("backend.services.agent_service.create_new_conversation")
+@patch("backend.services.agent_service.generate_stream")
+@patch("backend.services.agent_service.save_messages")
+@patch("backend.services.agent_service.build_memory_context")
+async def test_run_agent_stream_new_conversation_persists_runtime_metadata(
+    mock_build_mem_ctx,
+    mock_save_messages,
+    mock_generate_stream,
+    mock_create_conversation,
+    mock_resolve,
+    mock_http_request,
+):
+    """New conversations carry runtime_metadata into create_new_conversation."""
+    request = AgentRequest(
+        agent_id=1, conversation_id=None, query="q", history=[], minio_files=[],
+        metadata={"session": "s1"},
+    )
+    mock_create_conversation.return_value = {
+        "conversation_id": 222,
+        "runtime_metadata": {"session": "s1"},
+        "runtime_metadata_version": 3,
+    }
+    mock_build_mem_ctx.return_value = MagicMock(user_config=MagicMock(memory_switch=True))
+
+    async def stream_chunks():
+        yield "data: ok\n\n"
+
+    mock_generate_stream.return_value = stream_chunks()
+
+    with patch.object(
+        agent_service, "search_agent_info_by_agent_id",
+        return_value={"allow_chat_metadata": True},
+    ):
+        response = await run_agent_stream(request, mock_http_request, "Bearer token")
+
+    kwargs = mock_create_conversation.call_args.kwargs
+    assert kwargs["runtime_metadata"] == {"session": "s1"}
+    assert request.conversation_id == 222
+    assert request.__dict__["_runtime_metadata_snapshot"] == {"session": "s1"}
+    assert request.__dict__["_runtime_metadata_version"] == 3
+    assert response.headers["conversation_id"] == "222"
+
+
+@pytest.mark.asyncio
+@patch("backend.services.agent_service._resolve_user_tenant_language", return_value=("u", "t", "en"))
+@patch("backend.services.agent_service.update_conversation_chat_mode_service")
+@patch("backend.services.agent_service.update_conversation_agent_id_service")
+@patch("backend.services.agent_service.generate_stream")
+@patch("backend.services.agent_service.save_messages")
+@patch("backend.services.agent_service.build_memory_context")
+async def test_run_agent_stream_existing_conversation_resolves_metadata(
+    mock_build_mem_ctx,
+    mock_save_messages,
+    mock_generate_stream,
+    mock_update_agent_id,
+    mock_update_chat_mode,
+    mock_resolve,
+    mock_http_request,
+):
+    """Existing-conversation metadata updates go through resolve_conversation_runtime_metadata."""
+    request = AgentRequest(
+        agent_id=1, conversation_id=123, query="q", history=[], minio_files=[],
+        metadata={"session": "s2"},
+        expected_metadata_version=5,
+    )
+    mock_get_conversation = MagicMock(return_value={"knowledge_scope": None})
+    mock_resolve_metadata = MagicMock(
+        return_value={"runtime_metadata": {"session": "s2"}, "runtime_metadata_version": 6}
+    )
+    mock_build_mem_ctx.return_value = MagicMock(user_config=MagicMock(memory_switch=True))
+
+    async def stream_chunks():
+        yield "data: ok\n\n"
+
+    mock_generate_stream.return_value = stream_chunks()
+
+    with patch.object(agent_service, "get_conversation_service", mock_get_conversation), \
+            patch.object(
+                agent_service, "search_agent_info_by_agent_id",
+                return_value={"allow_chat_metadata": True},
+            ), \
+            patch.object(
+                agent_service, "resolve_conversation_runtime_metadata", mock_resolve_metadata,
+            ):
+        response = await run_agent_stream(request, mock_http_request, "Bearer token")
+
+    assert isinstance(response, StreamingResponse)
+    assert request.__dict__["_runtime_metadata_snapshot"] == {"session": "s2"}
+    assert request.__dict__["_runtime_metadata_version"] == 6
+    mock_resolve_metadata.assert_called_once_with(
+        conversation_id=123,
+        user_id="u",
+        request_metadata={"session": "s2"},
+        update_requested=True,
+        expected_version=5,
+    )
+    mock_update_chat_mode.assert_called_once()
+    mock_update_agent_id.assert_called_once()
+
+
+@pytest.mark.asyncio
+@patch("backend.services.agent_service._resolve_user_tenant_language", return_value=("u", "t", "en"))
+async def test_run_agent_stream_metadata_version_conflict(
+    mock_resolve, mock_http_request,
+):
+    """A concurrent metadata update surfaces as CHAT_METADATA_VERSION_CONFLICT."""
+    request = AgentRequest(
+        agent_id=1, conversation_id=123, query="q", history=[], minio_files=[],
+        metadata={"session": "s2"},
+    )
+
+    class _FakeVersionConflict(ValueError):
+        def __init__(self, current_version):
+            super().__init__("conflict")
+            self.current_version = current_version
+
+    original = agent_service.RuntimeMetadataVersionConflict
+    agent_service.RuntimeMetadataVersionConflict = _FakeVersionConflict
+    try:
+        mock_get_conversation = MagicMock(return_value={"knowledge_scope": None})
+        mock_resolve_metadata = MagicMock(side_effect=_FakeVersionConflict(current_version=7))
+        with patch.object(agent_service, "get_conversation_service", mock_get_conversation), \
+                patch.object(
+                    agent_service, "search_agent_info_by_agent_id",
+                    return_value={"allow_chat_metadata": True},
+                ), \
+                patch.object(
+                    agent_service, "resolve_conversation_runtime_metadata", mock_resolve_metadata,
+                ):
+            with pytest.raises(agent_service.AppException) as exc_info:
+                await run_agent_stream(request, mock_http_request, "Bearer token")
+    finally:
+        agent_service.RuntimeMetadataVersionConflict = original
+
+    assert exc_info.value.error_code == agent_service.ErrorCode.CHAT_METADATA_VERSION_CONFLICT
+    assert exc_info.value.details == {"current_version": 7}

@@ -27,6 +27,16 @@ Format: XXYYZZ (6 digits, string)
 from enum import Enum
 
 
+class RuntimeMetadataValidationCode(str, Enum):
+    """Internal runtime metadata validation reason codes."""
+
+    INVALID_METADATA_TYPE = "INVALID_METADATA_TYPE"
+    METADATA_TOO_DEEP = "METADATA_TOO_DEEP"
+    METADATA_TOO_MANY_ITEMS = "METADATA_TOO_MANY_ITEMS"
+    METADATA_TOO_LARGE = "METADATA_TOO_LARGE"
+
+
+
 class ErrorCode(Enum):
     """Business error codes (stored as strings to preserve leading zeros)."""
 
@@ -64,6 +74,10 @@ class ErrorCode(Enum):
     CHAT_MESSAGE_NOT_FOUND = "010102"  # Message not found
     CHAT_CONVERSATION_SAVE_FAILED = "010103"  # Failed to save conversation
     CHAT_TITLE_GENERATION_FAILED = "010104"  # Failed to generate title
+    CHAT_METADATA_NOT_ALLOWED = "010105"  # Runtime metadata input is disabled
+    CHAT_METADATA_INVALID = "010106"  # Runtime metadata is invalid
+    CHAT_METADATA_TOO_LARGE = "010107"  # Runtime metadata is too large
+    CHAT_METADATA_VERSION_CONFLICT = "010108"  # Runtime metadata version conflict
 
     # ==================== 02 QuickConfig / 快速配置 ====================
     # 01 - Configuration
@@ -285,6 +299,11 @@ ERROR_CODE_HTTP_STATUS = {
     ErrorCode.COMMON_RESOURCE_NOT_FOUND: 404,
     ErrorCode.COMMON_RESOURCE_ALREADY_EXISTS: 409,
     ErrorCode.COMMON_RESOURCE_DISABLED: 403,
+    # Chat - Runtime metadata
+    ErrorCode.CHAT_METADATA_NOT_ALLOWED: 400,
+    ErrorCode.CHAT_METADATA_INVALID: 422,
+    ErrorCode.CHAT_METADATA_TOO_LARGE: 413,
+    ErrorCode.CHAT_METADATA_VERSION_CONFLICT: 409,
     # Tenant resource - personal KB quota
     ErrorCode.TENANT_PERSONAL_KB_QUOTA_EXCEEDED: 403,
     ErrorCode.TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE: 503,
