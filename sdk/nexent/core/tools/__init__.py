@@ -27,6 +27,8 @@ from .analyze_video_tool import AnalyzeVideoTool
 from .parallel_executor import ParallelExecutorTool
 from .store_memory_tool import StoreMemoryTool
 from .search_memory_tool import SearchMemoryTool
+from .download_from_s3_tool import DownloadFromS3Tool
+from .upload_to_s3_tool import UploadToS3Tool
 from .plan_tools import CreatePlanTool, UpdatePlanStepTool
 
 __all__ = [
@@ -61,6 +63,8 @@ __all__ = [
     "AnalyzeVideoTool",
     "StoreMemoryTool",
     "SearchMemoryTool",
+    "DownloadFromS3Tool",
+    "UploadToS3Tool",
     "CreatePlanTool",
     "UpdatePlanStepTool",
 ]

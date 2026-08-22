@@ -6,8 +6,42 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 import yaml
+from charset_normalizer import from_bytes
 
 logger = logging.getLogger(__name__)
+
+
+def _read_skill_text(file_path: Path) -> str:
+    """Read SKILL.md using strict, detected character encoding."""
+    raw = file_path.read_bytes()
+    if raw.startswith(b"\xef\xbb\xbf"):
+        return raw.decode("utf-8-sig")
+    if raw.startswith((b"\xff\xfe\x00\x00", b"\x00\x00\xfe\xff")):
+        return raw.decode("utf-32")
+    if raw.startswith((b"\xff\xfe", b"\xfe\xff")):
+        return raw.decode("utf-16")
+    if raw and raw.count(b"\x00") / len(raw) > 0.2:
+        even_nuls = raw[0::2].count(0)
+        odd_nuls = raw[1::2].count(0)
+        if odd_nuls > len(raw) / 4:
+            return raw.decode("utf-16-le")
+        if even_nuls > len(raw) / 4:
+            return raw.decode("utf-16-be")
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        pass
+    for encoding in ("gb18030", "big5"):
+        try:
+            decoded = raw.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+        if any("\u3400" <= char <= "\u9fff" for char in decoded):
+            return decoded
+    match = from_bytes(raw).best()
+    if match is None or match.encoding is None or match.chaos > 0.3:
+        raise UnicodeDecodeError("unknown", raw, 0, len(raw), "Unable to detect a reliable text encoding")
+    return str(match)
 
 _ALLOWED_SKILL_META_KEYS = frozenset([
     "name",
@@ -30,7 +64,7 @@ class SkillLoader:
         if not file_path.exists():
             raise FileNotFoundError(f"Skill file not found: {path}")
 
-        content = file_path.read_text(encoding="utf-8")
+        content = _read_skill_text(file_path)
         return cls.parse(content, source_path=str(file_path))
 
     @classmethod

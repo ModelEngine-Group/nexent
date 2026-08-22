@@ -1,4 +1,6 @@
 from sqlalchemy import (
+    JSON,
+    TIMESTAMP,
     BigInteger,
     Boolean,
     CheckConstraint,
@@ -7,12 +9,10 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
-    JSON,
     Numeric,
     Sequence,
     String,
     Text,
-    TIMESTAMP,
     UniqueConstraint,
     text,
 )
@@ -609,6 +609,8 @@ class ToolInfo(TableBase):
     output_type = Column(String(100), doc="Prompt tool output description")
     category = Column(String(100), doc="Tool category description")
     labels = Column(JSONB, default=[], doc="JSON array of label strings for filtering/grouping tools")
+    is_user_selectable = Column(
+        Boolean, default=True, nullable=False, doc="Whether users can actively select the tool in agent configuration")
     is_available = Column(
         Boolean, doc="Whether the tool can be used under the current main service")
 
@@ -662,10 +664,12 @@ class AgentInfo(TableBase):
         ),
     )
     enable_context_manager = Column(Boolean, default=True, doc="Whether to enable context management (compression) for this agent")
+    is_a2a = Column(Boolean, default=False, nullable=False, doc="Whether to publish this agent as an A2A Server agent")
     verification_config = Column(JSONB, doc="Layered ReAct self-verification configuration")
     context_policy = Column(JSONB, doc="Agent-level context processing policy override")
     greeting_message = Column(Text, doc="Agent greeting message displayed on chat initial screen")
     example_questions = Column(JSONB, doc="List of example questions for starting a conversation with this agent")
+    icon_url = Column(String(1024), doc="Object storage key for the agent icon")
 
 
 class PromptTemplate(TableBase):
@@ -1487,8 +1491,6 @@ class AgentVersion(TableBase):
         30), doc="Source type: NORMAL (normal publish) / ROLLBACK (rollback and republish)")
     status = Column(String(30), default="RELEASED",
                     doc="Version status: RELEASED / DISABLED / ARCHIVED")
-    is_a2a = Column(Boolean, default=False,
-                    doc="Whether this version is published as an A2A Server agent")
 
 
 class AgentRepository(TableBase):

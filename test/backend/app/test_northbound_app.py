@@ -14,6 +14,9 @@ from io import BytesIO
 from apps.northbound_app import router
 from consts.exceptions import (
     LimitExceededError,
+    RuntimeServiceTimeoutError,
+    RuntimeServiceUnavailableError,
+    RuntimeUpstreamError,
     UnauthorizedError,
     SignatureValidationError,
 )
@@ -189,6 +192,33 @@ def test_run_chat_unauthorized():
         assert resp.status_code == 500
 
 
+@pytest.mark.parametrize(
+    ("error", "expected_status"),
+    [
+        (RuntimeServiceUnavailableError("unavailable"), 502),
+        (RuntimeServiceTimeoutError("timed out"), 504),
+    ],
+)
+def test_run_chat_maps_runtime_transport_errors(error, expected_status):
+    with patch(
+        "apps.northbound_app._get_northbound_context",
+        new_callable=AsyncMock,
+    ) as mock_ctx, patch(
+        "apps.northbound_app.start_streaming_chat",
+        new_callable=AsyncMock,
+        side_effect=error,
+    ):
+        mock_ctx.return_value = MagicMock()
+
+        response = client.post(
+            "/nb/v1/chat/run",
+            json={"agent_name": "general-assistant", "query": "Hello"},
+            headers=_build_headers(),
+        )
+
+    assert response.status_code == expected_status
+
+
 # =============================================================================
 # Stop Chat Tests
 # =============================================================================
@@ -207,6 +237,57 @@ def test_stop_chat_success():
         )
 
         assert resp.status_code == 200
+
+
+def test_stop_chat_preserves_runtime_error_response():
+    upstream_error = RuntimeUpstreamError(
+        status_code=403,
+        content=b'{"message":"forbidden"}',
+        headers={"content-type": "application/json"},
+    )
+    with patch(
+        "apps.northbound_app._get_northbound_context",
+        new_callable=AsyncMock,
+    ) as mock_ctx, patch(
+        "apps.northbound_app.stop_chat",
+        new_callable=AsyncMock,
+        side_effect=upstream_error,
+    ):
+        mock_ctx.return_value = MagicMock()
+
+        response = client.get(
+            "/nb/v1/chat/stop/123",
+            headers=_build_headers(),
+        )
+
+    assert response.status_code == 403
+    assert response.json() == {"message": "forbidden"}
+
+
+@pytest.mark.parametrize(
+    ("error", "expected_status"),
+    [
+        (RuntimeServiceUnavailableError("unavailable"), 502),
+        (RuntimeServiceTimeoutError("timed out"), 504),
+    ],
+)
+def test_stop_chat_maps_runtime_transport_errors(error, expected_status):
+    with patch(
+        "apps.northbound_app._get_northbound_context",
+        new_callable=AsyncMock,
+    ) as mock_ctx, patch(
+        "apps.northbound_app.stop_chat",
+        new_callable=AsyncMock,
+        side_effect=error,
+    ):
+        mock_ctx.return_value = MagicMock()
+
+        response = client.get(
+            "/nb/v1/chat/stop/123",
+            headers=_build_headers(),
+        )
+
+    assert response.status_code == expected_status
 
 
 # =============================================================================

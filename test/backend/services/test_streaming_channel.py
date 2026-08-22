@@ -75,6 +75,32 @@ class TestStreamingChannel:
         assert results == ["hist1", "hist2", "new1", "new2"]
 
     @pytest.mark.asyncio
+    async def test_slow_history_subscriber_does_not_block_publish(self, channel):
+        """A subscriber paused at yield must not retain the channel lock."""
+        await channel.publish("first")
+        subscription = channel.subscribe_with_history()
+
+        assert await anext(subscription) == "first"
+        await asyncio.wait_for(channel.publish("second"), timeout=0.1)
+
+        assert channel.get_history() == ["first", "second"]
+        await subscription.aclose()
+
+    @pytest.mark.asyncio
+    async def test_slow_live_subscriber_does_not_block_publish(self, channel):
+        """A paused live subscriber must not block subsequent publication."""
+        subscription = channel.subscribe()
+        first_chunk = asyncio.create_task(anext(subscription))
+        await asyncio.sleep(0)
+
+        await channel.publish("first")
+        assert await asyncio.wait_for(first_chunk, timeout=0.1) == "first"
+        await asyncio.wait_for(channel.publish("second"), timeout=0.1)
+
+        assert channel.get_history() == ["first", "second"]
+        await subscription.aclose()
+
+    @pytest.mark.asyncio
     async def test_event_driven_notification(self, channel):
         """Test that subscribers are notified via events (not polling)."""
         results = []

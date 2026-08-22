@@ -352,7 +352,7 @@ class AgentRunInfo(BaseModel):
     agent_config: AgentConfig = Field(description="Detailed Agent configuration")
     mcp_host: Optional[List[Union[str, Dict[str, Any]]]] = Field(
         description="MCP server address(es). Can be a string (URL) or dict with 'url', 'transport', "
-        "and optionally 'authorization' or 'headers' keys. "
+        "and optionally 'authorization', 'headers', or 'httpx_client_factory' keys. "
         "Transport can be 'sse' or 'streamable-http'. If string, transport is auto-detected based on URL ending: "
         "URLs ending with '/sse' use 'sse' transport, URLs ending with '/mcp' use 'streamable-http' transport. "
         "Authorization can be provided as 'authorization' (e.g., 'Bearer token') or as 'headers' dict.",
@@ -397,6 +397,22 @@ class AgentRunInfo(BaseModel):
             "MinIO client for syncing sandbox output files to object storage.  "
             "Required when sandbox_config.auto_sync_outputs is True."
         ),
+        default=None,
+    )
+    workspace_path: Optional[str] = Field(
+        description="Run-scoped local workspace used for uploaded inputs and generated outputs.",
+        default=None,
+    )
+    workspace_run_id: Optional[str] = Field(
+        description="Opaque run identifier used to isolate workspace files and object keys.",
+        default=None,
+    )
+    tenant_id: Optional[str] = Field(
+        description="Tenant id used for run-scoped file isolation.",
+        default=None,
+    )
+    minio_files: Optional[List[Dict[str, Any]]] = Field(
+        description="Authorized files uploaded with the current run request.",
         default=None,
     )
 

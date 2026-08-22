@@ -88,7 +88,7 @@ async def list_community_mcp_services_api(
     """List public community MCP services (shared only)."""
     try:
         user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
-        data = await list_community_mcp_services(
+        list_kwargs = dict(
             tenant_id=tenant_id,
             user_id=user_id,
             search=query.search,
@@ -97,6 +97,9 @@ async def list_community_mcp_services_api(
             cursor=query.cursor,
             limit=query.limit,
         )
+        if query.page is not None:
+            list_kwargs["page"] = query.page
+        data = await list_community_mcp_services(**list_kwargs)
         return JSONResponse(status_code=HTTPStatus.OK, content={"status": "success", "data": data})
     except UnauthorizedError as exc:
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))

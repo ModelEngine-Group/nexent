@@ -7,9 +7,16 @@ import uuid
 
 import httpx
 from fastapi import APIRouter, Body, File, Header, HTTPException, Query, Request, UploadFile
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 
-from consts.exceptions import LimitExceededError, UnauthorizedError, ConversationNotFoundError
+from consts.exceptions import (
+    ConversationNotFoundError,
+    LimitExceededError,
+    RuntimeServiceTimeoutError,
+    RuntimeServiceUnavailableError,
+    RuntimeUpstreamError,
+    UnauthorizedError,
+)
 from consts.model import ToolParamsRequest
 from services.northbound_service import (
     NorthboundContext,
@@ -277,6 +284,10 @@ async def run_chat(
     except PermissionError as e:
         logging.error(f"Permission denied while running northbound chat: {str(e)}", exc_info=e)
         raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(e))
+    except RuntimeServiceTimeoutError as e:
+        raise HTTPException(status_code=HTTPStatus.GATEWAY_TIMEOUT, detail=str(e)) from e
+    except RuntimeServiceUnavailableError as e:
+        raise HTTPException(status_code=HTTPStatus.BAD_GATEWAY, detail=str(e)) from e
     except HTTPException as e:
         raise e
     except Exception as e:
@@ -305,6 +316,16 @@ async def stop_chat_stream(
         logging.error(f"Too Many Requests: rate limit exceeded: {str(e)}", exc_info=e)
         raise HTTPException(status_code=HTTPStatus.TOO_MANY_REQUESTS,
                             detail="Too Many Requests: rate limit exceeded")
+    except RuntimeUpstreamError as e:
+        return Response(
+            content=e.content,
+            status_code=e.status_code,
+            headers=e.headers,
+        )
+    except RuntimeServiceTimeoutError as e:
+        raise HTTPException(status_code=HTTPStatus.GATEWAY_TIMEOUT, detail=str(e)) from e
+    except RuntimeServiceUnavailableError as e:
+        raise HTTPException(status_code=HTTPStatus.BAD_GATEWAY, detail=str(e)) from e
     except HTTPException as e:
         raise e
     except Exception as e:

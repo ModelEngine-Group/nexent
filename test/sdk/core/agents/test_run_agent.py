@@ -340,6 +340,10 @@ def test_agent_run_thread_local_flow(basic_agent_run_info, monkeypatch):
         minio_client=None,
         conversation_id=basic_agent_run_info.conversation_id,
         user_id=basic_agent_run_info.user_id,
+        tenant_id=None,
+        workspace_path=None,
+        workspace_run_id=None,
+        minio_files=None,
     )
 
     # Following methods on the NexentAgent instance should be invoked
@@ -445,6 +449,10 @@ def test_agent_run_thread_mcp_flow(basic_agent_run_info, mock_memory_context, mo
         minio_client=None,
         conversation_id=basic_agent_run_info.conversation_id,
         user_id=basic_agent_run_info.user_id,
+        tenant_id=None,
+        workspace_path=None,
+        workspace_run_id=None,
+        minio_files=None,
     )
 
     # Subsequent calls on NexentAgent instance should mirror the local flow
@@ -567,6 +575,23 @@ def test_normalize_mcp_config():
     # Test dict format with None transport (should auto-detect)
     result = run_agent._normalize_mcp_config({"url": "http://server/mcp", "transport": None})
     assert result == {"url": "http://server/mcp", "transport": "streamable-http"}
+
+    httpx_client_factory = MagicMock()
+    result = run_agent._normalize_mcp_config({
+        "url": "http://server/sse",
+        "httpx_client_factory": httpx_client_factory,
+    })
+    assert result == {
+        "url": "http://server/sse",
+        "transport": "sse",
+        "httpx_client_factory": httpx_client_factory,
+    }
+
+    with pytest.raises(ValueError, match="httpx_client_factory must be callable"):
+        run_agent._normalize_mcp_config({
+            "url": "http://server/sse",
+            "httpx_client_factory": "not-callable",
+        })
 
     # Test dict format with only authorization
     result = run_agent._normalize_mcp_config({

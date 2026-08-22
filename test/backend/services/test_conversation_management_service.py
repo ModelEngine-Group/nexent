@@ -331,6 +331,32 @@ class TestConversationManagementService(unittest.TestCase):
             invocation_id="subagent-invocation-1",
         )
 
+    @patch('backend.services.conversation_management_service.persist_assistant_run_batch_db')
+    def test_persist_assistant_run_batch_forwards_all_fields(self, mock_persist_batch):
+        """The service boundary forwards the complete atomic batch contract."""
+        from backend.services.conversation_management_service import persist_assistant_run_batch
+
+        expected = {0: 555}
+        mock_persist_batch.return_value = expected
+        params = {
+            "message_id": 1,
+            "conversation_id": 456,
+            "message_content": "done",
+            "terminal_status": "completed",
+            "message_units": [{"unit_index": 0, "unit_type": "final_answer"}],
+            "search_records": [{"unit_index": 0, "source_title": "Result"}],
+            "image_urls": ["https://example.com/image.png"],
+            "skill_files": [{"object_name": "generated/report.txt"}],
+            "automation_proposals": [{"unit_index": 0, "proposal_id": 77}],
+            "user_id": self.user_id,
+            "tenant_id": self.tenant_id,
+        }
+
+        result = persist_assistant_run_batch(**params)
+
+        self.assertEqual(result, expected)
+        mock_persist_batch.assert_called_once_with(**params)
+
     @patch('backend.services.conversation_management_service.create_source_image')
     def test_save_source_image_passes_through(self, mock_create_source_image):
         """save_source_image is a thin pass-through to create_source_image."""

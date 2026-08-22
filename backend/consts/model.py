@@ -433,6 +433,7 @@ class NL2AgentRunRequest(BaseModel):
     query: str = Field(min_length=1)
     history: Optional[List[HistoryItem]] = None
     minio_files: Optional[List[Dict[str, Any]]] = None
+    agent_id: int = Field(gt=0)
 
 
 class NL2SkillRunRequest(BaseModel):
@@ -717,11 +718,13 @@ class AgentInfoRequest(BaseModel):
     group_ids: Optional[List[int]] = None
     ingroup_permission: Optional[str] = None
     enable_context_manager: Optional[bool] = None
+    is_a2a: Optional[bool] = None
     verification_config: Optional[Dict[str, Any]] = None
     context_policy: Optional[Dict[str, Any]] = None
 
     greeting_message: Optional[str] = None
     example_questions: Optional[List[str]] = None
+    icon_url: Optional[str] = None
     version_no: int = 0
 
     @field_validator("verification_config", mode="before")
@@ -787,6 +790,7 @@ class ToolInfo(BaseModel):
     origin_name: Optional[str] = None
     category: Optional[str] = None
     labels: Optional[List[str]] = None
+    is_user_selectable: bool = True
 
 
 # used in Knowledge Summary request
@@ -826,6 +830,8 @@ class ExportAndImportAgentInfo(BaseModel):
     skill_names: Optional[List[str]] = None
     prompt_template_id: Optional[int] = None
     prompt_template_name: Optional[str] = None
+    greeting_message: Optional[str] = None
+    example_questions: Optional[List[str]] = None
 
     @field_validator("context_policy")
     @classmethod
@@ -955,10 +961,23 @@ class SkillZipEntry(BaseModel):
     skill_zip_base64: str
 
 
+class SkillResolution(BaseModel):
+    """User-selected resolution for a duplicate skill during agent import."""
+    skill_name: str
+    action: Literal["rename", "use_existing"]
+    new_name: Optional[str] = None
+
+
+class SkillConflictCheckRequest(BaseModel):
+    """Skill names to check before showing the agent import steps."""
+    skill_names: List[str]
+
+
 class AgentImportRequest(BaseModel):
     agent_info: ExportAndImportDataFormat
     force_import: bool = False
     skills: Optional[List[SkillZipEntry]] = None
+    skill_resolutions: Optional[List[SkillResolution]] = None
 
 
 class AgentNameBatchRegenerateItem(BaseModel):
@@ -1095,9 +1114,7 @@ class TenantCreateRequest(BaseModel):
     )
     locale: Optional[str] = Field(
         default=None,
-        description="Frontend locale when creating the tenant (e.g. 'zh' or 'en'). "
-                    "Determines the source label for auto-installed skills: "
-                    "'zh' → '官方', other locales → 'official'."
+        description="Frontend locale when creating the tenant (e.g. 'zh' or 'en')."
     )
 
 
@@ -1385,7 +1402,6 @@ class VersionPublishRequest(BaseModel):
     """Request model for publishing a new version"""
     version_name: Optional[str] = Field(None, description="User-defined version name for display")
     release_note: Optional[str] = Field(None, description="Release notes / publish remarks")
-    publish_as_a2a: bool = Field(False, description="Whether to publish this agent as an A2A Server agent")
 
 
 class VersionListItemResponse(BaseModel):
@@ -1397,7 +1413,6 @@ class VersionListItemResponse(BaseModel):
     source_version_no: Optional[int] = Field(None, description="Source version number if rollback")
     source_type: Optional[str] = Field(None, description="Source type: NORMAL / ROLLBACK")
     status: str = Field(..., description="Version status: RELEASED / DISABLED / ARCHIVED")
-    is_a2a: bool = Field(False, description="Whether this version is published as an A2A Server agent")
     created_by: str = Field(..., description="User who published this version")
     create_time: Optional[str] = Field(None, description="Publish timestamp")
 
@@ -1417,7 +1432,6 @@ class VersionDetailResponse(BaseModel):
     source_version_no: Optional[int] = Field(None, description="Source version number")
     source_type: Optional[str] = Field(None, description="Source type")
     status: str = Field(..., description="Version status")
-    is_a2a: bool = Field(False, description="Whether this version is published as an A2A Server agent")
     created_by: str = Field(..., description="User who published this version")
     create_time: Optional[str] = Field(None, description="Publish timestamp")
     agent_info: Optional[dict] = Field(None, description="Agent info snapshot")
@@ -1487,6 +1501,8 @@ class SkillFileData(BaseModel):
     """A single file within a skill."""
     path: str = Field(description="Relative file path within the skill (e.g. 'SKILL.md', 'scripts/run.py')")
     content: str = Field(description="Full file content")
+    encoding: Optional[str] = Field(default=None, description="Source character encoding to preserve when writing")
+    encoding: Optional[str] = Field(default=None, description="Source character encoding to preserve when writing")
 
 
 class SkillUpdateRequest(BaseModel):
@@ -1683,6 +1699,7 @@ class CommunityListRequest(BaseModel):
     tag: Optional[str] = Field(None, description="Filter by tag")
     transport_type: Optional[str] = Field(None,description="Filter by transport: url or container")
     cursor: Optional[str] = Field(None, description="Pagination cursor")
+    page: Optional[int] = Field(None, ge=1, description="Offset pagination page")
     limit: int = Field(default=30, ge=1, le=100, description="Items per page")
 
     @field_validator("search", "tag", "cursor", "transport_type", mode="before")

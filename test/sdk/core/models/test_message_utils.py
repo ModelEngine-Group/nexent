@@ -84,3 +84,22 @@ def test_prepare_messages_for_smolagents_text_flattening_uses_text_part_shape():
     assert prepared[0].content == [{"type": "text", "text": "SYS"}]
     assert prepared[1].content == [{"type": "text", "text": "ab"}]
 
+
+def test_prepare_messages_for_smolagents_text_flattening_preserves_media_blocks():
+    audio_block = {"type": "audio_url", "audio_url": {"url": "data:audio/mpeg;base64,xxx"}}
+    obj = SimpleNamespace(role="user", content=[audio_block, {"type": "text", "text": "describe"}])
+
+    prepared = prepare_messages_for_smolagents_text_flattening([obj])
+
+    assert prepared[0].content == [audio_block, {"type": "text", "text": "describe"}]
+
+
+def test_prepare_messages_for_smolagents_text_flattening_preserves_media_in_dict_msg():
+    audio_block = {"type": "audio_url", "audio_url": {"url": "data:audio/mpeg;base64,xxx"}}
+    msg = {"role": "user", "content": [audio_block, {"type": "text", "text": "describe"}]}
+
+    prepared = prepare_messages_for_smolagents_text_flattening([msg])
+
+    assert prepared[0]["content"] == [audio_block, {"type": "text", "text": "describe"}]
+
+
