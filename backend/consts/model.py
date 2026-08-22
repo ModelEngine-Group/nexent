@@ -1696,6 +1696,7 @@ class CommunityListRequest(BaseModel):
     tag: Optional[str] = Field(None, description="Filter by tag")
     transport_type: Optional[str] = Field(None,description="Filter by transport: url or container")
     cursor: Optional[str] = Field(None, description="Pagination cursor")
+    page: Optional[int] = Field(None, ge=1, description="Offset pagination page")
     limit: int = Field(default=30, ge=1, le=100, description="Items per page")
 
     @field_validator("search", "tag", "cursor", "transport_type", mode="before")

@@ -4,6 +4,7 @@ import tempfile
 import asyncio
 import socket
 import random
+from typing import Awaitable, Callable
 from fastmcp import Client
 from fastmcp.client.transports import StreamableHttpTransport, SSETransport
 from consts.const import CAN_EDIT_ALL_USER_ROLES, PERMISSION_EDIT, PERMISSION_READ, NEXENT_MCP_DOCKER_IMAGE
@@ -38,6 +39,10 @@ from database.remote_mcp_db import (
 from database.user_tenant_db import get_user_tenant_by_user_id
 from database.group_db import query_group_ids_by_user
 from database.tool_db import set_mcp_tools_unavailable
+from database.market_mcp_db import (
+    get_mcp_market_record_by_source_mcp_id,
+    update_mcp_market_record,
+)
 from services.mcp_container_service import MCPContainerManager
 from utils.http_client_utils import create_httpx_client
 
@@ -526,6 +531,9 @@ async def add_container_mcp_service(
     group_ids: str | None = None,
     ingroup_permission: str | None = None,
     shared_fields: dict | None = None,
+    wait_for_ready: bool = True,
+    skip_health_check: bool = False,
+    on_container_started: Callable[[dict], Awaitable[None]] | None = None,
 ) -> dict:
     """Add a container-based MCP service.
 
@@ -595,10 +603,33 @@ async def add_container_mcp_service(
             host_port=port,
             image=NEXENT_MCP_DOCKER_IMAGE,
             full_command=full_command,
+            wait_for_ready=wait_for_ready,
         )
         logger.info(f"Started MCP container with info: {container_info}")
 
+        if on_container_started:
+            await on_container_started(container_info)
+
         container_config = mcp_config.model_dump(exclude_none=True)
+
+        # Streaming callers need the container ID before it is healthy so the
+        # UI can display startup logs. Keep the original readiness guarantee
+        # by waiting here, after that ID has been emitted.
+        if not wait_for_ready and not skip_health_check:
+            readiness_error: MCPConnectionError | None = None
+            for _ in range(30):
+                try:
+                    await mcp_server_health(
+                        remote_mcp_server=container_info.get("mcp_url"),
+                        authorization_token=auth_token,
+                    )
+                    readiness_error = None
+                    break
+                except MCPConnectionError as exc:
+                    readiness_error = exc
+                    await asyncio.sleep(5)
+            if readiness_error:
+                raise readiness_error
 
         await add_mcp_service(
             tenant_id=tenant_id,
@@ -617,6 +648,7 @@ async def add_container_mcp_service(
             container_port=container_info.get("host_port"),
             group_ids=group_ids,
             ingroup_permission=ingroup_permission,
+            skip_health_check=skip_health_check,
         )
     except Exception as exc:
         logger.warning(f"Failed to start container MCP service: {exc}")
@@ -1440,7 +1472,7 @@ async def refresh_mcp_service_tool_count(
     user_id: str,
     mcp_id: int,
 ) -> list[str]:
-    """Connect to the MCP server, fetch tool names, and persist them to the record.
+    """Connect to the MCP server and persist a complete tool snapshot.
 
     Args:
         tenant_id: Tenant ID
@@ -1481,8 +1513,30 @@ async def refresh_mcp_service_tool_count(
     if not tool_names:
         raise MCPConnectionError("MCP server is unreachable or does not support MCP protocol")
 
+    service_name = record.get("mcp_name")
+    if not service_name:
+        raise McpValidationError("MCP record is missing service name")
+
+    from services.tool_configuration_service import get_tool_from_remote_mcp_server
+
+    tools_info = await get_tool_from_remote_mcp_server(
+        mcp_server_name=service_name,
+        remote_mcp_server=server_url,
+        tenant_id=tenant_id,
+        authorization_token=authorization_token,
+        custom_headers=custom_headers,
+    )
+    tool_snapshot = [
+        {"name": tool.name, "description": tool.description or ""}
+        for tool in tools_info
+        if getattr(tool, "name", "")
+    ]
+    if tool_snapshot:
+        tool_names = [tool["name"] for tool in tool_snapshot]
+
     registry_json = record.get("registry_json") or {}
     registry_json["_toolNames"] = tool_names
+    registry_json["tools"] = tool_snapshot
 
     update_mcp_record_registry_json_by_id(
         mcp_id=mcp_id,
@@ -1490,6 +1544,22 @@ async def refresh_mcp_service_tool_count(
         user_id=user_id,
         registry_json=registry_json,
     )
+
+    # A published MCP stores the tool snapshot in the market row. Keep it in
+    # sync so repository details show both the current count and descriptions.
+    market_id = record.get("market_id")
+    if market_id is None:
+        market = get_mcp_market_record_by_source_mcp_id(
+            tenant_id=tenant_id,
+            source_mcp_id=mcp_id,
+        )
+        market_id = market.get("market_id") if market else None
+    if market_id is not None:
+        update_mcp_market_record(
+            market_id=market_id,
+            user_id=user_id,
+            registry_json=registry_json,
+        )
     return tool_names
 
 
@@ -1508,6 +1578,8 @@ async def upload_and_start_mcp_image(
     group_ids: str | None = None,
     ingroup_permission: str | None = None,
     shared_fields: dict | None = None,
+    wait_for_ready: bool = True,
+    on_container_started: Callable[[dict], Awaitable[None]] | None = None,
 ) -> dict:
     """Upload MCP Docker image and start container.
 
@@ -1566,6 +1638,7 @@ async def upload_and_start_mcp_image(
             env_vars=parsed_env_vars,
             host_port=port,
             full_command=None,
+            wait_for_ready=wait_for_ready,
         )
     finally:
         try:
@@ -1576,6 +1649,25 @@ async def upload_and_start_mcp_image(
     authorization_token = None
     if parsed_env_vars:
         authorization_token = parsed_env_vars.get("authorization_token")
+
+    if on_container_started:
+        await on_container_started(container_info)
+
+    if not wait_for_ready:
+        readiness_error: MCPConnectionError | None = None
+        for _ in range(30):
+            try:
+                await mcp_server_health(
+                    remote_mcp_server=container_info["mcp_url"],
+                    authorization_token=authorization_token,
+                )
+                readiness_error = None
+                break
+            except MCPConnectionError as exc:
+                readiness_error = exc
+                await asyncio.sleep(5)
+        if readiness_error:
+            raise readiness_error
 
     try:
         await add_remote_mcp_server_list(

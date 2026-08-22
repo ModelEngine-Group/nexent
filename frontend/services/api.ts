@@ -390,7 +390,9 @@ export const API_ENDPOINTS = {
     list: `${API_BASE_URL}/mcp/list`,
     healthcheck: `${API_BASE_URL}/mcp/healthcheck`,
     addFromConfig: `${API_BASE_URL}/mcp/add-from-config`,
+    addFromConfigStream: `${API_BASE_URL}/mcp/add-from-config/stream`,
     uploadImage: `${API_BASE_URL}/mcp/upload-image`,
+    uploadImageStream: `${API_BASE_URL}/mcp/upload-image/stream`,
     containers: `${API_BASE_URL}/mcp/containers`,
     containerLogs: (containerId: string) =>
       `${API_BASE_URL}/mcp/container/${containerId}/logs`,

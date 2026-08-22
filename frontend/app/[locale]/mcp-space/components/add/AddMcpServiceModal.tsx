@@ -74,12 +74,15 @@ export default function AddMcpServiceModal({
           </h2>
         </div>
 
-        <div className="shrink-0 px-6 pt-4">
+        <div className="shrink-0 px-6 pb-4 pt-4">
           <Segmented
             value={tab}
             onChange={(value) => setTab(value as McpSource)}
             options={[
-              { label: t("mcpTools.addModal.tabLocal"), value: McpSource.LOCAL },
+              {
+                label: t("mcpTools.addModal.tabLocal"),
+                value: McpSource.LOCAL,
+              },
               {
                 label: t("mcpTools.addModal.tabRegistry"),
                 value: McpSource.REGISTRY,
