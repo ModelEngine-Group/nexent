@@ -346,6 +346,11 @@ export function useConfig() {
     config?.models?.vlm3?.displayName
   );
 
+  const isAudioUnderstandingAvailable = !!(
+    config?.models?.vlm4?.modelName ||
+    config?.models?.vlm4?.displayName
+  );
+
   // Whether config has selected an Embedding model
   const isEmbeddingAvailable = !!(config?.models?.embedding?.modelName || config?.models?.embedding?.displayName);
 
@@ -435,6 +440,7 @@ export function useConfig() {
     isVlmAvailable,
     isImageUnderstandingAvailable,
     isVideoUnderstandingAvailable,
+    isAudioUnderstandingAvailable,
     isEmbeddingAvailable,
     isMultiEmbeddingAvailable,
     defaultLlmModelName,

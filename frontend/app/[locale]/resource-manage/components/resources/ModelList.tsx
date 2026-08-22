@@ -226,8 +226,9 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
         return t("model.type.imageGeneration");
       case MODEL_TYPES.VLM3:
         return t("model.type.videoUnderstanding");
-      case MODEL_TYPES.VLM4:
+      case MODEL_TYPES.VLM4: {
         return t("model.type.audioUnderstanding");
+      }
       default:
         return t("model.type.unknown");
     }

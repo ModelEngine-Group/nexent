@@ -163,7 +163,7 @@ def test_analyze_video_accepts_legacy_url_list(observer_en, mock_vlm_model, mock
 @pytest.mark.parametrize(
     "tool_class,input_name,error_text",
     [
-        (AnalyzeAudioTool, "audio_urls_list", "Video understanding model is not configured"),
+        (AnalyzeAudioTool, "audio_urls_list", "Audio understanding model is not configured"),
         (AnalyzeVideoTool, "video_urls_list", "Video understanding model is not configured"),
     ],
 )

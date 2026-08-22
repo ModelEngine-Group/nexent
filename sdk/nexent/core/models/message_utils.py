@@ -71,10 +71,18 @@ def prepare_messages_for_smolagents_text_flattening(normalized_messages: List[An
     smolagents expects each message content to be a list whose first item is a
     text dict when flatten_messages_as_text=True. Plain string content otherwise
     fails with TypeError: string indices must be integers.
+
+    Messages carrying typed media blocks (audio_url, image_url, ...) are left
+    untouched: flattening them would discard the media payload an audio/video
+    model needs.
     """
     for msg in normalized_messages:
+        content = msg.get("content") if isinstance(msg, dict) else getattr(msg, "content", None)
+        if content_has_multimodal_blocks(content):
+            continue
+        flattened = [{"type": "text", "text": _flatten_content(content)}]
         if isinstance(msg, dict):
-            msg["content"] = [{"type": "text", "text": _flatten_content(msg.get("content"))}]
+            msg["content"] = flattened
         else:
-            msg.content = [{"type": "text", "text": _flatten_content(getattr(msg, "content", None))}]
+            msg.content = flattened
     return normalized_messages

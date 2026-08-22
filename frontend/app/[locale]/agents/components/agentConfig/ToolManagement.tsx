@@ -15,6 +15,7 @@ import {
   TOOLS_REQUIRING_KB_SELECTION,
   TOOLS_REQUIRING_EMBEDDING,
   TOOLS_REQUIRING_IMAGE_UNDERSTANDING,
+  TOOLS_REQUIRING_AUDIO_UNDERSTANDING,
   TOOLS_REQUIRING_VIDEO_UNDERSTANDING,
   getToolKbType,
   getToolLabels,
@@ -26,9 +27,11 @@ import log from "@/lib/logger";
 function isToolDisabledDueToVlm(
   name: string,
   img: boolean,
-  vid: boolean
+  vid: boolean,
+  audio: boolean
 ): boolean {
   if (TOOLS_REQUIRING_IMAGE_UNDERSTANDING.includes(name)) return !img;
+  if (TOOLS_REQUIRING_AUDIO_UNDERSTANDING.includes(name)) return !audio;
   if (TOOLS_REQUIRING_VIDEO_UNDERSTANDING.includes(name)) return !vid;
   return false;
 }
@@ -76,6 +79,7 @@ export default function ToolManagement({
   const {
     isImageUnderstandingAvailable,
     isVideoUnderstandingAvailable,
+    isAudioUnderstandingAvailable,
     isEmbeddingAvailable,
   } = useConfig();
 
@@ -282,7 +286,8 @@ export default function ToolManagement({
                             isToolDisabledDueToVlm(
                               tool.name,
                               isImageUnderstandingAvailable,
-                              isVideoUnderstandingAvailable
+                              isVideoUnderstandingAvailable,
+                              isAudioUnderstandingAvailable
                             ) ||
                             isToolDisabledDueToEmbedding(
                               tool.name,

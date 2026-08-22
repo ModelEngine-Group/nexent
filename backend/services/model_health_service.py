@@ -212,8 +212,8 @@ async def _perform_connectivity_check(
                                  display_name=display_name)
         connectivity = await build_adapter_fresh(
             {"base_url": model_base_url, "api_key": model_api_key,
-             "ssl_verify": ssl_verify},
-            "vlm", "vlm", None, model_name=model_name,
+             "ssl_verify": ssl_verify, "model_factory": model_factory},
+            "vlm", model_type, None, model_name=model_name,
             observer=observer, display_name=display_name,
         ).health_check()
     elif model_type == 'stt':

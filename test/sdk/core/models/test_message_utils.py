@@ -65,6 +65,14 @@ def test_prepare_messages_returns_unchanged_when_no_model_factory():
     assert out is msgs
 
 
+def test_prepare_messages_unchanged_for_other_factories():
+    obj = SimpleNamespace(role="user", content="hi")
+    msgs = [obj]
+    out = prepare_messages_for_completion(msgs, "openai")
+    # Non-modelengine factories must leave the normalized messages untouched.
+    assert out is msgs
+
+
 def test_prepare_messages_modelengine_with_objects_and_case_insensitive():
     obj1 = SimpleNamespace(role="system", content="SYS")
     obj2 = SimpleNamespace(role="user", content=["a", {"text": "b"}])
@@ -103,3 +111,14 @@ def test_prepare_messages_for_smolagents_text_flattening_preserves_media_in_dict
     assert prepared[0]["content"] == [audio_block, {"type": "text", "text": "describe"}]
 
 
+
+def test_prepare_messages_for_smolagents_text_flattening_uses_text_shape_for_dict():
+    msgs = [
+        {"role": "system", "content": "SYS"},
+        {"role": "user", "content": ["a", {"text": "b"}]},
+    ]
+
+    prepared = prepare_messages_for_smolagents_text_flattening(msgs)
+
+    assert prepared[0]["content"] == [{"type": "text", "text": "SYS"}]
+    assert prepared[1]["content"] == [{"type": "text", "text": "ab"}]

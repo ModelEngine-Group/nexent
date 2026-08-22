@@ -2,10 +2,11 @@
 
 import asyncio
 import base64
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from nexent.core.gateway.modality import OpenAIVLMAdapter
+from nexent.core.gateway.modality import ModelEngineVLMAdapter, OpenAIVLMAdapter
 
 
 @pytest.fixture()
@@ -521,3 +522,89 @@ async def test_health_check_delegates_to_check_connectivity(vlm_adapter):
 
     assert result is False
     mock_check.assert_awaited_once()
+
+
+# --- ModelEngineVLMAdapter connectivity probe selection ---
+
+
+def _modelengine_adapter(caps):
+    """Build a ModelEngineVLMAdapter bypassing __init__, with given capabilities."""
+    adapter = ModelEngineVLMAdapter.__new__(ModelEngineVLMAdapter)
+    adapter._context = SimpleNamespace(
+        capabilities=caps,
+        model_name="me-asr",
+        display_name="ME-ASR",
+        base_url="http://192.168.1.10:8080/open/router/v1",
+    )
+    inner = MagicMock()
+    inner.model_id = "me-asr"
+    inner.client.chat.completions.create = MagicMock(return_value=MagicMock())
+    adapter._model = inner
+    return adapter
+
+
+@pytest.mark.asyncio
+async def test_modelengine_audio_model_probes_with_audio():
+    """An audio-only (vlm4) ModelEngine model must be probed with audio, not image."""
+    adapter = _modelengine_adapter({"audio": True, "video": False, "image": False})
+    with patch.object(adapter, "_build_model") as mock_build:
+        result = await adapter.check_connectivity()
+
+    assert result is True
+    mock_build.assert_not_called()  # _model already set
+    create = adapter._model.client.chat.completions.create
+    create.assert_called_once()
+    messages = create.call_args.kwargs["messages"]
+    content = messages[0]["content"]
+    assert content[0]["type"] == "audio_url"
+    assert content[0]["audio_url"]["url"].startswith("data:audio/wav;base64,")
+
+
+@pytest.mark.asyncio
+async def test_modelengine_image_model_delegates_to_image_probe():
+    """An image-capable ModelEngine model falls back to the inherited image probe."""
+    adapter = _modelengine_adapter({"audio": False, "video": False, "image": True})
+    with patch.object(
+        OpenAIVLMAdapter, "check_connectivity", new_callable=AsyncMock, return_value=True
+    ) as mock_super:
+        result = await adapter.check_connectivity()
+
+    assert result is True
+    mock_super.assert_awaited_once()
+
+
+def test_modelengine_silent_wav_data_url_is_valid():
+    url = ModelEngineVLMAdapter._silent_wav_data_url()
+    assert url.startswith("data:audio/wav;base64,")
+    payload = base64.b64decode(url.split(",", 1)[1])
+    # RIFF header for a WAV
+    assert payload[:4] == b"RIFF"
+    assert payload[8:12] == b"WAVE"
+
+
+@pytest.mark.asyncio
+async def test_modelengine_audio_probe_returns_false_on_error():
+    """A failing ASR endpoint must report False, not raise."""
+    adapter = _modelengine_adapter({"audio": True, "video": False, "image": False})
+    adapter._model.client.chat.completions.create = MagicMock(side_effect=RuntimeError("boom"))
+    result = await adapter.check_connectivity()
+    assert result is False
+
+
+
+@pytest.mark.asyncio
+async def test_modelengine_probe_audio_builds_model_when_missing():
+    """_probe_audio must build the model when it is not initialized yet."""
+    adapter = _modelengine_adapter({"audio": True, "video": False, "image": False})
+    inner = adapter._model
+    adapter._model = None
+    with patch.object(
+        adapter, "_build_model", side_effect=lambda: setattr(adapter, "_model", inner)
+    ):
+        result = await adapter._probe_audio()
+
+    assert result is True
+    create = inner.client.chat.completions.create
+    create.assert_called_once()
+    messages = create.call_args.kwargs["messages"]
+    assert messages[0]["content"][0]["type"] == "audio_url"

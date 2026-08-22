@@ -780,6 +780,7 @@
   "toolPool.vlmRequired": "需要配置视觉语言模型",
   "toolPool.vlmDisabledTooltip": "请联系管理员配置可用的视觉语言模型",
   "toolPool.imageUnderstandingDisabledTooltip": "请联系管理员配置可用的图片理解模型",
+  "toolPool.audioUnderstandingDisabledTooltip": "请联系管理员配置可用的音频理解模型",
   "toolPool.videoUnderstandingDisabledTooltip": "请联系管理员配置可用的视频理解模型",
   "toolPool.embeddingDisabledTooltip": "请联系管理员配置可用的向量模型",
   "toolPool.tooltip.functionGuide": "1. 本地知识库检索功能，请启用knowledge_base_search工具；\n2. 文本文件解析功能，请启用analyze_text_file工具；\n3. 图片解析功能，请启用analyze_image工具。",

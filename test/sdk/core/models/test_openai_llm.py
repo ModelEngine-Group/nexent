@@ -135,8 +135,8 @@ def make_chunk(content, reasoning=None, role=None):
     return chunk
 
 
-def test_modelengine_message_flattening(monkeypatch):
-    # Create instance with model_factory set to 'modelengine'
+def _make_modelengine_model():
+    """Build a modelengine OpenAI model wired to capture completion kwargs."""
     ModelClass = OpenAIModel or globals().get("ImportedOpenAIModel")
     m = ModelClass(model_id="m", api_base="u", api_key="k", model_factory="modelengine")
 
@@ -148,23 +148,29 @@ def test_modelengine_message_flattening(monkeypatch):
         return {}
 
     m._prepare_completion_kwargs = fake_prepare_completion_kwargs
-    # Ensure required attributes exist
     m.model_id = "m"
     m.custom_role_conversions = {}
-    # Provide a writable observer with required methods/attributes
     m.observer = types.SimpleNamespace(current_mode=None,
                                       add_model_new_token=lambda token: None,
                                       add_model_reasoning_content=lambda rc: None,
                                       flush_remaining_tokens=lambda: None)
 
-    # client.chat.completions.create should return an iterable of chunks
     chunk = make_chunk("hi")
     client_ns = types.SimpleNamespace()
     client_ns.chat = types.SimpleNamespace()
+
     def fake_create(stream=True, **kw):
         return [chunk]
+
     client_ns.chat.completions = types.SimpleNamespace(create=fake_create)
     m.client = client_ns
+    return m, captured
+
+
+
+def test_modelengine_message_flattening(monkeypatch):
+    # Create instance with model_factory set to 'modelengine'
+    m, captured = _make_modelengine_model()
 
     # Call with dict messages (as external callers might)
     messages = [{"role": "system", "content": "SYS"}, {"role": "user", "content": ["a", {"text": "b"}]}]
@@ -181,31 +187,7 @@ def test_modelengine_message_flattening(monkeypatch):
 
 def test_modelengine_multimodal_not_flattened(monkeypatch):
     """ModelEngine must NOT flatten messages carrying audio/video/image blocks."""
-    ModelClass = OpenAIModel or globals().get("ImportedOpenAIModel")
-    m = ModelClass(model_id="m", api_base="u", api_key="k", model_factory="modelengine")
-
-    captured = {}
-
-    def fake_prepare_completion_kwargs(messages=None, **kwargs):
-        captured['messages'] = messages
-        captured['flatten_messages_as_text'] = kwargs.get('flatten_messages_as_text', False)
-        return {}
-
-    m._prepare_completion_kwargs = fake_prepare_completion_kwargs
-    m.model_id = "m"
-    m.custom_role_conversions = {}
-    m.observer = types.SimpleNamespace(current_mode=None,
-                                      add_model_new_token=lambda token: None,
-                                      add_model_reasoning_content=lambda rc: None,
-                                      flush_remaining_tokens=lambda: None)
-
-    chunk = make_chunk("hi")
-    client_ns = types.SimpleNamespace()
-    client_ns.chat = types.SimpleNamespace()
-    def fake_create(stream=True, **kw):
-        return [chunk]
-    client_ns.chat.completions = types.SimpleNamespace(create=fake_create)
-    m.client = client_ns
+    m, captured = _make_modelengine_model()
 
     # A multimodal user message carrying an audio_url block must stay structured.
     messages = [{"role": "user", "content": [

@@ -132,8 +132,8 @@ Raises:
             audio_urls_list: Optional[List[bytes]] = None) -> str:
         """Analyze an audio file and return the result as a string."""
         if self.vlm_model is None:
-            error_msg_zh = "视频理解模型未配置，请联系管理员配置视频理解模型后重试。"
-            error_msg_en = "Video understanding model is not configured. Please contact your administrator to configure the video understanding model and try again."
+            error_msg_zh = "音频理解模型未配置，请联系管理员配置音频理解模型后重试。"
+            error_msg_en = "Audio understanding model is not configured. Please contact your administrator to configure the audio understanding model and try again."
             error_msg = error_msg_zh if self._is_chinese else error_msg_en
             logger.error(error_msg)
             raise Exception(error_msg)
