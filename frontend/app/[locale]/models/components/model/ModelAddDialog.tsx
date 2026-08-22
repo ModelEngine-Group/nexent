@@ -1811,7 +1811,7 @@ export const ModelAddDialog = ({
               <Alert
                 type="info"
                 showIcon
-                message={t("model.dialog.capacity.batchDefault.title")}
+                title={t("model.dialog.capacity.batchDefault.title")}
                 description={t("model.dialog.capacity.batchDefault.hint")}
               />
             )}

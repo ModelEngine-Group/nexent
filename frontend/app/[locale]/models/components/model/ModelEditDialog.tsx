@@ -1173,7 +1173,7 @@ export const ProviderConfigEditDialog = ({
             <Alert
               type="info"
               showIcon
-              message={t("model.dialog.capacity.bulkApply.title")}
+              title={t("model.dialog.capacity.bulkApply.title")}
               description={t("model.dialog.capacity.bulkApply.hint")}
             />
             <ModelCapacityFields

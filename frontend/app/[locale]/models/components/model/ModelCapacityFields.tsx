@@ -160,7 +160,7 @@ export const validateCapacityForm = (
   if (
     contextWindowTokens !== undefined &&
     maxOutputTokens !== undefined &&
-    maxOutputTokens > contextWindowTokens
+    maxOutputTokens >= contextWindowTokens
   ) {
     return "model.dialog.capacity.error.outputExceedsWindow";
   }
@@ -371,7 +371,7 @@ export const ModelCapacityFields = ({
         <Alert
           type="warning"
           showIcon
-          message={t("model.dialog.capacity.legacyMaxTokensHint", {
+          title={t("model.dialog.capacity.legacyMaxTokensHint", {
             maxTokens: legacyMaxTokensCandidate,
           })}
           description={
@@ -417,7 +417,7 @@ export const ModelCapacityFields = ({
         <Alert
           type={hasSuggestion ? "success" : "info"}
           showIcon
-          message={
+          title={
             hasSuggestion
               ? t("model.dialog.capacity.suggestion.found")
               : t("model.dialog.capacity.suggestion.notFound")
@@ -512,7 +512,7 @@ export const ModelCapacityFields = ({
           adapters registered yet, so all families resolve to estimated). */}
 
       {validationError && (
-        <Alert type="error" showIcon message={t(validationError)} />
+        <Alert type="error" showIcon title={t(validationError)} />
       )}
     </div>
   );
