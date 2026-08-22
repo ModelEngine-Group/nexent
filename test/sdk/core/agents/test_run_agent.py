@@ -340,6 +340,10 @@ def test_agent_run_thread_local_flow(basic_agent_run_info, monkeypatch):
         minio_client=None,
         conversation_id=basic_agent_run_info.conversation_id,
         user_id=basic_agent_run_info.user_id,
+        tenant_id=None,
+        workspace_path=None,
+        workspace_run_id=None,
+        minio_files=None,
     )
 
     # Following methods on the NexentAgent instance should be invoked
@@ -349,7 +353,11 @@ def test_agent_run_thread_local_flow(basic_agent_run_info, monkeypatch):
     )
     mock_nexent_instance.set_agent.assert_called_once()
     mock_nexent_instance.add_history_to_agent.assert_called_once_with(basic_agent_run_info.history)
-    mock_nexent_instance.agent_run_with_observer.assert_called_once_with(query=basic_agent_run_info.query, reset=False)
+    mock_nexent_instance.agent_run_with_observer.assert_called_once_with(
+        query=basic_agent_run_info.query,
+        reset=False,
+        additional_args={"metadata": {}},
+    )
 
 
 def test_agent_run_thread_binds_capacity_and_budget_snapshots(basic_agent_run_info, monkeypatch):
@@ -445,6 +453,10 @@ def test_agent_run_thread_mcp_flow(basic_agent_run_info, mock_memory_context, mo
         minio_client=None,
         conversation_id=basic_agent_run_info.conversation_id,
         user_id=basic_agent_run_info.user_id,
+        tenant_id=None,
+        workspace_path=None,
+        workspace_run_id=None,
+        minio_files=None,
     )
 
     # Subsequent calls on NexentAgent instance should mirror the local flow
@@ -454,7 +466,20 @@ def test_agent_run_thread_mcp_flow(basic_agent_run_info, mock_memory_context, mo
     )
     mock_nexent_instance.set_agent.assert_called_once()
     mock_nexent_instance.add_history_to_agent.assert_called_once_with(basic_agent_run_info.history)
-    mock_nexent_instance.agent_run_with_observer.assert_called_once_with(query=basic_agent_run_info.query, reset=False)
+    mock_nexent_instance.agent_run_with_observer.assert_called_once_with(
+        query=basic_agent_run_info.query,
+        reset=False,
+        additional_args={"metadata": {}},
+    )
+
+
+def test_build_run_additional_args_isolates_metadata_snapshot(basic_agent_run_info):
+    basic_agent_run_info.runtime_metadata = {"tenant": {"region": "cn"}}
+
+    additional_args = run_agent.build_run_additional_args(basic_agent_run_info)
+    additional_args["metadata"]["tenant"]["region"] = "us"
+
+    assert basic_agent_run_info.runtime_metadata == {"tenant": {"region": "cn"}}
 
 
 def test_agent_run_thread_mcp_flow_with_explicit_transport(basic_agent_run_info, mock_memory_context, monkeypatch):
@@ -567,6 +592,23 @@ def test_normalize_mcp_config():
     # Test dict format with None transport (should auto-detect)
     result = run_agent._normalize_mcp_config({"url": "http://server/mcp", "transport": None})
     assert result == {"url": "http://server/mcp", "transport": "streamable-http"}
+
+    httpx_client_factory = MagicMock()
+    result = run_agent._normalize_mcp_config({
+        "url": "http://server/sse",
+        "httpx_client_factory": httpx_client_factory,
+    })
+    assert result == {
+        "url": "http://server/sse",
+        "transport": "sse",
+        "httpx_client_factory": httpx_client_factory,
+    }
+
+    with pytest.raises(ValueError, match="httpx_client_factory must be callable"):
+        run_agent._normalize_mcp_config({
+            "url": "http://server/sse",
+            "httpx_client_factory": "not-callable",
+        })
 
     # Test dict format with only authorization
     result = run_agent._normalize_mcp_config({

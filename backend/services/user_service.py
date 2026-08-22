@@ -2,7 +2,7 @@
 User service layer - handles user-related business logic
 """
 import logging
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, Optional
 
 from database.user_tenant_db import (
     get_users_by_tenant_id, update_user_tenant_role, get_user_tenant_by_user_id,
@@ -11,6 +11,7 @@ from database.user_tenant_db import (
 from database.group_db import remove_user_from_all_groups, query_groups_by_users
 from database.memory_config_db import soft_delete_all_configs_by_user_id
 from database.conversation_db import soft_delete_all_conversations_by_user
+from database.knowledge_db import get_private_knowledge_info_by_creator
 from database.oauth_account_db import soft_delete_all_oauth_accounts_by_user_id
 from consts.const import IS_SPEED_MODE
 from consts.exceptions import ForbiddenError, NotFoundException
@@ -166,6 +167,54 @@ async def update_user_for_requester(
     return await update_user(user_id, update_data, updated_by)
 
 
+async def _delete_private_knowledge_bases(user_id: str, tenant_id: str) -> Optional[Dict[str, int]]:
+    """Delete PRIVATE knowledge bases created by a user."""
+    private_kbs = get_private_knowledge_info_by_creator(tenant_id, user_id)
+    if not private_kbs:
+        return None
+
+    from services.vectordatabase_service import (
+        ElasticSearchService,
+        get_vector_db_core,
+    )
+
+    vdb_core = get_vector_db_core()
+    succeeded = 0
+    failed = 0
+    for kb in private_kbs:
+        index_name = kb.get("index_name")
+        kb_id = kb.get("knowledge_id")
+        if not index_name:
+            failed += 1
+            logger.error(
+                "Personal KB %s for user %s has no index_name",
+                kb_id,
+                user_id,
+            )
+            continue
+        try:
+            await ElasticSearchService.full_delete_knowledge_base(
+                index_name, vdb_core, user_id
+            )
+            succeeded += 1
+        except Exception:
+            failed += 1
+            logger.exception(
+                "Failed deleting personal KB for user %s kb_id %s index_name %s",
+                user_id,
+                kb_id,
+                index_name,
+            )
+
+    cleanup_result = {
+        "total": len(private_kbs),
+        "succeeded": succeeded,
+        "failed": failed,
+    }
+    logger.info("Personal KB cleanup for user %s: %s", user_id, cleanup_result)
+    return cleanup_result
+
+
 async def delete_user_and_cleanup(user_id: str, tenant_id: str) -> None:
     """
     Permanently delete user account and all related data.
@@ -174,7 +223,8 @@ async def delete_user_and_cleanup(user_id: str, tenant_id: str) -> None:
     1) Soft-delete user-tenant relation and remove from all groups
     2) Soft-delete memory user configs and all conversations
     3) Clear user-level memories in memory store
-    4) Permanently delete user from Supabase
+    4) Delete personal KBs created by the user
+    5) Permanently delete user from Supabase
 
     Args:
         user_id (str): User ID to delete
@@ -242,7 +292,16 @@ async def delete_user_and_cleanup(user_id: str, tenant_id: str) -> None:
             except Exception as e:
                 logger.error(f"Failed deleting Supabase user {user_id}: {e}")
 
+        # 7) Delete PRIVATE personal KBs created by the user. Shared KBs
+        # created by the user are intentionally left untouched.
+        cleanup_result = None
+        try:
+            cleanup_result = await _delete_private_knowledge_bases(user_id, tenant_id)
+        except Exception:
+            logger.exception("Failed personal KB cleanup for user %s", user_id)
+
         logger.info(f"Permanently deleted user {user_id} and all related data.")
+        return cleanup_result
 
     except Exception as exc:
         logger.error(f"Unexpected error in delete_user_and_cleanup for {user_id}: {str(exc)}")

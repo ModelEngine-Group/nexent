@@ -7,13 +7,17 @@ import uuid
 
 import httpx
 from fastapi import APIRouter, Body, File, Header, HTTPException, Query, Request, UploadFile
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import ValidationError as PydanticValidationError
 
 from consts.exceptions import (
     ConversationNotFoundError,
     ForbiddenError,
     LimitExceededError,
+    RuntimeServiceTimeoutError,
+    RuntimeServiceUnavailableError,
+    RuntimeUpstreamError,
+    UnauthorizedError,
     NotFoundException,
     UnauthorizedError,
     ValidationError,
@@ -334,6 +338,12 @@ async def run_chat(
                     "model so different models can be used for Q&A on the same agent.",
         examples=[123],
     ),
+    metadata: Optional[Dict[str, Any]] = Body(
+        None,
+        embed=True,
+        description="Optional runtime metadata available to the agent. This is separate from meta_data.",
+        examples=[{"project_id": "P001", "manager": "Alice"}],
+    ),
     meta_data: Optional[Dict[str, Any]] = Body(
         None,
         embed=True,
@@ -381,6 +391,7 @@ async def run_chat(
             agent_name=agent_name,
             query=query,
             attachments=attachments,
+            metadata=metadata,
             meta_data=meta_data,
             tool_params=tool_params,
             model_id=model_id,
@@ -396,6 +407,10 @@ async def run_chat(
     except PermissionError as e:
         logging.error(f"Permission denied while running northbound chat: {str(e)}", exc_info=e)
         raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(e))
+    except RuntimeServiceTimeoutError as e:
+        raise HTTPException(status_code=HTTPStatus.GATEWAY_TIMEOUT, detail=str(e)) from e
+    except RuntimeServiceUnavailableError as e:
+        raise HTTPException(status_code=HTTPStatus.BAD_GATEWAY, detail=str(e)) from e
     except HTTPException as e:
         raise e
     except Exception as e:
@@ -424,6 +439,16 @@ async def stop_chat_stream(
         logging.error(f"Too Many Requests: rate limit exceeded: {str(e)}", exc_info=e)
         raise HTTPException(status_code=HTTPStatus.TOO_MANY_REQUESTS,
                             detail="Too Many Requests: rate limit exceeded")
+    except RuntimeUpstreamError as e:
+        return Response(
+            content=e.content,
+            status_code=e.status_code,
+            headers=e.headers,
+        )
+    except RuntimeServiceTimeoutError as e:
+        raise HTTPException(status_code=HTTPStatus.GATEWAY_TIMEOUT, detail=str(e)) from e
+    except RuntimeServiceUnavailableError as e:
+        raise HTTPException(status_code=HTTPStatus.BAD_GATEWAY, detail=str(e)) from e
     except HTTPException as e:
         raise e
     except Exception as e:

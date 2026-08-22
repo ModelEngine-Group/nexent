@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import imghdr
 from http import HTTPStatus
 import io
 import json
@@ -22,8 +23,17 @@ from utils.prompt_template_utils import normalize_prompt_generate_template_conte
 from consts.const import TOOL_TYPE_MAPPING, \
     LANGUAGE, MESSAGE_ROLE, MODEL_CONFIG_MAPPING, CAN_EDIT_ALL_USER_ROLES, PERMISSION_PRIVATE, STREAM_STATUS_EVENT, \
     DEFAULT_EN_TITLE, DEFAULT_ZH_TITLE, RUNTIME_CANCEL_POLL_INTERVAL_SECONDS
-from consts.exceptions import AppException, ForbiddenError, MemoryPreparationException, SkillDuplicateError
-from consts.error_code import ErrorCode
+from consts.agent import SAFE_AGENT_STREAM_ERROR_MESSAGE
+from consts.exceptions import (
+    AppException,
+    ConversationNotFoundError,
+    ForbiddenError,
+    MemoryPreparationException,
+    RuntimeMetadataValidationError,
+    RuntimeMetadataVersionConflict,
+    SkillDuplicateError,
+)
+from consts.error_code import ErrorCode, RuntimeMetadataValidationCode
 from consts.agent_unavailable_reasons import AgentUnavailableReason
 from nexent.core.utils.observer import ProcessType
 from consts.model import (
@@ -36,6 +46,7 @@ from consts.model import (
     MCPInfo,
     MessageRequest,
     SkillInstanceInfoRequest,
+    SkillResolution,
     SkillZipEntry,
     ToolInstanceInfoRequest,
     ToolSourceEnum, ModelConnectStatusEnum,
@@ -57,10 +68,17 @@ from database.agent_db import (
     search_agent_info_by_agent_id,
     search_blank_sub_agent_by_main_agent_id,
     update_agent,
+    update_agent_icon,
     update_related_agents,
     clear_agent_new_mark
 )
 from database import a2a_agent_db
+from database.conversation_db import (
+    resolve_conversation_runtime_metadata,
+)
+from utils.runtime_metadata_utils import (
+    validate_runtime_metadata,
+)
 from database.model_management_db import (
     get_model_by_model_id,
     get_model_by_model_id_ignore_delete,
@@ -79,9 +97,13 @@ from database.tool_db import (
     search_tools_for_sub_agent
 )
 from database import skill_db
-from database.attachment_db import upload_fileobj
-from services.skill_service import SkillService
-from services.file_management_service import is_allowed_skill_upload_path
+from database.attachment_db import (
+    delete_file,
+    get_content_type,
+    get_file_stream,
+)
+from database.client import minio_client
+from services.skill_service import SkillService, generate_available_copy_skill_name
 from database.agent_version_db import query_version_list, query_current_version_no, batch_search_version_names, batch_query_current_version_nos
 from database.group_db import query_group_ids_by_user
 from database.user_tenant_db import get_user_tenant_by_user_id
@@ -100,28 +122,31 @@ from services.conversation_management_service import (
     get_latest_assistant_message,
     get_last_unit_for_message,
     load_historical_context,
+    persist_assistant_run_batch,
     persist_history_summary_candidate,
     save_conversation_user,
     save_message,
-    save_message_unit,
-    save_source_image,
-    save_source_search,
-    save_skill_files_to_conversation,
+    save_message_unit,  # noqa: F401 - retained as a compatibility re-export
     update_conversation_agent_id_service,
     update_conversation_chat_mode_service,
     update_conversation_knowledge_scope_service,
-    update_message_content,
     update_message_status,
-    update_unit_content,
-    update_unit_status,
+    update_unit_status,  # noqa: F401 - retained as a compatibility re-export
 )
 from services.memory_config_service import build_memory_context
 from services.streaming_channel import streaming_channel_manager
 from services.runtime_state_service import runtime_state_service
 from utils.auth_utils import get_current_user_info, get_user_language
+from utils.agent_stream_utils import (
+    extract_json_objects_from_text as _extract_json_objects_from_text,
+    extract_skill_file_upload_payloads as _extract_skill_file_upload_payloads,
+    process_skill_file_uploads as _process_skill_file_uploads,
+    safe_agent_stream_error_chunk as _safe_agent_stream_error_chunk,
+    serialize_stream_unit_content as _serialize_stream_unit_content,
+    transform_skill_files_to_standard_format as _transform_skill_files_to_standard_format,
+)
 from utils.config_utils import tenant_config_manager
 from utils.context_utils import build_authorized_context_input
-from utils.thread_utils import submit
 from utils.prompt_template_utils import get_prompt_generate_prompt_template
 from utils.llm_utils import call_llm_for_system_prompt
 
@@ -132,8 +157,79 @@ from nexent.monitor import AgentRunMetadata, agent_monitoring_context
 from utils.monitoring import monitoring_manager
 
 logger = logging.getLogger(__name__)
-SAFE_AGENT_STREAM_ERROR_MESSAGE = "Agent execution failed. Please try again later."
+AGENT_ICON_MAX_BYTES = 2 * 1024 * 1024
+AGENT_ICON_CONTENT_TYPES = {
+    "gif": "image/gif",
+    "jpeg": "image/jpeg",
+    "png": "image/png",
+    "webp": "image/webp",
+}
 _channel_cleanup_tasks: set[asyncio.Task[None]] = set()
+_agent_stream_producer_tasks: set[asyncio.Task[None]] = set()
+
+
+def _agent_icon_object_name(agent_id: int, tenant_id: str) -> str:
+    return f"agent-icons/{tenant_id}/{agent_id}/icon"
+
+
+def _detect_agent_icon_content_type(content: bytes) -> str | None:
+    image_type = imghdr.what(None, content)
+    return AGENT_ICON_CONTENT_TYPES.get(image_type)
+
+
+async def upload_agent_icon_impl(
+    agent_id: int,
+    content: bytes,
+    tenant_id: str,
+    user_id: str,
+) -> dict:
+    """Validate, store, and attach a user-supplied image to an editable agent."""
+    if not content:
+        raise ValueError("Agent icon file is empty")
+    if len(content) > AGENT_ICON_MAX_BYTES:
+        raise ValueError("Agent icon must not exceed 2 MB")
+
+    content_type = _detect_agent_icon_content_type(content)
+    if content_type is None:
+        raise ValueError("Agent icon must be a PNG, JPEG, GIF, or WebP image")
+
+    agent = await get_agent_info_impl(agent_id, tenant_id, user_id=user_id)
+    if agent.get("permission") != "EDIT":
+        raise ForbiddenError("You do not have permission to edit this agent")
+
+    owner_tenant_id = agent.get("tenant_id") or tenant_id
+    object_name = _agent_icon_object_name(agent_id, owner_tenant_id)
+    success, error = minio_client.upload_fileobj(io.BytesIO(content), object_name)
+    if not success:
+        raise ValueError(f"Failed to upload agent icon: {error}")
+
+    icon_url = f"/api/agent/{agent_id}/icon"
+    update_agent_icon(
+        agent_id=agent_id,
+        tenant_id=owner_tenant_id,
+        icon_url=icon_url,
+        user_id=user_id,
+    )
+    return {"icon_url": icon_url, "content_type": content_type}
+
+
+async def get_agent_icon_impl(agent_id: int, tenant_id: str, user_id: str) -> tuple[bytes, str]:
+    """Return a stored agent icon after applying normal agent visibility rules."""
+    agent = await get_agent_info_impl(agent_id, tenant_id, user_id=user_id)
+    if not agent.get("icon_url"):
+        raise FileNotFoundError("Agent icon not found")
+
+    owner_tenant_id = agent.get("tenant_id") or tenant_id
+    stream = get_file_stream(_agent_icon_object_name(agent_id, owner_tenant_id))
+    if stream is None:
+        raise FileNotFoundError("Agent icon not found")
+
+    content = stream.read()
+    content_type = _detect_agent_icon_content_type(content)
+    if content_type is None:
+        raise FileNotFoundError("Agent icon is invalid")
+    return content, content_type
+
 
 
 async def _cleanup_channel_later(conversation_id: int, user_id: str, delay: float = 5.0):
@@ -143,6 +239,77 @@ async def _cleanup_channel_later(conversation_id: int, user_id: str, delay: floa
     """
     await asyncio.sleep(delay)
     await streaming_channel_manager.remove_channel(conversation_id, user_id)
+
+
+async def _consume_agent_stream_producer(
+    stream_gen,
+    channel,
+    agent_metadata,
+    conversation_id: int,
+    user_id: str,
+) -> None:
+    """Consume a non-debug agent stream independently from its SSE subscriber."""
+    producer_error = False
+    try:
+        with agent_monitoring_context(agent_metadata):
+            async for _ in stream_gen:
+                pass
+    except asyncio.CancelledError:
+        raise
+    except Exception as stream_exc:
+        producer_error = True
+        logger.error(
+            "Agent stream response error: %r",
+            stream_exc,
+            exc_info=True,
+        )
+        if not channel.is_completed:
+            try:
+                await channel.publish(_safe_agent_stream_error_chunk())
+            except Exception:
+                logger.exception(
+                    "Failed to publish producer error conversation=%s",
+                    conversation_id,
+                )
+    finally:
+        # _stream_agent_chunks normally owns persistence and terminal state.
+        # This fallback covers failures before that generator is entered.
+        if not channel.is_completed:
+            if not producer_error:
+                logger.error(
+                    "Agent stream producer exited without terminal state conversation=%s",
+                    conversation_id,
+                )
+            try:
+                agent_run_manager.unregister_agent_run(
+                    conversation_id,
+                    user_id,
+                    status="failed",
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to unregister incomplete producer conversation=%s",
+                    conversation_id,
+                )
+            try:
+                await streaming_channel_manager.complete_channel(
+                    conversation_id=conversation_id,
+                    user_id=user_id,
+                    status="failed",
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to complete producer channel conversation=%s",
+                    conversation_id,
+                )
+            cleanup_task = asyncio.create_task(
+                _cleanup_channel_later(
+                    conversation_id=conversation_id,
+                    user_id=user_id,
+                )
+            )
+            _channel_cleanup_tasks.add(cleanup_task)
+            cleanup_task.add_done_callback(_channel_cleanup_tasks.discard)
 
 
 async def _poll_runtime_cancel_signal(conversation_id: int, user_id: str, stop_event) -> None:
@@ -171,167 +338,6 @@ async def _cancel_task_on_runtime_signal(conversation_id: int, user_id: str, tas
             )
             return
         await asyncio.sleep(RUNTIME_CANCEL_POLL_INTERVAL_SECONDS)
-
-
-def _extract_json_objects_from_text(text: str) -> list[dict]:
-    """Extract all JSON objects embedded in a text blob."""
-    if not text:
-        return []
-
-    decoder = json.JSONDecoder()
-    results: list[dict] = []
-    index = 0
-
-    while index < len(text):
-        start_index = text.find("{", index)
-        if start_index < 0:
-            break
-
-        try:
-            payload, end_index = decoder.raw_decode(text, start_index)
-        except json.JSONDecodeError:
-            index = start_index + 1
-            continue
-
-        if isinstance(payload, dict):
-            results.append(payload)
-        index = max(end_index, start_index + 1)
-
-    return results
-
-
-def _extract_skill_file_upload_payloads(content: str) -> list[dict]:
-    """Extract JSON payloads containing absolute_path from streamed tool output."""
-    payloads: list[dict] = []
-    for payload in _extract_json_objects_from_text(content):
-        if payload.get("absolute_path"):
-            payloads.append(payload)
-    return payloads
-
-
-def _serialize_stream_unit_content(data: Dict[str, Any], content: str) -> str:
-    """Preserve tool metadata in the existing message-unit content column."""
-    if data.get("type") not in {"tool", "tool-call"}:
-        return content
-
-    payload: Dict[str, Any] = {"content": content}
-    for field in ("tool_name", "tool_arguments", "role"):
-        if field in data:
-            payload[field] = data[field]
-    return json.dumps(payload, ensure_ascii=False)
-
-
-def _transform_skill_files_to_standard_format(upload_results: list[dict]) -> list[dict]:
-    """
-    Transform skill file upload results to match the frontend attachment format.
-
-    Skill upload format:
-        {file_name, absolute_path, object_name, preview_url, url, presigned_url, mime_type, file_size, status}
-    Frontend format:
-        {object_name, name, type, size, url, presigned_url, description}
-    """
-    frontend_files = []
-    for result in upload_results:
-        frontend_files.append({
-            "object_name": result.get("object_name", ""),
-            "name": result.get("file_name", result.get("name", "")),
-            "type": "file",
-            "size": result.get("file_size", result.get("size", 0)),
-            "url": result.get("url", ""),
-            "presigned_url": result.get("presigned_url", result.get("preview_url", "")),
-            "description": "",
-        })
-    return frontend_files
-
-
-async def _process_skill_file_uploads(
-    payloads: list[dict] | str,
-    user_id: str,
-    tenant_id: str,
-) -> list[dict]:
-    """Upload generated skill files to storage and return upload metadata."""
-
-    upload_results: list[dict] = []
-    structured_payloads = (
-        payloads
-        if isinstance(payloads, list)
-        else _extract_skill_file_upload_payloads(payloads)
-    )
-    for payload in structured_payloads:
-        absolute_path = str(payload.get("absolute_path") or "").strip()
-        file_name = str(
-            payload.get("file_name")
-            or payload.get("file_path")
-            or os.path.basename(absolute_path)
-        )
-        mime_type = str(payload.get("mime_type") or payload.get("content_type") or "application/octet-stream")
-        if not absolute_path:
-            continue
-
-        if not is_allowed_skill_upload_path(absolute_path):
-            logger.warning(
-                "[skill-file] rejected unsafe path absolute_path=%s",
-                absolute_path,
-            )
-            continue
-
-        if not file_name:
-            file_name = os.path.basename(absolute_path)
-
-        if not os.path.exists(absolute_path):
-            continue
-
-        try:
-            file_size = os.path.getsize(absolute_path)
-            actual_prefix = f"skill-files/{user_id}" if user_id else "skill-files"
-            with open(absolute_path, "rb") as file_obj:
-                upload_result = upload_fileobj(
-                    file_obj=file_obj,
-                    file_name=file_name,
-                    prefix=actual_prefix,
-                    generate_presigned_url=True,
-                    file_size=file_size,
-                )
-
-            if upload_result.get("success"):
-                upload_results.append(
-                    {
-                        "status": "success",
-                        "file_name": file_name,
-                        "absolute_path": absolute_path,
-                        "object_name": upload_result.get("object_name"),
-                        "preview_url": upload_result.get("presigned_url") or upload_result.get("url"),
-                        "url": upload_result.get("url"),
-                        "presigned_url": upload_result.get("presigned_url"),
-                        "mime_type": mime_type,
-                        "file_size": upload_result.get("file_size", file_size),
-                    }
-                )
-            else:
-                error_message = upload_result.get("error") or "Upload failed"
-                logger.warning(
-                    "[skill-file] upload failed file_name=%s absolute_path=%s error=%s",
-                    file_name,
-                    absolute_path,
-                    error_message,
-                )
-        except Exception:
-            logger.exception(
-                "[skill-file] failed to upload file file_name=%s absolute_path=%s",
-                file_name,
-                absolute_path,
-            )
-
-    return upload_results
-
-
-def _safe_agent_stream_error_chunk() -> str:
-    """Return a sanitized SSE error chunk without internal exception details."""
-    error_payload = json.dumps(
-        {"type": "error", "content": SAFE_AGENT_STREAM_ERROR_MESSAGE},
-        ensure_ascii=False,
-    )
-    return f"data: {error_payload}\n\n"
 
 
 def _resolve_user_tenant_language(
@@ -945,7 +951,7 @@ async def _stream_agent_chunks(
     channel: Optional[Any] = None,
 ):
     """
-    Yield SSE chunks from agent_run while persisting messages incrementally.
+    Yield SSE chunks from agent_run while buffering assistant persistence.
 
     Args:
         resume_from_unit_index: If > 0, we're in resume mode and should start
@@ -965,12 +971,20 @@ async def _stream_agent_chunks(
 
     captured_skill_files: dict[str, dict] = {}
     skill_file_uploads: list[dict] = []
+    workspace_file_uploads: dict[str, dict] = {}
+    frontend_skill_files: list[dict] = []
+    buffered_units: list[dict[str, Any]] = []
+    buffered_search_records: list[dict[str, Any]] = []
+    buffered_image_urls: list[str] = []
+    buffered_image_url_set: set[str] = set()
+    buffered_automation_proposals: list[dict[str, Any]] = []
+    final_answer_content = ""
 
     # Determine if we're in resume mode
     is_resume_mode = resume_from_unit_index > 0
 
     # Persist the parent ConversationMessage row up front with status='streaming'
-    # so that units saved incrementally have a valid message_id to reference.
+    # so history and recovery can observe the active assistant run.
     streaming_message_id: Optional[int] = resume_message_id
     if not is_resume_mode and not agent_request.is_debug:
         user_role_count = sum(
@@ -995,8 +1009,9 @@ async def _stream_agent_chunks(
             logger.error(
                 "Failed to create streaming message row: %r", msg_exc, exc_info=True)
 
-    # Tracks the unit currently being accumulated in memory. Each entry is
-    # a dict with keys: type, content, unit_id, unit_index, mergeable.
+    # Tracks the unit currently being accumulated in memory. Assistant output
+    # is written to PostgreSQL only once, after the stream reaches a terminal
+    # state. Redis/channel publication remains per chunk.
     current_unit: Optional[Dict[str, Any]] = None
     # The next unit_index to assign to a brand-new (non-merge) unit.
     # In resume mode, start from the position after the last persisted unit.
@@ -1096,6 +1111,26 @@ async def _stream_agent_chunks(
                 )
                 continue
 
+            if chunk_type == ProcessType.FILE_ARTIFACT.value:
+                artifact_content = data.get("content")
+                if isinstance(artifact_content, str):
+                    try:
+                        artifact_content = json.loads(artifact_content)
+                    except json.JSONDecodeError:
+                        artifact_content = {}
+                artifacts = (
+                    artifact_content.get("artifacts", [])
+                    if isinstance(artifact_content, dict)
+                    else []
+                )
+                for artifact in artifacts:
+                    if not isinstance(artifact, dict):
+                        continue
+                    object_name = str(artifact.get("object_name") or "").strip()
+                    if object_name:
+                        workspace_file_uploads[object_name] = artifact
+                continue
+
             should_parse_skill_file = (
                 chunk_type in {"execution_logs", "parse"}
                 or data.get("role") == "tool-response"
@@ -1132,9 +1167,9 @@ async def _stream_agent_chunks(
                         len(captured_skill_files),
                     )
 
-            # Incremental unit persistence: when a new chunk belongs to a different
-            # unit than the one currently being buffered, flush the previous unit
-            # and insert a fresh row for the new chunk.
+            # Buffer assistant persistence in memory. Redis/channel publication
+            # below remains per chunk; PostgreSQL is touched only once after the
+            # stream reaches a terminal state.
             if streaming_message_id is not None and chunk_type:
                 mergeable = chunk_type in _MERGEABLE_TYPES
                 is_continuation = (
@@ -1144,98 +1179,44 @@ async def _stream_agent_chunks(
                 )
 
                 if is_continuation:
-                    # Same mergeable unit: append to the in-memory buffer and
-                    # update the DB row to keep content in sync.
-                    # Use synchronous write to prevent race condition: the async submit()
-                    # approach has a critical bug where concurrent submits can read stale
-                    # content and overwrite the DB with incomplete data. Since the main
-                    # loop is async but the DB operations are I/O-bound with network
-                    # latency, synchronous writes here are acceptably fast and guarantee
-                    # that each chunk is fully persisted before the next chunk arrives.
                     current_unit["content"] += chunk_content
-                    update_unit_content(
-                        current_unit["unit_id"],
-                        current_unit["content"],
-                        user_id,
-                    )
+                    current_unit["unit_content"] = current_unit["content"]
                 else:
-                    # Boundary detected: close the previous unit (if any) and
-                    # open a new one for this chunk.
-                    if current_unit is not None:
-                        submit(
-                            update_unit_status,
-                            current_unit["unit_id"],
-                            "completed",
-                            user_id,
-                        )
-
-                    # Special-case: final_answer also updates message_content
                     if chunk_type == "final_answer":
-                        submit(
-                            update_message_content,
-                            streaming_message_id,
-                            chunk_content,
-                            user_id,
-                        )
+                        final_answer_content = chunk_content
 
-                    # Special-case: picture_web saves image source references
                     if chunk_type == "picture_web":
                         try:
                             content_json = json.loads(chunk_content)
                             if isinstance(content_json, dict) and "images_url" in content_json:
-                                seen_urls: set[str] = set()
-                                unique_urls: list[str] = []
                                 for image_url in content_json["images_url"]:
-                                    if image_url not in seen_urls:
-                                        seen_urls.add(image_url)
-                                        unique_urls.append(image_url)
-                                for image_url in unique_urls:
-                                    submit(
-                                        save_source_image,
-                                        {
-                                            "message_id": streaming_message_id,
-                                            "conversation_id": agent_request.conversation_id,
-                                            "image_url": image_url,
-                                        },
-                                    )
+                                    if image_url and image_url not in buffered_image_url_set:
+                                        buffered_image_url_set.add(image_url)
+                                        buffered_image_urls.append(image_url)
                         except Exception as img_exc:
                             logger.error(
-                                "Failed to persist picture_web unit: %r", img_exc, exc_info=True
+                                "Failed to buffer picture_web sources: %r", img_exc, exc_info=True
                             )
 
-                    # Special-case: search_content creates a placeholder unit
-                    # and inserts each search result as a source_search row
-                    # linked back to the unit_id we just created.
                     if chunk_type == "search_content":
-                        try:
-                            placeholder_unit_id = submit(
-                                save_message_unit,
-                                message_id=streaming_message_id,
-                                conversation_id=agent_request.conversation_id,
-                                unit_index=next_unit_index,
-                                unit_type="search_content_placeholder",
-                                unit_content='{"placeholder": true}',
-                                user_id=user_id,
-                                unit_status="completed",
-                                tool_call_id=data.get("tool_call_id"),
-                                invocation_id=data.get("invocation_id"),
-                            ).result()
-                        except Exception as persistence_exc:
-                            logger.error(
-                                "Failed to persist search_content placeholder: %r",
-                                persistence_exc,
-                                exc_info=True,
-                            )
-                            placeholder_unit_id = None
+                        placeholder_index = next_unit_index
+                        buffered_units.append({
+                            "type": "search_content_placeholder",
+                            "content": '{"placeholder": true}',
+                            "unit_index": placeholder_index,
+                            "unit_type": "search_content_placeholder",
+                            "unit_content": '{"placeholder": true}',
+                            "tool_call_id": data.get("tool_call_id"),
+                            "invocation_id": data.get("invocation_id"),
+                            "mergeable": False,
+                        })
                         try:
                             search_results = json.loads(chunk_content)
                             if not isinstance(search_results, list):
                                 search_results = [search_results]
                             for result in search_results:
-                                search_data = {
-                                    "message_id": streaming_message_id,
-                                    "conversation_id": agent_request.conversation_id,
-                                    "unit_id": placeholder_unit_id,
+                                buffered_search_records.append({
+                                    "unit_index": placeholder_index,
                                     "source_type": result.get("source_type", ""),
                                     "source_title": result.get("title", ""),
                                     "source_location": result.get("url", ""),
@@ -1259,11 +1240,10 @@ async def _stream_agent_chunks(
                                     if result.get("search_type")
                                     else None,
                                     "tool_sign": result.get("tool_sign", ""),
-                                }
-                                submit(save_source_search, search_data, user_id)
+                                })
                         except Exception as src_exc:
                             logger.error(
-                                "Failed to persist search_content unit: %r", src_exc, exc_info=True
+                                "Failed to buffer search_content sources: %r", src_exc, exc_info=True
                             )
                         current_unit = None
                         next_unit_index += 1
@@ -1271,7 +1251,6 @@ async def _stream_agent_chunks(
                         yield f"data: {chunk}\n\n"
                         continue
 
-                    # Default path: insert a new unit row with unit_status='streaming'.
                     # history_summary is already persisted once by the canonical
                     # checkpoint sink on its covered assistant message. The stream
                     # event is display-only and must not create a duplicate unit on
@@ -1284,52 +1263,29 @@ async def _stream_agent_chunks(
                         persisted_content = _serialize_stream_unit_content(
                             data, chunk_content
                         )
-                        try:
-                            new_unit_id = submit(
-                                save_message_unit,
-                                message_id=streaming_message_id,
-                                conversation_id=agent_request.conversation_id,
-                                unit_index=next_unit_index,
-                                unit_type=chunk_type,
-                                unit_content=persisted_content,
-                                user_id=user_id,
-                                unit_status="streaming",
-                                tool_call_id=data.get("tool_call_id"),
-                                invocation_id=data.get("invocation_id"),
-                            ).result()
-                        except Exception as persistence_exc:
-                            logger.error(
-                                "Failed to persist streaming message unit: %r",
-                                persistence_exc,
-                                exc_info=True,
-                            )
-                        else:
-                            current_unit = {
-                                "type": chunk_type,
-                                "content": persisted_content,
-                                "unit_id": new_unit_id,
-                                "unit_index": next_unit_index,
-                                "mergeable": mergeable,
-                            }
-                            if chunk_type == "automation_proposal":
-                                try:
-                                    from services.agent_automation.tool_adapter import (
-                                        link_persisted_proposal_card,
-                                    )
-
-                                    link_persisted_proposal_card(
-                                        persisted_content,
-                                        tenant_id,
-                                        user_id,
-                                        streaming_message_id,
-                                        new_unit_id,
-                                    )
-                                except Exception:
-                                    logger.warning(
-                                        "Failed to link persisted automation proposal card",
-                                        exc_info=True,
-                                    )
-                            next_unit_index += 1
+                        current_unit = {
+                            "type": chunk_type,
+                            "content": persisted_content,
+                            "unit_index": next_unit_index,
+                            "unit_type": chunk_type,
+                            "unit_content": persisted_content,
+                            "tool_call_id": data.get("tool_call_id"),
+                            "invocation_id": data.get("invocation_id"),
+                            "mergeable": mergeable,
+                        }
+                        buffered_units.append(current_unit)
+                        if chunk_type == "automation_proposal":
+                            try:
+                                proposal_payload = json.loads(persisted_content)
+                                buffered_automation_proposals.append({
+                                    "unit_index": next_unit_index,
+                                    "proposal_id": int(proposal_payload["proposal_id"]),
+                                })
+                            except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+                                logger.warning(
+                                    "Invalid persisted automation proposal event payload"
+                                )
+                        next_unit_index += 1
 
             await channel.publish(f"data: {chunk}\n\n")
             yield f"data: {chunk}\n\n"
@@ -1339,66 +1295,11 @@ async def _stream_agent_chunks(
         await channel.publish(_safe_agent_stream_error_chunk())
         yield _safe_agent_stream_error_chunk()
     finally:
-        # Finalize any in-flight unit and transition the parent message to its
-        # terminal status before releasing the agent run slot.
-        if streaming_message_id is not None:
-            if current_unit is not None:
-                try:
-                    # First update the content to ensure the last chunk is persisted
-                    # This must be done synchronously before updating status
-                    final_content = current_unit["content"]
-                    update_unit_content(
-                        current_unit["unit_id"],
-                        final_content,
-                        user_id,
-                    )
-                except Exception:
-                    logger.exception("Failed to update last unit content")
-                try:
-                    update_unit_status(
-                        current_unit["unit_id"],
-                        "completed",
-                        user_id,
-                    )
-                except Exception:
-                    logger.exception("Failed to mark last unit as completed")
-
-            was_stopped = getattr(agent_run_info, "stop_event", None) and agent_run_info.stop_event.is_set()
-            terminal_status = "stopped" if was_stopped else "completed" if stream_completed_normally else "failed"
-            try:
-                update_message_status(
-                    streaming_message_id,
-                    terminal_status,
-                    user_id,
-                )
-            except Exception:
-                logger.exception("Failed to mark assistant message as %s", terminal_status)
-
         if not cancel_poll_task.done():
             cancel_poll_task.cancel()
 
         was_stopped = getattr(agent_run_info, "stop_event", None) and agent_run_info.stop_event.is_set()
         terminal_status = 'stopped' if was_stopped else 'completed' if stream_completed_normally else 'failed'
-
-        agent_run_manager.unregister_agent_run(
-            agent_request.conversation_id, user_id, status=terminal_status)
-
-        # Mark channel as completed and schedule cleanup
-        if channel is not None:
-            await streaming_channel_manager.complete_channel(
-                conversation_id=agent_request.conversation_id,
-                user_id=user_id,
-                status=terminal_status
-            )
-            # Schedule channel removal (give subscribers time to receive final chunks)
-            cleanup_task = asyncio.create_task(
-                _cleanup_channel_later(
-                    conversation_id=agent_request.conversation_id,
-                    user_id=user_id
-                )
-            )
-            _channel_cleanup_tasks.add(cleanup_task)
-            cleanup_task.add_done_callback(_channel_cleanup_tasks.discard)
 
         try:
             skill_file_payloads = list(captured_skill_files.values())
@@ -1414,34 +1315,97 @@ async def _stream_agent_chunks(
                     len(skill_file_uploads), skill_file_uploads
                 )
                 if skill_file_uploads:
-                    # Keep original format for real-time SSE display
-                    skill_files_payload = json.dumps(
-                        {"skill_file_uploads": skill_file_uploads},
+                    files_payload = json.dumps(
+                        {"file_uploads": skill_file_uploads},
                         ensure_ascii=False,
                     )
                     try:
-                        yield f"data: {json.dumps({'type': 'skill_files', 'content': skill_files_payload}, ensure_ascii=False)}\n\n"
+                        yield f"data: {json.dumps({'type': 'files', 'content': files_payload}, ensure_ascii=False)}\n\n"
                     except RuntimeError:
                         # Stream is closing (e.g., client disconnect). Avoid raising during generator teardown.
                         pass
-                    # Persist skill file uploads to the conversation history so they
-                    # appear in subsequent GET /conversation/{id} calls.
-                    # Transform to frontend attachment format (object_name, name, type, size, etc.)
-                    try:
-                        frontend_files = _transform_skill_files_to_standard_format(skill_file_uploads)
-                        save_skill_files_to_conversation(
-                            conversation_id=agent_request.conversation_id,
-                            skill_file_uploads=frontend_files,
-                            user_id=user_id,
-                        )
-                    except Exception:
-                        logger.exception(
-                            "[skill-file] failed to persist skill file uploads to conversation=%s",
-                            agent_request.conversation_id,
-                        )
+                    frontend_skill_files.extend(
+                        _transform_skill_files_to_standard_format(skill_file_uploads)
+                    )
         except Exception:
             logger.exception("Failed to process skill file uploads")
 
+        if workspace_file_uploads:
+            uploaded_files = list(workspace_file_uploads.values())
+            files_payload = json.dumps(
+                {"file_uploads": uploaded_files},
+                ensure_ascii=False,
+            )
+            try:
+                yield f"data: {json.dumps({'type': 'files', 'content': files_payload}, ensure_ascii=False)}\n\n"
+            except RuntimeError:
+                pass
+            frontend_skill_files.extend(
+                _transform_skill_files_to_standard_format(uploaded_files)
+            )
+
+        persistence_failed = False
+        if streaming_message_id is not None:
+            try:
+                await asyncio.to_thread(
+                    persist_assistant_run_batch,
+                    message_id=streaming_message_id,
+                    conversation_id=agent_request.conversation_id,
+                    message_content=final_answer_content,
+                    terminal_status=terminal_status,
+                    message_units=buffered_units,
+                    search_records=buffered_search_records,
+                    image_urls=buffered_image_urls,
+                    skill_files=frontend_skill_files,
+                    automation_proposals=buffered_automation_proposals,
+                    user_id=user_id,
+                    tenant_id=tenant_id,
+                )
+            except Exception:
+                persistence_failed = True
+                terminal_status = "failed"
+                logger.exception(
+                    "Failed to persist assistant stream batch conversation=%s message=%s",
+                    agent_request.conversation_id,
+                    streaming_message_id,
+                )
+                try:
+                    await asyncio.to_thread(
+                        update_message_status,
+                        streaming_message_id,
+                        "failed",
+                        user_id,
+                    )
+                except Exception:
+                    logger.exception(
+                        "Failed to mark assistant message as failed after batch rollback"
+                    )
+
+        if persistence_failed and channel is not None:
+            persistence_error_chunk = _safe_agent_stream_error_chunk()
+            await channel.publish(persistence_error_chunk)
+            try:
+                yield persistence_error_chunk
+            except RuntimeError:
+                pass
+
+        agent_run_manager.unregister_agent_run(
+            agent_request.conversation_id, user_id, status=terminal_status)
+
+        if channel is not None:
+            await streaming_channel_manager.complete_channel(
+                conversation_id=agent_request.conversation_id,
+                user_id=user_id,
+                status=terminal_status
+            )
+            cleanup_task = asyncio.create_task(
+                _cleanup_channel_later(
+                    conversation_id=agent_request.conversation_id,
+                    user_id=user_id
+                )
+            )
+            _channel_cleanup_tasks.add(cleanup_task)
+            cleanup_task.add_done_callback(_channel_cleanup_tasks.discard)
         # Memory recording is now handled by the agent-side ``StoreMemoryTool``
         # (which delegates to the new ``MemoryService`` facade). The legacy
         # background ``add_memory_in_levels`` call has been removed because
@@ -1825,6 +1789,8 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
                 "requested_output_tokens": request.requested_output_tokens,
                 "is_main_agent": request.is_main_agent if request.is_main_agent is not None else True,
                 "provide_run_summary": request.provide_run_summary,
+                "allow_chat_metadata": request.allow_chat_metadata if request.allow_chat_metadata is not None else False,
+                "is_a2a": request.is_a2a if request.is_a2a is not None else False,
                 "verification_config": request.verification_config,
                 "context_policy": request.context_policy,
                 "duty_prompt": request.duty_prompt,
@@ -1832,6 +1798,7 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
                 "few_shots_prompt": request.few_shots_prompt,
                 "greeting_message": request.greeting_message,
                 "example_questions": request.example_questions,
+                "icon_url": request.icon_url,
                 "enabled": request.enabled if request.enabled is not None else True,
                 "group_ids": convert_list_to_string(request.group_ids) if request.group_ids else user_group_ids,
                 "ingroup_permission": request.ingroup_permission
@@ -2351,6 +2318,7 @@ async def export_agent_by_agent_id(
                                           requested_output_tokens=agent_info.get("requested_output_tokens"),
                                           is_main_agent=agent_info.get("is_main_agent", True),
                                           provide_run_summary=agent_info["provide_run_summary"],
+                                          allow_chat_metadata=agent_info.get("allow_chat_metadata", False),
                                           verification_config=agent_info.get("verification_config"),
                                           context_policy=agent_info.get("context_policy"),
                                           duty_prompt=agent_info.get(
@@ -2369,7 +2337,9 @@ async def export_agent_by_agent_id(
                                           skill_names=skill_names,
                                           prompt_template_id=agent_info.get(
                                               "prompt_template_id"),
-                                          prompt_template_name=agent_info.get("prompt_template_name"))
+                                          prompt_template_name=agent_info.get("prompt_template_name"),
+                                          greeting_message=agent_info.get("greeting_message"),
+                                          example_questions=agent_info.get("example_questions"))
     return agent_info
 
 
@@ -2516,13 +2486,16 @@ async def import_agent_by_agent_id(
                                          "requested_output_tokens": import_agent_info.requested_output_tokens,
                                          "is_main_agent": getattr(import_agent_info, "is_main_agent", True),
                                          "provide_run_summary": import_agent_info.provide_run_summary,
+                                         "allow_chat_metadata": import_agent_info.allow_chat_metadata,
                                          "verification_config": getattr(import_agent_info, "verification_config", None),
                                          "context_policy": getattr(import_agent_info, "context_policy", None),
                                          "duty_prompt": import_agent_info.duty_prompt,
                                          "constraint_prompt": import_agent_info.constraint_prompt,
                                          "few_shots_prompt": import_agent_info.few_shots_prompt,
                                          "enabled": import_agent_info.enabled,
-                                         "group_ids": user_group_ids},
+                                         "group_ids": user_group_ids,
+                                         "greeting_message": getattr(import_agent_info, "greeting_message", None),
+                                         "example_questions": getattr(import_agent_info, "example_questions", None)},
                              tenant_id=tenant_id,
                              user_id=user_id)
     new_agent_id = new_agent["agent_id"]
@@ -2696,6 +2669,7 @@ async def list_all_agent_info_impl(tenant_id: str, user_id: str) -> list[dict]:
                 "is_published": agent.get("current_version_no") is not None,
                 "current_version_no": agent.get("current_version_no"),
                 "is_a2a_server": agent["agent_id"] in a2a_server_agent_ids,
+                "allow_chat_metadata": bool(agent.get("allow_chat_metadata", False)),
             })
 
         return simple_agent_list
@@ -2934,6 +2908,14 @@ async def prepare_agent_run(
     agent_run_info = await create_agent_run_info(
         **create_run_kwargs,
     )
+    agent_run_info.runtime_metadata = dict(
+        getattr(agent_request, "_runtime_metadata_snapshot", {}) or {}
+    )
+    agent_run_info.runtime_metadata_version = getattr(
+        agent_request,
+        "_runtime_metadata_version",
+        None,
+    )
 
     historical_context = None
     if not agent_request.is_debug and agent_request.conversation_id is not None:
@@ -2970,8 +2952,8 @@ async def prepare_agent_run(
 
 
 # Helper function for run_agent_stream, used to save the user-side message
-# before streaming begins. Assistant-side persistence is handled incrementally
-# inside _stream_agent_chunks (see save_message / save_message_unit).
+# before streaming begins. Assistant output is buffered by _stream_agent_chunks
+# and finalized through persist_assistant_run_batch.
 def save_messages(agent_request, target: str, user_id: str, tenant_id: str, messages=None):
     if target == MESSAGE_ROLE["USER"]:
         if messages is not None:
@@ -2983,8 +2965,7 @@ def save_messages(agent_request, target: str, user_id: str, tenant_id: str, mess
     if target == MESSAGE_ROLE["ASSISTANT"]:
         raise ValueError(
             "save_messages no longer persists the assistant message; "
-            "_stream_agent_chunks persists units incrementally via "
-            "save_message_unit."
+            "_stream_agent_chunks persists the assistant run as a final batch."
         )
 
     raise ValueError(f"Unsupported target for save_messages: {target!r}")
@@ -3233,6 +3214,31 @@ async def run_agent_stream(
         if conversation is None:
             raise ForbiddenError("Conversation is not accessible to the current identity")
 
+    metadata_supplied = "metadata" in agent_request.model_fields_set
+    metadata_update_requested = metadata_supplied and agent_request.metadata is not None
+    if metadata_update_requested:
+        try:
+            validate_runtime_metadata(agent_request.metadata)
+        except RuntimeMetadataValidationError as exc:
+            error_code = (
+                ErrorCode.CHAT_METADATA_TOO_LARGE
+                if exc.code == RuntimeMetadataValidationCode.METADATA_TOO_LARGE
+                else ErrorCode.CHAT_METADATA_INVALID
+            )
+            raise AppException(
+                error_code,
+                details={"reason": exc.code.value},
+            ) from exc
+    metadata_entrypoint = getattr(agent_request, "_runtime_metadata_entrypoint", "native")
+    if metadata_update_requested and metadata_entrypoint in {"native", "debug"}:
+        agent_record = search_agent_info_by_agent_id(
+            agent_id=agent_request.agent_id,
+            tenant_id=resolved_tenant_id,
+            version_no=agent_request.version_no or 0,
+        )
+        if not bool(agent_record.get("allow_chat_metadata", False)):
+            raise AppException(ErrorCode.CHAT_METADATA_NOT_ALLOWED)
+
     raw_request_scope = None if resume else getattr(agent_request, "knowledge_scope", None)
     if isinstance(raw_request_scope, ConversationKnowledgeScopeRequest):
         request_scope = raw_request_scope
@@ -3311,6 +3317,8 @@ async def run_agent_stream(
         }
         if resolved_scope is not None:
             conversation_kwargs["knowledge_scope"] = resolved_scope.desired_scope
+        if metadata_update_requested:
+            conversation_kwargs["runtime_metadata"] = agent_request.metadata or {}
         conversation_data = create_new_conversation(**conversation_kwargs)
         agent_request.conversation_id = conversation_data["conversation_id"]
         is_new_conversation = True
@@ -3319,6 +3327,52 @@ async def run_agent_stream(
             agent_request.conversation_id,
             resolved_user_id,
         )
+
+    if not resume:
+        if agent_request.is_debug:
+            metadata_snapshot = dict(agent_request.metadata or {}) if metadata_update_requested else {}
+            metadata_version = None
+        elif is_new_conversation:
+            metadata_snapshot = dict(
+                conversation_data.get(
+                    "runtime_metadata",
+                    agent_request.metadata if metadata_update_requested else {},
+                )
+                or {}
+            )
+            metadata_version = int(
+                conversation_data.get(
+                    "runtime_metadata_version",
+                    1 if metadata_update_requested else 0,
+                )
+                or 0
+            )
+        elif not metadata_update_requested:
+            metadata_snapshot = dict((conversation or {}).get("runtime_metadata") or {})
+            metadata_version = int((conversation or {}).get("runtime_metadata_version") or 0)
+        else:
+            try:
+                resolved_metadata = resolve_conversation_runtime_metadata(
+                    conversation_id=agent_request.conversation_id,
+                    user_id=resolved_user_id,
+                    request_metadata=agent_request.metadata,
+                    update_requested=metadata_update_requested,
+                    expected_version=agent_request.expected_metadata_version,
+                )
+            except ConversationNotFoundError as exc:
+                raise AppException(
+                    ErrorCode.CHAT_CONVERSATION_NOT_FOUND,
+                ) from exc
+            except RuntimeMetadataVersionConflict as exc:
+                raise AppException(
+                    ErrorCode.CHAT_METADATA_VERSION_CONFLICT,
+                    details={"current_version": exc.current_version},
+                ) from exc
+            metadata_snapshot = resolved_metadata["runtime_metadata"]
+            metadata_version = resolved_metadata["runtime_metadata_version"]
+
+        agent_request.__dict__["_runtime_metadata_snapshot"] = metadata_snapshot
+        agent_request.__dict__["_runtime_metadata_version"] = metadata_version
 
     if (
         not agent_request.is_debug
@@ -3572,16 +3626,41 @@ async def run_agent_stream(
 
     use_memory_stream = memory_enabled and not agent_request.is_debug
 
-    stream_gen = generate_stream(
-        agent_request,
-        user_id=resolved_user_id,
-        tenant_id=resolved_tenant_id,
-        language=language,
-        enable_memory=use_memory_stream,
-    )
+    channel = None
+    if not agent_request.is_debug:
+        channel = await streaming_channel_manager.get_or_create_channel(
+            conversation_id=agent_request.conversation_id,
+            user_id=resolved_user_id,
+        )
+
+    stream_kwargs = {
+        "user_id": resolved_user_id,
+        "tenant_id": resolved_tenant_id,
+        "language": language,
+        "enable_memory": use_memory_stream,
+    }
+    if channel is not None:
+        stream_kwargs["channel"] = channel
+    stream_gen = generate_stream(agent_request, **stream_kwargs)
 
     async def stream_with_agent_context():
         try:
+            producer_task = None
+            if channel is not None:
+                producer_task = asyncio.create_task(
+                    _consume_agent_stream_producer(
+                        stream_gen=stream_gen,
+                        channel=channel,
+                        agent_metadata=agent_metadata,
+                        conversation_id=agent_request.conversation_id,
+                        user_id=resolved_user_id,
+                    )
+                )
+                _agent_stream_producer_tasks.add(producer_task)
+                producer_task.add_done_callback(
+                    _agent_stream_producer_tasks.discard
+                )
+
             # Emit conversation_created event for new conversations
             if is_new_conversation:
                 yield f'data: {{"type": "conversation_created", "content": {{"conversation_id": {agent_request.conversation_id}}}}}\n\n'
@@ -3597,9 +3676,15 @@ async def run_agent_stream(
                     + "\n\n"
                 )
 
-            with agent_monitoring_context(agent_metadata):
-                async for data_chunk in stream_gen:
+            if channel is not None:
+                async for data_chunk in channel.subscribe_with_history(0):
                     yield data_chunk
+            else:
+                # Debug/A2A streams intentionally retain the direct execution
+                # path and its existing disconnect semantics.
+                with agent_monitoring_context(agent_metadata):
+                    async for data_chunk in stream_gen:
+                        yield data_chunk
         except Exception as stream_exc:
             logger.error(
                 "Agent stream response error: %r",
@@ -3611,6 +3696,11 @@ async def run_agent_stream(
     headers = {"Cache-Control": "no-cache", "Connection": "keep-alive"}
     if agent_request.conversation_id is not None:
         headers["conversation_id"] = str(agent_request.conversation_id)
+    runtime_metadata_version = getattr(
+        agent_request, "_runtime_metadata_version", None
+    )
+    if runtime_metadata_version is not None:
+        headers["X-Runtime-Metadata-Version"] = str(runtime_metadata_version)
 
     return StreamingResponse(
         stream_with_agent_context(),
@@ -3947,46 +4037,82 @@ async def import_agent_with_skills_impl(
     agent_info: "ExportAndImportDataFormat",
     skills: List[SkillZipEntry],
     authorization: str,
-    force_import: bool = False
+    force_import: bool = False,
+    skill_resolutions: Optional[List[SkillResolution]] = None,
 ):
     """Import an agent with skills bundled from a ZIP export.
 
-    For each skill in the bundle:
-      1. Check if a skill with the same name already exists in the target tenant.
-      2. If duplicates exist, raise SkillDuplicateError (do not create anything).
-      3. If no duplicates, create the skill from ZIP bytes via SkillService.
-      4. Create a SkillInstance linking the new skill_id to the new agent_id.
-
-    Then proceeds with the standard agent import flow using the mapped skill IDs.
+    Duplicate skills require an explicit rename or use-existing resolution. New
+    and renamed skills share the same ZIP creation path, while imported agent
+    skill names are resolved to tenant-local skill IDs before creating instances.
     """
-    from services.skill_service import SkillService
-
     user_id, tenant_id, _ = get_current_user_info(authorization)
 
     skill_name_to_zip_base64 = {
         entry.skill_name: entry.skill_zip_base64 for entry in skills}
 
     existing_skills = skill_db.list_skills(tenant_id)
-    existing_skill_names = {s.get("name") for s in existing_skills}
+    existing_skills_by_name = {
+        skill.get("name"): skill
+        for skill in existing_skills
+        if skill.get("name")
+    }
+    existing_skill_names = set(existing_skills_by_name)
 
-    import_skill_names = set(skill_name_to_zip_base64.keys())
-    duplicate_names = list(import_skill_names & existing_skill_names)
+    skill_conflicts = build_skill_import_conflicts(
+        list(skill_name_to_zip_base64),
+        existing_skill_names,
+    )
+    duplicate_names = [conflict["skill_name"] for conflict in skill_conflicts]
+    resolutions_by_name = {
+        resolution.skill_name: resolution
+        for resolution in skill_resolutions or []
+    }
 
-    if duplicate_names:
-        raise SkillDuplicateError(duplicate_names)
+    conflict_by_name = {
+        conflict["skill_name"]: conflict
+        for conflict in skill_conflicts
+    }
+    has_unresolved_conflict = any(
+        (
+            (resolution := resolutions_by_name.get(skill_name)) is None
+            or (
+                resolution.action == "rename"
+                and str(resolution.new_name or "").strip()
+                != conflict_by_name[skill_name]["suggested_new_name"]
+            )
+        )
+        for skill_name in duplicate_names
+    )
+    if has_unresolved_conflict:
+        raise SkillDuplicateError(duplicate_names, skill_conflicts)
 
     skill_name_to_id: Dict[str, int] = {}
     skill_service = SkillService(tenant_id=tenant_id)
 
     for skill_name, zip_base64 in skill_name_to_zip_base64.items():
+        resolution = (
+            resolutions_by_name.get(skill_name)
+            if skill_name in existing_skills_by_name
+            else None
+        )
+        if skill_name in existing_skills_by_name and resolution and resolution.action == "use_existing":
+            skill_name_to_id[skill_name] = existing_skills_by_name[skill_name]["skill_id"]
+            continue
+
+        target_name = (
+            str(resolution.new_name).strip()
+            if resolution and resolution.action == "rename"
+            else skill_name
+        )
         zip_bytes = base64.b64decode(zip_base64)
         result = skill_service.create_skill_from_zip_bytes(
             zip_bytes=zip_bytes,
-            skill_name=skill_name,
+            skill_name=target_name,
             source="导入",
             user_id=user_id,
             tenant_id=tenant_id,
-            skip_duplicate_check=True
+            skip_duplicate_check=False,
         )
         skill_name_to_id[skill_name] = result.get("skill_id")
 
@@ -3995,13 +4121,18 @@ async def import_agent_with_skills_impl(
         skill_name_to_id=skill_name_to_id
     )
 
-    main_agent_id = agent_id_mapping.get(agent_info.agent_id)
-    if main_agent_id:
-        for skill_name, new_skill_id in skill_name_to_id.items():
+    for imported_agent in agent_info.agent_info.values():
+        new_agent_id = agent_id_mapping.get(imported_agent.agent_id)
+        if not new_agent_id:
+            continue
+        for skill_name in imported_agent.skill_names or []:
+            resolved_skill_id = skill_name_to_id.get(skill_name)
+            if resolved_skill_id is None:
+                continue
             skill_db.create_or_update_skill_by_skill_info(
                 skill_info=SkillInstanceInfoRequest(
-                    skill_id=new_skill_id,
-                    agent_id=main_agent_id,
+                    skill_id=resolved_skill_id,
+                    agent_id=new_agent_id,
                     enabled=True,
                     version_no=0
                 ),
@@ -4011,6 +4142,45 @@ async def import_agent_with_skills_impl(
             )
 
     return agent_id_mapping
+
+
+def build_skill_import_conflicts(
+    skill_names: List[str],
+    existing_skill_names: set[str],
+) -> List[Dict[str, str]]:
+    """Build duplicate skill resolutions without creating any data."""
+    ordered_skill_names = list(dict.fromkeys(skill_names))
+    unavailable_names = existing_skill_names | set(ordered_skill_names)
+    conflicts: List[Dict[str, str]] = []
+
+    for skill_name in ordered_skill_names:
+        if skill_name not in existing_skill_names:
+            continue
+        suggested_name = generate_available_copy_skill_name(
+            skill_name,
+            unavailable_names,
+        )
+        unavailable_names.add(suggested_name)
+        conflicts.append({
+            "skill_name": skill_name,
+            "suggested_new_name": suggested_name,
+        })
+
+    return conflicts
+
+
+def check_skill_conflicts_impl(
+    skill_names: List[str],
+    authorization: str,
+) -> List[Dict[str, str]]:
+    """Check agent import skill names against the current tenant."""
+    _, tenant_id, _ = get_current_user_info(authorization)
+    existing_skill_names = {
+        skill.get("name")
+        for skill in skill_db.list_skills(tenant_id)
+        if skill.get("name")
+    }
+    return build_skill_import_conflicts(skill_names, existing_skill_names)
 
 
 # =============================================================================

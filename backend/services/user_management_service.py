@@ -503,9 +503,10 @@ def format_role_permissions(permissions: List[Dict[str, Any]]) -> Dict[str, List
         permission_subtype = perm.get("permission_subtype", "")
 
         if permission_category == "RESOURCE" and permission_type and permission_subtype:
-            # Format as "permission_type:permission_subtype"
+            # Normalize to lower-case "type:subtype" so backend RBAC, frontend
+            # Can checks, and user info responses share one permission format.
             formatted_permissions.append(
-                f"{permission_type}:{permission_subtype}")
+                f"{permission_type}:{permission_subtype}".lower())
         elif permission_type == "LEFT_NAV_MENU" and permission_subtype:
             # Add permission_subtype to accessible routes for LEFT_NAV_MENU type
             accessible_routes.append(permission_subtype)
