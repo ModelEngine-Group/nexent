@@ -1,0 +1,17 @@
+# Nexent Open Source Project
+
+Copyright © 2025 Huawei Technologies Co., Ltd.
+
+This product includes software developed by the Nexent Team.
+
+=== Third-Party Components ===
+This software contains the following open-source components:
+
+1. Unstructured.io - Apache License 2.0
+   Source: https://github.com/Unstructured-IO/unstructured
+
+2. SmolAgents - Apache License 2.0  
+   Source: https://github.com/huggingface/smolagents
+
+3. Ray - Apache License 2.0
+   Source: https://github.com/ray-project/ray

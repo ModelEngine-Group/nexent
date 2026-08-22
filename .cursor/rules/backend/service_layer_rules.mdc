@@ -1,0 +1,113 @@
+---
+globs: backend/services/**/*.py
+description: Service layer implements core business logic orchestration; raise custom exceptions; no HTTP handling
+---
+
+### Service Layer Rules
+
+- **Scope**: Applies to `backend/services/*.py`.
+- **Goal**: Implement core business logic and orchestrate complex workflows. Coordinate repositories/SDKs. Keep HTTP concerns out of this layer.
+- **Exceptions**: Raise domain/service exceptions declared in `backend/consts/exceptions.py`. If a new case is needed, add a new class there, then raise it here. Do not translate to HTTP here.
+- **Environment variables**: Do not access `os.getenv()` directly. Read configuration from `consts.const` (see `environment_variable` rule) or accept parameters.
+
+Reference: [backend/consts/exceptions.py](mdc:backend/consts/exceptions.py)
+
+### Correct example (service orchestrates business logic and raises domain exceptions)
+```python
+# backend/services/agent_service.py
+from typing import Any, Dict
+
+from consts.exceptions import LimitExceededError, AgentRunException, MemoryPreparationException
+# from consts.const import APPID, TOKEN  # Example: read config via consts, not os.getenv
+
+
+def run_agent(task_payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Run agent core workflow and return domain result dict.
+    Raises domain exceptions on failure; no HTTP concerns here.
+    """
+    if _is_rate_limited(task_payload):
+        raise LimitExceededError("Too many requests for this tenant.")
+
+    try:
+        memory = _prepare_memory(task_payload)
+    except Exception as exc:
+        # Wrap low-level error in a domain exception for the app layer to translate
+        raise MemoryPreparationException("Failed to prepare memory.") from exc
+
+    try:
+        result = _execute_core_logic(task_payload, memory)
+    except Exception as exc:
+        raise AgentRunException("Agent execution failed.") from exc
+
+    # Return a plain Python object, not a Response
+    return {"status": "ok", "data": result}
+
+
+def _is_rate_limited(_: Dict[str, Any]) -> bool:
+    return False
+
+
+def _prepare_memory(_: Dict[str, Any]) -> Dict[str, Any]:
+    return {"memo": "prepared"}
+
+
+def _execute_core_logic(_: Dict[str, Any], __: Dict[str, Any]) -> Dict[str, Any]:
+    return {"answer": "42"}
+```
+
+### Incorrect example (service leaks HTTP/web concerns or reads env directly)
+```python
+# backend/services/agent_service.py
+from fastapi import HTTPException  # WRONG: HTTP in service
+from starlette.responses import JSONResponse  # WRONG: Response in service
+import os  # WRONG: direct env access in service
+
+
+def run_agent(_: dict):
+    # WRONG: translating to HTTP inside service
+    if os.getenv("RATE_LIMIT", "0") == "1":  # WRONG: direct getenv here
+        raise HTTPException(status_code=429, detail="Too many requests")
+
+    # WRONG: returning framework response from service
+    return JSONResponse({"status": "ok"})
+```
+
+### Declaring a new custom exception (do this in exceptions module)
+```python
+# backend/consts/exceptions.py
+class OrderProcessingError(Exception):
+    """Raised when order processing fails in service layer."""
+    pass
+```
+
+### Existing exceptions (excerpt from current code)
+```python
+"""
+Custom exception classes for the application.
+"""
+
+
+class AgentRunException(Exception):
+    """Exception raised when agent run fails."""
+    pass
+
+
+class LimitExceededError(Exception):
+    """Raised when an outer platform calling too frequently"""
+    pass
+
+
+class UnauthorizedError(Exception):
+    """Raised when a user from outer platform is unauthorized."""
+    pass
+
+
+class SignatureValidationError(Exception):
+    """Raised when X-Signature header is missing or does not match the expected HMAC value."""
+    pass
+
+
+class MemoryPreparationException(Exception):
+    """Raised when memory preprocessing or retrieval fails prior to agent run."""
+    pass
+```

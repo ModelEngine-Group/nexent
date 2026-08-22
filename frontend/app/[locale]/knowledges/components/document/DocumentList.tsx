@@ -1,0 +1,1225 @@
+import React, {
+  useState,
+  useRef,
+  forwardRef,
+  useImperativeHandle,
+  useEffect,
+  useMemo,
+} from "react";
+import { useTranslation } from "react-i18next";
+
+import {
+  Input,
+  InputNumber,
+  Button,
+  App,
+  Select,
+  Segmented,
+  Space,
+} from "antd";
+import { useStorageQuotaBlocked } from "@/hooks/useStorageQuotaBlocked";
+const { TextArea } = Input;
+import { InfoCircleFilled } from "@ant-design/icons";
+import {
+  BookText,
+  Pilcrow,
+  PencilRuler,
+  Eye,
+  Glasses,
+  CircleOff,
+  AlertCircle,
+} from "lucide-react";
+import { NAME_CHECK_STATUS } from "@/const/agentConfig";
+import { MarkdownRenderer } from "@/components/common/markdownRenderer";
+import { FilePreviewDrawer } from "@/components/common/filePreviewDrawer";
+
+import {
+  UI_CONFIG,
+  COLUMN_WIDTHS,
+  DOCUMENT_NAME_CONFIG,
+  LAYOUT,
+  DOCUMENT_STATUS,
+} from "@/const/knowledgeBase";
+import { FrequencyOption } from "@/const/scheduler";
+import knowledgeBaseService from "@/services/knowledgeBaseService";
+import { modelService } from "@/services/modelService";
+import { getTenantDefaultGroupId } from "@/services/groupService";
+import { extractObjectNameFromUrl } from "@/services/storageService";
+import { Document } from "@/types/knowledgeBase";
+import { ModelOption } from "@/types/modelConfig";
+import { formatFileSize } from "@/lib/utils";
+import log from "@/lib/logger";
+import { useConfig } from "@/hooks/useConfig";
+import { useGroupDetails, useGroupList } from "@/hooks/group/useGroupList";
+
+import DocumentStatus from "./DocumentStatus";
+import DocumentChunk from "./DocumentChunk";
+import UploadArea from "../upload/UploadArea";
+import { useDocumentContext } from "../../contexts/DocumentContext";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import { Can } from "@/components/permission/Can";
+
+const CONTAINER_HEIGHT_CLASS_MAP: Record<string, string> = {
+  "83vh": "h-[83vh]",
+  "70vh": "h-[70vh]",
+  "57vh": "h-[57vh]",
+  "100%": "h-full",
+};
+
+const TITLE_BAR_HEIGHT_CLASS_MAP: Record<string, string> = {
+  "56.8px": "min-h-[56.8px]",
+};
+
+interface DocumentListProps {
+  documents: Document[];
+  onDelete: (id: string) => void;
+  // Knowledge base source, e.g. "nexent" or "datamate"
+  knowledgeBaseSource?: string;
+  // User-facing knowledge base name (display name)
+  knowledgeBaseName?: string;
+  // Internal knowledge base ID / Elasticsearch index name
+  knowledgeBaseId?: string;
+  modelMismatch?: boolean;
+  currentModel?: string;
+  knowledgeBaseModel?: string;
+  embeddingModelInfo?: string;
+  containerHeight?: string;
+  isCreatingMode?: boolean;
+  onNameChange?: (name: string) => void;
+  hasDocuments?: boolean;
+  isNewlyCreatedAndWaiting?: boolean; // New prop to track newly created KB waiting for documents
+  onChunkCountChange?: () => void; // Callback when chunk count changes
+
+  // Group permission and user groups for create mode
+  ingroupPermission?: string;
+  onIngroupPermissionChange?: (value: string) => void;
+  selectedGroupIds?: number[];
+  onSelectedGroupIdsChange?: (values: number[]) => void;
+  // Embedding model for create mode
+  availableEmbeddingModels?: ModelOption[];
+  selectedEmbeddingModel?: string;
+  onEmbeddingModelChange?: (value: string) => void;
+  isMultimodal?: boolean;
+  quotaLimitBytes?: number | null;
+  onQuotaLimitBytesChange?: (value: number | null) => void;
+  onMultimodalChange?: (value: boolean) => void;
+  permission?: string; // User's permission for this knowledge base (READ_ONLY, EDIT, etc.)
+  preserveSourceFile?: boolean;
+  onPreserveSourceFileChange?: (value: boolean) => void;
+
+  // Auto-summary frequency
+  summaryFrequency?: string | null;
+  onSummaryFrequencyChange?: (frequency: string | null) => void;
+
+  // Upload related props
+  isDragging?: boolean;
+  onDragOver?: (e: React.DragEvent) => void;
+  onDragLeave?: (e: React.DragEvent) => void;
+  onDrop?: (e: React.DragEvent) => void;
+  onFileSelect: (files: File[]) => void;
+  onUpload?: (files: File[]) => Promise<void>;
+  isUploading?: boolean;
+}
+
+export interface DocumentListRef {
+  uppy: any;
+}
+
+const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
+  (
+    {
+      documents,
+      onDelete,
+      knowledgeBaseSource = "",
+      knowledgeBaseId = "",
+      knowledgeBaseName = "",
+      modelMismatch = false,
+      currentModel = "",
+      knowledgeBaseModel = "",
+      embeddingModelInfo = "",
+      containerHeight = "57vh",
+      isCreatingMode = false,
+      onNameChange,
+      hasDocuments = false,
+      isNewlyCreatedAndWaiting = false, // New prop
+      onChunkCountChange,
+      // Group permission and user groups for create mode
+      ingroupPermission,
+      onIngroupPermissionChange,
+      selectedGroupIds,
+      onSelectedGroupIdsChange,
+      // Embedding model for create mode
+      availableEmbeddingModels,
+      selectedEmbeddingModel,
+      onEmbeddingModelChange,
+      isMultimodal = false,
+      onMultimodalChange,
+      permission,
+      preserveSourceFile = true,
+      onPreserveSourceFileChange,
+      quotaLimitBytes = null,
+      onQuotaLimitBytesChange,
+      // Auto-summary frequency
+      summaryFrequency,
+      onSummaryFrequencyChange,
+
+      // Upload related props
+      isDragging = false,
+      onDragOver,
+      onDragLeave,
+      onDrop,
+      onFileSelect,
+      onUpload,
+      isUploading = false,
+    },
+    ref
+  ) => {
+    const { message } = App.useApp();
+    const uploadAreaRef = useRef<any>(null);
+    const { state: docState } = useDocumentContext();
+    const { modelConfig } = useConfig();
+    const { user, getAccessibleGroupIds } = useAuthorizationContext();
+    const tenantId = user?.tenantId || null;
+    const storageQuota = useStorageQuotaBlocked(tenantId);
+
+    // Fetch tenant groups and limit selections to accessible groups (all for admin roles).
+    const { data: groupData } = useGroupList(tenantId);
+    const accessibleGroupIds = useMemo(
+      () => getAccessibleGroupIds(),
+      [getAccessibleGroupIds]
+    );
+    const { groups } = useGroupDetails(groupData?.groups ?? [], accessibleGroupIds);
+
+    const groupOptions = groups.map((group) => ({
+      label: group.group_name,
+      value: group.group_id,
+    }));
+
+    // Preview drawer state
+    const [quotaUnit, setQuotaUnit] = useState<"GB" | "MB">("GB");
+
+    const [selectedFile, setSelectedFile] = useState<{
+      objectName: string;
+      fileName: string;
+      fileType?: string;
+      fileSize?: number;
+    } | null>(null);
+
+    // Use fixed height instead of percentage
+    const titleBarHeight = UI_CONFIG.TITLE_BAR_HEIGHT;
+    const uploadHeight = UI_CONFIG.UPLOAD_COMPONENT_HEIGHT;
+
+    // Sort documents by create_time (latest first)
+    const sortedDocuments = [...documents].sort((a, b) => {
+      const aTime = new Date(a.create_time).getTime();
+      const bTime = new Date(b.create_time).getTime();
+      const safeA = Number.isNaN(aTime) ? 0 : aTime;
+      const safeB = Number.isNaN(bTime) ? 0 : bTime;
+      return safeB - safeA;
+    });
+
+    // Get file icon
+    const getFileIcon = (type: string): string => {
+      switch (type.toLowerCase()) {
+        case "pdf":
+          return "📄";
+        case "word":
+          return "📝";
+        case "excel":
+          return "📊";
+        case "powerpoint":
+          return "📑";
+        default:
+          return "📃";
+      }
+    };
+
+    // Get permission icon for dropdown options
+    const getPermissionIcon = (permission: string) => {
+      const iconProps = {
+        size: 16,
+        className: "text-gray-500",
+      };
+
+      switch (permission) {
+        case "EDIT":
+          return <PencilRuler {...iconProps} />;
+        case "READ_ONLY":
+          return <Eye {...iconProps} />;
+        case "PRIVATE":
+          return <Glasses {...iconProps} />;
+        default:
+          return <CircleOff {...iconProps} />;
+      }
+    };
+
+    // Build model mismatch info
+    const getMismatchInfo = (): string => {
+      if (embeddingModelInfo) return embeddingModelInfo;
+      if (currentModel && knowledgeBaseModel) {
+        return t("document.modelMismatch.withModels", {
+          currentModel,
+          knowledgeBaseModel,
+        });
+      }
+      return t("document.modelMismatch.general");
+    };
+
+    // Expose uppy instance to parent component
+    useImperativeHandle(ref, () => ({
+      uppy: uploadAreaRef.current?.uppy,
+    }));
+    const [showDetail, setShowDetail] = React.useState(false);
+    const [showChunk, setShowChunk] = React.useState(false);
+    const [nameStatus, setNameStatus] = useState<string>("available");
+    const [summary, setSummary] = useState("");
+    const [isSummarizing, setIsSummarizing] = useState(false);
+    const [isEditing, setIsEditing] = useState(false);
+    const [isSaving, setIsSaving] = useState(false);
+    const [selectedModel, setSelectedModel] = useState<number>(0);
+    const [availableModels, setAvailableModels] = useState<ModelOption[]>([]);
+    const [isLoadingModels, setIsLoadingModels] = useState(false);
+    const [frequencyOptions, setFrequencyOptions] = useState<FrequencyOption[]>(
+      []
+    );
+    const { t } = useTranslation();
+    const isDataMate = (knowledgeBaseSource || "").toLowerCase() === "datamate";
+
+    // Determine if user has read-only permission
+    const isReadOnlyMode = permission === "READ_ONLY";
+    const canToggleMultimodal =
+      isCreatingMode && typeof onMultimodalChange === "function";
+
+    // Permission options with icons shown inside dropdown
+    const permissionOptions = [
+      {
+        value: "EDIT",
+        label: (
+          <span className="flex items-center gap-2">
+            {getPermissionIcon("EDIT")}
+            <span>{t("tenantResources.knowledgeBase.permission.EDIT")}</span>
+          </span>
+        ),
+      },
+      {
+        value: "READ_ONLY",
+        label: (
+          <span className="flex items-center gap-2">
+            {getPermissionIcon("READ_ONLY")}
+            <span>
+              {t("tenantResources.knowledgeBase.permission.READ_ONLY")}
+            </span>
+          </span>
+        ),
+      },
+      {
+        value: "PRIVATE",
+        label: (
+          <span className="flex items-center gap-2">
+            {getPermissionIcon("PRIVATE")}
+            <span>{t("tenantResources.knowledgeBase.permission.PRIVATE")}</span>
+          </span>
+        ),
+      },
+    ];
+
+    // Reset showDetail and showChunk state when knowledge base name changes
+    React.useEffect(() => {
+      setShowDetail(false);
+      setShowChunk(false);
+      setSummary("");
+    }, [knowledgeBaseName]);
+
+    // Initialize default group ID when entering create mode
+    React.useEffect(() => {
+      if (isCreatingMode && tenantId && onSelectedGroupIdsChange) {
+        const initDefaultGroup = async () => {
+          try {
+            const defaultGroupId = await getTenantDefaultGroupId(tenantId);
+            if (defaultGroupId && accessibleGroupIds.includes(defaultGroupId)) {
+              onSelectedGroupIdsChange([defaultGroupId]);
+            }
+          } catch (error) {
+            log.error("Failed to get tenant default group:", error);
+          }
+        };
+        initDefaultGroup();
+      }
+    }, [isCreatingMode, tenantId, accessibleGroupIds, onSelectedGroupIdsChange]);
+
+    // Clear group IDs when permission is set to PRIVATE
+    React.useEffect(() => {
+      if (ingroupPermission === "PRIVATE" && onSelectedGroupIdsChange) {
+        onSelectedGroupIdsChange([]);
+      }
+    }, [ingroupPermission, onSelectedGroupIdsChange]);
+
+    // Check if group select should be disabled (when permission is PRIVATE)
+    const isGroupSelectDisabled = ingroupPermission === "PRIVATE";
+    const embeddingModelsForOptions = availableEmbeddingModels || [];
+    const availableEmbeddingModelKeys = new Set(
+      embeddingModelsForOptions
+        .filter((model) => model.connect_status === "available")
+        .map((model) => `${model.displayName}::${model.type}`)
+    );
+    const isEmbeddingModelSelectable = (model: ModelOption): boolean => {
+      if (model.connect_status === "available") return true;
+      if (model.type === "embedding") {
+        return availableEmbeddingModelKeys.has(
+          `${model.displayName}::multi_embedding`
+        );
+      }
+      if (model.type === "multi_embedding") {
+        return availableEmbeddingModelKeys.has(
+          `${model.displayName}::embedding`
+        );
+      }
+      return false;
+    };
+
+    // Load frequency options from backend API
+    useEffect(() => {
+      const loadFrequencyOptions = async () => {
+        if (showDetail && frequencyOptions.length === 0) {
+          try {
+            const options =
+              await knowledgeBaseService.fetchSummaryFrequencyOptions();
+            setFrequencyOptions(options);
+          } catch (error) {
+            log.error("Failed to load frequency options:", error);
+            // Fallback to default options if API fails
+            setFrequencyOptions([
+              {
+                value: "disabled",
+                label: t("knowledgeBase.tag.autoSummary.off"),
+              },
+            ]);
+          }
+        }
+      };
+      loadFrequencyOptions();
+    }, [showDetail, frequencyOptions.length, t]);
+
+    // Load available models when showing detail
+    useEffect(() => {
+      const loadModels = async () => {
+        if (showDetail && availableModels.length === 0) {
+          setIsLoadingModels(true);
+          try {
+            const models = await modelService.getLLMModels();
+            setAvailableModels(
+              models.filter((m) => m.connect_status === "available")
+            );
+
+            // Determine initial selection order:
+            // 1) Knowledge base's own configured model (server-side config)
+            // 2) Globally configured default LLM from quick setup (create mode or no KB model)
+            // 3) First available model
+
+            let initialModelId: number | null = null;
+
+            // 1) Knowledge base model (if provided)
+            if (knowledgeBaseModel) {
+              const matchedByName = models.find(
+                (m) => m.name === knowledgeBaseModel
+              );
+              const matchedByDisplay = matchedByName
+                ? null
+                : models.find((m) => m.displayName === knowledgeBaseModel);
+              if (matchedByName) {
+                initialModelId = matchedByName.id;
+              } else if (matchedByDisplay) {
+                initialModelId = matchedByDisplay.id;
+              }
+            }
+
+            // 2) Fallback to globally configured default LLM
+            if (initialModelId === null) {
+              const configuredDisplayName = modelConfig?.llm?.displayName || "";
+              const configuredModelName = modelConfig?.llm?.modelName || "";
+
+              const matchedByDisplay = models.find(
+                (m) =>
+                  m.displayName === configuredDisplayName &&
+                  configuredDisplayName !== ""
+              );
+              const matchedByName = matchedByDisplay
+                ? null
+                : models.find(
+                    (m) =>
+                      m.name === configuredModelName &&
+                      configuredModelName !== ""
+                  );
+
+              if (matchedByDisplay) {
+                initialModelId = matchedByDisplay.id;
+              } else if (matchedByName) {
+                initialModelId = matchedByName.id;
+              }
+            }
+
+            // 3) Final fallback to first available model
+            if (initialModelId === null) {
+              if (models.length > 0) {
+                initialModelId = models[0].id;
+              }
+            }
+
+            if (initialModelId !== null) {
+              setSelectedModel(initialModelId);
+            } else {
+              message.warning(
+                t("businessLogic.config.error.noAvailableModels")
+              );
+            }
+          } catch (error) {
+            log.error("Failed to load models:", error);
+            message.error(t("modelConfig.error.loadListFailed"));
+          } finally {
+            setIsLoadingModels(false);
+          }
+        }
+      };
+      loadModels();
+    }, [showDetail]);
+
+    // Get summary when showing detailed content
+    React.useEffect(() => {
+      const fetchSummary = async () => {
+        if (showDetail && knowledgeBaseId) {
+          try {
+            const result =
+              await knowledgeBaseService.getSummary(knowledgeBaseId);
+            setSummary(result);
+          } catch (error) {
+            log.error(t("knowledgeBase.error.getSummary"), error);
+            message.error(t("document.summary.error"));
+          }
+        }
+      };
+      fetchSummary();
+    }, [showDetail, knowledgeBaseName]);
+
+    // Handle auto summary
+    const handleAutoSummary = async () => {
+      if (!knowledgeBaseId) {
+        message.warning(t("document.summary.selectKnowledgeBase"));
+        return;
+      }
+
+      setIsSummarizing(true);
+      setSummary("");
+
+      try {
+        const result = await knowledgeBaseService.summaryIndex(
+          knowledgeBaseId,
+          1000,
+          (newText) => {
+            setSummary((prev) => prev + newText);
+          },
+          selectedModel
+        );
+        // Only show success message if summary was actually generated
+        if (result && result.trim()) {
+          message.success(t("document.summary.completed"));
+        } else {
+          // If no summary was generated, show error message
+          message.error(t("knowledgeBase.summary.notGenerated"));
+        }
+      } catch (error) {
+        message.error(t("document.summary.error"));
+        log.error(t("document.summary.error"), error);
+      } finally {
+        setIsSummarizing(false);
+      }
+    };
+
+    // Handle save summary
+    const handleSaveSummary = async () => {
+      if (!knowledgeBaseId) {
+        message.warning(t("document.summary.selectKnowledgeBase"));
+        return;
+      }
+
+      if (!summary.trim()) {
+        message.warning(t("document.summary.emptyContent"));
+        return;
+      }
+
+      setIsSaving(true);
+      try {
+        await knowledgeBaseService.changeSummary(knowledgeBaseId, summary);
+        message.success(t("document.summary.saveSuccess"));
+      } catch (error: any) {
+        log.error(t("document.summary.saveError"), error);
+        const errorMessage =
+          error?.message || error?.detail || t("document.summary.saveFailed");
+        message.error(errorMessage);
+      } finally {
+        setIsSaving(false);
+        setShowDetail(false);
+      }
+    };
+
+    const containerHeightClass =
+      CONTAINER_HEIGHT_CLASS_MAP[containerHeight] ?? "h-full";
+    const titleBarHeightClass =
+      TITLE_BAR_HEIGHT_CLASS_MAP[titleBarHeight] ?? "min-h-[56px]";
+
+    return (
+      <div
+        className={`flex flex-col w-full h-full bg-white border border-gray-200 rounded-md shadow-sm overflow-hidden`}
+      >
+        {/* Title bar */}
+        <div
+          className={`${LAYOUT.KB_HEADER_PADDING} border-b border-gray-200 flex-shrink-0 flex items-start ${titleBarHeightClass}`}
+        >
+          <div
+            className="flex items-start justify-between w-full"
+            style={{ width: "100%" }}
+          >
+            <div className="flex items-start flex-1 min-w-0 overflow-hidden">
+              {isCreatingMode ? (
+                <div className="flex flex-wrap items-start gap-3 w-full overflow-hidden">
+                  <div
+                    className="flex flex-col flex-1"
+                    style={{ minWidth: 120 }}
+                  >
+                    <Input
+                      value={knowledgeBaseName}
+                      onChange={(e) =>
+                        onNameChange && onNameChange(e.target.value)
+                      }
+                      placeholder={t("document.input.knowledgeBaseName")}
+                      className={`${LAYOUT.KB_TITLE_MARGIN} max-w-[240px] font-medium`}
+                      size="large"
+                      prefix={<span className="text-blue-600">📚</span>}
+                      status={
+                        isCreatingMode &&
+                        (nameStatus === NAME_CHECK_STATUS.EXISTS_IN_TENANT ||
+                          nameStatus ===
+                            NAME_CHECK_STATUS.EXISTS_IN_OTHER_TENANT)
+                          ? "error"
+                          : undefined
+                      }
+                      autoFocus
+                      disabled={
+                        hasDocuments ||
+                        isUploading ||
+                        docState.isLoadingDocuments
+                      }
+                    />
+                    {isCreatingMode &&
+                      (nameStatus === NAME_CHECK_STATUS.EXISTS_IN_TENANT ||
+                        nameStatus ===
+                          NAME_CHECK_STATUS.EXISTS_IN_OTHER_TENANT) && (
+                        <div className="flex items-center gap-1 text-red-500 text-s whitespace-nowrap mt-0.5 ml-3">
+                          <AlertCircle size={14} />
+                          <span>
+                            {t("tenantResources.knowledgeBase.nameExists")}
+                          </span>
+                        </div>
+                      )}
+                  </div>
+                  {/* Right dropdowns for create mode */}
+                  <div
+                    className="flex items-center justify-end flex-wrap"
+                    style={{ gap: "12px" }}
+                  >
+                    {/* Embedding model selection - first position in create mode */}
+                    {isCreatingMode && onEmbeddingModelChange && (
+                      <Select
+                        value={selectedEmbeddingModel}
+                        onChange={onEmbeddingModelChange}
+                        style={{
+                          flex: "1 1 200px",
+                          minWidth: 200,
+                          justifyContent: "center",
+                          alignItems: "flex-end",
+                        }}
+                        placeholder={
+                          t("knowledgeBase.create.embeddingModelPlaceholder") ||
+                          "Select embedding model"
+                        }
+                        allowClear={false}
+                        options={[
+                          {
+                            label: t("modelConfig.option.embeddingModel"),
+                            options: embeddingModelsForOptions
+                              .filter((model) => model.type === "embedding")
+                              .map((model) => ({
+                                value: `${model.displayName}::${model.type}`,
+                                label: model.displayName,
+                                disabled: !isEmbeddingModelSelectable(model),
+                              })),
+                          },
+                          {
+                            label: t("modelConfig.option.multiEmbeddingModel"),
+                            options: embeddingModelsForOptions
+                              .filter(
+                                (model) => model.type === "multi_embedding"
+                              )
+                              .map((model) => ({
+                                value: `${model.displayName}::${model.type}`,
+                                label: model.displayName,
+                                disabled: !isEmbeddingModelSelectable(model),
+                              })),
+                          },
+                        ].filter((group) => group.options.length > 0)}
+                      />
+                    )}
+                    {/* User groups multi-select */}
+                    <Can permission="kb.groups:update">
+                      <Select
+                        mode="multiple"
+                        value={isGroupSelectDisabled ? [] : selectedGroupIds}
+                        onChange={onSelectedGroupIdsChange}
+                        style={{
+                          flex: "1 1 200px",
+                          minWidth: 200,
+                          justifyContent: "center",
+                          alignItems: "flex-end",
+                        }}
+                        placeholder={t(
+                          "knowledgeBase.create.permission.groupPlaceholder"
+                        )}
+                        options={groupOptions}
+                        maxTagCount={2}
+                        allowClear
+                        disabled={isGroupSelectDisabled}
+                      />
+                    </Can>
+                    {/* Group permission dropdown */}
+                    <Can permission="kb.groups:update">
+                      <Select
+                        value={ingroupPermission}
+                        onChange={onIngroupPermissionChange}
+                        style={{
+                          flex: "1 1 160px",
+                          minWidth: 160,
+                          justifyContent: "center",
+                          alignItems: "flex-end",
+                        }}
+                        placeholder={t(
+                          "knowledgeBase.ingroup.permission.DEFAULT"
+                        )}
+                        options={permissionOptions}
+                      />
+                    </Can>
+                    {onPreserveSourceFileChange && (
+                      <Select
+                        value={preserveSourceFile}
+                        onChange={onPreserveSourceFileChange}
+                        style={{
+                          flex: "1 1 200px",
+                          minWidth: 200,
+                          justifyContent: "center",
+                          alignItems: "flex-end",
+                        }}
+                        allowClear={false}
+                        options={[
+                          {
+                            value: true,
+                            label: t("knowledgeBase.create.preserveSourceFile"),
+                          },
+                          {
+                            value: false,
+                            label: t("knowledgeBase.tag.noPreserveSourceFile"),
+                          },
+                        ]}
+                      />
+                    )}
+                    {onQuotaLimitBytesChange && (
+                      <Space size={4}>
+                        <InputNumber
+                          value={
+                            quotaLimitBytes != null
+                              ? quotaUnit === "GB"
+                                ? Math.round(
+                                    quotaLimitBytes / (1024 * 1024 * 1024)
+                                  )
+                                : Math.round(quotaLimitBytes / (1024 * 1024))
+                              : null
+                          }
+                          onChange={(v) => {
+                            if (v == null) {
+                              onQuotaLimitBytesChange(null);
+                            } else if (quotaUnit === "GB") {
+                              onQuotaLimitBytesChange(v * 1024 * 1024 * 1024);
+                            } else {
+                              onQuotaLimitBytesChange(v * 1024 * 1024);
+                            }
+                          }}
+                          addonAfter={quotaUnit}
+                          placeholder={t("quota.unlimited", "无限制")}
+                          min={0}
+                          precision={0}
+                          style={{ width: 130 }}
+                        />
+                        <Segmented
+                          size="small"
+                          options={["GB", "MB"]}
+                          value={quotaUnit}
+                          onChange={(val) => setQuotaUnit(val as "GB" | "MB")}
+                        />
+                      </Space>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <h3
+                  className={`${LAYOUT.KB_TITLE_MARGIN} ${LAYOUT.KB_TITLE_SIZE} font-semibold text-blue-500 flex items-center truncate`}
+                >
+                  {knowledgeBaseName}
+                </h3>
+              )}
+              {modelMismatch && !isCreatingMode && (
+                <div className="ml-3 mt-0.5 px-1.5 py-1 inline-flex items-center rounded-md text-xs font-medium bg-yellow-100 text-yellow-800 border border-yellow-200">
+                  {getMismatchInfo()}
+                </div>
+              )}
+            </div>
+            {/* Right: overview and detail buttons */}
+            {!isCreatingMode && !isDataMate && (
+              <div className="flex gap-2 flex-shrink-0 ml-3">
+                <Button
+                  type="primary"
+                  icon={<BookText size={16} />}
+                  onClick={() => {
+                    if (showDetail) {
+                      // Close detail view and reset summary
+                      setShowDetail(false);
+                      setSummary("");
+                    } else {
+                      setShowDetail(true);
+                      setShowChunk(false);
+                    }
+                  }}
+                >
+                  {t("document.button.overview")}
+                </Button>
+                <Button
+                  type="primary"
+                  icon={<Pilcrow size={16} />}
+                  onClick={() => {
+                    if (showChunk) {
+                      setShowChunk(false);
+                    } else {
+                      setShowChunk(true);
+                      setShowDetail(false);
+                    }
+                  }}
+                >
+                  {t("document.button.detail")}
+                </Button>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Document list */}
+
+        <div
+          className={`p-2 flex-grow min-h-0 ${
+            showChunk ? "overflow-hidden" : "overflow-auto"
+          }`}
+          onDragOver={(e) => {
+            if (!isCreatingMode && knowledgeBaseName) {
+              return;
+            }
+            e.preventDefault();
+            e.stopPropagation();
+          }}
+          onDrop={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+          }}
+          onDragEnter={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+          }}
+          onDragLeave={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+          }}
+        >
+          {showChunk ? (
+            <div className="flex h-full min-h-0 flex-col px-8">
+              <DocumentChunk
+                knowledgeBaseName={knowledgeBaseName}
+                knowledgeBaseId={knowledgeBaseId || knowledgeBaseName}
+                documents={documents}
+                getFileIcon={getFileIcon}
+                currentEmbeddingModel={currentModel}
+                knowledgeBaseEmbeddingModel={knowledgeBaseModel}
+                onChunkCountChange={onChunkCountChange}
+                permission={permission}
+              />
+            </div>
+          ) : showDetail ? (
+            <div className="px-8 py-4 h-full flex flex-col">
+              <div className="flex items-center justify-between mb-5">
+                <span className="font-bold text-lg">
+                  {t("document.summary.title")}
+                </span>
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-gray-600">
+                      {t("document.summary.modelLabel")}:
+                    </span>
+                    <Select
+                      value={selectedModel}
+                      onChange={setSelectedModel}
+                      loading={isLoadingModels}
+                      disabled={isSummarizing}
+                      style={{ width: 200 }}
+                      placeholder={t("document.summary.modelPlaceholder")}
+                      options={availableModels.map((model) => ({
+                        value: model.id,
+                        label: model.displayName,
+                        disabled: model.connect_status === "unavailable",
+                      }))}
+                    />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-gray-600">
+                      {t("knowledgeBase.tag.autoSummary.label")}
+                    </span>
+                    <Select
+                      value={summaryFrequency || "disabled"}
+                      onChange={(value) => {
+                        const freq = value === "disabled" ? null : value;
+                        if (onSummaryFrequencyChange) {
+                          onSummaryFrequencyChange(freq);
+                        }
+                      }}
+                      disabled={isReadOnlyMode}
+                      style={{ width: 85 }}
+                      placeholder={t("knowledgeBase.tag.autoSummary.off")}
+                      options={frequencyOptions.map((opt) => ({
+                        value: opt.value,
+                        label:
+                          opt.value === "disabled"
+                            ? t("knowledgeBase.tag.autoSummary.off")
+                            : opt.label,
+                      }))}
+                    />
+                  </div>
+                  <Button
+                    type="default"
+                    onClick={handleAutoSummary}
+                    loading={isSummarizing}
+                    disabled={
+                      !knowledgeBaseName ||
+                      isSummarizing ||
+                      !selectedModel ||
+                      isReadOnlyMode
+                    }
+                  >
+                    {t("document.button.autoSummary")}
+                  </Button>
+                </div>
+              </div>
+              <div className="flex-1 min-h-0 mb-5 border border-gray-300 rounded-md overflow-auto">
+                {isReadOnlyMode ? (
+                  <div className="p-5 text-lg leading-[1.7] whitespace-pre-wrap">
+                    <MarkdownRenderer content={summary} />
+                  </div>
+                ) : isSummarizing ? (
+                  <div className="p-5 text-lg leading-[1.7] whitespace-pre-wrap">
+                    <MarkdownRenderer content={summary} />
+                  </div>
+                ) : (
+                  <div
+                    className="w-full h-full cursor-text hover:bg-gray-50"
+                    onClick={() => {
+                      if (!isSummarizing) {
+                        setIsEditing(true);
+                      }
+                    }}
+                  >
+                    {isEditing ? (
+                      <TextArea
+                        value={summary}
+                        onChange={(e) => setSummary(e.target.value)}
+                        onBlur={() => setIsEditing(false)}
+                        className="w-full h-full border-0 resize-none focus:shadow-none"
+                        style={{
+                          height: "100%",
+                          padding: "20px",
+                          fontSize: "18px",
+                          lineHeight: "1.7",
+                          whiteSpace: "pre-wrap",
+                        }}
+                        autoFocus
+                        placeholder={t("document.summary.placeholder")}
+                      />
+                    ) : (
+                      <div className="p-5 text-lg leading-[1.7] whitespace-pre-wrap">
+                        <MarkdownRenderer content={summary} />
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+              <div className="flex gap-3 justify-end">
+                {!isReadOnlyMode && (
+                  <Button
+                    type="primary"
+                    size="large"
+                    onClick={handleSaveSummary}
+                    loading={isSaving}
+                    disabled={!summary || isSaving}
+                  >
+                    {t("common.save")}
+                  </Button>
+                )}
+                <Button
+                  size="large"
+                  onClick={() => {
+                    setShowDetail(false);
+                    setSummary("");
+                  }}
+                >
+                  {t("common.back")}
+                </Button>
+              </div>
+            </div>
+          ) : docState.isLoadingDocuments || isNewlyCreatedAndWaiting ? (
+            <div className="flex items-center justify-center h-full border border-gray-200 rounded-md">
+              <div className="text-center">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto mb-2"></div>
+                <p className="text-sm text-gray-600">
+                  {isNewlyCreatedAndWaiting
+                    ? t("document.status.waitingForTask")
+                    : t("document.status.loadingList")}
+                </p>
+              </div>
+            </div>
+          ) : isCreatingMode ? (
+            hasDocuments || isUploading || docState.isLoadingDocuments ? (
+              <div className="flex items-center justify-center border border-gray-200 rounded-md h-full">
+                <div className="text-center">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto mb-2"></div>
+                  <p className="text-sm text-gray-600">
+                    {t("document.status.waitingForTask")}
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center justify-center border border-gray-200 rounded-md h-full">
+                <div className="text-center p-6">
+                  <div className="mb-4 text-blue-600 text-[36px]">
+                    <InfoCircleFilled />
+                  </div>
+                  <h3 className="text-lg font-medium text-gray-800 mb-2">
+                    {t("document.title.createNew")}
+                  </h3>
+                  <p className="text-gray-500 text-sm max-w-md">
+                    {t("document.hint.uploadToCreate")}
+                  </p>
+                </div>
+              </div>
+            )
+          ) : sortedDocuments.length > 0 ? (
+            <div className="overflow-y-auto border border-gray-200 rounded-md h-full">
+              <table className="min-w-full bg-white">
+                <thead
+                  className={`${LAYOUT.TABLE_HEADER_BG} sticky top-0 z-10`}
+                >
+                  <tr>
+                    <th
+                      className={`${LAYOUT.CELL_PADDING} text-left ${LAYOUT.HEADER_TEXT} w-[${COLUMN_WIDTHS.NAME}]`}
+                    >
+                      {t("document.table.header.name")}
+                    </th>
+                    <th
+                      className={`${LAYOUT.CELL_PADDING} text-left ${LAYOUT.HEADER_TEXT} w-[${COLUMN_WIDTHS.STATUS}]`}
+                    >
+                      {t("document.table.header.status")}
+                    </th>
+                    {!isDataMate && (
+                      <th
+                        className={`${LAYOUT.CELL_PADDING} text-left ${LAYOUT.HEADER_TEXT} w-[${COLUMN_WIDTHS.SIZE}]`}
+                      >
+                        {t("document.table.header.size")}
+                      </th>
+                    )}
+                    <th
+                      className={`${LAYOUT.CELL_PADDING} text-left ${LAYOUT.HEADER_TEXT} w-[${COLUMN_WIDTHS.DATE}]`}
+                    >
+                      {t("document.table.header.date")}
+                    </th>
+                    {!isDataMate && (
+                      <th
+                        className={`${LAYOUT.CELL_PADDING} text-left ${LAYOUT.HEADER_TEXT} w-[${COLUMN_WIDTHS.ACTION}]`}
+                      >
+                        {t("document.table.header.action")}
+                      </th>
+                    )}
+                  </tr>
+                </thead>
+                <tbody className={LAYOUT.TABLE_ROW_DIVIDER}>
+                  {sortedDocuments.map((doc) => (
+                    <tr key={doc.id} className={LAYOUT.TABLE_ROW_HOVER}>
+                      <td className={LAYOUT.CELL_PADDING}>
+                        <div className="flex items-center">
+                          <span
+                            className={`${LAYOUT.ICON_MARGIN} ${LAYOUT.ICON_SIZE}`}
+                          >
+                            {getFileIcon(doc.type)}
+                          </span>
+                          <span
+                            className={`${LAYOUT.TEXT_SIZE} font-medium text-gray-800 truncate max-w-[${DOCUMENT_NAME_CONFIG.MAX_WIDTH}] whitespace-${DOCUMENT_NAME_CONFIG.WHITE_SPACE} overflow-${DOCUMENT_NAME_CONFIG.OVERFLOW} text-${DOCUMENT_NAME_CONFIG.TEXT_OVERFLOW}`}
+                            title={doc.name}
+                          >
+                            {doc.name}
+                          </span>
+                        </div>
+                      </td>
+                      <td className={LAYOUT.CELL_PADDING}>
+                        <div className="flex items-center">
+                          <DocumentStatus
+                            status={doc.status}
+                            showIcon={true}
+                            errorReason={doc.error_reason}
+                            kbId={knowledgeBaseId}
+                            docId={doc.id}
+                            processedChunkNum={doc.processed_chunk_num}
+                            totalChunkNum={doc.total_chunk_num}
+                          />
+                        </div>
+                      </td>
+                      {!isDataMate && (
+                        <td
+                          className={`${LAYOUT.CELL_PADDING} ${LAYOUT.TEXT_SIZE} text-gray-600`}
+                        >
+                          {formatFileSize(doc.size)}
+                        </td>
+                      )}
+                      <td
+                        className={`${LAYOUT.CELL_PADDING} ${LAYOUT.TEXT_SIZE} text-gray-600`}
+                      >
+                        {new Date(doc.create_time).toLocaleString()}
+                      </td>
+                      {!isDataMate && (
+                        <td className={LAYOUT.CELL_PADDING}>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => {
+                                const objectName =
+                                  extractObjectNameFromUrl(doc.id) || undefined;
+                                if (!objectName) {
+                                  message.warning(
+                                    t("filePreview.previewFailed")
+                                  );
+                                  return;
+                                }
+
+                                setSelectedFile({
+                                  objectName,
+                                  fileName: doc.name,
+                                  fileType: doc.type,
+                                  fileSize: doc.size,
+                                });
+                              }}
+                              className={LAYOUT.ACTION_TEXT}
+                              title={t("common.preview")}
+                            >
+                              {t("common.preview")}
+                            </button>
+                            {!isReadOnlyMode && (
+                              <button
+                                onClick={() => onDelete(doc.id)}
+                                className={LAYOUT.ACTION_TEXT}
+                                title={
+                                  doc.status === DOCUMENT_STATUS.PROCESSING ||
+                                  doc.status === DOCUMENT_STATUS.FORWARDING
+                                    ? t("document.delete.terminateTask")
+                                    : undefined
+                                }
+                              >
+                                {t("common.delete")}
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="text-center py-2 text-gray-500 text-xs border border-gray-200 rounded-md h-full">
+              {t("document.hint.noDocuments")}
+            </div>
+          )}
+        </div>
+
+        {/* Upload area */}
+        {!showDetail &&
+          !showChunk &&
+          (isDataMate ? (
+            <div className="p-3 bg-gray-50 border-t border-gray-200 h-[30%] flex items-center justify-center min-h-[120px]">
+              <span className="text-base font-medium text-center leading-[1.7] text-gray-500">
+                {t("knowledgeBase.datamate.editDisabled")}
+              </span>
+            </div>
+          ) : (
+            <UploadArea
+              key={
+                isCreatingMode
+                  ? `create-${knowledgeBaseName}`
+                  : `view-${knowledgeBaseName}`
+              }
+              ref={uploadAreaRef}
+              onFileSelect={onFileSelect}
+              onUpload={onUpload || (async () => {})}
+              isUploading={isUploading}
+              isDragging={isDragging}
+              onDragOver={onDragOver}
+              onDragLeave={onDragLeave}
+              onDrop={onDrop}
+              disabled={
+                storageQuota.isBlocked ||
+                isReadOnlyMode ||
+                (!isCreatingMode && !knowledgeBaseId)
+              }
+              disabledMessage={
+                storageQuota.isBlocked
+                  ? storageQuota.message ||
+                    t(
+                      "quota.uploadBlocked",
+                      "Uploads are blocked - storage limit reached"
+                    )
+                  : undefined
+              }
+              componentHeight={uploadHeight}
+              isCreatingMode={isCreatingMode}
+              // Use internal ID for backend operations; fall back to name in creation mode
+              indexName={knowledgeBaseId || knowledgeBaseName}
+              newKnowledgeBaseName={isCreatingMode ? knowledgeBaseName : ""}
+              modelMismatch={modelMismatch}
+              onNameStatusChange={setNameStatus}
+            />
+          ))}
+
+        {/* File preview drawer */}
+        {selectedFile && (
+          <FilePreviewDrawer
+            open={!!selectedFile}
+            objectName={selectedFile.objectName}
+            fileName={selectedFile.fileName}
+            fileType={selectedFile.fileType}
+            fileSize={selectedFile.fileSize}
+            previewContext="knowledgeBase"
+            onClose={() => setSelectedFile(null)}
+          />
+        )}
+      </div>
+    );
+  }
+);
+
+export default DocumentListContainer;

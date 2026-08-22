@@ -1,0 +1,71 @@
+name: Docker Build and Push All Images to DockerHub
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Image version tag (e.g. v2.2.0 or latest)'
+        required: true
+        default: 'latest'
+      runner_label_json:
+        description: 'runner array in json format (e.g. ["ubuntu-latest"] or ["self-hosted"])'
+        required: true
+        default: '["ubuntu-latest"]'
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+
+jobs:
+  build-and-push:
+    runs-on: ${{ fromJson(github.event.inputs.runner_label_json || '["ubuntu-latest"]') }}
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [main, web, data-process, mcp, terminal, sandbox]
+    steps:
+      - name: Free disk space for data-process
+        if: matrix.image == 'data-process'
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Clone model assets for data-process
+        if: matrix.image == 'data-process'
+        run: |
+          GIT_LFS_SKIP_SMUDGE=1 git clone https://huggingface.co/Nexent-AI/model-assets
+          cd model-assets
+          git lfs pull
+          rm -rf .git .gitattributes
+
+      - name: Resolve image version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            VERSION="latest"
+          else
+            VERSION="${{ github.ref_name }}"
+          fi
+          echo "value=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Login to DockerHub
+        run: echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u nexent --password-stdin
+
+      - name: Build and push
+        run: |
+          bash deploy/images/build.sh \
+            --image "${{ matrix.image }}" \
+            --platform "linux/amd64,linux/arm64" \
+            --version "${{ steps.version.outputs.value }}" \
+            --registry general \
+            --push

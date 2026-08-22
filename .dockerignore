@@ -1,0 +1,65 @@
+# Python
+**/.venv/
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.pyd
+**/.Python
+**/pip-log.txt
+**/pip-delete-this-directory.txt
+**/.pytest_cache/
+**/.coverage
+**/.mypy_cache/
+
+# Git
+.git
+**/.git/
+.gitignore
+
+# Docker
+.dockerignore
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Node
+frontend/node_modules/
+frontend/.next/
+frontend/package-lock.json
+frontend/tsconfig.tsbuildinfo
+node_modules/
+.pnpm-store/
+.pnpm-lock.yaml
+dist/
+build/
+.npm
+*.tgz
+
+# Backend
+backend/flower_db.sqlite
+model-assets.tmp.*/
+uploads/
+test/
+assets/
+
+# Github
+.github/
+
+# Cursor
+.cursor/
+
+# Dev Container
+.devcontainer/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db

@@ -1,0 +1,546 @@
+"use client";
+
+import { useState, useRef, useCallback, useMemo } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import {
+  addMcpServer,
+  updateMcpServer,
+  deleteMcpServer,
+  getMcpTools,
+  updateToolList,
+  checkMcpServerHealth,
+  addMcpFromConfigStream,
+  uploadMcpImageStream,
+  getMcpContainerLogs,
+  deleteMcpContainer,
+  getMcpRecord,
+} from "@/services/mcpService";
+import { McpServer, McpContainer } from "@/types/agentConfig";
+import log from "@/lib/logger";
+import { MCP_SERVERS_QUERY_KEY, useMcpServerList } from "@/hooks/mcp/useMcpServerList";
+import { MCP_TOOLS_QUERY_KEYS } from "@/const/mcpTools";
+import {
+  MCP_CONTAINERS_QUERY_KEY,
+  useMcpContainerList,
+} from "@/hooks/mcp/useMcpContainerList";
+
+export interface UseMcpConfigOptions {
+  enabled?: boolean;
+  tenantId?: string | null;
+  onServerAdded?: () => void;
+  onServerDeleted?: () => void;
+  onServerUpdated?: () => void;
+  onContainerAdded?: () => void;
+  onContainerDeleted?: () => void;
+  onToolsRefreshed?: () => void;
+}
+
+// Message keys for i18n
+export interface McpMessageKeys {
+  addSuccess: string;
+  addError: string;
+  deleteSuccess: string;
+  deleteError: string;
+  updateSuccess: string;
+  updateError: string;
+  healthChecking: string;
+  healthCheckSuccess: string;
+  healthCheckError: string;
+  getToolsError: string;
+  containerAddSuccess: string;
+  containerAddError: string;
+  containerDeleteSuccess: string;
+  containerDeleteError: string;
+  uploadImageSuccess: string;
+  uploadImageError: string;
+  getLogsError: string;
+  loadServerError: string;
+  loadContainerError: string;
+}
+
+export function useMcpConfig(options: UseMcpConfigOptions = {}) {
+  const queryClient = useQueryClient();
+
+  const {
+    serverList: rawServerList,
+    enableUploadImage,
+    isLoading: loadingServers,
+    refetch: refetchMcpServers,
+    invalidate: invalidateMcpServers,
+  } = useMcpServerList({ enabled: options.enabled ?? true, staleTime: 60_000, tenantId: options.tenantId });
+
+  // Filter to match MCP space "My" tab: only show editable or group-shared MCPs
+  const serverList = useMemo(
+    () => rawServerList.filter((s) => s.permission === "EDIT" || s.group_ids),
+    [rawServerList],
+  );
+
+  const {
+    containerList: rawContainerList,
+    isLoading: loadingContainers,
+    refetch: refetchMcpContainers,
+    invalidate: invalidateMcpContainers,
+  } = useMcpContainerList({ enabled: options.enabled ?? true, staleTime: 60_000, tenantId: options.tenantId });
+
+  // Filter containers to match visible MCPs: match by container_id or host_port
+  const containerList = useMemo(() => {
+    const visibleIds = new Set<string>();
+    const visiblePorts = new Set<number>();
+    for (const srv of serverList) {
+      const s = srv as any;
+      if (s.container_id) visibleIds.add(s.container_id);
+      if (s.container_port) visiblePorts.add(s.container_port);
+    }
+    return rawContainerList.filter(
+      (c) => visibleIds.has(c.container_id) || visiblePorts.has(c.host_port ?? 0),
+    );
+  }, [rawContainerList, serverList]);
+
+  const loading = loadingServers || loadingContainers;
+
+  // Loading states
+  const [updatingTools, setUpdatingTools] = useState(false);
+  const [healthCheckLoading, setHealthCheckLoading] = useState<{ [key: string]: boolean }>({});
+  const delayedContainerRefreshRef = useRef<number | undefined>(undefined);
+
+  // Helper function to refresh tools and agents
+  const refreshToolsAndAgents = useCallback(async () => {
+    setUpdatingTools(true);
+    try {
+      await updateToolList();
+      queryClient.invalidateQueries({ queryKey: ["tools"] });
+      queryClient.invalidateQueries({ queryKey: ["agents"] });
+      queryClient.invalidateQueries({ queryKey: MCP_TOOLS_QUERY_KEYS.services });
+      options.onToolsRefreshed?.();
+    } catch (error) {
+      log.error("Failed to refresh tools and agents:", error);
+    } finally {
+      setUpdatingTools(false);
+    }
+  }, [options, queryClient]);
+
+  // Load MCP server list
+  const loadServerList = useCallback(async () => {
+    try {
+      await refetchMcpServers();
+      return { success: true };
+    } catch (error) {
+      log.error("Failed to load server list:", error);
+      return { success: false, message: "Failed to load server list", messageKey: "mcpConfig.message.loadServerListFailed" };
+    }
+  }, [refetchMcpServers]);
+
+  // Load container list
+  const loadContainerList = useCallback(async () => {
+    try {
+      await refetchMcpContainers();
+      return { success: true };
+    } catch (error) {
+      log.error("Failed to load container list:", error);
+      return { success: false, message: "Failed to load container list", messageKey: "mcpConfig.message.loadContainerListFailed" };
+    }
+  }, [refetchMcpContainers]);
+
+  // Add MCP server
+  const handleAddServer = useCallback(async (url: string, name: string, authorizationToken?: string | null, customHeaders?: Record<string, string> | null) => {
+    try {
+      const result = await addMcpServer(url, name, authorizationToken, customHeaders, options.tenantId);
+      if (result.success) {
+        invalidateMcpServers();
+        await refreshToolsAndAgents();
+        options.onServerAdded?.();
+        return { success: true, messageKey: "mcpService.message.addServerSuccess" };
+      } else {
+        return { success: false, message: result.message, messageKey: "mcpService.message.addServerFailed" };
+      }
+    } catch (error) {
+      log.error("Failed to add server:", error);
+      return { success: false, message: "Failed to add server", messageKey: "mcpConfig.message.addServerFailed" };
+    }
+  }, [invalidateMcpServers, refreshToolsAndAgents, options]);
+
+  // Delete MCP server
+  const handleDeleteServer = useCallback(async (server: McpServer) => {
+    if (!server.mcp_id) {
+      return { success: false, message: "MCP server ID not available", messageKey: "mcpConfig.message.mcpIdRequired" };
+    }
+    try {
+      const result = await deleteMcpServer(server.mcp_id, options.tenantId);
+      if (result.success) {
+        invalidateMcpServers();
+        refreshToolsAndAgents().catch(e => log.error("Refresh failed:", e));
+        options.onServerDeleted?.();
+        return { success: true, messageKey: "mcpService.message.deleteServerSuccess" };
+      } else {
+        return { success: false, message: result.message, messageKey: "mcpConfig.message.deleteServerFailed" };
+      }
+    } catch (error) {
+      log.error("Failed to delete server:", error);
+      return { success: false, message: "Failed to delete server", messageKey: "mcpConfig.message.deleteServerFailed" };
+    }
+  }, [invalidateMcpServers, refreshToolsAndAgents, options]);
+
+  // View server tools
+  const handleViewTools = useCallback(async (server: McpServer) => {
+    try {
+      if (!server.mcp_id) {
+        return { success: false, data: [], message: "MCP server ID not available", messageKey: "mcpConfig.message.mcpIdRequired" };
+      }
+      const result = await getMcpTools(server.mcp_id);
+      if (result.success) {
+        return { success: true, data: result.data };
+      } else {
+        return { success: false, data: [], message: result.message, messageKey: "mcpConfig.message.getToolsFailed" };
+      }
+    } catch (error) {
+      log.error("Failed to get tools:", error);
+      return { success: false, data: [], message: "Failed to get tools", messageKey: "mcpConfig.message.getToolsFailed" };
+    }
+  }, []);
+
+  // Check server health
+  const handleCheckHealth = useCallback(async (server: McpServer) => {
+    if (!server.mcp_id) {
+      return { success: false, message: "MCP server ID not available", messageKey: "mcpConfig.message.mcpIdRequired" };
+    }
+    const key = `${server.service_name}__${server.mcp_url}`;
+    setHealthCheckLoading(prev => ({ ...prev, [key]: true }));
+    try {
+      const result = await checkMcpServerHealth(server.mcp_id);
+      invalidateMcpServers();
+      invalidateMcpContainers();
+      await refreshToolsAndAgents();
+      if (result.success) {
+        return { success: true, messageKey: "mcpConfig.message.healthCheckSuccess" };
+      } else {
+        return { success: false, message: result.message, messageKey: "mcpConfig.message.healthCheckFailed" };
+      }
+    } catch (error) {
+      log.error("Health check failed:", error);
+      invalidateMcpServers();
+      invalidateMcpContainers();
+      await refreshToolsAndAgents();
+      return { success: false, message: "Health check failed", messageKey: "mcpConfig.message.healthCheckFailed" };
+    } finally {
+      setHealthCheckLoading(prev => ({ ...prev, [key]: false }));
+    }
+  }, [invalidateMcpServers, invalidateMcpContainers, refreshToolsAndAgents, options.tenantId]);
+
+  // Update MCP server
+  const handleUpdateServer = useCallback(async (
+    mcpId: number,
+    newName: string,
+    newUrl: string,
+    newAuthorizationToken?: string | null,
+    newCustomHeaders?: Record<string, string> | null
+  ) => {
+    try {
+      const result = await updateMcpServer(mcpId, newName, newUrl, newAuthorizationToken, newCustomHeaders, undefined, undefined, options.tenantId);
+      if (result.success) {
+        // Best-effort optimistic status update for UI responsiveness
+        queryClient.setQueryData([...MCP_SERVERS_QUERY_KEY, options.tenantId], (prev: any) => {
+          if (!prev?.data) return prev;
+          return {
+            ...prev,
+            data: (prev.data as McpServer[]).map((s) =>
+              s.mcp_id === mcpId ? { ...s, service_name: newName, mcp_url: newUrl, status: true } : s
+            ),
+          };
+        });
+        invalidateMcpServers();
+        await refreshToolsAndAgents();
+        options.onServerUpdated?.();
+        return { success: true, messageKey: "mcpService.message.updateServerSuccess" };
+      } else {
+        return { success: false, message: result.message, messageKey: "mcpService.message.updateServerFailed" };
+      }
+    } catch (error) {
+      log.error("Failed to update server:", error);
+      return { success: false, message: "Failed to update server", messageKey: "mcpService.message.updateServerFailed" };
+    }
+  }, [invalidateMcpServers, refreshToolsAndAgents, queryClient, options]);
+
+  // Add container
+  const handleAddContainer = useCallback(async (config: any, port: number, serviceName?: string) => {
+    // Extract mcpServers from config
+    const mcpServers = config.mcpServers || {};
+    const serverEntries = Object.entries(mcpServers as Record<string, any>);
+
+    if (serverEntries.length === 0) {
+      return { success: false, message: "No mcpServers found in config", messageKey: "mcpConfig.message.invalidConfigStructure" };
+    }
+
+    // Use provided serviceName or extract from config
+    const mcpName = serviceName || serverEntries[0][0];
+
+    // Validate server name
+    if (!/^[a-zA-Z0-9_-]+$/.test(mcpName)) {
+      return { success: false, message: "Invalid service name", messageKey: "mcpConfig.message.invalidServerName" };
+    }
+    if (mcpName.length > 20) {
+      return { success: false, message: "Service name too long", messageKey: "mcpConfig.message.serverNameTooLong" };
+    }
+
+    // Build the AddContainerMcpServiceRequest payload
+    const payload = {
+      name: mcpName,
+      description: null,
+      source: "local",
+      tags: [],
+      authorization_token: null,
+      registry_json: null,
+      port: port,
+      mcp_config: {
+        mcpServers: Object.fromEntries(
+          serverEntries.map(([key, value]) => [
+            key,
+            {
+              command: value.command,
+              args: value.args || [],
+              env: value.env || {},
+            },
+          ])
+        ),
+      },
+    };
+
+    if (delayedContainerRefreshRef.current) {
+      window.clearTimeout(delayedContainerRefreshRef.current);
+    }
+    delayedContainerRefreshRef.current = window.setTimeout(() => {
+      invalidateMcpContainers().catch(e => log.error("Failed to refresh containers:", e));
+    }, 3000);
+
+    try {
+      const result = await addMcpFromConfigStream(
+        payload as any,
+        options.tenantId,
+        (container) => {
+          const temporaryContainer: McpContainer = {
+            container_id: container.container_id,
+            name: container.container_name || mcpName,
+            host_port: container.host_port || port,
+            mcp_url: container.mcp_url,
+            // The container exists but is still completing MCP readiness checks.
+            status: "unknown",
+            permission: "EDIT",
+          };
+          const temporaryServer = {
+            service_name: mcpName,
+            mcp_url: container.mcp_url || "",
+            status: false,
+            enabled: false,
+            mcp_id: -Date.now(),
+            container_id: container.container_id,
+            container_port: container.host_port || port,
+            permission: "EDIT" as const,
+          };
+
+          queryClient.setQueryData(
+            [...MCP_CONTAINERS_QUERY_KEY, options.tenantId],
+            (previous: any) => ({
+              ...(previous || { success: true }),
+              data: [
+                temporaryContainer,
+                ...((previous?.data || []).filter(
+                  (item: McpContainer) => item.container_id !== container.container_id
+                )),
+              ],
+            })
+          );
+          queryClient.setQueryData(
+            [...MCP_SERVERS_QUERY_KEY, options.tenantId],
+            (previous: any) => ({
+              ...(previous || { success: true }),
+              data: [
+                temporaryServer,
+                ...((previous?.data || []).filter(
+                  (item: McpServer & { container_id?: string }) =>
+                    item.container_id !== container.container_id
+                )),
+              ],
+            })
+          );
+        }
+      );
+      if (result.success) {
+        invalidateMcpContainers();
+        invalidateMcpServers();
+        await refreshToolsAndAgents();
+        options.onContainerAdded?.();
+        return { success: true, messageKey: "mcpService.message.addContainerSuccess" };
+      } else {
+        invalidateMcpContainers();
+        invalidateMcpServers();
+        return {
+          success: false,
+          message: result.message,
+          messageKey: (result as any).messageKey || "mcpConfig.message.addContainerFailed"
+        };
+      }
+    } catch (error) {
+      log.error("Failed to add container:", error);
+      return { success: false, message: "Failed to add container", messageKey: "mcpConfig.message.addContainerFailed" };
+    }
+  }, [invalidateMcpContainers, invalidateMcpServers, refreshToolsAndAgents, options, queryClient]);
+
+  // Upload MCP image
+  const handleUploadImage = useCallback(async (
+    file: File,
+    port: number,
+    serviceName?: string,
+    authorizationToken?: string
+  ) => {
+    try {
+      // Build env_vars JSON string with authorization_token if provided
+      let envVars: string | undefined = undefined;
+      if (authorizationToken) {
+        envVars = JSON.stringify({ authorization_token: authorizationToken });
+      }
+
+      const result = await uploadMcpImageStream(
+        file,
+        port,
+        serviceName,
+        envVars,
+        options.tenantId,
+        undefined,
+        undefined,
+        undefined,
+        (containerId) => {
+          const temporaryContainer: McpContainer = {
+            container_id: containerId,
+            name: serviceName,
+            host_port: port,
+            status: "unknown",
+            permission: "EDIT",
+          };
+          const temporaryServer = {
+            service_name: serviceName || file.name.replace(/\.tar$/i, ""),
+            mcp_url: "",
+            status: false,
+            enabled: false,
+            mcp_id: -Date.now(),
+            container_id: containerId,
+            container_port: port,
+            permission: "EDIT" as const,
+          };
+          queryClient.setQueryData(
+            [...MCP_CONTAINERS_QUERY_KEY, options.tenantId],
+            (previous: any) => ({
+              ...(previous || { success: true }),
+              data: [
+                temporaryContainer,
+                ...((previous?.data || []).filter(
+                  (item: McpContainer) => item.container_id !== containerId
+                )),
+              ],
+            })
+          );
+          queryClient.setQueryData(
+            [...MCP_SERVERS_QUERY_KEY, options.tenantId],
+            (previous: any) => ({
+              ...(previous || { success: true }),
+              data: [
+                temporaryServer,
+                ...((previous?.data || []).filter(
+                  (item: McpServer & { container_id?: string }) =>
+                    item.container_id !== containerId
+                )),
+              ],
+            })
+          );
+        }
+      );
+      if (result.success) {
+        invalidateMcpContainers();
+        invalidateMcpServers();
+        await refreshToolsAndAgents();
+        return { success: true, messageKey: "mcpService.message.uploadImageSuccess" };
+      } else {
+        invalidateMcpContainers();
+        invalidateMcpServers();
+        return { success: false, message: result.message, messageKey: "mcpConfig.message.uploadImageFailed" };
+      }
+    } catch (error) {
+      log.error("Failed to upload image:", error);
+      return { success: false, message: "Failed to upload image", messageKey: "mcpConfig.message.uploadImageFailed" };
+    }
+  }, [invalidateMcpContainers, invalidateMcpServers, refreshToolsAndAgents, options.tenantId, queryClient]);
+
+  // Delete container
+  const handleDeleteContainer = useCallback(async (container: McpContainer) => {
+    try {
+      const result = await deleteMcpContainer(container.container_id, options.tenantId);
+      if (result.success) {
+        invalidateMcpContainers();
+        invalidateMcpServers();
+        refreshToolsAndAgents().catch(e => log.error("Refresh failed:", e));
+        options.onContainerDeleted?.();
+        return { success: true, messageKey: "mcpService.message.deleteContainerSuccess" };
+      } else {
+        return { success: false, message: result.message, messageKey: "mcpConfig.message.deleteContainerFailed" };
+      }
+    } catch (error) {
+      log.error("Failed to delete container:", error);
+      return { success: false, message: "Failed to delete container", messageKey: "mcpConfig.message.deleteContainerFailed" };
+    }
+  }, [invalidateMcpContainers, invalidateMcpServers, refreshToolsAndAgents, options]);
+
+  // View container logs
+  const handleViewLogs = useCallback(async (containerId: string, maxLines: number = 500) => {
+    try {
+      const result = await getMcpContainerLogs(containerId, maxLines, options.tenantId);
+      if (result.success) {
+        return { success: true, data: result.data };
+      } else {
+        return { success: false, data: result.message, messageKey: "mcpConfig.message.getContainerLogsFailed" };
+      }
+    } catch (error) {
+      log.error("Failed to get logs:", error);
+      return { success: false, data: "Failed to get logs", messageKey: "mcpConfig.message.getContainerLogsFailed" };
+    }
+  }, [options.tenantId]);
+
+  // Get MCP record by ID
+  const handleGetMcpRecord = useCallback(async (mcpId: number) => {
+    try {
+      const result = await getMcpRecord(mcpId, options.tenantId);
+      if (result.success) {
+        return { success: true, data: result.data };
+      } else {
+        return { success: false, data: null, message: result.message, messageKey: "mcpConfig.message.getMcpRecordFailed" };
+      }
+    } catch (error) {
+      log.error("Failed to get MCP record:", error);
+      return { success: false, data: null, message: "Failed to get MCP record", messageKey: "mcpConfig.message.getMcpRecordFailed" };
+    }
+  }, [options.tenantId]);
+
+  return {
+    // State
+    serverList,
+    loading,
+    containerList,
+    enableUploadImage,
+    updatingTools,
+    healthCheckLoading,
+
+    // Data loading functions
+    loadServerList,
+    loadContainerList,
+    refreshToolsAndAgents,
+
+    // Handler functions
+    handleAddServer,
+    handleDeleteServer,
+    handleViewTools,
+    handleCheckHealth,
+    handleUpdateServer,
+    handleAddContainer,
+    handleUploadImage,
+    handleDeleteContainer,
+    handleViewLogs,
+    handleGetMcpRecord,
+  };
+}

@@ -1,0 +1,23 @@
+apiVersion: 1
+
+datasources:
+  - name: Tempo
+    uid: Tempo
+    type: tempo
+    access: proxy
+    url: http://nexent-tempo:3200
+    isDefault: true
+    editable: true
+    basicAuth: false
+    jsonData:
+      nodeGraph:
+        enabled: true
+      search:
+        hide: false
+      traceQuery:
+        timeShiftEnabled: true
+        spanStartTimeShift: "-1h"
+        spanEndTimeShift: "1h"
+      streamingEnabled:
+        search: false
+        metrics: false

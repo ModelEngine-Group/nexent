@@ -1,0 +1,110 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Modal, Segmented } from "antd";
+import { useTranslation } from "react-i18next";
+import {
+  McpSource,
+  MCP_ADD_SERVICE_MODAL_WIDTH_MARKETS,
+} from "@/const/mcpTools";
+import AddMcpServiceLocalSection from "./local/AddMcpServiceLocalSection";
+import AddMcpServiceRegistrySection from "./registry/AddMcpServiceRegistrySection";
+import { useMcpServerList } from "@/hooks/mcp/useMcpServerList";
+
+interface AddMcpServiceModalProps {
+  open: boolean;
+  initialTab?: McpSource;
+  onClose: () => void;
+}
+
+export default function AddMcpServiceModal({
+  open,
+  initialTab = McpSource.LOCAL,
+  onClose,
+}: AddMcpServiceModalProps) {
+  const { t } = useTranslation("common");
+  const [tab, setTab] = useState<McpSource>(initialTab);
+  const { enableUploadImage } = useMcpServerList({ enabled: open });
+  const submittingRef = useRef(false);
+
+  useEffect(() => {
+    if (open) setTab(initialTab);
+  }, [initialTab, open]);
+
+  const handleClose = useCallback(() => {
+    if (submittingRef.current) return;
+    onClose();
+  }, [onClose]);
+
+  const setSubmitting = useCallback((v: boolean) => {
+    submittingRef.current = v;
+  }, []);
+
+  if (!open) return null;
+
+  /** Fixed body height + inner scroll: avoids size jump on tab/transport change and prevents overflow. */
+  const bodyFrame = "min(90vh, 700px)";
+
+  const modalWidth = MCP_ADD_SERVICE_MODAL_WIDTH_MARKETS;
+
+  return (
+    <Modal
+      open
+      footer={null}
+      closable={!submittingRef.current}
+      centered
+      width={modalWidth}
+      onCancel={handleClose}
+      maskClosable={!submittingRef.current}
+      wrapClassName="[&_.ant-modal]:transition-[width] [&_.ant-modal]:duration-300 [&_.ant-modal]:ease-in-out"
+      styles={{
+        mask: { background: "rgba(4, 4, 4, 0.6)", backdropFilter: "blur(2px)" },
+        body: {
+          padding: 0,
+          display: "flex",
+          flexDirection: "column",
+          height: bodyFrame,
+          maxHeight: bodyFrame,
+          overflow: "hidden",
+        },
+      }}
+    >
+      <div className="flex h-full min-h-0 min-w-0 flex-col">
+        <div className="shrink-0 border-b border-slate-100 px-6 py-4">
+          <h2 className="text-2xl font-semibold text-slate-900">
+            {t("mcpTools.addModal.title")}
+          </h2>
+        </div>
+
+        <div className="shrink-0 px-6 pb-4 pt-4">
+          <Segmented
+            value={tab}
+            onChange={(value) => setTab(value as McpSource)}
+            options={[
+              {
+                label: t("mcpTools.addModal.tabLocal"),
+                value: McpSource.LOCAL,
+              },
+              {
+                label: t("mcpTools.addModal.tabRegistry"),
+                value: McpSource.REGISTRY,
+              },
+            ]}
+            className="h-9 rounded-md border border-slate-200 bg-slate-100 p-[2px] text-sm [&_.ant-segmented-group]:h-full [&_.ant-segmented-item]:rounded-md [&_.ant-segmented-item-label]:px-4 [&_.ant-segmented-item-label]:leading-[30px] [&_.ant-segmented-thumb]:rounded-md [&_.ant-segmented-thumb]:bg-white [&_.ant-segmented-thumb]:shadow-sm [&_.ant-segmented-thumb]:top-[2px] [&_.ant-segmented-thumb]:bottom-[2px]"
+          />
+        </div>
+
+        <div className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable]">
+          <AddMcpServiceLocalSection
+            active={tab === McpSource.LOCAL}
+            enableUploadImage={enableUploadImage}
+            onAdded={onClose}
+            onSubmittingChange={setSubmitting}
+          />
+          <AddMcpServiceRegistrySection
+            active={tab === McpSource.REGISTRY}
+            onAdded={onClose}
+          />
+        </div>
+      </div>
+    </Modal>
+  );
+}

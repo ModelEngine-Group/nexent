@@ -1,0 +1,86 @@
+---
+globs: frontend/hooks/**/*.ts
+description: Hook layer rules for custom React hooks and state management
+---
+
+### Purpose and Scope
+
+- Hook layer contains custom React hooks for `frontend/hooks/**/*.ts`
+- Responsibilities: Encapsulate state logic, provide service interfaces, handle loading/error states
+- **MANDATORY**: All hooks must be named `useXxx` and use TypeScript
+
+### Hook Organization
+
+- **`hooks/useAuth.ts`** - Authentication state and operations
+- **`hooks/useConfig.ts`** - Configuration management  
+- **`hooks/useChat.ts`** - Chat-related state and operations
+- **`hooks/useMemory.ts`** - Memory management
+- Use descriptive names indicating the hook's purpose
+
+### Hook Structure
+
+- Use TypeScript for all hook definitions
+- Return objects with descriptive property names
+- Handle loading, error, and success states consistently
+- Implement proper cleanup for side effects
+- Use proper dependency arrays in useEffect
+
+### Essential Hook Usage
+
+| Hook | Purpose | When to Use |
+|------|---------|-------------|
+| `useState` | Store component state | Simple state like toggles, counters |
+| `useReducer` | Complex state logic | Multiple state dependencies |
+| `useContext` | Share data between components | Theme, user info, global state |
+| `useEffect` | Handle side effects | Data fetching, subscriptions, timers |
+| `useCallback` | Prevent function recreation | Callbacks passed to child components |
+| `useMemo` | Cache calculations | Expensive computations |
+| `useRef` | Store mutable values | DOM nodes, timer IDs |
+
+### State Management
+
+- Use useState for local component state
+- Use useReducer for complex state logic
+- Use useContext for shared state across components
+- Implement proper state updates and immutability
+- Handle async state updates correctly
+- **CRITICAL**: All logging must use [logger.ts](mdc:frontend/lib/logger.ts) - never use console.log
+
+### Error Handling
+
+- Handle async errors gracefully
+- Provide meaningful error messages
+- Log errors appropriately for debugging
+- Implement retry logic for transient failures
+
+### Example
+```typescript
+// frontend/hooks/useAuth.ts
+import { useState, useEffect, useCallback } from 'react';
+import { authService } from '@/services/authService';
+
+export function useAuth() {
+  const [user, setUser] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  const login = useCallback(async (credentials) => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const response = await authService.login(credentials);
+      if (response.success) {
+        setUser(response.data.user);
+      } else {
+        setError(response.error);
+      }
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  return { user, isLoading, error, login };
+}
+```

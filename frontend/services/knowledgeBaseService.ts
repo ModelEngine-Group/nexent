@@ -1,0 +1,1999 @@
+// Unified encapsulation of knowledge base related API calls
+
+import i18n from "i18next";
+
+import { API_ENDPOINTS, ApiError } from "./api";
+
+import { NAME_CHECK_STATUS } from "@/const/agentConfig";
+import {
+  FILE_TYPES,
+  EXTENSION_TO_TYPE_MAP,
+  KNOWLEDGE_BASE_MAX_FILE_SIZE_BYTES,
+} from "@/const/knowledgeBase";
+import {
+  Document,
+  KnowledgeBase,
+  KnowledgeBaseCreateParams,
+  KnowledgeBasesWithDataMateStatus,
+  DataMateSyncError,
+} from "@/types/knowledgeBase";
+import type {
+  AidpKnowledgeBaseItem,
+  AidpKnowledgeBaseListResponse,
+} from "@/types/agentConfig";
+import type { QuotaStatusResponse } from "@/types/quota";
+import { getAuthHeaders, fetchWithAuth } from "@/lib/auth";
+import { emitQuotaUsageChanged } from "@/lib/quotaEvents";
+import log from "@/lib/logger";
+
+// @ts-ignore
+const fetch: typeof fetchWithAuth = fetchWithAuth;
+
+const normalizeIsMultimodal = (value: unknown): boolean => {
+  if (value === true) return true;
+  if (value === false || value == null) return false;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    return normalized === "y" || normalized === "true" || normalized === "yes";
+  }
+  if (typeof value === "number") return value === 1;
+  return false;
+};
+
+const resolveIsMultimodal = (indexInfo: any, stats: any): boolean =>
+  normalizeIsMultimodal(indexInfo.is_multimodal ?? stats.is_multimodal);
+
+// Knowledge base service class
+class KnowledgeBaseService {
+  // Check Elasticsearch health (force refresh, no caching for setup page)
+  async checkHealth(): Promise<boolean> {
+    try {
+      // Force refresh in setup page, no caching
+      const response = await fetch(API_ENDPOINTS.knowledgeBase.health, {
+        headers: getAuthHeaders(),
+      });
+      const data = await response.json();
+
+      const isHealthy =
+        data.status === "healthy" && data.elasticsearch === "connected";
+
+      // No longer update cache, get latest status every time
+
+      return isHealthy;
+    } catch (error) {
+      log.error("Elasticsearch health check failed:", error);
+      // No longer cache error status
+      return false;
+    }
+  }
+
+  // Sync Dify knowledge bases
+  async syncDifyKnowledgeBases(
+    difyApiBase: string,
+    apiKey: string
+  ): Promise<{
+    indices: string[];
+    count: number;
+    indices_info: any[];
+  }> {
+    // Call backend proxy endpoint to avoid CORS issues
+    const url = new URL(API_ENDPOINTS.dify.datasets, window.location.origin);
+    url.searchParams.set("dify_api_base", difyApiBase);
+    url.searchParams.set("api_key", apiKey);
+
+    const response = await fetch(url.toString(), {
+      method: "GET",
+      headers: getAuthHeaders(),
+    });
+
+    const result = await response.json();
+
+    // Check for error response from middleware (has code field)
+    if (result.code !== undefined && result.code !== 0) {
+      // Use backend error code and message
+      const errorCode = result.code || response.status;
+      const errorMessage = result.message || "Failed to fetch Dify datasets";
+      log.error("Dify API error:", { code: errorCode, message: errorMessage });
+
+      // Use ApiError for proper error handling with i18n support
+      throw new ApiError(errorCode, errorMessage);
+    }
+
+    // Success: result is directly the data (indices, count, indices_info)
+    return {
+      indices: result.indices || [],
+      count: result.count || 0,
+      indices_info: result.indices_info || [],
+    };
+  }
+
+  // Get Dify knowledge bases as KnowledgeBase array
+  async getDifyKnowledgeBases(
+    difyApiBase: string,
+    apiKey: string
+  ): Promise<KnowledgeBase[]> {
+    try {
+      const syncResult = await this.syncDifyKnowledgeBases(difyApiBase, apiKey);
+
+      if (!syncResult.indices_info || syncResult.indices_info.length === 0) {
+        return [];
+      }
+
+      // Transform to KnowledgeBase format
+      const difyKnowledgeBases: KnowledgeBase[] = syncResult.indices_info.map(
+        (indexInfo: any) => {
+          const stats = indexInfo.stats?.base_info || {};
+          return {
+            id: indexInfo.name,
+            name: indexInfo.display_name || indexInfo.name,
+            display_name: indexInfo.display_name || indexInfo.name,
+            description: "Dify knowledge base",
+            documentCount: stats.doc_count || 0,
+            chunkCount: stats.chunk_count || 0,
+            createdAt: stats.creation_date || null,
+            updatedAt: stats.update_date || stats.creation_date || null,
+            embeddingModel: stats.embedding_model || "unknown",
+            knowledge_sources: "dify",
+            ingroup_permission: "",
+            group_ids: [],
+            store_size: stats.store_size || "",
+            process_source: stats.process_source || "Dify",
+            avatar: "",
+            chunkNum: 0,
+            language: "",
+            nickname: "",
+            parserId: "",
+            permission: "",
+            tokenNum: 0,
+            source: "dify",
+            tenant_id: "",
+          };
+        }
+      );
+
+      return difyKnowledgeBases;
+    } catch (error) {
+      log.error("Failed to get Dify knowledge bases:", error);
+      throw error;
+    }
+  }
+
+  // Get RAGFlow knowledge bases as KnowledgeBase array
+  async getRagflowKnowledgeBases(
+    ragflowApiBase: string,
+    apiKey: string
+  ): Promise<KnowledgeBase[]> {
+    try {
+      const url = new URL(
+        API_ENDPOINTS.ragflow.datasets,
+        globalThis.location.origin
+      );
+      url.searchParams.set("ragflow_api_base", ragflowApiBase);
+      url.searchParams.set("api_key", apiKey);
+
+      const response = await fetch(url.toString(), {
+        method: "GET",
+        headers: getAuthHeaders(),
+      });
+
+      const result = await response.json();
+
+      if (result.code !== undefined && result.code !== 0) {
+        const errorCode = result.code || response.status;
+        const errorMessage =
+          result.message || "Failed to fetch RAGFlow datasets";
+        throw new ApiError(errorCode, errorMessage);
+      }
+
+      const datasets: KnowledgeBase[] = (result.data || []).map((ds: any) => {
+        const stats = ds.stats || {};
+        return {
+          id: ds.id || ds.dataset_id || "",
+          name: ds.name || ds.dataset_name || "Unnamed",
+          display_name: ds.name || ds.dataset_name || "Unnamed",
+          description: ds.description || "",
+          documentCount: stats.doc_count || ds.doc_count || 0,
+          chunkCount: stats.chunk_count || ds.chunk_count || 0,
+          createdAt: ds.create_time || ds.create_date || null,
+          updatedAt: ds.update_time || ds.update_date || null,
+          embeddingModel: ds.embedding_model || "unknown",
+          knowledge_sources: "ragflow",
+          ingroup_permission: "",
+          group_ids: [],
+          store_size: "",
+          process_source: "RAGFlow",
+          avatar: "",
+          chunkNum: 0,
+          language: "",
+          nickname: "",
+          parserId: "",
+          permission: "",
+          tokenNum: 0,
+          source: "ragflow",
+          tenant_id: "",
+        };
+      });
+
+      return datasets;
+    } catch (error) {
+      log.error("Failed to get RAGFlow knowledge bases:", error);
+      throw error;
+    }
+  }
+
+  // Get iData knowledge spaces
+  async getIdataKnowledgeSpaces(
+    idataApiBase: string,
+    apiKey: string,
+    userId: string
+  ): Promise<Array<{ id: string; name: string }>> {
+    try {
+      const url = new URL(
+        API_ENDPOINTS.idata.knowledgeSpaces,
+        window.location.origin
+      );
+      url.searchParams.set("idata_api_base", idataApiBase);
+      url.searchParams.set("api_key", apiKey);
+      url.searchParams.set("user_id", userId);
+
+      const response = await fetch(url.toString(), {
+        method: "GET",
+        headers: getAuthHeaders(),
+      });
+
+      const result = await response.json();
+
+      // Check for error response from middleware (has code field)
+      if (result.code !== undefined && result.code !== 0) {
+        const errorCode = result.code || response.status;
+        const errorMessage =
+          result.message || "Failed to fetch iData knowledge spaces";
+        log.error("iData API error:", {
+          code: errorCode,
+          message: errorMessage,
+        });
+        throw new ApiError(errorCode, errorMessage);
+      }
+
+      // Success: result is directly the array of knowledge spaces
+      return Array.isArray(result) ? result : [];
+    } catch (error) {
+      log.error("Failed to get iData knowledge spaces:", error);
+      throw error;
+    }
+  }
+
+  // Sync iData knowledge bases (datasets)
+  async syncIdataKnowledgeBases(
+    idataApiBase: string,
+    apiKey: string,
+    userId: string,
+    knowledgeSpaceId: string
+  ): Promise<{
+    indices: string[];
+    count: number;
+    indices_info: any[];
+  }> {
+    try {
+      const url = new URL(API_ENDPOINTS.idata.datasets, window.location.origin);
+      url.searchParams.set("idata_api_base", idataApiBase);
+      url.searchParams.set("api_key", apiKey);
+      url.searchParams.set("user_id", userId);
+      url.searchParams.set("knowledge_space_id", knowledgeSpaceId);
+
+      const response = await fetch(url.toString(), {
+        method: "GET",
+        headers: getAuthHeaders(),
+      });
+
+      const result = await response.json();
+
+      // Check for error response from middleware (has code field)
+      if (result.code !== undefined && result.code !== 0) {
+        const errorCode = result.code || response.status;
+        const errorMessage = result.message || "Failed to fetch iData datasets";
+        log.error("iData API error:", {
+          code: errorCode,
+          message: errorMessage,
+        });
+        throw new ApiError(errorCode, errorMessage);
+      }
+
+      // Success: result is directly the data (indices, count, indices_info)
+      return {
+        indices: result.indices || [],
+        count: result.count || 0,
+        indices_info: result.indices_info || [],
+      };
+    } catch (error) {
+      log.error("Failed to sync iData knowledge bases:", error);
+      throw error;
+    }
+  }
+
+  // Get iData knowledge bases as KnowledgeBase array
+  async getIdataKnowledgeBases(
+    idataApiBase: string,
+    apiKey: string,
+    userId: string,
+    knowledgeSpaceId: string
+  ): Promise<KnowledgeBase[]> {
+    try {
+      const syncResult = await this.syncIdataKnowledgeBases(
+        idataApiBase,
+        apiKey,
+        userId,
+        knowledgeSpaceId
+      );
+
+      if (!syncResult.indices_info || syncResult.indices_info.length === 0) {
+        return [];
+      }
+
+      // Transform to KnowledgeBase format
+      const idataKnowledgeBases: KnowledgeBase[] = syncResult.indices_info.map(
+        (indexInfo: any) => {
+          const stats = indexInfo.stats?.base_info || {};
+          return {
+            id: indexInfo.name,
+            name: indexInfo.display_name || indexInfo.name,
+            display_name: indexInfo.display_name || indexInfo.name,
+            description: "iData knowledge base",
+            documentCount: stats.doc_count || 0,
+            chunkCount: stats.chunk_count || 0,
+            createdAt: stats.creation_date || null,
+            updatedAt: stats.update_date || stats.creation_date || null,
+            embeddingModel: stats.embedding_model || "unknown",
+            knowledge_sources: "idata",
+            ingroup_permission: "",
+            group_ids: [],
+            store_size: stats.store_size || "",
+            process_source: stats.process_source || "iData",
+            avatar: "",
+            chunkNum: 0,
+            language: "",
+            nickname: "",
+            parserId: "",
+            permission: "",
+            tokenNum: 0,
+            source: "idata",
+            tenant_id: "",
+          };
+        }
+      );
+
+      return idataKnowledgeBases;
+    } catch (error) {
+      log.error("Failed to get iData knowledge bases:", error);
+      throw error;
+    }
+  }
+
+  // Sync DataMate knowledge bases and create local records
+  async syncDataMateAndCreateRecords(datamateUrl?: string): Promise<{
+    indices: string[];
+    count: number;
+    indices_info: any[];
+    created_records: any[];
+  }> {
+    try {
+      const body = datamateUrl
+        ? JSON.stringify({ datamate_url: datamateUrl })
+        : undefined;
+
+      const response = await fetch(
+        API_ENDPOINTS.datamate.syncDatamateKnowledges,
+        {
+          method: "POST",
+          headers: getAuthHeaders(),
+          ...(body && { body }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data.detail ||
+            "Failed to sync DataMate knowledge bases and create records"
+        );
+      }
+
+      return data;
+    } catch (error) {
+      log.error(
+        "Failed to sync DataMate knowledge bases and create records:",
+        error
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Test connection to DataMate server
+   * @param datamateUrl Optional DataMate URL to test (uses configured URL if not provided)
+   * @returns Promise<{success: boolean, error?: string}>
+   */
+  async testDataMateConnection(
+    datamateUrl?: string
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      const body = datamateUrl
+        ? JSON.stringify({ datamate_url: datamateUrl })
+        : undefined;
+
+      const response = await fetch(API_ENDPOINTS.datamate.testConnection, {
+        method: "POST",
+        headers: getAuthHeaders(),
+        ...(body && { body }),
+      });
+
+      if (response.ok) {
+        return { success: true };
+      }
+
+      const errorData = await response.json();
+      return {
+        success: false,
+        error: errorData.detail || "Connection failed",
+      };
+    } catch (error) {
+      log.error("Failed to test DataMate connection:", error);
+      return {
+        success: false,
+        error:
+          error instanceof Error ? error.message : "Connection test failed",
+      };
+    }
+  }
+
+  /**
+   * Fetch Haotian knowledge sets via backend proxy.
+   */
+  async getHaotianKnowledgeSets(
+    listUrl: string,
+    externalAuthorization: string
+  ): Promise<{
+    knowledge_sets: Array<{
+      name: string;
+      knowledge_bases: Array<{ dify_dataset_id: string; name: string }>;
+    }>;
+  }> {
+    const response = await fetch(API_ENDPOINTS.haotian.knowledgeSets, {
+      method: "POST",
+      headers: {
+        ...getAuthHeaders(),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        list_url: listUrl,
+        authorization: externalAuthorization,
+      }),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.detail || "Failed to fetch Haotian knowledge sets");
+    }
+    return data;
+  }
+
+  /**
+   * Test Haotian connection via backend proxy.
+   */
+  async testHaotianConnection(
+    listUrl: string,
+    externalAuthorization: string
+  ): Promise<{
+    success: boolean;
+    error?: string;
+  }> {
+    try {
+      const response = await fetch(API_ENDPOINTS.haotian.testConnection, {
+        method: "POST",
+        headers: {
+          ...getAuthHeaders(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          list_url: listUrl,
+          authorization: externalAuthorization,
+        }),
+      });
+      if (response.ok) return { success: true };
+      const errorData = await response.json();
+      return { success: false, error: errorData.detail || "Connection failed" };
+    } catch (error) {
+      return {
+        success: false,
+        error:
+          error instanceof Error ? error.message : "Connection test failed",
+      };
+    }
+  }
+
+  async getAidpKnowledgeBasesAll(): Promise<AidpKnowledgeBaseListResponse> {
+    // Loop through pages until has_more is false, accumulating all items.
+    // The mgmt endpoint caps page_size at 100 (backend performance guard),
+    // so we paginate at the maximum allowed size to minimize requests.
+    // Safety cap: we never fetch more than 2000 KBs to prevent runaway
+    // loop in case of a bug (e.g. has_more not being cleared).
+    const AIDP_LIST_PAGE_MAX = 100;
+    const AIDP_LIST_ITEM_CAP = 2000;
+    const allItems: AidpKnowledgeBaseItem[] = [];
+    let page = 1;
+    let totalFromServer = 0;
+    let totalReliableFromServer = true;
+    let hasMore = true;
+
+    try {
+      while (hasMore && allItems.length < AIDP_LIST_ITEM_CAP) {
+        const url = new URL(
+          API_ENDPOINTS.aidpMgmt.knowledgeBases,
+          globalThis.location.origin
+        );
+        url.searchParams.set("page", String(page));
+        url.searchParams.set("page_size", String(AIDP_LIST_PAGE_MAX));
+
+        const response = await fetch(url.toString(), {
+          method: "GET",
+          headers: getAuthHeaders(),
+        });
+        const pageResult = await response.json();
+
+        if (pageResult.code !== undefined && pageResult.code !== 0) {
+          const errorCode = pageResult.code || response.status;
+          const errorMessage =
+            pageResult.message || "Failed to fetch all AIDP knowledge bases";
+          log.error("AIDP API error:", {
+            code: errorCode,
+            message: errorMessage,
+          });
+          throw new ApiError(errorCode, errorMessage);
+        }
+
+        const pageItems: AidpKnowledgeBaseItem[] = Array.isArray(
+          pageResult.value
+        )
+          ? pageResult.value
+          : [];
+        allItems.push(...pageItems);
+
+        // total_count from the server represents ALL KBs the user can access
+        // (not just the current page), so use it from the first response.
+        if (page === 1 && typeof pageResult.total_count === "number") {
+          totalFromServer = pageResult.total_count;
+        }
+        if (page === 1 && typeof pageResult.total_reliable === "boolean") {
+          totalReliableFromServer = pageResult.total_reliable;
+        }
+
+        hasMore = !!pageResult.has_more && pageItems.length > 0;
+        page += 1;
+      }
+
+      return {
+        value: allItems,
+        total_count: totalFromServer || allItems.length,
+        next_link: null,
+        has_more: allItems.length >= AIDP_LIST_ITEM_CAP,
+        total_reliable: totalReliableFromServer,
+      };
+    } catch (error) {
+      log.error("Failed to fetch all AIDP knowledge bases:", error);
+      throw error;
+    }
+  }
+
+  async getIndependentAidpKnowledgeBasesAll(
+    serverUrl: string,
+    apiKey: string,
+    tenantId: string = "aidp"
+  ): Promise<KnowledgeBase[]> {
+    const itemCap = 2000;
+    const allItems: AidpKnowledgeBaseItem[] = [];
+    let page = 1;
+    let hasMore = true;
+
+    while (hasMore && allItems.length < itemCap) {
+      const response = await fetch(
+        API_ENDPOINTS.independentAidp.knowledgeBases,
+        {
+          method: "POST",
+          headers: {
+            ...getAuthHeaders(),
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            server_url: serverUrl,
+            api_key: apiKey,
+            tenant_id: tenantId || "aidp",
+            page,
+            page_size: 100,
+          }),
+        }
+      );
+      const result = await response.json();
+      if (!response.ok) {
+        throw new ApiError(
+          response.status,
+          result?.detail || "Failed to fetch independent AIDP knowledge bases"
+        );
+      }
+
+      const pageItems: AidpKnowledgeBaseItem[] = Array.isArray(result?.value)
+        ? result.value
+        : [];
+      allItems.push(...pageItems);
+      hasMore = Boolean(result?.has_more) && pageItems.length > 0;
+      page += 1;
+    }
+
+    return this.mapAidpKnowledgeBasesToKnowledgeBases(allItems).map((kb) => ({
+      ...kb,
+      source: "ind-aidp",
+      knowledge_sources: "ind-aidp",
+      process_source: "Independent AIDP",
+    }));
+  }
+
+  async getAidpKnowledgeBases(
+    page: number = 1,
+    pageSize: number = 20
+  ): Promise<AidpKnowledgeBaseListResponse> {
+    try {
+      // Use the permission-filtered mgmt endpoint instead of the legacy
+      // `/aidp/knowledge-bases` proxy. The mgmt endpoint applies the current
+      // user's role / group intersection, ensuring the agent config KB picker
+      // only shows KBs the user has access to.
+      const url = new URL(
+        API_ENDPOINTS.aidpMgmt.knowledgeBases,
+        globalThis.location.origin
+      );
+      url.searchParams.set("page", String(page));
+      url.searchParams.set("page_size", String(pageSize));
+
+      const response = await fetch(url.toString(), {
+        method: "GET",
+        headers: getAuthHeaders(),
+      });
+      const result = await response.json();
+
+      if (result.code !== undefined && result.code !== 0) {
+        const errorCode = result.code || response.status;
+        const errorMessage =
+          result.message || "Failed to fetch AIDP knowledge bases";
+        log.error("AIDP API error:", {
+          code: errorCode,
+          message: errorMessage,
+        });
+        throw new ApiError(errorCode, errorMessage);
+      }
+
+      return {
+        value: Array.isArray(result.value) ? result.value : [],
+        total_count:
+          typeof result.total_count === "number"
+            ? result.total_count
+            : undefined,
+        next_link:
+          typeof result.next_link === "string" ? result.next_link : null,
+        has_more:
+          typeof result.has_more === "boolean" ? result.has_more : undefined,
+        total_reliable:
+          typeof result.total_reliable === "boolean"
+            ? result.total_reliable
+            : undefined,
+      };
+    } catch (error) {
+      log.error("Failed to fetch AIDP knowledge bases:", error);
+      throw error;
+    }
+  }
+
+  mapAidpKnowledgeBasesToKnowledgeBases(
+    items: AidpKnowledgeBaseItem[]
+  ): KnowledgeBase[] {
+    // Map the mgmt-endpoint item shape (which already carries
+    // ``permission``, ``ingroup_permission``, ``group_ids`` and the
+    // AIDP-normalized ``created_at`` / ``updated_at`` / ``embedding_model``
+    // fields) onto the ``KnowledgeBase`` shape shared across all tool types.
+    return items.map((item) => ({
+      id: String(item.kds_id),
+      name: item.kds_name || String(item.kds_id),
+      display_name: item.kds_name || String(item.kds_id),
+      description: item.description || null,
+      documentCount: item.document_count || 0,
+      chunkCount: item.chunk_count || 0,
+      createdAt: item.created_at || null,
+      updatedAt: item.updated_at || null,
+      embeddingModel: item.embedding_model || "unknown",
+      is_multimodal: item.is_multimodal === true,
+      knowledge_sources: "aidp",
+      ingroup_permission: item.ingroup_permission || "",
+      group_ids: item.group_ids || [],
+      store_size: "",
+      process_source: "AIDP",
+      avatar: "",
+      chunkNum: 0,
+      language: "",
+      nickname: "",
+      parserId: "",
+      permission: item.permission || "",
+      tokenNum: 0,
+      source: "aidp",
+      tenant_id: "",
+    }));
+  }
+
+  // Sync Dify knowledge bases
+  async syncDifyDatasets(
+    difyApiBase: string,
+    apiKey: string
+  ): Promise<{
+    indices: string[];
+    count: number;
+    indices_info: any[];
+  }> {
+    try {
+      // Normalize URL by removing trailing slash
+      const normalizedApiBase = difyApiBase.replace(/\/+$/, "");
+      const url = `${normalizedApiBase}/v1/datasets`;
+
+      const response = await fetch(url, {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`Dify API error: ${response.status}`);
+      }
+
+      const result = await response.json();
+      const datasetsData = result.data || [];
+
+      // Transform to internal format
+      const indices: string[] = [];
+      const indices_info: any[] = [];
+
+      for (const dataset of datasetsData) {
+        const datasetId = dataset.id;
+        if (!datasetId) continue;
+
+        indices.push(datasetId);
+
+        indices_info.push({
+          name: datasetId,
+          display_name: dataset.name,
+          stats: {
+            base_info: {
+              doc_count: dataset.document_count || 0,
+              chunk_count: 0,
+              store_size: "",
+              process_source: "Dify",
+              embedding_model: dataset.embedding_model || "",
+              embedding_dim: 0,
+              creation_date: (dataset.created_at || 0) * 1000,
+              update_date: (dataset.updated_at || 0) * 1000,
+            },
+            search_performance: {
+              total_search_count: 0,
+              hit_count: 0,
+            },
+          },
+        });
+      }
+
+      return {
+        indices,
+        count: indices.length,
+        indices_info,
+      };
+    } catch (error) {
+      log.error("Failed to sync Dify datasets:", error);
+      throw error;
+    }
+  }
+
+  // Get knowledge bases with stats from all sources (very slow, don't use it)
+  async getKnowledgeBasesInfo(
+    skipHealthCheck = false,
+    includeDataMateSync = true,
+    tenantId: string | null = null,
+    datamateUrl: string | null = null
+  ): Promise<KnowledgeBasesWithDataMateStatus> {
+    try {
+      const knowledgeBases: KnowledgeBase[] = [];
+      let dataMateSyncError: string | undefined;
+
+      // Get knowledge bases from Elasticsearch
+      try {
+        // First check Elasticsearch health (unless skipped)
+        if (!skipHealthCheck) {
+          const isElasticsearchHealthy = await this.checkHealth();
+          if (!isElasticsearchHealthy) {
+            log.warn("Elasticsearch service unavailable");
+          } else {
+            // Build URL with tenant_id parameter for filtering
+            const url = new URL(
+              `${API_ENDPOINTS.knowledgeBase.indices}?include_stats=true`,
+              window.location.origin
+            );
+            if (tenantId) {
+              url.searchParams.set("tenant_id", tenantId);
+            }
+            const response = await fetch(url.toString(), {
+              headers: getAuthHeaders(),
+            });
+            const data = await response.json();
+
+            log.log("Elasticsearch indices response:", data);
+
+            if (data.indices && data.indices_info) {
+              log.log(
+                "Processing indices_info:",
+                data.indices_info.length,
+                "items"
+              );
+              // Convert Elasticsearch indices to knowledge base format
+              const esKnowledgeBases = data.indices_info.map(
+                (indexInfo: any) => {
+                  const stats = indexInfo.stats?.base_info || {};
+                  // Backend returns:
+                  // - name: internal index_name
+                  // - display_name: user-facing knowledge_name (fallback to index_name)
+                  // - update_time: timestamp from database for sorting
+                  const kbId = indexInfo.name;
+                  const kbName = indexInfo.display_name || indexInfo.name;
+
+                  return {
+                    id: kbId,
+                    knowledge_id: indexInfo.knowledge_id,
+                    name: kbName,
+                    index_name: kbId, // Internal index_name for API calls
+                    display_name: indexInfo.display_name || indexInfo.name,
+                    description: "Elasticsearch index",
+                    documentCount: stats.doc_count || 0,
+                    chunkCount: stats.chunk_count || 0,
+                    createdAt: stats.creation_date || null,
+                    // Use update_time from database for sorting, fallback to ES update_date
+                    updatedAt:
+                      indexInfo.update_time ||
+                      stats.update_date ||
+                      stats.creation_date ||
+                      null,
+                    is_multimodal: resolveIsMultimodal(indexInfo, stats),
+                    // Use embedding_model_name (display_name) from backend, fallback to ES stats
+                    embeddingModel:
+                      indexInfo.embedding_model_name ||
+                      stats.embedding_model ||
+                      "unknown",
+                    embeddingModelId: indexInfo.embedding_model_id ?? null,
+                    summaryFrequency: indexInfo.summary_frequency || null,
+                    lastSummaryTime: indexInfo.last_summary_time || null,
+                    knowledge_sources:
+                      indexInfo.knowledge_sources || "elasticsearch",
+                    ingroup_permission: indexInfo.ingroup_permission || "",
+                    group_ids: indexInfo.group_ids || [],
+                    store_size: stats.store_size || "",
+                    process_source: stats.process_source || "",
+                    avatar: "",
+                    chunkNum: 0,
+                    language: "",
+                    nickname: "",
+                    parserId: "",
+                    permission: indexInfo.permission || "",
+                    tokenNum: 0,
+                    source: "nexent",
+                    tenant_id: indexInfo.tenant_id,
+                    preserve_source_file:
+                      indexInfo.preserve_source_file ?? true,
+                  };
+                }
+              );
+              log.log("Converted knowledge bases:", esKnowledgeBases);
+              knowledgeBases.push(...esKnowledgeBases);
+            } else {
+              log.log(
+                "Skipping indices processing:",
+                "indices exists:",
+                !!data.indices,
+                "indices_info exists:",
+                !!data.indices_info,
+                "indices length:",
+                data.indices?.length,
+                "indices_info length:",
+                data.indices_info?.length
+              );
+            }
+          }
+        }
+      } catch (error) {
+        log.error("Failed to get Elasticsearch indices:", error);
+      }
+
+      // Sync DataMate knowledge bases and get the synced data (only if enabled and URL is configured)
+      if (includeDataMateSync) {
+        if (!datamateUrl || datamateUrl.trim() === "") {
+          // Skip DataMate sync if URL is not configured
+          log.info(
+            "DataMate URL not configured, skipping DataMate knowledge base sync"
+          );
+        } else {
+          try {
+            const syncResult = await this.syncDataMateAndCreateRecords();
+            if (syncResult.indices_info) {
+              // Convert synced DataMate indices to knowledge base format
+              const datamateKnowledgeBases: KnowledgeBase[] =
+                syncResult.indices_info.map((indexInfo: any) => {
+                  const stats = indexInfo.stats?.base_info || {};
+                  const kbId = indexInfo.name;
+                  const kbName = indexInfo.display_name || indexInfo.name;
+
+                  return {
+                    id: kbId,
+                    name: kbName,
+                    display_name: indexInfo.display_name || indexInfo.name,
+                    description: "DataMate knowledge base",
+                    documentCount: stats.doc_count || 0,
+                    chunkCount: stats.chunk_count || 0,
+                    createdAt: stats.creation_date || null,
+                    updatedAt: stats.update_date || stats.creation_date || null,
+                    embeddingModel: stats.embedding_model || "unknown",
+                    is_multimodal: resolveIsMultimodal(indexInfo, stats),
+                    knowledge_sources:
+                      indexInfo.knowledge_sources || "datamate",
+                    ingroup_permission: indexInfo.ingroup_permission || "",
+                    group_ids: indexInfo.group_ids || [],
+                    store_size: stats.store_size || "",
+                    process_source: stats.process_source || "",
+                    avatar: "",
+                    chunkNum: 0,
+                    language: "",
+                    nickname: "",
+                    parserId: "",
+                    permission: indexInfo.permission || "",
+                    tokenNum: 0,
+                    source: "datamate",
+                    tenant_id: indexInfo.tenant_id,
+                  };
+                });
+              knowledgeBases.push(...datamateKnowledgeBases);
+            }
+          } catch (error) {
+            // Store the error message for DataMate sync failure
+            const errorMessage =
+              error instanceof Error ? error.message : String(error);
+            dataMateSyncError = errorMessage;
+            log.error("Failed to sync DataMate knowledge bases:", error);
+          }
+        }
+      }
+
+      return {
+        knowledgeBases,
+        dataMateSyncError,
+      };
+    } catch (error) {
+      log.error("Failed to get knowledge base list:", error);
+      throw error;
+    }
+  }
+
+  async getKnowledgeBases(skipHealthCheck = false): Promise<string[]> {
+    try {
+      // First check Elasticsearch health (unless skipped)
+      if (!skipHealthCheck) {
+        const isElasticsearchHealthy = await this.checkHealth();
+        if (!isElasticsearchHealthy) {
+          log.warn("Elasticsearch service unavailable");
+          return [];
+        }
+      }
+
+      let knowledgeBases = [];
+
+      try {
+        const response = await fetch(`${API_ENDPOINTS.knowledgeBase.indices}`, {
+          headers: getAuthHeaders(),
+        });
+        const data = await response.json();
+        knowledgeBases = data.indices;
+      } catch (error) {
+        log.error("Failed to get knowledge base list:", error);
+      }
+
+      return knowledgeBases;
+    } catch (error) {
+      log.error("Failed to get knowledge base list:", error);
+      throw error;
+    }
+  }
+
+  // Check whether the knowledge base name already exists in the current tenant
+  async checkKnowledgeBaseNameExists(name: string): Promise<boolean> {
+    try {
+      const result = await this.checkKnowledgeBaseName(name);
+      if (result.status === NAME_CHECK_STATUS.CHECK_FAILED) {
+        throw new Error("Failed to check knowledge base name availability");
+      }
+      return result.status !== NAME_CHECK_STATUS.AVAILABLE;
+    } catch (error) {
+      log.error("Failed to check knowledge base name existence:", error);
+      throw error;
+    }
+  }
+
+  // New method to check knowledge base name against the new endpoint
+  async checkKnowledgeBaseName(
+    name: string
+  ): Promise<{ status: string; action?: string }> {
+    try {
+      const response = await fetch(API_ENDPOINTS.knowledgeBase.checkName, {
+        method: "POST",
+        headers: {
+          ...getAuthHeaders(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ knowledge_name: name }),
+      });
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || "Server error during name check");
+      }
+      return await response.json();
+    } catch (error) {
+      log.error("Failed to check knowledge base name:", error);
+      // Return a specific status to indicate a failed check, so UI can handle it.
+      return { status: NAME_CHECK_STATUS.CHECK_FAILED };
+    }
+  }
+
+  // Create a new knowledge base
+  async createKnowledgeBase(
+    params: KnowledgeBaseCreateParams
+  ): Promise<KnowledgeBase> {
+    try {
+      // First check Elasticsearch health status to avoid subsequent operation failures
+      const isHealthy = await this.checkHealth();
+      if (!isHealthy) {
+        throw new Error(
+          "Elasticsearch service unavailable, cannot create knowledge base"
+        );
+      }
+
+      // Build request body with optional group permission and user groups
+      const requestBody: {
+        name: string;
+        description: string;
+        embedding_model_id: number;
+        ingroup_permission?: string;
+        group_ids?: number[];
+        preserve_source_file?: boolean;
+        quota_limit_bytes?: number | null;
+      } = {
+        name: params.name,
+        description: params.description || "",
+        embedding_model_id: params.embeddingModelId,
+      };
+
+      // Include group permission and user groups if provided
+      if (params.ingroup_permission) {
+        requestBody.ingroup_permission = params.ingroup_permission;
+      }
+      if (params.group_ids && params.group_ids.length > 0) {
+        requestBody.group_ids = params.group_ids;
+      }
+      if (params.preserve_source_file !== undefined) {
+        requestBody.preserve_source_file = params.preserve_source_file;
+      }
+      if (params.quota_limit_bytes !== undefined) {
+        requestBody.quota_limit_bytes = params.quota_limit_bytes;
+      }
+
+      const response = await fetch(
+        API_ENDPOINTS.knowledgeBase.indexDetail(params.name),
+        {
+          method: "POST",
+          headers: getAuthHeaders(), // Add user authentication information to obtain the user id
+          body: JSON.stringify(requestBody),
+        }
+      );
+
+      const result = await response.json();
+      if (!response.ok) {
+        throw new ApiError(
+          response.status,
+          result.detail || result.message || "Failed to create knowledge base"
+        );
+      }
+      if (result.status !== "success") {
+        throw new Error(result.message || "Failed to create knowledge base");
+      }
+
+      // Create a full KnowledgeBase object with default values
+      return {
+        id: result.id || params.name, // Use returned ID or name as ID
+        name: params.name,
+        description: params.description || null,
+        documentCount: 0,
+        chunkCount: 0,
+        createdAt: new Date().toISOString(),
+        embeddingModel: result.embedding_model_name || "",
+        embeddingModelId: params.embeddingModelId,
+        is_multimodal: result.model_type === "multi_embedding",
+        avatar: "",
+        chunkNum: 0,
+        language: "",
+        nickname: "",
+        parserId: "",
+        permission: "",
+        tokenNum: 0,
+        source: params.source || "elasticsearch",
+      };
+    } catch (error) {
+      log.error("Failed to create knowledge base:", error);
+      throw error;
+    }
+  }
+
+  // Delete a knowledge base
+  async deleteKnowledgeBase(id: string): Promise<void> {
+    try {
+      // Use REST-style DELETE request to delete index
+      const response = await fetch(
+        API_ENDPOINTS.knowledgeBase.indexDetail(id),
+        {
+          method: "DELETE",
+          headers: getAuthHeaders(),
+        }
+      );
+
+      const result = await response.json();
+      if (result.status !== "success") {
+        throw new Error(result.message || "Failed to delete knowledge base");
+      }
+      emitQuotaUsageChanged();
+    } catch (error) {
+      log.error("Failed to delete knowledge base:", error);
+      throw error;
+    }
+  }
+
+  // Get all files from a knowledge base, regardless of the existence of index
+  async getAllFiles(kbId: string, kbSource?: string): Promise<Document[]> {
+    try {
+      let response: Response;
+      let result: any;
+
+      // Determine which API to call based on knowledge base source
+      if (kbSource === "datamate") {
+        // Call DataMate files API
+        response = await fetch(API_ENDPOINTS.datamate.files(kbId), {
+          headers: getAuthHeaders(),
+        });
+        result = await response.json();
+      } else {
+        // Call Elasticsearch files API (default behavior)
+        response = await fetch(API_ENDPOINTS.knowledgeBase.listFiles(kbId), {
+          headers: getAuthHeaders(),
+        });
+        result = await response.json();
+      }
+
+      if (result.status !== "success") {
+        throw new Error("Failed to get file list");
+      }
+
+      if (!result.files || !Array.isArray(result.files)) {
+        return [];
+      }
+
+      return result.files.map((file: any) => ({
+        id: file.path_or_url,
+        kb_id: kbId,
+        name: file.file,
+        type: this.getFileTypeFromName(file.file || file.path_or_url),
+        size: file.file_size,
+        create_time: file.create_time,
+        chunk_num: file.chunk_count ?? 0,
+        token_num: 0,
+        status: file.status || "UNKNOWN",
+        latest_task_id: file.latest_task_id || "",
+        error_reason: file.error_reason,
+        // Optional ingestion progress metrics (only present for in-progress files)
+        processed_chunk_num:
+          typeof file.processed_chunk_num === "number"
+            ? file.processed_chunk_num
+            : null,
+        total_chunk_num:
+          typeof file.total_chunk_num === "number"
+            ? file.total_chunk_num
+            : null,
+      }));
+    } catch (error) {
+      log.error("Failed to get all files:", error);
+      throw error;
+    }
+  }
+
+  // Get file type from filename
+  private getFileTypeFromName(filename: string): string {
+    if (!filename) return FILE_TYPES.UNKNOWN;
+
+    const extension = filename.split(".").pop()?.toLowerCase();
+    return (
+      EXTENSION_TO_TYPE_MAP[extension as keyof typeof EXTENSION_TO_TYPE_MAP] ||
+      FILE_TYPES.UNKNOWN
+    );
+  }
+
+  // Upload documents to a knowledge base
+  async uploadDocuments(
+    kbId: string,
+    files: File[],
+    chunkingStrategy?: string
+  ): Promise<{ quota_status?: QuotaStatusResponse }> {
+    try {
+      if (
+        files.some((file) => file.size > KNOWLEDGE_BASE_MAX_FILE_SIZE_BYTES)
+      ) {
+        throw new Error(i18n.t("knowledgeBase.upload.fileTooLarge"));
+      }
+
+      // Create FormData object
+      const formData = new FormData();
+      formData.append("index_name", kbId);
+      for (let i = 0; i < files.length; i++) {
+        formData.append("file", files[i]);
+      }
+      // Default destination is now Minio
+      formData.append("destination", "minio");
+      formData.append("folder", "knowledge_base");
+
+      // If chunking strategy is provided, add it to the request
+      if (chunkingStrategy) {
+        formData.append("chunking_strategy", chunkingStrategy);
+      }
+
+      // 1. Upload files
+      const uploadResponse = await fetch(API_ENDPOINTS.knowledgeBase.upload, {
+        method: "POST",
+        headers: {
+          "User-Agent": "AgentFrontEnd/1.0",
+        },
+        body: formData,
+      });
+
+      const uploadResult = await uploadResponse.json();
+
+      if (!uploadResponse.ok) {
+        const detail =
+          uploadResult.detail && typeof uploadResult.detail === "object"
+            ? uploadResult.detail
+            : null;
+        throw new ApiError(
+          uploadResult.code ||
+            uploadResult.error ||
+            detail?.code ||
+            uploadResponse.status,
+          uploadResult.message ||
+            detail?.message ||
+            uploadResult.error ||
+            (uploadResponse.status === 400
+              ? "File upload validation failed"
+              : "File upload failed"),
+          uploadResult.details || detail?.details || null
+        );
+      }
+
+      if (
+        !uploadResult.uploaded_file_paths ||
+        uploadResult.uploaded_file_paths.length === 0
+      ) {
+        throw new Error("No files were uploaded successfully.");
+      }
+
+      // 2. Trigger data processing
+      // Combine uploaded file paths and filenames into the required format
+      const filesToProcess = uploadResult.uploaded_file_paths.map(
+        (filePath: string, index: number) => ({
+          path_or_url: filePath,
+          filename: uploadResult.uploaded_filenames[index],
+        })
+      );
+
+      const processResponse = await fetch(API_ENDPOINTS.knowledgeBase.process, {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          index_name: kbId,
+          files: filesToProcess,
+          chunking_strategy: chunkingStrategy,
+          destination: "minio",
+        }),
+      });
+
+      if (!processResponse.ok) {
+        const processResult = await processResponse.json();
+        // Handle 500 error (data processing service failure)
+        if (processResponse.status === 500) {
+          const errorMessage = `Data processing service failed: ${
+            processResult.error
+          }. Files: ${processResult.files.join(", ")}`;
+          throw new Error(errorMessage);
+        }
+        throw new Error(processResult.error || "Data processing failed");
+      }
+
+      // Handle successful response (201)
+      if (processResponse.status === 201) {
+        emitQuotaUsageChanged();
+        return { quota_status: uploadResult?.quota_status };
+      }
+
+      throw new Error("Unknown response status during processing");
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  // Delete a document from a knowledge base
+  async deleteDocument(docId: string, kbId: string): Promise<void> {
+    try {
+      // Use REST-style DELETE request to delete document, requires knowledge base ID and document path
+      const response = await fetch(
+        `${API_ENDPOINTS.knowledgeBase.indexDetail(
+          kbId
+        )}/documents?path_or_url=${encodeURIComponent(docId)}`,
+        {
+          method: "DELETE",
+          headers: getAuthHeaders(),
+        }
+      );
+
+      const result = await response.json();
+      if (result.status !== "success") {
+        throw new Error(result.message || "Failed to delete document");
+      }
+      emitQuotaUsageChanged();
+    } catch (error) {
+      log.error("Failed to delete document:", error);
+      throw error;
+    }
+  }
+
+  // Summary index content
+  async summaryIndex(
+    indexName: string,
+    batchSize: number = 1000,
+    onProgress?: (text: string) => void,
+    modelId?: number
+  ): Promise<string> {
+    try {
+      const baseUrl = API_ENDPOINTS.knowledgeBase.summary(indexName);
+      const url = new URL(baseUrl, window.location.origin);
+      url.searchParams.set("batch_size", batchSize.toString());
+      if (modelId) {
+        url.searchParams.set("model_id", modelId.toString());
+      }
+
+      const response = await fetch(url.toString(), {
+        method: "POST",
+        headers: getAuthHeaders(),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      if (!response.body) {
+        throw new Error("Response body is null");
+      }
+
+      // Handle streaming response
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder("utf-8");
+      let summary = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        // Decode binary data to text
+        const chunk = decoder.decode(value, { stream: true });
+
+        // Handle SSE format data
+        const lines = chunk.split("\n\n");
+        for (const line of lines) {
+          if (line.trim().startsWith("data:")) {
+            try {
+              // Extract JSON data
+              const jsonStr = line.substring(line.indexOf("{"));
+              const data = JSON.parse(jsonStr);
+
+              if (data.status === "success") {
+                // Accumulate message part to summary
+                summary += data.message;
+
+                // If progress callback is provided, call it
+                if (onProgress) {
+                  onProgress(data.message);
+                }
+              } else if (data.status === "completed") {
+                // On completed, check if the accumulated summary is empty
+                if (!summary || summary.trim() === "") {
+                  // No summary was generated, throw internationalized error
+                  const errorMessage = i18n.t(
+                    "knowledgeBase.summary.notGenerated"
+                  );
+                  throw new Error(errorMessage);
+                }
+                // If there is a final message, append it
+                if (data.message && data.message.trim() !== "") {
+                  summary += data.message;
+                  if (onProgress) {
+                    onProgress(data.message);
+                  }
+                }
+              } else if (data.status === "error") {
+                throw new Error(data.message);
+              }
+            } catch (e) {
+              log.error("Failed to parse SSE data:", e, line);
+            }
+          }
+        }
+      }
+
+      return summary;
+    } catch (error) {
+      log.error("Error summarizing index:", error);
+      throw error;
+    }
+  }
+
+  // Change knowledge base summary
+  async changeSummary(indexName: string, summaryResult: string): Promise<void> {
+    try {
+      const response = await fetch(
+        API_ENDPOINTS.knowledgeBase.changeSummary(indexName),
+        {
+          method: "POST",
+          headers: getAuthHeaders(),
+          body: JSON.stringify({
+            summary_result: summaryResult,
+          }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data.detail ||
+            data.message ||
+            `HTTP error! status: ${response.status}`
+        );
+      }
+
+      if (data.status !== "success") {
+        throw new Error(data.message || "Failed to change summary");
+      }
+    } catch (error) {
+      log.error("Error changing summary:", error);
+      if (error instanceof Error) {
+        throw error;
+      }
+      throw new Error("Failed to change summary");
+    }
+  }
+
+  async fetchSummaryFrequencyOptions(): Promise<
+    { value: string; label: string }[]
+  > {
+    const response = await fetch(
+      API_ENDPOINTS.knowledgeBase.summaryFrequencyOptions,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
+    const data = await response.json();
+    return data.options || [];
+  }
+
+  async updateKnowledgeBaseQuota(
+    indexName: string,
+    limitBytes: number | null
+  ): Promise<void> {
+    const response = await fetch(
+      API_ENDPOINTS.knowledgeBase.updateIndex(indexName),
+      {
+        method: "PATCH",
+        headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({ quota_limit_bytes: limitBytes }),
+      }
+    );
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.detail || data.message || "Failed to update quota");
+    }
+  }
+
+  // Update auto-summary frequency for a knowledge base
+  async updateSummaryFrequency(
+    indexName: string,
+    frequency: string | null
+  ): Promise<void> {
+    try {
+      const response = await fetch(
+        API_ENDPOINTS.knowledgeBase.updateSummaryFrequency(indexName),
+        {
+          method: "PATCH",
+          headers: {
+            ...getAuthHeaders(),
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ summary_frequency: frequency }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data.detail ||
+            data.message ||
+            `HTTP error! status: ${response.status}`
+        );
+      }
+    } catch (error) {
+      log.error("Error updating summary frequency:", error);
+      throw error;
+    }
+  }
+
+  // Get knowledge base summary
+  async getSummary(indexName: string): Promise<string> {
+    try {
+      const response = await fetch(
+        API_ENDPOINTS.knowledgeBase.getSummary(indexName),
+        {
+          method: "GET",
+          headers: getAuthHeaders(),
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data.detail ||
+            data.message ||
+            `HTTP error! status: ${response.status}`
+        );
+      }
+
+      if (data.status !== "success") {
+        throw new Error(data.message || "Failed to get summary");
+      }
+      return data.summary;
+    } catch (error) {
+      log.error("Error geting summary:", error);
+      if (error instanceof Error) {
+        throw error;
+      }
+      throw new Error("Failed to get summary");
+    }
+  }
+
+  // Preview chunks from a knowledge base
+  async previewChunks(
+    indexName: string,
+    batchSize: number = 1000
+  ): Promise<any[]> {
+    try {
+      const url = new URL(
+        API_ENDPOINTS.knowledgeBase.chunks(indexName),
+        window.location.origin
+      );
+      url.searchParams.set("batch_size", batchSize.toString());
+
+      const response = await fetch(url.toString(), {
+        method: "POST",
+        headers: getAuthHeaders(),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data.detail ||
+            data.message ||
+            `HTTP error! status: ${response.status}`
+        );
+      }
+
+      if (data.status !== "success") {
+        throw new Error(data.message || "Failed to get chunks");
+      }
+
+      return data.chunks || [];
+    } catch (error) {
+      log.error("Error getting chunks:", error);
+      if (error instanceof Error) {
+        throw error;
+      }
+      throw new Error("Failed to get chunks");
+    }
+  }
+
+  // Preview chunks from a knowledge base with pagination
+  async previewChunksPaginated(
+    indexName: string,
+    page: number = 1,
+    pageSize: number = 10,
+    pathOrUrl?: string
+  ): Promise<{
+    chunks: any[];
+    total: number;
+    page: number;
+    pageSize: number;
+  }> {
+    try {
+      const url = new URL(
+        API_ENDPOINTS.knowledgeBase.chunks(indexName),
+        window.location.origin
+      );
+      url.searchParams.set("page", page.toString());
+      url.searchParams.set("page_size", pageSize.toString());
+      if (pathOrUrl) {
+        url.searchParams.set("path_or_url", pathOrUrl);
+      }
+
+      const response = await fetch(url.toString(), {
+        method: "POST",
+        headers: getAuthHeaders(),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data.detail ||
+            data.message ||
+            `HTTP error! status: ${response.status}`
+        );
+      }
+
+      if (data.status !== "success") {
+        throw new Error(data.message || "Failed to get chunks");
+      }
+
+      return {
+        chunks: data.chunks || [],
+        total: data.total || 0,
+        page: data.page || page,
+        pageSize: data.page_size || pageSize,
+      };
+    } catch (error) {
+      log.error("Error getting chunks with pagination:", error);
+      if (error instanceof Error) {
+        throw error;
+      }
+      throw new Error("Failed to get chunks");
+    }
+  }
+
+  async createChunk(
+    indexName: string,
+    payload: {
+      content: string;
+      filename?: string;
+      path_or_url: string;
+      metadata?: Record<string, unknown>;
+    }
+  ): Promise<{ chunk_id: string }> {
+    try {
+      const response = await fetch(
+        API_ENDPOINTS.knowledgeBase.chunk(indexName),
+        {
+          method: "POST",
+          headers: getAuthHeaders(),
+          body: JSON.stringify(payload),
+        }
+      );
+      const data = await response.json();
+
+      if (data.status !== "success") {
+        throw new Error(data.message || "Failed to create chunk");
+      }
+
+      return { chunk_id: data.chunk_id };
+    } catch (error) {
+      log.error("Error creating chunk:", error);
+      if (error instanceof Error) {
+        throw error;
+      }
+      throw new Error("Failed to create chunk");
+    }
+  }
+
+  async updateChunk(
+    indexName: string,
+    chunkId: string,
+    payload: {
+      content?: string;
+      filename?: string;
+      metadata?: Record<string, unknown>;
+    }
+  ): Promise<void> {
+    try {
+      const response = await fetch(
+        API_ENDPOINTS.knowledgeBase.chunkDetail(indexName, chunkId),
+        {
+          method: "PUT",
+          headers: getAuthHeaders(),
+          body: JSON.stringify(payload),
+        }
+      );
+      const data = await response.json();
+
+      if (data.status !== "success") {
+        throw new Error(data.message || "Failed to update chunk");
+      }
+    } catch (error) {
+      log.error("Error updating chunk:", error);
+      if (error instanceof Error) {
+        throw error;
+      }
+      throw new Error("Failed to update chunk");
+    }
+  }
+
+  async deleteChunk(indexName: string, chunkId: string): Promise<void> {
+    try {
+      const response = await fetch(
+        API_ENDPOINTS.knowledgeBase.chunkDetail(indexName, chunkId),
+        {
+          method: "DELETE",
+          headers: getAuthHeaders(),
+        }
+      );
+      const data = await response.json();
+
+      if (data.status !== "success") {
+        throw new Error(data.message || "Failed to delete chunk");
+      }
+    } catch (error) {
+      log.error("Error deleting chunk:", error);
+      if (error instanceof Error) {
+        throw error;
+      }
+      throw new Error("Failed to delete chunk");
+    }
+  }
+
+  // Hybrid search to retrieve chunks via combined semantic and accurate scoring
+  async hybridSearch(
+    indexName: string,
+    query: string,
+    options?: { topK?: number; weightAccurate?: number }
+  ): Promise<{
+    results: any[];
+    total?: number;
+    query_time_ms?: number;
+  }> {
+    try {
+      const response = await fetch(API_ENDPOINTS.knowledgeBase.searchHybrid, {
+        method: "POST",
+        headers: {
+          ...getAuthHeaders(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          query,
+          index_names: [indexName],
+          top_k: options?.topK ?? 10,
+          ...(options?.weightAccurate !== undefined
+            ? { weight_accurate: options.weightAccurate }
+            : {}),
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data.detail ||
+            data.message ||
+            `HTTP error! status: ${response.status}`
+        );
+      }
+
+      return {
+        results: Array.isArray(data.results) ? data.results : [],
+        total: data.total,
+        query_time_ms: data.query_time_ms,
+      };
+    } catch (error) {
+      log.error("Failed to execute hybrid search:", error);
+      if (error instanceof Error) {
+        throw error;
+      }
+      throw new Error("Failed to execute hybrid search");
+    }
+  }
+
+  // Update knowledge base info
+  async updateKnowledgeBase(
+    indexName: string,
+    data: {
+      knowledge_name?: string;
+      ingroup_permission?: string;
+      group_ids?: number[];
+    }
+  ): Promise<void> {
+    try {
+      const response = await fetch(
+        API_ENDPOINTS.knowledgeBase.updateIndex(indexName),
+        {
+          method: "PATCH",
+          headers: {
+            ...getAuthHeaders(),
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(data),
+        }
+      );
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          result.detail || result.message || "Failed to update knowledge base"
+        );
+      }
+    } catch (error) {
+      log.error("Failed to update knowledge base:", error);
+      if (error instanceof Error) {
+        throw error;
+      }
+      throw new Error("Failed to update knowledge base");
+    }
+  }
+
+  // Get document error information for a document
+  async getDocumentErrorInfo(
+    kbId: string,
+    docId: string
+  ): Promise<{
+    errorCode: string | null;
+  }> {
+    try {
+      const response = await fetch(
+        API_ENDPOINTS.knowledgeBase.getErrorInfo(kbId, docId),
+        {
+          headers: getAuthHeaders(),
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      if (data.status !== "success") {
+        throw new Error(data.message || "Failed to get error info");
+      }
+
+      const errorCode = (data.error_code && String(data.error_code)) || null;
+
+      return {
+        errorCode,
+      };
+    } catch (error) {
+      log.error("Failed to get document error info:", error);
+      throw error;
+    }
+  }
+
+  // Embedding model status and configuration
+  async getEmbeddingModelStatus(indexName: string): Promise<{
+    status: "configured" | "legacy" | "missing";
+    needs_config: boolean;
+    index_name: string;
+    knowledge_name: string;
+    model_id: string | null;
+    embedding_model_name: string | null;
+    model_info: {
+      model_id: string;
+      model_name: string;
+      display_name: string;
+      model_type: string;
+    } | null;
+    message: string;
+  }> {
+    try {
+      const response = await fetch(
+        API_ENDPOINTS.knowledgeBase.embeddingModelStatus(indexName),
+        {
+          headers: getAuthHeaders(),
+        }
+      );
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new ApiError(
+          response.status,
+          errorData.detail ||
+            errorData.message ||
+            "Failed to get embedding model status"
+        );
+      }
+
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      log.error("Failed to get embedding model status:", error);
+      if (error instanceof ApiError) {
+        throw error;
+      }
+      if (error instanceof Error) {
+        throw error;
+      }
+      throw new Error("Failed to get embedding model status");
+    }
+  }
+
+  async updateEmbeddingModel(
+    indexName: string,
+    modelId: string
+  ): Promise<{
+    success: boolean;
+    message: string;
+  }> {
+    try {
+      const response = await fetch(
+        API_ENDPOINTS.knowledgeBase.updateEmbeddingModel(indexName),
+        {
+          method: "PUT",
+          headers: {
+            ...getAuthHeaders(),
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ model_id: modelId }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new ApiError(
+          response.status,
+          data.detail || data.message || "Failed to update embedding model"
+        );
+      }
+
+      return {
+        success: true,
+        message: data.message || "Embedding model updated successfully",
+      };
+    } catch (error) {
+      log.error("Failed to update embedding model:", error);
+      if (error instanceof ApiError) {
+        throw error;
+      }
+      if (error instanceof Error) {
+        throw error;
+      }
+      throw new Error("Failed to update embedding model");
+    }
+  }
+}
+
+// Export a singleton instance
+const knowledgeBaseService = new KnowledgeBaseService();
+export default knowledgeBaseService;

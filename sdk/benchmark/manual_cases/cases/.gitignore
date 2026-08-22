@@ -1,0 +1,5 @@
+# Only keep the example case under version control; all other cases are
+# private/experimental data that should not be committed.
+*
+!.gitignore
+!example_infra/

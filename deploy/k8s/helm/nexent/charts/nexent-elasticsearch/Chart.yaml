@@ -1,0 +1,17 @@
+apiVersion: v2
+name: nexent-elasticsearch
+description: Nexent Elasticsearch - Search and analytics engine
+type: application
+version: 0.1.0
+appVersion: "latest"
+keywords:
+  - nexent
+  - elasticsearch
+  - search
+  - analytics
+maintainers:
+  - name: Nexent Team
+dependencies:
+  - name: nexent-common
+    version: 0.1.0
+    repository: "file://../nexent-common"

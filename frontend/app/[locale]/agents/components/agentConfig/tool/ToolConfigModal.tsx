@@ -1,0 +1,2573 @@
+﻿"use client";
+
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useTranslation } from "react-i18next";
+import {
+  Modal,
+  Input,
+  Switch,
+  InputNumber,
+  Tag,
+  Form,
+  Select,
+  Skeleton,
+  App,
+} from "antd";
+import type { FormInstance } from "antd";
+
+// Delay setFieldValue to the next microtask so the form is guaranteed to be mounted.
+// Otherwise React Strict Mode or modal close cycles can call it before the Form
+// element is re-inserted into the DOM, triggering the "not connected" warning.
+function safeSetFieldValue(form: FormInstance, field: string, value: unknown) {
+  queueMicrotask(() => {
+    form.setFieldValue(field, value);
+  });
+}
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useAgentStore } from "@/stores/agentStore";
+import { CloseOutlined } from "@ant-design/icons";
+
+import { TOOL_PARAM_TYPES, getToolParamOptions } from "@/const/agentConfig";
+import { ToolParam, Tool } from "@/types/agentConfig";
+import { KnowledgeBase } from "@/types/knowledgeBase";
+import ToolTestPanel from "./ToolTestPanel";
+import { updateToolConfig } from "@/services/agentConfigService";
+import KnowledgeBaseSelectorModal from "@/components/tool-config/KnowledgeBaseSelectorModal";
+import HaotianKnowledgeSelectorModal, {
+  HaotianKnowledgeSet,
+} from "@/components/tool-config/HaotianKnowledgeSelectorModal";
+import AidpKnowledgeSelectorModal from "@/ext_components/aidp/AidpKnowledgeSelectorModal";
+import { useConfig } from "@/hooks/useConfig";
+import {
+  useKnowledgeBasesForToolConfig,
+  knowledgeBaseKeys,
+} from "@/hooks/useKnowledgeBaseSelector";
+import {
+  useKnowledgeBaseConfigChangeHandler,
+  ToolKbType,
+} from "@/hooks/useKnowledgeBaseConfigChangeHandler";
+import knowledgeBaseService from "@/services/knowledgeBaseService";
+import { modelService } from "@/services/modelService";
+import log from "@/lib/logger";
+import { MODEL_TYPES } from "@/const/modelConfig";
+import {
+  isZhLocale,
+  getLocalizedDescription,
+  getKbDisplayName,
+  mapKbIdsToDisplayNames,
+  parseKbIds,
+} from "@/lib/utils";
+import { ModelOption, ModelType } from "@/types/modelConfig";
+
+export interface ToolConfigModalProps {
+  isOpen: boolean;
+  onCancel: () => void;
+  onSave?: (params: ToolParam[]) => void;
+  tool: Tool;
+  initialParams: ToolParam[];
+  selectedTool?: Tool | null;
+  currentAgentId?: number;
+  localOnly?: boolean;
+}
+
+// Tool types that require knowledge base selection
+const TOOLS_REQUIRING_KB_SELECTION = [
+  "knowledge_base_search",
+  "dify_search",
+  "datamate_search",
+  "idata_search",
+  "haotian_search",
+  "ragflow_search",
+  "aidp_search",
+  "ind_aidp_search",
+];
+
+const TOOLS_SUPPORTING_RERANK = [
+  "knowledge_base_search",
+  "dify_search",
+  "datamate_search",
+  "ragflow_search",
+];
+
+const ANALYZE_TOOL_MODEL_TYPES: Record<string, ModelType> = {
+  analyze_text_file: MODEL_TYPES.LLM,
+  analyze_image: MODEL_TYPES.VLM,
+  analyze_audio: MODEL_TYPES.VLM3,
+  analyze_video: MODEL_TYPES.VLM3,
+};
+
+const ANALYZE_TOOL_MODEL_DESCRIPTIONS: Record<string, string> = {
+  analyze_text_file:
+    "Optional Nexent LLM model ID to use for text file analysis. If omitted, the default LLM model is used.",
+  analyze_image:
+    "Optional Nexent image understanding model ID to use for image analysis. If omitted, the default image understanding model is used.",
+  analyze_audio:
+    "Optional Nexent video understanding model ID to use for audio analysis. If omitted, the default video understanding model is used.",
+  analyze_video:
+    "Optional Nexent video understanding model ID to use for video analysis. If omitted, the default video understanding model is used.",
+};
+
+function withRerankParams(params: ToolParam[], toolName?: string): ToolParam[] {
+  if (!toolName || !TOOLS_SUPPORTING_RERANK.includes(toolName)) return params;
+
+  const hasRerank = params.some((p) => p.name === "rerank");
+  const hasRerankModelName = params.some((p) => p.name === "rerank_model_name");
+  if (hasRerank && hasRerankModelName) return params;
+
+  const next = [...params];
+
+  if (!hasRerank) {
+    next.push({
+      name: "rerank",
+      type: "boolean",
+      required: false,
+      value: false,
+      description: "Whether to enable reranking for search results",
+    });
+  }
+
+  if (!hasRerankModelName) {
+    next.push({
+      name: "rerank_model_name",
+      type: "string",
+      required: false,
+      value: "",
+      description: "The name of the rerank model to use",
+    });
+  }
+
+  return next;
+}
+
+function withAnalyzeToolModelParam(
+  params: ToolParam[],
+  toolName?: string
+): ToolParam[] {
+  if (!toolName || !ANALYZE_TOOL_MODEL_TYPES[toolName]) return params;
+
+  const normalizedParams = params.map((param) => {
+    if (param.name !== "selected_model_id") return param;
+    const value =
+      param.value === "" || param.value === undefined || param.value === null
+        ? undefined
+        : Number(param.value);
+    return { ...param, value };
+  });
+
+  if (normalizedParams.some((param) => param.name === "selected_model_id")) {
+    return normalizedParams;
+  }
+
+  return [
+    ...normalizedParams,
+    {
+      name: "selected_model_id",
+      type: "number",
+      required: false,
+      value: undefined,
+      description: ANALYZE_TOOL_MODEL_DESCRIPTIONS[toolName],
+    },
+  ];
+}
+
+function withExtraToolParams(
+  params: ToolParam[],
+  toolName?: string
+): ToolParam[] {
+  return withAnalyzeToolModelParam(
+    withRerankParams(params, toolName),
+    toolName
+  );
+}
+
+export default function ToolConfigModal({
+  isOpen,
+  onCancel,
+  onSave,
+  tool,
+  initialParams,
+  selectedTool,
+  currentAgentId,
+  localOnly = false,
+}: ToolConfigModalProps) {
+  const [currentParams, setCurrentParams] = useState<ToolParam[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const { t } = useTranslation("common");
+  const [form] = Form.useForm();
+  const queryClient = useQueryClient();
+  const updateTools = useAgentStore((state) => state.updateTools);
+  const { message } = App.useApp();
+
+  // Tool test panel visibility state
+  const [testPanelVisible, setTestPanelVisible] = useState(false);
+
+  // Knowledge base selector state
+  const [kbSelectorVisible, setKbSelectorVisible] = useState(false);
+  const [currentKbParamIndex, setCurrentKbParamIndex] = useState<number | null>(
+    null
+  );
+  const [selectedKbIds, setSelectedKbIds] = useState<string[]>([]);
+
+  // Use React Query for config data
+  const { data: configData } = useConfig();
+  const analyzeToolModelType = tool?.name
+    ? ANALYZE_TOOL_MODEL_TYPES[tool.name]
+    : undefined;
+  const isAnalyzeToolWithModelSelection = Boolean(analyzeToolModelType);
+  const { data: registeredModels = [], isFetching: registeredModelsLoading } =
+    useQuery<ModelOption[]>({
+      queryKey: ["models", "registered", "toolConfig", analyzeToolModelType],
+      queryFn: () => modelService.getAllModels(),
+      enabled: isOpen && isAnalyzeToolWithModelSelection,
+      staleTime: 60_000,
+      gcTime: 5 * 60_000,
+    });
+  const analyzeToolModelOptions = useMemo(() => {
+    if (!analyzeToolModelType) return [];
+    return registeredModels
+      .filter((model) => model.type === analyzeToolModelType)
+      .map((model) => ({
+        value: model.id,
+        label: model.displayName || model.name,
+      }));
+  }, [registeredModels, analyzeToolModelType]);
+  const [selectedKbDisplayNames, setSelectedKbDisplayNames] = useState<
+    string[]
+  >([]);
+
+  // Independent KB selection state for test panel (separate from config's selectedKbIds)
+  const [testPanelKbIds, setTestPanelKbIds] = useState<string[]>([]);
+  const [testPanelKbDisplayNames, setTestPanelKbDisplayNames] = useState<
+    string[]
+  >([]);
+
+  // Track if user has attempted to submit the form
+  const [hasSubmitted, setHasSubmitted] = useState(false);
+
+  // Dify configuration state
+  const [difyConfig, setDifyConfig] = useState<{
+    serverUrl: string;
+    apiKey: string;
+  }>({
+    serverUrl: "",
+    apiKey: "",
+  });
+
+  // RAGFlow configuration state
+  const [ragflowConfig, setRagflowConfig] = useState<{
+    serverUrl: string;
+    apiKey: string;
+  }>({
+    serverUrl: "",
+    apiKey: "",
+  });
+
+  // iData configuration state
+  const [idataConfig, setIdataConfig] = useState<{
+    serverUrl: string;
+    apiKey: string;
+    userId: string;
+    knowledgeSpaceId: string;
+  }>({
+    serverUrl: "",
+    apiKey: "",
+    userId: "",
+    knowledgeSpaceId: "",
+  });
+
+  // iData knowledge spaces state
+  const [idataKnowledgeSpaces, setIdataKnowledgeSpaces] = useState<
+    Array<{ id: string; name: string }>
+  >([]);
+  const [idataKnowledgeSpacesLoading, setIdataKnowledgeSpacesLoading] =
+    useState(false);
+
+  // DataMate URL from knowledge base configuration
+  const [knowledgeBaseDataMateUrl, setKnowledgeBaseDataMateUrl] =
+    useState<string>("");
+  // Track if knowledge base config has changed (server_url or api_key changed)
+  const [hasKbConfigChanged, setHasKbConfigChanged] = useState(false);
+  // Track if user has manually modified the datamate URL field
+  const [hasUserModifiedDatamateUrl, setHasUserModifiedDatamateUrl] =
+    useState(false);
+
+  // Load DataMate URL from knowledge base configuration via React Query cached data
+  const loadKnowledgeBaseDataMateUrl = useCallback(() => {
+    if (configData?.app && typeof configData.app.datamateUrl === "string") {
+      setKnowledgeBaseDataMateUrl(configData.app.datamateUrl);
+    }
+  }, [configData]);
+
+  // Check if current tool requires knowledge base selection (must be declared before toolKbType)
+  const toolRequiresKbSelection = useMemo(() => {
+    return TOOLS_REQUIRING_KB_SELECTION.includes(tool?.name);
+  }, [tool?.name]);
+
+  // Get tool type for knowledge base selection
+  const toolKbType = useMemo(():
+    | "knowledge_base_search"
+    | "dify_search"
+    | "datamate_search"
+    | "idata_search"
+    | "haotian_search"
+    | "ragflow_search"
+    | "aidp_search"
+    | "ind_aidp_search"
+    | null => {
+    if (!toolRequiresKbSelection) return null;
+    const name = tool?.name;
+    if (name === "dify_search") return "dify_search";
+    if (name === "datamate_search") return "datamate_search";
+    if (name === "idata_search") return "idata_search";
+    if (name === "haotian_search") return "haotian_search";
+    if (name === "ragflow_search") return "ragflow_search";
+    if (name === "aidp_search") return "aidp_search";
+    if (name === "ind_aidp_search") return "ind_aidp_search";
+    return "knowledge_base_search";
+  }, [tool?.name, toolRequiresKbSelection]);
+
+  const isKnowledgeBaseSearchTool = toolKbType === "knowledge_base_search";
+
+  // Ref to track when modal opens so we can restore testPanelKbIds after selectedKbIds is loaded from config.
+  // Using a ref avoids the stale-closure problem and ensures the restore always runs
+  // after selectedKbIds has been updated from config.
+  const prevIsOpenRef = useRef<boolean>(false);
+  // Track if KB IDs came from user confirmation (not config load)
+  const isUserConfirmedKbRef = useRef<boolean>(false);
+  // Track if we have restored test panel KB from config (only restore once per modal open)
+  const hasRestoredFromConfigRef = useRef<boolean>(false);
+  // Ref to always have the latest selectedKbIds value (avoid stale closure)
+  const selectedKbIdsRef = useRef<string[]>([]);
+
+  // Keep selectedKbIdsRef in sync with selectedKbIds
+  useEffect(() => {
+    selectedKbIdsRef.current = selectedKbIds;
+  }, [selectedKbIds]);
+
+  // Reset testPanelKbIds to [] on modal open (before config KB IDs are loaded).
+  // This prevents stale test panel KB when switching between tools with different KBs.
+  useEffect(() => {
+    const wasClosed = !prevIsOpenRef.current;
+    prevIsOpenRef.current = isOpen;
+    isUserConfirmedKbRef.current = false;
+    hasRestoredFromConfigRef.current = false;
+    if (
+      isOpen &&
+      (toolKbType === "aidp_search" ||
+        toolKbType === "ind_aidp_search" ||
+        isKnowledgeBaseSearchTool)
+    ) {
+      setTestPanelKbIds([]);
+      setTestPanelKbDisplayNames([]);
+    }
+  }, [isOpen, toolKbType]);
+
+  // Haotian configuration state
+  const [haotianConfig, setHaotianConfig] = useState<{
+    listUrl: string;
+    retrieveUrl: string;
+    authorization: string;
+  }>({
+    listUrl: "",
+    retrieveUrl: "",
+    authorization: "",
+  });
+  const [haotianKnowledgeSets, setHaotianKnowledgeSets] = useState<
+    HaotianKnowledgeSet[]
+  >([]);
+
+  // Initialize Haotian config from params
+  useEffect(() => {
+    if (toolKbType !== "haotian_search") return;
+    const listUrl = String(
+      currentParams.find((p) => p.name === "list_url")?.value || ""
+    );
+    const retrieveUrl = String(
+      currentParams.find((p) => p.name === "retrieve_url")?.value || ""
+    );
+    const extAuth = String(
+      currentParams.find((p) => p.name === "authorization")?.value || ""
+    );
+    setHaotianConfig({ listUrl, retrieveUrl, authorization: extAuth });
+  }, [toolKbType, currentParams]);
+
+  const {
+    data: haotianSetsResult,
+    isFetching: haotianSetsLoading,
+    refetch: refetchHaotianSets,
+  } = useQuery({
+    queryKey: [
+      "knowledgeSets",
+      "list",
+      "haotian_search",
+      haotianConfig.listUrl,
+    ],
+    queryFn: async () => {
+      if (!haotianConfig.listUrl || !haotianConfig.authorization) {
+        return { knowledge_sets: [] as HaotianKnowledgeSet[] };
+      }
+      return await knowledgeBaseService.getHaotianKnowledgeSets(
+        haotianConfig.listUrl,
+        haotianConfig.authorization
+      );
+    },
+    enabled: !!haotianConfig.listUrl,
+    staleTime: 30_000,
+    gcTime: 5 * 60_000,
+    retry: 0,
+  });
+
+  useEffect(() => {
+    if (toolKbType !== "haotian_search") return;
+    const sets = (haotianSetsResult?.knowledge_sets ||
+      []) as HaotianKnowledgeSet[];
+    setHaotianKnowledgeSets(sets);
+  }, [toolKbType, haotianSetsResult]);
+
+  // Get Dify configuration from initial params
+  const difyServerUrlParam = useMemo(() => {
+    return currentParams.find((param) => param.name === "server_url");
+  }, [currentParams]);
+
+  const difyApiKeyParam = useMemo(() => {
+    return currentParams.find((param) => param.name === "api_key");
+  }, [currentParams]);
+
+  // Initialize Dify config from params
+  useEffect(() => {
+    if (toolKbType === "dify_search") {
+      const serverUrl = difyServerUrlParam?.value || "";
+      const apiKey = difyApiKeyParam?.value || "";
+
+      setDifyConfig({
+        serverUrl,
+        apiKey,
+      });
+    }
+  }, [toolKbType, difyServerUrlParam, difyApiKeyParam]);
+
+  // Get RAGFlow configuration from initial params
+  const ragflowServerUrlParam = useMemo(() => {
+    return currentParams.find((param) => param.name === "server_url");
+  }, [currentParams]);
+
+  const ragflowApiKeyParam = useMemo(() => {
+    return currentParams.find((param) => param.name === "api_key");
+  }, [currentParams]);
+
+  // Initialize RAGFlow config from params
+  useEffect(() => {
+    if (toolKbType === "ragflow_search") {
+      const serverUrl = ragflowServerUrlParam?.value || "";
+      const apiKey = ragflowApiKeyParam?.value || "";
+
+      setRagflowConfig({
+        serverUrl,
+        apiKey,
+      });
+    }
+  }, [toolKbType, ragflowServerUrlParam, ragflowApiKeyParam]);
+
+  // Get iData configuration from initial params
+  const idataServerUrlParam = useMemo(() => {
+    return currentParams.find((param) => param.name === "server_url");
+  }, [currentParams]);
+
+  const idataApiKeyParam = useMemo(() => {
+    return currentParams.find((param) => param.name === "api_key");
+  }, [currentParams]);
+
+  const idataUserIdParam = useMemo(() => {
+    return currentParams.find((param) => param.name === "user_id");
+  }, [currentParams]);
+
+  const idataKnowledgeSpaceIdParam = useMemo(() => {
+    return currentParams.find((param) => param.name === "knowledge_space_id");
+  }, [currentParams]);
+
+  // Initialize iData config from params
+  useEffect(() => {
+    if (toolKbType === "idata_search") {
+      const serverUrl = idataServerUrlParam?.value || "";
+      const apiKey = idataApiKeyParam?.value || "";
+      const userId = idataUserIdParam?.value || "";
+      const knowledgeSpaceId = idataKnowledgeSpaceIdParam?.value || "";
+
+      setIdataConfig({
+        serverUrl,
+        apiKey,
+        userId,
+        knowledgeSpaceId,
+      });
+    }
+  }, [
+    toolKbType,
+    idataServerUrlParam,
+    idataApiKeyParam,
+    idataUserIdParam,
+    idataKnowledgeSpaceIdParam,
+  ]);
+
+  // Fetch knowledge bases for tool config based on tool type (now uses React Query caching)
+  // For datamate_search, use the server_url from the form as config
+  const datamateServerUrl = useMemo(() => {
+    if (toolKbType === "datamate_search") {
+      const serverUrlParam = currentParams.find((p) => p.name === "server_url");
+      return serverUrlParam?.value || "";
+    }
+    return "";
+  }, [toolKbType, currentParams]);
+
+  const independentAidpConfig = useMemo(() => {
+    if (toolKbType !== "ind_aidp_search") return undefined;
+    return {
+      serverUrl: String(
+        currentParams.find((param) => param.name === "server_url")?.value || ""
+      ),
+      apiKey: String(
+        currentParams.find((param) => param.name === "api_key")?.value || ""
+      ),
+      tenantId: String(
+        currentParams.find((param) => param.name === "tenant_id")?.value ||
+          "aidp"
+      ),
+    };
+  }, [toolKbType, currentParams]);
+
+  // Fetch iData knowledge spaces when config is available
+  useEffect(() => {
+    if (
+      toolKbType === "idata_search" &&
+      idataConfig.serverUrl &&
+      idataConfig.apiKey &&
+      idataConfig.userId
+    ) {
+      setIdataKnowledgeSpacesLoading(true);
+      knowledgeBaseService
+        .getIdataKnowledgeSpaces(
+          idataConfig.serverUrl,
+          idataConfig.apiKey,
+          idataConfig.userId
+        )
+        .then((spaces) => {
+          setIdataKnowledgeSpaces(spaces);
+          setIdataKnowledgeSpacesLoading(false);
+        })
+        .catch((error) => {
+          log.error("Failed to fetch iData knowledge spaces:", error);
+          setIdataKnowledgeSpaces([]);
+          setIdataKnowledgeSpacesLoading(false);
+        });
+    } else if (toolKbType === "idata_search") {
+      setIdataKnowledgeSpaces([]);
+    }
+  }, [
+    toolKbType,
+    idataConfig.serverUrl,
+    idataConfig.apiKey,
+    idataConfig.userId,
+  ]);
+
+  // Resolve which config payload the shared "knowledge bases" hook needs for
+  // the current tool. Returns ``undefined`` when required fields are missing
+  // (the hook uses this to short-circuit refetching).
+  const resolveKbConfig = () => {
+    if (toolKbType === "dify_search") {
+      return difyConfig;
+    }
+    if (toolKbType === "datamate_search") {
+      return { serverUrl: datamateServerUrl };
+    }
+    if (toolKbType === "idata_search") {
+      if (
+        !idataConfig.serverUrl ||
+        !idataConfig.apiKey ||
+        !idataConfig.userId ||
+        !idataConfig.knowledgeSpaceId
+      ) {
+        return undefined;
+      }
+      return {
+        serverUrl: idataConfig.serverUrl,
+        apiKey: idataConfig.apiKey,
+        userId: idataConfig.userId,
+        knowledgeSpaceId: idataConfig.knowledgeSpaceId,
+      };
+    }
+    if (toolKbType === "aidp_search") {
+      return {};
+    }
+    if (toolKbType === "ind_aidp_search") {
+      return independentAidpConfig?.serverUrl && independentAidpConfig?.apiKey
+        ? independentAidpConfig
+        : undefined;
+    }
+    if (toolKbType === "ragflow_search") {
+      if (!ragflowConfig.serverUrl || !ragflowConfig.apiKey) {
+        return undefined;
+      }
+      return {
+        serverUrl: ragflowConfig.serverUrl,
+        apiKey: ragflowConfig.apiKey,
+      };
+    }
+    return undefined;
+  };
+
+  const {
+    data: knowledgeBases = [],
+    isLoading: kbLoading,
+    isSuccess: isKbListLoaded,
+    refetch: refetchKnowledgeBases,
+    clearKnowledgeBases,
+  } = useKnowledgeBasesForToolConfig(toolKbType, resolveKbConfig());
+
+  // Restore testPanelKbIds from selectedKbIds after modal opens and config KBs are loaded.
+  // Only runs when: (1) modal is open, (2) NOT from user confirmation, (3) knowledgeBases has been loaded.
+  // We depend on selectedKbIds to catch the case where KBs are loaded before selectedKbIds is initialized.
+  useEffect(() => {
+    if (!isOpen) return;
+    if (
+      toolKbType !== "aidp_search" &&
+      toolKbType !== "ind_aidp_search" &&
+      !isKnowledgeBaseSearchTool
+    )
+      return;
+    if (isUserConfirmedKbRef.current) return;
+    if (hasRestoredFromConfigRef.current) return;
+    if (selectedKbIds.length === 0 || knowledgeBases.length === 0) return;
+    hasRestoredFromConfigRef.current = true;
+    const displayNames = selectedKbIds.map((id) => {
+      const kb = knowledgeBases.find(
+        (k) => String(k.id).trim() === String(id).trim()
+      );
+      return kb?.display_name || kb?.name || id;
+    });
+    setTestPanelKbIds(selectedKbIds);
+    setTestPanelKbDisplayNames(displayNames);
+  }, [isOpen, selectedKbIds, knowledgeBases]);
+
+  // Handle config change: clear knowledge base selection and refetch
+  // Uses shared hook for both Dify and DataMate tools
+  const handleKbConfigChange = useCallback(() => {
+    // Mark that config has changed - this prevents restoring from initialParams
+    setHasKbConfigChanged(true);
+
+    // Clear previous knowledge base selection
+    setSelectedKbIds([]);
+    setSelectedKbDisplayNames([]);
+
+    // Clear form value for knowledge base field (index_names or dataset_ids)
+    const kbFieldIndex = currentParams.findIndex(
+      (p) =>
+        p.name === "index_names" ||
+        p.name === "dataset_ids" ||
+        p.name === "kds_list"
+    );
+    if (kbFieldIndex >= 0) {
+      form.setFieldValue(`param_${kbFieldIndex}`, []);
+      // Also clear the value in currentParams
+      const updatedParams = [...currentParams];
+      updatedParams[kbFieldIndex] = {
+        ...updatedParams[kbFieldIndex],
+        value: [],
+      };
+      setCurrentParams(updatedParams);
+    }
+
+    // Clear knowledge base list when config changes (API key/URL changed)
+    clearKnowledgeBases();
+
+    // Refetch knowledge bases with new config
+    refetchKnowledgeBases();
+  }, [refetchKnowledgeBases, clearKnowledgeBases, currentParams, form]);
+
+  // Resolve the config payload for the knowledge-base config change handler
+  // based on the current tool type, avoiding a deeply-nested ternary expression.
+  const kbHandlerConfig = useMemo(() => {
+    switch (toolKbType) {
+      case "dify_search":
+        return difyConfig;
+      case "ragflow_search":
+        return ragflowConfig;
+      case "datamate_search":
+        return { serverUrl: datamateServerUrl };
+      case "idata_search":
+        return {
+          serverUrl: idataConfig.serverUrl,
+          apiKey: idataConfig.apiKey,
+          userId: idataConfig.userId,
+        };
+      case "aidp_search":
+        return {
+          serverUrl: "",
+          apiKey: "",
+        };
+      case "ind_aidp_search":
+        return independentAidpConfig;
+      default:
+        return undefined;
+    }
+  }, [
+    toolKbType,
+    difyConfig,
+    ragflowConfig,
+    datamateServerUrl,
+    idataConfig,
+    independentAidpConfig,
+  ]);
+
+  useKnowledgeBaseConfigChangeHandler({
+    toolKbType,
+    config: kbHandlerConfig,
+    onConfigChange: handleKbConfigChange,
+  });
+
+  // Handle iData knowledge space ID change: clear knowledge base selection and refetch
+  const prevKnowledgeSpaceIdRef = useRef<string>("");
+  useEffect(() => {
+    if (
+      toolKbType === "idata_search" &&
+      idataConfig.knowledgeSpaceId &&
+      idataConfig.serverUrl &&
+      idataConfig.apiKey &&
+      idataConfig.userId
+    ) {
+      // Only trigger if knowledge space ID actually changed
+      // Skip if this is the initial load (prevKnowledgeSpaceIdRef is empty and we have a value from initialParams)
+      if (prevKnowledgeSpaceIdRef.current === idataConfig.knowledgeSpaceId) {
+        return;
+      }
+
+      // If prevKnowledgeSpaceIdRef is empty, this is likely the initial load
+      // Don't clear dataset_ids on initial load, only when space ID actually changes
+      if (prevKnowledgeSpaceIdRef.current === "") {
+        // This is initial load, just update the ref without clearing
+        prevKnowledgeSpaceIdRef.current = idataConfig.knowledgeSpaceId;
+        return;
+      }
+
+      // Update ref
+      prevKnowledgeSpaceIdRef.current = idataConfig.knowledgeSpaceId;
+
+      // Clear previous knowledge base selection when space ID changes
+      setSelectedKbIds([]);
+      setSelectedKbDisplayNames([]);
+
+      // Clear form value for dataset_ids field
+      const kbFieldIndex = currentParams.findIndex(
+        (p) => p.name === "dataset_ids"
+      );
+      if (kbFieldIndex >= 0) {
+        form.setFieldValue(`param_${kbFieldIndex}`, []);
+        const updatedParams = [...currentParams];
+        updatedParams[kbFieldIndex] = {
+          ...updatedParams[kbFieldIndex],
+          value: [],
+        };
+        setCurrentParams(updatedParams);
+      }
+
+      // Refetch knowledge bases with new space ID
+      refetchKnowledgeBases();
+    } else if (toolKbType === "idata_search") {
+      // Reset ref when config is cleared
+      prevKnowledgeSpaceIdRef.current = "";
+    }
+  }, [
+    toolKbType,
+    idataConfig.knowledgeSpaceId,
+    idataConfig.serverUrl,
+    idataConfig.apiKey,
+    idataConfig.userId,
+    refetchKnowledgeBases,
+    currentParams,
+    form,
+  ]);
+
+  // Reset prevKnowledgeSpaceIdRef when modal opens/closes
+  useEffect(() => {
+    if (!isOpen) {
+      // Reset ref when modal closes
+      prevKnowledgeSpaceIdRef.current = "";
+    } else if (isOpen && toolKbType === "idata_search") {
+      // Initialize ref with current knowledgeSpaceId when modal opens
+      // This prevents clearing dataset_ids on initial load
+      if (idataConfig.knowledgeSpaceId) {
+        prevKnowledgeSpaceIdRef.current = idataConfig.knowledgeSpaceId;
+      }
+    }
+  }, [isOpen, toolKbType, idataConfig.knowledgeSpaceId]);
+
+  // Check if a knowledge base can be selected
+  const canSelectKnowledgeBase = useCallback((kb: KnowledgeBase): boolean => {
+    // Only empty knowledge bases (0 documents AND 0 chunks) cannot be selected
+    const isEmpty = (kb.documentCount || 0) === 0 && (kb.chunkCount || 0) === 0;
+    if (isEmpty) {
+      return false;
+    }
+
+    return true;
+  }, []);
+
+  // Track whether this is the first time opening the modal (reset when modal closes)
+  const [modalOpened, setModalOpened] = useState(false);
+
+  // Reset modal state when modal closes
+  useEffect(() => {
+    if (!isOpen) {
+      setModalOpened(false);
+      setKnowledgeBaseDataMateUrl("");
+      setHasKbConfigChanged(false);
+    }
+  }, [isOpen]);
+
+  // Initialize with provided params and sync display names when knowledgeBases is ready
+  useEffect(() => {
+    // Load DataMate URL from knowledge base configuration
+    // This should run every time the modal opens for datamate_search tool
+    if (tool?.name === "datamate_search" && isOpen && !modalOpened) {
+      loadKnowledgeBaseDataMateUrl();
+    }
+  }, [tool?.name, isOpen, modalOpened]);
+
+  // Apply DataMate URL default value for datamate_search tool
+  // This should only run ONCE when modal first opens
+  useEffect(() => {
+    if (!isOpen || !tool || tool.name !== "datamate_search") {
+      return;
+    }
+
+    // Mark modal as opened
+    if (!modalOpened) {
+      setModalOpened(true);
+    }
+
+    // Only apply default URL if:
+    // 1. server_url has NO saved value (empty)
+    // 2. knowledgeBaseDataMateUrl IS available
+    // 3. This is the first time opening (modalOpened is false)
+    const serverUrlParam = initialParams.find((p) => p.name === "server_url");
+
+    // If server_url already has a saved value, use it
+    if (serverUrlParam?.value) {
+      // Initialize form with saved values (including server_url)
+      const paramsWithRerank = withExtraToolParams(initialParams, tool.name);
+      setCurrentParams(paramsWithRerank);
+      const formValues: Record<string, any> = {};
+      paramsWithRerank.forEach((param, index) => {
+        formValues[`param_${index}`] = param.value;
+      });
+      form.setFieldsValue(formValues);
+
+      // Parse initial index_names/dataset_ids value for knowledge base selection
+      const kbParam = paramsWithRerank.find(
+        (p) =>
+          p.name === "index_names" ||
+          p.name === "dataset_ids" ||
+          p.name === "kds_list"
+      );
+      if (kbParam?.value) {
+        let ids: string[] = [];
+        if (Array.isArray(kbParam.value)) {
+          ids = kbParam.value.map(String);
+        } else if (typeof kbParam.value === "string") {
+          try {
+            const parsed = JSON.parse(kbParam.value);
+            if (Array.isArray(parsed)) {
+              ids = parsed.map(String);
+            }
+          } catch {
+            ids = kbParam.value.split(",").filter(Boolean);
+          }
+        }
+        if (ids.length > 0) {
+          setSelectedKbIds(ids);
+        } else {
+          setSelectedKbIds([]);
+          setSelectedKbDisplayNames([]);
+        }
+      } else {
+        setSelectedKbIds([]);
+        setSelectedKbDisplayNames([]);
+      }
+      return;
+    }
+
+    // If we reach here, server_url has no saved value
+    // Apply default from knowledgeBaseDataMateUrl if available
+    // Only apply if user has NOT manually modified the URL field
+    if (knowledgeBaseDataMateUrl && !hasUserModifiedDatamateUrl) {
+      const updatedParams = initialParams.map((param) => {
+        if (param.name === "server_url") {
+          return { ...param, value: knowledgeBaseDataMateUrl };
+        }
+        return param;
+      });
+
+      const paramsWithRerank = withExtraToolParams(updatedParams, tool.name);
+      setCurrentParams(paramsWithRerank);
+
+      const formValues: Record<string, any> = {};
+      paramsWithRerank.forEach((param, index) => {
+        formValues[`param_${index}`] = param.value;
+      });
+      form.setFieldsValue(formValues);
+    } else {
+      // Either no default available OR user has modified the URL, initialize with initialParams
+      const paramsWithRerank = withExtraToolParams(initialParams, tool.name);
+      setCurrentParams(paramsWithRerank);
+      const formValues: Record<string, any> = {};
+      paramsWithRerank.forEach((param, index) => {
+        formValues[`param_${index}`] = param.value;
+      });
+      form.setFieldsValue(formValues);
+    }
+
+    // Parse initial index_names/dataset_ids value for knowledge base selection
+    const kbParam = initialParams.find(
+      (p) =>
+        p.name === "index_names" ||
+        p.name === "dataset_ids" ||
+        p.name === "kds_list"
+    );
+    if (kbParam?.value) {
+      let ids: string[] = [];
+      if (Array.isArray(kbParam.value)) {
+        ids = kbParam.value.map(String);
+      } else if (typeof kbParam.value === "string") {
+        try {
+          const parsed = JSON.parse(kbParam.value);
+          if (Array.isArray(parsed)) {
+            ids = parsed.map(String);
+          }
+        } catch {
+          ids = kbParam.value.split(",").filter(Boolean);
+        }
+      }
+      if (ids.length > 0) {
+        setSelectedKbIds(ids);
+      } else {
+        setSelectedKbIds([]);
+        setSelectedKbDisplayNames([]);
+      }
+    } else {
+      setSelectedKbIds([]);
+      setSelectedKbDisplayNames([]);
+    }
+  }, [
+    isOpen,
+    tool,
+    initialParams,
+    knowledgeBaseDataMateUrl,
+    form,
+    modalOpened,
+  ]);
+
+  // When knowledgeBaseDataMateUrl is loaded, check if we need to apply it to the form
+  // This handles the case where the URL was loaded after the initial form setup
+  useEffect(() => {
+    // Only run for datamate_search tool when modal is open
+    if (!isOpen || !tool || tool.name !== "datamate_search") {
+      return;
+    }
+
+    // Skip if server_url already has a saved value
+    const serverUrlParam = initialParams.find((p) => p.name === "server_url");
+    if (serverUrlParam?.value) {
+      return;
+    }
+
+    // Skip if no knowledgeBaseDataMateUrl available
+    if (!knowledgeBaseDataMateUrl) {
+      return;
+    }
+
+    // Skip if user has manually modified the URL field
+    if (hasUserModifiedDatamateUrl) {
+      return;
+    }
+
+    // Skip if form is already initialized with this URL
+    const existingUrlParam = currentParams.find((p) => p.name === "server_url");
+    if (existingUrlParam?.value === knowledgeBaseDataMateUrl) {
+      return;
+    }
+
+    // Apply the loaded URL to the form
+    const updatedParams = initialParams.map((param) => {
+      if (param.name === "server_url") {
+        return { ...param, value: knowledgeBaseDataMateUrl };
+      }
+      return param;
+    });
+
+    const paramsWithRerank = withExtraToolParams(updatedParams, tool.name);
+    setCurrentParams(paramsWithRerank);
+
+    const formValues: Record<string, any> = {};
+    paramsWithRerank.forEach((param, index) => {
+      formValues[`param_${index}`] = param.value;
+    });
+    form.setFieldsValue(formValues);
+  }, [
+    isOpen,
+    tool,
+    initialParams,
+    knowledgeBaseDataMateUrl,
+    form,
+    currentParams,
+    hasUserModifiedDatamateUrl,
+  ]);
+
+  // Apply default values for init parameters (e.g., init_path)
+  const applyInitParamDefaults = useCallback(
+    (params: ToolParam[]): ToolParam[] => {
+      return params.map((param) => {
+        // Handle init_path: use default "/mnt/nexent" if value is empty or not set
+        if (param.name === "init_path" && param.default) {
+          if (!param.value || param.value.trim() === "") {
+            return { ...param, value: param.default };
+          }
+        }
+        return param;
+      });
+    },
+    []
+  );
+
+  // Migrate legacy AIDP param names so the UI and persisted config stay in sync
+  // with the new SDK signature (base_url -> server_url).
+  const migrateAidpParamNames = useCallback(
+    (params: ToolParam[]): ToolParam[] => {
+      if (tool?.name !== "aidp_search") return params;
+      const hasServerUrl = params.some((p) => p.name === "server_url");
+      if (hasServerUrl) return params;
+      return params.map((p) =>
+        p.name === "base_url" ? { ...p, name: "server_url" } : p
+      );
+    },
+    [tool?.name]
+  );
+
+  // Initialize form values for non-datamate tools
+  useEffect(() => {
+    // Skip if it's datamate_search tool (handled by other useEffects above)
+    if (tool?.name === "datamate_search") {
+      return;
+    }
+
+    // Initialize form values
+    const paramsWithDefaults = applyInitParamDefaults(initialParams);
+    const paramsMigrated = migrateAidpParamNames(paramsWithDefaults);
+    const paramsWithRerank = withExtraToolParams(paramsMigrated, tool?.name);
+    setCurrentParams(paramsWithRerank);
+    const formValues: Record<string, any> = {};
+    paramsWithRerank.forEach((param, index) => {
+      formValues[`param_${index}`] = param.value;
+    });
+    form.setFieldsValue(formValues);
+
+    // Parse initial index_names/dataset_ids value for knowledge base selection
+    if (toolRequiresKbSelection) {
+      // Support both index_names and dataset_ids
+      const kbParam = initialParams.find(
+        (p) =>
+          p.name === "index_names" ||
+          p.name === "dataset_ids" ||
+          p.name === "kds_list"
+      );
+      if (kbParam?.value) {
+        let ids: string[] = [];
+        // Value can be an array or a JSON string
+        if (Array.isArray(kbParam.value)) {
+          ids = kbParam.value.map(String);
+        } else if (typeof kbParam.value === "string") {
+          try {
+            const parsed = JSON.parse(kbParam.value);
+            if (Array.isArray(parsed)) {
+              ids = parsed.map(String);
+            }
+          } catch {
+            ids = kbParam.value.split(",").filter(Boolean);
+          }
+        }
+
+        if (ids.length > 0) {
+          setSelectedKbIds(ids);
+          // If knowledgeBases is already loaded, sync display names immediately
+          if (knowledgeBases.length > 0) {
+            const displayNames = ids.map((id) => {
+              const kb = knowledgeBases.find((k) => k.id === id);
+              return kb?.display_name || kb?.name || id;
+            });
+            setSelectedKbDisplayNames(displayNames);
+          }
+        }
+      }
+    }
+  }, [
+    initialParams,
+    toolRequiresKbSelection,
+    tool?.name,
+    form,
+    applyInitParamDefaults,
+    migrateAidpParamNames,
+  ]);
+
+  // Sync selectedKbDisplayNames when knowledgeBases or selectedKbIds changes
+  useEffect(() => {
+    if (selectedKbIds.length > 0 && knowledgeBases.length > 0) {
+      const displayNames = selectedKbIds.map((id) => {
+        // Use robust ID comparison
+        const kb = knowledgeBases.find(
+          (k) => String(k.id).trim() === String(id).trim()
+        );
+        return kb?.display_name || kb?.name || id;
+      });
+      setSelectedKbDisplayNames(displayNames);
+    }
+  }, [knowledgeBases, selectedKbIds]);
+
+  // Filter selected KB IDs to the current accessible list. For AIDP, an
+  // successfully loaded empty list is meaningful: the current user cannot
+  // read any of the KBs saved by the agent creator.
+  useEffect(() => {
+    const canValidateSelection =
+      knowledgeBases.length > 0 ||
+      ((toolKbType === "aidp_search" || toolKbType === "ind_aidp_search") &&
+        isKbListLoaded);
+
+    if (selectedKbIds.length > 0 && canValidateSelection) {
+      const validKbIds = selectedKbIds.filter((id) =>
+        knowledgeBases.some((kb) => String(kb.id).trim() === String(id).trim())
+      );
+      if (validKbIds.length !== selectedKbIds.length) {
+        setSelectedKbIds(validKbIds);
+        // Also update display names
+        const displayNames = validKbIds.map((id) => {
+          const kb = knowledgeBases.find(
+            (k) => String(k.id).trim() === String(id).trim()
+          );
+          return kb?.display_name || kb?.name || id;
+        });
+        setSelectedKbDisplayNames(displayNames);
+
+        if (toolKbType === "aidp_search") {
+          setTestPanelKbIds(validKbIds);
+          setTestPanelKbDisplayNames(displayNames);
+          const fieldIndex = currentParams.findIndex(
+            (p) => p.name === "kds_list"
+          );
+          if (fieldIndex !== -1) {
+            form.setFieldValue(`param_${fieldIndex}`, validKbIds);
+          }
+          setCurrentParams((prevParams) => {
+            const prevFieldIndex = prevParams.findIndex(
+              (p) => p.name === "kds_list"
+            );
+            if (prevFieldIndex === -1) return prevParams;
+            const updatedParams = [...prevParams];
+            updatedParams[prevFieldIndex] = {
+              ...updatedParams[prevFieldIndex],
+              value: validKbIds,
+            };
+            return updatedParams;
+          });
+        }
+      }
+    }
+  }, [
+    knowledgeBases,
+    isKbListLoaded,
+    toolKbType,
+    selectedKbIds,
+    currentParams,
+    form,
+  ]);
+
+  // Force sync selectedKbIds when modal is about to open (kbSelectorVisible changes to true)
+  // This ensures the modal receives the correct selected IDs
+  useEffect(() => {
+    // Skip if config has changed - don't restore from initialParams after server_url/api_key change
+    if (hasKbConfigChanged) {
+      return;
+    }
+
+    if (
+      kbSelectorVisible &&
+      selectedKbIds.length === 0 &&
+      initialParams.length > 0
+    ) {
+      // Parse initial index_names/dataset_ids value for knowledge base selection
+      if (toolRequiresKbSelection) {
+        const kbParam = initialParams.find(
+          (p) =>
+            p.name === "index_names" ||
+            p.name === "dataset_ids" ||
+            p.name === "kds_list"
+        );
+        if (kbParam?.value) {
+          let ids: string[] = [];
+          if (Array.isArray(kbParam.value)) {
+            ids = kbParam.value.map(String);
+          } else if (typeof kbParam.value === "string") {
+            try {
+              const parsed = JSON.parse(kbParam.value);
+              if (Array.isArray(parsed)) {
+                ids = parsed.map(String);
+              }
+            } catch {
+              ids = kbParam.value.split(",").filter(Boolean);
+            }
+          }
+          if (ids.length > 0) {
+            setSelectedKbIds(ids);
+          }
+        }
+      }
+    }
+  }, [
+    kbSelectorVisible,
+    initialParams,
+    toolRequiresKbSelection,
+    hasKbConfigChanged,
+  ]);
+
+  // Trigger refetch when opening for knowledge base tools (with loading state support)
+  // Skip if initial load was already done to avoid duplicate API calls
+  // Reset when currentAgentId changes (i.e., when switching agents)
+  const hasTriggeredInitialRefetch = useRef(false);
+  const prevAgentIdRef = useRef<number | undefined>(undefined);
+  // Track if sync message has been shown when KB selector opens
+  const hasShownSyncMessageRef = useRef(false);
+
+  // Reset refetch flag when switching agents and invalidate cache to force fresh fetch
+  useEffect(() => {
+    if (currentAgentId !== prevAgentIdRef.current) {
+      prevAgentIdRef.current = currentAgentId;
+      hasTriggeredInitialRefetch.current = false;
+
+      // Invalidate knowledge base cache when switching agents to force fresh fetch
+      // This ensures we get the correct knowledge bases for the new agent's config
+      if (toolKbType === "dify_search") {
+        queryClient.invalidateQueries({
+          queryKey: ["knowledgeBases", "list", "dify_search"],
+        });
+      } else if (toolKbType === "ragflow_search") {
+        queryClient.invalidateQueries({
+          queryKey: ["knowledgeBases", "list", "ragflow_search"],
+        });
+      } else if (toolKbType === "datamate_search") {
+        queryClient.invalidateQueries({
+          queryKey: ["knowledgeBases", "list", "datamate_search"],
+        });
+      }
+    }
+  }, [currentAgentId, toolKbType, queryClient]);
+
+  // Pick which knowledge-base list endpoint the current tool should hit
+  // during the initial refetch. Returns ``true`` when a refetch was issued.
+  const refetchForCurrentTool = (): boolean => {
+    if (toolKbType === "dify_search") {
+      if (difyConfig.serverUrl && difyConfig.apiKey) {
+        refetchKnowledgeBases();
+        return true;
+      }
+      return false;
+    }
+    if (toolKbType === "haotian_search") {
+      if (haotianConfig.listUrl && haotianConfig.authorization) {
+        refetchHaotianSets();
+        return true;
+      }
+      return false;
+    }
+    if (toolKbType === "aidp_search" || toolKbType === "ind_aidp_search") {
+      if (
+        toolKbType === "ind_aidp_search" &&
+        (!independentAidpConfig?.serverUrl || !independentAidpConfig?.apiKey)
+      ) {
+        return false;
+      }
+      refetchKnowledgeBases();
+      return true;
+    }
+    refetchKnowledgeBases();
+    return true;
+  };
+
+  useEffect(() => {
+    if (
+      toolRequiresKbSelection &&
+      isOpen &&
+      !hasTriggeredInitialRefetch.current
+    ) {
+      hasTriggeredInitialRefetch.current = true;
+      refetchForCurrentTool();
+    }
+  }, [
+    toolRequiresKbSelection,
+    isOpen,
+    refetchKnowledgeBases,
+    refetchHaotianSets,
+    toolKbType,
+    difyConfig,
+    ragflowConfig,
+    haotianConfig,
+  ]);
+
+  // Show sync message when knowledge base selector modal opens
+  // This provides immediate feedback on sync status to the user
+  useEffect(() => {
+    // Only trigger when KB selector opens and tool requires KB selection
+    if (
+      kbSelectorVisible &&
+      toolRequiresKbSelection &&
+      !hasShownSyncMessageRef.current
+    ) {
+      // Mark as shown to avoid duplicate messages
+      hasShownSyncMessageRef.current = true;
+
+      // Trigger sync and show message based on result
+      const syncPromise =
+        toolKbType === "haotian_search"
+          ? refetchHaotianSets()
+          : refetchKnowledgeBases();
+
+      syncPromise
+        .then((result) => {
+          if (result.isError || result.error) {
+            log.error("Failed to sync knowledge bases:", result.error);
+            // Clear knowledge base list on sync failure
+            clearKnowledgeBases();
+            message.error(t("knowledgeBase.message.syncError"));
+          } else {
+            // Show success message after sync completes
+            message.success(t("knowledgeBase.message.syncSuccess"));
+          }
+        })
+        .catch((error) => {
+          log.error("Failed to sync knowledge bases:", error);
+          // Clear knowledge base list on sync failure
+          clearKnowledgeBases();
+          message.error(t("knowledgeBase.message.syncError"));
+        });
+    }
+  }, [
+    kbSelectorVisible,
+    toolRequiresKbSelection,
+    refetchKnowledgeBases,
+    refetchHaotianSets,
+    toolKbType,
+    clearKnowledgeBases,
+    t,
+  ]);
+
+  // Reset sync message flag when KB selector closes
+  useEffect(() => {
+    if (!kbSelectorVisible) {
+      hasShownSyncMessageRef.current = false;
+    }
+  }, [kbSelectorVisible]);
+
+  // Watch all form values and sync to currentParams
+  const formValues = Form.useWatch([], form);
+  useEffect(() => {
+    if (formValues) {
+      const newParams = [...currentParams];
+      Object.entries(formValues).forEach(([fieldName, value]) => {
+        const index = parseInt(fieldName.replace("param_", ""));
+        if (!isNaN(index) && newParams[index]) {
+          const paramName = newParams[index].name;
+          // Skip knowledge base selector field (controlled by handleHaotianKbConfirm)
+          if (
+            paramName === "index_names" ||
+            paramName === "dataset_ids" ||
+            paramName === "kds_list"
+          ) {
+            return;
+          }
+          newParams[index] = { ...newParams[index], value };
+        }
+      });
+      setCurrentParams(newParams);
+    }
+  }, [formValues]);
+
+  const handleSave = async () => {
+    // Mark that user has attempted to submit the form
+    setHasSubmitted(true);
+
+    try {
+      // Force sync form values to currentParams before validation
+      const latestFormValues = form.getFieldsValue();
+      if (latestFormValues) {
+        const newParams = [...currentParams];
+        Object.entries(latestFormValues).forEach(([fieldName, value]) => {
+          const index = parseInt(fieldName.replace("param_", ""));
+          if (!isNaN(index) && newParams[index]) {
+            newParams[index] = { ...newParams[index], value };
+          }
+        });
+        setCurrentParams(newParams);
+      }
+
+      await form.validateFields();
+
+      // Check if knowledge base selector has valid selection (for index_names/dataset_ids fields)
+      // Since these fields use custom UI without form control, we need manual validation
+      if (
+        toolRequiresKbSelection &&
+        toolKbType !== "aidp_search" &&
+        selectedKbIds.length === 0
+      ) {
+        const kbParam = currentParams.find(
+          (p) =>
+            p.required &&
+            (p.name === "index_names" ||
+              p.name === "dataset_ids" ||
+              p.name === "kds_list")
+        );
+        if (kbParam) {
+          message.error(t("toolConfig.validation.selectKb"));
+          return;
+        }
+      }
+
+      // Use selectedTool if available, otherwise use tool
+      const toolToSave = selectedTool || tool;
+      if (!toolToSave) {
+        message.error("No tool selected");
+        return;
+      }
+
+      // Convert params to backend format - use latestFormValues directly to avoid async state issues
+      // This ensures we capture the most recent form values without relying on async setState
+      const syncedParams = [...currentParams];
+      if (latestFormValues) {
+        Object.entries(latestFormValues).forEach(([fieldName, value]) => {
+          const index = parseInt(fieldName.replace("param_", ""));
+          if (!isNaN(index) && syncedParams[index]) {
+            syncedParams[index] = { ...syncedParams[index], value };
+          }
+        });
+      }
+      const paramsObj = syncedParams.reduce(
+        (acc, param) => {
+          acc[param.name] = param.value;
+          return acc;
+        },
+        {} as Record<string, any>
+      );
+
+      // Update local state: Add tool to selected tools with updated params and display_names
+      // Include display_names for knowledge base tools to pass to prompt generation
+      const updatedTool: typeof toolToSave = {
+        ...toolToSave,
+        initParams: syncedParams,
+        // Store knowledge base display names for prompt generation
+        ...(toolRequiresKbSelection && selectedKbDisplayNames.length > 0
+          ? { display_names: selectedKbDisplayNames }
+          : {}),
+      };
+      const currentTools = useAgentStore.getState().editedAgent?.tools ?? [];
+
+      // Check if tool already exists, if so replace it, otherwise add it
+      const existingToolIndex = currentTools.findIndex(
+        (t) => parseInt(t.id) === parseInt(updatedTool.id)
+      );
+
+      let newSelectedTools;
+      if (existingToolIndex >= 0) {
+        // Replace existing tool
+        newSelectedTools = [...currentTools];
+        newSelectedTools[existingToolIndex] = updatedTool;
+      } else {
+        // Add new tool
+        newSelectedTools = [...currentTools, updatedTool];
+      }
+
+      if (!localOnly) {
+        updateTools(newSelectedTools);
+      }
+
+      message.success(t("toolConfig.message.saveSuccess"));
+      handleClose(); // Close modal
+
+      // Call original onSave if provided
+      if (onSave) {
+        onSave(syncedParams);
+      }
+    } catch {
+      // Form validation failed, error will be shown by antd Form
+    }
+  };
+
+  const handleClose = () => {
+    setTestPanelVisible(false);
+    // Reset user modification tracking state for datamate URL
+    setHasUserModifiedDatamateUrl(false);
+
+    // Clear knowledge base cache to ensure fresh data on next open
+    // This is especially important after saving tool config with KB changes
+    if (toolKbType) {
+      queryClient.invalidateQueries({
+        queryKey: knowledgeBaseKeys.list(toolKbType),
+      });
+    }
+
+    onCancel();
+  };
+
+  // Handle tool testing - toggle test panel
+  const handleTestTool = () => {
+    setTestPanelVisible(!testPanelVisible);
+  };
+
+  // Close test panel
+  const handleCloseTestPanel = () => {
+    setTestPanelVisible(false);
+  };
+
+  // Open knowledge base selector
+  // fromTestPanel: true if called from test panel (for aidp_search and knowledge_base_search)
+  const openKbSelector = (paramIndex: number, fromTestPanel?: boolean) => {
+    // For aidp_search and knowledge_base_search, track whether opening from test panel
+    if (
+      toolKbType === "aidp_search" ||
+      toolKbType === "ind_aidp_search" ||
+      isKnowledgeBaseSearchTool
+    ) {
+      setIsTestPanelKbSelection(fromTestPanel === true);
+    }
+    setCurrentKbParamIndex(paramIndex);
+    setKbSelectorVisible(true);
+  };
+
+  // Track if KB selection is from test panel (for aidp_search)
+  const [isTestPanelKbSelection, setIsTestPanelKbSelection] = useState(false);
+
+  // Handle test panel KB selection for aidp_search (only updates test panel state, not config's selectedKbIds)
+  const handleTestPanelKbSelect = (ids: string[], displayNames: string[]) => {
+    setTestPanelKbIds(ids);
+    setTestPanelKbDisplayNames(displayNames);
+  };
+
+  // Handle test panel KB removal for aidp_search (only updates test panel state, not config's selectedKbIds/currentParams)
+  const handleTestPanelKbRemove = (index: number) => {
+    const newIds = testPanelKbIds.filter((_, i) => i !== index);
+    const newDisplayNames = testPanelKbDisplayNames.filter(
+      (_, i) => i !== index
+    );
+    setTestPanelKbIds(newIds);
+    setTestPanelKbDisplayNames(newDisplayNames);
+    // Note: do NOT update currentParams here - test panel kds_list is independent from config
+  };
+
+  // Sync kds_list from manual JSON back to testPanelKbIds when switching mode.
+  const handleTestPanelKbIdsChange = (
+    ids: string[],
+    _displayNames: string[]
+  ) => {
+    // Resolve display names from knowledgeBases by ID
+    const resolvedDisplayNames = ids.map((id) => {
+      const kb = knowledgeBases.find(
+        (k) => String(k.id).trim() === String(id).trim()
+      );
+      return kb?.display_name || kb?.name || id;
+    });
+    setTestPanelKbIds(ids);
+    setTestPanelKbDisplayNames(resolvedDisplayNames);
+  };
+
+  // Apply the user's KB selection (shared by Dify / Haotian flows).
+  // Each tool's selector passes a slightly different payload shape; we
+  // normalize here so the rest of the state update stays identical.
+  const applyKbConfirm = (ids: string[], displayNames: string[]) => {
+    // Mark that KBs came from user confirmation, so restore effect won't override
+    isUserConfirmedKbRef.current = true;
+    setSelectedKbIds(ids);
+    setSelectedKbDisplayNames(displayNames);
+    setHasSubmitted(false);
+
+    // Sync to testPanelKbIds for aidp_search and knowledge_base_search
+    if (
+      toolKbType === "aidp_search" ||
+      toolKbType === "ind_aidp_search" ||
+      isKnowledgeBaseSearchTool
+    ) {
+      setTestPanelKbIds(ids);
+      setTestPanelKbDisplayNames(displayNames);
+    }
+
+    // Update currentParams - find the KB param index by name if currentKbParamIndex is null
+    const kbParamIndex =
+      currentKbParamIndex !== null
+        ? currentKbParamIndex
+        : currentParams.findIndex(
+            (p) =>
+              p.name === "index_names" ||
+              p.name === "dataset_ids" ||
+              p.name === "kds_list"
+          );
+    if (kbParamIndex >= 0) {
+      const param = currentParams[kbParamIndex];
+      if (param) {
+        const formFieldName = `param_${kbParamIndex}`;
+        // Update form field synchronously to ensure renderKbSelectorInput sees the new value
+        form.setFieldValue(formFieldName, ids);
+
+        // Also update currentParams directly since Form.Item has no name for index_names/dataset_ids
+        const updatedParams = [...currentParams];
+        updatedParams[kbParamIndex] = {
+          ...updatedParams[kbParamIndex],
+          value: ids,
+        };
+        setCurrentParams(updatedParams);
+      }
+    }
+
+    setKbSelectorVisible(false);
+    setCurrentKbParamIndex(null);
+  };
+
+  // Handle knowledge base selection confirm (Dify)
+  const handleKbConfirm = (selectedKnowledgeBases: KnowledgeBase[]) => {
+    const ids = selectedKnowledgeBases.map((kb) => kb.id);
+    const displayNames = selectedKnowledgeBases.map((kb) =>
+      getKbDisplayName(kb)
+    );
+
+    if (isTestPanelKbSelection) {
+      // From test panel: only update test panel state
+      // Note: do NOT update currentParams - test panel KB is independent from config
+      setTestPanelKbIds(ids);
+      setTestPanelKbDisplayNames(displayNames);
+      setIsTestPanelKbSelection(false);
+      setKbSelectorVisible(false);
+      setCurrentKbParamIndex(null);
+    } else {
+      // From config panel: update selectedKbIds and sync to testPanelKbIds
+      applyKbConfirm(ids, displayNames);
+    }
+  };
+
+  const handleHaotianKbConfirm = (payload: {
+    datasetIds: string[];
+    displayNames: string[];
+  }) => {
+    applyKbConfirm(payload.datasetIds || [], payload.displayNames || []);
+  };
+
+  const handleAidpKbConfirm = (payload: {
+    datasetIds: string[];
+    displayNames: string[];
+  }) => {
+    const ids = payload.datasetIds || [];
+    const displayNames = payload.displayNames || [];
+
+    if (isTestPanelKbSelection) {
+      // From test panel: only update test panel state
+      // Note: do NOT update currentParams - test panel kds_list is independent from config
+      setTestPanelKbIds(ids);
+      setTestPanelKbDisplayNames(displayNames);
+      setIsTestPanelKbSelection(false);
+      setKbSelectorVisible(false);
+      setCurrentKbParamIndex(null);
+    } else {
+      // From config panel: update selectedKbIds and sync to testPanelKbIds
+      // Mark that KBs came from user confirmation, so restore effect won't override
+      isUserConfirmedKbRef.current = true;
+      setSelectedKbIds(ids);
+      setSelectedKbDisplayNames(displayNames);
+      setTestPanelKbIds(ids);
+      setTestPanelKbDisplayNames(displayNames);
+      setHasSubmitted(false);
+      setKbSelectorVisible(false);
+      setCurrentKbParamIndex(null);
+
+      // Update currentParams for kds_list using functional update to avoid stale closure
+      setCurrentParams((prevParams) => {
+        const kdsListFieldIndex = prevParams.findIndex(
+          (p) => p.name === "kds_list"
+        );
+        if (kdsListFieldIndex === -1) return prevParams;
+        const updatedParams = [...prevParams];
+        updatedParams[kdsListFieldIndex] = {
+          ...updatedParams[kdsListFieldIndex],
+          value: ids,
+        };
+        return updatedParams;
+      });
+
+      // Update form field synchronously to ensure renderKbSelectorInput sees the new value
+      const kdsListFieldIndex = currentParams.findIndex(
+        (p) => p.name === "kds_list"
+      );
+      if (kdsListFieldIndex !== -1) {
+        form.setFieldValue(`param_${kdsListFieldIndex}`, ids);
+      }
+    }
+  };
+
+  // Page provider for the independent AIDP knowledge-base selector. The
+  // independent endpoint exposes no server-side pagination, so slice the
+  // already-loaded list (useKnowledgeBasesForToolConfig) into pages and map
+  // onto the AidpKnowledgeBaseItem shape expected by the selector.
+  const independentAidpItemsProvider = useCallback(
+    async (page: number, pageSize: number) => {
+      const list = Array.isArray(knowledgeBases) ? knowledgeBases : [];
+      const start = (page - 1) * pageSize;
+      const pageItems = list.slice(start, start + pageSize).map((kb) => ({
+        kds_id: String(kb.id),
+        kds_name: kb.name || String(kb.id),
+        description:
+          typeof kb.description === "string" ? kb.description : undefined,
+      }));
+      return { value: pageItems, total_count: list.length };
+    },
+    [knowledgeBases]
+  );
+
+  // Re-fetch the independent AIDP list when the selector's Sync button is hit.
+  const handleIndependentAidpSync = useCallback(async () => {
+    const result = await refetchKnowledgeBases();
+    if (result.isError || result.error) {
+      clearKnowledgeBases();
+      message.error(t("knowledgeBase.message.syncError"));
+    }
+  }, [refetchKnowledgeBases, clearKnowledgeBases, t]);
+
+  // Remove a single knowledge base from selection
+  const removeKbFromSelection = (indexToRemove: number, paramIndex: number) => {
+    const newIds = selectedKbIds.filter((_, i) => i !== indexToRemove);
+    const newDisplayNames = selectedKbDisplayNames.filter(
+      (_, i) => i !== indexToRemove
+    );
+
+    setSelectedKbIds(newIds);
+    setSelectedKbDisplayNames(newDisplayNames);
+    // Reset submit state when user modifies selection
+    setHasSubmitted(false);
+
+    // Update form value synchronously to ensure renderKbSelectorInput sees the new value
+    form.setFieldValue(`param_${paramIndex}`, newIds);
+    setCurrentParams((prevParams) => {
+      const updatedParams = [...prevParams];
+      updatedParams[paramIndex] = {
+        ...updatedParams[paramIndex],
+        value: newIds,
+      };
+      return updatedParams;
+    });
+  };
+
+  // Get tool type for knowledge base selector
+  const getToolType = (): ToolKbType => {
+    return toolKbType || "knowledge_base_search";
+  };
+
+  // Render knowledge base selector input (no button, just clickable input)
+  const renderKbSelectorInput = useCallback(
+    (param: ToolParam, index: number) => {
+      const fieldName = `param_${index}`;
+      const formValue = form.getFieldValue(fieldName);
+
+      // Get display names based on current form value and knowledgeBases
+      let displayNames: string[] = [];
+      let ids: string[] = [];
+      if (formValue) {
+        // Value can be an array or a JSON string
+        ids = parseKbIds(formValue);
+
+        if (
+          (toolKbType === "aidp_search" || toolKbType === "ind_aidp_search") &&
+          isKbListLoaded
+        ) {
+          ids = ids.filter((id) =>
+            knowledgeBases.some(
+              (kb) => String(kb.id).trim() === String(id).trim()
+            )
+          );
+        }
+
+        // Map IDs to display names
+        if (ids.length > 0) {
+          if (
+            toolKbType === "haotian_search" &&
+            haotianKnowledgeSets.length > 0
+          ) {
+            // Search through nested haotian knowledge sets
+            displayNames = ids.map((id) => {
+              const cleanId = id.trim();
+              for (const ks of haotianKnowledgeSets) {
+                const kb = (ks.knowledge_bases || []).find(
+                  (b) => String(b.dify_dataset_id) === cleanId
+                );
+                if (kb) return kb.name;
+              }
+              return cleanId;
+            });
+          } else if (knowledgeBases.length > 0) {
+            displayNames = mapKbIdsToDisplayNames(ids, knowledgeBases);
+          }
+        }
+      }
+
+      // Fallback to selectedKbDisplayNames if displayNames is empty
+      if (
+        toolKbType !== "aidp_search" &&
+        displayNames.length === 0 &&
+        selectedKbDisplayNames.length > 0
+      ) {
+        displayNames = selectedKbDisplayNames;
+        ids = selectedKbIds;
+      }
+
+      // Use the actual ids and displayNames for rendering
+      const tagsToRender = ids.length > 0 ? ids : [];
+      const namesToRender = displayNames;
+
+      const placeholder = t(
+        "toolConfig.input.knowledgeBaseSelector.placeholder",
+        {
+          name:
+            getLocalizedDescription(param.description, param.description_zh) ||
+            param.name,
+        }
+      );
+
+      // Check if this field has validation error
+      // Only show error after user has attempted to submit the form
+      const hasError =
+        hasSubmitted && param.required && selectedKbIds.length === 0;
+
+      return (
+        <div>
+          <div
+            className={`cursor-pointer bg-white border rounded px-3 py-2 transition-colors ${
+              hasError
+                ? "border-red-500 hover:border-red-500"
+                : "border-gray-300 hover:border-blue-400"
+            }`}
+            onClick={() => openKbSelector(index)}
+            style={{
+              width: "100%",
+              minHeight: "32px",
+              display: "flex",
+              flexWrap: "wrap",
+              alignItems: "center",
+              gap: "4px",
+            }}
+            title={namesToRender.join(", ")}
+          >
+            {kbLoading && knowledgeBases.length === 0 ? (
+              // Show skeleton loading when fetching knowledge bases
+              <div className="flex items-center gap-2 w-full">
+                <Skeleton.Input active size="small" style={{ width: "60%" }} />
+              </div>
+            ) : namesToRender.length > 0 ? (
+              namesToRender.map((name, i) => (
+                <Tag
+                  key={tagsToRender[i]}
+                  closeIcon={
+                    <span className="ant-tag-close-icon">
+                      <CloseOutlined style={{ fontSize: "10px" }} />
+                    </span>
+                  }
+                  onClose={(e) => {
+                    e.stopPropagation();
+                    removeKbFromSelection(i, index);
+                  }}
+                  style={{
+                    marginRight: 0,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    lineHeight: "20px",
+                    padding: "0 8px",
+                    fontSize: "13px",
+                  }}
+                >
+                  {name}
+                </Tag>
+              ))
+            ) : (
+              <span className="text-gray-400 text-sm">{placeholder}</span>
+            )}
+          </div>
+          {/* Show error message when validation fails */}
+          {hasError && (
+            <div
+              className="ant-form-item-explain-error"
+              style={{ marginTop: "4px" }}
+            >
+              {t("toolConfig.validation.selectKb")}
+            </div>
+          )}
+        </div>
+      );
+    },
+    [
+      form,
+      knowledgeBases,
+      isKbListLoaded,
+      toolKbType,
+      selectedKbIds,
+      selectedKbDisplayNames,
+      kbLoading,
+      hasSubmitted,
+      t,
+    ]
+  );
+
+  const renderParamInput = (param: ToolParam, index: number) => {
+    // Get field name for form
+    const fieldName = `param_${index}`;
+
+    // Get options from frontend configuration based on tool name and parameter name
+    const options = getToolParamOptions(tool.name, param.name);
+
+    // Determine if this parameter should be rendered as a select dropdown
+    const isSelectType = options && options.length > 0;
+
+    if (param.name === "selected_model_id" && isAnalyzeToolWithModelSelection) {
+      return (
+        <Select
+          placeholder={t("toolConfig.placeholder.useDefaultModel")}
+          options={analyzeToolModelOptions}
+          loading={registeredModelsLoading}
+          allowClear
+          showSearch
+          optionFilterProp="label"
+          notFoundContent={
+            registeredModelsLoading
+              ? undefined
+              : t("toolConfig.placeholder.noAvailableModels")
+          }
+        />
+      );
+    }
+
+    // Special handling for rerank_model_name parameter - show model selector
+    if (param.name === "rerank_model_name") {
+      // First try to get the list of available rerank models from config
+      const rerankConfig = configData?.models?.rerank;
+      const hasRerankModel = rerankConfig?.modelName;
+
+      if (hasRerankModel) {
+        // If rerank model is configured, show it as an option
+        const modelOptions = [
+          {
+            value: rerankConfig.modelName,
+            label: rerankConfig.displayName || rerankConfig.modelName,
+          },
+        ];
+        return (
+          <Select
+            placeholder={t("toolConfig.input.string.placeholder", {
+              name: param.description,
+            })}
+            options={modelOptions}
+            allowClear
+          />
+        );
+      }
+      // If no rerank model configured, show text input for manual entry
+      return (
+        <Input.TextArea
+          placeholder={t("toolConfig.input.string.placeholder", {
+            name: param.description,
+          })}
+          autoSize={{ minRows: 1, maxRows: 2 }}
+        />
+      );
+    }
+
+    // Special handling for iData knowledge_space_id parameter
+    const isIdataKnowledgeSpaceId =
+      toolKbType === "idata_search" && param.name === "knowledge_space_id";
+
+    const inputComponent = (() => {
+      // Handle iData knowledge space ID selector
+      if (isIdataKnowledgeSpaceId) {
+        const currentValue = form.getFieldValue(fieldName);
+        return (
+          <Select
+            placeholder={t("toolConfig.input.string.placeholder", {
+              name: param.description,
+            })}
+            loading={idataKnowledgeSpacesLoading}
+            value={currentValue}
+            options={idataKnowledgeSpaces.map((space) => ({
+              value: space.id,
+              label: space.name,
+            }))}
+            onChange={(value) => {
+              // Update idataConfig when space ID changes
+              setIdataConfig((prev) => ({
+                ...prev,
+                knowledgeSpaceId: value || "",
+              }));
+              // Also update form value
+              safeSetFieldValue(form, fieldName, value);
+            }}
+          />
+        );
+      }
+
+      // Handle select type - when options are defined in frontend config
+      if (isSelectType) {
+        return (
+          <Select
+            placeholder={t("toolConfig.input.string.placeholder", {
+              name: getLocalizedDescription(
+                param.description,
+                param.description_zh
+              ),
+            })}
+            options={options.map((option) => ({
+              value: option,
+              label: String(option),
+            }))}
+          />
+        );
+      }
+
+      switch (param.type) {
+        case TOOL_PARAM_TYPES.NUMBER:
+          return (
+            <InputNumber
+              placeholder={t("toolConfig.input.string.placeholder", {
+                name: getLocalizedDescription(
+                  param.description,
+                  param.description_zh
+                ),
+              })}
+            />
+          );
+
+        case TOOL_PARAM_TYPES.BOOLEAN:
+          return <Switch />;
+
+        case TOOL_PARAM_TYPES.STRING:
+        case TOOL_PARAM_TYPES.ARRAY:
+        case TOOL_PARAM_TYPES.OBJECT:
+        default:
+          // Check if parameter name indicates a secure/sensitive field
+          const sensitivePatterns = [
+            "password",
+            "authorization",
+            "api_key",
+            "apikey",
+            "api-key",
+            "secret",
+            "token",
+          ];
+          const isSecureField = sensitivePatterns.some((pattern) =>
+            param.name.toLowerCase().includes(pattern)
+          );
+
+          if (isSecureField) {
+            return (
+              <Input.Password
+                placeholder={t("toolConfig.input.string.placeholder", {
+                  name: getLocalizedDescription(
+                    param.description,
+                    param.description_zh
+                  ),
+                })}
+              />
+            );
+          }
+
+          // Default TextArea for all text-like types and unknown types
+          return (
+            <Input.TextArea
+              placeholder={t(`toolConfig.input.${param.type}.placeholder`, {
+                name: getLocalizedDescription(
+                  param.description,
+                  param.description_zh
+                ),
+              })}
+              autoSize={{ minRows: 1, maxRows: 8 }}
+              style={{ resize: "vertical" }}
+            />
+          );
+      }
+    })();
+
+    return inputComponent;
+  };
+
+  const isRerankEnabled = useMemo(() => {
+    const rerankIndex = currentParams.findIndex((p) => p.name === "rerank");
+    if (rerankIndex < 0) return false;
+    const fieldName = `param_${rerankIndex}`;
+    const value = form.getFieldValue(fieldName);
+    return Boolean(value);
+  }, [currentParams, form, formValues]);
+
+  if (!tool) return null;
+
+  // Resolve which Dify-style config payload the KB selection modal needs for
+  // the current tool.
+  const resolveDifyModalConfig = () => {
+    if (toolKbType === "dify_search") {
+      return difyConfig;
+    }
+    if (toolKbType === "datamate_search") {
+      return { serverUrl: datamateServerUrl };
+    }
+    if (toolKbType === "idata_search") {
+      return {
+        serverUrl: idataConfig.serverUrl,
+        apiKey: idataConfig.apiKey,
+        userId: idataConfig.userId,
+        knowledgeSpaceId: idataConfig.knowledgeSpaceId,
+      };
+    }
+    if (toolKbType === "ind_aidp_search") {
+      return independentAidpConfig;
+    }
+    return undefined;
+  };
+
+  return (
+    <>
+      <Modal
+        mask={true}
+        title={
+          <div className="flex justify-between items-center w-full pr-8">
+            <span>{`${tool?.name}`}</span>
+            <div className="flex items-center gap-2">
+              <Tag
+                color={
+                  tool?.source === "mcp"
+                    ? "blue"
+                    : tool?.source === "langchain"
+                      ? "orange"
+                      : "green"
+                }
+              >
+                {tool?.source === "mcp"
+                  ? t("toolPool.tag.mcp")
+                  : tool?.source === "langchain"
+                    ? t("toolPool.tag.langchain")
+                    : t("toolPool.tag.local")}
+              </Tag>
+            </div>
+          </div>
+        }
+        open={isOpen}
+        onCancel={onCancel}
+        onOk={handleSave}
+        okText={t("common.button.save")}
+        cancelText={t("common.button.cancel")}
+        width={600}
+        confirmLoading={isLoading}
+        className="tool-config-modal-content"
+        wrapProps={{ style: { pointerEvents: "auto" } }}
+        footer={
+          <div className="flex items-center w-full">
+            <div className="flex-1 flex justify-start">
+              <button
+                onClick={handleTestTool}
+                disabled={!tool}
+                className="flex items-center justify-center px-4 py-2 text-sm border border-gray-300 text-gray-700 rounded hover:bg-gray-50 transition-colors duration-200 h-8"
+              >
+                {testPanelVisible
+                  ? t("toolConfig.button.closeTest")
+                  : t("toolConfig.button.testTool")}
+              </button>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={handleClose}
+                className="flex items-center justify-center px-4 py-2 text-sm border border-gray-300 text-gray-700 rounded hover:bg-gray-50 transition-colors duration-200 h-8"
+              >
+                {t("common.button.cancel")}
+              </button>
+              <button
+                onClick={handleSave}
+                disabled={isLoading}
+                className="flex items-center justify-center px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200 h-8"
+              >
+                {isLoading
+                  ? t("common.button.saving")
+                  : t("common.button.save")}
+              </button>
+            </div>
+          </div>
+        }
+      >
+        <div className="mb-4">
+          <p className="text-sm text-gray-500 mb-4">
+            {getLocalizedDescription(tool?.description, tool?.description_zh)}
+          </p>
+          <div className="text-sm font-medium mb-2">
+            {t("toolConfig.title.paramConfig")}
+          </div>
+          <div style={{ maxHeight: "500px", overflow: "auto" }}>
+            <Form
+              form={form}
+              layout="horizontal"
+              labelAlign="left"
+              labelCol={{ span: 6 }}
+              wrapperCol={{ span: 18 }}
+              onValuesChange={(changedValues, allValues) => {
+                // Track if user has modified the datamate server_url field
+                if (
+                  tool?.name === "datamate_search" &&
+                  knowledgeBaseDataMateUrl &&
+                  !hasUserModifiedDatamateUrl
+                ) {
+                  const serverUrlFieldIndex = currentParams.findIndex(
+                    (p) => p.name === "server_url"
+                  );
+                  if (serverUrlFieldIndex >= 0) {
+                    const fieldName = `param_${serverUrlFieldIndex}`;
+                    if (changedValues[fieldName] !== undefined) {
+                      setHasUserModifiedDatamateUrl(true);
+                    }
+                  }
+                }
+              }}
+            >
+              <div className="pr-2 mt-3">
+                {currentParams.map((param, index) => {
+                  if (param.name === "rerank_model_name" && !isRerankEnabled) {
+                    return null;
+                  }
+                  // Hide server_url / api_key for AIDP search - now read from environment variables
+                  if (
+                    toolKbType === "aidp_search" &&
+                    (param.name === "server_url" || param.name === "api_key")
+                  ) {
+                    return null;
+                  }
+                  const fieldName = `param_${index}`;
+                  const rules: any[] = [];
+
+                  // Add required validation rule
+                  if (param.required) {
+                    rules.push({
+                      required: true,
+                      message: t("toolConfig.validation.required"),
+                    });
+                  }
+
+                  // Add URL validation for server_url parameter
+                  if (param.name === "server_url") {
+                    rules.push({
+                      validator: async (_: any, value: any) => {
+                        if (!value) return Promise.resolve();
+                        try {
+                          // Check if value is a valid URL
+                          let url: URL;
+                          try {
+                            url = new URL(value);
+                          } catch {
+                            return Promise.reject(
+                              t("knowledgeBase.error.invalidUrlFormat")
+                            );
+                          }
+                          // Check if protocol is http or https
+                          if (
+                            url.protocol !== "http:" &&
+                            url.protocol !== "https:"
+                          ) {
+                            return Promise.reject(
+                              t("knowledgeBase.error.invalidUrlProtocol")
+                            );
+                          }
+                          return Promise.resolve();
+                        } catch {
+                          return Promise.reject(
+                            t("knowledgeBase.error.invalidUrlFormat")
+                          );
+                        }
+                      },
+                    });
+                  }
+
+                  // Add init_path validation - non-empty string if provided
+                  if (param.name === "init_path") {
+                    rules.push({
+                      validator: async (_: any, value: any) => {
+                        if (!value || value.trim() === "") {
+                          return Promise.reject(
+                            t("toolConfig.validation.initPathEmpty")
+                          );
+                        }
+                        return Promise.resolve();
+                      },
+                    });
+                  }
+
+                  // Add custom validator for knowledge base selector fields (index_names/dataset_ids)
+                  // Since these fields use custom display without form control, we need custom validation
+                  if (
+                    toolRequiresKbSelection &&
+                    toolKbType !== "aidp_search" &&
+                    (param.name === "index_names" ||
+                      param.name === "dataset_ids" ||
+                      param.name === "kds_list")
+                  ) {
+                    rules.push({
+                      validator: async () => {
+                        // Check if any knowledge base has been selected
+                        if (selectedKbIds.length === 0) {
+                          return Promise.reject(
+                            t("toolConfig.validation.selectKb")
+                          );
+                        }
+                        return Promise.resolve();
+                      },
+                    });
+                  }
+
+                  // Add type-specific validation rules
+                  switch (param.type) {
+                    case TOOL_PARAM_TYPES.ARRAY:
+                      rules.push({
+                        validator: async (_: any, value: any) => {
+                          if (!value) return Promise.resolve();
+                          try {
+                            const parsed =
+                              typeof value === "string"
+                                ? JSON.parse(value)
+                                : value;
+                            if (!Array.isArray(parsed)) {
+                              return Promise.reject(
+                                t("toolConfig.validation.array.invalid")
+                              );
+                            }
+                            return Promise.resolve();
+                          } catch {
+                            return Promise.reject(
+                              t("toolConfig.validation.array.invalid")
+                            );
+                          }
+                        },
+                      });
+                      break;
+                    case TOOL_PARAM_TYPES.OBJECT:
+                      rules.push({
+                        validator: async (_: any, value: any) => {
+                          if (!value) return Promise.resolve();
+                          try {
+                            const parsed =
+                              typeof value === "string"
+                                ? JSON.parse(value)
+                                : value;
+                            if (
+                              typeof parsed !== "object" ||
+                              Array.isArray(parsed)
+                            ) {
+                              return Promise.reject(
+                                t("toolConfig.validation.object.invalid")
+                              );
+                            }
+                            return Promise.resolve();
+                          } catch {
+                            return Promise.reject(
+                              t("toolConfig.validation.object.invalid")
+                            );
+                          }
+                        },
+                      });
+                      break;
+                  }
+
+                  return (
+                    <Form.Item
+                      key={param.name}
+                      required={param.required}
+                      label={
+                        <span
+                          className="inline-block w-full truncate"
+                          title={param.name}
+                        >
+                          {param.name}
+                        </span>
+                      }
+                      name={
+                        toolRequiresKbSelection &&
+                        (param.name === "index_names" ||
+                          param.name === "dataset_ids" ||
+                          param.name === "kds_list")
+                          ? undefined
+                          : fieldName
+                      }
+                      rules={rules}
+                      tooltip={{
+                        title: getLocalizedDescription(
+                          param.description,
+                          param.description_zh
+                        ),
+                        placement: "topLeft",
+                        styles: { root: { maxWidth: 400 } },
+                      }}
+                    >
+                      {/* For KB selector, use custom display (Form.Item doesn't control value) */}
+                      {toolRequiresKbSelection &&
+                      (param.name === "index_names" ||
+                        param.name === "dataset_ids" ||
+                        param.name === "kds_list")
+                        ? renderKbSelectorInput(param, index)
+                        : renderParamInput(param, index)}
+                    </Form.Item>
+                  );
+                })}
+              </div>
+            </Form>
+          </div>
+          <div>
+            {testPanelVisible && (
+              <ToolTestPanel
+                visible={testPanelVisible}
+                tool={tool}
+                onClose={handleCloseTestPanel}
+                configParams={currentParams}
+                toolRequiresKbSelection={toolRequiresKbSelection}
+                knowledgeBases={knowledgeBases}
+                kbLoading={kbLoading}
+                selectedKbIds={selectedKbIds}
+                selectedKbDisplayNames={selectedKbDisplayNames}
+                onOpenKbSelector={(paramIndex) => {
+                  // For aidp_search and knowledge_base_search, mark that KB selection is from test panel
+                  if (
+                    toolKbType === "aidp_search" ||
+                    toolKbType === "ind_aidp_search" ||
+                    isKnowledgeBaseSearchTool
+                  ) {
+                    setIsTestPanelKbSelection(true);
+                  }
+                  // paramIndex === -1 means the call originates from the test
+                  // panel's KbSelectorDisplay, which doesn't know which slot in
+                  // currentParams holds the KB parameter. Resolve the real
+                  // index here so the KB selection updates the correct param
+                  // (and only the KB param) instead of overwriting param_0
+                  // (top_k for knowledge_base_search).
+                  const kbParamIndex =
+                    paramIndex === -1
+                      ? currentParams.findIndex(
+                          (p) =>
+                            p.name === "index_names" ||
+                            p.name === "dataset_ids" ||
+                            p.name === "kds_list"
+                        )
+                      : paramIndex;
+                  openKbSelector(kbParamIndex >= 0 ? kbParamIndex : 0, true);
+                }}
+                onKbSelectionChange={(ids, displayNames) => {
+                  // For aidp_search and knowledge_base_search, this is handled by onTestPanelKbSelect
+                  if (
+                    toolKbType !== "aidp_search" &&
+                    toolKbType !== "ind_aidp_search" &&
+                    !isKnowledgeBaseSearchTool
+                  ) {
+                    setSelectedKbIds(ids);
+                    setSelectedKbDisplayNames(displayNames);
+                  }
+                }}
+                onRemoveKb={(index, paramIndex) => {
+                  if (paramIndex === -1) {
+                    // Called from test panel - for aidp_search and knowledge_base_search, this is handled by onTestPanelKbRemove
+                    if (
+                      toolKbType !== "aidp_search" &&
+                      toolKbType !== "ind_aidp_search" &&
+                      !isKnowledgeBaseSearchTool
+                    ) {
+                      const newIds = selectedKbIds.filter(
+                        (_, i) => i !== index
+                      );
+                      const newDisplayNames = selectedKbDisplayNames.filter(
+                        (_, i) => i !== index
+                      );
+                      setSelectedKbIds(newIds);
+                      setSelectedKbDisplayNames(newDisplayNames);
+                    }
+                  } else {
+                    // Called from config panel
+                    removeKbFromSelection(index, paramIndex);
+                  }
+                }}
+                onTestPanelKbSelect={handleTestPanelKbSelect}
+                onTestPanelKbRemove={handleTestPanelKbRemove}
+                onTestPanelKbIdsChange={handleTestPanelKbIdsChange}
+                testPanelKbIds={testPanelKbIds}
+                testPanelKbDisplayNames={testPanelKbDisplayNames}
+                toolKbType={toolKbType}
+                haotianKnowledgeSets={haotianKnowledgeSets}
+              />
+            )}
+          </div>
+        </div>
+      </Modal>
+
+      {/* Knowledge Base Selector Modal */}
+      {toolKbType === "haotian_search" ? (
+        <HaotianKnowledgeSelectorModal
+          isOpen={kbSelectorVisible}
+          onClose={() => setKbSelectorVisible(false)}
+          onConfirm={handleHaotianKbConfirm}
+          selectedDatasetIds={selectedKbIds}
+          knowledgeSets={haotianKnowledgeSets}
+          isLoading={haotianSetsLoading}
+          title="Haotian knowledge sets"
+        />
+      ) : toolKbType === "aidp_search" || toolKbType === "ind_aidp_search" ? (
+        <AidpKnowledgeSelectorModal
+          isOpen={kbSelectorVisible}
+          onClose={() => setKbSelectorVisible(false)}
+          onConfirm={handleAidpKbConfirm}
+          selectedDatasetIds={
+            isTestPanelKbSelection ? testPanelKbIds : selectedKbIds
+          }
+          itemsProvider={
+            toolKbType === "ind_aidp_search"
+              ? independentAidpItemsProvider
+              : undefined
+          }
+          onSync={
+            toolKbType === "ind_aidp_search"
+              ? handleIndependentAidpSync
+              : undefined
+          }
+        />
+      ) : (
+        <KnowledgeBaseSelectorModal
+          isOpen={kbSelectorVisible}
+          onClose={() => setKbSelectorVisible(false)}
+          onConfirm={handleKbConfirm}
+          selectedIds={isTestPanelKbSelection ? testPanelKbIds : selectedKbIds}
+          toolType={getToolType()}
+          knowledgeBases={knowledgeBases}
+          isLoading={kbLoading}
+          showCheckbox={true}
+          onSync={async () => {
+            try {
+              const result = await refetchKnowledgeBases();
+              if (result.isError || result.error) {
+                log.error("Failed to sync knowledge bases:", result.error);
+                clearKnowledgeBases();
+                message.error(t("knowledgeBase.message.syncError"));
+                return;
+              }
+              message.success(t("knowledgeBase.message.syncSuccess"));
+            } catch (error) {
+              log.error("Failed to sync knowledge bases:", error);
+              clearKnowledgeBases();
+              message.error(t("knowledgeBase.message.syncError"));
+            }
+          }}
+          syncLoading={kbLoading}
+          isSelectable={canSelectKnowledgeBase}
+          difyConfig={resolveDifyModalConfig()}
+        />
+      )}
+    </>
+  );
+}

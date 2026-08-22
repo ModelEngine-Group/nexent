@@ -1,0 +1,63 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    timeout: 1s
+    send_batch_size: 512
+
+  memory_limiter:
+    limit_mib: 256
+    check_interval: 1s
+
+  resource:
+    attributes:
+      - key: service.name
+        value: nexent-backend
+        action: upsert
+      - key: service.version
+        from_attribute: version
+        action: insert
+
+exporters:
+  debug:
+    verbosity: normal
+
+  otlphttp/langsmith:
+    traces_endpoint: ${env:LANGSMITH_OTLP_TRACES_ENDPOINT}
+    headers:
+      x-api-key: ${env:LANGSMITH_API_KEY}
+      Langsmith-Project: ${env:LANGSMITH_PROJECT}
+    timeout: 10s
+
+    sending_queue:
+      enabled: true
+      num_consumers: 10
+      queue_size: 5000
+
+    retry_on_failure:
+      enabled: true
+      initial_interval: 1s
+      max_interval: 30s
+      max_elapsed_time: 300s
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, batch]
+      exporters: [otlphttp/langsmith, debug]
+
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, batch]
+      exporters: [debug]
+
+  telemetry:
+    logs:
+      level: "info"

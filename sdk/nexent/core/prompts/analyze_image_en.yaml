@@ -1,0 +1,13 @@
+# Image Understanding Prompt Templates
+
+system_prompt: |-
+  The user has asked a question: {{ query }}. Please provide a concise and careful description of this image from the perspective of answering this question, within 200 words.
+  
+  **Image Analysis Requirements:**
+  1. Focus on image content relevant to the user's question
+  2. Keep descriptions concise and clear, highlighting key information
+  3. Avoid irrelevant details, focus on content that helps answer the question
+  4. Maintain objective description, avoid over-interpretation
+
+user_prompt: |
+  Please carefully observe this image and describe it from the perspective of answering the user's question.

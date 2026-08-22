@@ -1,0 +1,144 @@
+{
+  "id": "example_infra",
+  "history_file": "./history.json",
+  "queries": [
+    "请总结一下我们之前主要讨论了哪些部署和基础设施问题。",
+    "如果 Elasticsearch 因磁盘使用率过高变成只读，我应该按什么步骤恢复？",
+    "结合之前的讨论，请说明把容器内服务地址改写为 localhost:映射端口是否可行，以及需要满足什么条件。"
+  ],
+  "probes": [
+    {
+      "question": "docker ps 输出中，Elasticsearch 容器的 STATUS 显示的是什么状态？",
+      "must_contain": [
+        "unhealthy"
+      ]
+    },
+    {
+      "question": "PostgreSQL 容器映射到宿主机的端口号是多少？",
+      "must_contain": [
+        "5434"
+      ]
+    },
+    {
+      "question": "Elasticsearch 默认低水位线是多少？触发后会发生什么？",
+      "must_contain": [
+        "85%",
+        "停止分配",
+        "不再分配"
+      ]
+    },
+    {
+      "question": "deploy.sh 中默认的部署版本选项是什么？",
+      "must_contain": [
+        "speed"
+      ]
+    },
+    {
+      "question": "Supabase 启动时拉取失败的具体是哪个 Docker 镜像？",
+      "must_contain": [
+        "gotrue"
+      ]
+    },
+    {
+      "question": "Elasticsearch 容器映射到宿主机的端口号是多少？",
+      "must_contain": [
+        "9210"
+      ]
+    }
+  ],
+  "summary_checks": [
+    {
+      "description": "ES low watermark value",
+      "must_contain": [
+        "85%"
+      ]
+    },
+    {
+      "description": "PostgreSQL mapped port",
+      "must_contain": [
+        "5434"
+      ]
+    },
+    {
+      "description": "ES mapped port",
+      "must_contain": [
+        "9210"
+      ]
+    },
+    {
+      "description": "deploy.sh default version",
+      "must_contain": [
+        "speed"
+      ]
+    },
+    {
+      "description": "sed command for env modification",
+      "must_contain": [
+        "sed"
+      ]
+    },
+    {
+      "description": "ES unhealthy status",
+      "must_contain": [
+        "unhealthy"
+      ]
+    },
+    {
+      "description": "read_only_allow_delete setting",
+      "must_contain": [
+        "read_only_allow_delete"
+      ]
+    },
+    {
+      "description": "container localhost limitation",
+      "must_contain": [
+        "容器内",
+        "localhost"
+      ]
+    },
+    {
+      "description": "gotrue image pull failure",
+      "must_contain": [
+        "gotrue"
+      ]
+    },
+    {
+      "description": "context classification",
+      "must_contain": [
+        "Model",
+        "Tool"
+      ]
+    }
+  ],
+  "task_checks": [
+    {
+      "turn": 1,
+      "must_contain_any": [
+        "Docker Compose",
+        "Elasticsearch",
+        "Terminal Tool",
+        "localhost"
+      ]
+    },
+    {
+      "turn": 2,
+      "must_contain_any": [
+        "清理",
+        "解除只读",
+        "read_only_allow_delete"
+      ]
+    },
+    {
+      "turn": 3,
+      "must_contain": [
+        "localhost",
+        "映射端口"
+      ]
+    }
+  ],
+  "compressed_config": {
+    "token_threshold": 9576,
+    "keep_recent_pairs": 1,
+    "keep_recent_steps": 4
+  }
+}

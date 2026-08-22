@@ -1,0 +1,48 @@
+name: Docker Build Doc Check
+
+concurrency:
+  group: docker-build-doc-dev-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [develop, 'release/**', 'hotfix/**']
+    paths:
+      - 'doc/**'
+      - '.github/workflows/**'
+  push:
+    branches: [develop, 'release/**', 'hotfix/**']
+    paths:
+      - 'doc/**'
+      - '.github/workflows/**'
+
+jobs:
+  build-docs-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      
+      - name: Install dependencies
+        run: |
+          cd doc
+          npm install
+      
+      - name: Build doc
+        run: |
+          cd doc
+          npm run docs:build
+          BUILD_EXIT_CODE=$?
+          
+          if [ $BUILD_EXIT_CODE -ne 0 ]; then
+            echo "❌ Doc build failed with exit code $BUILD_EXIT_CODE"
+            exit $BUILD_EXIT_CODE
+          else
+            echo "✅ Doc build completed successfully"
+          fi

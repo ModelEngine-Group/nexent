@@ -1,0 +1,28 @@
+from enum import Enum
+
+
+class ProviderEnum(str, Enum):
+    """Supported model providers"""
+    SILICON = "silicon"
+    OPENAI = "openai"
+    MODELENGINE = "modelengine"
+    DASHSCOPE = "dashscope"
+    TOKENPONY = "tokenpony"
+
+
+# Silicon Flow
+SILICON_BASE_URL = "https://api.siliconflow.cn/v1/"
+SILICON_GET_URL = "https://api.siliconflow.cn/v1/models"
+
+# Dashcope
+DASHSCOPE_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1/"
+DASHSCOPE_GET_URL = "https://dashscope.aliyuncs.com/api/v1/models"
+DASHSCOPE_REALTIME_BASE_URL = "wss://dashscope.aliyuncs.com/api-ws/v1/realtime"
+DASHSCOPE_STT_BASE_URL = DASHSCOPE_REALTIME_BASE_URL
+
+# TokenPony
+TOKENPONY_BASE_URL = "https://api.tokenpony.cn/v1/"
+TOKENPONY_GET_URL = "https://api.tokenpony.cn/v1/models"
+
+# ModelEngine
+# Base URL and API key are loaded from environment variables at runtime

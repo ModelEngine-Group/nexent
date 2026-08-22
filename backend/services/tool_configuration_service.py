@@ -1,0 +1,1326 @@
+import importlib
+import inspect
+import json
+import logging
+import time
+from typing import Any, List, Optional, Dict
+from urllib.parse import urljoin
+
+import jsonref
+import requests
+from fastmcp import Client
+from fastmcp.client.transports import SSETransport, StreamableHttpTransport
+from pydantic_core import PydanticUndefined
+
+from consts.const import (
+    AIDP_API_KEY,
+    AIDP_SERVER_URL,
+    AIDP_TENANT_ID,
+    DATA_PROCESS_SERVICE,
+    LOCAL_MCP_SERVER,
+    MCP_MANAGEMENT_API,
+)
+from consts.exceptions import MCPConnectionError, NotFoundException, ToolExecutionException, ValidationError
+from consts.model import ToolInstanceInfoRequest, ToolInfo, ToolSourceEnum, ToolValidateRequest
+from consts.tool_labels import SYSTEM_MANAGED_TOOL_NAMES
+from database.outer_api_tool_db import (
+    upsert_openapi_service,
+    query_openapi_services_by_tenant,
+    delete_openapi_service as db_delete_openapi_service,
+)
+from database.remote_mcp_db import (
+    get_mcp_authorization_token_by_name_and_url,
+    get_mcp_records_by_tenant,
+    get_mcp_server_by_name_and_tenant,
+    get_mcp_custom_headers_by_name_and_url,
+)
+from database.tool_db import (
+    check_tool_list_initialized,
+    create_or_update_tool_by_tool_info,
+    query_all_tools,
+    query_tools_by_labels,
+    query_tools_by_ids,
+    query_tool_instances_by_id,
+    search_last_tool_instance_by_tool_id,
+    update_tool_table_from_scan_tool_list,
+)
+from database.knowledge_db import get_knowledge_name_map_by_index_names
+from database.user_tenant_db import get_user_email_map
+from mcpadapt.smolagents_adapter import _sanitize_function_name
+from services.file_management_service import validate_urls_access
+from .agent_draft_permission_service import (
+    AgentDraftEditError,
+    ResourceBindingError,
+    require_agent_draft_edit,
+)
+from services.vectordatabase_service import get_embedding_model_by_index_name, get_rerank_model
+from utils.http_client_utils import create_httpx_client
+from database.client import minio_client
+from services.model_gateway_service import get_llm_adapter, get_vlm_adapter
+from nexent.monitor import set_monitoring_context, set_monitoring_operation
+from services.vectordatabase_service import get_vector_db_core
+from utils.langchain_utils import discover_langchain_modules
+from utils.tool_utils import get_local_tools_classes, get_local_tools_description_zh
+
+logger = logging.getLogger("tool_configuration_service")
+
+
+def _parse_kds_list(value: Any) -> list[str]:
+    """Normalize legacy JSON strings and list values into ordered string IDs."""
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError:
+            return []
+    if not isinstance(value, list):
+        return []
+    return list(dict.fromkeys(str(item).strip() for item in value if str(item).strip()))
+
+
+def _is_aidp_search_tool(tool_id: int, tool_name: Any = None) -> bool:
+    if isinstance(tool_name, str):
+        return tool_name == "aidp_search"
+    tools = query_tools_by_ids([tool_id])
+    return bool(tools and tools[0].get("name") == "aidp_search")
+
+
+def _resolve_aidp_snapshot(user_id: str, tenant_id: str):
+    from ext_components.aidp.services.aidp_access_service import (
+        resolve_current_aidp_access,
+    )
+
+    return resolve_current_aidp_access(
+        server_url=AIDP_SERVER_URL,
+        api_key=AIDP_API_KEY,
+        user_id=user_id,
+        tenant_id=tenant_id,
+        aidp_tenant_id=AIDP_TENANT_ID,
+    )
+
+
+def _create_mcp_transport(url: str, authorization_token: Optional[str] = None, custom_headers: Optional[Dict[str, Any]] = None):
+    """
+    Create appropriate MCP transport based on URL ending.
+
+    Args:
+        url: MCP server URL
+        authorization_token: Optional authorization token
+        custom_headers: Optional custom HTTP headers
+
+    Returns:
+        Transport instance (SSETransport or StreamableHttpTransport)
+    """
+    url_stripped = url.strip()
+    headers = {}
+    if authorization_token:
+        headers["Authorization"] = authorization_token
+    if custom_headers:
+        headers.update(custom_headers)
+
+    if url_stripped.endswith("/sse"):
+        return SSETransport(url=url_stripped, headers=headers, httpx_client_factory=create_httpx_client)
+    elif url_stripped.endswith("/mcp"):
+        return StreamableHttpTransport(url=url_stripped, headers=headers, httpx_client_factory=create_httpx_client)
+    else:
+        # Default to StreamableHttpTransport for unrecognized formats
+        return StreamableHttpTransport(url=url_stripped, headers=headers, httpx_client_factory=create_httpx_client)
+
+
+def python_type_to_json_schema(annotation: Any) -> str:
+    """
+    Convert Python type annotations to JSON Schema types
+
+    Args:
+        annotation: Python type annotation
+
+    Returns:
+        Corresponding JSON Schema type string
+    """
+    # Handle case with no type annotation
+    if annotation == inspect.Parameter.empty:
+        return "string"
+
+    # Get type name
+    type_name = getattr(annotation, "__name__", str(annotation))
+
+    # Type mapping dictionary
+    type_mapping = {
+        "str": "string",
+        "int": "integer",
+        "float": "float",
+        "bool": "boolean",
+        "list": "array",
+        "List": "array",
+        "tuple": "array",
+        "Tuple": "array",
+        "dict": "object",
+        "Dict": "object",
+        "Any": "any"
+    }
+
+    # Return mapped type, or original type name if no mapping exists
+    return type_mapping.get(type_name, type_name)
+
+
+def get_local_tools() -> List[ToolInfo]:
+    """
+    Get metadata for all locally available tools
+
+    Returns:
+        List of ToolInfo objects for local tools
+    """
+    tools_info = []
+    tools_classes = get_local_tools_classes()
+    for tool_class in tools_classes:
+        # Get class-level init_param_descriptions for fallback
+        init_param_descriptions = getattr(tool_class, 'init_param_descriptions', {})
+
+        init_params_list = []
+        sig = inspect.signature(tool_class.__init__)
+        for param_name, param in sig.parameters.items():
+            if param_name == "self":
+                continue
+
+            # Check if parameter has a default value and if it should be excluded
+            if param.default != inspect.Parameter.empty:
+                if hasattr(param.default, 'exclude') and param.default.exclude:
+                    continue
+
+            # Check if default is a Pydantic FieldInfo (has .default attribute)
+            is_pydantic_field = hasattr(param.default, 'default')
+
+            # Get description in both languages
+            param_description = param.default.description if is_pydantic_field else ""
+
+            # First try to get from param.default.description_zh (FieldInfo)
+            # Note: Pydantic Field doesn't have description_zh attribute, so use getattr with default
+            param_description_zh = getattr(param.default, 'description_zh', None) if is_pydantic_field else None
+
+            # Fallback to init_param_descriptions if not found
+            if param_description_zh is None and param_name in init_param_descriptions:
+                param_description_zh = init_param_descriptions[param_name].get('description_zh')
+
+            param_info = {
+                "type": python_type_to_json_schema(param.annotation),
+                "name": param_name,
+                "description": param_description,
+                "description_zh": param_description_zh
+            }
+
+            # Handle both Pydantic FieldInfo and simple defaults
+            if is_pydantic_field:
+                if param.default.default is PydanticUndefined:
+                    param_info["optional"] = False
+                else:
+                    param_info["default"] = param.default.default
+                    param_info["optional"] = True
+            else:
+                # Simple default value (not a FieldInfo)
+                if param.default == inspect.Parameter.empty:
+                    param_info["optional"] = False
+                else:
+                    param_info["default"] = param.default
+                    param_info["optional"] = True
+
+            init_params_list.append(param_info)
+
+        # Get tool fixed attributes with bilingual support
+        tool_description_zh = getattr(tool_class, 'description_zh', None)
+        tool_inputs = getattr(tool_class, 'inputs', {})
+
+        # Process inputs to add bilingual descriptions
+        processed_inputs = {}
+        if isinstance(tool_inputs, dict):
+            for key, value in tool_inputs.items():
+                if isinstance(value, dict):
+                    processed_inputs[key] = {
+                        **value,
+                        "description_zh": value.get("description_zh")
+                    }
+                else:
+                    processed_inputs[key] = value
+
+        tool_info = ToolInfo(
+            name=getattr(tool_class, 'name'),
+            description=getattr(tool_class, 'description'),
+            description_zh=tool_description_zh,
+            params=init_params_list,
+            source=ToolSourceEnum.LOCAL.value,
+            inputs=json.dumps(processed_inputs, ensure_ascii=False),
+            output_type=getattr(tool_class, 'output_type'),
+            category=getattr(tool_class, 'category'),
+            labels=getattr(tool_class, 'labels', None),
+            is_user_selectable=getattr(tool_class, 'is_user_selectable', True),
+            class_name=tool_class.__name__,
+            usage=None,
+            origin_name=getattr(tool_class, 'name')
+        )
+        tools_info.append(tool_info)
+    return tools_info
+
+
+# --------------------------------------------------
+# LangChain tools discovery (functions decorated with @tool)
+# --------------------------------------------------
+
+def _build_tool_info_from_langchain(obj) -> ToolInfo:
+    """Convert a LangChain Tool object into our internal ToolInfo model."""
+
+    # Try to infer parameter schema from the underlying callable signature if
+    # available.  LangChain tools usually expose a `.func` attribute pointing
+    # to the original python function.  If not present, we fallback to the
+    # tool instance itself (implements __call__).
+    target_callable = getattr(obj, "func", obj)
+
+    inputs = getattr(obj, "args", {})
+
+    if inputs:
+        for key, value in inputs.items():
+            if "description" not in value:
+                value["description"] = "see the description"
+
+    # Attempt to infer output type from return annotation
+    try:
+        return_schema = inspect.signature(target_callable).return_annotation
+        output_type = python_type_to_json_schema(return_schema)
+    except (TypeError, ValueError):
+        output_type = "string"
+    tool_name = getattr(obj, "name", target_callable.__name__)
+    tool_info = ToolInfo(
+        name=tool_name,
+        description=getattr(obj, "description", ""),
+        params=[],
+        source=ToolSourceEnum.LANGCHAIN.value,
+        inputs=json.dumps(inputs, ensure_ascii=False),
+        output_type=output_type,
+        class_name=tool_name,
+        usage=None,
+        origin_name=tool_name,
+        category=None,
+        labels=None,
+        is_user_selectable=True,
+    )
+    return tool_info
+
+
+def get_langchain_tools() -> List[ToolInfo]:
+    """Discover LangChain tools in the specified directory.
+
+    We dynamically import every `*.py` file and extract objects that look like
+    LangChain tools (based on presence of `name` & `description`).  Any valid
+    tool is converted to ToolInfo with source = "langchain".
+    """
+    tools_info: List[ToolInfo] = []
+    # Discover all objects that look like LangChain tools
+    discovered_tools = discover_langchain_modules()
+
+    # Process discovered tools
+    for obj, filename in discovered_tools:
+        try:
+            tool_info = _build_tool_info_from_langchain(obj)
+            tools_info.append(tool_info)
+        except Exception as e:
+            logger.warning(
+                f"Error processing LangChain tool in {filename}: {e}")
+
+    return tools_info
+
+
+async def get_all_mcp_tools(tenant_id: str) -> List[ToolInfo]:
+    """
+    Get metadata for all tools available from the MCP service
+
+    Returns:
+        List of ToolInfo objects for MCP tools, or empty list if connection fails
+    """
+    mcp_info = get_mcp_records_by_tenant(tenant_id=tenant_id)
+    tools_info = []
+    for record in mcp_info:
+        # Only scan MCP services that are explicitly enabled and currently healthy.
+        if bool(record.get("enabled")) and bool(record.get("status")):
+            try:
+                tools_info.extend(await get_tool_from_remote_mcp_server(
+                    mcp_server_name=record["mcp_name"],
+                    remote_mcp_server=record["mcp_server"],
+                    tenant_id=tenant_id,
+                    authorization_token=record.get("authorization_token"),
+                    custom_headers=record.get("custom_headers"),
+                ))
+            except Exception as e:
+                logger.error(f"mcp connection error: {str(e)}")
+
+    default_mcp_url = urljoin(LOCAL_MCP_SERVER, "sse")
+    tools_info.extend(await get_tool_from_remote_mcp_server(
+        mcp_server_name="outer-apis",
+        remote_mcp_server=default_mcp_url,
+        tenant_id=None
+    ))
+    return tools_info
+
+
+def search_tool_info_impl(
+    agent_id: int,
+    tool_id: int,
+    tenant_id: str,
+    user_id: Optional[str] = None,
+):
+    """
+    Search for tool configuration information by agent ID and tool ID
+
+    Args:
+        agent_id: Agent ID
+        tool_id: Tool ID
+        tenant_id: Tenant ID
+
+    Returns:
+        Dictionary containing tool parameters and enabled status
+
+    Raises:
+        ValueError: If database query fails
+    """
+    tool_instance = query_tool_instances_by_id(
+        agent_id, tool_id, tenant_id)
+
+    if tool_instance:
+        params = dict(tool_instance["params"] or {})
+        if user_id and _is_aidp_search_tool(tool_id):
+            snapshot = _resolve_aidp_snapshot(user_id, tenant_id)
+            existing_ids = _parse_kds_list(params.get("kds_list"))
+            params["kds_list"] = [
+                kds_id for kds_id in existing_ids
+                if kds_id in snapshot.accessible_id_set
+            ]
+        return {
+            "params": params,
+            "enabled": tool_instance["enabled"]
+        }
+    else:
+        return {
+            "params": None,
+            "enabled": False
+        }
+
+
+def update_tool_info_impl(tool_info: ToolInstanceInfoRequest, tenant_id: str, user_id: str):
+    """
+    Update tool configuration information
+
+    Args:
+        tool_info: ToolInstanceInfoRequest containing tool configuration data
+        tenant_id: Tenant ID
+        user_id: User ID
+
+    Returns:
+        Dictionary containing the updated tool instance
+
+    Raises:
+        ValueError: If database update fails
+    """
+    version_no = getattr(tool_info, "version_no", 0)
+    if version_no != 0:
+        raise AgentDraftEditError("agent_not_draft")
+    require_agent_draft_edit(
+        agent_id=tool_info.agent_id,
+        tenant_id=tenant_id,
+        user_id=user_id,
+    )
+    tool = next(
+        (
+            item
+            for item in query_all_tools(tenant_id)
+            if item.get("tool_id") == tool_info.tool_id
+        ),
+        None,
+    )
+    if (
+        tool is None
+        or tool.get("is_available") is not True
+        or tool.get("name") in SYSTEM_MANAGED_TOOL_NAMES
+    ):
+        raise ResourceBindingError("resource_not_visible")
+
+    if _is_aidp_search_tool(tool_info.tool_id, tool.get("name")):
+        existing = query_tool_instances_by_id(
+            tool_info.agent_id,
+            tool_info.tool_id,
+            tenant_id,
+            version_no,
+        )
+        existing_params = dict((existing or {}).get("params") or {})
+        existing_ids = _parse_kds_list(existing_params.get("kds_list"))
+        params = dict(tool_info.params or {})
+
+        # A missing key means the caller did not edit the knowledge scope.
+        if "kds_list" not in params:
+            params["kds_list"] = existing_ids
+        else:
+            submitted_ids = _parse_kds_list(params.get("kds_list"))
+            try:
+                snapshot = _resolve_aidp_snapshot(user_id, tenant_id)
+            except Exception as exc:
+                new_ids = [kds_id for kds_id in submitted_ids if kds_id not in set(existing_ids)]
+                if new_ids:
+                    raise ValidationError(
+                        "AIDP is unavailable; the knowledge base configuration was not changed"
+                    ) from exc
+                params["kds_list"] = existing_ids
+            else:
+                existing_set = set(existing_ids)
+                invalid_ids = [
+                    kds_id for kds_id in submitted_ids
+                    if kds_id not in snapshot.accessible_id_set and kds_id not in existing_set
+                ]
+                if invalid_ids:
+                    raise ValidationError(
+                        "aidp_search kds_list contains a knowledge base the user cannot configure"
+                    )
+                hidden_existing = [
+                    kds_id for kds_id in existing_ids
+                    if kds_id not in snapshot.accessible_id_set
+                ]
+                visible_submitted = [
+                    kds_id for kds_id in submitted_ids
+                    if kds_id in snapshot.accessible_id_set
+                ]
+                params["kds_list"] = list(dict.fromkeys(hidden_existing + visible_submitted))
+        tool_info.params = params
+
+    tool_instance = create_or_update_tool_by_tool_info(
+        tool_info, tenant_id, user_id, version_no=version_no)
+    return {
+        "tool_instance": tool_instance
+    }
+
+
+async def get_tool_from_remote_mcp_server(
+    mcp_server_name: str,
+    remote_mcp_server: str,
+    tenant_id: Optional[str] = None,
+    authorization_token: Optional[str] = None,
+    custom_headers: Optional[Dict[str, Any]] = None
+):
+    """
+    Get the tool information from the remote MCP server, avoid blocking the event loop
+
+    Args:
+        mcp_server_name: Name of the MCP server
+        remote_mcp_server: URL of the MCP server
+        tenant_id: Optional tenant ID for database lookup of authorization_token
+        authorization_token: Optional authorization token for authentication (if not provided and tenant_id is given, will be fetched from database)
+        custom_headers: Optional custom HTTP headers
+    """
+    # Get authorization token from database if not provided
+    if authorization_token is None and tenant_id:
+        authorization_token = get_mcp_authorization_token_by_name_and_url(
+            mcp_name=mcp_server_name,
+            mcp_server=remote_mcp_server,
+            tenant_id=tenant_id
+        )
+
+    # Get custom headers from database if not provided
+    if custom_headers is None and tenant_id:
+        custom_headers = get_mcp_custom_headers_by_name_and_url(
+            mcp_name=mcp_server_name,
+            mcp_server=remote_mcp_server,
+            tenant_id=tenant_id
+        )
+
+    tools_info = []
+
+    try:
+        transport = _create_mcp_transport(remote_mcp_server, authorization_token, custom_headers)
+        client = Client(transport=transport, timeout=10)
+        async with client:
+            # List available operations
+            tools = await client.list_tools()
+
+            for tool in tools:
+                if isinstance(tool.meta, dict) and tool.meta.get("nexent_internal") is True:
+                    continue
+
+                input_schema = {
+                    k: v
+                    for k, v in jsonref.replace_refs(tool.inputSchema).items()
+                    if k != "$defs"
+                }
+                # make sure mandatory `description` and `type` is provided for each argument:
+                for k, v in input_schema["properties"].items():
+                    if "description" not in v:
+                        input_schema["properties"][k]["description"] = "see tool description"
+                    if "type" not in v:
+                        input_schema["properties"][k]["type"] = "string"
+
+                sanitized_tool_name = _sanitize_function_name(tool.name)
+                tool_description = tool.description or ""
+                tool_info = ToolInfo(name=sanitized_tool_name,
+                                     description=tool_description,
+                                     params=[],
+                                     source=ToolSourceEnum.MCP.value,
+                                     inputs=str(input_schema["properties"]),
+                                     output_type="string",
+                                     class_name=sanitized_tool_name,
+                                     usage=mcp_server_name,
+                                     origin_name=tool.name,
+                                     category=None,
+                                     is_user_selectable=True)
+                tools_info.append(tool_info)
+            return tools_info
+    except BaseException as e:
+        logger.error(
+            f"failed to get tool from remote MCP server, detail: {e}", exc_info=True)
+        # Convert all failures (including SystemExit) to domain error to avoid process exit
+        raise MCPConnectionError(
+            f"failed to get tool from remote MCP server, detail: {e}")
+
+
+async def init_tool_list_for_tenant(tenant_id: str, user_id: str):
+    """
+    Initialize tool list for a new tenant.
+    This function scans and populates available tools from local, MCP, and LangChain sources.
+
+    Args:
+        tenant_id: Tenant ID for MCP tools (required for MCP tools)
+        user_id: User ID for tracking who initiated the scan
+
+    Returns:
+        Dictionary containing initialization result with tool count
+    """
+    # Check if tools have already been initialized for this tenant
+    if check_tool_list_initialized(tenant_id):
+        logger.info(f"Tool list already initialized for tenant {tenant_id}, skipping")
+        return {"status": "already_initialized", "message": "Tool list already exists"}
+
+    logger.info(f"Initializing tool list for new tenant: {tenant_id}")
+    await update_tool_list(tenant_id=tenant_id, user_id=user_id)
+    return {"status": "success", "message": "Tool list initialized successfully"}
+
+
+async def update_tool_list(tenant_id: str, user_id: str):
+    """
+        Scan and gather all available tools from local, MCP, and outer API sources.
+        Also refreshes dynamic outer API tools in MCP server.
+
+        Args:
+            tenant_id: Tenant ID for MCP tools (required for MCP tools)
+            user_id: User ID for MCP tools (required for MCP tools)
+
+        Returns:
+            List of ToolInfo objects containing tool metadata
+        """
+    local_tools = get_local_tools()
+    langchain_tools = get_langchain_tools()
+
+    _refresh_openapi_services_in_mcp(tenant_id)
+
+    try:
+        mcp_tools = await get_all_mcp_tools(tenant_id)
+    except Exception as e:
+        logger.error(f"failed to get all mcp tools, detail: {e}")
+        # Don't block local/langchain tool update when MCP is unavailable.
+        mcp_tools = []
+
+    # Enabled MCP services are "intended to be available". Their tools keep their
+    # previous availability even when this scan fails to reach them, so a transient
+    # connection failure does not hide a healthy MCP's tools from the tool list.
+    enabled_mcp_names = {
+        str(record.get("mcp_name") or "")
+        for record in get_mcp_records_by_tenant(tenant_id=tenant_id)
+        if bool(record.get("enabled"))
+    }
+
+    update_tool_table_from_scan_tool_list(tenant_id=tenant_id,
+                                          user_id=user_id,
+                                          tool_list=local_tools+mcp_tools+langchain_tools,
+                                          enabled_mcp_names=enabled_mcp_names)
+
+
+async def list_all_tools(tenant_id: str, labels: Optional[List[str]] = None):
+    """
+    List all tools for a given tenant, optionally filtered by labels (OR match).
+    """
+    if labels:
+        tools_info = query_tools_by_labels(tenant_id, labels)
+    else:
+        tools_info = query_all_tools(tenant_id)
+
+    updated_by_email_map = get_user_email_map(
+        [tool.get("updated_by", "") for tool in tools_info]
+    )
+
+    # Get description_zh from SDK for local tools (not persisted to DB)
+    local_tool_descriptions = get_local_tools_description_zh()
+
+    # only return the fields needed
+    formatted_tools = []
+    for tool in tools_info:
+        tool_name = tool.get("name")
+
+        if tool_name in SYSTEM_MANAGED_TOOL_NAMES:
+            continue
+
+        # Always use SDK inputs for local tools to stay in sync with current tool code
+        is_local = tool.get("source") == "local"
+        sdk_info = local_tool_descriptions.get(tool_name) if is_local else None
+
+        if is_local and sdk_info:
+            description_zh = sdk_info.get("description_zh")
+
+            # Merge params description_zh from SDK (independent of tool-level description_zh)
+            params = tool.get("params", [])
+            if params:
+                for param in params:
+                    if not param.get("description_zh"):
+                        for sdk_param in sdk_info.get("params", []):
+                            if sdk_param.get("name") == param.get("name"):
+                                param["description_zh"] = sdk_param.get("description_zh")
+                                break
+
+            # Merge SDK inputs: use DB as base, merge description_zh for existing keys,
+            # add new keys from SDK. This ensures new inputs like kds_list appear even
+            # if the DB record was created before the field was added to the SDK.
+            inputs_str = tool.get("inputs", "{}")
+            try:
+                inputs = json.loads(inputs_str) if isinstance(inputs_str, str) else (inputs_str or {})
+                sdk_inputs = sdk_info.get("inputs", {})
+
+                if isinstance(inputs, dict):
+                    for key, value in inputs.items():
+                        if isinstance(value, dict) and key in sdk_inputs:
+                            sdk_desc_zh = sdk_inputs[key].get("description_zh")
+                            if sdk_desc_zh:
+                                value["description_zh"] = sdk_desc_zh
+
+                    for key, sdk_value in sdk_inputs.items():
+                        if key not in inputs:
+                            inputs[key] = sdk_value
+
+                    inputs_str = json.dumps(inputs, ensure_ascii=False)
+            except (json.JSONDecodeError, TypeError):
+                pass
+        else:
+            description_zh = tool.get("description_zh")
+            inputs_str = tool.get("inputs", "{}")
+
+        formatted_tool = {
+            "tool_id": tool.get("tool_id"),
+            "name": tool_name,
+            "origin_name": tool.get("origin_name"),
+            "description": tool.get("description"),
+            "description_zh": description_zh,
+            "source": tool.get("source"),
+            "is_available": tool.get("is_available"),
+            "create_time": tool.get("create_time"),
+            "usage": tool.get("usage"),
+            "params": tool.get("params", []),
+            "inputs": inputs_str,
+            "category": tool.get("category"),
+            "labels": tool.get("labels", []),
+            "is_user_selectable": tool.get("is_user_selectable", True),
+            "updated_by": tool.get("updated_by", ""),
+            "updated_by_name": updated_by_email_map.get(tool.get("updated_by"), ""),
+        }
+        formatted_tools.append(formatted_tool)
+    return formatted_tools
+
+
+def load_last_tool_config_impl(tool_id: int, tenant_id: str, user_id: str):
+    """
+    Load the last tool configuration for a given tool ID
+    """
+    tool_instance = search_last_tool_instance_by_tool_id(
+        tool_id, tenant_id, user_id)
+    if tool_instance is None:
+        raise ValueError(
+            f"Tool configuration not found for tool ID: {tool_id}")
+    return tool_instance.get("params", {})
+
+
+async def _call_mcp_tool(
+    mcp_url: str,
+    tool_name: str,
+    inputs: Optional[Dict[str, Any]],
+    authorization_token: Optional[str] = None,
+    custom_headers: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """
+    Common method to call MCP tool with connection handling.
+
+    Args:
+        mcp_url: MCP server URL
+        tool_name: Name of the tool to call
+        inputs: Parameters to pass to the tool
+        authorization_token: Optional authorization token for authentication
+        custom_headers: Optional custom HTTP headers
+
+    Returns:
+        Dict containing tool execution result
+
+    Raises:
+        MCPConnectionError: If MCP connection fails
+    """
+    transport = _create_mcp_transport(mcp_url, authorization_token, custom_headers)
+    client = Client(transport=transport)
+    async with client:
+        # Check if connected
+        if not client.is_connected():
+            logger.error("Failed to connect to MCP server")
+            raise MCPConnectionError("Failed to connect to MCP server")
+
+        # Call the tool
+        result = await client.call_tool(
+            name=tool_name,
+            arguments=inputs
+        )
+        return result.content[0].text
+
+
+async def _validate_mcp_tool_nexent(
+    tool_name: str,
+    inputs: Optional[Dict[str, Any]]
+) -> Dict[str, Any]:
+    """
+    Validate MCP tool using local nexent server.
+
+    Args:
+        tool_name: Name of the tool to test
+        inputs: Parameters to pass to the tool
+
+    Returns:
+        Dict containing validation result
+
+    Raises:
+        MCPConnectionError: If MCP connection fails
+    """
+    actual_mcp_url = urljoin(LOCAL_MCP_SERVER, "sse")
+    return await _call_mcp_tool(actual_mcp_url, tool_name, inputs)
+
+
+async def _validate_mcp_tool_remote(
+    tool_name: str,
+    inputs: Optional[Dict[str, Any]],
+    usage: str,
+    tenant_id: Optional[str]
+) -> Dict[str, Any]:
+    """
+    Validate MCP tool using remote server from database.
+
+    Args:
+        tool_name: Name of the tool to test
+        inputs: Parameters to pass to the tool
+        usage: MCP name for database lookup
+        tenant_id: Tenant ID for database queries
+
+    Returns:
+        Dict containing validation result
+
+    Raises:
+        NotFoundException: If MCP server not found
+        MCPConnectionError: If MCP connection fails
+    """
+    # Query mcp_record_t table to get mcp_server by mcp_name
+    actual_mcp_url = get_mcp_server_by_name_and_tenant(usage, tenant_id)
+    if not actual_mcp_url:
+        raise NotFoundException(f"MCP server not found for name: {usage}")
+
+    # Get authorization token and custom headers from database
+    authorization_token = None
+    custom_headers = None
+    if tenant_id:
+        authorization_token = get_mcp_authorization_token_by_name_and_url(
+            mcp_name=usage,
+            mcp_server=actual_mcp_url,
+            tenant_id=tenant_id
+        )
+        custom_headers = get_mcp_custom_headers_by_name_and_url(
+            mcp_name=usage,
+            mcp_server=actual_mcp_url,
+            tenant_id=tenant_id
+        )
+
+    return await _call_mcp_tool(actual_mcp_url, tool_name, inputs, authorization_token, custom_headers)
+
+
+def _get_tool_class_by_name(tool_name: str) -> Optional[type]:
+    """
+    Get tool class by tool name from nexent.core.tools package.
+
+    Args:
+        tool_name: Name of the tool to find
+
+    Returns:
+        Tool class if found, None otherwise
+    """
+    try:
+        tools_package = importlib.import_module('nexent.core.tools')
+        for name in dir(tools_package):
+            obj = getattr(tools_package, name)
+            if inspect.isclass(obj) and hasattr(obj, 'name') and obj.name == tool_name:
+                return obj
+        return None
+    except Exception as e:
+        logger.error(f"Failed to get tool class for {tool_name}: {e}")
+        return None
+
+
+def _validate_local_tool(
+    tool_name: str,
+    inputs: Optional[Dict[str, Any]] = None,
+    params: Optional[Dict[str, Any]] = None,
+    tenant_id: Optional[str] = None,
+    user_id: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Validate local tool by actually instantiating and calling it.
+
+    Args:
+        tool_name: Name of the tool to test
+        inputs: Parameters to pass to the tool's forward method
+        params: Configuration parameters for tool initialization
+        tenant_id: Tenant ID for knowledge base tools (optional)
+        user_id: User ID for knowledge base tools (optional)
+
+    Returns:
+        Dict[str, Any]: The actual result returned by the tool's forward method,
+                       serving as proof that the tool works correctly
+
+    Raises:
+        NotFoundException: If tool class not found
+        ToolExecutionException: If tool execution fails
+    """
+    try:
+        # Get tool class by name
+        tool_class = _get_tool_class_by_name(tool_name)
+        if not tool_class:
+            raise NotFoundException(f"Tool class not found for {tool_name}")
+
+        runtime_inputs = dict(inputs or {})
+
+        # Parse instantiation parameters first
+        instantiation_params = params or {}
+        # Get signature and extract default values for all parameters
+        sig = inspect.signature(tool_class.__init__)
+
+        # Extract default values for all parameters not provided in instantiation_params
+        for param_name, param in sig.parameters.items():
+            if param_name == "self":
+                continue
+
+            # If parameter not provided, extract default value
+            if param_name not in instantiation_params:
+                if param.default is PydanticUndefined:
+                    continue
+                elif hasattr(param.default, 'default'):
+                    # This is a Field object, extract its default value
+                    if param.default.default is not PydanticUndefined:
+                        instantiation_params[param_name] = param.default.default
+                else:
+                    instantiation_params[param_name] = param.default
+
+        if tool_name == "knowledge_base_search":
+            index_names = instantiation_params.get("index_names", [])
+            is_multimodal = instantiation_params.pop("multimodal", False)
+
+            # Must have embedding model for knowledge base search
+            if not index_names or not tenant_id:
+                raise ToolExecutionException(
+                    "Embedding model is required for knowledge_base_search but index_names or tenant_id is missing")
+
+            embedding_model, model_id, _ = get_embedding_model_by_index_name(tenant_id, index_names[0])
+            if not embedding_model:
+                raise ToolExecutionException(
+                    f"No embedding model found for index '{index_names[0]}'. "
+                    f"Please configure an embedding model for this knowledge base.")
+
+            vdb_core = get_vector_db_core()
+
+            # Get rerank configuration
+            rerank = instantiation_params.get("rerank", False)
+            rerank_model_name = instantiation_params.get("rerank_model_name", "")
+            rerank_model = None
+            if rerank and rerank_model_name:
+                rerank_model = get_rerank_model(tenant_id=tenant_id, model_name=rerank_model_name)
+
+            # Build display_name to index_name mapping for LLM parameter conversion
+            display_name_to_index_map = {}
+            if index_names:
+                knowledge_name_map = get_knowledge_name_map_by_index_names(
+                    index_names,
+                    tenant_id=tenant_id,
+                )
+                for idx_name, kb_name in knowledge_name_map.items():
+                    display_name_to_index_map[kb_name] = idx_name
+
+            params = {
+                **instantiation_params,
+                'vdb_core': vdb_core,
+                'embedding_model': embedding_model,
+                'rerank_model': rerank_model,
+                'display_name_to_index_map': display_name_to_index_map,
+                # Internal access control: restrict results to specific document paths (path_or_urls)
+                'document_paths': instantiation_params.get('document_paths'),
+            }
+            tool_instance = tool_class(**params)
+        elif tool_name in ["dify_search", "datamate_search"]:
+            # Get rerank configuration for dify and datamate search tools
+            rerank = instantiation_params.get("rerank", False)
+            rerank_model_name = instantiation_params.get("rerank_model_name", "")
+            rerank_model = None
+
+            if rerank and rerank_model_name:
+                rerank_model = get_rerank_model(tenant_id=tenant_id, model_name=rerank_model_name)
+
+            params = {
+                **instantiation_params,
+                'rerank_model': rerank_model,
+            }
+            tool_instance = tool_class(**params)
+        elif tool_name == "ragflow_search":
+            # RAGFlowSearchTool does not accept rerank/rerank_model_name params
+            # RAGFlow handles reranking internally via its API
+            filtered_params = {k: v for k, v in instantiation_params.items()
+                               if k not in ["rerank_model", "rerank", "rerank_model_name"]}
+            tool_instance = tool_class(**filtered_params)
+        elif tool_name in ("haotian_search", "aidp_search", "ind_aidp_search"):
+            # Haotian and AIDP share the same instantiation shape: drop the
+            # backend-only rerank keys and explicitly set observer=None
+            # (otherwise Python falls back to the FieldInfo default, which
+            # later triggers "'FieldInfo' has no attribute 'lang'" in
+            # forward()).
+            filtered_params = {k: v for k, v in instantiation_params.items()
+                              if k not in ["observer", "rerank_model", "rerank"]}
+            filtered_params["observer"] = None
+            if tool_name == "ind_aidp_search":
+                # Older UI builds incorrectly sent the independent AIDP KDS
+                # selection under the local-search name ``index_names``.
+                # Normalize that alias without ever replacing the independent
+                # connector's own URL or API key.
+                legacy_index_names = filtered_params.pop("index_names", None)
+                if not filtered_params.get("kds_list") and legacy_index_names:
+                    filtered_params["kds_list"] = legacy_index_names
+            if tool_name == "aidp_search":
+                # AIDP credentials are sourced from ``consts.const`` (i.e. the
+                # process environment). Inject them here exactly as
+                # ``create_agent_info`` does at runtime, so validation builds
+                # the same tool instance shape. Never trust client-submitted
+                # credentials.
+                if not AIDP_SERVER_URL:
+                    raise ToolExecutionException(
+                        "AIDP is not configured for this deployment: "
+                        "set AIDP_SERVER_URL before testing aidp_search"
+                    )
+                if not AIDP_API_KEY:
+                    raise ToolExecutionException(
+                        "AIDP is not configured for this deployment: "
+                        "set AIDP_API_KEY before testing aidp_search"
+                    )
+                if not tenant_id or not user_id:
+                    raise ToolExecutionException(
+                        "Tenant ID and User ID are required for aidp_search validation"
+                    )
+                snapshot = _resolve_aidp_snapshot(user_id, tenant_id)
+                requested_kds = _parse_kds_list(filtered_params.get("kds_list"))
+                invalid_kds = [
+                    kds_id for kds_id in requested_kds
+                    if kds_id not in snapshot.accessible_id_set
+                ]
+                if invalid_kds:
+                    raise ToolExecutionException(
+                        "aidp_search test selection contains an unavailable knowledge base"
+                    )
+                filtered_params["kds_list"] = requested_kds
+                filtered_params["server_url"] = AIDP_SERVER_URL
+                filtered_params["api_key"] = AIDP_API_KEY
+                filtered_params["tenant_id"] = AIDP_TENANT_ID
+            tool_instance = tool_class(**filtered_params)
+        elif tool_name == "analyze_image":
+            if not tenant_id or not user_id:
+                raise ToolExecutionException(
+                    f"Tenant ID and User ID are required for {tool_name} validation")
+            selected_model_id = instantiation_params.get("selected_model_id")
+            image_to_text_model = get_vlm_adapter(tenant_id, selected_model_id, slot="vlm")
+            vlm_display_name = getattr(
+                image_to_text_model, 'display_name', None)
+            set_monitoring_context(tenant_id=tenant_id)
+            set_monitoring_operation(
+                "tool_validation", display_name=vlm_display_name)
+            params = {
+                **instantiation_params,
+                'vlm_model': image_to_text_model,
+                'storage_client': minio_client,
+                'validate_url_access': lambda urls: validate_urls_access(urls, user_id)
+            }
+            tool_instance = tool_class(**params)
+        elif tool_name in ["analyze_audio", "analyze_video"]:
+            if not tenant_id or not user_id:
+                raise ToolExecutionException(
+                    f"Tenant ID and User ID are required for {tool_name} validation")
+            selected_model_id = instantiation_params.get("selected_model_id")
+            video_understanding_model = get_vlm_adapter(tenant_id, selected_model_id, slot="vlm3")
+            model_display_name = getattr(
+                video_understanding_model, 'display_name', None)
+            set_monitoring_context(tenant_id=tenant_id)
+            set_monitoring_operation(
+                "tool_validation", display_name=model_display_name)
+            params = {
+                **instantiation_params,
+                'vlm_model': video_understanding_model,
+                'storage_client': minio_client,
+                'validate_url_access': lambda urls: validate_urls_access(urls, user_id)
+            }
+            tool_instance = tool_class(**params)
+        elif tool_name == "analyze_text_file":
+            if not tenant_id or not user_id:
+                raise ToolExecutionException(
+                    f"Tenant ID and User ID are required for {tool_name} validation")
+            selected_model_id = instantiation_params.get("selected_model_id")
+            long_text_to_text_model = get_llm_adapter(tenant_id, selected_model_id, modality="llm_long_context")
+            llm_display_name = getattr(
+                long_text_to_text_model, 'display_name', None)
+            set_monitoring_context(tenant_id=tenant_id)
+            set_monitoring_operation(
+                "tool_validation", display_name=llm_display_name)
+            params = {
+                **instantiation_params,
+                'llm_model': long_text_to_text_model,
+                'storage_client': minio_client,
+                "data_process_service_url": DATA_PROCESS_SERVICE,
+                'validate_url_access': lambda urls: validate_urls_access(urls, user_id)
+            }
+            tool_instance = tool_class(**params)
+        else:
+            tool_instance = tool_class(**instantiation_params)
+
+        # # Only pass declared runtime inputs to forward() to avoid unexpected kwargs.
+        # declared_inputs = getattr(tool_class, "inputs", {}) or {}
+        # allowed_input_names = (
+        #     set(declared_inputs.keys()) if isinstance(declared_inputs, dict) else set()
+        # )
+        # filtered_runtime_inputs = (
+        #     {k: v for k, v in runtime_inputs.items() if k in allowed_input_names}
+        #     if allowed_input_names
+        #     else runtime_inputs
+        # )
+
+        result = tool_instance.forward(**(inputs or {}))
+        return result
+    except Exception as e:
+        logger.error(f"Local tool validation failed for {tool_name}: {e}")
+        raise ToolExecutionException(
+            f"Local tool {tool_name} validation failed: {str(e)}")
+
+
+def _validate_langchain_tool(
+    tool_name: str,
+    inputs: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """
+    Validate LangChain tool by actually executing it.
+
+    Args:
+        tool_name: Name of the tool to test
+        inputs: Parameters to pass to the tool for execution test
+
+    Returns:
+        Dict containing validation result - success returns result
+
+    Raises:
+        NotFoundException: If tool not found in LangChain tools
+        ToolExecutionException: If tool execution fails
+    """
+    try:
+
+        # Discover all LangChain tools
+        discovered_tools = discover_langchain_modules()
+
+        # Find the target tool by name
+        target_tool = None
+        for obj, filename in discovered_tools:
+            if hasattr(obj, 'name') and obj.name == tool_name:
+                target_tool = obj
+                break
+
+        if not target_tool:
+            raise NotFoundException(
+                f"Tool '{tool_name}' not found in LangChain tools")
+
+        # Execute the tool directly
+        result = target_tool.invoke(inputs or {})
+        return result
+    except Exception as e:
+        logger.error(f"LangChain tool '{tool_name}' validation failed: {e}")
+        raise ToolExecutionException(
+            f"LangChain tool '{tool_name}' validation failed: {e}")
+
+
+async def validate_tool_impl(
+    request: ToolValidateRequest,
+    tenant_id: Optional[str] = None,
+    user_id: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Validate a tool from various sources (MCP, local, or LangChain).
+
+    Args:
+        request: Tool validation request containing tool details
+        tenant_id: Tenant ID for database queries (optional)
+        user_id: User ID for database queries (optional)
+
+    Returns:
+        Dict containing validation result - success returns tool result, failure returns error message
+
+    Raises:
+        NotFoundException: If tool is not found
+        MCPConnectionError: If MCP connection fails
+        ToolExecutionException: If tool execution fails
+        Exception: If unsupported tool source is provided
+    """
+    try:
+        tool_name, inputs, source, usage, params = (
+            request.name, request.inputs, request.source, request.usage, request.params)
+        if source == ToolSourceEnum.MCP.value:
+            if usage == "outer-apis":
+                return await _validate_mcp_tool_nexent(tool_name, inputs)
+            else:
+                return await _validate_mcp_tool_remote(tool_name, inputs, usage, tenant_id)
+        elif source == ToolSourceEnum.LOCAL.value:
+            return _validate_local_tool(tool_name, inputs, params, tenant_id, user_id)
+        elif source == ToolSourceEnum.LANGCHAIN.value:
+            return _validate_langchain_tool(tool_name, inputs)
+        else:
+            raise Exception(f"Unsupported tool source: {source}")
+
+    except NotFoundException as e:
+        logger.error(f"Tool not found: {e}")
+        raise NotFoundException(str(e))
+    except MCPConnectionError as e:
+        logger.error(f"MCP connection failed: {e}")
+        raise MCPConnectionError(str(e))
+    except Exception as e:
+        logger.error(f"Validate Tool failed: {e}")
+        raise ToolExecutionException(str(e))
+
+
+# --------------------------------------------------
+# Outer API Tools (OpenAPI to MCP Conversion)
+# --------------------------------------------------
+
+def import_openapi_service(
+    service_name: str,
+    openapi_json: Dict[str, Any],
+    server_url: str,
+    tenant_id: str,
+    user_id: str,
+    service_description: str = None,
+    headers_template: Dict[str, Any] = None,
+    force_update: bool = False
+) -> Dict[str, Any]:
+    """
+    Import OpenAPI JSON as an MCP service, using FastMCP.from_openapi() approach.
+    All tools from the same OpenAPI spec share the same mcp_service_name.
+
+    Args:
+        service_name: MCP service name for grouping tools
+        openapi_json: OpenAPI 3.x specification as dictionary
+        server_url: Base URL of the REST API server
+        tenant_id: Tenant ID for multi-tenancy
+        user_id: User ID for audit
+        service_description: Optional service description (if not provided, reads from openapi_json.info.description)
+        headers_template: Optional default headers template
+        force_update: If True, replace all existing tools for this service
+
+    Returns:
+        Dictionary with import result
+    """
+    # If service_description not provided, extract from openapi_json info
+    if service_description is None:
+        info = openapi_json.get("info", {})
+        service_description = info.get("description") or info.get("title", "")
+
+    # Override server URL in openapi_json if different
+    openapi_spec = openapi_json.copy()
+    openapi_spec["servers"] = [{"url": server_url}]
+
+    result = upsert_openapi_service(
+        service_name=service_name,
+        openapi_json=openapi_spec,
+        server_url=server_url,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        description=service_description,
+        headers_template=headers_template,
+    )
+
+    logger.info(f"Imported service '{service_name}' for tenant {tenant_id}")
+    return result
+
+
+def list_openapi_services(tenant_id: str) -> List[Dict[str, Any]]:
+    """
+    List all OpenAPI services for a tenant.
+
+    Args:
+        tenant_id: Tenant ID
+
+    Returns:
+        List of service dictionaries
+    """
+    return query_openapi_services_by_tenant(tenant_id)
+
+
+def delete_openapi_service(service_name: str, tenant_id: str, user_id: str) -> bool:
+    """
+    Delete an OpenAPI service (all tools belonging to it).
+
+    Args:
+        service_name: MCP service name
+        tenant_id: Tenant ID
+        user_id: User ID for audit
+
+    Returns:
+        True if deleted, False if not found
+    """
+    return db_delete_openapi_service(service_name, tenant_id, user_id)
+
+
+def _refresh_openapi_services_in_mcp(tenant_id: str) -> Dict[str, Any]:
+    """
+    Refresh OpenAPI services in MCP server via HTTP API using from_openapi approach.
+
+    This replaces the old per-tool registration with service-level registration,
+    using FastMCP.from_openapi() to batch-load all tools from each service.
+
+    Args:
+        tenant_id: Tenant ID
+
+    Returns:
+        Dictionary with refresh result
+    """
+    refresh_url = f"{MCP_MANAGEMENT_API}/tools/openapi_service/refresh"
+    max_retries = 3
+    retry_delay = 1.0
+
+    for attempt in range(max_retries):
+        try:
+            response = requests.post(
+                refresh_url,
+                params={"tenant_id": tenant_id},
+                timeout=30
+            )
+            response.raise_for_status()
+            result = response.json()
+            logger.info(f"Refreshed OpenAPI services for tenant {tenant_id}: {result}")
+            return result.get("data", {})
+        except requests.RequestException as e:
+            if attempt < max_retries - 1:
+                logger.warning(
+                    f"Failed to refresh OpenAPI services (attempt {attempt + 1}/{max_retries}): {e}. "
+                    f"Retrying in {retry_delay}s..."
+                )
+                time.sleep(retry_delay)
+                retry_delay *= 2
+            else:
+                logger.error(f"Failed to refresh OpenAPI services after {max_retries} attempts: {e}")
+                return {"error": str(e)}
+        except Exception as e:
+            logger.warning(f"Failed to refresh OpenAPI services in MCP: {e}")
+            return {"error": str(e)}

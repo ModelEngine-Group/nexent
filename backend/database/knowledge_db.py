@@ -1,0 +1,642 @@
+import logging
+import uuid
+from typing import Any, Dict, List, Optional
+
+from sqlalchemy import func, text
+from sqlalchemy.exc import SQLAlchemyError
+
+from consts.exceptions import DuplicateError
+from consts.scheduler import VALID_SUMMARY_FREQUENCIES
+from database.client import as_dict, get_db_session
+from database.db_models import KnowledgeRecord
+from utils.str_utils import convert_list_to_string
+
+logger = logging.getLogger("knowledge_db")
+
+
+def _lock_and_check_knowledge_name(session, tenant_id: Optional[str], knowledge_name: Optional[str]) -> None:
+    """Serialize and validate tenant-scoped knowledge base name creation."""
+    if not tenant_id or not knowledge_name:
+        return
+
+    lock_key = f"knowledge-name:{tenant_id}:{knowledge_name}"
+    session.execute(
+        text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
+        {"lock_key": lock_key},
+    )
+    existing_record = session.query(KnowledgeRecord.knowledge_id).filter(
+        KnowledgeRecord.tenant_id == tenant_id,
+        KnowledgeRecord.knowledge_name == knowledge_name,
+        KnowledgeRecord.delete_flag != 'Y',
+    ).first()
+    if existing_record is not None:
+        raise DuplicateError(f"Knowledge base name '{knowledge_name}' already exists")
+
+
+def _generate_index_name(knowledge_id: int) -> str:
+    """
+    Generate a new internal index_name based on knowledge_id and a UUID suffix.
+    The suffix contains only digits and lowercase letters.
+    """
+    suffix = uuid.uuid4().hex
+    return f"{knowledge_id}-{suffix}"
+
+
+def create_knowledge_record(query: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Create a knowledge base record
+
+    Args:
+        query: Dictionary containing all knowledge base data, must include:
+            - index_name: Knowledge base name
+            - knowledge_describe: Knowledge base description
+            - knowledge_status: Knowledge base status
+            - user_id: Optional user ID for created_by and updated_by fields
+            - tenant_id: Optional tenant ID for created_by and updated_by fields
+            - embedding_model_name: embedding model name for the knowledge base
+            - preserve_source_file: whether to preserve uploaded source documents (optional)
+
+    Returns:
+        Dict[str, Any]: Dictionary with at least 'knowledge_id' and 'index_name'
+    """
+    try:
+        with get_db_session() as session:
+            # Determine user-facing knowledge base name
+            raw_knowledge_name = query.get("knowledge_name") or query.get("index_name")
+            knowledge_name = raw_knowledge_name.strip() if isinstance(raw_knowledge_name, str) else raw_knowledge_name
+            tenant_id = query.get("tenant_id")
+            _lock_and_check_knowledge_name(session, tenant_id, knowledge_name)
+
+            # Prepare data dictionary
+            group_ids = query.get("group_ids")
+            data: Dict[str, Any] = {
+                "knowledge_describe": query.get("knowledge_describe", ""),
+                "created_by": query.get("user_id"),
+                "updated_by": query.get("user_id"),
+                "knowledge_sources": query.get("knowledge_sources", "elasticsearch"),
+                "tenant_id": tenant_id,
+                "embedding_model_name": query.get("embedding_model_name"),
+                "embedding_model_id": query.get("embedding_model_id"),
+                "knowledge_name": knowledge_name,
+                "group_ids": convert_list_to_string(group_ids) if isinstance(group_ids, list) else group_ids,
+                "ingroup_permission": query.get("ingroup_permission"),
+                "preserve_source_file": query.get("preserve_source_file", True),
+            }
+
+            # Per-KB soft quota (optional, null = unlimited)
+            if "quota_limit_bytes" in query:
+                data["quota_limit_bytes"] = query["quota_limit_bytes"]
+
+            # For backward compatibility: if caller explicitly provides index_name,
+            # respect it and do not regenerate; otherwise generate after flush.
+            explicit_index_name = query.get("index_name")
+            if explicit_index_name:
+                data["index_name"] = explicit_index_name
+
+            # Create new record
+            new_record = KnowledgeRecord(**data)
+            session.add(new_record)
+            session.flush()
+
+            # Generate internal index_name for new records when not explicitly provided
+            if not explicit_index_name:
+                generated_index_name = _generate_index_name(
+                    new_record.knowledge_id)
+                new_record.index_name = generated_index_name
+                session.flush()
+
+            session.commit()
+            return {
+                "knowledge_id": new_record.knowledge_id,
+                "index_name": new_record.index_name,
+                "knowledge_name": new_record.knowledge_name,
+            }
+    except SQLAlchemyError as e:
+        raise e
+
+
+def upsert_knowledge_record(query: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Create or update a knowledge base record (upsert operation).
+    If a record with the same index_name and tenant_id exists, update it.
+    Otherwise, create a new record.
+
+    Args:
+        query: Dictionary containing knowledge base data, must include:
+            - index_name: Knowledge base name (used as unique identifier)
+            - tenant_id: Tenant ID
+            - knowledge_name: User-facing knowledge base name
+            - knowledge_describe: Knowledge base description
+            - knowledge_sources: Knowledge base sources (optional, default 'elasticsearch')
+            - embedding_model_name: Embedding model name
+            - user_id: User ID for created_by and updated_by fields
+
+    Returns:
+        Dict[str, Any]: Dictionary with 'knowledge_id' and 'index_name'
+    """
+    try:
+        with get_db_session() as session:
+            # Check if record exists
+            existing_record = session.query(KnowledgeRecord).filter(
+                KnowledgeRecord.index_name == query['index_name'],
+                KnowledgeRecord.tenant_id == query['tenant_id'],
+                KnowledgeRecord.delete_flag != 'Y'
+            ).first()
+
+            if existing_record:
+                # Update existing record
+                existing_record.knowledge_name = query.get(
+                    'knowledge_name') or query.get('index_name')
+                existing_record.knowledge_describe = query.get(
+                    'knowledge_describe', '')
+                existing_record.knowledge_sources = query.get(
+                    'knowledge_sources', 'elasticsearch')
+                existing_record.embedding_model_name = query.get(
+                    'embedding_model_name')
+                existing_record.embedding_model_id = query.get(
+                    'embedding_model_id')
+                existing_record.updated_by = query.get('user_id')
+                existing_record.update_time = func.current_timestamp()
+
+                # Update per-KB soft quota if provided
+                if "quota_limit_bytes" in query:
+                    existing_record.quota_limit_bytes = query["quota_limit_bytes"]
+
+                session.flush()
+                session.commit()
+                return {
+                    "knowledge_id": existing_record.knowledge_id,
+                    "index_name": existing_record.index_name,
+                    "knowledge_name": existing_record.knowledge_name,
+                }
+            else:
+                # Create new record
+                return create_knowledge_record(query)
+
+    except SQLAlchemyError as e:
+        raise e
+
+
+def update_knowledge_record(query: Dict[str, Any]) -> bool:
+    """
+    Update a knowledge base record
+
+    Args:
+        query: Dictionary containing update data, must include:
+            - index_name: Knowledge base index name (used as unique identifier)
+            - knowledge_name: New user-facing knowledge base name (optional)
+            - knowledge_describe: Knowledge base description (optional)
+            - ingroup_permission: Permission level - EDIT, READ_ONLY, or PRIVATE (optional)
+            - group_ids: List of group IDs to assign (optional)
+            - user_id: Optional user ID for updated_by field
+
+    Returns:
+        bool: Whether the operation was successful
+    """
+    try:
+        with get_db_session() as session:
+            record = session.query(KnowledgeRecord).filter(
+                KnowledgeRecord.index_name == query['index_name'],
+                KnowledgeRecord.delete_flag != 'Y'
+            ).first()
+
+            if not record:
+                return False
+
+            record.update_time = func.current_timestamp()
+
+            # Update knowledge name
+            if query.get("knowledge_name"):
+                record.knowledge_name = query["knowledge_name"]
+
+            # Update description
+            if query.get("knowledge_describe"):
+                record.knowledge_describe = query["knowledge_describe"]
+
+            # Update permission
+            if query.get("ingroup_permission"):
+                record.ingroup_permission = query["ingroup_permission"]
+
+            # Update group IDs
+            if query.get("group_ids") is not None:
+                record.group_ids = query["group_ids"]
+
+            # Update per-KB soft quota
+            if "quota_limit_bytes" in query:
+                record.quota_limit_bytes = query["quota_limit_bytes"]
+
+            # Update timestamp and user
+            if query.get("user_id"):
+                record.updated_by = query["user_id"]
+
+            session.flush()
+            session.commit()
+            return True
+    except SQLAlchemyError as e:
+        raise e
+
+
+def delete_knowledge_record(query: Dict[str, Any]) -> bool:
+    """
+    Delete a knowledge base record (soft delete)
+
+    Args:
+        query: Dictionary containing delete data, must include:
+            - index_name: Knowledge base name
+            - user_id: Optional user ID for updated_by field
+
+    Returns:
+        bool: Whether the operation was successful
+    """
+    try:
+        with get_db_session() as session:
+            # Find the record to update
+            record = session.query(KnowledgeRecord).filter(
+                KnowledgeRecord.index_name == query['index_name'],
+                KnowledgeRecord.delete_flag != 'Y'
+            ).first()
+
+            if not record:
+                return False
+
+            # Update record for soft delete
+            record.delete_flag = 'Y'
+            record.update_time = func.current_timestamp()
+            if query.get('user_id'):
+                record.updated_by = query['user_id']
+
+            session.flush()
+            session.commit()
+            return True
+    except SQLAlchemyError as e:
+        raise e
+
+
+def get_knowledge_record(query: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """
+    Get a knowledge base record
+
+    Args:
+        query: Dictionary containing filter conditions, optional parameter.
+               If 'tenant_id' is provided, it will filter by tenant.
+               If 'tenant_id' is not provided, it will search across all tenants.
+
+    Returns:
+        Dict[str, Any]: Knowledge base record
+    """
+    try:
+        with get_db_session() as session:
+            db_query = session.query(KnowledgeRecord).filter(
+                KnowledgeRecord.delete_flag != 'Y',
+            )
+
+            # Support both index_name and knowledge_name queries
+            if 'index_name' in query:
+                db_query = db_query.filter(
+                    KnowledgeRecord.index_name == query['index_name'])
+            elif 'knowledge_name' in query:
+                db_query = db_query.filter(
+                    KnowledgeRecord.knowledge_name == query['knowledge_name'])
+
+            # Add tenant_id filter only if it is provided in the query
+            if 'tenant_id' in query and query['tenant_id'] is not None:
+                db_query = db_query.filter(
+                    KnowledgeRecord.tenant_id == query['tenant_id'])
+
+            result = db_query.first()
+
+            if result:
+                return as_dict(result)
+            return {}
+    except SQLAlchemyError as e:
+        raise e
+
+
+def get_knowledge_info_by_knowledge_ids(knowledge_ids: List[str]) -> List[Dict[str, Any]]:
+    try:
+        with get_db_session() as session:
+            result = session.query(KnowledgeRecord).filter(
+                KnowledgeRecord.knowledge_id.in_(knowledge_ids),
+                KnowledgeRecord.delete_flag != 'Y'
+            ).all()
+            knowledge_info = []
+            for item in result:
+                knowledge_info.append({
+                    "knowledge_id": item.knowledge_id,
+                    "index_name": item.index_name,
+                    "knowledge_name": item.knowledge_name,
+                    "knowledge_sources": item.knowledge_sources,
+                    "embedding_model_name": item.embedding_model_name
+                })
+            return knowledge_info
+    except SQLAlchemyError as e:
+        raise e
+
+
+def get_knowledge_info_by_ids_and_tenant(
+    knowledge_ids: List[int],
+    tenant_id: str,
+) -> List[Dict[str, Any]]:
+    """Return active local knowledge bases within one tenant, preserving input order."""
+    if not knowledge_ids:
+        return []
+    try:
+        with get_db_session() as session:
+            records = session.query(KnowledgeRecord).filter(
+                KnowledgeRecord.knowledge_id.in_(knowledge_ids),
+                KnowledgeRecord.tenant_id == tenant_id,
+                KnowledgeRecord.delete_flag != 'Y',
+            ).all()
+            by_id = {record.knowledge_id: record for record in records}
+            result = []
+            for knowledge_id in knowledge_ids:
+                record = by_id.get(knowledge_id)
+                if record is None:
+                    continue
+                result.append({
+                    "knowledge_id": record.knowledge_id,
+                    "index_name": record.index_name,
+                    "knowledge_name": record.knowledge_name,
+                    "knowledge_sources": record.knowledge_sources,
+                    "embedding_model_name": record.embedding_model_name,
+                    "embedding_model_id": record.embedding_model_id,
+                })
+            return result
+    except SQLAlchemyError as exc:
+        raise exc
+
+
+def get_knowledge_ids_by_index_names(index_names: List[str]) -> List[str]:
+    try:
+        with get_db_session() as session:
+            result = session.query(KnowledgeRecord.knowledge_id).filter(
+                KnowledgeRecord.index_name.in_(index_names),
+                KnowledgeRecord.delete_flag != 'Y'
+            ).all()
+            return [item.knowledge_id for item in result]
+    except SQLAlchemyError as e:
+        raise e
+
+
+def get_knowledge_info_by_tenant_id(tenant_id: str) -> List[Dict[str, Any]]:
+    try:
+        with get_db_session() as session:
+            result = session.query(KnowledgeRecord).filter(
+                KnowledgeRecord.tenant_id == tenant_id,
+                KnowledgeRecord.delete_flag != 'Y'
+            ).all()
+            return [as_dict(item) for item in result]
+    except SQLAlchemyError as e:
+        raise e
+
+
+def get_private_knowledge_info_by_tenant_id(tenant_id: str) -> List[Dict[str, Any]]:
+    """Get non-deleted PRIVATE knowledge base records for a tenant."""
+    with get_db_session() as session:
+        result = session.query(KnowledgeRecord).filter(
+            KnowledgeRecord.tenant_id == tenant_id,
+            KnowledgeRecord.ingroup_permission == 'PRIVATE',
+            KnowledgeRecord.delete_flag != 'Y'
+        ).all()
+        return [as_dict(item) for item in result]
+
+
+def get_private_knowledge_info_by_creator(tenant_id: str, created_by: str) -> List[Dict[str, Any]]:
+    """Get non-deleted PRIVATE knowledge base records created by a user."""
+    with get_db_session() as session:
+        result = session.query(KnowledgeRecord).filter(
+            KnowledgeRecord.tenant_id == tenant_id,
+            KnowledgeRecord.created_by == created_by,
+            KnowledgeRecord.ingroup_permission == 'PRIVATE',
+            KnowledgeRecord.delete_flag != 'Y'
+        ).all()
+        return [as_dict(item) for item in result]
+
+
+def get_knowledge_info_by_tenant_and_source(tenant_id: str, knowledge_sources: str) -> List[Dict[str, Any]]:
+    """
+    Get knowledge base records by tenant ID and knowledge sources.
+
+    Args:
+        tenant_id: Tenant ID to filter by
+        knowledge_sources: Knowledge sources to filter by (e.g., 'datamate')
+
+    Returns:
+        List[Dict[str, Any]]: List of knowledge base record dictionaries
+    """
+    try:
+        with get_db_session() as session:
+            result = session.query(KnowledgeRecord).filter(
+                KnowledgeRecord.tenant_id == tenant_id,
+                KnowledgeRecord.knowledge_sources == knowledge_sources,
+                KnowledgeRecord.delete_flag != 'Y'
+            ).all()
+            return [as_dict(item) for item in result]
+    except SQLAlchemyError as e:
+        raise e
+
+
+def update_model_name_by_index_name(index_name: str, embedding_model_name: str, tenant_id: str, user_id: str) -> bool:
+    try:
+        with get_db_session() as session:
+            session.query(KnowledgeRecord).filter(
+                KnowledgeRecord.index_name == index_name,
+                KnowledgeRecord.delete_flag != 'Y',
+                KnowledgeRecord.tenant_id == tenant_id
+            ).update({"embedding_model_name": embedding_model_name, "updated_by": user_id})
+            session.commit()
+            return True
+    except SQLAlchemyError as e:
+        raise e
+
+
+def update_embedding_model_by_index_name(
+    index_name: str,
+    embedding_model_id: int,
+    embedding_model_name: str,
+    tenant_id: str,
+    user_id: str
+) -> bool:
+    """
+    Update the embedding model (both ID and name) for a knowledge base.
+
+    Args:
+        index_name: Internal index name of the knowledge base
+        embedding_model_id: New embedding model ID
+        embedding_model_name: New embedding model name
+        tenant_id: Tenant ID
+        user_id: User ID making the update
+
+    Returns:
+        bool: Whether the update was successful
+    """
+    try:
+        with get_db_session() as session:
+            result = session.query(KnowledgeRecord).filter(
+                KnowledgeRecord.index_name == index_name,
+                KnowledgeRecord.delete_flag != 'Y',
+                KnowledgeRecord.tenant_id == tenant_id
+            ).update({
+                "embedding_model_id": embedding_model_id,
+                "embedding_model_name": embedding_model_name,
+                "updated_by": user_id
+            })
+            session.commit()
+            return result > 0
+    except SQLAlchemyError as e:
+        raise e
+
+
+def get_index_name_by_knowledge_name(knowledge_name: str, tenant_id: str) -> str:
+    """
+    Get the internal index_name from user-facing knowledge_name.
+
+    Args:
+        knowledge_name: User-facing knowledge base name
+        tenant_id: Tenant ID to filter by
+
+    Returns:
+        str: The internal index_name if found
+
+    Raises:
+        ValueError: If knowledge base with the given name is not found for the tenant
+    """
+    try:
+        with get_db_session() as session:
+            # First try resolving by user-facing knowledge_name.
+            result = session.query(KnowledgeRecord).filter(
+                KnowledgeRecord.knowledge_name == knowledge_name,
+                KnowledgeRecord.tenant_id == tenant_id,
+                KnowledgeRecord.delete_flag != 'Y'
+            ).first()
+            if result:
+                return result.index_name
+
+            # Backward/forward compatibility: if caller already passes internal index_name,
+            # accept it directly by resolving on index_name as well.
+            index_result = session.query(KnowledgeRecord).filter(
+                KnowledgeRecord.index_name == knowledge_name,
+                KnowledgeRecord.tenant_id == tenant_id,
+                KnowledgeRecord.delete_flag != 'Y'
+            ).first()
+            if index_result:
+                return index_result.index_name
+
+            raise ValueError(
+                f"Knowledge base '{knowledge_name}' not found for the current tenant"
+            )
+    except SQLAlchemyError as e:
+        raise e
+
+
+def get_knowledge_name_map_by_index_names(index_names: List[str], tenant_id: str) -> Dict[str, str]:
+    """
+    Get a mapping from index_name to knowledge_name (display name) for the given index_names.
+    Used to build user-friendly knowledge base summaries in prompts.
+
+    Args:
+        index_names: List of internal index names
+        tenant_id: Tenant that owns the knowledge bases
+
+    Returns:
+        Dict[str, str]: Mapping of index_name -> knowledge_name.
+                       If a knowledge base is not found in the database,
+                       the index_name itself is used as the fallback value.
+    """
+    if not index_names:
+        return {}
+
+    try:
+        with get_db_session() as session:
+            result = session.query(
+                KnowledgeRecord.index_name,
+                KnowledgeRecord.knowledge_name
+            ).filter(
+                KnowledgeRecord.index_name.in_(index_names),
+                KnowledgeRecord.tenant_id == tenant_id,
+                KnowledgeRecord.delete_flag != 'Y'
+            ).all()
+
+            knowledge_name_map = {}
+            for row in result:
+                knowledge_name_map[row.index_name] = row.knowledge_name
+
+            for index_name in index_names:
+                if index_name not in knowledge_name_map:
+                    knowledge_name_map[index_name] = index_name
+
+            return knowledge_name_map
+    except SQLAlchemyError:
+        logger.exception("Query knowledge name map error")
+        raise
+
+
+def update_summary_frequency(index_name: str, summary_frequency: Optional[str],
+                             _tenant_id: str, user_id: str) -> bool:
+    """Update the auto-summary frequency for a knowledge base."""
+    valid_frequencies = VALID_SUMMARY_FREQUENCIES
+    if summary_frequency not in valid_frequencies:
+        raise ValueError(f"Invalid summary_frequency: {summary_frequency}")
+    try:
+        with get_db_session() as session:
+            record = session.query(KnowledgeRecord).filter(
+                KnowledgeRecord.index_name == index_name,
+                KnowledgeRecord.delete_flag != 'Y'
+            ).first()
+            if not record:
+                return False
+            record.summary_frequency = summary_frequency
+            record.updated_by = user_id
+            session.commit()
+            return True
+    except SQLAlchemyError:
+        logger.exception("Update summary frequency error")
+        raise
+
+
+def update_last_summary_time(index_name: str):
+    """Update last_summary_time to now after a successful summary generation."""
+    from datetime import datetime
+    try:
+        with get_db_session() as session:
+            record = session.query(KnowledgeRecord).filter(
+                KnowledgeRecord.index_name == index_name,
+                KnowledgeRecord.delete_flag != 'Y'
+            ).first()
+            if record:
+                record.last_summary_time = datetime.now()
+                session.commit()
+    except SQLAlchemyError:
+        logger.exception("Update last summary time error")
+        raise
+
+
+def update_last_doc_update_time(index_name: str):
+    """Update last_doc_update_time to now after document add/delete operation."""
+    from datetime import datetime
+    try:
+        with get_db_session() as session:
+            record = session.query(KnowledgeRecord).filter(
+                KnowledgeRecord.index_name == index_name,
+                KnowledgeRecord.delete_flag != 'Y'
+            ).first()
+            if record:
+                record.last_doc_update_time = datetime.now()
+                session.commit()
+    except SQLAlchemyError:
+        logger.exception("Update last doc update time error")
+        raise
+
+
+def get_knowledge_bases_for_auto_summary() -> List[Dict[str, Any]]:
+    """Query all knowledge bases with non-null summary_frequency."""
+    try:
+        with get_db_session() as session:
+            records = session.query(KnowledgeRecord).filter(
+                KnowledgeRecord.summary_frequency.isnot(None),
+                KnowledgeRecord.delete_flag != 'Y'
+            ).all()
+            return [as_dict(record) for record in records]
+    except SQLAlchemyError:
+        logger.exception("Get knowledge bases error")
+        raise

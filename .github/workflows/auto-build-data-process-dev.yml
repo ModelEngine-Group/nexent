@@ -1,0 +1,57 @@
+name: Docker Build Data-Process Images
+
+concurrency:
+  group: docker-build-data-process-dev-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [develop, 'release/**', 'hotfix/**']
+    paths:
+      - 'backend/**'
+      - 'sdk/**'
+      - 'deploy/images/dockerfiles/data-process/**'
+      - 'deploy/common/**'
+      - 'deploy/sql/**'
+      - '.github/workflows/**'
+  push:
+    branches: [develop, 'release/**', 'hotfix/**']
+    paths:
+      - 'backend/**'
+      - 'sdk/**'
+      - 'deploy/images/dockerfiles/data-process/**'
+      - 'deploy/common/**'
+      - 'deploy/sql/**'
+      - '.github/workflows/**'
+
+jobs:
+  build-data-process-amd64:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Clone model
+        run: |
+          GIT_LFS_SKIP_SMUDGE=1 git clone https://huggingface.co/Nexent-AI/model-assets
+          cd ./model-assets
+          GIT_TRACE=1 GIT_CURL_VERBOSE=1 GIT_LFS_LOG=debug git lfs pull
+          rm -rf .git .gitattributes
+      - name: Build data process image (amd64) and load locally
+        run: |
+          docker build --platform linux/amd64 -t nexent/nexent-data-process:dev-amd64 -f deploy/images/dockerfiles/data-process/Dockerfile .
+
+  build-data-process-arm64:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Clone model
+        run: |
+          GIT_LFS_SKIP_SMUDGE=1 git clone https://huggingface.co/Nexent-AI/model-assets
+          cd ./model-assets
+          GIT_TRACE=1 GIT_CURL_VERBOSE=1 GIT_LFS_LOG=debug git lfs pull
+          rm -rf .git .gitattributes
+      - name: Build data process image (arm64) and load locally
+        run: |
+          docker build --platform linux/arm64 -t nexent/nexent-data-process:dev-arm64 -f deploy/images/dockerfiles/data-process/Dockerfile .

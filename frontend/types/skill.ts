@@ -1,0 +1,143 @@
+/**
+ * Skill-related type definitions and constants
+ */
+
+// ========== Constants ==========
+
+/**
+ * Maximum number of recent skills to display in dropdown
+ */
+export const MAX_RECENT_SKILLS = 5;
+
+/**
+ * Interactive skill creation steps (Chinese)
+ */
+export const THINKING_STEPS_ZH = [
+  { step: 1, description: "生成技能内容中 ..." },
+  { step: 2, description: "总结中 ..." },
+];
+
+/**
+ * Interactive skill creation steps (English)
+ */
+export const THINKING_STEPS_EN = [
+  { step: 1, description: "Generating skill content..." },
+  { step: 2, description: "Summarizing..." },
+];
+
+/**
+ * Content height for skill detail preview
+ */
+export const SKILL_DETAIL_CONTENT_HEIGHT = 300;
+
+// ========== Interfaces ==========
+
+/**
+ * Skill form data structure
+ */
+export interface SkillFormData {
+  name: string;
+  description: string;
+  source: string;
+  tags: string[];
+  content: string;
+  group_ids?: number[];
+  ingroup_permission?: "EDIT" | "READ_ONLY" | "PRIVATE";
+}
+
+/**
+ * Chat message structure for interactive skill creation
+ */
+export interface ChatMessage {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  timestamp: Date;
+}
+
+/**
+ * Existing skill data for update scenarios
+ */
+export interface ExistingSkill {
+  name: string;
+  description: string;
+  tags: string[];
+  content: string;
+}
+
+/**
+ * Result of parsing a skill draft from AI response
+ */
+export interface CreateSkillStreamRequest {
+  user_request: string;
+  existing_skill?: ExistingSkill;
+  complexity?: string;
+  language?: string;
+  files?: SkillFileContent[];
+}
+
+/**
+ * Result of parsing a skill draft from AI response
+ */
+export interface SkillDraftResult {
+  name: string;
+  description: string;
+  tags: string[];
+  content: string;
+}
+
+/**
+ * Skill file tree node type
+ */
+export interface SkillFileNode {
+  name: string;
+  type: "file" | "directory";
+  children?: SkillFileNode[];
+  preview_status?: "readable" | "unsupported";
+}
+
+/**
+ * Extended data node for Ant Design Tree
+ */
+export interface ExtendedSkillFileNode {
+  key: React.Key;
+  title: string;
+  icon?: React.ReactNode;
+  isLeaf?: boolean;
+  children?: ExtendedSkillFileNode[];
+  data?: SkillFileNode;
+  fullPath?: string;
+}
+
+/**
+ * Skill creation mode (create new or update existing)
+ */
+export type SkillCreationMode = "create" | "update";
+
+/**
+ * Skill build tab type
+ */
+export type SkillBuildTab = "interactive" | "upload";
+
+/**
+ * Skill file content for tabbed editing
+ */
+export interface SkillFileContent {
+  path: string;
+  content: string;
+  status?: "readable" | "unsupported" | "read_error";
+  encoding?: string;
+}
+
+/**
+ * Result of parsing streaming skill content
+ */
+export interface SkillContentParseResult {
+  skillTabs: SkillFileContent[];
+  newTabContent: string;
+  newTabPath: string;
+  summaryContent: string;
+  activeTab: string;
+  summaryStarted: boolean;
+  done: boolean;
+}

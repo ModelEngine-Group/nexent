@@ -1,0 +1,368 @@
+import json
+import logging
+from typing import Optional, List, Union
+
+from pydantic import Field
+from smolagents.tools import Tool
+from urllib.parse import urlparse
+
+from ...vector_database import DataMateCore
+from ..gateway.modality import RerankAdapter
+from ..utils.observer import MessageObserver, ProcessType
+from ..utils.constants import RERANK_OVERSEARCH_MULTIPLIER
+from ..utils.tools_common_message import SearchResultTextMessage, ToolCategory, ToolSign
+
+# Get logger instance
+logger = logging.getLogger("datamate_search_tool")
+
+
+class DataMateSearchTool(Tool):
+    """DataMate knowledge base search tool"""
+    name = "datamate_search"
+    description = (
+        "Performs a DataMate knowledge base search based on your query then returns the top search results. "
+        "A tool for retrieving domain-specific knowledge, documents, and information stored in the DataMate knowledge base. "
+        "Use this tool when users ask questions related to specialized knowledge, technical documentation, "
+        "domain expertise, or any information that has been indexed in the DataMate knowledge base. "
+        "Suitable for queries requiring access to stored knowledge that may not be publicly available."
+    )
+
+    description_zh = "基于你的查询词在 DataMate 知识库中进行搜索，返回最相关的搜索结果。适用于检索 DataMate 知识库中存储的领域专业知识、文档和信息。当用户询问与专业知识、技术文档、领域专长或任何已在 DataMate 知识库中建立索引的信息相关的问题时，请使用此工具。"
+
+    inputs = {
+        "query": {
+            "type": "string",
+            "description": "The search query to perform.",
+            "description_zh": "要执行的搜索查询词"
+        },
+    }
+
+    init_param_descriptions = {
+        "server_url": {
+            "description": "DataMate server url",
+            "description_zh": "服务器 IP 地址"
+        },
+        "verify_ssl": {
+            "description": "Whether to verify SSL certificates for HTTPS connections",
+            "description_zh": "是否验证 HTTPS 连接的 SSL 证书"
+        },
+        "index_names": {
+            "description": "The list of index names to search",
+            "description_zh": "要索引的知识库"
+        },
+        "top_k": {
+            "description": "Default maximum number of search results to return",
+            "description_zh": "返回的搜索结果最大数量"
+        },
+        "threshold": {
+            "description": "Default similarity threshold for search results",
+            "description_zh": "搜索结果的相似度阈值"
+        },
+        "kb_page": {
+            "description": "Page index when listing knowledge bases from DataMate",
+            "description_zh": "从 DataMate 列出知识库时的页面索引"
+        },
+        "kb_page_size": {
+            "description": "Page size when listing knowledge bases from DataMate",
+            "description_zh": "从 DataMate 列出知识库时的页面大小"
+        }
+    }
+    output_type = "string"
+    category = ToolCategory.SEARCH.value
+
+    # Used to distinguish different index sources for summaries
+    tool_sign = ToolSign.DATAMATE_SEARCH.value
+
+    def __init__(
+        self,
+        server_url: str = Field(description="DataMate server url. (e.g., 'https://192.168.1.100:8080' or 'https://datamate.example.com:8443')"),
+        verify_ssl: bool = Field(
+            description="Whether to verify SSL certificates for HTTPS connections", default=False),
+        index_names: List[str] = Field(
+            description="The list of index names to search"),
+        observer: MessageObserver = Field(
+            description="Message observer", default=None, exclude=True),
+        top_k: int = Field(
+            description="Default maximum number of search results to return", default=3),
+        threshold: float = Field(
+            description="Default similarity threshold for search results", default=0.2),
+        rerank: bool = Field(
+            description="Whether to enable reranking for search results",
+            default=False,
+        ),
+        rerank_model_name: str = Field(
+            description="The name of the rerank model to use",
+            default="",
+        ),
+        rerank_model: RerankAdapter = Field(
+            description="The rerank model to use", default=None, exclude=True),
+        kb_page: int = Field(
+            description="Page index when listing knowledge bases from DataMate", default=1),
+        kb_page_size: int = Field(
+            description="Page size when listing knowledge bases from DataMate", default=20),
+    ):
+        """Initialize the DataMateSearchTool.
+
+        Args:
+            server_url (str): DataMate server URL (e.g., 'http://192.168.1.100:8080' or 'https://datamate.example.com:8443').
+            verify_ssl (bool, optional): Whether to verify SSL certificates for HTTPS connections. Defaults to False for HTTPS, True for HTTP.
+            index_names (List[str], optional): The list of index names to search. Defaults to None.
+            observer (MessageObserver, optional): Message observer instance. Defaults to None.
+            top_k (int, optional): Default maximum number of search results to return. Defaults to 3.
+            threshold (float, optional): Default similarity threshold for search results. Defaults to 0.2.
+            kb_page (int, optional): Page index when listing knowledge bases from DataMate. Defaults to 0.
+            kb_page_size (int, optional): Page size when listing knowledge bases from DataMate. Defaults to 20.
+        """
+        super().__init__()
+
+        if not server_url:
+            raise ValueError("server_url is required for DataMateSearchTool")
+
+        # Parse the URL
+        parsed_url = self._parse_server_url(server_url)
+
+        # Store parsed components
+        self.server_ip = parsed_url["host"]
+        self.server_port = parsed_url["port"]
+        self.use_https = parsed_url["use_https"]
+        self.server_base_url = parsed_url["base_url"]
+        self.index_names = [] if index_names is None else index_names
+        self.top_k = top_k
+        self.threshold = threshold
+        self.rerank = rerank
+        self.rerank_model_name = rerank_model_name
+        self.rerank_model = rerank_model
+
+        # Determine SSL verification setting
+        if verify_ssl is None:
+            # Default: don't verify SSL for HTTPS (for self-signed certificates), always verify for HTTP
+            self.verify_ssl = not self.use_https
+        else:
+            self.verify_ssl = verify_ssl
+
+        # Initialize DataMate vector database core with SSL verification settings
+        self.datamate_core = DataMateCore(
+            base_url=self.server_base_url,
+            verify_ssl=self.verify_ssl if self.use_https else True
+        )
+
+        self.kb_page = kb_page
+        self.kb_page_size = kb_page_size
+        self.observer = observer
+
+        self.record_ops = 1  # To record serial number
+
+    @staticmethod
+    def _parse_server_url(server_url: str) -> dict:
+        """Parse server URL and extract components.
+
+        Args:
+            server_url: Server URL string (e.g., 'http://192.168.1.100:8080' or 'https://example.com:8443')
+
+        Returns:
+            dict: Parsed URL components containing:
+                - host: Server hostname or IP
+                - port: Server port
+                - use_https: Whether HTTPS is used
+                - base_url: Full base URL
+        """
+
+        # Ensure URL has a scheme
+        if not server_url.startswith(('http://', 'https://')):
+            raise ValueError(
+                f"server_url must include protocol (http:// or https://): {server_url}")
+
+        parsed = urlparse(server_url)
+
+        if not parsed.hostname:
+            raise ValueError(f"Invalid server_url format: {server_url}")
+
+        # Determine port
+        if parsed.port:
+            port = parsed.port
+        else:
+            # Use default ports
+            port = 443 if parsed.scheme == 'https' else 80
+
+        # Validate port range
+        if not (1 <= port <= 65535):
+            raise ValueError(f"Port {port} is not in valid range (1-65535)")
+
+        use_https = parsed.scheme == 'https'
+        base_url = f"{parsed.scheme}://{parsed.hostname}:{port}".rstrip('/')
+
+        return {
+            "host": parsed.hostname,
+            "port": port,
+            "use_https": use_https,
+            "base_url": base_url
+        }
+
+    def forward(
+        self,
+        query: str,
+    ) -> str:
+        """Execute DataMate search.
+
+        Args:
+            query: Search query text.
+        """
+
+        # Tool running chunk is emitted by the SDK tool-call bridge in
+        # core_agent.py so it is consistent across direct and code_action
+        # invocations. We only emit the search card from inside the tool.
+        if self.observer:
+            card_content = [{"icon": "search", "text": query}]
+            self.observer.add_message("", ProcessType.CARD, json.dumps(
+                card_content, ensure_ascii=False))
+
+        logger.info(
+            f"DataMateSearchTool called with query: '{query}', base_url: '{self.server_base_url}', "
+            f"top_k: {self.top_k}, threshold: {self.threshold}, index_names: {self.index_names}"
+        )
+
+        try:
+            # Step 1: Determine knowledge base IDs to search
+            knowledge_base_ids = self.index_names
+            if len(knowledge_base_ids) == 0:
+                return json.dumps("No knowledge base selected. No relevant information found.", ensure_ascii=False)
+
+            # Compute effective top_k for initial search:
+            # When rerank is enabled, retrieve more candidates to allow rerank to select the best ones.
+            effective_top_k = (
+                self.top_k * RERANK_OVERSEARCH_MULTIPLIER
+                if self.rerank else self.top_k
+            )
+
+            # Step 2: Retrieve knowledge base content using DataMateCore hybrid search
+            kb_search_results = []
+            for knowledge_base_id in knowledge_base_ids:
+                kb_search = self.datamate_core.hybrid_search(
+                    query_text=query,
+                    index_names=[knowledge_base_id],
+                    top_k=effective_top_k,
+                    weight_accurate=self.threshold,
+                )
+                if not kb_search:
+                    raise Exception(
+                        "No results found! Try a less restrictive/shorter query.")
+                kb_search_results.extend(kb_search)
+
+            # Apply reranking if enabled
+            if self.rerank and self.rerank_model and kb_search_results:
+                try:
+                    documents = []
+                    for r in kb_search_results:
+                        entity = r.get("entity", {}) or {}
+                        documents.append(entity.get("text", "") or "")
+
+                    reranked_results = self.rerank_model.rerank(
+                        query=query,
+                        documents=documents,
+                        top_n=len(documents),
+                    )
+
+                    if reranked_results:
+                        original_results_map = {
+                            i: kb_search_results[i] for i in range(len(kb_search_results))
+                        }
+                        reordered = []
+                        for reranked_item in reranked_results[: self.top_k]:
+                            orig_idx = reranked_item.get("index")
+                            if orig_idx is None or orig_idx not in original_results_map:
+                                continue
+                            result = original_results_map[orig_idx]
+                            entity = result.get("entity", {}) or {}
+                            entity["score"] = reranked_item.get(
+                                "relevance_score", entity.get("score", 0)
+                            )
+                            result["entity"] = entity
+                            reordered.append(result)
+
+                        if reordered:
+                            kb_search_results = reordered
+                            logger.info(
+                                f"Reranking applied: selected top {self.top_k} from "
+                                f"{len(documents)} candidates"
+                            )
+                except Exception as e:
+                    logger.warning(
+                        f"Reranking failed, using original results: {str(e)}"
+                    )
+
+            # Format search results
+            search_results_json = []  # Organize search results into a unified format
+            search_results_return = []  # Format for input to the large model
+            for index, single_search_result in enumerate(kb_search_results):
+                # Extract fields from DataMate API response
+                entity_data = single_search_result.get("entity", {})
+                metadata = self._parse_metadata(entity_data.get("metadata"))
+                dataset_id = self._extract_dataset_id(
+                    metadata.get("absolute_directory_path", ""))
+                file_id = metadata.get("original_file_id")
+                download_url = self.datamate_core.client.build_file_download_url(
+                    dataset_id, file_id)
+
+                score_details = entity_data.get("scoreDetails", {}) or {}
+                score_details.update({
+                    "datamate_dataset_id": dataset_id,
+                    "datamate_file_id": file_id,
+                    "datamate_download_url": download_url,
+                    "datamate_base_url": self.server_base_url.rstrip("/")
+                })
+
+                search_result_message = SearchResultTextMessage(
+                    title=metadata.get("file_name", ""),
+                    text=entity_data.get("text", ""),
+                    source_type="datamate",
+                    url=download_url,
+                    filename=metadata.get("file_name", ""),
+                    published_date=entity_data.get("createTime", ""),
+                    score=entity_data.get("score", "0"),
+                    score_details=score_details,
+                    cite_index=self.record_ops + index,
+                    search_type=self.name,
+                    tool_sign=self.tool_sign,
+                )
+
+                search_results_json.append(search_result_message.to_dict())
+                search_results_return.append(
+                    search_result_message.to_model_dict())
+
+            self.record_ops += len(search_results_return)
+
+            # Record the detailed content of this search
+            if self.observer:
+                search_results_data = json.dumps(
+                    search_results_json, ensure_ascii=False)
+                self.observer.add_message(
+                    "", ProcessType.SEARCH_CONTENT, search_results_data)
+            return json.dumps(search_results_return, ensure_ascii=False)
+
+        except Exception as e:
+            error_msg = f"Error during DataMate knowledge base search: {str(e)}"
+            logger.error(error_msg)
+            raise Exception(error_msg)
+
+    @staticmethod
+    def _parse_metadata(metadata_raw: Optional[str]) -> dict:
+        """Parse metadata payload safely."""
+        if not metadata_raw:
+            return {}
+        if isinstance(metadata_raw, dict):
+            return metadata_raw
+        try:
+            return json.loads(metadata_raw)
+        except (json.JSONDecodeError, TypeError):
+            logger.warning(
+                "Failed to parse metadata payload, falling back to empty metadata.")
+            return {}
+
+    @staticmethod
+    def _extract_dataset_id(absolute_path: str) -> str:
+        """Extract dataset identifier from an absolute directory path."""
+        if not absolute_path:
+            return ""
+        segments = [segment for segment in absolute_path.strip(
+            "/").split("/") if segment]
+        return segments[-1] if segments else ""

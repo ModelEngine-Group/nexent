@@ -1,0 +1,68 @@
+---
+globs: frontend/types/**/*.ts
+description: Type layer rules for TypeScript type definitions and interfaces
+---
+
+### Purpose and Scope
+
+- Type layer contains TypeScript definitions for `frontend/types/**/*.ts`
+- Responsibilities: Define type-safe interfaces, API types, reusable utilities, ensure consistency
+- **MANDATORY**: All types must be exported and use TypeScript
+
+### Type Organization
+
+- **`types/auth.ts`** - Authentication-related types
+- **`types/chat.ts`** - Chat and conversation types
+- **`types/config.ts`** - Configuration types
+- **`types/api.ts`** - API-related types
+- Use descriptive names matching the domain they represent
+
+### Type Definition Standards
+
+- Use interfaces for object shapes and API contracts
+- Use type aliases for unions, primitives, and computed types
+- Use enums for fixed sets of string/number values
+- Use generic types for reusable type patterns
+- Export all types for use in other modules
+
+### API Type Definitions
+
+- Define separate interfaces for request and response data
+- Use consistent naming conventions (e.g., `UserRequest`, `UserResponse`)
+- Include optional fields with proper typing
+- Use union types for status fields and enums
+- Provide JSDoc comments for complex types
+
+### Component Props Types
+
+- Define interfaces for all component props
+- Use descriptive property names
+- Include proper optional/required field indicators
+- Use generic types for reusable component patterns
+- Export types for use in component files
+- **CRITICAL**: All logging must use [logger.ts](mdc:frontend/lib/logger.ts) - never use console.log
+
+### Utility Types
+
+- Create utility types for common patterns
+- Use mapped types for transformations
+- Implement conditional types for complex logic
+- Provide type guards for runtime validation
+
+### Example
+```typescript
+// frontend/types/auth.ts
+export interface User {
+  id: string;
+  email: string;
+  name: string;
+  avatar?: string;
+  role: UserRole;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// Utility types
+export type UserUpdateData = Partial<Pick<User, 'name' | 'avatar'>>;
+export type UserCreateData = Omit<User, 'id' | 'createdAt' | 'updatedAt'>;
+```

@@ -1,0 +1,190 @@
+""""
+Analyze Image Tool
+
+Analyze images using a large language model.
+Supports images from S3, HTTP, and HTTPS URLs.
+"""
+
+import logging
+from io import BytesIO
+from typing import Any, List
+
+from jinja2 import Template, StrictUndefined
+from pydantic import Field
+from smolagents.tools import Tool
+
+from ...core.gateway.modality import VLMRequest
+from ...core.utils.observer import MessageObserver, ProcessType
+from ...core.utils.prompt_template_utils import get_prompt_template
+from ...core.utils.tools_common_message import ToolCategory, ToolSign
+from ...storage import MinIOStorageClient
+from ...multi_modal.load_save_object import LoadSaveObjectManager
+
+logger = logging.getLogger("analyze_image_tool")
+
+
+class AnalyzeImageTool(Tool):
+    """Tool for understanding and analyzing images using the image understanding model."""
+
+    name = "analyze_image"
+    description = (
+        "This tool uses the configured image understanding model to understand images based on your query and then returns a description of the image.\n"
+        "It is used to understand and analyze multiple images, with image sources supporting S3 URLs (s3://bucket/key or /bucket/key), "
+        "HTTP, and HTTPS URLs.\n"
+        "Use this tool when you want to retrieve information contained in an image and provide the image's URL and your query."
+    )
+
+    description_zh = "使用图片理解模型，根据你的提示词来理解图像，并返回图像的描述。可用于理解和分析多张图片，支持 S3 URLs（s3://bucket/key 或 /bucket/key）、HTTP 和 HTTPS URL。"
+
+    inputs = {
+        "image_urls_list": {
+            "type": "array",
+            "description": "List of image URLs (S3, HTTP, or HTTPS). Supports s3://bucket/key, /bucket/key, http://, and https:// URLs.",
+            "description_zh": "列表形式输入图片 URL（S3、HTTP 或 HTTPS）。支持 s3://bucket/key、/bucket/key、http:// 和 https:// URL。"
+        },
+        "query": {
+            "type": "string",
+            "description": "User's question to guide the analysis",
+            "description_zh": "用户的问题，用于指导分析"
+        }
+    }
+
+    init_param_descriptions = {
+        "observer": {
+            "description": "Message observer"
+        },
+        "vlm_model": {
+            "description": "The image understanding model to use"
+        },
+        "selected_model_id": {
+            "description": "Optional Nexent image understanding model ID to use for image analysis. If omitted, the default image understanding model is used."
+        },
+        "storage_client": {
+            "description": "Storage client for downloading files"
+        },
+        "validate_url_access": {
+            "description": "Callback function to validate URL access permissions (passed to LoadSaveObjectManager)"
+        }
+    }
+    output_type = "array"
+    category = ToolCategory.MULTIMODAL.value
+    tool_sign = ToolSign.MULTIMODAL_OPERATION.value
+
+    def __init__(
+            self,
+            observer: MessageObserver = Field(
+                description="Message observer",
+                default=None,
+                exclude=True),
+            vlm_model: Any = Field(
+                description="The image understanding model to use",
+                default=None,
+                exclude=True),
+            selected_model_id: int = Field(
+                description="Optional Nexent image understanding model ID to use for image analysis. If omitted, the default image understanding model is used.",
+                default=None),
+            storage_client: MinIOStorageClient = Field(
+                description="Storage client for downloading files from S3 URLs、HTTP URLs、HTTPS URLs.",
+                default=None,
+                exclude=True),
+            validate_url_access: callable = Field(
+                description="Callback function to validate URL access permissions",
+                default=None,
+                exclude=True)
+    ):
+        super().__init__()
+        self.observer = observer
+        self.vlm_model = vlm_model
+        self.selected_model_id = selected_model_id
+        self.storage_client = storage_client
+
+        # Determine if the language is Chinese for internationalization
+        self._is_chinese = bool(observer and observer.lang == "zh")
+
+        # Create LoadSaveObjectManager with the storage client and validation callback
+        # Ensure validate_url_access is callable before passing to LoadSaveObjectManager
+        validate_callback = None
+        if validate_url_access is not None and callable(validate_url_access):
+            validate_callback = validate_url_access
+        self.mm = LoadSaveObjectManager(
+            storage_client=self.storage_client,
+            validate_url_access=validate_callback
+        )
+
+        # Dynamically apply the load_object decorator to forward method
+        self.forward = self.mm.load_object(
+            input_names=["image_urls_list"])(self._forward_impl)
+
+    def _forward_impl(self, image_urls_list: List[bytes], query: str) -> List[str]:
+        """
+        Analyze images identified by S3 URL, HTTP URL, or HTTPS URL and return the identified text.
+
+        Note: This method is wrapped by load_object decorator which downloads
+        the image from S3 URL, HTTP URL, or HTTPS URL and passes bytes to this method.
+
+        Args:
+            image_urls_list: List of image bytes converted from URLs by the decorator.
+                             The load_object decorator converts URLs to bytes before calling this method.
+            query: User's question to guide the analysis
+
+        Returns:
+            List[str]: One analysis string per image that aligns with the order
+            of the provided images.
+
+        Raises:
+            Exception: If the image cannot be downloaded or analyzed.
+        """
+        # Check if the image understanding model is available.
+        if self.vlm_model is None:
+            error_msg_zh = "图片理解模型未配置，请联系管理员配置图片理解模型后重试"
+            error_msg_en = "Image understanding model is not configured. Please contact your administrator to configure the image understanding model and try again."
+            error_msg = error_msg_zh if self._is_chinese else error_msg_en
+            logger.error(error_msg)
+            raise Exception(error_msg)
+
+        # Tool running chunk is emitted by the SDK tool-call bridge in
+        # core_agent.py so it is consistent across direct and code_action
+        # invocations. This tool does not emit a card.
+
+        if image_urls_list is None:
+            raise ValueError("image_urls cannot be None")
+
+        if not isinstance(image_urls_list, list):
+            raise ValueError("image_urls must be a list of bytes")
+
+        if not image_urls_list:
+            raise ValueError("image_urls must contain at least one image")
+
+        # Load prompts from yaml file
+        language = self.observer.lang if self.observer else "en"
+        prompts = get_prompt_template(
+            template_type='analyze_image', language=language)
+        system_prompt = Template(
+            prompts['system_prompt'], undefined=StrictUndefined).render({'query': query})
+
+        try:
+            analysis_results: List[str] = []
+            for index, image_bytes in enumerate(image_urls_list, start=1):
+                logger.info(f"Extracting image #{index}, query: {query}")
+                image_stream = BytesIO(image_bytes)
+                try:
+                    response = self.vlm_model.invoke_sync(
+                        VLMRequest(
+                            media_type="image",
+                            media_input=image_stream,
+                            prompt=system_prompt,
+                        )
+                    )
+                except Exception as e:
+                    error_msg_zh = f"图片{index}分析失败: {str(e)}。请检查图片理解模型配置是否正确。"
+                    error_msg_en = f"Failed to analyze image {index}: {str(e)}. Please check if the image understanding model is configured correctly."
+                    error_msg = error_msg_zh if self._is_chinese else error_msg_en
+                    raise Exception(error_msg)
+
+                analysis_results.append(response.content)
+
+            return analysis_results
+        except Exception as e:
+            logger.error(f"Error analyzing image: {str(e)}", exc_info=True)
+            error_msg = f"Error analyzing image: {str(e)}"
+            raise Exception(error_msg)

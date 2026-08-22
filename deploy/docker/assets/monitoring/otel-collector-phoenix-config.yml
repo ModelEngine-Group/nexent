@@ -1,0 +1,110 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    timeout: 1s
+    send_batch_size: 512
+
+  memory_limiter:
+    limit_mib: 256
+    check_interval: 1s
+
+  resource:
+    attributes:
+      - key: service.name
+        value: nexent-backend
+        action: insert
+      - key: service.version
+        from_attribute: version
+        action: insert
+
+  # Phoenix selects projects from this resource attribute. Applying it only
+  # to knowledge.* spans keeps generic HTTP/Elasticsearch polling elsewhere.
+  transform/knowledge_project:
+    error_mode: ignore
+    trace_statements:
+      - context: span
+        statements:
+          - 'set(resource.attributes["openinference.project.name"], "knowledge-base-monitor") where IsMatch(span.name, "^knowledge\\.")'
+
+  # Filter conditions describe what to drop. Two pipelines prevent resource
+  # attributes shared by a mixed OTLP batch from moving unrelated spans.
+  filter/knowledge_only:
+    error_mode: ignore
+    traces:
+      span:
+        - 'not IsMatch(span.name, "^knowledge\\.")'
+
+  filter/non_knowledge:
+    error_mode: ignore
+    traces:
+      span:
+        - 'IsMatch(span.name, "^knowledge\\.")'
+
+exporters:
+  debug:
+    verbosity: normal
+
+  otlphttp/phoenix:
+    endpoint: http://phoenix:6006
+    # 1. 超时控制 (Timeout)
+    # 防止 Collector 等待太久导致协程暴涨
+    timeout: 5s
+
+    # 2. 发送队列 (Sending Queue)
+    # 当后端处理变慢时，把数据先缓存在 Collector 内存中
+    sending_queue:
+      enabled: true
+      num_consumers: 10         # 并发发送的工作线程数（可提升发送吞吐量）
+      queue_size: 5000          # 队列最大可容纳的批次数。如果队列满了，新来的数据将被丢弃！
+
+    # 3. 失败重试 (Retry on Failure)
+    # 遇到网络抖动或后端返回 503 等临时性错误时，进行指数退避重试
+    retry_on_failure:
+      enabled: true
+      initial_interval: 1s      # 第一次重试间隔 1s
+      max_interval: 30s         # 最大重试间隔不超过 30s
+      max_elapsed_time: 300s    # 一条数据最多重试 5 分钟，超过则彻底放弃并丢弃
+
+  # Phoenix 15.5+ gives this header precedence over resource attributes.
+  otlphttp/phoenix_knowledge:
+    endpoint: http://phoenix:6006
+    headers:
+      x-project-name: knowledge-base-monitor
+    timeout: 5s
+    sending_queue:
+      enabled: true
+      num_consumers: 4
+      queue_size: 2000
+    retry_on_failure:
+      enabled: true
+      initial_interval: 1s
+      max_interval: 30s
+      max_elapsed_time: 300s
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, filter/non_knowledge, batch]
+      exporters: [otlphttp/phoenix, debug]
+
+    traces/knowledge:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, filter/knowledge_only, transform/knowledge_project, batch]
+      exporters: [otlphttp/phoenix_knowledge, debug]
+
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, batch]
+      exporters: [debug]
+
+  telemetry:
+    logs:
+      level: "info"

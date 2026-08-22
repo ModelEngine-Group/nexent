@@ -1,0 +1,765 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { usePathname, useRouter } from "next/navigation";
+import {
+  Modal,
+  Form,
+  Input,
+  Button,
+  Typography,
+  Space,
+  App,
+  Popover,
+} from "antd";
+import {
+  UserRound,
+  LockKeyhole,
+  ShieldCheck,
+  KeyRound,
+  HelpCircle,
+  Users,
+} from "lucide-react";
+
+import { useAuthenticationContext } from "@/components/providers/AuthenticationProvider";
+import { useDeployment } from "@/components/providers/deploymentProvider";
+import type { AuthFormValues } from "@/types/auth";
+import { getEffectiveRoutePath } from "@/lib/auth";
+import { withBasePath, withoutBasePath } from "@/lib/basePath";
+import { authEventUtils } from "@/lib/authEvents";
+import { oauthService } from "@/services/oauthService";
+import log from "@/lib/logger";
+import { getPasswordChecks, getStrengthLevel, validatePassword as validatePasswordUtil } from "@/lib/utils";
+
+const { Text } = Typography;
+
+export function RegisterModal() {
+  const {
+    isRegisterModalOpen,
+    registerModalOptions,
+    isAuthenticated,
+    closeRegisterModal,
+    openLoginModal,
+    register,
+    authServiceUnavailable,
+  } = useAuthenticationContext();
+  const { isSpeedMode } = useDeployment();
+
+  const router = useRouter();
+  const pathname = usePathname();
+  const [form] = Form.useForm<AuthFormValues>();
+  const [isLoading, setIsLoading] = useState(false);
+  const [emailError, setEmailError] = useState("");
+  const [passwordValue, setPasswordValue] = useState("");
+  const [passwordError, setPasswordError] = useState<{
+    target: "password" | "confirmPassword" | "";
+    message: string;
+  }>({ target: "", message: "" });
+  const { t } = useTranslation("common");
+  const { message } = App.useApp();
+  const isOAuthCompletion = registerModalOptions?.mode === "oauth_complete";
+
+  const validateEmail = (email: string): boolean => {
+    if (!email) return false;
+
+    if (!email.includes("@")) return false;
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return emailRegex.test(email);
+  };
+
+  const validatePassword = validatePasswordUtil;
+
+  const resetForm = () => {
+    setEmailError("");
+    setPasswordError({ target: "", message: "" });
+    setPasswordValue("");
+    form.resetFields();
+  };
+
+  const setInviteCodeError = (errorMsg: string, value?: string) => {
+    message.error(errorMsg);
+    form.setFields([
+      {
+        name: "inviteCode",
+        errors: [errorMsg],
+        value,
+      },
+    ]);
+  };
+
+  const setPasswordFieldError = (errorMsg: string, value?: string) => {
+    message.error(errorMsg);
+    setPasswordError({ target: "password", message: errorMsg });
+    form.setFields([
+      {
+        name: "password",
+        errors: [errorMsg],
+        value,
+      },
+    ]);
+  };
+
+  const setEmailFieldError = (errorMsg: string, value?: string) => {
+    message.error(errorMsg);
+    setEmailError(errorMsg);
+    form.setFields([
+      {
+        name: "email",
+        errors: [errorMsg],
+        value,
+      },
+    ]);
+  };
+
+  const handleOAuthCompleteError = (
+    errorKey: string,
+    values: AuthFormValues
+  ) => {
+    const errorMsg = t(errorKey);
+
+    if (errorKey === "auth.inviteCodeInvalid") {
+      setInviteCodeError(errorMsg, values.inviteCode);
+      return;
+    }
+
+    if (errorKey === "auth.passwordMinLength") {
+      setPasswordFieldError(errorMsg, values.password);
+      return;
+    }
+
+    if (
+      errorKey === "auth.invalidEmailFormat" ||
+      errorKey === "auth.emailRequired" ||
+      errorKey === "auth.oauthEmailAlreadyExists"
+    ) {
+      setEmailFieldError(errorMsg, values.email);
+      return;
+    }
+
+    message.error(errorMsg);
+  };
+
+  useEffect(() => {
+    if (!isRegisterModalOpen) return;
+
+    setEmailError("");
+    setPasswordError({ target: "", message: "" });
+    setPasswordValue("");
+    form.resetFields();
+    if (registerModalOptions?.email) {
+      form.setFieldsValue({ email: registerModalOptions.email });
+    } else if (isOAuthCompletion) {
+      form.setFieldsValue({ email: "" });
+    }
+  }, [form, isOAuthCompletion, isRegisterModalOpen, registerModalOptions]);
+
+  const handleSubmit = async (values: AuthFormValues) => {
+    setIsLoading(true);
+    setEmailError(""); // Reset error state
+    setPasswordError({ target: "", message: "" }); // Reset password error state
+
+    if (!validateEmail(values.email)) {
+      const errorMsg = t("auth.invalidEmailFormat");
+      message.error(errorMsg);
+      setEmailError(errorMsg);
+      setIsLoading(false);
+      return;
+    }
+
+    if (!validatePassword(values.password)) {
+      const errorMsg = t("auth.passwordStrengthError") || "Password must contain uppercase, lowercase, and digit";
+      message.error(errorMsg);
+      setPasswordError({ target: "password", message: errorMsg });
+      form.setFields([
+        {
+          name: "password",
+          errors: [errorMsg],
+          value: values.password,
+        },
+      ]);
+      setIsLoading(false);
+      return;
+    }
+
+    try {
+      if (isOAuthCompletion) {
+        const result = await oauthService.completeOAuth({
+          email: registerModalOptions?.emailReadOnly ? undefined : values.email,
+          invite_code: values.inviteCode || "",
+          password: values.password,
+        });
+
+        if (result.error || !result.data) {
+          handleOAuthCompleteError(
+            result.errorKey || "auth.oauthCompleteFailed",
+            values
+          );
+          setIsLoading(false);
+          return;
+        }
+
+        resetForm();
+        message.success(t("auth.oauthCompleteSuccess"));
+        authEventUtils.emitRegisterSuccess();
+        authEventUtils.emitLoginSuccess();
+
+        const locale = withoutBasePath(pathname).split("/").find(Boolean) || "zh";
+        window.location.href = withBasePath(`/${locale}`);
+        return;
+      }
+
+      await register(
+        values.email,
+        values.password,
+        values.inviteCode
+      );
+
+      // Reset form and clear error states
+      resetForm();
+    } catch (error: any) {
+      log.error("Registration error details:", error);
+
+      if (error?.detail && Array.isArray(error.detail)) {
+        const validationError = error.detail[0];
+
+        if (validationError.loc && validationError.loc.includes("email")) {
+          const errorMsg = t("auth.invalidEmailFormat");
+          message.error(errorMsg);
+          setEmailError(errorMsg);
+          form.setFields([
+            {
+              name: "email",
+              errors: [errorMsg],
+              value: values.email,
+            },
+          ]);
+          setIsLoading(false);
+          return;
+        }
+
+        if (validationError.loc && validationError.loc.includes("password")) {
+          const errorMsg = t("auth.passwordStrengthError") || "Password must contain uppercase, lowercase, and digit";
+          message.error(errorMsg);
+          setPasswordError({ target: "password", message: errorMsg });
+          setIsLoading(false);
+          return;
+        }
+      }
+
+      // process the specific error type returned by the backend (based on HTTP status code and error_type)
+      const httpStatusCode = error?.code;
+      const errorType = error?.message;
+
+      if (isOAuthCompletion) {
+        handleOAuthCompleteError("auth.oauthCompleteFailed", values);
+        setIsLoading(false);
+        return;
+      }
+
+      // HTTP 409 Conflict
+      if (httpStatusCode === 409 || errorType === "EMAIL_ALREADY_EXISTS") {
+        const errorMsg = t("auth.emailAlreadyExists");
+        message.error(errorMsg);
+        setEmailError(errorMsg);
+        form.setFields([
+          {
+            name: "email",
+            errors: [errorMsg],
+            value: values.email,
+          },
+        ]);
+      }
+      // HTTP 406 Not Acceptable
+      else if (httpStatusCode === 406 || errorType === "WEAK_PASSWORD") {
+        const errorMsg = t("auth.weakPassword");
+        message.error(errorMsg);
+        setPasswordError({ target: "password", message: errorMsg });
+        form.setFields([
+          {
+            name: "password",
+            errors: [errorMsg],
+            value: values.password,
+          },
+        ]);
+      }
+      // Invite code not configured
+      else if (errorType === "INVITE_CODE_NOT_CONFIGURED") {
+        const errorMsg = t("auth.inviteCodeNotConfigured");
+        message.error(errorMsg);
+        form.setFields([
+          {
+            name: "inviteCode",
+            errors: [errorMsg],
+            value: values.inviteCode,
+          },
+        ]);
+      } else if (errorType === "INVITE_CODE_REQUIRED") {
+        const errorMsg = t("auth.inviteCodeRequired");
+        message.error(errorMsg);
+        form.setFields([
+          {
+            name: "inviteCode",
+            errors: [errorMsg],
+            value: values.inviteCode,
+          },
+        ]);
+      } else if (errorType === "INVITE_CODE_INVALID") {
+        const errorMsg = t("auth.inviteCodeInvalid");
+        message.error(errorMsg);
+        form.setFields([
+          {
+            name: "inviteCode",
+            errors: [errorMsg],
+            value: values.inviteCode,
+          },
+        ]);
+      } else if (errorType === "ASSET_OWNER_USE_OAUTH") {
+        const errorMsg = t("auth.assetOwnerUseOAuth");
+        message.error(errorMsg);
+        form.setFields([
+          {
+            name: "inviteCode",
+            errors: [errorMsg],
+            value: values.inviteCode,
+          },
+        ]);
+      }
+      // Invalid email format
+      else if (errorType === "INVALID_EMAIL_FORMAT") {
+        const errorMsg = t("auth.invalidEmailFormat");
+        message.error(errorMsg);
+        setEmailError(errorMsg);
+        form.setFields([
+          {
+            name: "email",
+            errors: [errorMsg],
+            value: values.email,
+          },
+        ]);
+      }
+      // Registration service error
+      else if (
+        errorType === "REGISTRATION_SERVICE_ERROR" ||
+        httpStatusCode === 500
+      ) {
+        const errorMsg = t("auth.registrationServiceError");
+        message.error(errorMsg);
+        setEmailError(errorMsg);
+      }
+      // Network error
+      else if (errorType === "NETWORK_ERROR") {
+        const errorMsg = t("auth.networkError");
+        message.error(errorMsg);
+        setEmailError(errorMsg);
+      }
+      // Auth service unavailable
+      else if (
+        httpStatusCode === 503 ||
+        errorType === "AUTH_SERVICE_UNAVAILABLE"
+      ) {
+        const errorMsg = t("auth.authServiceUnavailable");
+        message.error(errorMsg);
+        setEmailError(errorMsg);
+      }
+      // Other unknown errors
+      else {
+        const errorMsg = error?.message || t("auth.unknownError");
+        message.error(errorMsg);
+        setPasswordError({ target: "", message: "" });
+      }
+    }
+
+    setIsLoading(false);
+  };
+
+  const handleLoginClick = () => {
+    resetForm();
+    setPasswordError({ target: "", message: "" });
+    closeRegisterModal();
+    openLoginModal();
+  };
+
+  const handleCancel = () => {
+    resetForm();
+    setPasswordError({ target: "", message: "" });
+    closeRegisterModal();
+
+    if (isOAuthCompletion) {
+      const locale = withoutBasePath(pathname).split("/").find(Boolean) || "zh";
+      router.push(`/${locale}`);
+      return;
+    }
+
+    // If user manually cancels registration from a protected page,
+    // redirect back to home instead of keeping them on the restricted page
+    if (!isAuthenticated && !isSpeedMode) {
+      const effectivePath = pathname ? getEffectiveRoutePath(pathname) : "/";
+      if (effectivePath !== "/") {
+        router.push("/");
+      }
+    }
+  };
+
+  // Handle email input change - real-time email format validation
+  const handleEmailInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+
+    // Real-time email format validation
+    if (value && !validateEmail(value)) {
+      setEmailError(t("auth.invalidEmailFormat"));
+    } else {
+      setEmailError("");
+    }
+  };
+
+  // Handle password input change - use new validation logic
+  const handlePasswordChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setPasswordValue(value);
+
+    // Use validation function to check password strength
+    if (value && !validatePassword(value)) {
+      setPasswordError({
+        target: "password",
+        message: t("auth.passwordStrengthError") || "Password must contain uppercase, lowercase, and digit",
+      });
+      return; // Exit early if password length is invalid
+    }
+
+    // Only check password match if length requirement is met
+    setPasswordError({ target: "", message: "" });
+    const confirmPassword = form.getFieldValue("confirmPassword");
+    if (confirmPassword && confirmPassword !== value) {
+      setPasswordError({
+        target: "confirmPassword",
+        message: t("auth.passwordsDoNotMatch"),
+      });
+    }
+  };
+
+  // Handle confirm password input change - use new validation logic
+  const handleConfirmPasswordChange = (
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const value = e.target.value;
+    const password = form.getFieldValue("password");
+
+    // First check if original password meets length requirement
+    if (password && !validatePassword(password)) {
+      setPasswordError({
+        target: "password",
+        message: t("auth.passwordStrengthError") || "Password must contain uppercase, lowercase, and digit",
+      });
+      return;
+    }
+
+    // Then check password match
+    if (value && value !== password) {
+      setPasswordError({
+        target: "confirmPassword",
+        message: t("auth.passwordsDoNotMatch"),
+      });
+    } else {
+      setPasswordError({ target: "", message: "" });
+    }
+  };
+
+  return (
+    <Modal
+      title={
+        <div className="text-center text-xl font-bold mt-3">
+          {isOAuthCompletion
+            ? t("auth.oauthCompleteTitle")
+            : t("auth.registerTitle")}
+        </div>
+      }
+      open={isRegisterModalOpen}
+      onCancel={handleCancel}
+      footer={null}
+      width={420}
+      centered
+      forceRender
+    >
+      <div className="relative bg-white p-4 rounded-2xl">
+        <Form
+          id="register-form"
+          form={form}
+          layout="vertical"
+          onFinish={handleSubmit}
+          className="mt-6"
+          autoComplete="off"
+        >
+          <Form.Item
+            name="email"
+            label={t("auth.emailLabel")}
+            validateStatus={emailError ? "error" : ""}
+            help={emailError}
+            rules={[
+              { required: true, message: t("auth.emailRequired") },
+              {
+                validator: (_, value) => {
+                  if (!value) return Promise.resolve();
+                  if (!validateEmail(value)) {
+                    return Promise.reject(
+                      new Error(t("auth.invalidEmailFormat"))
+                    );
+                  }
+                  return Promise.resolve();
+                },
+              },
+            ]}
+          >
+            <Input
+              prefix={<UserRound className="text-gray-400" size={16} />}
+              placeholder="your@email.com"
+              size="large"
+              disabled={isOAuthCompletion && registerModalOptions?.emailReadOnly}
+              onChange={handleEmailInputChange}
+            />
+          </Form.Item>
+
+          <Form.Item
+            name="password"
+            label={t("auth.passwordLabel")}
+            validateStatus={
+              passwordError.target === "password" &&
+                !form.getFieldError("password").length
+                ? "error"
+                : ""
+            }
+            help={
+              form.getFieldError("password").length
+                ? undefined
+                : passwordError.target === "password"
+                  ? passwordError.message
+                  : authServiceUnavailable
+                    ? t("auth.authServiceUnavailable")
+                    : undefined
+            }
+            rules={[
+              { required: true, message: t("auth.passwordRequired") },
+              {
+                validator: (_, value) => {
+                  if (!value) return Promise.resolve();
+                  if (!validatePassword(value)) {
+                    return Promise.reject(new Error(t("auth.passwordStrengthError") || "Password must contain uppercase, lowercase, and digit"));
+                  }
+                  return Promise.resolve();
+                },
+              },
+            ]}
+            hasFeedback
+          >
+            <Input.Password
+              id="register-password"
+              prefix={<LockKeyhole className="text-gray-400" size={16} />}
+              placeholder={t("auth.passwordRequired")}
+              size="large"
+              onChange={handlePasswordChange}
+            />
+          </Form.Item>
+
+          {/* Password Strength Indicator */}
+          {passwordValue && (() => {
+            const checks = getPasswordChecks(passwordValue);
+            const levelInfo = getStrengthLevel(passwordValue, t);
+            return (
+              <div className="mb-4">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs text-gray-500">{t("auth.passwordStrength") || "Password strength"}</span>
+                  <span className="text-xs font-medium" style={{ color: levelInfo.color }}>
+                    {levelInfo.label}
+                  </span>
+                </div>
+                <div className="flex gap-1">
+                  {[0, 1, 2, 3].map((level) => (
+                    <div
+                      key={level}
+                      className="h-1 flex-1 rounded-full transition-colors"
+                      style={{
+                        backgroundColor: level <= levelInfo.level ? levelInfo.color : "#e5e7eb"
+                      }}
+                    />
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
+
+          <Form.Item
+            name="confirmPassword"
+            label={t("auth.confirmPasswordLabel")}
+            validateStatus={
+              passwordError.target === "confirmPassword" &&
+                !form.getFieldError("confirmPassword").length
+                ? "error"
+                : ""
+            }
+            help={
+              form.getFieldError("confirmPassword").length
+                ? undefined
+                : passwordError.target === "confirmPassword"
+                  ? passwordError.message
+                  : authServiceUnavailable
+                    ? t("auth.authServiceUnavailable")
+                    : undefined
+            }
+            dependencies={["password"]}
+            hasFeedback
+            rules={[
+              { required: true, message: t("auth.confirmPasswordRequired") },
+              ({ getFieldValue }) => ({
+                validator(_, value) {
+                  const password = getFieldValue("password");
+                  // First check password length using validation function
+                  if (password && !validatePassword(password)) {
+                    setPasswordError({
+                      target: "password",
+                      message: t("auth.passwordStrengthError") || "Password must contain uppercase, lowercase, and digit",
+                    });
+                    return Promise.reject(new Error(t("auth.passwordStrengthError") || "Password must contain uppercase, lowercase, and digit"));
+                  }
+                  // Then check password match
+                  if (!value || getFieldValue("password") === value) {
+                    setPasswordError({ target: "", message: "" });
+                    return Promise.resolve();
+                  }
+                  setPasswordError({
+                    target: "confirmPassword",
+                    message: t("auth.passwordsDoNotMatch"),
+                  });
+                  return Promise.reject(new Error(t("auth.passwordsDoNotMatch")));
+                },
+              }),
+            ]}
+          >
+            <Input.Password
+              id="register-confirm-password"
+              prefix={<ShieldCheck className="text-gray-400" size={16} />}
+              placeholder={t("auth.confirmPasswordRequired")}
+              size="large"
+              onChange={handleConfirmPasswordChange}
+            />
+          </Form.Item>
+
+          <Form.Item
+            name="inviteCode"
+            label={t("auth.inviteCodeLabel")}
+            rules={[{ required: true, message: t("auth.inviteCodeRequired") }]}
+          >
+            <Input
+              prefix={<KeyRound className="text-gray-400" size={16} />}
+              placeholder={t("auth.inviteCodePlaceholder")}
+              size="large"
+            />
+          </Form.Item>
+
+          <Form.Item>
+            <Popover
+              content={
+                <div className="max-w-sm">
+                  {/* Method 1: Open Source Contribution */}
+                  <div className="bg-white dark:bg-gray-800 rounded-lg p-3 mb-3">
+                    <div className="font-medium text-sm text-gray-900 dark:text-gray-100 mb-2">
+                      {t("auth.inviteCodeHint.method1.title")}
+                    </div>
+                    <div className="space-y-2">
+                      <div className="flex items-start">
+                        <span className="mr-1 leading-none">✨</span>
+                        <div className="text-sm text-gray-600 dark:text-gray-400">
+                          {t("auth.inviteCodeHint.step1")}
+                          <a
+                            href="https://github.com/ModelEngine-Group/nexent"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-blue-600 dark:text-blue-400 hover:underline font-medium"
+                          >
+                            {t("auth.inviteCodeHint.projectLink")}
+                          </a>
+                          {t("auth.inviteCodeHint.starAction")}
+                        </div>
+                      </div>
+                      <div className="flex items-start">
+                        <span className="mr-1 leading-none">🎁</span>
+                        <div className="text-sm text-gray-600 dark:text-gray-400">
+                          {t("auth.inviteCodeHint.step3")}
+                          <a
+                            href={`http://60.204.251.153:3001/${pathname.split("/").find(Boolean) || "zh"}/contact`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-blue-600 dark:text-blue-400 hover:underline font-medium"
+                          >
+                            {t("auth.inviteCodeHint.communityLink")}
+                          </a>
+                          {t("auth.inviteCodeHint.step3Action")}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Method 2: Contact Tenant Administrator */}
+                  <div className="bg-white dark:bg-gray-800 rounded-lg p-3">
+                    <div className="font-medium text-sm text-gray-900 dark:text-gray-100 mb-2">
+                      {t("auth.inviteCodeHint.method2.title")}
+                    </div>
+                    <div className="space-y-2">
+                      <div className="flex items-start">
+                        <Users size={16} className="text-blue-600 dark:text-blue-400 mr-1 mt-0.5" />
+                        <div className="text-sm text-gray-600 dark:text-gray-400">
+                          {t("auth.inviteCodeHint.method2.description")}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              }
+              title={t("auth.inviteCodeHint.popoverTitle")}
+              trigger="hover"
+              mouseEnterDelay={0.3}
+              overlayClassName="max-w-xs"
+            >
+              <div className="flex items-center text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 cursor-pointer text-sm">
+                <HelpCircle size={16} className="mr-1" />
+                {t("auth.inviteCodeHint.howToGetCode")}
+              </div>
+            </Popover>
+          </Form.Item>
+
+
+          <Form.Item>
+            <Button
+              type="primary"
+              htmlType="submit"
+              loading={isLoading}
+              block
+              size="large"
+              className="mt-2"
+              disabled={!isOAuthCompletion && authServiceUnavailable}
+            >
+              {isLoading
+                ? isOAuthCompletion
+                  ? t("auth.oauthCompleting")
+                  : t("auth.registering")
+                : isOAuthCompletion
+                  ? t("auth.oauthCompleteSubmit")
+                  : t("auth.register")}
+            </Button>
+          </Form.Item>
+
+          {!isOAuthCompletion && (
+            <div className="text-center">
+              <Space>
+                <Text type="secondary">{t("auth.hasAccount")}</Text>
+                <Button type="link" onClick={handleLoginClick} className="p-0">
+                  {t("auth.loginNow")}
+                </Button>
+              </Space>
+            </div>
+          )}
+        </Form>
+      </div>
+    </Modal>
+  );
+}

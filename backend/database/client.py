@@ -1,0 +1,413 @@
+import logging
+from contextlib import contextmanager
+from typing import Any, BinaryIO, Dict, List, Optional, Tuple
+
+import psycopg2
+from sqlalchemy import create_engine
+from sqlalchemy.orm import class_mapper, sessionmaker
+
+from consts.const import (
+    MINIO_ACCESS_KEY,
+    MINIO_DEFAULT_BUCKET,
+    MINIO_ENDPOINT,
+    MINIO_REGION,
+    MINIO_SECRET_KEY,
+    NEXENT_POSTGRES_PASSWORD,
+    POSTGRES_DB,
+    POSTGRES_HOST,
+    POSTGRES_PORT,
+    POSTGRES_USER,
+)
+from database.db_models import TableBase
+from nexent.storage.storage_client_factory import create_storage_client_from_config, MinIOStorageConfig
+
+
+logger = logging.getLogger("database.client")
+
+
+class PostgresClient:
+    _instance: Optional['PostgresClient'] = None
+    _conn: Optional[psycopg2.extensions.connection] = None
+
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super(PostgresClient, cls).__new__(cls)
+        return cls._instance
+
+    def __init__(self):
+        self.host = POSTGRES_HOST
+        self.user = POSTGRES_USER
+        self.password = NEXENT_POSTGRES_PASSWORD
+        self.database = POSTGRES_DB
+        self.port = POSTGRES_PORT
+        self.engine = create_engine(
+            "postgresql://",
+            connect_args={
+                "host": self.host,
+                "user": self.user,
+                "password": self.password,
+                "database": self.database,
+                "port": self.port,
+                "client_encoding": "utf8"
+            },
+            echo=False,
+            pool_size=10,
+            pool_pre_ping=True,
+            pool_timeout=30
+        )
+        self.session_maker = sessionmaker(bind=self.engine)
+
+    @staticmethod
+    def clean_string_values(data: Dict[str, Any]) -> Dict[str, Any]:
+        """Ensure all strings are UTF-8 encoded"""
+        cleaned_data = {}
+        for key, value in data.items():
+            if isinstance(value, str):
+                cleaned_data[key] = value.encode(
+                    'utf-8', errors='ignore').decode('utf-8')
+            else:
+                cleaned_data[key] = value
+        return cleaned_data
+
+
+class MinioClient:
+    """
+    MinIO client wrapper using storage SDK
+
+    This class maintains backward compatibility with the existing MinioClient interface
+    while using the new storage SDK under the hood.
+    """
+    _instance: Optional['MinioClient'] = None
+    _initialized: bool = False
+
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super(MinioClient, cls).__new__(cls)
+        return cls._instance
+
+    def __init__(self):
+        if MinioClient._initialized:
+            return
+        MinioClient._initialized = True
+        # Explicitly initialize attributes so external callers never hit missing-attribute errors.
+        self._storage_client = None
+        self.storage_config = None
+
+    def _ensure_initialized(self):
+        """Lazily initialize the storage client on first use."""
+        if not hasattr(self, '_storage_client') or self._storage_client is None:
+            secure = MINIO_ENDPOINT.startswith(
+                'https://') if MINIO_ENDPOINT else True
+            self.storage_config = MinIOStorageConfig(
+                endpoint=MINIO_ENDPOINT,
+                access_key=MINIO_ACCESS_KEY,
+                secret_key=MINIO_SECRET_KEY,
+                region=MINIO_REGION,
+                default_bucket=MINIO_DEFAULT_BUCKET,
+                secure=secure
+            )
+            self._storage_client = create_storage_client_from_config(
+                self.storage_config)
+            return True
+        return False
+
+    @property
+    def default_bucket(self) -> Optional[str]:
+        """
+        Resolve default bucket safely for callers that need bucket info.
+        Falls back to configured constant when lazy init has not run yet.
+        """
+        try:
+            self._ensure_initialized()
+        except Exception:
+            # Keep this accessor resilient; operational methods can still raise
+            # detailed storage errors when invoked.
+            pass
+
+        if getattr(self, "storage_config", None) is not None:
+            return self.storage_config.default_bucket
+        return MINIO_DEFAULT_BUCKET
+
+    def upload_file(
+            self,
+            file_path: str,
+            object_name: Optional[str] = None,
+            bucket: Optional[str] = None
+    ) -> Tuple[bool, str]:
+        """
+        Upload local file to MinIO
+
+        Args:
+            file_path: Local file path
+            object_name: Object name, if not specified use filename
+            bucket: Bucket name, if not specified use default bucket
+
+        Returns:
+            Tuple[bool, str]: (Success status, File URL or error message)
+        """
+        self._ensure_initialized()
+        return self._storage_client.upload_file(file_path, object_name, bucket)
+
+    def upload_fileobj(self, file_obj: BinaryIO, object_name: str, bucket: Optional[str] = None) -> Tuple[bool, str]:
+        """
+        Upload file object to MinIO
+
+        Args:
+            file_obj: File object
+            object_name: Object name
+            bucket: Bucket name, if not specified use default bucket
+
+        Returns:
+            Tuple[bool, str]: (Success status, File URL or error message)
+        """
+        self._ensure_initialized()
+        return self._storage_client.upload_fileobj(file_obj, object_name, bucket)
+
+    def download_file(self, object_name: str, file_path: str, bucket: Optional[str] = None) -> Tuple[bool, str]:
+        """
+        Download file from MinIO to local
+
+        Args:
+            object_name: Object name
+            file_path: Local save path
+            bucket: Bucket name, if not specified use default bucket
+
+        Returns:
+            Tuple[bool, str]: (Success status, Success message or error message)
+        """
+        self._ensure_initialized()
+        return self._storage_client.download_file(object_name, file_path, bucket)
+
+    def get_file_url(self, object_name: str, bucket: Optional[str] = None, expires: int = 86400) -> Tuple[bool, str]:
+        """
+        Get presigned URL for file
+
+        Args:
+            object_name: Object name
+            bucket: Bucket name, if not specified use default bucket
+            expires: URL expiration time in seconds (default 86400 = 24 hours)
+
+        Returns:
+            Tuple[bool, str]: (Success status, Presigned URL or error message)
+        """
+        self._ensure_initialized()
+        return self._storage_client.get_file_url(object_name, bucket, expires)
+
+    def get_file_size(self, object_name: str, bucket: Optional[str] = None) -> int:
+        """
+        Get file size in bytes
+
+        Args:
+            object_name: Object name
+            bucket: Bucket name, if not specified use default bucket
+
+        Returns:
+            int: File size in bytes, 0 if file not found or error
+        """
+        self._ensure_initialized()
+        return self._storage_client.get_file_size(object_name, bucket)
+
+    def get_file_size_strict(
+        self,
+        object_name: str,
+        bucket: Optional[str] = None,
+    ) -> Optional[int]:
+        """Return authoritative size, distinguishing a missing object from operational errors."""
+        self._ensure_initialized()
+        return self._storage_client.get_file_size_strict(object_name, bucket)
+
+    def list_files(self, prefix: str = "", bucket: Optional[str] = None) -> List[dict]:
+        """
+        List files in bucket
+
+        Args:
+            prefix: Prefix filter
+            bucket: Bucket name, if not specified use default bucket
+
+        Returns:
+            List[dict]: List of file information
+        """
+        self._ensure_initialized()
+        return self._storage_client.list_files(prefix, bucket)
+
+    def delete_file(self, object_name: str, bucket: Optional[str] = None) -> Tuple[bool, str]:
+        """
+        Delete file
+
+        Args:
+            object_name: Object name
+            bucket: Bucket name, if not specified use default bucket
+
+        Returns:
+            Tuple[bool, str]: (Success status, Success message or error message)
+        """
+        self._ensure_initialized()
+        return self._storage_client.delete_file(object_name, bucket)
+
+    def get_file_stream(self, object_name: str, bucket: Optional[str] = None) -> Tuple[bool, Any]:
+        """
+        Get file binary stream from MinIO
+
+        Args:
+            object_name: Object name
+            bucket: Bucket name, if not specified use default bucket
+
+        Returns:
+            Tuple[bool, Any]: (Success status, File stream object or error message)
+        """
+        self._ensure_initialized()
+        return self._storage_client.get_file_stream(object_name, bucket)
+
+    def get_file_range(self, object_name: str, start: int, end: int, bucket: Optional[str] = None) -> Tuple[bool, Any]:
+        """
+        Get a byte-range slice of a file from MinIO.
+
+        Args:
+            object_name: Object name
+            start: Start byte offset (inclusive)
+            end: End byte offset (inclusive), matching HTTP Range semantics
+            bucket: Bucket name, if not specified use default bucket
+
+        Returns:
+            Tuple[bool, Any]: (True, raw_body_stream) on success, (False, error_str) on failure
+        """
+        self._ensure_initialized()
+        return self._storage_client.get_file_range(object_name, start, end, bucket)
+
+    def file_exists(self, object_name: str, bucket: Optional[str] = None) -> bool:
+        """
+        Check if file exists in MinIO
+
+        Args:
+            object_name: Object name
+            bucket: Bucket name, if not specified use default bucket
+
+        Returns:
+            bool: True if file exists, False otherwise
+        """
+        self._ensure_initialized()
+        return self._storage_client.exists(object_name, bucket)
+
+    def copy_file(self, source_object: str, dest_object: str, bucket: Optional[str] = None) -> Tuple[bool, str]:
+        """
+        Copy a file within the same bucket (atomic operation)
+
+        Args:
+            source_object: Source object name
+            dest_object: Destination object name
+            bucket: Bucket name, if not specified use default bucket
+
+        Returns:
+            Tuple[bool, str]: (Success status, Destination object name or error message)
+        """
+        self._ensure_initialized()
+        return self._storage_client.copy_file(source_object, dest_object, bucket)
+
+
+# Create global database and MinIO client instances
+db_client = PostgresClient()
+minio_client = MinioClient()
+
+
+@contextmanager
+def get_db_session(db_session=None):
+    """
+    param db_session: Optional session to use, if None, a new session will be created.
+    Provide a transactional scope around a series of operations.
+    """
+    session = db_client.session_maker() if db_session is None else db_session
+    try:
+        yield session
+        if db_session is None:
+            session.commit()
+    except Exception as e:
+        if db_session is None:
+            session.rollback()
+        logger.error(f"Database operation failed: {str(e)}")
+        raise e
+    finally:
+        if db_session is None:
+            session.close()
+
+
+def as_dict(obj):
+    from datetime import datetime
+
+    # Handle SQLAlchemy ORM objects (both TableBase and other DeclarativeBase subclasses)
+    if hasattr(obj, '__class__') and hasattr(obj.__class__, '__mapper__'):
+        result = {}
+        for c in class_mapper(obj.__class__).columns:
+            value = getattr(obj, c.key)
+            # Convert datetime to ISO format string for JSON serialization
+            # Naive datetime (TIMESTAMP WITHOUT TIME ZONE) is treated as local time.
+            # Append 'Z' so browsers interpret it as UTC-equivalent local time
+            # without shifting.
+            if isinstance(value, datetime):
+                iso = value.isoformat()
+                result[c.key] = iso if value.tzinfo else iso + "Z"
+            else:
+                result[c.key] = value
+        return result
+
+    # noinspection PyProtectedMember
+    return dict(obj._mapping)
+
+
+def filter_property(data, model_class):
+    """
+    Filter the data dictionary to only include keys that correspond to columns in the model class.
+
+    :param data: Dictionary containing the data to be filtered.
+    :param model_class: The SQLAlchemy model class to filter against.
+    :return: A new dictionary with only the keys that match the model's columns.
+    """
+    model_fields = model_class.__table__.columns.keys()
+    return {key: value for key, value in data.items() if key in model_fields}
+
+
+# ---------------------------------------------------------------------------
+# Monitoring-specific, isolated engine and session management
+# ---------------------------------------------------------------------------
+# Internal engine and session maker for monitoring data, isolated from main pool
+_monitoring_engine = None
+_monitoring_session_maker = None
+
+
+def _get_monitoring_engine():
+    global _monitoring_engine, _monitoring_session_maker
+    if _monitoring_engine is None:
+        _monitoring_engine = create_engine(
+            "postgresql://",
+            connect_args={
+                "host": POSTGRES_HOST,
+                "user": POSTGRES_USER,
+                "password": NEXENT_POSTGRES_PASSWORD,
+                "database": POSTGRES_DB,
+                "port": POSTGRES_PORT,
+                "client_encoding": "utf8",
+            },
+            echo=False,
+            pool_size=3,
+            pool_pre_ping=True,
+            pool_timeout=30,
+        )
+        _monitoring_session_maker = sessionmaker(bind=_monitoring_engine)
+    return _monitoring_engine
+
+
+@contextmanager
+def get_monitoring_db_session(db_session=None):
+    _get_monitoring_engine()
+    session = _monitoring_session_maker() if db_session is None else db_session
+    try:
+        yield session
+        if db_session is None:
+            session.commit()
+    except Exception as e:
+        if db_session is None:
+            session.rollback()
+        logger.error(f"Monitoring database operation failed: {str(e)}")
+        raise
+    finally:
+        if db_session is None:
+            session.close()

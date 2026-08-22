@@ -1,0 +1,939 @@
+import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
+
+import pytest
+from unittest.mock import MagicMock
+
+# First mock the consts module to avoid ModuleNotFoundError
+consts_mock = MagicMock()
+consts_mock.const = MagicMock()
+# Set constants needed in consts.const
+consts_mock.const.MINIO_ENDPOINT = "http://localhost:9000"
+consts_mock.const.MINIO_ACCESS_KEY = "test_access_key"
+consts_mock.const.MINIO_SECRET_KEY = "test_secret_key"
+consts_mock.const.MINIO_REGION = "us-east-1"
+consts_mock.const.MINIO_DEFAULT_BUCKET = "test-bucket"
+consts_mock.const.POSTGRES_HOST = "localhost"
+consts_mock.const.POSTGRES_USER = "test_user"
+consts_mock.const.NEXENT_POSTGRES_PASSWORD = "test_password"
+consts_mock.const.POSTGRES_DB = "test_db"
+consts_mock.const.POSTGRES_PORT = 5432
+consts_mock.const.DEFAULT_TENANT_ID = "default_tenant"
+
+# Add the mocked consts module to sys.modules
+sys.modules['consts'] = consts_mock
+sys.modules['consts.const'] = consts_mock.const
+
+# Mock utils module
+utils_mock = MagicMock()
+utils_mock.auth_utils = MagicMock()
+utils_mock.auth_utils.get_current_user_id_from_token = MagicMock(return_value="test_user_id")
+utils_mock.str_utils = MagicMock()
+utils_mock.str_utils.convert_list_to_string = MagicMock(
+    side_effect=lambda x: ",".join(str(i) for i in x) if x else "")
+
+# Add the mocked utils module to sys.modules
+sys.modules['utils'] = utils_mock
+sys.modules['utils.auth_utils'] = utils_mock.auth_utils
+sys.modules['utils.str_utils'] = utils_mock.str_utils
+
+# Provide a stub for the `boto3` module so that it can be imported safely even
+# if the testing environment does not have it available.
+boto3_mock = MagicMock()
+sys.modules['boto3'] = boto3_mock
+
+# Mock the entire client module
+client_mock = MagicMock()
+client_mock.MinioClient = MagicMock()
+client_mock.PostgresClient = MagicMock()
+client_mock.db_client = MagicMock()
+client_mock.get_db_session = MagicMock()
+client_mock.as_dict = MagicMock()
+client_mock.filter_property = MagicMock()
+
+# Add the mocked client module to sys.modules
+sys.modules['database.client'] = client_mock
+sys.modules['backend.database.client'] = client_mock
+
+# Mock db_models module
+db_models_mock = MagicMock()
+db_models_mock.UserTenant = MagicMock()
+sys.modules['database.db_models'] = db_models_mock
+sys.modules['backend.database.db_models'] = db_models_mock
+
+# Mock exceptions module
+exceptions_mock = MagicMock()
+sys.modules['consts.exceptions'] = exceptions_mock
+sys.modules['backend.consts.exceptions'] = exceptions_mock
+
+# Mock SQLAlchemy exception for testing
+class MockSQLAlchemyError(Exception):
+    """Mock SQLAlchemy exception for testing database errors"""
+    pass
+
+# Mock sqlalchemy.exc module
+sqlalchemy_mock = MagicMock()
+sqlalchemy_mock.exc.SQLAlchemyError = MockSQLAlchemyError
+sys.modules['sqlalchemy'] = sqlalchemy_mock
+sys.modules['sqlalchemy.exc'] = sqlalchemy_mock.exc
+
+# Now import the functions to be tested
+from backend.database.user_tenant_db import (
+    get_user_email_map,
+    get_user_tenant_by_user_id,
+    get_all_tenant_ids,
+    insert_user_tenant,
+    get_users_by_tenant_id,
+    update_user_tenant_role,
+    soft_delete_user_tenant_by_user_id,
+    soft_delete_users_by_tenant_id,
+)
+
+class MockUserTenant:
+    def __init__(self, user_id="test_user_id", user_email="test@example.com", user_role="USER"):
+        self.user_id = user_id
+        self.tenant_id = "test_tenant_id"
+        self.user_email = user_email
+        self.user_role = user_role
+        self.delete_flag = "N"
+        self.created_by = user_id
+        self.updated_by = user_id
+        self.create_time = "2024-01-01 00:00:00"
+        self.update_time = "2024-01-01 00:00:00"
+        self.__dict__ = {
+            "user_id": user_id,
+            "tenant_id": "test_tenant_id",
+            "user_email": user_email,
+            "user_role": user_role,
+            "delete_flag": "N",
+            "created_by": user_id,
+            "updated_by": user_id,
+            "create_time": "2024-01-01 00:00:00",
+            "update_time": "2024-01-01 00:00:00"
+        }
+
+@pytest.fixture
+def mock_session():
+    """Create mock database session"""
+    mock_session = MagicMock()
+    mock_query = MagicMock()
+    mock_session.query.return_value = mock_query
+    return mock_session, mock_query
+
+def test_get_user_tenant_by_user_id_success(monkeypatch, mock_session):
+    """Test successful retrieval of user tenant relationship by user ID"""
+    session, query = mock_session
+    mock_user_tenant = MockUserTenant()
+
+    mock_first = MagicMock()
+    mock_first.return_value = mock_user_tenant
+    mock_filter = MagicMock()
+    mock_filter.first = mock_first
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.user_tenant_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("backend.database.user_tenant_db.as_dict", lambda obj: obj.__dict__)
+
+    result = get_user_tenant_by_user_id("test_user_id")
+
+    assert result is not None
+    assert result["user_id"] == "test_user_id"
+    assert result["tenant_id"] == "test_tenant_id"
+    assert result["user_role"] == "USER"
+    assert result["delete_flag"] == "N"
+
+
+def test_get_user_email_map_returns_empty_without_user_ids(mock_session):
+    """Empty user IDs avoid an unnecessary database query."""
+    session, _ = mock_session
+
+    assert get_user_email_map(["", ""]) == {}
+    session.query.assert_not_called()
+
+
+def test_get_user_email_map_returns_only_non_empty_emails(monkeypatch, mock_session):
+    """Only active user IDs with email addresses are exposed to callers."""
+    session, query = mock_session
+    query.filter.return_value.all.return_value = [
+        ("user-1", "editor@example.com"),
+        ("user-2", ""),
+        ("user-3", None),
+    ]
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.user_tenant_db.get_db_session", lambda: mock_ctx)
+
+    assert get_user_email_map(["user-1", "user-1", "user-2", "user-3"]) == {
+        "user-1": "editor@example.com"
+    }
+    query.filter.assert_called_once()
+
+def test_get_user_tenant_by_user_id_not_found(monkeypatch, mock_session):
+    """Test retrieval of user tenant relationship when record does not exist"""
+    session, query = mock_session
+
+    mock_first = MagicMock()
+    mock_first.return_value = None
+    mock_filter = MagicMock()
+    mock_filter.first = mock_first
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.user_tenant_db.get_db_session", lambda: mock_ctx)
+
+    result = get_user_tenant_by_user_id("nonexistent_user_id")
+
+    assert result is None
+
+def test_get_user_tenant_by_user_id_database_error(monkeypatch, mock_session):
+    """Test database error when retrieving user tenant relationship - exception should propagate"""
+    from sqlalchemy.exc import SQLAlchemyError
+
+    session, query = mock_session
+    query.filter.side_effect = SQLAlchemyError("Database error")
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.user_tenant_db.get_db_session", lambda: mock_ctx)
+
+    # Should raise SQLAlchemyError
+    with pytest.raises(SQLAlchemyError):
+        get_user_tenant_by_user_id("test_user_id")
+
+def test_insert_user_tenant_success(monkeypatch, mock_session):
+    """Test successful insertion of user tenant relationship"""
+    session, _ = mock_session
+    session.add = MagicMock()
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.user_tenant_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("backend.database.user_tenant_db.UserTenant", lambda **kwargs: MagicMock())
+
+    # Should not raise any exception
+    insert_user_tenant("test_user_id", "test_tenant_id")
+
+    session.add.assert_called_once()
+
+def test_insert_user_tenant_failure(monkeypatch, mock_session):
+    """Test failure of user tenant relationship insertion - exception should propagate"""
+    from sqlalchemy.exc import SQLAlchemyError
+
+    session, _ = mock_session
+    session.add = MagicMock(side_effect=SQLAlchemyError("Database error"))
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.user_tenant_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("backend.database.user_tenant_db.UserTenant", lambda **kwargs: MagicMock())
+
+    # Should raise SQLAlchemyError
+    with pytest.raises(SQLAlchemyError):
+        insert_user_tenant("test_user_id", "test_tenant_id")
+
+def test_insert_user_tenant_with_empty_user_id(monkeypatch, mock_session):
+    """Test insertion of user tenant relationship with empty user ID"""
+    session, _ = mock_session
+    session.add = MagicMock()
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.user_tenant_db.get_db_session", lambda: mock_ctx)
+
+    # Mock UserTenant constructor to capture the arguments
+    mock_user_tenant_instance = MagicMock()
+    mock_user_tenant_constructor = MagicMock(return_value=mock_user_tenant_instance)
+    monkeypatch.setattr("backend.database.user_tenant_db.UserTenant", mock_user_tenant_constructor)
+
+    # Should not raise any exception
+    insert_user_tenant("", "test_tenant_id")
+
+    # Verify UserTenant was called with correct parameters
+    mock_user_tenant_constructor.assert_called_once_with(
+        user_id="",
+        tenant_id="test_tenant_id",
+        user_role="USER",
+        user_email=None,
+        created_by="",
+        updated_by=""
+    )
+    session.add.assert_called_once_with(mock_user_tenant_instance)
+
+
+def test_insert_user_tenant_with_empty_tenant_id(monkeypatch, mock_session):
+    """Test insertion of user tenant relationship with empty tenant ID"""
+    session, _ = mock_session
+    session.add = MagicMock()
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.user_tenant_db.get_db_session", lambda: mock_ctx)
+
+    # Mock UserTenant constructor to capture the arguments
+    mock_user_tenant_instance = MagicMock()
+    mock_user_tenant_constructor = MagicMock(return_value=mock_user_tenant_instance)
+    monkeypatch.setattr("backend.database.user_tenant_db.UserTenant", mock_user_tenant_constructor)
+
+    # Should not raise any exception
+    insert_user_tenant("test_user_id", "")
+
+    # Verify UserTenant was called with correct parameters
+    mock_user_tenant_constructor.assert_called_once_with(
+        user_id="test_user_id",
+        tenant_id="",
+        user_role="USER",
+        user_email=None,
+        created_by="test_user_id",
+        updated_by="test_user_id"
+    )
+    session.add.assert_called_once_with(mock_user_tenant_instance)
+
+# Integration test
+def test_user_tenant_lifecycle(monkeypatch, mock_session):
+    """Test complete user tenant lifecycle: insert and then retrieve"""
+    session, query = mock_session
+
+    # Mock database operations for insertion
+    session.add = MagicMock()
+
+    # Mock database operations for retrieval
+    mock_user_tenant = MockUserTenant()
+    mock_first = MagicMock()
+    mock_first.return_value = mock_user_tenant
+    mock_filter = MagicMock()
+    mock_filter.first = mock_first
+    query.filter.return_value = mock_filter
+
+    # Create a proper mock UserTenant class with attributes
+    mock_user_tenant_class = MagicMock()
+    mock_user_tenant_class.user_id = MagicMock()
+    mock_user_tenant_class.delete_flag = MagicMock()
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.user_tenant_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("backend.database.user_tenant_db.UserTenant", mock_user_tenant_class)
+    monkeypatch.setattr("backend.database.user_tenant_db.as_dict", lambda obj: obj.__dict__)
+
+    # 1. Insert user tenant relationship - should not raise exception
+    insert_user_tenant("test_user_id", "test_tenant_id")
+    session.add.assert_called_once()
+
+    # 2. Retrieve user tenant relationship
+    result = get_user_tenant_by_user_id("test_user_id")
+    assert result is not None
+    assert result["user_id"] == "test_user_id"
+    assert result["tenant_id"] == "test_tenant_id"
+    assert result["user_role"] == "USER"
+    assert result["delete_flag"] == "N"
+
+def test_get_user_tenant_by_user_id_with_deleted_record(monkeypatch, mock_session):
+    """Test retrieval of user tenant relationship when record is marked as deleted"""
+    session, query = mock_session
+
+    # Mock a deleted record (should not be returned)
+    mock_first = MagicMock()
+    mock_first.return_value = None  # Filter should exclude deleted records
+    mock_filter = MagicMock()
+    mock_filter.first = mock_first
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.user_tenant_db.get_db_session", lambda: mock_ctx)
+
+    result = get_user_tenant_by_user_id("deleted_user_id")
+
+    assert result is None
+    # Verify that the filter was called with correct conditions
+    query.filter.assert_called_once()
+
+
+def test_get_all_tenant_ids_empty_database(monkeypatch, mock_session):
+    """Test get_all_tenant_ids when database is empty - should return only DEFAULT_TENANT_ID"""
+    session, query = mock_session
+
+    # Mock empty database result
+    query.filter.return_value.distinct.return_value.all.return_value = []
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.user_tenant_db.get_db_session", lambda: mock_ctx)
+
+    result = get_all_tenant_ids()
+
+    assert result == ["default_tenant"]  # DEFAULT_TENANT_ID from consts_mock
+    assert len(result) == 1
+
+
+def test_get_all_tenant_ids_with_existing_tenants(monkeypatch, mock_session):
+    """Test get_all_tenant_ids with existing tenants - should include all plus DEFAULT_TENANT_ID"""
+    session, query = mock_session
+
+    # Mock database result with existing tenants
+    mock_tenants = [
+        ("tenant_1",),
+        ("tenant_2",),
+        ("tenant_3",)
+    ]
+    query.filter.return_value.distinct.return_value.all.return_value = mock_tenants
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.user_tenant_db.get_db_session", lambda: mock_ctx)
+
+    result = get_all_tenant_ids()
+
+    assert len(result) == 4  # 3 existing + 1 default
+    assert "tenant_1" in result
+    assert "tenant_2" in result
+    assert "tenant_3" in result
+    assert "default_tenant" in result  # DEFAULT_TENANT_ID from consts_mock
+    # Should not duplicate DEFAULT_TENANT_ID
+    assert result.count("default_tenant") == 1
+
+
+def test_soft_delete_user_tenant_by_user_id_success(monkeypatch, mock_session):
+    """Test soft deletion updates rows for the given user"""
+    session, _ = mock_session
+
+    # Setup query filter().update() chain
+    mock_query = MagicMock()
+    mock_query.filter.return_value.update.return_value = 2
+    session.query.return_value = mock_query
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr(
+        "backend.database.user_tenant_db.get_db_session", lambda: mock_ctx)
+
+    ok = soft_delete_user_tenant_by_user_id("user123", "actor1")
+    assert ok is True
+    mock_query.filter.assert_called_once()
+    mock_query.filter.return_value.update.assert_called_once()
+
+
+def test_soft_delete_user_tenant_by_user_id_no_rows(monkeypatch, mock_session):
+    """Test soft deletion when no rows match"""
+    session, _ = mock_session
+    mock_query = MagicMock()
+    mock_query.filter.return_value.update.return_value = 0
+    session.query.return_value = mock_query
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr(
+        "backend.database.user_tenant_db.get_db_session", lambda: mock_ctx)
+
+    ok = soft_delete_user_tenant_by_user_id("none", "test_user")
+    assert ok is False
+
+
+def test_get_users_by_tenant_id_success_with_pagination(monkeypatch, mock_session):
+    """Test successfully getting users by tenant ID with pagination"""
+    session, query = mock_session
+
+    # Mock the pagination query result
+    mock_paginated_results = [
+        MockUserTenant(user_id="user1", user_email="user1@example.com", user_role="ADMIN"),
+        MockUserTenant(user_id="user2", user_email="user2@example.com", user_role="USER"),
+    ]
+
+    # Create mock objects outside the function so they can be accessed in assertions
+    mock_paginated_filter = MagicMock()
+    mock_paginated_order_by = MagicMock()
+    mock_paginated_offset = MagicMock()
+    mock_paginated_limit = MagicMock()
+    mock_paginated_limit.all.return_value = mock_paginated_results
+    mock_paginated_offset.limit.return_value = mock_paginated_limit
+    mock_paginated_order_by.offset.return_value = mock_paginated_offset
+    mock_paginated_filter.order_by.return_value = mock_paginated_order_by
+
+    # Mock session.query to return different objects for different calls
+    call_count = 0
+    def mock_query(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:  # First call for count
+            mock_q = MagicMock()
+            mock_count_filter = MagicMock()
+            mock_count_filter.count.return_value = 5
+            mock_q.filter.return_value = mock_count_filter
+            return mock_q
+        else:  # Second call for paginated results
+            mock_q = MagicMock()
+            mock_q.filter.return_value = mock_paginated_filter
+            return mock_q
+
+    session.query = mock_query
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.user_tenant_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("backend.database.user_tenant_db.as_dict", lambda obj: obj.__dict__)
+
+    result = get_users_by_tenant_id("test_tenant", page=2, page_size=10, sort_by="created_at", sort_order="desc")
+
+    assert result["total"] == 5
+    assert len(result["users"]) == 2
+    assert result["users"][0]["user_id"] == "user1"
+    assert result["users"][0]["user_email"] == "user1@example.com"
+    assert result["users"][0]["user_role"] == "ADMIN"
+    assert result["users"][1]["user_id"] == "user2"
+    assert result["users"][1]["user_email"] == "user2@example.com"
+    assert result["users"][1]["user_role"] == "USER"
+    # Verify pagination was applied
+    mock_paginated_order_by.offset.assert_called_once_with(10)  # (page-1) * page_size = (2-1) * 10 = 10
+    mock_paginated_offset.limit.assert_called_once_with(10)
+
+
+def test_get_users_by_tenant_id_success_without_pagination(monkeypatch, mock_session):
+    """Test successfully getting users by tenant ID without pagination (returns all data)"""
+    session, query = mock_session
+
+    # Mock the query result (all users)
+    mock_all_results = [
+        MockUserTenant(user_id="user1", user_email="user1@example.com", user_role="ADMIN"),
+        MockUserTenant(user_id="user2", user_email="user2@example.com", user_role="USER"),
+        MockUserTenant(user_id="user3", user_email="user3@example.com", user_role="USER"),
+    ]
+
+    # Create mock objects outside the function so they can be accessed in assertions
+    mock_filter = MagicMock()
+    mock_order_by = MagicMock()
+    mock_order_by.all.return_value = mock_all_results
+    mock_filter.order_by.return_value = mock_order_by
+
+    # Mock session.query to return different objects for different calls
+    call_count = 0
+    def mock_query(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:  # First call for count
+            mock_q = MagicMock()
+            mock_count_filter = MagicMock()
+            mock_count_filter.count.return_value = 3
+            mock_q.filter.return_value = mock_count_filter
+            return mock_q
+        else:  # Second call for all results
+            mock_q = MagicMock()
+            mock_q.filter.return_value = mock_filter
+            return mock_q
+
+    session.query = mock_query
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.user_tenant_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("backend.database.user_tenant_db.as_dict", lambda obj: obj.__dict__)
+
+    result = get_users_by_tenant_id("test_tenant", page=None, page_size=None)
+
+    assert result["total"] == 3
+    assert len(result["users"]) == 3
+    assert result["users"][0]["user_id"] == "user1"
+    assert result["users"][1]["user_id"] == "user2"
+    assert result["users"][2]["user_id"] == "user3"
+    # Verify .all() was called (no pagination)
+    mock_order_by.all.assert_called_once()
+
+
+def test_get_users_by_tenant_id_with_asc_sort(monkeypatch, mock_session):
+    """Test getting users by tenant ID with ascending sort order"""
+    session, query = mock_session
+
+    mock_paginated_results = [
+        MockUserTenant(user_id="user1", user_email="user1@example.com", user_role="ADMIN")
+    ]
+
+    # Create mock objects outside the function so they can be accessed in assertions
+    mock_paginated_filter = MagicMock()
+    mock_paginated_order_by = MagicMock()
+    mock_paginated_offset = MagicMock()
+    mock_paginated_limit = MagicMock()
+    mock_paginated_limit.all.return_value = mock_paginated_results
+    mock_paginated_offset.limit.return_value = mock_paginated_limit
+    mock_paginated_order_by.offset.return_value = mock_paginated_offset
+    mock_paginated_filter.order_by.return_value = mock_paginated_order_by
+
+    # Mock session.query to return different objects for different calls
+    call_count = 0
+    def mock_query(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:  # First call for count
+            mock_q = MagicMock()
+            mock_count_filter = MagicMock()
+            mock_count_filter.count.return_value = 1
+            mock_q.filter.return_value = mock_count_filter
+            return mock_q
+        else:  # Second call for paginated results
+            mock_q = MagicMock()
+            mock_q.filter.return_value = mock_paginated_filter
+            return mock_q
+
+    session.query = mock_query
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.user_tenant_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("backend.database.user_tenant_db.as_dict", lambda obj: obj.__dict__)
+
+    result = get_users_by_tenant_id("test_tenant", page=1, page_size=10, sort_by="created_at", sort_order="asc")
+
+    assert result["total"] == 1
+    assert len(result["users"]) == 1
+    # Verify order_by was called with asc
+    mock_paginated_filter.order_by.assert_called_once()
+
+
+def test_get_users_by_tenant_id_with_only_page_none(monkeypatch, mock_session):
+    """Test getting users by tenant ID when page is None but page_size is provided"""
+    session, query = mock_session
+
+    mock_all_results = [
+        MockUserTenant(user_id="user1", user_email="user1@example.com", user_role="ADMIN")
+    ]
+
+    # Create mock objects outside the function so they can be accessed in assertions
+    mock_filter = MagicMock()
+    mock_order_by = MagicMock()
+    mock_order_by.all.return_value = mock_all_results
+    mock_filter.order_by.return_value = mock_order_by
+
+    # Mock session.query to return different objects for different calls
+    call_count = 0
+    def mock_query(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:  # First call for count
+            mock_q = MagicMock()
+            mock_count_filter = MagicMock()
+            mock_count_filter.count.return_value = 1
+            mock_q.filter.return_value = mock_count_filter
+            return mock_q
+        else:  # Second call for all results (no pagination when page is None)
+            mock_q = MagicMock()
+            mock_q.filter.return_value = mock_filter
+            return mock_q
+
+    session.query = mock_query
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.user_tenant_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("backend.database.user_tenant_db.as_dict", lambda obj: obj.__dict__)
+
+    result = get_users_by_tenant_id("test_tenant", page=None, page_size=10)
+
+    assert result["total"] == 1
+    assert len(result["users"]) == 1
+    # Verify .all() was called (no pagination when page is None)
+    mock_order_by.all.assert_called_once()
+
+
+def test_get_users_by_tenant_id_with_only_page_size_none(monkeypatch, mock_session):
+    """Test getting users by tenant ID when page_size is None but page is provided"""
+    session, query = mock_session
+
+    mock_all_results = [
+        MockUserTenant(user_id="user1", user_email="user1@example.com", user_role="ADMIN")
+    ]
+
+    # Create mock objects outside the function so they can be accessed in assertions
+    mock_filter = MagicMock()
+    mock_order_by = MagicMock()
+    mock_order_by.all.return_value = mock_all_results
+    mock_filter.order_by.return_value = mock_order_by
+
+    # Mock session.query to return different objects for different calls
+    call_count = 0
+    def mock_query(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:  # First call for count
+            mock_q = MagicMock()
+            mock_count_filter = MagicMock()
+            mock_count_filter.count.return_value = 1
+            mock_q.filter.return_value = mock_count_filter
+            return mock_q
+        else:  # Second call for all results (no pagination when page_size is None)
+            mock_q = MagicMock()
+            mock_q.filter.return_value = mock_filter
+            return mock_q
+
+    session.query = mock_query
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.user_tenant_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("backend.database.user_tenant_db.as_dict", lambda obj: obj.__dict__)
+
+    result = get_users_by_tenant_id("test_tenant", page=1, page_size=None)
+
+    assert result["total"] == 1
+    assert len(result["users"]) == 1
+    # Verify .all() was called (no pagination when page_size is None)
+    mock_order_by.all.assert_called_once()
+
+
+def test_get_users_by_tenant_id_empty_result(monkeypatch, mock_session):
+    """Test getting users by tenant ID when no users exist"""
+    session, query = mock_session
+
+    # Mock count query returning 0
+    mock_count_query = MagicMock()
+    mock_count_query.count.return_value = 0
+    query.filter.return_value = mock_count_query
+
+    # Mock the query chain for results
+    mock_filter = MagicMock()
+    mock_order_by = MagicMock()
+    mock_order_by.all.return_value = []
+    mock_filter.order_by.return_value = mock_order_by
+
+    # Mock session.query to return different objects for different calls
+    call_count = 0
+    def mock_query(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:  # First call for count
+            mock_q = MagicMock()
+            mock_q.filter.return_value = mock_count_query
+            return mock_q
+        else:  # Second call for results
+            mock_q = MagicMock()
+            mock_q.filter.return_value = mock_filter
+            return mock_q
+
+    session.query = mock_query
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.user_tenant_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("backend.database.user_tenant_db.as_dict", lambda obj: obj.__dict__)
+
+    result = get_users_by_tenant_id("empty_tenant", page=1, page_size=20)
+
+    assert result["total"] == 0
+    assert result["users"] == []
+
+
+def test_update_user_tenant_role_success(monkeypatch, mock_session):
+    """Test successfully updating user tenant role"""
+    session, query = mock_session
+
+    # Mock update query
+    mock_update_query = MagicMock()
+    mock_update_query.update.return_value = 1  # 1 row affected
+    query.filter.return_value = mock_update_query
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.user_tenant_db.get_db_session", lambda: mock_ctx)
+
+    result = update_user_tenant_role("user123", "ADMIN", "updater456")
+
+    assert result is True
+    # Verify the update was called with correct parameters
+    mock_update_query.update.assert_called_once_with({
+        "user_role": "ADMIN",
+        "updated_by": "updater456",
+        "update_time": "NOW()"
+    })
+
+
+def test_update_user_tenant_role_no_user_found(monkeypatch, mock_session):
+    """Test updating user tenant role when user not found"""
+    session, query = mock_session
+
+    # Mock update query returning 0 (no rows affected)
+    mock_update_query = MagicMock()
+    mock_update_query.update.return_value = 0  # No rows affected
+    query.filter.return_value = mock_update_query
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.user_tenant_db.get_db_session", lambda: mock_ctx)
+
+    result = update_user_tenant_role("nonexistent_user", "ADMIN", "updater456")
+
+    assert result is False
+
+
+def test_update_user_tenant_role_database_error(monkeypatch, mock_session):
+    """Test database error handling for update_user_tenant_role"""
+    session, query = mock_session
+
+    # Mock query.filter to raise an error
+    query.filter.side_effect = MockSQLAlchemyError("Database connection failed")
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.user_tenant_db.get_db_session", lambda: mock_ctx)
+
+    with pytest.raises(MockSQLAlchemyError, match="Database connection failed"):
+        update_user_tenant_role("user123", "ADMIN", "updater456")
+
+
+def test_soft_delete_users_by_tenant_id_success(monkeypatch, mock_session):
+    """Test successfully soft deleting all users for a tenant"""
+    session, _ = mock_session
+
+    # Setup query filter().update() chain
+    mock_query = MagicMock()
+    mock_query.filter.return_value.update.return_value = 5  # 5 users deleted
+    session.query.return_value = mock_query
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr(
+        "backend.database.user_tenant_db.get_db_session", lambda: mock_ctx)
+
+    ok = soft_delete_users_by_tenant_id("tenant123", "admin_user")
+    assert ok is True
+    mock_query.filter.assert_called_once()
+    mock_query.filter.return_value.update.assert_called_once()
+
+
+def test_soft_delete_users_by_tenant_id_no_users(monkeypatch, mock_session):
+    """Test soft deleting users when no users exist for the tenant"""
+    session, _ = mock_session
+    mock_query = MagicMock()
+    mock_query.filter.return_value.update.return_value = 0  # No users deleted
+    session.query.return_value = mock_query
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr(
+        "backend.database.user_tenant_db.get_db_session", lambda: mock_ctx)
+
+    ok = soft_delete_users_by_tenant_id("empty_tenant", "admin_user")
+    assert ok is False  # Returns False when no users were deleted
+
+
+def test_soft_delete_users_by_tenant_id_database_error(monkeypatch, mock_session):
+    """Test database error handling for soft_delete_users_by_tenant_id"""
+    session, query = mock_session
+
+    # Mock query.filter to raise an error
+    query.filter.side_effect = MockSQLAlchemyError("Database connection failed")
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr(
+        "backend.database.user_tenant_db.get_db_session", lambda: mock_ctx)
+
+    with pytest.raises(MockSQLAlchemyError, match="Database connection failed"):
+        soft_delete_users_by_tenant_id("tenant123", "admin_user")
+
+
+def test_user_limit_rejects_new_user(monkeypatch):
+    """A tenant cannot exceed its hard user limit."""
+    import backend.database.user_tenant_db as module
+
+    class ResourceLimitError(Exception):
+        pass
+
+    query = MagicMock()
+    query.filter.return_value.count.return_value = 1
+    session = MagicMock()
+    session.query.return_value = query
+    monkeypatch.setattr(module, "TenantResourceLimitError", ResourceLimitError)
+    monkeypatch.setattr(module, "_USER_LIMIT", 1)
+
+    with pytest.raises(ResourceLimitError, match="user limit"):
+        module._validate_user_tenant_limit(session, "tenant-1", "USER")
+
+
+def test_admin_and_super_admin_limits_reject_role_promotion(monkeypatch):
+    """Administrator limits are enforced independently of the user limit."""
+    import backend.database.user_tenant_db as module
+
+    class ResourceLimitError(Exception):
+        pass
+
+    monkeypatch.setattr(module, "TenantResourceLimitError", ResourceLimitError)
+    monkeypatch.setattr(module, "_ADMIN_LIMIT", 1)
+    monkeypatch.setattr(module, "_SUPER_ADMIN_LIMIT", 1)
+
+    admin_session = MagicMock()
+    admin_user_count = MagicMock()
+    admin_user_count.filter.return_value.count.return_value = 0
+    admin_role_count = MagicMock()
+    admin_role_count.filter.return_value.count.return_value = 1
+    admin_session.query.side_effect = [admin_user_count, admin_role_count]
+    with pytest.raises(ResourceLimitError, match="administrator limit"):
+        module._validate_user_tenant_limit(admin_session, "tenant-1", "ADMIN")
+
+    su_session = MagicMock()
+    su_user_count = MagicMock()
+    su_user_count.filter.return_value.count.return_value = 0
+    su_role_count = MagicMock()
+    su_role_count.filter.return_value.count.return_value = 1
+    su_session.query.side_effect = [su_user_count, su_role_count]
+    with pytest.raises(ResourceLimitError, match="Super administrator limit"):
+        module._validate_user_tenant_limit(su_session, "tenant-1", "SU")
+
+
+@pytest.mark.parametrize("current_count, should_reject", [(0, False), (1, True), (2, True)])
+@pytest.mark.parametrize("role, limit_name", [("USER", "_USER_LIMIT"), ("ADMIN", "_ADMIN_LIMIT"), ("SU", "_SUPER_ADMIN_LIMIT")])
+def test_user_role_limit_boundaries(monkeypatch, current_count, should_reject, role, limit_name):
+    """All user-role limits allow below cap and reject at or above cap."""
+    import backend.database.user_tenant_db as module
+
+    class ResourceLimitError(Exception):
+        pass
+
+    session = MagicMock()
+    query = MagicMock()
+    query.filter.return_value.count.return_value = current_count
+    session.query.return_value = query
+    monkeypatch.setattr(module, "TenantResourceLimitError", ResourceLimitError)
+    monkeypatch.setattr(module, limit_name, 1)
+
+    if should_reject:
+        with pytest.raises(ResourceLimitError):
+            module._validate_user_tenant_limit(
+                session,
+                "tenant-1",
+                role,
+                include_user_count=role == "USER",
+            )
+    else:
+        module._validate_user_tenant_limit(
+            session,
+            "tenant-1",
+            role,
+            include_user_count=role == "USER",
+        )

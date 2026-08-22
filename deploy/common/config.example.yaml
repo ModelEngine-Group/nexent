@@ -1,0 +1,25 @@
+schemaVersion: "1"
+
+# Default deployment: shared infrastructure plus Nexent core application.
+components:
+  - infrastructure
+  - application
+portPolicy: "development"
+imageSource: "general"
+monitoringProvider: "otlp"
+
+# Optional component examples:
+# components:
+#   - infrastructure
+#   - application
+#   - data-process
+#   - supabase
+#   - terminal
+#   - monitoring
+# monitoringProvider: "phoenix"
+
+# Local development image example:
+# imageSource: "local-latest"
+
+# Mainland China registry mirror example:
+# imageSource: "mainland"

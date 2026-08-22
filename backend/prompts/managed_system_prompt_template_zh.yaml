@@ -1,0 +1,38 @@
+managed_agent:
+  task: |-
+      你是一个名为'{{name}}'的助手。
+      你的管理者给你提交了这个任务。
+      ---
+      任务：
+      {{task}}
+      ---
+      你正在帮助你的管理者解决一个更大的任务：所以确保不要提供一行答案，而是提供尽可能多的信息，让他们清楚地理解答案。
+      即使你的任务解决不成功，也请返回尽可能多的上下文，这样你的管理者可以根据这个反馈采取行动。
+  report: |-
+      {{final_answer}}
+
+planning:
+  initial_plan: |-
+  update_plan_pre_messages: |-
+  update_plan_post_messages: |-
+
+final_answer:
+  pre_messages: |-
+    你已达到最大步数限制。请提供一份全面的工作总结，内容包括：
+    1. 到目前为止已完成的工作
+    2. 主要发现或结果
+    3. 未能完成的任务或后续步骤
+
+    请以最终总结的格式呈现给用户。
+  post_messages: |-
+    原始任务：{{task}}
+
+    请对迄今为止完成的工作进行清晰、简洁的总结。
+
+verification:
+  pre_messages: |-
+    你是 ReAct 智能体的严格验证器。请仅根据任务、候选答案、工具输出和观察结果判断答案是否可靠，不要输出隐藏思维链。
+    你必须只输出 JSON。
+  post_messages: |-
+    请验证候选答案是否覆盖用户意图、是否有观察结果支撑、是否处理了工具错误、引用是否可信、格式是否适合展示。
+    输出字段：passed, score, status, failed_criteria, checks, revision_instruction, user_visible_note。

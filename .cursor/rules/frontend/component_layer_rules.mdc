@@ -1,0 +1,118 @@
+---
+globs: frontend/components/**/*.tsx,frontend/app/**/components/**/*.tsx
+description: Component layer rules for reusable and feature-specific UI components
+---
+
+### Purpose and Scope
+
+- Component layer contains reusable UI components for `frontend/components/**/*.tsx` and feature-specific components under `frontend/app/**/components/**/*.tsx`
+- Responsibilities: Create reusable components, implement business logic, handle interactions, provide consistent UI
+- **MANDATORY**: All components must use TypeScript and functional components
+
+### UI Library and Icons
+
+- **Ant Design first**: Use Ant Design for forms, data display, modals, buttons, layouts. See [ui_standards_rules.mdc](mdc:frontend/ui_standards_rules.mdc).
+- **Icons**: Lucide icons primary (`lucide-react`), `@ant-design/icons` as fallback when Lucide lacks the icon.
+
+```tsx
+// Prefer Lucide
+import { Search, RefreshCw, Edit } from "lucide-react";
+
+// Fallback when Lucide has no equivalent (e.g. ExclamationCircleFilled for modal)
+import { ExclamationCircleFilled, InfoCircleFilled } from "@ant-design/icons";
+```
+
+### Component Organization
+
+- **`components/auth/`** - Authentication-related components
+- **`components/providers/`** - Context providers and global state management
+
+### Component Structure
+
+- Use functional components with TypeScript
+- Define proper interfaces for all props
+- Use React hooks for state management
+- Implement proper error boundaries where needed
+- Follow single responsibility principle
+- **Single component file should not exceed ~1000 lines**: Split into subcomponents or extract logic to hooks/utils when a file grows. keep files digestible.
+
+### Props and State Management
+
+- All props must be typed with interfaces
+- Use optional props with default values when appropriate
+- Prefer controlled components over uncontrolled
+- Use local state for component-specific data
+- Use context for shared state across components
+- **Avoid Prop Drilling**: When a component receives more than ~7–10 props, or props are passed through multiple layers only to reach a deep child, prefer:
+  - **Context** for cross-cutting state (auth, theme, feature flags)
+  - **Composition** (children, render props) instead of passing many callbacks
+  - **Custom hooks** to encapsulate shared logic; let children use the hook instead of receiving props from parent
+- **CRITICAL**: All logging must use [logger.ts](mdc:frontend/lib/logger.ts) - never use console.log
+
+### Styling and Design
+
+- Use Ant Design components + Tailwind for spacing and simple styling
+- Follow design system patterns and spacing
+- Ensure responsive design with mobile-first approach
+- Use CSS variables for theme colors
+- Implement proper focus states and accessibility
+
+### Internationalization
+
+- All user-facing text must use `useTranslation` hook
+- Use descriptive translation keys: `t('button.save')` instead of `t('save')`
+- Provide fallback text for missing translations
+- Group related translations in namespaces
+
+### Error Handling
+
+- Implement proper error boundaries for component trees
+- Handle async operations with loading and error states
+- Provide meaningful error messages to users
+- Log errors appropriately for debugging
+
+### Other Considerations
+
+- **Colocate subcomponents**: When a component file grows, extract logically distinct subcomponents into separate files in the same folder. Avoid putting many unrelated components in one file.
+- **Lean interfaces**: Group related props into objects when they form a cohesive concern (e.g. `user: { email, avatarUrl, role }`) instead of passing many flat props.
+
+### Example
+```tsx
+// frontend/components/example-modal.tsx
+import React from "react";
+import { useTranslation } from "react-i18next";
+import { Modal } from "antd";
+import { AlertTriangle } from "lucide-react";
+
+interface ExampleModalProps {
+  open: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+}
+
+export function ExampleModal({
+  open,
+  onClose,
+  onConfirm,
+}: ExampleModalProps) {
+  const { t } = useTranslation("common");
+
+  return (
+    <Modal
+      open={open}
+      onCancel={onClose}
+      centered
+      okText={t("common.confirm")}
+      cancelText={t("common.cancel")}
+      onOk={onConfirm}
+    >
+      <div className="flex items-center gap-3">
+        <AlertTriangle className="h-5 w-5 text-amber-500" />
+        <span>{t("modal.exampleMessage")}</span>
+      </div>
+    </Modal>  
+
+
+  );
+}
+```

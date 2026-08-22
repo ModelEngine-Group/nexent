@@ -1,0 +1,137 @@
+import { API_ENDPOINTS } from './api';
+
+import {
+  GeneratePromptParams,
+  OptimizePromptSectionParams,
+  OptimizePromptSectionResponse,
+  OptimizePromptBadCaseParams,
+  OptimizePromptBadCaseResponse,
+  StreamResponseData,
+} from '@/types/agentConfig';
+import { fetchWithAuth, getAuthHeaders } from '@/lib/auth';
+// @ts-ignore
+const fetch = fetchWithAuth;
+
+/**
+ * Get Request Headers
+ */
+const getHeaders = () => {
+  return getAuthHeaders();
+};
+
+export const generatePromptStream = async (
+  params: GeneratePromptParams,
+  onData: (data: StreamResponseData) => void,
+  onError?: (err: any) => void,
+  onComplete?: () => void
+) => {
+  try {
+    const response = await fetch(API_ENDPOINTS.prompt.generate, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify(params),
+    });
+
+    if (!response.body) throw new Error('No response body');
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    let buffer = '';
+    let hasError = false;
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      let lines = buffer.split('\n\n');
+      buffer = lines.pop() || '';
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          try {
+            const json = JSON.parse(line.replace('data: ', ''));
+            if (json.success) {
+              onData(json.data);
+            } else if (json.success === false && json.error) {
+              // Handle error response from backend
+              hasError = true;
+              if (onError) onError(json.error);
+            }
+          } catch (e) {
+            if (onError) onError(e);
+          }
+        }
+      }
+    }
+    // Only call onComplete if no error occurred
+    if (!hasError && onComplete) onComplete();
+  } catch (err) {
+    if (onError) onError(err);
+    if (onComplete) onComplete();
+  }
+};
+
+export const optimizePromptSection = async (
+  params: OptimizePromptSectionParams,
+): Promise<OptimizePromptSectionResponse> => {
+  const response = await fetch(API_ENDPOINTS.prompt.optimize, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify(params),
+  });
+
+  const result = await response.json();
+  return result.data as OptimizePromptSectionResponse;
+};
+
+export interface GenerateGuardrailRulesParams {
+  description: string;
+  model_id: number;
+  language?: string;
+}
+
+export interface GuardrailAiResult {
+  type: "single" | "multi";
+  candidates?: { pattern: string; desc: string }[];
+  rules?: { name: string; pattern: string; severity: "block" | "mask" | "pass"; desc: string }[];
+}
+
+export interface DebugPromptOptimizeParams {
+  agent_id: number;
+  model_id: number;
+  feedback: string;
+  selected: { user_question: string; assistant_answer: string };
+  history: Array<{ role: string; content: string }>;
+}
+
+export interface DebugPromptOptimizeResult {
+  original_full_prompt?: string;
+  optimized_full_prompt?: string;
+}
+
+export const optimizePromptFromDebug = async (
+  params: DebugPromptOptimizeParams
+): Promise<DebugPromptOptimizeResult> => {
+  const response = await fetch(API_ENDPOINTS.prompt.optimizeFromDebug, {
+    method: "POST",
+    headers: getHeaders(),
+    body: JSON.stringify(params),
+  });
+  const result = await response.json();
+  return result?.data || {};
+};
+
+export const generateGuardrailRules = async (
+  params: GenerateGuardrailRulesParams,
+): Promise<GuardrailAiResult> => {
+  const response = await fetch(API_ENDPOINTS.agent.generateGuardrailRules, {
+    method: "POST",
+    headers: getHeaders(),
+    body: JSON.stringify(params),
+  });
+
+  const result = await response.json();
+  return result.data as GuardrailAiResult;
+};
+
+// optimizePromptBadCase removed: badcase optimization is now fully automated in agent debug.

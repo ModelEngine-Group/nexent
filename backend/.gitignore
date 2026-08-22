@@ -1,0 +1,6 @@
+.venv/
+.uv/
+
+flower_db.sqlite.db
+uv.lock
+.env

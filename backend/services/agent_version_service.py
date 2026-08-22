@@ -1,0 +1,998 @@
+import logging
+from typing import Optional, Tuple, List, Dict, Any
+from sqlalchemy import update
+
+from database.client import get_db_session, as_dict
+from database.db_models import AgentInfo, ToolInstance, AgentRelation
+from database.agent_version_db import (
+    search_version_by_version_no,
+    query_version_list,
+    query_current_version_no,
+    query_agent_snapshot,
+    query_agent_draft,
+    insert_version,
+    update_version_status,
+    update_version,
+    update_agent_current_version,
+    insert_agent_snapshot,
+    insert_tool_snapshot,
+    insert_relation_snapshot,
+    insert_skill_snapshot,
+    delete_agent_snapshot,
+    delete_tool_snapshot,
+    delete_relation_snapshot,
+    delete_skill_snapshot,
+    restore_agent_draft,
+    get_next_version_no,
+    delete_version,
+    SOURCE_TYPE_NORMAL,
+    SOURCE_TYPE_ROLLBACK,
+    STATUS_RELEASED,
+    STATUS_DISABLED,
+    STATUS_ARCHIVED,
+)
+from database.model_management_db import get_model_by_model_id, get_valid_model_ids
+from utils.str_utils import convert_string_to_list
+from consts.agent_unavailable_reasons import AgentUnavailableReason
+
+logger = logging.getLogger("agent_version_service")
+
+
+def _remove_audit_fields_for_insert(data: dict) -> None:
+    """
+    Remove audit fields that should not be copied during snapshot
+    """
+    data.pop('create_time', None)
+    data.pop('update_time', None)
+    data.pop('delete_flag', None)
+
+
+def _build_sub_agent_relations(relations: List[dict]) -> List[dict]:
+    """Map relation snapshots to sub-agent relation payloads for API responses."""
+    return [
+        {
+            'agent_id': r['selected_agent_id'],
+            'version_no': r.get('selected_agent_version_no'),
+        }
+        for r in relations
+    ]
+
+
+def publish_version_impl(
+    agent_id: int,
+    tenant_id: str,
+    user_id: str,
+    version_name: Optional[str] = None,
+    release_note: Optional[str] = None,
+    source_type: str = SOURCE_TYPE_NORMAL,
+    source_version_no: Optional[int] = None,
+) -> dict:
+    """
+    Publish a new version
+    1. Copy draft data (version_no=0) to new version
+    2. Create version metadata record
+    3. Update current_version_no
+    4. Optionally register as A2A Server agent
+    """
+    # Get draft data
+    agent_draft, tools_draft, relations_draft = query_agent_draft(agent_id, tenant_id)
+    if not agent_draft:
+        raise ValueError("Agent draft not found")
+
+    publish_as_a2a = bool(agent_draft.get("is_a2a", False))
+
+    # Calculate new version number
+    new_version_no = get_next_version_no(agent_id, tenant_id)
+
+    # Prepare agent snapshot data
+    agent_snapshot = agent_draft.copy()
+    agent_snapshot.pop('version_no', None)
+    agent_snapshot.pop('current_version_no', None)
+    agent_snapshot['version_no'] = new_version_no
+    agent_snapshot['updated_by'] = user_id
+    _remove_audit_fields_for_insert(agent_snapshot)
+
+    # Insert agent snapshot
+    insert_agent_snapshot(agent_snapshot)
+
+    # Insert tool snapshots
+    for tool in tools_draft:
+        tool_snapshot = tool.copy()
+        tool_snapshot.pop('version_no', None)
+        tool_snapshot['version_no'] = new_version_no
+        tool_snapshot['updated_by'] = user_id
+        _remove_audit_fields_for_insert(tool_snapshot)
+        insert_tool_snapshot(tool_snapshot)
+
+    # Insert relation snapshots with pinned child agent versions
+    for rel in relations_draft:
+        child_id = rel['selected_agent_id']
+        child_version = query_current_version_no(child_id, tenant_id)
+        if child_version is None:
+            raise ValueError(
+                f"Sub-agent {child_id} has no published version; publish the sub-agent first."
+            )
+        rel_snapshot = rel.copy()
+        rel_snapshot.pop('version_no', None)
+        rel_snapshot['version_no'] = new_version_no
+        rel_snapshot['selected_agent_version_no'] = child_version
+        rel_snapshot['updated_by'] = user_id
+        _remove_audit_fields_for_insert(rel_snapshot)
+        insert_relation_snapshot(rel_snapshot)
+
+    # Get skill instances from draft (version_no=0)
+    from database import skill_db as skill_db_module
+    skills_draft = skill_db_module.query_skill_instances_by_agent_id(
+        agent_id=agent_id,
+        tenant_id=tenant_id,
+        version_no=0
+    )
+
+    # Insert skill instance snapshots
+    for skill in skills_draft:
+        skill_snapshot = skill.copy()
+        skill_snapshot.pop('version_no', None)
+        skill_snapshot['version_no'] = new_version_no
+        skill_snapshot['updated_by'] = user_id
+        _remove_audit_fields_for_insert(skill_snapshot)
+        insert_skill_snapshot(skill_snapshot)
+
+    # Create version metadata
+    version_data = {
+        'tenant_id': tenant_id,
+        'agent_id': agent_id,
+        'version_no': new_version_no,
+        'version_name': version_name,
+        'release_note': release_note,
+        'source_type': source_type,
+        'source_version_no': source_version_no,
+        'status': STATUS_RELEASED,
+        'created_by': user_id,
+        'updated_by': user_id,
+    }
+    version_id = insert_version(version_data)
+
+    # Update current_version_no in draft
+    update_agent_current_version(agent_id, tenant_id, new_version_no)
+
+    # Register as A2A Server agent if requested
+    a2a_agent_info = None
+    a2a_agent_card = None
+    if publish_as_a2a:
+        from database.a2a_agent_db import create_server_agent, get_server_agent_by_agent_id
+        existing_a2a = get_server_agent_by_agent_id(agent_id, tenant_id)
+        logger.info(f"Creating/updating A2A Server agent for agent_id={agent_id}")
+        agent_name = agent_draft.get("name") or f"Agent-{agent_id}"
+        # Build supported interfaces for this endpoint
+        # Note: endpoint_id will be generated by create_server_agent for new agents
+        # For existing agents, we use their endpoint_id to build correct paths
+        if existing_a2a:
+            endpoint_id = existing_a2a.get("endpoint_id")
+            logger.info(f"A2A Server agent already exists, updating with endpoint_id={endpoint_id}")
+        else:
+            endpoint_id = None  # Will be generated by create_server_agent
+        # supported_interfaces will be built with the actual endpoint_id after creation
+        a2a_agent_info = create_server_agent(
+            agent_id=agent_id,
+            user_id=user_id,
+            tenant_id=tenant_id,
+            name=agent_name,
+            description=agent_draft.get("description"),
+            version=str(new_version_no),
+        )
+        logger.info(f"A2A Server agent created/updated with endpoint_id={a2a_agent_info.get('endpoint_id')}")
+
+        # Generate Agent Card info for frontend display
+        # Note: base_url will be provided by frontend, we return endpoint_id and protocol info
+        endpoint_id = a2a_agent_info.get("endpoint_id")
+        base_path = f"/nb/a2a/{endpoint_id}"
+        a2a_agent_card = {
+            "endpoint_id": endpoint_id,
+            "name": a2a_agent_info.get("name"),
+            "description": a2a_agent_info.get("description"),
+            "version": a2a_agent_info.get("version"),
+            "streaming": a2a_agent_info.get("streaming", False),
+            # Agent Card URL following A2A 1.0 spec path pattern
+            "agent_card_url": f"{base_path}/.well-known/agent-card.json",
+            "rest_endpoints": {
+                "message_send": f"/nb/a2a/{endpoint_id}/message:send",
+                "message_stream": f"/nb/a2a/{endpoint_id}/message:stream",
+                "tasks_get": f"/nb/a2a/{endpoint_id}/tasks/{{task_id}}",
+            },
+            "jsonrpc_url": f"/nb/a2a/{endpoint_id}/v1",
+            "jsonrpc_methods": ["SendMessage", "SendStreamingMessage", "GetTask"],
+        }
+
+    result = {
+        "id": version_id,
+        "version_no": new_version_no,
+        "message": "Version published successfully",
+    }
+
+    if a2a_agent_info:
+        result["a2a_agent"] = a2a_agent_info
+    if a2a_agent_card:
+        result["a2a_agent_card"] = a2a_agent_card
+
+    return result
+
+
+def get_version_list_impl(
+    agent_id: int,
+    tenant_id: str,
+) -> dict:
+    """
+    Get version list for an agent
+    """
+    items = query_version_list(
+        agent_id=agent_id,
+        tenant_id=tenant_id,
+    )
+    total = len(items)
+    return {
+        "items": items,
+        "total": total,
+    }
+
+
+def get_version_impl(
+    agent_id: int,
+    tenant_id: str,
+    version_no: int,
+) -> dict:
+    """
+    Get version
+    """
+    return search_version_by_version_no(agent_id, tenant_id, version_no)
+
+
+def get_version_detail_impl(
+    agent_id: int,
+    tenant_id: str,
+    version_no: int,
+) -> dict:
+    """
+    Get version detail including snapshot data, structured like agent info.
+    Returns agent info with tools, sub_agents, skills, availability, etc.
+    """
+    result: Dict[str, Any] = {}
+
+    # Get version metadata first
+    version = search_version_by_version_no(agent_id, tenant_id, version_no)
+    if not version:
+        raise ValueError(f"Version {version_no} not found")
+
+    # Add version metadata as a nested object
+    result['version'] = {
+        'version_name': version.get('version_name'),
+        'version_status': version.get('status'),
+        'release_note': version.get('release_note'),
+        'source_type': version.get('source_type'),
+        'source_version_no': version.get('source_version_no'),
+    }
+
+    # Get snapshot data
+    agent_snapshot, tools_snapshot, relations_snapshot = query_agent_snapshot(
+        agent_id=agent_id,
+        tenant_id=tenant_id,
+        version_no=version_no,
+    )
+
+    if not agent_snapshot:
+        raise ValueError(f"Agent snapshot for version {version_no} not found")
+
+    # Copy all fields from agent_snapshot (excluding current_version_no as it has no meaning for version snapshot)
+    for key, value in agent_snapshot.items():
+        if key != 'current_version_no':
+            result[key] = value
+
+    # Add tools (only enabled tools)
+    result['tools'] = [t for t in tools_snapshot if t.get('enabled', True)]
+
+    # Extract sub_agent_id_list from relations
+    result['sub_agent_id_list'] = [r['selected_agent_id'] for r in relations_snapshot]
+    result['sub_agent_relations'] = _build_sub_agent_relations(relations_snapshot)
+
+    # Get skill instances for this version (from ag_skill_instance_t with version_no)
+    from database import skill_db as skill_db_module
+    skills_snapshot = skill_db_module.query_skill_instances_by_agent_id(
+        agent_id=agent_id,
+        tenant_id=tenant_id,
+        version_no=version_no
+    )
+    # Add enabled skills to result
+    result['skills'] = [s for s in skills_snapshot if s.get('enabled', True)]
+
+    # Get model names from model_ids array
+    snapshot_model_ids = result.get("model_ids") or []
+    snapshot_model_names: List[str] = []
+    for mid in snapshot_model_ids:
+        mid_info = get_model_by_model_id(mid)
+        if mid_info and mid_info.get("display_name"):
+            snapshot_model_names.append(mid_info["display_name"])
+    result["model_names"] = snapshot_model_names
+    # Derive legacy model_name from the first model for backward compatibility
+    result["model_name"] = snapshot_model_names[0] if snapshot_model_names else None
+
+    # Get business logic model name
+    if result.get('business_logic_model_id') is not None and result['business_logic_model_id'] != 0:
+        business_logic_model_info = get_model_by_model_id(result['business_logic_model_id'])
+        result['business_logic_model_name'] = business_logic_model_info.get('display_name', None) if business_logic_model_info else None
+    else:
+        result['business_logic_model_name'] = None
+
+    # Convert group_ids string to list
+    if result.get('group_ids') is not None:
+        result['group_ids'] = convert_string_to_list(result.get('group_ids', ''))
+    else:
+        result['group_ids'] = []
+
+    # Build tool instances list for availability check
+    tool_instances_for_check = []
+    for tool in tools_snapshot:
+        tool_instance = {
+            'id': tool.get('tool_id'),
+            'enabled': tool.get('enabled', True),
+            'tool_id': tool.get('tool_id'),
+        }
+        tool_instances_for_check.append(tool_instance)
+
+    # Check agent availability
+    is_available, unavailable_reasons = _check_version_snapshot_availability(
+        agent_id=agent_id,
+        tenant_id=tenant_id,
+        agent_info=result,
+        tool_instances=tool_instances_for_check,
+    )
+    result['is_available'] = is_available
+    result['unavailable_reasons'] = unavailable_reasons
+
+    return result
+
+
+def _check_version_snapshot_availability(
+    agent_id: int,
+    tenant_id: str,
+    agent_info: dict,
+    tool_instances: List[dict],
+) -> Tuple[bool, List[str]]:
+    """
+    Check if a version snapshot agent is available.
+    Simplified version of check_agent_availability for snapshots.
+    """
+    unavailable_reasons: List[str] = []
+
+    # Check if agent info exists
+    if not agent_info:
+        return False, [AgentUnavailableReason.AGENT_NOT_FOUND]
+
+    # Check model availability
+    model_ids = agent_info.get('model_ids') or []
+    if not model_ids:
+        unavailable_reasons.append(AgentUnavailableReason.MODEL_NOT_CONFIGURED)
+
+    # Check tools availability (only when tools are configured)
+    if tool_instances:
+        has_enabled_tool = any(t.get('enabled', True) for t in tool_instances)
+        if not has_enabled_tool:
+            unavailable_reasons.append(AgentUnavailableReason.ALL_TOOLS_DISABLED)
+
+    return len(unavailable_reasons) == 0, unavailable_reasons
+
+
+def rollback_version_impl(
+    agent_id: int,
+    tenant_id: str,
+    target_version_no: int,
+) -> dict:
+    """
+    Rollback to a specific version by restoring draft (version_no=0) with the target version's data.
+    This copies all snapshot data (agent, tools, relations, skills) from the target version into the draft,
+    then updates current_version_no to point to the target version.
+
+    The user can then continue editing or re-publish from the restored state.
+
+    Args:
+        agent_id: Agent ID
+        tenant_id: Tenant ID
+        target_version_no: The version number to rollback to
+
+    Returns:
+        Success message with target version info
+    """
+    # Verify the target version exists
+    version = search_version_by_version_no(agent_id, tenant_id, target_version_no)
+    if not version:
+        raise ValueError(f"Version {target_version_no} not found")
+
+    # Get target version's snapshot data
+    (target_agent, target_tools,
+     target_relations) = query_agent_snapshot(agent_id, tenant_id, target_version_no)
+    if not target_agent:
+        raise ValueError(f"Agent snapshot for version {target_version_no} not found")
+
+    # Ensure the draft still exists before attempting an in-place restore.
+    draft_agent, _, _ = query_agent_draft(agent_id, tenant_id)
+    if not draft_agent:
+        raise ValueError("Agent draft not found")
+
+    # Get skill snapshots for target version
+    from database import skill_db as skill_db_module
+    target_skills = skill_db_module.query_skill_instances_by_agent_id(
+        agent_id=agent_id,
+        tenant_id=tenant_id,
+        version_no=target_version_no,
+    )
+
+    # Atomically restore draft from target version snapshot
+    restore_agent_draft(
+        agent_id=agent_id,
+        tenant_id=tenant_id,
+        target_version_no=target_version_no,
+        target_agent_snapshot=target_agent,
+        target_tool_snapshots=target_tools,
+        target_relation_snapshots=target_relations,
+        target_skill_snapshots=target_skills,
+    )
+
+    return {
+        "message": f"Successfully rolled back to version {target_version_no}",
+        "version_no": target_version_no,
+        "version_name": version.get("version_name"),
+    }
+
+
+def update_version_status_impl(
+    agent_id: int,
+    tenant_id: str,
+    user_id: str,
+    version_no: int,
+    status: str,
+) -> dict:
+    """
+    Update version status (DISABLED / ARCHIVED)
+    """
+    valid_statuses = [STATUS_DISABLED, STATUS_ARCHIVED]
+    if status not in valid_statuses:
+        raise ValueError(f"Invalid status. Must be one of: {valid_statuses}")
+
+    rows_affected = update_version_status(
+        agent_id=agent_id,
+        tenant_id=tenant_id,
+        version_no=version_no,
+        status=status,
+        updated_by=user_id,
+    )
+
+    if rows_affected == 0:
+        raise ValueError(f"Version {version_no} not found")
+
+    return {"message": "Status updated successfully"}
+
+
+def update_version_impl(
+    agent_id: int,
+    tenant_id: str,
+    user_id: str,
+    version_no: int,
+    version_name: Optional[str] = None,
+    release_note: Optional[str] = None,
+) -> dict:
+    """
+    Update version metadata (version_name and release_note)
+    """
+    # Check if version exists
+    version = search_version_by_version_no(agent_id, tenant_id, version_no)
+    if not version:
+        raise ValueError(f"Version {version_no} not found")
+
+    rows_affected = update_version(
+        agent_id=agent_id,
+        tenant_id=tenant_id,
+        version_no=version_no,
+        version_name=version_name,
+        release_note=release_note,
+        updated_by=user_id,
+    )
+
+    if rows_affected == 0:
+        raise ValueError("No changes to update")
+
+    return {
+        "message": "Version updated successfully",
+        "version_no": version_no,
+    }
+
+
+def delete_version_impl(
+    agent_id: int,
+    tenant_id: str,
+    user_id: str,
+    version_no: int,
+) -> dict:
+    """
+    Soft delete a version by setting delete_flag='Y'
+    Also soft deletes all related snapshot data (agent, tools, relations, skills) for this version
+    """
+    # Check if version exists
+    version = search_version_by_version_no(agent_id, tenant_id, version_no)
+    if not version:
+        raise ValueError(f"Version {version_no} not found")
+
+    # Prevent deleting the current published version
+    current_version_no = query_current_version_no(agent_id, tenant_id)
+    if current_version_no == version_no:
+        raise ValueError("Cannot delete the current published version")
+
+    # Prevent deleting draft version (version_no=0)
+    if version_no == 0:
+        raise ValueError("Cannot delete draft version")
+
+    # Soft delete version metadata
+    rows_affected = delete_version(
+        agent_id=agent_id,
+        tenant_id=tenant_id,
+        version_no=version_no,
+        deleted_by=user_id,
+    )
+
+    if rows_affected == 0:
+        raise ValueError(f"Version {version_no} not found")
+
+    # Soft delete all related snapshot data for this version
+    # 1. Delete agent snapshot
+    delete_agent_snapshot(
+        agent_id=agent_id,
+        tenant_id=tenant_id,
+        version_no=version_no,
+        deleted_by=user_id,
+    )
+
+    # 2. Delete tool snapshots
+    delete_tool_snapshot(
+        agent_id=agent_id,
+        tenant_id=tenant_id,
+        version_no=version_no,
+        deleted_by=user_id,
+    )
+
+    # 3. Delete relation snapshots
+    delete_relation_snapshot(
+        agent_id=agent_id,
+        tenant_id=tenant_id,
+        version_no=version_no,
+        deleted_by=user_id,
+    )
+
+    # 4. Delete skill instance snapshots
+    delete_skill_snapshot(
+        agent_id=agent_id,
+        tenant_id=tenant_id,
+        version_no=version_no,
+        deleted_by=user_id,
+    )
+
+    logger.info(f"Successfully deleted version {version_no} and all related snapshots for agent_id={agent_id}, tenant_id={tenant_id}")
+
+    return {"message": f"Version {version_no} deleted successfully"}
+
+
+def get_current_version_impl(
+    agent_id: int,
+    tenant_id: str,
+) -> dict:
+    """
+    Get current published version
+    """
+    current_version_no = query_current_version_no(agent_id, tenant_id)
+    if current_version_no is None:
+        raise ValueError("No published version")
+
+    version = search_version_by_version_no(agent_id, tenant_id, current_version_no)
+    if not version:
+        raise ValueError(f"Version {current_version_no} not found")
+
+    return {
+        "version_no": current_version_no,
+        "version_name": version.get('version_name'),
+        "status": version.get('status'),
+        "source_type": version.get('source_type'),
+        "source_version_no": version.get('source_version_no'),
+        "release_note": version.get('release_note'),
+        "created_by": version.get('created_by'),
+        "create_time": version.get('create_time'),
+    }
+
+
+def compare_versions_impl(
+    agent_id: int,
+    tenant_id: str,
+    version_no_a: int,
+    version_no_b: int,
+) -> dict:
+    """
+    Compare two versions and return their differences.
+    Returns detailed comparison data for both versions.
+    Handles version 0 as draft data.
+    """
+    # Get version A detail (handles version 0 as draft)
+    version_a = _get_version_detail_or_draft(agent_id, tenant_id, version_no_a)
+    # Get version B detail (handles version 0 as draft)
+    version_b = _get_version_detail_or_draft(agent_id, tenant_id, version_no_b)
+
+    # Calculate differences
+    differences = []
+
+    # Compare name
+    if version_a.get('name') != version_b.get('name'):
+        differences.append({
+            'field': 'name',
+            'label': 'Name',
+            'value_a': version_a.get('name'),
+            'value_b': version_b.get('name'),
+        })
+
+    # Compare model_ids (canonical field). Both versions should always have the
+    # same shape (list of ints) after get_version_detail_impl / draft path normalization.
+    def _normalize_model_ids(value: Any) -> List[int]:
+        if not value:
+            return []
+        return [int(x) for x in value if x is not None]
+
+    model_ids_a = _normalize_model_ids(version_a.get('model_ids'))
+    model_ids_b = _normalize_model_ids(version_b.get('model_ids'))
+    if model_ids_a != model_ids_b:
+        differences.append({
+            'field': 'model_ids',
+            'label': 'Model',
+            'value_a': version_a.get('model_names') or model_ids_a,
+            'value_b': version_b.get('model_names') or model_ids_b,
+        })
+
+    # Compare max_steps
+    if version_a.get('max_steps') != version_b.get('max_steps'):
+        differences.append({
+            'field': 'max_steps',
+            'label': 'Max Steps',
+            'value_a': version_a.get('max_steps'),
+            'value_b': version_b.get('max_steps'),
+        })
+
+    # Compare description
+    if version_a.get('description') != version_b.get('description'):
+        differences.append({
+            'field': 'description',
+            'label': 'Description',
+            'value_a': version_a.get('description'),
+            'value_b': version_b.get('description'),
+        })
+
+    # Compare duty_prompt
+    if version_a.get('duty_prompt') != version_b.get('duty_prompt'):
+        differences.append({
+            'field': 'duty_prompt',
+            'label': 'Duty Prompt',
+            'value_a': version_a.get('duty_prompt'),
+            'value_b': version_b.get('duty_prompt'),
+        })
+
+    # Compare tools count
+    tools_a_count = len(version_a.get('tools', []))
+    tools_b_count = len(version_b.get('tools', []))
+    if tools_a_count != tools_b_count:
+        differences.append({
+            'field': 'tools_count',
+            'label': 'Tools Count',
+            'value_a': tools_a_count,
+            'value_b': tools_b_count,
+        })
+
+    # Compare sub_agents count
+    sub_agents_a_count = len(version_a.get('sub_agent_id_list', []))
+    sub_agents_b_count = len(version_b.get('sub_agent_id_list', []))
+    if sub_agents_a_count != sub_agents_b_count:
+        differences.append({
+            'field': 'sub_agents_count',
+            'label': 'Sub Agents Count',
+            'value_a': sub_agents_a_count,
+            'value_b': sub_agents_b_count,
+        })
+
+    # Compare skills count
+    skills_a_count = len(version_a.get('skills', []))
+    skills_b_count = len(version_b.get('skills', []))
+    if skills_a_count != skills_b_count:
+        differences.append({
+            'field': 'skills_count',
+            'label': 'Skills Count',
+            'value_a': skills_a_count,
+            'value_b': skills_b_count,
+        })
+
+    return {
+        'version_a': version_a,
+        'version_b': version_b,
+        'differences': differences,
+    }
+
+
+def _get_version_detail_or_draft(
+    agent_id: int,
+    tenant_id: str,
+    version_no: int,
+) -> dict:
+    """
+    Get version detail for published versions, or draft data for version 0.
+    Returns structured agent info similar to get_version_detail_impl.
+    """
+    from database import skill_db as skill_db_module
+
+    result: Dict[str, Any] = {}
+
+    if version_no == 0:
+        # Get draft data for version 0
+        agent_draft, tools_draft, relations_draft = query_agent_draft(agent_id, tenant_id)
+        if not agent_draft:
+            raise ValueError(f"Draft version not found")
+
+        # Copy draft data
+        for key, value in agent_draft.items():
+            if key != 'current_version_no':
+                result[key] = value
+
+        # Add tools (only enabled tools)
+        result['tools'] = [t for t in tools_draft if t.get('enabled', True)]
+        result['sub_agent_id_list'] = [r['selected_agent_id'] for r in relations_draft]
+        result['sub_agent_relations'] = _build_sub_agent_relations(relations_draft)
+
+        # Get draft skill instances (version_no=0)
+        skills_draft = skill_db_module.query_skill_instances_by_agent_id(
+            agent_id=agent_id,
+            tenant_id=tenant_id,
+            version_no=0
+        )
+        result['skills'] = [s for s in skills_draft if s.get('enabled', True)]
+
+        result['version'] = {
+            'version_name': 'Draft',
+            'version_status': 'DRAFT',
+            'release_note': '',
+            'source_type': 'DRAFT',
+            'source_version_no': 0,
+        }
+    else:
+        # Get published version detail (already includes skills from get_version_detail_impl)
+        result = get_version_detail_impl(agent_id, tenant_id, version_no)
+
+    # Get model names from model_ids array
+    detail_model_ids = result.get("model_ids") or []
+    detail_model_names: List[str] = []
+    for mid in detail_model_ids:
+        mid_info = get_model_by_model_id(mid)
+        if mid_info and mid_info.get("display_name"):
+            detail_model_names.append(mid_info["display_name"])
+    result["model_names"] = detail_model_names
+    result["model_name"] = detail_model_names[0] if detail_model_names else None
+
+    # Get business logic model name
+    if result.get('business_logic_model_id') is not None and result['business_logic_model_id'] != 0:
+        business_logic_model_info = get_model_by_model_id(result['business_logic_model_id'])
+        result['business_logic_model_name'] = business_logic_model_info.get('display_name', None) if business_logic_model_info else None
+    else:
+        result['business_logic_model_name'] = None
+
+    # Convert group_ids string to list (only if it's not already a list)
+    group_ids = result.get('group_ids')
+    if group_ids is not None:
+        # If already a list, keep it as is; otherwise convert from string
+        if isinstance(group_ids, list):
+            result['group_ids'] = group_ids
+        else:
+            result['group_ids'] = convert_string_to_list(str(group_ids))
+    else:
+        result['group_ids'] = []
+
+    return result
+
+
+async def list_published_agents_impl(
+    tenant_id: str,
+    user_id: str,
+) -> list[dict]:
+    """
+    List all published agents with their current published version information.
+    1. Query all agents with version_no=0 (draft versions)
+    2. For each agent with current_version_no > 0, get the published version snapshot
+    3. Return the list of published agents
+
+    Args:
+        tenant_id (str): Tenant ID
+        user_id (str): User ID (for permission calculation and filtering)
+
+    Returns:
+        list[dict]: List of published agent info
+    """
+    try:
+        from database.agent_db import (
+            query_all_agent_info_by_tenant_id,
+        )
+        from services.agent_service import (
+            CAN_EDIT_ALL_USER_ROLES,
+            get_user_tenant_by_user_id,
+            query_group_ids_by_user,
+            get_model_by_model_id,
+            check_agent_availability,
+            _apply_duplicate_name_availability_rules,
+        )
+        from services.asset_owner_visibility import resolve_agent_list_permission
+        from database.agent_version_db import query_agent_snapshot, query_version_list
+
+        # Get user role for permission check
+        user_tenant_record = get_user_tenant_by_user_id(user_id) or {}
+        user_role = str(user_tenant_record.get("user_role") or "").upper()
+        can_edit_all = user_role in CAN_EDIT_ALL_USER_ROLES
+
+        # Get user's group IDs for filtering
+        user_group_ids: set[int] = set()
+        if not can_edit_all:
+            try:
+                user_group_ids = set(query_group_ids_by_user(user_id) or [])
+            except Exception as e:
+                logger.warning(
+                    f"Failed to query user group ids for filtering: user_id={user_id}, err={str(e)}"
+                )
+                user_group_ids = set()
+
+        # Get all draft agents (version_no=0)
+        agent_list = query_all_agent_info_by_tenant_id(tenant_id=tenant_id)
+
+        model_cache: Dict[int, Optional[dict]] = {}
+        enriched_agents: list[dict] = []
+
+        for agent in agent_list:
+            # Filter out disabled agents
+            if not agent.get("enabled"):
+                continue
+
+            # Apply visibility filter for DEV/USER based on group overlap
+            if not can_edit_all:
+                agent_group_ids = set(convert_string_to_list(agent.get("group_ids")))
+                is_creator = str(agent.get("created_by")) == str(user_id)
+                if not is_creator and len(user_group_ids.intersection(agent_group_ids)) == 0:
+                    continue
+
+            agent_id = agent.get("agent_id")
+            current_version_no = agent.get("current_version_no")
+
+            # Only include agents that have a published version (current_version_no > 0)
+            if not current_version_no or current_version_no <= 0:
+                continue
+
+            # Verify current_version_no exists, if not find the latest available version
+            available_versions = query_version_list(agent_id=agent_id, tenant_id=tenant_id)
+            
+            if not available_versions:
+                logger.warning(f"No available versions found for agent_id={agent_id}")
+                continue
+            
+            available_version_nos = {v["version_no"] for v in available_versions}
+            
+            if current_version_no not in available_version_nos:
+                logger.warning(
+                    f"Current version {current_version_no} not found for agent_id={agent_id}, using latest available version"
+                )
+                current_version_no = available_versions[0]["version_no"]
+
+            # Get the published version snapshot
+            agent_snapshot, tools_snapshot, relations_snapshot = query_agent_snapshot(
+                agent_id=agent_id,
+                tenant_id=tenant_id,
+                version_no=current_version_no,
+            )
+
+            if not agent_snapshot:
+                logger.warning(
+                    f"Published version snapshot not found for agent_id={agent_id}, version_no={current_version_no}"
+                )
+                continue
+
+            # Build the agent info from snapshot
+            agent_info: Dict[str, Any] = {}
+
+            # Copy all fields from snapshot (excluding current_version_no as it's not meaningful for version)
+            for key, value in agent_snapshot.items():
+                if key != 'current_version_no':
+                    agent_info[key] = value
+
+            # Add version_name from version metadata
+            current_version_info = next((v for v in available_versions if v["version_no"] == current_version_no), None)
+            if current_version_info:
+                agent_info['version_name'] = current_version_info.get("version_name")
+
+            # Add tools
+            agent_info['tools'] = tools_snapshot
+
+            # Extract sub_agent_id_list from relations
+            agent_info['sub_agent_id_list'] = [r['selected_agent_id'] for r in relations_snapshot]
+            agent_info['sub_agent_relations'] = _build_sub_agent_relations(relations_snapshot)
+
+            # Add current version info
+            agent_info['current_version_no'] = current_version_no
+
+            # Filter out deleted models (delete_flag='Y' in model_record_t)
+            raw_model_ids = agent_info.get("model_ids") or []
+            valid_model_ids = get_valid_model_ids(raw_model_ids, tenant_id)
+            agent_info["model_ids"] = valid_model_ids
+
+            # Check agent availability using the shared function
+            _, unavailable_reasons = check_agent_availability(
+                agent_id=agent_id,
+                tenant_id=tenant_id,
+                agent_info=agent_info,
+                model_cache=model_cache
+            )
+
+            # Preserve the raw data so we can adjust availability for duplicates
+            enriched_agents.append({
+                "raw_agent": agent_info,
+                "unavailable_reasons": unavailable_reasons,
+            })
+
+        # Handle duplicate name/display_name: keep the earliest created agent available,
+        # mark later ones as unavailable due to duplication.
+        _apply_duplicate_name_availability_rules(enriched_agents)
+
+        # Build the final simple agent list
+        simple_agent_list: list[dict] = []
+        for entry in enriched_agents:
+            agent = entry["raw_agent"]
+            unavailable_reasons = list(dict.fromkeys(entry["unavailable_reasons"]))
+
+            # Build model_ids and model_names from agent snapshot
+            model_ids_list = agent.get("model_ids")
+            model_names_list: list[str] = []
+
+            if model_ids_list:
+                # Resolve model names for each model_id
+                for mid in model_ids_list:
+                    if mid not in model_cache:
+                        model_cache[mid] = get_model_by_model_id(mid, tenant_id)
+                    model_info_item = model_cache.get(mid)
+                    if model_info_item:
+                        model_names_list.append(model_info_item.get("display_name") or model_info_item.get("model_name") or str(mid))
+                    else:
+                        model_names_list.append(str(mid))
+
+            permission = resolve_agent_list_permission(
+                user_role=user_role,
+                agent=agent,
+                user_id=user_id,
+                can_edit_all=can_edit_all,
+            )
+
+            simple_agent_list.append({
+                "agent_id": agent.get("agent_id"),
+                "name": agent.get("name") if agent.get("name") else agent.get("display_name"),
+                "display_name": agent.get("display_name") if agent.get("display_name") else agent.get("name"),
+                "description": agent.get("description"),
+                "author": agent.get("author"),
+                "model_ids": model_ids_list,
+                "model_names": model_names_list,
+                "model_name": model_names_list[0] if model_names_list else None,
+                "is_available": len(unavailable_reasons) == 0,
+                "unavailable_reasons": unavailable_reasons,
+                "is_new": agent.get("is_new", False),
+                "is_main_agent": agent.get("is_main_agent", True),
+                "group_ids": agent.get("group_ids", []),
+                "permission": permission,
+                "current_version_no": agent.get("current_version_no"),
+                "version_name": agent.get("version_name"),
+                "greeting_message": agent.get("greeting_message"),
+                "example_questions": agent.get("example_questions"),
+            })
+
+        return simple_agent_list
+
+    except Exception as e:
+        logger.error(f"Failed to list published agents: {str(e)}")
+        raise ValueError(f"Failed to list published agents: {str(e)}")

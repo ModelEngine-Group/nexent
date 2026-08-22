@@ -1,0 +1,47 @@
+---
+globs: backend/**/*.py,sdk/**/*.py
+alwaysApply: false
+description: Centralize env var access in backend/consts/const.py; no direct os.getenv outside
+---
+# Environment Variables: Single Source of Truth
+
+All environment variable access must go through [backend/consts/const.py](mdc:backend/consts/const.py). No direct `os.getenv()` or `os.environ.get()` calls elsewhere.
+
+## Do
+```python
+# backend/consts/const.py
+APPID = os.getenv("APPID", "")
+TOKEN = os.getenv("TOKEN", "")
+
+# other modules
+from consts.const import APPID, TOKEN
+```
+
+## Don't
+```python
+# direct calls in other modules
+import os
+appid = os.getenv("APPID")
+token = os.environ.get("TOKEN")
+```
+
+## Architecture
+- **Single source**: Only `backend/consts/const.py` may read env vars.
+- **SDK (`sdk/`)**: Never read env. Accept configuration via parameters. Remove `from_env()`.
+- **Services (`backend/services/`)**: Read from `consts.const`; pass config to SDK.
+- **Apps (`backend/apps/`)**: Read from `consts.const`; pass through to services/SDK. No business logic here.
+
+## Migration checklist
+1. Add new vars to `backend/consts/const.py`.
+2. Update `.env.example`.
+3. Remove all direct `os.getenv()`/`os.environ.get()` outside `const.py`.
+4. Import from `consts.const` in backend modules.
+5. Pass configuration as parameters to SDK.
+6. Remove `from_env()` methods from config classes.
+7. Update service constructors to read from `const.py`.
+
+## Validation
+- No direct env access outside `const.py`.
+- No `from_env()` in config classes.
+- All env vars defined in `const.py`.
+- SDK modules accept configuration via parameters. 

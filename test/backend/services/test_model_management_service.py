@@ -1,0 +1,2330 @@
+import os
+import importlib
+import logging
+import sys
+import types
+import pytest
+from unittest import mock
+
+# Add backend to Python path for imports
+current_dir = os.path.dirname(os.path.abspath(__file__))
+backend_dir = os.path.abspath(os.path.join(current_dir, "../../../backend"))
+if backend_dir not in sys.path:
+    sys.path.insert(0, backend_dir)
+
+
+# Stub external modules required by consts.model before importing services
+if "nexent" not in sys.modules:
+    sys.modules["nexent"] = mock.MagicMock()
+if "nexent.core" not in sys.modules:
+    sys.modules["nexent.core"] = mock.MagicMock()
+if "nexent.core.agents" not in sys.modules:
+    sys.modules["nexent.core.agents"] = mock.MagicMock()
+if "nexent.core.agents.agent_model" not in sys.modules:
+    agent_model_mod = types.ModuleType("nexent.core.agents.agent_model")
+
+    class ToolConfig:  # minimal stub
+        pass
+
+    agent_model_mod.ToolConfig = ToolConfig
+    sys.modules["nexent.core.agents.agent_model"] = agent_model_mod
+
+# Stub boto3 used by backend.database.client
+if "boto3" not in sys.modules:
+    sys.modules["boto3"] = mock.MagicMock()
+
+# Provide stub modules for backend.database.client and database.client so that
+# patching MinioClient does not import the real client module (which pulls SQLAlchemy).
+backend_db_client_mod = types.ModuleType("backend.database.client")
+
+
+class _MinioClient:  # minimal stub
+    pass
+
+
+backend_db_client_mod.MinioClient = _MinioClient
+sys.modules["backend.database.client"] = backend_db_client_mod
+
+# Ensure parent package exposes the submodule attribute for import machinery
+try:
+    backend_database_pkg = importlib.import_module("backend.database")
+    setattr(backend_database_pkg, "client", backend_db_client_mod)
+except Exception:
+    # If backend.database is not importable yet, defer to sys.modules injection
+    if "backend.database" in sys.modules:
+        setattr(sys.modules["backend.database"],
+                "client", backend_db_client_mod)
+
+# Also stub database.client.MinioClient in case modules import without the 'backend.' prefix
+database_client_mod = types.ModuleType("database.client")
+database_client_mod.MinioClient = _MinioClient
+sys.modules["database.client"] = database_client_mod
+
+if "database" in sys.modules:
+    setattr(sys.modules["database"], "client", database_client_mod)
+
+# Stub consts.model to avoid deep dependencies
+consts_model_mod = types.ModuleType("consts.model")
+
+
+class _EnumItem:
+    def __init__(self, value: str):
+        self.value = value
+
+
+class _ModelConnectStatusEnum:
+    OPERATIONAL = _EnumItem("operational")
+    NOT_DETECTED = _EnumItem("not_detected")
+    DETECTING = _EnumItem("detecting")
+    UNAVAILABLE = _EnumItem("unavailable")
+
+    @staticmethod
+    def get_value(status):
+        return status or _ModelConnectStatusEnum.NOT_DETECTED.value
+
+
+class _ToolValidateRequest:
+    def __init__(self, **kwargs):
+        self.__dict__.update(kwargs)
+
+
+class _ProcessParams:
+    def __init__(self, **kwargs):
+        self.__dict__.update(kwargs)
+
+    def model_dump(self, *args, **kwargs):
+        return dict(self.__dict__)
+
+
+consts_model_mod.ModelConnectStatusEnum = _ModelConnectStatusEnum
+consts_model_mod.ToolValidateRequest = _ToolValidateRequest
+consts_model_mod.ProcessParams = _ProcessParams
+sys.modules["consts.model"] = consts_model_mod
+if "consts" not in sys.modules:
+    sys.modules["consts"] = types.ModuleType("consts")
+
+# Stub consts.const required by service
+consts_const_mod = types.ModuleType("consts.const")
+consts_const_mod.LOCALHOST_IP = "127.0.0.1"
+consts_const_mod.LOCALHOST_NAME = "localhost"
+consts_const_mod.DOCKER_INTERNAL_HOST = "host.docker.internal"
+consts_const_mod.CAPACITY_SUGGESTION_ENABLED = True
+consts_const_mod.CAPACITY_VISIBILITY_ENABLED = True
+consts_const_mod.DATA_PROCESS_SERVICE = "http://data-process"
+consts_const_mod.FILE_PREVIEW_SIZE_LIMIT = 100 * 1024 * 1024
+consts_const_mod.MAX_CONCURRENT_UPLOADS = 5
+consts_const_mod.OFFICE_MIME_TYPES = []
+consts_const_mod.UPLOAD_FOLDER = "uploads"
+consts_const_mod.LOCAL_MCP_SERVER = "http://local-mcp"
+consts_const_mod.MCP_MANAGEMENT_API = "http://mcp-management"
+consts_const_mod.LIBREOFFICE_PROFILE_DIR = "libreoffice-profile"
+consts_const_mod.DEFAULT_TENANT_ID = "tenant_id"
+consts_const_mod.DEFAULT_USER_ID = "user_id"
+consts_const_mod.IS_SPEED_MODE = False
+consts_const_mod.SUPABASE_JWT_SECRET = "test-secret"
+consts_const_mod.SUPABASE_URL = "http://supabase"
+consts_const_mod.SUPABASE_KEY = "supabase-key"
+consts_const_mod.SERVICE_ROLE_KEY = "service-role-key"
+consts_const_mod.DEBUG_JWT_EXPIRE_SECONDS = 3600
+consts_const_mod.LANGUAGE = "zh"
+# Fields required by utils.memory_utils and services.vectordatabase_service
+consts_const_mod.MODEL_CONFIG_MAPPING = {
+    "llm": "LLM_ID", "embedding": "EMBEDDING_ID"}
+consts_const_mod.ES_HOST = "http://localhost:9200"
+consts_const_mod.ES_API_KEY = ""
+consts_const_mod.ES_USERNAME = ""
+consts_const_mod.ES_PASSWORD = ""
+sys.modules["consts.const"] = consts_const_mod
+
+# Stub sqlalchemy.sql.func used by utils.config_utils
+sqlalchemy_sql_mod = types.ModuleType("sqlalchemy.sql")
+
+
+class _Func:
+    pass
+
+
+sqlalchemy_sql_mod.func = _Func()
+sys.modules["sqlalchemy.sql"] = sqlalchemy_sql_mod
+
+# Stub consts.provider used by service
+consts_provider_mod = types.ModuleType("consts.provider")
+
+
+class _ProviderEnum:
+    SILICON = _EnumItem("silicon")
+    MODELENGINE = _EnumItem("modelengine")
+    DASHSCOPE = _EnumItem("dashscope")
+    TOKENPONY = _EnumItem("tokenpony")
+
+
+consts_provider_mod.ProviderEnum = _ProviderEnum
+consts_provider_mod.SILICON_BASE_URL = "http://silicon.test"
+consts_provider_mod.DASHSCOPE_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1/"
+consts_provider_mod.DASHSCOPE_REALTIME_BASE_URL = "wss://dashscope.aliyuncs.com/api-ws/v1/realtime"
+consts_provider_mod.DASHSCOPE_STT_BASE_URL = consts_provider_mod.DASHSCOPE_REALTIME_BASE_URL
+consts_provider_mod.TOKENPONY_BASE_URL = "https://api.tokenpony.cn/v1/"
+sys.modules["consts.provider"] = consts_provider_mod
+
+# Stub services.model_provider_service used by service
+services_provider_mod = types.ModuleType("services.model_provider_service")
+
+
+async def _prepare_model_dict(**kwargs):
+    return {}
+
+
+def _merge_existing_model_attributes(model_list, tenant_id, provider, model_type, fields=None):
+    return model_list
+
+
+def _merge_existing_model_tokens(model_list, tenant_id, provider, model_type):
+    return model_list
+
+
+async def _get_provider_models(model_data):
+    return []
+services_provider_mod.prepare_model_dict = _prepare_model_dict
+services_provider_mod.merge_existing_model_attributes = _merge_existing_model_attributes
+services_provider_mod.merge_existing_model_tokens = _merge_existing_model_tokens
+services_provider_mod.get_provider_models = _get_provider_models
+sys.modules["services.model_provider_service"] = services_provider_mod
+
+# Stub services.model_health_service used by service
+services_health_mod = types.ModuleType("services.model_health_service")
+
+
+async def _embedding_dimension_check(model_config):
+    return 0
+
+
+def _infer_model_factory(model_type, base_url, current_factory=None):
+    """Mock implementation of _infer_model_factory for testing."""
+    base_url_lower = base_url.lower()
+    if "dashscope" in base_url_lower:
+        return "dashscope"
+    return current_factory
+
+
+services_health_mod.embedding_dimension_check = _embedding_dimension_check
+services_health_mod._infer_model_factory = _infer_model_factory
+sys.modules["services.model_health_service"] = services_health_mod
+
+# Stub parent utils package and memory helpers used by service imports. Some
+# test modules replace `utils` with a plain mock during collection, so keep this
+# file's service import setup self-contained.
+utils_mod = types.ModuleType("utils")
+utils_mod.__path__ = []
+sys.modules["utils"] = utils_mod
+
+utils_memory_mod = types.ModuleType("utils.memory_utils")
+utils_memory_mod.build_memory_config = lambda *args, **kwargs: {}
+sys.modules["utils.memory_utils"] = utils_memory_mod
+
+# Stub utils.model_name_utils used by service
+utils_name_mod = types.ModuleType("utils.model_name_utils")
+
+
+def _add_repo_to_name(model_repo, model_name):
+    return f"{model_repo}/{model_name}" if model_repo else model_name
+
+
+def _split_display_name(model_name: str):
+    return model_name.split("/")[-1]
+
+
+def _split_repo_name(model_name: str):
+    parts = model_name.split("/", 1)
+    return (parts[0], parts[1]) if len(parts) > 1 else ("", parts[0])
+
+
+def _sort_models_by_id(model_list):
+    if isinstance(model_list, list):
+        model_list.sort(key=lambda m: str(
+            (m.get("id") if isinstance(m, dict) else m) or "")[:1].lower())
+    return model_list
+
+
+utils_name_mod.add_repo_to_name = _add_repo_to_name
+utils_name_mod.split_display_name = _split_display_name
+utils_name_mod.split_repo_name = _split_repo_name
+utils_name_mod.sort_models_by_id = _sort_models_by_id
+sys.modules["utils.model_name_utils"] = utils_name_mod
+
+# Stub utils.file_management_utils so file_management_service can be imported
+# by other tests in the same pytest process without pulling auth/database deps.
+utils_file_mgmt_mod = types.ModuleType("utils.file_management_utils")
+
+
+async def _save_upload_file(*args, **kwargs):
+    return None
+
+
+utils_file_mgmt_mod.save_upload_file = _save_upload_file
+sys.modules["utils.file_management_utils"] = utils_file_mgmt_mod
+
+# Stub database.model_management_db to avoid importing heavy DB client
+database_mod = types.ModuleType("database")
+database_mod.__path__ = []
+db_mm_mod = types.ModuleType("database.model_management_db")
+db_attachment_mod = types.ModuleType("database.attachment_db")
+
+
+def _noop(*args, **kwargs):
+    return None
+
+
+def _get_model_records(*args, **kwargs):
+    return []
+
+
+def _get_models_by_tenant_factory_type(*args, **kwargs):
+    return []
+
+
+def _get_models_by_display_name(*args, **kwargs):
+    """Return an empty list for display name lookups in tests."""
+    return []
+
+
+def _get_model_by_name_factory(*args, **kwargs):
+    """Return None by default; tests can patch svc.get_model_by_name_factory."""
+    return None
+
+
+db_mm_mod.create_model_record = _noop
+db_mm_mod.delete_model_record = _noop
+db_mm_mod.get_model_by_display_name = _noop
+db_mm_mod.get_model_by_name_factory = _get_model_by_name_factory
+db_mm_mod.get_models_by_display_name = _get_models_by_display_name
+db_mm_mod.get_model_records = _get_model_records
+db_mm_mod.get_models_by_tenant_factory_type = _get_models_by_tenant_factory_type
+
+
+def _get_model_by_model_id(model_id: int, tenant_id: str):
+    # Minimal model config stub for utils.config_utils.get_model_name_from_config usage
+    return {
+        "model_id": model_id,
+        "model_repo": "openai",
+        "model_name": "text-embedding-3-small",
+        "max_tokens": 1536,
+        "base_url": "https://api.openai.com",
+        "api_key": "test-key",
+    }
+
+
+db_mm_mod.get_model_by_model_id = _get_model_by_model_id
+db_mm_mod.update_model_record = _noop
+sys.modules["database"] = database_mod
+sys.modules["database.model_management_db"] = db_mm_mod
+for _attachment_func in [
+    "copy_file",
+    "delete_file",
+    "file_exists",
+    "get_content_type",
+    "get_file_range",
+    "get_file_size_from_minio",
+    "get_file_stream",
+    "get_file_stream_raw",
+    "get_file_url",
+    "list_files",
+    "upload_fileobj",
+]:
+    setattr(db_attachment_mod, _attachment_func, _noop)
+sys.modules["database.attachment_db"] = db_attachment_mod
+setattr(database_mod, "attachment_db", db_attachment_mod)
+
+# Stub database.tenant_config_db required by utils.config_utils
+db_tenant_cfg_mod = types.ModuleType("database.tenant_config_db")
+
+
+def _delete_config_by_tenant_config_id(*args, **kwargs):
+    return None
+
+
+def _get_all_configs_by_tenant_id(tenant_id):
+    return {}
+
+
+def _get_single_config_info(*args, **kwargs):
+    return None
+
+
+def _insert_config(*args, **kwargs):
+    return None
+
+
+def _update_config_by_tenant_config_id_and_data(*args, **kwargs):
+    return None
+
+
+def _update_config_by_tenant_config_id(*args, **kwargs):
+    return None
+
+
+db_tenant_cfg_mod.delete_config_by_tenant_config_id = _delete_config_by_tenant_config_id
+db_tenant_cfg_mod.get_all_configs_by_tenant_id = _get_all_configs_by_tenant_id
+db_tenant_cfg_mod.get_single_config_info = _get_single_config_info
+db_tenant_cfg_mod.insert_config = _insert_config
+db_tenant_cfg_mod.update_config_by_tenant_config_id = _update_config_by_tenant_config_id
+db_tenant_cfg_mod.update_config_by_tenant_config_id_and_data = _update_config_by_tenant_config_id_and_data
+sys.modules["database.tenant_config_db"] = db_tenant_cfg_mod
+
+# Stub services.vectordatabase_service to avoid heavy imports
+services_vdb_mod = types.ModuleType("services.vectordatabase_service")
+
+
+class _ElasticSearchService:
+    pass
+
+
+def _get_vector_db_core():
+    return object()
+
+
+services_vdb_mod.ElasticSearchService = _ElasticSearchService
+services_vdb_mod.get_vector_db_core = _get_vector_db_core
+sys.modules["services.vectordatabase_service"] = services_vdb_mod
+
+# Stub nexent.memory.memory_service.clear_model_memories
+nexent_memory_mod = types.ModuleType("nexent.memory.memory_service")
+
+
+async def _clear_model_memories(**kwargs):
+    return None
+nexent_memory_mod.clear_model_memories = _clear_model_memories
+sys.modules["nexent.memory.memory_service"] = nexent_memory_mod
+
+# Stub services.tenant_service required by list_models_for_admin BEFORE any imports
+services_tenant_mod = types.ModuleType("services.tenant_service")
+
+
+def _get_tenant_info(tenant_id):
+    """Mock implementation of get_tenant_info for testing."""
+    # Raise exception for empty tenant to test error handling
+    if tenant_id == "empty_tenant":
+        raise Exception("Tenant not found")
+    return {"tenant_name": "Test Tenant"}
+
+
+services_tenant_mod.get_tenant_info = _get_tenant_info
+sys.modules["services.tenant_service"] = services_tenant_mod
+
+
+def _add_repo_to_name(model_repo, model_name):
+    """Mock implementation of add_repo_to_name for testing."""
+    return f"{model_repo}/{model_name}" if model_repo else model_name
+
+
+def import_svc():
+    """Import service under MinioClient patch to avoid real initialization."""
+    minio_client_mock = mock.MagicMock()
+    sys.modules["database"] = database_mod
+    sys.modules["database.model_management_db"] = db_mm_mod
+    setattr(database_mod, "model_management_db", db_mm_mod)
+    sys.modules.pop("backend.services.model_management_service", None)
+    sys.modules.pop("services.model_management_service", None)
+    with mock.patch("backend.database.client.MinioClient", return_value=minio_client_mock):
+        from backend.services import model_management_service as svc  # type: ignore
+    return svc
+
+
+@pytest.mark.asyncio
+async def test_create_model_for_tenant_success_llm():
+    svc = import_svc()
+
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=[]) as mock_get_by_display, \
+            mock.patch.object(svc, "create_model_record") as mock_create, \
+            mock.patch.object(svc, "split_repo_name", return_value=("huggingface", "llama")):
+
+        user_id = "u1"
+        tenant_id = "t1"
+        model_data = {
+            "model_name": "huggingface/llama",
+            "display_name": None,
+            "base_url": "http://localhost:8000",
+            "model_type": "llm",
+        }
+        model_data['ssl_verify'] = False
+
+        await svc.create_model_for_tenant(user_id, tenant_id, model_data)
+
+        mock_get_by_display.assert_called_once_with(
+            "huggingface/llama", tenant_id)
+        # create_model_record called once for non-multimodal
+        assert mock_create.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_create_model_for_tenant_open_router_disables_ssl():
+    """When base_url contains 'open/router' ssl_verify should be set to False and model_factory to 'modelengine'."""
+    svc = import_svc()
+
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=[]), \
+            mock.patch.object(svc, "create_model_record") as mock_create, \
+            mock.patch.object(svc, "split_repo_name", return_value=("modelengine", "m")):
+
+        user_id = "u1"
+        tenant_id = "t1"
+        model_data = {
+            "model_name": "modelengine/m",
+            "display_name": None,
+            "base_url": "https://api.example.com/open/router/v1",
+            "model_type": "llm",
+        }
+
+        await svc.create_model_for_tenant(user_id, tenant_id, model_data)
+
+        # Ensure a single record created and ssl_verify was disabled
+        assert mock_create.call_count == 1
+        create_args = mock_create.call_args[0][0]
+        assert create_args["ssl_verify"] is False
+        # model_factory should be set to modelengine when open/router URL is used
+        assert create_args["model_factory"] == "modelengine"
+
+
+@pytest.mark.asyncio
+async def test_create_model_for_tenant_conflict_raises():
+    svc = import_svc()
+
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=[{"model_id": "exists", "model_type": "llm"}]):
+        user_id = "u1"
+        tenant_id = "t1"
+        model_data = {
+            "model_name": "huggingface/llama",
+            "display_name": "dup",
+            "base_url": "http://localhost:8000",
+            "model_type": "llm",
+        }
+
+        with pytest.raises(Exception) as exc:
+            await svc.create_model_for_tenant(user_id, tenant_id, model_data)
+        assert "Failed to create model" in str(exc.value)
+
+
+@pytest.mark.asyncio
+async def test_create_model_for_tenant_display_name_conflict_valueerror():
+    """Test that display_name conflict raises ValueError (covers lines 65-72)"""
+    svc = import_svc()
+
+    existing_model = {"model_id": 1, "display_name": "existing_name"}
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=[existing_model]):
+        user_id = "u1"
+        tenant_id = "t1"
+        model_data = {
+            "model_name": "huggingface/llama",
+            "display_name": "existing_name",  # Conflicts with existing
+            "base_url": "http://localhost:8000",
+            "model_type": "llm",
+        }
+
+        # ValueError is wrapped in Exception, but the error message should contain the original ValueError message
+        with pytest.raises(Exception) as exc:
+            await svc.create_model_for_tenant(user_id, tenant_id, model_data)
+        assert "already in use" in str(exc.value)
+        assert "existing_name" in str(exc.value)
+
+
+@pytest.mark.asyncio
+async def test_create_model_for_tenant_allows_same_display_name_across_multimodal_slots():
+    """Image understanding, image generation, and video understanding are separate slots."""
+    svc = import_svc()
+
+    existing_models = [
+        {"model_id": 1, "display_name": "Qwen3.6-27B", "model_type": "vlm"},
+        {"model_id": 2, "display_name": "Qwen3.6-27B", "model_type": "vlm3"},
+    ]
+
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=existing_models), \
+            mock.patch.object(svc, "create_model_record") as mock_create, \
+            mock.patch.object(svc, "split_repo_name", return_value=("Qwen", "Qwen3.6-27B")):
+
+        model_data = {
+            "model_name": "Qwen/Qwen3.6-27B",
+            "display_name": "Qwen3.6-27B",
+            "base_url": "https://api.example.com/v1",
+            "model_type": "vlm2",
+        }
+
+        await svc.create_model_for_tenant("u1", "t1", model_data)
+
+        mock_create.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_create_model_for_tenant_blocks_duplicate_within_same_multimodal_slot():
+    svc = import_svc()
+
+    with mock.patch.object(
+        svc,
+        "get_models_by_display_name",
+        return_value=[{"model_id": 1, "display_name": "Qwen3.6-27B", "model_type": "vlm"}],
+    ):
+        model_data = {
+            "model_name": "Qwen/Qwen3.6-27B",
+            "display_name": "Qwen3.6-27B",
+            "base_url": "https://api.example.com/v1",
+            "model_type": "vlm",
+        }
+
+        with pytest.raises(Exception) as exc:
+            await svc.create_model_for_tenant("u1", "t1", model_data)
+        assert "already in use" in str(exc.value)
+
+
+@pytest.mark.asyncio
+async def test_create_model_for_tenant_multi_embedding_creates_two_records():
+    svc = import_svc()
+
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=[]), \
+            mock.patch.object(svc, "create_model_record") as mock_create, \
+            mock.patch.object(svc, "split_repo_name", return_value=("openai", "clip")):
+
+        user_id = "u1"
+        tenant_id = "t1"
+        model_data = {
+            "model_name": "openai/clip",
+            "display_name": None,
+            "base_url": "https://api.openai.com",
+            "model_type": "multi_embedding",
+        }
+
+        await svc.create_model_for_tenant(user_id, tenant_id, model_data)
+        # Should create two records: multi_embedding and its embedding variant
+        assert mock_create.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_create_model_for_tenant_embedding_sets_dimension():
+    svc = import_svc()
+
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=[]), \
+            mock.patch.object(svc, "embedding_dimension_check", new=mock.AsyncMock(return_value=1536)) as mock_dim, \
+            mock.patch.object(svc, "create_model_record") as mock_create, \
+            mock.patch.object(svc, "split_repo_name", return_value=("openai", "text-embedding-ada-002")):
+
+        user_id = "u1"
+        tenant_id = "t1"
+        model_data = {
+            "model_name": "openai/text-embedding-ada-002",
+            "display_name": None,
+            "base_url": "https://api.openai.com",
+            "model_type": "embedding",
+        }
+
+        await svc.create_model_for_tenant(user_id, tenant_id, model_data)
+
+        mock_dim.assert_awaited()
+        # Ensure we created exactly one record (non-multimodal)
+        assert mock_create.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_create_model_for_tenant_embedding_sets_default_chunk_batch():
+    """chunk_batch defaults to 10 when not provided for embedding models."""
+    svc = import_svc()
+
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=[]), \
+            mock.patch.object(svc, "embedding_dimension_check", new=mock.AsyncMock(return_value=512)) as mock_dim, \
+            mock.patch.object(svc, "create_model_record") as mock_create, \
+            mock.patch.object(svc, "split_repo_name", return_value=("openai", "text-embedding-3-small")):
+
+        user_id = "u1"
+        tenant_id = "t1"
+        model_data = {
+            "model_name": "openai/text-embedding-3-small",
+            "display_name": None,
+            "base_url": "https://api.openai.com",
+            "model_type": "embedding",
+            "chunk_batch": None,  # Explicitly unset to exercise defaulting
+        }
+
+        await svc.create_model_for_tenant(user_id, tenant_id, model_data)
+
+        mock_dim.assert_awaited_once()
+        assert mock_create.call_count == 1
+        # chunk_batch should be defaulted before persistence
+        create_args = mock_create.call_args[0][0]
+        assert create_args["chunk_batch"] == 10
+
+
+@pytest.mark.asyncio
+async def test_create_model_for_tenant_multi_embedding_sets_default_chunk_batch():
+    """chunk_batch defaults to 10 when not provided for multi_embedding models (covers line 79)."""
+    svc = import_svc()
+
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=[]), \
+            mock.patch.object(svc, "embedding_dimension_check", new=mock.AsyncMock(return_value=512)) as mock_dim, \
+            mock.patch.object(svc, "create_model_record") as mock_create, \
+            mock.patch.object(svc, "split_repo_name", return_value=("openai", "clip")):
+
+        user_id = "u1"
+        tenant_id = "t1"
+        model_data = {
+            "model_name": "openai/clip",
+            "display_name": None,
+            "base_url": "https://api.openai.com",
+            "model_type": "multi_embedding",
+            "chunk_batch": None,  # Explicitly unset to exercise defaulting
+        }
+
+        await svc.create_model_for_tenant(user_id, tenant_id, model_data)
+
+        mock_dim.assert_awaited_once()
+        # Should create two records: multi_embedding and its embedding variant
+        assert mock_create.call_count == 2
+
+        # Verify chunk_batch was set to 10 for both records
+        create_calls = mock_create.call_args_list
+        # First call is for multi_embedding
+        multi_emb_args = create_calls[0][0][0]
+        assert multi_emb_args["chunk_batch"] == 10
+        assert multi_emb_args["model_type"] == "multi_embedding"
+        # Second call is for embedding variant
+        emb_args = create_calls[1][0][0]
+        assert emb_args["chunk_batch"] == 10
+        assert emb_args["model_type"] == "embedding"
+
+
+@pytest.mark.asyncio
+async def test_create_provider_models_for_tenant_success():
+    svc = import_svc()
+
+    req = {"provider": "silicon", "model_type": "llm"}
+    models = [{"id": "silicon/a"}, {"id": "silicon/b"}]
+
+    with mock.patch.object(svc, "get_provider_models", new=mock.AsyncMock(return_value=models)) as mock_get, \
+            mock.patch.object(svc, "merge_existing_model_attributes", return_value=models) as mock_merge, \
+            mock.patch.object(svc, "sort_models_by_id", side_effect=lambda m: m) as mock_sort:
+
+        out = await svc.create_provider_models_for_tenant("t1", req)
+        assert out == models
+        mock_get.assert_awaited_once()
+        mock_merge.assert_called_once()
+        mock_sort.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_create_provider_models_for_tenant_exception():
+    svc = import_svc()
+
+    req = {"provider": "silicon", "model_type": "llm"}
+    with mock.patch.object(svc, "get_provider_models", new=mock.AsyncMock(side_effect=Exception("boom"))):
+        with pytest.raises(Exception) as exc:
+            await svc.create_provider_models_for_tenant("t1", req)
+        assert "Failed to create provider models" in str(exc.value)
+
+
+@pytest.mark.asyncio
+async def test_batch_create_models_for_tenant_dashscope_provider():
+    """Test batch_create_models_for_tenant with DASHSCOPE provider uses DASHSCOPE_BASE_URL."""
+    svc = import_svc()
+
+    batch_payload = {
+        "provider": "dashscope",
+        "type": "llm",
+        "models": [{"id": "qwen/qwen-turbo", "max_tokens": 8192}],
+        "api_key": "dash-key",
+    }
+
+    with mock.patch.object(svc, "get_models_by_tenant_factory_type", return_value=[]), \
+            mock.patch.object(svc, "delete_model_record"), \
+            mock.patch.object(svc, "split_repo_name", return_value=("qwen", "qwen-turbo")), \
+            mock.patch.object(svc, "add_repo_to_name", return_value="qwen/qwen-turbo"), \
+            mock.patch.object(svc, "get_models_by_display_name", return_value=[]), \
+            mock.patch.object(svc, "prepare_model_dict", new=mock.AsyncMock(return_value={"model_id": 1})), \
+            mock.patch.object(svc, "create_model_record", return_value=True):
+
+        await svc.batch_create_models_for_tenant("u1", "t1", batch_payload)
+
+        call_args = svc.prepare_model_dict.call_args
+        assert call_args[1]["model_url"] == "https://dashscope.aliyuncs.com/compatible-mode/v1/"
+
+
+@pytest.mark.asyncio
+async def test_batch_create_models_for_tenant_dashscope_stt_uses_realtime_url():
+    """DashScope STT batch creation must use the realtime websocket URL."""
+    svc = import_svc()
+
+    batch_payload = {
+        "provider": "dashscope",
+        "type": "stt",
+        "models": [{"id": "qwen3-asr-flash-realtime"}],
+        "api_key": "dash-key",
+    }
+
+    with mock.patch.object(svc, "get_models_by_tenant_factory_type", return_value=[]), \
+            mock.patch.object(svc, "delete_model_record"), \
+            mock.patch.object(svc, "split_repo_name", return_value=("", "qwen3-asr-flash-realtime")), \
+            mock.patch.object(svc, "add_repo_to_name", return_value="qwen3-asr-flash-realtime"), \
+            mock.patch.object(svc, "prepare_model_dict", new=mock.AsyncMock(return_value={"model_id": 1})), \
+            mock.patch.object(svc, "create_model_record", return_value=True):
+
+        await svc.batch_create_models_for_tenant("u1", "t1", batch_payload)
+
+        call_args = svc.prepare_model_dict.call_args
+        assert call_args[1]["model_url"] == "wss://dashscope.aliyuncs.com/api-ws/v1/realtime"
+
+
+@pytest.mark.asyncio
+async def test_batch_create_models_for_tenant_dashscope_tts_uses_realtime_url():
+    """DashScope TTS batch creation must use the realtime websocket URL."""
+    svc = import_svc()
+
+    batch_payload = {
+        "provider": "dashscope",
+        "type": "tts",
+        "models": [{"id": "qwen-tts-realtime"}],
+        "api_key": "dash-key",
+    }
+
+    with mock.patch.object(svc, "get_models_by_tenant_factory_type", return_value=[]), \
+            mock.patch.object(svc, "delete_model_record"), \
+            mock.patch.object(svc, "split_repo_name", return_value=("", "qwen-tts-realtime")), \
+            mock.patch.object(svc, "add_repo_to_name", return_value="qwen-tts-realtime"), \
+            mock.patch.object(svc, "prepare_model_dict", new=mock.AsyncMock(return_value={"model_id": 1})), \
+            mock.patch.object(svc, "create_model_record", return_value=True):
+
+        await svc.batch_create_models_for_tenant("u1", "t1", batch_payload)
+
+        call_args = svc.prepare_model_dict.call_args
+        assert call_args[1]["model_url"] == "wss://dashscope.aliyuncs.com/api-ws/v1/realtime"
+
+
+@pytest.mark.asyncio
+async def test_batch_create_models_for_tenant_tokenpony_provider():
+    """Test batch_create_models_for_tenant with TOKENPONY provider uses TOKENPONY_BASE_URL."""
+    svc = import_svc()
+
+    batch_payload = {
+        "provider": "tokenpony",
+        "type": "llm",
+        "models": [{"id": "gpt/gpt-4o", "max_tokens": 128000}],
+        "api_key": "tp-key",
+    }
+
+    with mock.patch.object(svc, "get_models_by_tenant_factory_type", return_value=[]), \
+            mock.patch.object(svc, "delete_model_record"), \
+            mock.patch.object(svc, "split_repo_name", return_value=("gpt", "gpt-4o")), \
+            mock.patch.object(svc, "add_repo_to_name", return_value="gpt/gpt-4o"), \
+            mock.patch.object(svc, "get_models_by_display_name", return_value=[]), \
+            mock.patch.object(svc, "prepare_model_dict", new=mock.AsyncMock(return_value={"model_id": 2})), \
+            mock.patch.object(svc, "create_model_record", return_value=True):
+
+        await svc.batch_create_models_for_tenant("u1", "t1", batch_payload)
+
+        call_args = svc.prepare_model_dict.call_args
+        assert call_args[1]["model_url"] == "https://api.tokenpony.cn/v1/"
+
+
+@pytest.mark.asyncio
+async def test_batch_create_models_for_tenant_other_provider():
+    """Test batch_create_models_for_tenant with non-Silicon/ModelEngine provider (covers lines 138-140)"""
+    svc = import_svc()
+
+    batch_payload = {
+        "provider": "openai",  # Not Silicon or ModelEngine
+        "type": "llm",
+        "models": [
+            {"id": "openai/gpt-4", "max_tokens": 4096},
+        ],
+        "api_key": "k",
+    }
+
+    # Add MODELENGINE to ProviderEnum if it doesn't exist
+    if not hasattr(svc.ProviderEnum, 'MODELENGINE'):
+        modelengine_item = _EnumItem("modelengine")
+        svc.ProviderEnum.MODELENGINE = modelengine_item
+
+    with mock.patch.object(svc, "get_models_by_tenant_factory_type", return_value=[]), \
+            mock.patch.object(svc, "delete_model_record"), \
+            mock.patch.object(svc, "split_repo_name", return_value=("openai", "gpt-4")), \
+            mock.patch.object(svc, "add_repo_to_name", return_value="openai/gpt-4"), \
+            mock.patch.object(svc, "get_models_by_display_name", return_value=[]), \
+            mock.patch.object(svc, "prepare_model_dict", new=mock.AsyncMock(return_value={"model_id": 1})), \
+            mock.patch.object(svc, "create_model_record", return_value=True):
+
+        await svc.batch_create_models_for_tenant("u1", "t1", batch_payload)
+
+        # Verify prepare_model_dict was called with empty model_url for non-Silicon/ModelEngine provider
+        call_args = svc.prepare_model_dict.call_args
+        # Should be empty for other providers
+        assert call_args[1]["model_url"] == ""
+
+
+@pytest.mark.asyncio
+async def test_batch_create_models_for_tenant_flow():
+    svc = import_svc()
+
+    batch_payload = {
+        "provider": "silicon",
+        "type": "llm",
+        "models": [
+            {"id": "silicon/keep", "max_tokens": 4096},
+            {"id": "silicon/new", "max_tokens": 8192},
+        ],
+        "api_key": "k",
+    }
+
+    existing = [
+        {"model_id": "del-id", "model_repo": "silicon", "model_name": "delete"},
+        {"model_id": "keep-id", "model_repo": "silicon", "model_name": "keep", "max_tokens": 1024},
+    ]
+
+    with mock.patch.object(svc, "get_models_by_tenant_factory_type", return_value=existing) as mock_get_existing, \
+            mock.patch.object(svc, "delete_model_record") as mock_delete, \
+            mock.patch.object(svc, "update_model_record") as mock_update, \
+            mock.patch.object(svc, "prepare_model_dict", new=mock.AsyncMock(return_value={"prepared": True})) as mock_prep, \
+            mock.patch.object(svc, "create_model_record") as mock_create:
+
+        await svc.batch_create_models_for_tenant("u1", "t1", batch_payload)
+
+        mock_get_existing.assert_called_once_with("t1", "silicon", "llm")
+        mock_delete.assert_called_once_with("del-id", "u1", "t1")
+        mock_update.assert_called_once_with(
+            "keep-id", {"max_tokens": 4096}, "u1")
+        mock_prep.assert_awaited()
+        mock_create.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_batch_create_models_uses_requested_type_for_each_model():
+    svc = import_svc()
+
+    batch_payload = {
+        "provider": "silicon",
+        "type": "vlm",
+        "models": [
+            {"id": "Qwen/Qwen2.5-VL-72B-Instruct", "model_type": "llm", "max_tokens": 4096},
+        ],
+        "api_key": "k",
+    }
+
+    with mock.patch.object(svc, "get_models_by_tenant_factory_type", return_value=[]), \
+            mock.patch.object(svc, "prepare_model_dict", new=mock.AsyncMock(return_value={"prepared": True})) as mock_prep, \
+            mock.patch.object(svc, "create_model_record"):
+
+        await svc.batch_create_models_for_tenant("u1", "t1", batch_payload)
+
+        prepared_model = mock_prep.call_args.kwargs["model"]
+        assert prepared_model["model_type"] == "vlm"
+
+
+@pytest.mark.asyncio
+async def test_batch_create_models_max_tokens_update():
+    """Test batch_create_models updates max_tokens when display_name exists and max_tokens changed (covers lines 160->173, 168->171)"""
+    svc = import_svc()
+
+    batch_payload = {
+        "provider": "silicon",
+        "type": "llm",
+        "models": [
+            {"id": "silicon/model1", "max_tokens": 8192},  # Changed from 4096
+            {"id": "silicon/model2", "max_tokens": 4096},  # Same as existing
+            {"id": "silicon/model3", "max_tokens": None},  # None should not update
+        ],
+        "api_key": "k",
+    }
+
+    existing = [
+        {"model_id": "id1", "model_repo": "silicon", "model_name": "model1", "max_tokens": 4096},
+        {"model_id": "id2", "model_repo": "silicon", "model_name": "model2", "max_tokens": 4096},
+        {"model_id": "id3", "model_repo": "silicon", "model_name": "model3", "max_tokens": 2048},
+    ]
+
+    with mock.patch.object(svc, "get_models_by_tenant_factory_type", return_value=existing), \
+            mock.patch.object(svc, "delete_model_record"), \
+            mock.patch.object(svc, "split_repo_name", side_effect=lambda x: ("silicon", x.split("/")[1] if "/" in x else x)), \
+            mock.patch.object(svc, "add_repo_to_name", side_effect=lambda *args, **kwargs: f"{kwargs.get('model_repo', args[0] if args else '')}/{kwargs.get('model_name', args[1] if len(args) > 1 else '')}"), \
+            mock.patch.object(svc, "update_model_record") as mock_update, \
+            mock.patch.object(svc, "prepare_model_dict", new=mock.AsyncMock(return_value={"model_id": 1})), \
+            mock.patch.object(svc, "create_model_record", return_value=True):
+
+        await svc.batch_create_models_for_tenant("u1", "t1", batch_payload)
+
+        # Should update model1 (max_tokens changed from 4096 to 8192)
+        # Note: update_model_record may be called multiple times, so check if it was called with correct args
+        update_calls = [
+            call for call in mock_update.call_args_list if call[0][0] == "id1"]
+        if update_calls:
+            assert update_calls[0][0][1] == {"max_tokens": 8192}
+
+        # Should NOT update model2 (max_tokens same) or model3 (new max_tokens is None)
+        # Verify model2 and model3 were not updated
+        model2_calls = [
+            call for call in mock_update.call_args_list if call[0][0] == "id2"]
+        model3_calls = [
+            call for call in mock_update.call_args_list if call[0][0] == "id3"]
+        # model2 should not be updated (same max_tokens)
+        assert len(model2_calls) == 0
+        # model3 should not be updated (new max_tokens is None)
+        assert len(model3_calls) == 0
+
+
+@pytest.mark.asyncio
+async def test_batch_create_models_for_tenant_exception():
+    svc = import_svc()
+
+    batch_payload = {"provider": "other", "type": "llm",
+                     "models": [{"id": "x"}], "api_key": "k"}
+
+    with mock.patch.object(svc, "get_models_by_tenant_factory_type", return_value=[]), \
+            mock.patch.object(svc, "prepare_model_dict", new=mock.AsyncMock(side_effect=Exception("prep failed"))):
+        with pytest.raises(Exception) as exc:
+            await svc.batch_create_models_for_tenant("u1", "t1", batch_payload)
+        assert "Failed to batch create models" in str(exc.value)
+
+
+async def test_list_provider_models_for_tenant_success():
+    svc = import_svc()
+
+    existing = [
+        {"model_repo": "huggingface", "model_name": "llama"},
+        {"model_repo": "openai", "model_name": "clip"},
+    ]
+    with mock.patch.object(svc, "get_models_by_tenant_factory_type", return_value=existing):
+        out = await svc.list_provider_models_for_tenant("t1", "huggingface", "llm")
+        assert out[0]["id"] == "huggingface/llama"
+        assert out[1]["id"] == "openai/clip"
+
+
+async def test_list_provider_models_for_tenant_exception():
+    svc = import_svc()
+
+    with mock.patch.object(svc, "get_models_by_tenant_factory_type", side_effect=Exception("db")):
+        with pytest.raises(Exception) as exc:
+            await svc.list_provider_models_for_tenant("t1", "p", "llm")
+        assert "Failed to list provider models" in str(exc.value)
+
+
+async def test_update_single_model_for_tenant_success_single_model():
+    """Update succeeds for a single non-embedding model with no display_name change."""
+    svc = import_svc()
+
+    existing_models = [
+        {"model_id": 1, "model_type": "llm", "display_name": "name"},
+    ]
+    model_data = {
+        "model_id": 1,
+        "display_name": "name",
+        "description": "updated",
+        "model_type": "llm",
+    }
+
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=existing_models) as mock_get, \
+            mock.patch.object(svc, "update_model_record") as mock_update:
+        await svc.update_single_model_for_tenant("u1", "t1", "name", model_data)
+
+        mock_get.assert_called_once_with("name", "t1")
+        # update_model_record should be called without model_id in the payload
+        mock_update.assert_called_once_with(
+            1,
+            {"display_name": "name", "description": "updated", "model_type": "llm"},
+            "u1",
+        )
+
+
+async def test_update_single_model_for_tenant_mirrors_max_output_into_legacy_max_tokens():
+    """LLM updates carrying max_output_tokens must mirror into the legacy
+    max_tokens column so the SDK's pre-W2 auto-fill cannot read a stale value
+    and trip CallerMaxTokensOverrideForbidden at the W2 dispatch boundary.
+    """
+    svc = import_svc()
+
+    existing_models = [
+        {"model_id": 1, "model_type": "llm", "display_name": "name", "max_tokens": 204800},
+    ]
+    model_data = {
+        "model_id": 1,
+        "display_name": "name",
+        "max_output_tokens": 131072,
+        # No explicit max_tokens — caller relies on backend coercion.
+    }
+
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=existing_models), \
+            mock.patch.object(svc, "update_model_record") as mock_update:
+        await svc.update_single_model_for_tenant("u1", "t1", "name", model_data)
+
+        update_args = mock_update.call_args.args[1]
+        assert update_args["max_output_tokens"] == 131072
+        assert update_args["max_tokens"] == 131072
+
+
+async def test_update_single_model_for_tenant_preserves_embedding_max_tokens():
+    """Embedding rows must NOT have max_tokens mirrored from max_output_tokens —
+    max_tokens is repurposed as the vector dimension on those rows.
+    """
+    svc = import_svc()
+
+    existing_models = [
+        {"model_id": 10, "model_type": "embedding", "display_name": "emb", "max_tokens": 4096},
+    ]
+    # Defensive caller accidentally passes max_output_tokens on an embedding row.
+    model_data = {
+        "model_id": 10,
+        "display_name": "emb",
+        "max_output_tokens": 8192,
+    }
+
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=existing_models), \
+            mock.patch.object(svc, "update_model_record") as mock_update:
+        await svc.update_single_model_for_tenant("u1", "t1", "emb", model_data)
+
+        update_args = mock_update.call_args.args[1]
+        # Embedding rows skip the coercion, so legacy max_tokens stays untouched.
+        assert "max_tokens" not in update_args
+
+
+async def test_update_single_model_for_tenant_conflict_new_display_name():
+    """Updating to a new conflicting display_name raises ValueError."""
+    svc = import_svc()
+
+    existing_models = [
+        {"model_id": 1, "model_type": "llm", "display_name": "old_name"},
+    ]
+    conflict_models = [
+        {"model_id": 2, "model_type": "llm", "display_name": "new_name"},
+    ]
+    model_data = {
+        "model_id": 1,
+        "display_name": "new_name",
+    }
+
+    with mock.patch.object(svc, "get_models_by_display_name", side_effect=[existing_models, conflict_models]):
+        with pytest.raises(ValueError) as exc:
+            await svc.update_single_model_for_tenant("u1", "t1", "old_name", model_data)
+        assert "already in use" in str(exc.value)
+
+
+async def test_update_single_model_for_tenant_not_found_raises_lookup_error():
+    """If no model is found for current_display_name, raise LookupError."""
+    svc = import_svc()
+
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=[]):
+        with pytest.raises(LookupError):
+            await svc.update_single_model_for_tenant("u1", "t1", "missing", {"display_name": "x"})
+
+
+async def test_update_single_model_for_tenant_multi_embedding_updates_both():
+    """Updating multi_embedding models updates both embedding and multi_embedding records."""
+    svc = import_svc()
+
+    existing_models = [
+        {"model_id": 10, "model_type": "embedding", "display_name": "emb_name"},
+        {"model_id": 11, "model_type": "multi_embedding", "display_name": "emb_name"},
+    ]
+    model_data = {
+        "model_id": 10,
+        "display_name": "emb_name",
+        "description": "updated",
+        "model_type": "multi_embedding",
+    }
+
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=existing_models) as mock_get, \
+            mock.patch.object(svc, "update_model_record") as mock_update:
+        await svc.update_single_model_for_tenant("u1", "t1", "emb_name", model_data)
+
+        mock_get.assert_called_once_with("emb_name", "t1")
+        # model_type should be stripped from update payload for multi_embedding flow
+        expected_update = {"display_name": "emb_name",
+                           "description": "updated"}
+        mock_update.assert_any_call(10, expected_update, "u1")
+        mock_update.assert_any_call(11, expected_update, "u1")
+
+
+async def test_batch_update_models_for_tenant_success():
+    svc = import_svc()
+
+    models = [{"model_id": "1", "max_tokens": 4096}, {"model_id": "2", "max_tokens": 8192}]
+    with mock.patch.object(svc, "update_model_record") as mock_update:
+        await svc.batch_update_models_for_tenant("u1", "t1", models)
+        assert mock_update.call_count == 2
+        mock_update.assert_any_call(1, {"max_tokens": 4096}, "u1", "t1")
+        mock_update.assert_any_call(2, {"max_tokens": 8192}, "u1", "t1")
+
+
+async def test_batch_update_models_for_tenant_by_name_factory():
+    """Batch update resolves model_id via get_model_by_name_factory when model_id is not numeric."""
+    svc = import_svc()
+
+    models = [{"model_id": "openai/gpt-4", "max_tokens": 4096}]
+    with mock.patch.object(
+        svc,
+        "get_model_by_name_factory",
+        return_value={"model_id": 42},
+    ) as mock_lookup, mock.patch.object(svc, "update_model_record") as mock_update:
+        await svc.batch_update_models_for_tenant("u1", "t1", models)
+        mock_lookup.assert_called_once_with("gpt-4", "openai", "t1")
+        mock_update.assert_called_once_with(42, {"max_tokens": 4096}, "u1", "t1")
+
+
+async def test_batch_update_models_for_tenant_exception():
+    svc = import_svc()
+
+    models = [{"model_id": "1"}]
+    with mock.patch.object(svc, "update_model_record", side_effect=Exception("oops")):
+        with pytest.raises(Exception) as exc:
+            await svc.batch_update_models_for_tenant("u1", "t1", models)
+        assert "Failed to batch update models" in str(exc.value)
+
+
+async def test_delete_model_for_tenant_not_found_raises_lookup_error():
+    """If no models are found for display_name, raise LookupError."""
+    svc = import_svc()
+
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=[]):
+        with pytest.raises(LookupError):
+            await svc.delete_model_for_tenant("u1", "t1", "missing")
+
+
+@pytest.mark.asyncio
+async def test_delete_model_for_tenant_embedding_deletes_both():
+    """Embedding + multi_embedding models are both deleted."""
+    svc = import_svc()
+
+    models = [
+        {
+            "model_id": "id-emb",
+            "model_type": "embedding",
+            "model_repo": "openai",
+            "model_name": "text-embedding-3-small",
+            "max_tokens": 1536,
+        },
+        {
+            "model_id": "id-multi",
+            "model_type": "multi_embedding",
+            "model_repo": "openai",
+            "model_name": "text-embedding-3-small",
+            "max_tokens": 1536,
+        },
+    ]
+
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=models) as mock_get, \
+            mock.patch.object(svc, "delete_model_record") as mock_delete:
+        await svc.delete_model_for_tenant("u1", "t1", "name")
+
+        mock_get.assert_called_once_with("name", "t1")
+        # Both embedding and multi_embedding records must be deleted
+        assert mock_delete.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_delete_model_for_tenant_cleanup_inner_exception(caplog):
+    """Inner exceptions during cleanup must be logged but must not abort the delete."""
+    svc = import_svc()
+
+    models = [
+        {"model_id": "id-emb", "model_type": "embedding",
+            "model_repo": "r", "model_name": "n", "max_tokens": 1},
+        {"model_id": "id-multi", "model_type": "multi_embedding",
+            "model_repo": "r", "model_name": "n", "max_tokens": 1},
+    ]
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=models), \
+            mock.patch.object(svc, "delete_model_record") as mock_delete:
+
+        with caplog.at_level(logging.WARNING):
+            await svc.delete_model_for_tenant("u1", "t1", "name")
+
+        # Both records must still be deleted even if internal helpers errored
+        assert mock_delete.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_delete_model_for_tenant_cleanup_outer_exception(caplog):
+    """Outer exceptions during cleanup must be logged but must not abort the delete."""
+    svc = import_svc()
+
+    models = [
+        {"model_id": "id-emb", "model_type": "embedding"},
+        {"model_id": "id-multi", "model_type": "multi_embedding"},
+    ]
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=models), \
+            mock.patch.object(svc, "delete_model_record") as mock_delete:
+
+        with caplog.at_level(logging.WARNING):
+            await svc.delete_model_for_tenant("u1", "t1", "name")
+
+        # The delete must still complete both records
+        assert mock_delete.call_count == 2
+
+
+async def test_delete_model_for_tenant_non_embedding():
+    """Non-embedding model deletes a single record."""
+    svc = import_svc()
+
+    models = [
+        {"model_id": "id", "model_type": "llm"},
+    ]
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=models), \
+            mock.patch.object(svc, "delete_model_record") as mock_delete:
+        await svc.delete_model_for_tenant("u1", "t1", "name")
+        mock_delete.assert_called_once_with("id", "u1", "t1")
+
+
+async def test_list_models_for_tenant_success():
+    svc = import_svc()
+
+    records = [
+        {"model_repo": "huggingface", "model_name": "llama",
+            "connect_status": "operational"},
+        {"model_repo": "openai", "model_name": "clip", "connect_status": None},
+    ]
+    with mock.patch.object(svc, "get_model_records", return_value=records), \
+            mock.patch.object(svc, "add_repo_to_name", side_effect=lambda model_repo, model_name: f"{model_repo}/{model_name}" if model_repo else model_name), \
+            mock.patch.object(svc.ModelConnectStatusEnum, "get_value", side_effect=lambda s: s or "not_detected"):
+        out = await svc.list_models_for_tenant("t1")
+        assert out[0]["model_name"] == "huggingface/llama"
+        assert out[1]["model_name"] == "openai/clip"
+        assert out[1]["connect_status"] == "not_detected"
+
+
+async def test_list_models_for_tenant_exception():
+    svc = import_svc()
+
+    with mock.patch.object(svc, "get_model_records", side_effect=Exception("db")):
+        with pytest.raises(Exception) as exc:
+            await svc.list_models_for_tenant("t1")
+        assert "Failed to retrieve model list" in str(exc.value)
+
+
+async def test_list_llm_models_for_tenant_success():
+    """Test list_llm_models_for_tenant returns filtered LLM models."""
+    svc = import_svc()
+
+    records = [
+        {
+            "model_id": "llm1",
+            "model_repo": "huggingface",
+            "model_name": "llama-2",
+            "display_name": "LLaMA 2",
+            "connect_status": "operational"
+        },
+        {
+            "model_id": "llm2",
+            "model_repo": "openai",
+            "model_name": "gpt-4",
+            "display_name": "GPT-4",
+            "connect_status": "not_detected"
+        }
+    ]
+
+    with mock.patch.object(svc, "get_model_records", return_value=records) as mock_get_records, \
+            mock.patch.object(svc, "add_repo_to_name", side_effect=lambda model_repo, model_name: f"{model_repo}/{model_name}" if model_repo else model_name), \
+            mock.patch.object(svc.ModelConnectStatusEnum, "get_value", side_effect=lambda s: s or "not_detected"):
+
+        result = await svc.list_llm_models_for_tenant("t1")
+
+        # Should only return LLM models, filtered by model_type="llm"
+        assert len(result) == 2
+        assert result[0]["model_id"] == "llm1"
+        assert result[0]["model_name"] == "huggingface/llama-2"
+        assert result[0]["display_name"] == "LLaMA 2"
+        assert result[0]["connect_status"] == "operational"
+
+        assert result[1]["model_id"] == "llm2"
+        assert result[1]["model_name"] == "openai/gpt-4"
+        assert result[1]["display_name"] == "GPT-4"
+        assert result[1]["connect_status"] == "not_detected"
+
+        # Verify get_model_records was called with correct filter
+        mock_get_records.assert_called_once_with({"model_type": "llm"}, "t1")
+
+
+async def test_list_llm_models_for_tenant_exception():
+    """Test list_llm_models_for_tenant handles exceptions properly."""
+    svc = import_svc()
+
+    with mock.patch.object(svc, "get_model_records", side_effect=Exception("Database error")):
+        with pytest.raises(Exception) as exc:
+            await svc.list_llm_models_for_tenant("t1")
+        assert "Failed to retrieve model list" in str(exc.value)
+
+
+async def test_list_llm_models_for_tenant_normalizes_connect_status():
+    """Test list_llm_models_for_tenant normalizes connect_status values."""
+    svc = import_svc()
+
+    records = [
+        {
+            "model_id": "llm1",
+            "model_repo": "huggingface",
+            "model_name": "llama-2",
+            "display_name": "LLaMA 2",
+            "connect_status": None  # Should be normalized to "not_detected"
+        },
+        {
+            "model_id": "llm2",
+            "model_repo": "openai",
+            "model_name": "gpt-4",
+            "display_name": "GPT-4",
+            "connect_status": "operational"
+        }
+    ]
+
+    with mock.patch.object(svc, "get_model_records", return_value=records), \
+            mock.patch.object(svc, "add_repo_to_name", side_effect=lambda model_repo, model_name: f"{model_repo}/{model_name}" if model_repo else model_name), \
+            mock.patch.object(svc.ModelConnectStatusEnum, "get_value", side_effect=lambda s: s or "not_detected"):
+
+        result = await svc.list_llm_models_for_tenant("t1")
+
+        assert len(result) == 2
+        # Normalized from None
+        assert result[0]["connect_status"] == "not_detected"
+        assert result[1]["connect_status"] == "operational"
+
+
+async def test_list_models_for_tenant_type_mapping():
+    """Test list_models_for_tenant maps model_type from 'chat' to 'llm' (covers line 310)"""
+    svc = import_svc()
+
+    records = [
+        {
+            "model_id": "llm1",
+            "model_repo": "openai",
+            "model_name": "gpt-4",
+            "display_name": "GPT-4",
+            "model_type": "chat",  # ModelEngine type that should be mapped to "llm"
+            "connect_status": "operational"
+        },
+        {
+            "model_id": "llm2",
+            "model_repo": "anthropic",
+            "model_name": "claude-3",
+            "display_name": "Claude 3",
+            "model_type": "llm",  # Already correct type
+            "connect_status": "not_detected"
+        }
+    ]
+
+    with mock.patch.object(svc, "get_model_records", return_value=records), \
+            mock.patch.object(svc, "add_repo_to_name", side_effect=lambda model_repo, model_name: f"{model_repo}/{model_name}" if model_repo else model_name), \
+            mock.patch.object(svc.ModelConnectStatusEnum, "get_value", side_effect=lambda s: s or "not_detected"):
+
+        result = await svc.list_models_for_tenant("t1")
+
+        assert len(result) == 2
+        # First model should have model_type mapped from "chat" to "llm" (covers line 310)
+        assert result[0]["model_type"] == "llm"  # Should be mapped from "chat"
+        assert result[0]["model_id"] == "llm1"
+        # Second model should remain "llm"
+        assert result[1]["model_type"] == "llm"
+        assert result[1]["model_id"] == "llm2"
+
+
+async def test_list_llm_models_for_tenant_handles_missing_repo():
+    """Test list_llm_models_for_tenant handles models without repo."""
+    svc = import_svc()
+
+    records = [
+        {
+            "model_id": "llm1",
+            "model_repo": "",  # Empty repo
+            "model_name": "local-model",
+            "display_name": "Local Model",
+            "connect_status": "operational"
+        },
+        {
+            "model_id": "llm2",
+            "model_repo": None,  # None repo
+            "model_name": "another-model",
+            "display_name": "Another Model",
+            "connect_status": "operational"
+        }
+    ]
+
+    with mock.patch.object(svc, "get_model_records", return_value=records), \
+            mock.patch.object(svc, "add_repo_to_name", side_effect=lambda model_repo, model_name: f"{model_repo}/{model_name}" if model_repo else model_name), \
+            mock.patch.object(svc.ModelConnectStatusEnum, "get_value", side_effect=lambda s: s or "not_detected"):
+
+        result = await svc.list_llm_models_for_tenant("t1")
+
+        assert len(result) == 2
+        assert result[0]["model_name"] == "local-model"  # No repo prefix
+        assert result[1]["model_name"] == "another-model"  # No repo prefix
+
+
+# Tests for list_models_for_admin
+async def test_list_models_for_admin_success():
+    """Test list_models_for_tenant returns models for a specified tenant."""
+    svc = import_svc()
+
+    records = [
+        {"model_repo": "huggingface", "model_name": "llama",
+            "connect_status": "operational", "model_type": "llm"},
+        {"model_repo": "openai", "model_name": "clip", "connect_status": None, "model_type": "embedding"},
+    ]
+
+    with mock.patch.object(svc, "get_model_records", return_value=records), \
+            mock.patch.object(svc, "add_repo_to_name", side_effect=lambda model_repo, model_name: f"{model_repo}/{model_name}" if model_repo else model_name), \
+            mock.patch.object(svc.ModelConnectStatusEnum, "get_value", side_effect=lambda s: s or "not_detected"):
+        out = await svc.list_models_for_admin("t1")
+        assert out["tenant_id"] == "t1"
+        assert out["tenant_name"] == "Test Tenant"
+        assert out["total"] == 2
+        assert out["page"] == 1
+        assert out["page_size"] == 20
+        assert out["total_pages"] == 1
+        assert len(out["models"]) == 2
+        assert out["models"][0]["model_name"] == "huggingface/llama"
+
+
+async def test_list_models_for_admin_with_pagination():
+    """Test list_models_for_tenant handles pagination correctly."""
+    svc = import_svc()
+
+    # Create 25 records to test pagination
+    records = [
+        {"model_repo": "openai", "model_name": f"gpt-{i}", "connect_status": "operational", "model_type": "llm"}
+        for i in range(25)
+    ]
+
+    with mock.patch.object(svc, "get_model_records", return_value=records), \
+            mock.patch("backend.utils.model_name_utils.add_repo_to_name", side_effect=_add_repo_to_name), \
+            mock.patch.object(svc.ModelConnectStatusEnum, "get_value", side_effect=lambda s: s or "not_detected"):
+        # Page 1, page_size 10
+        out = await svc.list_models_for_admin("t1", page=1, page_size=10)
+        assert out["page"] == 1
+        assert out["page_size"] == 10
+        assert out["total"] == 25
+        assert out["total_pages"] == 3
+        assert len(out["models"]) == 10
+        assert out["models"][0]["model_name"] == "openai/gpt-0"
+
+        # Page 2
+        out = await svc.list_models_for_admin("t1", page=2, page_size=10)
+        assert out["page"] == 2
+        assert len(out["models"]) == 10
+
+        # Page 3 (last page)
+        out = await svc.list_models_for_admin("t1", page=3, page_size=10)
+        assert out["page"] == 3
+        assert out["total_pages"] == 3
+        assert len(out["models"]) == 5
+
+
+async def test_list_models_for_admin_with_model_type_filter():
+    """Test list_models_for_tenant filters by model_type."""
+    svc = import_svc()
+
+    records = [
+        {"model_repo": "openai", "model_name": "gpt-4", "connect_status": "operational", "model_type": "llm"},
+        {"model_repo": "openai", "model_name": "text-embedding", "connect_status": "operational", "model_type": "embedding"},
+    ]
+
+    with mock.patch.object(svc, "get_model_records", return_value=records) as mock_get_records, \
+            mock.patch("backend.utils.model_name_utils.add_repo_to_name", side_effect=lambda model_repo, model_name: f"{model_repo}/{model_name}" if model_repo else model_name), \
+            mock.patch.object(svc.ModelConnectStatusEnum, "get_value", side_effect=lambda s: s or "not_detected"):
+        # Filter by llm
+        out = await svc.list_models_for_admin("t1", model_type="llm")
+        mock_get_records.assert_called_once_with({"model_type": "llm"}, "t1")
+        assert out["total"] == 2
+        assert out["models"][0]["model_type"] == "llm"
+
+
+async def test_list_models_for_admin_empty_tenant():
+    """Test list_models_for_tenant handles empty tenant gracefully."""
+    svc = import_svc()
+
+    with mock.patch.object(svc, "get_model_records", return_value=[]):
+        # Use "empty_tenant" ID to trigger exception in stub, resulting in empty tenant_name
+        out = await svc.list_models_for_admin("empty_tenant")
+        assert out["tenant_id"] == "empty_tenant"
+        assert out["tenant_name"] == ""
+        assert out["total"] == 0
+        assert out["total_pages"] == 0
+        assert len(out["models"]) == 0
+
+
+async def test_list_models_for_admin_exception():
+    """Test list_models_for_tenant handles exceptions."""
+    svc = import_svc()
+
+    with mock.patch.object(svc, "get_model_records", side_effect=Exception("db error")):
+        with pytest.raises(Exception) as exc:
+            await svc.list_models_for_admin("t1")
+        assert "Failed to retrieve admin model list" in str(exc.value)
+
+
+async def test_list_models_for_admin_type_mapping():
+    """Test list_models_for_tenant maps model_type from 'chat' to 'llm'."""
+    svc = import_svc()
+
+    records = [
+        {
+            "model_id": "llm1",
+            "model_repo": "openai",
+            "model_name": "gpt-4",
+            "display_name": "GPT-4",
+            "model_type": "chat",  # Should be mapped to "llm"
+            "connect_status": "operational"
+        },
+    ]
+
+    with mock.patch.object(svc, "get_model_records", return_value=records), \
+            mock.patch.object(svc, "add_repo_to_name", side_effect=lambda model_repo, model_name: f"{model_repo}/{model_name}" if model_repo else model_name), \
+            mock.patch.object(svc.ModelConnectStatusEnum, "get_value", side_effect=lambda s: s or "not_detected"):
+        out = await svc.list_models_for_admin("t1")
+
+        assert len(out["models"]) == 1
+        assert out["models"][0]["model_type"] == "llm"  # Should be mapped from "chat"
+
+
+# ============================================================
+# Coverage tests for uncovered lines
+# ============================================================
+
+@pytest.mark.asyncio
+async def test_create_model_for_tenant_embedding_dimension_none():
+    """Test that dimension=None raises ValueError (covered by outer exception handler, line 116)."""
+    svc = import_svc()
+
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=[]), \
+            mock.patch.object(svc, "embedding_dimension_check", new=mock.AsyncMock(return_value=None)), \
+            mock.patch.object(svc, "split_repo_name", return_value=("openai", "text-embedding-ada-002")):
+
+        model_data = {
+            "model_name": "openai/text-embedding-ada-002",
+            "display_name": None,
+            "base_url": "https://api.openai.com",
+            "model_type": "embedding",
+        }
+
+        # ValueError is raised at line 116 but caught by outer except Exception at line 144,
+        # which re-raises as Exception with "Failed to create model: ..."
+        with pytest.raises(Exception) as exc:
+            await svc.create_model_for_tenant("u1", "t1", model_data)
+        assert "Failed to get embedding dimension" in str(exc.value)
+
+
+@pytest.mark.asyncio
+async def test_batch_create_models_for_tenant_modelengine_provider():
+    """Test MODELENGINE provider sets model_url to empty string (covers line 185)."""
+    svc = import_svc()
+
+    # Ensure MODELENGINE exists in ProviderEnum
+    if not hasattr(svc.ProviderEnum, 'MODELENGINE'):
+        modelengine_item = _EnumItem("modelengine")
+        svc.ProviderEnum.MODELENGINE = modelengine_item
+
+    batch_payload = {
+        "provider": "modelengine",
+        "type": "llm",
+        "models": [{"id": "modelengine/gpt-4", "max_tokens": 4096}],
+        "api_key": "me-key",
+    }
+
+    with mock.patch.object(svc, "get_models_by_tenant_factory_type", return_value=[]), \
+            mock.patch.object(svc, "split_repo_name", return_value=("modelengine", "gpt-4")), \
+            mock.patch.object(svc, "add_repo_to_name", return_value="modelengine/gpt-4"), \
+            mock.patch.object(svc, "get_models_by_display_name", return_value=[]), \
+            mock.patch.object(svc, "prepare_model_dict", new=mock.AsyncMock(return_value={"model_id": 1})), \
+            mock.patch.object(svc, "create_model_record", return_value=True):
+
+        await svc.batch_create_models_for_tenant("u1", "t1", batch_payload)
+
+        # MODELENGINE should pass empty string as model_url
+        call_args = svc.prepare_model_dict.call_args
+        assert call_args[1]["model_url"] == ""
+
+
+async def test_update_single_model_for_tenant_api_key_sets_ssl_verify():
+    """Test that providing api_key in model_data auto-sets ssl_verify (covers lines 305-308)."""
+    svc = import_svc()
+
+    existing_models = [
+        {"model_id": 1, "model_type": "llm", "display_name": "name"},
+    ]
+    model_data = {
+        "model_id": 1,
+        "display_name": "name",
+        "api_key": "my-secret-key",
+    }
+
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=existing_models), \
+            mock.patch.object(svc, "update_model_record") as mock_update:
+
+        await svc.update_single_model_for_tenant("u1", "t1", "name", model_data)
+
+        # ssl_verify should be set to True since api_key is non-empty
+        update_call = mock_update.call_args
+        assert update_call[0][1]["ssl_verify"] is True
+
+
+async def test_update_single_model_for_tenant_empty_api_key_sets_ssl_verify_false():
+    """Test that empty api_key in model_data sets ssl_verify to False (covers lines 305-308)."""
+    svc = import_svc()
+
+    existing_models = [
+        {"model_id": 1, "model_type": "llm", "display_name": "name"},
+    ]
+    model_data = {
+        "model_id": 1,
+        "display_name": "name",
+        "api_key": "",
+    }
+
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=existing_models), \
+            mock.patch.object(svc, "update_model_record") as mock_update:
+
+        await svc.update_single_model_for_tenant("u1", "t1", "name", model_data)
+
+        update_call = mock_update.call_args
+        assert update_call[0][1]["ssl_verify"] is False
+
+
+async def test_update_single_model_for_tenant_generic_exception():
+    """Test that generic exceptions are caught and re-raised (covers lines 329-331)."""
+    svc = import_svc()
+
+    existing_models = [
+        {"model_id": 1, "model_type": "llm", "display_name": "name"},
+    ]
+    model_data = {
+        "model_id": 1,
+        "display_name": "name",
+    }
+
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=existing_models), \
+            mock.patch.object(svc, "update_model_record", side_effect=RuntimeError("db failure")):
+
+        with pytest.raises(Exception) as exc:
+            await svc.update_single_model_for_tenant("u1", "t1", "name", model_data)
+        assert "Failed to update model" in str(exc.value)
+
+
+async def test_batch_update_models_for_tenant_by_name_only_not_found():
+    """Test batch_update with model_name only (no slash) when model not found (covers lines 351-352, 359-360)."""
+    svc = import_svc()
+
+    models = [{"model_id": "gpt-4", "max_tokens": 4096}]  # No slash -> goes to else branch
+
+    with mock.patch.object(
+        svc,
+        "get_model_by_name_factory",
+        return_value=None,
+    ) as mock_lookup:
+        await svc.batch_update_models_for_tenant("u1", "t1", models)
+
+        mock_lookup.assert_called_once_with("gpt-4", None, "t1")
+
+
+async def test_delete_model_for_tenant_generic_exception():
+    """Test that generic exceptions are caught and re-raised (covers line 426)."""
+    svc = import_svc()
+
+    with mock.patch.object(
+        svc,
+        "get_models_by_display_name",
+        side_effect=RuntimeError("db connection lost"),
+    ):
+        with pytest.raises(Exception) as exc:
+            await svc.delete_model_for_tenant("u1", "t1", "name")
+        assert "Failed to delete model" in str(exc.value)
+
+
+@pytest.mark.asyncio
+async def test_create_model_for_tenant_embedding_with_api_key_sets_ssl_verify_true():
+    """Test that non-empty api_key and no open/router URL sets ssl_verify=True (covers line 73)."""
+    svc = import_svc()
+
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=[]), \
+            mock.patch.object(svc, "embedding_dimension_check", new=mock.AsyncMock(return_value=1536)), \
+            mock.patch.object(svc, "create_model_record") as mock_create, \
+            mock.patch.object(svc, "split_repo_name", return_value=("openai", "text-embedding-ada-002")):
+
+        model_data = {
+            "model_name": "openai/text-embedding-ada-002",
+            "display_name": None,
+            "base_url": "https://api.openai.com",
+            "model_type": "embedding",
+            "api_key": "sk-my-secret-key",
+        }
+
+        await svc.create_model_for_tenant("u1", "t1", model_data)
+
+        assert mock_create.call_count == 1
+        create_args = mock_create.call_args[0][0]
+        assert create_args["ssl_verify"] is True
+
+
+@pytest.mark.asyncio
+async def test_batch_create_models_for_tenant_update_branch_persists_operator_capacity():
+    """Re-confirming a batch with operator-marked capacity updates W1/W2 columns.
+
+    Regression test for the gap that left glm-5.x style rows with NULL
+    W2 columns: the batch_create update branch previously only checked
+    legacy max_tokens for changes, so a user who tweaked the top-level
+    batch defaults and re-confirmed could not push the new
+    context_window_tokens / max_output_tokens onto an existing row.
+    """
+    svc = import_svc()
+
+    existing_row = {
+        "model_id": 42,
+        "model_repo": "dashscope",
+        "model_name": "glm-5.2",
+        "max_tokens": 31920,
+        "context_window_tokens": None,
+        "max_output_tokens": None,
+        "capacity_source": None,
+    }
+
+    batch_payload = {
+        "provider": "dashscope",
+        "type": "llm",
+        "models": [
+            {
+                "id": "dashscope/glm-5.2",
+                "max_tokens": 31920,
+                "context_window_tokens": 200000,
+                "max_output_tokens": 31920,
+                "default_output_reserve_tokens": 4096,
+                "tokenizer_family": "qwen",
+                "capacity_source": "operator",
+            }
+        ],
+        "api_key": "dash-key",
+    }
+
+    with mock.patch.object(svc, "get_models_by_tenant_factory_type", return_value=[existing_row]), \
+            mock.patch.object(svc, "delete_model_record"), \
+            mock.patch.object(svc, "split_repo_name", return_value=("dashscope", "glm-5.2")), \
+            mock.patch.object(svc, "add_repo_to_name", return_value="dashscope/glm-5.2"), \
+            mock.patch.object(svc, "update_model_record") as mock_update, \
+            mock.patch.object(svc, "create_model_record"):
+
+        await svc.batch_create_models_for_tenant("u1", "t1", batch_payload)
+
+        mock_update.assert_called_once()
+        called_model_id, called_update_data, *_ = mock_update.call_args[0]
+        assert called_model_id == 42
+        assert called_update_data["context_window_tokens"] == 200000
+        assert called_update_data["max_output_tokens"] == 31920
+        assert called_update_data["default_output_reserve_tokens"] == 4096
+        assert called_update_data["tokenizer_family"] == "qwen"
+        assert called_update_data["capacity_source"] == "operator"
+
+
+@pytest.mark.asyncio
+async def test_batch_create_models_for_tenant_update_branch_skips_provider_candidate_capacity():
+    """Provider-discovered hints must not auto-overwrite an existing row.
+
+    Even when the catalog response contains rich inference_metadata, those
+    values stay tagged capacity_source="provider_candidate" until the
+    operator accepts them. Refreshing the provider list must not
+    silently rewrite a row's operator-set capacity (or its NULLs) with
+    catalog hints.
+    """
+    svc = import_svc()
+
+    existing_row = {
+        "model_id": 7,
+        "model_repo": "dashscope",
+        "model_name": "glm-5.1",
+        "max_tokens": 8192,
+        "context_window_tokens": None,
+        "max_output_tokens": None,
+        "capacity_source": None,
+    }
+
+    batch_payload = {
+        "provider": "dashscope",
+        "type": "llm",
+        "models": [
+            {
+                "id": "dashscope/glm-5.1",
+                "max_tokens": 8192,
+                "context_window_tokens": 128000,
+                "max_output_tokens": 8192,
+                "tokenizer_family": "qwen",
+                "capacity_source": "provider_candidate",
+            }
+        ],
+        "api_key": "dash-key",
+    }
+
+    with mock.patch.object(svc, "get_models_by_tenant_factory_type", return_value=[existing_row]), \
+            mock.patch.object(svc, "delete_model_record"), \
+            mock.patch.object(svc, "split_repo_name", return_value=("dashscope", "glm-5.1")), \
+            mock.patch.object(svc, "add_repo_to_name", return_value="dashscope/glm-5.1"), \
+            mock.patch.object(svc, "update_model_record") as mock_update, \
+            mock.patch.object(svc, "create_model_record"):
+
+        await svc.batch_create_models_for_tenant("u1", "t1", batch_payload)
+
+        # max_tokens didn't change between existing (8192) and incoming
+        # (8192), so no update is needed at all. If the implementation
+        # were treating provider_candidate as authoritative, update would
+        # fire with the W2 fields.
+        if mock_update.called:
+            _, called_update_data, *_ = mock_update.call_args[0]
+            assert "context_window_tokens" not in called_update_data
+            assert "max_output_tokens" not in called_update_data
+            assert "tokenizer_family" not in called_update_data
+            assert called_update_data.get("capacity_source") != "provider_candidate"
+
+
+def test_get_capacity_coverage_filters_bare_llm_vlm_rows():
+    svc = import_svc()
+
+    records = [
+        {
+            "model_id": 1,
+            "model_repo": "",
+            "model_name": "gpt-4o",
+            "model_factory": "openai",
+            "model_type": "llm",
+            "context_window_tokens": 128000,
+            "max_output_tokens": 16384,
+            "max_tokens": 16384,
+            "base_url": "https://api.openai.com/v1",
+        },
+        {
+            "model_id": 2,
+            "model_repo": "",
+            "model_name": "glm-5",
+            "model_factory": "OpenAI-API-Compatible",
+            "model_type": "llm",
+            "context_window_tokens": None,
+            "max_output_tokens": None,
+            "max_tokens": 131072,
+            "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        },
+        {
+            "model_id": 3,
+            "model_repo": "",
+            "model_name": "vision-model",
+            "model_factory": "custom",
+            "model_type": "vlm",
+            "context_window_tokens": 32000,
+            "max_output_tokens": None,
+            "max_tokens": 8192,
+            "base_url": "https://example.com/v1",
+        },
+        {
+            "model_id": 4,
+            "model_repo": "",
+            "model_name": "embedding-model",
+            "model_factory": "openai",
+            "model_type": "embedding",
+            "context_window_tokens": None,
+            "max_output_tokens": None,
+            "max_tokens": 1536,
+            "base_url": "https://api.openai.com/v1",
+        },
+        {
+            "model_id": 5,
+            "model_repo": "",
+            "model_name": "rerank-model",
+            "model_factory": "custom",
+            "model_type": "rerank",
+            "context_window_tokens": None,
+            "max_output_tokens": None,
+            "max_tokens": 512,
+            "base_url": "https://example.com/v1",
+        },
+    ]
+
+    with mock.patch.object(svc, "get_model_records", return_value=records), \
+            mock.patch.object(svc, "_capacity_suggestion_available", side_effect=[True, False]):
+        result = svc.get_capacity_coverage("tenant-a")
+
+    assert result["total_llm_vlm"] == 3
+    assert result["bare_count"] == 2
+    assert [model["model_id"] for model in result["bare_models"]] == [2, 3]
+    assert result["bare_models"][0]["max_tokens"] == 131072
+    assert result["bare_models"][0]["suggestion_available"] is True
+    assert result["bare_models"][1]["suggestion_available"] is False
+
+
+def test_get_capacity_coverage_visibility_flag_off():
+    svc = import_svc()
+
+    with mock.patch.object(svc, "CAPACITY_VISIBILITY_ENABLED", False), \
+            mock.patch.object(svc, "get_model_records") as mock_get_records:
+        result = svc.get_capacity_coverage("tenant-a")
+
+    assert result == {"total_llm_vlm": 0, "bare_count": 0, "bare_models": []}
+    mock_get_records.assert_not_called()
+
+
+def test_capacity_suggestion_available_uses_catalog_matcher():
+    svc = import_svc()
+
+    model = {
+        "model_id": 10,
+        "model_repo": "",
+        "model_name": "gpt-4o",
+        "model_factory": "openai",
+        "model_type": "llm",
+        "base_url": "https://api.openai.com/v1",
+    }
+    fake_result = mock.MagicMock()
+    fake_result.match_kind = svc.CapacitySuggestionMatchKind.CATALOG_EXACT
+
+    with mock.patch.object(svc, "suggest_capacity", return_value=fake_result) as mock_suggest:
+        assert svc._capacity_suggestion_available(model) is True
+
+    mock_suggest.assert_called_once_with(
+        model_name="gpt-4o",
+        base_url="https://api.openai.com/v1",
+        provider_hint="openai",
+        model_type="llm",
+        enabled=True,
+    )
+
+
+def test_capacity_suggestion_available_records_error_on_exception():
+    """A catalog-matcher exception falls back to False AND increments the
+    coverage-error counter. Without the counter a corrupt catalog entry would
+    silently flip every row's suggestion_available to False with zero signal.
+    """
+    svc = import_svc()
+
+    model = {
+        "model_id": 42,
+        "model_repo": "",
+        "model_name": "broken-model",
+        "model_factory": "openai",
+        "model_type": "llm",
+        "base_url": "https://api.openai.com/v1",
+    }
+
+    with mock.patch.object(svc, "suggest_capacity", side_effect=RuntimeError("catalog corrupt")), \
+            mock.patch.object(svc, "_record_capacity_coverage_error") as mock_record:
+        assert svc._capacity_suggestion_available(model) is False
+
+    mock_record.assert_called_once()
+    recorded_args = mock_record.call_args[0]
+    assert recorded_args[0] == 42
+    assert isinstance(recorded_args[1], RuntimeError)
+
+
+def test_record_capacity_coverage_error_no_op_when_counter_disabled():
+    """The recorder must not raise when OpenTelemetry is unavailable; the
+    counter is None and the call becomes a no-op so coverage scans keep
+    working in deployments without telemetry installed.
+    """
+    svc = import_svc()
+
+    with mock.patch.object(svc, "_capacity_suggestion_coverage_errors_total", None):
+        # Should not raise.
+        svc._record_capacity_coverage_error(7, RuntimeError("boom"))
+
+
+# ---------------------------------------------------------------------------
+# W11 V1.5 - cross-tenant isolation and accept-signal metrics
+# ---------------------------------------------------------------------------
+
+
+def test_get_capacity_coverage_cross_tenant_isolation():
+    """Spec L312-322: a bare row in tenant B must not appear in tenant A's
+    response. The service layer relies on `get_model_records(None, tenant_id)`
+    for the scoping; this test verifies the contract by routing records by
+    tenant_id at the mock boundary and asserting both tenants see only their
+    own bare rows.
+    """
+    svc = import_svc()
+
+    tenant_a_rows = [
+        {
+            "model_id": 11,
+            "model_repo": "",
+            "model_name": "tenant-a-bare",
+            "model_factory": "OpenAI-API-Compatible",
+            "model_type": "llm",
+            "context_window_tokens": None,
+            "max_output_tokens": None,
+            "max_tokens": 8192,
+            "base_url": "https://api.tenant-a.example.com/v1",
+        },
+    ]
+    tenant_b_rows = [
+        {
+            "model_id": 22,
+            "model_repo": "",
+            "model_name": "tenant-b-bare",
+            "model_factory": "OpenAI-API-Compatible",
+            "model_type": "llm",
+            "context_window_tokens": None,
+            "max_output_tokens": None,
+            "max_tokens": 16384,
+            "base_url": "https://api.tenant-b.example.com/v1",
+        },
+    ]
+
+    def get_records_by_tenant(_filters, tenant_id):
+        if tenant_id == "tenant-a":
+            return list(tenant_a_rows)
+        if tenant_id == "tenant-b":
+            return list(tenant_b_rows)
+        return []
+
+    with mock.patch.object(svc, "get_model_records", side_effect=get_records_by_tenant), \
+            mock.patch.object(svc, "_capacity_suggestion_available", return_value=False):
+        result_a = svc.get_capacity_coverage("tenant-a")
+        result_b = svc.get_capacity_coverage("tenant-b")
+
+    assert [m["model_id"] for m in result_a["bare_models"]] == [11]
+    assert [m["model_id"] for m in result_b["bare_models"]] == [22]
+    # Neither tenant must see the other's model_id anywhere in its payload.
+    assert all(m["model_id"] != 22 for m in result_a["bare_models"])
+    assert all(m["model_id"] != 11 for m in result_b["bare_models"])
+    assert result_a["total_llm_vlm"] == 1
+    assert result_b["total_llm_vlm"] == 1
+
+
+def test_pop_capacity_accept_signal_extracts_and_strips():
+    """The frontend ships accepted_suggestion_match_kind /
+    accepted_capability_profile_version on save. Spec L500-502 marks them
+    audit-only; the app layer must strip them before the dict reaches the
+    DB write, and return the popped values so the recorder can label the
+    counter.
+    """
+    svc = import_svc()
+
+    payload = {
+        "model_name": "gpt-4o",
+        "model_factory": "openai",
+        "context_window_tokens": 128000,
+        "max_output_tokens": 16384,
+        "capacity_source": "operator",
+        "accepted_suggestion_match_kind": "catalog_exact",
+        "accepted_capability_profile_version": "openai/gpt-4o@1",
+    }
+
+    signal = svc.pop_capacity_accept_signal(payload)
+
+    assert signal == {
+        "match_kind": "catalog_exact",
+        "capability_profile_version": "openai/gpt-4o@1",
+    }
+    # Audit fields must not leak through to DB write.
+    assert "accepted_suggestion_match_kind" not in payload
+    assert "accepted_capability_profile_version" not in payload
+    # Real model fields are untouched.
+    assert payload["model_name"] == "gpt-4o"
+    assert payload["context_window_tokens"] == 128000
+
+
+def test_pop_capacity_accept_signal_returns_none_without_match_kind():
+    svc = import_svc()
+
+    # Plain save: no accept fields at all.
+    assert svc.pop_capacity_accept_signal({"model_name": "x"}) is None
+
+    # match_kind missing but version present -> still treated as "no accept"
+    # since match_kind is the metric-label key and version alone is meaningless.
+    only_version = {"accepted_capability_profile_version": "x/y@1"}
+    assert svc.pop_capacity_accept_signal(only_version) is None
+    # The orphan version field is still stripped so it cannot reach the DB.
+    assert "accepted_capability_profile_version" not in only_version
+
+
+def test_record_capacity_suggestion_accept_no_op_when_counter_disabled():
+    """Same OTel-optional guard as the coverage-errors recorder."""
+    svc = import_svc()
+
+    with mock.patch.object(svc, "_capacity_suggestion_accept_total", None):
+        # Should not raise.
+        svc._record_capacity_suggestion_accept("catalog_exact", "openai")
+
+
+def test_record_capacity_suggestion_accept_labels_counter():
+    """When the counter is wired, the recorder forwards match_kind and a
+    lower-cased provider label so dashboards can compute per-provider
+    accept rates without inconsistent casing.
+    """
+    svc = import_svc()
+    counter = mock.MagicMock()
+
+    with mock.patch.object(svc, "_capacity_suggestion_accept_total", counter):
+        svc._record_capacity_suggestion_accept("catalog_fuzzy", "DashScope")
+
+    counter.add.assert_called_once_with(
+        1, {"match_kind": "catalog_fuzzy", "provider": "dashscope"}
+    )
+
+
+# ---------------------------------------------------------------------------
+# Tests for create_model_for_tenant embedding URL fallback logic (NEW)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_cmt_embedding_original_url_succeeds_no_fallback():
+    """create_model_for_tenant: embedding original URL succeeds -> stored with original URL."""
+    svc = import_svc()
+
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=[]), \
+            mock.patch.object(svc, "embedding_dimension_check", new=mock.AsyncMock(return_value=768)) as mock_dim, \
+            mock.patch.object(svc, "create_model_record") as mock_create, \
+            mock.patch.object(svc, "split_repo_name", return_value=("", "test-emb")), \
+            mock.patch.object(svc, "_infer_model_factory", return_value=None):
+
+        # Use non-localhost URL to avoid automatic replacement
+        model_data = {
+            "model_name": "test-emb",
+            "display_name": "Test Emb",
+            "base_url": "http://proxy.local:8794/embed",
+            "model_type": "embedding",
+            "api_key": "k",
+        }
+
+        await svc.create_model_for_tenant("u1", "t1", model_data)
+
+        # embedding_dimension_check called only once (original URL succeeded)
+        assert mock_dim.call_count == 1
+        # Model stored with original URL
+        created = mock_create.call_args[0][0]
+        assert created["base_url"] == "http://proxy.local:8794/embed"
+        assert created["max_tokens"] == 768
+
+
+@pytest.mark.asyncio
+async def test_cmt_embedding_fallback_to_embeddings_url():
+    """create_model_for_tenant: original URL fails, /embeddings appended succeeds."""
+    svc = import_svc()
+
+    # First call returns None (fail), second call returns dimension
+    mock_dim = mock.AsyncMock(side_effect=[None, 1024])
+
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=[]), \
+            mock.patch.object(svc, "embedding_dimension_check", new=mock_dim), \
+            mock.patch.object(svc, "create_model_record") as mock_create, \
+            mock.patch.object(svc, "split_repo_name", return_value=("", "test-emb")), \
+            mock.patch.object(svc, "_infer_model_factory", return_value=None):
+
+        model_data = {
+            "model_name": "test-emb",
+            "display_name": "Test Emb",
+            "base_url": "https://api.openai.com/v1",
+            "model_type": "embedding",
+            "api_key": "k",
+        }
+
+        await svc.create_model_for_tenant("u1", "t1", model_data)
+
+        # embedding_dimension_check called twice
+        assert mock_dim.call_count == 2
+        # Model stored with /embeddings appended URL
+        created = mock_create.call_args[0][0]
+        assert created["base_url"] == "https://api.openai.com/v1/embeddings"
+        assert created["max_tokens"] == 1024
+
+
+@pytest.mark.asyncio
+async def test_cmt_embedding_url_already_has_embeddings_no_fallback():
+    """create_model_for_tenant: URL already has /embeddings -> no fallback attempted."""
+    svc = import_svc()
+
+    mock_dim = mock.AsyncMock(return_value=512)
+
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=[]), \
+            mock.patch.object(svc, "embedding_dimension_check", new=mock_dim), \
+            mock.patch.object(svc, "create_model_record") as mock_create, \
+            mock.patch.object(svc, "split_repo_name", return_value=("", "test-emb")), \
+            mock.patch.object(svc, "_infer_model_factory", return_value=None):
+
+        model_data = {
+            "model_name": "test-emb",
+            "display_name": "Test Emb",
+            "base_url": "https://api.openai.com/v1/embeddings",
+            "model_type": "embedding",
+            "api_key": "k",
+        }
+
+        await svc.create_model_for_tenant("u1", "t1", model_data)
+
+        # Only one call since URL already has /embeddings
+        assert mock_dim.call_count == 1
+        created = mock_create.call_args[0][0]
+        assert created["base_url"] == "https://api.openai.com/v1/embeddings"
+
+
+@pytest.mark.asyncio
+async def test_cmt_embedding_both_urls_fail_raises():
+    """create_model_for_tenant: both URLs fail -> raises Exception."""
+    svc = import_svc()
+
+    mock_dim = mock.AsyncMock(return_value=None)
+
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=[]), \
+            mock.patch.object(svc, "embedding_dimension_check", new=mock_dim), \
+            mock.patch.object(svc, "split_repo_name", return_value=("", "test-emb")), \
+            mock.patch.object(svc, "_infer_model_factory", return_value=None):
+
+        model_data = {
+            "model_name": "test-emb",
+            "display_name": "Test Emb",
+            "base_url": "https://api.openai.com/v1",
+            "model_type": "embedding",
+            "api_key": "k",
+        }
+
+        with pytest.raises(Exception) as exc:
+            await svc.create_model_for_tenant("u1", "t1", model_data)
+        assert "Failed to get embedding dimension" in str(exc.value)
+        # Called twice: original + fallback
+        assert mock_dim.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_cmt_multi_embedding_fallback_to_embeddings_url():
+    """create_model_for_tenant: multi_embedding fallback to /embeddings works."""
+    svc = import_svc()
+
+    mock_dim = mock.AsyncMock(side_effect=[None, 2048])
+
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=[]), \
+            mock.patch.object(svc, "embedding_dimension_check", new=mock_dim), \
+            mock.patch.object(svc, "create_model_record") as mock_create, \
+            mock.patch.object(svc, "split_repo_name", return_value=("", "clip-emb")), \
+            mock.patch.object(svc, "_infer_model_factory", return_value=None):
+
+        model_data = {
+            "model_name": "clip-emb",
+            "display_name": "Clip Emb",
+            "base_url": "https://api.siliconflow.cn/v1",
+            "model_type": "multi_embedding",
+            "api_key": "k",
+        }
+
+        await svc.create_model_for_tenant("u1", "t1", model_data)
+
+        assert mock_dim.call_count == 2
+        # multi_embedding creates two records
+        assert mock_create.call_count == 2
+        created = mock_create.call_args_list[0][0][0]
+        assert created["base_url"] == "https://api.siliconflow.cn/v1/embeddings"
+        assert created["max_tokens"] == 2048
+
+
+@pytest.mark.asyncio
+async def test_cmt_embedding_fallback_reinfers_model_factory():
+    """create_model_for_tenant: model_factory is re-inferred after URL fallback."""
+    svc = import_svc()
+
+    mock_dim = mock.AsyncMock(side_effect=[None, 1536])
+
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=[]), \
+            mock.patch.object(svc, "embedding_dimension_check", new=mock_dim), \
+            mock.patch.object(svc, "create_model_record"), \
+            mock.patch.object(svc, "split_repo_name", return_value=("", "test-emb")), \
+            mock.patch.object(svc, "_infer_model_factory", side_effect=[None, "dashscope"]) as mock_infer:
+
+        model_data = {
+            "model_name": "test-emb",
+            "display_name": "Test Emb",
+            "base_url": "https://dashscope.aliyuncs.com/v1",
+            "model_type": "embedding",
+            "api_key": "k",
+        }
+
+        await svc.create_model_for_tenant("u1", "t1", model_data)
+
+        # _infer_model_factory called twice: once for original URL, once for fallback URL
+        assert mock_infer.call_count == 2
+        # Second call with fallback URL
+        second_call_url = mock_infer.call_args_list[1][0][1]
+        assert second_call_url == "https://dashscope.aliyuncs.com/v1/embeddings"
+

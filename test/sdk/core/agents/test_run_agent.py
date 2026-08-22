@@ -1,0 +1,1005 @@
+import types
+import json
+import importlib.machinery
+import pytest
+import importlib
+import sys
+from types import ModuleType
+from unittest.mock import MagicMock, patch
+from threading import Event
+
+# ---------------------------------------------------------------------------
+# Prepare mocks for external dependencies that are not required for this test
+# ---------------------------------------------------------------------------
+
+# Create a real module object for smolagents so that submodule imports (e.g. smolagents.agents)
+# succeed during the import machinery that expects the parent module to be a *package*.
+mock_smolagents = ModuleType("smolagents")
+mock_smolagents.__dict__.update({})  # ensure we can set attrs dynamically
+# Mark as package so that importlib can load submodules like smolagents.agents
+mock_smolagents.__path__ = []
+
+# Mock Tool and smolagents.tools sub-module
+mock_smolagents_tool_cls = MagicMock(name="Tool")
+mock_smolagents_tools_mod = ModuleType("smolagents.tools")
+mock_smolagents_tools_mod.Tool = mock_smolagents_tool_cls
+# Also mock the tool decorator function at smolagents.tools level
+mock_smolagents_tools_mod.tool = MagicMock(name="tool_decorator")
+
+# Attach tools sub-module to the parent module and to sys.modules via module_mocks later
+setattr(mock_smolagents, "tools", mock_smolagents_tools_mod)
+
+# Provide a dummy ToolCollection with a classmethod from_mcp that works as a
+# context manager. The context manager returns the ToolCollection instance
+# itself on __enter__ so it can be inspected from tests.
+class _MockToolCollection(MagicMock):
+    @classmethod
+    def from_mcp(cls, *args, **kwargs):  # pylint: disable=unused-argument
+        instance = cls()
+        # Make the instance a context manager
+        instance.__enter__ = MagicMock(return_value=instance)
+        instance.__exit__ = MagicMock(return_value=None)
+        return instance
+
+setattr(mock_smolagents, "ToolCollection", _MockToolCollection)
+
+
+def test_log_memory_value_assessment_for_store_attempt(caplog):
+    caplog.set_level("INFO")
+    store_tool = types.SimpleNamespace(
+        tenant_id="tenant-1",
+        user_id="user-1",
+        agent_id="agent-1",
+        conversation_id="167",
+        invocation_count=1,
+        successful_store_count=1,
+        last_outcome="completed",
+    )
+    agent = types.SimpleNamespace(tools={"store_memory": store_tool})
+
+    run_agent._log_memory_value_assessment(agent)
+
+    assert "event=memory_value_assessment" in caplog.text
+    assert "decision=store_attempted" in caplog.text
+    assert "successful_store_count=1" in caplog.text
+    assert "conversation_id=167" in caplog.text
+
+
+def test_log_memory_value_assessment_for_skip_and_unavailable(caplog):
+    caplog.set_level("INFO")
+    store_tool = types.SimpleNamespace(
+        tenant_id="tenant-1",
+        user_id="user-1",
+        agent_id="agent-1",
+        conversation_id="168",
+        invocation_count=0,
+        successful_store_count=0,
+        last_outcome="not_invoked",
+    )
+
+    run_agent._log_memory_value_assessment(
+        types.SimpleNamespace(tools={"store_memory": store_tool})
+    )
+    run_agent._log_memory_value_assessment(types.SimpleNamespace(tools={}))
+
+    assert "decision=skip" in caplog.text
+    assert "last_outcome=not_invoked" in caplog.text
+    assert "decision=unavailable" in caplog.text
+
+# Create dummy smolagents sub-modules to satisfy indirect imports
+for _sub in [
+    "agents",
+    "memory",
+    "models",
+    "monitoring",
+    "utils",
+    "local_python_executor",
+]:
+    sub_mod = ModuleType(f"smolagents.{_sub}")
+    # Populate required attributes with MagicMocks to satisfy import-time `from smolagents.<sub> import ...`.
+    if _sub == "agents":
+        for _name in ["CodeAgent", "populate_template", "handle_agent_output_types", "AgentError", "AgentType", "ActionOutput", "RunResult"]:
+            setattr(sub_mod, _name, MagicMock(name=f"smolagents.agents.{_name}"))
+    elif _sub == "local_python_executor":
+        setattr(sub_mod, "fix_final_answer_code", MagicMock(name="fix_final_answer_code"))
+    elif _sub == "memory":
+        class _TaskStepBase:
+            def __init__(self, task=None):
+                self.task = task
+        class _ActionStepBase:
+            def __init__(self, step_number=None, timing=None, action_output=None, model_output=None):
+                self.step_number = step_number
+                self.timing = timing
+                self.action_output = action_output
+                self.model_output = model_output
+        setattr(sub_mod, "TaskStep", _TaskStepBase)
+        setattr(sub_mod, "ActionStep", _ActionStepBase)
+        setattr(sub_mod, "AgentMemory", MagicMock)
+        setattr(sub_mod, "MemoryStep", MagicMock)
+        for _name in ["ToolCall", "SystemPromptStep", "PlanningStep", "FinalAnswerStep"]:
+            setattr(sub_mod, _name, MagicMock(name=f"smolagents.memory.{_name}"))
+    elif _sub == "models":
+        setattr(sub_mod, "ChatMessage", MagicMock(name="smolagents.models.ChatMessage"))
+        setattr(sub_mod, "MessageRole", MagicMock(name="smolagents.models.MessageRole"))
+        setattr(sub_mod, "CODEAGENT_RESPONSE_FORMAT", MagicMock(name="smolagents.models.CODEAGENT_RESPONSE_FORMAT"))
+        # Provide a simple base class so that OpenAIModel can inherit from it
+        class _DummyOpenAIServerModel:
+            def __init__(self, *args, **kwargs):
+                pass
+
+        setattr(sub_mod, "OpenAIServerModel", _DummyOpenAIServerModel)
+    elif _sub == "monitoring":
+        setattr(sub_mod, "LogLevel", MagicMock(name="smolagents.monitoring.LogLevel"))
+        setattr(sub_mod, "Timing", MagicMock(name="smolagents.monitoring.Timing"))
+        setattr(sub_mod, "YELLOW_HEX", MagicMock(name="smolagents.monitoring.YELLOW_HEX"))
+        setattr(sub_mod, "TokenUsage", MagicMock(name="smolagents.monitoring.TokenUsage"))
+    elif _sub == "utils":
+        for _name in [
+            "AgentExecutionError",
+            "AgentGenerationError",
+            "AgentParsingError",
+            "AgentMaxStepsError",
+            "parse_code_blobs",
+            "truncate_content",
+            "extract_code_from_text",
+        ]:
+            setattr(sub_mod, _name, MagicMock(name=f"smolagents.utils.{_name}"))
+    setattr(mock_smolagents, _sub, sub_mod)
+    # Will be added to module_mocks below
+
+# Top-level exports expected directly from `smolagents` by nexent_agent.py
+setattr(mock_smolagents, "TaskStep", mock_smolagents.memory.TaskStep)
+setattr(mock_smolagents, "ActionStep", mock_smolagents.memory.ActionStep)
+setattr(mock_smolagents, "AgentText", MagicMock(name="smolagents.AgentText"))
+setattr(mock_smolagents, "handle_agent_output_types", MagicMock(name="smolagents.handle_agent_output_types"))
+# Export Timing from monitoring submodule to top-level
+setattr(mock_smolagents, "Timing", mock_smolagents.monitoring.Timing)
+# Also export Tool at top-level so that `from smolagents import Tool` works
+setattr(mock_smolagents, "Tool", mock_smolagents_tool_cls)
+# Also export tool decorator at top-level for modules that import from smolagents
+setattr(mock_smolagents, "tool", mock_smolagents_tools_mod.tool)
+
+# Mock langchain_core.tools.BaseTool
+mock_langchain_core_tools_mod = MagicMock(name="langchain_core.tools")
+mock_langchain_core_tools_mod.BaseTool = MagicMock(name="BaseTool")
+mock_langchain_core_mod = MagicMock(name="langchain_core")
+mock_langchain_core_mod.tools = mock_langchain_core_tools_mod
+
+sys.modules['elangchain_cor'] = MagicMock()
+sys.modules['langchain_core.documents'] = MagicMock()
+sys.modules['langchain_core.documents.Document'] = MagicMock()
+sys.modules['langchain_core.documents.BaseDocumentTransformer'] = MagicMock()
+sys.modules['langchain_text_splitters'] = MagicMock()
+sys.modules['langchain_text_splitters.MarkdownHeaderTextSplitter'] = MagicMock()
+
+# Re-use mocks from test_nexent_agent for langchain and openai to avoid real imports
+mock_langchain_tools = MagicMock()
+mock_langchain_tools.StructuredTool = MagicMock()
+mock_langchain = MagicMock()
+mock_langchain.tools = mock_langchain_tools
+
+mock_openai_chat_completion_message = MagicMock()
+
+# Stub for the legacy ``nexent.memory.memory_service`` module has been
+# removed because that module no longer exists; tests that depend on it
+# will be migrated to the new ``MemoryService`` facade in a follow-up.
+
+# Mock nexent.skills module for run_skill_script_tool
+mock_nexent = ModuleType("nexent")
+mock_nexent.skills = ModuleType("nexent.skills")
+mock_nexent.skills.SkillManager = MagicMock(name="SkillManager")
+sys.modules["nexent"] = mock_nexent
+sys.modules["nexent.skills"] = mock_nexent.skills
+
+openai_module = types.ModuleType("openai")
+openai_module.__spec__ = importlib.machinery.ModuleSpec("openai", loader=None)
+sys.modules['openai'] = openai_module
+
+module_mocks = {
+    "smolagents": mock_smolagents,
+    "smolagents.tools": mock_smolagents_tools_mod,
+    "smolagents.ToolCollection": _MockToolCollection,
+    # Add smolagents sub-modules created above to ensure importability
+    **{f"smolagents.{_sub}": getattr(mock_smolagents, _sub) for _sub in [
+        "agents",
+        "memory",
+        "models",
+        "monitoring",
+        "utils",
+        "local_python_executor",
+    ]},
+    "langchain_core": mock_langchain_core_mod,
+    "langchain_core.tools": mock_langchain_core_tools_mod,
+    "langchain": mock_langchain,
+    "langchain.tools": mock_langchain_tools,
+    # Minimal openai mock needed by other modules
+    "openai": openai_module,
+    "openai.types": MagicMock(),
+    "openai.types.chat": MagicMock(),
+    "openai.types.chat.chat_completion_message": MagicMock(ChatCompletionMessage=mock_openai_chat_completion_message),
+    "openai.types.chat.chat_completion_message_param": MagicMock(),
+    # exa_py is imported by sdk.nexent.core.tools – provide dummy to skip real import
+    "exa_py": MagicMock(Exa=MagicMock()),
+    # Mock nexent.skills for skill tools
+    "nexent.skills": mock_nexent.skills,
+    "nexent.skills.skill_manager": MagicMock(),
+}
+
+# Stub the gateway bridge: ``sdk.nexent.memory.embedding_model`` and the vector
+# database core import gateway adapter symbols at module level, and the real
+# gateway eagerly registers every vendor adapter (absolute ``nexent.*`` imports
+# that the mocked environment cannot satisfy). The mocked modules only need the
+# adapter names for typing / construction stubs.
+_gateway_mod = ModuleType("sdk.nexent.core.gateway")
+_gateway_mod.__path__ = []
+_gateway_modality_mod = ModuleType("sdk.nexent.core.gateway.modality")
+_gateway_modality_mod.__path__ = []
+for _name in ("OpenAICompatibleEmbeddingAdapter", "EmbeddingAdapter", "RerankAdapter", "VLMRequest"):
+    setattr(_gateway_modality_mod, _name, MagicMock(name=f"gateway.modality.{_name}"))
+_gateway_mod.modality = _gateway_modality_mod
+_gateway_mod.EmbeddingContext = MagicMock(name="gateway.EmbeddingContext")
+sys.modules["sdk.nexent.core.gateway"] = _gateway_mod
+sys.modules["sdk.nexent.core.gateway.modality"] = _gateway_modality_mod
+
+# ---------------------------------------------------------------------------
+# Import modules under test with patched dependencies in place
+# ---------------------------------------------------------------------------
+with patch.dict("sys.modules", module_mocks):
+    from sdk.nexent.core.utils.observer import MessageObserver, ProcessType  # noqa: E402
+    from sdk.nexent.core.agents.agent_model import (
+        AgentRunInfo,
+        ModelConfig,
+        AgentConfig,
+        ToolConfig,
+    )  # noqa: E402
+    import sdk.nexent.core.agents.run_agent as run_agent  # noqa: E402
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def mock_observer():
+    """Return a mocked MessageObserver instance."""
+    observer = MagicMock(spec=MessageObserver)
+    observer.lang = "en"
+    return observer
+
+
+@pytest.fixture
+def mock_memory_context():
+    """Return a mocked MemoryContext instance for tests."""
+    mock_user_config = MagicMock()
+    mock_user_config.memory_switch = False  # Disable memory by default for tests
+    mock_user_config.agent_share_option = "always"
+    mock_user_config.disable_agent_ids = []
+    mock_user_config.disable_user_agent_ids = []
+
+    mock_memory_context = MagicMock()
+    mock_memory_context.user_config = mock_user_config
+    mock_memory_context.memory_config = {}
+    mock_memory_context.tenant_id = "test_tenant"
+    mock_memory_context.user_id = "test_user"
+    mock_memory_context.agent_id = "test_agent"
+
+    return mock_memory_context
+
+
+@pytest.fixture
+def basic_agent_run_info(mock_observer):
+    """Return a minimal AgentRunInfo instance for tests (without MCP host)."""
+    model_cfg = ModelConfig(
+        cite_name="test_model",
+        api_key="",
+        model_name="model",
+        url="http://example.com",
+        temperature=0.1,
+        top_p=0.95,
+    )
+
+    agent_cfg = AgentConfig(
+        name="agent",
+        description="desc",
+        prompt_templates={},
+        tools=[],
+        model_name="test_model",
+    )
+
+    return AgentRunInfo(
+        query="hello",
+        model_config_list=[model_cfg],
+        observer=mock_observer,
+        agent_config=agent_cfg,
+        stop_event=Event(),
+        conversation_id=273,
+        user_id="test_user",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+
+def test_agent_run_thread_local_flow(basic_agent_run_info, monkeypatch):
+    """Verify local execution path when mcp_host is empty or None."""
+    # Patch NexentAgent inside run_agent to a MagicMock instance
+    mock_nexent_instance = MagicMock(name="NexentAgentInstance")
+    monkeypatch.setattr(run_agent, "NexentAgent", MagicMock(return_value=mock_nexent_instance))
+
+    # Call the function under test
+    run_agent.agent_run_thread(basic_agent_run_info)
+
+    # NexentAgent should be instantiated with observer, model_config_list, stop_event
+    run_agent.NexentAgent.assert_called_once_with(
+        observer=basic_agent_run_info.observer,
+        model_config_list=basic_agent_run_info.model_config_list,
+        stop_event=basic_agent_run_info.stop_event,
+        redis_client=basic_agent_run_info.redis_client,
+        sandbox_config=None,
+        minio_client=None,
+        conversation_id=basic_agent_run_info.conversation_id,
+        user_id=basic_agent_run_info.user_id,
+        tenant_id=None,
+        workspace_path=None,
+        workspace_run_id=None,
+        minio_files=None,
+    )
+
+    # Following methods on the NexentAgent instance should be invoked
+    mock_nexent_instance.create_single_agent.assert_called_once_with(
+        basic_agent_run_info.agent_config,
+        context_items_override=None,
+    )
+    mock_nexent_instance.set_agent.assert_called_once()
+    mock_nexent_instance.add_history_to_agent.assert_called_once_with(basic_agent_run_info.history)
+    mock_nexent_instance.agent_run_with_observer.assert_called_once_with(query=basic_agent_run_info.query, reset=False)
+
+
+def test_agent_run_thread_binds_capacity_and_budget_snapshots(basic_agent_run_info, monkeypatch):
+    captured = {}
+    basic_agent_run_info.capacity_snapshot = {"capacity_fingerprint": "w1"}
+    basic_agent_run_info.safe_input_budget_snapshot = {"fingerprint": "w2"}
+
+    monkeypatch.setattr(
+        run_agent,
+        "set_monitoring_capacity_snapshot",
+        lambda snapshot: captured.setdefault("capacity", snapshot),
+    )
+    monkeypatch.setattr(
+        run_agent,
+        "set_monitoring_safe_input_budget_snapshot",
+        lambda snapshot: captured.setdefault("budget", snapshot),
+    )
+    mock_nexent_instance = MagicMock(name="NexentAgentInstance")
+    monkeypatch.setattr(run_agent, "NexentAgent", MagicMock(return_value=mock_nexent_instance))
+
+    run_agent.agent_run_thread(basic_agent_run_info)
+
+    assert captured["capacity"] == {"capacity_fingerprint": "w1"}
+    assert captured["budget"] == {"fingerprint": "w2"}
+
+
+def test_emit_uncertainty_reserve_warning(basic_agent_run_info):
+    basic_agent_run_info.safe_input_budget_snapshot = {
+        "warnings": ["uncertainty_reserve_active"],
+        "fingerprint": "w2",
+        "w1_fingerprint": "w1",
+        "uncertainty_reserve_tokens": 12800,
+        "hard_input_budget_tokens": 114200,
+    }
+
+    run_agent._emit_uncertainty_reserve_warning(basic_agent_run_info)
+
+    basic_agent_run_info.observer.add_message.assert_called_once()
+    _, process_type, content = basic_agent_run_info.observer.add_message.call_args[0]
+    assert process_type == ProcessType.OTHER
+    payload = json.loads(content)
+    assert payload["code"] == "uncertainty_reserve_active"
+    assert payload["budget_fingerprint"] == "w2"
+    assert payload["uncertainty_reserve_tokens"] == 12800
+
+
+def test_emit_uncertainty_reserve_warning_noops_without_warning(basic_agent_run_info):
+    basic_agent_run_info.safe_input_budget_snapshot = {
+        "warnings": [],
+        "fingerprint": "w2",
+    }
+
+    run_agent._emit_uncertainty_reserve_warning(basic_agent_run_info)
+
+    basic_agent_run_info.observer.add_message.assert_not_called()
+
+    # Ensure no MCP-specific behaviour occurred
+    basic_agent_run_info.observer.add_message.assert_not_called()
+
+
+def test_agent_run_thread_mcp_flow(basic_agent_run_info, mock_memory_context, monkeypatch):
+    """Verify behaviour when an MCP host list is provided with auto-detected transport."""
+    # Give the AgentRunInfo an MCP host list (string format, auto-detect transport)
+    basic_agent_run_info.mcp_host = ["http://mcp.server/mcp"]
+
+    # Prepare ToolCollection.from_mcp to return a context manager
+    mock_tool_collection = MagicMock(name="ToolCollectionInstance")
+    mock_context_manager = MagicMock(__enter__=MagicMock(return_value=mock_tool_collection), __exit__=MagicMock(return_value=None))
+    monkeypatch.setattr(run_agent.ToolCollection, "from_mcp", MagicMock(return_value=mock_context_manager))
+
+    # Patch NexentAgent
+    mock_nexent_instance = MagicMock(name="NexentAgentInstance")
+    monkeypatch.setattr(run_agent, "NexentAgent", MagicMock(return_value=mock_nexent_instance))
+
+    # Execute
+    run_agent.agent_run_thread(basic_agent_run_info)
+
+    # Observer should receive <MCP_START> signal
+    basic_agent_run_info.observer.add_message.assert_any_call("", ProcessType.AGENT_NEW_RUN, "<MCP_START>")
+
+    # ToolCollection.from_mcp should be called with the expected client list and trust_remote_code=True
+    expected_client_list = [{"url": "http://mcp.server/mcp", "transport": "streamable-http"}]
+    run_agent.ToolCollection.from_mcp.assert_called_once_with(expected_client_list, trust_remote_code=True)
+
+    # NexentAgent should be instantiated with mcp_tool_collection
+    run_agent.NexentAgent.assert_called_once_with(
+        observer=basic_agent_run_info.observer,
+        model_config_list=basic_agent_run_info.model_config_list,
+        stop_event=basic_agent_run_info.stop_event,
+        mcp_tool_collection=mock_tool_collection,
+        redis_client=basic_agent_run_info.redis_client,
+        sandbox_config=None,
+        minio_client=None,
+        conversation_id=basic_agent_run_info.conversation_id,
+        user_id=basic_agent_run_info.user_id,
+        tenant_id=None,
+        workspace_path=None,
+        workspace_run_id=None,
+        minio_files=None,
+    )
+
+    # Subsequent calls on NexentAgent instance should mirror the local flow
+    mock_nexent_instance.create_single_agent.assert_called_once_with(
+        basic_agent_run_info.agent_config,
+        context_items_override=None,
+    )
+    mock_nexent_instance.set_agent.assert_called_once()
+    mock_nexent_instance.add_history_to_agent.assert_called_once_with(basic_agent_run_info.history)
+    mock_nexent_instance.agent_run_with_observer.assert_called_once_with(query=basic_agent_run_info.query, reset=False)
+
+
+def test_agent_run_thread_mcp_flow_with_explicit_transport(basic_agent_run_info, mock_memory_context, monkeypatch):
+    """Verify behaviour when MCP host is provided with explicit transport in dict format."""
+    # Give the AgentRunInfo an MCP host list with explicit transport
+    basic_agent_run_info.mcp_host = [{"url": "http://mcp.server", "transport": "sse"}]
+
+    # Prepare ToolCollection.from_mcp to return a context manager
+    mock_tool_collection = MagicMock(name="ToolCollectionInstance")
+    mock_context_manager = MagicMock(__enter__=MagicMock(return_value=mock_tool_collection), __exit__=MagicMock(return_value=None))
+    monkeypatch.setattr(run_agent.ToolCollection, "from_mcp", MagicMock(return_value=mock_context_manager))
+
+    # Patch NexentAgent
+    mock_nexent_instance = MagicMock(name="NexentAgentInstance")
+    monkeypatch.setattr(run_agent, "NexentAgent", MagicMock(return_value=mock_nexent_instance))
+
+    # Execute
+    run_agent.agent_run_thread(basic_agent_run_info)
+
+    # ToolCollection.from_mcp should be called with the expected client list
+    expected_client_list = [{"url": "http://mcp.server", "transport": "sse"}]
+    run_agent.ToolCollection.from_mcp.assert_called_once_with(expected_client_list, trust_remote_code=True)
+
+
+def test_agent_run_thread_mcp_flow_mixed_formats(basic_agent_run_info, mock_memory_context, monkeypatch):
+    """Verify behaviour when MCP host list contains both string and dict formats."""
+    # Mix of string (auto-detect) and dict (explicit) formats
+    basic_agent_run_info.mcp_host = [
+        "http://mcp1.server/mcp",  # Auto-detect: streamable-http
+        "http://mcp2.server/sse",  # Auto-detect: sse
+        {"url": "http://mcp3.server/mcp", "transport": "streamable-http"},  # Explicit: streamable-http
+    ]
+
+    # Prepare ToolCollection.from_mcp to return a context manager
+    mock_tool_collection = MagicMock(name="ToolCollectionInstance")
+    mock_context_manager = MagicMock(__enter__=MagicMock(return_value=mock_tool_collection), __exit__=MagicMock(return_value=None))
+    monkeypatch.setattr(run_agent.ToolCollection, "from_mcp", MagicMock(return_value=mock_context_manager))
+
+    # Patch NexentAgent
+    mock_nexent_instance = MagicMock(name="NexentAgentInstance")
+    monkeypatch.setattr(run_agent, "NexentAgent", MagicMock(return_value=mock_nexent_instance))
+
+    # Execute
+    run_agent.agent_run_thread(basic_agent_run_info)
+
+    # ToolCollection.from_mcp should be called with normalized client list
+    expected_client_list = [
+        {"url": "http://mcp1.server/mcp", "transport": "streamable-http"},
+        {"url": "http://mcp2.server/sse", "transport": "sse"},
+        {"url": "http://mcp3.server/mcp", "transport": "streamable-http"},
+    ]
+    run_agent.ToolCollection.from_mcp.assert_called_once_with(expected_client_list, trust_remote_code=True)
+
+
+def test_detect_transport():
+    """Test transport auto-detection logic based on URL ending."""
+    # Test URLs ending with /sse
+    assert run_agent._detect_transport("http://server/sse") == "sse"
+    assert run_agent._detect_transport("https://api.example.com/sse") == "sse"
+    assert run_agent._detect_transport("http://localhost:3000/sse") == "sse"
+
+    # Test URLs ending with /mcp
+    assert run_agent._detect_transport("http://server/mcp") == "streamable-http"
+    assert run_agent._detect_transport("https://api.example.com/mcp") == "streamable-http"
+    assert run_agent._detect_transport("http://localhost:3000/mcp") == "streamable-http"
+
+    # Test default fallback (no /sse or /mcp ending)
+    assert run_agent._detect_transport("http://server") == "streamable-http"
+    assert run_agent._detect_transport("https://api.example.com") == "streamable-http"
+    assert run_agent._detect_transport("http://server/other") == "streamable-http"
+
+    # Test URLs with whitespace (should be stripped)
+    assert run_agent._detect_transport("  http://server/sse  ") == "sse"
+    assert run_agent._detect_transport("\thttp://server/mcp\n") == "streamable-http"
+    assert run_agent._detect_transport("  http://server  ") == "streamable-http"
+
+
+def test_normalize_mcp_config():
+    """Test MCP configuration normalization."""
+    # Test string format (auto-detect based on URL ending)
+    result = run_agent._normalize_mcp_config("http://server/mcp")
+    assert result == {"url": "http://server/mcp", "transport": "streamable-http"}
+
+    result = run_agent._normalize_mcp_config("http://server/sse")
+    assert result == {"url": "http://server/sse", "transport": "sse"}
+
+    # Test string format without /sse or /mcp ending (defaults to streamable-http)
+    result = run_agent._normalize_mcp_config("http://server")
+    assert result == {"url": "http://server", "transport": "streamable-http"}
+
+    # Test string format with whitespace (should be preserved in url, but transport detection strips)
+    result = run_agent._normalize_mcp_config("  http://server/sse  ")
+    assert result == {"url": "  http://server/sse  ", "transport": "sse"}
+
+    # Test dict format with explicit transport
+    result = run_agent._normalize_mcp_config({"url": "http://server/mcp", "transport": "sse"})
+    assert result == {"url": "http://server/mcp", "transport": "sse"}
+
+    # Test dict format without transport (auto-detect)
+    result = run_agent._normalize_mcp_config({"url": "http://server/sse"})
+    assert result == {"url": "http://server/sse", "transport": "sse"}
+
+    result = run_agent._normalize_mcp_config({"url": "http://server/mcp"})
+    assert result == {"url": "http://server/mcp", "transport": "streamable-http"}
+
+    # Test dict format with empty string transport (should auto-detect)
+    result = run_agent._normalize_mcp_config({"url": "http://server/sse", "transport": ""})
+    assert result == {"url": "http://server/sse", "transport": "sse"}
+
+    # Test dict format with None transport (should auto-detect)
+    result = run_agent._normalize_mcp_config({"url": "http://server/mcp", "transport": None})
+    assert result == {"url": "http://server/mcp", "transport": "streamable-http"}
+
+    httpx_client_factory = MagicMock()
+    result = run_agent._normalize_mcp_config({
+        "url": "http://server/sse",
+        "httpx_client_factory": httpx_client_factory,
+    })
+    assert result == {
+        "url": "http://server/sse",
+        "transport": "sse",
+        "httpx_client_factory": httpx_client_factory,
+    }
+
+    with pytest.raises(ValueError, match="httpx_client_factory must be callable"):
+        run_agent._normalize_mcp_config({
+            "url": "http://server/sse",
+            "httpx_client_factory": "not-callable",
+        })
+
+    # Test dict format with only authorization
+    result = run_agent._normalize_mcp_config({
+        "url": "http://server/mcp",
+        "authorization": "Bearer token123"
+    })
+    assert result == {
+        "url": "http://server/mcp",
+        "transport": "streamable-http",
+        "headers": {"Authorization": "Bearer token123"}
+    }
+
+    # Test dict format with only headers
+    result = run_agent._normalize_mcp_config({
+        "url": "http://server/sse",
+        "headers": {"Custom-Header": "value"}
+    })
+    assert result == {
+        "url": "http://server/sse",
+        "transport": "sse",
+        "headers": {"Custom-Header": "value"}
+    }
+
+    # Test dict format with both authorization and headers (authorization should override/merge)
+    result = run_agent._normalize_mcp_config({
+        "url": "http://server/mcp",
+        "authorization": "Bearer token456",
+        "headers": {"Custom-Header": "value", "Other-Header": "other"}
+    })
+    assert result == {
+        "url": "http://server/mcp",
+        "transport": "streamable-http",
+        "headers": {
+            "Custom-Header": "value",
+            "Other-Header": "other",
+            "Authorization": "Bearer token456"
+        }
+    }
+
+    # Test dict format with headers that is not a dict (should be handled gracefully)
+    result = run_agent._normalize_mcp_config({
+        "url": "http://server/mcp",
+        "authorization": "Bearer token789",
+        "headers": "not-a-dict"  # Not a dict, will be replaced with empty dict
+    })
+    # When headers is not a dict, it will be replaced with empty dict and then Authorization added
+    assert result == {
+        "url": "http://server/mcp",
+        "transport": "streamable-http",
+        "headers": {"Authorization": "Bearer token789"}
+    }
+
+    # Test dict format with headers as list (not a dict)
+    result = run_agent._normalize_mcp_config({
+        "url": "http://server/mcp",
+        "authorization": "Bearer token999",
+        "headers": ["item1", "item2"]  # Not a dict, will be replaced with empty dict
+    })
+    assert result == {
+        "url": "http://server/mcp",
+        "transport": "streamable-http",
+        "headers": {"Authorization": "Bearer token999"}
+    }
+
+    # Test dict format with empty url string
+    with pytest.raises(ValueError, match="must contain 'url' key"):
+        run_agent._normalize_mcp_config({"url": ""})
+
+    # Test dict format with None url
+    with pytest.raises(ValueError, match="must contain 'url' key"):
+        run_agent._normalize_mcp_config({"url": None})
+
+    # Test invalid dict (missing url)
+    with pytest.raises(ValueError, match="must contain 'url' key"):
+        run_agent._normalize_mcp_config({"transport": "sse"})
+
+    # Test invalid transport type
+    with pytest.raises(ValueError, match="Invalid transport type"):
+        run_agent._normalize_mcp_config({"url": "http://server/mcp", "transport": "stdio"})
+
+    with pytest.raises(ValueError, match="Invalid transport type"):
+        run_agent._normalize_mcp_config({"url": "http://server/mcp", "transport": "invalid"})
+
+    # Test invalid type
+    with pytest.raises(ValueError, match="Invalid MCP host item type"):
+        run_agent._normalize_mcp_config(123)
+
+    with pytest.raises(ValueError, match="Invalid MCP host item type"):
+        run_agent._normalize_mcp_config([])
+
+    with pytest.raises(ValueError, match="Invalid MCP host item type"):
+        run_agent._normalize_mcp_config(None)
+
+
+def test_agent_run_thread_handles_internal_exception(basic_agent_run_info, mock_memory_context, monkeypatch):
+    """If an internal error occurs, the observer should be notified and a ValueError propagated."""
+    # Configure NexentAgent.create_single_agent to raise an exception
+    failing_nexent_instance = MagicMock(name="NexentAgentInstance")
+    failing_nexent_instance.create_single_agent.side_effect = Exception("Boom")
+
+    monkeypatch.setattr(run_agent, "NexentAgent", MagicMock(return_value=failing_nexent_instance))
+
+    # Execute and expect ValueError
+    with pytest.raises(ValueError) as exc_info:
+        run_agent.agent_run_thread(basic_agent_run_info)
+
+    # Observer should have been informed of the failure via FINAL_ANSWER
+    basic_agent_run_info.observer.add_message.assert_called_with("", ProcessType.FINAL_ANSWER, "Run Agent Error: Boom")
+
+    # Ensure the raised error contains our message to confirm correct propagation
+    assert "Error in agent_run_thread: Boom" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_agent_run_streams_messages_while_thread_alive(basic_agent_run_info, monkeypatch):
+    """agent_run should yield messages while the thread is alive, then final cache."""
+    # Arrange observer cached messages: one streaming batch, then final flush
+    basic_agent_run_info.observer.get_cached_message.side_effect = [
+        ["m1", "m2"],  # during loop
+        ["final1", "final2"],  # after loop
+    ]
+
+    # Fast asyncio.sleep to avoid delays and to assert both sleeps are awaited
+    sleep_calls = []
+
+    async def fast_sleep(duration):  # pylint: disable=unused-argument
+        sleep_calls.append(duration)
+
+    monkeypatch.setattr(run_agent.asyncio, "sleep", fast_sleep)
+
+    # Fake Thread that is alive once, then stops
+    class FakeThread:
+        def __init__(self, target=None, args=None):  # pylint: disable=unused-argument
+            self._alive_checks = 0
+            self.started = False
+
+        def start(self):
+            self.started = True
+
+        def is_alive(self):
+            self._alive_checks += 1
+            return self._alive_checks == 1
+
+    monkeypatch.setattr(run_agent, "Thread", FakeThread)
+
+    # Act
+    received = []
+    async for item in run_agent.agent_run(basic_agent_run_info):
+        received.append(item)
+
+    # Assert: streamed + final messages
+    assert received == ["m1", "m2", "final1", "final2"]
+    # Ensure thread was started and sleeps were awaited (both inner and outer occur)
+    assert any(d in (0.05, 0.1) for d in sleep_calls)
+
+
+@pytest.mark.asyncio
+async def test_agent_run_skips_loop_when_thread_not_alive(basic_agent_run_info, monkeypatch):
+    """If the thread is not alive initially, only the final cache is yielded."""
+    # Only final cache should be yielded
+    basic_agent_run_info.observer.get_cached_message.side_effect = [
+        ["final_only"],
+    ]
+
+    async def fast_sleep(duration):  # pylint: disable=unused-argument
+        return None
+
+    monkeypatch.setattr(run_agent.asyncio, "sleep", fast_sleep)
+
+    class FakeThread:
+        def __init__(self, target=None, args=None):  # pylint: disable=unused-argument
+            pass
+
+        def start(self):
+            pass
+
+        def is_alive(self):
+            return False
+
+    monkeypatch.setattr(run_agent, "Thread", FakeThread)
+
+    received = []
+    async for item in run_agent.agent_run(basic_agent_run_info):
+        received.append(item)
+
+    assert received == ["final_only"]
+
+
+# ----------------------------------------------------------------------------
+# Additional tests for improved coverage
+# ----------------------------------------------------------------------------
+
+def test_agent_run_thread_mcp_connection_error(basic_agent_run_info, monkeypatch):
+    """Test that MCP connection errors are properly handled."""
+    basic_agent_run_info.mcp_host = ["http://mcp.server/mcp"]
+
+    mock_tool_collection = MagicMock(name="ToolCollectionInstance")
+    mock_context_manager = MagicMock(__enter__=MagicMock(return_value=mock_tool_collection), __exit__=MagicMock(return_value=None))
+    monkeypatch.setattr(run_agent.ToolCollection, "from_mcp", MagicMock(return_value=mock_context_manager))
+
+    mock_nexent_instance = MagicMock(name="NexentAgentInstance")
+    mock_nexent_instance.create_single_agent.side_effect = Exception("Couldn't connect to the MCP server")
+    monkeypatch.setattr(run_agent, "NexentAgent", MagicMock(return_value=mock_nexent_instance))
+
+    with pytest.raises(ValueError) as exc_info:
+        run_agent.agent_run_thread(basic_agent_run_info)
+
+    assert "Error in agent_run_thread" in str(exc_info.value)
+
+
+def test_agent_run_thread_chinese_lang(basic_agent_run_info, monkeypatch):
+    """Test MCP connection error message in Chinese when observer.lang is zh."""
+    basic_agent_run_info.mcp_host = ["http://mcp.server/mcp"]
+    basic_agent_run_info.observer.lang = "zh"
+
+    mock_tool_collection = MagicMock(name="ToolCollectionInstance")
+    mock_context_manager = MagicMock(__enter__=MagicMock(return_value=mock_tool_collection), __exit__=MagicMock(return_value=None))
+    monkeypatch.setattr(run_agent.ToolCollection, "from_mcp", MagicMock(return_value=mock_context_manager))
+
+    mock_nexent_instance = MagicMock(name="NexentAgentInstance")
+    mock_nexent_instance.create_single_agent.side_effect = Exception("Couldn't connect to the MCP server")
+    monkeypatch.setattr(run_agent, "NexentAgent", MagicMock(return_value=mock_nexent_instance))
+
+    with pytest.raises(ValueError):
+        run_agent.agent_run_thread(basic_agent_run_info)
+
+    basic_agent_run_info.observer.add_message.assert_called()
+    call_args = basic_agent_run_info.observer.add_message.call_args
+    assert "MCP" in str(call_args)
+
+
+@pytest.mark.asyncio
+async def test_agent_run_empty_cached_messages(basic_agent_run_info, monkeypatch):
+    """Test agent_run yields nothing when cached messages are empty."""
+    basic_agent_run_info.observer.get_cached_message.return_value = []
+
+    async def fast_sleep(duration):
+        return None
+
+    monkeypatch.setattr(run_agent.asyncio, "sleep", fast_sleep)
+
+    class FakeThread:
+        def __init__(self, target=None, args=None):
+            self._alive_checks = 0
+
+        def start(self):
+            pass
+
+        def is_alive(self):
+            self._alive_checks += 1
+            return self._alive_checks == 1
+
+    monkeypatch.setattr(run_agent, "Thread", FakeThread)
+
+    received = []
+    async for item in run_agent.agent_run(basic_agent_run_info):
+        received.append(item)
+
+    assert received == []
+
+
+@pytest.mark.asyncio
+async def test_agent_run_cached_messages_multiple_batches(basic_agent_run_info, monkeypatch):
+    """Test agent_run with multiple batches of cached messages."""
+    basic_agent_run_info.observer.get_cached_message.side_effect = [
+        ["msg1", "msg2"],
+        ["msg3", "msg4"],
+        ["msg5"],
+        ["msg6"],  # Final call after thread ends
+    ]
+
+    async def fast_sleep(duration):
+        return None
+
+    monkeypatch.setattr(run_agent.asyncio, "sleep", fast_sleep)
+
+    class FakeThread:
+        def __init__(self, target=None, args=None):
+            self._alive_checks = 0
+
+        def start(self):
+            pass
+
+        def is_alive(self):
+            self._alive_checks += 1
+            return self._alive_checks <= 3
+
+    monkeypatch.setattr(run_agent, "Thread", FakeThread)
+
+    received = []
+    async for item in run_agent.agent_run(basic_agent_run_info):
+        received.append(item)
+
+    assert received == ["msg1", "msg2", "msg3", "msg4", "msg5", "msg6"]
+
+
+def test_detect_transport_edge_cases():
+    """Test transport detection with edge cases."""
+    assert run_agent._detect_transport("http://server/SSE") == "streamable-http"
+    assert run_agent._detect_transport("http://server/MCP") == "streamable-http"
+    assert run_agent._detect_transport("http://server/sse/more") == "streamable-http"
+    assert run_agent._detect_transport("http://server/mcp/extra") == "streamable-http"
+
+
+def test_normalize_mcp_config_edge_cases():
+    """Test MCP config normalization with edge cases."""
+    result = run_agent._normalize_mcp_config({
+        "url": "http://server/sse",
+        "authorization": "",
+        "headers": None
+    })
+    assert result["url"] == "http://server/sse"
+    assert result["transport"] == "sse"
+    # Empty string authorization creates empty headers dict
+    assert result.get("headers") == {"Authorization": ""}
+
+
+def test_authorized_context_items_use_run_snapshot(basic_agent_run_info):
+    """Run-local authorized items override mutable AgentConfig data."""
+    authorized_item = types.SimpleNamespace(type=types.SimpleNamespace(value="system_prompt"))
+    basic_agent_run_info.context_input = types.SimpleNamespace(
+        items=(authorized_item,),
+    )
+    basic_agent_run_info.agent_config.context_items = [MagicMock(name="stale_item")]
+
+    assert run_agent._get_authorized_context_items(basic_agent_run_info) == (authorized_item,)
+
+
+def test_authorized_context_items_preserve_explicit_empty_snapshot(basic_agent_run_info):
+    """An empty authorized snapshot must not fall back to mutable config items."""
+    basic_agent_run_info.context_input = types.SimpleNamespace(items=())
+    basic_agent_run_info.agent_config.context_items = [MagicMock(name="stale_item")]
+
+    assert run_agent._get_authorized_context_items(basic_agent_run_info) == ()
+
+
+def test_authorized_history_snapshot_overrides_mutable_run_history(basic_agent_run_info):
+    """History consumed by the SDK must come from the authorized run snapshot."""
+    authorized_history = types.SimpleNamespace(
+        type=types.SimpleNamespace(value="history"),
+        content={"role": "user", "text": "authorized history"},
+    )
+    basic_agent_run_info.context_input = types.SimpleNamespace(
+        items=(authorized_history,),
+    )
+    basic_agent_run_info.history = [MagicMock(name="stale_history")]
+
+    history = run_agent._get_authorized_history(basic_agent_run_info)
+    # Cross-run history is represented by ContextItems, never restored into AgentMemory.
+    assert history == []
+
+
+def test_authorized_history_keeps_direct_sdk_compatibility(basic_agent_run_info):
+    """Direct SDK callers without ContextInput retain the existing behavior."""
+    basic_agent_run_info.context_input = None
+    history = [MagicMock(name="history")]
+    basic_agent_run_info.history = history
+
+    assert run_agent._get_authorized_history(basic_agent_run_info) is history
+
+
+@pytest.mark.asyncio
+async def test_agent_run_uses_copy_context(basic_agent_run_info, monkeypatch):
+    """agent_run passes ctx.run as Thread target, preserving contextvars."""
+    basic_agent_run_info.observer.get_cached_message.side_effect = [[]]
+
+    async def fast_sleep(duration):
+        ...
+
+    monkeypatch.setattr(run_agent.asyncio, "sleep", fast_sleep)
+
+    captured_target = {}
+
+    class CapturingThread:
+        def __init__(self, target=None, args=None):
+            captured_target["target"] = target
+            captured_target["args"] = args
+
+        def start(self):
+            ...
+
+        def is_alive(self):
+            return False
+
+    monkeypatch.setattr(run_agent, "Thread", CapturingThread)
+
+    async for _ in run_agent.agent_run(basic_agent_run_info):
+        pass
+
+    assert captured_target["target"] is not None
+    assert callable(captured_target["target"])
+
+
+def test_agent_run_thread_preserves_context_var(basic_agent_run_info, monkeypatch):
+    """contextvars set before agent_run_thread are visible inside the thread."""
+    from contextvars import ContextVar
+
+    test_var = ContextVar("test_preserve_var", default="missing")
+
+    captured_value = {}
+
+    mock_nexent_instance = MagicMock(name="NexentAgentInstance")
+    def create_nexent_agent(*args, **kwargs):
+        captured_value["val"] = test_var.get()
+        return mock_nexent_instance
+
+    monkeypatch.setattr(run_agent, "NexentAgent", MagicMock(side_effect=create_nexent_agent))
+
+    test_var.set("preserved!")
+    run_agent.agent_run_thread(basic_agent_run_info)
+    assert captured_value.get("val") == "preserved!"

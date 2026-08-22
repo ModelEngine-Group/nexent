@@ -1,0 +1,15 @@
+{{- if include "nexent-monitoring.phoenixEnabled" . }}
+{{ include "nexent-monitoring.persistentStorage" (dict "root" . "name" "nexent-phoenix" "size" .Values.phoenix.storage.size) }}
+{{- end }}
+{{- if include "nexent-monitoring.tempoEnabled" . }}
+{{ include "nexent-monitoring.persistentStorage" (dict "root" . "name" "nexent-tempo" "size" .Values.tempo.storage.size) }}
+{{- end }}
+{{- if include "nexent-monitoring.grafanaEnabled" . }}
+{{ include "nexent-monitoring.persistentStorage" (dict "root" . "name" "nexent-grafana" "size" .Values.grafana.storage.size) }}
+{{- end }}
+{{- if include "nexent-monitoring.langfuseEnabled" . }}
+{{ include "nexent-monitoring.persistentStorage" (dict "root" . "name" "nexent-langfuse-postgres" "size" .Values.langfuse.postgres.storage.size) }}
+{{ include "nexent-monitoring.persistentStorage" (dict "root" . "name" "nexent-langfuse-clickhouse" "size" .Values.langfuse.clickhouse.storage.dataSize) }}
+{{ include "nexent-monitoring.persistentStorage" (dict "root" . "name" "nexent-langfuse-minio" "size" .Values.langfuse.minio.storage.size) }}
+{{ include "nexent-monitoring.persistentStorage" (dict "root" . "name" "nexent-langfuse-redis" "size" .Values.langfuse.redis.storage.size) }}
+{{- end }}

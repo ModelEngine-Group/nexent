@@ -1,0 +1,16 @@
+name: 'Improvement Proposal'
+description: 'Suggest enhancements or new features'
+title: '[Improvement] '
+type: Feature
+labels: ['enhancement']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before creating a new Issue, please [search existing issues](https://github.com/AI-Application-Innovation/nexent/issues), including closed ones.
+  - type: textarea
+    attributes:
+      label: 'Improvement Description'
+      description: 'Clearly articulate the proposed improvement, including its benefits and potential impact.'
+    validations:
+      required: true

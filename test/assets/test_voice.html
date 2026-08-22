@@ -1,0 +1,757 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>语音识别与合成测试</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background-color: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        h1, h2 {
+            color: #333;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        .control-panel {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            justify-content: center;
+        }
+        .input-group {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        textarea {
+            flex: 1;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 16px;
+            min-height: 100px;
+            resize: vertical;
+        }
+        button {
+            padding: 10px 20px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background-color 0.2s;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+        button.recording {
+            background-color: #dc3545;
+        }
+        .output-container {
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            padding: 15px;
+            min-height: 200px;
+            margin-top: 20px;
+            background-color: #f9f9f9;
+            overflow-y: auto;
+            white-space: pre-wrap;
+        }
+        .audio-container {
+            margin-top: 20px;
+        }
+        audio {
+            width: 100%;
+            margin-top: 10px;
+        }
+        .status {
+            margin-top: 15px;
+            color: #666;
+            text-align: center;
+            font-style: italic;
+        }
+        .text-result {
+            margin-bottom: 10px;
+            padding: 5px;
+            border-bottom: 1px solid #eee;
+        }
+        .final {
+            font-weight: bold;
+            color: #28a745;
+        }
+        .interim {
+            color: #6c757d;
+            font-style: italic;
+        }
+        .hidden {
+            display: none;
+        }
+        .microphone-icon {
+            font-size: 24px;
+            margin-right: 8px;
+        }
+        .recording-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            background-color: #dc3545;
+            border-radius: 50%;
+            margin-right: 8px;
+            animation: pulse 1.5s infinite;
+        }
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.4; }
+            100% { opacity: 1; }
+        }
+        .audio-info {
+            margin-top: 10px;
+            padding: 8px;
+            background-color: #f0f0f0;
+            border-radius: 4px;
+            font-size: 12px;
+            color: #555;
+        }
+        .tabs {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        .tab {
+            padding: 10px 20px;
+            background-color: #eee;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        .tab.active {
+            background-color: #007bff;
+            color: white;
+        }
+        .tab-content {
+            display: none;
+        }
+        .tab-content.active {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>语音识别与合成测试</h1>
+        
+        <div class="tabs">
+            <div class="tab active" onclick="switchTab('stt')">语音识别 (STT)</div>
+            <div class="tab" onclick="switchTab('tts')">语音合成 (TTS)</div>
+        </div>
+        
+        <!-- STT 模块 -->
+        <div id="stt-tab" class="tab-content active">
+            <div class="control-panel">
+                <button id="startBtn" onclick="startRecording()"><span class="microphone-icon">🎤</span> 开始录音</button>
+                <button id="stopBtn" onclick="stopRecording()" disabled>停止录音</button>
+                <button id="clearBtn" onclick="clearResults()">清空结果</button>
+            </div>
+            
+            <div class="status" id="stt-status">准备就绪</div>
+            
+            <div class="output-container" id="outputContainer">
+                <div class="text-result">识别结果将显示在这里...</div>
+            </div>
+        </div>
+        
+        <!-- TTS 模块 -->
+        <div id="tts-tab" class="tab-content">
+            <div class="input-group">
+                <textarea id="textInput" placeholder="请输入要转换的文字..."></textarea>
+                <button id="convertBtn" onclick="convertToSpeech()">转换</button>
+            </div>
+            <div class="audio-container">
+                <audio id="audioPlayer" controls></audio>
+                <div class="status" id="tts-status"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 全局配置
+        const APP_CONFIG = {
+            // 服务器地址配置
+            TTS_ENDPOINT: 'ws://localhost:8004/tts/ws',
+            STT_ENDPOINT: 'ws://localhost:8004/stt/ws'
+        };
+        
+        // 标签页切换功能
+        function switchTab(tabId) {
+            // 切换标签页样式
+            document.querySelectorAll('.tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.remove('active');
+            });
+            
+            // 激活当前标签页
+            document.querySelector(`.tab[onclick="switchTab('${tabId}')"]`).classList.add('active');
+            document.getElementById(`${tabId}-tab`).classList.add('active');
+        }
+        
+        // ===================== STT 功能 =====================
+        let websocket;
+        let mediaRecorder;
+        let audioChunks = []; // 用于共享STT和TTS功能
+        let isRecording = false;
+        let audioStream = null; // 保存麦克风流，避免重复请求权限
+        let audioContext = null; // 用于处理音频格式转换
+        let ttsWebsocket = null; // TTS WebSocket 连接
+        
+        // 初始化
+        function initialize() {
+            // 检查浏览器支持
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                updateStatus('您的浏览器不支持音频录制功能', true, 'stt');
+                disableButtons();
+                return;
+            }
+            
+            try {
+                // 创建音频上下文
+                window.AudioContext = window.AudioContext || window.webkitAudioContext;
+                audioContext = new AudioContext();
+            } catch (e) {
+                console.error("无法创建音频上下文:", e);
+                updateStatus('浏览器不支持AudioContext', true, 'stt');
+                disableButtons();
+                return;
+            }
+            
+            // 预先请求麦克风权限
+            requestMicrophonePermission();
+            
+            updateStatus('准备就绪', false, 'stt');
+        }
+        
+        // 预先请求麦克风权限
+        async function requestMicrophonePermission() {
+            try {
+                updateStatus('请求麦克风权限...', false, 'stt');
+                // 请求与服务器配置匹配的音频参数
+                audioStream = await navigator.mediaDevices.getUserMedia({ 
+                    audio: {
+                        sampleRate: 16000,         // 确保与服务器配置匹配
+                        channelCount: 1,           // 单声道
+                        echoCancellation: true,    // 回声消除
+                        noiseSuppression: true,    // 噪声抑制
+                        autoGainControl: true      // 自动增益控制
+                    } 
+                });
+                updateStatus('麦克风权限已获取，准备就绪', false, 'stt');
+                
+                // 创建新的音频上下文，指定采样率
+                if (audioContext) {
+                    audioContext.close();
+                }
+                audioContext = new (window.AudioContext || window.webkitAudioContext)({
+                    sampleRate: 16000 // 强制使用16kHz采样率
+                });
+                
+                console.log(`音频上下文创建成功，采样率: ${audioContext.sampleRate}Hz`);
+            } catch (error) {
+                updateStatus(`无法访问麦克风: ${error.message}`, true, 'stt');
+                disableButtons();
+            }
+        }
+        
+        // 开始录音
+        async function startRecording() {
+            try {
+                updateStatus('正在连接服务器...', false, 'stt');
+                audioChunks = [];
+                
+                // 确保我们有麦克风权限
+                if (!audioStream) {
+                    try {
+                        updateStatus('请求麦克风权限...', false, 'stt');
+                        audioStream = await navigator.mediaDevices.getUserMedia({ 
+                            audio: {
+                                sampleRate: 16000,         // 确保与服务器配置匹配
+                                channelCount: 1,           // 单声道
+                                echoCancellation: true,    // 回声消除
+                                noiseSuppression: true,    // 噪声抑制
+                                autoGainControl: true      // 自动增益控制
+                            } 
+                        });
+                        
+                        // 创建新的音频上下文，指定采样率
+                        if (audioContext) {
+                            audioContext.close();
+                        }
+                        audioContext = new (window.AudioContext || window.webkitAudioContext)({
+                            sampleRate: 16000 // 强制使用16kHz采样率
+                        });
+                        
+                        console.log(`音频上下文创建成功，采样率: ${audioContext.sampleRate}Hz`);
+                        updateStatus('麦克风权限已获取，连接服务器...', false, 'stt');
+                    } catch (error) {
+                        updateStatus(`无法访问麦克风: ${error.message}`, true, 'stt');
+                        return;
+                    }
+                }
+                
+                // 关闭现有WebSocket连接(如果有的话)
+                if (websocket && websocket.readyState !== WebSocket.CLOSED) {
+                    websocket.close();
+                    websocket = null;
+                }
+                
+                // 重置标志位
+                isRecording = false;
+                
+                // 连接WebSocket
+                websocket = new WebSocket(APP_CONFIG.STT_ENDPOINT);
+                
+                websocket.onopen = function() {
+                    updateStatus('WebSocket已连接，等待服务准备就绪...', false, 'stt');
+                };
+                
+                websocket.onmessage = function(event) {
+                    const data = JSON.parse(event.data);
+                    console.log("Received data:", data);
+                    
+                    if (data.status === 'ready') {
+                        // 服务器准备就绪后启动录音
+                        startMediaRecorder(audioStream);
+                    } else if (data.status === 'processing') {
+                        // 处理中状态，不需要显示任何内容
+                        console.log("Processing status received");
+                    } else if (data.error) {
+                        updateStatus(`错误: ${data.error}`, true, 'stt');
+                        stopRecording();
+                    } else if (data.code !== undefined && data.code !== 1000) {
+                        updateStatus(`服务器错误码: ${data.code}`, true, 'stt');
+                    } else if (data.result) {
+                        // 标准结果格式处理
+                        const result = data.result;
+                        const text = result.text || '';
+                        // 只有当有文本内容时才追加结果
+                        if (text && text.trim() !== '') {
+                            appendResult(text, result.is_final || false);
+                        }
+                    } else if (data.trans_result) {
+                        // 新格式处理
+                        console.log("Recognition result:", data);
+                        const text = data.trans_result.text || '';
+                        if (text && text.trim() !== '') {
+                            appendResult(text, data.is_final || false);
+                        }
+                    } else if (data.text || data.partial) {
+                        // 另一种可能的格式
+                        const text = data.text || data.partial;
+                        if (text && text.trim() !== '') {
+                            appendResult(text, data.is_final || false);
+                        }
+                    } else {
+                        // 未知格式，记录但不显示空结果
+                        console.log("Received unrecognized data format:", data);
+                        if (JSON.stringify(data) !== '{}' && !data.audio_info) {
+                            appendResult(JSON.stringify(data), false);
+                        }
+                    }
+                };
+                
+                websocket.onclose = function(event) {
+                    console.log("WebSocket关闭:", event);
+                    if (isRecording) {
+                        updateStatus('WebSocket连接已关闭', false, 'stt');
+                        stopLocalRecording();
+                        
+                        // 更新UI
+                        document.getElementById('startBtn').disabled = false;
+                        document.getElementById('stopBtn').disabled = true;
+                        document.getElementById('startBtn').classList.remove('recording');
+                        isRecording = false;
+                    }
+                };
+                
+                websocket.onerror = function(error) {
+                    console.error("WebSocket错误:", error);
+                    updateStatus(`WebSocket错误，请检查服务器是否运行`, true, 'stt');
+                    stopLocalRecording();
+                    
+                    // 更新UI
+                    document.getElementById('startBtn').disabled = false;
+                    document.getElementById('stopBtn').disabled = true;
+                    document.getElementById('startBtn').classList.remove('recording');
+                    isRecording = false;
+                };
+                
+                // 更新UI - 在WebSocket连接完成后修改按钮状态
+                document.getElementById('startBtn').disabled = true;
+                document.getElementById('stopBtn').disabled = false;
+                document.getElementById('startBtn').classList.add('recording');
+                
+            } catch (error) {
+                updateStatus(`启动录音失败: ${error.message}`, true, 'stt');
+                console.error("启动录音错误:", error);
+                
+                // 恢复UI状态
+                document.getElementById('startBtn').disabled = false;
+                document.getElementById('stopBtn').disabled = true;
+                document.getElementById('startBtn').classList.remove('recording');
+            }
+        }
+        
+        // 启动MediaRecorder开始录制
+        function startMediaRecorder(stream) {
+            updateStatus('<span class="recording-indicator"></span>录音中...', false, 'stt');
+            isRecording = true;
+            
+            // 创建音频处理管道
+            const sourceNode = audioContext.createMediaStreamSource(stream);
+            const processorNode = audioContext.createScriptProcessor(4096, 1, 1);
+            
+            processorNode.onaudioprocess = function(e) {
+                if (!isRecording) return;
+                
+                // 获取PCM格式的音频数据
+                const inputData = e.inputBuffer.getChannelData(0);
+                
+                // 将Float32Array转换为Int16Array (16-bit PCM)
+                const pcmData = new Int16Array(inputData.length);
+                for (let i = 0; i < inputData.length; i++) {
+                    // 将[-1,1]范围的float值转换为16位整数范围
+                    pcmData[i] = Math.max(-32768, Math.min(32767, Math.floor(inputData[i] * 32767)));
+                }
+                
+                // 直接发送PCM数据到服务器
+                if (websocket && websocket.readyState === WebSocket.OPEN && isRecording) {
+                    // 输出调试信息
+                    console.log(`发送PCM数据: 长度=${pcmData.length}, 采样率=${audioContext.sampleRate}Hz, 第一个样本值=${pcmData[0]}`);
+                    
+                    // 将Int16Array发送为二进制数据
+                    websocket.send(pcmData.buffer);
+                }
+            };
+            
+            // 连接节点
+            sourceNode.connect(processorNode);
+            processorNode.connect(audioContext.destination);
+            
+            // 保存节点引用，以便于后续停止处理
+            this.sourceNode = sourceNode;
+            this.processorNode = processorNode;
+            
+            const audioInfo = document.createElement('div');
+            audioInfo.className = 'audio-info';
+            audioInfo.id = 'audioInfo';
+            audioInfo.innerHTML = `
+                <strong>音频信息:</strong>
+                <ul style="margin: 5px 0; padding-left: 20px;">
+                    <li>采样率: ${audioContext.sampleRate} Hz</li>
+                    <li>声道数: 1</li>
+                    <li>格式: PCM 16-bit</li>
+                    <li>编码: raw (未压缩)</li>
+                </ul>
+            `;
+            
+            const statusElement = document.getElementById('stt-status');
+            const existingInfo = document.getElementById('audioInfo');
+            if (existingInfo) {
+                existingInfo.remove();
+            }
+            statusElement.after(audioInfo);
+        }
+        
+        // 停止录音
+        function stopRecording() {
+            if (!isRecording) return;
+            
+            // 立即设置标志位，阻止后续音频数据发送
+            isRecording = false;
+            updateStatus('停止录音...', false, 'stt');
+            
+            // 立即停止本地录音设备
+            stopLocalRecording();
+            
+            // 发送结束信号到服务器并立即关闭连接
+            if (websocket && websocket.readyState === WebSocket.OPEN) {
+                try {
+                    // 发送一个空的buffer作为结束标记，服务器会将其识别为最后一个音频包
+                    console.log("发送空的结束标记...");
+                    websocket.send(new ArrayBuffer(0));
+                    
+                    // 等待一段时间后关闭WebSocket，给服务器处理最后一个音频包的时间
+                    setTimeout(() => {
+                        console.log("关闭WebSocket连接...");
+                        updateStatus('识别已终止', false, 'stt');
+                        websocket.close(1000, "正常关闭");
+                        websocket = null;
+                    }, 1000);
+                } catch (error) {
+                    console.error("关闭WebSocket时出错:", error);
+                    websocket = null;
+                }
+            }
+            
+            // 更新UI
+            document.getElementById('startBtn').disabled = false;
+            document.getElementById('stopBtn').disabled = true;
+            document.getElementById('startBtn').classList.remove('recording');
+        }
+        
+        // 停止本地录音设备
+        function stopLocalRecording() {
+            if (this.sourceNode) {
+                // 断开节点连接，彻底停止音频数据流动
+                this.sourceNode.disconnect();
+                this.processorNode.disconnect();
+                this.sourceNode = null;
+                this.processorNode = null;
+            }
+        }
+        
+        // 释放所有资源
+        function releaseResources() {
+            if (audioStream) {
+                audioStream.getTracks().forEach(track => track.stop());
+                audioStream = null;
+            }
+            
+            if (websocket && websocket.readyState !== WebSocket.CLOSED) {
+                websocket.close();
+                websocket = null;
+            }
+            
+            if (ttsWebsocket && ttsWebsocket.readyState !== WebSocket.CLOSED) {
+                ttsWebsocket.close();
+                ttsWebsocket = null;
+            }
+        }
+        
+        // 添加结果到输出区域
+        function appendResult(result, isFinal) {
+            if (!result) return;
+            
+            const outputContainer = document.getElementById('outputContainer');
+            const resultDiv = document.createElement('div');
+            resultDiv.className = `text-result ${isFinal ? 'final' : 'interim'}`;
+            
+            // 格式化时间戳
+            const timestamp = new Date().toLocaleTimeString();
+            const prefix = isFinal ? '最终结果' : '临时结果';
+            
+            // 处理不同响应格式
+            let textContent = '';
+            let resultInfo = '';
+            
+            if (typeof result === 'string') {
+                textContent = result;
+            } else if (result.text) {
+                textContent = result.text;
+                
+                if (result.utterances) {
+                    const definiteUtterances = result.utterances.filter(u => u.definite);
+                    if (definiteUtterances.length > 0) {
+                        const utterance = definiteUtterances[0];
+                        resultInfo = `<small>[${utterance.start_time}ms-${utterance.end_time}ms]</small>`;
+                    }
+                }
+                
+                if (result.audio_info) {
+                    const audioDuration = result.audio_info.duration || 0;
+                    resultInfo += ` <small>音频长度: ${(audioDuration/1000).toFixed(1)}秒</small>`;
+                }
+            } else if (result.result) {
+                textContent = result.result;
+            } else if (result.trans_result && result.trans_result.text) {
+                textContent = result.trans_result.text;
+            } else {
+                textContent = JSON.stringify(result);
+            }
+            
+            resultDiv.innerHTML = `
+                <strong>${prefix} [${timestamp}]:</strong> ${textContent}
+                ${resultInfo ? `<div>${resultInfo}</div>` : ''}
+            `;
+            
+            // 如果是最终结果，将其添加到顶部，否则追加到最后
+            if (isFinal) {
+                // 在容器顶部插入
+                if (outputContainer.firstChild) {
+                    outputContainer.insertBefore(resultDiv, outputContainer.firstChild);
+                } else {
+                    outputContainer.appendChild(resultDiv);
+                }
+                
+                // 如果最终结果有文本，可以自动将其填充到TTS输入框中
+                if (textContent && textContent.trim() !== '') {
+                    document.getElementById('textInput').value = textContent;
+                }
+            } else {
+                // 查找并替换之前的临时结果
+                const interimResults = outputContainer.querySelectorAll('.interim');
+                if (interimResults.length > 0) {
+                    outputContainer.replaceChild(resultDiv, interimResults[interimResults.length - 1]);
+                } else {
+                    outputContainer.appendChild(resultDiv);
+                }
+            }
+            
+            outputContainer.scrollTop = 0; // 滚动到顶部查看最新结果
+        }
+        
+        // 清空识别结果
+        function clearResults() {
+            const outputContainer = document.getElementById('outputContainer');
+            outputContainer.innerHTML = '<div class="text-result">识别结果将显示在这里...</div>';
+            updateStatus('结果已清空', false, 'stt');
+        }
+        
+        // ===================== TTS 功能 =====================
+        async function convertToSpeech() {
+            const text = document.getElementById('textInput').value;
+            const button = document.getElementById('convertBtn');
+            const status = document.getElementById('tts-status');
+            const audioPlayer = document.getElementById('audioPlayer');
+
+            if (!text) {
+                updateStatus('请输入文字', false, 'tts');
+                return;
+            }
+
+            try {
+                button.disabled = true;
+                audioChunks = []; // 清空之前的音频块
+                
+                // 关闭现有WebSocket连接(如果有的话)
+                if (ttsWebsocket && ttsWebsocket.readyState !== WebSocket.CLOSED) {
+                    ttsWebsocket.close();
+                    ttsWebsocket = null;
+                }
+                
+                updateStatus('正在连接TTS服务...', false, 'tts');
+                
+                // 创建新的WebSocket连接
+                ttsWebsocket = new WebSocket(APP_CONFIG.TTS_ENDPOINT);
+                
+                ttsWebsocket.onopen = function() {
+                    updateStatus('正在转换...', false, 'tts');
+                    // 发送文本到服务器
+                    ttsWebsocket.send(JSON.stringify({
+                        text: text
+                    }));
+                };
+                
+                ttsWebsocket.onmessage = function(event) {
+                    // 处理二进制音频数据
+                    if (event.data instanceof Blob) {
+                        audioChunks.push(event.data);
+                    } 
+                    // 处理JSON消息
+                    else {
+                        try {
+                            const data = JSON.parse(event.data);
+                            
+                            // 处理完成消息
+                            if (data.status === 'completed') {
+                                // 合并音频块并播放
+                                const audioBlob = new Blob(audioChunks, {type: 'audio/mp3'});
+                                const audioUrl = URL.createObjectURL(audioBlob);
+                                
+                                // 设置音频源并播放
+                                audioPlayer.src = audioUrl;
+                                audioPlayer.play().then(() => {
+                                    updateStatus('正在播放...', false, 'tts');
+                                }).catch(error => {
+                                    console.error('播放失败:', error);
+                                    updateStatus('播放失败', true, 'tts');
+                                });
+                                
+                                // 当音频播放完毕时释放 URL
+                                audioPlayer.onended = () => {
+                                    URL.revokeObjectURL(audioUrl);
+                                    updateStatus('播放完成', false, 'tts');
+                                };
+                            }
+                            // 处理错误消息
+                            else if (data.error) {
+                                console.error('TTS服务错误:', data.error);
+                                updateStatus(`错误: ${data.error}`, true, 'tts');
+                                
+                                // 服务器端可能有async iterator错误，提供更友好的错误信息
+                                if (data.error.includes('__aiter__') || data.error.includes('coroutine')) {
+                                    updateStatus('服务器配置错误: TTS生成器实现有问题', true, 'tts');
+                                    console.error('服务器端async iterator实现错误，需要修复voice_service.py中generate_speech方法');
+                                }
+                                
+                                button.disabled = false;
+                            }
+                        } catch (e) {
+                            console.error('解析消息错误:', e);
+                        }
+                    }
+                };
+                
+                ttsWebsocket.onclose = function() {
+                    if (audioChunks.length === 0) {
+                        updateStatus('连接已关闭，未收到音频数据', true, 'tts');
+                    }
+                    button.disabled = false;
+                };
+                
+                ttsWebsocket.onerror = function(error) {
+                    updateStatus(`WebSocket错误: ${error.message || '未知错误'}`, true, 'tts');
+                    console.error('TTS WebSocket错误:', error);
+                    button.disabled = false;
+                };
+                
+            } catch (error) {
+                updateStatus(`错误: ${error.message}`, true, 'tts');
+                console.error('TTS错误:', error);
+                button.disabled = false;
+            }
+        }
+        
+        // 通用状态更新函数
+        function updateStatus(message, isError = false, type = 'stt') {
+            const statusElement = document.getElementById(`${type}-status`);
+            if (statusElement) {
+                statusElement.innerHTML = message;
+                statusElement.style.color = isError ? '#dc3545' : '#666';
+            }
+        }
+        
+        // 禁用所有按钮
+        function disableButtons() {
+            document.getElementById('startBtn').disabled = true;
+            document.getElementById('stopBtn').disabled = true;
+        }
+        
+        // 页面关闭前释放资源
+        window.addEventListener('beforeunload', function() {
+            releaseResources();
+        });
+        
+        // 初始化页面
+        window.onload = initialize;
+    </script>
+</body>
+</html> 

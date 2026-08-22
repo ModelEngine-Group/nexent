@@ -1,0 +1,27 @@
+name: 'Bug Report'
+description: 'Report errors or unexpected behavior'
+title: '[Bug] '
+type: Bug
+labels: ['unconfirm']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before creating a new Issue, please [search existing issues](https://github.com/AI-Application-Innovation/nexent/issues), including closed ones.  
+  - type: input
+    attributes:
+      label: 'Nexent Version'
+  - type: textarea
+    attributes:
+      label: 'Problem Description'
+      description: Please provide a clear and concise description of the issue.
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: 'Reproduction Steps'
+      description: Please provide clear and concise steps to reproduce the issue.
+  - type: textarea
+    attributes:
+      label: 'Additional Information'
+      description: If your issue requires further explanation or cannot be reproduced in a simple example, please provide more information here.

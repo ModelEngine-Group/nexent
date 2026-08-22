@@ -1,0 +1,732 @@
+/* Markdown styles for ReactMarkdown */
+
+/* Nord Color Variables */
+:root {
+  --color-nord0: #2e3440;
+  --color-nord1: #3b4252;
+  --color-nord2: #434c5e;
+  --color-nord3: #4c566a;
+  --color-nord4: #d8dee9;
+  --color-nord5: #e5e9f0;
+  --color-nord6: #eceff4;
+  --color-nord7: #8fbcbb;
+  --color-nord8: #88c0d0;
+  --color-nord9: #81a1c1;
+  --color-nord10: #5e81ac;
+  --color-nord11: #bf616a;
+  --color-nord12: #d08770;
+  --color-nord13: #ebcb8b;
+  --color-nord14: #a3be8c;
+  --color-nord15: #b48ead;
+
+  /* Tailwind-like Nord color names */
+  --color-nord-0: #2e3440;
+  --color-nord-1: #3b4252;
+  --color-nord-2: #434c5e;
+  --color-nord-3: #4c566a;
+  --color-nord-4: #d8dee9;
+  --color-nord-5: #e5e9f0;
+  --color-nord-6: #eceff4;
+  --color-nord-7: #8fbcbb;
+  --color-nord-8: #88c0d0;
+  --color-nord-9: #81a1c1;
+  --color-nord-10: #5e81ac;
+  --color-nord-11: #bf616a;
+  --color-nord-12: #d08770;
+  --color-nord-13: #ebcb8b;
+  --color-nord-14: #a3be8c;
+  --color-nord-15: #b48ead;
+}
+
+/* Heading Styles */
+.markdown-h1 {
+  font-size: 1.875rem;
+  font-weight: 700;
+  line-height: 1.25;
+  margin-top: 1.5rem;
+  margin-bottom: 0.5rem;
+  color: var(--color-nord0);
+}
+
+.markdown-h2 {
+  font-size: 1.5rem;
+  font-weight: 600;
+  line-height: 1.3;
+  margin-top: 1.25rem;
+  margin-bottom: 0.5rem;
+  color: var(--color-nord0);
+}
+
+.markdown-h3 {
+  font-size: 1.25rem;
+  font-weight: 500;
+  line-height: 1.4;
+  margin-top: 1rem;
+  margin-bottom: 0.5rem;
+  color: var(--color-nord0);
+}
+
+.markdown-h4 {
+  font-size: 1.125rem;
+  font-weight: 500;
+  line-height: 1.4;
+  margin-top: 0.75rem;
+  margin-bottom: 0.5rem;
+  color: var(--color-nord0);
+}
+
+.markdown-h5 {
+  font-size: 1rem;
+  font-weight: 500;
+  line-height: 1.5;
+  margin-top: 0.5rem;
+  margin-bottom: 0.25rem;
+  color: var(--color-nord0);
+}
+
+.markdown-h6 {
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1.5;
+  margin-top: 0.5rem;
+  margin-bottom: 0.25rem;
+  color: var(--color-nord0);
+}
+
+/* Paragraph Styles */
+.markdown-paragraph {
+  font-size: 1rem;
+  line-height: 1.625;
+  margin: 0.5rem 0;
+  color: var(--color-nord0);
+}
+
+/* Horizontal Rule Styles */
+.markdown-hr {
+  border: none;
+  height: 2px;
+  background-color: #e5e7eb;
+  margin: 1.5rem 0;
+  border-radius: 1px;
+}
+
+/* List Styles */
+.markdown-ol {
+  margin: 0.5rem 0;
+  padding-left: 1.5rem;
+  list-style-type: decimal;
+  list-style-position: outside;
+}
+
+.markdown-ul {
+  margin: 0.5rem 0;
+  padding-left: 1.5rem;
+  list-style-type: disc;
+  list-style-position: outside;
+}
+
+/* List Item Styles */
+.markdown-li {
+  margin-bottom: 0.25rem;
+  color: var(--color-nord0);
+}
+
+/* Remove first br from paragraphs inside list items */
+.markdown-li > br:first-child {
+  display: none;
+}
+
+.markdown-li > br:first-child {
+  display: none;
+}
+
+/* Remove extra spacing from paragraphs inside list items */
+.markdown-ol li > p,
+.markdown-ul li > p,
+.markdown-li > p {
+  display: inline;
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+}
+
+/* Preserve spacing only between multiple paragraphs within same list item */
+.markdown-ol li > p + p,
+.markdown-ul li > p + p,
+.markdown-li > p + p {
+  margin-top: 0.5rem !important;
+}
+
+/* Blockquote Styles */
+.markdown-blockquote {
+  border-left: 4px solid #d1d5db;
+  padding-left: 1rem;
+  padding-top: 0.5rem;
+  padding-bottom: 0.5rem;
+  margin: 1rem 0;
+  background-color: #f9fafb;
+  font-style: italic;
+  font-size: 1rem;
+  line-height: 1.6;
+  color: var(--color-nord1);
+}
+
+/* Table Cell Styles */
+.markdown-td {
+  padding: 0.75rem 1rem;
+  border: 1px solid #e5e7eb;
+  color: var(--color-nord0);
+}
+
+.markdown-th {
+  padding: 0.75rem 1rem;
+  border: 1px solid #e5e7eb;
+  font-weight: 600;
+  background-color: #f9fafb;
+  color: var(--color-nord0);
+}
+
+/* Markdown table reset to prevent external zebra striping */
+.markdown-body table {
+  border-collapse: collapse;
+}
+
+.markdown-body table tr,
+.markdown-body table tr:nth-child(odd),
+.markdown-body table tr:nth-child(even) {
+  background-color: transparent !important;
+}
+
+.markdown-body table td,
+.markdown-body table th {
+  background-color: transparent !important;
+}
+
+/* Emphasis Styles */
+.markdown-strong {
+  font-weight: 600;
+  color: var(--color-nord0);
+}
+
+.markdown-em {
+  font-style: italic;
+  color: var(--color-nord0);
+}
+
+.markdown-del {
+  text-decoration: line-through;
+  color: var(--color-nord3);
+}
+
+/* Link Styles */
+.markdown-link {
+  color: var(--color-nord10);
+  text-decoration: underline;
+  transition: color 0.2s ease;
+}
+
+.markdown-link:hover {
+  color: var(--color-nord9);
+}
+
+/* Inline Code Styles */
+.markdown-code {
+  background-color: var(--color-nord6);
+  color: var(--color-nord10);
+  padding: 0.125rem 0.25rem;
+  border-radius: 0.25rem;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 0.875em;
+  font-weight: normal;
+}
+
+/* Image Styles */
+.markdown-img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 0.5rem;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+  margin: 1rem 0;
+  display: block;
+}
+
+.markdown-video-wrapper {
+  margin: 1rem 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: 100%;
+  align-items: stretch;
+}
+
+.markdown-video {
+  width: 100%;
+  max-height: 70vh;
+  border-radius: 0.75rem;
+  background-color: #000;
+  box-shadow: 0 6px 12px -3px rgba(0, 0, 0, 0.2);
+}
+
+.markdown-video:focus {
+  outline: 2px solid var(--color-nord10);
+  outline-offset: 2px;
+}
+
+.markdown-video-caption {
+  font-size: 0.875rem;
+  color: var(--color-nord2);
+  line-height: 1.4;
+}
+
+/* Media Error Styles */
+.markdown-media-error {
+  margin: 0.5rem 0;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.5rem;
+  background-color: #f9fafb;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  align-items: center;
+  justify-content: center;
+  min-height: 60px;
+  max-width: 800px;
+  width: fit-content;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.markdown-media-error-message {
+  font-size: 0.875rem;
+  color: #6b7280;
+  text-align: center;
+  font-weight: 500;
+}
+
+.markdown-media-error-caption {
+  font-size: 0.75rem;
+  color: #9ca3af;
+  text-align: center;
+  font-style: italic;
+}
+
+/* Global markdown container */
+.task-message-content {
+  color: hsl(var(--foreground)) !important;
+}
+
+/* Deep thinking content - gray color */
+.deep-thinking-content {
+  color: #6b7280 !important;
+}
+
+.deep-thinking-content * {
+  color: #6b7280 !important;
+}
+
+.markdown-body {
+  background: transparent !important;
+  min-height: 1em;
+  padding-top: 0.5em;
+  padding-bottom: 0.5em;
+  color: hsl(var(--foreground)) !important;
+}
+
+/* KaTeX adjustments */
+.markdown-body .katex * {
+  font-family: KaTeX_Main, "Times New Roman", serif !important;
+}
+
+.markdown-body .katex {
+  font-size: 1.1em;
+  display: inline;
+  white-space: nowrap;
+  vertical-align: baseline;
+  font-family: KaTeX_Main, "Times New Roman", serif !important;
+}
+
+.markdown-body .katex-display {
+  margin: 1.2em 0;
+  text-align: center;
+  display: block;
+  white-space: normal;
+}
+
+.markdown-body .katex .katex-html {
+  white-space: nowrap;
+  display: inline;
+}
+
+.markdown-body .katex .base {
+  display: inline;
+  white-space: nowrap;
+}
+
+.markdown-body p .katex,
+.markdown-body li .katex,
+.markdown-body td .katex,
+.markdown-body th .katex {
+  display: inline;
+  white-space: nowrap;
+  vertical-align: baseline;
+}
+
+.markdown-body .katex .mord,
+.markdown-body .katex .mop,
+.markdown-body .katex .mbin,
+.markdown-body .katex .mrel,
+.markdown-body .katex .mopen,
+.markdown-body .katex .mclose,
+.markdown-body .katex .mpunct {
+  white-space: nowrap;
+}
+
+/* Scrollbar helpers */
+.tooltip-content-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(209 213 219) transparent;
+}
+
+.tooltip-content-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+
+/* List spacing and reset */
+.markdown-body ul,
+.markdown-body ol {
+  margin-left: revert !important;
+  padding-left: revert !important;
+}
+
+/* Force solid bullets and standard numbers */
+.markdown-body ul {
+  list-style-type: disc !important;
+  list-style-position: outside !important;
+}
+
+.markdown-body ul ul {
+  list-style-type: circle !important;
+}
+
+.markdown-body ol {
+  list-style-type: decimal !important;
+  list-style-position: outside !important;
+}
+
+.markdown-body li {
+  display: list-item !important;
+}
+
+.markdown-body p {
+  margin-bottom: 0.5rem !important;
+  margin-top: 0.25rem !important;
+}
+
+.user-paragraph {
+  margin-bottom: 0.25rem !important;
+  margin-top: 0.25rem !important;
+}
+
+/* Code block container styles */
+.code-block-container {
+  position: relative;
+  display: block;
+  border-radius: 6px;
+  margin: 16px 0;
+  width: 100%;
+  overflow: hidden;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
+  border: 1px solid #e0e0e0;
+}
+
+.code-block-container > div {
+  margin: 0 !important;
+}
+
+.code-block-container pre {
+  margin: 0 !important;
+}
+
+.code-block-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 12px;
+  background: #eeeeee;
+  border-bottom: 1px solid #ddd;
+  font-size: 13px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    "Liberation Mono", "Courier New", monospace;
+  min-height: 36px;
+  box-sizing: border-box;
+}
+
+.code-language-label {
+  color: #666;
+  font-weight: 500;
+  text-transform: lowercase;
+  display: flex;
+  align-items: center;
+  font-size: 12px;
+  letter-spacing: 0.5px;
+  margin-left: 0;
+}
+
+.code-language-label::before {
+  display: none;
+}
+
+.code-language-label[data-language="python"]::before,
+.code-language-label[data-language="javascript"]::before,
+.code-language-label[data-language="js"]::before,
+.code-language-label[data-language="typescript"]::before,
+.code-language-label[data-language="ts"]::before,
+.code-language-label[data-language="html"]::before,
+.code-language-label[data-language="css"]::before {
+  display: none;
+}
+
+.code-block-content {
+  position: relative;
+  background: #f8f8f8;
+  padding: 0;
+}
+
+.code-block-header .copy-button,
+.code-block-header .header-copy-button {
+  padding: 2px;
+  height: 24px;
+  width: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.6;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  transition: all 0.2s ease;
+  font-size: 12px;
+  cursor: pointer;
+  position: static;
+  margin: 0;
+  float: right;
+  margin-right: 0;
+}
+
+.code-block-header .copy-button:hover,
+.code-block-header .header-copy-button:hover {
+  opacity: 1;
+  background: rgba(0, 0, 0, 0.05);
+  border-color: transparent;
+}
+
+.token.punctuation,
+.token.operator {
+  opacity: 0.7;
+}
+
+/* Ensure Prism tokens display inline within code blocks */
+.code-block-content .token,
+.code-block-content span[class*="token"] {
+  display: inline;
+}
+
+.token.comment {
+  font-style: italic;
+  color: #6a9955;
+}
+
+.token.string {
+  color: #a31515;
+}
+
+.code-block-content pre::-webkit-scrollbar {
+  height: 6px;
+  width: 6px;
+}
+
+.code-block-content pre::-webkit-scrollbar-thumb {
+  background: #ccc;
+  border-radius: 3px;
+}
+
+.code-block-content pre::-webkit-scrollbar-thumb:hover {
+  background: #aaa;
+}
+
+/* Mermaid Diagram Styles */
+.mermaid-container {
+  border: 1px solid #e5e7eb;
+  border-radius: 0.5rem;
+  overflow: hidden;
+  background-color: #ffffff;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
+  margin: 1rem 0;
+  transition: box-shadow 0.2s ease;
+}
+
+.mermaid-container:hover {
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+}
+
+.mermaid-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 1rem;
+  background: linear-gradient(to right, #f9fafb, #f3f4f6);
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.mermaid-label {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #374151;
+}
+
+.mermaid-copy-button {
+  transition: background-color 0.2s;
+  border-radius: 0.375rem;
+  padding: 0.25rem;
+}
+
+.mermaid-copy-button:hover {
+  background-color: #e5e7eb;
+}
+
+.mermaid-content {
+  position: relative;
+}
+
+.mermaid-diagram {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 1rem;
+  min-height: 120px;
+  overflow: visible; /* allow container to grow with content */
+  background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
+}
+
+.mermaid-diagram svg {
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+  display: block; /* ensure responsive SVG sizing */
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.05));
+}
+.mermaid-inline {
+  display: inline-block;
+  vertical-align: middle;
+  line-height: 1;
+}
+
+.mermaid-inline-svg svg {
+  height: 1.25em;
+  width: auto;
+  display: inline-block;
+  vertical-align: middle;
+}
+
+/* Generic Diagram helpers for new Diagram component */
+.diagram-block {
+  display: block;
+  width: 100%;
+}
+
+.diagram-inline {
+  display: inline-block;
+  vertical-align: baseline;
+  line-height: 1;
+}
+
+.mermaid-code-display {
+  padding: 1rem;
+  background-color: #f9fafb;
+  font-size: 0.875rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  overflow-x: auto;
+  white-space: pre-wrap;
+}
+
+.mermaid-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  color: #6b7280;
+}
+
+.mermaid-error-container {
+  border: 1px solid #fecaca;
+  border-radius: 0.5rem;
+  overflow: hidden;
+  background-color: #fef2f2;
+  margin: 1rem 0;
+}
+
+.mermaid-error-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 1rem;
+  background-color: #fee2e2;
+  border-bottom: 1px solid #fecaca;
+}
+
+.mermaid-error-label {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #b91c1c;
+}
+
+.mermaid-error-content {
+  padding: 1rem;
+}
+
+.mermaid-error-message {
+  color: #dc2626;
+}
+
+/* Gantt chart optimization styles */
+.mermaid svg {
+  /* Ensure Gantt chart has enough space */
+  min-width: 100%;
+  overflow: visible;
+}
+
+/* Gantt chart timeline label optimization */
+.mermaid svg .axis text {
+  font-size: 11px !important;
+  font-weight: 500 !important;
+  fill: #6b7280 !important;
+  text-anchor: middle !important;
+  dominant-baseline: hanging !important;
+}
+
+/* Gantt chart grid line optimization */
+.mermaid svg .grid .tick line {
+  stroke: #e5e7eb !important;
+  stroke-width: 1px !important;
+}
+
+/* Gantt chart task bar optimization */
+.mermaid svg .task text {
+  font-size: 12px !important;
+  font-weight: 500 !important;
+  fill: #374151 !important;
+}
+
+/* Gantt chart section title optimization */
+.mermaid svg .section text {
+  font-size: 14px !important;
+  font-weight: 600 !important;
+  fill: #374151 !important;
+}
+
+/* Ensure Gantt chart container has sufficient padding */
+.mermaid {
+  padding: 20px !important;
+  margin: 10px 0 !important;
+}

@@ -1,0 +1,1947 @@
+import React, { useRef, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
+import {
+  Globe,
+  Search,
+  Zap,
+  Bot,
+  Code,
+  FileText,
+  ChevronRight,
+  Wrench,
+  CheckCircle2,
+  AlertTriangle,
+  RotateCcw,
+  ShieldCheck,
+} from "lucide-react";
+
+import { ScrollArea } from "@/components/ui/scrollArea";
+import { Button, message as antdMessage } from "antd";
+import {
+  MarkdownRenderer,
+  CodeBlock,
+} from "@/components/common/markdownRenderer";
+import { chatConfig } from "@/const/chatConfig";
+import {
+  ChatMessageType,
+  TaskMessageType,
+  CardItem,
+  MessageHandler,
+} from "@/types/chat";
+import { useChatTaskMessage } from "@/hooks/useChatTaskMessage";
+import {
+  storageService,
+  extractObjectNameFromUrl,
+} from "@/services/storageService";
+import log from "@/lib/logger";
+import { useConfig } from "@/hooks/useConfig";
+
+/**
+ * Convert custom code tags to standard markdown code fences
+ * This should be called BEFORE passing content to MarkdownRenderer
+ * Handles streaming cases where closing tags may not be present yet
+ * - <code>...</code> → ```python ... ```
+ * - <code>... (incomplete) → ```python (open code fence, no content yet)
+ * - <DISPLAY:language>...</DISPLAY> → ```language ... ```
+ * - <DISPLAY:language>... (incomplete) → ```language (open code fence, no content yet)
+ */
+const convertToMarkdownCodeFences = (content: string): string => {
+  // Step 1: Handle complete <DISPLAY:language>...</DISPLAY> blocks
+  content = content.replace(
+    /<DISPLAY:(\w+)>([\s\S]*?)<\/DISPLAY>/g,
+    (_match, language, code) => {
+      return `\`\`\`${language}\n${code.trim()}\n\`\`\``;
+    }
+  );
+
+  // Step 2: Handle complete <code>...</code> blocks
+  content = content.replace(/<code>([\s\S]*?)<\/code>/g, (_match, code) => {
+    return `\`\`\`python\n${code.trim()}\n\`\`\``;
+  });
+
+  // Step 3: Handle incomplete tags during streaming
+  // <DISPLAY:language> without closing </DISPLAY> → ```language\n (open fence)
+  // Only match if there's no closing tag later in the content
+  content = content.replace(
+    /<DISPLAY:(\w+)>(?![\s\S]*<\/DISPLAY>)/g,
+    (_match, language) => {
+      return `\`\`\`${language}\n`;
+    }
+  );
+
+  // <code> without closing </code> → ```python\n (open fence)
+  // Only match if there's no closing tag later in the content
+  content = content.replace(/<code>(?![\s\S]*<\/code>)/g, () => {
+    return `\`\`\`python\n`;
+  });
+
+  return content;
+};
+
+/**
+ * Extract code content and language from model_output_code content
+ * Handles both <code> and legacy <RUN> / <DISPLAY:language> formats
+ * Supports streaming mode where end markers may not be present yet
+ * @param content - Raw code content from stream
+ * @returns Object with codeContent and language
+ */
+/**
+ * Strip trailing backticks and newlines from code content.
+ * Used during streaming when closing markers may not be fully received.
+ */
+const stripTrailingMarkers = (content: string): string => {
+  while (content.endsWith("```") || content.endsWith("\n")) {
+    if (content.endsWith("```")) {
+      content = content.substring(0, content.length - 3);
+    } else {
+      content = content.substring(0, content.length - 1);
+    }
+  }
+  return content;
+};
+
+/**
+ * Remove incomplete end markers that may appear during streaming.
+ */
+const stripIncompleteEndMarkers = (content: string): string => {
+  const endIdx = content.indexOf("```<END");
+  if (endIdx !== -1) {
+    content = content.substring(0, endIdx);
+  }
+  const endTagIdx = content.indexOf("<END");
+  if (endTagIdx !== -1) {
+    content = content.substring(0, endTagIdx);
+  }
+  return content;
+};
+
+const extractCodeInfo = (
+  content: string
+): { codeContent: string; language: string } => {
+  if (!content || typeof content !== "string") {
+    return { codeContent: "", language: "python" };
+  }
+
+  let processed = content;
+
+  // Remove "代码：" or "Code:" prefix if present
+  if (processed.startsWith("代码：") || processed.startsWith("代码:")) {
+    processed = processed.substring(4);
+  } else if (
+    processed.toLowerCase().startsWith("code：") ||
+    processed.toLowerCase().startsWith("code:")
+  ) {
+    processed = processed.substring(4);
+  }
+
+  // 1. NEW <code>...</code> format (executable, default python)
+  const codeStart = processed.indexOf("<code>");
+  if (codeStart !== -1) {
+    const contentStart = codeStart + "<code>".length;
+    const codeEnd = processed.indexOf("</code>", contentStart);
+    processed =
+      codeEnd !== -1
+        ? processed.substring(contentStart, codeEnd)
+        : processed.substring(contentStart);
+    processed = stripIncompleteEndMarkers(processed);
+    processed = stripTrailingMarkers(processed);
+    return { codeContent: processed.trim(), language: "python" };
+  }
+
+  // 2. NEW <DISPLAY:language>...</DISPLAY> format (display only)
+  const displayStart = processed.indexOf("<DISPLAY:");
+  if (displayStart !== -1) {
+    const langEnd = processed.indexOf(">", displayStart);
+    if (langEnd !== -1) {
+      const language = processed.substring(
+        displayStart + "<DISPLAY:".length,
+        langEnd
+      );
+      const contentStart = langEnd + 1;
+      const displayEnd = processed.indexOf("</DISPLAY>", contentStart);
+      processed =
+        displayEnd !== -1
+          ? processed.substring(contentStart, displayEnd)
+          : processed.substring(contentStart);
+      processed = stripIncompleteEndMarkers(processed);
+      processed = stripTrailingMarkers(processed);
+      const displayUserIdx = processed.indexOf("[已展示给用户]");
+      if (displayUserIdx !== -1) {
+        processed = processed.substring(0, displayUserIdx);
+      }
+      return { codeContent: processed.trim(), language };
+    }
+  }
+
+  // 3. LEGACY ```<DISPLAY:language> format with backticks
+  const legacyDisplayStart = processed.indexOf("```<DISPLAY:");
+  if (legacyDisplayStart !== -1) {
+    const langEnd = processed.indexOf(
+      ">",
+      legacyDisplayStart + "```<DISPLAY:".length
+    );
+    if (langEnd !== -1) {
+      const language = processed.substring(
+        legacyDisplayStart + "```<DISPLAY:".length,
+        langEnd
+      );
+      const contentStart = langEnd + 1;
+      const endCodeIdx = processed.indexOf(
+        "```<END_DISPLAY_CODE>",
+        contentStart
+      );
+      const endCodeIdx2 = processed.indexOf("<END_DISPLAY_CODE>", contentStart);
+      const endPos = endCodeIdx !== -1 ? endCodeIdx : endCodeIdx2;
+      processed =
+        endPos !== -1
+          ? processed.substring(contentStart, endPos)
+          : processed.substring(contentStart);
+      processed = stripIncompleteEndMarkers(processed);
+      processed = stripTrailingMarkers(processed);
+      const displayUserIdx = processed.indexOf("[已展示给用户]");
+      if (displayUserIdx !== -1) {
+        processed = processed.substring(0, displayUserIdx);
+      }
+      return { codeContent: processed.trim(), language };
+    }
+  }
+
+  // 4. LEGACY ```<RUN> format (executable, default python)
+  const runStart = processed.indexOf("```<RUN>");
+  if (runStart !== -1) {
+    const contentStart = runStart + "```<RUN>".length;
+    const endCodeIdx = processed.indexOf("```<END_CODE>", contentStart);
+    const endCodeIdx2 = processed.indexOf("<END_CODE>", contentStart);
+    const endPos = endCodeIdx !== -1 ? endCodeIdx : endCodeIdx2;
+    processed =
+      endPos !== -1
+        ? processed.substring(contentStart, endPos)
+        : processed.substring(contentStart);
+    processed = stripIncompleteEndMarkers(processed);
+    processed = stripTrailingMarkers(processed);
+    return { codeContent: processed.trim(), language: "python" };
+  }
+
+  // 5. Handle PARTIAL/INCOMPLETE headers (Streaming)
+  // Prevent raw incomplete tags from being shown to users
+
+  if (processed === "<code") {
+    return { codeContent: "", language: "python" };
+  }
+
+  const incompleteDisplayRun = /^<(DISPLAY:[a-z0-9]*|RUN)$/i.test(processed);
+  if (incompleteDisplayRun) {
+    const colonIdx = processed.lastIndexOf(":");
+    return {
+      codeContent: "",
+      language:
+        colonIdx !== -1
+          ? processed.substring(colonIdx + 1) || "python"
+          : "python",
+    };
+  }
+
+  const incompleteWithBackticks = /^```\s*<[A-Z]*(:[a-z0-9]*)?$/.test(
+    processed
+  );
+  if (incompleteWithBackticks) {
+    const colonIdx = processed.lastIndexOf(":");
+    const lang =
+      colonIdx !== -1
+        ? processed.substring(colonIdx + 1).replace(/[`\s<>]/g, "")
+        : "";
+    return { codeContent: "", language: lang || "python" };
+  }
+
+  // 6. Inline DISPLAY/RUN detection (handles case where backticks may have been stripped)
+  const inlineDisplayIdx = processed.indexOf("<DISPLAY:");
+  if (inlineDisplayIdx !== -1) {
+    const langEnd = processed.indexOf(">", inlineDisplayIdx);
+    if (langEnd !== -1) {
+      const language = processed.substring(
+        inlineDisplayIdx + "<DISPLAY:".length,
+        langEnd
+      );
+      const contentStart = langEnd + 1;
+      processed = processed.substring(contentStart);
+      processed = stripIncompleteEndMarkers(processed);
+      processed = stripTrailingMarkers(processed);
+      return { codeContent: processed.trim(), language };
+    }
+  }
+
+  const inlineRunIdx = processed.indexOf("<RUN>");
+  if (inlineRunIdx !== -1) {
+    const contentStart = inlineRunIdx + "<RUN>".length;
+    processed = processed.substring(contentStart);
+    processed = stripIncompleteEndMarkers(processed);
+    processed = stripTrailingMarkers(processed);
+    return { codeContent: processed.trim(), language: "python" };
+  }
+
+  // 7. Handle standard markdown block start
+  const stripped = processed.replace(/^```\s*/, "");
+  if (stripped !== processed && stripped.length === 0) {
+    return { codeContent: "", language: "python" };
+  }
+
+  // 8. Fallback: standard markdown code block
+  if (processed.startsWith("```")) {
+    let lang = "python";
+    let contentStart = processed.charAt(3) === "\n" ? 4 : 3;
+    if (processed.charAt(3) !== "\n") {
+      const spaceIdx = processed.indexOf(" ");
+      const newlineIdx = processed.indexOf("\n");
+      if (spaceIdx !== -1 && (newlineIdx === -1 || spaceIdx < newlineIdx)) {
+        lang = processed.substring(3, spaceIdx);
+        contentStart = spaceIdx + 1;
+      } else if (newlineIdx !== -1) {
+        lang = processed.substring(3, newlineIdx);
+        contentStart = newlineIdx + 1;
+      }
+    }
+    processed = processed.substring(contentStart);
+    const closingIdx = processed.lastIndexOf("```");
+    if (closingIdx !== -1) {
+      processed = processed.substring(0, closingIdx);
+    }
+    return { codeContent: processed.trim(), language: lang };
+  }
+
+  // Default: treat as python code content
+  return { codeContent: processed.trim(), language: "python" };
+};
+
+// Icon mapping dictionary - map strings to corresponding icon components
+const iconMap: Record<string, React.ReactNode> = {
+  search: <Search size={16} className="mr-2" color="#4b5563" />,
+  bot: <Bot size={16} className="mr-2" color="#4b5563" />,
+  code: <Code size={16} className="mr-2" color="#4b5563" />,
+  file: <FileText size={16} className="mr-2" color="#4b5563" />,
+  globe: <Globe size={16} className="mr-2" color="#4b5563" />,
+  zap: <Zap size={16} className="mr-2" color="#4b5563" />,
+  knowledge: <FileText size={16} className="mr-2" color="#4b5563" />,
+  default: <Wrench size={16} className="mr-2" color="#4b5563" />, // Default icon
+};
+
+type HistorySummaryPayload = {
+  summary?: string | Record<string, unknown>;
+  covered_through_message_id?: number;
+  trigger?: string;
+};
+
+type TranslationFunction = Parameters<MessageHandler["render"]>[1];
+
+const formatHistorySummary = (
+  summary: HistorySummaryPayload["summary"]
+): string => {
+  if (typeof summary === "string") return summary;
+  if (!summary || typeof summary !== "object") return "";
+  return Object.entries(summary)
+    .filter(
+      (entry): entry is [string, string] =>
+        typeof entry[1] === "string" && entry[1].trim().length > 0
+    )
+    .map(([key, value]) => `**${key.replaceAll("_", " ")}**\n\n${value}`)
+    .join("\n\n");
+};
+
+const HistorySummaryEvent = ({
+  content,
+  t,
+}: {
+  content: string;
+  t: TranslationFunction;
+}) => {
+  let payload: HistorySummaryPayload = {};
+  try {
+    payload = JSON.parse(content) as HistorySummaryPayload;
+  } catch {
+    payload = { summary: content };
+  }
+
+  const summary = formatHistorySummary(payload.summary);
+  const trigger = payload.trigger
+    ? t(`taskWindow.historySummary.triggers.${payload.trigger}`, {
+        defaultValue: payload.trigger,
+      })
+    : t("taskWindow.historySummary.triggerUnknown");
+
+  return (
+    <div className="w-full text-gray-700">
+      <div className="flex items-center gap-2 font-medium">
+        <FileText size={15} aria-hidden="true" />
+        {t("taskWindow.historySummary.title")}
+      </div>
+      <div className="mt-1 text-xs text-gray-500">
+        {typeof payload.covered_through_message_id === "number" && (
+          <span className="mr-3">
+            {t("taskWindow.historySummary.coveredThrough", {
+              id: payload.covered_through_message_id,
+            })}
+          </span>
+        )}
+        <span>{t("taskWindow.historySummary.trigger", { trigger })}</span>
+      </div>
+      <div className="mt-3 border-t border-gray-200 pt-3 text-sm">
+        {summary ? (
+          <MarkdownRenderer
+            content={summary}
+            className="task-message-content"
+            showDiagramToggle={false}
+            enableMultimodal={false}
+          />
+        ) : (
+          t("taskWindow.historySummary.empty")
+        )}
+      </div>
+    </div>
+  );
+};
+
+type KnowledgeSiteInfo = {
+  key: string;
+  domain: string;
+  displayName: string;
+  faviconUrl: string;
+  useDefaultIcon: boolean;
+  isKnowledgeBase: boolean;
+  sourceType: string;
+  url: string;
+  filename: string;
+  datamateDatasetId?: string;
+  datamateFileId?: string;
+  datamateBaseUrl?: string;
+  objectName?: string;
+  downloadUrl?: string;
+  canOpenWeb: boolean;
+};
+
+// Define the handlers for different types of messages to improve extensibility
+const messageHandlers: MessageHandler[] = [
+  {
+    canHandle: (message) =>
+      message.type === chatConfig.messageTypes.HISTORY_SUMMARY,
+    render: (message, t) => (
+      <HistorySummaryEvent content={message.content || ""} t={t} />
+    ),
+  },
+  // Preprocess type processor - handles contents array logic
+  {
+    canHandle: (message) => message.type === chatConfig.contentTypes.PREPROCESS,
+    render: (message, _t) => {
+      // For preprocess messages, display content from contents array if available
+      let displayContent = message.content;
+      if (message.contents && message.contents.length > 0) {
+        // Find the latest preprocess content
+        const preprocessContent = message.contents.find(
+          (content: any) => content.type === chatConfig.contentTypes.PREPROCESS
+        );
+        if (preprocessContent) {
+          displayContent = preprocessContent.content;
+        }
+      }
+
+      return (
+        <div
+          style={{
+            fontFamily:
+              "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
+            fontSize: "0.875rem",
+            lineHeight: 1.5,
+            color: "#6b7280",
+            fontWeight: 500,
+            borderRadius: "0.25rem",
+            paddingTop: "0.5rem",
+          }}
+        >
+          <span>{displayContent}</span>
+        </div>
+      );
+    },
+  },
+
+  // Processing type processor - thinking, code generation, code execution
+  {
+    canHandle: (message) =>
+      message.type === chatConfig.messageTypes.AGENT_NEW_RUN ||
+      message.type === chatConfig.messageTypes.GENERATING_CODE ||
+      message.type === chatConfig.messageTypes.EXECUTING,
+    render: (message, _t) => (
+      <div
+        style={{
+          fontFamily:
+            "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
+          fontSize: "0.875rem",
+          lineHeight: 1.5,
+          color: "#6b7280",
+          fontWeight: 500,
+          borderRadius: "0.25rem",
+          paddingTop: "0.5rem",
+        }}
+      >
+        <span>{message.content}</span>
+      </div>
+    ),
+  },
+
+  // Thinking types processor - render through MarkdownRenderer for proper formatting
+  {
+    canHandle: (message) =>
+      message.type === chatConfig.messageTypes.MODEL_OUTPUT_THINKING ||
+      message.type === chatConfig.messageTypes.MODEL_OUTPUT_DEEP_THINKING,
+    render: (message, _t) => (
+      <div
+        className={
+          message.subType === "deep_thinking"
+            ? "deep-thinking-content"
+            : "task-message-content"
+        }
+      >
+        <MarkdownRenderer
+          content={convertToMarkdownCodeFences(message.content)}
+          className={
+            message.subType === "deep_thinking"
+              ? "deep-thinking-content"
+              : "task-message-content"
+          }
+          showDiagramToggle={false}
+          enableMultimodal={false}
+        />
+      </div>
+    ),
+  },
+
+  // Add search_content_placeholder type processor - for history records
+  {
+    canHandle: (message) =>
+      message.type === chatConfig.messageTypes.SEARCH_CONTENT_PLACEHOLDER,
+    render: (message, t, context) => {
+      // Find search results in the message context
+      const messageContainer = message._messageContainer;
+      if (
+        !messageContainer ||
+        !messageContainer.search ||
+        messageContainer.search.length === 0
+      ) {
+        return null;
+      }
+
+      // Build the content for displaying search results
+      const searchResults = messageContainer.search;
+
+      // deduplication logic - based on the combination of URL and filename
+      const uniqueSearchResults = searchResults.filter(
+        (result: any, index: number, array: any[]) => {
+          const currentKey = `${result.url || ""}-${result.filename || ""}-${
+            result.title || ""
+          }`;
+          return (
+            array.findIndex((item: any) => {
+              const itemKey = `${item.url || ""}-${item.filename || ""}-${
+                item.title || ""
+              }`;
+              return itemKey === currentKey;
+            }) === index
+          );
+        }
+      );
+
+      // Process website / knowledge base information for display
+      const siteInfos: KnowledgeSiteInfo[] = uniqueSearchResults.map(
+        (result: any, index: number) => {
+          const pageUrl = result.url || "";
+          const filename = result.filename || result.title || "";
+          const sourceType = result.source_type || (filename ? "file" : "url");
+          const scoreDetails = result.score_details || {};
+          const datamateDatasetId =
+            scoreDetails?.datamate_dataset_id || scoreDetails?.dataset_id;
+          const datamateFileId =
+            scoreDetails?.datamate_file_id || scoreDetails?.file_id;
+          const datamateBaseUrl =
+            scoreDetails?.datamate_base_url ||
+            scoreDetails?.datamate_baseUrl ||
+            scoreDetails?.base_url;
+          const objectName =
+            result.object_name ||
+            scoreDetails?.object_name ||
+            scoreDetails?.minio_object_name;
+
+          let domain = t("taskWindow.unknownSource");
+          let displayName = t("taskWindow.unknownSource");
+          let baseUrl = "";
+          let faviconUrl = "";
+          let useDefaultIcon = false;
+          const searchType = result.search_type || "";
+          let isKnowledgeBase =
+            sourceType === "file" ||
+            sourceType === "datamate" ||
+            sourceType === "aidp" ||
+            searchType === "aidp_search" ||
+            (!sourceType && !!filename);
+          let canOpenWeb = false;
+
+          if (isKnowledgeBase) {
+            displayName =
+              filename || result.title || t("taskWindow.knowledgeFile");
+            domain =
+              datamateBaseUrl ||
+              (pageUrl && pageUrl !== "#"
+                ? (() => {
+                    try {
+                      return new URL(pageUrl).hostname;
+                    } catch {
+                      return t("taskWindow.unknownSource");
+                    }
+                  })()
+                : t("taskWindow.unknownSource"));
+            useDefaultIcon = true;
+          } else if (pageUrl && pageUrl !== "#") {
+            try {
+              const parsedUrl = new URL(pageUrl);
+              baseUrl = `${parsedUrl.protocol}//${parsedUrl.host}`;
+              domain = parsedUrl.hostname;
+
+              displayName = domain
+                .replace(/^www\./, "")
+                .replace(
+                  /\.(com|cn|org|net|io|gov|edu|co|info|biz|xyz)(\.[a-z]{2})?$/,
+                  ""
+                );
+              if (!displayName) {
+                displayName = domain;
+              }
+
+              faviconUrl = `${baseUrl}/favicon.ico`;
+              canOpenWeb = true;
+            } catch (e) {
+              log.error(t("taskWindow.urlParseError"), e);
+              useDefaultIcon = true;
+              canOpenWeb = false;
+            }
+          } else {
+            useDefaultIcon = true;
+            canOpenWeb = false;
+          }
+
+          return {
+            key: `site-${index}-${result.cite_index ?? ""}-${filename ?? ""}`,
+            domain,
+            displayName,
+            faviconUrl,
+            url: pageUrl,
+            useDefaultIcon,
+            isKnowledgeBase,
+            filename,
+            sourceType,
+            datamateDatasetId,
+            datamateFileId,
+            datamateBaseUrl,
+            objectName,
+            downloadUrl: result.download_url,
+            canOpenWeb,
+          };
+        }
+      );
+
+      const handleKnowledgeFileDownload = async (
+        site: KnowledgeSiteInfo
+      ): Promise<void> => {
+        try {
+          if (site.sourceType === "datamate") {
+            if (!context?.appConfig?.modelEngineEnabled) {
+              antdMessage.error(
+                "DataMate download not available: ModelEngine is not enabled"
+              );
+              return;
+            }
+            if (
+              !site.datamateDatasetId &&
+              !site.datamateFileId &&
+              (!site.url || site.url === "#")
+            ) {
+              antdMessage.error(
+                t(
+                  "taskWindow.downloadError",
+                  "Missing Datamate dataset or file information"
+                )
+              );
+              return;
+            }
+
+            await storageService.downloadDatamateFile({
+              url: site.url && site.url !== "#" ? site.url : undefined,
+              baseUrl: site.datamateBaseUrl,
+              datasetId: site.datamateDatasetId,
+              fileId: site.datamateFileId,
+              filename: site.filename || undefined,
+            });
+          } else {
+            if (site.downloadUrl) {
+              const link = document.createElement("a");
+              link.href = site.downloadUrl;
+              link.download = site.filename || "download";
+              link.style.display = "none";
+              document.body.appendChild(link);
+              link.click();
+              setTimeout(() => {
+                document.body.removeChild(link);
+              }, 100);
+              antdMessage.success(
+                t("taskWindow.downloadSuccess", "File download started")
+              );
+              return;
+            }
+
+            // Check if URL is a direct http/https URL that can be accessed directly
+            // Exclude backend API endpoints (containing /api/file/download/)
+            if (
+              site.url &&
+              site.url !== "#" &&
+              (site.url.startsWith("http://") ||
+                site.url.startsWith("https://")) &&
+              !site.url.includes("/api/file/download/")
+            ) {
+              // Direct download from HTTP/HTTPS URL without backend
+              const link = document.createElement("a");
+              link.href = site.url;
+              link.download = site.filename || "download";
+              link.style.display = "none";
+              document.body.appendChild(link);
+              link.click();
+              setTimeout(() => {
+                document.body.removeChild(link);
+              }, 100);
+              antdMessage.success(
+                t("taskWindow.downloadSuccess", "File download started")
+              );
+              return;
+            }
+
+            let objectName = site.objectName;
+            if (!objectName && site.url) {
+              objectName = extractObjectNameFromUrl(site.url) || undefined;
+            }
+            if (!objectName && site.filename) {
+              objectName = site.filename.includes("/")
+                ? site.filename
+                : `attachments/${site.filename}`;
+            }
+            if (!objectName) {
+              antdMessage.error(
+                t(
+                  "taskWindow.downloadError",
+                  "Failed to download file. Please try again."
+                )
+              );
+              return;
+            }
+            await storageService.downloadFile(
+              objectName,
+              site.filename || undefined
+            );
+          }
+
+          antdMessage.success(
+            t("taskWindow.downloadSuccess", "File download started")
+          );
+        } catch (error) {
+          log.error("Failed to download knowledge file:", error);
+          antdMessage.error(
+            t(
+              "taskWindow.downloadError",
+              "Failed to download file. Please try again."
+            )
+          );
+        }
+      };
+
+      // Render the search result information bar
+      return (
+        <div
+          style={{
+            fontFamily:
+              "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
+            fontSize: "0.875rem",
+            lineHeight: 1.5,
+          }}
+        >
+          {/* Display multiple source websites in a single line */}
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: "0.5rem",
+              marginBottom: "0.25rem",
+            }}
+          >
+            {/* "Reading" label - a single line */}
+            <div
+              style={{
+                fontSize: "0.875rem",
+                color: "#6b7280",
+                fontWeight: 500,
+                paddingTop: "0.5rem",
+              }}
+            >
+              {t("taskWindow.readingSearchResults")}
+            </div>
+
+            {/* Website icon and domain list - a new line */}
+            <div
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                gap: "0.5rem",
+              }}
+            >
+              {siteInfos.map((site) => {
+                const isClickable = site.isKnowledgeBase || site.canOpenWeb;
+                return (
+                  <div
+                    key={site.key}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      padding: "0.25rem 0.5rem",
+                      backgroundColor: "#f9fafb",
+                      borderRadius: "0.25rem",
+                      fontSize: "0.75rem",
+                      color: "#4b5563",
+                      border: "1px solid #e5e7eb",
+                      cursor: isClickable ? "pointer" : "default",
+                      transition: isClickable
+                        ? "background-color 0.2s"
+                        : "none",
+                    }}
+                    onClick={() => {
+                      if (site.isKnowledgeBase) {
+                        handleKnowledgeFileDownload(site);
+                      } else if (site.canOpenWeb && site.url) {
+                        window.open(site.url, "_blank", "noopener,noreferrer");
+                      }
+                    }}
+                    onMouseEnter={(e) => {
+                      if (isClickable) {
+                        e.currentTarget.style.backgroundColor = "#f3f4f6";
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      if (isClickable) {
+                        e.currentTarget.style.backgroundColor = "#f9fafb";
+                      }
+                    }}
+                    title={
+                      site.isKnowledgeBase
+                        ? t("taskWindow.downloadFile", {
+                            name: site.filename || site.displayName,
+                          })
+                        : site.canOpenWeb
+                          ? t("taskWindow.visit", { domain: site.domain })
+                          : site.filename || site.displayName
+                    }
+                  >
+                    {site.isKnowledgeBase ? (
+                      <FileText size={16} className="mr-2" color="#6b7280" />
+                    ) : site.useDefaultIcon ? (
+                      <Globe size={16} className="mr-2" color="#6b7280" />
+                    ) : (
+                      <img
+                        src={site.faviconUrl}
+                        alt={site.domain}
+                        style={{
+                          width: "16px",
+                          height: "16px",
+                          marginRight: "0.5rem",
+                          borderRadius: "2px",
+                        }}
+                        onError={(e) => {
+                          // If the icon fails to load, replace it with a React component
+                          const imgElement = e.target as HTMLImageElement;
+                          // Mark the element to prevent duplicate onError triggers
+                          imgElement.style.display = "none";
+                          // Get the parent element
+                          const parent = imgElement.parentElement;
+                          if (parent) {
+                            // Create a placeholder div, as the container of the Globe component
+                            const placeholder = document.createElement("div");
+                            placeholder.style.marginRight = "0.5rem";
+                            placeholder.style.display = "inline-flex";
+                            placeholder.style.alignItems = "center";
+                            placeholder.style.justifyContent = "center";
+                            placeholder.style.width = "16px";
+                            placeholder.style.height = "16px";
+                            // Insert it before the img
+                            parent.insertBefore(placeholder, imgElement);
+                            // Render the Globe icon to this element (this can only be approximated using native methods)
+                            placeholder.innerHTML =
+                              '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>';
+                          }
+                        }}
+                      />
+                    )}
+                    <span
+                      style={{
+                        color: site.isKnowledgeBase ? "#2563eb" : undefined,
+                        textDecoration: site.isKnowledgeBase
+                          ? "underline"
+                          : "none",
+                        fontWeight: site.isKnowledgeBase ? 600 : undefined,
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "0.25rem",
+                      }}
+                    >
+                      {site.displayName}
+                      {site.isKnowledgeBase && (
+                        <ChevronRight size={14} color="#2563eb" />
+                      )}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      );
+    },
+  },
+
+  // card type processor - display cards with icons
+  {
+    canHandle: (message) => message.type === "card",
+    render: (message, t) => {
+      let cardItems: CardItem[] = [];
+
+      try {
+        // Parse the card content
+        if (typeof message.content === "string") {
+          cardItems = JSON.parse(message.content);
+        } else if (Array.isArray(message.content)) {
+          cardItems = message.content;
+        }
+      } catch (error) {
+        log.error(t("taskWindow.parseCardError"), error);
+        return (
+          <div style={{ color: "red", padding: "8px" }}>
+            {t("taskWindow.cannotParseCard")}
+          </div>
+        );
+      }
+
+      if (!cardItems || cardItems.length === 0) {
+        return null;
+      }
+
+      return (
+        <div
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            gap: "0.5rem",
+            marginTop: "0.25rem",
+          }}
+        >
+          {cardItems.map((card: CardItem, index: number) => (
+            <div
+              key={index}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                padding: "0.25rem 0.5rem",
+                backgroundColor: "#f9fafb",
+                borderRadius: "0.25rem",
+                fontSize: "0.7rem",
+                color: "#4b5563",
+                border: "1px solid #e5e7eb",
+                fontWeight: 500,
+              }}
+            >
+              {/* Get the corresponding icon component from the dictionary based on the icon name */}
+              {card.icon && iconMap[card.icon]
+                ? iconMap[card.icon]
+                : iconMap["default"]}
+              <span>{card.text}</span>
+            </div>
+          ))}
+        </div>
+      );
+    },
+  },
+
+  // search_content type processor - search results
+  {
+    canHandle: (message) => {
+      const isSearchContent = message.type === "search_content";
+      return isSearchContent;
+    },
+    render: (message, t) => {
+      // Extract search results from the content
+      let searchResults = [];
+      const content = message.content || "";
+
+      try {
+        // Try to parse the JSON content
+        if (typeof content === "string") {
+          // Parse the JSON string
+          const parsedContent = JSON.parse(content);
+
+          // Check if it is an array
+          if (Array.isArray(parsedContent)) {
+            searchResults = parsedContent;
+          } else {
+            // If it is not an array but an object, it may be a single result
+            searchResults = [parsedContent];
+          }
+        } else if (Array.isArray(content)) {
+          // If it is already an array, use it directly
+          searchResults = content;
+        }
+      } catch (error: any) {
+        log.error(t("taskWindow.parseSearchError"), error);
+        return (
+          <div style={{ color: "red", padding: "8px" }}>
+            {t("taskWindow.cannotParseSearch", { message: error.message })}
+          </div>
+        );
+      }
+
+      // If there are no search results, display an empty message
+      if (!searchResults || searchResults.length === 0) {
+        return (
+          <div style={{ padding: "8px", color: "#6b7280" }}>
+            {t("taskWindow.noSearchResults")}
+          </div>
+        );
+      }
+
+      // deduplication logic - based on the combination of URL and filename
+      const uniqueSearchResults = searchResults.filter(
+        (result: any, index: number, array: any[]) => {
+          const currentKey = `${result.url || ""}-${result.filename || ""}-${
+            result.title || ""
+          }`;
+          return (
+            array.findIndex((item: any) => {
+              const itemKey = `${item.url || ""}-${item.filename || ""}-${
+                item.title || ""
+              }`;
+              return itemKey === currentKey;
+            }) === index
+          );
+        }
+      );
+
+      // Process website information for display
+      const siteInfos = uniqueSearchResults.map((result: any) => {
+        const pageUrl = result.url || "";
+        const filename = result.filename || "";
+        const sourceType = result.source_type || "";
+        let domain = t("taskWindow.unknownSource");
+        let displayName = t("taskWindow.unknownSource");
+        let baseUrl = "";
+        let faviconUrl = "";
+        let useDefaultIcon = false;
+        let isKnowledgeBase = false;
+        let canClick = true; // whether to allow click to jump
+
+        // first judge based on source_type
+        if (sourceType === "file") {
+          isKnowledgeBase = true;
+          displayName =
+            filename || result.title || t("taskWindow.knowledgeFile");
+          useDefaultIcon = true;
+          canClick = false; // file type does not allow jump
+        }
+        // if there is no source_type, judge based on filename (compatibility processing)
+        else if (filename) {
+          isKnowledgeBase = true;
+          displayName = filename;
+          useDefaultIcon = true;
+          canClick = false; // file type does not allow jump
+        }
+        // handle webpage link
+        else if (pageUrl && pageUrl !== "#") {
+          try {
+            const parsedUrl = new URL(pageUrl);
+            baseUrl = `${parsedUrl.protocol}//${parsedUrl.host}`;
+            domain = parsedUrl.hostname;
+
+            // Process the domain, remove the www prefix and com/cn etc. suffix
+            displayName = domain
+              .replace(/^www\./, "") // Remove the www. prefix
+              .replace(
+                /\.(com|cn|org|net|io|gov|edu|co|info|biz|xyz)(\.[a-z]{2})?$/,
+                ""
+              ); // Remove common suffixes
+
+            // If the processing is empty, use the original domain
+            if (!displayName) {
+              displayName = domain;
+            }
+
+            faviconUrl = `${baseUrl}/favicon.ico`;
+            canClick = true;
+          } catch (e) {
+            log.error(t("taskWindow.urlParseError"), e);
+            useDefaultIcon = true;
+            canClick = false;
+          }
+        } else {
+          useDefaultIcon = true;
+          canClick = false;
+        }
+
+        return {
+          domain,
+          displayName,
+          faviconUrl,
+          url: pageUrl,
+          useDefaultIcon,
+          isKnowledgeBase,
+          filename,
+          downloadUrl: result.download_url,
+          canClick: canClick || Boolean(result.download_url),
+        };
+      });
+
+      // Render the search result information bar
+      return (
+        <div
+          style={{
+            fontFamily:
+              "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
+            fontSize: "0.875rem",
+            lineHeight: 1.5,
+          }}
+        >
+          {/* Display multiple source websites in a single line */}
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: "0.5rem",
+              marginBottom: "0.25rem",
+            }}
+          >
+            {/* "Reading search results" label - a single line */}
+            <div
+              style={{
+                fontSize: "0.875rem",
+                color: "#6b7280",
+                fontWeight: 500,
+                paddingTop: "0.5rem",
+              }}
+            >
+              {t("taskWindow.readingSearchResults")}
+            </div>
+
+            {/* Website icon and domain list - a new line */}
+            <div
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                gap: "0.5rem",
+              }}
+            >
+              {siteInfos.map((site: any, index: number) => (
+                <div
+                  key={index}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    padding: "0.25rem 0.5rem",
+                    backgroundColor: "#f9fafb",
+                    borderRadius: "0.25rem",
+                    fontSize: "0.75rem",
+                    color: "#4b5563",
+                    border: "1px solid #e5e7eb",
+                    cursor: site.canClick ? "pointer" : "default",
+                    transition: site.canClick
+                      ? "background-color 0.2s"
+                      : "none",
+                  }}
+                  onClick={() => {
+                    if (site.downloadUrl) {
+                      const link = document.createElement("a");
+                      link.href = site.downloadUrl;
+                      link.download = site.filename || "download";
+                      link.click();
+                    } else if (site.canClick && site.url) {
+                      window.open(site.url, "_blank", "noopener,noreferrer");
+                    }
+                  }}
+                  onMouseEnter={(e) => {
+                    if (site.canClick) {
+                      e.currentTarget.style.backgroundColor = "#f3f4f6";
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (site.canClick) {
+                      e.currentTarget.style.backgroundColor = "#f9fafb";
+                    }
+                  }}
+                  title={
+                    site.canClick
+                      ? t("taskWindow.visit", { domain: site.domain })
+                      : site.filename || site.displayName
+                  }
+                >
+                  {site.isKnowledgeBase ? (
+                    <FileText size={16} className="mr-2" color="#6b7280" />
+                  ) : site.useDefaultIcon ? (
+                    <Globe size={16} className="mr-2" color="#6b7280" />
+                  ) : (
+                    <img
+                      src={site.faviconUrl}
+                      alt={site.domain}
+                      style={{
+                        width: "16px",
+                        height: "16px",
+                        marginRight: "0.5rem",
+                        borderRadius: "2px",
+                      }}
+                      onError={(e) => {
+                        // If the icon fails to load, replace it with a React component
+                        const imgElement = e.target as HTMLImageElement;
+                        // Mark the element to prevent duplicate onError triggers
+                        imgElement.style.display = "none";
+                        // Get the parent element
+                        const parent = imgElement.parentElement;
+                        if (parent) {
+                          // Create a placeholder div, as the container of the Globe component
+                          const placeholder = document.createElement("div");
+                          placeholder.style.marginRight = "0.5rem";
+                          placeholder.style.display = "inline-flex";
+                          placeholder.style.alignItems = "center";
+                          placeholder.style.justifyContent = "center";
+                          placeholder.style.width = "16px";
+                          placeholder.style.height = "16px";
+                          // Insert it before the img
+                          parent.insertBefore(placeholder, imgElement);
+                          // Render the Globe icon to this element (this can only be approximated using native methods)
+                          placeholder.innerHTML =
+                            '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>';
+                        }
+                      }}
+                    />
+                  )}
+                  <span>{site.displayName}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      );
+    },
+  },
+
+  // model_output type processor - model output
+  {
+    canHandle: (message) => message.type === "model_output",
+    render: (message, _t) => (
+      <div
+        className={
+          message.subType === "deep_thinking"
+            ? "deep-thinking-content"
+            : "task-message-content"
+        }
+      >
+        <MarkdownRenderer
+          content={convertToMarkdownCodeFences(message.content)}
+          className={
+            message.subType === "deep_thinking"
+              ? "deep-thinking-content"
+              : "task-message-content"
+          }
+          showDiagramToggle={false}
+          enableMultimodal={false}
+        />
+      </div>
+    ),
+  },
+
+  // model_output_code type processor - code output with direct code block rendering
+  {
+    canHandle: (message) =>
+      message.type === chatConfig.messageTypes.MODEL_OUTPUT_CODE,
+    render: (message, _t) => {
+      // Extract code content and language from the message
+      const { codeContent, language } = extractCodeInfo(message.content);
+
+      return (
+        <div
+          style={{
+            fontFamily:
+              "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
+            fontSize: "0.875rem",
+            lineHeight: 1.5,
+            color: "#1f2937",
+            fontWeight: 400,
+          }}
+        >
+          <CodeBlock codeContent={codeContent} language={language} />
+        </div>
+      );
+    },
+  },
+
+  // execution type processor - execution result (not displayed)
+  {
+    canHandle: (message) => message.type === "execution",
+    render: (_message, _t) => null, // Return null, do not render this type of message
+  },
+
+  // verification type processor - layered ReAct self-check status
+  {
+    canHandle: (message) =>
+      message.type === chatConfig.messageTypes.VERIFICATION,
+    render: (message, t) => {
+      let data: any = {};
+      try {
+        data =
+          typeof message.content === "string"
+            ? JSON.parse(message.content)
+            : message.content || {};
+      } catch (_) {
+        data = { message: message.content };
+      }
+
+      const phase = data.phase || "start";
+      const severity = data.severity || "info";
+      const labelMap: Record<string, string> = {
+        start: t("taskWindow.verification.start"),
+        pass: t("taskWindow.verification.pass"),
+        warning: t("taskWindow.verification.warning"),
+        blocked: t("taskWindow.verification.blocked"),
+        repair: t("taskWindow.verification.repair"),
+        final_pass: t("taskWindow.verification.finalPass"),
+        final_fail: t("taskWindow.verification.finalFail"),
+      };
+      const label =
+        labelMap[phase] || data.message || t("taskWindow.verification.start");
+      const rawMessage =
+        typeof data.message === "string" ? data.message.trim() : "";
+      const genericPassMessages = new Set([
+        "自检通过",
+        "最终自检通过",
+        "Self-check passed",
+        "Final self-check passed",
+      ]);
+      const fallbackReason = (() => {
+        if (data.event === "tool_precheck") {
+          return "动作非空、参数和语法已检查";
+        }
+        if (data.event === "retrieval") {
+          return "检索结果和错误信号已检查";
+        }
+        if (data.event === "handoff") {
+          return "子任务返回内容已检查";
+        }
+        if (data.event === "tool_result" || data.event === "code_execution") {
+          return "执行结果非空，未发现未处理错误";
+        }
+        if (data.event === "final_answer") {
+          return phase === "final_pass"
+            ? "答案完整、格式正常，未发现未处理错误"
+            : "答案非空、无内部标记、无占位符";
+        }
+        return "未发现阻断问题";
+      })();
+      const displayMessage =
+        (phase === "pass" || phase === "final_pass") &&
+        (!rawMessage || genericPassMessages.has(rawMessage))
+          ? `${rawMessage || label}：${fallbackReason}`
+          : rawMessage || label;
+      const tone =
+        phase === "final_pass" || phase === "pass"
+          ? "#047857"
+          : phase === "blocked" ||
+              phase === "final_fail" ||
+              severity === "blocking"
+            ? "#dc2626"
+            : phase === "repair" || phase === "warning"
+              ? "#d97706"
+              : "#2563eb";
+      const Icon =
+        phase === "final_pass" || phase === "pass"
+          ? CheckCircle2
+          : phase === "repair"
+            ? RotateCcw
+            : phase === "blocked" || phase === "final_fail"
+              ? AlertTriangle
+              : ShieldCheck;
+
+      return (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "0.5rem",
+            fontFamily:
+              "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
+            fontSize: "0.875rem",
+            lineHeight: 1.5,
+            color: tone,
+            fontWeight: 500,
+            borderRadius: "0.25rem",
+            paddingTop: "0.5rem",
+          }}
+        >
+          <Icon size={16} />
+          <span>{displayMessage}</span>
+          {typeof data.score === "number" && (
+            <span style={{ opacity: 0.72 }}>
+              {Math.round(data.score * 100)}%
+            </span>
+          )}
+        </div>
+      );
+    },
+  },
+
+  // error type processor - error information
+  {
+    canHandle: (message) => message.type === "error",
+    render: (message, _t) => (
+      <div
+        style={{
+          fontFamily:
+            "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
+          fontSize: "0.875rem",
+          lineHeight: 1.5,
+          color: "#dc2626",
+          fontWeight: 500,
+          borderRadius: "0.25rem",
+          paddingTop: "0.5rem",
+        }}
+      >
+        <span>{message.content}</span>
+      </div>
+    ),
+  },
+
+  // max_steps_reached type processor - max steps warning
+  {
+    canHandle: (message) =>
+      message.type === chatConfig.messageTypes.MAX_STEPS_REACHED,
+    render: (message, t) => {
+      let maxStepsData = { completedSteps: 0, maxSteps: 0, message: "" };
+
+      try {
+        if (typeof message.content === "string") {
+          maxStepsData = JSON.parse(message.content);
+        } else if (typeof message.content === "object") {
+          maxStepsData = message.content;
+        }
+      } catch (error) {
+        return null;
+      }
+
+      return (
+        <div
+          style={{
+            fontFamily:
+              "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
+            fontSize: "0.875rem",
+            lineHeight: 1.5,
+            color: "#d97706",
+            fontWeight: 500,
+            borderRadius: "0.25rem",
+            paddingTop: "0.5rem",
+          }}
+        >
+          <span>
+            {t("taskWindow.maxStepsReached", {
+              completedSteps: maxStepsData.completedSteps,
+            })}
+          </span>
+        </div>
+      );
+    },
+  },
+
+  // virtual type processor - virtual message (do not display content, only as a card container)
+  {
+    canHandle: (message) => message.type === "virtual",
+    render: (_message, _t) => null,
+  },
+
+  // memory_search type processor - memory fetching status
+  {
+    canHandle: (message) => message.type === "memory_search",
+    render: (message, t) => {
+      let memoryData: any = {};
+
+      try {
+        // Parse the memory search content
+        memoryData = JSON.parse(message.content);
+      } catch (error) {
+        log.error("Failed to parse memory search content:", error);
+        return null;
+      }
+
+      let messageText = memoryData.message || "";
+      // Map backend placeholders to translated text
+      switch (messageText) {
+        case "<MEM_START>":
+          messageText = t("chatStreamHandler.memoryRetrieving");
+          break;
+        case "<MEM_DONE>":
+          messageText = t("chatStreamHandler.memoryRetrieved");
+          break;
+        case "<MEM_FAILED>":
+          messageText = t("chatStreamHandler.memoryFailed");
+          break;
+        default:
+          break;
+      }
+
+      return (
+        <div
+          style={{
+            fontFamily:
+              "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
+            fontSize: "0.875rem",
+            lineHeight: 1.5,
+            color: "#6b7280",
+            fontWeight: 500,
+            paddingTop: "0.5rem",
+          }}
+        >
+          <span>{messageText}</span>
+        </div>
+      );
+    },
+  },
+
+  // default processor - should be placed at the end
+  {
+    canHandle: () => true,
+    render: (message, t) => {
+      const content = message.content;
+      if (typeof content === "string") {
+        return (
+          <MarkdownRenderer
+            content={convertToMarkdownCodeFences(content)}
+            className="task-message-content"
+            showDiagramToggle={false}
+            enableMultimodal={false}
+          />
+        );
+      } else {
+        return (
+          <pre
+            style={{
+              whiteSpace: "pre-wrap",
+              fontSize: "0.75rem",
+              fontFamily: "monospace",
+            }}
+          >
+            {JSON.stringify(content, null, 2)}
+          </pre>
+        );
+      }
+    },
+  },
+];
+
+interface TaskWindowProps {
+  messages: TaskMessageType[];
+  isStreaming?: boolean;
+  defaultExpanded?: boolean;
+}
+
+function TaskWindowInner({
+  messages,
+  isStreaming = false,
+  defaultExpanded = true,
+}: TaskWindowProps) {
+  const { t } = useTranslation("common");
+  const { appConfig } = useConfig();
+  const scrollAreaRef = useRef<HTMLDivElement>(null);
+  const [autoScroll, setAutoScroll] = useState(true);
+  const [isExpanded, setIsExpanded] = useState(defaultExpanded); // default expand task details interface
+  const [contentHeight, setContentHeight] = useState(0);
+  const contentRef = useRef<HTMLDivElement>(null);
+
+  // Add new refs for dynamic threshold calculation
+  const prevContentHeightRef = useRef(0);
+  const lastScrollTimeRef = useRef(Date.now());
+
+  const { hasMessages, hasVisibleMessages, groupedMessages } =
+    useChatTaskMessage(messages as ChatMessageType[]);
+
+  // The function of scrolling to the bottom - defined early to avoid hoisting issues
+  const scrollToBottom = () => {
+    const scrollAreaElement = scrollAreaRef.current?.querySelector(
+      "[data-radix-scroll-area-viewport]"
+    );
+    if (!scrollAreaElement) return;
+
+    // Use requestAnimationFrame to optimize performance
+    requestAnimationFrame(() => {
+      (scrollAreaElement as HTMLElement).scrollTop = (
+        scrollAreaElement as HTMLElement
+      ).scrollHeight;
+    });
+  };
+
+  // calculate the content height
+  useEffect(() => {
+    if (isExpanded && contentRef.current) {
+      const height = contentRef.current.scrollHeight;
+      setContentHeight(height);
+    }
+  }, [isExpanded, groupedMessages, messages]);
+
+  // Force recalculate content height after mount for cached error messages
+  useEffect(() => {
+    if (isExpanded && contentHeight === 0) {
+      // Delay to ensure DOM is rendered
+      const timer = setTimeout(() => {
+        if (contentRef.current) {
+          const height = contentRef.current.scrollHeight;
+          setContentHeight(height);
+        }
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [isExpanded, contentHeight]);
+
+  // Dynamic threshold calculation based on content growth
+  const calculateDynamicThreshold = (baseThreshold: number) => {
+    const contentGrowth = contentHeight - prevContentHeightRef.current;
+    const currentTime = Date.now();
+    const timeDiff = currentTime - lastScrollTimeRef.current;
+
+    // If content grew significantly (more than 200px) in a short time (less than 1 second)
+    if (contentGrowth > 200 && timeDiff < 1000) {
+      // Increase threshold proportionally to content growth, but cap it at reasonable limits
+      const dynamicThreshold = Math.min(
+        baseThreshold + contentGrowth * 0.8,
+        400
+      );
+      return dynamicThreshold;
+    }
+
+    // If content grew moderately (50-200px)
+    if (contentGrowth > 50) {
+      const dynamicThreshold = Math.min(
+        baseThreshold + contentGrowth * 0.5,
+        250
+      );
+      return dynamicThreshold;
+    }
+
+    return baseThreshold;
+  };
+
+  // Listen for message changes and automatically scroll to the bottom (only when user allows it)
+  useEffect(() => {
+    if (isExpanded && autoScroll) {
+      const scrollAreaElement = scrollAreaRef.current?.querySelector(
+        "[data-radix-scroll-area-viewport]"
+      );
+      if (!scrollAreaElement) return;
+
+      const { scrollTop, scrollHeight, clientHeight } =
+        scrollAreaElement as HTMLElement;
+      const distanceToBottom = scrollHeight - scrollTop - clientHeight;
+
+      // Use dynamic threshold for auto-scroll
+      const dynamicThreshold = calculateDynamicThreshold(150);
+
+      // Only auto-scroll if user is near the bottom (within dynamic threshold)
+      if (distanceToBottom < dynamicThreshold) {
+        // Use requestAnimationFrame to avoid too frequent updates
+        requestAnimationFrame(() => {
+          scrollToBottom();
+        });
+      }
+
+      // Update tracking refs after scroll decision
+      prevContentHeightRef.current = contentHeight;
+      lastScrollTimeRef.current = Date.now();
+    }
+  }, [messages.length, isExpanded, autoScroll, contentHeight]);
+
+  // Auto-scroll during streaming when user allows it
+  useEffect(() => {
+    if (autoScroll && isStreaming && isExpanded) {
+      const scrollAreaElement = scrollAreaRef.current?.querySelector(
+        "[data-radix-scroll-area-viewport]"
+      );
+      if (!scrollAreaElement) return;
+
+      const { scrollTop, scrollHeight, clientHeight } =
+        scrollAreaElement as HTMLElement;
+      const distanceToBottom = scrollHeight - scrollTop - clientHeight;
+
+      // Use dynamic threshold for streaming auto-scroll (more sensitive base threshold)
+      const dynamicThreshold = calculateDynamicThreshold(50);
+
+      // Only auto-scroll during streaming if user is near the bottom (within dynamic threshold)
+      if (distanceToBottom < dynamicThreshold) {
+        scrollToBottom();
+      }
+
+      // Update tracking refs after scroll decision
+      prevContentHeightRef.current = contentHeight;
+      lastScrollTimeRef.current = Date.now();
+    }
+  }, [messages, autoScroll, isStreaming, isExpanded, contentHeight]);
+
+  // Handle the scrolling event of the scroll area
+  useEffect(() => {
+    const scrollAreaElement = scrollAreaRef.current?.querySelector(
+      "[data-radix-scroll-area-viewport]"
+    );
+
+    if (!scrollAreaElement) return;
+
+    const handleScroll = () => {
+      const { scrollTop, scrollHeight, clientHeight } =
+        scrollAreaElement as HTMLElement;
+      const distanceToBottom = scrollHeight - scrollTop - clientHeight;
+
+      // If the distance to the bottom is less than 50px, it is considered that the user has scrolled to the bottom, and enable automatic scrolling
+      if (distanceToBottom < 50) {
+        setAutoScroll(true);
+      } else if (distanceToBottom > 80) {
+        // If the distance to the bottom is greater than 80px, and it is user-initiated scrolling, disable automatic scrolling
+        setAutoScroll(false);
+      }
+    };
+
+    scrollAreaElement.addEventListener("scroll", handleScroll);
+
+    return () => {
+      scrollAreaElement.removeEventListener("scroll", handleScroll);
+    };
+  }, []);
+
+  // The logic of automatically folding when the message changes
+  useEffect(() => {
+    if (!isStreaming && messages.length > 0) {
+      const lastMessage = messages[messages.length - 1];
+      // Check if the last message contains finalAnswer
+      if (lastMessage.finalAnswer) {
+        const timer = setTimeout(() => {
+          setIsExpanded(false);
+        }, 1000); // Collapse after 1 second
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [messages, isStreaming]);
+
+  // Use the processor to render the message content
+  const renderMessageContent = (message: any) => {
+    // Find the first processor that can handle this message type
+
+    const handler = messageHandlers.find((h) => h.canHandle(message));
+    if (handler) {
+      return handler.render(message, t, { appConfig });
+    }
+
+    // Fallback processing, normally not executed here
+
+    return (
+      <div className="text-sm text-gray-500">
+        {t("taskWindow.unknownMessageType", { type: message.type })}
+      </div>
+    );
+  };
+
+  // Error messages that should be completely hidden (including the node)
+  const suppressedErrorMessages = [
+    "Model is interrupted by stop event",
+    "Agent execution interrupted by external stop signal",
+  ];
+
+  // Check if a message should be suppressed (not displayed at all)
+  const shouldSuppressMessage = (message: any) => {
+    if (message.type !== "error") return false;
+    const content = message.content || "";
+    return suppressedErrorMessages.some((errText) => content.includes(errText));
+  };
+
+  // Check if it is the last message
+  const isLastMessage = (index: number, messages: any[]) => {
+    return index === messages.length - 1;
+  };
+
+  // Check if a message should display a blinking dot
+  const shouldBlinkDot = (index: number, messages: any[]) => {
+    // As long as it is the last message and is streaming, it should blink, regardless of the message type
+    return isStreaming && isLastMessage(index, messages);
+  };
+
+  // Render the message list
+  const renderMessages = () => {
+    if (!hasMessages) {
+      return (
+        <div className="text-center text-sm text-gray-400 mt-8">
+          {t("taskWindow.noTaskMessages")}
+        </div>
+      );
+    }
+
+    if (!hasVisibleMessages) {
+      return (
+        <div className="text-center text-sm text-gray-400 mt-8">
+          {t("taskWindow.noTaskMessages")}
+        </div>
+      );
+    }
+
+    // Filter out messages that should be suppressed
+    const filteredGroupedMessages = groupedMessages.filter(
+      (group) => !shouldSuppressMessage(group.message)
+    );
+
+    return (
+      <div className="relative">
+        <div className="absolute left-[0.2rem] top-[1.25rem] bottom-0 w-0.5 bg-gray-200"></div>
+
+        {filteredGroupedMessages.map((group, groupIndex) => {
+          const message = group.message;
+          const isBlinking = shouldBlinkDot(
+            groupIndex,
+            filteredGroupedMessages.map((g) => g.message)
+          );
+
+          return (
+            <div key={message.id || groupIndex} className="relative mb-5">
+              {/* Use flex layout to ensure dots align with text content */}
+              <div className="flex items-start">
+                {/* Dot container */}
+                <div
+                  className="flex-shrink-0 mr-3"
+                  style={{ position: "relative", top: "0.95rem" }}
+                >
+                  <div
+                    className={isBlinking ? "blinkingDot" : ""}
+                    style={
+                      isBlinking
+                        ? {
+                            width: "0.5rem",
+                            height: "0.5rem",
+                            borderRadius: "9999px",
+                          }
+                        : {
+                            width: "0.5rem",
+                            height: "0.5rem",
+                            borderRadius: "9999px",
+                            backgroundColor:
+                              message.type === "virtual"
+                                ? "transparent"
+                                : "#9ca3af",
+                          }
+                    }
+                  ></div>
+                </div>
+
+                {/* Message content */}
+                <div className="flex-1 text-sm break-words min-w-0">
+                  {renderMessageContent(message)}
+
+                  {/* Render card messages */}
+                  {group.cards.length > 0 && (
+                    <div className="mt-2">
+                      {group.cards.map((card, cardIndex) => (
+                        <div key={`card-${cardIndex}`} className="ml-0">
+                          {renderMessageContent(card)}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  // Calculate container height: content height + header height, but not exceeding maximum height
+  const maxHeight = 300;
+  const headerHeight = 55;
+  const availableHeight = maxHeight - headerHeight;
+  // Add extra padding for diagrams to prevent bottom cutoff
+  const actualContentHeight = Math.min(contentHeight + 32, availableHeight);
+  const containerHeight = isExpanded
+    ? headerHeight + actualContentHeight
+    : "auto";
+  const needsScroll = contentHeight + 16 > availableHeight;
+
+  return (
+    <>
+      <div
+        className="relative rounded-lg mb-4 overflow-hidden border border-gray-200 bg-gray-50"
+        style={{
+          height: containerHeight,
+          minHeight: isExpanded ? `${headerHeight}px` : "auto",
+        }}
+      >
+        <div className="px-1 py-2">
+          <div className="flex items-center">
+            <Button
+              type="text"
+              size="small"
+              className="h-6 w-6 p-0 rounded-full mr-2 text-gray-500 hover:bg-transparent"
+              onClick={() => setIsExpanded(!isExpanded)}
+            >
+              <ChevronRight
+                className={`h-4 w-4 ${isExpanded ? "rotate-90" : "-rotate-90"}`}
+              />
+            </Button>
+            <span className="text-xs font-medium text-gray-500">
+              {t("taskWindow.taskDetails")}
+            </span>
+          </div>
+          {isExpanded && <div className="h-px bg-gray-200 mt-2" />}
+        </div>
+
+        {isExpanded && (
+          <div
+            className="px-4 pb-4"
+            style={{ height: `${actualContentHeight}px` }}
+          >
+            {needsScroll ? (
+              <ScrollArea className="h-full" ref={scrollAreaRef}>
+                <div className="pb-2" ref={contentRef}>
+                  {renderMessages()}
+                </div>
+              </ScrollArea>
+            ) : (
+              <div className="pb-2" ref={contentRef}>
+                {renderMessages()}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+function areEqualTaskWindow(
+  prev: TaskWindowProps,
+  next: TaskWindowProps
+): boolean {
+  if (prev.isStreaming !== next.isStreaming) return false;
+  if (prev.messages.length !== next.messages.length) return false;
+  // During streaming the last message grows in content without the array length changing.
+  if (prev.messages.length > 0) {
+    const prevLast = prev.messages[prev.messages.length - 1];
+    const nextLast = next.messages[next.messages.length - 1];
+    if (prevLast.id !== nextLast.id || prevLast.content !== nextLast.content)
+      return false;
+  }
+  // defaultExpanded is only meaningful on initial mount; exclude from equality check.
+  return true;
+}
+
+export const TaskWindow = React.memo(TaskWindowInner, areEqualTaskWindow);

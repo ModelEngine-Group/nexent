@@ -1,0 +1,46 @@
+replicaCount: 1
+
+strategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 1
+    maxUnavailable: 0
+
+images:
+  web:
+    repository: nexent/nexent-web
+    tag: latest
+    pullPolicy: IfNotPresent
+
+resources:
+  web:
+    requests:
+      memory: 256Mi
+      cpu: 200m
+    limits:
+      memory: 512Mi
+      cpu: 500m
+
+config:
+  marketBackend: "http://60.204.251.153:8010"
+  proxyTimeoutMs: "600000"
+  proxyWsTimeoutMs: "600000"
+  sseProxyTimeoutMs: "600000"
+  modelEngine:
+    enabled: "false"
+
+services:
+  web:
+    type: NodePort
+    nodePort: 30000
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: nexent.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []

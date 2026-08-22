@@ -1,0 +1,584 @@
+"""
+Tenant service for managing tenant operations
+"""
+import asyncio
+import logging
+import os
+import shutil
+import uuid
+from typing import Any, Dict, List, Optional
+
+from database import skill_db
+from database.tenant_config_db import (
+    create_tenant_with_default_group,
+    get_single_config_info,
+    insert_config,
+    update_config_by_tenant_config_id,
+    get_all_tenant_ids,
+    delete_config_by_tenant_config_id,
+    get_all_configs_by_tenant_id,
+)
+from database.user_tenant_db import get_users_by_tenant_id, soft_delete_users_by_tenant_id
+from services.user_service import delete_user_and_cleanup
+from database.group_db import query_groups_by_tenant, remove_group
+from database.model_management_db import get_model_records, delete_model_record
+from database.knowledge_db import get_knowledge_info_by_tenant_id, delete_knowledge_record
+from database.agent_db import query_all_agent_info_by_tenant_id, delete_agent_by_id, delete_agent_relationship
+from database.remote_mcp_db import get_mcp_records_by_tenant, delete_mcp_record_by_name_and_url
+from database.invitation_db import query_invitations_by_tenant, remove_invitation
+from database.tool_db import delete_tools_by_agent_id
+from consts.const import (
+    ASSET_OWNER_TENANT_ID,
+    CONTAINER_SKILLS_PATH,
+    DEFAULT_GROUP_ID,
+    DEFAULT_TENANT_ID,
+    TENANT_ID,
+    TENANT_NAME,
+    IS_SPEED_MODE,
+)
+from consts.exceptions import ForbiddenError, NotFoundException, ValidationError, UserRegistrationException
+from services.skill_service import install_skills_from_zip_for_tenant
+
+logger = logging.getLogger(__name__)
+
+
+def _is_displayable_tenant_id(tenant_id: Optional[str]) -> bool:
+    """Return whether a tenant id represents a real tenant in management views."""
+    normalized_tenant_id = (tenant_id or "").strip()
+    return normalized_tenant_id not in {"", DEFAULT_TENANT_ID, ASSET_OWNER_TENANT_ID}
+
+
+def get_tenant_info(tenant_id: str) -> Dict[str, Any]:
+    """
+    Get tenant information by tenant ID
+
+    If TENANT_NAME config is missing, automatically create one with default name.
+
+    Args:
+        tenant_id (str): Tenant ID
+
+    Returns:
+        Dict[str, Any]: Tenant information
+    """
+    if not _is_displayable_tenant_id(tenant_id):
+        return {}
+
+    # Get tenant name
+    name_config = get_single_config_info(tenant_id, TENANT_NAME)
+    if not name_config:
+        logger.warning(
+            f"The name of tenant {tenant_id} not found, creating default config.")
+        # Auto-create TENANT_NAME config with default name
+        _ensure_tenant_name_config(tenant_id)
+        # Re-fetch after creation
+        name_config = get_single_config_info(tenant_id, TENANT_NAME)
+
+    group_config = get_single_config_info(tenant_id, DEFAULT_GROUP_ID)
+
+    tenant_info = {
+        "tenant_id": tenant_id,
+        "tenant_name": name_config.get("config_value") if name_config else "",
+        "default_group_id": group_config.get("config_value") if group_config else ""
+    }
+
+    return tenant_info
+
+
+def get_tenant_info_for_user(
+    tenant_id: str,
+    *,
+    requester_tenant_id: str,
+    requester_role: str,
+) -> Dict[str, Any]:
+    """Get tenant information after enforcing tenant-scoped access."""
+    role = (requester_role or "").upper()
+    is_speed_admin = IS_SPEED_MODE and role == "SPEED"
+    if role != "SU" and not is_speed_admin and tenant_id != requester_tenant_id:
+        raise ForbiddenError("Not authorized to access this tenant")
+    return get_tenant_info(tenant_id)
+
+
+def _ensure_tenant_name_config(tenant_id: str) -> bool:
+    """
+    Ensure TENANT_NAME config exists for the tenant.
+    Creates a default name config if it doesn't exist.
+
+    Args:
+        tenant_id: Tenant ID
+
+    Returns:
+        bool: True if config exists or was created successfully, False otherwise
+    """
+    # Check if already exists (double-check in case of race condition)
+    existing = get_single_config_info(tenant_id, TENANT_NAME)
+    if existing:
+        return True
+
+    # Create default TENANT_NAME config
+    tenant_name_data = {
+        "tenant_id": tenant_id,
+        "config_key": TENANT_NAME,
+        "config_value": "Unnamed Tenant",
+        "created_by": "system_auto_create",
+        "updated_by": "system_auto_create"
+    }
+    success = insert_config(tenant_name_data)
+    if success:
+        logger.info(f"Auto-created TENANT_NAME config for tenant {tenant_id}")
+    else:
+        logger.error(
+            f"Failed to auto-create TENANT_NAME config for tenant {tenant_id}")
+    return success
+
+
+def check_tenant_name_exists(tenant_name: str, exclude_tenant_id: Optional[str] = None) -> bool:
+    """
+    Check if a tenant with the given name already exists
+
+    Args:
+        tenant_name (str): Tenant name to check
+        exclude_tenant_id (Optional[str]): Tenant ID to exclude from check (for rename operations)
+
+    Returns:
+        bool: True if tenant name already exists, False otherwise
+    """
+    all_tenant_ids = get_all_tenant_ids()
+
+    for tid in all_tenant_ids:
+        # Skip if this is the tenant being updated
+        if exclude_tenant_id and tid == exclude_tenant_id:
+            continue
+
+        # Check if this tenant has the given name
+        name_config = get_single_config_info(tid, TENANT_NAME)
+        if name_config and name_config.get("config_value") == tenant_name:
+            return True
+
+    return False
+
+
+def get_tenants_paginated(page: int = 1, page_size: int = 20) -> Dict[str, Any]:
+    """
+    Get tenants with pagination support
+
+    Args:
+        page (int): Page number (starting from 1)
+        page_size (int): Number of items per page
+
+    Returns:
+        Dict[str, Any]: Dictionary containing paginated tenant data and pagination info
+    """
+    # Exclude virtual/system tenants from admin tenant listings.
+    all_tenant_ids = [
+        tid for tid in get_all_tenant_ids()
+        if _is_displayable_tenant_id(tid)
+    ]
+    total = len(all_tenant_ids)
+
+    # Calculate pagination
+    total_pages = (total + page_size - 1) // page_size if total > 0 else 1
+    start_idx = (page - 1) * page_size
+    end_idx = start_idx + page_size
+
+    # Get tenant IDs for current page
+    page_tenant_ids = all_tenant_ids[start_idx:end_idx]
+
+    tenants = []
+    for tenant_id in page_tenant_ids:
+        try:
+            tenant_info = get_tenant_info(tenant_id)
+            tenants.append(tenant_info)
+        except NotFoundException:
+            logging.warning(
+                f"Tenant info of {tenant_id} not found. Returning basic tenant structure.")
+            tenant_info = {
+                "tenant_id": tenant_id,
+                "tenant_name": "",
+                "default_group_id": ""
+            }
+            tenants.append(tenant_info)
+
+    return {
+        "data": tenants,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": total_pages
+    }
+
+
+def get_tenants_paginated_for_user(
+    page: int = 1,
+    page_size: int = 20,
+    *,
+    requester_role: str,
+) -> Dict[str, Any]:
+    """List tenants for platform administrators only."""
+    role = (requester_role or "").upper()
+    if role != "SU" and not (IS_SPEED_MODE and role == "SPEED"):
+        raise ForbiddenError("Only super administrators can list tenants")
+    return get_tenants_paginated(page=page, page_size=page_size)
+
+
+def create_tenant(
+    tenant_name: str,
+    created_by: Optional[str] = None,
+    skill_ids: Optional[List[int]] = None,
+    skill_names: Optional[List[str]] = None,
+    locale: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Create a new tenant with default group
+
+    Args:
+        tenant_name (str): Tenant name
+        created_by (Optional[str]): Created by user ID
+
+    Returns:
+        Dict[str, Any]: Created tenant information
+
+    Raises:
+        ValidationError: When tenant creation fails or tenant name already exists
+    """
+    # Generate a random UUID for tenant_id
+    tenant_id = str(uuid.uuid4())
+
+    # Validate tenant name
+    if not tenant_name or not tenant_name.strip():
+        raise ValidationError("Tenant name cannot be empty")
+
+    # Check if tenant name already exists
+    if check_tenant_name_exists(tenant_name.strip()):
+        raise ValidationError(
+            f"Tenant with name '{tenant_name.strip()}' already exists")
+
+    try:
+        default_group_id = create_tenant_with_default_group(
+            tenant_id=tenant_id,
+            tenant_name=tenant_name.strip(),
+            created_by=created_by,
+        )
+
+        # Install requested skills for the new tenant
+        # Prefer skill_names (ZIP-based installation) over skill_ids (legacy record-copy)
+        installed_skill_names: List[str] = []
+        if skill_names:
+            try:
+                installed_skill_names = install_skills_from_zip_for_tenant(
+                    skill_names=skill_names,
+                    tenant_id=tenant_id,
+                    user_id=created_by,
+                    locale=locale
+                )
+            except Exception as e:
+                logger.warning(
+                    f"Failed to install skills from ZIP for tenant {tenant_id}: {e}")
+        elif skill_ids:
+            try:
+                from services.skill_service import install_skills_for_tenant as install_by_ids
+                installed_by_ids = install_by_ids(
+                    skill_ids=skill_ids,
+                    tenant_id=tenant_id,
+                    user_id=created_by
+                )
+                logger.info(
+                    f"Legacy install_skills_for_tenant installed IDs: {installed_by_ids} "
+                    f"for tenant {tenant_id}"
+                )
+            except Exception as e:
+                logger.warning(
+                    f"Failed to install skills by IDs for tenant {tenant_id}: {e}")
+
+        tenant_info = {
+            "tenant_id": tenant_id,
+            "tenant_name": tenant_name.strip(),
+            "default_group_id": str(default_group_id),
+            "installed_skill_names": installed_skill_names,
+        }
+
+        logger.info(
+            f"Created tenant {tenant_id} with name '{tenant_name}' and default group {default_group_id}")
+        return tenant_info
+
+    except Exception as e:
+        logger.error(f"Failed to create tenant {tenant_id}: {str(e)}")
+        raise ValidationError(f"Failed to create tenant: {str(e)}")
+
+
+def update_tenant_info(tenant_id: str, tenant_name: str, updated_by: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Update tenant information
+
+    If TENANT_NAME config doesn't exist, creates it with the provided name.
+
+    Args:
+        tenant_id (str): Tenant ID
+        tenant_name (str): New tenant name
+        updated_by (Optional[str]): Updated by user ID
+
+    Returns:
+        Dict[str, Any]: Updated tenant information
+
+    Raises:
+        ValidationError: When tenant name is invalid or update fails
+    """
+    # Validate tenant name
+    if not tenant_name or not tenant_name.strip():
+        raise ValidationError("Tenant name cannot be empty")
+
+    # Check if tenant name already exists (exclude current tenant)
+    if check_tenant_name_exists(tenant_name.strip(), exclude_tenant_id=tenant_id):
+        raise ValidationError(
+            f"Tenant with name '{tenant_name.strip()}' already exists")
+
+    # Check if tenant name config exists
+    name_config = get_single_config_info(tenant_id, TENANT_NAME)
+    if not name_config:
+        # Tenant config doesn't exist, create it with the provided name
+        logger.info(
+            f"TENANT_NAME config not found for {tenant_id}, creating new config.")
+        tenant_name_data = {
+            "tenant_id": tenant_id,
+            "config_key": TENANT_NAME,
+            "config_value": tenant_name.strip(),
+            "created_by": updated_by,
+            "updated_by": updated_by
+        }
+        success = insert_config(tenant_name_data)
+        if not success:
+            raise ValidationError("Failed to create tenant name configuration")
+    else:
+        # Update existing config
+        success = update_config_by_tenant_config_id(
+            name_config["tenant_config_id"],
+            tenant_name.strip()
+        )
+        if not success:
+            raise ValidationError("Failed to update tenant name")
+
+    # Return updated tenant information
+    updated_tenant = get_tenant_info(tenant_id)
+    logger.info(f"Updated tenant {tenant_id} name to '{tenant_name}'")
+    return updated_tenant
+
+
+async def _delete_skills_for_tenant(tenant_id: str, actor: str) -> None:
+    """
+    Delete all skills, skill instances, and local skill files for a tenant.
+
+    This performs cascade cleanup of:
+    - All skill instances (ag_skill_instance_t) for the tenant
+    - All skills (ag_skill_info_t) for the tenant
+    - All local skill directories and files under CONTAINER_SKILLS_PATH/{tenant_id}/
+
+    Args:
+        tenant_id: Tenant ID to delete skills for
+        actor: User ID performing the deletion (for audit trail)
+    """
+    logger.info(f"Deleting skills and local files for tenant {tenant_id}")
+
+    # 1. Soft-delete all skill instances for the tenant (regardless of skill source)
+    try:
+        deleted_count = skill_db.delete_skill_instances_by_tenant(
+            tenant_id, actor)
+        logger.info(
+            f"Soft-deleted {deleted_count} skill instances for tenant {tenant_id}")
+    except Exception as e:
+        logger.warning(
+            f"Failed to soft-delete skill instances for tenant {tenant_id}: {str(e)}")
+
+    # 2. Soft-delete all skills for the tenant
+    skills = skill_db.list_skills(tenant_id)
+    for skill in skills:
+        try:
+            skill_name = skill.get("name")
+            if skill_name:
+                skill_db.delete_skill(skill_name, tenant_id, actor)
+                logger.info(
+                    f"Soft-deleted skill '{skill_name}' for tenant {tenant_id}")
+        except Exception as e:
+            logger.warning(
+                f"Failed to soft-delete skill {skill.get('name')}: {str(e)}")
+
+    # 3. Delete the tenant's local skill directory and all its contents
+    if CONTAINER_SKILLS_PATH:
+        tenant_skill_root = os.path.join(CONTAINER_SKILLS_PATH, tenant_id)
+        if os.path.exists(tenant_skill_root):
+            try:
+                shutil.rmtree(tenant_skill_root)
+                logger.info(
+                    f"Deleted tenant skill root directory: {tenant_skill_root}")
+            except Exception as e:
+                logger.warning(
+                    f"Failed to delete tenant skill root directory {tenant_skill_root}: {str(e)}")
+
+
+async def delete_tenant(tenant_id: str, deleted_by: Optional[str] = None) -> bool:
+    """
+    Delete tenant and all associated resources
+
+    This performs cascade deletion of:
+    - All users in the tenant (soft delete)
+    - All groups in the tenant
+    - All models in the tenant
+    - All knowledge bases in the tenant
+    - All agents in the tenant (including tool instances)
+    - All skills, skill instances, and local skill files for the tenant
+    - All MCP configurations in the tenant
+    - All invitation codes in the tenant
+    - All tenant configurations
+
+    Args:
+        tenant_id (str): Tenant ID to delete
+        deleted_by (Optional[str]): User who initiated the deletion
+
+    Returns:
+        bool: True if deletion was successful
+
+    Raises:
+        NotFoundException: When tenant does not exist
+        ValidationError: When deletion fails
+    """
+    # Validate tenant exists
+    name_config = get_single_config_info(tenant_id, TENANT_NAME)
+    if not name_config:
+        raise NotFoundException(f"Tenant {tenant_id} does not exist")
+
+    logger.info(
+        f"Starting cascade deletion for tenant {tenant_id} by {deleted_by}")
+
+    try:
+        # 1. Deactivate all users in the tenant (full cleanup including Supabase deletion)
+        logger.info(f"Deactivating users for tenant {tenant_id}")
+        users_result = get_users_by_tenant_id(
+            tenant_id, page=1, page_size=10000)
+        users = users_result.get("users", [])
+
+        if users:
+            async def delete_single_user(user: Dict[str, Any]) -> None:
+                user_id = user.get("user_id")
+                if user_id:
+                    try:
+                        await delete_user_and_cleanup(user_id, tenant_id)
+                        logger.info(
+                            f"Deactivated user {user_id} for tenant {tenant_id}")
+                    except Exception as e:
+                        logger.warning(
+                            f"Failed to deactivate user {user_id}: {str(e)}")
+
+            # Concurrently delete all users
+            await asyncio.gather(*[delete_single_user(user) for user in users])
+
+        # 2. Delete all groups in the tenant
+        logger.info(f"Deleting groups for tenant {tenant_id}")
+        groups = query_groups_by_tenant(tenant_id, page=1, page_size=10000)
+        for group in groups.get("data", []):
+            try:
+                remove_group(group["group_id"], deleted_by)
+            except Exception as e:
+                logger.warning(
+                    f"Failed to delete group {group.get('group_id')}: {str(e)}")
+
+        # 3. Delete all models in the tenant
+        logger.info(f"Deleting models for tenant {tenant_id}")
+        models = get_model_records({"tenant_id": tenant_id}, tenant_id)
+        for model in models:
+            try:
+                delete_model_record(
+                    model["model_id"], deleted_by or "system", tenant_id)
+            except Exception as e:
+                logger.warning(
+                    f"Failed to delete model {model.get('model_id')}: {str(e)}")
+
+        # 4. Delete all knowledge bases in the tenant
+        logger.info(f"Deleting knowledge bases for tenant {tenant_id}")
+        knowledge_list = get_knowledge_info_by_tenant_id(tenant_id)
+        for kb in knowledge_list:
+            try:
+                delete_knowledge_record({
+                    "knowledge_id": kb["knowledge_id"],
+                    "user_id": deleted_by or "system"
+                })
+            except Exception as e:
+                logger.warning(
+                    f"Failed to delete knowledge base {kb.get('knowledge_id')}: {str(e)}")
+
+        # 5. Delete all agents in the tenant (including related data)
+        logger.info(f"Deleting agents for tenant {tenant_id}")
+        agents = query_all_agent_info_by_tenant_id(tenant_id, version_no=0)
+        for agent in agents:
+            try:
+                agent_id = agent.get("agent_id")
+                # Delete tool instances first
+                delete_tools_by_agent_id(
+                    agent_id, tenant_id, deleted_by or "system", version_no=0)
+                # Delete agent relationships
+                delete_agent_relationship(
+                    agent_id, tenant_id, deleted_by or "system", version_no=0)
+                # Delete the agent
+                delete_agent_by_id(agent_id, tenant_id, deleted_by or "system")
+            except Exception as e:
+                logger.warning(
+                    f"Failed to delete agent {agent.get('agent_id')}: {str(e)}")
+
+        # Also delete published agents (version_no >= 1)
+        agents_published = query_all_agent_info_by_tenant_id(
+            tenant_id, version_no=1)
+        for agent in agents_published:
+            try:
+                agent_id = agent.get("agent_id")
+                delete_tools_by_agent_id(
+                    agent_id, tenant_id, deleted_by or "system", version_no=1)
+                delete_agent_relationship(
+                    agent_id, tenant_id, deleted_by or "system", version_no=1)
+                delete_agent_by_id(agent_id, tenant_id, deleted_by or "system")
+            except Exception as e:
+                logger.warning(
+                    f"Failed to delete published agent {agent.get('agent_id')}: {str(e)}")
+
+        # 5b. Delete all skills, skill instances, and local skill files for the tenant
+        _delete_skills_for_tenant(tenant_id, deleted_by or "system")
+
+        # 6. Delete all MCP configurations in the tenant
+        logger.info(f"Deleting MCP records for tenant {tenant_id}")
+        mcp_list = get_mcp_records_by_tenant(tenant_id)
+        for mcp in mcp_list:
+            try:
+                delete_mcp_record_by_name_and_url(
+                    mcp["mcp_name"],
+                    mcp["mcp_server"],
+                    tenant_id,
+                    deleted_by or "system"
+                )
+            except Exception as e:
+                logger.warning(
+                    f"Failed to delete MCP {mcp.get('mcp_id')}: {str(e)}")
+
+        # 7. Delete all invitation codes in the tenant
+        logger.info(f"Deleting invitations for tenant {tenant_id}")
+        invitations = query_invitations_by_tenant(tenant_id)
+        for invitation in invitations:
+            try:
+                remove_invitation(invitation["invitation_id"], deleted_by)
+            except Exception as e:
+                logger.warning(
+                    f"Failed to delete invitation {invitation.get('invitation_id')}: {str(e)}")
+
+        # 8. Delete all tenant configurations (must be done last)
+        logger.info(f"Deleting tenant configurations for tenant {tenant_id}")
+        # Delete all config records for this tenant
+        all_configs = get_all_configs_by_tenant_id(tenant_id)
+        for config in all_configs:
+            try:
+                delete_config_by_tenant_config_id(config["tenant_config_id"])
+            except Exception as e:
+                logger.warning(
+                    f"Failed to delete config {config.get('tenant_config_id')}: {str(e)}")
+
+        logger.info(
+            f"Successfully deleted tenant {tenant_id} and all associated resources")
+        return True
+
+    except Exception as e:
+        logger.error(f"Failed to delete tenant {tenant_id}: {str(e)}")
+        raise ValidationError(f"Failed to delete tenant: {str(e)}")

@@ -1,0 +1,624 @@
+"""
+Test module for document_vector_utils
+
+Tests for document-level vector operations and clustering functionality.
+"""
+import os
+import sys
+from unittest.mock import MagicMock, patch
+
+import numpy as np
+import pytest
+
+# Mock consts module before patching backend.database.client to avoid ImportError
+# backend.database.client imports from consts.const, so we need to mock it first
+consts_mock = MagicMock()
+consts_const_mock = MagicMock()
+# Set required constants that backend.database.client might use
+consts_const_mock.MINIO_ENDPOINT = "http://localhost:9000"
+consts_const_mock.MINIO_ACCESS_KEY = "test_access_key"
+consts_const_mock.MINIO_SECRET_KEY = "test_secret_key"
+consts_const_mock.MINIO_REGION = "us-east-1"
+consts_const_mock.MINIO_DEFAULT_BUCKET = "test-bucket"
+consts_const_mock.POSTGRES_HOST = "localhost"
+consts_const_mock.POSTGRES_USER = "test_user"
+consts_const_mock.NEXENT_POSTGRES_PASSWORD = "test_password"
+consts_const_mock.POSTGRES_DB = "test_db"
+consts_const_mock.POSTGRES_PORT = 5432
+consts_const_mock.LANGUAGE = {"ZH": "zh", "EN": "en"}
+consts_const_mock.MESSAGE_ROLE = {"USER": "user", "ASSISTANT": "assistant", "SYSTEM": "system"}
+consts_const_mock.THINK_START_PATTERN = "<think>"
+consts_const_mock.THINK_END_PATTERN = "</think>"
+consts_mock.const = consts_const_mock
+# Mock consts.error_code and consts.exceptions
+consts_error_code_mock = MagicMock()
+consts_error_code_mock.ErrorCode = MagicMock()
+consts_exceptions_mock = MagicMock()
+consts_exceptions_mock.AppException = Exception
+consts_prompt_template_mock = MagicMock()
+consts_prompt_template_mock.PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP = {
+    "duty_system_prompt": "DUTY_SYSTEM_PROMPT",
+    "constraint_system_prompt": "CONSTRAINT_SYSTEM_PROMPT",
+    "few_shots_system_prompt": "FEW_SHOTS_SYSTEM_PROMPT",
+    "agent_variable_name_system_prompt": "AGENT_VARIABLE_NAME_SYSTEM_PROMPT",
+    "agent_display_name_system_prompt": "AGENT_DISPLAY_NAME_SYSTEM_PROMPT",
+    "agent_description_system_prompt": "AGENT_DESCRIPTION_SYSTEM_PROMPT",
+    "user_prompt": "USER_PROMPT",
+    "agent_name_regenerate_system_prompt": "AGENT_NAME_REGENERATE_SYSTEM_PROMPT",
+    "agent_name_regenerate_user_prompt": "AGENT_NAME_REGENERATE_USER_PROMPT",
+    "agent_display_name_regenerate_system_prompt": "AGENT_DISPLAY_NAME_REGENERATE_SYSTEM_PROMPT",
+    "agent_display_name_regenerate_user_prompt": "AGENT_DISPLAY_NAME_REGENERATE_USER_PROMPT",
+}
+consts_prompt_template_mock.PROMPT_GENERATE_TEMPLATE_FIELDS = tuple(
+    consts_prompt_template_mock.PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP.keys()
+)
+sys.modules['consts'] = consts_mock
+sys.modules['consts.const'] = consts_const_mock
+sys.modules['consts.error_code'] = consts_error_code_mock
+sys.modules['consts.exceptions'] = consts_exceptions_mock
+sys.modules['consts.prompt_template'] = consts_prompt_template_mock
+
+# Add backend to path before patching backend modules
+current_dir = os.path.dirname(os.path.abspath(__file__))
+backend_dir = os.path.abspath(os.path.join(current_dir, "../../backend"))
+sys.path.insert(0, backend_dir)
+
+# Patch storage factory and MinIO config validation to avoid errors during initialization
+# These patches must be started before any imports that use MinioClient
+storage_client_mock = MagicMock()
+minio_client_mock = MagicMock()
+patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock).start()
+patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
+patch('backend.database.client.MinioClient', return_value=minio_client_mock).start()
+
+from backend.utils.document_vector_utils import (
+    calculate_document_embedding,
+    auto_determine_k,
+    kmeans_cluster_documents,
+    extract_representative_chunks_smart,
+    summarize_document,
+    summarize_cluster,
+    summarize_clusters_map_reduce,
+    merge_cluster_summaries,
+    get_documents_from_es,
+    process_documents_for_clustering,
+    analyze_cluster_coherence,
+    merge_duplicate_documents_in_clusters
+)
+
+
+class TestDocumentEmbedding:
+    """Test document embedding calculation"""
+    
+    def test_calculate_document_embedding_simple_average(self):
+        """Test simple average embedding calculation"""
+        chunks = [
+            {'embedding': [1.0, 2.0, 3.0], 'content': 'Content 1'},
+            {'embedding': [4.0, 5.0, 6.0], 'content': 'Content 2'},
+            {'embedding': [7.0, 8.0, 9.0], 'content': 'Content 3'}
+        ]
+        
+        result = calculate_document_embedding(chunks, use_weighted=False)
+        
+        assert result is not None
+        assert np.allclose(result, [4.0, 5.0, 6.0])  # Average of all embeddings
+    
+    def test_calculate_document_embedding_weighted(self):
+        """Test weighted average embedding calculation (no position weight)"""
+        chunks = [
+            {'embedding': [1.0, 2.0], 'content': 'Short'},
+            {'embedding': [3.0, 4.0], 'content': 'Long content with more words'},
+            {'embedding': [5.0, 6.0], 'content': 'Medium length content'}
+        ]
+        
+        result = calculate_document_embedding(chunks, use_weighted=True)
+        
+        assert result is not None
+        assert len(result) == 2
+        # Weight should be based on content length only, not position
+        # First chunk should NOT have extra 1.5x weight
+        # Result should be weighted average where longer chunks have more weight
+    
+    def test_calculate_document_embedding_empty_chunks(self):
+        """Test handling of empty chunks"""
+        chunks = []
+        result = calculate_document_embedding(chunks)
+        assert result is None
+    
+    def test_calculate_document_embedding_no_embeddings(self):
+        """Test handling of chunks without embeddings"""
+        chunks = [
+            {'content': 'Content 1'},
+            {'content': 'Content 2'}
+        ]
+        result = calculate_document_embedding(chunks)
+        assert result is None
+
+
+class TestAutoDetermineK:
+    """Test automatic K determination"""
+    
+    def test_auto_determine_k_small_dataset(self):
+        """Test K determination for small dataset"""
+        embeddings = np.random.rand(10, 128)
+        k = auto_determine_k(embeddings, min_k=3, max_k=15)
+        
+        assert 3 <= k <= 15
+    
+    def test_auto_determine_k_large_dataset(self):
+        """Test K determination for large dataset"""
+        embeddings = np.random.rand(200, 128)
+        k = auto_determine_k(embeddings, min_k=3, max_k=15)
+        
+        assert 3 <= k <= 15
+    
+    def test_auto_determine_k_very_small_dataset(self):
+        """Test K determination for very small dataset"""
+        embeddings = np.random.rand(5, 128)
+        k = auto_determine_k(embeddings, min_k=3, max_k=15)
+        
+        assert k >= 2
+        assert k <= 5
+    
+    def test_auto_determine_k_minimum(self):
+        """Test K determination respects minimum"""
+        embeddings = np.random.rand(100, 128)
+        k = auto_determine_k(embeddings, min_k=5, max_k=15)
+        
+        assert k >= 5
+
+
+class TestKMeansClustering:
+    """Test K-means clustering"""
+    
+    def test_kmeans_cluster_documents(self):
+        """Test basic K-means clustering"""
+        doc_embeddings = {
+            'doc1': np.array([1.0, 1.0]),
+            'doc2': np.array([1.1, 1.1]),
+            'doc3': np.array([5.0, 5.0]),
+            'doc4': np.array([5.1, 5.1]),
+            'doc5': np.array([9.0, 9.0]),
+            'doc6': np.array([9.1, 9.1])
+        }
+        
+        clusters = kmeans_cluster_documents(doc_embeddings, k=3)
+        
+        assert len(clusters) == 3
+        assert sum(len(docs) for docs in clusters.values()) == 6
+    
+    def test_kmeans_cluster_documents_auto_k(self):
+        """Test K-means clustering with auto-determined K"""
+        doc_embeddings = {
+            f'doc{i}': np.random.rand(128) for i in range(50)
+        }
+        
+        clusters = kmeans_cluster_documents(doc_embeddings, k=None)
+        
+        assert len(clusters) > 0
+        assert sum(len(docs) for docs in clusters.values()) == 50
+    
+    def test_kmeans_cluster_documents_empty(self):
+        """Test handling of empty embeddings"""
+        doc_embeddings = {}
+        clusters = kmeans_cluster_documents(doc_embeddings)
+        
+        assert clusters == {}
+    
+    def test_kmeans_cluster_documents_single(self):
+        """Test handling of single document"""
+        doc_embeddings = {
+            'doc1': np.array([1.0, 1.0, 1.0])
+        }
+        clusters = kmeans_cluster_documents(doc_embeddings)
+        
+        # Should return single cluster with one document
+        assert len(clusters) == 1
+        assert 0 in clusters
+        assert len(clusters[0]) == 1
+        assert clusters[0][0] == 'doc1'
+
+
+class TestExtractRepresentativeChunksSmart:
+    """Test smart chunk selection"""
+
+    def test_extract_representative_chunks_smart_basic(self):
+        """Test basic smart chunk selection"""
+        chunks = [
+            {'content': 'First chunk content'},
+            {'content': 'Second chunk content'},
+            {'content': 'Third chunk content'},
+            {'content': 'Fourth chunk content'}
+        ]
+
+        result = extract_representative_chunks_smart(chunks, max_chunks=3)
+
+        assert len(result) <= 3
+        assert result[0] == chunks[0]  # First chunk always included
+        assert result[-1] == chunks[-1]  # Last chunk included
+
+    def test_extract_representative_chunks_smart_import_error(self):
+        """Test fallback when calculate_term_weights import fails"""
+        chunks = [
+            {'content': 'First chunk content'},
+            {'content': 'Second chunk content'},
+            {'content': 'Third chunk content'},
+            {'content': 'Fourth chunk content'}
+        ]
+
+        # Mock the import to fail
+        with patch.dict('sys.modules', {'nexent.core.nlp.tokenizer': None}):
+            result = extract_representative_chunks_smart(chunks, max_chunks=3)
+
+            # The fallback logic actually returns 3 chunks (first, middle, last)
+            assert len(result) == 3
+            assert result[0] == chunks[0]  # First chunk
+            assert result[-1] == chunks[-1]  # Last chunk
+
+
+class TestSummarizeDocument:
+    """Test document summarization"""
+
+    def test_summarize_document_no_model(self):
+        """Test document summarization without model"""
+        result = summarize_document(
+            document_content="Test content",
+            filename="test.pdf",
+            model_id=None,
+            tenant_id=None
+        )
+        assert isinstance(result, str)
+        assert "test.pdf" in result
+
+    def test_summarize_document_with_model_placeholder(self):
+        """Test document summarization with model ID but no actual LLM call"""
+        result = summarize_document(
+            document_content="Test content for summarization",
+            filename="test.pdf",
+            model_id=999,  # Non-existent model
+            tenant_id="test_tenant"
+        )
+        assert isinstance(result, str)
+        assert len(result) > 0
+
+    def test_summarize_document_with_model_success(self):
+        """Test document summarization when model config exists and LLM returns value"""
+        with patch('backend.utils.document_vector_utils.get_model_by_model_id') as mock_get_model, \
+             patch('backend.utils.document_vector_utils.call_llm_for_system_prompt') as mock_llm:
+            mock_get_model.return_value = {"id": 1}
+            mock_llm.return_value = "Generated summary\n"
+
+            result = summarize_document(
+                document_content="LLM content",
+                filename="doc.pdf",
+                language="en",
+                max_words=50,
+                model_id=1,
+                tenant_id="tenant"
+            )
+
+            assert result == "Generated summary"
+            mock_llm.assert_called_once()
+            call_args = mock_llm.call_args.kwargs
+            assert call_args["model_id"] == 1
+            assert call_args["tenant_id"] == "tenant"
+
+
+class TestSummarizeCluster:
+    """Test cluster summarization"""
+
+    def test_summarize_cluster_no_model(self):
+        """Test cluster summarization without model"""
+        result = summarize_cluster(
+            document_summaries=["Summary 1", "Summary 2"],
+            model_id=None,
+            tenant_id=None
+        )
+        assert isinstance(result, str)
+        assert "Summary" in result
+
+    def test_summarize_cluster_with_model_placeholder(self):
+        """Test cluster summarization with model ID but no actual LLM call"""
+        result = summarize_cluster(
+            document_summaries=["Summary 1", "Summary 2"],
+            model_id=999,  # Non-existent model
+            tenant_id="test_tenant"
+        )
+        assert isinstance(result, str)
+        assert len(result) > 0
+
+    def test_summarize_cluster_with_model_success(self):
+        """Test cluster summarization when model config exists and LLM returns value"""
+        with patch('backend.utils.document_vector_utils.get_model_by_model_id') as mock_get_model, \
+             patch('backend.utils.document_vector_utils.call_llm_for_system_prompt') as mock_llm:
+            mock_get_model.return_value = {"id": 1}
+            mock_llm.return_value = "Cluster summary text  "
+
+            result = summarize_cluster(
+                document_summaries=["Doc 1 summary", "Doc 2 summary"],
+                language="en",
+                max_words=120,
+                model_id=1,
+                tenant_id="tenant"
+            )
+
+            assert result == "Cluster summary text"
+            mock_llm.assert_called_once()
+            call_args = mock_llm.call_args.kwargs
+            assert call_args["model_id"] == 1
+            assert call_args["tenant_id"] == "tenant"
+
+
+class TestSummarizeClustersMapReduce:
+    """Test map-reduce cluster summarization"""
+
+    def test_summarize_clusters_map_reduce_basic(self):
+        """Test basic map-reduce summarization"""
+        document_samples = {
+            'doc1': {
+                'chunks': [{'content': 'Content 1'}],
+                'filename': 'doc1.pdf',
+                'path_or_url': '/path/doc1.pdf'
+            },
+            'doc2': {
+                'chunks': [{'content': 'Content 2'}],
+                'filename': 'doc2.pdf',
+                'path_or_url': '/path/doc2.pdf'
+            }
+        }
+        clusters = {0: ['doc1', 'doc2']}
+
+        with patch('backend.utils.document_vector_utils.summarize_document') as mock_summarize_doc, \
+             patch('backend.utils.document_vector_utils.summarize_cluster') as mock_summarize_cluster:
+
+            mock_summarize_doc.return_value = "Document summary"
+            mock_summarize_cluster.return_value = "Cluster summary"
+
+            result = summarize_clusters_map_reduce(
+                document_samples=document_samples,
+                clusters=clusters,
+                model_id=1,
+                tenant_id="test_tenant"
+            )
+
+            assert isinstance(result, dict)
+            assert 0 in result
+            assert result[0] == "Cluster summary"
+
+    def test_summarize_clusters_map_reduce_no_valid_documents(self):
+        """Test map-reduce when no valid documents in cluster"""
+        document_samples = {
+            'doc1': {
+                'chunks': [],
+                'filename': 'doc1.pdf'
+            }
+        }
+        clusters = {0: ['doc1']}
+
+        with patch('backend.utils.document_vector_utils.summarize_document') as mock_summarize_doc, \
+             patch('backend.utils.document_vector_utils.summarize_cluster') as mock_summarize_cluster:
+
+            mock_summarize_doc.return_value = ""
+            mock_summarize_cluster.return_value = "Mock cluster summary"
+
+            result = summarize_clusters_map_reduce(
+                document_samples=document_samples,
+                clusters=clusters,
+                model_id=1,
+                tenant_id="test_tenant"
+            )
+
+            assert isinstance(result, dict)
+            assert 0 in result
+            assert result[0] == "Mock cluster summary"
+
+
+class TestMergeClusterSummaries:
+    """Test cluster summary merging"""
+
+    def test_merge_cluster_summaries(self):
+        """Test merging multiple cluster summaries"""
+        cluster_summaries = {
+            0: "First cluster summary",
+            1: "Second cluster summary",
+            2: "Third cluster summary"
+        }
+
+        result = merge_cluster_summaries(cluster_summaries)
+
+        assert isinstance(result, str)
+        assert "First cluster summary" in result
+        assert "Second cluster summary" in result
+        assert "Third cluster summary" in result
+        assert "<p>" in result  # Should use HTML p tags
+
+
+class TestGetDocumentsFromEs:
+    """Test ES document retrieval"""
+
+    def test_get_documents_from_es_mock(self):
+        """Test ES document retrieval with mocked VectorDatabaseCore search"""
+        mock_vdb_core = MagicMock()
+        mock_vdb_core.search.return_value = {
+            'hits': {
+                'hits': [
+                    {
+                        '_source': {
+                            'path_or_url': '/path/doc1.pdf',
+                            'filename': 'doc1.pdf',
+                            'content': 'Content 1',
+                            'embedding': [1.0, 2.0, 3.0],
+                            'create_time': '2024-01-01T00:00:00'
+                        }
+                    }
+                ]
+            },
+            'aggregations': {
+                'unique_documents': {
+                    'buckets': [
+                        {
+                            'key': '/path/doc1.pdf',
+                            'doc_count': 1
+                        }
+                    ]
+                }
+            }
+        }
+
+        result = get_documents_from_es(
+            'test_index', mock_vdb_core, sample_doc_count=10)
+
+        assert isinstance(result, dict)
+        assert len(result) > 0
+        # Check that we have document data
+        first_doc = list(result.values())[0]
+        assert 'chunks' in first_doc
+        
+        # Verify that sort parameter is included in the query
+        call_args = mock_vdb_core.search.call_args
+        if call_args:
+            query_body = call_args[1].get('body') or call_args[0][1] if len(call_args[0]) > 1 else None
+            if query_body and 'sort' in query_body:
+                sort_config = query_body['sort']
+                assert isinstance(sort_config, list)
+                # Should have create_time sort
+                assert any('create_time' in str(sort_item) for sort_item in sort_config)
+
+
+class TestProcessDocumentsForClustering:
+    """Test document processing for clustering"""
+
+    def test_process_documents_for_clustering_mock(self):
+        """Test document processing with mocked functions"""
+        mock_vdb_core = MagicMock()
+        mock_vdb_core.client.search.return_value = {
+            'hits': {
+                'hits': [
+                    {
+                        '_source': {
+                            'path_or_url': '/path/doc1.pdf',
+                            'filename': 'doc1.pdf',
+                            'content': 'Content 1',
+                            'embedding': [1.0, 2.0, 3.0]
+                        }
+                    }
+                ]
+            },
+            'aggregations': {
+                'unique_documents': {
+                    'buckets': [
+                        {
+                            'key': '/path/doc1.pdf',
+                            'doc_count': 1
+                        }
+                    ]
+                }
+            }
+        }
+
+        with patch('backend.utils.document_vector_utils.calculate_document_embedding') as mock_calc_embedding:
+            mock_calc_embedding.return_value = np.array([1.0, 2.0, 3.0])
+
+            documents, embeddings = process_documents_for_clustering(
+                'test_index', mock_vdb_core, sample_doc_count=10
+            )
+
+            assert isinstance(documents, dict)
+            assert isinstance(embeddings, dict)
+            assert len(documents) == len(embeddings)
+
+
+class TestAnalyzeClusterCoherence:
+    """Test cluster coherence analysis"""
+
+    def test_analyze_cluster_coherence(self):
+        """Test cluster coherence analysis"""
+        document_samples = {
+            'doc1': {
+                'filename': 'doc1.pdf',
+                'path_or_url': '/path/doc1.pdf'
+            },
+            'doc2': {
+                'filename': 'doc2.pdf',
+                'path_or_url': '/path/doc2.pdf'
+            }
+        }
+        doc_ids = ['doc1', 'doc2']
+
+        result = analyze_cluster_coherence(doc_ids, document_samples)
+
+        assert isinstance(result, dict)
+        assert 'doc_count' in result
+        assert result['doc_count'] == 2
+
+
+class TestMergeDuplicateDocumentsInClusters:
+    """Test duplicate document merging in clusters"""
+    
+    def test_merge_duplicate_documents_same_cluster(self):
+        """Test that documents in same cluster are not merged"""
+        clusters = {
+            0: ['doc1', 'doc2'],
+            1: ['doc3']
+        }
+        doc_embeddings = {
+            'doc1': np.array([1.0, 0.0]),
+            'doc2': np.array([0.9, 0.1]),
+            'doc3': np.array([0.0, 1.0])
+        }
+        
+        result = merge_duplicate_documents_in_clusters(clusters, doc_embeddings, similarity_threshold=0.98)
+        
+        # Documents with similarity < 0.98 should not be merged
+        assert len(result) == 2
+        assert 0 in result
+        assert 1 in result
+    
+    def test_merge_duplicate_documents_different_clusters(self):
+        """Test that highly similar documents in different clusters are merged"""
+        clusters = {
+            0: ['doc1'],
+            1: ['doc2']
+        }
+        # Create two identical embeddings (duplicate documents)
+        identical_embedding = np.array([1.0, 0.0, 0.0])
+        doc_embeddings = {
+            'doc1': identical_embedding,
+            'doc2': identical_embedding.copy()  # Same embedding
+        }
+        
+        result = merge_duplicate_documents_in_clusters(clusters, doc_embeddings, similarity_threshold=0.98)
+        
+        # Documents with similarity >= 0.98 should be merged into same cluster
+        # Result should have fewer clusters
+        assert len(result) <= 2
+    
+    def test_merge_duplicate_documents_empty_clusters(self):
+        """Test handling of empty clusters"""
+        clusters = {}
+        doc_embeddings = {}
+        
+        result = merge_duplicate_documents_in_clusters(clusters, doc_embeddings)
+        
+        assert result == {}
+    
+    def test_merge_duplicate_documents_error_handling(self):
+        """Test error handling in merge function"""
+        clusters = {
+            0: ['doc1', 'doc2']
+        }
+        doc_embeddings = {
+            'doc1': np.array([1.0, 0.0]),
+            'doc2': np.array([0.9, 0.1])
+        }
+        
+        # Should not raise exception even with invalid similarity calculation
+        result = merge_duplicate_documents_in_clusters(clusters, doc_embeddings, similarity_threshold=2.0)
+        
+        # Should return clusters (possibly unchanged due to high threshold)
+        assert isinstance(result, dict)
+
+
+if __name__ == '__main__':
+    pytest.main([__file__, '-v'])
+

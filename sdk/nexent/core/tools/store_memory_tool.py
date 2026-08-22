@@ -1,0 +1,270 @@
+"""Store memory tool for the new Memory system.
+
+This tool is invoked by the agent to persist important information to its
+short-term memory. Under the new Memory system architecture:
+
+- Agents can ONLY write to the ``agent`` layer with ``short_term`` type.
+- Calls write a single memory record via the ``MemoryService`` facade.
+- Per-run storage limits are preserved.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import concurrent.futures
+import logging
+from typing import Any
+
+from smolagents.tools import Tool
+from pydantic import Field
+
+from ..utils.observer import MessageObserver
+from ..utils.tools_common_message import ToolSign, ToolCategory
+
+
+logger = logging.getLogger("store_memory_tool")
+
+
+def _run_coroutine(coro):
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(asyncio.run, coro).result()
+
+
+class StoreMemoryTool(Tool):
+    """Tool that stores a memory into the agent's short-term memory.
+
+    In the new architecture the tool enforces:
+    ``layer == MemoryLayer.AGENT`` and ``memory_type == MemoryType.SHORT_TERM``.
+    The legacy multi-level concatenation (``user_agent`` etc.) is no longer
+    supported: a sub-agent cannot write to a parent agent's memory and vice
+    versa.
+    """
+
+    name = "store_memory"
+    description = (
+        "Save important information as short-term memory evidence for future "
+        "recall and autonomous Dreaming consolidation. "
+        "Use this when the user shares personal preferences, facts about "
+        "themselves, project context, or instructions that should persist "
+        "across the current conversation. Do NOT store transient information "
+        "like temporary calculations, information already in the knowledge "
+        "base, or data the user explicitly says to forget."
+    )
+    description_zh = (
+        "将重要信息保存为短期记忆素材，以便未来回忆并由 Dreaming 自主整合。"
+        "当用户分享个人偏好、关于自己的事实、项目上下文或应在本对话中保留的指令时使用此工具。"
+        "不要存储临时信息，如临时计算结果、知识库中已有的信息或用户明确要求遗忘的数据。"
+    )
+
+    inputs = {
+        "content": {
+            "type": "string",
+            "description": "The information to remember",
+            "description_zh": "需要记住的信息"
+        }
+    }
+    output_type = "string"
+    category = ToolCategory.DATABASE.value
+    tool_sign = ToolSign.MEMORY_OPERATION.value
+
+    def __init__(
+        self,
+        memory_service: Any = Field(
+            description="MemoryService instance (new SDK facade)",
+            default=None,
+            exclude=True,
+        ),
+        tenant_id: str = Field(
+            description="Tenant ID",
+            default="",
+            exclude=True,
+        ),
+        user_id: str = Field(
+            description="User ID",
+            default="",
+            exclude=True,
+        ),
+        agent_id: str = Field(
+            description="Agent ID",
+            default="",
+            exclude=True,
+        ),
+        conversation_id: str = Field(
+            description="Conversation ID",
+            default="",
+            exclude=True,
+        ),
+        embedding_configured: bool = Field(
+            description="Whether the tenant has an active embedding model",
+            default=True,
+            exclude=True,
+        ),
+        observer: MessageObserver = Field(
+            description="Message observer",
+            default=None,
+            exclude=True,
+        ),
+    ):
+        super().__init__()
+        self.memory_service = memory_service
+        self.tenant_id = tenant_id
+        self.user_id = user_id
+        self.agent_id = agent_id
+        self.conversation_id = (
+            str(conversation_id) if conversation_id not in (None, "") else ""
+        )
+        self.embedding_configured = embedding_configured
+        self.observer = observer
+        self.store_count = 0
+        self.invocation_count = 0
+        self.successful_store_count = 0
+        self.last_outcome = "not_invoked"
+        self.max_stores_per_run = 3
+
+    def forward(self, content: str) -> str:
+        """Store ``content`` into the current agent's short-term memory.
+
+        Args:
+            content: The information to remember.
+
+        Returns:
+            Status message describing what was stored.
+        """
+        self.invocation_count += 1
+        self.last_outcome = "invoked"
+        logger.info(
+            "event=memory_tool_invoked tool=store_memory tenant_id=%s user_id=%s "
+            "agent_id=%s conversation_id=%s content_length=%d",
+            self.tenant_id,
+            self.user_id,
+            self.agent_id,
+            self.conversation_id,
+            len(content),
+        )
+        if not self.embedding_configured:
+            self.last_outcome = "failed_embedding_not_configured"
+            logger.warning(
+                "event=memory_tool_failed tool=store_memory tenant_id=%s "
+                "user_id=%s agent_id=%s reason=embedding_not_configured",
+                self.tenant_id,
+                self.user_id,
+                self.agent_id,
+            )
+            return "Failed to store memory: tenant embedding model is not configured."
+        if self.store_count >= self.max_stores_per_run:
+            self.last_outcome = "degraded_store_limit"
+            logger.warning(
+                "event=memory_tool_degraded tool=store_memory tenant_id=%s user_id=%s "
+                "agent_id=%s conversation_id=%s reason=store_limit max_stores_per_run=%s",
+                self.tenant_id,
+                self.user_id,
+                self.agent_id,
+                self.conversation_id,
+                self.max_stores_per_run,
+            )
+            return (
+                "Memory storage limit reached for this conversation. "
+                "Information will be saved automatically at the end."
+            )
+
+        if self.memory_service is None:
+            self.last_outcome = "failed_service_not_configured"
+            logger.error(
+                "event=memory_tool_failed tool=store_memory tenant_id=%s user_id=%s "
+                "agent_id=%s conversation_id=%s reason=service_not_configured",
+                self.tenant_id,
+                self.user_id,
+                self.agent_id,
+                self.conversation_id,
+            )
+            return (
+                "Failed to store memory: MemoryService is not configured. "
+                "Pass a MemoryService instance when constructing "
+                "StoreMemoryTool."
+            )
+
+        try:
+            from ...memory import MemoryLayer, MemoryType
+
+            async def _store():
+                return await self.memory_service.store_memory(
+                    content=content,
+                    tenant_id=self.tenant_id,
+                    user_id=self.user_id,
+                    agent_id=self.agent_id,
+                    conversation_id=(
+                        str(self.conversation_id)
+                        if self.conversation_id not in (None, "")
+                        else None
+                    ),
+                    layer=MemoryLayer.AGENT,
+                    memory_type=MemoryType.SHORT_TERM,
+                )
+
+            result = _run_coroutine(_store())
+            if result.event == "UNCHANGED":
+                self.last_outcome = "duplicate"
+                logger.info(
+                    "event=memory_tool_completed tool=store_memory tenant_id=%s "
+                    "user_id=%s agent_id=%s conversation_id=%s "
+                    "path=memory_service memory_id=%s memory_event=UNCHANGED",
+                    self.tenant_id,
+                    self.user_id,
+                    self.agent_id,
+                    self.conversation_id,
+                    result.memory_id,
+                )
+                return "Memory already stored; no new memory was created."
+
+            self.store_count += 1
+            self.successful_store_count += 1
+            self.last_outcome = "completed"
+
+            logger.info(
+                "event=memory_tool_completed tool=store_memory tenant_id=%s user_id=%s "
+                "agent_id=%s conversation_id=%s path=memory_service memory_id=%s "
+                "memory_event=%s",
+                self.tenant_id,
+                self.user_id,
+                self.agent_id,
+                self.conversation_id,
+                result.memory_id,
+                result.event,
+            )
+            return (
+                "Stored successfully:\n"
+                f"[{result.event}] {result.content}"
+            )
+        except PermissionError as exc:
+            self.last_outcome = "policy_denied"
+            logger.warning(
+                "event=memory_tool_failed tool=store_memory tenant_id=%s user_id=%s "
+                "agent_id=%s conversation_id=%s reason=policy_denied error_type=%s",
+                self.tenant_id,
+                self.user_id,
+                self.agent_id,
+                self.conversation_id,
+                type(exc).__name__,
+            )
+            return (
+                "Failed to store memory: agent is not allowed to write to "
+                "the requested layer/type."
+            )
+        except Exception as exc:
+            self.last_outcome = "failed"
+            logger.error(
+                "event=memory_tool_failed tool=store_memory tenant_id=%s user_id=%s "
+                "agent_id=%s conversation_id=%s error_type=%s",
+                self.tenant_id,
+                self.user_id,
+                self.agent_id,
+                self.conversation_id,
+                type(exc).__name__,
+            )
+            return (
+                f"Failed to store memory: {exc}. Continuing without saving."
+            )

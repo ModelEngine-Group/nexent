@@ -1,0 +1,162 @@
+name: Docker Image Pull Test
+
+on:
+  schedule:
+    # Run every 30 minutes (at minute 0 and 30 of every hour)
+    - cron: '0,30 * * * *'
+  workflow_dispatch:
+    inputs:
+      runner_label_json:
+        description: 'runner array in json format (e.g. ["ubuntu-latest"] or ["self-hosted"])'
+        required: true
+        default: '["ubuntu-latest"]'
+
+env:
+  NEXENT_IMAGE: nexent/nexent:latest
+  NEXENT_WEB_IMAGE: nexent/nexent-web:latest
+  NEXENT_DATA_PROCESS_IMAGE: nexent/nexent-data-process:latest
+  OPENSSH_SERVER_IMAGE: nexent/nexent-ubuntu-terminal:latest
+
+jobs:
+  test-image-pull:
+    runs-on: ${{ github.event_name == 'workflow_dispatch' && fromJson(inputs.runner_label_json) || fromJson('["ubuntu-latest"]') }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Generate random pull count
+        id: random-count
+        run: |
+          # Generate a random number between 2-5
+          RANDOM_COUNT=$(shuf -i 2-5 -n 1)
+          echo "pull-count=$RANDOM_COUNT" >> "$GITHUB_OUTPUT"
+          echo "Will pull each image $RANDOM_COUNT times"
+        
+      - name: Clean existing images
+        run: |
+          echo "Cleaning existing images..."
+          docker rmi -f ${{ env.NEXENT_IMAGE }} 2>/dev/null || echo "Image ${{ env.NEXENT_IMAGE }} not found locally"
+          docker rmi -f ${{ env.NEXENT_WEB_IMAGE }} 2>/dev/null || echo "Image ${{ env.NEXENT_WEB_IMAGE }} not found locally"
+          docker rmi -f ${{ env.NEXENT_DATA_PROCESS_IMAGE }} 2>/dev/null || echo "Image ${{ env.NEXENT_DATA_PROCESS_IMAGE }} not found locally"
+          docker rmi -f ${{ env.OPENSSH_SERVER_IMAGE }} 2>/dev/null || echo "Image ${{ env.OPENSSH_SERVER_IMAGE }} not found locally"
+          
+          # Clean up dangling images
+          docker image prune -f 2>/dev/null || echo "No dangling images to remove"
+          
+          echo "Image cleanup completed"
+        
+      - name: Test pull nexent/nexent:latest
+        run: |
+          echo "Testing nexent/nexent:latest image pull..."
+          PULL_COUNT=${{ steps.random-count.outputs.pull-count }}
+          
+          for i in $(seq 1 $PULL_COUNT); do
+            echo "Pull attempt $i/$PULL_COUNT for nexent/nexent:latest"
+            if docker pull ${{ env.NEXENT_IMAGE }}; then
+              echo "✅ Successfully pulled nexent/nexent:latest (attempt $i)"
+              # Remove image after successful pull to prepare for next pull
+              docker rmi -f ${{ env.NEXENT_IMAGE }} 2>/dev/null || true
+            else
+              echo "❌ Failed to pull nexent/nexent:latest (attempt $i)"
+              exit 1
+            fi
+            
+            # Wait 5 seconds if not the last pull attempt
+            if [ $i -lt $PULL_COUNT ]; then
+              sleep 5
+            fi
+          done
+          
+      - name: Test pull nexent/nexent-web:latest  
+        run: |
+          echo "Testing nexent/nexent-web:latest image pull..."
+          PULL_COUNT=${{ steps.random-count.outputs.pull-count }}
+          
+          for i in $(seq 1 $PULL_COUNT); do
+            echo "Pull attempt $i/$PULL_COUNT for nexent/nexent-web:latest"
+            if docker pull ${{ env.NEXENT_WEB_IMAGE }}; then
+              echo "✅ Successfully pulled nexent/nexent-web:latest (attempt $i)"
+              # Remove image after successful pull to prepare for next pull
+              docker rmi -f ${{ env.NEXENT_WEB_IMAGE }} 2>/dev/null || true
+            else
+              echo "❌ Failed to pull nexent/nexent-web:latest (attempt $i)"
+              exit 1
+            fi
+            
+            # Wait 5 seconds if not the last pull attempt
+            if [ $i -lt $PULL_COUNT ]; then
+              sleep 5
+            fi
+          done
+          
+      - name: Test pull nexent/nexent-data-process:latest
+        run: |
+          echo "Testing nexent/nexent-data-process:latest image pull..."
+          PULL_COUNT=${{ steps.random-count.outputs.pull-count }}
+          
+          for i in $(seq 1 $PULL_COUNT); do
+            echo "Pull attempt $i/$PULL_COUNT for nexent/nexent-data-process:latest"
+            if docker pull ${{ env.NEXENT_DATA_PROCESS_IMAGE }}; then
+              echo "✅ Successfully pulled nexent/nexent-data-process:latest (attempt $i)"
+              # Remove image after successful pull to prepare for next pull
+              docker rmi -f ${{ env.NEXENT_DATA_PROCESS_IMAGE }} 2>/dev/null || true
+            else
+              echo "❌ Failed to pull nexent/nexent-data-process:latest (attempt $i)"
+              exit 1
+            fi
+            
+            # Wait 5 seconds if not the last pull attempt
+            if [ $i -lt $PULL_COUNT ]; then
+              sleep 5
+            fi
+          done
+          
+      - name: Test pull nexent/nexent-ubuntu-terminal:latest
+        run: |
+          echo "Testing nexent/nexent-ubuntu-terminal:latest image pull..."
+          PULL_COUNT=${{ steps.random-count.outputs.pull-count }}
+          
+          for i in $(seq 1 $PULL_COUNT); do
+            echo "Pull attempt $i/$PULL_COUNT for nexent/nexent-ubuntu-terminal:latest"
+            if docker pull ${{ env.OPENSSH_SERVER_IMAGE }}; then
+              echo "✅ Successfully pulled nexent/nexent-ubuntu-terminal:latest (attempt $i)"
+              # Remove image after successful pull to prepare for next pull
+              docker rmi -f ${{ env.OPENSSH_SERVER_IMAGE }} 2>/dev/null || true
+            else
+              echo "❌ Failed to pull nexent/nexent-ubuntu-terminal:latest (attempt $i)"
+              exit 1
+            fi
+            
+            # Wait 5 seconds if not the last pull attempt
+            if [ $i -lt $PULL_COUNT ]; then
+              sleep 5
+            fi
+          done
+          
+      - name: Final cleanup
+        if: always()
+        run: |
+          echo "Performing final cleanup..."
+          docker rmi -f ${{ env.NEXENT_IMAGE }} 2>/dev/null || echo "Image ${{ env.NEXENT_IMAGE }} already removed"
+          docker rmi -f ${{ env.NEXENT_WEB_IMAGE }} 2>/dev/null || echo "Image ${{ env.NEXENT_WEB_IMAGE }} already removed"
+          docker rmi -f ${{ env.NEXENT_DATA_PROCESS_IMAGE }} 2>/dev/null || echo "Image ${{ env.NEXENT_DATA_PROCESS_IMAGE }} already removed"
+          docker rmi -f ${{ env.OPENSSH_SERVER_IMAGE }} 2>/dev/null || echo "Image ${{ env.OPENSSH_SERVER_IMAGE }} already removed"
+          
+          # Clean up dangling and unused images
+          docker image prune -f 2>/dev/null || echo "No images to prune"
+          
+          echo "Final cleanup completed"
+          
+      - name: Test Summary
+        if: always()
+        run: |
+          echo "🎯 Docker Image Pull Test Summary"
+          echo "================================="
+          echo "Test run completed with ${{ steps.random-count.outputs.pull-count }} pull attempts per image"
+          echo "Images tested:"
+          echo "  - nexent/nexent:latest"
+          echo "  - nexent/nexent-web:latest" 
+          echo "  - nexent/nexent-data-process:latest"
+          echo "  - nexent/nexent-ubuntu-terminal:latest"
+          echo "Next scheduled run: in 30 minutes"

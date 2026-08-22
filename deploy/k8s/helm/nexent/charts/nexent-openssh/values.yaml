@@ -1,0 +1,23 @@
+replicaCount: 1
+
+enabled: true
+
+images:
+  openssh:
+    repository: nexent/nexent-ubuntu-terminal
+    tag: latest
+    pullPolicy: IfNotPresent
+
+resources:
+  openssh:
+    requests:
+      memory: 256Mi
+      cpu: 100m
+    limits:
+      memory: 512Mi
+      cpu: 200m
+
+services:
+  openssh:
+    type: NodePort
+    nodePort: 30022

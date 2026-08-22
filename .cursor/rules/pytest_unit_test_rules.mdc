@@ -1,0 +1,52 @@
+---
+globs: test/**/*.py
+description: Pytest Unit Test Rules for this repository
+---
+
+## Pytest Unit Test Rules (Concise)
+
+### Framework
+- Use pytest exclusively; prefer fixtures; use pytest `assert` statements.
+
+### Naming
+- Files `test_*`; classes `Test*`; functions `test_*`.
+
+### Imports
+- Order: standard library, third‑party, project.
+- Import only the unit under test; mock collaborators using `pytest-mock`.
+
+### Import and Mock Rules
+- Do not directly import external interfaces/clients/services into tests to exercise collaborators.
+- Patch where the dependency is imported (lookup site) using a fully‑qualified path.
+- Use `side_effect` to cover error paths when appropriate.
+
+```python
+from pytest_mock import MockFixture
+from backend.apps.some_app import create_resource
+
+def test_create_resource_success(mocker: MockFixture):
+    mocker.patch(
+        "backend.services.model_provider_service.ModelProviderService.create",
+        return_value={"id": "res-1"},
+    )
+    assert create_resource({...})["id"] == "res-1"
+```
+
+### Structure and Size
+- Keep files under 500 lines or split by feature; include `__init__.py` in split directories; use `test_<module>_<feature>.py` names.
+
+### Coverage and Async
+- Cover success/error flows and boundaries; use `@pytest.mark.parametrize` for variants.
+- Use `@pytest.mark.asyncio` for async tests.
+
+### Isolation
+- Use `autouse=True` fixtures to reset state; fully mock external I/O and APIs.
+
+### Checklist
+- [ ] pytest only (no unittest)
+- [ ] naming conventions followed
+- [ ] collaborators mocked with pytest-mock
+- [ ] import/mocking rules followed
+- [ ] async tests decorated when needed
+- [ ] clear, specific assertions
+- [ ] adequate coverage (normal and exception paths)

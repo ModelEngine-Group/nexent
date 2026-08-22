@@ -1,0 +1,47 @@
+{{- if or (eq .Values.global.deploymentVersion "full") (index .Values.global.deploymentComponents "supabase") }}
+{{- $mode := default "local" .Values.persistence.mode }}
+{{- if eq $mode "local" }}
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: nexent-supabase-db-pv
+  labels:
+    type: hostpath
+    app: nexent-supabase-db
+  annotations:
+    "helm.sh/hook-weight": "-2"
+spec:
+  storageClassName: {{ .Values.persistence.storageClassName | quote }}
+  capacity:
+    storage: {{ .Values.storage.size }}
+  accessModes:
+{{ toYaml .Values.persistence.accessModes | indent 4 }}
+  persistentVolumeReclaimPolicy: Retain
+  hostPath:
+    path: {{ .Values.persistence.localPath | quote }}
+    type: DirectoryOrCreate
+{{- end }}
+{{- if ne $mode "existing" }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: nexent-supabase-db
+  namespace: {{ .Values.global.namespace }}
+  annotations:
+    "helm.sh/hook-weight": "-2"
+spec:
+  accessModes:
+{{ toYaml .Values.persistence.accessModes | indent 4 }}
+  resources:
+    requests:
+      storage: {{ .Values.storage.size }}
+  {{- if eq $mode "local" }}
+  volumeName: nexent-supabase-db-pv
+  {{- end }}
+  {{- if .Values.persistence.storageClassName }}
+  storageClassName: {{ .Values.persistence.storageClassName | quote }}
+  {{- end }}
+{{- end }}
+{{- end }}

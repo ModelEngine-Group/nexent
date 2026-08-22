@@ -1,0 +1,474 @@
+import logging
+
+from dotenv import load_dotenv
+from fastapi import APIRouter, Header, Query, Request, HTTPException
+from fastapi.responses import JSONResponse
+from http import HTTPStatus
+from typing import Optional
+
+from supabase_auth.errors import AuthApiError, AuthWeakPasswordError
+
+from consts.const import ASSET_OWNER_SIGNUP_USE_OAUTH_DETAIL
+from consts.model import UserSignInRequest, UserSignUpRequest, UpdatePasswordRequest
+from consts.exceptions import (
+    NoInviteCodeException,
+    IncorrectInviteCodeException,
+    UserRegistrationException,
+    AppException,
+    UnauthorizedError,
+    ValidationError,
+)
+from consts.error_code import ErrorCode
+from services.cas_service import build_logout_url, CasAuthenticationError
+from services.user_management_service import get_authorized_client, validate_token, \
+    check_auth_service_health, signup_user_with_invitation, signin_user, refresh_user_token, \
+    get_session_by_authorization, get_user_info, create_token, list_tokens_by_user, delete_token, \
+    update_password
+from services.user_service import delete_user_and_cleanup
+from utils.auth_utils import get_current_user_id, extract_session_id_from_authorization
+
+
+load_dotenv()
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logger = logging.getLogger("user_management_app")
+router = APIRouter(prefix="/user", tags=["user"])
+
+
+@router.get("/service_health")
+async def service_health():
+    """Service health check"""
+    try:
+        await check_auth_service_health()
+
+        return JSONResponse(status_code=HTTPStatus.OK,
+                            content={"message": "Auth service is available"})
+    except ConnectionError as e:
+        logging.error(f"Auth service health check failed: {str(e)}")
+        raise HTTPException(
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE, detail="Auth service is unavailable")
+    except Exception as e:
+        logging.error(f"Auth service health check failed: {str(e)}")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Auth service is unavailable")
+
+
+@router.post("/signup")
+async def signup(request: UserSignUpRequest):
+    """User registration"""
+    try:
+        user_data = await signup_user_with_invitation(email=request.email,
+                                                      password=request.password,
+                                                      invite_code=request.invite_code,
+                                                      auto_login=request.auto_login)
+        success_message = "🎉 User account registered successfully! Please start experiencing the AI assistant service."
+        return JSONResponse(status_code=HTTPStatus.OK,
+                            content={"message": success_message, "data": user_data})
+    except NoInviteCodeException as e:
+        logging.error(f"User registration failed by invite code: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+                            detail="INVITE_CODE_NOT_CONFIGURED")
+    except IncorrectInviteCodeException as e:
+        logging.error(f"User registration failed by invite code: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+                            detail="INVITE_CODE_INVALID")
+    except ValidationError as e:
+        detail = str(e)
+        if detail == ASSET_OWNER_SIGNUP_USE_OAUTH_DETAIL:
+            logging.warning(
+                "User registration rejected: asset owner invite requires OAuth")
+        else:
+            logging.warning(
+                f"User registration rejected by validation: {detail}")
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=detail)
+    except UserRegistrationException as e:
+        logging.error(
+            f"User registration failed by registration service: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+                            detail="REGISTRATION_SERVICE_ERROR")
+    except AuthWeakPasswordError as e:
+        logging.error(f"User registration failed by weak password: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST,
+                            detail="WEAK_PASSWORD")
+    except AuthApiError as e:
+        logging.error(f"User registration failed by auth error: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.CONFLICT,
+                            detail="EMAIL_ALREADY_EXISTS")
+    except Exception as e:
+        logging.error(f"User registration failed, unknown error: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+                            detail="UNKNOWN_ERROR")
+
+
+@router.post("/signin")
+async def signin(request: UserSignInRequest):
+    """User login"""
+    try:
+        signin_content = await signin_user(email=request.email,
+                                           password=request.password)
+        return JSONResponse(status_code=HTTPStatus.OK,
+                            content=signin_content)
+    except AuthApiError as e:
+        logging.error(f"User login failed: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED,
+                            detail="Email or password error")
+    except ValidationError as e:
+        logging.warning(f"User login rejected by feature flag: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        logging.error(f"User login failed, unknown error: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+                            detail="Login failed")
+
+
+@router.post("/refresh_token")
+async def user_refresh_token(request: Request):
+    """Refresh token"""
+    authorization = request.headers.get("Authorization")
+    if not authorization:
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED,
+                            detail="No authorization token provided")
+    try:
+        session_data = await request.json()
+        refresh_token = session_data.get("refresh_token")
+        if not refresh_token:
+            raise ValueError("No refresh token provided")
+        session_info = await refresh_user_token(authorization, refresh_token)
+        return JSONResponse(status_code=HTTPStatus.OK,
+                            content={"message": "Token refresh successful", "data": {"session": session_info}})
+    except ValueError as e:
+        logging.error(f"Refresh token failed: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+                            detail="No refresh token provided")
+    except Exception as e:
+        logging.error(f"Refresh token failed: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+                            detail="Refresh token failed")
+
+
+@router.post("/logout")
+async def logout(request: Request):
+    """User logout"""
+    authorization = request.headers.get("Authorization")
+    try:
+        # Make logout idempotent: if no token or token expired, still return success
+        session_id = None
+        cas_logout_url = ""
+        if authorization:
+            session_id = extract_session_id_from_authorization(authorization)
+            if session_id:
+                from database.cas_session_db import revoke_cas_session_by_session_id
+
+                revoke_cas_session_by_session_id(session_id, actor="user")
+                try:
+                    cas_logout_url = build_logout_url()
+                except CasAuthenticationError as cas_err:
+                    logging.warning(f"CAS logout URL is unavailable: {str(cas_err)}")
+            client = get_authorized_client(authorization)
+            try:
+                client.auth.sign_out()
+            except Exception as signout_err:
+                # Ignore sign out errors to keep logout idempotent
+                logging.warning(
+                    f"Sign out encountered an error but will be ignored: {str(signout_err)}")
+        return JSONResponse(status_code=HTTPStatus.OK,
+                            content={
+                                "message": "Logout successful",
+                                "data": {
+                                    "cas_logout_url": cas_logout_url
+                                }
+                            })
+
+    except Exception as e:
+        logging.error(f"User logout failed: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+                            detail="Logout failed!")
+
+
+@router.get("/session")
+async def get_session(request: Request):
+    """Get current user session"""
+    authorization = request.headers.get("Authorization")
+    if not authorization:
+        # Treat as not logged in when missing token
+        return JSONResponse(status_code=HTTPStatus.OK,
+                            content={"message": "User not logged in",
+                                     "data": None})
+    try:
+        data = await get_session_by_authorization(authorization)
+        return JSONResponse(status_code=HTTPStatus.OK,
+                            content={"message": "Session is valid",
+                                     "data": data})
+    except UnauthorizedError as e:
+        logging.error(f"Get user session unauthorized: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED,
+                            detail="User not logged in or session invalid")
+    except Exception as e:
+        logging.error(f"error in get user session, {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+                            detail="Get user session failed")
+
+
+@router.get("/current_user_info")
+async def get_user_information(request: Request):
+    """Get current user information including user ID, group IDs, tenant ID, and role"""
+    authorization = request.headers.get("Authorization")
+    if not authorization:
+        # Treat as not logged in when missing token
+        return JSONResponse(status_code=HTTPStatus.OK,
+                            content={"message": "User not logged in",
+                                     "data": None})
+
+    try:
+        # Use the unified token validation function to get user ID
+        is_valid, user = validate_token(authorization)
+        if not is_valid or not user:
+            raise UnauthorizedError("User not logged in or session invalid")
+
+        user_id = user.id
+
+        # Get user information
+        user_info = await get_user_info(user_id)
+        if not user_info:
+            raise UnauthorizedError("User information not found")
+
+        user_info["user"]["auth_provider"] = (
+            "cas" if extract_session_id_from_authorization(authorization) else "local"
+        )
+
+        return JSONResponse(status_code=HTTPStatus.OK,
+                            content={"message": "Success",
+                                     "data": user_info})
+
+    except UnauthorizedError as e:
+        logging.error(f"Get user information unauthorized: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED,
+                            detail="User not logged in or session invalid")
+    except Exception as e:
+        logging.error(f"Get user information failed: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+                            detail="Get user information failed")
+
+
+@router.get("/current_user_id")
+async def get_user_id(request: Request):
+    """Get current user ID, return None if not logged in"""
+    authorization = request.headers.get("Authorization")
+    if not authorization:
+        # Treat as not logged in when missing token, return 200 with null user_id
+        return JSONResponse(status_code=HTTPStatus.OK,
+                            content={"message": "User not logged in",
+                                     "data": {"user_id": None}})
+    try:
+        # Use the unified token validation function (validates signature via Supabase)
+        is_valid, user = validate_token(authorization)
+        if is_valid and user:
+            return JSONResponse(status_code=HTTPStatus.OK,
+                                content={"message": "Get user ID successfully",
+                                         "data": {"user_id": user.id}})
+
+        # Token invalid or expired - do not trust unsigned JWT, return 401
+        logging.warning("Get user ID failed: token validation failed")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED,
+                            detail="User not logged in or session invalid")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Get user ID failed: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+                            detail="Get user ID failed")
+
+
+@router.post("/revoke")
+async def revoke_user_account(request: Request):
+    """Delete current regular user's account and purge related data.
+
+    Notes:
+    - Tenant admin (role=admin) is not allowed to be revoked via this endpoint.
+    - Idempotent: local deletions are soft deletes; Supabase deletion may already have occurred.
+    """
+    authorization = request.headers.get("Authorization")
+    if not authorization:
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED,
+                            detail="No authorization token provided")
+    try:
+        # Identify current user and tenant
+        user_id, tenant_id = get_current_user_id(authorization)
+
+        # Determine role via token validation
+        is_valid, user = validate_token(authorization.replace("Bearer ", ""))
+        if not is_valid or not user:
+            raise UnauthorizedError("User not logged in or session invalid")
+
+        # Extract role from user metadata
+        user_role = "user"
+        if getattr(user, "user_metadata", None) and 'role' in user.user_metadata:
+            user_role = user.user_metadata['role']
+
+        # Disallow admin revocation by this endpoint
+        if user_role == "admin":
+            raise HTTPException(status_code=HTTPStatus.FORBIDDEN,
+                                detail="Admin account cannot be deleted via this endpoint")
+
+        # Orchestrate revoke for regular user
+        await delete_user_and_cleanup(user_id=user_id, tenant_id=tenant_id)
+
+        return JSONResponse(status_code=HTTPStatus.OK, content={"message": "User account revoked"})
+    except UnauthorizedError as e:
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"User revoke failed: {str(e)}")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="User revoke failed")
+
+
+@router.post("/tokens")
+async def create_token_endpoint(
+    authorization: Optional[str] = Header(None)
+):
+    """Create a new token for the authenticated user.
+
+    The user_id is extracted from the Authorization header (JWT token).
+    Returns the complete token including the secret key.
+    """
+    try:
+        if not authorization:
+            raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED,
+                                detail="Unauthorized: No authorization header found")
+
+        user_id, _ = get_current_user_id(authorization)
+        if not user_id:
+            raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED,
+                                detail="Unauthorized: missing user_id in JWT token")
+
+        result = create_token(str(user_id))
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={"message": "success", "data": result}
+        )
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        logging.error(f"Failed to create token: {str(e)}", exc_info=e)
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Internal Server Error")
+
+
+@router.get("/tokens")
+async def list_tokens_endpoint(
+    user_id: str = Query(..., description="User ID to query tokens for"),
+    authorization: Optional[str] = Header(None)
+):
+    """List all tokens for the specified user.
+
+    Returns token information with masked access keys (middle part replaced with *).
+    """
+    try:
+        if not authorization:
+            raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED,
+                                detail="Unauthorized: No authorization header found")
+
+        request_user_id, _ = get_current_user_id(authorization)
+        if not request_user_id:
+            raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED,
+                                detail="Unauthorized: missing user_id in JWT token")
+
+        # Only allow users to list their own tokens
+        if str(request_user_id) != user_id:
+            raise HTTPException(status_code=HTTPStatus.FORBIDDEN,
+                                detail="Forbidden: cannot list tokens for other users")
+
+        tokens = list_tokens_by_user(user_id)
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={"message": "success", "data": tokens}
+        )
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        logging.error(f"Failed to list tokens: {str(e)}", exc_info=e)
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Internal Server Error")
+
+
+@router.delete("/tokens/{token_id}")
+async def delete_token_endpoint(
+    token_id: int,
+    authorization: Optional[str] = Header(None)
+):
+    """Soft delete a token.
+
+    Only the owner of the token can delete it.
+    """
+    try:
+        if not authorization:
+            raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED,
+                                detail="Unauthorized: No authorization header found")
+
+        user_id, _ = get_current_user_id(authorization)
+        if not user_id:
+            raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED,
+                                detail="Unauthorized: missing user_id in JWT token")
+
+        success = delete_token(token_id, str(user_id))
+        if not success:
+            raise HTTPException(status_code=HTTPStatus.NOT_FOUND,
+                                detail="Token not found or not owned by user")
+
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={"message": "success", "data": {"token_id": token_id}}
+        )
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        logging.error(f"Failed to delete token: {str(e)}", exc_info=e)
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Internal Server Error")
+
+
+@router.put("/password")
+async def update_password_endpoint(
+    request: UpdatePasswordRequest,
+    authorization: Optional[str] = Header(None)
+):
+    """Update current user's password.
+
+    This endpoint requires the user to provide their current password for verification
+    before setting a new password.
+    """
+    try:
+        if not authorization:
+            raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED,
+                                detail="Unauthorized: No authorization token provided")
+
+        user_id, _ = get_current_user_id(authorization)
+        if not user_id:
+            raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED,
+                                detail="Unauthorized: missing user_id in JWT token")
+
+        await update_password(
+            user_id=str(user_id),
+            old_password=request.old_password,
+            new_password=request.new_password
+        )
+
+        logger.info(f"Password updated successfully for user {user_id}")
+
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={"message": "Password updated successfully"}
+        )
+
+    except UnauthorizedError as e:
+        logger.warning(f"Password update unauthorized for user: {str(e)}")
+        raise AppException(ErrorCode.PROFILE_INVALID_CREDENTIALS, str(e))
+    except AppException as e:
+        logger.warning(
+            f"Password update business error: {e.error_code} - {str(e)}")
+        raise e  # Let app_exception_handler format the response
+    except Exception as e:
+        logging.error(f"Failed to update password: {str(e)}", exc_info=e)
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+                            detail="Internal Server Error")

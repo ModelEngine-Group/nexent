@@ -1,0 +1,726 @@
+import importlib
+import sys
+import pytest
+from unittest.mock import patch, MagicMock
+from types import SimpleNamespace
+
+# Mock consts module first to avoid ModuleNotFoundError during module import
+consts_mock = MagicMock()
+consts_mock.const = MagicMock()
+# Set required constants on consts.const for tests
+consts_mock.const.MINIO_ENDPOINT = "http://localhost:9000"
+consts_mock.const.MINIO_ACCESS_KEY = "test_access_key"
+consts_mock.const.MINIO_SECRET_KEY = "test_secret_key"
+consts_mock.const.MINIO_REGION = "us-east-1"
+consts_mock.const.MINIO_DEFAULT_BUCKET = "test-bucket"
+consts_mock.const.POSTGRES_HOST = "localhost"
+consts_mock.const.POSTGRES_USER = "test_user"
+consts_mock.const.NEXENT_POSTGRES_PASSWORD = "test_password"
+consts_mock.const.POSTGRES_DB = "test_db"
+consts_mock.const.POSTGRES_PORT = 5432
+consts_mock.const.DEFAULT_TENANT_ID = "default_tenant"
+consts_mock.const.DEFAULT_EXPECTED_CHUNK_SIZE = 1024
+consts_mock.const.DEFAULT_MAXIMUM_CHUNK_SIZE = 1536
+
+# Register mocked consts module in sys.modules
+sys.modules['consts'] = consts_mock
+sys.modules['consts.const'] = consts_mock.const
+
+# Mock utils module used by target module
+utils_mock = MagicMock()
+utils_mock.auth_utils = MagicMock()
+utils_mock.auth_utils.get_current_user_id = MagicMock(return_value=("test_user_id", "test_tenant_id"))
+
+# Register mocked utils module in sys.modules
+sys.modules['utils'] = utils_mock
+sys.modules['utils.auth_utils'] = utils_mock.auth_utils
+
+# Provide a stub for the `boto3` module so that it can be imported safely even
+# if the testing environment does not have it available.
+boto3_mock = MagicMock()
+sys.modules['boto3'] = boto3_mock
+
+# Mock the entire client module used by database layer
+client_mock = MagicMock()
+client_mock.MinioClient = MagicMock()
+client_mock.PostgresClient = MagicMock()
+client_mock.db_client = MagicMock()
+client_mock.get_db_session = MagicMock()
+client_mock.as_dict = MagicMock()
+
+# Register mocked client module in sys.modules
+sys.modules['backend.database.client'] = client_mock
+
+"""Now that dependencies are mocked, import the module under test.
+Access functions via the module object to avoid direct function imports.
+"""
+model_mgmt_db = importlib.import_module("backend.database.model_management_db")
+
+@pytest.fixture
+def mock_session():
+    # mock scalars().all() return value
+    mock_model = SimpleNamespace(
+        model_id=1,
+        model_factory="openai",
+        model_type="chat",
+        tenant_id="tenant1",
+        delete_flag="N",
+    )
+    mock_scalars = MagicMock()
+    mock_scalars.all.return_value = [mock_model]
+    mock_session = MagicMock()
+    mock_session.scalars.return_value = mock_scalars
+    return mock_session
+
+def test_get_models_by_tenant_factory_type(monkeypatch, mock_session):
+    # patch get_db_session
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = mock_session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.model_management_db.get_db_session", lambda: mock_ctx)
+    # patch as_dict
+    monkeypatch.setattr("backend.database.model_management_db.as_dict", lambda obj: obj.__dict__)
+
+    tenant_id = "tenant1"
+    model_factory = "openai"
+    model_type = "chat"
+    result = model_mgmt_db.get_models_by_tenant_factory_type(
+        tenant_id, model_factory, model_type)
+    assert isinstance(result, list)
+    assert len(result) == 1
+    assert result[0]["model_factory"] == model_factory
+    assert result[0]["model_type"] == model_type
+    assert result[0]["tenant_id"] == tenant_id
+
+
+def test_get_model_records_fills_default_chunk_sizes(monkeypatch):
+    # Create a mock session returning an embedding record with None chunk sizes
+    mock_model = SimpleNamespace(
+        model_id=2,
+        model_factory="openai",
+        model_type="embedding",
+        tenant_id="tenant2",
+        delete_flag="N",
+        expected_chunk_size=None,
+        maximum_chunk_size=None,
+    )
+    mock_scalars = MagicMock()
+    mock_scalars.all.return_value = [mock_model]
+    session = MagicMock()
+    session.scalars.return_value = mock_scalars
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr(
+        "backend.database.model_management_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr(
+        "backend.database.model_management_db.as_dict", lambda obj: obj.__dict__)
+
+    records = model_mgmt_db.get_model_records(
+        {"model_type": "embedding"}, tenant_id="tenant2")
+    assert len(records) == 1
+    assert records[0]["expected_chunk_size"] == 1024
+    assert records[0]["maximum_chunk_size"] == 1536
+
+
+def test_get_model_by_model_id_fills_default_chunk_sizes(monkeypatch):
+    # Mock session.scalars().first() to return an embedding record with None sizes
+    mock_model = SimpleNamespace(
+        model_id=3,
+        model_factory="openai",
+        model_type="embedding",
+        tenant_id="tenant3",
+        delete_flag="N",
+        expected_chunk_size=None,
+        maximum_chunk_size=None,
+    )
+    mock_scalars = MagicMock()
+    mock_scalars.first.return_value = mock_model
+    session = MagicMock()
+    session.scalars.return_value = mock_scalars
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr(
+        "backend.database.model_management_db.get_db_session", lambda: mock_ctx)
+
+    out = model_mgmt_db.get_model_by_model_id(3, tenant_id="tenant3")
+    assert out is not None
+    assert out["expected_chunk_size"] == 1024
+    assert out["maximum_chunk_size"] == 1536
+
+
+def test_create_model_record(monkeypatch):
+    """Test create_model_record function (covers lines 23-42)"""
+    mock_result = MagicMock()
+    mock_result.rowcount = 1
+    
+    mock_stmt = MagicMock()
+    mock_stmt.values.return_value = mock_stmt
+    
+    mock_insert = MagicMock(return_value=mock_stmt)
+    monkeypatch.setattr("backend.database.model_management_db.insert", mock_insert)
+    
+    session = MagicMock()
+    session.execute.return_value = mock_result
+    
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.model_management_db.get_db_session", lambda: mock_ctx)
+    
+    # Mock clean_string_values and add_creation_tracking
+    monkeypatch.setattr("backend.database.model_management_db.db_client.clean_string_values", lambda x: x)
+    monkeypatch.setattr("backend.database.model_management_db.add_creation_tracking", lambda x, uid: x)
+    monkeypatch.setattr("backend.database.model_management_db.func.current_timestamp", MagicMock())
+    
+    model_data = {"model_name": "test", "model_type": "llm"}
+    result = model_mgmt_db.create_model_record(model_data, user_id="u1", tenant_id="t1")
+    
+    assert result is True
+    session.execute.assert_called_once()
+
+
+def test_update_model_record(monkeypatch):
+    """Test update_model_record function (covers lines 63-84)"""
+    mock_result = MagicMock()
+    mock_result.rowcount = 1
+    
+    mock_stmt = MagicMock()
+    mock_stmt.where.return_value = mock_stmt
+    mock_stmt.values.return_value = mock_stmt
+    
+    mock_update = MagicMock(return_value=mock_stmt)
+    monkeypatch.setattr("backend.database.model_management_db.update", mock_update)
+    
+    session = MagicMock()
+    session.execute.return_value = mock_result
+    
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.model_management_db.get_db_session", lambda: mock_ctx)
+    
+    # Mock clean_string_values and add_update_tracking
+    monkeypatch.setattr("backend.database.model_management_db.db_client.clean_string_values", lambda x: x)
+    monkeypatch.setattr("backend.database.model_management_db.add_update_tracking", lambda x, uid: x)
+    monkeypatch.setattr("backend.database.model_management_db.func.current_timestamp", MagicMock())
+    
+    update_data = {"model_name": "updated"}
+    result = model_mgmt_db.update_model_record(1, update_data, user_id="u1", tenant_id="t1")
+    
+    assert result is True
+    session.execute.assert_called_once()
+
+
+def test_delete_model_record(monkeypatch):
+    """Test delete_model_record function (covers lines 99-119)"""
+    mock_result = MagicMock()
+    mock_result.rowcount = 1
+    
+    mock_stmt = MagicMock()
+    mock_stmt.where.return_value = mock_stmt
+    mock_stmt.values.return_value = mock_stmt
+    
+    mock_update = MagicMock(return_value=mock_stmt)
+    monkeypatch.setattr("backend.database.model_management_db.update", mock_update)
+    
+    session = MagicMock()
+    session.execute.return_value = mock_result
+    
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.model_management_db.get_db_session", lambda: mock_ctx)
+    
+    # Mock add_update_tracking
+    monkeypatch.setattr("backend.database.model_management_db.add_update_tracking", lambda x, uid: x)
+    monkeypatch.setattr("backend.database.model_management_db.func.current_timestamp", MagicMock())
+    
+    result = model_mgmt_db.delete_model_record(1, user_id="u1", tenant_id="t1")
+    
+    assert result is True
+    session.execute.assert_called_once()
+
+
+def test_get_model_records_with_tenant_id(monkeypatch):
+    """Test get_model_records with tenant_id filter (covers lines 137->141)"""
+    mock_model = SimpleNamespace(
+        model_id=4,
+        model_factory="openai",
+        model_type="llm",
+        tenant_id="tenant4",
+        delete_flag="N",
+    )
+    mock_scalars = MagicMock()
+    mock_scalars.all.return_value = [mock_model]
+    session = MagicMock()
+    session.scalars.return_value = mock_scalars
+    
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.model_management_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("backend.database.model_management_db.as_dict", lambda obj: obj.__dict__)
+    
+    records = model_mgmt_db.get_model_records({"model_type": "llm"}, tenant_id="tenant4")
+    assert len(records) == 1
+    assert records[0]["tenant_id"] == "tenant4"
+
+
+def test_get_model_records_with_none_filter(monkeypatch):
+    """Test get_model_records with None value in filter (covers line 145)"""
+    mock_model = SimpleNamespace(
+        model_id=5,
+        model_factory="openai",
+        model_type="llm",
+        tenant_id="tenant5",
+        delete_flag="N",
+        display_name=None,
+    )
+    mock_scalars = MagicMock()
+    mock_scalars.all.return_value = [mock_model]
+    session = MagicMock()
+    session.scalars.return_value = mock_scalars
+    
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.model_management_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("backend.database.model_management_db.as_dict", lambda obj: obj.__dict__)
+    
+    records = model_mgmt_db.get_model_records({"display_name": None}, tenant_id="tenant5")
+    assert len(records) == 1
+
+
+def test_get_model_by_display_name(monkeypatch):
+    """Test get_model_by_display_name function (covers lines 178-185)"""
+    mock_model = SimpleNamespace(
+        model_id=6,
+        model_factory="openai",
+        model_name="gpt-4",
+        display_name="GPT-4",
+        tenant_id="tenant6",
+        delete_flag="N",
+    )
+    mock_scalars = MagicMock()
+    mock_scalars.all.return_value = [mock_model]
+    session = MagicMock()
+    session.scalars.return_value = mock_scalars
+    
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.model_management_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("backend.database.model_management_db.as_dict", lambda obj: obj.__dict__)
+    
+    result = model_mgmt_db.get_model_by_display_name("GPT-4", "tenant6")
+    assert result is not None
+    assert result["display_name"] == "GPT-4"
+
+
+def test_get_model_id_by_display_name(monkeypatch):
+    """Test get_model_id_by_display_name function (covers lines 199-200)"""
+    mock_model = SimpleNamespace(
+        model_id=7,
+        model_factory="openai",
+        model_name="gpt-4",
+        display_name="GPT-4",
+        tenant_id="tenant7",
+        delete_flag="N",
+    )
+    mock_scalars = MagicMock()
+    mock_scalars.all.return_value = [mock_model]
+    session = MagicMock()
+    session.scalars.return_value = mock_scalars
+    
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.model_management_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("backend.database.model_management_db.as_dict", lambda obj: obj.__dict__)
+    
+    result = model_mgmt_db.get_model_id_by_display_name("GPT-4", "tenant7")
+    assert result == 7
+
+
+def test_get_model_by_display_name_with_model_type_filter(monkeypatch):
+    captured_filters = {}
+
+    def fake_get_model_records(filters, tenant_id):
+        captured_filters.update(filters)
+        return [{"model_id": 10, "display_name": "Embed"}]
+
+    monkeypatch.setattr(model_mgmt_db, "get_model_records", fake_get_model_records)
+
+    result = model_mgmt_db.get_model_by_display_name("Embed", "tenant10", model_type="multiEmbedding")
+
+    assert result["display_name"] == "Embed"
+    assert captured_filters["display_name"] == "Embed"
+    assert captured_filters["model_type"] == "multi_embedding"
+
+
+def test_get_model_id_by_display_name_with_model_type(monkeypatch):
+    def fake_get_model_by_display_name(display_name, tenant_id, model_type=None):
+        assert model_type == "embedding"
+        return {"model_id": 11}
+
+    monkeypatch.setattr(model_mgmt_db, "get_model_by_display_name", fake_get_model_by_display_name)
+
+    result = model_mgmt_db.get_model_id_by_display_name("Embed", "tenant11", model_type="embedding")
+
+    assert result == 11
+
+
+def test_get_model_by_model_id_with_tenant_id(monkeypatch):
+    """Test get_model_by_model_id with tenant_id filter (covers lines 222->226)"""
+    mock_model = SimpleNamespace(
+        model_id=8,
+        model_factory="openai",
+        model_type="llm",
+        tenant_id="tenant8",
+        delete_flag="N",
+    )
+    mock_scalars = MagicMock()
+    mock_scalars.first.return_value = mock_model
+    session = MagicMock()
+    session.scalars.return_value = mock_scalars
+    
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.model_management_db.get_db_session", lambda: mock_ctx)
+    
+    result = model_mgmt_db.get_model_by_model_id(8, tenant_id="tenant8")
+    assert result is not None
+    assert result["model_id"] == 8
+
+
+def test_get_model_by_name_factory(monkeypatch):
+    """Test get_model_by_name_factory function (covers lines 269-274)"""
+    mock_model = SimpleNamespace(
+        model_id=9,
+        model_factory="openai",
+        model_name="gpt-4",
+        tenant_id="tenant9",
+        delete_flag="N",
+    )
+    mock_scalars = MagicMock()
+    mock_scalars.all.return_value = [mock_model]
+    session = MagicMock()
+    session.scalars.return_value = mock_scalars
+    
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.model_management_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("backend.database.model_management_db.as_dict", lambda obj: obj.__dict__)
+    
+    result = model_mgmt_db.get_model_by_name_factory("gpt-4", "openai", "tenant9")
+    assert result is not None
+    assert result["model_name"] == "gpt-4"
+    assert result["model_factory"] == "openai"
+
+
+def test_get_model_by_display_name_embedding_filter(monkeypatch):
+    captured = {}
+
+    def fake_get_model_records(filters, tenant_id):
+        captured.update(filters)
+        return [{"model_id": 12, "display_name": "Embed"}]
+
+    monkeypatch.setattr(model_mgmt_db, "get_model_records", fake_get_model_records)
+    result = model_mgmt_db.get_model_by_display_name("Embed", "tenant12", model_type="embedding")
+    assert result["model_id"] == 12
+    assert captured["model_type"] == "embedding"
+
+
+def test_get_model_by_display_name_llm_filter(monkeypatch):
+    captured = {}
+
+    def fake_get_model_records(filters, tenant_id):
+        captured.update(filters)
+        return [{"model_id": 13, "display_name": "Shared Name", "model_type": "llm"}]
+
+    monkeypatch.setattr(model_mgmt_db, "get_model_records", fake_get_model_records)
+
+    result = model_mgmt_db.get_model_by_display_name("Shared Name", "tenant13", model_type="llm")
+
+    assert result["model_id"] == 13
+    assert captured["display_name"] == "Shared Name"
+    assert captured["model_type"] == "llm"
+
+
+def test_get_model_by_model_id_not_found(monkeypatch):
+    mock_scalars = MagicMock()
+    mock_scalars.first.return_value = None
+    session = MagicMock()
+    session.scalars.return_value = mock_scalars
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.model_management_db.get_db_session", lambda: mock_ctx)
+    assert model_mgmt_db.get_model_by_model_id(999, tenant_id="t") is None
+
+
+def test_get_valid_model_ids_empty_input(monkeypatch):
+    """Test get_valid_model_ids with empty input returns empty list."""
+    result = model_mgmt_db.get_valid_model_ids([], "tenant1")
+    assert result == []
+
+
+def test_get_valid_model_ids_all_valid(monkeypatch):
+    """Test get_valid_model_ids when all model IDs are valid (not deleted)."""
+    # Mock session.scalars().all() to return all model IDs
+    mock_scalars = MagicMock()
+    mock_scalars.all.return_value = [1, 2, 3]
+    session = MagicMock()
+    session.scalars.return_value = mock_scalars
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.model_management_db.get_db_session", lambda: mock_ctx)
+
+    # All model IDs are valid
+    result = model_mgmt_db.get_valid_model_ids([1, 2, 3], "tenant1")
+    assert result == [1, 2, 3]
+
+
+def test_get_valid_model_ids_some_deleted(monkeypatch):
+    """Test get_valid_model_ids filters out deleted models."""
+    # Mock session.scalars().all() to return only valid model IDs (1 and 3, 2 is deleted)
+    mock_scalars = MagicMock()
+    mock_scalars.all.return_value = [1, 3]
+    session = MagicMock()
+    session.scalars.return_value = mock_scalars
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.model_management_db.get_db_session", lambda: mock_ctx)
+
+    # Model 2 was deleted (delete_flag='Y'), so only 1 and 3 should be returned
+    result = model_mgmt_db.get_valid_model_ids([1, 2, 3], "tenant1")
+    assert result == [1, 3]
+
+
+def test_get_valid_model_ids_preserves_order(monkeypatch):
+    """Test get_valid_model_ids preserves the order of valid model IDs."""
+    # Mock session.scalars().all() to return valid model IDs in arbitrary order from DB
+    mock_scalars = MagicMock()
+    mock_scalars.all.return_value = [3, 1]  # DB returns in different order
+    session = MagicMock()
+    session.scalars.return_value = mock_scalars
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.model_management_db.get_db_session", lambda: mock_ctx)
+
+    # Original order should be preserved for valid IDs
+    result = model_mgmt_db.get_valid_model_ids([2, 3, 1], "tenant1")
+    assert result == [3, 1]  # Only valid ones in original order
+
+
+def test_get_valid_model_ids_none_deleted(monkeypatch):
+    """Test get_valid_model_ids when all models are deleted."""
+    # Mock session.scalars().all() to return empty list (all deleted)
+    mock_scalars = MagicMock()
+    mock_scalars.all.return_value = []
+    session = MagicMock()
+    session.scalars.return_value = mock_scalars
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.model_management_db.get_db_session", lambda: mock_ctx)
+
+    # All models were deleted
+    result = model_mgmt_db.get_valid_model_ids([1, 2, 3], "tenant1")
+    assert result == []
+
+
+# ---------------------------------------------------------------------------
+# Tests for get_model_by_model_id_ignore_delete
+# ---------------------------------------------------------------------------
+
+
+def _patch_session(monkeypatch, scalars_first, scalars_all=None):
+    """Helper to install a fake DB session returning the given scalars."""
+    mock_scalars = MagicMock()
+    mock_scalars.first.return_value = scalars_first
+    if scalars_all is not None:
+        mock_scalars.all.return_value = scalars_all
+    session = MagicMock()
+    session.scalars.return_value = mock_scalars
+    ctx = MagicMock()
+    ctx.__enter__.return_value = session
+    ctx.__exit__.return_value = None
+    monkeypatch.setattr(
+        "backend.database.model_management_db.get_db_session", lambda: ctx)
+    return session
+
+
+def test_get_model_by_model_id_ignore_delete_returns_chat_model(monkeypatch):
+    """Non-embedding records should be returned untouched, without chunk-size defaults."""
+    mock_model = SimpleNamespace(
+        model_id=101,
+        model_factory="openai",
+        model_type="chat",
+        tenant_id="tenant_ignore_chat",
+        delete_flag="Y",  # explicitly soft-deleted; the function must still return it
+        expected_chunk_size=None,
+        maximum_chunk_size=None,
+        _sa_instance_state=None,  # underscore-prefixed; should be dropped from dict
+    )
+    session = _patch_session(monkeypatch, scalars_first=mock_model)
+
+    result = model_mgmt_db.get_model_by_model_id_ignore_delete(
+        101, tenant_id="tenant_ignore_chat")
+
+    # The filtered-by-underscore dictionary must contain only the public attributes.
+    assert result["model_id"] == 101
+    assert result["model_type"] == "chat"
+    assert result["delete_flag"] == "Y"
+    # No default chunk-size backfill for non-embedding types.
+    assert result["expected_chunk_size"] is None
+    assert result["maximum_chunk_size"] is None
+    # Private attributes beginning with "_" are removed from the dict.
+    assert all(not key.startswith("_") for key in result)
+
+
+def test_get_model_by_model_id_ignore_delete_embedding_fills_defaults(monkeypatch):
+    """For embedding records with None chunk sizes, defaults must be applied."""
+    mock_model = SimpleNamespace(
+        model_id=102,
+        model_factory="openai",
+        model_type="embedding",
+        tenant_id="tenant_ignore_emb",
+        delete_flag="Y",
+        expected_chunk_size=None,
+        maximum_chunk_size=None,
+    )
+    _patch_session(monkeypatch, scalars_first=mock_model)
+
+    result = model_mgmt_db.get_model_by_model_id_ignore_delete(
+        102, tenant_id="tenant_ignore_emb")
+
+    assert result["model_type"] == "embedding"
+    assert result["expected_chunk_size"] == 1024
+    assert result["maximum_chunk_size"] == 1536
+
+
+def test_get_model_by_model_id_ignore_delete_multi_embedding_fills_defaults(monkeypatch):
+    """For multi_embedding records with None chunk sizes, defaults must also be applied."""
+    mock_model = SimpleNamespace(
+        model_id=103,
+        model_factory="openai",
+        model_type="multi_embedding",
+        tenant_id="tenant_ignore_multi",
+        delete_flag="Y",
+        expected_chunk_size=None,
+        maximum_chunk_size=None,
+    )
+    _patch_session(monkeypatch, scalars_first=mock_model)
+
+    result = model_mgmt_db.get_model_by_model_id_ignore_delete(
+        103, tenant_id="tenant_ignore_multi")
+
+    assert result["model_type"] == "multi_embedding"
+    assert result["expected_chunk_size"] == 1024
+    assert result["maximum_chunk_size"] == 1536
+
+
+def test_get_model_by_model_id_ignore_delete_embedding_keeps_existing_sizes(monkeypatch):
+    """Pre-existing chunk sizes (even for embedding) must NOT be overwritten."""
+    mock_model = SimpleNamespace(
+        model_id=104,
+        model_factory="openai",
+        model_type="embedding",
+        tenant_id="tenant_ignore_keep",
+        delete_flag="Y",
+        expected_chunk_size=256,
+        maximum_chunk_size=512,
+    )
+    _patch_session(monkeypatch, scalars_first=mock_model)
+
+    result = model_mgmt_db.get_model_by_model_id_ignore_delete(
+        104, tenant_id="tenant_ignore_keep")
+
+    # The pre-existing sizes must be preserved.
+    assert result["expected_chunk_size"] == 256
+    assert result["maximum_chunk_size"] == 512
+
+
+def test_get_model_by_model_id_ignore_delete_embedding_only_one_size_missing(monkeypatch):
+    """When only one of the chunk sizes is missing, only that one should be defaulted."""
+    mock_model = SimpleNamespace(
+        model_id=105,
+        model_factory="openai",
+        model_type="embedding",
+        tenant_id="tenant_ignore_partial",
+        delete_flag="Y",
+        expected_chunk_size=256,        # already set
+        maximum_chunk_size=None,        # missing — must be defaulted
+    )
+    _patch_session(monkeypatch, scalars_first=mock_model)
+
+    result = model_mgmt_db.get_model_by_model_id_ignore_delete(
+        105, tenant_id="tenant_ignore_partial")
+
+    assert result["expected_chunk_size"] == 256
+    assert result["maximum_chunk_size"] == 1536
+
+
+def test_get_model_by_model_id_ignore_delete_embedding_fills_only_max_if_min_present(monkeypatch):
+    """Complement of the partial-fill test: missing `expected_chunk_size` defaults
+    even though `maximum_chunk_size` is supplied."""
+    mock_model = SimpleNamespace(
+        model_id=106,
+        model_factory="openai",
+        model_type="embedding",
+        tenant_id="tenant_ignore_min",
+        delete_flag="Y",
+        expected_chunk_size=None,
+        maximum_chunk_size=999,
+    )
+    _patch_session(monkeypatch, scalars_first=mock_model)
+
+    result = model_mgmt_db.get_model_by_model_id_ignore_delete(
+        106, tenant_id="tenant_ignore_min")
+
+    assert result["expected_chunk_size"] == 1024
+    assert result["maximum_chunk_size"] == 999
+
+
+def test_get_model_by_model_id_ignore_delete_not_found_returns_none(monkeypatch):
+    """When the DB query finds nothing, the function returns None."""
+    _patch_session(monkeypatch, scalars_first=None)
+
+    result = model_mgmt_db.get_model_by_model_id_ignore_delete(
+        9999, tenant_id="tenant_ignore_missing")
+
+    assert result is None
+
+
+def test_get_model_by_model_id_ignore_delete_without_tenant_id(monkeypatch):
+    """Omitting tenant_id must look up the record purely by model_id."""
+    mock_model = SimpleNamespace(
+        model_id=107,
+        model_factory="openai",
+        model_type="chat",
+        tenant_id="some_tenant",
+        delete_flag="Y",
+    )
+    session = _patch_session(monkeypatch, scalars_first=mock_model)
+
+    result = model_mgmt_db.get_model_by_model_id_ignore_delete(107)
+
+    assert result is not None
+    assert result["model_id"] == 107
+    # Filter by model_id alone; the absence of tenant_id means we still call
+    # scalars() exactly once.
+    assert session.scalars.call_count == 1

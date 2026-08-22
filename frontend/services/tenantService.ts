@@ -1,0 +1,237 @@
+import { API_ENDPOINTS, ApiError } from "./api";
+import { fetchWithAuth } from "@/lib/auth";
+import { ASSET_OWNER_TENANT_ID } from "@/const/auth";
+
+// Types
+export interface Tenant {
+  tenant_id: string;
+  tenant_name: string;
+  created_by?: string;
+  created_at?: string;
+  updated_at?: string;
+  user_count?: number;
+  group_count?: number;
+  installed_skill_names?: string[];
+}
+
+export interface CreateTenantRequest {
+  tenant_name: string;
+  skill_ids?: number[];
+  skill_names?: string[];
+  locale?: string;
+}
+
+export interface UpdateTenantRequest {
+  tenant_name: string;
+}
+
+export interface TenantListResponse {
+  data: Tenant[];
+  message: string;
+}
+
+export interface TenantListPaginatedResponse {
+  data: Tenant[];
+  message: string;
+  total: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
+}
+
+export interface TenantDetailResponse {
+  data: Tenant;
+  message: string;
+}
+
+export interface CreateTenantResponse {
+  data: Tenant;
+  message: string;
+}
+
+export interface TenantUser {
+  user_tenant_id: number;
+  user_id: string;
+  tenant_id: string;
+  user_role: string;
+  user_email: string;
+  create_time: string;
+  update_time: string;
+}
+
+export interface TenantUsersResponse {
+  users: TenantUser[];
+  total: number;
+  message: string;
+}
+
+export interface ListTenantsParams {
+  page?: number;
+  page_size?: number;
+}
+
+const VIRTUAL_TENANT_IDS = new Set(["", "tenant_id", ASSET_OWNER_TENANT_ID]);
+
+function isDisplayableTenant(tenant: Tenant): boolean {
+  const normalizedTenantId = tenant.tenant_id?.trim() ?? "";
+  return !VIRTUAL_TENANT_IDS.has(normalizedTenantId);
+}
+
+/**
+ * List tenants with pagination support (filtered by user permissions)
+ */
+export async function listTenants(
+  params?: ListTenantsParams
+): Promise<TenantListPaginatedResponse> {
+  try {
+    const url = API_ENDPOINTS.tenant.list;
+
+    const response = await fetchWithAuth(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        page: params?.page ?? 1,
+        page_size: params?.page_size ?? 20,
+      }),
+    });
+
+    const result: TenantListPaginatedResponse = await response.json();
+    const tenants = (result.data || []).filter(isDisplayableTenant);
+    const hiddenCount = (result.data || []).length - tenants.length;
+    const visibleTotal = Math.max(0, (result.total || 0) - hiddenCount);
+    const pageSize = result.page_size || params?.page_size || 20;
+
+    return {
+      ...result,
+      data: tenants,
+      total: visibleTotal,
+      total_pages: visibleTotal === 0 ? 1 : Math.ceil(visibleTotal / pageSize),
+    };
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw error;
+    }
+    throw new ApiError(500, "Failed to fetch tenants");
+  }
+}
+
+/**
+ * Get tenant details by tenant ID
+ */
+export async function getTenant(tenantId: string): Promise<Tenant> {
+  try {
+    const response = await fetchWithAuth(
+      API_ENDPOINTS.tenant.detail(tenantId),
+      {
+        method: "GET",
+      }
+    );
+
+    const result: TenantDetailResponse = await response.json();
+    return result.data;
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw error;
+    }
+    throw new ApiError(500, "Failed to fetch tenant details");
+  }
+}
+
+/**
+ * Create a new tenant
+ */
+export async function createTenant(
+  payload: CreateTenantRequest
+): Promise<Tenant> {
+  try {
+    const response = await fetchWithAuth(API_ENDPOINTS.tenant.create, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+
+    const result: CreateTenantResponse = await response.json();
+    return result.data;
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw error;
+    }
+    throw new ApiError(500, "Failed to create tenant");
+  }
+}
+
+/**
+ * Update tenant information
+ */
+export async function updateTenant(
+  tenantId: string,
+  payload: UpdateTenantRequest
+): Promise<Tenant> {
+  try {
+    const response = await fetchWithAuth(
+      API_ENDPOINTS.tenant.update(tenantId),
+      {
+        method: "PUT",
+        body: JSON.stringify(payload),
+      }
+    );
+
+    const result: TenantDetailResponse = await response.json();
+    return result.data;
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw error;
+    }
+    throw new ApiError(500, "Failed to update tenant");
+  }
+}
+
+/**
+ * Delete a tenant
+ */
+export async function deleteTenant(tenantId: string): Promise<void> {
+  try {
+    await fetchWithAuth(API_ENDPOINTS.tenant.delete(tenantId), {
+      method: "DELETE",
+    });
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw error;
+    }
+    throw new ApiError(500, "Failed to delete tenant");
+  }
+}
+
+/**
+ * Get users belonging to a tenant (using existing users/list endpoint)
+ * Returns all users without pagination
+ */
+export async function getTenantUsers(
+  tenantId: string
+): Promise<TenantUsersResponse> {
+  try {
+    const response = await fetchWithAuth(API_ENDPOINTS.users.list, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        tenant_id: tenantId,
+        // Omit page and page_size to get all users
+      }),
+    });
+
+    const result = await response.json();
+    return {
+      users: result.data || [],
+      total: result.total || 0,
+      message: result.message || "",
+    };
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw error;
+    }
+    throw new ApiError(500, "Failed to fetch tenant users");
+  }
+}

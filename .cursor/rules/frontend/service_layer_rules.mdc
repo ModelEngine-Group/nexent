@@ -1,0 +1,52 @@
+---
+globs: frontend/services/**/*.ts
+description: Compact service layer rules for API calls and data management
+---
+
+### Purpose and Scope
+
+- Service layer handles API communication and data management for `frontend/services/**/*.ts`
+- **CRITICAL**: All API URLs must come from [api.ts](mdc:frontend/services/api.ts) - never hardcode URLs
+- Responsibilities: API calls, request/response transformation, error handling, type safety
+
+### API URL Management
+
+- **MANDATORY**: Import and use `API_ENDPOINTS` from [api.ts](mdc:frontend/services/api.ts)
+- **FORBIDDEN**: Hardcoded URLs, direct string concatenation for endpoints
+- Use `fetchWithErrorHandling` from [api.ts](mdc:frontend/services/api.ts) for all requests
+
+### Service Organization
+
+- **`services/api.ts`** - Base configuration, endpoints, error handling
+- **`services/*Service.ts`** - Domain-specific API calls (auth, chat, config, etc.)
+- Use descriptive names matching the domain they serve
+
+### Error Handling
+
+- Use `ApiError` class from [api.ts](mdc:frontend/services/api.ts)
+- Handle 401/499 status codes for session expiration
+- Provide meaningful error messages for user feedback
+
+### Type Safety
+
+- Define TypeScript interfaces for all request/response data
+- Use generic types for reusable API functions
+- Export types for use in components and hooks
+- **CRITICAL**: All logging must use [logger.ts](mdc:frontend/lib/logger.ts) - never use console.log
+
+### Example
+```typescript
+// frontend/services/authService.ts
+import { API_ENDPOINTS, fetchWithErrorHandling, ApiError } from './api';
+
+export const authService = {
+  async signin(credentials: SigninRequest): Promise<SigninResponse> {
+    const response = await fetchWithErrorHandling(API_ENDPOINTS.user.signin, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(credentials),
+    });
+    return response.json();
+  }
+};
+```

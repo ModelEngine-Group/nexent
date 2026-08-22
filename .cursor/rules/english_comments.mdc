@@ -1,0 +1,37 @@
+---
+alwaysApply: true
+description: Enforce English-only comments and docstrings across the codebase
+---
+# English-only Comments
+
+- All comments and docstrings must be written in clear, concise English.
+- Do not use non-English characters in comments (string literals may contain any language).
+- Use proper grammar and spelling; avoid ambiguous abbreviations.
+
+## Do
+```python
+# Initialize cache for 60 seconds
+self.cache_ttl = 60
+```
+
+## Don't
+```python
+# 初始化缓存 60 秒 - FORBIDDEN
+# データキャッシュ60秒 - FORBIDDEN
+# 데이터 캐시 60초 - FORBIDDEN
+```
+
+## Scope
+- Docstrings, inline comments, TODO/FIXME/NOTE, header comments
+- Configuration comments in YAML/JSON and other config files
+
+## Validation Checklist
+- All comments are in English
+- Docstrings use proper English grammar
+- No non-Latin characters in comments (except inside strings)
+- Comments are clear and provide value
+
+## Optional Automation
+- Pre-commit hook to detect non-English comments
+- IDE extensions for real-time detection
+- CI checks for compliance

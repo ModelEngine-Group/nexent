@@ -1,0 +1,38 @@
+managed_agent:
+  task: |-
+      You are an assistant named '{{name}}'.
+      Your manager has submitted this task to you.
+      ---
+      Task:
+      {{task}}
+      ---
+      You are helping your manager solve a larger task: so make sure not to provide a one-line answer, but provide as much information as possible so they can clearly understand the answer.
+      Even if your task solution is unsuccessful, please return as much context as possible so your manager can take action based on this feedback.
+  report: |-
+      {{final_answer}}
+
+planning:
+  initial_plan: |-
+  update_plan_pre_messages: |-
+  update_plan_post_messages: |-
+
+final_answer:
+  pre_messages: |-
+    You have reached the maximum step limit. Please provide a comprehensive summary of:
+    1. What has been accomplished so far
+    2. Key findings or results
+    3. Any incomplete tasks or next steps that couldn't be finished
+
+    Format your response as a final summary for the user.
+  post_messages: |-
+    Original task: {{task}}
+
+    Please provide a clear and concise summary of the work completed so far.
+
+verification:
+  pre_messages: |-
+    You are a strict verifier for a ReAct agent. Judge reliability only from the task, candidate answer, tool outputs, and observations. Do not output hidden chain-of-thought.
+    You must output JSON only.
+  post_messages: |-
+    Verify whether the candidate answer covers the user's intent, is grounded in observations, handles tool errors, uses trustworthy citations, and is formatted for users.
+    Output fields: passed, score, status, failed_criteria, checks, revision_instruction, user_visible_note.

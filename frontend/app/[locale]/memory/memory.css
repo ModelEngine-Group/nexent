@@ -1,0 +1,281 @@
+.memory-page,
+.memory-page-inner {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.memory-page-inner {
+  margin: 0 auto;
+}
+
+.memory-panel {
+  overflow: hidden;
+  border: 1px solid #e4e7ec;
+  border-radius: 12px;
+  background: #ffffff;
+  box-shadow: 0 1px 3px rgb(23 32 51 / 5%);
+}
+
+.memory-panel-long-term {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.memory-panel-long-term > .ant-tabs {
+  flex: 0 0 auto;
+}
+
+.memory-panel > .ant-tabs {
+  margin: 0;
+}
+
+.memory-panel > .ant-tabs .ant-tabs-nav {
+  margin: 0;
+  padding: 0 24px;
+}
+
+.memory-panel > .ant-tabs .ant-tabs-tab {
+  padding: 18px 4px 16px;
+}
+
+.memory-panel > .ant-tabs .ant-tabs-content-holder {
+  display: none;
+}
+
+.tab-label,
+.memory-time {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.tab-count {
+  min-width: 22px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: #f0f2f5;
+  color: #667085;
+  font-size: 12px;
+  line-height: 18px;
+  text-align: center;
+}
+
+.ant-tabs-tab-active .tab-count {
+  background: #e8f1ff;
+  color: #1677ff;
+}
+
+.panel-body,
+.memory-config-content {
+  padding: 24px;
+}
+
+.long-term-memory-panel {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.long-term-memory-panel > .ant-flex,
+.long-term-version-row {
+  flex: 0 0 auto;
+}
+
+.long-term-version-row {
+  margin: 16px 0;
+}
+
+.long-term-memory-card {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.long-term-memory-card > .ant-card-head {
+  flex: 0 0 auto;
+}
+
+.long-term-memory-card > .ant-card-body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.long-term-memory-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding-right: 8px;
+}
+
+.long-term-memory-editor-shell {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.long-term-memory-editor {
+  height: 100% !important;
+  resize: none;
+}
+
+.long-term-memory-card .ant-empty {
+  margin: auto;
+}
+
+.scope-intro {
+  margin-bottom: 24px;
+}
+
+.scope-intro .ant-typography,
+.memory-config-content > .ant-typography {
+  margin: 0;
+}
+
+.scope-intro h4.ant-typography,
+.memory-config-content h4.ant-typography {
+  margin-bottom: 4px;
+  color: #172033;
+}
+
+.memory-config-card {
+  margin-top: 24px;
+  box-shadow: none;
+}
+
+.memory-setting-description {
+  display: block;
+  margin-top: 3px;
+}
+
+.memory-toolbar {
+  align-items: center;
+  margin-bottom: 16px;
+  white-space: nowrap;
+}
+
+.search-input {
+  width: min(360px, 100%);
+  min-width: 220px;
+}
+
+.status-select {
+  width: 140px;
+}
+
+.agent-select {
+  width: 160px;
+}
+
+.conversation-select {
+  width: 190px;
+}
+
+.created-range-picker {
+  width: 250px;
+}
+
+.memory-conversation-link {
+  color: #1677ff;
+  text-decoration: none;
+}
+
+.memory-conversation-link:hover {
+  text-decoration: underline;
+}
+
+.result-count {
+  margin-left: auto;
+  font-size: 13px;
+}
+
+.memory-panel .ant-table-wrapper {
+  overflow: hidden;
+  border: 1px solid #e4e7ec;
+  border-radius: 8px;
+}
+
+.memory-panel .ant-table-thead > tr > th {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.memory-panel .ant-table-tbody > tr > td {
+  padding-top: 18px;
+  padding-bottom: 18px;
+  vertical-align: top;
+}
+
+.memory-panel .ant-table-tbody > tr.memory-row-incompatible > td {
+  background: #f5f5f5;
+  color: #98a2b3;
+}
+
+.memory-panel .ant-table-tbody > tr.memory-row-incompatible .memory-content,
+.memory-panel .ant-table-tbody > tr.memory-row-incompatible .memory-time,
+.memory-panel .ant-table-tbody > tr.memory-row-incompatible a {
+  color: #98a2b3;
+}
+
+.memory-content {
+  max-width: 560px;
+  margin: 0 !important;
+  color: #344054;
+  line-height: 1.6;
+}
+
+.memory-time {
+  color: #667085;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.memory-form {
+  padding-top: 12px;
+}
+
+.form-half {
+  flex: 1;
+}
+
+@media (max-width: 640px) {
+  .memory-panel > .ant-tabs .ant-tabs-nav {
+    padding: 0 16px;
+  }
+
+  .panel-body,
+  .memory-config-content {
+    padding: 20px 16px;
+  }
+
+  .memory-toolbar {
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
+
+  .search-input {
+    width: 240px;
+    min-width: 240px;
+  }
+
+  .status-select {
+    width: 132px;
+    min-width: 132px;
+  }
+
+  .agent-select,
+  .conversation-select,
+  .created-range-picker {
+    min-width: 180px;
+  }
+}

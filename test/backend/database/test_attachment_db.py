@@ -1,0 +1,928 @@
+"""
+Unit tests for backend/database/attachment_db.py
+Tests attachment database utility functions
+"""
+
+import os
+import sys
+import pytest
+from unittest.mock import MagicMock, patch, mock_open, call
+from io import BytesIO
+from datetime import datetime
+
+# Add project root to Python path
+sys.path.insert(0, os.path.abspath(os.path.join(
+    os.path.dirname(__file__), '..', '..', '..')))
+
+# Mock consts module
+consts_mock = MagicMock()
+consts_mock.const = MagicMock()
+# Ensure constants are real strings to avoid startswith TypeError
+consts_mock.const.S3_URL_PREFIX = "s3://"
+# Environment variables are now configured in conftest.py
+
+sys.modules['consts'] = consts_mock
+sys.modules['consts.const'] = consts_mock.const
+
+# Mock boto3
+boto3_mock = MagicMock()
+sys.modules['boto3'] = boto3_mock
+
+# Mock minio module
+minio_mock = MagicMock()
+minio_commonconfig_mock = MagicMock()
+minio_commonconfig_mock.CopySource = MagicMock()
+minio_mock.commonconfig = minio_commonconfig_mock
+sys.modules['minio'] = minio_mock
+sys.modules['minio.commonconfig'] = minio_commonconfig_mock
+
+# Mock nexent.storage modules
+nexent_mock = MagicMock()
+nexent_storage_mock = MagicMock()
+nexent_storage_factory_mock = MagicMock()
+storage_client_mock = MagicMock()
+nexent_storage_factory_mock.create_storage_client_from_config = MagicMock(return_value=storage_client_mock)
+nexent_storage_factory_mock.MinIOStorageConfig = MagicMock()
+nexent_storage_mock.storage_client_factory = nexent_storage_factory_mock
+nexent_mock.storage = nexent_storage_mock
+sys.modules['nexent'] = nexent_mock
+sys.modules['nexent.storage'] = nexent_storage_mock
+sys.modules['nexent.storage.storage_client_factory'] = nexent_storage_factory_mock
+
+# Mock database.client
+minio_client_mock = MagicMock()
+minio_client_mock.storage_config = MagicMock()
+minio_client_mock.storage_config.default_bucket = 'test-bucket'
+# Current attachment_db uses minio_client.default_bucket directly.
+minio_client_mock.default_bucket = 'test-bucket'
+client_mock = MagicMock()
+client_mock.minio_client = minio_client_mock
+sys.modules['database'] = MagicMock()
+sys.modules['database.client'] = client_mock
+sys.modules['backend.database.client'] = client_mock
+
+# Patch minio_client before importing
+with patch('backend.database.attachment_db.minio_client', minio_client_mock):
+    from backend.database.attachment_db import (
+        generate_object_name,
+        upload_file,
+        upload_fileobj,
+        download_file,
+        get_file_url,
+        get_file_size_from_minio,
+        get_file_size_from_minio_strict,
+        file_exists,
+        copy_file,
+        list_files,
+        delete_file,
+        get_file_stream,
+        get_file_stream_raw,
+        get_file_range,
+        get_content_type,
+        build_s3_url,
+        _normalize_object_and_bucket
+    )
+
+
+class TestGenerateObjectName:
+    """Test cases for generate_object_name function"""
+
+    def test_generate_object_name_with_default_prefix(self):
+        """Test generate_object_name with default prefix"""
+        result = generate_object_name('test.txt')
+
+        assert result.startswith('attachments/')
+        assert result.endswith('.txt')
+        assert len(result) > len('attachments/.txt')
+
+    def test_generate_object_name_with_custom_prefix(self):
+        """Test generate_object_name with custom prefix"""
+        result = generate_object_name('test.jpg', prefix='images')
+
+        assert result.startswith('images/')
+        assert result.endswith('.jpg')
+        assert len(result) > len('images/.jpg')
+
+    def test_generate_object_name_without_extension(self):
+        """Test generate_object_name with file without extension"""
+        result = generate_object_name('testfile')
+
+        assert result.startswith('attachments/')
+        assert not result.endswith('.')
+
+    def test_generate_object_name_unique(self):
+        """Test generate_object_name generates unique names"""
+        name1 = generate_object_name('test.txt')
+        name2 = generate_object_name('test.txt')
+
+        # Names should be different due to timestamp and UUID
+        assert name1 != name2
+
+    def test_generate_object_name_format(self):
+        """Test generate_object_name format includes timestamp and UUID"""
+        result = generate_object_name('test.txt')
+
+        parts = result.split('/')
+        assert len(parts) == 2
+        assert parts[0] == 'attachments'
+
+        # Check format: timestamp_uuid.ext
+        filename_parts = parts[1].split('_')
+        assert len(filename_parts) >= 2
+
+
+class TestUploadFile:
+    """Test cases for upload_file function"""
+
+    @patch('backend.database.attachment_db.get_file_url')
+    @patch('backend.database.attachment_db.os.path.exists')
+    @patch('backend.database.attachment_db.os.path.getsize')
+    @patch('backend.database.attachment_db.os.path.basename')
+    def test_upload_file_success(self, mock_basename, mock_getsize, mock_exists, mock_get_file_url):
+        """Test successful file upload with presigned URL"""
+        mock_basename.return_value = 'test.txt'
+        mock_exists.return_value = True
+        mock_getsize.return_value = 1024
+        minio_client_mock.upload_file.return_value = (True, '/bucket/attachments/test.txt')
+        mock_get_file_url.return_value = {'success': True, 'url': 'http://minio:9000/presigned-url?signature=xxx'}
+
+        result = upload_file('/path/to/test.txt', 'attachments/test.txt', 'bucket')
+
+        assert result['success'] is True
+        assert result['object_name'] == 'attachments/test.txt'
+        assert result['file_name'] == 'test.txt'
+        assert result['file_size'] == 1024
+        assert 'url' in result
+        assert 'presigned_url' in result
+        # presigned_url is now wrapped with MCP proxy prefix and URL-encoded
+        assert 'presigned-url' in result['presigned_url']
+        assert 'upload_time' in result
+        minio_client_mock.upload_file.assert_called_once_with(
+            '/path/to/test.txt', 'attachments/test.txt', 'bucket'
+        )
+
+    @patch('backend.database.attachment_db.os.path.exists')
+    @patch('backend.database.attachment_db.os.path.getsize')
+    @patch('backend.database.attachment_db.os.path.basename')
+    @patch('backend.database.attachment_db.generate_object_name')
+    @patch('backend.database.attachment_db.get_file_url')
+    def test_upload_file_auto_generate_object_name(self, mock_get_file_url, mock_generate, mock_basename, mock_getsize, mock_exists):
+        """Test upload_file auto-generates object name when not provided"""
+        mock_basename.return_value = 'test.txt'
+        mock_exists.return_value = True
+        mock_getsize.return_value = 1024
+        mock_generate.return_value = 'attachments/20240101120000_abc123.txt'
+        minio_client_mock.upload_file.return_value = (True, '/bucket/attachments/20240101120000_abc123.txt')
+        mock_get_file_url.return_value = {'success': True, 'url': 'http://minio:9000/presigned-url'}
+
+        result = upload_file('/path/to/test.txt', None, 'bucket')
+
+        assert result['success'] is True
+        assert result['object_name'] == 'attachments/20240101120000_abc123.txt'
+        last_call = minio_client_mock.upload_file.call_args
+        assert last_call == call('/path/to/test.txt', 'attachments/20240101120000_abc123.txt', 'bucket')
+
+    @patch('backend.database.attachment_db.os.path.exists')
+    @patch('backend.database.attachment_db.os.path.getsize')
+    @patch('backend.database.attachment_db.os.path.basename')
+    def test_upload_file_failure(self, mock_basename, mock_getsize, mock_exists):
+        """Test upload_file handles upload failure"""
+        mock_basename.return_value = 'test.txt'
+        mock_exists.return_value = True
+        mock_getsize.return_value = 1024
+        minio_client_mock.upload_file.return_value = (False, 'Upload failed')
+
+        result = upload_file('/path/to/test.txt', 'attachments/test.txt', 'bucket')
+
+        assert result['success'] is False
+        assert result['error'] == 'Upload failed'
+        assert 'url' not in result
+        assert 'presigned_url' not in result
+
+    @patch('backend.database.attachment_db.os.path.exists')
+    @patch('backend.database.attachment_db.os.path.getsize')
+    @patch('backend.database.attachment_db.os.path.basename')
+    @patch('backend.database.attachment_db.get_file_url')
+    def test_upload_file_without_presigned_url(self, mock_get_file_url, mock_basename, mock_getsize, mock_exists):
+        """Test upload_file when generate_presigned_url is False"""
+        mock_basename.return_value = 'test.txt'
+        mock_exists.return_value = True
+        mock_getsize.return_value = 1024
+        minio_client_mock.upload_file.return_value = (True, '/bucket/attachments/test.txt')
+
+        result = upload_file('/path/to/test.txt', 'attachments/test.txt', 'bucket', generate_presigned_url=False)
+
+        assert result['success'] is True
+        assert 'url' in result
+        assert 'presigned_url' not in result
+        mock_get_file_url.assert_not_called()
+
+    @patch('backend.database.attachment_db.os.path.exists')
+    @patch('backend.database.attachment_db.os.path.getsize')
+    @patch('backend.database.attachment_db.os.path.basename')
+    @patch('backend.database.attachment_db.get_file_url')
+    def test_upload_file_custom_presigned_url_expires(self, mock_get_file_url, mock_basename, mock_getsize, mock_exists):
+        """Test upload_file with custom presigned URL expiration"""
+        mock_basename.return_value = 'test.txt'
+        mock_exists.return_value = True
+        mock_getsize.return_value = 1024
+        minio_client_mock.upload_file.return_value = (True, '/bucket/attachments/test.txt')
+        mock_get_file_url.return_value = {'success': True, 'url': 'http://minio:9000/presigned-url'}
+
+        result = upload_file('/path/to/test.txt', 'attachments/test.txt', 'bucket', presigned_url_expires=7200)
+
+        assert result['success'] is True
+        mock_get_file_url.assert_called_once_with('attachments/test.txt', 'bucket', 7200)
+
+    @patch('backend.database.attachment_db.get_file_url')
+    @patch('backend.database.attachment_db.os.path.exists')
+    @patch('backend.database.attachment_db.os.path.getsize')
+    @patch('backend.database.attachment_db.os.path.basename')
+    def test_upload_file_nonexistent_file(self, mock_basename, mock_getsize, mock_exists, mock_get_file_url):
+        """Test upload_file handles nonexistent local file gracefully"""
+        mock_basename.return_value = 'missing.txt'
+        mock_exists.return_value = False
+        mock_getsize.return_value = 1024
+        minio_client_mock.upload_file.return_value = (True, '/bucket/attachments/missing.txt')
+        mock_get_file_url.return_value = {'success': True, 'url': 'http://minio:9000/presigned-url'}
+
+        result = upload_file('/path/to/missing.txt', 'attachments/missing.txt', 'bucket')
+
+        assert result['success'] is True
+        assert result['file_size'] == 0
+        assert result['file_name'] == 'missing.txt'
+        assert 'url' in result
+        assert 'presigned_url' in result
+        mock_getsize.assert_not_called()
+
+
+class TestUploadFileobj:
+    """Test cases for upload_fileobj function"""
+
+    @patch('backend.database.attachment_db.generate_object_name')
+    @patch('backend.database.attachment_db.get_file_url')
+    def test_upload_fileobj_success(self, mock_get_file_url, mock_generate):
+        """Test successful file object upload with presigned URL"""
+        mock_generate.return_value = 'attachments/20240101120000_abc123.txt'
+        minio_client_mock.upload_fileobj.return_value = (True, '/bucket/attachments/20240101120000_abc123.txt')
+        mock_get_file_url.return_value = {'success': True, 'url': 'http://minio:9000/presigned-url?signature=xxx'}
+
+        file_obj = BytesIO(b'test data')
+        result = upload_fileobj(file_obj, 'test.txt', 'bucket', 'attachments')
+
+        assert result['success'] is True
+        assert result['object_name'] == 'attachments/20240101120000_abc123.txt'
+        assert result['file_name'] == 'test.txt'
+        assert result['file_size'] == len(b'test data')
+        assert 'url' in result
+        assert 'presigned_url' in result
+        # presigned_url is now wrapped with MCP proxy prefix and URL-encoded
+        assert 'presigned-url' in result['presigned_url']
+        assert 'upload_time' in result
+        mock_generate.assert_called_once_with('test.txt', prefix='attachments')
+        minio_client_mock.upload_fileobj.assert_called_once()
+        mock_get_file_url.assert_called_once()
+
+    @patch('backend.database.attachment_db.generate_object_name')
+    def test_upload_fileobj_failure(self, mock_generate):
+        """Test upload_fileobj handles upload failure"""
+        mock_generate.return_value = 'attachments/20240101120000_abc123.txt'
+        minio_client_mock.upload_fileobj.return_value = (False, 'Upload failed')
+
+        file_obj = BytesIO(b'test data')
+        result = upload_fileobj(file_obj, 'test.txt', 'bucket')
+
+        assert result['success'] is False
+        assert result['error'] == 'Upload failed'
+        assert 'url' not in result
+        assert 'presigned_url' not in result
+
+    @patch('backend.database.attachment_db.generate_object_name')
+    @patch('backend.database.attachment_db.get_file_url')
+    def test_upload_fileobj_preserves_file_position(self, mock_get_file_url, mock_generate):
+        """Test upload_fileobj seeks to beginning before upload and restores position after"""
+        mock_generate.return_value = 'attachments/test.txt'
+        mock_get_file_url.return_value = {'success': True, 'url': 'http://minio:9000/presigned-url'}
+
+        file_obj = BytesIO(b'full test data content')
+        original_pos = 4
+        file_obj.seek(original_pos)
+
+        captured_data = {}
+        def capture_upload(file_obj_arg, object_name, bucket):
+            captured_data['position_before_read'] = file_obj_arg.tell()
+            captured_data['content'] = file_obj_arg.read()
+            return (True, '/bucket/attachments/test.txt')
+        minio_client_mock.upload_fileobj.side_effect = capture_upload
+
+        result = upload_fileobj(file_obj, 'test.txt', 'bucket')
+
+        assert captured_data['position_before_read'] == 0  # Should seek to beginning for full upload
+        assert captured_data['content'] == b'full test data content'
+
+    @patch('backend.database.attachment_db.generate_object_name')
+    @patch('backend.database.attachment_db.get_file_url')
+    def test_upload_fileobj_without_presigned_url(self, mock_get_file_url, mock_generate):
+        """Test upload_fileobj when generate_presigned_url is False"""
+        mock_generate.return_value = 'attachments/test.txt'
+        minio_client_mock.upload_fileobj.return_value = (True, '/bucket/attachments/test.txt')
+
+        file_obj = BytesIO(b'test data')
+        result = upload_fileobj(file_obj, 'test.txt', 'bucket', generate_presigned_url=False)
+
+        assert result['success'] is True
+        assert 'url' in result
+        assert 'presigned_url' not in result
+        mock_get_file_url.assert_not_called()
+
+    @patch('backend.database.attachment_db.generate_object_name')
+    @patch('backend.database.attachment_db.get_file_url')
+    def test_upload_fileobj_custom_presigned_url_expires(self, mock_get_file_url, mock_generate):
+        """Test upload_fileobj with custom presigned URL expiration"""
+        mock_generate.return_value = 'attachments/test.txt'
+        minio_client_mock.upload_fileobj.return_value = (True, '/bucket/attachments/test.txt')
+        mock_get_file_url.return_value = {'success': True, 'url': 'http://minio:9000/presigned-url'}
+
+        file_obj = BytesIO(b'test data')
+        result = upload_fileobj(file_obj, 'test.txt', 'bucket', presigned_url_expires=7200)
+
+        assert result['success'] is True
+        mock_get_file_url.assert_called_once_with('attachments/test.txt', 'bucket', 7200)
+
+    @patch('backend.database.attachment_db.generate_object_name')
+    @patch('backend.database.attachment_db.get_file_url')
+    @patch('backend.database.attachment_db.minio_client')
+    def test_upload_fileobj_file_size_calculation_valueerror_sets_zero(self, mock_client, mock_get_file_url, mock_generate):
+        """Test upload_fileobj handles ValueError during file size calculation by setting file_size=0"""
+        mock_generate.return_value = 'attachments/test.txt'
+        mock_get_file_url.return_value = {'success': True, 'url': 'http://minio:9000/presigned-url'}
+        mock_client.upload_fileobj.return_value = (True, '/bucket/attachments/test.txt')
+
+        file_obj = MagicMock()
+        file_obj.tell.side_effect = ValueError("Not a valid file")
+        # First seek (in try block) succeeds, second seek (in except block) fails
+        file_obj.seek.side_effect = [None, ValueError("Seek not supported")]
+
+        result = upload_fileobj(file_obj, 'test.txt', 'bucket')
+
+        assert result['success'] is True
+        assert result['file_size'] == 0
+
+    @patch('backend.database.attachment_db.generate_object_name')
+    @patch('backend.database.attachment_db.get_file_url')
+    @patch('backend.database.attachment_db.minio_client')
+    def test_upload_fileobj_file_size_calculation_ioerror_sets_zero(self, mock_client, mock_get_file_url, mock_generate):
+        """Test upload_fileobj handles IOError during file size calculation by setting file_size=0"""
+        mock_generate.return_value = 'attachments/test.txt'
+        mock_get_file_url.return_value = {'success': True, 'url': 'http://minio:9000/presigned-url'}
+        mock_client.upload_fileobj.return_value = (True, '/bucket/attachments/test.txt')
+
+        file_obj = MagicMock()
+        file_obj.tell.side_effect = IOError("IO error")
+        # First seek (in try block) succeeds, second seek (in except block) fails
+        file_obj.seek.side_effect = [None, IOError("IO error")]
+
+        result = upload_fileobj(file_obj, 'test.txt', 'bucket')
+
+        assert result['success'] is True
+        assert result['file_size'] == 0
+
+    @patch('backend.database.attachment_db.generate_object_name')
+    @patch('backend.database.attachment_db.get_file_url')
+    @patch('backend.database.attachment_db.minio_client')
+    def test_upload_fileobj_restore_position_valueerror_ignored(self, mock_client, mock_get_file_url, mock_generate):
+        """Test upload_fileobj ignores ValueError when restoring file position after upload"""
+        mock_generate.return_value = 'attachments/test.txt'
+        mock_get_file_url.return_value = {'success': True, 'url': 'http://minio:9000/presigned-url'}
+        mock_client.upload_fileobj.return_value = (True, '/bucket/attachments/test.txt')
+
+        file_obj = MagicMock()
+        file_obj.tell.return_value = 0
+        # seek(0, SEEK_END) succeeds, seek(0) in try block succeeds, seek(0) in finally block fails
+        file_obj.seek.side_effect = [None, None, ValueError("File is closed")]
+
+        result = upload_fileobj(file_obj, 'test.txt', 'bucket')
+
+        assert result['success'] is True
+
+    @patch('backend.database.attachment_db.generate_object_name')
+    @patch('backend.database.attachment_db.get_file_url')
+    @patch('backend.database.attachment_db.minio_client')
+    def test_upload_fileobj_restore_position_ioerror_ignored(self, mock_client, mock_get_file_url, mock_generate):
+        """Test upload_fileobj ignores IOError when restoring file position after upload"""
+        mock_generate.return_value = 'attachments/test.txt'
+        mock_get_file_url.return_value = {'success': True, 'url': 'http://minio:9000/presigned-url'}
+        mock_client.upload_fileobj.return_value = (True, '/bucket/attachments/test.txt')
+
+        file_obj = MagicMock()
+        file_obj.tell.return_value = 0
+        # seek(0, SEEK_END) succeeds, seek(0) in try block succeeds, seek(0) in finally block fails
+        file_obj.seek.side_effect = [None, None, IOError("IO error on close")]
+
+        result = upload_fileobj(file_obj, 'test.txt', 'bucket')
+
+        assert result['success'] is True
+
+
+class TestDownloadFile:
+    """Test cases for download_file function"""
+
+    def test_download_file_success(self):
+        """Test successful file download"""
+        minio_client_mock.download_file.return_value = (True, 'Downloaded successfully')
+
+        result = download_file('attachments/test.txt', '/path/to/download.txt', 'bucket')
+
+        assert result['success'] is True
+        assert result['object_name'] == 'attachments/test.txt'
+        assert result['file_path'] == '/path/to/download.txt'
+        assert 'error' not in result
+        minio_client_mock.download_file.assert_called_once_with(
+            'attachments/test.txt', '/path/to/download.txt', 'bucket'
+        )
+
+    def test_download_file_failure(self):
+        """Test download_file handles download failure"""
+        minio_client_mock.download_file.return_value = (False, 'Download failed')
+
+        result = download_file('attachments/test.txt', '/path/to/download.txt', 'bucket')
+
+        assert result['success'] is False
+        assert result['error'] == 'Download failed'
+
+
+class TestGetFileUrl:
+    """Test cases for get_file_url function"""
+
+    def test_get_file_url_success(self):
+        """Test successful presigned URL generation"""
+        minio_client_mock.get_file_url.return_value = (True, 'http://example.com/presigned-url')
+
+        result = get_file_url('attachments/test.txt', 'bucket', 7200)
+
+        assert result['success'] is True
+        assert result['url'] == 'http://example.com/presigned-url'
+        assert result['object_name'] == 'attachments/test.txt'
+        assert result['expires_in'] == 7200
+        assert 'error' not in result
+        minio_client_mock.get_file_url.assert_called_once_with(
+            'attachments/test.txt', 'bucket', 7200
+        )
+
+    def test_get_file_url_failure(self):
+        """Test get_file_url handles URL generation failure"""
+        minio_client_mock.get_file_url.return_value = (False, 'URL generation failed')
+
+        result = get_file_url('attachments/test.txt', 'bucket', 7200)
+
+        assert result['success'] is False
+        assert result['error'] == 'URL generation failed'
+
+
+class TestGetFileSizeFromMinio:
+    """Test cases for get_file_size_from_minio function"""
+
+    def test_get_file_size_from_minio_success(self):
+        """Test successful file size retrieval"""
+        minio_client_mock.get_file_size.return_value = 1024
+
+        size = get_file_size_from_minio('attachments/test.txt', 'bucket')
+
+        assert size == 1024
+        minio_client_mock.get_file_size.assert_called_once_with('attachments/test.txt', 'bucket')
+
+    def test_get_file_size_from_minio_uses_default_bucket(self):
+        """Test get_file_size_from_minio uses default bucket when not specified"""
+        minio_client_mock.get_file_size.return_value = 2048
+
+        size = get_file_size_from_minio('attachments/test.txt')
+
+        assert size == 2048
+        assert minio_client_mock.get_file_size.call_args_list[-1] == call(
+            'attachments/test.txt', 'test-bucket'
+        )
+
+    @patch('backend.database.attachment_db.minio_client')
+    def test_get_file_size_from_minio_calls_ensure_initialized(self, mock_client):
+        """Test get_file_size_from_minio calls _ensure_initialized before accessing storage_config.
+
+        Regression test: prior to the fix, accessing storage_config without calling
+        _ensure_initialized() first would raise AttributeError when the MinioClient
+        singleton was not yet initialized (lazy init).
+        """
+        # Simulate uninitialized client: _storage_client is None, so _ensure_initialize
+        # must be called before storage_config can be accessed.
+        mock_client._storage_client = None
+        mock_client._ensure_initialized = MagicMock(return_value=False)
+        mock_client.storage_config.default_bucket = 'default-bucket'
+        mock_client.get_file_size.return_value = 4096
+
+        size = get_file_size_from_minio('attachments/test.txt')
+
+        mock_client._ensure_initialized.assert_called_once()
+        assert size == 4096
+        mock_client.get_file_size.assert_called_once_with('attachments/test.txt', 'default-bucket')
+
+    @patch('backend.database.attachment_db.minio_client')
+    def test_get_file_size_from_minio_with_explicit_bucket(self, mock_client):
+        """Test get_file_size_from_minio uses explicit bucket when provided."""
+        mock_client._ensure_initialized = MagicMock()
+        mock_client.get_file_size.return_value = 2048
+
+        size = get_file_size_from_minio('attachments/test.txt', bucket='explicit-bucket')
+
+        mock_client._ensure_initialized.assert_called_once()
+        mock_client.get_file_size.assert_called_once_with('attachments/test.txt', 'explicit-bucket')
+
+    @patch('backend.database.attachment_db.minio_client')
+    def test_get_file_size_from_minio_strict_normalizes_and_preserves_missing(self, mock_client):
+        mock_client.get_file_size_strict.return_value = None
+
+        size = get_file_size_from_minio_strict(
+            's3://source-bucket/knowledge_base/test.txt'
+        )
+
+        assert size is None
+        mock_client.get_file_size_strict.assert_called_once_with(
+            'knowledge_base/test.txt', 'source-bucket'
+        )
+
+
+class TestListFiles:
+    """Test cases for list_files function"""
+
+    def test_list_files_success(self):
+        """Test successful file listing"""
+        from datetime import datetime
+        mock_files = [
+            {
+                'key': 'attachments/file1.txt',
+                'size': 100,
+                'last_modified': datetime(2024, 1, 1)
+            },
+            {
+                'key': 'attachments/file2.txt',
+                'size': 200,
+                'last_modified': datetime(2024, 1, 2)
+            }
+        ]
+        minio_client_mock.list_files.return_value = mock_files
+        minio_client_mock.get_file_url.return_value = (True, 'http://example.com/file1.txt')
+
+        files = list_files('attachments/', 'bucket')
+
+        assert len(files) == 2
+        assert files[0]['key'] == 'attachments/file1.txt'
+        assert files[0]['size'] == 100
+        assert 'content_type' in files[0]
+        assert 'url' in files[0]
+        minio_client_mock.list_files.assert_called_once_with('attachments/', 'bucket')
+
+    def test_list_files_empty(self):
+        """Test list_files with empty result"""
+        minio_client_mock.list_files.return_value = []
+
+        files = list_files('attachments/', 'bucket')
+
+        assert files == []
+
+    def test_list_files_url_generation_failure(self):
+        """Test list_files handles URL generation failure"""
+        from datetime import datetime
+        mock_files = [
+            {
+                'key': 'attachments/file1.txt',
+                'size': 100,
+                'last_modified': datetime(2024, 1, 1)
+            }
+        ]
+        minio_client_mock.list_files.return_value = mock_files
+        minio_client_mock.get_file_url.return_value = (False, 'URL generation failed')
+
+        files = list_files('attachments/', 'bucket')
+
+        assert len(files) == 1
+        assert 'url' not in files[0]
+
+
+class TestDeleteFile:
+    """Test cases for delete_file function"""
+
+    def test_delete_file_success(self):
+        """Test successful file deletion"""
+        minio_client_mock.delete_file.return_value = (True, 'Deleted successfully')
+
+        result = delete_file('attachments/test.txt', 'bucket')
+
+        assert result['success'] is True
+        assert result['object_name'] == 'attachments/test.txt'
+        assert 'error' not in result
+        minio_client_mock.delete_file.assert_called_once_with('attachments/test.txt', 'bucket')
+
+    def test_delete_file_uses_default_bucket(self):
+        """Test delete_file uses default bucket when not specified"""
+        minio_client_mock.delete_file.return_value = (True, 'Deleted successfully')
+
+        result = delete_file('attachments/test.txt')
+
+        assert result['success'] is True
+        assert minio_client_mock.delete_file.call_args_list[-1] == call(
+            'attachments/test.txt', 'test-bucket'
+        )
+
+    def test_delete_file_failure(self):
+        """Test delete_file handles deletion failure"""
+        minio_client_mock.delete_file.return_value = (False, 'Delete failed')
+
+        result = delete_file('attachments/test.txt', 'bucket')
+
+        assert result['success'] is False
+        assert result['error'] == 'Delete failed'
+
+    @patch('backend.database.attachment_db.minio_client')
+    def test_delete_file_calls_ensure_initialized_when_using_default_bucket(self, mock_client):
+        """Test delete_file calls _ensure_initialized before accessing storage_config when no bucket provided.
+
+        Regression test: prior to the fix, accessing storage_config without calling
+        _ensure_initialized() first would raise AttributeError when the MinioClient
+        singleton was not yet initialized (lazy init).
+        """
+        mock_client._storage_client = None
+        mock_client._ensure_initialized = MagicMock(return_value=False)
+        mock_client.storage_config.default_bucket = 'default-bucket'
+        mock_client.delete_file.return_value = (True, 'Deleted')
+
+        result = delete_file('attachments/test.txt')
+
+        mock_client._ensure_initialized.assert_called_once()
+        mock_client.delete_file.assert_called_once_with('attachments/test.txt', 'default-bucket')
+        assert result['success'] is True
+
+    @patch('backend.database.attachment_db.minio_client')
+    def test_delete_file_skips_init_when_bucket_provided(self, mock_client):
+        """Test delete_file does not call _ensure_initialized when bucket is provided."""
+        mock_client._ensure_initialized = MagicMock()
+        mock_client.delete_file.return_value = (True, 'Deleted')
+
+        result = delete_file('attachments/test.txt', bucket='explicit-bucket')
+
+        mock_client._ensure_initialized.assert_not_called()
+        mock_client.delete_file.assert_called_once_with('attachments/test.txt', 'explicit-bucket')
+
+
+class TestGetFileStream:
+    """Test cases for get_file_stream function"""
+
+    def test_get_file_stream_success(self):
+        """Test successful file stream retrieval"""
+        mock_stream = BytesIO(b'test data')
+        minio_client_mock.get_file_stream.return_value = (True, mock_stream)
+
+        result = get_file_stream('attachments/test.txt', 'bucket')
+
+        assert result is not None
+        assert isinstance(result, BytesIO)
+        assert result.read() == b'test data'
+        minio_client_mock.get_file_stream.assert_called_once_with('attachments/test.txt', 'bucket')
+
+    def test_get_file_stream_failure(self):
+        """Test get_file_stream returns None on failure"""
+        minio_client_mock.get_file_stream.return_value = (False, 'Stream failed')
+
+        result = get_file_stream('attachments/test.txt', 'bucket')
+
+        assert result is None
+
+    def test_get_file_stream_read_error(self):
+        """Test get_file_stream handles read errors"""
+        mock_stream = MagicMock()
+        mock_stream.read.side_effect = Exception("Read error")
+        minio_client_mock.get_file_stream.return_value = (True, mock_stream)
+
+        result = get_file_stream('attachments/test.txt', 'bucket')
+
+        assert result is None
+
+
+class TestGetContentType:
+    """Test cases for get_content_type function"""
+
+    def test_get_content_type_jpeg(self):
+        """Test get_content_type for JPEG files"""
+        assert get_content_type('test.jpg') == 'image/jpeg'
+        assert get_content_type('test.JPEG') == 'image/jpeg'
+
+    def test_get_content_type_png(self):
+        """Test get_content_type for PNG files"""
+        assert get_content_type('test.png') == 'image/png'
+
+    def test_get_content_type_pdf(self):
+        """Test get_content_type for PDF files"""
+        assert get_content_type('test.pdf') == 'application/pdf'
+
+    def test_get_content_type_txt(self):
+        """Test get_content_type for text files"""
+        assert get_content_type('test.txt') == 'text/plain'
+
+    def test_get_content_type_json(self):
+        """Test get_content_type for JSON files"""
+        assert get_content_type('test.json') == 'application/json'
+
+    def test_get_content_type_unknown(self):
+        """Test get_content_type for unknown file types"""
+        assert get_content_type('test.unknown') == 'application/octet-stream'
+
+    def test_get_content_type_no_extension(self):
+        """Test get_content_type for files without extension"""
+        assert get_content_type('testfile') == 'application/octet-stream'
+
+    def test_get_content_type_with_path(self):
+        """Test get_content_type with full file path"""
+        assert get_content_type('/path/to/test.jpg') == 'image/jpeg'
+        assert get_content_type('C:\\path\\to\\test.png') == 'image/png'
+
+    def test_get_content_type_case_insensitive(self):
+        """Test get_content_type is case insensitive"""
+        assert get_content_type('test.JPG') == 'image/jpeg'
+        assert get_content_type('test.PNG') == 'image/png'
+        assert get_content_type('test.PDF') == 'application/pdf'
+
+
+class TestFileExists:
+    """Test cases for file_exists function"""
+
+    def test_file_exists_returns_true_when_file_exists(self):
+        """Test file_exists returns True when file exists in bucket"""
+        with patch('backend.database.attachment_db.minio_client') as mock_client:
+            mock_client.file_exists.return_value = True
+
+            result = file_exists('test/file.txt')
+
+            assert result is True
+            mock_client.file_exists.assert_called_once_with('test/file.txt', None)
+
+    def test_file_exists_returns_false_when_file_not_exists(self):
+        """Test file_exists returns False when file does not exist"""
+        with patch('backend.database.attachment_db.minio_client') as mock_client:
+            mock_client.file_exists.return_value = False
+
+            result = file_exists('nonexistent/file.txt')
+
+            assert result is False
+            mock_client.file_exists.assert_called_once_with('nonexistent/file.txt', None)
+
+    def test_file_exists_with_custom_bucket(self):
+        """Test file_exists with custom bucket parameter"""
+        with patch('backend.database.attachment_db.minio_client') as mock_client:
+            mock_client.file_exists.return_value = True
+
+            result = file_exists('test/file.txt', bucket='custom-bucket')
+
+            assert result is True
+            mock_client.file_exists.assert_called_once_with('test/file.txt', 'custom-bucket')
+
+    def test_file_exists_handles_any_exception(self):
+        """Test file_exists handles any exception and returns False"""
+        with patch('backend.database.attachment_db.minio_client') as mock_client:
+            mock_client.file_exists.side_effect = RuntimeError('Connection failed')
+
+            result = file_exists('test/file.txt')
+
+            assert result is False
+            mock_client.file_exists.assert_called_once_with('test/file.txt', None)
+
+
+class TestCopyFile:
+    """Test cases for copy_file function"""
+
+    def test_copy_file_success(self):
+        """Test successful file copy"""
+        with patch('backend.database.attachment_db.minio_client') as mock_client:
+            mock_client.copy_file.return_value = (True, 'dest/file.pdf')
+
+            result = copy_file('source/file.pdf', 'dest/file.pdf')
+
+            assert result['success'] is True
+            assert result['object_name'] == 'dest/file.pdf'
+            mock_client.copy_file.assert_called_once_with('source/file.pdf', 'dest/file.pdf', None)
+
+    def test_copy_file_with_custom_bucket(self):
+        """Test copy_file with custom bucket"""
+        with patch('backend.database.attachment_db.minio_client') as mock_client:
+            mock_client.copy_file.return_value = (True, 'dest/file.pdf')
+
+            result = copy_file('source/file.pdf', 'dest/file.pdf', bucket='custom-bucket')
+
+            assert result['success'] is True
+            mock_client.copy_file.assert_called_once_with('source/file.pdf', 'dest/file.pdf', 'custom-bucket')
+
+    def test_copy_file_failure(self):
+        """Test copy_file handles errors"""
+        with patch('backend.database.attachment_db.minio_client') as mock_client:
+            mock_client.copy_file.return_value = (False, 'Copy failed')
+
+            result = copy_file('source/file.pdf', 'dest/file.pdf')
+
+            assert result['success'] is False
+            assert 'Copy failed' in result['error']
+
+
+class TestGetFileRange:
+    """Unit tests for get_file_range function."""
+
+    def test_range_calls_client_get_file_range(self):
+        """When start and end are provided, calls client.get_file_range."""
+        with patch('backend.database.attachment_db.minio_client') as mock_client:
+            mock_body = MagicMock()
+            mock_client.get_file_range.return_value = (True, mock_body)
+
+            result = get_file_range('attachments/doc.pdf', start=0, end=1023)
+
+            assert result is mock_body
+            mock_client.get_file_range.assert_called_once_with('attachments/doc.pdf', 0, 1023, None)
+
+    def test_range_with_custom_bucket(self):
+        """Passes bucket parameter through to the underlying client call."""
+        with patch('backend.database.attachment_db.minio_client') as mock_client:
+            mock_body = MagicMock()
+            mock_client.get_file_range.return_value = (True, mock_body)
+
+            result = get_file_range('attachments/doc.pdf', start=512, end=1023, bucket='my-bucket')
+
+            assert result is mock_body
+            mock_client.get_file_range.assert_called_once_with('attachments/doc.pdf', 512, 1023, 'my-bucket')
+
+    def test_range_returns_none_on_client_failure(self):
+        """Returns None when client returns success=False for a range request."""
+        with patch('backend.database.attachment_db.minio_client') as mock_client:
+            mock_client.get_file_range.return_value = (False, 'NoSuchKey')
+
+            result = get_file_range('missing/doc.pdf', start=0, end=100)
+
+            assert result is None
+
+
+class TestGetFileStreamRaw:
+    """Unit tests for get_file_stream_raw function."""
+
+    def test_returns_raw_stream_on_success(self):
+        """Returns the underlying raw stream object on success."""
+        with patch('backend.database.attachment_db.minio_client') as mock_client:
+            mock_body = MagicMock()
+            mock_client.get_file_stream.return_value = (True, mock_body)
+
+            result = get_file_stream_raw('attachments/doc.pdf')
+
+            assert result is mock_body
+            mock_client.get_file_stream.assert_called_once_with('attachments/doc.pdf', None)
+
+    def test_returns_none_on_failure(self):
+        """Returns None when client returns success=False."""
+        with patch('backend.database.attachment_db.minio_client') as mock_client:
+            mock_client.get_file_stream.return_value = (False, 'error')
+
+            result = get_file_stream_raw('missing/doc.pdf')
+
+            assert result is None
+class TestS3UrlHelpers:
+    """Test cases for S3 URL helpers and normalization."""
+
+    def test_normalize_object_and_bucket_s3_url(self):
+        object_name, bucket = _normalize_object_and_bucket("s3://my-bucket/path/to/file.txt")
+        assert object_name == "path/to/file.txt"
+        assert bucket == "my-bucket"
+
+    def test_normalize_object_and_bucket_slash_path(self):
+        object_name, bucket = _normalize_object_and_bucket("/my-bucket/path/to/file.txt")
+        assert object_name == "path/to/file.txt"
+        assert bucket == "my-bucket"
+
+    def test_build_s3_url_passthrough(self):
+        assert build_s3_url("s3://bucket/key") == "s3://bucket/key"
+
+    def test_build_s3_url_from_path(self):
+        assert build_s3_url("/bucket/key") == "s3://bucket/key"
+
+    def test_build_s3_url_from_object(self):
+        assert build_s3_url("attachments/file.txt") == "s3://test-bucket/attachments/file.txt"
+
+
+def test_get_file_stream_normalizes_s3_url():
+    minio_client_mock.get_file_stream.reset_mock()
+    mock_stream = BytesIO(b"test data")
+    minio_client_mock.get_file_stream.return_value = (True, mock_stream)
+
+    result = get_file_stream("s3://test-bucket/attachments/test.txt")
+
+    assert isinstance(result, BytesIO)
+    minio_client_mock.get_file_stream.assert_called_once_with("attachments/test.txt", "test-bucket")
+
+
+def test_delete_file_normalizes_s3_url():
+    minio_client_mock.delete_file.reset_mock()
+    minio_client_mock.delete_file.return_value = (True, "Deleted successfully")
+
+    result = delete_file("s3://test-bucket/attachments/test.txt")
+
+    assert result["success"] is True
+    minio_client_mock.delete_file.assert_called_once_with("attachments/test.txt", "test-bucket")

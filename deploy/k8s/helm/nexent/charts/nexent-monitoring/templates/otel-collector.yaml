@@ -1,0 +1,73 @@
+{{- if .Values.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nexent-otel-collector
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: nexent-otel-collector
+spec:
+  replicas: {{ .Values.collector.replicaCount }}
+  selector:
+    matchLabels:
+      app: nexent-otel-collector
+  template:
+    metadata:
+      labels:
+        app: nexent-otel-collector
+    spec:
+      containers:
+        - name: otel-collector
+          image: "{{ .Values.images.otelCollector.repository }}:{{ .Values.images.otelCollector.tag }}"
+          imagePullPolicy: {{ .Values.images.otelCollector.pullPolicy }}
+          args:
+            - "--config=/etc/otel/{{ include "nexent-monitoring.collectorConfigFile" . }}"
+          env:
+            - name: LANGFUSE_OTLP_AUTH_HEADER
+              value: {{ include "nexent-monitoring.langfuseAuthHeader" . | quote }}
+            - name: LANGSMITH_API_KEY
+              value: {{ include "nexent-monitoring.langsmithApiKey" . | quote }}
+            - name: LANGSMITH_PROJECT
+              value: {{ include "nexent-monitoring.langsmithProject" . | quote }}
+            - name: LANGSMITH_OTLP_TRACES_ENDPOINT
+              value: {{ include "nexent-monitoring.langsmithOtlpTracesEndpoint" . | quote }}
+          ports:
+            - containerPort: 4317
+              name: otlp-grpc
+            - containerPort: 4318
+              name: otlp-http
+          volumeMounts:
+            - name: otel-config
+              mountPath: /etc/otel
+              readOnly: true
+          resources:
+            requests:
+              cpu: {{ .Values.collector.resources.requests.cpu }}
+              memory: {{ .Values.collector.resources.requests.memory }}
+            limits:
+              cpu: {{ .Values.collector.resources.limits.cpu }}
+              memory: {{ .Values.collector.resources.limits.memory }}
+      volumes:
+        - name: otel-config
+          configMap:
+            name: nexent-otel-collector-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nexent-otel-collector
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: nexent-otel-collector
+spec:
+  type: {{ .Values.collector.service.type }}
+  ports:
+    - port: {{ .Values.collector.service.grpcPort }}
+      targetPort: 4317
+      name: otlp-grpc
+    - port: {{ .Values.collector.service.httpPort }}
+      targetPort: 4318
+      name: otlp-http
+  selector:
+    app: nexent-otel-collector
+{{- end }}

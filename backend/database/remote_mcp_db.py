@@ -1,0 +1,441 @@
+import logging
+from typing import Any, Dict, List
+
+from database.client import as_dict, filter_property, get_db_session
+from database.db_models import McpRecord
+
+logger = logging.getLogger("remote_mcp_db")
+
+
+def create_mcp_record(mcp_data: Dict[str, Any], tenant_id: str, user_id: str):
+    """
+    Create new MCP record
+
+    :param mcp_data: Dictionary containing MCP information
+    :param tenant_id: Tenant ID
+    :param user_id: User ID
+    :return: Created MCP record
+
+    """
+    allowed_fields = {
+        'mcp_name', 'mcp_server', 'status', 'container_id', 'container_port',
+        'authorization_token', 'custom_headers', 'source', 'market_id',
+        'registry_json', 'config_json', 'enabled', 'tags', 'description',
+        'group_ids', 'ingroup_permission', 'shared_fields'
+    }
+
+    filtered_data = {k: v for k, v in mcp_data.items() if k in allowed_fields and v is not None}
+    filtered_data.update({
+        "tenant_id": tenant_id,
+        "user_id": user_id,
+        "created_by": user_id,
+        "updated_by": user_id,
+        "delete_flag": "N"
+    })
+    with get_db_session() as session:
+        new_mcp = McpRecord(**filtered_data)
+        session.add(new_mcp)
+
+
+def delete_mcp_record_by_name_and_url(mcp_name: str, mcp_server: str, tenant_id: str, user_id: str):
+    """
+    Delete MCP record by name and URL
+
+    :param mcp_name: MCP name
+    :param mcp_server: MCP server URL
+    :param tenant_id: Tenant ID
+    :param user_id: User ID
+    """
+    with get_db_session() as session:
+        session.query(McpRecord).filter(
+            McpRecord.mcp_name == mcp_name,
+            McpRecord.mcp_server == mcp_server,
+            McpRecord.tenant_id == tenant_id,
+            McpRecord.delete_flag != 'Y'
+        ).update({"delete_flag": "Y", "updated_by": user_id})
+
+
+def delete_mcp_record_by_container_id(container_id: str, tenant_id: str, user_id: str):
+    """
+    Soft delete MCP record by container ID
+
+    :param container_id: Docker container ID
+    :param tenant_id: Tenant ID
+    :param user_id: User ID
+    """
+    with get_db_session() as session:
+        session.query(McpRecord).filter(
+            McpRecord.container_id == container_id,
+            McpRecord.tenant_id == tenant_id,
+            McpRecord.delete_flag != 'Y'
+        ).update({"delete_flag": "Y", "updated_by": user_id})
+
+
+def update_mcp_status_by_name_and_url(mcp_name: str, mcp_server: str, tenant_id: str, user_id: str, status: bool):
+    """
+    Update the status of MCP record by name and URL
+    :param mcp_name: MCP name
+    :param mcp_server: MCP server URL
+    :param tenant_id: Tenant ID
+    :param status: New status (True/False)
+    :param user_id: User ID
+    """
+    with get_db_session() as session:
+        session.query(McpRecord).filter(
+            McpRecord.mcp_name == mcp_name,
+            McpRecord.mcp_server == mcp_server,
+            McpRecord.tenant_id == tenant_id,
+            McpRecord.delete_flag != 'Y'
+        ).update({"status": status, "updated_by": user_id})
+
+
+def get_mcp_records_by_tenant(tenant_id: str, tag: str | None = None) -> List[Dict[str, Any]]:
+    """
+    Get all MCP records for a tenant
+
+    :param tenant_id: Tenant ID
+    :return: List of MCP records
+    """
+    with get_db_session() as session:
+        query = session.query(McpRecord).filter(
+            McpRecord.tenant_id == tenant_id,
+            McpRecord.delete_flag != 'Y'
+        )
+
+        if tag:
+            query = query.filter(McpRecord.tags.any(tag))
+
+        mcp_records = query.order_by(McpRecord.create_time.desc()).all()
+
+        return [as_dict(record) for record in mcp_records]
+
+
+def get_mcp_records_by_container_port(container_port: int) -> List[Dict[str, Any]]:
+    """
+    Get enabled MCP records that already use the given container port.
+
+    The lookup is global.
+    """
+    with get_db_session() as session:
+        query = session.query(McpRecord).filter(
+            McpRecord.container_port == container_port,
+            McpRecord.delete_flag != 'Y'
+        )
+
+        records = query.order_by(McpRecord.create_time.desc()).all()
+        return [as_dict(record) for record in records]
+
+
+def update_mcp_record_manage_fields_by_id(
+    *,
+    mcp_id: int,
+    tenant_id: str,
+    user_id: str,
+    name: str,
+    server_url: str,
+    description: str | None,
+    tags: List[str] | None,
+    source: str | None,
+    authorization_token: str | None,
+    custom_headers: Dict[str, Any] | None,
+    config_json: Dict[str, Any] | None,
+    market_id: int | None,
+    group_ids: str | None = None,
+    ingroup_permission: str | None = None,
+    shared_fields: dict | None = None,
+) -> None:
+    with get_db_session() as session:
+        update_data = {
+            "mcp_name": name,
+            "mcp_server": server_url,
+            "description": description,
+            "tags": tags or [],
+            "source": source,
+            "authorization_token": authorization_token,
+            "custom_headers": custom_headers,
+            "config_json": config_json,
+            "market_id": market_id,
+            "updated_by": user_id,
+        }
+        if group_ids is not None:
+            update_data["group_ids"] = group_ids
+        if ingroup_permission is not None:
+            update_data["ingroup_permission"] = ingroup_permission
+        if shared_fields is not None:
+            update_data["shared_fields"] = shared_fields
+        session.query(McpRecord).filter(
+            McpRecord.mcp_id == mcp_id,
+            McpRecord.tenant_id == tenant_id,
+            McpRecord.delete_flag != 'Y'
+        ).update(update_data)
+
+
+def update_mcp_record_market_id_by_id(
+    *,
+    mcp_id: int,
+    tenant_id: str,
+    user_id: str,
+    market_id: int | None,
+) -> None:
+    with get_db_session() as session:
+        session.query(McpRecord).filter(
+            McpRecord.mcp_id == mcp_id,
+            McpRecord.tenant_id == tenant_id,
+            McpRecord.delete_flag != 'Y'
+        ).update({"market_id": market_id, "updated_by": user_id})
+
+
+def clear_mcp_record_market_id(
+    *,
+    tenant_id: str,
+    user_id: str,
+    market_id: int,
+) -> None:
+    with get_db_session() as session:
+        session.query(McpRecord).filter(
+            McpRecord.tenant_id == tenant_id,
+            McpRecord.market_id == market_id,
+            McpRecord.delete_flag != 'Y'
+        ).update({"market_id": None, "updated_by": user_id})
+
+
+def update_mcp_record_enabled_by_id(
+    *,
+    mcp_id: int,
+    tenant_id: str,
+    user_id: str,
+    enabled: bool,
+) -> None:
+    with get_db_session() as session:
+        session.query(McpRecord).filter(
+            McpRecord.mcp_id == mcp_id,
+            McpRecord.tenant_id == tenant_id,
+            McpRecord.delete_flag != 'Y'
+        ).update({"enabled": enabled, "updated_by": user_id})
+
+
+def update_mcp_record_status_by_id(
+    *,
+    mcp_id: int,
+    tenant_id: str,
+    user_id: str,
+    status: bool,
+) -> None:
+    with get_db_session() as session:
+        session.query(McpRecord).filter(
+            McpRecord.mcp_id == mcp_id,
+            McpRecord.tenant_id == tenant_id,
+            McpRecord.delete_flag != 'Y'
+        ).update({"status": status, "updated_by": user_id})
+
+
+def update_mcp_record_container_fields_by_id(
+    *,
+    mcp_id: int,
+    tenant_id: str,
+    user_id: str,
+    container_id: str | None,
+    container_port: int | None,
+    mcp_server: str,
+    status: bool | None,
+) -> None:
+    with get_db_session() as session:
+        session.query(McpRecord).filter(
+            McpRecord.mcp_id == mcp_id,
+            McpRecord.tenant_id == tenant_id,
+            McpRecord.delete_flag != 'Y'
+        ).update(
+            {
+                "container_id": container_id,
+                "container_port": container_port,
+                "mcp_server": mcp_server,
+                "status": status,
+                "updated_by": user_id,
+            }
+        )
+
+
+def delete_mcp_record_by_id(
+    *,
+    mcp_id: int,
+    tenant_id: str,
+    user_id: str,
+) -> None:
+    with get_db_session() as session:
+        session.query(McpRecord).filter(
+            McpRecord.mcp_id == mcp_id,
+            McpRecord.tenant_id == tenant_id,
+            McpRecord.delete_flag != 'Y'
+        ).update({"delete_flag": "Y", "updated_by": user_id})
+
+
+def get_mcp_server_by_name_and_tenant(mcp_name: str, tenant_id: str) -> str:
+    """
+    Get MCP server address by name and tenant ID
+
+    :param mcp_name: MCP name
+    :param tenant_id: Tenant ID
+    :return: MCP server address, empty string if not found
+    """
+    with get_db_session() as session:
+        mcp_record = session.query(McpRecord).filter(
+            McpRecord.mcp_name == mcp_name,
+            McpRecord.tenant_id == tenant_id,
+            McpRecord.delete_flag != 'Y'
+        ).first()
+
+        return mcp_record.mcp_server if mcp_record else ""
+
+
+def get_mcp_authorization_token_by_name_and_url(mcp_name: str, mcp_server: str, tenant_id: str) -> str | None:
+    """
+    Get MCP authorization token by name, URL and tenant ID
+
+    :param mcp_name: MCP name
+    :param mcp_server: MCP server URL
+    :param tenant_id: Tenant ID
+    :return: Authorization token, None if not found
+    """
+    with get_db_session() as session:
+        mcp_record = session.query(McpRecord).filter(
+            McpRecord.mcp_name == mcp_name,
+            McpRecord.mcp_server == mcp_server,
+            McpRecord.tenant_id == tenant_id,
+            McpRecord.delete_flag != 'Y'
+        ).first()
+
+        return mcp_record.authorization_token if mcp_record else None
+
+
+def get_mcp_custom_headers_by_name_and_url(mcp_name: str, mcp_server: str, tenant_id: str) -> Dict[str, Any] | None:
+    """
+    Get MCP custom headers by name, URL and tenant ID
+
+    :param mcp_name: MCP name
+    :param mcp_server: MCP server URL
+    :param tenant_id: Tenant ID
+    :return: Custom headers dict, None if not found
+    """
+    with get_db_session() as session:
+        mcp_record = session.query(McpRecord).filter(
+            McpRecord.mcp_name == mcp_name,
+            McpRecord.mcp_server == mcp_server,
+            McpRecord.tenant_id == tenant_id,
+            McpRecord.delete_flag != 'Y'
+        ).first()
+
+        return mcp_record.custom_headers if mcp_record else None
+
+
+def update_mcp_record_by_name_and_url(
+    update_data,
+    tenant_id: str,
+    user_id: str,
+    status: bool = None
+):
+    """
+    Update MCP record by current name and URL
+
+    :param update_data: MCPUpdateRequest containing current and new values
+    :param tenant_id: Tenant ID
+    :param user_id: User ID
+    :param status: Optional status to update
+    """
+    update_fields = {
+        "mcp_name": update_data.new_service_name,
+        "mcp_server": update_data.new_mcp_url,
+        "updated_by": user_id
+    }
+
+    if status is not None:
+        update_fields["status"] = status
+
+    # Update authorization_token if provided
+    if hasattr(update_data, 'new_authorization_token'):
+        update_fields["authorization_token"] = update_data.new_authorization_token
+
+    # Update custom_headers if provided
+    if hasattr(update_data, 'custom_headers'):
+        update_fields["custom_headers"] = update_data.custom_headers
+
+    with get_db_session() as session:
+        session.query(McpRecord).filter(
+            McpRecord.mcp_name == update_data.current_service_name,
+            McpRecord.mcp_server == update_data.current_mcp_url,
+            McpRecord.tenant_id == tenant_id,
+            McpRecord.delete_flag != 'Y'
+        ).update(update_fields)
+
+
+def check_mcp_name_exists(mcp_name: str, tenant_id: str) -> bool:
+    """
+    Check if MCP name already exists for a tenant
+
+    :param mcp_name: MCP name
+    :param tenant_id: Tenant ID
+    :return: True if name exists, False otherwise
+    """
+    with get_db_session() as session:
+        mcp_record = session.query(McpRecord).filter(
+            McpRecord.mcp_name == mcp_name,
+            McpRecord.tenant_id == tenant_id,
+            McpRecord.delete_flag != 'Y'
+        ).first()
+        return mcp_record is not None
+
+
+def check_enabled_mcp_name_exists(mcp_name: str, tenant_id: str) -> bool:
+    """
+    Check if enabled MCP name already exists for a tenant.
+
+    Only enabled records participate in conflict checks for runtime container startup.
+
+    :param mcp_name: MCP name
+    :param tenant_id: Tenant ID
+    :return: True if enabled name exists, False otherwise
+    """
+    with get_db_session() as session:
+        mcp_record = session.query(McpRecord).filter(
+            McpRecord.mcp_name == mcp_name,
+            McpRecord.tenant_id == tenant_id,
+            McpRecord.delete_flag != 'Y',
+            McpRecord.enabled.is_(True),
+        ).first()
+        return mcp_record is not None
+
+
+def get_mcp_record_by_id_and_tenant(mcp_id: int, tenant_id: str) -> Dict[str, Any] | None:
+    """
+    Get MCP record by ID and tenant ID
+
+    :param mcp_id: MCP record ID
+    :param tenant_id: Tenant ID
+    :return: MCP record as dictionary, or None if not found
+    """
+    with get_db_session() as session:
+        mcp_record = session.query(McpRecord).filter(
+            McpRecord.mcp_id == mcp_id,
+            McpRecord.tenant_id == tenant_id,
+            McpRecord.delete_flag != 'Y'
+        ).first()
+
+        return as_dict(mcp_record) if mcp_record else None
+
+
+def update_mcp_record_registry_json_by_id(
+    *,
+    mcp_id: int,
+    tenant_id: str,
+    user_id: str,
+    registry_json: dict,
+) -> None:
+    """Update the registry_json field on an MCP record (e.g. to persist refreshed tool names)."""
+    with get_db_session() as session:
+        session.query(McpRecord).filter(
+            McpRecord.mcp_id == mcp_id,
+            McpRecord.tenant_id == tenant_id,
+            McpRecord.delete_flag != 'Y'
+        ).update({
+            "registry_json": registry_json,
+            "updated_by": user_id,
+        })

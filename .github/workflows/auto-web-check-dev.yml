@@ -1,0 +1,53 @@
+name: Run Auto Web Type Check
+
+concurrency:
+  group: auto-web-type-check-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  workflow_dispatch:
+    inputs:
+      runner_label_json:
+        description: 'runner array in json format (e.g. ["ubuntu-latest"] or ["self-hosted"])'
+        default: '["ubuntu-latest"]'
+  pull_request:
+    branches: [develop, 'release/**', 'hotfix/**']
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/**'
+  push:
+    branches: [develop, 'release/**', 'hotfix/**']
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/**'
+
+jobs:
+  type-check:
+    runs-on: ${{ fromJson(github.event.inputs.runner_label_json || '["ubuntu-latest"]') }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        run: |
+          cd frontend
+          npm install --legacy-peer-deps
+
+      - name: Run TypeScript type check
+        run: |
+          cd frontend
+          npm run type-check
+          TYPE_CHECK_EXIT_CODE=$?
+
+          # Check if type check actually passed
+          if [ $TYPE_CHECK_EXIT_CODE -ne 0 ]; then
+            echo "❌ Type check failed with exit code $TYPE_CHECK_EXIT_CODE"
+            exit $TYPE_CHECK_EXIT_CODE
+          else
+            echo "✅ Type check passed successfully."
+          fi

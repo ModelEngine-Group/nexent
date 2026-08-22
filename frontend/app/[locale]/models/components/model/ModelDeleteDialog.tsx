@@ -1,0 +1,2084 @@
+import { useCallback, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
+
+import { Modal, Button, Switch, App, Tooltip, Input } from "antd";
+import { Trash, ChevronRight, RefreshCw, Settings } from "lucide-react";
+import { ExclamationCircleFilled } from "@ant-design/icons";
+
+import { MODEL_TYPES, MODEL_SOURCES } from "@/const/modelConfig";
+import { useConfig } from "@/hooks/useConfig";
+import { modelService } from "@/services/modelService";
+import { processProviderResponse } from "@/lib/providerError";
+import {
+  CapacityCoverage,
+  ModelOption,
+  ModelType,
+  ModelSource,
+} from "@/types/modelConfig";
+import log from "@/lib/logger";
+import { publicAsset } from "@/lib/publicAsset";
+
+import { ModelEditDialog, ProviderConfigEditDialog } from "./ModelEditDialog";
+import {
+  ModelChunkSizeSlider,
+  DEFAULT_EXPECTED_CHUNK_SIZE,
+  DEFAULT_MAXIMUM_CHUNK_SIZE,
+} from "./ModelChunkSizeSilder";
+
+interface ModelDeleteDialogProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onSuccess: () => Promise<void>;
+  models: ModelOption[];
+  capacityCoverage?: CapacityCoverage | null;
+}
+
+export const ModelDeleteDialog = ({
+  isOpen,
+  onClose,
+  onSuccess,
+  models,
+  capacityCoverage,
+}: ModelDeleteDialogProps) => {
+  const { t } = useTranslation();
+  const { message } = App.useApp();
+  const { modelConfig, updateModelConfig } = useConfig();
+  const [deletingModelType, setDeletingModelType] = useState<ModelType | null>(
+    null
+  );
+  const [selectedSource, setSelectedSource] = useState<ModelSource | null>(
+    null
+  );
+  const [deletingModels, setDeletingModels] = useState<Set<string>>(new Set());
+  const [editModel, setEditModel] = useState<ModelOption | null>(null);
+  const [providerModels, setProviderModels] = useState<any[]>([]);
+  const [pendingSelectedProviderIds, setPendingSelectedProviderIds] = useState<
+    Set<string>
+  >(new Set());
+  const [loadingSource, setLoadingSource] = useState<ModelSource | null>(null);
+  const [isProviderConfigOpen, setIsProviderConfigOpen] =
+    useState<boolean>(false);
+  const [isConfirmLoading, setIsConfirmLoading] = useState<boolean>(false);
+  const [maxTokens, setMaxTokens] = useState<number>(0);
+
+  // Single model settings modal state
+  const [isSingleModelSettingsOpen, setIsSingleModelSettingsOpen] =
+    useState<boolean>(false);
+  const [selectedSingleModel, setSelectedSingleModel] = useState<any>(null);
+  const [providerModelSearchTerm, setProviderModelSearchTerm] = useState("");
+
+  // Embedding model chunk config modal state
+  const [embeddingConfigModalVisible, setEmbeddingConfigModalVisible] =
+    useState(false);
+  const [selectedEmbeddingModel, setSelectedEmbeddingModel] =
+    useState<ModelOption | null>(null);
+  const [chunkSizeRange, setChunkSizeRange] = useState<[number, number]>([
+    DEFAULT_EXPECTED_CHUNK_SIZE,
+    DEFAULT_MAXIMUM_CHUNK_SIZE,
+  ]);
+  const [chunkingBatchSize, setChunkingBatchSize] = useState("10");
+  const [savingEmbeddingConfig, setSavingEmbeddingConfig] = useState(false);
+  const bareCapacityModelIds = useMemo(
+    () =>
+      new Set(
+        (capacityCoverage?.bareModels || []).map((model) => model.modelId)
+      ),
+    [capacityCoverage]
+  );
+  const suggestionAvailableModelIds = useMemo(
+    () =>
+      new Set(
+        (capacityCoverage?.bareModels || [])
+          .filter((model) => model.suggestionAvailable)
+          .map((model) => model.modelId)
+      ),
+    [capacityCoverage]
+  );
+
+  // Get model color scheme
+  const getModelColorScheme = (
+    type: ModelType
+  ): { bg: string; text: string; border: string } => {
+    switch (type) {
+      case MODEL_TYPES.LLM:
+        return {
+          bg: "bg-blue-50",
+          text: "text-blue-600",
+          border: "border-blue-100",
+        };
+      case MODEL_TYPES.EMBEDDING:
+        return {
+          bg: "bg-green-50",
+          text: "text-green-600",
+          border: "border-green-100",
+        };
+      case MODEL_TYPES.MULTI_EMBEDDING:
+        return {
+          bg: "bg-teal-50",
+          text: "text-teal-600",
+          border: "border-teal-100",
+        };
+      case MODEL_TYPES.RERANK:
+        return {
+          bg: "bg-purple-50",
+          text: "text-purple-600",
+          border: "border-purple-100",
+        };
+      case MODEL_TYPES.VLM:
+      case MODEL_TYPES.VLM2:
+      case MODEL_TYPES.VLM3:
+        return {
+          bg: "bg-yellow-50",
+          text: "text-yellow-600",
+          border: "border-yellow-100",
+        };
+      case MODEL_TYPES.STT:
+        return {
+          bg: "bg-red-50",
+          text: "text-red-600",
+          border: "border-red-100",
+        };
+      case MODEL_TYPES.TTS:
+        return {
+          bg: "bg-pink-50",
+          text: "text-pink-600",
+          border: "border-pink-100",
+        };
+      default:
+        return {
+          bg: "bg-gray-50",
+          text: "text-gray-600",
+          border: "border-gray-100",
+        };
+    }
+  };
+
+  // Get model icon
+  const getModelIcon = (type: ModelType) => {
+    switch (type) {
+      case MODEL_TYPES.LLM:
+        return "🤖";
+      case MODEL_TYPES.EMBEDDING:
+        return "🔢";
+      case MODEL_TYPES.MULTI_EMBEDDING:
+        return "🖼️🔢";
+      case MODEL_TYPES.RERANK:
+        return "🔍";
+      case MODEL_TYPES.STT:
+        return "🎤";
+      case MODEL_TYPES.TTS:
+        return "🔊";
+      case MODEL_TYPES.VLM:
+      case MODEL_TYPES.VLM2:
+      case MODEL_TYPES.VLM3:
+        return "👁️";
+      default:
+        return "⚙️";
+    }
+  };
+
+  // Get model display name
+  const getModelTypeName = (type: ModelType | null): string => {
+    if (!type) return t("model.type.unknown");
+    switch (type) {
+      case MODEL_TYPES.LLM:
+        return t("model.type.llm");
+      case MODEL_TYPES.EMBEDDING:
+        return t("model.type.embedding");
+      case MODEL_TYPES.MULTI_EMBEDDING:
+        return t("model.type.multiEmbedding");
+      case MODEL_TYPES.RERANK:
+        return t("model.type.rerank");
+      case MODEL_TYPES.STT:
+        return t("model.type.stt");
+      case MODEL_TYPES.TTS:
+        return t("model.type.tts");
+      case MODEL_TYPES.VLM:
+        return t("model.type.imageUnderstanding");
+      case MODEL_TYPES.VLM2:
+        return t("model.type.imageGeneration");
+      case MODEL_TYPES.VLM3:
+        return t("model.type.videoUnderstanding");
+      default:
+        return t("model.type.unknown");
+    }
+  };
+
+  // Get source display name
+  const getSourceName = (source: ModelSource): string => {
+    switch (source) {
+      case MODEL_SOURCES.OPENAI:
+        return t("model.source.openai");
+      case MODEL_SOURCES.SILICON:
+        return t("model.source.silicon");
+      case MODEL_SOURCES.MODELENGINE:
+        return t("model.source.modelEngine");
+      case MODEL_SOURCES.OPENAI_API_COMPATIBLE:
+        return t("model.source.custom");
+      case MODEL_SOURCES.DASHSCOPE:
+        return t("model.source.dashscope");
+      case MODEL_SOURCES.TOKENPONY:
+        return t("model.source.tokenpony");
+      case MODEL_SOURCES.VOLCENGINE:
+        return t("model.provider.volcengine");
+      default:
+        return t("model.source.unknown");
+    }
+  };
+
+  // Get source color scheme
+  const getSourceColorScheme = (
+    source: ModelSource
+  ): { bg: string; text: string; border: string } => {
+    switch (source) {
+      case MODEL_SOURCES.SILICON:
+        return {
+          bg: "bg-purple-50",
+          text: "text-purple-600",
+          border: "border-purple-100",
+        };
+      case MODEL_SOURCES.MODELENGINE:
+        return {
+          bg: "bg-blue-50",
+          text: "text-blue-600",
+          border: "border-blue-100",
+        };
+      case MODEL_SOURCES.OPENAI:
+        return {
+          bg: "bg-indigo-50",
+          text: "text-indigo-600",
+          border: "border-indigo-100",
+        };
+      case MODEL_SOURCES.OPENAI_API_COMPATIBLE:
+        return {
+          bg: "bg-rose-50",
+          text: "text-rose-600",
+          border: "border-rose-100",
+        };
+      case MODEL_SOURCES.DASHSCOPE:
+        return {
+          bg: "bg-orange-50",
+          text: "text-orange-600",
+          border: "border-orange-100",
+        };
+      case MODEL_SOURCES.TOKENPONY:
+        return {
+          bg: "bg-cyan-50",
+          text: "text-cyan-600",
+          border: "border-cyan-100",
+        };
+      case MODEL_SOURCES.VOLCENGINE:
+        return {
+          bg: "bg-pink-50",
+          text: "text-pink-600",
+          border: "border-pink-100",
+        };
+      default:
+        return {
+          bg: "bg-gray-50",
+          text: "text-gray-600",
+          border: "border-gray-100",
+        };
+    }
+  };
+
+  // Get source icon
+  const getSourceIcon = (source: ModelSource): JSX.Element => {
+    switch (source) {
+      case MODEL_SOURCES.SILICON:
+        return (
+          <img src={publicAsset("/siliconflow.png")} alt="SiliconFlow" className="w-5 h-5" />
+        );
+      case MODEL_SOURCES.MODELENGINE:
+        return (
+          <img
+            src={publicAsset("/modelengine-logo.png")}
+            alt="ModelEngine"
+            className="w-5 h-5"
+          />
+        );
+      case MODEL_SOURCES.OPENAI:
+        return (
+          <span role="img" aria-label="openai">
+            🏷️
+          </span>
+        );
+      case MODEL_SOURCES.OPENAI_API_COMPATIBLE:
+        return (
+          <span role="img" aria-label="custom">
+            🛠️
+          </span>
+        );
+      case MODEL_SOURCES.DASHSCOPE:
+        return <img src={publicAsset("/aliyuncs.png")} alt="DashScope" className="w-5 h-5" />;
+      case MODEL_SOURCES.TOKENPONY:
+        return <img src={publicAsset("/tokenpony.png")} alt="TokenPony" className="w-5 h-5" />;
+      case MODEL_SOURCES.VOLCENGINE:
+        return (
+          <img src={publicAsset("/volcengine.png")} alt="VolcEngine" className="w-5 h-5" />
+        );
+      default:
+        return (
+          <span role="img" aria-label="box">
+            📦
+          </span>
+        );
+    }
+  };
+
+  // Get API key by model type, optionally scoped to a provider
+  const getApiKeyByType = (
+    type: ModelType | null,
+    provider?: ModelSource
+  ): string => {
+    if (!type) return "";
+
+    // If a provider is specified, return the first model for that provider+type
+    if (provider) {
+      const byProvider = models.find(
+        (m) => m.source === provider && m.type === type && m.apiKey
+      );
+      if (byProvider?.apiKey) return byProvider.apiKey;
+    }
+
+    // Prefer provider entries in order: Silicon, ModelEngine
+    const bySilicon = models.find(
+      (m) => m.source === MODEL_SOURCES.SILICON && m.type === type && m.apiKey
+    );
+    if (bySilicon?.apiKey) return bySilicon.apiKey;
+
+    const byModelEngine = models.find(
+      (m) =>
+        m.source === MODEL_SOURCES.MODELENGINE && m.type === type && m.apiKey
+    );
+    if (byModelEngine?.apiKey) return byModelEngine.apiKey;
+
+    const byDashScope = models.find(
+      (m) => m.source === MODEL_SOURCES.DASHSCOPE && m.type === type && m.apiKey
+    );
+    if (byDashScope?.apiKey) return byDashScope.apiKey;
+
+    const byTokenPony = models.find(
+      (m) => m.source === MODEL_SOURCES.TOKENPONY && m.type === type && m.apiKey
+    );
+    if (byTokenPony?.apiKey) return byTokenPony.apiKey;
+
+    // Fallback: any model that has apiKey
+    const anyWithKey = models.find((m) => m.apiKey);
+    return anyWithKey?.apiKey || "";
+  };
+
+  // Get provider base URL by model type (prefer ModelEngine entries)
+  const getProviderBaseUrlByType = (
+    type: ModelType | null
+  ): string | undefined => {
+    if (!type) return undefined;
+    // Prefer provider entries (ModelEngine) first, then explicit modelConfig, then any model
+    const engineModel = models.find(
+      (m) =>
+        m.source === MODEL_SOURCES.MODELENGINE && m.type === type && m.apiUrl
+    );
+    if (engineModel?.apiUrl) return engineModel.apiUrl;
+
+    try {
+      if (type === MODEL_TYPES.EMBEDDING) {
+        const cfgUrl = modelConfig?.embedding?.apiConfig?.modelUrl;
+        if (cfgUrl && cfgUrl.trim() !== "") return cfgUrl;
+      }
+      if (type === MODEL_TYPES.MULTI_EMBEDDING) {
+        const cfgUrl = modelConfig?.multiEmbedding?.apiConfig?.modelUrl;
+        if (cfgUrl && cfgUrl.trim() !== "") return cfgUrl;
+      }
+      if (type === MODEL_TYPES.VLM) {
+        const cfgUrl =
+          modelConfig?.vlm?.apiConfig?.modelUrl ||
+          modelConfig?.vlm2?.apiConfig?.modelUrl ||
+          modelConfig?.vlm3?.apiConfig?.modelUrl;
+        if (cfgUrl && cfgUrl.trim() !== "") return cfgUrl;
+      }
+      if (type === MODEL_TYPES.LLM) {
+        const cfgUrl = modelConfig?.llm?.apiConfig?.modelUrl;
+        if (cfgUrl && cfgUrl.trim() !== "") return cfgUrl;
+      }
+    } catch (e) {
+      // ignore and continue
+    }
+
+    const anyModelWithUrl = models.find((m) => m.apiUrl);
+    return anyModelWithUrl?.apiUrl || undefined;
+  };
+
+  const overlaySavedModelConfig = useCallback(
+    (
+      providerModel: any,
+      provider: ModelSource,
+      modelType: ModelType | null,
+      options?: { preferProviderValues?: boolean }
+    ) => {
+      const existingModel = models.find(
+        (m) =>
+          m.name === providerModel.id &&
+          m.type === (providerModel.model_type || modelType) &&
+          m.source === provider
+      );
+      if (!existingModel) return providerModel;
+
+      const pickValue = <T,>(
+        providerValue: T | undefined,
+        savedValue: T | undefined
+      ) =>
+        options?.preferProviderValues
+          ? (providerValue ?? savedValue)
+          : (savedValue ?? providerValue);
+
+      return {
+        ...providerModel,
+        saved_model_id: existingModel.id,
+        model_factory: existingModel.source ?? providerModel.model_factory,
+        max_tokens: pickValue(
+          providerModel.max_tokens,
+          existingModel.maxTokens
+        ),
+        timeout_seconds: pickValue(
+          providerModel.timeout_seconds,
+          existingModel.timeoutSeconds
+        ),
+        concurrency_limit: pickValue(
+          providerModel.concurrency_limit,
+          existingModel.concurrencyLimit
+        ),
+        context_window_tokens: pickValue(
+          providerModel.context_window_tokens,
+          existingModel.contextWindowTokens
+        ),
+        max_input_tokens: pickValue(
+          providerModel.max_input_tokens,
+          existingModel.maxInputTokens
+        ),
+        max_output_tokens: pickValue(
+          providerModel.max_output_tokens,
+          existingModel.maxOutputTokens
+        ),
+        default_output_reserve_tokens: pickValue(
+          providerModel.default_output_reserve_tokens,
+          existingModel.defaultOutputReserveTokens
+        ),
+        tokenizer_family: pickValue(
+          providerModel.tokenizer_family,
+          existingModel.tokenizerFamily
+        ),
+        capacity_source: pickValue(
+          providerModel.capacity_source,
+          existingModel.capacitySource
+        ),
+        capability_profile_version:
+          existingModel.capabilityProfileVersion ??
+          providerModel.capability_profile_version,
+      };
+    },
+    [models]
+  );
+
+  // Prefetch provider model list (supports Silicon, ModelEngine, DashScope, TokenPony)
+  const prefetchProviderModels = async (
+    provider: ModelSource,
+    modelType: ModelType | null,
+    // Optional override for the API key to use for this fetch. Needed
+    // right after a provider config save: `models` state may not have
+    // re-rendered into this closure yet (React state updates are async),
+    // so falling back to getApiKeyByType() here could still read the
+    // pre-save key even though the backend already has the new one.
+    apiKeyOverride?: string
+  ): Promise<void> => {
+    if (!modelType) return;
+    try {
+      let result: any[] = [];
+      if (provider === MODEL_SOURCES.SILICON) {
+        const apiKey =
+          apiKeyOverride ?? getApiKeyByType(modelType, MODEL_SOURCES.SILICON);
+        result = await modelService.addProviderModel({
+          provider: MODEL_SOURCES.SILICON,
+          type: modelType,
+          apiKey: apiKey && apiKey.trim() !== "" ? apiKey : "sk-no-api-key",
+        });
+      } else if (provider === MODEL_SOURCES.MODELENGINE) {
+        const apiKey =
+          apiKeyOverride ??
+          getApiKeyByType(modelType, MODEL_SOURCES.MODELENGINE);
+        const baseUrl = getProviderBaseUrlByType(modelType);
+        result = await modelService.addProviderModel({
+          provider: MODEL_SOURCES.MODELENGINE,
+          type: modelType,
+          apiKey: apiKey && apiKey.trim() !== "" ? apiKey : "sk-no-api-key",
+          baseUrl: baseUrl || undefined,
+        });
+      } else if (provider === MODEL_SOURCES.DASHSCOPE) {
+        const apiKey =
+          apiKeyOverride ??
+          getApiKeyByType(modelType, MODEL_SOURCES.DASHSCOPE);
+        result = await modelService.addProviderModel({
+          provider: MODEL_SOURCES.DASHSCOPE,
+          type: modelType,
+          apiKey: apiKey && apiKey.trim() !== "" ? apiKey : "sk-no-api-key",
+        });
+      } else if (provider === MODEL_SOURCES.TOKENPONY) {
+        const apiKey =
+          apiKeyOverride ??
+          getApiKeyByType(modelType, MODEL_SOURCES.TOKENPONY);
+        result = await modelService.addProviderModel({
+          provider: MODEL_SOURCES.TOKENPONY,
+          type: modelType,
+          apiKey: apiKey && apiKey.trim() !== "" ? apiKey : "sk-no-api-key",
+        });
+      } else {
+        // Unsupported provider for prefetching
+        return;
+      }
+
+      const { models: providerRows, error } = processProviderResponse(
+        result || [],
+        provider,
+        t
+      );
+
+      if (error) {
+        message.error(error);
+        setProviderModels([]);
+        setPendingSelectedProviderIds(new Set());
+        return;
+      }
+
+      const providerRowsWithSaved = providerRows.map((providerModel: any) =>
+        overlaySavedModelConfig(providerModel, provider, modelType)
+      );
+
+      setProviderModels(providerRowsWithSaved);
+      // Initialize pending selected switch states (based on current models status)
+      const currentIds = new Set(
+        models
+          .filter((m) => m.type === modelType && m.source === provider)
+          .map((m) => m.name)
+      );
+      setPendingSelectedProviderIds(
+        new Set(
+          providerRowsWithSaved
+            .map((pm: any) => pm.id)
+            .filter((id: string) => currentIds.has(id))
+        )
+      );
+    } catch (e) {
+      log.error("Failed to prefetch provider models", e);
+      setProviderModels([]);
+      setPendingSelectedProviderIds(new Set());
+    }
+  };
+
+  // Handle source selection
+  const handleSourceSelect = async (source: ModelSource) => {
+    setLoadingSource(source);
+    try {
+      if (
+        source === MODEL_SOURCES.SILICON ||
+        source === MODEL_SOURCES.MODELENGINE ||
+        source === MODEL_SOURCES.DASHSCOPE ||
+        source === MODEL_SOURCES.TOKENPONY
+      ) {
+        await prefetchProviderModels(source, deletingModelType);
+      } else if (source === MODEL_SOURCES.OPENAI) {
+        // For OpenAI source, just set the selected source without prefetching
+        // TODO: Call the relevant API to fetch OpenAI models
+        setSelectedSource(source);
+        return;
+      }
+    } finally {
+      setLoadingSource(null);
+    }
+    setSelectedSource(source);
+    setProviderModelSearchTerm("");
+  };
+
+  const handleEditModel = (model: ModelOption) => {
+    setEditModel(model);
+  };
+
+  // Handle model deletion
+  const handleDeleteModel = async (
+    displayName: string,
+    provider?: ModelSource
+  ) => {
+    setDeletingModels((prev) => new Set(prev).add(displayName));
+    try {
+      // Prefer explicit provider passed in, fall back to selectedSource
+      await modelService.deleteCustomModel(
+        displayName,
+        provider || selectedSource || undefined
+      );
+      let configUpdates: any = {};
+
+      // Check each model configuration, if currently using a deleted model, clear the configuration
+      if (modelConfig.llm.displayName === displayName) {
+        configUpdates.llm = {
+          modelName: "",
+          displayName: "",
+          apiConfig: { apiKey: "", modelUrl: "" },
+        };
+      }
+
+      if (modelConfig.embedding.displayName === displayName) {
+        configUpdates.embedding = {
+          modelName: "",
+          displayName: "",
+          apiConfig: { apiKey: "", modelUrl: "" },
+        };
+      }
+
+      if (modelConfig.multiEmbedding.displayName === displayName) {
+        configUpdates.multiEmbedding = {
+          modelName: "",
+          displayName: "",
+          apiConfig: { apiKey: "", modelUrl: "" },
+        };
+      }
+
+      if (modelConfig.rerank.displayName === displayName) {
+        configUpdates.rerank = { modelName: "", displayName: "" };
+      }
+
+      if (modelConfig.vlm.displayName === displayName) {
+        configUpdates.vlm = {
+          modelName: "",
+          displayName: "",
+          apiConfig: { apiKey: "", modelUrl: "" },
+        };
+      }
+
+      if (modelConfig.vlm2?.displayName === displayName) {
+        configUpdates.vlm2 = {
+          modelName: "",
+          displayName: "",
+          apiConfig: { apiKey: "", modelUrl: "" },
+        };
+      }
+
+      if (modelConfig.vlm3?.displayName === displayName) {
+        configUpdates.vlm3 = {
+          modelName: "",
+          displayName: "",
+          apiConfig: { apiKey: "", modelUrl: "" },
+        };
+      }
+
+      if (modelConfig.stt.displayName === displayName) {
+        configUpdates.stt = { modelName: "", displayName: "" };
+      }
+
+      if (modelConfig.tts.displayName === displayName) {
+        configUpdates.tts = { modelName: "", displayName: "" };
+      }
+
+      // If there are configurations to update, update localStorage
+      if (Object.keys(configUpdates).length > 0) {
+        updateModelConfig(configUpdates);
+      }
+
+      // Show success message
+      message.success(t("model.message.deleteSuccess", { name: displayName }));
+
+      // Directly call parent component's onSuccess callback to refresh model list
+      // This triggers a modelService.getCustomModels() call, avoiding duplicate requests
+      await onSuccess();
+
+      // Adjust hierarchical navigation based on remaining count after deletion
+      if (deletingModelType) {
+        const remainingByTypeAndSource = models.filter(
+          (model) =>
+            model.type === deletingModelType &&
+            (!selectedSource || model.source === selectedSource) &&
+            model.displayName !== displayName
+        );
+        if (selectedSource && remainingByTypeAndSource.length === 0) {
+          // No models under current source, return to source selection
+          setSelectedSource(null);
+        }
+        const remainingByType = models.filter(
+          (model) =>
+            model.type === deletingModelType &&
+            model.displayName !== displayName
+        );
+        if (remainingByType.length === 0) {
+          setDeletingModelType(null);
+        }
+      }
+    } catch (error) {
+      log.error(t("model.error.deleteError"), error);
+      message.error(t("model.message.deleteFailed", { name: displayName }));
+    } finally {
+      setDeletingModels((prev) => {
+        const next = new Set(prev);
+        next.delete(displayName);
+        return next;
+      });
+    }
+  };
+
+  // Handle closing dialog
+  const handleClose = () => {
+    setDeletingModelType(null);
+    setSelectedSource(null);
+    setProviderModels([]);
+    setPendingSelectedProviderIds(new Set());
+    setMaxTokens(0);
+    setProviderModelSearchTerm("");
+    onClose();
+  };
+  const filteredProviderModels = useMemo(() => {
+    const keyword = providerModelSearchTerm.trim().toLowerCase();
+    if (!keyword) {
+      return providerModels;
+    }
+    return providerModels.filter((model) => {
+      const candidates = [
+        model?.id,
+        model?.model_name,
+        model?.model_tag,
+        model?.description,
+      ];
+      return candidates.some(
+        (text) =>
+          typeof text === "string" && text.toLowerCase().includes(keyword)
+      );
+    });
+  }, [providerModels, providerModelSearchTerm]);
+
+  // Per-row required capacity gate for the provider-management batch confirm.
+  // Each enabled LLM/VLM row must resolve to positive context_window_tokens
+  // and max_output_tokens. The values may come from the provider catalog, the
+  // saved model record, the per-row gear modal, or the provider bulk config.
+  // Without this gate the user could batch-confirm a row whose catalog
+  // supplied no W2 metadata, persisting context_window_tokens=NULL and
+  // max_output_tokens=NULL.
+  //
+  // We deliberately don't fall back to model.max_tokens here: per the W1/W2
+  // plan the legacy column is unconditionally seeded by the provider
+  // adapters, so treating it as a stand-in would mask every missing W2 row.
+  const requiresW2Capacity = (modelType?: ModelType): boolean => {
+    if (!modelType) return false;
+    if (
+      modelType === MODEL_TYPES.EMBEDDING ||
+      modelType === MODEL_TYPES.MULTI_EMBEDDING
+    )
+      return false;
+    if (modelType === MODEL_TYPES.STT || modelType === MODEL_TYPES.TTS)
+      return false;
+    if (modelType === MODEL_TYPES.RERANK) return false;
+    return true;
+  };
+  const hasPositiveW2Capacity = (model: any): boolean =>
+    Number(model.context_window_tokens) > 0 &&
+    Number(model.max_output_tokens) > 0;
+
+  const hasUnconfiguredSelectedRow = useMemo(() => {
+    if (!requiresW2Capacity(deletingModelType as ModelType)) return false;
+    return providerModels.some((m: any) => {
+      if (!pendingSelectedProviderIds.has(m.id)) return false;
+      const resolvedModel = selectedSource
+        ? overlaySavedModelConfig(m, selectedSource, deletingModelType, {
+            preferProviderValues: true,
+          })
+        : m;
+      return !hasPositiveW2Capacity(resolvedModel);
+    });
+  }, [
+    providerModels,
+    pendingSelectedProviderIds,
+    deletingModelType,
+    selectedSource,
+    overlaySavedModelConfig,
+  ]);
+
+  // Handle provider config save. In addition to the shared API key /
+  // timeoutSeconds / concurrencyLimit, the "modify config" dialog now also
+  // exposes a top-level capacity panel (Tokenizer hidden) as a per-provider
+  // bulk-apply default, mirroring the batch-add UX. Any filled capacity
+  // field is forwarded to every model under (provider, model_type) so the
+  // user can fix glm-5.x style rows with NULL W2 columns from one place
+  // instead of opening N gear modals.
+  const handleProviderConfigSave = async ({
+    apiKey,
+    maxTokens,
+    timeoutSeconds,
+    concurrencyLimit,
+    contextWindowTokens,
+    maxInputTokens,
+    maxOutputTokens,
+    defaultOutputReserveTokens,
+    capacitySource,
+  }: {
+    apiKey?: string;
+    maxTokens: number;
+    timeoutSeconds?: number;
+    concurrencyLimit?: number;
+    contextWindowTokens?: number;
+    maxInputTokens?: number;
+    maxOutputTokens?: number;
+    defaultOutputReserveTokens?: number;
+    tokenizerFamily?: string;
+    capacitySource?: string;
+  }) => {
+    setMaxTokens(maxTokens);
+    if (
+      (selectedSource === MODEL_SOURCES.SILICON ||
+        selectedSource === MODEL_SOURCES.MODELENGINE ||
+        selectedSource === MODEL_SOURCES.DASHSCOPE ||
+        selectedSource === MODEL_SOURCES.TOKENPONY) &&
+      deletingModelType
+    ) {
+      try {
+        const currentIds = new Set(
+          models
+            .filter(
+              (m) =>
+                m.type === deletingModelType &&
+                m.source === (selectedSource as ModelSource)
+            )
+            .map((m) => m.name)
+        );
+
+        // Build payload items for the current provider models in required format
+        const currentModelPayloads = models
+          .filter(
+            (m) =>
+              m.type === deletingModelType &&
+              m.source === (selectedSource as ModelSource) &&
+              currentIds.has(m.name)
+          )
+          .map((m) => ({
+            model_id: String(m.id),
+            apiKey: apiKey ?? m.apiKey,
+            maxTokens: maxTokens || m.maxTokens,
+            ...(timeoutSeconds !== undefined ? { timeoutSeconds } : {}),
+            ...(concurrencyLimit !== undefined ? { concurrencyLimit } : {}),
+            // Only forward capacity fields the user actually filled in the
+            // bulk panel; omitted fields keep each model's existing value.
+            ...(contextWindowTokens !== undefined
+              ? { contextWindowTokens }
+              : {}),
+            ...(maxInputTokens !== undefined ? { maxInputTokens } : {}),
+            ...(maxOutputTokens !== undefined ? { maxOutputTokens } : {}),
+            ...(defaultOutputReserveTokens !== undefined
+              ? { defaultOutputReserveTokens }
+              : {}),
+            ...(capacitySource !== undefined ? { capacitySource } : {}),
+          }));
+
+        await modelService.updateBatchModel(
+          currentModelPayloads,
+          selectedSource as ModelSource
+        );
+
+        // Show success message since no exception was thrown
+        message.success(t("model.dialog.success.updateSuccess"));
+
+        // Synchronize providerModels state with the bulk values that landed,
+        // so the row gear modals show the new defaults next time they open.
+        setProviderModels((prev) =>
+          prev.map((model) => ({
+            ...model,
+            max_tokens: maxTokens || model.max_tokens,
+            timeout_seconds: timeoutSeconds || model.timeout_seconds,
+            concurrency_limit:
+              concurrencyLimit !== undefined
+                ? concurrencyLimit
+                : model.concurrency_limit,
+            ...(contextWindowTokens !== undefined
+              ? { context_window_tokens: contextWindowTokens }
+              : {}),
+            ...(maxInputTokens !== undefined
+              ? { max_input_tokens: maxInputTokens }
+              : {}),
+            ...(maxOutputTokens !== undefined
+              ? { max_output_tokens: maxOutputTokens }
+              : {}),
+            ...(defaultOutputReserveTokens !== undefined
+              ? { default_output_reserve_tokens: defaultOutputReserveTokens }
+              : {}),
+            ...(capacitySource !== undefined
+              ? { capacity_source: capacitySource }
+              : {}),
+          }))
+        );
+      } catch (e) {
+        message.error(t("model.dialog.error.noModelsFetched"));
+      }
+    }
+    await onSuccess();
+    if (selectedSource && deletingModelType) {
+      // Pass the just-saved apiKey directly instead of re-deriving it from
+      // `models` state, which may still be stale in this closure.
+      await prefetchProviderModels(
+        selectedSource,
+        deletingModelType,
+        apiKey
+      );
+    }
+    setIsProviderConfigOpen(false);
+  };
+
+  // Handle embedding model click to open config modal
+  const handleEmbeddingModelClick = (model: ModelOption | any) => {
+    const isEmbeddingModel =
+      model.type === MODEL_TYPES.EMBEDDING ||
+      model.type === MODEL_TYPES.MULTI_EMBEDDING ||
+      model.model_type === MODEL_TYPES.EMBEDDING ||
+      model.model_type === MODEL_TYPES.MULTI_EMBEDDING;
+    if (isEmbeddingModel) {
+      // If it's a providerModel (not yet added to system), find the corresponding model in models list
+      if (model.id && !model.name) {
+        // This is a providerModel, find the corresponding model in models list
+        const existingModel = models.find(
+          (m) =>
+            m.name === model.id &&
+            m.type === (model.model_type || deletingModelType) &&
+            m.source === selectedSource
+        );
+        if (existingModel) {
+          setSelectedEmbeddingModel(existingModel);
+          setChunkSizeRange([
+            existingModel.expectedChunkSize || DEFAULT_EXPECTED_CHUNK_SIZE,
+            existingModel.maximumChunkSize || DEFAULT_MAXIMUM_CHUNK_SIZE,
+          ]);
+          setChunkingBatchSize(
+            (existingModel.chunkingBatchSize || 10).toString()
+          );
+        } else {
+          // Model not yet added, use default values
+          setSelectedEmbeddingModel({
+            ...model,
+            name: model.id,
+            displayName: model.id,
+            type: model.model_type || deletingModelType,
+            source: selectedSource,
+            expectedChunkSize: DEFAULT_EXPECTED_CHUNK_SIZE,
+            maximumChunkSize: DEFAULT_MAXIMUM_CHUNK_SIZE,
+            chunkingBatchSize: 10,
+          } as ModelOption);
+          setChunkSizeRange([
+            DEFAULT_EXPECTED_CHUNK_SIZE,
+            DEFAULT_MAXIMUM_CHUNK_SIZE,
+          ]);
+          setChunkingBatchSize("10");
+        }
+      } else {
+        // This is a ModelOption from models list
+        setSelectedEmbeddingModel(model);
+        setChunkSizeRange([
+          model.expectedChunkSize || DEFAULT_EXPECTED_CHUNK_SIZE,
+          model.maximumChunkSize || DEFAULT_MAXIMUM_CHUNK_SIZE,
+        ]);
+        setChunkingBatchSize((model.chunkingBatchSize || 10).toString());
+      }
+      setEmbeddingConfigModalVisible(true);
+    }
+  };
+
+  // Handle single model settings button click
+  const handleSingleModelSettingsClick = (model: any) => {
+    setSelectedSingleModel(model);
+    setIsSingleModelSettingsOpen(true);
+  };
+
+  // Handle embedding config save
+  const handleEmbeddingConfigSave = async () => {
+    if (!selectedEmbeddingModel) return;
+
+    setSavingEmbeddingConfig(true);
+    try {
+      // Get the display name - use the one from existing model if available
+      const displayName =
+        selectedEmbeddingModel.displayName || selectedEmbeddingModel.name;
+      const apiKey =
+        selectedEmbeddingModel.apiKey ||
+        getApiKeyByType(
+          deletingModelType,
+          (selectedEmbeddingModel?.source as ModelSource) ||
+            selectedSource ||
+            undefined
+        );
+
+      await modelService.updateSingleModel({
+        currentDisplayName: displayName,
+        url: selectedEmbeddingModel.apiUrl || "",
+        apiKey: apiKey || "sk-no-api-key",
+        source: selectedEmbeddingModel.source || selectedSource,
+        expectedChunkSize: chunkSizeRange[0],
+        maximumChunkSize: chunkSizeRange[1],
+        chunkingBatchSize: parseInt(chunkingBatchSize) || 10,
+      });
+
+      message.success(t("model.dialog.editSuccess"));
+      setEmbeddingConfigModalVisible(false);
+      setSelectedEmbeddingModel(null);
+      // Refresh model list to reflect changes
+      await onSuccess();
+    } catch (error: any) {
+      log.error("Failed to save embedding model config:", error);
+      if (error.code === 404) {
+        message.error(t("model.dialog.error.modelNotFound"));
+      } else if (error.code === 500) {
+        message.error(t("model.dialog.error.serverError"));
+      } else {
+        message.error(t("model.dialog.error.editFailed"));
+      }
+    } finally {
+      setSavingEmbeddingConfig(false);
+    }
+  };
+
+  return (
+    // Refactor: Styles are embedded within the component
+    <Modal
+      title={t("model.dialog.edit.title")}
+      open={isOpen}
+      onCancel={handleClose}
+      footer={[
+        <Button key="close" onClick={handleClose}>
+          {t("common.button.close")}
+        </Button>,
+        // Only show confirm button when displaying model details (silicon and openai sources)
+        selectedSource &&
+          selectedSource !== MODEL_SOURCES.OPENAI_API_COMPATIBLE &&
+          deletingModelType && (
+            <Tooltip
+              key="confirm-tooltip"
+              title={
+                hasUnconfiguredSelectedRow
+                  ? t("model.dialog.batch.requireRowCapacity")
+                  : ""
+              }
+            >
+              <Button
+                key="confirm"
+                type="primary"
+                loading={isConfirmLoading}
+                disabled={hasUnconfiguredSelectedRow}
+                onClick={async () => {
+                  setIsConfirmLoading(true);
+                  try {
+                    // Handle changes for both silicon and openai sources
+                    if (
+                      selectedSource === MODEL_SOURCES.SILICON &&
+                      deletingModelType
+                    ) {
+                      try {
+                        // Get all currently enabled models (including originally enabled and newly enabled ones)
+                        const allEnabledModels = providerModels.filter(
+                          (pm: any) => pendingSelectedProviderIds.has(pm.id)
+                        );
+
+                        if (allEnabledModels) {
+                          const apiKey = getApiKeyByType(
+                            deletingModelType,
+                            MODEL_SOURCES.SILICON
+                          );
+                          const isEmbeddingType =
+                            deletingModelType === MODEL_TYPES.EMBEDDING ||
+                            deletingModelType === MODEL_TYPES.MULTI_EMBEDDING;
+                          // Pass all currently enabled models
+                          // For embedding/multi_embedding models, explicitly exclude max_tokens as backend will set it via connectivity check
+                          await modelService.addBatchCustomModel({
+                            api_key:
+                              apiKey && apiKey.trim() !== ""
+                                ? apiKey
+                                : "sk-no-api-key",
+                            provider: MODEL_SOURCES.SILICON,
+                            type: deletingModelType,
+                            models: allEnabledModels.map((model) => {
+                              if (isEmbeddingType) {
+                                const { max_tokens, ...modelWithoutMaxTokens } =
+                                  model;
+                                return modelWithoutMaxTokens;
+                              } else {
+                                return {
+                                  ...model,
+                                  max_tokens: model.max_tokens,
+                                };
+                              }
+                            }),
+                          });
+                        }
+
+                        // Refresh list
+                        await onSuccess();
+                        // Re-fetch provider models and sync switch states
+                        await prefetchProviderModels(
+                          selectedSource,
+                          deletingModelType
+                        );
+                        message.success(
+                          t("model.dialog.success.updateSuccess")
+                        );
+                        // Close dialog
+                        handleClose();
+                      } catch (e) {
+                        log.error("Failed to apply model updates", e);
+                        message.error(
+                          t("model.dialog.error.addFailed", { error: e as any })
+                        );
+                      }
+                    } else if (
+                      selectedSource === MODEL_SOURCES.MODELENGINE &&
+                      deletingModelType
+                    ) {
+                      try {
+                        const allEnabledModels = providerModels.filter(
+                          (pm: any) => pendingSelectedProviderIds.has(pm.id)
+                        );
+
+                        if (allEnabledModels) {
+                          const apiKey = getApiKeyByType(
+                            deletingModelType,
+                            MODEL_SOURCES.MODELENGINE
+                          );
+                          const isEmbeddingType =
+                            deletingModelType === MODEL_TYPES.EMBEDDING ||
+                            deletingModelType === MODEL_TYPES.MULTI_EMBEDDING;
+                          await modelService.addBatchCustomModel({
+                            api_key:
+                              apiKey && apiKey.trim() !== ""
+                                ? apiKey
+                                : "sk-no-api-key",
+                            provider: MODEL_SOURCES.MODELENGINE,
+                            type: deletingModelType,
+                            models: allEnabledModels.map((model) => {
+                              if (isEmbeddingType) {
+                                const { max_tokens, ...modelWithoutMaxTokens } =
+                                  model;
+                                return modelWithoutMaxTokens;
+                              } else {
+                                return {
+                                  ...model,
+                                  max_tokens: model.max_tokens,
+                                };
+                              }
+                            }),
+                          });
+                        }
+
+                        await onSuccess();
+                        await prefetchProviderModels(
+                          selectedSource,
+                          deletingModelType
+                        );
+                        message.success(
+                          t("model.dialog.success.updateSuccess")
+                        );
+                        handleClose();
+                      } catch (e) {
+                        log.error(
+                          "Failed to apply ModelEngine model updates",
+                          e
+                        );
+                        message.error(
+                          t("model.dialog.error.addFailed", { error: e as any })
+                        );
+                      }
+                    } else if (
+                      selectedSource === MODEL_SOURCES.DASHSCOPE &&
+                      deletingModelType
+                    ) {
+                      try {
+                        const allEnabledModels = providerModels.filter(
+                          (pm: any) => pendingSelectedProviderIds.has(pm.id)
+                        );
+
+                        if (allEnabledModels) {
+                          const apiKey = getApiKeyByType(
+                            deletingModelType,
+                            MODEL_SOURCES.DASHSCOPE
+                          );
+                          const isEmbeddingType =
+                            deletingModelType === MODEL_TYPES.EMBEDDING ||
+                            deletingModelType === MODEL_TYPES.MULTI_EMBEDDING;
+                          await modelService.addBatchCustomModel({
+                            api_key:
+                              apiKey && apiKey.trim() !== ""
+                                ? apiKey
+                                : "sk-no-api-key",
+                            provider: MODEL_SOURCES.DASHSCOPE,
+                            type: deletingModelType,
+                            models: allEnabledModels.map((model) => {
+                              if (isEmbeddingType) {
+                                const { max_tokens, ...modelWithoutMaxTokens } =
+                                  model;
+                                return modelWithoutMaxTokens;
+                              } else {
+                                return {
+                                  ...model,
+                                  max_tokens: model.max_tokens,
+                                };
+                              }
+                            }),
+                          });
+                        }
+
+                        await onSuccess();
+                        await prefetchProviderModels(
+                          selectedSource,
+                          deletingModelType
+                        );
+                        message.success(
+                          t("model.dialog.success.updateSuccess")
+                        );
+                        handleClose();
+                      } catch (e) {
+                        log.error("Failed to apply DashScope model updates", e);
+                        message.error(
+                          t("model.dialog.error.addFailed", { error: e as any })
+                        );
+                      }
+                    } else if (
+                      selectedSource === MODEL_SOURCES.TOKENPONY &&
+                      deletingModelType
+                    ) {
+                      try {
+                        const allEnabledModels = providerModels.filter(
+                          (pm: any) => pendingSelectedProviderIds.has(pm.id)
+                        );
+
+                        if (allEnabledModels) {
+                          const apiKey = getApiKeyByType(
+                            deletingModelType,
+                            MODEL_SOURCES.TOKENPONY
+                          );
+                          const isEmbeddingType =
+                            deletingModelType === MODEL_TYPES.EMBEDDING ||
+                            deletingModelType === MODEL_TYPES.MULTI_EMBEDDING;
+                          await modelService.addBatchCustomModel({
+                            api_key:
+                              apiKey && apiKey.trim() !== ""
+                                ? apiKey
+                                : "sk-no-api-key",
+                            provider: MODEL_SOURCES.TOKENPONY,
+                            type: deletingModelType,
+                            models: allEnabledModels.map((model) => {
+                              if (isEmbeddingType) {
+                                const { max_tokens, ...modelWithoutMaxTokens } =
+                                  model;
+                                return modelWithoutMaxTokens;
+                              } else {
+                                return {
+                                  ...model,
+                                  max_tokens: model.max_tokens,
+                                };
+                              }
+                            }),
+                          });
+                        }
+
+                        await onSuccess();
+                        await prefetchProviderModels(
+                          selectedSource,
+                          deletingModelType
+                        );
+                        message.success(
+                          t("model.dialog.success.updateSuccess")
+                        );
+                        handleClose();
+                      } catch (e) {
+                        log.error("Failed to apply TokenPony model updates", e);
+                        message.error(
+                          t("model.dialog.error.addFailed", { error: e as any })
+                        );
+                      }
+                    } else if (
+                      selectedSource === MODEL_SOURCES.OPENAI &&
+                      deletingModelType
+                    ) {
+                      try {
+                        // For OpenAI source, just refresh the list and close dialog
+                        await onSuccess();
+                        message.success(
+                          t("model.dialog.success.updateSuccess")
+                        );
+                        handleClose();
+                      } catch (e) {
+                        log.error("Failed to apply OpenAI model updates", e);
+                        message.error(
+                          t("model.dialog.error.addFailed", { error: e as any })
+                        );
+                      }
+                    }
+                  } finally {
+                    setIsConfirmLoading(false);
+                  }
+                }}
+              >
+                {t("common.confirm")}
+              </Button>
+            </Tooltip>
+          ),
+      ]}
+      width={520}
+      destroyOnHidden
+    >
+      {!deletingModelType ? (
+        <div className="space-y-4">
+          <p className="text-sm text-gray-600 mb-4">
+            {t("model.dialog.edit.selectType")}
+          </p>
+
+          <div className="grid grid-cols-1 gap-2">
+            {(
+              [
+                MODEL_TYPES.LLM,
+                MODEL_TYPES.EMBEDDING,
+                MODEL_TYPES.MULTI_EMBEDDING,
+                MODEL_TYPES.RERANK,
+                MODEL_TYPES.VLM,
+                MODEL_TYPES.VLM2,
+                MODEL_TYPES.VLM3,
+                MODEL_TYPES.STT,
+                MODEL_TYPES.TTS,
+              ] as ModelType[]
+            ).map((type) => {
+              const modelsByType = models.filter(
+                (model) => model.type === type
+              );
+              const colorScheme = getModelColorScheme(type);
+
+              if (modelsByType.length === 0) return null;
+
+              return (
+                <button
+                  key={type}
+                  onClick={() => {
+                    setDeletingModelType(type);
+                    setSelectedSource(null);
+                    setProviderModelSearchTerm("");
+                    // Initialize maxTokens with a value from existing models of this type
+                    const existingModel = models.find(
+                      (model) => model.type === type
+                    );
+                    setMaxTokens(existingModel?.maxTokens || 0);
+                  }}
+                  className={`p-3 flex justify-between rounded-md border transition-colors ${
+                    colorScheme.border
+                  } ${colorScheme.bg} hover:bg-opacity-80`}
+                >
+                  <div className="flex items-center">
+                    <div
+                      className={`w-8 h-8 rounded-md flex items-center justify-center mr-3 ${colorScheme.text}`}
+                    >
+                      {getModelIcon(type)}
+                    </div>
+                    <div className="flex flex-col text-left">
+                      <div className="font-medium">
+                        {getModelTypeName(type)}
+                      </div>
+                      <div className="text-xs text-gray-500">
+                        {t("model.dialog.delete.customModelCount", {
+                          count: modelsByType.length,
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                  <ChevronRight size={24} className="self-center" />
+                </button>
+              );
+            })}
+          </div>
+
+          {models.length === 0 && (
+            <div className="text-center py-8 text-gray-500">
+              {t("model.dialog.delete.noModels")}
+            </div>
+          )}
+        </div>
+      ) : selectedSource === null ? (
+        <div className="space-y-4">
+          <div className="flex items-center mb-2">
+            <button
+              onClick={() => setDeletingModelType(null)}
+              className="text-blue-500 hover:text-blue-700 flex items-center"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                className="h-5 w-5 mr-1"
+                viewBox="0 0 20 20"
+                fill="currentColor"
+              >
+                <path
+                  fillRule="evenodd"
+                  d="M9.707 16.707a1 1 0 01-1.414 0l-6-6a1 1 0 010-1.414l6-6a1 1 0 011.414 1.414L5.414 9H17a1 1 0 110 2H5.414l4.293 4.293a1 1 0 010 1.414z"
+                  clipRule="evenodd"
+                />
+              </svg>
+              {t("common.back")}
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 gap-2">
+            {(
+              [
+                MODEL_SOURCES.MODELENGINE,
+                MODEL_SOURCES.OPENAI,
+                MODEL_SOURCES.SILICON,
+                MODEL_SOURCES.OPENAI_API_COMPATIBLE,
+                MODEL_SOURCES.DASHSCOPE,
+                MODEL_SOURCES.TOKENPONY,
+                MODEL_SOURCES.VOLCENGINE,
+              ] as ModelSource[]
+            ).map((source) => {
+              const modelsOfSource = models.filter(
+                (model) =>
+                  model.type === deletingModelType && model.source === source
+              );
+              if (modelsOfSource.length === 0) return null;
+              const colorScheme = getSourceColorScheme(source);
+              const isLoading = loadingSource === source;
+              return (
+                <button
+                  key={source}
+                  onClick={() => handleSourceSelect(source)}
+                  disabled={isLoading}
+                  className={`p-3 flex justify-between rounded-md border transition-colors ${
+                    colorScheme.border
+                  } ${colorScheme.bg} hover:bg-opacity-80 ${
+                    isLoading ? "opacity-60 cursor-not-allowed" : ""
+                  }`}
+                >
+                  <div className="flex items-center">
+                    <div
+                      className={`w-8 h-8 rounded-md flex items-center justify-center mr-3 ${colorScheme.text}`}
+                    >
+                      {isLoading ? (
+                        <svg
+                          className="animate-spin h-5 w-5"
+                          xmlns="http://www.w3.org/2000/svg"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                        >
+                          <circle
+                            className="opacity-25"
+                            cx="12"
+                            cy="12"
+                            r="10"
+                            stroke="currentColor"
+                            strokeWidth="4"
+                          ></circle>
+                          <path
+                            className="opacity-75"
+                            fill="currentColor"
+                            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                          ></path>
+                        </svg>
+                      ) : (
+                        getSourceIcon(source)
+                      )}
+                    </div>
+                    <div className="flex flex-col text-left">
+                      <div className="font-medium">{getSourceName(source)}</div>
+                      <div className="text-xs text-gray-500">
+                        {t("model.dialog.delete.customModelCount", {
+                          count: modelsOfSource.length,
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                  <ChevronRight size={24} className="self-center" />
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ) : (
+        <div>
+          <div className="flex items-center justify-between mb-4">
+            <button
+              onClick={() => {
+                setSelectedSource(null);
+                setProviderModels([]);
+                setProviderModelSearchTerm("");
+              }}
+              className="text-blue-500 hover:text-blue-700 flex items-center"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                className="h-5 w-5 mr-1"
+                viewBox="0 0 20 20"
+                fill="currentColor"
+              >
+                <path
+                  fillRule="evenodd"
+                  d="M9.707 16.707a1 1 0 01-1.414 0l-6-6a1 1 0 010-1.414l6-6a1 1 0 011.414 1.414L5.414 9H17a1 1 0 110 2H5.414l4.293 4.293a1 1 0 010 1.414z"
+                  clipRule="evenodd"
+                />
+              </svg>
+              {t("common.back")}
+            </button>
+
+            {(selectedSource === MODEL_SOURCES.SILICON ||
+              selectedSource === MODEL_SOURCES.MODELENGINE ||
+              selectedSource === MODEL_SOURCES.DASHSCOPE ||
+              selectedSource === MODEL_SOURCES.TOKENPONY) && (
+              <div className="flex gap-2">
+                <Button
+                  size="small"
+                  icon={<RefreshCw className="text-blue-500" size={16} />}
+                  onClick={async () => {
+                    if (
+                      (selectedSource === MODEL_SOURCES.SILICON ||
+                        selectedSource === MODEL_SOURCES.MODELENGINE ||
+                        selectedSource === MODEL_SOURCES.DASHSCOPE ||
+                        selectedSource === MODEL_SOURCES.TOKENPONY) &&
+                      deletingModelType
+                    ) {
+                      try {
+                        await prefetchProviderModels(
+                          selectedSource as ModelSource,
+                          deletingModelType
+                        );
+                        message.success(t("common.message.refreshSuccess"));
+                      } catch (error) {
+                        message.error(t("common.message.refreshFailed"));
+                      }
+                    }
+                  }}
+                  className="border-none shadow-none hover:bg-blue-50"
+                ></Button>
+                <Button
+                  size="small"
+                  onClick={() => setIsProviderConfigOpen(true)}
+                >
+                  {t("common.button.editConfig")}
+                </Button>
+              </div>
+            )}
+          </div>
+
+          {(selectedSource === MODEL_SOURCES.SILICON ||
+            selectedSource === MODEL_SOURCES.MODELENGINE ||
+            selectedSource === MODEL_SOURCES.DASHSCOPE ||
+            selectedSource === MODEL_SOURCES.TOKENPONY) &&
+          providerModels.length > 0 ? (
+            <div className="max-h-60 overflow-y-auto border border-gray-200 rounded-md divide-y divide-gray-200">
+              {providerModels.length > 0 && (
+                <div className="sticky top-0 z-10 bg-white p-2">
+                  <Input
+                    allowClear
+                    size="small"
+                    placeholder={t("model.dialog.modelList.searchPlaceholder")}
+                    value={providerModelSearchTerm}
+                    onChange={(event) =>
+                      setProviderModelSearchTerm(event.target.value)
+                    }
+                  />
+                </div>
+              )}
+              {filteredProviderModels.length === 0 && (
+                <div className="p-4 text-center text-xs text-gray-500">
+                  {t("model.dialog.modelList.noResults")}
+                </div>
+              )}
+              {filteredProviderModels.map((providerModel: any) => {
+                const checked = pendingSelectedProviderIds.has(
+                  providerModel.id
+                );
+                const isEmbeddingModel =
+                  deletingModelType === MODEL_TYPES.EMBEDDING ||
+                  deletingModelType === MODEL_TYPES.MULTI_EMBEDDING ||
+                  providerModel.model_type === MODEL_TYPES.EMBEDDING ||
+                  providerModel.model_type === MODEL_TYPES.MULTI_EMBEDDING;
+                // Check if this model is already added to the system
+                const existingModel = models.find(
+                  (m) =>
+                    m.name === providerModel.id &&
+                    m.type ===
+                      (providerModel.model_type || deletingModelType) &&
+                    m.source === selectedSource
+                );
+                const canEditEmbedding = isEmbeddingModel && existingModel;
+                const isBareCapacity = existingModel
+                  ? bareCapacityModelIds.has(existingModel.id)
+                  : false;
+                const hasSuggestion = existingModel
+                  ? suggestionAvailableModelIds.has(existingModel.id)
+                  : false;
+
+                return (
+                  <div
+                    key={providerModel.id}
+                    className={`p-2 flex justify-between items-center hover:bg-gray-50 text-sm ${
+                      canEditEmbedding ? "cursor-pointer" : ""
+                    }`}
+                  >
+                    <div
+                      className="flex items-center min-w-0 flex-1"
+                      onClick={
+                        canEditEmbedding
+                          ? () => handleEmbeddingModelClick(providerModel)
+                          : undefined
+                      }
+                    >
+                      <span className="truncate" title={providerModel.id}>
+                        {providerModel.id}
+                      </span>
+                      {providerModel.model_type && (
+                        <span className="ml-2 px-1.5 py-0.5 text-xs rounded bg-gray-200 text-gray-600 uppercase">
+                          {String(providerModel.model_tag)}
+                        </span>
+                      )}
+                      {isBareCapacity && existingModel && (
+                        <span className="ml-2 px-1.5 py-0.5 text-xs rounded bg-yellow-100 text-yellow-700 border border-yellow-200">
+                          {t("model.list.capacityWarning.tag")}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      {deletingModelType !== MODEL_TYPES.EMBEDDING &&
+                        deletingModelType !== MODEL_TYPES.MULTI_EMBEDDING &&
+                        deletingModelType !== MODEL_TYPES.STT && (
+                          <Tooltip
+                            title={t("model.dialog.modelList.tooltip.settings")}
+                          >
+                            <Button
+                              type="text"
+                              icon={<Settings size={16} />}
+                              size="small"
+                              onClick={(e) => {
+                                e.stopPropagation(); // Prevent switch toggle
+                                // The provider catalog entry carries snake_case
+                                // ids and (sometimes) a default max_tokens, but
+                                // never the user's saved capacity columns. When
+                                // the model has already been added, overlay the
+                                // saved ModelOption (camelCase) onto the catalog
+                                // row in snake_case so the edit dialog
+                                // pre-fills context_window_tokens etc. instead
+                                // of showing empty fields.
+                                const settingsTarget = selectedSource
+                                  ? overlaySavedModelConfig(
+                                      providerModel,
+                                      selectedSource,
+                                      deletingModelType,
+                                      { preferProviderValues: true }
+                                    )
+                                  : providerModel;
+                                handleSingleModelSettingsClick(settingsTarget);
+                              }}
+                            />
+                          </Tooltip>
+                        )}
+                      <Switch
+                        size="small"
+                        checked={checked}
+                        onChange={(value, event) => {
+                          // Ensure toggling switch never triggers the row click handler
+                          if (
+                            event &&
+                            typeof event.stopPropagation === "function"
+                          ) {
+                            event.stopPropagation();
+                          }
+                          setPendingSelectedProviderIds((prev) => {
+                            const next = new Set(prev);
+                            if (value) {
+                              next.add(providerModel.id);
+                            } else {
+                              next.delete(providerModel.id);
+                            }
+                            return next;
+                          });
+                        }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="max-h-60 overflow-y-auto border border-gray-200 rounded-md divide-y divide-gray-200">
+              {models
+                .filter(
+                  (model) =>
+                    model.type === deletingModelType &&
+                    model.source === selectedSource
+                )
+                .map((model) => {
+                  const isEmbeddingModel =
+                    model.type === MODEL_TYPES.EMBEDDING ||
+                    model.type === MODEL_TYPES.MULTI_EMBEDDING;
+                  // Only allow clicking for batch-imported embedding models (not custom models)
+                  const isBatchImportedEmbedding =
+                    isEmbeddingModel &&
+                    selectedSource !== MODEL_SOURCES.OPENAI_API_COMPATIBLE;
+                  // Custom models can still be clicked to edit full model config
+                  const isCustomModelClickable =
+                    selectedSource === MODEL_SOURCES.OPENAI_API_COMPATIBLE;
+                  const isClickable =
+                    isBatchImportedEmbedding || isCustomModelClickable;
+                  const isBareCapacity = bareCapacityModelIds.has(model.id);
+                  const hasSuggestion = suggestionAvailableModelIds.has(
+                    model.id
+                  );
+
+                  return (
+                    <div
+                      key={model.name}
+                      onClick={
+                        isClickable
+                          ? () =>
+                              isBatchImportedEmbedding
+                                ? handleEmbeddingModelClick(model)
+                                : handleEditModel(model)
+                          : undefined
+                      }
+                      className={`p-2 flex justify-between items-center hover:bg-gray-50 text-sm ${
+                        isClickable ? "cursor-pointer" : ""
+                      }`}
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div
+                          className="font-medium truncate"
+                          title={model.name}
+                        >
+                          {model.displayName || model.name} ({model.name})
+                        </div>
+                        {isBareCapacity && (
+                          <span className="mt-1 inline-flex w-fit px-1.5 py-0.5 text-xs rounded bg-yellow-100 text-yellow-700 border border-yellow-200">
+                            {t("model.list.capacityWarning.tag")}
+                          </span>
+                        )}
+                      </div>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteModel(
+                            model.displayName || model.name,
+                            model.source
+                          );
+                        }}
+                        disabled={deletingModels.has(
+                          model.displayName || model.name
+                        )}
+                        className="p-1 text-red-500 hover:text-red-700"
+                        title={t("model.dialog.delete.deleteHint")}
+                      >
+                        {deletingModels.has(model.displayName || model.name) ? (
+                          <svg
+                            className="animate-spin h-5 w-5"
+                            xmlns="http://www.w3.org/2000/svg"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                          >
+                            <circle
+                              className="opacity-25"
+                              cx="12"
+                              cy="12"
+                              r="10"
+                              stroke="currentColor"
+                              strokeWidth="4"
+                            ></circle>
+                            <path
+                              className="opacity-75"
+                              fill="currentColor"
+                              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                            ></path>
+                          </svg>
+                        ) : (
+                          <Trash size={16} />
+                        )}
+                      </button>
+                    </div>
+                  );
+                })}
+
+              {models.filter(
+                (model) =>
+                  model.type === deletingModelType &&
+                  model.source === selectedSource
+              ).length === 0 && (
+                <div className="p-4 text-center text-gray-500">
+                  {t("model.dialog.delete.noModelsOfType", {
+                    type: getModelTypeName(deletingModelType),
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="mt-4 p-3 bg-yellow-50 border border-yellow-100 rounded-md text-xs text-yellow-700">
+            <div>
+              <div className="flex items-center mb-1">
+                <ExclamationCircleFilled className="text-md text-yellow-500 mr-3" />
+                <p className="font-bold text-medium">{t("common.notice")}</p>
+              </div>
+              <p className="mt-0.5 ml-6">
+                {selectedSource === "OpenAI-API-Compatible"
+                  ? t("model.dialog.delete.warning")
+                  : t("model.dialog.edit.warning")}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Edit model dialog */}
+      {/* key forces full unmount/remount when model changes, preventing
+          stale capacitySuggestion state from flashing on the first render
+          before the [model] effect clears it. Without key, the component
+          returns null (line 559) but never unmounts, so useState keeps
+          the previous model's suggestion alive for one render cycle. */}
+      <ModelEditDialog
+        key={editModel?.displayName || "__none__"}
+        isOpen={!!editModel}
+        model={editModel}
+        onClose={() => setEditModel(null)}
+        onSuccess={async () => {
+          await onSuccess();
+          // After closing, if the current list type is empty, go back one level
+          if (
+            editModel &&
+            deletingModelType &&
+            editModel.type !== deletingModelType
+          ) {
+            setDeletingModelType(null);
+          }
+        }}
+      />
+      {/* key forces full unmount/remount whenever the dialog is (re)opened
+          for a given type/source, so the internal apiKey/maxTokens/etc
+          state always initializes from the latest initialApiKey prop. Without
+          this, the component stays mounted across opens and relies on the
+          [initialApiKey, ...] effect dependency diff to resync -- if that
+          diff doesn't trigger at the right time relative to the parent's
+          models refresh, the API key input can keep showing a stale value
+          after the user saves and reopens the dialog. */}
+      <ProviderConfigEditDialog
+        key={`${selectedSource || "__none__"}-${deletingModelType || "__none__"}-${isProviderConfigOpen}`}
+        isOpen={isProviderConfigOpen}
+        onClose={() => setIsProviderConfigOpen(false)}
+        initialApiKey={getApiKeyByType(
+          deletingModelType,
+          selectedSource || undefined
+        )}
+        initialMaxTokens={
+          models
+            .find(
+              (m) =>
+                m.type === deletingModelType &&
+                m.source === (selectedSource || MODEL_SOURCES.SILICON)
+            )
+            ?.maxTokens?.toString() || ""
+        }
+        initialTimeoutSeconds={
+          models
+            .find(
+              (m) =>
+                m.type === deletingModelType &&
+                m.source === (selectedSource || MODEL_SOURCES.SILICON)
+            )
+            ?.timeoutSeconds?.toString() || "120"
+        }
+        initialConcurrencyLimit={
+          models
+            .find(
+              (m) =>
+                m.type === deletingModelType &&
+                m.source === (selectedSource || MODEL_SOURCES.SILICON)
+            )
+            ?.concurrencyLimit?.toString() || ""
+        }
+        modelType={deletingModelType || undefined}
+        hideCapacityFields={true}
+        onSave={handleProviderConfigSave}
+      />
+
+      {/* Single Model Settings Modal */}
+      <ProviderConfigEditDialog
+        isOpen={isSingleModelSettingsOpen}
+        onClose={() => {
+          setIsSingleModelSettingsOpen(false);
+          setSelectedSingleModel(null);
+        }}
+        initialMaxTokens={selectedSingleModel?.max_tokens?.toString() || ""}
+        initialTimeoutSeconds={
+          selectedSingleModel?.timeout_seconds?.toString() || "120"
+        }
+        initialConcurrencyLimit={
+          selectedSingleModel?.concurrency_limit?.toString() || ""
+        }
+        initialCapacity={
+          selectedSingleModel
+            ? {
+                contextWindowTokens: selectedSingleModel.context_window_tokens,
+                maxInputTokens: selectedSingleModel.max_input_tokens,
+                maxOutputTokens: selectedSingleModel.max_output_tokens,
+                // Legacy max_tokens is promoted to maxOutputTokens by
+                // capacityFormFromModel; pass it through so the deprecation
+                // warning auto-resolves when the user opens the dialog.
+                maxTokens: selectedSingleModel.max_tokens,
+                defaultOutputReserveTokens:
+                  selectedSingleModel.default_output_reserve_tokens,
+                tokenizerFamily: selectedSingleModel.tokenizer_family,
+                capacitySource: selectedSingleModel.capacity_source,
+                capabilityProfileVersion:
+                  selectedSingleModel.capability_profile_version,
+              }
+            : undefined
+        }
+        modelType={deletingModelType || undefined}
+        showApiKeyField={false}
+        modelName={
+          selectedSingleModel?.model_name ||
+          selectedSingleModel?.name ||
+          selectedSingleModel?.id ||
+          ""
+        }
+        baseUrl={getProviderBaseUrlByType(deletingModelType) || ""}
+        providerHint={
+          selectedSingleModel?.model_factory || selectedSource || ""
+        }
+        onSave={async (config) => {
+          if (!selectedSingleModel) return;
+          try {
+            // batch_update_models_for_tenant looks the row up by either a
+            // numeric model_id or a "model_factory/model_name" composite key
+            // (it splits on "/" and passes the prefix as model_factory).
+            // Sending just `model_name` here matched no row in production
+            // because DB rows have model_factory="dashscope" (etc.) and the
+            // missing prefix made get_model_by_name_factory return None --
+            // the gear modal's capacity edits became silent no-ops, which
+            // contributed to the glm-5.x / glm-4.7 soft-delete incident.
+            const baseName =
+              selectedSingleModel.model_name || selectedSingleModel.id;
+            const provider =
+              selectedSingleModel.model_factory || selectedSource;
+            const qualifiedId =
+              baseName && typeof baseName === "string" && baseName.includes("/")
+                ? baseName
+                : provider
+                  ? `${provider}/${baseName}`
+                  : baseName;
+
+            const updatePayload: any = {
+              model_id: selectedSingleModel.saved_model_id
+                ? String(selectedSingleModel.saved_model_id)
+                : qualifiedId,
+              maxTokens: config.maxTokens,
+              timeoutSeconds: config.timeoutSeconds,
+              concurrencyLimit: config.concurrencyLimit,
+              contextWindowTokens: config.contextWindowTokens,
+              maxInputTokens: config.maxInputTokens,
+              maxOutputTokens: config.maxOutputTokens,
+              defaultOutputReserveTokens: config.defaultOutputReserveTokens,
+              tokenizerFamily: config.tokenizerFamily,
+              capacitySource: config.capacitySource,
+              ...(config.acceptedSuggestionMatchKind
+                ? {
+                    accepted_suggestion_match_kind:
+                      config.acceptedSuggestionMatchKind,
+                  }
+                : {}),
+              ...(config.acceptedCapabilityProfileVersion
+                ? {
+                    accepted_capability_profile_version:
+                      config.acceptedCapabilityProfileVersion,
+                  }
+                : {}),
+            };
+
+            if (config.apiKey) {
+              updatePayload.apiKey = config.apiKey;
+            }
+
+            await modelService.updateBatchModel([updatePayload], provider);
+
+            // Update the model in the list
+            setProviderModels((prev) =>
+              prev.map((model) =>
+                model.id === selectedSingleModel.id
+                  ? {
+                      ...model,
+                      max_tokens: config.maxTokens,
+                      timeout_seconds: config.timeoutSeconds,
+                      concurrency_limit: config.concurrencyLimit,
+                      context_window_tokens: config.contextWindowTokens,
+                      max_input_tokens: config.maxInputTokens,
+                      max_output_tokens: config.maxOutputTokens,
+                      default_output_reserve_tokens:
+                        config.defaultOutputReserveTokens,
+                      tokenizer_family: config.tokenizerFamily,
+                      capacity_source: config.capacitySource,
+                      saved_model_id: selectedSingleModel.saved_model_id,
+                      model_factory: provider || model.model_factory,
+                    }
+                  : model
+              )
+            );
+
+            await onSuccess();
+
+            message.success(
+              t("model.message.updateSuccess") || "Update successful"
+            );
+          } catch (error) {
+            console.error("Failed to update model settings:", error);
+            message.error(
+              t("model.message.updateFailed") || "Failed to update settings"
+            );
+          }
+        }}
+      />
+
+      {/* Embedding Model Config Modal */}
+      <Modal
+        title={t("model.dialog.embeddingConfig.title", {
+          modelName:
+            selectedEmbeddingModel?.displayName ||
+            selectedEmbeddingModel?.name ||
+            "",
+        })}
+        open={embeddingConfigModalVisible}
+        onCancel={() => {
+          setEmbeddingConfigModalVisible(false);
+          setSelectedEmbeddingModel(null);
+        }}
+        onOk={handleEmbeddingConfigSave}
+        cancelText={t("common.button.cancel")}
+        okText={t("common.button.save")}
+        confirmLoading={savingEmbeddingConfig}
+        destroyOnHidden
+      >
+        <div className="space-y-4">
+          {/* Chunk Size Range */}
+          <div>
+            <label className="block mb-2 text-sm font-medium text-gray-700">
+              {t("modelConfig.slider.chunkingSize")}
+            </label>
+            <ModelChunkSizeSlider
+              value={chunkSizeRange}
+              onChange={(value) => setChunkSizeRange(value)}
+            />
+          </div>
+
+          {/* Concurrent Request Count */}
+          <div>
+            <label
+              htmlFor="embeddingChunkingBatchSize"
+              className="block mb-1 text-sm font-medium text-gray-700"
+            >
+              {t("modelConfig.input.chunkingBatchSize")}
+            </label>
+            <Input
+              id="embeddingChunkingBatchSize"
+              type="number"
+              min="1"
+              placeholder="10"
+              value={chunkingBatchSize}
+              onChange={(e) => setChunkingBatchSize(e.target.value)}
+            />
+          </div>
+        </div>
+      </Modal>
+    </Modal>
+  );
+};

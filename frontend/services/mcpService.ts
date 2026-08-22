@@ -1,0 +1,1047 @@
+import i18n from 'i18next';
+
+import { API_ENDPOINTS } from './api';
+import log from "@/lib/logger";
+
+// Translation function
+const t = (key: string, options?: any): string => {
+  return i18n.t(key, options) as string;
+};
+
+const getAuthHeaders = () => {
+  return {
+    'Content-Type': 'application/json',
+    'User-Agent': 'AgentFrontEnd/1.0',
+  };
+};
+
+/**
+ * Get MCP server list
+ */
+export const getMcpServerList = async (tenantId?: string | null) => {
+  try {
+    const url = tenantId
+      ? `${API_ENDPOINTS.mcp.list}?tenant_id=${encodeURIComponent(tenantId)}`
+      : API_ENDPOINTS.mcp.list;
+    const response = await fetch(url, {
+      headers: getAuthHeaders(),
+    });
+
+    const data = await response.json();
+
+    if (response.ok && data.status === 'success') {
+
+      // Convert backend field names to frontend expected format
+      const formattedData = (data.remote_mcp_server_list || []).map((server: any) => {
+        return {
+          service_name: server.remote_mcp_server_name,
+          mcp_url: server.remote_mcp_server,
+          status: server.status || false,
+          permission: server.permission,
+          mcp_id: server.mcp_id,
+          // New fields from merged endpoint
+          container_id: server.container_id,
+          description: server.description,
+          enabled: server.enabled,
+          source: server.source,
+          update_time: server.update_time,
+          create_time: server.create_time,
+          tags: server.tags || [],
+          container_port: server.container_port,
+          registry_json: server.registry_json,
+          config_json: server.config_json,
+          container_status: server.container_status,
+          authorization_token: server.authorization_token,
+          custom_headers: server.custom_headers,
+          version: server.version,
+          market_id: server.market_id,
+          is_listed_in_repository: server.is_listed_in_repository,
+          group_ids: server.group_ids,
+          ingroup_permission: server.ingroup_permission,
+          shared_fields: server.shared_fields,
+        };
+      });
+
+      return {
+        success: true,
+        data: formattedData,
+        enable_upload_image: data.enable_upload_image || false,
+        message: ''
+      };
+    } else {
+      // Handle specific error information based on HTTP status code
+      let errorMessage = data.message || t('mcpService.message.getServerListFailed');
+
+      switch (response.status) {
+        case 500:
+          errorMessage = t('mcpService.message.getRemoteProxyFailed');
+          break;
+        case 503:
+          errorMessage = t('mcpService.message.serviceUnavailable');
+          break;
+        default:
+          errorMessage = data.message || t('mcpService.message.getServerListFailed');
+      }
+
+      return {
+        success: false,
+        data: [],
+        message: errorMessage
+      };
+    }
+  } catch (error) {
+    log.error(t('mcpService.debug.getServerListFailed'), error);
+    return {
+      success: false,
+      data: [],
+      message: t('mcpService.message.networkError')
+    };
+  }
+};
+
+/**
+ * Add MCP server
+ */
+export const addMcpServer = async (mcpUrl: string, serviceName: string, authorizationToken?: string | null, customHeaders?: Record<string, string> | null, tenantId?: string | null) => {
+  try {
+    const url = tenantId
+      ? `${API_ENDPOINTS.mcp.add}?tenant_id=${encodeURIComponent(tenantId)}`
+      : API_ENDPOINTS.mcp.add;
+    const body: any = {
+      name: serviceName,
+      server_url: mcpUrl,
+      enabled: true,
+    };
+    if (authorizationToken) {
+      body.authorization_token = authorizationToken;
+    }
+    if (customHeaders) {
+      body.custom_headers = customHeaders;
+    }
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(body),
+    });
+
+    const data = await response.json();
+
+    if (response.ok && data.status === 'success') {
+      return {
+        success: true,
+        data: data,
+        message: data.message || t('mcpService.message.addServerSuccess')
+      };
+    } else {
+      // Handle specific error status codes and error information
+      let errorMessage = data.detail || data.message || t('mcpService.message.addServerFailed');
+
+      if (response.status === 409) {
+        errorMessage = t('mcpService.message.nameAlreadyUsed');
+      } else if (response.status === 503) {
+        errorMessage = t('mcpService.message.cannotConnectToServer');
+      } else {
+          errorMessage = t('mcpService.message.addProxyFailed');
+      }
+
+      return {
+        success: false,
+        data: null,
+        message: errorMessage
+      };
+    }
+  } catch (error) {
+    log.error(t('mcpService.debug.addServerFailed'), error);
+    return {
+      success: false,
+      data: null,
+      message: t('mcpService.message.networkError')
+    };
+  }
+};
+
+/**
+ * Update MCP server
+ */
+export const updateMcpServer = async (
+  mcpId: number,
+  newServiceName: string,
+  newMcpUrl: string,
+  newAuthorizationToken?: string | null,
+  newCustomHeaders?: Record<string, string> | null,
+  description?: string | null,
+  tags?: string[],
+  tenantId?: string | null
+) => {
+  try {
+    const url = tenantId
+      ? `${API_ENDPOINTS.mcp.update}?tenant_id=${encodeURIComponent(tenantId)}`
+      : API_ENDPOINTS.mcp.update;
+    const body: any = {
+      mcp_id: mcpId,
+      name: newServiceName,
+      server_url: newMcpUrl,
+      description: description ?? null,
+      tags: tags ?? [],
+    };
+    if (newAuthorizationToken !== undefined) {
+      body.authorization_token = newAuthorizationToken;
+    }
+    if (newCustomHeaders !== undefined) {
+      body.custom_headers = newCustomHeaders;
+    }
+    const response = await fetch(url, {
+      method: "PUT",
+      headers: getAuthHeaders(),
+      body: JSON.stringify(body),
+    });
+
+    const data = await response.json();
+
+    if (response.ok && data.status === "success") {
+      return {
+        success: true,
+        data: data,
+        message: data.message || t("mcpService.message.updateServerSuccess"),
+      };
+    } else {
+      // Handle specific error status codes and error information
+      let errorMessage =
+        data.message || t("mcpService.message.updateServerFailed");
+
+      if (response.status === 409) {
+        errorMessage = t("mcpService.message.nameAlreadyUsed");
+      } else if (response.status === 503) {
+        errorMessage = t("mcpService.message.cannotConnectToServer");
+      } else {
+        errorMessage = t("mcpService.message.updateProxyFailed");
+      }
+
+      return {
+        success: false,
+        data: null,
+        message: errorMessage,
+      };
+    }
+  } catch (error) {
+    log.error(t("mcpService.debug.updateServerFailed"), error);
+    return {
+      success: false,
+      data: null,
+      message: t("mcpService.message.networkError"),
+    };
+  }
+};
+
+/**
+ * Delete MCP server by ID
+ */
+export const deleteMcpServer = async (mcpId: number, tenantId?: string | null) => {
+  try {
+    const url = tenantId
+      ? `${API_ENDPOINTS.mcp.delete(mcpId)}?tenant_id=${encodeURIComponent(tenantId)}`
+      : API_ENDPOINTS.mcp.delete(mcpId);
+    const response = await fetch(url, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    });
+
+    const data = await response.json();
+
+    if (response.ok && data.status === 'success') {
+      return {
+        success: true,
+        data: data,
+        message: data.message || t('mcpService.message.deleteServerSuccess')
+      };
+    } else {
+      let errorMessage = data.detail || data.message || t('mcpService.message.deleteServerFailed');
+
+      switch (response.status) {
+        case 404:
+          errorMessage = t('mcpService.message.mcpServerNotFound');
+          break;
+        case 500:
+          errorMessage = t('mcpService.message.deleteProxyFailed');
+          break;
+        default:
+          errorMessage = data.detail || data.message || t('mcpService.message.deleteServerFailed');
+      }
+
+      return {
+        success: false,
+        data: null,
+        message: errorMessage
+      };
+    }
+  } catch (error) {
+    log.error(t('mcpService.debug.deleteServerFailed'), error);
+    return {
+      success: false,
+      data: null,
+      message: t('mcpService.message.networkError')
+    };
+  }
+};
+
+/**
+ * Get tool list from remote MCP server by ID
+ */
+export const getMcpTools = async (mcpId: number) => {
+  try {
+    const query = new URLSearchParams();
+    query.set('mcp_id', mcpId.toString());
+    const response = await fetch(
+      `${API_ENDPOINTS.mcp.tools}?${query.toString()}`,
+      {
+        method: 'GET',
+        headers: getAuthHeaders(),
+      }
+    );
+
+    const data = await response.json();
+
+    if (response.ok && data.status === 'success') {
+      return {
+        success: true,
+        data: data.tools || [],
+        message: ''
+      };
+    } else {
+      let errorMessage = data.detail || data.message || t('mcpService.message.getToolsFailed');
+
+      switch (response.status) {
+        case 500:
+          errorMessage = t('mcpService.message.getToolsFromServerFailed');
+          break;
+        case 503:
+          errorMessage = t('mcpService.message.cannotConnectToServer');
+          break;
+        case 404:
+          errorMessage = t('mcpService.message.mcpServerNotFound');
+          break;
+        default:
+          errorMessage = data.detail || data.message || t('mcpService.message.getToolsFailed');
+      }
+
+      return {
+        success: false,
+        data: [],
+        message: errorMessage
+      };
+    }
+  } catch (error) {
+    log.error(t('mcpService.debug.getToolsFailed'), error);
+    return {
+      success: false,
+      data: [],
+      message: t('mcpService.message.networkError')
+    };
+  }
+};
+
+/**
+ * Update tool list and status
+ */
+export const updateToolList = async () => {
+  try {
+    const response = await fetch(API_ENDPOINTS.tool.updateTool, {
+      headers: getAuthHeaders(),
+    });
+
+    const data = await response.json();
+
+    if (response.ok && data.status === 'success') {
+      return {
+        success: true,
+        data: data,
+        message: data.message || t('mcpService.message.updateToolListSuccess')
+      };
+    } else {
+      // Handle specific error information based on HTTP status code
+      let errorMessage = data.message || t('mcpService.message.updateToolListFailed');
+
+      switch (response.status) {
+        case 500:
+          errorMessage = t('mcpService.message.updateToolListBadRequest');
+          break;
+        case 503:
+          errorMessage = t('mcpService.message.serviceUnavailable');
+          break;
+        default:
+          errorMessage = data.message || t('mcpService.message.updateToolListFailed');
+      }
+
+      return {
+        success: false,
+        data: null,
+        message: errorMessage
+      };
+    }
+  } catch (error) {
+    log.error(t('mcpService.debug.updateToolListFailed'), error);
+    return {
+      success: false,
+      data: null,
+      message: t('mcpService.message.networkError')
+    };
+  }
+};
+
+/**
+ * checkMcpServerHealth
+ */
+export const checkMcpServerHealth = async (mcpId: number) => {
+  try {
+    const query = new URLSearchParams();
+    query.set('mcp_id', mcpId.toString());
+    const response = await fetch(`${API_ENDPOINTS.mcp.healthcheck}?${query.toString()}`, {
+      method: 'GET',
+      headers: getAuthHeaders(),
+    });
+
+    const data = await response.json();
+
+    if (response.ok && data.status === 'success') {
+      return {
+        success: true,
+        data: data,
+        message: data.message || t('mcpService.message.healthCheckSuccess')
+      };
+    } else {
+      let errorMessage = data.message || t('mcpService.message.healthCheckFailed');
+      if (response.status === 503) {
+        errorMessage = t('mcpService.message.cannotConnectToServer');
+      }
+      return {
+        success: false,
+        data: null,
+        message: errorMessage
+      };
+    }
+  } catch (error) {
+    log.error(t('mcpService.debug.healthCheckFailed'), error);
+    return {
+      success: false,
+      data: null,
+      message: t('mcpService.message.networkError')
+    };
+  }
+};
+
+/**
+ * Add MCP server from container configuration
+ */
+export const addMcpFromConfig = async (mcpConfig: { mcpServers: Record<string, { command: string; args?: string[]; env?: Record<string, string>; port?: number; image?: string }> }, tenantId?: string | null) => {
+  try {
+    const url = tenantId
+      ? `${API_ENDPOINTS.mcp.addFromConfig}?tenant_id=${encodeURIComponent(tenantId)}`
+      : API_ENDPOINTS.mcp.addFromConfig;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(mcpConfig),
+    });
+
+    const data = await response.json();
+
+    if (response.ok && data.status === 'success') {
+      return {
+        success: true,
+        data: data,
+        message: data.message || t('mcpService.message.addFromConfigSuccess')
+      };
+    } else {
+      let errorMessage = data.detail || data.message || t('mcpService.message.addFromConfigFailed');
+      let messageKey: string | undefined;
+
+      if (response.status === 400) {
+        const rawError = data.detail || data.message || '';
+        // Check if error is related to image not found
+        const errorLower = rawError.toLowerCase();
+        if (rawError && (errorLower.includes('image not found') || 
+            errorLower.includes('mcp service startup image is missing') ||
+            (errorLower.includes('not found') && errorLower.includes('image')))) {
+          messageKey = 'mcpService.message.missingMcpImage';
+          errorMessage = t('mcpService.message.missingMcpImage');
+        } else {
+          errorMessage = rawError || t('mcpService.message.invalidConfig');
+        }
+      } else if (response.status === 503) {
+        messageKey = 'mcpService.message.dockerServiceUnavailable';
+        errorMessage = t('mcpService.message.dockerServiceUnavailable');
+      }
+
+      return {
+        success: false,
+        data: null,
+        message: errorMessage,
+        messageKey: messageKey
+      };
+    }
+  } catch (error) {
+    log.error(t('mcpService.debug.addFromConfigFailed'), error);
+    return {
+      success: false,
+      data: null,
+      message: t('mcpService.message.networkError'),
+      messageKey: 'mcpService.message.networkError'
+    };
+  }
+};
+
+/**
+ * Add a container MCP through an SSE response. The callback receives the
+ * container metadata as soon as it has been created; the promise resolves
+ * only after the MCP is ready and its tools have been scanned.
+ */
+export const addMcpFromConfigStream = async (
+  mcpConfig: { mcpServers: Record<string, { command: string; args?: string[]; env?: Record<string, string>; port?: number; image?: string }> },
+  tenantId: string | null | undefined,
+  onContainerStarted: (container: { container_id: string; container_name?: string; host_port?: number; mcp_url?: string }) => void,
+) => {
+  try {
+    const url = tenantId
+      ? `${API_ENDPOINTS.mcp.addFromConfigStream}?tenant_id=${encodeURIComponent(tenantId)}`
+      : API_ENDPOINTS.mcp.addFromConfigStream;
+    const response = await fetch(url, {
+      method: "POST",
+      headers: getAuthHeaders(),
+      body: JSON.stringify(mcpConfig),
+    });
+    if (!response.ok || !response.body) {
+      const data = await response.json().catch(() => ({}));
+      return {
+        success: false,
+        data: null,
+        message: data.detail || data.message || t("mcpService.message.addFromConfigFailed"),
+      };
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder("utf-8");
+    let buffer = "";
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const events = buffer.split("\n\n");
+        buffer = events.pop() || "";
+        for (const event of events) {
+          if (!event.startsWith("data: ")) continue;
+          const message = JSON.parse(event.slice(6));
+          if (message.status === "container_started") {
+            onContainerStarted(message.data);
+          } else if (message.status === "success") {
+            return { success: true, data: message.data };
+          } else if (message.status === "error") {
+            return { success: false, data: null, message: message.detail };
+          }
+        }
+      }
+    } finally {
+      await reader.cancel().catch(() => undefined);
+    }
+    return { success: false, data: null, message: t("mcpService.message.addFromConfigFailed") };
+  } catch (error) {
+    log.error(t("mcpService.debug.addFromConfigFailed"), error);
+    return {
+      success: false,
+      data: null,
+      message: t("mcpService.message.networkError"),
+      messageKey: "mcpService.message.networkError",
+    };
+  }
+};
+
+/**
+ * Get MCP container list
+ */
+export const getMcpContainers = async (tenantId?: string | null) => {
+  try {
+    const url = tenantId
+      ? `${API_ENDPOINTS.mcp.containers}?tenant_id=${encodeURIComponent(tenantId)}`
+      : API_ENDPOINTS.mcp.containers;
+    const response = await fetch(url, {
+      headers: getAuthHeaders(),
+    });
+
+    const data = await response.json();
+
+    if (response.ok && data.status === 'success') {
+      return {
+        success: true,
+        data: data.containers || [],
+        message: ''
+      };
+    } else {
+      let errorMessage = data.detail || data.message || t('mcpService.message.getContainersFailed');
+
+      if (response.status === 503) {
+        errorMessage = t('mcpService.message.dockerServiceUnavailable');
+      }
+
+      return {
+        success: false,
+        data: [],
+        message: errorMessage
+      };
+    }
+  } catch (error) {
+    log.error(t('mcpService.debug.getContainersFailed'), error);
+    return {
+      success: false,
+      data: [],
+      message: t('mcpService.message.networkError')
+    };
+  }
+};
+
+/**
+ * Get MCP container logs (legacy non-streaming method)
+ */
+export const getMcpContainerLogs = async (containerId: string, tail: number = 100, tenantId?: string | null) => {
+  try {
+    const params = new URLSearchParams({
+      tail: tail.toString(),
+    });
+    if (tenantId) {
+      params.append('tenant_id', tenantId);
+    }
+    const response = await fetch(
+      `${API_ENDPOINTS.mcp.containerLogs(containerId)}?${params.toString()}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
+
+    const data = await response.json();
+
+    if (response.ok && data.status === 'success') {
+      return {
+        success: true,
+        data: data.logs || '',
+        message: ''
+      };
+    } else {
+      let errorMessage = data.detail || data.message || t('mcpService.message.getContainerLogsFailed');
+
+      if (response.status === 404) {
+        errorMessage = t('mcpService.message.containerNotFound');
+      } else if (response.status === 503) {
+        errorMessage = t('mcpService.message.dockerServiceUnavailable');
+      }
+
+      return {
+        success: false,
+        data: '',
+        message: errorMessage
+      };
+    }
+  } catch (error) {
+    log.error(t('mcpService.debug.getContainerLogsFailed'), error);
+    return {
+      success: false,
+      data: '',
+      message: t('mcpService.message.networkError')
+    };
+  }
+};
+
+/**
+ * Stream MCP container logs via SSE
+ * Returns an AbortController that can be used to cancel the stream
+ */
+export const streamMcpContainerLogs = async (
+  containerId: string,
+  tail: number = 100,
+  follow: boolean = true,
+  tenantId?: string | null,
+  onData?: (logLine: string) => void,
+  onError?: (error: any) => void,
+  onComplete?: () => void,
+  abortSignal?: AbortSignal,
+  onConnected?: () => void
+): Promise<AbortController> => {
+  const abortController = new AbortController();
+  const signal = abortSignal || abortController.signal;
+
+  (async () => {
+    try {
+      const params = new URLSearchParams({
+        tail: tail.toString(),
+        follow: follow.toString(),
+      });
+      if (tenantId) {
+        params.append('tenant_id', tenantId);
+      }
+      
+      const response = await fetch(
+        `${API_ENDPOINTS.mcp.containerLogs(containerId)}?${params.toString()}`,
+        {
+          headers: getAuthHeaders(),
+          signal: signal,
+        }
+      );
+
+      if (!response.body) {
+        throw new Error('No response body');
+      }
+
+      onConnected?.();
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder('utf-8');
+      let buffer = '';
+
+      try {
+        while (true) {
+          // Check if aborted before reading
+          if (signal.aborted) {
+            break;
+          }
+
+          const { value, done } = await reader.read();
+          if (done) break;
+          
+          buffer += decoder.decode(value, { stream: true });
+          
+          // Process complete SSE messages (separated by \n\n)
+          let lines = buffer.split('\n\n');
+          buffer = lines.pop() || ''; // Keep incomplete message in buffer
+          
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              try {
+                const json = JSON.parse(line.replace('data: ', ''));
+                if (json.logs && onData) {
+                  onData(json.logs);
+                }
+                if (json.status === 'error' && onError) {
+                  onError(new Error(json.logs || 'Unknown error'));
+                }
+              } catch (e) {
+                if (onError) onError(e);
+              }
+            }
+          }
+        }
+      } finally {
+        // Cancel the reader to close the stream
+        try {
+          await reader.cancel();
+        } catch (e) {
+          // Ignore cancel errors
+        }
+      }
+      
+      if (onComplete && !signal.aborted) {
+        onComplete();
+      }
+    } catch (error: any) {
+      // Ignore abort errors
+      if (error.name === 'AbortError') {
+        return;
+      }
+      log.error(t('mcpService.debug.streamContainerLogsFailed'), error);
+      if (onError && !signal.aborted) {
+        onError(error);
+      }
+      if (onComplete && !signal.aborted) {
+        onComplete();
+      }
+    }
+  })();
+
+  return abortController;
+};
+
+/**
+ * Upload MCP image and start container
+ */
+export const uploadMcpImage = async (file: File, port: number, serviceName?: string, envVars?: string, tenantId?: string | null, groupIds?: string, ingroupPermission?: string, sharedFields?: string) => {
+  try {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('port', port.toString());
+    if (serviceName) {
+      formData.append('service_name', serviceName);
+    }
+    if (envVars) {
+      formData.append('env_vars', envVars);
+    }
+    if (groupIds) {
+      formData.append('group_ids', groupIds);
+    }
+    if (ingroupPermission) {
+      formData.append('ingroup_permission', ingroupPermission);
+    }
+    if (sharedFields) {
+      formData.append('shared_fields', sharedFields);
+    }
+    if (tenantId) {
+      formData.append('tenant_id', tenantId);
+    }
+
+    const { 'Content-Type': _, ...headers } = getAuthHeaders();
+
+    const response = await fetch(API_ENDPOINTS.mcp.uploadImage, {
+      method: 'POST',
+      headers: headers,
+      body: formData,
+    });
+
+    const data = await response.json();
+
+    if (response.ok && data.status === 'success') {
+      return {
+        success: true,
+        data: data,
+        message: data.message || t('mcpService.message.uploadImageSuccess')
+      };
+    } else {
+      let errorMessage = data.detail || data.message || t('mcpService.message.uploadImageFailed');
+
+      if (response.status === 400) {
+        errorMessage = data.detail || t('mcpService.message.invalidUploadParameters');
+      } else if (response.status === 409) {
+        errorMessage = t('mcpService.message.serviceNameAlreadyExists');
+      } else if (response.status === 413) {
+        errorMessage = t('mcpService.message.fileTooLarge');
+      } else if (response.status === 503) {
+        errorMessage = t('mcpService.message.dockerServiceUnavailable');
+      }
+
+      return {
+        success: false,
+        data: null,
+        message: errorMessage
+      };
+    }
+  } catch (error) {
+    log.error(t('mcpService.debug.uploadImageFailed'), error);
+    return {
+      success: false,
+      data: null,
+      message: t('mcpService.message.networkError')
+    };
+  }
+};
+
+export const uploadMcpImageStream = async (
+  file: File,
+  port: number,
+  serviceName: string | undefined,
+  envVars: string | undefined,
+  tenantId: string | null | undefined,
+  groupIds: string | undefined,
+  ingroupPermission: string | undefined,
+  sharedFields: string | undefined,
+  onContainerStarted: (containerId: string) => void,
+) => {
+  try {
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("port", port.toString());
+    if (serviceName) formData.append("service_name", serviceName);
+    if (envVars) formData.append("env_vars", envVars);
+    if (tenantId) formData.append("tenant_id", tenantId);
+    if (groupIds) formData.append("group_ids", groupIds);
+    if (ingroupPermission) formData.append("ingroup_permission", ingroupPermission);
+    if (sharedFields) formData.append("shared_fields", sharedFields);
+
+    const { "Content-Type": _, ...headers } = getAuthHeaders();
+    const response = await fetch(API_ENDPOINTS.mcp.uploadImageStream, {
+      method: "POST",
+      headers,
+      body: formData,
+    });
+    if (!response.ok || !response.body) {
+      const data = await response.json().catch(() => ({}));
+      return { success: false, data: null, message: data.detail || data.message };
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder("utf-8");
+    let buffer = "";
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const events = buffer.split("\n\n");
+        buffer = events.pop() || "";
+        for (const event of events) {
+          if (!event.startsWith("data: ")) continue;
+          const message = JSON.parse(event.slice(6));
+          if (message.status === "container_started" && message.data?.container_id) {
+            onContainerStarted(message.data.container_id);
+          } else if (message.status === "success") {
+            return { success: true, data: message.data };
+          } else if (message.status === "error") {
+            return { success: false, data: null, message: message.detail };
+          }
+        }
+      }
+    } finally {
+      await reader.cancel().catch(() => undefined);
+    }
+    return { success: false, data: null, message: t("mcpService.message.uploadImageFailed") };
+  } catch (error) {
+    log.error(t("mcpService.debug.uploadImageFailed"), error);
+    return { success: false, data: null, message: t("mcpService.message.networkError") };
+  }
+};
+
+/**
+ * Delete MCP container
+ */
+export const deleteMcpContainer = async (containerId: string, tenantId?: string | null) => {
+  try {
+    const url = tenantId
+      ? `${API_ENDPOINTS.mcp.deleteContainer(containerId)}?tenant_id=${encodeURIComponent(tenantId)}`
+      : API_ENDPOINTS.mcp.deleteContainer(containerId);
+    const response = await fetch(url, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    });
+
+    const data = await response.json();
+
+    if (response.ok && data.status === 'success') {
+      return {
+        success: true,
+        data: data,
+        message: data.message || t('mcpService.message.deleteContainerSuccess')
+      };
+    } else {
+      let errorMessage = data.detail || data.message || t('mcpService.message.deleteContainerFailed');
+
+      if (response.status === 404) {
+        errorMessage = t('mcpService.message.containerNotFound');
+      } else if (response.status === 503) {
+        errorMessage = t('mcpService.message.dockerServiceUnavailable');
+      }
+
+      return {
+        success: false,
+        data: null,
+        message: errorMessage
+      };
+    }
+  } catch (error) {
+    log.error(t('mcpService.debug.deleteContainerFailed'), error);
+    return {
+      success: false,
+      data: null,
+      message: t('mcpService.message.networkError')
+    };
+  }
+};
+
+/**
+ * Get single MCP record by ID
+ */
+export const getMcpRecord = async (mcpId: number, tenantId?: string | null) => {
+  try {
+    const url = tenantId
+      ? `${API_ENDPOINTS.mcp.record(mcpId)}?tenant_id=${encodeURIComponent(tenantId)}`
+      : API_ENDPOINTS.mcp.record(mcpId);
+    const response = await fetch(url, {
+      headers: getAuthHeaders(),
+    });
+
+    const data = await response.json();
+
+    if (response.ok && data.status === 'success') {
+      return {
+        success: true,
+        data: {
+          mcp_name: data.mcp_name,
+          mcp_server: data.mcp_server,
+          authorization_token: data.authorization_token,
+          custom_headers: data.custom_headers,
+        },
+        message: ''
+      };
+    } else {
+      let errorMessage = data.detail || data.message || t('mcpService.message.getMcpRecordFailed');
+
+      if (response.status === 404) {
+        errorMessage = t('mcpService.message.mcpRecordNotFound');
+      } else if (response.status === 500) {
+        errorMessage = t('mcpService.message.getMcpRecordFailed');
+      }
+
+      return {
+        success: false,
+        data: null,
+        message: errorMessage
+      };
+    }
+  } catch (error) {
+    log.error(t('mcpService.debug.getMcpRecordFailed'), error);
+    return {
+      success: false,
+      data: null,
+      message: t('mcpService.message.networkError')
+    };
+  }
+};
+
+export interface OpenApiServiceInput {
+  service_name: string;
+  server_url: string;
+  openapi_json: Record<string, unknown>;
+  headers_template?: Record<string, unknown> | null;
+}
+
+export const getOpenApiServices = async () => {
+  const response = await fetch(API_ENDPOINTS.tool.openapiServices, {
+    headers: getAuthHeaders(),
+  });
+  const result = await response.json();
+  if (!response.ok) {
+    throw new Error(result.detail || result.message || "Failed to load OpenAPI services");
+  }
+  return result.data || [];
+};
+
+export const importOpenApiService = async (input: OpenApiServiceInput) => {
+  const response = await fetch(API_ENDPOINTS.tool.openapiService, {
+    method: "POST",
+    headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const result = await response.json();
+  if (!response.ok) {
+    throw new Error(result.detail || result.message || "Failed to import OpenAPI service");
+  }
+  return result;
+};
+
+export const deleteOpenApiService = async (serviceName: string) => {
+  const response = await fetch(API_ENDPOINTS.tool.deleteOpenapiService(serviceName), {
+    method: "DELETE",
+    headers: getAuthHeaders(),
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(result.detail || result.message || "Failed to delete OpenAPI service");
+  }
+  return result;
+};
+
+export const updateToolLabels = async (toolId: string, labels: string[]) => {
+  const response = await fetch(API_ENDPOINTS.tool.updateLabels, {
+    method: "PUT",
+    headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ tool_id: parseInt(toolId, 10), labels }),
+  });
+  if (!response.ok) {
+    const result = await response.json().catch(() => ({}));
+    throw new Error(result.detail || result.message || "Failed to update tool labels");
+  }
+  return response.json();
+};

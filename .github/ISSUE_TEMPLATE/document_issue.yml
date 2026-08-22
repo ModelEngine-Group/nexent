@@ -1,0 +1,16 @@
+name: 'Document Issue'
+description: 'Report an issue with the documentation'
+title: '[Document] '
+type: Feature
+labels: ['documentation']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before creating a new Issue, please [search existing issues](https://github.com/AI-Application-Innovation/nexent/issues), including closed ones.  
+  - type: textarea
+    attributes:
+      label: 'Document Change Description'
+      description: Please describe which document needs to be corrected and why.
+    validations:
+      required: true

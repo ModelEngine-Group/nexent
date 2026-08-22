@@ -1,0 +1,1139 @@
+"""Skill manager for loading and managing skills from local storage."""
+
+import io
+import json
+import logging
+import ntpath
+import os
+import shlex
+import shutil
+import subprocess
+import sys
+import tempfile
+import threading
+import zipfile
+from typing import Any, Dict, List, Optional, Union
+
+from .constants import SKILL_FILE_NAME
+from .skill_loader import SkillLoader
+
+logger = logging.getLogger(__name__)
+
+
+class SkillNotFoundError(Exception):
+    """Raised when the requested skill does not exist in local storage."""
+
+    def __init__(self, message: str = ""):
+        self.message = message
+        super().__init__(self.message)
+
+
+class SkillScriptNotFoundError(Exception):
+    """Raised when the requested script does not exist within a skill."""
+
+    def __init__(self, message: str = ""):
+        self.message = message
+        super().__init__(self.message)
+
+
+class SkillManager:
+    """Process-wide manager for tenant-isolated skills."""
+
+    _instance: Optional["SkillManager"] = None
+    _instance_lock = threading.Lock()
+
+    def __new__(cls, base_skills_dir: Optional[str] = None):
+        if cls._instance is None:
+            with cls._instance_lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+        return cls._instance
+
+    def __init__(
+        self,
+        base_skills_dir: Optional[str] = None,
+    ):
+        """Initialize the immutable skills root on first construction."""
+        if hasattr(self, "_initialized"):
+            return
+        with self._instance_lock:
+            if hasattr(self, "_initialized"):
+                return
+            self.base_skills_dir = os.path.abspath(base_skills_dir) if base_skills_dir else None
+            self._initialized = True
+
+    def resolve_tenant_dir(self, *, tenant_id: Optional[str]) -> str:
+        """Resolve a tenant directory while preventing escape from the skills root."""
+        if not self.base_skills_dir:
+            raise ValueError("base_skills_dir is not configured")
+        base_skills_dir_real = os.path.realpath(self.base_skills_dir)
+        if tenant_id is None:
+            return base_skills_dir_real
+        if not isinstance(tenant_id, str) or not tenant_id.strip():
+            raise ValueError("tenant_id must be a non-empty string or explicit None")
+        if (
+            os.path.isabs(tenant_id)
+            or ntpath.isabs(tenant_id)
+            or bool(ntpath.splitdrive(tenant_id)[0])
+        ):
+            raise ValueError("tenant_id must not be an absolute path")
+        if (
+            tenant_id in {".", ".."}
+            or "/" in tenant_id
+            or "\\" in tenant_id
+            or "\x00" in tenant_id
+            or os.path.basename(tenant_id) != tenant_id
+        ):
+            raise ValueError("tenant_id resolves outside base_skills_dir")
+
+        tenant_dir = os.path.realpath(os.path.join(base_skills_dir_real, tenant_id))
+        if not tenant_dir.startswith(base_skills_dir_real + os.sep):
+            raise ValueError("tenant_id resolves outside base_skills_dir")
+        return tenant_dir
+
+    def resolve_skill_dir(self, skill_name: str, *, tenant_id: Optional[str]) -> str:
+        """Resolve a skill directory and reject names that escape the tenant root."""
+        if not isinstance(skill_name, str) or not skill_name.strip():
+            raise ValueError("skill_name must be a non-empty string")
+        if (
+            os.path.isabs(skill_name)
+            or ntpath.isabs(skill_name)
+            or bool(ntpath.splitdrive(skill_name)[0])
+        ):
+            raise ValueError("skill_name must not be an absolute path")
+        if (
+            skill_name in {".", ".."}
+            or "/" in skill_name
+            or "\\" in skill_name
+            or "\x00" in skill_name
+            or os.path.basename(skill_name) != skill_name
+        ):
+            raise ValueError("skill_name resolves outside the tenant directory")
+        tenant_dir = self.resolve_tenant_dir(tenant_id=tenant_id)
+        tenant_dir_real = os.path.realpath(tenant_dir)
+        skill_dir = os.path.realpath(os.path.join(tenant_dir_real, skill_name))
+        if (
+            not skill_dir.startswith(os.path.realpath(self.base_skills_dir) + os.sep)
+            or not skill_dir.startswith(tenant_dir_real + os.sep)
+        ):
+            raise ValueError("skill_name resolves outside the tenant directory")
+        return skill_dir
+
+    def _resolve_skill_file_path(self, skill_dir: str, file_path: str) -> str:
+        """Resolve a relative skill file path and keep it inside ``skill_dir``."""
+        if not isinstance(file_path, str) or not file_path.strip():
+            raise ValueError("file_path must be a non-empty relative path")
+
+        if "\x00" in file_path:
+            raise ValueError("file_path contains a null byte")
+        if (
+            os.path.isabs(file_path)
+            or ntpath.isabs(file_path)
+            or bool(ntpath.splitdrive(file_path)[0])
+        ):
+            raise ValueError("file_path must not be an absolute path")
+
+        path_segments = file_path.replace("\\", "/").split("/")
+        if any(segment == ".." for segment in path_segments):
+            raise ValueError("file_path resolves outside the skill directory")
+        normalized_segments = [segment for segment in path_segments if segment not in {"", "."}]
+        if not normalized_segments:
+            raise ValueError("file_path must point to a file inside the skill directory")
+
+        if not self.base_skills_dir:
+            raise ValueError("base_skills_dir is not configured")
+        base_skills_dir_real = os.path.realpath(self.base_skills_dir)
+        skill_dir_real = os.path.realpath(skill_dir)
+        target_path = os.path.realpath(os.path.join(skill_dir_real, *normalized_segments))
+        if not skill_dir_real.startswith(base_skills_dir_real + os.sep):
+            raise ValueError("file_path resolves outside the skill directory")
+        if (
+            not target_path.startswith(base_skills_dir_real + os.sep)
+            or not target_path.startswith(skill_dir_real + os.sep)
+        ):
+            raise ValueError("file_path resolves outside the skill directory")
+        return target_path
+
+    def list_skills(self, *, tenant_id: Optional[str]) -> List[Dict[str, str]]:
+        """List all available skills from local storage.
+
+        Returns:
+            List of skill info dicts with name and description
+        """
+        skills = []
+
+        local_skills_dir = self.resolve_tenant_dir(tenant_id=tenant_id)
+        if not os.path.exists(local_skills_dir):
+            return skills
+
+        try:
+            for skill_name in os.listdir(local_skills_dir):
+                skill_path = os.path.join(local_skills_dir, skill_name)
+                if os.path.isdir(skill_path):
+                    skill_file = os.path.join(skill_path, SKILL_FILE_NAME)
+                    if os.path.exists(skill_file):
+                        skill = self._get_skill_metadata(skill_name, tenant_id=tenant_id)
+                        if skill:
+                            skills.append(skill)
+        except Exception as e:
+            logger.error(f"Error listing skills: {e}")
+
+        return skills
+
+    def _get_skill_metadata(self, skill_name: str, *, tenant_id: Optional[str]) -> Optional[Dict[str, str]]:
+        """Get skill metadata without loading full content."""
+        try:
+            skill = self.load_skill(skill_name, tenant_id=tenant_id)
+            if skill:
+                return {
+                    "name": skill.get("name", skill_name),
+                    "description": skill.get("description", ""),
+                    "tags": skill.get("tags", []),
+                }
+        except Exception as e:
+            logger.warning(f"Could not load skill {skill_name}: {e}")
+        return None
+
+    def load_skill(self, name: str, *, tenant_id: Optional[str]) -> Optional[Dict[str, Any]]:
+        """Load a skill by name from local storage.
+
+        Args:
+            name: Skill name
+
+        Returns:
+            Skill dict with metadata and content, or None if not found
+        """
+        local_path = os.path.join(
+            self.resolve_skill_dir(name, tenant_id=tenant_id), SKILL_FILE_NAME
+        )
+        try:
+            if os.path.exists(local_path):
+                return SkillLoader.load(local_path)
+        except Exception as e:
+            logger.error(f"Error loading skill from local: {e}")
+
+        return None
+
+    def load_skill_content(self, name: str, *, tenant_id: Optional[str]) -> Optional[str]:
+        """Load only the content body of a skill.
+
+        Args:
+            name: Skill name
+
+        Returns:
+            Skill content as string, or None if not found
+        """
+        skill = self.load_skill(name, tenant_id=tenant_id)
+        return skill.get("content") if skill else None
+
+    def save_skill(self, skill_data: Dict[str, Any], *, tenant_id: Optional[str]) -> Dict[str, Any]:
+        """Save a skill to local storage.
+
+        If skill_data contains a "files" key (list of dicts with file_path and content),
+        those files are written alongside SKILL.md.
+
+        Args:
+            skill_data: Skill dict with name, description, content, etc.
+            May include "files": [{"file_path": "...", "content": "..."}]
+
+        Returns:
+            Saved skill dict
+        """
+        name = skill_data.get("name")
+        if not name:
+            raise ValueError("Skill name is required")
+
+        content = SkillLoader.to_skill_md(skill_data)
+
+        local_dir = os.path.realpath(self.resolve_skill_dir(name, tenant_id=tenant_id))
+        base_skills_dir_real = os.path.realpath(self.base_skills_dir)
+        if not local_dir.startswith(base_skills_dir_real + os.sep):
+            raise ValueError("skill_name resolves outside base_skills_dir")
+        extra_files = skill_data.get("files") or []
+        files_to_write = []
+        for file_entry in extra_files:
+            file_path = file_entry.get("path") or file_entry.get("file_path") or ""
+            if not file_path or file_path.lower() == SKILL_FILE_NAME.lower():
+                continue
+            self._resolve_skill_file_path(local_dir, file_path)
+            files_to_write.append((
+                file_path,
+                file_entry.get("content", ""),
+                file_entry.get("encoding") or "utf-8",
+            ))
+
+        os.makedirs(local_dir, exist_ok=True)
+
+        # Write SKILL.md
+        skill_md_path = os.path.realpath(os.path.join(local_dir, SKILL_FILE_NAME))
+        if not skill_md_path.startswith(base_skills_dir_real + os.sep):
+            raise ValueError("skill_name resolves outside base_skills_dir")
+        with open(skill_md_path, "w", encoding="utf-8") as f:
+            f.write(content)
+
+        # Write additional files
+        for file_path, file_content, file_encoding in files_to_write:
+            self._write_skill_file(
+                name,
+                file_path,
+                file_content,
+                encoding=file_encoding,
+                tenant_id=tenant_id,
+            )
+
+        logger.info(f"Saved skill '{name}' to local storage with {len(extra_files)} extra file(s)")
+        return self.load_skill(name, tenant_id=tenant_id)
+
+    def write_skill_file(
+        self,
+        skill_name: str,
+        file_path: str,
+        content: str,
+        *,
+        encoding: str = "utf-8",
+        tenant_id: Optional[str],
+    ) -> None:
+        """Write a file inside a tenant-scoped skill directory."""
+        if not self.base_skills_dir:
+            raise ValueError("base_skills_dir is not configured")
+        if not isinstance(skill_name, str) or not skill_name.strip():
+            raise ValueError("skill_name must be a non-empty string")
+
+        local_dir = self.resolve_skill_dir(skill_name, tenant_id=tenant_id)
+        base_skills_dir_real = os.path.realpath(self.base_skills_dir)
+        full_path = os.path.realpath(self._resolve_skill_file_path(local_dir, file_path))
+        if not full_path.startswith(base_skills_dir_real + os.sep):
+            raise ValueError("file_path resolves outside the skill directory")
+        os.makedirs(os.path.dirname(full_path), exist_ok=True)
+
+        # Resolve again after creating parent directories so an existing symlink
+        # cannot redirect the write outside the skill directory.
+        safe_path = os.path.realpath(self._resolve_skill_file_path(local_dir, file_path))
+        if not safe_path.startswith(base_skills_dir_real + os.sep):
+            raise ValueError("file_path resolves outside the skill directory")
+        with open(safe_path, "w", encoding=encoding) as f:
+            f.write(content)
+        logger.debug(f"Wrote skill file '{skill_name}/{file_path}'")
+
+    def _write_skill_file(
+        self,
+        skill_name: str,
+        file_path: str,
+        content: str,
+        *,
+        encoding: str = "utf-8",
+        tenant_id: Optional[str],
+    ) -> None:
+        """Write a skill file through the validated public API."""
+        if not self.base_skills_dir:
+            return
+        self.write_skill_file(
+            skill_name,
+            file_path,
+            content,
+            encoding=encoding,
+            tenant_id=tenant_id,
+        )
+
+    def upload_skill_from_file(
+        self,
+        file_content: Union[bytes, str, io.BytesIO],
+        skill_name: Optional[str] = None,
+        file_type: str = "auto",
+        *,
+        tenant_id: Optional[str],
+    ) -> Dict[str, Any]:
+        """Upload a skill from file content (SKILL.md or ZIP).
+
+        Supports two formats:
+        1. Single SKILL.md file - extracts metadata and saves directly
+        2. ZIP archive - extracts SKILL.md and all other files/scripts
+
+        Args:
+            file_content: File content as bytes, string, or BytesIO
+            skill_name: Optional skill name (extracted from ZIP if not provided)
+            file_type: File type hint - "md", "zip", or "auto" (detect)
+
+        Returns:
+            Created skill dict
+
+        Raises:
+            ValueError: If file format is invalid or SKILL.md not found
+        """
+        content_bytes: bytes
+        if isinstance(file_content, str):
+            content_bytes = file_content.encode("utf-8")
+        elif isinstance(file_content, io.BytesIO):
+            content_bytes = file_content.getvalue()
+        else:
+            content_bytes = file_content
+
+        if file_type == "auto":
+            if skill_name and skill_name.endswith(".zip"):
+                file_type = "zip"
+            elif content_bytes.startswith(b"PK"):  # ZIP magic bytes
+                file_type = "zip"
+            else:
+                file_type = "md"
+
+        if file_type == "zip":
+            return self._upload_skill_from_zip(content_bytes, skill_name, tenant_id=tenant_id)
+        else:
+            return self._upload_skill_from_md(content_bytes, skill_name, tenant_id=tenant_id)
+
+    def _upload_skill_from_md(
+        self,
+        content_bytes: bytes,
+        skill_name: Optional[str] = None,
+        *,
+        tenant_id: Optional[str],
+    ) -> Dict[str, Any]:
+        """Upload skill from SKILL.md content.
+
+        Args:
+            content_bytes: SKILL.md file content
+            skill_name: Optional skill name override
+
+        Returns:
+            Created skill dict
+        """
+        content_str = content_bytes.decode("utf-8")
+
+        try:
+            skill_data = SkillLoader.parse(content_str)
+        except ValueError as e:
+            raise ValueError(f"Invalid SKILL.md format: {e}")
+
+        name = skill_name or skill_data.get("name")
+        if not name:
+            raise ValueError("Skill name is required (provide in filename or SKILL.md frontmatter)")
+
+        skill_data["name"] = name
+        return self.save_skill(skill_data, tenant_id=tenant_id)
+
+    def _upload_skill_from_zip(
+        self,
+        zip_bytes: bytes,
+        skill_name: Optional[str] = None,
+        *,
+        tenant_id: Optional[str],
+    ) -> Dict[str, Any]:
+        """Upload skill from ZIP archive containing SKILL.md and files.
+
+        Expected structure:
+            skill_name/
+                SKILL.md
+                scripts/
+                    ...
+                assets/
+                    ...
+
+        Args:
+            zip_bytes: ZIP archive content
+            skill_name: Optional skill name (folder name in ZIP if not provided)
+
+        Returns:
+            Created skill dict
+        """
+        zip_stream = io.BytesIO(zip_bytes)
+
+        try:
+            with zipfile.ZipFile(zip_stream, "r") as zf:
+                file_list = zf.namelist()
+        except zipfile.BadZipFile:
+            raise ValueError("Invalid ZIP archive")
+
+        skill_md_path: Optional[str] = None
+        detected_skill_name: Optional[str] = None
+        skill_files: List[tuple] = []
+
+        for file_path in file_list:
+            if file_path.endswith("/"):
+                continue
+
+            normalized_path = file_path.replace("\\", "/")
+            parts = normalized_path.split("/")
+
+            if len(parts) == 2 and parts[1].lower() == SKILL_FILE_NAME.lower():
+                skill_md_path = file_path
+                detected_skill_name = parts[0]
+                break
+            elif len(parts) >= 2 and parts[1].lower() == SKILL_FILE_NAME.lower():
+                skill_md_path = file_path
+                detected_skill_name = parts[0]
+                break
+
+        if not skill_md_path:
+            for file_path in file_list:
+                if file_path.lower().endswith("skill.md"):
+                    parts = file_path.replace("\\", "/").split("/")
+                    skill_md_path = file_path
+                    detected_skill_name = parts[0] if len(parts) > 1 else "unknown"
+                    break
+
+        if not skill_md_path:
+            raise ValueError("SKILL.md not found in ZIP archive")
+
+        name = skill_name or detected_skill_name
+        if not name or name == "unknown":
+            raise ValueError("Skill name is required (provide in folder name or skill_name param)")
+
+        skill_data: Dict[str, Any] = {}
+
+        try:
+            with zipfile.ZipFile(zip_stream, "r") as zf:
+                skill_content = zf.read(skill_md_path).decode("utf-8")
+                skill_data = SkillLoader.parse(skill_content)
+                skill_data["name"] = name
+        except Exception as e:
+            raise ValueError(f"Failed to parse SKILL.md from ZIP: {e}")
+
+        local_dir = self.resolve_skill_dir(name, tenant_id=tenant_id)
+        validated_files = []
+        for file_path in file_list:
+            if file_path == skill_md_path or file_path.endswith("/"):
+                continue
+            normalized_path = file_path.replace("\\", "/")
+            relative_path = (
+                normalized_path[len(name) + 1:]
+                if normalized_path.startswith(f"{name}/")
+                else normalized_path
+            )
+            if not relative_path:
+                continue
+            self._resolve_skill_file_path(local_dir, relative_path)
+            validated_files.append((file_path, relative_path))
+
+        self.save_skill(skill_data, tenant_id=tenant_id)
+
+        with zipfile.ZipFile(zip_stream, "r") as zf:
+            for file_path, relative_path in validated_files:
+                file_data = zf.read(file_path)
+
+                local_path = self._resolve_skill_file_path(local_dir, relative_path)
+                os.makedirs(os.path.dirname(local_path), exist_ok=True)
+                local_path = self._resolve_skill_file_path(local_dir, relative_path)
+                with open(local_path, "wb") as f:
+                    f.write(file_data)
+
+        logger.info(f"Extracted skill '{name}' from ZIP with {len(file_list)} files")
+        return self.load_skill(name, tenant_id=tenant_id)
+
+    def update_skill_from_file(
+        self,
+        file_content: Union[bytes, str, io.BytesIO],
+        skill_name: str,
+        file_type: str = "auto",
+        *,
+        tenant_id: Optional[str],
+    ) -> Dict[str, Any]:
+        """Update an existing skill from file content.
+
+        Supports both SKILL.md and ZIP formats. For ZIP, only updates files
+        that are present in the archive.
+
+        Args:
+            file_content: File content as bytes, string, or BytesIO
+            skill_name: Name of the skill to update
+            file_type: File type hint - "md", "zip", or "auto" (detect)
+
+        Returns:
+            Updated skill dict
+        """
+        existing = self.load_skill(skill_name, tenant_id=tenant_id)
+        if not existing:
+            raise ValueError(f"Skill not found: {skill_name}")
+
+        content_bytes: bytes
+        if isinstance(file_content, str):
+            content_bytes = file_content.encode("utf-8")
+        elif isinstance(file_content, io.BytesIO):
+            content_bytes = file_content.getvalue()
+        else:
+            content_bytes = file_content
+
+        if file_type == "auto":
+            if content_bytes.startswith(b"PK"):
+                file_type = "zip"
+            else:
+                file_type = "md"
+
+        if file_type == "zip":
+            return self._update_skill_from_zip(content_bytes, skill_name, tenant_id=tenant_id)
+        else:
+            return self._update_skill_from_md(content_bytes, skill_name, tenant_id=tenant_id)
+
+    def _update_skill_from_md(
+        self,
+        content_bytes: bytes,
+        skill_name: str,
+        *,
+        tenant_id: Optional[str],
+    ) -> Dict[str, Any]:
+        """Update skill from SKILL.md content.
+
+        Args:
+            content_bytes: SKILL.md file content
+            skill_name: Name of the skill to update
+
+        Returns:
+            Updated skill dict
+        """
+        content_str = content_bytes.decode("utf-8")
+        skill_data = SkillLoader.parse(content_str)
+        skill_data["name"] = skill_name
+        return self.save_skill(skill_data, tenant_id=tenant_id)
+
+    def _update_skill_from_zip(
+        self,
+        zip_bytes: bytes,
+        skill_name: str,
+        *,
+        tenant_id: Optional[str],
+    ) -> Dict[str, Any]:
+        """Update skill from ZIP archive.
+
+        Updates SKILL.md and adds/updates additional files.
+        Does not delete existing files not in the archive.
+
+        Args:
+            zip_bytes: ZIP archive content
+            skill_name: Name of the skill to update
+
+        Returns:
+            Updated skill dict
+        """
+        existing = self.load_skill(skill_name, tenant_id=tenant_id)
+        if not existing:
+            raise ValueError(f"Skill not found: {skill_name}")
+
+        zip_stream = io.BytesIO(zip_bytes)
+
+        with zipfile.ZipFile(zip_stream, "r") as zf:
+            file_list = zf.namelist()
+
+            skill_md_path = None
+            for file_path in file_list:
+                normalized_path = file_path.replace("\\", "/")
+                if normalized_path.lower().endswith("skill.md"):
+                    parts = normalized_path.split("/")
+                    if len(parts) >= 2:
+                        skill_md_path = file_path
+                        break
+
+            if skill_md_path:
+                skill_content = zf.read(skill_md_path).decode("utf-8")
+                skill_data = SkillLoader.parse(skill_content)
+                skill_data["name"] = skill_name
+
+            local_dir = self.resolve_skill_dir(skill_name, tenant_id=tenant_id)
+            validated_files = []
+            for file_path in file_list:
+                if file_path == skill_md_path or file_path.endswith("/"):
+                    continue
+
+                normalized_path = file_path.replace("\\", "/")
+                parts = normalized_path.split("/")
+
+                if len(parts) >= 2 and parts[0] != skill_name:
+                    relative_path = "/".join(parts[1:])
+                else:
+                    relative_path = normalized_path
+
+                if not relative_path:
+                    continue
+
+                self._resolve_skill_file_path(local_dir, relative_path)
+                validated_files.append((file_path, relative_path))
+
+            if skill_md_path:
+                self.save_skill(skill_data, tenant_id=tenant_id)
+
+            for file_path, relative_path in validated_files:
+                file_data = zf.read(file_path)
+
+                local_path = self._resolve_skill_file_path(local_dir, relative_path)
+                os.makedirs(os.path.dirname(local_path), exist_ok=True)
+                local_path = self._resolve_skill_file_path(local_dir, relative_path)
+                with open(local_path, "wb") as f:
+                    f.write(file_data)
+
+        logger.info(f"Updated skill '{skill_name}' from ZIP")
+        return self.load_skill(skill_name, tenant_id=tenant_id)
+
+    def get_skill_file_tree(self, skill_name: str, *, tenant_id: Optional[str]) -> Optional[Dict[str, Any]]:
+        """Get file tree structure of a skill.
+
+        Args:
+            skill_name: Name of the skill
+
+        Returns:
+            Dict with file tree structure, or None if skill not found
+        """
+        skill = self.load_skill(skill_name, tenant_id=tenant_id)
+        if not skill:
+            return None
+
+        tree = {
+            "name": skill_name,
+            "type": "directory",
+            "children": []
+        }
+
+        local_dir = self.resolve_skill_dir(skill_name, tenant_id=tenant_id)
+        if os.path.exists(local_dir):
+            for root, dirs, files in os.walk(local_dir):
+                rel_root = os.path.relpath(root, local_dir)
+
+                if rel_root == ".":
+                    for f in files:
+                        # Use just the filename (relative to skill directory)
+                        tree.setdefault("children", []).append({
+                            "name": f,
+                            "type": "file"
+                        })
+                    continue
+
+                parts = rel_root.split(os.sep)
+                current = tree
+                for part in parts:
+                    found = None
+                    for child in current.get("children", []):
+                        if child.get("name") == part and child.get("type") == "directory":
+                            found = child
+                            break
+                    if not found:
+                        found = {"name": part, "type": "directory", "children": []}
+                        current.setdefault("children", []).append(found)
+                    current = found
+
+                for f in files:
+                    current.setdefault("children", []).append({
+                        "name": f,
+                        "type": "file"
+                    })
+
+        return tree
+
+    def _add_to_tree(self, node: Dict, parts: List[str], is_directory: bool = False) -> None:
+        """Add a path to the tree structure.
+
+        Args:
+            node: Current tree node
+            parts: Path parts to add
+            is_directory: Whether the path being added is a directory
+        """
+        if not parts:
+            return
+
+        name = parts[0]
+
+        if len(parts) == 1:
+            # Leaf node - add as file or directory based on is_directory flag
+            node_type = "directory" if is_directory else "file"
+            # Skip if same name exists with different type
+            for child in node.get("children", []):
+                if child.get("name") == name:
+                    if child.get("type") == node_type:
+                        return
+                    # If types conflict, skip (should not happen with proper usage)
+                    return
+            node.setdefault("children", []).append({
+                "name": name,
+                "type": node_type
+            })
+        else:
+            # Directory path - find or create the directory
+            found = None
+            for child in node.get("children", []):
+                if child.get("name") == name and child.get("type") == "directory":
+                    found = child
+                    break
+
+            if not found:
+                found = {"name": name, "type": "directory", "children": []}
+                node.setdefault("children", []).append(found)
+
+            self._add_to_tree(found, parts[1:], is_directory)
+
+    def delete_skill(self, name: str, *, tenant_id: Optional[str]) -> bool:
+        """Delete a skill from local storage.
+
+        Args:
+            name: Skill name
+
+        Returns:
+            True if deleted successfully
+        """
+        local_dir = self.resolve_skill_dir(name, tenant_id=tenant_id)
+        if os.path.exists(local_dir):
+            try:
+                shutil.rmtree(local_dir)
+            except Exception as e:
+                logger.error(f"Error deleting skill from local: {e}")
+
+        logger.info(f"Deleted skill '{name}' from local storage")
+        return True
+
+
+    def build_skills_summary(
+        self, available_skills: Optional[List[str]] = None, *, tenant_id: Optional[str]
+    ) -> str:
+        """Build XML-formatted summary of available skills.
+
+        Args:
+            available_skills: Optional whitelist of skill names. If provided,
+                             only skills in this list will be included in summary.
+
+        Returns:
+            XML-formatted skills summary with name and description.
+        """
+        all_skills = self.list_skills(tenant_id=tenant_id)
+
+        skills_to_include = all_skills
+        if available_skills is not None:
+            available_set = set(available_skills)
+            skills_to_include = [s for s in all_skills if s.get("name") in available_set]
+
+        if not skills_to_include:
+            return ""
+
+        def escape_xml(s: str) -> str:
+            if s is None:
+                return ""
+            return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+        lines = ["<skills>"]
+        for skill in skills_to_include:
+            name = escape_xml(skill.get("name", ""))
+            description = escape_xml(skill.get("description", ""))
+
+            lines.append(f'  <skill>')
+            lines.append(f'    <name>{name}</name>')
+            lines.append(f'    <description>{description}</description>')
+            lines.append(f'  </skill>')
+
+        lines.append("</skills>")
+
+        return "\n".join(lines)
+
+
+    def load_skill_directory(self, name: str, *, tenant_id: Optional[str]) -> Optional[Dict[str, Any]]:
+        """Load entire skill directory including scripts.
+
+        This copies the skill directory from local storage to a temp directory
+        for execution.
+
+        Args:
+            name: Skill name
+
+        Returns:
+            Dict with skill metadata and local directory path
+        """
+        skill = self.load_skill(name, tenant_id=tenant_id)
+        if not skill:
+            return None
+
+        temp_dir = tempfile.mkdtemp(prefix=f"skill_{name}_")
+
+        local_path = self.resolve_skill_dir(name, tenant_id=tenant_id)
+        if os.path.exists(local_path):
+            import shutil as sh
+            sh.copytree(local_path, temp_dir, dirs_exist_ok=True)
+
+        skill["directory"] = temp_dir
+        return skill
+
+    def get_skill_scripts(self, name: str, *, tenant_id: Optional[str]) -> List[str]:
+        """Get list of executable scripts in skill.
+
+        Args:
+            name: Skill name
+
+        Returns:
+            List of script file paths within the skill directory
+        """
+        skill_dir = self.load_skill_directory(name, tenant_id=tenant_id)
+        if not skill_dir:
+            return []
+
+        scripts_dir = os.path.join(skill_dir["directory"], "scripts")
+        if not os.path.exists(scripts_dir):
+            return []
+
+        scripts = []
+        for root, _, files in os.walk(scripts_dir):
+            for file in files:
+                if file.endswith((".py", ".sh")):
+                    scripts.append(os.path.join(root, file))
+
+        return scripts
+
+    def cleanup_skill_directory(self, name: str, *, tenant_id: Optional[str]) -> None:
+        """Clean up temporary skill directory.
+
+        Args:
+            name: Skill name
+        """
+        temp_dir = tempfile.gettempdir()
+        for item in os.listdir(temp_dir):
+            if item.startswith(f"skill_{name}_"):
+                path = os.path.join(temp_dir, item)
+                try:
+                    if os.path.isdir(path):
+                        shutil.rmtree(path)
+                    else:
+                        os.remove(path)
+                except Exception as e:
+                    logger.warning(f"Could not cleanup temp dir {path}: {e}")
+
+    def run_skill_script(
+        self,
+        skill_name: str,
+        script_path: str,
+        params: Optional[str] = None,
+        *,
+        tenant_id: Optional[str],
+        working_directory: Optional[str] = None,
+    ) -> Any:
+        """Execute a skill script with given parameters.
+
+        The ``script_path`` is always resolved **relative to the skill's root
+        directory** (i.e. ``<local_skills_dir>/<skill_name>``). This applies to
+        every caller - including tools that pass paths extracted from SKILL.md
+        inline backticks/code fences or `<use_script path="..." />` tags. The
+        The script location never depends on the current working directory.
+        Callers may still provide an isolated ``working_directory`` for input
+        and output files while the executable itself remains skill-relative.
+
+        When the requested script cannot be found, the error message lists:
+
+        * every path that was tried (after normalisation),
+        * a search summary (absolute and skill-relative), and
+        * the scripts that *do* exist under the skill so the caller can
+          pick the right one.
+
+        Args:
+            skill_name: Name of the skill containing the script
+            script_path: Path to script relative to the skill root directory
+                (e.g. ``scripts/analyze.py`` or ``scripts/sub/run.sh``).
+                Leading ``./`` or ``\\`` and surrounding whitespace are
+                stripped. The path may use forward slashes or backslashes.
+            params: Raw command-line argument string to pass to the script.
+                Example: ``--target /path/to/file -c --code "SELECT 1"``
+            agent_id: Agent ID for DB-based available skills lookup
+            tenant_id: Tenant ID for DB-based available skills lookup
+            version_no: Version number for DB-based available skills lookup
+            working_directory: Optional isolated directory used as subprocess cwd.
+
+        Returns:
+            Script execution result as string or parsed JSON
+
+        Raises:
+            SkillNotFoundError: When the skill directory does not exist in local storage
+            SkillScriptNotFoundError: When the specified script path does not exist within the skill
+        """
+        local_skill_dir = self.resolve_skill_dir(skill_name, tenant_id=tenant_id)
+        if not os.path.isdir(local_skill_dir):
+            raise SkillNotFoundError(f"Skill '{skill_name}' not found.")
+
+        # Normalise the incoming path: collapse whitespace, strip a leading
+        # "./" or "/" that the caller may have added by mistake, and convert
+        # backslashes to the platform separator so we can join it cleanly.
+        if script_path is None:
+            normalised_script_path = ""
+        else:
+            normalised_script_path = script_path.strip()
+
+        # Strip surrounding quotes (`"foo.py"` / `'foo.py'`) that sometimes
+        # leak from backtick or code-fence extraction. This is a best-effort
+        # helper for the LLM and does not handle arbitrarily escaped strings.
+        if (
+            len(normalised_script_path) >= 2
+            and normalised_script_path[0] == normalised_script_path[-1]
+            and normalised_script_path[0] in ("'", '"')
+        ):
+            normalised_script_path = normalised_script_path[1:-1].strip()
+
+        normalised_script_path = normalised_script_path.strip()
+        # Drop a leading relative-path marker like "./" so the join below is
+        # robust against callers that prepend "./scripts/foo.py".
+        while normalised_script_path.startswith(("./", ".\\")):
+            normalised_script_path = normalised_script_path[2:]
+        normalised_script_path = normalised_script_path.lstrip("/\\")
+        normalised_script_path = normalised_script_path.replace("/", os.sep).replace("\\", os.sep)
+        full_path = os.path.realpath(
+            os.path.join(local_skill_dir, normalised_script_path)
+        )
+
+        # Build the friendly error up-front so we can attach diagnostic info
+        # whether the path is missing or escapes the skill root.
+        available = self._list_available_scripts(local_skill_dir)
+        tries: List[str] = [full_path]
+        tried_reasons: List[str] = []
+
+        def _fail(reason: str) -> "SkillScriptNotFoundError":
+            tried_reasons.append(reason)
+            return SkillScriptNotFoundError(
+                f"Script '{script_path}' not found in skill '{skill_name}'.\n"
+                f"  - reason: {reason}\n"
+                f"  - resolved to: {full_path}\n"
+                f"  - skill root: {local_skill_dir}\n"
+                f"  - tried: {', '.join(tries)}\n"
+                f"  - available scripts: {available if available else 'none'}"
+            )
+
+        try:
+            full_path = self._resolve_skill_file_path(
+                local_skill_dir,
+                normalised_script_path,
+            )
+        except ValueError:
+            raise _fail("resolved path escapes the skill root directory")
+
+        skill_root_abs = os.path.realpath(local_skill_dir)
+
+        if os.path.isfile(full_path):
+            pass
+        else:
+            # Try a couple of common fall-backs so that ``scripts/foo`` finds
+            # ``scripts/foo.py`` and ``scripts/foo.sh`` when the extension is
+            # omitted, but only when the variant stays inside the skill root.
+            base, ext = os.path.splitext(full_path)
+            if not ext:
+                for candidate_ext in (".py", ".sh"):
+                    candidate = base + candidate_ext
+                    candidate_abs = os.path.abspath(candidate)
+                    if (
+                        candidate_abs == skill_root_abs
+                        or candidate_abs.startswith(skill_root_abs + os.sep)
+                    ) and os.path.isfile(candidate):
+                        full_path = candidate
+                        normalised_script_path = normalised_script_path + candidate_ext
+                        tries.append(candidate)
+                        break
+                else:
+                    raise _fail("script file does not exist (and no .py/.sh fall-back matched)")
+            else:
+                raise _fail("script file does not exist")
+
+        if normalised_script_path.endswith(".py"):
+            return self._run_python_script(full_path, params, working_directory)
+        elif normalised_script_path.endswith(".sh"):
+            return self._run_shell_script(full_path, params, working_directory)
+        else:
+            raise ValueError(f"Unsupported script type: {normalised_script_path}")
+
+    def _list_available_scripts(self, local_skill_dir: str) -> List[str]:
+        """Return script paths (relative to the skill root) that exist on disk.
+
+        Args:
+            local_skill_dir: Absolute path to the skill's local directory.
+
+        Returns:
+            Sorted list of script paths relative to ``local_skill_dir``. An
+            empty list is returned when the directory does not exist.
+        """
+        available: List[str] = []
+        scripts_dir = os.path.join(local_skill_dir, "scripts")
+        for root in (local_skill_dir, scripts_dir):
+            if not os.path.isdir(root):
+                continue
+            for dirpath, _dirs, files in os.walk(root):
+                for f in files:
+                    if f.endswith((".py", ".sh")):
+                        rel = os.path.relpath(os.path.join(dirpath, f), local_skill_dir)
+                        available.append(rel.replace("\\", "/"))
+        # Deduplicate while keeping order.
+        seen = set()
+        unique: List[str] = []
+        for rel in available:
+            if rel in seen:
+                continue
+            seen.add(rel)
+            unique.append(rel)
+        return sorted(unique)
+
+    def _run_python_script(
+        self,
+        script_path: str,
+        params: Optional[str],
+        working_directory: Optional[str] = None,
+    ) -> str:
+        """Run a Python script with parameters.
+
+        Args:
+            script_path: Full path to the Python script
+            params: Raw command-line argument string to pass to the script
+
+        Returns:
+            Script output as string
+        """
+        cmd_parts = shlex.split(params) if params else []
+
+        # Use sys.executable to ensure the script runs in the same Python environment
+        # as the current process, so all installed packages (e.g., python-docx) are available
+        python_executable = sys.executable
+
+        try:
+            run_environment = os.environ.copy()
+            if working_directory:
+                os.makedirs(working_directory, exist_ok=True)
+                run_environment["NEXENT_WORKSPACE"] = working_directory
+            result = subprocess.run(
+                [python_executable, script_path] + cmd_parts,
+                capture_output=True,
+                text=True,
+                timeout=300,
+                env=run_environment,
+                cwd=working_directory,
+            )
+            if result.returncode != 0:
+                logger.error(f"Script error: {result.stderr}")
+                return json.dumps({"error": result.stderr, "output": result.stdout})
+            return result.stdout
+        except subprocess.TimeoutExpired:
+            raise TimeoutError(f"Script execution timed out: {script_path}")
+        except Exception as e:
+            logger.error(f"Failed to run script: {e}")
+            raise
+
+    def _run_shell_script(
+        self,
+        script_path: str,
+        params: Optional[str],
+        working_directory: Optional[str] = None,
+    ) -> str:
+        """Run a shell script with parameters.
+
+        Args:
+            script_path: Full path to the shell script
+            params: Raw command-line argument string to pass to the script
+
+        Returns:
+            Script output as string
+        """
+        cmd_parts = shlex.split(params) if params else []
+
+        try:
+            run_environment = os.environ.copy()
+            if working_directory:
+                os.makedirs(working_directory, exist_ok=True)
+                run_environment["NEXENT_WORKSPACE"] = working_directory
+            result = subprocess.run(
+                ["bash", script_path] + cmd_parts,
+                capture_output=True,
+                text=True,
+                timeout=300,
+                env=run_environment,
+                cwd=working_directory,
+            )
+            if result.returncode != 0:
+                logger.error(f"Script error: {result.stderr}")
+                return json.dumps({"error": result.stderr, "output": result.stdout})
+            return result.stdout
+        except subprocess.TimeoutExpired:
+            raise TimeoutError(f"Script execution timed out: {script_path}")
+        except Exception as e:
+            logger.error(f"Failed to run script: {e}")
+            raise
