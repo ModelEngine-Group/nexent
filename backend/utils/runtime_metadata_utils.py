@@ -5,8 +5,9 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-from dataclasses import dataclass
 from typing import Any, Dict, Mapping
+
+from consts.exceptions import RuntimeMetadataValidationError
 
 
 MAX_RUNTIME_METADATA_BYTES = 64 * 1024
@@ -16,15 +17,6 @@ MAX_RUNTIME_METADATA_ARRAY_ITEMS = 1000
 MAX_RUNTIME_METADATA_KEY_LENGTH = 256
 
 
-@dataclass(frozen=True)
-class RuntimeMetadataValidationError(ValueError):
-    """Describe a metadata validation failure without retaining its values."""
-
-    code: str
-    message: str
-
-    def __str__(self) -> str:
-        return self.message
 
 
 def canonical_runtime_metadata_json(metadata: Mapping[str, Any]) -> str:

@@ -2,13 +2,14 @@ import math
 
 import pytest
 
+from consts.exceptions import RuntimeMetadataValidationError
+
 from utils.runtime_metadata_utils import (
     MAX_RUNTIME_METADATA_ARRAY_ITEMS,
     MAX_RUNTIME_METADATA_BYTES,
     MAX_RUNTIME_METADATA_DEPTH,
     MAX_RUNTIME_METADATA_KEY_LENGTH,
     MAX_RUNTIME_METADATA_KEYS,
-    RuntimeMetadataValidationError,
     canonical_runtime_metadata_json,
     runtime_metadata_hash,
     validate_runtime_metadata,

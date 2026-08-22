@@ -5,6 +5,11 @@ from typing import Any, Dict, List, Optional, TypedDict
 
 from sqlalchemy import asc, desc, func, insert, select, update
 
+from consts.exceptions import (
+    ConversationNotFoundError,
+    RuntimeMetadataVersionConflict,
+)
+
 from .client import as_dict, db_client, get_db_session
 from .db_models import (
     ConversationMessage,
@@ -631,14 +636,6 @@ def get_conversation(
         return None if record is None else as_dict(record)
 
 
-class RuntimeMetadataVersionConflict(ValueError):
-    """Raised when a conversation metadata optimistic-lock check fails."""
-
-    def __init__(self, current_version: int):
-        super().__init__("Runtime metadata version conflict")
-        self.current_version = current_version
-
-
 def resolve_conversation_runtime_metadata(
     conversation_id: int,
     user_id: str,
@@ -660,7 +657,7 @@ def resolve_conversation_runtime_metadata(
         )
         record = session.scalars(stmt).first()
         if record is None:
-            raise ValueError("Conversation not found")
+            raise ConversationNotFoundError("Conversation not found")
 
         current_version = int(record.runtime_metadata_version or 0)
         if update_requested:

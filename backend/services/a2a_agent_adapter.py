@@ -9,10 +9,7 @@ from typing import Any, AsyncIterator, Dict, List, Optional
 from dataclasses import dataclass, field
 from uuid import uuid4
 
-try:
-    from utils.runtime_metadata_utils import validate_runtime_metadata
-except ModuleNotFoundError:  # Support repository-root imports used by tests.
-    from backend.utils.runtime_metadata_utils import validate_runtime_metadata
+from utils.runtime_metadata_utils import validate_runtime_metadata
 
 logger = logging.getLogger(__name__)
 

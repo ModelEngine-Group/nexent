@@ -13,6 +13,12 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from consts.error_code import ErrorCode
+from consts.exceptions import (
+    AppException,
+    RuntimeMetadataValidationError,
+)
+
 from services.a2a_client_service import (
     a2a_client_service,
     AgentCallError,
@@ -21,16 +27,9 @@ from services.a2a_client_service import (
 from services.a2a_server_service import a2a_server_service
 from database import a2a_agent_db
 from utils.auth_utils import get_current_user_info
-try:
-    from utils.runtime_metadata_utils import (
-        RuntimeMetadataValidationError,
-        validate_runtime_metadata,
-    )
-except ModuleNotFoundError:  # Support repository-root imports used by tests.
-    from backend.utils.runtime_metadata_utils import (
-        RuntimeMetadataValidationError,
-        validate_runtime_metadata,
-    )
+from utils.runtime_metadata_utils import (
+    validate_runtime_metadata,
+)
 
 router = APIRouter(prefix="/a2a/client", tags=["A2A Client"])
 logger = logging.getLogger("a2a_client_app")
@@ -875,13 +874,14 @@ async def chat_with_external_agent(
             try:
                 validate_runtime_metadata(request_body.metadata)
             except RuntimeMetadataValidationError as exc:
-                raise HTTPException(
-                    status_code=(
-                        HTTPStatus.REQUEST_ENTITY_TOO_LARGE
-                        if exc.code == "METADATA_TOO_LARGE"
-                        else HTTPStatus.UNPROCESSABLE_ENTITY
-                    ),
-                    detail=str(exc),
+                error_code = (
+                    ErrorCode.CHAT_METADATA_TOO_LARGE
+                    if exc.code == "METADATA_TOO_LARGE"
+                    else ErrorCode.CHAT_METADATA_INVALID
+                )
+                raise AppException(
+                    error_code,
+                    details={"reason": exc.code},
                 ) from exc
 
         # Build A2A message format following A2A protocol with parts array
@@ -922,7 +922,7 @@ async def chat_with_external_agent(
             status_code=HTTPStatus.NOT_FOUND,
             detail=str(e)
         )
-    except HTTPException:
+    except (AppException, HTTPException):
         raise
     except Exception as e:
         logger.error(f"Chat with external agent failed: {e}", exc_info=True)

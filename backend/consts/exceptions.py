@@ -215,6 +215,23 @@ class ValidationError(Exception):
     pass
 
 
+class RuntimeMetadataValidationError(ValueError):
+    """Describe a runtime metadata validation failure without retaining values."""
+
+    def __init__(self, code: str, message: str):
+        self.code = code
+        self.message = message
+        super().__init__(message)
+
+
+class RuntimeMetadataVersionConflict(ValueError):
+    """Raised when a runtime metadata optimistic-lock check fails."""
+
+    def __init__(self, current_version: int):
+        self.current_version = current_version
+        super().__init__("Runtime metadata version conflict")
+
+
 class TenantResourceLimitError(ValidationError, ValueError):
     """Raised when a platform or tenant hard resource limit is reached."""
 

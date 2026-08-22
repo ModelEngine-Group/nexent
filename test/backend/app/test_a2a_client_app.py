@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
+from fastapi.responses import JSONResponse
 
 # =============================================================================
 # Stub heavy service / auth modules BEFORE importing the app module, following
@@ -40,13 +41,23 @@ auth_utils_mock.get_current_user_info = MagicMock(return_value=("user_1", "tenan
 sys.modules["utils.auth_utils"] = auth_utils_mock
 sys.modules["backend.utils.auth_utils"] = auth_utils_mock
 
-# Real runtime metadata utilities (stdlib-only, safe to import)
-from utils.runtime_metadata_utils import RuntimeMetadataValidationError  # noqa: E402
+from consts.exceptions import (  # noqa: E402
+    AppException,
+    RuntimeMetadataValidationError,
+)
 
 from apps.a2a_client_app import router  # noqa: E402
 
 app = FastAPI()
 app.include_router(router)
+
+@app.exception_handler(AppException)
+async def _app_exception_handler(_request, exc):
+    return JSONResponse(
+        status_code=exc.http_status,
+        content=exc.to_dict(),
+    )
+
 client = TestClient(app)
 
 CHAT_URL = "/a2a/client/agents/7/chat"
@@ -114,6 +125,9 @@ def test_chat_metadata_too_large_returns_413(_mock_call_agent):
         resp = _chat({"metadata": {"big": "x"}})
     assert resp.status_code == 413
     _mock_call_agent.assert_not_awaited()
+    assert resp.json()["code"] == "010107"
+    assert resp.json()["message"] == "Runtime metadata exceeds the maximum allowed size."
+    assert resp.json()["details"] == {"reason": "METADATA_TOO_LARGE"}
 
 
 def test_chat_metadata_invalid_returns_422(_mock_call_agent):
@@ -122,9 +136,12 @@ def test_chat_metadata_invalid_returns_422(_mock_call_agent):
         "apps.a2a_client_app.validate_runtime_metadata",
         side_effect=RuntimeMetadataValidationError("INVALID_METADATA_TYPE", "must be object"),
     ):
-        resp = _chat({"metadata": "not-a-dict"})
+        resp = _chat({"metadata": {"invalid": "value"}})
     assert resp.status_code == 422
     _mock_call_agent.assert_not_awaited()
+    assert resp.json()["code"] == "010106"
+    assert resp.json()["message"] == "Runtime metadata is invalid."
+    assert resp.json()["details"] == {"reason": "INVALID_METADATA_TYPE"}
 
 
 def test_chat_metadata_real_validator_too_large_returns_413(_mock_call_agent):

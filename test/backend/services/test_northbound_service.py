@@ -21,6 +21,25 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 # Mock all required modules BEFORE importing northbound_service
 # =============================================================================
 
+class ErrorCode:
+    CHAT_METADATA_INVALID = "010106"
+    CHAT_METADATA_TOO_LARGE = "010107"
+
+
+class AppException(Exception):
+    def __init__(self, error_code, message=None, details=None):
+        self.error_code = error_code
+        self.message = message
+        self.details = details or {}
+        super().__init__(message)
+
+
+class RuntimeMetadataValidationError(ValueError):
+    def __init__(self, code, message):
+        self.code = code
+        super().__init__(message)
+
+
 # Mock consts.exceptions
 class LimitExceededError(Exception):
     pass
@@ -48,8 +67,15 @@ consts_exceptions_mod.ConversationNotFoundError = ConversationNotFoundError
 consts_exceptions_mod.RuntimeServiceTimeoutError = RuntimeServiceTimeoutError
 consts_exceptions_mod.RuntimeServiceUnavailableError = RuntimeServiceUnavailableError
 consts_exceptions_mod.RuntimeUpstreamError = RuntimeUpstreamError
+consts_exceptions_mod.AppException = AppException
+consts_exceptions_mod.RuntimeMetadataValidationError = RuntimeMetadataValidationError
 sys.modules["consts.exceptions"] = consts_exceptions_mod
 sys.modules["backend.consts.exceptions"] = consts_exceptions_mod
+
+consts_error_code_mod = types.ModuleType("consts.error_code")
+consts_error_code_mod.ErrorCode = ErrorCode
+sys.modules["consts.error_code"] = consts_error_code_mod
+sys.modules["backend.consts.error_code"] = consts_error_code_mod
 
 # Mock consts.const
 consts_const_mod = types.ModuleType("consts.const")
@@ -71,6 +97,7 @@ sys.modules["consts.const"] = consts_const_mod
 consts_package = types.ModuleType("consts")
 consts_package.exceptions = consts_exceptions_mod
 consts_package.const = consts_const_mod
+consts_package.error_code = consts_error_code_mod
 sys.modules["consts"] = consts_package
 
 # Mock database modules
@@ -519,11 +546,9 @@ class TestStartStreamingChat:
 
     async def test_start_streaming_chat_rejects_invalid_metadata(self):
         """Non-object runtime metadata must be rejected with HTTP 422."""
-        from fastapi import HTTPException
-
         ctx = MockNorthboundContext(token_id=0)
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(AppException) as exc_info:
             await ns.start_streaming_chat(
                 ctx=ctx,
                 conversation_id=None,
@@ -532,20 +557,19 @@ class TestStartStreamingChat:
                 metadata=["not", "an", "object"],
             )
 
-        assert exc_info.value.status_code == 422
+        assert exc_info.value.error_code == ErrorCode.CHAT_METADATA_INVALID
+        assert exc_info.value.details == {"reason": "INVALID_METADATA_TYPE"}
 
     async def test_start_streaming_chat_oversized_metadata_returns_413(self):
         """METADATA_TOO_LARGE validation failures map to HTTP 413."""
-        from fastapi import HTTPException
-
         ctx = MockNorthboundContext(token_id=0)
 
         with patch.object(
             ns,
             "validate_runtime_metadata",
-            side_effect=ns.RuntimeMetadataValidationError("METADATA_TOO_LARGE", "too large"),
+            side_effect=RuntimeMetadataValidationError("METADATA_TOO_LARGE", "too large"),
         ):
-            with pytest.raises(HTTPException) as exc_info:
+            with pytest.raises(AppException) as exc_info:
                 await ns.start_streaming_chat(
                     ctx=ctx,
                     conversation_id=None,
@@ -554,7 +578,8 @@ class TestStartStreamingChat:
                     metadata={"payload": "x"},
                 )
 
-        assert exc_info.value.status_code == 413
+        assert exc_info.value.error_code == ErrorCode.CHAT_METADATA_TOO_LARGE
+        assert exc_info.value.details == {"reason": "METADATA_TOO_LARGE"}
 
     async def test_start_streaming_chat_creates_conversation(self):
         """Test that new conversation is created when conversation_id is None."""

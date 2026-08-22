@@ -24,7 +24,15 @@ from consts.const import TOOL_TYPE_MAPPING, \
     LANGUAGE, MESSAGE_ROLE, MODEL_CONFIG_MAPPING, CAN_EDIT_ALL_USER_ROLES, PERMISSION_PRIVATE, STREAM_STATUS_EVENT, \
     DEFAULT_EN_TITLE, DEFAULT_ZH_TITLE, RUNTIME_CANCEL_POLL_INTERVAL_SECONDS
 from consts.agent import SAFE_AGENT_STREAM_ERROR_MESSAGE
-from consts.exceptions import AppException, ForbiddenError, MemoryPreparationException, SkillDuplicateError
+from consts.exceptions import (
+    AppException,
+    ConversationNotFoundError,
+    ForbiddenError,
+    MemoryPreparationException,
+    RuntimeMetadataValidationError,
+    RuntimeMetadataVersionConflict,
+    SkillDuplicateError,
+)
 from consts.error_code import ErrorCode
 from consts.agent_unavailable_reasons import AgentUnavailableReason
 from nexent.core.utils.observer import ProcessType
@@ -66,19 +74,11 @@ from database.agent_db import (
 )
 from database import a2a_agent_db
 from database.conversation_db import (
-    RuntimeMetadataVersionConflict,
     resolve_conversation_runtime_metadata,
 )
-try:
-    from utils.runtime_metadata_utils import (
-        RuntimeMetadataValidationError,
-        validate_runtime_metadata,
-    )
-except ModuleNotFoundError:  # Support repository-root imports used by tests.
-    from backend.utils.runtime_metadata_utils import (
-        RuntimeMetadataValidationError,
-        validate_runtime_metadata,
-    )
+from utils.runtime_metadata_utils import (
+    validate_runtime_metadata,
+)
 from database.model_management_db import (
     get_model_by_model_id,
     get_model_by_model_id_ignore_delete,
@@ -3225,7 +3225,10 @@ async def run_agent_stream(
                 if exc.code == "METADATA_TOO_LARGE"
                 else ErrorCode.CHAT_METADATA_INVALID
             )
-            raise AppException(error_code, str(exc)) from exc
+            raise AppException(
+                error_code,
+                details={"reason": exc.code},
+            ) from exc
     metadata_entrypoint = getattr(agent_request, "_runtime_metadata_entrypoint", "native")
     if metadata_update_requested and metadata_entrypoint in {"native", "debug"}:
         agent_record = search_agent_info_by_agent_id(
@@ -3234,10 +3237,7 @@ async def run_agent_stream(
             version_no=agent_request.version_no or 0,
         )
         if not bool(agent_record.get("allow_chat_metadata", False)):
-            raise AppException(
-                ErrorCode.CHAT_METADATA_NOT_ALLOWED,
-                "Runtime metadata input is disabled for this agent",
-            )
+            raise AppException(ErrorCode.CHAT_METADATA_NOT_ALLOWED)
 
     raw_request_scope = None if resume else getattr(agent_request, "knowledge_scope", None)
     if isinstance(raw_request_scope, ConversationKnowledgeScopeRequest):
@@ -3359,10 +3359,13 @@ async def run_agent_stream(
                     update_requested=metadata_update_requested,
                     expected_version=agent_request.expected_metadata_version,
                 )
+            except ConversationNotFoundError as exc:
+                raise AppException(
+                    ErrorCode.CHAT_CONVERSATION_NOT_FOUND,
+                ) from exc
             except RuntimeMetadataVersionConflict as exc:
                 raise AppException(
                     ErrorCode.CHAT_METADATA_VERSION_CONFLICT,
-                    "Runtime metadata was updated by another request",
                     details={"current_version": exc.current_version},
                 ) from exc
             metadata_snapshot = resolved_metadata["runtime_metadata"]

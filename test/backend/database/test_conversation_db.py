@@ -227,7 +227,6 @@ from backend.database.conversation_db import (
     persist_assistant_run_batch,
     rename_conversation,
     resolve_conversation_runtime_metadata,
-    RuntimeMetadataVersionConflict,
     save_history_summary,
     soft_delete_all_conversations_by_user,
     update_conversation_agent_id,
@@ -239,6 +238,10 @@ from backend.database.conversation_db import (
     update_message_unit_content,
     update_message_unit_status,
     update_conversation_knowledge_scope,
+)
+from consts.exceptions import (
+    ConversationNotFoundError,
+    RuntimeMetadataVersionConflict,
 )
 
 
@@ -626,6 +629,22 @@ def test_resolve_runtime_metadata_rejects_stale_version(monkeypatch, mock_sessio
     assert exc_info.value.current_version == 4
     assert record.runtime_metadata == {"current": True}
     session.flush.assert_not_called()
+
+
+def test_resolve_runtime_metadata_raises_conversation_not_found(monkeypatch, mock_session_ctx):
+    session, ctx = mock_session_ctx
+    session.scalars.return_value.first.return_value = None
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    with pytest.raises(ConversationNotFoundError):
+        resolve_conversation_runtime_metadata(
+            conversation_id=9,
+            user_id="user-1",
+            request_metadata={},
+            update_requested=True,
+            expected_version=0,
+        )
+
 
 
 # =============================================================================

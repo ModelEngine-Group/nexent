@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from os.path import basename
 from typing import Any, Dict, List, Optional
 
-from fastapi import HTTPException, UploadFile
+from fastapi import UploadFile
 from fastapi.responses import StreamingResponse
 
 
@@ -20,6 +20,8 @@ from consts.const import (
     NORTHBOUND_RATE_LIMIT_PER_MINUTE,
 )
 from consts.exceptions import (
+    AppException,
+    RuntimeMetadataValidationError,
     LimitExceededError,
     RuntimeServiceTimeoutError,
     RuntimeServiceUnavailableError,
@@ -27,6 +29,7 @@ from consts.exceptions import (
     UnauthorizedError,
     ConversationNotFoundError,
 )
+from consts.error_code import ErrorCode
 from consts.model import AgentRequest, ToolParamsRequest
 from database.knowledge_db import get_knowledge_info_by_tenant_id
 from database.conversation_db import get_conversation_messages
@@ -52,18 +55,10 @@ from services.conversation_management_service import (
     create_new_conversation,
     update_conversation_title as update_conversation_title_service,
 )
-try:
-    from utils.runtime_metadata_utils import (
-        RuntimeMetadataValidationError,
-        runtime_metadata_hash,
-        validate_runtime_metadata,
-    )
-except ModuleNotFoundError:  # Support repository-root imports used by tests.
-    from backend.utils.runtime_metadata_utils import (
-        RuntimeMetadataValidationError,
-        runtime_metadata_hash,
-        validate_runtime_metadata,
-    )
+from utils.runtime_metadata_utils import (
+    runtime_metadata_hash,
+    validate_runtime_metadata,
+)
 from services.file_management_service import upload_to_minio, resolve_minio_upload_folder, validate_urls_access
 from database.attachment_db import get_file_url, get_file_size_from_minio
 from nexent.multi_modal.utils import parse_s3_url
@@ -394,11 +389,14 @@ async def start_streaming_chat(
             try:
                 validate_runtime_metadata(metadata)
             except RuntimeMetadataValidationError as exc:
-                raise HTTPException(
-                    status_code=(
-                        413 if exc.code == "METADATA_TOO_LARGE" else 422
-                    ),
-                    detail=str(exc),
+                error_code = (
+                    ErrorCode.CHAT_METADATA_TOO_LARGE
+                    if exc.code == "METADATA_TOO_LARGE"
+                    else ErrorCode.CHAT_METADATA_INVALID
+                )
+                raise AppException(
+                    error_code,
+                    details={"reason": exc.code},
                 ) from exc
         # Simple rate limit
         await check_and_consume_rate_limit(ctx.tenant_id)
@@ -467,7 +465,7 @@ async def start_streaming_chat(
         raise LimitExceededError(str(exc))
     except UnauthorizedError as _:
         raise UnauthorizedError("Cannot authenticate.")
-    except HTTPException:
+    except AppException:
         raise
     except Exception as e:
         raise Exception(f"Failed to start streaming chat for conversation_id {conversation_id}: {str(e)}")
