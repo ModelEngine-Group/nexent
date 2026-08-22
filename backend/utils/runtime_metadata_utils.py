@@ -8,6 +8,7 @@ import math
 from typing import Any, Dict, Mapping
 
 from consts.exceptions import RuntimeMetadataValidationError
+from consts.error_code import RuntimeMetadataValidationCode
 
 
 MAX_RUNTIME_METADATA_BYTES = 64 * 1024
@@ -49,7 +50,7 @@ def validate_runtime_metadata(value: Any) -> Dict[str, Any]:
 
     if not isinstance(value, dict):
         raise RuntimeMetadataValidationError(
-            "INVALID_METADATA_TYPE",
+            RuntimeMetadataValidationCode.INVALID_METADATA_TYPE,
             "Runtime metadata must be a JSON object",
         )
 
@@ -61,7 +62,7 @@ def validate_runtime_metadata(value: Any) -> Dict[str, Any]:
 
         if depth > MAX_RUNTIME_METADATA_DEPTH:
             raise RuntimeMetadataValidationError(
-                "METADATA_TOO_DEEP",
+                RuntimeMetadataValidationCode.METADATA_TOO_DEEP,
                 f"Runtime metadata depth exceeds {MAX_RUNTIME_METADATA_DEPTH}",
             )
 
@@ -69,18 +70,18 @@ def validate_runtime_metadata(value: Any) -> Dict[str, Any]:
             for key, child in node.items():
                 if not isinstance(key, str):
                     raise RuntimeMetadataValidationError(
-                        "INVALID_METADATA_TYPE",
+                        RuntimeMetadataValidationCode.INVALID_METADATA_TYPE,
                         "Runtime metadata keys must be strings",
                     )
                 if len(key) > MAX_RUNTIME_METADATA_KEY_LENGTH:
                     raise RuntimeMetadataValidationError(
-                        "METADATA_TOO_MANY_ITEMS",
+                        RuntimeMetadataValidationCode.METADATA_TOO_MANY_ITEMS,
                         f"Runtime metadata key length exceeds {MAX_RUNTIME_METADATA_KEY_LENGTH}",
                     )
                 key_count += 1
                 if key_count > MAX_RUNTIME_METADATA_KEYS:
                     raise RuntimeMetadataValidationError(
-                        "METADATA_TOO_MANY_ITEMS",
+                        RuntimeMetadataValidationCode.METADATA_TOO_MANY_ITEMS,
                         f"Runtime metadata contains more than {MAX_RUNTIME_METADATA_KEYS} keys",
                     )
                 visit(child, depth + 1)
@@ -90,7 +91,7 @@ def validate_runtime_metadata(value: Any) -> Dict[str, Any]:
             array_item_count += len(node)
             if array_item_count > MAX_RUNTIME_METADATA_ARRAY_ITEMS:
                 raise RuntimeMetadataValidationError(
-                    "METADATA_TOO_MANY_ITEMS",
+                    RuntimeMetadataValidationCode.METADATA_TOO_MANY_ITEMS,
                     "Runtime metadata contains too many array items",
                 )
             for child in node:
@@ -103,7 +104,7 @@ def validate_runtime_metadata(value: Any) -> Dict[str, Any]:
             return
 
         raise RuntimeMetadataValidationError(
-            "INVALID_METADATA_TYPE",
+            RuntimeMetadataValidationCode.INVALID_METADATA_TYPE,
             "Runtime metadata contains a non-JSON value",
         )
 
@@ -113,13 +114,13 @@ def validate_runtime_metadata(value: Any) -> Dict[str, Any]:
         size_bytes = runtime_metadata_size_bytes(value)
     except (TypeError, ValueError, OverflowError) as exc:
         raise RuntimeMetadataValidationError(
-            "INVALID_METADATA_TYPE",
+            RuntimeMetadataValidationCode.INVALID_METADATA_TYPE,
             "Runtime metadata contains a non-JSON value",
         ) from exc
 
     if size_bytes > MAX_RUNTIME_METADATA_BYTES:
         raise RuntimeMetadataValidationError(
-            "METADATA_TOO_LARGE",
+            RuntimeMetadataValidationCode.METADATA_TOO_LARGE,
             f"Runtime metadata exceeds {MAX_RUNTIME_METADATA_BYTES} bytes",
         )
 

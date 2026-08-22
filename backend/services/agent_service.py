@@ -33,7 +33,7 @@ from consts.exceptions import (
     RuntimeMetadataVersionConflict,
     SkillDuplicateError,
 )
-from consts.error_code import ErrorCode
+from consts.error_code import ErrorCode, RuntimeMetadataValidationCode
 from consts.agent_unavailable_reasons import AgentUnavailableReason
 from nexent.core.utils.observer import ProcessType
 from consts.model import (
@@ -3222,12 +3222,12 @@ async def run_agent_stream(
         except RuntimeMetadataValidationError as exc:
             error_code = (
                 ErrorCode.CHAT_METADATA_TOO_LARGE
-                if exc.code == "METADATA_TOO_LARGE"
+                if exc.code == RuntimeMetadataValidationCode.METADATA_TOO_LARGE
                 else ErrorCode.CHAT_METADATA_INVALID
             )
             raise AppException(
                 error_code,
-                details={"reason": exc.code},
+                details={"reason": exc.code.value},
             ) from exc
     metadata_entrypoint = getattr(agent_request, "_runtime_metadata_entrypoint", "native")
     if metadata_update_requested and metadata_entrypoint in {"native", "debug"}:

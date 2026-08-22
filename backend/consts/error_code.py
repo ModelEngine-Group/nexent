@@ -27,6 +27,16 @@ Format: XXYYZZ (6 digits, string)
 from enum import Enum
 
 
+class RuntimeMetadataValidationCode(str, Enum):
+    """Internal runtime metadata validation reason codes."""
+
+    INVALID_METADATA_TYPE = "INVALID_METADATA_TYPE"
+    METADATA_TOO_DEEP = "METADATA_TOO_DEEP"
+    METADATA_TOO_MANY_ITEMS = "METADATA_TOO_MANY_ITEMS"
+    METADATA_TOO_LARGE = "METADATA_TOO_LARGE"
+
+
+
 class ErrorCode(Enum):
     """Business error codes (stored as strings to preserve leading zeros)."""
 

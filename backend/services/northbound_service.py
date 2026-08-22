@@ -29,7 +29,7 @@ from consts.exceptions import (
     UnauthorizedError,
     ConversationNotFoundError,
 )
-from consts.error_code import ErrorCode
+from consts.error_code import ErrorCode, RuntimeMetadataValidationCode
 from consts.model import AgentRequest, ToolParamsRequest
 from database.knowledge_db import get_knowledge_info_by_tenant_id
 from database.conversation_db import get_conversation_messages
@@ -391,12 +391,12 @@ async def start_streaming_chat(
             except RuntimeMetadataValidationError as exc:
                 error_code = (
                     ErrorCode.CHAT_METADATA_TOO_LARGE
-                    if exc.code == "METADATA_TOO_LARGE"
+                    if exc.code == RuntimeMetadataValidationCode.METADATA_TOO_LARGE
                     else ErrorCode.CHAT_METADATA_INVALID
                 )
                 raise AppException(
                     error_code,
-                    details={"reason": exc.code},
+                    details={"reason": exc.code.value},
                 ) from exc
         # Simple rate limit
         await check_and_consume_rate_limit(ctx.tenant_id)

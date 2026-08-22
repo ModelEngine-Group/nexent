@@ -10,6 +10,7 @@ This module tests the northbound-facing service layer functions including:
 import sys
 import os
 import types
+from enum import Enum
 from unittest.mock import MagicMock, AsyncMock, patch
 
 import pytest
@@ -24,6 +25,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 class ErrorCode:
     CHAT_METADATA_INVALID = "010106"
     CHAT_METADATA_TOO_LARGE = "010107"
+
+
+class RuntimeMetadataValidationCode(str, Enum):
+    INVALID_METADATA_TYPE = "INVALID_METADATA_TYPE"
+    METADATA_TOO_LARGE = "METADATA_TOO_LARGE"
 
 
 class AppException(Exception):
@@ -74,6 +80,7 @@ sys.modules["backend.consts.exceptions"] = consts_exceptions_mod
 
 consts_error_code_mod = types.ModuleType("consts.error_code")
 consts_error_code_mod.ErrorCode = ErrorCode
+consts_error_code_mod.RuntimeMetadataValidationCode = RuntimeMetadataValidationCode
 sys.modules["consts.error_code"] = consts_error_code_mod
 sys.modules["backend.consts.error_code"] = consts_error_code_mod
 
@@ -567,7 +574,10 @@ class TestStartStreamingChat:
         with patch.object(
             ns,
             "validate_runtime_metadata",
-            side_effect=RuntimeMetadataValidationError("METADATA_TOO_LARGE", "too large"),
+            side_effect=RuntimeMetadataValidationError(
+                RuntimeMetadataValidationCode.METADATA_TOO_LARGE,
+                "too large",
+            ),
         ):
             with pytest.raises(AppException) as exc_info:
                 await ns.start_streaming_chat(

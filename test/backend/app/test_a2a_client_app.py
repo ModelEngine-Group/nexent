@@ -41,6 +41,7 @@ auth_utils_mock.get_current_user_info = MagicMock(return_value=("user_1", "tenan
 sys.modules["utils.auth_utils"] = auth_utils_mock
 sys.modules["backend.utils.auth_utils"] = auth_utils_mock
 
+from consts.error_code import RuntimeMetadataValidationCode  # noqa: E402
 from consts.exceptions import (  # noqa: E402
     AppException,
     RuntimeMetadataValidationError,
@@ -120,7 +121,10 @@ def test_chat_metadata_too_large_returns_413(_mock_call_agent):
     """METADATA_TOO_LARGE validation errors map to HTTP 413."""
     with patch(
         "apps.a2a_client_app.validate_runtime_metadata",
-        side_effect=RuntimeMetadataValidationError("METADATA_TOO_LARGE", "too large"),
+        side_effect=RuntimeMetadataValidationError(
+            RuntimeMetadataValidationCode.METADATA_TOO_LARGE,
+            "too large",
+        ),
     ):
         resp = _chat({"metadata": {"big": "x"}})
     assert resp.status_code == 413
@@ -134,7 +138,10 @@ def test_chat_metadata_invalid_returns_422(_mock_call_agent):
     """Other validation errors map to HTTP 422."""
     with patch(
         "apps.a2a_client_app.validate_runtime_metadata",
-        side_effect=RuntimeMetadataValidationError("INVALID_METADATA_TYPE", "must be object"),
+        side_effect=RuntimeMetadataValidationError(
+            RuntimeMetadataValidationCode.INVALID_METADATA_TYPE,
+            "must be object",
+        ),
     ):
         resp = _chat({"metadata": {"invalid": "value"}})
     assert resp.status_code == 422

@@ -3,6 +3,7 @@ import math
 import pytest
 
 from consts.exceptions import RuntimeMetadataValidationError
+from consts.error_code import RuntimeMetadataValidationCode
 
 from utils.runtime_metadata_utils import (
     MAX_RUNTIME_METADATA_ARRAY_ITEMS,
@@ -30,7 +31,7 @@ def test_validate_runtime_metadata_rejects_non_object_root(value):
     with pytest.raises(RuntimeMetadataValidationError) as exc_info:
         validate_runtime_metadata(value)
 
-    assert exc_info.value.code == "INVALID_METADATA_TYPE"
+    assert exc_info.value.code == RuntimeMetadataValidationCode.INVALID_METADATA_TYPE
 
 
 @pytest.mark.parametrize("value", [math.nan, math.inf, -math.inf, object()])
@@ -38,7 +39,7 @@ def test_validate_runtime_metadata_rejects_non_json_values(value):
     with pytest.raises(RuntimeMetadataValidationError) as exc_info:
         validate_runtime_metadata({"value": value})
 
-    assert exc_info.value.code == "INVALID_METADATA_TYPE"
+    assert exc_info.value.code == RuntimeMetadataValidationCode.INVALID_METADATA_TYPE
 
 
 def test_validate_runtime_metadata_enforces_depth():
@@ -50,7 +51,7 @@ def test_validate_runtime_metadata_enforces_depth():
     with pytest.raises(RuntimeMetadataValidationError) as exc_info:
         validate_runtime_metadata(value)
 
-    assert exc_info.value.code == "METADATA_TOO_DEEP"
+    assert exc_info.value.code == RuntimeMetadataValidationCode.METADATA_TOO_DEEP
 
 
 def test_validate_runtime_metadata_enforces_total_keys():
@@ -59,7 +60,7 @@ def test_validate_runtime_metadata_enforces_total_keys():
     with pytest.raises(RuntimeMetadataValidationError) as exc_info:
         validate_runtime_metadata(value)
 
-    assert exc_info.value.code == "METADATA_TOO_MANY_ITEMS"
+    assert exc_info.value.code == RuntimeMetadataValidationCode.METADATA_TOO_MANY_ITEMS
 
 
 def test_validate_runtime_metadata_enforces_total_array_items():
@@ -68,7 +69,7 @@ def test_validate_runtime_metadata_enforces_total_array_items():
     with pytest.raises(RuntimeMetadataValidationError) as exc_info:
         validate_runtime_metadata(value)
 
-    assert exc_info.value.code == "METADATA_TOO_MANY_ITEMS"
+    assert exc_info.value.code == RuntimeMetadataValidationCode.METADATA_TOO_MANY_ITEMS
 
 
 def test_validate_runtime_metadata_enforces_canonical_utf8_size():
@@ -77,7 +78,7 @@ def test_validate_runtime_metadata_enforces_canonical_utf8_size():
     with pytest.raises(RuntimeMetadataValidationError) as exc_info:
         validate_runtime_metadata(value)
 
-    assert exc_info.value.code == "METADATA_TOO_LARGE"
+    assert exc_info.value.code == RuntimeMetadataValidationCode.METADATA_TOO_LARGE
 
 
 def test_canonical_json_and_hash_are_order_independent():
@@ -92,7 +93,7 @@ def test_validate_runtime_metadata_rejects_non_string_key():
     with pytest.raises(RuntimeMetadataValidationError) as exc_info:
         validate_runtime_metadata({1: "value"})
 
-    assert exc_info.value.code == "INVALID_METADATA_TYPE"
+    assert exc_info.value.code == RuntimeMetadataValidationCode.INVALID_METADATA_TYPE
 
 
 def test_validate_runtime_metadata_rejects_overlong_key():
@@ -101,5 +102,5 @@ def test_validate_runtime_metadata_rejects_overlong_key():
     with pytest.raises(RuntimeMetadataValidationError) as exc_info:
         validate_runtime_metadata({long_key: "value"})
 
-    assert exc_info.value.code == "METADATA_TOO_MANY_ITEMS"
+    assert exc_info.value.code == RuntimeMetadataValidationCode.METADATA_TOO_MANY_ITEMS
 
