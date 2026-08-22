@@ -819,7 +819,6 @@ class ExportAndImportAgentInfo(BaseModel):
     name: str
     display_name: Optional[str] = None
     description: str
-    business_description: str
     author: Optional[str] = None
     max_steps: int
     requested_output_tokens: Optional[int] = Field(default=None, gt=0)
@@ -1003,7 +1002,7 @@ class AgentNameBatchRegenerateRequest(BaseModel):
 
 
 class AgentNameBatchCheckItem(BaseModel):
-    name: str
+    name: str = ""
     display_name: Optional[str] = None
     agent_id: Optional[int] = None
 

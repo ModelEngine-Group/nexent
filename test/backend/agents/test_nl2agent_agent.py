@@ -147,6 +147,149 @@ def test_build_nl2agent_system_prompt_falls_back_to_chinese():
     assert build_nl2agent_system_prompt("fr") == build_nl2agent_system_prompt("zh")
 
 
+@pytest.mark.parametrize(
+    (
+        "language",
+        "boundary_heading",
+        "deferred_rule",
+        "resource_rule",
+        "empty_resource_rule",
+        "single_invocation_rule",
+        "summary_rule",
+    ),
+    [
+        (
+            "en",
+            "### Scheduled-task Boundary",
+            "this workflow does not create the scheduled task",
+            "Never search for a scheduled-task resource",
+            'resource_result={"status": "success", "resources": []}',
+            "Every Prompt field describes one invocation",
+            "open [Scheduled tasks](/agent-tasks)",
+        ),
+        (
+            "zh",
+            "### 定时任务边界",
+            "本流程不创建定时任务",
+            "不得搜索定时任务资源",
+            'resource_result={"status": "success", "resources": []}',
+            "所有 Prompt 字段只描述 Agent 单次被调用时的行为",
+            "前往[定时任务](/agent-tasks)",
+        ),
+    ],
+)
+def test_build_nl2agent_system_prompt_defers_scheduled_tasks_until_agent_chat(
+    language,
+    boundary_heading,
+    deferred_rule,
+    resource_rule,
+    empty_resource_rule,
+    single_invocation_rule,
+    summary_rule,
+):
+    prompt = build_nl2agent_system_prompt(language)
+
+    assert boundary_heading in prompt
+    assert deferred_rule in prompt
+    assert resource_rule in prompt
+    assert empty_resource_rule in prompt
+    assert single_invocation_rule in prompt
+    assert summary_rule in prompt
+    assert prompt.count("(/agent-tasks)") == 1
+
+
+@pytest.mark.parametrize(
+    (
+        "language",
+        "priority_heading",
+        "state_rule",
+        "linear_priority_rule",
+        "partial_patch_rule",
+        "preserve_rule",
+        "clarification_rule",
+        "resource_scope_rule",
+        "reconfigure_rule",
+        "resource_continue_rule",
+        "revision_summary_rule",
+        "removal_rule",
+        "immutable_boundary",
+    ),
+    [
+        (
+            "en",
+            "### Revision Mode Priority",
+            "Determine completion from the current `nl2agent_verified_state`",
+            "always take priority over the linear generation state machine",
+            "One request may update multiple explicitly requested fields in one save call",
+            "Omit every unspecified field so its persisted value remains unchanged",
+            "listing only the potentially affected fields",
+            "search only for the newly requested capability",
+            "reconfigure a specifically requested bound resource",
+            "Never start at `duty_prompt` or enter the full Prompt generation chain",
+            'Start with "Updated:"',
+            "Conversational removal is unsupported",
+            "model settings, publication status, version state",
+        ),
+        (
+            "zh",
+            "### 修订模式优先级",
+            "只能根据当前 `nl2agent_verified_state` 判断是否完成",
+            "始终优先于线性生成状态机",
+            "一次请求可在一次保存调用中更新多个明确指定字段",
+            "所有未指定字段都必须省略并保持数据库原值",
+            "只列出可能受影响的字段",
+            "只搜索用户新请求的能力",
+            "重新配置用户明确指定的已绑定资源",
+            "不得因卡片已确认就从 `duty_prompt` 开始",
+            "以“已更新：”开头",
+            "不支持通过对话移除资源",
+            "模型设置、发布状态、版本状态",
+        ),
+    ],
+)
+def test_build_nl2agent_system_prompt_prioritizes_completed_draft_revisions(
+    language,
+    priority_heading,
+    state_rule,
+    linear_priority_rule,
+    partial_patch_rule,
+    preserve_rule,
+    clarification_rule,
+    resource_scope_rule,
+    reconfigure_rule,
+    resource_continue_rule,
+    revision_summary_rule,
+    removal_rule,
+    immutable_boundary,
+):
+    prompt = build_nl2agent_system_prompt(language)
+
+    assert priority_heading in prompt
+    assert state_rule in prompt
+    assert linear_priority_rule in prompt
+    assert partial_patch_rule in prompt
+    assert preserve_rule in prompt
+    assert clarification_rule in prompt
+    assert "Never cascade automatically" in prompt or "禁止自动级联" in prompt
+    assert resource_scope_rule in prompt
+    assert (
+        "does not confirm any Prompt update" in prompt
+        or "不代表用户确认更新任何 Prompt" in prompt
+    )
+    assert reconfigure_rule in prompt
+    assert resource_continue_rule in prompt
+    assert revision_summary_rule in prompt
+    assert removal_rule in prompt
+    assert immutable_boundary in prompt
+    assert "revision save emits `agent_generation_completed`" in prompt or (
+        "修订保存触发 `agent_generation_completed`" in prompt
+    )
+    assert (
+        "must still follow every bound-resource" in prompt
+        or "仍须遵守“Prompt 生成”中的真实绑定资源" in prompt
+    )
+
+
 @pytest.mark.parametrize("language", ["zh", "en"])
 def test_build_nl2agent_system_prompt_uses_mounted_tool_names(language):
     prompt = build_nl2agent_system_prompt(language)
@@ -245,6 +388,20 @@ def test_installed_resource_binding_wrapper_preserves_verified_contract():
 
     assert payload["agent_id"] == 42
     assert payload["resources"][0]["candidate"]["candidate_ref"] == "skill:12"
+
+    empty_wrapped = build_nl2a_wrapper(
+        subtype="installed_resource_binding",
+        agent_id=42,
+        resource_result={"status": "success", "resources": []},
+    )
+    empty_payload = json.loads(
+        empty_wrapped.split("<nl2a>", 1)[1].split("</nl2a>", 1)[0]
+    )
+    assert empty_payload == {
+        "subtype": "installed_resource_binding",
+        "agent_id": 42,
+        "resources": [],
+    }
 
 
 def test_requirement_clarification_accepts_at_most_five_questions():

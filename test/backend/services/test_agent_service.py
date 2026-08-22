@@ -3683,7 +3683,6 @@ async def test_export_agent_by_agent_id_success(mock_search_agent_info, mock_cre
     assert result.agent_id == 123
     assert result.tenant_id == "test_tenant"
     assert result.name == "Test Agent"
-    assert result.business_description == "For testing purposes"
     assert len(result.tools) == 5
     assert result.managed_agents == mock_sub_agent_ids
 
@@ -7254,7 +7253,7 @@ async def test_import_agent_all_model_fields_in_database(
     assert agent_info_dict["name"] == "complete_agent"
     assert agent_info_dict["display_name"] == "Complete Agent"
     assert agent_info_dict["description"] == "Agent with all fields"
-    assert agent_info_dict["business_description"] == "Complete test"
+    assert "business_description" not in agent_info_dict
     assert agent_info_dict["max_steps"] == 5
     assert agent_info_dict["provide_run_summary"] is True
     assert agent_info_dict["duty_prompt"] == "Complete duty"
@@ -7913,6 +7912,36 @@ async def test_check_agent_name_conflict_batch_impl_detects_conflicts(monkeypatc
     assert result[1]["name_conflict"] is False
     assert result[1]["display_name_conflict"] is False
     assert result[1]["conflict_agents"] == []
+
+
+@pytest.mark.asyncio
+async def test_check_agent_name_conflict_batch_impl_checks_display_name_without_name(monkeypatch):
+    monkeypatch.setattr(
+        "backend.services.agent_service.get_current_user_info",
+        lambda authorization: ("user-x", "tenant-x", "en"),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "backend.services.agent_service.query_all_agent_info_by_tenant_id",
+        lambda tenant_id: [
+            {"agent_id": 3, "name": "alpha", "display_name": "Shown"},
+        ],
+        raising=False,
+    )
+
+    request = AgentNameBatchCheckRequest(
+        items=[AgentNameBatchCheckItem(display_name="Shown")]
+    )
+
+    result = await agent_service.check_agent_name_conflict_batch_impl(
+        request, authorization="Bearer token"
+    )
+
+    assert result[0]["name_conflict"] is False
+    assert result[0]["display_name_conflict"] is True
+    assert result[0]["conflict_agents"] == [
+        {"name": "alpha", "display_name": "Shown"}
+    ]
 
 
 @pytest.mark.asyncio

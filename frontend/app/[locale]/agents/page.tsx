@@ -9,8 +9,15 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
-import { Button, Switch } from "antd";
-import { Maximize2, Minimize2, RefreshCw, Sparkles, X } from "lucide-react";
+import { Button, Switch, Tag } from "antd";
+import {
+  History,
+  Maximize2,
+  Minimize2,
+  RefreshCw,
+  Sparkles,
+  X,
+} from "lucide-react";
 import { useSearchParams } from "next/navigation";
 
 import AgentSelectorHeader from "./agent-selector-header";
@@ -24,6 +31,9 @@ import {
   type Nl2AgentConfigFocusTarget,
 } from "@/contexts/nl2AgentFlow";
 import { useAgentStore } from "@/stores/agentStore";
+import { useAgentInfo } from "@/hooks/agent/useAgentInfo";
+import { useAgentVersionDetail } from "@/hooks/agent/useAgentVersionDetail";
+import { useAgentVersionList } from "@/hooks/agent/useAgentVersionList";
 import { searchAgentInfo } from "@/services/agentConfigService";
 import log from "@/lib/logger";
 import type {
@@ -101,6 +111,12 @@ function AgentSetupContent() {
   const [isShowVersionManagePanel, setIsShowVersionManagePanel] =
     useState(false);
   const currentAgentId = useAgentStore((state) => state.currentAgentId);
+  const { agentInfo } = useAgentInfo(currentAgentId);
+  const { total } = useAgentVersionList(currentAgentId);
+  const { agentVersionDetail } = useAgentVersionDetail(
+    currentAgentId,
+    agentInfo?.current_version_no ?? null
+  );
   const permissionReadOnly = useAgentStore((state) => state.isReadOnly);
   const {
     isComposerDisabled,
@@ -281,6 +297,26 @@ function AgentSetupContent() {
           <PanelCard
             title={t("agent.page.panel.config")}
             className={isDebugFullscreen ? "flex-1" : "flex-[2]"}
+            leftAction={
+              currentAgentId !== null &&
+              agentInfo?.current_version_no !== 0 &&
+              total > 0 ? (
+                <div className="flex shrink-0 items-center gap-1 rounded-lg px-3 py-1.5 text-gray-700">
+                  <History size={16} />
+                  <Tag
+                    color="cyan"
+                    variant="outlined"
+                    className="cursor-pointer rounded-md font-mono text-sm"
+                    onClick={() => setIsShowVersionManagePanel(true)}
+                  >
+                    {agentVersionDetail?.version.version_name}
+                  </Tag>
+                  <span className="text-xs text-gray-500">
+                    / {t("agent.version.totalVersions", { count: total })}
+                  </span>
+                </div>
+              ) : null
+            }
             rightAction={
               <Button
                 icon={<Sparkles size={16} />}

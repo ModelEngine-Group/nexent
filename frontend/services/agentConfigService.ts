@@ -782,7 +782,7 @@ export const clearAgentNewMark = async (agentId: string | number) => {
  * @param payload name/displayName to check
  */
 export const checkAgentNameConflictBatch = async (payload: {
-  items: Array<{ name: string; display_name?: string; agent_id?: number }>;
+  items: Array<{ name?: string; display_name?: string; agent_id?: number }>;
 }) => {
   try {
     const response = await fetch(API_ENDPOINTS.agent.checkNameBatch, {
