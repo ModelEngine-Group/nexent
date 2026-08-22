@@ -2266,7 +2266,13 @@ async def test_get_document_error_info_no_task_id(auth_data):
         )
 
     assert response.status_code == 200
-    assert response.json() == {"status": "success", "error_code": None}
+    assert response.json() == {
+        "status": "success",
+        "error_code": None,
+        "error_message": None,
+        "error_stage": None,
+        "failed_at": None,
+    }
     mock_redis.assert_not_called()
 
 
@@ -2297,7 +2303,13 @@ async def test_get_document_error_info_json_error_code(auth_data):
         )
 
     assert response.status_code == 200
-    assert response.json() == {"status": "success", "error_code": "INVALID_FORMAT"}
+    assert response.json() == {
+        "status": "success",
+        "error_code": "INVALID_FORMAT",
+        "error_message": '{"error_code": "INVALID_FORMAT"}',
+        "error_stage": None,
+        "failed_at": None,
+    }
     redis_mock.get_error_info.assert_called_once_with("task-123")
 
 
@@ -2328,7 +2340,13 @@ async def test_get_document_error_info_regex_error_code(auth_data):
         )
 
     assert response.status_code == 200
-    assert response.json() == {"status": "success", "error_code": "TIMEOUT_ERROR"}
+    assert response.json() == {
+        "status": "success",
+        "error_code": "TIMEOUT_ERROR",
+        "error_message": "oops {'error_code': 'TIMEOUT_ERROR'}",
+        "error_stage": None,
+        "failed_at": None,
+    }
     redis_mock.get_error_info.assert_called_once_with("task-999")
 
 

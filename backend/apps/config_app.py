@@ -83,10 +83,22 @@ async def start_dreaming_scheduler():
     await dreaming_scheduler.start()
 
 
+@app.on_event("startup")
+async def start_knowledge_file_maintenance():
+    from services.knowledge_file_maintenance import start
+    start()
+
+
 @app.on_event("shutdown")
 async def stop_dreaming_scheduler():
     from services.memory_dreaming_scheduler import dreaming_scheduler
     await dreaming_scheduler.stop()
+
+
+@app.on_event("shutdown")
+async def stop_knowledge_file_maintenance():
+    from services.knowledge_file_maintenance import stop
+    stop()
 
 
 app.include_router(model_manager_router)

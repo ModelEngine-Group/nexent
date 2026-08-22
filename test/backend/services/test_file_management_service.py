@@ -474,7 +474,7 @@ class TestUploadToMinio:
             assert len(results) == 1
             assert results[0]["success"] is False
             assert results[0]["file_name"] == "test.txt"
-            assert results[0]["error"] == "An error occurred while processing the file."
+            assert results[0]["error"] == "Read error"
             mock_logger.error.assert_called_once()
 
     @pytest.mark.asyncio
@@ -495,7 +495,7 @@ class TestUploadToMinio:
             assert len(results) == 1
             assert results[0]["success"] is False
             assert results[0]["file_name"] == "test.txt"
-            assert results[0]["error"] == "An error occurred while processing the file."
+            assert results[0]["error"] == "Upload error"
             mock_file.read.assert_called_once()
             # seek is not called when upload_fileobj throws exception
             mock_file.seek.assert_not_called()
@@ -555,7 +555,7 @@ class TestUploadToMinio:
             # Second file failure
             assert results[1]["success"] is False
             assert results[1]["file_name"] == "test2.txt"
-            assert results[1]["error"] == "An error occurred while processing the file."
+            assert results[1]["error"] == "Read error"
 
             mock_upload.assert_called_once()  # Only called for successful file
             mock_logger.error.assert_called_once()  # Called for failed file
@@ -580,7 +580,7 @@ class TestUploadToMinio:
             assert len(results) == 1
             assert results[0]["success"] is False
             assert results[0]["file_name"] == "test.txt"
-            assert results[0]["error"] == "An error occurred while processing the file."
+            assert results[0]["error"] == "Seek error"
             mock_file.read.assert_called_once()
             mock_file.seek.assert_called_once_with(0)
             mock_logger.error.assert_called_once()

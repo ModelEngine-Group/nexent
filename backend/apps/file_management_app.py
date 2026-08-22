@@ -1,6 +1,7 @@
 import logging
 import re
 import base64
+from datetime import datetime
 from http import HTTPStatus
 from typing import Annotated, List, Optional
 from urllib.parse import urlparse, urlunparse, unquote, quote
@@ -128,6 +129,24 @@ async def upload_files(
         )
         errors, uploaded_file_paths, uploaded_filenames = upload_result
         quota_status = getattr(upload_result, "quota_status", None)
+        lifecycle_fields = (
+            "file_id",
+            "object_name",
+            "original_filename",
+            "file_size",
+            "status",
+            "stage",
+            "uploaded_at",
+            "error_code",
+            "error_message",
+            "error_stage",
+            "failed_at",
+        )
+        file_records = [
+            {field: record.get(field) for field in lifecycle_fields}
+            for record in getattr(upload_result, "file_records", [])
+            if isinstance(record, dict)
+        ]
 
         if uploaded_file_paths:
             response_content = {
@@ -135,6 +154,7 @@ async def upload_files(
                 "uploaded_filenames": uploaded_filenames,
                 "uploaded_file_paths": uploaded_file_paths,
                 "errors": errors,
+                "file_records": file_records,
             }
             if quota_status:
                 response_content["quota_status"] = quota_status.get("quota_status")
@@ -189,6 +209,30 @@ async def process_files(
         error_message = "Data process service failed"
         if isinstance(process_result, dict) and "message" in process_result:
             error_message = process_result["message"]
+        for file_details in files:
+            try:
+                from database.knowledge_file_lifecycle_db import get_file_record, transition_file_record
+
+                record = get_file_record(
+                    file_id=file_details.get("file_id"),
+                    index_name=index_name,
+                    object_name=file_details.get("path_or_url"),
+                    include_hidden=True,
+                )
+                if record:
+                    transition_file_record(
+                        record["file_id"],
+                        status="FAILED",
+                        stage="TASK_SUBMIT",
+                        expected_statuses=("UPLOADED", "UPLOADING", "PROCESSING", "FORWARDING"),
+                        error_code="TASK_SUBMIT_FAILED",
+                        error_message=str(error_message)[:500],
+                        error_stage="TASK_SUBMIT",
+                        failed_at=datetime.utcnow(),
+                        updated_by=user_id,
+                    )
+            except Exception as lifecycle_exc:
+                logger.warning("Failed to persist process-submit error: %s", lifecycle_exc)
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=error_message)
 

@@ -788,7 +788,7 @@ function DataConfig({ isActive }: DataConfigProps) {
   };
 
   // Handle document deletion
-  const handleDeleteDocument = (docId: string) => {
+  const handleDeleteDocument = (docId: string, fileId?: string) => {
     const kbId = kbState.activeKnowledgeBase?.id;
     if (!kbId) return;
     if (kbState.activeKnowledgeBase?.permission === "READ_ONLY") {
@@ -804,7 +804,7 @@ function DataConfig({ isActive }: DataConfigProps) {
       danger: true,
       onOk: async () => {
         try {
-          await deleteDocument(kbId, docId);
+          await deleteDocument(kbId, docId, fileId);
           message.success(t("document.message.deleteSuccess"));
         } catch (error) {
           message.error(t("document.message.deleteError"));

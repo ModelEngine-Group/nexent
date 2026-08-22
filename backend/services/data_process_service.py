@@ -169,6 +169,7 @@ class DataProcessService:
                     'index_name': kwargs.get('index_name', ''),
                     'path_or_url': kwargs.get('source', ''),
                     'original_filename': kwargs.get('original_filename', ''),
+                    'file_id': kwargs.get('file_id'),
                 }
 
             celery_start = time.time()
@@ -260,6 +261,8 @@ class DataProcessService:
                     if not task_info.get('original_filename') and runtime_meta.get('original_filename'):
                         task_info['original_filename'] = runtime_meta.get(
                             'original_filename')
+                    if not task_info.get('file_id') and runtime_meta.get('file_id'):
+                        task_info['file_id'] = runtime_meta.get('file_id')
 
                 if filter and not (task_info.get('index_name') and task_info.get('task_name')):
                     # Keep user-visible queued tasks even before worker updates task meta.
@@ -541,6 +544,7 @@ class DataProcessService:
             original_filename = source_config.get('original_filename')
             embedding_model_id = source_config.get('embedding_model_id')
             tenant_id = source_config.get('tenant_id')
+            file_id = source_config.get('file_id')
             telemetry_context = source_config.get('telemetry_context') or {}
 
             # Validate required fields
@@ -553,7 +557,7 @@ class DataProcessService:
                     f"Missing required field 'index_name' in source config: {source_config}")
                 continue
 
-            chain_id = submit_process_forward_chain(
+            chain_kwargs = dict(
                 source=source,
                 source_type=source_type,
                 chunking_strategy=chunking_strategy,
@@ -564,6 +568,9 @@ class DataProcessService:
                 tenant_id=tenant_id,
                 telemetry_context=telemetry_context,
             )
+            if file_id is not None:
+                chain_kwargs["file_id"] = file_id
+            chain_id = submit_process_forward_chain(**chain_kwargs)
             if not chain_id:
                 logger.error(
                     f"Failed to enqueue process-forward chain for source: {source}")

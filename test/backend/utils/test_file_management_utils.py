@@ -219,6 +219,27 @@ async def test_trigger_data_process_single_success_with_embedding(fmu, monkeypat
 
 
 @pytest.mark.asyncio
+async def test_trigger_data_process_propagates_file_id(fmu, monkeypatch):
+    """New clients must carry the durable lifecycle ID into the task request."""
+    fake_client = _FakeAsyncClient(_Resp(201, {"task_id": "t-file"}))
+    fake_httpx = types.SimpleNamespace(
+        AsyncClient=lambda: fake_client,
+        RequestError=_FakeRequestError,
+    )
+    monkeypatch.setattr(fmu, "httpx", fake_httpx)
+    monkeypatch.setattr(fmu, "get_knowledge_record", lambda query=None: {})
+
+    params = _ProcessParams("tok", "minio", "basic", "idx")
+    result = await fmu.trigger_data_process(
+        [{"path_or_url": "knowledge_base/a.txt", "filename": "a.txt", "file_id": "fid-1"}],
+        params,
+    )
+
+    assert result == {"task_id": "t-file"}
+    assert fake_client.last_post["json"]["file_id"] == "fid-1"
+
+
+@pytest.mark.asyncio
 async def test_trigger_data_process_queries_knowledge_record_by_index(fmu, monkeypatch):
     fake_client = _FakeAsyncClient(_Resp(201, {"task_id": "t1"}))
     fake_httpx = types.SimpleNamespace(AsyncClient=lambda: fake_client, RequestError=_FakeRequestError)

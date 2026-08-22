@@ -487,6 +487,7 @@ class TaskRequest(BaseModel):
     original_filename: Optional[str] = None
     embedding_model_id: Optional[int] = None
     tenant_id: Optional[str] = None
+    file_id: Optional[str] = None
     telemetry_context: Dict[str, str] = Field(default_factory=dict)
     additional_params: Dict[str, Any] = Field(default_factory=dict)
 

@@ -1192,7 +1192,10 @@ class KnowledgeBaseService {
       }
 
       return result.files.map((file: any) => ({
-        id: file.path_or_url,
+        // Keep the legacy path identity for existing list/delete callers;
+        // expose the durable ID separately for new APIs.
+        id: file.path_or_url || file.file_id,
+        file_id: file.file_id || undefined,
         kb_id: kbId,
         name: file.file,
         type: this.getFileTypeFromName(file.file || file.path_or_url),
@@ -1203,6 +1206,8 @@ class KnowledgeBaseService {
         status: file.status || "UNKNOWN",
         latest_task_id: file.latest_task_id || "",
         error_reason: file.error_reason,
+        error_stage: file.error_stage,
+        failed_at: file.failed_at,
         // Optional ingestion progress metrics (only present for in-progress files)
         processed_chunk_num:
           typeof file.processed_chunk_num === "number"
@@ -1302,6 +1307,9 @@ class KnowledgeBaseService {
         (filePath: string, index: number) => ({
           path_or_url: filePath,
           filename: uploadResult.uploaded_filenames[index],
+          file_id: (uploadResult.file_records || []).find(
+            (record: any) => record.object_name === filePath
+          )?.file_id,
         })
       );
 
@@ -1321,11 +1329,19 @@ class KnowledgeBaseService {
         // Handle 500 error (data processing service failure)
         if (processResponse.status === 500) {
           const errorMessage = `Data processing service failed: ${
-            processResult.error
-          }. Files: ${processResult.files.join(", ")}`;
+            processResult.detail ||
+            processResult.error ||
+            processResult.message ||
+            "unknown error"
+          }`;
           throw new Error(errorMessage);
         }
-        throw new Error(processResult.error || "Data processing failed");
+        throw new Error(
+          processResult.detail ||
+            processResult.error ||
+            processResult.message ||
+            "Data processing failed"
+        );
       }
 
       // Handle successful response (201)
@@ -1341,13 +1357,17 @@ class KnowledgeBaseService {
   }
 
   // Delete a document from a knowledge base
-  async deleteDocument(docId: string, kbId: string): Promise<void> {
+  async deleteDocument(
+    docId: string,
+    kbId: string,
+    fileId?: string
+  ): Promise<void> {
     try {
       // Use REST-style DELETE request to delete document, requires knowledge base ID and document path
+      const query = new URLSearchParams({ path_or_url: docId });
+      if (fileId) query.set("file_id", fileId);
       const response = await fetch(
-        `${API_ENDPOINTS.knowledgeBase.indexDetail(
-          kbId
-        )}/documents?path_or_url=${encodeURIComponent(docId)}`,
+        `${API_ENDPOINTS.knowledgeBase.indexDetail(kbId)}/documents?${query.toString()}`,
         {
           method: "DELETE",
           headers: getAuthHeaders(),
@@ -1868,13 +1888,19 @@ class KnowledgeBaseService {
   // Get document error information for a document
   async getDocumentErrorInfo(
     kbId: string,
-    docId: string
+    docId: string,
+    fileId?: string
   ): Promise<{
     errorCode: string | null;
+    errorReason: string | null;
+    errorStage: string | null;
+    failedAt: string | null;
   }> {
     try {
       const response = await fetch(
-        API_ENDPOINTS.knowledgeBase.getErrorInfo(kbId, docId),
+        `${API_ENDPOINTS.knowledgeBase.getErrorInfo(kbId, docId)}${
+          fileId ? `?file_id=${encodeURIComponent(fileId)}` : ""
+        }`,
         {
           headers: getAuthHeaders(),
         }
@@ -1890,9 +1916,15 @@ class KnowledgeBaseService {
       }
 
       const errorCode = (data.error_code && String(data.error_code)) || null;
+      const errorReason = (data.error_message && String(data.error_message)) || null;
+      const errorStage = (data.error_stage && String(data.error_stage)) || null;
+      const failedAt = (data.failed_at && String(data.failed_at)) || null;
 
       return {
         errorCode,
+        errorReason,
+        errorStage,
+        failedAt,
       };
     } catch (error) {
       log.error("Failed to get document error info:", error);

@@ -846,6 +846,79 @@ class KnowledgeStorageObject(TableBase):
     )
 
 
+class KnowledgeFileLifecycle(TableBase):
+    """Durable lifecycle record for one knowledge-base upload attempt."""
+
+    __tablename__ = "knowledge_file_lifecycle_t"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('UPLOADING', 'UPLOADED', 'PROCESSING', 'FORWARDING', "
+            "'FAILED', 'COMPLETED', 'DELETE_REQUESTED', 'DELETED')",
+            name="ck_knowledge_file_lifecycle_status",
+        ),
+        Index(
+            "idx_knowledge_file_lifecycle_kb_status",
+            "tenant_id",
+            "knowledge_id",
+            "status",
+        ),
+        Index(
+            "idx_knowledge_file_lifecycle_identity",
+            "tenant_id",
+            "index_name",
+            "object_name",
+        ),
+        Index(
+            "uq_knowledge_file_lifecycle_active_identity",
+            "tenant_id",
+            "index_name",
+            "object_name",
+            unique=True,
+            postgresql_where=text(
+                "object_name IS NOT NULL AND status NOT IN ('DELETE_REQUESTED', 'DELETED')"
+            ),
+        ),
+        Index(
+            "idx_knowledge_file_lifecycle_maintenance",
+            "status",
+            "update_time",
+        ),
+        {"schema": SCHEMA},
+    )
+
+    file_id = Column(String(64), primary_key=True, nullable=False, doc="Stable file lifecycle ID")
+    tenant_id = Column(String(100), nullable=False, doc="Tenant isolation key")
+    knowledge_id = Column(BigInteger, nullable=False, doc="Owning knowledge base ID")
+    index_name = Column(String(100), nullable=False, doc="Owning Elasticsearch index")
+    bucket_name = Column(String(255), nullable=True, doc="MinIO bucket")
+    object_name = Column(String(1024), nullable=True, doc="MinIO object name")
+    original_filename = Column(String(1024), nullable=False, doc="Original upload filename")
+    file_size = Column(BigInteger, nullable=True, doc="Uploaded file size in bytes")
+    uploaded_at = Column(TIMESTAMP(timezone=False), nullable=True, doc="Successful MinIO upload time")
+    completed_at = Column(TIMESTAMP(timezone=False), nullable=True, doc="Successful ES indexing time")
+    status = Column(
+        String(30),
+        nullable=False,
+        default="UPLOADING",
+        server_default=text("'UPLOADING'"),
+        doc="File lifecycle status",
+    )
+    stage = Column(String(30), nullable=True, doc="Current processing stage")
+    process_task_id = Column(String(64), nullable=True, doc="Process task ID")
+    forward_task_id = Column(String(64), nullable=True, doc="Forward task ID")
+    parent_task_id = Column(String(64), nullable=True, doc="Parent chain task ID")
+    processing_attempt = Column(Integer, nullable=False, default=0, server_default=text("0"))
+    error_code = Column(String(100), nullable=True, doc="Stable error code")
+    error_message = Column(Text, nullable=True, doc="Sanitized user-facing error summary")
+    error_stage = Column(String(30), nullable=True, doc="Failure stage")
+    failed_at = Column(TIMESTAMP(timezone=False), nullable=True, doc="Failure time")
+    delete_requested_at = Column(TIMESTAMP(timezone=False), nullable=True)
+    deleted_at = Column(TIMESTAMP(timezone=False), nullable=True)
+    delete_requested_by = Column(String(100), nullable=True)
+    storage_object_id = Column(BigInteger, nullable=True, doc="Linked storage ledger ID")
+    version = Column(Integer, nullable=False, default=0, server_default=text("0"), doc="Optimistic-lock version")
+
+
 class TenantConfig(TableBase):
     """
     Tenant configuration information table
