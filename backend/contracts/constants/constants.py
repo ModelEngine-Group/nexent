@@ -330,7 +330,7 @@ VALID_MARKET_STATUSES = frozenset({STATUS_NOT_SHARED, STATUS_PENDING_REVIEW, STA
 # Keep in sync with: deploy/sql/migrations/v2.3_merged_migrations.sql
 _category_database = {'mysql_database': ['database'], 'postgres_database': ['database'], 'mssql_database': ['database']}
 _category_file = {'read_file': ['file'], 'create_file': ['file'], 'delete_file': ['file'], 'download_from_s3': ['file'], 'upload_to_s3': ['file'], 'create_directory': ['file'], 'delete_directory': ['file'], 'list_directory': ['file'], 'move_item': ['file']}
-_category_search = {'deepseek_search': ['search'], 'tavily_search': ['search'], 'exa_search': ['search'], 'linkup_search': ['search'], 'search_memory': ['search'], 'knowledge_base_search': ['search']}
+_category_search = {'deepseek_search': ['search'], 'tavily_search': ['search'], 'exa_search': ['search'], 'linkup_search': ['search'], 'serply_search': ['search'], 'search_memory': ['search'], 'knowledge_base_search': ['search']}
 _category_kb = {'dify_search': ['knowledge-base'], 'datamate_search': ['knowledge-base'], 'idata_search': ['knowledge-base'], 'haotian_search': ['knowledge-base'], 'ragflow_search': ['knowledge-base'], 'aidp_search': ['knowledge-base']}
 _category_multimodal = {'analyze_image': ['multimodal'], 'analyze_audio': ['multimodal'], 'analyze_video': ['multimodal'], 'analyze_text_file': ['multimodal']}
 _category_email = {'get_email': ['email'], 'send_email': ['email']}
