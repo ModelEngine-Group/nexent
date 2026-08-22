@@ -13,7 +13,7 @@ Targets
   truncated results plus exception fallbacks.
 * ``fetch_agent_profile`` – ``None`` when agent missing, full assembly and
   missing-field / truncation branches.
-* ``_format_list_section`` / ``_format_tool_section`` / 
+* ``_format_list_section`` / ``_format_tool_section`` /
   ``format_agent_profile_context`` – empty / single / multi item rendering.
 
 The pattern mirrors ``test_evaluator_db.py``: sys.path injection, idempotent

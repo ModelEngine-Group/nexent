@@ -20,9 +20,9 @@ This module provides two types of exceptions:
 The exception handler automatically maps legacy exception class names to ErrorCode.
 """
 
-from .error_code import ErrorCode, ERROR_CODE_HTTP_STATUS
+from .error_code import ErrorCode, ERROR_CODE_HTTP_STATUS, RuntimeMetadataValidationCode
 from .error_message import ErrorMessage
-from typing import List
+from typing import Dict, List, Optional
 
 
 # ==================== New Framework: AppException with ErrorCode ====================
@@ -215,6 +215,23 @@ class ValidationError(Exception):
     pass
 
 
+class RuntimeMetadataValidationError(ValueError):
+    """Describe a runtime metadata validation failure without retaining values."""
+
+    def __init__(self, code: RuntimeMetadataValidationCode, message: str):
+        self.code = code
+        self.message = message
+        super().__init__(message)
+
+
+class RuntimeMetadataVersionConflict(ValueError):
+    """Raised when a runtime metadata optimistic-lock check fails."""
+
+    def __init__(self, current_version: int):
+        self.current_version = current_version
+        super().__init__("Runtime metadata version conflict")
+
+
 class TenantResourceLimitError(ValidationError, ValueError):
     """Raised when a platform or tenant hard resource limit is reached."""
 
@@ -283,8 +300,14 @@ class DataMateConnectionError(Exception):
 
 class SkillDuplicateError(Exception):
     """Raised when importing an agent with skills that have duplicate names in target tenant."""
-    def __init__(self, duplicate_names: List[str]):
+    def __init__(
+        self,
+        duplicate_names: List[str],
+        skill_conflicts: Optional[List[Dict[str, str]]] = None,
+    ):
         self.duplicate_names = duplicate_names
+        self.skill_conflicts = skill_conflicts or []
+        super().__init__(f"Duplicate skills: {', '.join(duplicate_names)}")
 
 
 class SkillException(Exception):

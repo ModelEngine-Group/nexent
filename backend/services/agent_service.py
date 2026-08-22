@@ -24,8 +24,16 @@ from consts.const import TOOL_TYPE_MAPPING, \
     LANGUAGE, MESSAGE_ROLE, MODEL_CONFIG_MAPPING, CAN_EDIT_ALL_USER_ROLES, PERMISSION_PRIVATE, STREAM_STATUS_EVENT, \
     DEFAULT_EN_TITLE, DEFAULT_ZH_TITLE, RUNTIME_CANCEL_POLL_INTERVAL_SECONDS
 from consts.agent import SAFE_AGENT_STREAM_ERROR_MESSAGE
-from consts.exceptions import AppException, ForbiddenError, MemoryPreparationException, SkillDuplicateError
-from consts.error_code import ErrorCode
+from consts.exceptions import (
+    AppException,
+    ConversationNotFoundError,
+    ForbiddenError,
+    MemoryPreparationException,
+    RuntimeMetadataValidationError,
+    RuntimeMetadataVersionConflict,
+    SkillDuplicateError,
+)
+from consts.error_code import ErrorCode, RuntimeMetadataValidationCode
 from consts.agent_unavailable_reasons import AgentUnavailableReason
 from nexent.core.utils.observer import ProcessType
 from consts.model import (
@@ -38,6 +46,7 @@ from consts.model import (
     MCPInfo,
     MessageRequest,
     SkillInstanceInfoRequest,
+    SkillResolution,
     SkillZipEntry,
     ToolInstanceInfoRequest,
     ToolSourceEnum, ModelConnectStatusEnum,
@@ -64,6 +73,12 @@ from database.agent_db import (
     clear_agent_new_mark
 )
 from database import a2a_agent_db
+from database.conversation_db import (
+    resolve_conversation_runtime_metadata,
+)
+from utils.runtime_metadata_utils import (
+    validate_runtime_metadata,
+)
 from database.model_management_db import (
     get_model_by_model_id,
     get_model_by_model_id_ignore_delete,
@@ -88,7 +103,7 @@ from database.attachment_db import (
     get_file_stream,
 )
 from database.client import minio_client
-from services.skill_service import SkillService
+from services.skill_service import SkillService, generate_available_copy_skill_name
 from database.agent_version_db import query_version_list, query_current_version_no, batch_search_version_names, batch_query_current_version_nos
 from database.group_db import query_group_ids_by_user
 from database.user_tenant_db import get_user_tenant_by_user_id
@@ -1810,6 +1825,7 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
                 "requested_output_tokens": request.requested_output_tokens,
                 "is_main_agent": request.is_main_agent if request.is_main_agent is not None else True,
                 "provide_run_summary": request.provide_run_summary,
+                "allow_chat_metadata": request.allow_chat_metadata if request.allow_chat_metadata is not None else False,
                 "is_a2a": request.is_a2a if request.is_a2a is not None else False,
                 "verification_config": request.verification_config,
                 "context_policy": request.context_policy,
@@ -2338,6 +2354,7 @@ async def export_agent_by_agent_id(
                                           requested_output_tokens=agent_info.get("requested_output_tokens"),
                                           is_main_agent=agent_info.get("is_main_agent", True),
                                           provide_run_summary=agent_info["provide_run_summary"],
+                                          allow_chat_metadata=agent_info.get("allow_chat_metadata", False),
                                           verification_config=agent_info.get("verification_config"),
                                           context_policy=agent_info.get("context_policy"),
                                           duty_prompt=agent_info.get(
@@ -2356,7 +2373,9 @@ async def export_agent_by_agent_id(
                                           skill_names=skill_names,
                                           prompt_template_id=agent_info.get(
                                               "prompt_template_id"),
-                                          prompt_template_name=agent_info.get("prompt_template_name"))
+                                          prompt_template_name=agent_info.get("prompt_template_name"),
+                                          greeting_message=agent_info.get("greeting_message"),
+                                          example_questions=agent_info.get("example_questions"))
     return agent_info
 
 
@@ -2503,13 +2522,16 @@ async def import_agent_by_agent_id(
                                          "requested_output_tokens": import_agent_info.requested_output_tokens,
                                          "is_main_agent": getattr(import_agent_info, "is_main_agent", True),
                                          "provide_run_summary": import_agent_info.provide_run_summary,
+                                         "allow_chat_metadata": import_agent_info.allow_chat_metadata,
                                          "verification_config": getattr(import_agent_info, "verification_config", None),
                                          "context_policy": getattr(import_agent_info, "context_policy", None),
                                          "duty_prompt": import_agent_info.duty_prompt,
                                          "constraint_prompt": import_agent_info.constraint_prompt,
                                          "few_shots_prompt": import_agent_info.few_shots_prompt,
                                          "enabled": import_agent_info.enabled,
-                                         "group_ids": user_group_ids},
+                                         "group_ids": user_group_ids,
+                                         "greeting_message": getattr(import_agent_info, "greeting_message", None),
+                                         "example_questions": getattr(import_agent_info, "example_questions", None)},
                              tenant_id=tenant_id,
                              user_id=user_id)
     new_agent_id = new_agent["agent_id"]
@@ -2683,6 +2705,7 @@ async def list_all_agent_info_impl(tenant_id: str, user_id: str) -> list[dict]:
                 "is_published": agent.get("current_version_no") is not None,
                 "current_version_no": agent.get("current_version_no"),
                 "is_a2a_server": agent["agent_id"] in a2a_server_agent_ids,
+                "allow_chat_metadata": bool(agent.get("allow_chat_metadata", False)),
             })
 
         return simple_agent_list
@@ -2921,6 +2944,14 @@ async def prepare_agent_run(
         create_run_kwargs["enable_automation_tool"] = False
     agent_run_info = await create_agent_run_info(
         **create_run_kwargs,
+    )
+    agent_run_info.runtime_metadata = dict(
+        getattr(agent_request, "_runtime_metadata_snapshot", {}) or {}
+    )
+    agent_run_info.runtime_metadata_version = getattr(
+        agent_request,
+        "_runtime_metadata_version",
+        None,
     )
 
     historical_context = None
@@ -3241,6 +3272,31 @@ async def run_agent_stream(
         if conversation is None:
             raise ForbiddenError("Conversation is not accessible to the current identity")
 
+    metadata_supplied = "metadata" in agent_request.model_fields_set
+    metadata_update_requested = metadata_supplied and agent_request.metadata is not None
+    if metadata_update_requested:
+        try:
+            validate_runtime_metadata(agent_request.metadata)
+        except RuntimeMetadataValidationError as exc:
+            error_code = (
+                ErrorCode.CHAT_METADATA_TOO_LARGE
+                if exc.code == RuntimeMetadataValidationCode.METADATA_TOO_LARGE
+                else ErrorCode.CHAT_METADATA_INVALID
+            )
+            raise AppException(
+                error_code,
+                details={"reason": exc.code.value},
+            ) from exc
+    metadata_entrypoint = getattr(agent_request, "_runtime_metadata_entrypoint", "native")
+    if metadata_update_requested and metadata_entrypoint in {"native", "debug"}:
+        agent_record = search_agent_info_by_agent_id(
+            agent_id=agent_request.agent_id,
+            tenant_id=resolved_tenant_id,
+            version_no=agent_request.version_no or 0,
+        )
+        if not bool(agent_record.get("allow_chat_metadata", False)):
+            raise AppException(ErrorCode.CHAT_METADATA_NOT_ALLOWED)
+
     raw_request_scope = None if resume else getattr(agent_request, "knowledge_scope", None)
     if isinstance(raw_request_scope, ConversationKnowledgeScopeRequest):
         request_scope = raw_request_scope
@@ -3319,6 +3375,8 @@ async def run_agent_stream(
         }
         if resolved_scope is not None:
             conversation_kwargs["knowledge_scope"] = resolved_scope.desired_scope
+        if metadata_update_requested:
+            conversation_kwargs["runtime_metadata"] = agent_request.metadata or {}
         conversation_data = create_new_conversation(**conversation_kwargs)
         agent_request.conversation_id = conversation_data["conversation_id"]
         is_new_conversation = True
@@ -3327,6 +3385,52 @@ async def run_agent_stream(
             agent_request.conversation_id,
             resolved_user_id,
         )
+
+    if not resume:
+        if agent_request.is_debug:
+            metadata_snapshot = dict(agent_request.metadata or {}) if metadata_update_requested else {}
+            metadata_version = None
+        elif is_new_conversation:
+            metadata_snapshot = dict(
+                conversation_data.get(
+                    "runtime_metadata",
+                    agent_request.metadata if metadata_update_requested else {},
+                )
+                or {}
+            )
+            metadata_version = int(
+                conversation_data.get(
+                    "runtime_metadata_version",
+                    1 if metadata_update_requested else 0,
+                )
+                or 0
+            )
+        elif not metadata_update_requested:
+            metadata_snapshot = dict((conversation or {}).get("runtime_metadata") or {})
+            metadata_version = int((conversation or {}).get("runtime_metadata_version") or 0)
+        else:
+            try:
+                resolved_metadata = resolve_conversation_runtime_metadata(
+                    conversation_id=agent_request.conversation_id,
+                    user_id=resolved_user_id,
+                    request_metadata=agent_request.metadata,
+                    update_requested=metadata_update_requested,
+                    expected_version=agent_request.expected_metadata_version,
+                )
+            except ConversationNotFoundError as exc:
+                raise AppException(
+                    ErrorCode.CHAT_CONVERSATION_NOT_FOUND,
+                ) from exc
+            except RuntimeMetadataVersionConflict as exc:
+                raise AppException(
+                    ErrorCode.CHAT_METADATA_VERSION_CONFLICT,
+                    details={"current_version": exc.current_version},
+                ) from exc
+            metadata_snapshot = resolved_metadata["runtime_metadata"]
+            metadata_version = resolved_metadata["runtime_metadata_version"]
+
+        agent_request.__dict__["_runtime_metadata_snapshot"] = metadata_snapshot
+        agent_request.__dict__["_runtime_metadata_version"] = metadata_version
 
     if (
         not agent_request.is_debug
@@ -3699,6 +3803,11 @@ async def run_agent_stream(
     headers = {"Cache-Control": "no-cache", "Connection": "keep-alive"}
     if agent_request.conversation_id is not None:
         headers["conversation_id"] = str(agent_request.conversation_id)
+    runtime_metadata_version = getattr(
+        agent_request, "_runtime_metadata_version", None
+    )
+    if runtime_metadata_version is not None:
+        headers["X-Runtime-Metadata-Version"] = str(runtime_metadata_version)
 
     return StreamingResponse(
         stream_with_agent_context(),
@@ -4035,46 +4144,82 @@ async def import_agent_with_skills_impl(
     agent_info: "ExportAndImportDataFormat",
     skills: List[SkillZipEntry],
     authorization: str,
-    force_import: bool = False
+    force_import: bool = False,
+    skill_resolutions: Optional[List[SkillResolution]] = None,
 ):
     """Import an agent with skills bundled from a ZIP export.
 
-    For each skill in the bundle:
-      1. Check if a skill with the same name already exists in the target tenant.
-      2. If duplicates exist, raise SkillDuplicateError (do not create anything).
-      3. If no duplicates, create the skill from ZIP bytes via SkillService.
-      4. Create a SkillInstance linking the new skill_id to the new agent_id.
-
-    Then proceeds with the standard agent import flow using the mapped skill IDs.
+    Duplicate skills require an explicit rename or use-existing resolution. New
+    and renamed skills share the same ZIP creation path, while imported agent
+    skill names are resolved to tenant-local skill IDs before creating instances.
     """
-    from services.skill_service import SkillService
-
     user_id, tenant_id, _ = get_current_user_info(authorization)
 
     skill_name_to_zip_base64 = {
         entry.skill_name: entry.skill_zip_base64 for entry in skills}
 
     existing_skills = skill_db.list_skills(tenant_id)
-    existing_skill_names = {s.get("name") for s in existing_skills}
+    existing_skills_by_name = {
+        skill.get("name"): skill
+        for skill in existing_skills
+        if skill.get("name")
+    }
+    existing_skill_names = set(existing_skills_by_name)
 
-    import_skill_names = set(skill_name_to_zip_base64.keys())
-    duplicate_names = list(import_skill_names & existing_skill_names)
+    skill_conflicts = build_skill_import_conflicts(
+        list(skill_name_to_zip_base64),
+        existing_skill_names,
+    )
+    duplicate_names = [conflict["skill_name"] for conflict in skill_conflicts]
+    resolutions_by_name = {
+        resolution.skill_name: resolution
+        for resolution in skill_resolutions or []
+    }
 
-    if duplicate_names:
-        raise SkillDuplicateError(duplicate_names)
+    conflict_by_name = {
+        conflict["skill_name"]: conflict
+        for conflict in skill_conflicts
+    }
+    has_unresolved_conflict = any(
+        (
+            (resolution := resolutions_by_name.get(skill_name)) is None
+            or (
+                resolution.action == "rename"
+                and str(resolution.new_name or "").strip()
+                != conflict_by_name[skill_name]["suggested_new_name"]
+            )
+        )
+        for skill_name in duplicate_names
+    )
+    if has_unresolved_conflict:
+        raise SkillDuplicateError(duplicate_names, skill_conflicts)
 
     skill_name_to_id: Dict[str, int] = {}
     skill_service = SkillService(tenant_id=tenant_id)
 
     for skill_name, zip_base64 in skill_name_to_zip_base64.items():
+        resolution = (
+            resolutions_by_name.get(skill_name)
+            if skill_name in existing_skills_by_name
+            else None
+        )
+        if skill_name in existing_skills_by_name and resolution and resolution.action == "use_existing":
+            skill_name_to_id[skill_name] = existing_skills_by_name[skill_name]["skill_id"]
+            continue
+
+        target_name = (
+            str(resolution.new_name).strip()
+            if resolution and resolution.action == "rename"
+            else skill_name
+        )
         zip_bytes = base64.b64decode(zip_base64)
         result = skill_service.create_skill_from_zip_bytes(
             zip_bytes=zip_bytes,
-            skill_name=skill_name,
+            skill_name=target_name,
             source="导入",
             user_id=user_id,
             tenant_id=tenant_id,
-            skip_duplicate_check=True
+            skip_duplicate_check=False,
         )
         skill_name_to_id[skill_name] = result.get("skill_id")
 
@@ -4083,13 +4228,18 @@ async def import_agent_with_skills_impl(
         skill_name_to_id=skill_name_to_id
     )
 
-    main_agent_id = agent_id_mapping.get(agent_info.agent_id)
-    if main_agent_id:
-        for skill_name, new_skill_id in skill_name_to_id.items():
+    for imported_agent in agent_info.agent_info.values():
+        new_agent_id = agent_id_mapping.get(imported_agent.agent_id)
+        if not new_agent_id:
+            continue
+        for skill_name in imported_agent.skill_names or []:
+            resolved_skill_id = skill_name_to_id.get(skill_name)
+            if resolved_skill_id is None:
+                continue
             skill_db.create_or_update_skill_by_skill_info(
                 skill_info=SkillInstanceInfoRequest(
-                    skill_id=new_skill_id,
-                    agent_id=main_agent_id,
+                    skill_id=resolved_skill_id,
+                    agent_id=new_agent_id,
                     enabled=True,
                     version_no=0
                 ),
@@ -4099,6 +4249,45 @@ async def import_agent_with_skills_impl(
             )
 
     return agent_id_mapping
+
+
+def build_skill_import_conflicts(
+    skill_names: List[str],
+    existing_skill_names: set[str],
+) -> List[Dict[str, str]]:
+    """Build duplicate skill resolutions without creating any data."""
+    ordered_skill_names = list(dict.fromkeys(skill_names))
+    unavailable_names = existing_skill_names | set(ordered_skill_names)
+    conflicts: List[Dict[str, str]] = []
+
+    for skill_name in ordered_skill_names:
+        if skill_name not in existing_skill_names:
+            continue
+        suggested_name = generate_available_copy_skill_name(
+            skill_name,
+            unavailable_names,
+        )
+        unavailable_names.add(suggested_name)
+        conflicts.append({
+            "skill_name": skill_name,
+            "suggested_new_name": suggested_name,
+        })
+
+    return conflicts
+
+
+def check_skill_conflicts_impl(
+    skill_names: List[str],
+    authorization: str,
+) -> List[Dict[str, str]]:
+    """Check agent import skill names against the current tenant."""
+    _, tenant_id, _ = get_current_user_info(authorization)
+    existing_skill_names = {
+        skill.get("name")
+        for skill in skill_db.list_skills(tenant_id)
+        if skill.get("name")
+    }
+    return build_skill_import_conflicts(skill_names, existing_skill_names)
 
 
 # =============================================================================

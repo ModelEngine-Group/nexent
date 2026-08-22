@@ -5,15 +5,16 @@ import inspect
 import io
 import json
 import logging
+import os
 import re
 import shutil
 import tarfile
 import time
-import os
+from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
 from threading import Event
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Sequence
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Sequence
 
 from smolagents import ActionStep, AgentText, TaskStep, Timing
 from smolagents.tools import Tool
@@ -884,7 +885,62 @@ class NexentAgent:
                                                           action_output=msg.content, model_output=msg.content))
 
         self.agent._history_step_count = len(self.agent.memory.steps)
-    def agent_run_with_observer(self, query: str, reset=True):
+    @staticmethod
+    def _set_runtime_metadata_for_agent_tree(root_agent: CoreAgent, metadata: Dict[str, Any]):
+        """Set isolated runtime metadata on internal and external sub-agents."""
+
+        snapshots = []
+        pending = [root_agent]
+        visited = set()
+        while pending:
+            current = pending.pop()
+            if not isinstance(current, CoreAgent) or id(current) in visited:
+                continue
+            visited.add(id(current))
+            snapshots.append(("core", current, "metadata" in current.state, current.state.get("metadata")))
+            current.state["metadata"] = deepcopy(metadata)
+            children = getattr(current, "managed_agents", {}) or {}
+            if isinstance(children, dict):
+                child_values = children.values()
+            elif isinstance(children, (list, tuple)):
+                child_values = children
+            else:
+                child_values = ()
+            for child in child_values:
+                inner_agent = (
+                    child
+                    if isinstance(child, CoreAgent)
+                    else getattr(child, "_inner", child)
+                )
+                if isinstance(inner_agent, CoreAgent):
+                    pending.append(inner_agent)
+                    continue
+
+                set_runtime_metadata = getattr(inner_agent, "set_runtime_metadata", None)
+                get_runtime_metadata = getattr(inner_agent, "get_runtime_metadata", None)
+                if callable(set_runtime_metadata) and callable(get_runtime_metadata):
+                    snapshots.append(("external", inner_agent, True, get_runtime_metadata()))
+                    set_runtime_metadata(deepcopy(metadata))
+        return snapshots
+
+    @staticmethod
+    def _restore_runtime_metadata_for_agent_tree(snapshots) -> None:
+        """Restore agent state after one run, including failure and cancellation."""
+
+        for agent_type, agent, existed, previous_value in snapshots:
+            if agent_type == "external":
+                agent.set_runtime_metadata(previous_value)
+            elif existed:
+                agent.state["metadata"] = previous_value
+            else:
+                agent.state.pop("metadata", None)
+
+    def agent_run_with_observer(
+        self,
+        query: str,
+        reset: bool = True,
+        additional_args: Optional[Dict[str, Any]] = None,
+    ):
         if not isinstance(self.agent, CoreAgent):
             raise TypeError(f"agent must be a CoreAgent object, not {type(self.agent)}")
 
@@ -904,10 +960,18 @@ class NexentAgent:
                 metadata,
                 step_type="agent_loop",
             ):
+                runtime_state_snapshots = []
                 try:
                     query = self._prepare_file_workspace(query)
+                    runtime_state_snapshots = self._set_runtime_metadata_for_agent_tree(
+                        self.agent,
+                        (additional_args or {}).get("metadata", {}),
+                    )
                     step_log = None
-                    for step_log in self.agent.run(query, stream=True, reset=reset):
+                    run_kwargs = {"stream": True, "reset": reset}
+                    if additional_args is not None:
+                        run_kwargs["additional_args"] = additional_args
+                    for step_log in self.agent.run(query, **run_kwargs):
                         # Add content to observer
                         if not isinstance(step_log, ActionStep):
                             continue
@@ -1037,6 +1101,7 @@ class NexentAgent:
                     raise ValueError(f"Error in interaction: {str(e)}")
 
                 finally:
+                    self._restore_runtime_metadata_for_agent_tree(runtime_state_snapshots)
                     self._log_step_metrics()
                     try:
                         self._finalize_file_workspace()

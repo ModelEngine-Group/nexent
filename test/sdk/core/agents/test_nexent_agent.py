@@ -503,6 +503,8 @@ def mock_core_agent():
     agent.observer = MagicMock()
     agent.stop_event = MagicMock()
     agent.run = MagicMock()  # Ensure .run exists and is mockable
+    agent.state = {}
+    agent.managed_agents = {}
     return agent
 
 
@@ -1618,6 +1620,124 @@ def test_agent_run_with_observer_success_with_agent_text(nexent_agent_instance, 
         "", ProcessType.TOKEN_COUNT, ANY)
     mock_core_agent.observer.add_message.assert_any_call(
         "test_agent", ProcessType.FINAL_ANSWER, "Final answer with  content")
+
+
+def test_runtime_metadata_isolated_across_full_agent_tree(nexent_agent_instance, mock_core_agent):
+    child = mock_core_agent_class()
+    child.state = {}
+    child.managed_agents = {}
+    child_wrapper = MagicMock()
+    child_wrapper._inner = child
+    external_agent = MagicMock()
+    external_agent.get_runtime_metadata.return_value = {"external": "previous"}
+    external_wrapper = MagicMock()
+    external_wrapper._inner = external_agent
+    mock_core_agent.state = {"metadata": {"previous": True}}
+    mock_core_agent.managed_agents = {
+        "child": child_wrapper,
+        "external": external_wrapper,
+    }
+
+    snapshots = nexent_agent_instance._set_runtime_metadata_for_agent_tree(
+        mock_core_agent,
+        {"request": {"id": 7}},
+    )
+
+    assert mock_core_agent.state["metadata"] == {"request": {"id": 7}}
+    assert child.state["metadata"] == {"request": {"id": 7}}
+    assert child.state["metadata"] is not mock_core_agent.state["metadata"]
+    external_agent.set_runtime_metadata.assert_called_once_with({"request": {"id": 7}})
+
+    nexent_agent_instance._restore_runtime_metadata_for_agent_tree(snapshots)
+
+    assert mock_core_agent.state["metadata"] == {"previous": True}
+    assert "metadata" not in child.state
+    assert external_agent.set_runtime_metadata.call_args_list[-1].args[0] == {
+        "external": "previous"
+    }
+
+
+def test_runtime_metadata_tree_handles_list_tuple_and_scalar_children(
+    nexent_agent_instance, mock_core_agent
+):
+    """Metadata tree walk handles list/tuple child containers and the scalar fallback."""
+    # list children container
+    child_a = mock_core_agent_class()
+    child_a.state = {}
+    child_a.managed_agents = {}
+    root_list = mock_core_agent_class()
+    root_list.state = {}
+    root_list.managed_agents = [child_a]
+    snapshots = nexent_agent_instance._set_runtime_metadata_for_agent_tree(
+        root_list, {"list": 1}
+    )
+    assert child_a.state["metadata"] == {"list": 1}
+    assert child_a.state["metadata"] is not root_list.state["metadata"]
+
+    # tuple children container
+    child_b = mock_core_agent_class()
+    child_b.state = {}
+    child_b.managed_agents = {}
+    root_tuple = mock_core_agent_class()
+    root_tuple.state = {}
+    root_tuple.managed_agents = (child_b,)
+    nexent_agent_instance._set_runtime_metadata_for_agent_tree(root_tuple, {"tuple": 2})
+    assert child_b.state["metadata"] == {"tuple": 2}
+
+    # scalar/unknown container falls back to no children
+    root_scalar = mock_core_agent_class()
+    root_scalar.state = {}
+    root_scalar.managed_agents = "scalar-value"
+    snapshots = nexent_agent_instance._set_runtime_metadata_for_agent_tree(
+        root_scalar, {"scalar": 3}
+    )
+    assert root_scalar.state["metadata"] == {"scalar": 3}
+
+
+def test_runtime_metadata_tree_skips_duplicate_agent(
+    nexent_agent_instance, mock_core_agent
+):
+    """A node reachable twice (shared child) is only processed once."""
+    shared = mock_core_agent_class()
+    shared.state = {}
+    shared.managed_agents = {}
+    root = mock_core_agent_class()
+    root.state = {}
+    # The same inner agent is referenced from two child entries.
+    root.managed_agents = [shared, shared]
+    snapshots = nexent_agent_instance._set_runtime_metadata_for_agent_tree(
+        root, {"shared": "v"}
+    )
+    assert shared.state["metadata"] == {"shared": "v"}
+    assert len(snapshots) == 2  # root + shared, not duplicated
+
+
+def test_agent_run_with_observer_forwards_additional_args(
+    nexent_agent_instance, mock_core_agent
+):
+    """additional_args are forwarded to the underlying agent run and stored as metadata."""
+    nexent_agent_instance.agent = mock_core_agent
+    mock_action_step = MagicMock(spec=ActionStep)
+    mock_action_step.timing = MagicMock()
+    mock_action_step.timing.duration = 1.5
+    mock_action_step.step_number = 1
+    mock_action_step.error = None
+    mock_final_answer = _AgentText("metadata forwarded answer")
+    mock_action_step.output = mock_final_answer
+
+    mock_core_agent.run.return_value = [mock_action_step]
+    mock_core_agent.state = {}
+    mock_core_agent.managed_agents = {}
+
+    nexent_agent_instance.agent_run_with_observer(
+        "test query",
+        additional_args={"metadata": {"session": "s9"}},
+    )
+
+    mock_core_agent.run.assert_called_once_with(
+        "test query", stream=True, reset=True,
+        additional_args={"metadata": {"session": "s9"}},
+    )
 
 
 def test_agent_run_with_observer_emits_model_context_window(nexent_agent_instance, mock_core_agent):

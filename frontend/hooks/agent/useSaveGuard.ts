@@ -190,7 +190,10 @@ export const useSaveGuard = () => {
       // - Newly selected agents get their current_version_no from the published list
       // - Already saved agents retain their original version_no
       const relatedAgents = (currentEditedAgent.sub_agent_relations || [])
-        .filter((rel: any) => rel?.agent_id != null && Number.isFinite(Number(rel.agent_id)))
+        .filter(
+          (rel: any) =>
+            rel?.agent_id != null && Number.isFinite(Number(rel.agent_id))
+        )
         .map((rel: any) => ({
           agent_id: Number(rel.agent_id),
           version_no: rel.version_no != null ? Number(rel.version_no) : 0,
@@ -253,6 +256,7 @@ export const useSaveGuard = () => {
         requested_output_tokens:
           currentEditedAgent.requested_output_tokens ?? null,
         provide_run_summary: currentEditedAgent.provide_run_summary,
+        allow_chat_metadata: currentEditedAgent.allow_chat_metadata ?? false,
         verification_config: currentEditedAgent.verification_config,
         enabled: true,
         business_description: currentEditedAgent.business_description,

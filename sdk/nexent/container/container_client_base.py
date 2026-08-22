@@ -56,6 +56,7 @@ class ContainerClient(ABC):
         env_vars: Optional[Dict[str, str]] = None,
         host_port: Optional[int] = None,
         image: Optional[str] = None,
+        wait_for_ready: bool = True,
     ) -> Dict[str, Any]:
         """
         Start a container and return access information
@@ -73,6 +74,8 @@ class ContainerClient(ABC):
             env_vars: Optional environment variables
             host_port: Optional host port to bind (if None, auto assign)
             image: Optional image override
+            wait_for_ready: Whether to wait for the service readiness check
+                before returning
 
         Returns:
             Dictionary with container_id (or pod_id for k8s), service_url,

@@ -411,11 +411,21 @@ class AgentRequest(BaseModel):
         default=None,
         description="Optional request-scoped context policy override",
     )
+    metadata: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Conversation runtime metadata available to the agent",
+    )
+    expected_metadata_version: Optional[int] = Field(
+        default=None,
+        ge=0,
+        description="Optional optimistic-lock version for runtime metadata updates",
+    )
 
     @field_validator("context_policy")
     @classmethod
     def validate_context_policy(cls, value):
         return _validated_context_policy(value)
+
     enable_plan: Optional[bool] = Field(
         default=False,
         description="Whether to enable the planning phase before execution"
@@ -720,6 +730,7 @@ class AgentInfoRequest(BaseModel):
     is_a2a: Optional[bool] = None
     verification_config: Optional[Dict[str, Any]] = None
     context_policy: Optional[Dict[str, Any]] = None
+    allow_chat_metadata: Optional[bool] = None
 
     greeting_message: Optional[str] = None
     example_questions: Optional[List[str]] = None
@@ -814,6 +825,7 @@ class ExportAndImportAgentInfo(BaseModel):
     requested_output_tokens: Optional[int] = Field(default=None, gt=0)
     is_main_agent: bool = True
     provide_run_summary: bool
+    allow_chat_metadata: bool = False
     verification_config: Optional[Dict[str, Any]] = None
     context_policy: Optional[Dict[str, Any]] = None
     duty_prompt: Optional[str] = None
@@ -829,6 +841,8 @@ class ExportAndImportAgentInfo(BaseModel):
     skill_names: Optional[List[str]] = None
     prompt_template_id: Optional[int] = None
     prompt_template_name: Optional[str] = None
+    greeting_message: Optional[str] = None
+    example_questions: Optional[List[str]] = None
 
     @field_validator("context_policy")
     @classmethod
@@ -958,10 +972,23 @@ class SkillZipEntry(BaseModel):
     skill_zip_base64: str
 
 
+class SkillResolution(BaseModel):
+    """User-selected resolution for a duplicate skill during agent import."""
+    skill_name: str
+    action: Literal["rename", "use_existing"]
+    new_name: Optional[str] = None
+
+
+class SkillConflictCheckRequest(BaseModel):
+    """Skill names to check before showing the agent import steps."""
+    skill_names: List[str]
+
+
 class AgentImportRequest(BaseModel):
     agent_info: ExportAndImportDataFormat
     force_import: bool = False
     skills: Optional[List[SkillZipEntry]] = None
+    skill_resolutions: Optional[List[SkillResolution]] = None
 
 
 class AgentNameBatchRegenerateItem(BaseModel):
@@ -1683,6 +1710,7 @@ class CommunityListRequest(BaseModel):
     tag: Optional[str] = Field(None, description="Filter by tag")
     transport_type: Optional[str] = Field(None,description="Filter by transport: url or container")
     cursor: Optional[str] = Field(None, description="Pagination cursor")
+    page: Optional[int] = Field(None, ge=1, description="Offset pagination page")
     limit: int = Field(default=30, ge=1, le=100, description="Items per page")
 
     @field_validator("search", "tag", "cursor", "transport_type", mode="before")

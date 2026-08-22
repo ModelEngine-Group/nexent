@@ -91,6 +91,7 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/agent/stop/${conversationId}`,
     export: `${API_BASE_URL}/agent/export`,
     import: `${API_BASE_URL}/agent/import`,
+    checkSkills: `${API_BASE_URL}/agent/check_skills`,
     checkNameBatch: `${API_BASE_URL}/agent/check_name`,
     regenerateNameBatch: `${API_BASE_URL}/agent/regenerate_name`,
     searchInfo: `${API_BASE_URL}/agent/search_info`,
@@ -389,7 +390,9 @@ export const API_ENDPOINTS = {
     list: `${API_BASE_URL}/mcp/list`,
     healthcheck: `${API_BASE_URL}/mcp/healthcheck`,
     addFromConfig: `${API_BASE_URL}/mcp/add-from-config`,
+    addFromConfigStream: `${API_BASE_URL}/mcp/add-from-config/stream`,
     uploadImage: `${API_BASE_URL}/mcp/upload-image`,
+    uploadImageStream: `${API_BASE_URL}/mcp/upload-image/stream`,
     containers: `${API_BASE_URL}/mcp/containers`,
     containerLogs: (containerId: string) =>
       `${API_BASE_URL}/mcp/container/${containerId}/logs`,
@@ -678,6 +681,15 @@ export const API_ENDPOINTS = {
     platformCapacity: `${API_BASE_URL}/platform/quota/capacity`,
     platformTenantQuota: (tenantId: string) =>
       `${API_BASE_URL}/platform/quota/tenants/${tenantId}`,
+    // Personal KB capacity (ADMIN/SU)
+    personalUsers: `${API_BASE_URL}/capacity/personal/users`,
+    personalUserKbs: (userId: string) =>
+      `${API_BASE_URL}/capacity/personal/users/${userId}/kbs`,
+    personalUserQuota: (userId: string) =>
+      `${API_BASE_URL}/capacity/personal/users/${userId}/quota`,
+    personalDefaultQuota: `${API_BASE_URL}/capacity/personal/default-quota`,
+    personalSummary: `${API_BASE_URL}/capacity/personal/summary`,
+    personalSelf: `${API_BASE_URL}/capacity/personal/me`,
   },
   users: {
     list: `${API_BASE_URL}/users/list`,
@@ -737,7 +749,7 @@ export class ApiError extends Error {
   constructor(
     public code: string | number,
     message: string,
-    public details?: unknown
+    public details?: Record<string, unknown> | null
   ) {
     super(message);
     this.name = "ApiError";
@@ -767,7 +779,7 @@ export const fetchWithErrorHandling = async (
       // Try to parse JSON response for business error code first
       let errorCode = response.status;
       let errorMessage = `Request failed: ${response.status}`;
-      let errorDetails: unknown;
+      let errorDetails: Record<string, unknown> | null | undefined;
       const errorText = await response.text();
 
       try {

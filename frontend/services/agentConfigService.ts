@@ -173,6 +173,7 @@ export const fetchAgentList = async (tenantId?: string) => {
       is_published: agent.is_published,
       current_version_no: agent.current_version_no,
       is_a2a_server: agent.is_a2a_server || false,
+      allow_chat_metadata: agent.allow_chat_metadata ?? false,
       icon_url: agent.icon_url,
     }));
 
@@ -228,6 +229,7 @@ export const fetchPublishedAgentList = async () => {
       version_name: agent.version_name,
       greeting_message: agent.greeting_message,
       example_questions: agent.example_questions || [],
+      allow_chat_metadata: agent.allow_chat_metadata ?? false,
       icon_url: agent.icon_url,
     }));
 
@@ -458,6 +460,7 @@ export interface UpdateAgentInfoPayload {
   requested_output_tokens?: number | null;
   is_main_agent?: boolean;
   provide_run_summary?: boolean;
+  allow_chat_metadata?: boolean;
   enable_context_manager?: boolean;
   verification_config?: Record<string, any>;
   enabled?: boolean;
@@ -641,11 +644,51 @@ const downloadBlob = (blob: Blob, filename: string) => {
  * @param options import options including optional skill ZIPs
  * @returns import result
  */
+export interface SkillResolution {
+  skill_name: string;
+  action: "rename" | "use_existing";
+  new_name?: string;
+}
+
+export interface SkillConflict {
+  skill_name: string;
+  suggested_new_name: string;
+}
+
+export const checkAgentSkillConflicts = async (skillNames: string[]) => {
+  try {
+    const response = await fetch(API_ENDPOINTS.agent.checkSkills, {
+      method: "POST",
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ skill_names: skillNames }),
+    });
+    if (!response.ok) {
+      throw new Error(`Request failed: ${response.status}`);
+    }
+    const data = await response.json();
+    return {
+      success: true,
+      data: Array.isArray(data.skill_conflicts)
+        ? (data.skill_conflicts as SkillConflict[])
+        : [],
+      message: "",
+    };
+  } catch (error) {
+    log.error("Failed to check Agent skill conflicts:", error);
+    return {
+      success: false,
+      data: [] as SkillConflict[],
+      message: "Failed to check Agent skill conflicts",
+    };
+  }
+};
+
 export const importAgent = async (
   agentInfo: any,
   options?: {
     forceImport?: boolean;
     skillZips?: Array<{ skill_name: string; skill_zip_base64: string }>;
+    skillResolutions?: SkillResolution[];
   }
 ) => {
   try {
@@ -656,6 +699,9 @@ export const importAgent = async (
     if (options?.skillZips && options.skillZips.length > 0) {
       payload.skills = options.skillZips;
     }
+    if (options?.skillResolutions && options.skillResolutions.length > 0) {
+      payload.skill_resolutions = options.skillResolutions;
+    }
     const response = await fetch(API_ENDPOINTS.agent.import, {
       method: "POST",
       headers: getAuthHeaders(),
@@ -664,7 +710,7 @@ export const importAgent = async (
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
-      const errMsg = errorData?.message;
+      const errMsg = errorData?.message ?? errorData?.detail;
       if (typeof errMsg === "object" && errMsg !== null) {
         return {
           success: false,
@@ -926,6 +972,7 @@ export const searchAgentInfo = async (
       greeting_message: data.greeting_message || "",
       example_questions: data.example_questions || [],
       current_version_no: data.current_version_no,
+      allow_chat_metadata: data.allow_chat_metadata ?? false,
     };
 
     return {

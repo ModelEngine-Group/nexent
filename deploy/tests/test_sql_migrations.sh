@@ -144,7 +144,7 @@ assert_file_contains "$PLAN_FILE" "\\echo [sql-migrations] check v1_merged_migra
 assert_file_contains "$PLAN_FILE" "\\echo [sql-migrations] skip v1_merged_migrations.sql" "plan should skip matching checksums"
 assert_file_contains "$PLAN_FILE" "\\echo [sql-migrations] apply v1_merged_migrations.sql" "plan should apply new migration files"
 assert_file_contains "$PLAN_FILE" "\\echo [sql-migrations] reapply v1_merged_migrations.sql" "plan should reapply changed migration files"
-assert_file_contains "$PLAN_FILE" "migration_checksum_matched" "plan should compare recorded checksum with current file checksum"
+assert_file_contains "$PLAN_FILE" "migration_skip_eligible" "plan should compute skip eligibility from checksum and cascade flag"
 assert_file_contains "$PLAN_FILE" "executed_at = now()" "plan should refresh execution time on reapply"
 assert_file_contains "$PLAN_FILE" "SET search_path TO \"nexent\", public;" "plan should set search path for legacy migrations"
 

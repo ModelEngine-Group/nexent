@@ -58,7 +58,7 @@ export default function AgentRunPolicy() {
       {/* Self Validation */}
       <Row gutter={[16, 0]}>
         {/* Provide Run Summary */}
-        <Col xs={24} sm={12}>
+        <Col xs={24} sm={8}>
           <Form.Item
             label={t("agent.field.provideRunSummary")}
             className="mb-3"
@@ -78,7 +78,29 @@ export default function AgentRunPolicy() {
             </Flex>
           </Form.Item>
         </Col>
-        <Col xs={24} sm={12}>
+        {/* Allow Chat Metadata */}
+        <Col xs={24} sm={8}>
+          <Form.Item
+            label={t("agent.allowChatMetadata")}
+            tooltip={t("agent.allowChatMetadata.tooltip")}
+            className="mb-3"
+          >
+            <Flex align="center" gap={8}>
+              <Switch
+                checked={editedAgent.allow_chat_metadata ?? false}
+                onChange={(checked) =>
+                  updateAgent({ allow_chat_metadata: checked })
+                }
+              />
+              <span className="text-xs text-gray-500">
+                {editedAgent.allow_chat_metadata
+                  ? t("common.enabled")
+                  : t("common.disabled")}
+              </span>
+            </Flex>
+          </Form.Item>
+        </Col>
+        <Col xs={24} sm={8}>
           <Form.Item label={t("agent.field.selfValidate")} className="mb-2">
             <Switch
               checked={editedAgent.verification_config?.enabled ?? false}
