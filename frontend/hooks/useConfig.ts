@@ -97,6 +97,14 @@ const defaultConfig: GlobalConfig = {
         modelUrl: "",
       },
     },
+    vlm4: {
+      modelName: "",
+      displayName: "",
+      apiConfig: {
+        apiKey: "",
+        modelUrl: "",
+      },
+    },
     stt: {
       id: 0,
       modelName: "",
@@ -191,6 +199,7 @@ function transformBackendToFrontend(backendConfig: any): GlobalConfig {
         vlm: transformModelEntry(backendConfig.models.vlm),
         vlm2: transformModelEntry(backendConfig.models.vlm2),
         vlm3: transformModelEntry(backendConfig.models.vlm3),
+        vlm4: transformModelEntry(backendConfig.models.vlm4),
         stt: transformVoiceModelEntry(backendConfig.models.stt),
         tts: transformVoiceModelEntry(backendConfig.models.tts),
       }
@@ -337,6 +346,11 @@ export function useConfig() {
     config?.models?.vlm3?.displayName
   );
 
+  const isAudioUnderstandingAvailable = !!(
+    config?.models?.vlm4?.modelName ||
+    config?.models?.vlm4?.displayName
+  );
+
   // Whether config has selected an Embedding model
   const isEmbeddingAvailable = !!(config?.models?.embedding?.modelName || config?.models?.embedding?.displayName);
 
@@ -426,6 +440,7 @@ export function useConfig() {
     isVlmAvailable,
     isImageUnderstandingAvailable,
     isVideoUnderstandingAvailable,
+    isAudioUnderstandingAvailable,
     isEmbeddingAvailable,
     isMultiEmbeddingAvailable,
     defaultLlmModelName,
