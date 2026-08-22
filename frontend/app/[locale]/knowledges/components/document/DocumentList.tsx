@@ -1082,6 +1082,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                           <DocumentStatus
                             status={doc.status}
                             showIcon={true}
+                            errorReason={doc.error_reason}
                             kbId={knowledgeBaseId}
                             docId={doc.id}
                             processedChunkNum={doc.processed_chunk_num}

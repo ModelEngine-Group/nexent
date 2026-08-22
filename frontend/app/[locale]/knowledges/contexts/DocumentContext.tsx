@@ -299,7 +299,6 @@ export const DocumentProvider: React.FC<DocumentProviderProps> = ({
         dispatch({ type: DOCUMENT_ACTION_TYPES.SET_UPLOAD_FILES, payload: [] });
         return uploadResult;
       } catch (error) {
-        log.error(t("document.error.upload"), error);
         dispatch({
           type: DOCUMENT_ACTION_TYPES.ERROR,
           payload: `${t("document.error.upload")}. ${t("document.error.retry")}`,

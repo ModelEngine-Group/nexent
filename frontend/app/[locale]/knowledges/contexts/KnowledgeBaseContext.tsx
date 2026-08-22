@@ -119,8 +119,8 @@ export const KnowledgeBaseContext = createContext<{
     group_ids?: number[],
     embeddingModelId?: number,
     preserve_source_file?: boolean,
-    quota_limit_bytes?: number | null,
-  ) => Promise<KnowledgeBase | null>;
+    quota_limit_bytes?: number | null
+  ) => Promise<KnowledgeBase>;
   deleteKnowledgeBase: (id: string) => Promise<boolean>;
   selectKnowledgeBase: (id: string) => void;
   setActiveKnowledgeBase: (kb: KnowledgeBase | null) => void;
@@ -142,7 +142,9 @@ export const KnowledgeBaseContext = createContext<{
   },
   dispatch: () => {},
   fetchKnowledgeBases: async () => {},
-  createKnowledgeBase: async () => null,
+  createKnowledgeBase: async () => {
+    throw new Error("KnowledgeBaseProvider is required");
+  },
   deleteKnowledgeBase: async () => false,
   selectKnowledgeBase: () => {},
   setActiveKnowledgeBase: () => {},
@@ -349,7 +351,10 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
 
   // Update knowledge base in list - memoized with useCallback
   const updateKnowledgeBase = useCallback((kb: KnowledgeBase) => {
-    dispatch({ type: KNOWLEDGE_BASE_ACTION_TYPES.UPDATE_KNOWLEDGE_BASE, payload: kb });
+    dispatch({
+      type: KNOWLEDGE_BASE_ACTION_TYPES.UPDATE_KNOWLEDGE_BASE,
+      payload: kb,
+    });
   }, []);
 
   // Create knowledge base - memoized with useCallback
@@ -362,7 +367,7 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
       group_ids?: number[],
       embeddingModelId?: number,
       preserve_source_file?: boolean,
-      quota_limit_bytes?: number | null,
+      quota_limit_bytes?: number | null
     ) => {
       try {
         if (embeddingModelId === undefined) {
@@ -385,7 +390,7 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
           type: KNOWLEDGE_BASE_ACTION_TYPES.ERROR,
           payload: t("knowledgeBase.error.createRetry"),
         });
-        return null;
+        throw error;
       }
     },
     [t]

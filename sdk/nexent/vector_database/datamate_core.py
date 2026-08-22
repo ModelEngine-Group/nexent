@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional, Callable, Tuple
 
 from .base import VectorDatabaseCore
 from ..datamate.datamate_client import DataMateClient
-from ..core.models.embedding_model import BaseEmbedding
+from ..core.gateway.modality import EmbeddingAdapter
 
 logger = logging.getLogger("datamate_core")
 
@@ -86,7 +86,7 @@ class DataMateCore(VectorDatabaseCore):
     def vectorize_documents(
             self,
             index_name: str,
-            embedding_model: BaseEmbedding,
+            embedding_model: EmbeddingAdapter,
             documents: List[Dict[str, Any]],
             batch_size: int = 64,
             content_field: str = "content",
@@ -164,7 +164,7 @@ class DataMateCore(VectorDatabaseCore):
             "DataMate SDK does not support accurate search API.")
 
     def semantic_search(
-            self, index_names: List[str], query_text: str, embedding_model: BaseEmbedding, top_k: int = 5
+            self, index_names: List[str], query_text: str, embedding_model: EmbeddingAdapter, top_k: int = 5
     ) -> List[Dict[str, Any]]:
         _ = (index_names, query_text, embedding_model, top_k)
         raise NotImplementedError(
@@ -175,7 +175,7 @@ class DataMateCore(VectorDatabaseCore):
             self,
             index_names: List[str],
             query_text: str,
-            embedding_model: Optional[BaseEmbedding] = None,
+            embedding_model: Optional[EmbeddingAdapter] = None,
             top_k: int = 10,
             weight_accurate: float = 0.2,
     ) -> List[Dict[str, Any]]:

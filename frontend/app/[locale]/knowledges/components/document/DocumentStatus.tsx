@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Popover, Progress } from "antd";
 import { CircleHelp } from "lucide-react";
 import { DOCUMENT_STATUS } from "@/const/knowledgeBase";
+import { ErrorCode } from "@/const/errorCode";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
 import log from "@/lib/logger";
 
@@ -17,6 +18,21 @@ interface DocumentStatusProps {
   processedChunkNum?: number | null;
   totalChunkNum?: number | null;
 }
+
+const inferErrorCodeFromReason = (errorReason?: string): string | null => {
+  if (!errorReason) return null;
+
+  const normalizedReason = errorReason.toLowerCase();
+  if (
+    normalizedReason.includes("personal kb quota") ||
+    normalizedReason.includes("tenant personal kb storage full") ||
+    normalizedReason.includes("kb quota exceeded")
+  ) {
+    return ErrorCode.TENANT_PERSONAL_KB_QUOTA_EXCEEDED;
+  }
+
+  return null;
+};
 
 export const DocumentStatus: React.FC<DocumentStatusProps> = ({
   status,
@@ -200,8 +216,10 @@ export const DocumentStatus: React.FC<DocumentStatusProps> = ({
     }
   };
 
-  // Get localized error messages from error code
-  const localizedError = getLocalizedError(errorCodeState);
+  // Keep old task records compatible when only the backend error reason is available.
+  const localizedError = getLocalizedError(
+    errorCodeState || inferErrorCodeFromReason(errorReason)
+  );
 
   const popoverContent = (
     <div className="max-w-md">

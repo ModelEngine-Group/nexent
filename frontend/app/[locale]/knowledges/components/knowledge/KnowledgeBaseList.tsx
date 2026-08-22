@@ -23,11 +23,13 @@ import { Can } from "@/components/permission/Can";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useGroupList } from "@/hooks/group/useGroupList";
 import { KnowledgeBaseEditModal } from "./KnowledgeBaseEditModal";
+import PersonalKnowledgeBaseCapacityBar from "./PersonalKnowledgeBaseCapacityBar";
 
 import { KnowledgeBase } from "@/types/knowledgeBase";
 import { KB_LAYOUT, KB_TAG_VARIANTS } from "@/const/knowledgeBaseLayout";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
 import { formatDateOrFallback } from "@/lib/date";
+import { USER_ROLES } from "@/const/auth";
 
 interface KnowledgeBaseListProps {
   knowledgeBases: KnowledgeBase[];
@@ -80,6 +82,7 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
   // Get user info for tenant ID
   const { user } = useAuthorizationContext();
   const tenantId = user?.tenantId || null;
+  const showPersonalCapacity = user?.role === USER_ROLES.USER;
 
   // Fetch groups for group name mapping
   const { data: groupData } = useGroupList(tenantId);
@@ -289,7 +292,10 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
               {t("knowledgeBase.list.title")}
             </h3>
           </div>
-          <div className="flex items-center min-w-0 overflow-x-auto" style={{ gap: "6px" }}>
+          <div
+            className="flex items-center min-w-0 overflow-x-auto"
+            style={{ gap: "6px" }}
+          >
             <Button
               style={{
                 padding: "4px 15px",
@@ -458,35 +464,43 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                           {/* Permission icon with tooltip */}
                           <Can permission="kb.groups:read">
                             <Tooltip
-                              title={t(getPermissionTooltipKey(kb.ingroup_permission || ""))}
+                              title={t(
+                                getPermissionTooltipKey(
+                                  kb.ingroup_permission || ""
+                                )
+                              )}
                               placement="top"
                             >
                               <div className="ml-3 flex-shrink-0 cursor-pointer">
                                 <div className="flex items-center justify-center w-5 h-5 rounded-full bg-gray-200 hover:bg-gray-300 transition-all duration-200 hover:shadow-sm">
-                                  {getPermissionIcon(kb.ingroup_permission || "")}
+                                  {getPermissionIcon(
+                                    kb.ingroup_permission || ""
+                                  )}
                                 </div>
                               </div>
                             </Tooltip>
                           </Can>
                         </div>
-                          <div className="flex items-center ml-2">
+                        <div className="flex items-center ml-2">
                           <Can permission="kb:update">
                             {/* Edit button - only show for Nexent (local) sources and when user has edit permission */}
-                            {(!kb.source || kb.source === "nexent" || kb.source === "elasticsearch") &&
+                            {(!kb.source ||
+                              kb.source === "nexent" ||
+                              kb.source === "elasticsearch") &&
                               kb.permission !== "READ_ONLY" && (
-                              <Tooltip title={t("common.edit")}>
-                                <Button
-                                  type="text"
-                                  icon={<SquarePen className="h-4 w-4" />}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    openEditModal(kb);
-                                  }}
-                                  size="small"
-                                />
-                              </Tooltip>
-                            )}
-                            </Can>
+                                <Tooltip title={t("common.edit")}>
+                                  <Button
+                                    type="text"
+                                    icon={<SquarePen className="h-4 w-4" />}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      openEditModal(kb);
+                                    }}
+                                    size="small"
+                                  />
+                                </Tooltip>
+                              )}
+                          </Can>
                           <Can permission="kb:delete">
                             {/* Delete button - hide when user has READ_ONLY permission */}
                             {kb.permission !== "READ_ONLY" && (
@@ -503,9 +517,8 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                                 />
                               </Tooltip>
                             )}
-                            </Can>
-                          </div>
-
+                          </Can>
+                        </div>
                       </div>
                       <div
                         className={`flex flex-wrap items-center ${KB_LAYOUT.TAG_MARGIN} ${KB_LAYOUT.TAG_SPACING}`}
@@ -555,7 +568,7 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                               className={`w-full ${KB_LAYOUT.TAG_BREAK_HEIGHT}`}
                             ></div>
 
-{/* Model tag - only show when model is not "unknown" */}
+                            {/* Model tag - only show when model is not "unknown" */}
                             {kb.embeddingModel !== "unknown" && (
                               <span
                                 className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_LAYOUT.SECOND_ROW_TAG_MARGIN} ${KB_TAG_VARIANTS.model} mr-1`}
@@ -567,26 +580,28 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                             )}
                             {kb.is_multimodal &&
                               hasIndexedDocumentsAndChunks(kb) && (
-                              <span
-                                className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_LAYOUT.SECOND_ROW_TAG_MARGIN} ${KB_TAG_VARIANTS.red} mr-1`}
-                              >
-                                multimodal
-                              </span>
-                            )}
+                                <span
+                                  className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_LAYOUT.SECOND_ROW_TAG_MARGIN} ${KB_TAG_VARIANTS.red} mr-1`}
+                                >
+                                  multimodal
+                                </span>
+                              )}
 
                             {/* Model mismatch is shown in the knowledge-base detail header only. */}
 
                             {/* User group tags - only show when not PRIVATE */}
                             <Can permission="group:read">
                               {kb.ingroup_permission !== "PRIVATE" &&
-                                getGroupNames(kb.group_ids).map((groupName, idx) => (
-                                  <span
-                                    key={idx}
-                                    className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_LAYOUT.SECOND_ROW_TAG_MARGIN} bg-blue-100 text-blue-800 border border-blue-200 mr-1`}
-                                  >
-                                    {groupName}
-                                  </span>
-                                ))}
+                                getGroupNames(kb.group_ids).map(
+                                  (groupName, idx) => (
+                                    <span
+                                      key={idx}
+                                      className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_LAYOUT.SECOND_ROW_TAG_MARGIN} bg-blue-100 text-blue-800 border border-blue-200 mr-1`}
+                                    >
+                                      {groupName}
+                                    </span>
+                                  )
+                                )}
                             </Can>
                             {kb.preserve_source_file === false && (
                               <span
@@ -616,6 +631,8 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
           </div>
         )}
       </div>
+
+      {showPersonalCapacity && <PersonalKnowledgeBaseCapacityBar />}
 
       {/* Edit Knowledge Base Modal */}
       <KnowledgeBaseEditModal

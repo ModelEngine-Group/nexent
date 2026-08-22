@@ -130,10 +130,10 @@ def _normalize_mcp_config(mcp_host_item: Union[str, Dict[str, Any]]) -> Dict[str
 
     Args:
         mcp_host_item: Either a string URL or a dict with 'url', optional 'transport',
-                       and optional 'headers' or 'authorization'
+                       'headers', 'authorization', or 'httpx_client_factory'
 
     Returns:
-        Dictionary with 'url', 'transport', and optionally 'headers' keys
+        Dictionary with 'url', 'transport', and supported transport options
     """
     if isinstance(mcp_host_item, str):
         url = mcp_host_item
@@ -160,6 +160,12 @@ def _normalize_mcp_config(mcp_host_item: Union[str, Dict[str, Any]]) -> Dict[str
         elif "headers" in mcp_host_item:
             result["headers"] = mcp_host_item["headers"]
 
+        if "httpx_client_factory" in mcp_host_item:
+            httpx_client_factory = mcp_host_item["httpx_client_factory"]
+            if not callable(httpx_client_factory):
+                raise ValueError("httpx_client_factory must be callable")
+            result["httpx_client_factory"] = httpx_client_factory
+
         return result
     else:
         raise ValueError(f"Invalid MCP host item type: {type(mcp_host_item)}. Must be str or dict")
@@ -185,6 +191,10 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
                 minio_client=getattr(agent_run_info, "minio_client", None),
                 conversation_id=agent_run_info.conversation_id,
                 user_id=agent_run_info.user_id,
+                tenant_id=getattr(agent_run_info, "tenant_id", None),
+                workspace_path=getattr(agent_run_info, "workspace_path", None),
+                workspace_run_id=getattr(agent_run_info, "workspace_run_id", None),
+                minio_files=getattr(agent_run_info, "minio_files", None),
             )
             agent = nexent.create_single_agent(  # NOSONAR - constructs the SDK's trusted CoreAgent implementation.
                 agent_run_info.agent_config,
@@ -214,6 +224,10 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
                     minio_client=getattr(agent_run_info, "minio_client", None),
                     conversation_id=agent_run_info.conversation_id,
                     user_id=agent_run_info.user_id,
+                    tenant_id=getattr(agent_run_info, "tenant_id", None),
+                    workspace_path=getattr(agent_run_info, "workspace_path", None),
+                    workspace_run_id=getattr(agent_run_info, "workspace_run_id", None),
+                    minio_files=getattr(agent_run_info, "minio_files", None),
                 )
                 agent = nexent.create_single_agent(  # NOSONAR - constructs the SDK's trusted CoreAgent implementation.
                     agent_run_info.agent_config,

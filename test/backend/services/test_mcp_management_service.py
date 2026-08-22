@@ -526,6 +526,24 @@ class TestListCommunityMcpServices(unittest.IsolatedAsyncioTestCase):
             user_id="uid", user_group_ids=[],
         )
 
+    @patch('backend.services.mcp_management_service.get_mcp_market_records')
+    async def test_list_with_page(self, mock_get):
+        mock_get.return_value = {
+            "count": 1, "total": 4, "page": 2,
+            "nextCursor": None, "items": [],
+        }
+
+        result = await list_community_mcp_services(
+            tenant_id="tid", user_id="uid", page=2, limit=2,
+        )
+
+        self.assertEqual(result["total"], 4)
+        self.assertEqual(result["page"], 2)
+        mock_get.assert_called_once_with(
+            tenant_id="tid", search=None, tag=None, transport_type=None,
+            cursor=None, limit=2, user_id="uid", user_group_ids=[], page=2,
+        )
+
 
 # ============================================================================
 # list_community_mcp_tag_stats

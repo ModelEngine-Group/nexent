@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchTools } from "@/services/agentConfigService";
-import { useMemo } from "react";
-import { ToolGroup, ToolSubGroup } from "@/types/agentConfig";
+import { useMemo, useCallback } from "react";
+import type { Tool, ToolGroup, ToolSubGroup } from "@/types/agentConfig";
 import { TOOL_SOURCE_TYPES } from "@/const/agentConfig";
 
 export function useToolList(options?: { enabled?: boolean; staleTime?: number }) {
@@ -29,6 +29,20 @@ export function useToolList(options?: { enabled?: boolean; staleTime?: number })
 	}, [tools]);
 
 	// Extract all unique labels from available tools (used by LabelManagementModal suggestions)
+	const isUserSelectable = useCallback(
+		(tool: Tool) => {
+			const canonicalTool = availableTools.find(
+				(availableTool: Tool) => String(availableTool.id) === String(tool.id)
+			);
+			return (canonicalTool ?? tool).is_user_selectable !== false;
+		},
+		[availableTools]
+	);
+
+	const selectableTools = useMemo(
+		() => availableTools.filter((tool: Tool) => tool.is_user_selectable !== false),
+		[availableTools]
+	);
 	const allLabels = useMemo(() => {
 		const labelSet = new Set<string>();
 		availableTools.forEach((tool: any) => {
@@ -135,6 +149,8 @@ export function useToolList(options?: { enabled?: boolean; staleTime?: number })
 		...query,
 		tools,
 		availableTools,
+		selectableTools,
+		isUserSelectable,
 		groupedTools,
 		allLabels,
 		invalidate: () => queryClient.invalidateQueries({ queryKey: ["tools"] }),

@@ -113,6 +113,9 @@ class ErrorMessage:
         ErrorCode.TENANT_DISABLED: "Tenant is disabled.",
         ErrorCode.TENANT_CONFIG_ERROR: "Tenant configuration error.",
         ErrorCode.TENANT_RESOURCE_EXCEEDED: "Tenant resource exceeded.",
+        ErrorCode.TENANT_PERSONAL_KB_QUOTA_EXCEEDED: "Personal knowledge base quota exceeded.",
+        ErrorCode.TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE: "Personal knowledge base quota usage is unavailable.",
+        ErrorCode.TENANT_PERSONAL_KB_QUOTA_BELOW_USAGE: "Personal knowledge base quota cannot be lower than current usage.",
 
         # ==================== 13 External / 外部服务 ====================
         ErrorCode.DATAMATE_CONNECTION_FAILED: "Failed to connect to DataMate service.",
