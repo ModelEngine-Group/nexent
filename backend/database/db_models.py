@@ -1,4 +1,6 @@
 from sqlalchemy import (
+    JSON,
+    TIMESTAMP,
     BigInteger,
     Boolean,
     CheckConstraint,
@@ -7,12 +9,10 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
-    JSON,
     Numeric,
     Sequence,
     String,
     Text,
-    TIMESTAMP,
     UniqueConstraint,
     text,
 )

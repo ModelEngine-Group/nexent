@@ -169,6 +169,9 @@ class ErrorCode(Enum):
     TENANT_DISABLED = "120102"  # Tenant disabled
     TENANT_CONFIG_ERROR = "120103"  # Tenant configuration error
     TENANT_RESOURCE_EXCEEDED = "120104"  # Tenant resource exceeded
+    TENANT_PERSONAL_KB_QUOTA_EXCEEDED = "120105"  # Personal KB quota exceeded
+    TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE = "120106"  # Personal KB quota usage unavailable
+    TENANT_PERSONAL_KB_QUOTA_BELOW_USAGE = "120107"  # Personal KB quota below current usage
 
     # ==================== 13 External / 外部服务 ====================
     # 01 - DataMate
@@ -291,6 +294,10 @@ ERROR_CODE_HTTP_STATUS = {
     ErrorCode.CHAT_METADATA_INVALID: 422,
     ErrorCode.CHAT_METADATA_TOO_LARGE: 413,
     ErrorCode.CHAT_METADATA_VERSION_CONFLICT: 409,
+    # Tenant resource - personal KB quota
+    ErrorCode.TENANT_PERSONAL_KB_QUOTA_EXCEEDED: 403,
+    ErrorCode.TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE: 503,
+    ErrorCode.TENANT_PERSONAL_KB_QUOTA_BELOW_USAGE: 400,
     # Common - File
     ErrorCode.FILE_NOT_FOUND: 404,
     ErrorCode.FILE_UPLOAD_FAILED: 500,

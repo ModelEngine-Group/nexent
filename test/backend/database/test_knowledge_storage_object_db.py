@@ -290,6 +290,33 @@ def test_get_storage_object_can_include_deleted_and_returns_none(monkeypatch):
     query.filter.assert_called_once()
 
 
+def test_get_storage_object_by_identity_filters_active_row(monkeypatch):
+    row = _row()
+    session, query = _query_session(row)
+    _patch_session(monkeypatch, session)
+
+    result = storage_db.get_storage_object_by_identity(
+        "bucket",
+        "knowledge_base/source.pdf",
+    )
+
+    assert result["knowledge_id"] == 10
+    assert result["tenant_id"] == "tenant-a"
+    assert query.filter.call_count == 2
+
+
+def test_get_storage_object_by_identity_can_include_deleted(monkeypatch):
+    session, query = _query_session()
+    _patch_session(monkeypatch, session)
+
+    assert storage_db.get_storage_object_by_identity(
+        "bucket",
+        "knowledge_base/source.pdf",
+        include_deleted=True,
+    ) is None
+    query.filter.assert_called_once()
+
+
 def test_aggregate_committed_bytes_by_kb(monkeypatch):
     session, query = _query_session()
     query.all.return_value = [(10, 300), (11, 700), (12, None)]
@@ -300,6 +327,27 @@ def test_aggregate_committed_bytes_by_kb(monkeypatch):
     assert result == {10: 300, 11: 700, 12: 0}
     assert query.filter.call_count == 2
     query.group_by.assert_called_once()
+
+
+def test_get_committed_source_bytes_by_object_names(monkeypatch):
+    session, query = _query_session()
+    query.all.return_value = [
+        ("knowledge_base/source.pdf", 300),
+        ("knowledge_base/source-1.pdf", 450),
+    ]
+    _patch_session(monkeypatch, session)
+
+    result = storage_db.get_committed_source_bytes_by_object_names(
+        tenant_id="tenant-a",
+        knowledge_id=10,
+        bucket_name="bucket",
+        object_names=["knowledge_base/source.pdf", "knowledge_base/source-1.pdf"],
+    )
+
+    assert result == {
+        "knowledge_base/source.pdf": 300,
+        "knowledge_base/source-1.pdf": 450,
+    }
 
 
 def test_aggregate_committed_bytes_by_kb_empty_filter_avoids_database(monkeypatch):

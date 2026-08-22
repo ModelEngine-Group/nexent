@@ -126,6 +126,30 @@ class TestCommunityList:
 
     @patch('apps.mcp_management_app.get_current_user_info')
     @patch('apps.mcp_management_app.list_community_mcp_services')
+    def test_list_with_offset_pagination(self, mock_list, mock_auth):
+        """Test community list forwards offset pagination parameters."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_list.return_value = {
+            "count": 1,
+            "total": 7,
+            "page": 2,
+            "items": [],
+        }
+
+        resp = client.get(
+            "/mcp-tools/community/list?page=2&limit=6",
+            headers=AUTH_HEADER,
+        )
+
+        assert resp.status_code == HTTPStatus.OK
+        assert resp.json()["data"]["total"] == 7
+        mock_list.assert_called_once_with(
+            tenant_id="tid", user_id="uid", search=None, tag=None,
+            transport_type=None, cursor=None, page=2, limit=6,
+        )
+
+    @patch('apps.mcp_management_app.get_current_user_info')
+    @patch('apps.mcp_management_app.list_community_mcp_services')
     def test_list_unauthorized(self, mock_list, mock_auth):
         """Test community list returns 401 on UnauthorizedError."""
         mock_auth.side_effect = UnauthorizedError("unauthorized")

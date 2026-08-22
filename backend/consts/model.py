@@ -841,6 +841,8 @@ class ExportAndImportAgentInfo(BaseModel):
     skill_names: Optional[List[str]] = None
     prompt_template_id: Optional[int] = None
     prompt_template_name: Optional[str] = None
+    greeting_message: Optional[str] = None
+    example_questions: Optional[List[str]] = None
 
     @field_validator("context_policy")
     @classmethod
@@ -970,10 +972,23 @@ class SkillZipEntry(BaseModel):
     skill_zip_base64: str
 
 
+class SkillResolution(BaseModel):
+    """User-selected resolution for a duplicate skill during agent import."""
+    skill_name: str
+    action: Literal["rename", "use_existing"]
+    new_name: Optional[str] = None
+
+
+class SkillConflictCheckRequest(BaseModel):
+    """Skill names to check before showing the agent import steps."""
+    skill_names: List[str]
+
+
 class AgentImportRequest(BaseModel):
     agent_info: ExportAndImportDataFormat
     force_import: bool = False
     skills: Optional[List[SkillZipEntry]] = None
+    skill_resolutions: Optional[List[SkillResolution]] = None
 
 
 class AgentNameBatchRegenerateItem(BaseModel):
@@ -1695,6 +1710,7 @@ class CommunityListRequest(BaseModel):
     tag: Optional[str] = Field(None, description="Filter by tag")
     transport_type: Optional[str] = Field(None,description="Filter by transport: url or container")
     cursor: Optional[str] = Field(None, description="Pagination cursor")
+    page: Optional[int] = Field(None, ge=1, description="Offset pagination page")
     limit: int = Field(default=30, ge=1, le=100, description="Items per page")
 
     @field_validator("search", "tag", "cursor", "transport_type", mode="before")

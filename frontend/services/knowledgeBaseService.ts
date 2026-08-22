@@ -1012,11 +1012,14 @@ class KnowledgeBaseService {
     }
   }
 
-  // Check whether the knowledge base name already exists in Elasticsearch
+  // Check whether the knowledge base name already exists in the current tenant
   async checkKnowledgeBaseNameExists(name: string): Promise<boolean> {
     try {
-      const knowledgeBases = await this.getKnowledgeBases(true);
-      return knowledgeBases.includes(name);
+      const result = await this.checkKnowledgeBaseName(name);
+      if (result.status === NAME_CHECK_STATUS.CHECK_FAILED) {
+        throw new Error("Failed to check knowledge base name availability");
+      }
+      return result.status !== NAME_CHECK_STATUS.AVAILABLE;
     } catch (error) {
       log.error("Failed to check knowledge base name existence:", error);
       throw error;
@@ -1100,10 +1103,14 @@ class KnowledgeBaseService {
       );
 
       const result = await response.json();
-      if (!response.ok || result.status !== "success") {
-        throw new Error(
+      if (!response.ok) {
+        throw new ApiError(
+          response.status,
           result.detail || result.message || "Failed to create knowledge base"
         );
+      }
+      if (result.status !== "success") {
+        throw new Error(result.message || "Failed to create knowledge base");
       }
 
       // Create a full KnowledgeBase object with default values
@@ -1263,12 +1270,23 @@ class KnowledgeBaseService {
       const uploadResult = await uploadResponse.json();
 
       if (!uploadResponse.ok) {
-        if (uploadResponse.status === 400) {
-          throw new Error(
-            uploadResult.error || "File upload validation failed"
-          );
-        }
-        throw new Error("File upload failed");
+        const detail =
+          uploadResult.detail && typeof uploadResult.detail === "object"
+            ? uploadResult.detail
+            : null;
+        throw new ApiError(
+          uploadResult.code ||
+            uploadResult.error ||
+            detail?.code ||
+            uploadResponse.status,
+          uploadResult.message ||
+            detail?.message ||
+            uploadResult.error ||
+            (uploadResponse.status === 400
+              ? "File upload validation failed"
+              : "File upload failed"),
+          uploadResult.details || detail?.details || null
+        );
       }
 
       if (
@@ -1318,7 +1336,6 @@ class KnowledgeBaseService {
 
       throw new Error("Unknown response status during processing");
     } catch (error) {
-      log.error("Failed to upload and process files:", error);
       throw error;
     }
   }

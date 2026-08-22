@@ -170,6 +170,25 @@ class _SkillServiceMock:
 
 _skill_service_module_mock = MagicMock()
 _skill_service_module_mock.SkillService = _SkillServiceMock
+
+
+def _generate_available_copy_skill_name_mock(base_name, unavailable_names=None):
+    normalized_base = (base_name or "Skill").strip() or "Skill"
+    unavailable = unavailable_names or set()
+    if normalized_base not in unavailable:
+        return normalized_base
+    index = 1
+    while True:
+        suffix = " \u526f\u672c" if index == 1 else f" \u526f\u672c {index}"
+        max_base_length = max(100 - len(suffix), 1)
+        truncated_base = normalized_base[:max_base_length].rstrip() or normalized_base[:max_base_length]
+        candidate = f"{truncated_base}{suffix}"
+        if candidate not in unavailable:
+            return candidate
+        index += 1
+
+
+_skill_service_module_mock.generate_available_copy_skill_name = _generate_available_copy_skill_name_mock
 sys.modules["services.skill_service"] = _skill_service_module_mock
 
 _notification_service_mock = MagicMock()
@@ -1152,7 +1171,6 @@ def test_status_transition_edges_and_update_failures():
 
 def test_copy_name_and_install_error_edges():
     assert srs._extract_duplicate_skill_name("plain failure") is None
-    assert srs._truncate_copy_base_name("A" * 120, " suffix") == "A" * 93
 
     _skill_db_mock.get_skill_by_name.side_effect = None
     _skill_db_mock.get_skill_by_name.return_value = None
