@@ -1951,6 +1951,74 @@ async def test_delete_documents_success(vdb_core_mock, redis_service_mock, auth_
 
 
 @pytest.mark.asyncio
+async def test_delete_documents_resolves_lifecycle_file_id(vdb_core_mock, redis_service_mock, auth_data):
+    """New clients can delete a file by durable lifecycle ID."""
+    lifecycle_record = {"file_id": "fid-1", "object_name": "knowledge_base/a.txt"}
+    with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+            patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("database.knowledge_file_lifecycle_db.get_file_record", return_value=lifecycle_record) as mock_get_record, \
+            patch(
+                "backend.apps.vectordatabase_app.ElasticSearchService.delete_document_by_scope",
+                new_callable=AsyncMock,
+            ) as mock_delete_by_scope:
+        mock_delete_by_scope.return_value = {"status": "success", "scope": "source_only"}
+
+        response = client.delete(
+            f"/indices/{auth_data['index_name']}/documents",
+            params={"file_id": "fid-1", "scope": "source_only"},
+            headers=auth_data["auth_header"],
+        )
+
+        assert response.status_code == 200
+        mock_get_record.assert_called_once_with(
+            file_id="fid-1",
+            index_name=auth_data["index_name"],
+            tenant_id=auth_data["tenant_id"],
+            include_hidden=True,
+        )
+        mock_delete_by_scope.assert_awaited_once_with(
+            auth_data["index_name"], "knowledge_base/a.txt", "source_only", ANY
+        )
+
+
+@pytest.mark.asyncio
+async def test_get_document_error_info_returns_lifecycle_error(auth_data):
+    """Durable lifecycle errors take precedence over Redis task metadata."""
+    lifecycle_record = {
+        "file_id": "fid-failed",
+        "error_code": "PARSE_FAILED",
+        "error_message": "unsupported format",
+        "error_stage": "PROCESS",
+        "failed_at": "2026-08-22T00:00:00",
+    }
+    with patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("database.knowledge_file_lifecycle_db.get_file_record", return_value=lifecycle_record) as mock_get_record, \
+            patch("backend.apps.vectordatabase_app.get_all_files_status", new_callable=AsyncMock) as mock_legacy:
+        response = client.get(
+            f"/indices/{auth_data['index_name']}/documents/knowledge_base/a.txt/error-info",
+            params={"file_id": "fid-failed"},
+            headers=auth_data["auth_header"],
+        )
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "status": "success",
+            "error_code": "PARSE_FAILED",
+            "error_message": "unsupported format",
+            "error_stage": "PROCESS",
+            "failed_at": "2026-08-22T00:00:00",
+        }
+        mock_get_record.assert_called_once_with(
+            file_id="fid-failed",
+            index_name=auth_data["index_name"],
+            tenant_id=auth_data["tenant_id"],
+            object_name=None,
+            include_hidden=True,
+        )
+        mock_legacy.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_delete_documents_forbidden_for_read_only(vdb_core_mock, auth_data):
     """Read-only users must not be able to delete files from a knowledge base."""
     with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \

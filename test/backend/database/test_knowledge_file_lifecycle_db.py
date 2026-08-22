@@ -155,6 +155,11 @@ def test_list_file_records_applies_tenant_and_hides_deleted_rows(monkeypatch):
     assert lifecycle_db.list_file_records(index_name="kb-1", tenant_id="tenant-1") == [{"file_id": "fid-4"}]
     assert query.filter.call_count == 3
 
+    query.filter.reset_mock()
+    query.order_by.return_value.all.return_value = []
+    assert lifecycle_db.list_file_records(index_name="kb-1", include_hidden=True) == []
+    assert query.filter.call_count == 1
+
 
 def test_transition_file_record_updates_allowed_fields_and_version(monkeypatch):
     session = MagicMock()
@@ -195,9 +200,19 @@ def test_transition_file_record_returns_none_for_stale_row(monkeypatch):
     query.with_for_update.return_value = query
     query.first.return_value = None
     monkeypatch.setattr(lifecycle_db, "get_db_session", _session_context(session))
+    monkeypatch.setattr(
+        lifecycle_db,
+        "as_dict",
+        lambda value: {"file_id": value.file_id, "version": value.version},
+    )
 
     assert lifecycle_db.transition_file_record("missing", expected_version=9) is None
     session.flush.assert_not_called()
+
+    row = MagicMock(file_id="fid-7", version=0)
+    query.first.return_value = row
+    assert lifecycle_db.transition_file_record("fid-7") == {"file_id": "fid-7", "version": 1}
+    assert row.version == 1
 
 
 def test_delete_tombstone_creates_and_finalizes_missing_row(monkeypatch):

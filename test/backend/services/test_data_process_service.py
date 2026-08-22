@@ -652,7 +652,7 @@ class TestDataProcessService(unittest.TestCase):
         # Setup mocks — get_all_tasks creates short-timeout inspectors via celery_app
         mock_inspector = MagicMock()
         mock_inspector.active.return_value = {
-            'worker1': [{'id': 'task1'}, {'id': 'task2'}]
+            'worker1': [{'id': 'task1', 'file_id': 'fid-runtime'}, {'id': 'task2'}]
         }
         mock_inspector.reserved.return_value = {
             'worker1': [{'id': 'task3'}]
@@ -681,6 +681,7 @@ class TestDataProcessService(unittest.TestCase):
 
         # task1-task4 have index_name + task_name; task5 is filtered out
         self.assertEqual(len(result), 4)
+        self.assertEqual(next(task for task in result if task['id'] == 'task1')['file_id'], 'fid-runtime')
 
         # Get all tasks without filtering
         result = await self.service.get_all_tasks(filter=False)
@@ -1678,7 +1679,8 @@ class TestDataProcessService(unittest.TestCase):
                     'source_type': 'url',
                     'chunking_strategy': 'semantic',
                     'index_name': 'test_index_1',
-                    'original_filename': 'doc1.pdf'
+                    'original_filename': 'doc1.pdf',
+                    'file_id': 'fid-batch-1',
                 },
                 {
                     'source': 'http://example.com/doc2.pdf',
@@ -1708,6 +1710,7 @@ class TestDataProcessService(unittest.TestCase):
                 'embedding_model_id': None,
                 'tenant_id': None,
                 'telemetry_context': {},
+                'file_id': 'fid-batch-1',
             },
             {
                 'source': 'http://example.com/doc2.pdf',

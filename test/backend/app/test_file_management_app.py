@@ -404,6 +404,37 @@ async def test_process_files_error_message(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_process_files_persists_submit_failure(monkeypatch):
+    """A process-submit error is persisted on the durable lifecycle record."""
+    async def fake_trigger(files, params):
+        return {"status": "error", "message": "queue unavailable"}
+
+    lifecycle_module = types.ModuleType("database.knowledge_file_lifecycle_db")
+    lifecycle_module.get_file_record = MagicMock(return_value={"file_id": "fid-submit"})
+    lifecycle_module.transition_file_record = MagicMock()
+    database_module = types.ModuleType("database")
+    database_module.__path__ = []
+    monkeypatch.setitem(sys.modules, "database", database_module)
+    monkeypatch.setitem(sys.modules, "database.knowledge_file_lifecycle_db", lifecycle_module)
+    monkeypatch.setattr(file_management_app, "trigger_data_process", fake_trigger)
+
+    with pytest.raises(HTTPException) as raised:
+        await file_management_app.process_files(
+            files=[{"file_id": "fid-submit", "path_or_url": "knowledge_base/a.txt", "filename": "a.txt"}],
+            chunking_strategy="basic",
+            index_name="kb",
+            destination="minio",
+            authorization=MOCK_AUTH,
+        )
+
+    assert raised.value.status_code == 500
+    assert raised.value.detail == "queue unavailable"
+    lifecycle_module.get_file_record.assert_called_once()
+    lifecycle_module.transition_file_record.assert_called_once()
+    assert lifecycle_module.transition_file_record.call_args.kwargs["error_code"] == "TASK_SUBMIT_FAILED"
+
+
+@pytest.mark.asyncio
 async def test_get_storage_files_maps_unauthorized_error(monkeypatch):
     def unauthorized(_authorization):
         raise file_management_app.UnauthorizedError("token expired")
