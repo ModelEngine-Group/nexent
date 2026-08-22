@@ -16,20 +16,37 @@ import {
 import type { UploadProps } from "antd";
 import { Upload } from "lucide-react";
 
-import { useAgentStore } from "@/stores/agentStore";
+import { useAgentStore, type AgentDraftPatch } from "@/stores/agentStore";
 import {
   AGENT_DESCRIPTION_MAX_LENGTH,
   AGENT_NAME_MAX_LENGTH,
+  createAgentNameConflictValidator,
   isValidAgentName,
-} from "@/lib/agentValidation";
+} from "@/hooks/agent/useSaveGuard";
 import { API_ENDPOINTS } from "@/services/api";
 import { fetchWithAuth } from "@/lib/auth";
 import { getAgentIcon } from "@/lib/chat/agentIconUtils";
 
 export default function AgentInfo() {
   const { t } = useTranslation("common");
+  const form = Form.useFormInstance();
   const editedAgent = useAgentStore((state) => state.editedAgent!);
   const updateDraft = useAgentStore((state) => state.updateDraft);
+
+  const updateValidatedDraft = (
+    field: "display_name" | "name" | "description",
+    value: string
+  ) => {
+    form.setFieldValue(field, value);
+    void form
+      .validateFields([field])
+      .then(() => {
+        if (form.getFieldValue(field) === value) {
+          updateDraft({ [field]: value } as AgentDraftPatch);
+        }
+      })
+      .catch(() => undefined);
+  };
 
   const agentId = useAgentStore((state) => state.agentId);
   const [uploading, setUploading] = useState(false);
@@ -100,13 +117,19 @@ export default function AgentInfo() {
                       max: AGENT_NAME_MAX_LENGTH,
                     }),
                   },
+                  createAgentNameConflictValidator(
+                    t,
+                    "display_name",
+                    agentId ?? undefined
+                  ),
                 ]}
               >
                 <Input
                   placeholder={t("agent.displayNamePlaceholder")}
-                  value={editedAgent.display_name}
+                  maxLength={AGENT_NAME_MAX_LENGTH}
+                  showCount
                   onChange={(event) =>
-                    updateDraft({ display_name: event.target.value })
+                    updateValidatedDraft("display_name", event.target.value)
                   }
                 />
               </Form.Item>
@@ -134,15 +157,19 @@ export default function AgentInfo() {
                         ? Promise.resolve()
                         : Promise.reject(new Error(t("agent.validation.namePattern"))),
                   },
+                  createAgentNameConflictValidator(
+                    t,
+                    "name",
+                    agentId ?? undefined
+                  ),
                 ]}
               >
                 <Input
                   placeholder={t("agent.namePlaceholder")}
-                  value={editedAgent.name}
                   maxLength={AGENT_NAME_MAX_LENGTH}
                   showCount
                   onChange={(event) =>
-                    updateDraft({ name: event.target.value })
+                    updateValidatedDraft("name", event.target.value)
                   }
                 />
               </Form.Item>
@@ -193,9 +220,8 @@ export default function AgentInfo() {
             <Input.TextArea
               placeholder={t("agent.descriptionPlaceholder")}
               rows={3}
-              value={editedAgent.description}
               onChange={(event) =>
-                updateDraft({ description: event.target.value })
+                updateValidatedDraft("description", event.target.value)
               }
               showCount
               maxLength={AGENT_DESCRIPTION_MAX_LENGTH}

@@ -1,13 +1,6 @@
 import { create } from "zustand";
 
 import {
-  AGENT_DESCRIPTION_MAX_LENGTH,
-  AGENT_NAME_MAX_LENGTH,
-  isValidAgentDescription,
-  isValidAgentDisplayName,
-  isValidAgentName,
-} from "@/lib/agentValidation";
-import {
   searchToolConfig,
   updateAgentInfo,
   updateToolConfig,
@@ -68,7 +61,6 @@ interface AgentStoreState {
   savedAgent: AgentDraft | null;
   serverSnapshotRevision: number;
   queue: AgentSaveTask[];
-  isSaving: boolean;
   isGenerating: boolean;
   saveError: string | null;
   lastSaveFailed: boolean;
@@ -191,10 +183,24 @@ const mergePersistedResources = (
 const DRAFT_SAVE_DEBOUNCE_MS = 500;
 let pendingDraftPatch: AgentDraftPatch = {};
 let draftSaveTimer: ReturnType<typeof setTimeout> | null = null;
+let saveQueue: AgentSaveTask[] = [];
+let saveQueueProcessing = false;
+let idleWaiters: Array<(success: boolean) => void> = [];
 
-const hasPendingSaveWork = (state: AgentStoreState): boolean =>
-  state.isSaving ||
-  state.queue.length > 0 ||
+const resolveIdleWaiters = () => {
+  if (saveQueueProcessing || saveQueue.length > 0) {
+    return;
+  }
+
+  const success = !useAgentStore.getState().lastSaveFailed;
+  const waiters = idleWaiters;
+  idleWaiters = [];
+  waiters.forEach((resolve) => resolve(success));
+};
+
+const hasPendingSaveWork = (): boolean =>
+  saveQueueProcessing ||
+  saveQueue.length > 0 ||
   draftSaveTimer !== null ||
   Object.keys(pendingDraftPatch).length > 0;
 
@@ -206,7 +212,7 @@ const canApplyPersistedState = (
   state.currentAgentId === agentId &&
   state.editedAgent !== null &&
   state.savedAgent !== null &&
-  !hasPendingSaveWork(state);
+  !hasPendingSaveWork();
 
 const clearPendingDraftSave = () => {
   if (draftSaveTimer) {
@@ -373,79 +379,78 @@ async function persistToolChanges(
 }
 
 async function processSaveQueue(): Promise<void> {
-  if (useAgentStore.getState().isSaving) {
+  if (saveQueueProcessing) {
     return;
   }
+
+  saveQueueProcessing = true;
   let drainHadFailure = false;
 
-  while (true) {
-    const task = useAgentStore.getState().queue[0];
-    if (!task) {
-      return;
-    }
-
-    useAgentStore.setState({ isSaving: true, saveError: null });
-
-    try {
-      const result = await updateAgentInfo(
-        toAgentPayload(task.agentId, task.patch)
-      );
-      if (!result.success) {
-        throw new Error(result.message);
+  try {
+    while (true) {
+      const task = saveQueue[0];
+      if (!task) {
+        return;
       }
 
-      const savedAgent = useAgentStore.getState().savedAgent;
-      if (task.patch.tools !== undefined) {
-        await persistToolChanges(
-          task.agentId,
-          task.patch.tools,
-          savedAgent?.tools ?? []
+      useAgentStore.setState({ saveError: null });
+
+      try {
+        const result = await updateAgentInfo(
+          toAgentPayload(task.agentId, task.patch)
         );
-      }
+        if (!result.success) {
+          throw new Error(result.message);
+        }
 
-      const currentState = useAgentStore.getState();
-      if (
-        currentState.agentId !== task.agentId ||
-        currentState.queue[0] !== task
-      ) {
-        return;
-      }
+        const savedAgent = useAgentStore.getState().savedAgent;
+        if (task.patch.tools !== undefined) {
+          await persistToolChanges(
+            task.agentId,
+            task.patch.tools,
+            savedAgent?.tools ?? []
+          );
+        }
 
-      useAgentStore.setState((state) => ({
-        savedAgent: mergeDraft(state.savedAgent, task.patch),
-        queue: state.queue.slice(1),
-        isSaving: false,
-        lastSaveFailed:
-          drainHadFailure || state.queue.length > 1
-            ? state.lastSaveFailed
-            : false,
-      }));
-    } catch (error) {
-      drainHadFailure = true;
-      const currentState = useAgentStore.getState();
-      if (
-        currentState.agentId !== task.agentId ||
-        currentState.queue[0] !== task
-      ) {
-        return;
-      }
+        const currentState = useAgentStore.getState();
+        if (currentState.agentId !== task.agentId || saveQueue[0] !== task) {
+          return;
+        }
 
-      useAgentStore.setState((state) => {
-        const queue = state.queue.slice(1);
-        return {
+        saveQueue = saveQueue.slice(1);
+        useAgentStore.setState((state) => ({
+          savedAgent: mergeDraft(state.savedAgent, task.patch),
+          lastSaveFailed:
+            drainHadFailure || saveQueue.length > 0
+              ? state.lastSaveFailed
+              : false,
+        }));
+      } catch (error) {
+        drainHadFailure = true;
+        const currentState = useAgentStore.getState();
+        if (currentState.agentId !== task.agentId || saveQueue[0] !== task) {
+          return;
+        }
+
+        saveQueue = saveQueue.slice(1);
+        useAgentStore.setState((state) => ({
           editedAgent: mergeDraft(
-            applyQueuedPatches(state.savedAgent, queue),
+            applyQueuedPatches(state.savedAgent, saveQueue),
             pendingDraftPatch
           ),
-          queue,
-          isSaving: false,
           lastSaveFailed: true,
           saveError:
             error instanceof Error
               ? error.message
               : "Failed to save agent changes",
-        };
-      });
+        }));
+      }
+    }
+  } finally {
+    saveQueueProcessing = false;
+    resolveIdleWaiters();
+    if (saveQueue.length > 0) {
+      void processSaveQueue();
     }
   }
 }
@@ -458,9 +463,9 @@ export const useAgentStore = create<AgentStoreState>((set) => {
     }
 
     const task: AgentSaveTask = { agentId, patch: cloneDraft(patch) };
+    saveQueue = [...saveQueue, task];
     set((state) => ({
       editedAgent: mergeDraft(state.editedAgent, task.patch),
-      queue: [...state.queue, task],
       saveError: null,
     }));
     void processSaveQueue();
@@ -474,7 +479,6 @@ export const useAgentStore = create<AgentStoreState>((set) => {
     savedAgent: null,
     serverSnapshotRevision: 0,
     queue: [],
-    isSaving: false,
     isGenerating: false,
     saveError: null,
     lastSaveFailed: false,
@@ -482,6 +486,7 @@ export const useAgentStore = create<AgentStoreState>((set) => {
 
     initialize: (agent) => {
       clearPendingDraftSave();
+      saveQueue = [];
       const agentId = Number(agent.id);
       const draft = toDraft(agent);
       set((state) => ({
@@ -491,8 +496,6 @@ export const useAgentStore = create<AgentStoreState>((set) => {
         editedAgent: cloneDraft(draft),
         savedAgent: cloneDraft(draft),
         serverSnapshotRevision: state.serverSnapshotRevision + 1,
-        queue: [],
-        isSaving: false,
         isGenerating: false,
         saveError: null,
         lastSaveFailed: false,
@@ -501,36 +504,13 @@ export const useAgentStore = create<AgentStoreState>((set) => {
 
     updateDraft: (patch) => {
       const draftPatch = cloneDraft(patch);
-      const savePatch = cloneDraft(draftPatch);
-      if (savePatch.name !== undefined && !isValidAgentName(savePatch.name)) {
-        delete savePatch.name;
-        delete pendingDraftPatch.name;
-      }
-      if (
-        savePatch.display_name !== undefined &&
-        !isValidAgentDisplayName(savePatch.display_name)
-      ) {
-        delete savePatch.display_name;
-        delete pendingDraftPatch.display_name;
-      }
-      if (
-        savePatch.description !== undefined &&
-        !isValidAgentDescription(savePatch.description)
-      ) {
-        delete savePatch.description;
-        delete pendingDraftPatch.description;
-      }
 
       set((state) => ({
         editedAgent: mergeDraft(state.editedAgent, draftPatch),
         saveError: null,
       }));
 
-      if (Object.keys(savePatch).length === 0) {
-        return;
-      }
-
-      pendingDraftPatch = { ...pendingDraftPatch, ...savePatch };
+      pendingDraftPatch = { ...pendingDraftPatch, ...draftPatch };
 
       if (draftSaveTimer) {
         clearTimeout(draftSaveTimer);
@@ -598,25 +578,18 @@ export const useAgentStore = create<AgentStoreState>((set) => {
     waitForIdle: () => {
       useAgentStore.getState().flushDraft();
       return new Promise((resolve) => {
-        if (
-          !useAgentStore.getState().isSaving &&
-          useAgentStore.getState().queue.length === 0
-        ) {
+        if (!saveQueueProcessing && saveQueue.length === 0) {
           resolve(!useAgentStore.getState().lastSaveFailed);
           return;
         }
 
-        const unsubscribe = useAgentStore.subscribe((state) => {
-          if (!state.isSaving && state.queue.length === 0) {
-            unsubscribe();
-            resolve(!state.lastSaveFailed);
-          }
-        });
+        idleWaiters.push(resolve);
       });
     },
     clearSaveError: () => set({ saveError: null }),
     reset: () => {
       clearPendingDraftSave();
+      saveQueue = [];
       set((state) => ({
         agentId: null,
         currentAgentId: null,
@@ -624,8 +597,6 @@ export const useAgentStore = create<AgentStoreState>((set) => {
         editedAgent: null,
         savedAgent: null,
         serverSnapshotRevision: state.serverSnapshotRevision + 1,
-        queue: [],
-        isSaving: false,
         isGenerating: false,
         saveError: null,
         lastSaveFailed: false,

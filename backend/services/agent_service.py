@@ -885,14 +885,6 @@ async def check_agent_name_conflict_batch_impl(
 
     results: list[dict] = []
     for item in request.items:
-        if not item.name:
-            results.append({
-                "name_conflict": False,
-                "display_name_conflict": False,
-                "conflict_agents": []
-            })
-            continue
-
         conflicts: list[dict] = []
         name_conflict = False
         display_name_conflict = False
@@ -2479,7 +2471,6 @@ async def export_agent_by_agent_id(
                                           name=agent_info["name"],
                                           display_name=agent_info["display_name"],
                                           description=agent_info["description"],
-                                          business_description=agent_info["business_description"],
                                           author=agent_info.get("author"),
                                           max_steps=agent_info["max_steps"],
                                           requested_output_tokens=agent_info.get("requested_output_tokens"),
@@ -2636,7 +2627,6 @@ async def import_agent_by_agent_id(
     new_agent = create_agent(agent_info={"name": agent_name,
                                          "display_name": agent_display_name,
                                          "description": import_agent_info.description,
-                                         "business_description": import_agent_info.business_description,
                                          "author": import_agent_info.author,
                                          "model_ids": model_ids,
                                          "business_logic_model_id": (

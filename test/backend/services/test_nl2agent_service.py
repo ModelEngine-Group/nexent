@@ -1008,6 +1008,7 @@ async def test_build_run_info_is_ephemeral(mocker):
             "url": "http://local-mcp:5011/sse",
             "transport": "sse",
             "httpx_client_factory": create_httpx_client,
+            "bypass_proxy": True,
             "headers": {
                 "Authorization": "Bearer tenant-token",
                 NL2AGENT_AGENT_ID_HEADER: "42",

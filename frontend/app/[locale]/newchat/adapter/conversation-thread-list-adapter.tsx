@@ -1378,7 +1378,18 @@ export const conversationThreadListAdapter: RemoteThreadListAdapter = {
   },
 
   async delete(remoteId: string): Promise<void> {
-    await conversationService.delete(Number(remoteId));
+    const candidateId = await waitForServerConversationId(remoteId);
+    const conversationId = Number(candidateId);
+    if (
+      !candidateId ||
+      !Number.isInteger(conversationId) ||
+      conversationId <= 0
+    ) {
+      throw new Error(
+        "Cannot delete a conversation without a backend conversation ID."
+      );
+    }
+    await conversationService.delete(conversationId);
   },
 
   async fetch(threadId: string): Promise<RemoteThreadMetadata> {

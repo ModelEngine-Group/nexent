@@ -19,7 +19,7 @@ export default function AgentRunPolicy() {
         <Col xs={24} sm={12}>
           <Form.Item
             name="max_step"
-            label={t("agent.field.maxStep")}
+            label={t("agent.runPolicy.maxStep")}
             className="mb-3"
           >
             <InputNumber
@@ -28,7 +28,7 @@ export default function AgentRunPolicy() {
               className="w-full"
               value={editedAgent.max_step || 10}
               onChange={(val) => updateAgent({ max_step: val ?? 10 })}
-              addonAfter={t("agent.field.maxStepUnit")}
+              addonAfter={t("agent.runPolicy.maxStepUnit")}
             />
           </Form.Item>
         </Col>
@@ -37,7 +37,7 @@ export default function AgentRunPolicy() {
         <Col xs={24} sm={12}>
           <Form.Item
             name="requested_output_tokens"
-            label={t("agent.field.requestedOutputTokens")}
+            label={t("agent.requestedOutputTokens")}
             className="mb-3"
           >
             <InputNumber
@@ -60,7 +60,7 @@ export default function AgentRunPolicy() {
         {/* Provide Run Summary */}
         <Col xs={24} sm={12}>
           <Form.Item
-            label={t("agent.field.provideRunSummary")}
+            label={t("agent.provideRunSummary")}
             className="mb-3"
           >
             <Flex align="center" gap={8}>
@@ -79,7 +79,7 @@ export default function AgentRunPolicy() {
           </Form.Item>
         </Col>
         <Col xs={24} sm={12}>
-          <Form.Item label={t("agent.field.selfValidate")} className="mb-2">
+          <Form.Item label={t("agent.verification")} className="mb-2">
             <Switch
               checked={editedAgent.verification_config?.enabled ?? false}
               onChange={(checked) =>
@@ -97,7 +97,7 @@ export default function AgentRunPolicy() {
             <Alert
               type="info"
               icon={<Info size={14} />}
-              message={t("agent.field.selfValidateHint")}
+              message={t("agent.runPolicy.selfValidateHint")}
               className="mt-1"
             />
           )}

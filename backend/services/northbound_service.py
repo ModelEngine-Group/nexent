@@ -380,10 +380,16 @@ async def start_streaming_chat(
         # Simple rate limit
         await check_and_consume_rate_limit(ctx.tenant_id)
 
-        # If conversation_id is not provided, create a new conversation
+        agent_info = get_agent_by_name_impl(agent_name=agent_name, tenant_id=ctx.tenant_id)
+        agent_id = agent_info["agent_id"]
+        latest_version_no = agent_info["latest_version_no"]
         if conversation_id is None:
             logging.info("No conversation_id provided, creating a new conversation")
-            new_conversation = create_new_conversation(title="New Conversation", user_id=ctx.user_id)
+            new_conversation = create_new_conversation(
+                title="New Conversation",
+                user_id=ctx.user_id,
+                agent_id=agent_id,
+            )
             conversation_id = new_conversation["conversation_id"]
             logging.info(f"Created new conversation with id: {conversation_id}")
 
@@ -391,9 +397,6 @@ async def start_streaming_chat(
 
         # Get history according to internal_conversation_id
         history_resp = await get_conversation_history_internal(ctx, internal_conversation_id)
-        agent_info = get_agent_by_name_impl(agent_name=agent_name, tenant_id=ctx.tenant_id)
-        agent_id = agent_info["agent_id"]
-        latest_version_no = agent_info["latest_version_no"]
         normalized_attachments = _normalize_northbound_attachments(
             attachments=attachments,
             user_id=ctx.user_id,
