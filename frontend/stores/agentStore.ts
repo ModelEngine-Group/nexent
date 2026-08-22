@@ -21,6 +21,7 @@ export type AgentDraft = Pick<
   | "requested_output_tokens"
   | "is_main_agent"
   | "provide_run_summary"
+  | "allow_chat_metadata"
   | "enable_context_manager"
   | "is_a2a"
   | "verification_config"
@@ -108,6 +109,7 @@ const toDraft = (agent: Agent): AgentDraft => ({
   requested_output_tokens: agent.requested_output_tokens ?? null,
   is_main_agent: agent.is_main_agent ?? true,
   provide_run_summary: agent.provide_run_summary,
+  allow_chat_metadata: agent.allow_chat_metadata ?? false,
   enable_context_manager: agent.enable_context_manager,
   is_a2a: agent.is_a2a,
   verification_config: agent.verification_config,
@@ -253,6 +255,9 @@ const toAgentPayload = (agentId: number, patch: AgentDraftPatch) => ({
     : {}),
   ...(patch.provide_run_summary !== undefined
     ? { provide_run_summary: patch.provide_run_summary }
+    : {}),
+  ...(patch.allow_chat_metadata !== undefined
+    ? { allow_chat_metadata: patch.allow_chat_metadata }
     : {}),
   ...(patch.is_a2a !== undefined ? { is_a2a: patch.is_a2a } : {}),
   ...(patch.enable_context_manager !== undefined

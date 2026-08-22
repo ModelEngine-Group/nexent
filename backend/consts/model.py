@@ -411,11 +411,21 @@ class AgentRequest(BaseModel):
         default=None,
         description="Optional request-scoped context policy override",
     )
+    metadata: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Conversation runtime metadata available to the agent",
+    )
+    expected_metadata_version: Optional[int] = Field(
+        default=None,
+        ge=0,
+        description="Optional optimistic-lock version for runtime metadata updates",
+    )
 
     @field_validator("context_policy")
     @classmethod
     def validate_context_policy(cls, value):
         return _validated_context_policy(value)
+
     enable_plan: Optional[bool] = Field(
         default=False,
         description="Whether to enable the planning phase before execution"
@@ -720,6 +730,7 @@ class AgentInfoRequest(BaseModel):
     is_a2a: Optional[bool] = None
     verification_config: Optional[Dict[str, Any]] = None
     context_policy: Optional[Dict[str, Any]] = None
+    allow_chat_metadata: Optional[bool] = None
 
     greeting_message: Optional[str] = None
     example_questions: Optional[List[str]] = None
@@ -813,6 +824,7 @@ class ExportAndImportAgentInfo(BaseModel):
     requested_output_tokens: Optional[int] = Field(default=None, gt=0)
     is_main_agent: bool = True
     provide_run_summary: bool
+    allow_chat_metadata: bool = False
     verification_config: Optional[Dict[str, Any]] = None
     context_policy: Optional[Dict[str, Any]] = None
     duty_prompt: Optional[str] = None
