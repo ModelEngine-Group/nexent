@@ -1,6 +1,22 @@
 from typing import Any, List, Optional
 
 
+_MULTIMODAL_BLOCK_TYPES = {
+    "image_url", "audio_url", "video_url",
+    "input_audio", "input_image", "input_video",
+}
+
+
+def content_has_multimodal_blocks(content: Any) -> bool:
+    """True when ``content`` is a list carrying a typed media block."""
+    if not isinstance(content, list):
+        return False
+    return any(
+        isinstance(item, dict) and item.get("type") in _MULTIMODAL_BLOCK_TYPES
+        for item in content
+    )
+
+
 def _flatten_content(raw_content: Any) -> str:
     """
     Convert structured content to plain text for providers with stricter schemas.

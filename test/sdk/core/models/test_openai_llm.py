@@ -178,6 +178,45 @@ def test_modelengine_message_flattening(monkeypatch):
     # second message content should contain 'b' (either as list or flattened string)
     assert "b" in str(captured['messages'][1].content)
 
+
+def test_modelengine_multimodal_not_flattened(monkeypatch):
+    """ModelEngine must NOT flatten messages carrying audio/video/image blocks."""
+    ModelClass = OpenAIModel or globals().get("ImportedOpenAIModel")
+    m = ModelClass(model_id="m", api_base="u", api_key="k", model_factory="modelengine")
+
+    captured = {}
+
+    def fake_prepare_completion_kwargs(messages=None, **kwargs):
+        captured['messages'] = messages
+        captured['flatten_messages_as_text'] = kwargs.get('flatten_messages_as_text', False)
+        return {}
+
+    m._prepare_completion_kwargs = fake_prepare_completion_kwargs
+    m.model_id = "m"
+    m.custom_role_conversions = {}
+    m.observer = types.SimpleNamespace(current_mode=None,
+                                      add_model_new_token=lambda token: None,
+                                      add_model_reasoning_content=lambda rc: None,
+                                      flush_remaining_tokens=lambda: None)
+
+    chunk = make_chunk("hi")
+    client_ns = types.SimpleNamespace()
+    client_ns.chat = types.SimpleNamespace()
+    def fake_create(stream=True, **kw):
+        return [chunk]
+    client_ns.chat.completions = types.SimpleNamespace(create=fake_create)
+    m.client = client_ns
+
+    # A multimodal user message carrying an audio_url block must stay structured.
+    messages = [{"role": "user", "content": [
+        {"type": "audio_url", "audio_url": {"url": "data:audio/mpeg;base64,xxx"}},
+        {"type": "text", "text": "describe"},
+    ]}]
+    m.__call__(messages)
+
+    # Must NOT flatten — audio payload would be lost.
+    assert captured['flatten_messages_as_text'] is False
+
 from unittest.mock import AsyncMock, MagicMock, patch, ANY
 import importlib.util
 import sys

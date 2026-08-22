@@ -6,10 +6,30 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "sdk"))
 
 from nexent.core.models.message_utils import (
     _flatten_content,
+    content_has_multimodal_blocks,
     prepare_messages_for_completion,
     prepare_messages_for_smolagents_text_flattening,
 )
 from types import SimpleNamespace
+
+
+def test_content_has_multimodal_blocks_false_for_non_list():
+    assert content_has_multimodal_blocks("plain text") is False
+    assert content_has_multimodal_blocks(None) is False
+
+
+def test_content_has_multimodal_blocks_false_for_text_only_list():
+    assert content_has_multimodal_blocks([{"type": "text", "text": "hi"}]) is False
+    assert content_has_multimodal_blocks(["a", {"text": "b"}]) is False
+
+
+def test_content_has_multimodal_blocks_true_for_media_block():
+    assert content_has_multimodal_blocks(
+        [{"type": "audio_url", "audio_url": {"url": "data:audio/mpeg;base64,xxx"}},
+         {"type": "text", "text": "describe"}]
+    ) is True
+    assert content_has_multimodal_blocks([{"type": "image_url"}]) is True
+    assert content_has_multimodal_blocks([{"type": "video_url"}]) is True
 
 
 def test_flatten_string_returns_same():

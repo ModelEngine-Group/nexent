@@ -119,6 +119,9 @@ class CapacitySuggestionResult:
 # PROVIDER_HINTS in `frontend/const/modelConfig.ts` so backend provider-by-URL
 # detection stays consistent with the icon the user sees in the UI.
 HOST_PROVIDER_PATTERNS = (
+    # Private deployments are IP-only (no DNS); the /open/router path is the
+    # reliable ModelEngine marker.
+    ("open/router", "modelengine"),
     ("dashscope", "dashscope"),
     ("aliyuncs", "dashscope"),
     ("siliconflow", "silicon"),

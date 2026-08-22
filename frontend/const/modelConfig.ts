@@ -42,6 +42,7 @@ export const ICON_TYPES = {
 
 // Provider detection and icon mapping
 export const MODEL_PROVIDER_KEYS = [
+  "modelengine",
   "qwen",
   "openai",
   "siliconflow",
@@ -57,6 +58,7 @@ export type ModelProviderKey = (typeof MODEL_PROVIDER_KEYS)[number];
 
 // Direct provider hint string mapping (no arrays)
 export const PROVIDER_HINTS: Record<ModelProviderKey, string> = {
+  modelengine: "open/router",
   qwen: "qwen",
   openai: "openai",
   siliconflow: "siliconflow",
@@ -70,6 +72,7 @@ export const PROVIDER_HINTS: Record<ModelProviderKey, string> = {
 
 // Icon filenames for providers
 export const PROVIDER_ICON_MAP: Record<ModelProviderKey, string> = {
+  modelengine: publicAsset("/modelengine-logo.png"),
   qwen: publicAsset("/qwen.png"),
   openai: publicAsset("/openai.png"),
   siliconflow: publicAsset("/siliconflow.png"),

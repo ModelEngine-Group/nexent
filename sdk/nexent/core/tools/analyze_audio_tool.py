@@ -110,7 +110,7 @@ class AnalyzeAudioTool(Tool):
 
 
     def _validate_audio_capable_model(self) -> None:
-        """Fail early if the VLM cannot accept audio input.
+        """Fail early if the VLM cannot accept audio input (e.g. SiliconFlow non-omni).
 
 Asks the adapter through the uniform :meth:`get_model_info` interface instead
 of reaching into the wrapped model internals.
