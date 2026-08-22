@@ -86,6 +86,27 @@ class UserDeleteRequest(BaseModel):
     new_owner_id: Optional[str] = None
 
 
+class ApiUserBatchCreateRequest(BaseModel):
+    """Request model for creating API-only users in one transaction."""
+
+    role: Literal["DEV", "USER"] = "USER"
+    group_id: Optional[int] = Field(None, ge=1)
+    count: int = Field(1, ge=1, le=100)
+
+
+class ApiKeyTargetRequest(BaseModel):
+    """Identify a tenant user by exactly one supported field."""
+
+    user_id: Optional[str] = Field(None, min_length=1, max_length=100)
+    email: Optional[EmailStr] = None
+
+    @model_validator(mode="after")
+    def validate_single_target(self):
+        if bool(self.user_id) == bool(self.email):
+            raise ValueError("Exactly one of user_id or email must be provided")
+        return self
+
+
 class OAuthProviderDefinition(BaseModel):
     name: str
     display_name: str
