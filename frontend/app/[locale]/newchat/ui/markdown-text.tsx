@@ -10,7 +10,7 @@ import {
   useIsMarkdownCodeBlock,
 } from "@assistant-ui/react-markdown";
 import { useAuiState } from "@assistant-ui/react";
-import { type FC, memo, useState } from "react";
+import { type FC, memo, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CheckIcon, CopyIcon } from "lucide-react";
 import remarkGfm from "remark-gfm";
@@ -107,6 +107,25 @@ function getCiteIndex(citekey: string): number | undefined {
   return Number.isNaN(citeIndex) ? undefined : citeIndex;
 }
 
+function buildCitationDisplayIndexMap(
+  content: readonly MessageSourcePart[]
+): Map<string, number> {
+  const displayIndexMap = new Map<string, number>();
+
+  for (const part of content) {
+    if (part.type !== "text" || typeof part.text !== "string") continue;
+
+    for (const match of part.text.matchAll(/\[\[([^\]]+)\]\]/g)) {
+      const citekey = match[1];
+      if (!displayIndexMap.has(citekey)) {
+        displayIndexMap.set(citekey, displayIndexMap.size + 1);
+      }
+    }
+  }
+
+  return displayIndexMap;
+}
+
 function toPanelSource(source: SearchSource): PanelSourceItem {
   return {
     sourceType:
@@ -142,7 +161,9 @@ const CiteComponent: FC<
   const citeIndex = getCiteIndex(citekey);
   const messageSources = resolveCiteSources(messageId, content);
   const source = messageSources.find((item) => item.citeIndex === citeIndex);
-  const resolvedCiteIndex = source?.citeIndex ?? citeIndex ?? 0;
+  const sourceIndex = source?.citeIndex ?? citeIndex ?? 0;
+  const citationDisplayIndexMap = buildCitationDisplayIndexMap(content);
+  const displayIndex = citationDisplayIndexMap.get(citekey) ?? sourceIndex;
   const panelItems = messageSources.map(toPanelSource);
   const sources = panelItems.filter((item) => !item.isImage);
   const images = panelItems.filter((item) => item.isImage);
@@ -150,9 +171,10 @@ const CiteComponent: FC<
   return (
     <CiteMarker
       citekey={citekey}
-      citeIndex={resolvedCiteIndex}
+      displayIndex={displayIndex}
+      sourceIndex={sourceIndex}
       url={source?.url}
-      title={source?.title ?? `Source ${resolvedCiteIndex}`}
+      title={source?.title ?? `Source ${sourceIndex}`}
       text={source?.text}
       loading={!source}
       onClick={
@@ -174,6 +196,10 @@ const CiteComponent: FC<
 // Wrapper component that safely renders MarkdownTextPrimitive
 // Guards against rendering for non-text parts or when text is not a valid string
 const MarkdownTextImpl = () => {
+  const messageId = useAuiState((s) => s.message.id as string | undefined);
+  const content = useAuiState(
+    (s) => s.message.content as readonly MessageSourcePart[]
+  );
   // Check if we have a valid text part context using useAuiState
   const isValidTextPart = useAuiState((s) => {
     const part = s.part;
@@ -184,23 +210,42 @@ const MarkdownTextImpl = () => {
       part.text.length > 0
     );
   });
+  const citationDisplayIndexMap = useMemo(
+    () => buildCitationDisplayIndexMap(content),
+    [content]
+  );
+  const citationIndexMapAttribute = useMemo(
+    () => JSON.stringify(Object.fromEntries(citationDisplayIndexMap)),
+    [citationDisplayIndexMap]
+  );
+
+  useEffect(() => {
+    if (citationDisplayIndexMap.size === 0) return;
+
+    console.info("[Nexent] Citation display index mapping", {
+      messageId,
+      citationIndexMap: Object.fromEntries(citationDisplayIndexMap),
+    });
+  }, [citationDisplayIndexMap, messageId]);
 
   if (!isValidTextPart) {
     return null;
   }
 
   return (
-    <MarkdownTextPrimitive
-      remarkPlugins={[remarkGfm, remarkCite]}
-      urlTransform={markdownUrlTransform}
-      className="aui-md"
-      components={defaultComponents}
-      componentsByLanguage={{
-        mermaid: {
-          SyntaxHighlighter: MermaidDiagram,
-        },
-      }}
-    />
+    <div data-citation-index-map={citationIndexMapAttribute}>
+      <MarkdownTextPrimitive
+        remarkPlugins={[remarkGfm, remarkCite]}
+        urlTransform={markdownUrlTransform}
+        className="aui-md"
+        components={defaultComponents}
+        componentsByLanguage={{
+          mermaid: {
+            SyntaxHighlighter: MermaidDiagram,
+          },
+        }}
+      />
+    </div>
   );
 };
 
