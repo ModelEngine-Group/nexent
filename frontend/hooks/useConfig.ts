@@ -97,6 +97,14 @@ const defaultConfig: GlobalConfig = {
         modelUrl: "",
       },
     },
+    vlm4: {
+      modelName: "",
+      displayName: "",
+      apiConfig: {
+        apiKey: "",
+        modelUrl: "",
+      },
+    },
     stt: {
       id: 0,
       modelName: "",
@@ -191,6 +199,7 @@ function transformBackendToFrontend(backendConfig: any): GlobalConfig {
         vlm: transformModelEntry(backendConfig.models.vlm),
         vlm2: transformModelEntry(backendConfig.models.vlm2),
         vlm3: transformModelEntry(backendConfig.models.vlm3),
+        vlm4: transformModelEntry(backendConfig.models.vlm4),
         stt: transformVoiceModelEntry(backendConfig.models.stt),
         tts: transformVoiceModelEntry(backendConfig.models.tts),
       }

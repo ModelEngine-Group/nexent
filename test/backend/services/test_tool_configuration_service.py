@@ -3397,7 +3397,8 @@ class TestValidateLocalToolAnalyzeAudioVideo:
         )
 
         assert result == f"{tool_name} result"
-        mock_get_video_model.assert_called_once_with("tenant1", None, slot="vlm3")
+        expected_slot = "vlm4" if tool_name == "analyze_audio" else "vlm3"
+        mock_get_video_model.assert_called_once_with("tenant1", None, slot=expected_slot)
         call_kwargs = mock_tool_class.call_args.kwargs
         assert call_kwargs["vlm_model"] == "mock_video_model"
         assert "storage_client" in call_kwargs

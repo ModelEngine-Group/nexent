@@ -127,6 +127,7 @@ export const ModelDeleteDialog = ({
       case MODEL_TYPES.VLM:
       case MODEL_TYPES.VLM2:
       case MODEL_TYPES.VLM3:
+      case MODEL_TYPES.VLM4:
         return {
           bg: "bg-yellow-50",
           text: "text-yellow-600",
@@ -171,6 +172,7 @@ export const ModelDeleteDialog = ({
       case MODEL_TYPES.VLM:
       case MODEL_TYPES.VLM2:
       case MODEL_TYPES.VLM3:
+      case MODEL_TYPES.VLM4:
         return "👁️";
       default:
         return "⚙️";
@@ -199,6 +201,8 @@ export const ModelDeleteDialog = ({
         return t("model.type.imageGeneration");
       case MODEL_TYPES.VLM3:
         return t("model.type.videoUnderstanding");
+      case MODEL_TYPES.VLM4:
+        return t("model.type.audioUnderstanding");
       default:
         return t("model.type.unknown");
     }
@@ -1337,6 +1341,7 @@ export const ModelDeleteDialog = ({
                 MODEL_TYPES.VLM,
                 MODEL_TYPES.VLM2,
                 MODEL_TYPES.VLM3,
+                MODEL_TYPES.VLM4,
                 MODEL_TYPES.STT,
                 MODEL_TYPES.TTS,
               ] as ModelType[]

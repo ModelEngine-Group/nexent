@@ -1025,15 +1025,16 @@ def _validate_local_tool(
                 raise ToolExecutionException(
                     f"Tenant ID and User ID are required for {tool_name} validation")
             selected_model_id = instantiation_params.get("selected_model_id")
-            video_understanding_model = get_vlm_adapter(tenant_id, selected_model_id, slot="vlm3")
+            slot = "vlm4" if tool_name == "analyze_audio" else "vlm3"
+            understanding_model = get_vlm_adapter(tenant_id, selected_model_id, slot=slot)
             model_display_name = getattr(
-                video_understanding_model, 'display_name', None)
+                understanding_model, 'display_name', None)
             set_monitoring_context(tenant_id=tenant_id)
             set_monitoring_operation(
                 "tool_validation", display_name=model_display_name)
             params = {
                 **instantiation_params,
-                'vlm_model': video_understanding_model,
+                'vlm_model': understanding_model,
                 'storage_client': minio_client,
                 'validate_url_access': lambda urls: validate_urls_access(urls, user_id)
             }

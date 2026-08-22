@@ -17,7 +17,7 @@ DASHSCOPE_MODEL_FACTORY = "dashscope"
 TOKENPONY_MODEL_FACTORY = "tokenpony"
 SILICONFLOW_MODEL_FACTORY = "silicon"
 PROVIDER_CATALOG_HEALTHCHECK_FACTORIES = {DASHSCOPE_MODEL_FACTORY, TOKENPONY_MODEL_FACTORY}
-PROVIDER_CATALOG_HEALTHCHECK_TYPES = {"vlm", "vlm2", "vlm3"}
+PROVIDER_CATALOG_HEALTHCHECK_TYPES = {"vlm", "vlm2", "vlm3", "vlm4"}
 
 EMBEDDING_TYPES = {"embedding", "multi_embedding"}
 
@@ -194,7 +194,7 @@ async def _perform_connectivity_check(
              "ssl_verify": ssl_verify},
             "rerank", "rerank", None, model_name=model_name,
         ).health_check()
-    elif model_type in ("vlm", "vlm2", "vlm3"):
+    elif model_type in ("vlm", "vlm2", "vlm3", "vlm4"):
         if (
             model_type in PROVIDER_CATALOG_HEALTHCHECK_TYPES
             and (model_factory or "").lower() in PROVIDER_CATALOG_HEALTHCHECK_FACTORIES

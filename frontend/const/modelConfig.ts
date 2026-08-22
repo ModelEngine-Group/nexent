@@ -11,6 +11,7 @@ export const MODEL_TYPES = {
   VLM: "vlm",
   VLM2: "vlm2",
   VLM3: "vlm3",
+  VLM4: "vlm4",
 } as const;
 
 // Model source constants

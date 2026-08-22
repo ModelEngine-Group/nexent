@@ -92,7 +92,7 @@ const TOOLS_SUPPORTING_RERANK = [
 const ANALYZE_TOOL_MODEL_TYPES: Record<string, ModelType> = {
   analyze_text_file: MODEL_TYPES.LLM,
   analyze_image: MODEL_TYPES.VLM,
-  analyze_audio: MODEL_TYPES.VLM3,
+  analyze_audio: MODEL_TYPES.VLM4,
   analyze_video: MODEL_TYPES.VLM3,
 };
 

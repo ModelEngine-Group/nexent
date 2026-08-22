@@ -77,7 +77,7 @@ def test_analyze_audio_accepts_legacy_url_list(observer_en, mock_vlm_model, mock
     assert result == "audio result"
 
 
-def test_analyze_audio_rejects_siliconflow_non_omni_model(observer_en, mock_storage_client):
+def test_analyze_audio_rejects_non_audio_capable_model(observer_en, mock_storage_client):
     vlm_model = MagicMock()
     vlm_model.get_model_info.return_value = SimpleNamespace(
         capabilities={"audio": False})
@@ -90,7 +90,25 @@ def test_analyze_audio_rejects_siliconflow_non_omni_model(observer_en, mock_stor
     with pytest.raises(ValueError) as exc_info:
         tool._forward_impl(audio_url=b"ID3audio-bytes", query="what happened?")
 
-    assert "Please choose a Qwen3-Omni model" in str(exc_info.value)
+    assert "does not support audio input" in str(exc_info.value)
+    assert "audio-capable model for analyze_audio" in str(exc_info.value)
+
+
+def test_analyze_video_rejects_non_video_capable_model(observer_en, mock_storage_client):
+    vlm_model = MagicMock()
+    vlm_model.get_model_info.return_value = SimpleNamespace(
+        capabilities={"video": False})
+    tool = AnalyzeVideoTool(
+        observer=observer_en,
+        vlm_model=vlm_model,
+        storage_client=mock_storage_client,
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        tool._forward_impl(video_url=b"\x00\x00\x00\x18ftypmp42video-bytes", query="what happened?")
+
+    assert "does not support video input" in str(exc_info.value)
+    assert "video-capable model for analyze_video" in str(exc_info.value)
 
 
 def test_analyze_video_uses_video_understanding_model(observer_en, mock_vlm_model, mock_storage_client, monkeypatch):

@@ -1198,7 +1198,8 @@ class TestCreateToolConfigList:
 
             assert len(result) == 1
             assert result[0] is mock_tool_instance
-            mock_get_video_model.assert_called_once_with("tenant_1", None, slot="vlm3")
+            expected_slot = "vlm4" if tool_name == "analyze_audio" else "vlm3"
+            mock_get_video_model.assert_called_once_with("tenant_1", None, slot=expected_slot)
             assert mock_tool_instance.metadata["vlm_model"] == "mock_video_model"
             assert "storage_client" in mock_tool_instance.metadata
             assert callable(mock_tool_instance.metadata["validate_url_access"])

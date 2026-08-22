@@ -110,7 +110,7 @@ class AnalyzeAudioTool(Tool):
 
 
     def _validate_audio_capable_model(self) -> None:
-        """Fail early if the VLM cannot accept audio input (e.g. SiliconFlow non-omni).
+        """Fail early if the VLM cannot accept audio input.
 
 Asks the adapter through the uniform :meth:`get_model_info` interface instead
 of reaching into the wrapped model internals.
@@ -121,8 +121,8 @@ Raises:
         info = self.vlm_model.get_model_info()
         if not info.capabilities.get("audio", True):
             raise ValueError(
-                "The selected video understanding model does not support audio input on SiliconFlow. "
-                "Please choose a Qwen3-Omni model for analyze_audio."
+                "The selected audio understanding model does not support audio input. "
+                "Please choose an audio-capable model for analyze_audio."
             )
 
     def _forward_impl(

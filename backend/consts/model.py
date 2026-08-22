@@ -204,7 +204,7 @@ class CapacityCoverageBareModel(BaseModel):
     model_id: int
     model_name: str
     model_factory: Optional[str] = None
-    model_type: Literal["llm", "vlm", "vlm2", "vlm3"]
+    model_type: Literal["llm", "vlm", "vlm2", "vlm3", "vlm4"]
     max_tokens: Optional[int] = None
     suggestion_available: bool = False
 
@@ -278,6 +278,7 @@ class ModelConfig(BaseModel):
     vlm: SingleModelConfig
     vlm2: SingleModelConfig = Field(default_factory=_empty_model_config)
     vlm3: SingleModelConfig = Field(default_factory=_empty_model_config)
+    vlm4: SingleModelConfig = Field(default_factory=_empty_model_config)
     stt: STTModelConfig
     tts: TTSModelConfig
 
