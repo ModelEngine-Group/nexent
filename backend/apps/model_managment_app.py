@@ -32,6 +32,7 @@ from consts.model import (
     ManageProviderModelCreateRequest,
 )
 from consts.const import CAPACITY_SUGGESTION_ENABLED
+from consts.exceptions import ModelCapacityConfigError
 
 from fastapi import APIRouter, Header, Query, HTTPException
 from fastapi.responses import JSONResponse
@@ -149,6 +150,9 @@ async def create_model(request: ModelRequest, authorization: Optional[str] = Hea
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "message": "Model created successfully"
         })
+    except ModelCapacityConfigError as e:
+        logging.warning("Invalid model capacity configuration: %s", e.reason_code)
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
     except ValueError as e:
         logging.error(f"Failed to create model: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.CONFLICT,
@@ -267,6 +271,9 @@ async def batch_create_models(request: BatchCreateModelsRequest, authorization: 
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "message": "Batch create models successfully"
         })
+    except ModelCapacityConfigError as e:
+        logging.warning("Invalid model capacity configuration: %s", e.reason_code)
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
     except Exception as e:
         logging.error(f"Failed to batch create models: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
@@ -332,6 +339,9 @@ async def update_single_model(
         logging.error(f"Failed to update model: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND,
                             detail=str(e))
+    except ModelCapacityConfigError as e:
+        logging.warning("Invalid model capacity configuration: %s", e.reason_code)
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
     except ValueError as e:
         logging.error(f"Failed to update model: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.CONFLICT,
@@ -356,6 +366,9 @@ async def batch_update_models(request: List[dict], authorization: Optional[str] 
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "message": "Batch update models successfully"
         })
+    except ModelCapacityConfigError as e:
+        logging.warning("Invalid model capacity configuration: %s", e.reason_code)
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
     except Exception as e:
         logging.error(f"Failed to batch update models: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
@@ -573,6 +586,9 @@ async def manage_create_model(
             "message": "Model created successfully",
             "data": {"tenant_id": request.tenant_id}
         })
+    except ModelCapacityConfigError as e:
+        logging.warning("Invalid model capacity configuration: %s", e.reason_code)
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
     except ValueError as e:
         logging.error(f"Failed to create model for tenant: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.CONFLICT, detail=str(e))
@@ -622,6 +638,9 @@ async def manage_update_model(
     except LookupError as e:
         logging.error(f"Failed to update model for tenant: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(e))
+    except ModelCapacityConfigError as e:
+        logging.warning("Invalid model capacity configuration: %s", e.reason_code)
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
     except ValueError as e:
         logging.error(f"Failed to update model for tenant: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.CONFLICT, detail=str(e))
@@ -716,6 +735,9 @@ async def manage_batch_create_models(
                 "models_count": len(request.models)
             }
         })
+    except ModelCapacityConfigError as e:
+        logging.warning("Invalid model capacity configuration: %s", e.reason_code)
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
     except Exception as e:
         logging.error(f"Failed to batch create models for tenant: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))

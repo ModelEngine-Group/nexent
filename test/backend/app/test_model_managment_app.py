@@ -352,6 +352,39 @@ async def test_create_model_skips_accept_recorder_without_match_kind(client, aut
 
 
 @pytest.mark.asyncio
+async def test_ac_004_create_model_maps_capacity_error_to_bad_request(
+    client, auth_header, user_credentials, sample_model_data, mocker
+):
+    from consts.exceptions import ModelCapacityConfigError
+
+    mocker.patch(
+        "backend.apps.model_managment_app.get_current_user_id",
+        return_value=user_credentials,
+    )
+
+    async def _reject(*args, **kwargs):
+        raise ModelCapacityConfigError(
+            "capacity_config_invalid.max_output_not_below_context",
+            "max output must be lower than context",
+        )
+
+    mocker.patch(
+        "backend.apps.model_managment_app.create_model_for_tenant",
+        side_effect=_reject,
+    )
+
+    response = client.post(
+        "/model/create", json=sample_model_data, headers=auth_header
+    )
+
+    assert response.status_code == HTTPStatus.BAD_REQUEST
+    assert (
+        "capacity_config_invalid.max_output_not_below_context"
+        in response.json()["detail"]
+    )
+
+
+@pytest.mark.asyncio
 async def test_create_model_conflict(client, auth_header, user_credentials, sample_model_data, mocker):
     """Test model creation with name conflict."""
     mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)

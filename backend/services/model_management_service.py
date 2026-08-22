@@ -22,10 +22,16 @@ from database.model_management_db import (
     create_model_record,
     delete_model_record,
     get_model_by_name_factory,
+    get_model_by_model_id,
     get_models_by_display_name,
     get_model_records,
     get_models_by_tenant_factory_type,
     update_model_record
+)
+from consts.exceptions import ModelCapacityConfigError
+from services.model_capacity_validation_service import (
+    audit_capacity_records,
+    validate_capacity_contract,
 )
 from services.model_provider_service import (
     prepare_model_dict,
@@ -44,6 +50,17 @@ logger = logging.getLogger("model_management_service")
 
 INDEPENDENT_MULTIMODAL_MODEL_TYPES = {"vlm", "vlm2", "vlm3"}
 CAPACITY_COVERAGE_MODEL_TYPES = {"llm", "vlm", "vlm2", "vlm3"}
+
+
+def get_capacity_audit(tenant_id: str) -> Dict[str, Any]:
+    """Return a sanitized, read-only capacity audit for one tenant."""
+    records = get_model_records(None, tenant_id)
+    scoped = [
+        record
+        for record in records
+        if record.get("model_type") in CAPACITY_COVERAGE_MODEL_TYPES
+    ]
+    return audit_capacity_records(scoped)
 
 
 # OpenTelemetry counter for silent catalog-matcher failures during the
@@ -309,6 +326,7 @@ async def create_model_for_tenant(user_id: str, tenant_id: str, model_data: Dict
             )
 
         _coerce_legacy_max_tokens_alias(model_data)
+        validate_capacity_contract(model_data)
 
         # Use NOT_DETECTED status as default
         model_data["connect_status"] = model_data.get(
@@ -372,6 +390,8 @@ async def create_model_for_tenant(user_id: str, tenant_id: str, model_data: Dict
             create_model_record(model_data, user_id, tenant_id)
             logging.debug(
                 f"Model {model_data['display_name']} created successfully")
+    except ModelCapacityConfigError:
+        raise
     except Exception as e:
         logging.error(f"Failed to create model: {str(e)}")
         raise Exception(f"Failed to create model: {str(e)}")
@@ -432,6 +452,20 @@ async def batch_create_models_for_tenant(user_id: str, tenant_id: str, batch_pay
             ): model
             for model in existing_model_list
         }
+
+        # Validate the full incoming synchronization set before the first
+        # delete or write, so an invalid row cannot leave a partially-mutated
+        # provider catalog.
+        for model in model_list:
+            candidate = dict(model)
+            candidate["model_type"] = model_type
+            candidate_repo, candidate_name_only = split_repo_name(
+                candidate.get("id", "")
+            )
+            existing = existing_model_map.get(
+                add_repo_to_name(candidate_repo, candidate_name_only)
+            )
+            validate_capacity_contract(candidate, existing=existing)
 
         # Delete existing models not present.
         # The membership key MUST match how existing_model_map (a few lines
@@ -506,8 +540,11 @@ async def batch_create_models_for_tenant(user_id: str, tenant_id: str, batch_pay
                 model_url=model_url,
                 model_api_key=model_api_key,
             )
+            validate_capacity_contract(model_dict)
             create_model_record(model_dict, user_id, tenant_id)
             logging.debug(f"Model {model['id']} created successfully")
+    except ModelCapacityConfigError:
+        raise
     except Exception as e:
         logging.error(f"Failed to batch create models: {str(e)}")
         raise Exception(f"Failed to batch create models: {str(e)}")
@@ -590,6 +627,8 @@ async def update_single_model_for_tenant(
                 existing_model_type not in ("embedding", "multi_embedding"):
             model_data["max_tokens"] = model_data["max_output_tokens"]
 
+        validate_capacity_contract(model_data, existing=existing_models[0])
+
         if has_multi_embedding:
             # Update both embedding and multi_embedding records
             for model in existing_models:
@@ -626,6 +665,13 @@ async def batch_update_models_for_tenant(user_id: str, tenant_id: str, model_lis
 
             # Check if model_id is a numeric string (primary key)
             if model_id_or_name and model_id_or_name.isdigit():
+                current_model = get_model_by_model_id(
+                    int(model_id_or_name), tenant_id=tenant_id
+                )
+                if current_model is None:
+                    logging.warning("Model not found: model_id=%s", model_id_or_name)
+                    continue
+                validate_capacity_contract(model, existing=current_model)
                 update_model_record(int(model_id_or_name), update_data, user_id, tenant_id)
             else:
                 # Parse "model_repo/model_name" format from frontend's model_id field
@@ -643,9 +689,13 @@ async def batch_update_models_for_tenant(user_id: str, tenant_id: str, model_lis
                     logging.warning(f"Model not found: model_name={model_name}, model_repo={model_repo}, tenant_id={tenant_id}")
                     continue
 
+                validate_capacity_contract(model, existing=model_record)
+
                 update_model_record(model_record["model_id"], update_data, user_id, tenant_id)
 
         logging.info("[DEBUG] Batch update models successfully")
+    except ModelCapacityConfigError:
+        raise
     except Exception as e:
         logging.error(f"Failed to batch update models: {str(e)}")
         raise Exception(f"Failed to batch update models: {str(e)}")

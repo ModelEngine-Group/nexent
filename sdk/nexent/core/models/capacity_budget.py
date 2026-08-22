@@ -10,13 +10,13 @@ from pydantic import BaseModel, ConfigDict, Field
 from .capacity_resolver import ModelCapacitySnapshot
 
 
-W2_RESOLVER_VERSION = "1.0.0"
+W2_RESOLVER_VERSION = "1.1.0"
 W2_FINGERPRINT_SCHEMA_VERSION = 1
 
 
 OutputReserveSource = Literal["model_default", "agent", "request"]
 UncertaintyReserveBasis = Literal[
-    "context_window_10pct", "approved_profile", "none"
+    "provider_input_limit_10pct", "approved_profile", "none"
 ]
 SoftLimitRatioSource = Literal["code_default", "tenant_config"]
 BudgetFieldSource = Literal[
@@ -267,7 +267,11 @@ class SafeInputBudgetCalculator:
         )
 
         uncertainty_reserve_tokens, uncertainty_reserve_basis, warnings = (
-            self._uncertainty_reserve(capacity_snapshot, reserve_policy)
+            self._uncertainty_reserve(
+                capacity_snapshot,
+                reserve_policy,
+                provider_input_limit=provider_input_limit,
+            )
         )
 
         if uncertainty_reserve_tokens > provider_input_limit:
@@ -360,6 +364,8 @@ class SafeInputBudgetCalculator:
         self,
         capacity_snapshot: ModelCapacitySnapshot,
         reserve_policy: CapacityReservePolicy,
+        *,
+        provider_input_limit: int,
     ) -> tuple[int, UncertaintyReserveBasis, list[str]]:
         unknown_required_behavior = self._UNKNOWN_CAPABILITIES_REQUIRING_RESERVE.intersection(
             capacity_snapshot.unknown_capabilities
@@ -375,11 +381,9 @@ class SafeInputBudgetCalculator:
         if not unknown_required_behavior:
             return 0, "none", []
 
-        if capacity_snapshot.context_window_tokens is None:
-            raise UncertaintyReserveBasisUnknown(
-                "context_window_tokens is required for the unified 10 percent "
-                "uncertainty reserve"
-            )
-
-        reserve = math.ceil(capacity_snapshot.context_window_tokens * 0.10)
-        return reserve, "context_window_10pct", ["uncertainty_reserve_active"]
+        reserve = math.ceil(provider_input_limit * 0.10)
+        return (
+            reserve,
+            "provider_input_limit_10pct",
+            ["uncertainty_reserve_active"],
+        )

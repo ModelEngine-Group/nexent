@@ -45,6 +45,13 @@ class ToolExecutionException(Exception):
     pass
 
 
+class MockModelCapacityConfigError(ValidationError):
+    def __init__(self, reason_code, message, *, field=None):
+        self.reason_code = reason_code
+        self.field = field
+        super().__init__(f"{reason_code}: {message}")
+
+
 consts_model_module = types.ModuleType("consts.model")
 consts_model_module.HistoryItem = HistoryItem
 
@@ -71,6 +78,7 @@ sys.modules["consts.capability_profiles"].CATALOG = {}
 # Mock consts.exceptions module with ValidationError
 consts_exceptions_module = types.ModuleType("consts.exceptions")
 consts_exceptions_module.ValidationError = ValidationError
+consts_exceptions_module.ModelCapacityConfigError = MockModelCapacityConfigError
 consts_exceptions_module.MCPConnectionError = MCPConnectionError
 consts_exceptions_module.NotFoundException = NotFoundException
 consts_exceptions_module.ToolExecutionException = ToolExecutionException
@@ -383,7 +391,11 @@ class MockSafeInputBudgetCalculator:
         )
 
 
-class MockUncertaintyReserveBasisUnknown(Exception):
+class MockBudgetResolverError(Exception):
+    """Mock W2 base exception."""
+
+
+class MockUncertaintyReserveBasisUnknown(MockBudgetResolverError):
     """Mock W2 exception raised when context_window_tokens is missing."""
 
 
@@ -396,6 +408,7 @@ sys.modules['nexent.core.models.capacity_resolver'] = _create_stub_module(
 )
 sys.modules['nexent.core.models.capacity_budget'] = _create_stub_module(
     "nexent.core.models.capacity_budget",
+    BudgetResolverError=MockBudgetResolverError,
     RequestBudgetOverrides=MockRequestBudgetOverrides,
     SafeInputBudgetCalculator=MockSafeInputBudgetCalculator,
     UncertaintyReserveBasisUnknown=MockUncertaintyReserveBasisUnknown,
@@ -5139,6 +5152,43 @@ class TestAdditionalAgentInfoCoverage:
             )
 
         assert result is None
+
+    @pytest.mark.parametrize(
+        ("exception_name", "reason"),
+        [
+            ("InvalidReservePolicy", "invalid_reserve_policy"),
+            ("RequestedOutputExceedsCapacity", "requested_output_exceeds_model"),
+            ("ReserveExceedsCapacity", "reserve_exceeds_capacity"),
+            ("NoSafeInputCapacity", "no_safe_input_capacity"),
+            ("SafeInputBudgetFingerprintMismatch", "budget_fingerprint_mismatch"),
+            ("CallerMaxTokensOverrideForbidden", "caller_output_override_forbidden"),
+            ("SafeInputBudgetCapacityMismatch", "capacity_snapshot_mismatch"),
+            ("FutureBudgetError", "budget_resolution_failed"),
+        ],
+    )
+    def test_ac_007_resolve_safe_input_budget_maps_budget_error(
+        self, exception_name, reason
+    ):
+        capacity = MockModelCapacitySnapshot(model_name="invalid-model")
+        calculator = MagicMock()
+        exception_type = type(exception_name, (MockBudgetResolverError,), {})
+        calculator.calculate_safe_input_budget.side_effect = exception_type("internal details")
+        with patch(
+            "backend.agents.create_agent_info.SafeInputBudgetCalculator",
+            return_value=calculator,
+        ):
+            with pytest.raises(
+                create_agent_info_module.ModelCapacityConfigError,
+                match=f"capacity_config_invalid.{reason}",
+            ) as exc_info:
+                _resolve_safe_input_budget(
+                    capacity_snapshot=capacity,
+                    tenant_id="tenant-1",
+                    agent_requested_output_tokens=None,
+                    request_requested_output_tokens=None,
+                )
+
+        assert "internal details" not in str(exc_info.value)
 
     def test_inject_plan_tools_adds_tools_once(self):
         tools = []

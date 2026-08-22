@@ -215,6 +215,15 @@ class ValidationError(Exception):
     pass
 
 
+class ModelCapacityConfigError(ValidationError, ValueError):
+    """Raised when a model capacity contract is internally inconsistent."""
+
+    def __init__(self, reason_code: str, message: str, *, field: str = None):
+        self.reason_code = reason_code
+        self.field = field
+        super().__init__(f"{reason_code}: {message}")
+
+
 class TenantResourceLimitError(ValidationError, ValueError):
     """Raised when a platform or tenant hard resource limit is reached."""
 

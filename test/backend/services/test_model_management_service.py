@@ -2328,3 +2328,95 @@ async def test_cmt_embedding_fallback_reinfers_model_factory():
         second_call_url = mock_infer.call_args_list[1][0][1]
         assert second_call_url == "https://dashscope.aliyuncs.com/v1/embeddings"
 
+
+@pytest.mark.asyncio
+async def test_ac_004_create_rejects_invalid_capacity_before_persistence():
+    svc = import_svc()
+    payload = {
+        "model_name": "bad-llm",
+        "display_name": "Bad LLM",
+        "base_url": "https://example.test/v1",
+        "model_type": "llm",
+        "api_key": "secret",
+        "context_window_tokens": 4096,
+        "max_output_tokens": 4096,
+    }
+
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=[]), \
+            mock.patch.object(svc, "create_model_record") as create_record:
+        with pytest.raises(Exception, match="max_output_not_below_context"):
+            await svc.create_model_for_tenant("u1", "t1", payload)
+
+    create_record.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_ac_004_partial_update_rejects_invalid_merged_capacity():
+    svc = import_svc()
+    existing = {
+        "model_id": 7,
+        "model_name": "llm",
+        "display_name": "LLM",
+        "model_type": "llm",
+        "context_window_tokens": 8192,
+        "max_output_tokens": 2048,
+    }
+
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=[existing]), \
+            mock.patch.object(svc, "update_model_record") as update_record:
+        with pytest.raises(Exception, match="max_output_not_below_context"):
+            await svc.update_single_model_for_tenant(
+                "u1", "t1", "LLM", {"max_output_tokens": 8192}
+            )
+
+    update_record.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_ac_004_batch_rejects_all_rows_before_delete_or_write():
+    svc = import_svc()
+    payload = {
+        "provider": "dashscope",
+        "type": "llm",
+        "api_key": "secret",
+        "models": [
+            {
+                "id": "bad-llm",
+                "context_window_tokens": 8192,
+                "max_output_tokens": 8192,
+                "capacity_source": "operator",
+            }
+        ],
+    }
+
+    with mock.patch.object(svc, "get_models_by_tenant_factory_type", return_value=[]), \
+            mock.patch.object(svc, "delete_model_record") as delete_record, \
+            mock.patch.object(svc, "create_model_record") as create_record, \
+            mock.patch.object(svc, "update_model_record") as update_record:
+        with pytest.raises(Exception, match="max_output_not_below_context"):
+            await svc.batch_create_models_for_tenant("u1", "t1", payload)
+
+    delete_record.assert_not_called()
+    create_record.assert_not_called()
+    update_record.assert_not_called()
+
+
+def test_ac_008_capacity_audit_entry_point_is_read_only_and_scoped():
+    svc = import_svc()
+    records = [
+        {
+            "model_id": 1,
+            "model_name": "unknown-llm",
+            "model_type": "llm",
+            "api_key": "must-not-leak",
+        },
+        {"model_id": 2, "model_name": "embed", "model_type": "embedding"},
+    ]
+
+    with mock.patch.object(svc, "get_model_records", return_value=records) as read:
+        report = svc.get_capacity_audit("tenant-1")
+
+    read.assert_called_once_with(None, "tenant-1")
+    assert report["counts"] == {"unknown": 1}
+    assert report["rows"][0]["model_id"] == 1
+    assert "api_key" not in report["rows"][0]

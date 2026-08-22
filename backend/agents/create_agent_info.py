@@ -25,6 +25,7 @@ from nexent.core.models.capacity_resolver import (
     resolve_capacity,
 )
 from nexent.core.models.capacity_budget import (
+    BudgetResolverError,
     RequestBudgetOverrides,
     SafeInputBudgetCalculator,
     UncertaintyReserveBasisUnknown,
@@ -80,7 +81,7 @@ from consts.const import (
     NEXENT_SANDBOX_WORKSPACE_VOLUME,
 )
 from consts.model import ToolParamsRequest
-from consts.exceptions import ValidationError
+from consts.exceptions import ModelCapacityConfigError, ValidationError
 
 logger = logging.getLogger("create_agent_info")
 logger.setLevel(logging.INFO)
@@ -310,6 +311,28 @@ def _resolve_safe_input_budget(
             exc,
         )
         return None
+    except BudgetResolverError as exc:
+        reason_by_type = {
+            "InvalidReservePolicy": "invalid_reserve_policy",
+            "RequestedOutputExceedsCapacity": "requested_output_exceeds_model",
+            "ReserveExceedsCapacity": "reserve_exceeds_capacity",
+            "NoSafeInputCapacity": "no_safe_input_capacity",
+            "SafeInputBudgetFingerprintMismatch": "budget_fingerprint_mismatch",
+            "CallerMaxTokensOverrideForbidden": "caller_output_override_forbidden",
+            "SafeInputBudgetCapacityMismatch": "capacity_snapshot_mismatch",
+        }
+        reason = reason_by_type.get(type(exc).__name__, "budget_resolution_failed")
+        logger.warning(
+            "W2 safe input budget rejected: tenant_id=%s model=%s reason=%s",
+            tenant_id,
+            capacity_snapshot.model_name,
+            reason,
+        )
+        raise ModelCapacityConfigError(
+            f"capacity_config_invalid.{reason}",
+            "The selected model capacity cannot produce a safe Agent input budget. "
+            "Review the model context, input, output, and reserve settings.",
+        ) from exc
     logger.debug(
         "W2 safe input budget resolved: tenant_id=%s model=%s requested_output_tokens=%s "
         "soft_input_budget_tokens=%s hard_input_budget_tokens=%s fingerprint=%s warnings=%s",

@@ -686,8 +686,7 @@ export const ModelEditDialog = ({
               validationError={capacityValidationError}
               capacitySource={model.capacitySource}
               capabilityProfileVersion={model.capabilityProfileVersion}
-              // context_window/max_output no longer required; empty input
-              // lands DEFAULT_* via buildCapacityPayload at save time.
+              // Capacity fields are optional; blank input remains unknown.
               suggestion={capacitySuggestionEnabled ? capacitySuggestion : null}
               suggestionLoading={checkingCapacitySuggestion}
               onUseSuggestion={() =>
@@ -991,7 +990,7 @@ export const ProviderConfigEditDialog = ({
   const needsLegacyMaxTokens = isRerankModel || isVoiceModel;
   // Neither mode marks any field required:
   // - per-row mode (supportsCapacityFields): context_window/max_output are
-  //   optional and get DEFAULT_* substituted at save by buildCapacityPayload
+  //   optional and blank values remain unknown
   // - bulk-apply mode (supportsBulkCapacity): optional broadcast -- "fill
   //   to override; leave empty to keep each row's current value"
   const capacityRequiredFields: Array<keyof ModelCapacityFormState> = [];
@@ -1067,14 +1066,8 @@ export const ProviderConfigEditDialog = ({
                 : undefined,
             }
           : {}),
-        // Both per-model and bulk-apply modes write capacity via
-        // buildCapacityPayload. Per-model (supportsCapacityFields) opts
-        // into default substitution: empty context_window/max_output land
-        // DEFAULT_CONTEXT_WINDOW_TOKENS / DEFAULT_MAX_OUTPUT_TOKENS at the
-        // wire. Bulk-apply (supportsBulkCapacity) passes applyDefaults=false
-        // so empty fields stay omitted ("don't broadcast this value"), and
-        // an apiKey-only bulk edit doesn't accidentally null out per-row
-        // capacity by writing 32K/4K across N rows.
+        // Both modes omit blank capacity fields, preserving unknown rows and
+        // preventing API-key-only edits from rewriting capacity facts.
         ...(supportsCapacityFields
           ? buildCapacityPayload(capacityForm)
           : supportsBulkCapacity
@@ -1162,7 +1155,7 @@ export const ProviderConfigEditDialog = ({
             validationError={capacityValidationError}
             capacitySource={initialCapacity?.capacitySource}
             capabilityProfileVersion={initialCapacity?.capabilityProfileVersion}
-            // context_window/max_output optional; DEFAULT_* substitute at save.
+            // Capacity fields are optional; blank values remain unknown.
             legacyMaxTokensCandidate={
               initialCapacity?.contextWindowTokens &&
               initialCapacity?.maxOutputTokens

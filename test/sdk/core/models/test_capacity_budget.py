@@ -61,8 +61,8 @@ def _fingerprint(**overrides) -> str:
         "model_name": "gpt-4o",
         "requested_output_tokens": 4096,
         "output_reserve_source": "model_default",
-        "uncertainty_reserve_tokens": 12800,
-        "uncertainty_reserve_basis": "context_window_10pct",
+        "uncertainty_reserve_tokens": 12391,
+        "uncertainty_reserve_basis": "provider_input_limit_10pct",
         "approved_profile_reserve_tokens": None,
         "soft_limit_ratio": 0.8,
         "soft_limit_ratio_source": "code_default",
@@ -130,7 +130,7 @@ def _capacity_snapshot(**overrides) -> ModelCapacitySnapshot:
     return ModelCapacitySnapshot(**payload)
 
 
-def test_calculator_combined_window_uses_10_percent_uncertainty_reserve():
+def test_calculator_combined_window_uses_effective_limit_for_uncertainty_reserve():
     calculator = SafeInputBudgetCalculator()
 
     snap = calculator.calculate_safe_input_budget(
@@ -139,10 +139,10 @@ def test_calculator_combined_window_uses_10_percent_uncertainty_reserve():
     )
 
     assert snap.provider_input_limit_tokens == 128_000 - 4_096
-    assert snap.uncertainty_reserve_tokens == 12_800
-    assert snap.uncertainty_reserve_basis == "context_window_10pct"
-    assert snap.hard_input_budget_tokens == 111_104
-    assert snap.soft_input_budget_tokens == 88_883
+    assert snap.uncertainty_reserve_tokens == 12_391
+    assert snap.uncertainty_reserve_basis == "provider_input_limit_10pct"
+    assert snap.hard_input_budget_tokens == 111_513
+    assert snap.soft_input_budget_tokens == 89_210
     assert snap.requested_output_tokens == 4_096
     assert snap.output_reserve_source == "model_default"
     assert snap.w1_fingerprint == "w1fingerprint"
@@ -162,7 +162,7 @@ def test_calculator_recomputes_provider_limit_for_request_override():
     assert snap.requested_output_tokens == 8_192
     assert snap.output_reserve_source == "request"
     assert snap.provider_input_limit_tokens == 128_000 - 8_192
-    assert snap.hard_input_budget_tokens == (128_000 - 8_192) - 12_800
+    assert snap.hard_input_budget_tokens == (128_000 - 8_192) - 11_981
 
 
 def test_calculator_rejects_request_override_that_lowers_reserve():
@@ -209,19 +209,21 @@ def test_calculator_uses_approved_profile_reserve_for_separate_input_limit():
     assert snap.hard_input_budget_tokens == 32_256
 
 
-def test_calculator_requires_context_window_for_10_percent_reserve():
+def test_calculator_uses_independent_input_limit_for_10_percent_reserve():
     calculator = SafeInputBudgetCalculator()
 
-    with pytest.raises(UncertaintyReserveBasisUnknown):
-        calculator.calculate_safe_input_budget(
-            capacity_snapshot=_capacity_snapshot(
-                context_window_tokens=None,
-                max_input_tokens=32_768,
-                provider_input_limit_tokens=32_768,
-                unknown_capabilities=["tokenizer"],
-            ),
-            reserve_policy=CapacityReservePolicy(),
-        )
+    snap = calculator.calculate_safe_input_budget(
+        capacity_snapshot=_capacity_snapshot(
+            context_window_tokens=None,
+            max_input_tokens=32_768,
+            provider_input_limit_tokens=32_768,
+            unknown_capabilities=["tokenizer"],
+        ),
+        reserve_policy=CapacityReservePolicy(),
+    )
+
+    assert snap.uncertainty_reserve_tokens == 3_277
+    assert snap.hard_input_budget_tokens == 29_491
 
 
 def test_calculator_rejects_requested_output_above_capacity():
@@ -235,19 +237,25 @@ def test_calculator_rejects_requested_output_above_capacity():
         )
 
 
-def test_calculator_rejects_reserve_larger_than_provider_limit():
+def test_ac_001_small_independent_limit_uses_compatible_reserve():
     calculator = SafeInputBudgetCalculator()
 
-    with pytest.raises(ReserveExceedsCapacity):
-        calculator.calculate_safe_input_budget(
-            capacity_snapshot=_capacity_snapshot(
-                context_window_tokens=10_000,
-                max_input_tokens=100,
-                provider_input_limit_tokens=100,
-                unknown_capabilities=["tokenizer"],
-            ),
-            reserve_policy=CapacityReservePolicy(),
-        )
+    snap = calculator.calculate_safe_input_budget(
+        capacity_snapshot=_capacity_snapshot(
+            context_window_tokens=262_144,
+            max_input_tokens=16_384,
+            max_output_tokens=65_536,
+            requested_output_tokens=8_192,
+            provider_input_limit_tokens=16_384,
+            unknown_capabilities=["tokenizer"],
+        ),
+        reserve_policy=CapacityReservePolicy(),
+    )
+
+    assert snap.provider_input_limit_tokens == 16_384
+    assert snap.uncertainty_reserve_tokens == 1_639
+    assert snap.uncertainty_reserve_basis == "provider_input_limit_10pct"
+    assert snap.hard_input_budget_tokens == 14_745
 
 
 def test_calculator_rejects_no_safe_input_capacity_after_output_reserve():

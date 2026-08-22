@@ -2,6 +2,7 @@ import { Alert, AutoComplete, Button, Input, Space, Tag, Tooltip } from "antd";
 import { useTranslation } from "react-i18next";
 
 import type { CapacitySuggestion } from "@/types/modelConfig";
+import { buildCamelCapacityPayload } from "@/lib/modelCapacityPayload";
 
 // W11 spec L767-790. Common token-count presets surfaced as a fallback
 // preset selector when no catalog suggestion populates the field. The
@@ -37,12 +38,7 @@ const OUTPUT_RESERVE_PRESET_OPTIONS = [
 ];
 
 export type CapacitySource =
-  | "operator"
-  | "profile"
-  | "provider_candidate"
-  | "legacy"
-  | "unknown"
-  | string;
+  "operator" | "profile" | "provider_candidate" | "legacy" | "unknown" | string;
 
 export interface ModelCapacityFormState {
   contextWindowTokens: string;
@@ -80,12 +76,9 @@ interface ModelCapacityFieldsProps {
    */
   legacyMaxTokensCandidate?: number;
   /**
-   * When true (default), the context_window/max_output inputs render a gray
-   * placeholder showing the value the save handler would substitute if the
-   * field were left empty. Pass false in bulk-apply broadcast mode where
-   * empty means "do not broadcast this field"; showing a default-value hint
-   * there would be misleading. Tied to `buildCapacityPayload`'s
-   * `applyDefaults` option -- callers should pass matching booleans.
+   * When true (default), context_window/max_output inputs render gray
+   * estimated-value placeholders. Placeholders are never serialized. Pass
+   * false in bulk-apply mode where even a visual estimate is misleading.
    */
   applyDefaultsOnEmpty?: boolean;
   /** Currently accepted suggestion, used to detect fuzzy canonicalization mismatch */
@@ -196,42 +189,8 @@ export const hasCapacityValues = (value: ModelCapacityFormState): boolean =>
 
 export const buildCapacityPayload = (
   value: ModelCapacityFormState,
-  options?: { applyDefaults?: boolean }
-) => {
-  // applyDefaults=true (default): single-row write paths (add/edit single,
-  //   batch top-defaults, batch per-row gear, per-row gear in delete dialog).
-  //   When the user leaves context_window/max_output empty, substitute the
-  //   defaults so the bare-capacity gates and badge see a populated row.
-  // applyDefaults=false: bulk-apply broadcast mode in ProviderConfigEditDialog
-  //   ("修改配置"). Empty inputs mean "don't broadcast this value", preserving
-  //   each row's existing capacity. We must NOT substitute defaults here.
-  const applyDefaults = options?.applyDefaults !== false;
-  const hasValues = hasCapacityValues(value);
-  if (!hasValues && !applyDefaults) return {};
-
-  const contextWindowTokens =
-    toOptionalPositiveInt(value.contextWindowTokens) ??
-    (applyDefaults ? DEFAULT_CONTEXT_WINDOW_TOKENS : undefined);
-  const maxOutputTokens =
-    toOptionalPositiveInt(value.maxOutputTokens) ??
-    (applyDefaults ? DEFAULT_MAX_OUTPUT_TOKENS : undefined);
-
-  return {
-    contextWindowTokens,
-    maxInputTokens: toOptionalPositiveInt(value.maxInputTokens),
-    maxOutputTokens,
-    // Mirror max_output_tokens into the deprecated max_tokens column so
-    // legacy readers stay consistent. W1 step 4 makes them aliases server-side;
-    // keeping both columns populated avoids a brittle dependency on the
-    // Pydantic validator firing on every code path.
-    ...(maxOutputTokens !== undefined ? { maxTokens: maxOutputTokens } : {}),
-    defaultOutputReserveTokens: toOptionalPositiveInt(
-      value.defaultOutputReserveTokens
-    ),
-    tokenizerFamily: value.tokenizerFamily.trim() || undefined,
-    capacitySource: "operator",
-  };
-};
+  _options?: { applyDefaults?: boolean }
+) => buildCamelCapacityPayload(value);
 
 export const capacityFormFromModel = (model: {
   contextWindowTokens?: number;
@@ -316,10 +275,8 @@ export const ModelCapacityFields = ({
   const requiredSet = new Set<keyof ModelCapacityFormState>(requiredFields);
   const isAddMode = formMode === "add";
 
-  // Per-field default-value hints. Rendered as native input placeholders
-  // (gray text) only when the parent opts into default substitution. The
-  // gray text is purely a UX nudge -- the form state stays "" until the
-  // user types, and `buildCapacityPayload` does the substitution at save.
+  // Per-field estimates rendered as native input placeholders. They are
+  // never serialized unless the operator explicitly enters or selects them.
   const defaultPlaceholders: Partial<
     Record<keyof ModelCapacityFormState, string>
   > = applyDefaultsOnEmpty

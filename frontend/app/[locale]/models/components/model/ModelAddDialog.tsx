@@ -22,6 +22,7 @@ import {
 import { useConfig } from "@/hooks/useConfig";
 import { useCapacitySuggestion } from "@/hooks/useCapacitySuggestion";
 import { getConnectivityMeta, ConnectivityStatusType } from "@/lib/utils";
+import { buildSnakeCapacityPayload } from "@/lib/modelCapacityPayload";
 import { modelService } from "@/services/modelService";
 import {
   ModelType,
@@ -50,8 +51,6 @@ import {
   capacityFieldKeys,
   capacityFormFromSuggestion,
   capacityFormFromModel,
-  DEFAULT_CONTEXT_WINDOW_TOKENS,
-  DEFAULT_MAX_OUTPUT_TOKENS,
   emptyCapacityForm,
   ModelCapacityFields,
   ModelCapacityFormState,
@@ -563,34 +562,8 @@ export const ModelAddDialog = ({
       if (needsMaxTokens && !isValidMaxTokens(form.maxTokens)) {
         return false;
       }
-      // Per-row capacity gate for LLM/VLM batch import. After moving
-      // context_window/max_output to optional-with-defaults, the batch top
-      // defaults are guaranteed to be populated (capacityFormToSnakePayload
-      // substitutes DEFAULT_* on empty), so `effectiveContextWindow` and
-      // `effectiveMaxOutput` cannot be falsy in normal flow. Keeping the
-      // gate as defense-in-depth for future row sources (e.g., a catalog
-      // entry that pre-fills both row columns NULL and somehow bypasses
-      // the substitute) -- cheap to keep, costly to discover missing.
-      //
-      // We deliberately do NOT fall back to model.max_tokens here. Per the
-      // W1/W2 production plan the legacy column is unconditionally seeded
-      // with DEFAULT_LLM_MAX_TOKENS (4096) by the provider adapters, so
-      // treating it as a stand-in for max_output_tokens would mask missing
-      // W2 metadata and let any row pass validation.
-      if (supportsCapacityFields) {
-        const batchDefaults = capacityFormToSnakePayload(form);
-        for (const model of modelList) {
-          if (!selectedModelIds.has(model.id)) continue;
-          if (!rowSupportsCapacityFields(model)) continue;
-          const effectiveContextWindow =
-            model.context_window_tokens ?? batchDefaults.context_window_tokens;
-          const effectiveMaxOutput =
-            model.max_output_tokens ?? batchDefaults.max_output_tokens;
-          if (!effectiveContextWindow || !effectiveMaxOutput) {
-            return false;
-          }
-        }
-      }
+      // Capacity may remain unknown during the migration. Present values are
+      // validated above and again by the backend contract validator.
       // If provider is ModelEngine, require the ModelEngine URL as well.
       if (form.provider === "modelengine") {
         return (
@@ -803,41 +776,8 @@ export const ModelAddDialog = ({
   // fallback in batch mode when the row itself has no capacity overrides AND
   // as the single-add wire payload.
   //
-  // `applyDefaults` controls whether empty context_window/max_output get the
-  // shared UI defaults substituted. Defaults true for write-time paths
-  // (single-add, batch fallback for missing rows, per-row gear). The Settings
-  // Modal's "no-op edit" path passes false so that opening the gear and
-  // saving without touching anything does not clobber an existing
-  // `context_window_tokens=128000` (from catalog) with the 32K default.
-  const capacityFormToSnakePayload = (
-    capacity: ModelCapacityFormState,
-    options?: { applyDefaults?: boolean }
-  ) => {
-    const applyDefaults = options?.applyDefaults !== false;
-    const toInt = (raw: string) => {
-      const trimmed = raw.trim();
-      if (!/^[1-9]\d*$/.test(trimmed)) return undefined;
-      return Number.parseInt(trimmed, 10);
-    };
-    const tokenizer = capacity.tokenizerFamily.trim();
-    const contextWindow =
-      toInt(capacity.contextWindowTokens) ??
-      (applyDefaults ? DEFAULT_CONTEXT_WINDOW_TOKENS : undefined);
-    const maxOutput =
-      toInt(capacity.maxOutputTokens) ??
-      (applyDefaults ? DEFAULT_MAX_OUTPUT_TOKENS : undefined);
-    const hasAny = capacityFieldKeys.some((k) => capacity[k].trim() !== "");
-    return {
-      context_window_tokens: contextWindow,
-      max_input_tokens: toInt(capacity.maxInputTokens),
-      max_output_tokens: maxOutput,
-      default_output_reserve_tokens: toInt(capacity.defaultOutputReserveTokens),
-      tokenizer_family: tokenizer || undefined,
-      // When defaults substituted, the row carries a deterministic operator
-      // value. When not (Settings Modal no-op preserve mode), only mark
-      // operator-sourced if the operator actually typed something.
-      capacity_source: applyDefaults || hasAny ? "operator" : undefined,
-    };
+  const capacityFormToSnakePayload = (capacity: ModelCapacityFormState) => {
+    return buildSnakeCapacityPayload(capacity);
   };
 
   const buildBatchModelData = (model: any, modelType: ModelType) => {
@@ -1063,11 +1003,8 @@ export const ModelAddDialog = ({
     if (useCapacity) {
       // Persist capacity fields onto the row in their snake_case API shape so
       // buildBatchModelData can forward them without further translation.
-      // Defaults always apply at save: the gear modal preloads modelCapacity
-      // from the row's existing values (or batch defaults), so "no-op save"
-      // already carries non-empty inputs and goes through toInt unchanged.
-      // Only the row-NULL + empty-batch-default case lands DEFAULT_*, which
-      // is the desired "empty input means default" semantic.
+      // The gear modal preloads existing values. A fully blank form keeps the
+      // row unknown instead of manufacturing an operator-owned default.
       const payload = capacityFormToSnakePayload(modelCapacity);
       const hasAny = capacityFieldKeys.some(
         (k) => modelCapacity[k].trim() !== ""
@@ -1903,9 +1840,7 @@ export const ModelAddDialog = ({
               onChange={(field, value) => handleFormChange(field, value)}
               validationError={capacityValidationError}
               formMode="add"
-              // context_window/max_output are no longer required; an empty
-              // input lands the shared DEFAULT_* values at save time
-              // (see capacityFormToSnakePayload).
+              // Capacity fields are optional; blank input remains unknown.
               suggestion={
                 capacitySuggestionEnabled && !form.isBatchImport
                   ? topSuggestion
