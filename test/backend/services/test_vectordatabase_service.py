@@ -2255,6 +2255,104 @@ class TestElasticSearchService(unittest.TestCase):
         self.mock_vdb_core.get_documents_detail.assert_called_once_with(
             "test_index")
 
+    @patch('backend.services.vectordatabase_service.get_redis_service')
+    @patch('backend.services.vectordatabase_service.get_file_size', return_value=12)
+    @patch('backend.services.vectordatabase_service.list_file_records')
+    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    @patch('backend.services.vectordatabase_service.get_all_files_status', new_callable=AsyncMock)
+    def test_list_files_merges_lifecycle_rows_and_hides_tombstones(
+        self, mock_get_files_status, mock_get_knowledge, mock_list_lifecycle, mock_get_size, mock_redis
+    ):
+        """PG lifecycle rows should override legacy status and hide deleted paths."""
+        self.mock_vdb_core.get_documents_detail.return_value = []
+        mock_get_files_status.return_value = {
+            "legacy-ms": {
+                "state": "PROCESS_FAILED",
+                "latest_task_id": "task-legacy",
+                "created_at": 1700000000000,
+                "original_filename": "legacy.txt",
+            }
+        }
+        mock_get_knowledge.return_value = {"tenant_id": "tenant-1"}
+        mock_list_lifecycle.return_value = [
+            {"file_id": "deleted", "object_name": "deleted.txt", "status": "DELETED"},
+            {
+                "file_id": "failed",
+                "object_name": "failed.txt",
+                "original_filename": "failed.txt",
+                "file_size": 4,
+                "uploaded_at": "2024-01-01T00:00:00",
+                "status": "FAILED",
+                "stage": "FORWARD",
+                "error_code": "FORWARD_FAILED",
+                "error_message": "forward unavailable",
+                "process_task_id": "task-failed",
+                "failed_at": "2024-01-01T00:00:01",
+            },
+        ]
+        mock_redis.return_value.get_error_info.return_value = "legacy parse error"
+
+        result = asyncio.run(
+            ElasticSearchService.list_files("test_index", include_chunks=False, vdb_core=self.mock_vdb_core)
+        )
+
+        by_path = {item["path_or_url"]: item for item in result["files"]}
+        assert "deleted.txt" not in by_path
+        assert by_path["failed.txt"]["status"] == "FORWARD_FAILED"
+        assert by_path["failed.txt"]["error_reason"] == "forward unavailable"
+        assert by_path["failed.txt"]["file_id"] == "failed"
+        assert by_path["legacy-ms"]["create_time"] == 1700000000000
+
+    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    @patch('backend.services.vectordatabase_service.get_file_record')
+    @patch('backend.services.vectordatabase_service.transition_file_record')
+    def test_mark_file_delete_requested_updates_existing_record(
+        self, mock_transition, mock_get_record, mock_get_knowledge
+    ):
+        mock_get_knowledge.return_value = {"tenant_id": "tenant-1", "knowledge_id": 7}
+        mock_get_record.return_value = {"file_id": "fid-delete"}
+        mock_transition.return_value = {"file_id": "fid-delete", "status": "DELETE_REQUESTED"}
+
+        result = ElasticSearchService._mark_file_delete_requested(
+            "test_index", "knowledge_base/a.txt", requested_by="user-1"
+        )
+
+        assert result["status"] == "DELETE_REQUESTED"
+        assert mock_transition.call_args.args == ("fid-delete",)
+        assert mock_transition.call_args.kwargs["status"] == "DELETE_REQUESTED"
+
+    @patch('backend.services.vectordatabase_service.create_delete_tombstone')
+    @patch('backend.services.vectordatabase_service.get_file_record', return_value=None)
+    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    def test_mark_file_delete_requested_creates_legacy_tombstone(
+        self, mock_get_knowledge, _mock_get_record, mock_create_tombstone
+    ):
+        mock_get_knowledge.return_value = {"tenant_id": "tenant-1", "knowledge_id": 7}
+        mock_create_tombstone.return_value = {"file_id": "fid-new", "status": "DELETED"}
+
+        result = ElasticSearchService._mark_file_delete_requested(
+            "test_index", "knowledge_base/legacy.txt"
+        )
+
+        assert result["file_id"] == "fid-new"
+        mock_create_tombstone.assert_called_once()
+
+    @patch('backend.services.vectordatabase_service.get_knowledge_record', return_value={})
+    def test_mark_file_delete_requested_skips_missing_knowledge_identity(self, _mock_get_knowledge):
+        assert ElasticSearchService._mark_file_delete_requested("test_index", "missing.txt") is None
+
+    @patch('backend.services.vectordatabase_service.get_file_record')
+    @patch('backend.services.vectordatabase_service.get_knowledge_record', return_value={"tenant_id": "tenant-1"})
+    @patch('backend.services.vectordatabase_service.transition_file_record')
+    def test_mark_file_deleted_finalizes_existing_record(
+        self, mock_transition, _mock_get_knowledge, mock_get_record
+    ):
+        mock_get_record.return_value = {"file_id": "fid-delete"}
+        ElasticSearchService._mark_file_deleted("test_index", "knowledge_base/a.txt", updated_by="user-1")
+        mock_transition.assert_called_once()
+        assert mock_transition.call_args.args == ("fid-delete",)
+        assert mock_transition.call_args.kwargs["status"] == "DELETED"
+
     @patch('backend.services.vectordatabase_service.get_all_files_status')
     def test_list_files_with_chunks(self, mock_get_files_status):
         """

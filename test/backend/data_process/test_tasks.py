@@ -3460,6 +3460,7 @@ def test_submit_process_forward_chain(monkeypatch):
         authorization="Bearer token",
         embedding_model_id=1,
         tenant_id="tenant-1",
+        file_id="fid-1",
     )
 
     assert chain_id == "chain-id-123"
@@ -3544,10 +3545,51 @@ def test_process_and_forward_delegates_to_chain(monkeypatch):
         source_type="local",
         chunking_strategy="basic",
         index_name="test-index",
+        file_id="fid-2",
     )
 
     assert result == "chain-456"
     assert captured["steps"] == 3  # process, forward, cleanup_source
+
+
+def test_update_file_lifecycle_uses_file_id_and_legacy_source_fallback(monkeypatch):
+    """Lifecycle updates should be best-effort and skip deleted or missing rows."""
+    import_tasks_with_fake_ray(monkeypatch)
+    from backend.data_process import tasks
+
+    calls = []
+    lifecycle_module = types.ModuleType("database.knowledge_file_lifecycle_db")
+    lifecycle_module.get_file_record = lambda **kwargs: {"file_id": "fid-3", "status": "PROCESSING"}
+    lifecycle_module.transition_file_record = lambda file_id, **kwargs: calls.append((file_id, kwargs))
+    monkeypatch.setitem(sys.modules, "database.knowledge_file_lifecycle_db", lifecycle_module)
+
+    tasks._update_file_lifecycle(
+        file_id=None,
+        index_name="idx",
+        source="knowledge_base/a.txt",
+        status="PROCESSING",
+        stage="PROCESS",
+    )
+    assert calls[0][0] == "fid-3"
+    assert calls[0][1]["expected_statuses"] == ("PROCESSING",)
+
+    lifecycle_module.get_file_record = lambda **kwargs: {"file_id": "fid-4", "status": "DELETED"}
+    tasks._update_file_lifecycle(
+        file_id="fid-4",
+        index_name="idx",
+        source="knowledge_base/deleted.txt",
+        status="FAILED",
+        stage="PROCESS",
+    )
+    assert len(calls) == 1
+
+    tasks._update_file_lifecycle(
+        file_id="fid-5",
+        index_name=None,
+        source="knowledge_base/no-index.txt",
+        status="FAILED",
+        stage="PROCESS",
+    )
 
 
 def test_estimate_parallel_parts_edge_cases(monkeypatch):
