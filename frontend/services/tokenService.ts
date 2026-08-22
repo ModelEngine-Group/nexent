@@ -3,6 +3,7 @@ import { API_ENDPOINTS, ApiError, fetchWithErrorHandling } from "./api";
 export interface UserToken {
   token_id: number;
   access_key: string;
+  can_copy: boolean;
 }
 
 interface TokenListResponse {

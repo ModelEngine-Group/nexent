@@ -1559,7 +1559,11 @@ class UserTokenInfo(TableBase):
     User token (AK/SK) information table
     """
     __tablename__ = "user_token_info_t"
-    __table_args__ = {"schema": SCHEMA}
+    __table_args__ = (
+        Index("ux_user_token_access_key", "access_key", unique=True),
+        Index("ix_user_token_user_active", "user_id", "delete_flag"),
+        {"schema": SCHEMA},
+    )
 
     token_id = Column(Integer, Sequence("user_token_info_t_token_id_seq", schema=SCHEMA),
                       primary_key=True, nullable=False, doc="Token ID, unique primary key")
@@ -1573,7 +1577,16 @@ class UserTokenUsageLog(TableBase):
     User token usage log table
     """
     __tablename__ = "user_token_usage_log_t"
-    __table_args__ = {"schema": SCHEMA}
+    __table_args__ = (
+        Index(
+            "ix_user_token_usage_active_token_time",
+            "token_id",
+            text("create_time DESC"),
+            postgresql_include=["token_usage_id"],
+            postgresql_where=text("delete_flag = 'N'"),
+        ),
+        {"schema": SCHEMA},
+    )
 
     token_usage_id = Column(Integer, Sequence("user_token_usage_log_t_token_usage_id_seq", schema=SCHEMA),
                             primary_key=True, nullable=False, doc="Token usage log ID, unique primary key")

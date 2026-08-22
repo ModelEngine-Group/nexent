@@ -684,6 +684,11 @@ export const API_ENDPOINTS = {
     update: (userId: string) => `${API_BASE_URL}/users/${userId}`,
     delete: (userId: string) => `${API_BASE_URL}/users/${userId}`,
   },
+  apiKeys: {
+    list: `${API_BASE_URL}/api-keys`,
+    refresh: `${API_BASE_URL}/api-keys/refresh`,
+    revoke: `${API_BASE_URL}/api-keys`,
+  },
   groups: {
     create: `${API_BASE_URL}/groups`,
     list: `${API_BASE_URL}/groups/list`,
