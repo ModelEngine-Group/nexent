@@ -7,16 +7,18 @@ helpers unless :func:`resolve_storage_context` returns a valid tenant-owned KB.
 
 import logging
 from dataclasses import dataclass
-from typing import Dict, Iterable, Optional
+from typing import Any, Dict, Iterable, Optional
 from urllib.parse import urlparse
 
-from consts.const import ASSET_OWNER_ATTACHMENTS_PREFIX, MINIO_DEFAULT_BUCKET
+from consts.const import ASSET_OWNER_ATTACHMENTS_PREFIX, MINIO_DEFAULT_BUCKET, PERMISSION_EDIT
 from database.attachment_db import delete_file, get_file_size_from_minio_strict
 from database.knowledge_db import get_knowledge_record
 from database.knowledge_storage_object_db import (
     COMMITTED_STATUS,
     aggregate_committed_bytes_by_kb,
     commit_storage_object,
+    get_committed_source_bytes_by_object_names,
+    get_storage_object_by_identity,
     get_tenant_committed_bytes,
     mark_storage_object_deleted,
 )
@@ -32,6 +34,7 @@ class KnowledgeStorageContext:
     knowledge_id: int
     index_name: str
     bucket_name: str
+    ingroup_permission: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -40,6 +43,122 @@ class StorageObjectReference:
 
     bucket_name: str
     object_name: str
+
+
+def resolve_storage_object_knowledge(
+    object_name: str,
+    tenant_id: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """Resolve an active storage object to one tenant-owned knowledge base."""
+    reference = resolve_storage_reference(object_name)
+    if reference is None:
+        return None
+
+    ledger_record = get_storage_object_by_identity(
+        bucket_name=reference.bucket_name,
+        object_name=reference.object_name,
+    )
+    if not ledger_record:
+        return None
+
+    owner_tenant_id = str(ledger_record.get("tenant_id") or "")
+    knowledge_id = ledger_record.get("knowledge_id")
+    index_name = ledger_record.get("index_name")
+    if not owner_tenant_id or knowledge_id is None or not index_name:
+        return None
+
+    if tenant_id is not None and owner_tenant_id != str(tenant_id):
+        return None
+
+    knowledge = get_knowledge_record({
+        "index_name": index_name,
+        "tenant_id": owner_tenant_id,
+    })
+    if not knowledge:
+        return None
+
+    if (
+        knowledge.get("knowledge_id") is None
+        or str(knowledge.get("knowledge_id")) != str(knowledge_id)
+        or str(knowledge.get("index_name")) != str(index_name)
+        or str(knowledge.get("tenant_id")) != owner_tenant_id
+    ):
+        return None
+
+    return {
+        "reference": reference,
+        "ledger": ledger_record,
+        "knowledge": knowledge,
+    }
+
+
+def resolve_storage_object_access(
+    object_name: str,
+    user_id: Optional[str],
+    tenant_id: Optional[str],
+    required_permission: str,
+) -> bool:
+    """Resolve a KB source object to its owning KB and enforce write access.
+
+    Knowledge-base source reads intentionally remain public to authenticated
+    users for backward compatibility. This resolver is therefore used for
+    operations with write semantics, such as deleting a source object. It
+    fails closed when the object cannot be mapped to one active ledger row and
+    a matching knowledge-base record.
+    """
+    if not user_id or not tenant_id:
+        return False
+
+    normalized_permission = str(required_permission or "").upper()
+    if normalized_permission not in {"EDIT", "DELETE", "MODIFY", "WRITE"}:
+        return False
+
+    try:
+        ownership = resolve_storage_object_knowledge(
+            object_name=object_name,
+            tenant_id=tenant_id,
+        )
+    except Exception:
+        logger.exception(
+            "Failed to resolve storage-object ownership: object=%s user=%s tenant=%s",
+            object_name,
+            user_id,
+            tenant_id,
+        )
+        return False
+    if ownership is None:
+        logger.warning(
+            "Denied storage-object write without active ledger row: object=%s user=%s tenant=%s",
+            object_name,
+            user_id,
+            tenant_id,
+        )
+        return False
+
+    knowledge = ownership["knowledge"]
+    index_name = knowledge["index_name"]
+
+    # Import lazily to avoid the existing vectordatabase_service -> this
+    # module import relationship during application startup.
+    from services.vectordatabase_service import ElasticSearchService
+
+    try:
+        knowledge_permission = ElasticSearchService.resolve_knowledge_base_permission(
+            index_name=str(index_name),
+            user_id=str(user_id),
+            tenant_id=str(tenant_id),
+        )
+    except (PermissionError, ValueError):
+        return False
+    except Exception:
+        logger.exception(
+            "Failed to resolve KB permission for storage object: object=%s index=%s",
+            object_name,
+            index_name,
+        )
+        return False
+
+    return str(knowledge_permission or "").upper() in {PERMISSION_EDIT, "CREATOR"}
 
 
 def resolve_storage_reference(path_or_url: Optional[str]) -> Optional[StorageObjectReference]:
@@ -68,6 +187,44 @@ def resolve_storage_reference(path_or_url: Optional[str]) -> Optional[StorageObj
     if value.startswith(source_prefixes) and MINIO_DEFAULT_BUCKET:
         return StorageObjectReference(MINIO_DEFAULT_BUCKET, value)
     return None
+
+
+def get_committed_source_bytes_by_paths(
+    tenant_id: str,
+    knowledge_id: int,
+    paths: Iterable[str],
+) -> Dict[str, int]:
+    """Return committed source sizes for a batch of source paths."""
+    references: Dict[str, StorageObjectReference] = {}
+    for path in paths:
+        reference = resolve_storage_reference(path)
+        if reference is not None:
+            references[path] = reference
+
+    grouped_paths: Dict[str, set[str]] = {}
+    for reference in references.values():
+        grouped_paths.setdefault(reference.bucket_name, set()).add(
+            reference.object_name
+        )
+
+    committed_by_identity: Dict[tuple[str, str], int] = {}
+    for bucket_name, object_names in grouped_paths.items():
+        committed = get_committed_source_bytes_by_object_names(
+            tenant_id=tenant_id,
+            knowledge_id=knowledge_id,
+            bucket_name=bucket_name,
+            object_names=sorted(object_names),
+        )
+        for object_name, raw_bytes in committed.items():
+            committed_by_identity[(bucket_name, object_name)] = raw_bytes
+
+    return {
+        path: committed_by_identity.get(
+            (reference.bucket_name, reference.object_name),
+            0,
+        )
+        for path, reference in references.items()
+    }
 
 
 def resolve_storage_context(
@@ -99,6 +256,7 @@ def resolve_storage_context(
         knowledge_id=int(knowledge_id),
         index_name=index_name,
         bucket_name=bucket_name,
+        ingroup_permission=knowledge.get("ingroup_permission"),
     )
 
 
