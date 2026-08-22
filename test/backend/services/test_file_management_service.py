@@ -2078,6 +2078,7 @@ class TestResolvePreviewFile:
         ("test/readme.txt", "text/plain"),
         ("test/data.csv", "text/csv"),
         ("test/readme.md", "text/markdown"),
+        ("test/config.json", "application/json"),
     ])
     async def test_direct_types_returned_as_is(self, object_name, content_type):
         """PDF, images, and text files resolve to themselves without conversion."""
