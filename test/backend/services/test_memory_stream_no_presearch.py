@@ -106,27 +106,18 @@ async def test_fixed_search_is_streamed_and_persisted_as_structured_tool(monkeyp
         "generate_conversation_title_service",
         AsyncMock(),
     )
-    monkeypatch.setattr(agent_service, "update_unit_status", lambda *args, **kwargs: None)
-    monkeypatch.setattr(agent_service, "update_unit_content", lambda *args, **kwargs: None)
-    monkeypatch.setattr(agent_service, "update_message_content", lambda *args, **kwargs: None)
-    monkeypatch.setattr(agent_service, "update_message_status", lambda *args, **kwargs: None)
-
-    saved_units = []
-
-    class FakeFuture:
-        def __init__(self, value=None):
-            self.value = value
-
-        def result(self):
-            return self.value
-
-    def fake_submit(_fn, *args, **kwargs):
-        if "unit_type" in kwargs:
-            saved_units.append(kwargs)
-            return FakeFuture(len(saved_units))
-        return FakeFuture()
-
-    monkeypatch.setattr(agent_service, "submit", fake_submit)
+    persisted_batches = []
+    monkeypatch.setattr(
+        agent_service,
+        "persist_assistant_run_batch",
+        lambda **kwargs: persisted_batches.append(kwargs),
+    )
+    monkeypatch.setattr(
+        agent_service.streaming_channel_manager,
+        "complete_channel",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(agent_service, "_cleanup_channel_later", AsyncMock())
     channel = AsyncMock()
 
     chunks = [
@@ -147,6 +138,8 @@ async def test_fixed_search_is_streamed_and_persisted_as_structured_tool(monkeyp
         "unit_index": 0,
     }
 
+    assert len(persisted_batches) == 1
+    saved_units = persisted_batches[0]["message_units"]
     tool_unit = next(unit for unit in saved_units if unit["unit_type"] == "tool")
     persisted_tool = json.loads(tool_unit["unit_content"])
     assert persisted_tool == {

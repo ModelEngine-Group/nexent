@@ -88,7 +88,7 @@ from database.attachment_db import (
     upload_fileobj,
 )
 from database.client import minio_client
-from services.skill_service import SkillService
+from services.skill_service import SkillService, generate_available_copy_skill_name
 from services.file_management_service import is_allowed_skill_upload_path
 from database.agent_version_db import query_version_list, query_current_version_no, batch_search_version_names, batch_query_current_version_nos
 from database.group_db import query_group_ids_by_user

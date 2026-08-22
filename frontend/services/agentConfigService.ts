@@ -10,6 +10,7 @@ import { getAuthHeaders } from "@/lib/auth";
 import { convertParamType } from "@/lib/utils";
 import log from "@/lib/logger";
 import yaml from "js-yaml";
+import type { SkillFileNode } from "@/types/skill";
 
 /** Normalize tags field: Ant Design mode="tags" sends a string when only one tag is entered. */
 function normalizeTags(tags: unknown): string[] {
@@ -640,11 +641,51 @@ const downloadBlob = (blob: Blob, filename: string) => {
  * @param options import options including optional skill ZIPs
  * @returns import result
  */
+export interface SkillResolution {
+  skill_name: string;
+  action: "rename" | "use_existing";
+  new_name?: string;
+}
+
+export interface SkillConflict {
+  skill_name: string;
+  suggested_new_name: string;
+}
+
+export const checkAgentSkillConflicts = async (skillNames: string[]) => {
+  try {
+    const response = await fetch(API_ENDPOINTS.agent.checkSkills, {
+      method: "POST",
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ skill_names: skillNames }),
+    });
+    if (!response.ok) {
+      throw new Error(`Request failed: ${response.status}`);
+    }
+    const data = await response.json();
+    return {
+      success: true,
+      data: Array.isArray(data.skill_conflicts)
+        ? (data.skill_conflicts as SkillConflict[])
+        : [],
+      message: "",
+    };
+  } catch (error) {
+    log.error("Failed to check Agent skill conflicts:", error);
+    return {
+      success: false,
+      data: [] as SkillConflict[],
+      message: "Failed to check Agent skill conflicts",
+    };
+  }
+};
+
 export const importAgent = async (
   agentInfo: any,
   options?: {
     forceImport?: boolean;
     skillZips?: Array<{ skill_name: string; skill_zip_base64: string }>;
+    skillResolutions?: SkillResolution[];
   }
 ) => {
   try {
@@ -655,6 +696,9 @@ export const importAgent = async (
     if (options?.skillZips && options.skillZips.length > 0) {
       payload.skills = options.skillZips;
     }
+    if (options?.skillResolutions && options.skillResolutions.length > 0) {
+      payload.skill_resolutions = options.skillResolutions;
+    }
     const response = await fetch(API_ENDPOINTS.agent.import, {
       method: "POST",
       headers: getAuthHeaders(),
@@ -663,7 +707,7 @@ export const importAgent = async (
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
-      const errMsg = errorData?.message;
+      const errMsg = errorData?.message ?? errorData?.detail;
       if (typeof errMsg === "object" && errMsg !== null) {
         return {
           success: false,
@@ -1649,11 +1693,7 @@ export const searchSkillsByName = <T extends { name: string }>(
  * @param skillName skill name
  * @returns file/folder structure
  */
-export interface SkillFileNode {
-  name: string;
-  type: "file" | "directory";
-  children?: SkillFileNode[];
-}
+export type { SkillFileNode } from "@/types/skill";
 
 export class SkillFilesAccessDeniedError extends Error {
   constructor(message: string) {
@@ -1734,24 +1774,33 @@ export const getAgentByName = async (
 export const fetchSkillFileContent = async (
   skillName: string,
   filePath: string
-): Promise<string | null> => {
-  try {
-    const encodedPath = encodeURIComponent(filePath);
-    const response = await fetch(
-      `${API_ENDPOINTS.skills.fileContent(skillName, encodedPath)}`,
-      {
-        headers: getAuthHeaders(),
-      }
-    );
-    if (!response.ok) {
-      throw new Error(`Request failed: ${response.status}`);
+): Promise<{
+  status: "readable" | "unsupported";
+  content: string;
+  encoding?: string;
+}> => {
+  const encodedPath = encodeURIComponent(filePath);
+  const response = await fetch(
+    `${API_ENDPOINTS.skills.fileContent(skillName, encodedPath)}`,
+    {
+      headers: getAuthHeaders(),
     }
-    const data = await response.json();
-    return data.content || data;
-  } catch (error) {
-    log.error("Error fetching skill file content:", error);
-    return null;
+  );
+  if (response.status === 415) {
+    return { status: "unsupported", content: "" };
   }
+  if (!response.ok) {
+    throw new Error(`Request failed: ${response.status}`);
+  }
+  const data = await response.json();
+  if (typeof data === "string") {
+    return { status: "readable", content: data, encoding: "utf-8" };
+  }
+  return {
+    status: data.status === "unsupported" ? "unsupported" : "readable",
+    content: typeof data.content === "string" ? data.content : "",
+    encoding: typeof data.encoding === "string" ? data.encoding : undefined,
+  };
 };
 
 /**
