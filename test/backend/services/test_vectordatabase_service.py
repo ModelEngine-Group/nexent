@@ -2289,6 +2289,14 @@ class TestElasticSearchService(unittest.TestCase):
                 "process_task_id": "task-failed",
                 "failed_at": "2024-01-01T00:00:01",
             },
+            {
+                "file_id": "uploading",
+                "object_name": "uploading.txt",
+                "original_filename": "uploading.txt",
+                "file_size": 2,
+                "uploaded_at": "not-a-timestamp",
+                "status": "UPLOADED",
+            },
         ]
         mock_redis.return_value.get_error_info.return_value = "legacy parse error"
 
@@ -2301,6 +2309,7 @@ class TestElasticSearchService(unittest.TestCase):
         assert by_path["failed.txt"]["status"] == "FORWARD_FAILED"
         assert by_path["failed.txt"]["error_reason"] == "forward unavailable"
         assert by_path["failed.txt"]["file_id"] == "failed"
+        assert by_path["uploading.txt"]["status"] == "WAIT_FOR_PROCESSING"
         assert by_path["legacy-ms"]["create_time"] == 1700000000000
 
     @patch('backend.services.vectordatabase_service.get_knowledge_record')
@@ -2354,6 +2363,16 @@ class TestElasticSearchService(unittest.TestCase):
         assert mock_transition.call_args.args == ("fid-delete",)
         assert mock_transition.call_args.kwargs["status"] == "DELETED"
 
+    @patch('backend.services.vectordatabase_service.get_file_record', return_value=None)
+    @patch('backend.services.vectordatabase_service.get_knowledge_record', return_value={"tenant_id": "tenant-1"})
+    @patch('backend.services.vectordatabase_service.transition_file_record')
+    def test_mark_file_deleted_ignores_missing_record(
+        self, mock_transition, _mock_get_knowledge, _mock_get_record
+    ):
+        """Finalization is best effort when a legacy row does not exist."""
+        ElasticSearchService._mark_file_deleted("test_index", "knowledge_base/missing.txt")
+        mock_transition.assert_not_called()
+
     @patch('backend.services.vectordatabase_service.transition_file_record')
     def test_delete_lifecycle_record_without_object_transitions_to_deleted(self, mock_transition):
         mock_transition.side_effect = [
@@ -2378,6 +2397,120 @@ class TestElasticSearchService(unittest.TestCase):
         assert mock_transition.call_count == 2
         assert mock_transition.call_args_list[0].kwargs["status"] == "DELETE_REQUESTED"
         assert mock_transition.call_args_list[1].kwargs["status"] == "DELETED"
+
+    def test_delete_lifecycle_record_without_object_rejects_invalid_identity(self):
+        with pytest.raises(ValueError, match="file ID without an object path"):
+            ElasticSearchService.delete_lifecycle_record_without_object(
+                {"file_id": "fid-with-object", "object_name": "knowledge_base/a.txt"}
+            )
+
+    @patch('backend.services.vectordatabase_service.transition_file_record')
+    def test_delete_lifecycle_record_without_object_returns_existing_deleted(self, mock_transition):
+        result = ElasticSearchService.delete_lifecycle_record_without_object(
+            {"file_id": "fid-deleted", "object_name": None, "status": "DELETED"}
+        )
+
+        assert result["lifecycle_deleted"] is True
+        assert "already deleted" in result["message"]
+        mock_transition.assert_not_called()
+
+    @patch('backend.services.vectordatabase_service.get_file_record')
+    @patch('backend.services.vectordatabase_service.transition_file_record')
+    def test_delete_lifecycle_record_without_object_reconciles_stale_delete_request(
+        self, mock_transition, mock_get_record
+    ):
+        """A concurrent transition to DELETE_REQUESTED can still be finalized."""
+        mock_transition.side_effect = [
+            None,
+            {"file_id": "fid-race", "status": "DELETED"},
+        ]
+        mock_get_record.return_value = {
+            "file_id": "fid-race",
+            "tenant_id": "tenant-1",
+            "index_name": "kb-1",
+            "status": "DELETE_REQUESTED",
+        }
+
+        result = ElasticSearchService.delete_lifecycle_record_without_object(
+            {
+                "file_id": "fid-race",
+                "tenant_id": "tenant-1",
+                "index_name": "kb-1",
+                "object_name": None,
+                "status": "FAILED",
+            }
+        )
+
+        assert result["lifecycle_deleted"] is True
+        assert mock_get_record.call_count == 1
+        assert mock_transition.call_count == 2
+
+    @patch('backend.services.vectordatabase_service.get_file_record', return_value={"status": "DELETED"})
+    @patch('backend.services.vectordatabase_service.transition_file_record', return_value=None)
+    def test_delete_lifecycle_record_without_object_reconciles_deleted_race(
+        self, _mock_transition, _mock_get_record
+    ):
+        """A concurrent delete that already finalized is treated as success."""
+        result = ElasticSearchService.delete_lifecycle_record_without_object(
+            {
+                "file_id": "fid-race-deleted",
+                "tenant_id": "tenant-1",
+                "index_name": "kb-1",
+                "object_name": None,
+                "status": "FAILED",
+            }
+        )
+
+        assert result["lifecycle_deleted"] is True
+
+    @patch('backend.services.vectordatabase_service.get_file_record', return_value=None)
+    @patch('backend.services.vectordatabase_service.transition_file_record', return_value=None)
+    def test_delete_lifecycle_record_without_object_raises_when_request_is_stale(
+        self, _mock_transition, _mock_get_record
+    ):
+        with pytest.raises(ValueError, match="could not be deleted"):
+            ElasticSearchService.delete_lifecycle_record_without_object(
+                {
+                    "file_id": "fid-stale",
+                    "tenant_id": "tenant-1",
+                    "index_name": "kb-1",
+                    "object_name": None,
+                    "status": "FAILED",
+                }
+            )
+
+    @patch('backend.services.vectordatabase_service.get_file_record', return_value={"status": "DELETED"})
+    @patch('backend.services.vectordatabase_service.transition_file_record', return_value=None)
+    def test_delete_lifecycle_record_without_object_accepts_concurrent_finalization(
+        self, _mock_transition, _mock_get_record
+    ):
+        result = ElasticSearchService.delete_lifecycle_record_without_object(
+            {
+                "file_id": "fid-race-final",
+                "tenant_id": "tenant-1",
+                "index_name": "kb-1",
+                "object_name": None,
+                "status": "DELETE_REQUESTED",
+            }
+        )
+
+        assert result["lifecycle_deleted"] is True
+
+    @patch('backend.services.vectordatabase_service.get_file_record', return_value={"status": "FAILED"})
+    @patch('backend.services.vectordatabase_service.transition_file_record', return_value=None)
+    def test_delete_lifecycle_record_without_object_raises_when_finalization_is_stale(
+        self, _mock_transition, _mock_get_record
+    ):
+        with pytest.raises(ValueError, match="could not be finalized"):
+            ElasticSearchService.delete_lifecycle_record_without_object(
+                {
+                    "file_id": "fid-stale-final",
+                    "tenant_id": "tenant-1",
+                    "index_name": "kb-1",
+                    "object_name": None,
+                    "status": "DELETE_REQUESTED",
+                }
+            )
 
     @patch('backend.services.vectordatabase_service.get_all_files_status')
     def test_list_files_with_chunks(self, mock_get_files_status):

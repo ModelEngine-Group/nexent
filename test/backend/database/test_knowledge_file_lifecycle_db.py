@@ -90,6 +90,16 @@ def test_create_file_records_uses_one_transaction_for_the_whole_batch(monkeypatc
     session.flush.assert_called_once_with()
 
 
+def test_create_file_records_returns_empty_for_empty_batch(monkeypatch):
+    """Empty uploads should not open a database transaction."""
+    session = MagicMock()
+    monkeypatch.setattr(lifecycle_db, "get_db_session", _session_context(session))
+
+    assert lifecycle_db.create_file_records([]) == []
+    session.add_all.assert_not_called()
+    session.flush.assert_not_called()
+
+
 def test_delete_tombstone_updates_existing_row(monkeypatch):
     existing = {"file_id": "fid-2", "status": "FAILED"}
     transition = MagicMock(return_value={"file_id": "fid-2", "status": "DELETE_REQUESTED"})
@@ -108,6 +118,24 @@ def test_delete_tombstone_updates_existing_row(monkeypatch):
     transition.assert_called_once()
     assert transition.call_args.kwargs["delete_requested_by"] == "user-1"
     assert "deleted_at" not in transition.call_args.kwargs
+
+
+def test_delete_tombstone_keeps_existing_deleted_row(monkeypatch):
+    """Repeated legacy deletion must not transition an already hidden row."""
+    existing = {"file_id": "fid-deleted", "status": "DELETED"}
+    transition = MagicMock()
+    monkeypatch.setattr(lifecycle_db, "get_file_record", MagicMock(return_value=existing))
+    monkeypatch.setattr(lifecycle_db, "transition_file_record", transition)
+
+    result = lifecycle_db.create_delete_tombstone(
+        tenant_id="tenant-1",
+        knowledge_id=10,
+        index_name="kb-1",
+        object_name="knowledge_base/object.pdf",
+    )
+
+    assert result == existing
+    transition.assert_not_called()
 
 
 def test_new_file_id_is_opaque_and_stable_length():

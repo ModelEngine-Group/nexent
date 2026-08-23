@@ -308,6 +308,7 @@ async def test_upload_files_no_valid_files_uploaded(monkeypatch):
     class UploadResult(tuple):
         def __new__(cls):
             result = super().__new__(cls, (["Failed to upload x.txt: parser unavailable"], [], []))
+            result.quota_status = {"quota_status": "warning"}
             result.file_records = [
                 {
                     "file_id": "failed-file",
@@ -332,6 +333,7 @@ async def test_upload_files_no_valid_files_uploaded(monkeypatch):
     content = response.body.decode()
     assert '"message":"No valid files uploaded"' in content
     assert '"detail":"No valid files uploaded"' in content
+    assert '"quota_status":"warning"' in content
     assert "parser unavailable" in content
     assert "failed-file" in content
 

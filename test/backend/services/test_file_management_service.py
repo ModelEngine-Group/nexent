@@ -537,6 +537,52 @@ class TestUploadFilesImpl:
         upload_mock.assert_not_awaited()
 
     @pytest.mark.asyncio
+    async def test_upload_files_impl_skips_empty_entry_when_creating_lifecycle_batch(self, monkeypatch):
+        """A sparse multipart list must not create a lifecycle row for an empty slot."""
+        uploads = [MagicMock(filename="a.txt", size=3), None]
+        context = SimpleNamespace(
+            tenant_id="tenant-1",
+            knowledge_id=7,
+            index_name="kb-1",
+            bucket_name="bucket-1",
+            ingroup_permission="SHARED",
+        )
+        quota_service = MagicMock()
+        quota_service.check_hard_limit.return_value = {"quota_status": "ok"}
+        quota_module = types.ModuleType("services.quota_service")
+        quota_module.QuotaService = MagicMock(return_value=quota_service)
+        record = {"file_id": "fid-a", "object_name": "folder/a.txt", "status": "UPLOADING"}
+
+        monkeypatch.setitem(sys.modules, "services.quota_service", quota_module)
+        with patch.object(knowledge_storage_stub, "resolve_storage_context", return_value=context), \
+                patch("backend.services.file_management_service.create_file_records", return_value=[record]) as create_records, \
+                patch("backend.services.file_management_service.transition_file_record", return_value={"file_id": "fid-a", "status": "UPLOADED"}), \
+                patch("backend.services.file_management_service.upload_to_minio", AsyncMock(return_value=[
+                    {"success": True, "file_id": "fid-a", "file_name": "a.txt", "object_name": "folder/a.txt"}
+                ])):
+            result = await upload_files_impl(destination="minio", file=uploads, folder="folder")
+
+        assert result[1] == ["folder/a.txt"]
+        specs = create_records.call_args.args[0]
+        assert len(specs) == 1
+        assert specs[0]["original_filename"] == "a.txt"
+
+    @pytest.mark.asyncio
+    async def test_upload_files_impl_rejects_incomplete_lifecycle_batch(self):
+        """MinIO must not be called when the repository returns fewer rows than files."""
+        upload = MagicMock(filename="a.txt", size=3)
+        context = SimpleNamespace(
+            tenant_id="tenant-1", knowledge_id=7, index_name="kb-1", bucket_name="bucket-1"
+        )
+        with patch.object(knowledge_storage_stub, "resolve_storage_context", return_value=context), \
+                patch("backend.services.file_management_service.create_file_records", return_value=[]), \
+                patch("backend.services.file_management_service.upload_to_minio", AsyncMock()) as upload_mock:
+            with pytest.raises(RuntimeError, match="incomplete result"):
+                await upload_files_impl(destination="minio", file=[upload], folder="folder")
+
+        upload_mock.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_upload_files_impl_keeps_partial_minio_success_after_lifecycle_batch_creation(self):
         """Per-file MinIO success/failure behavior remains after atomic pre-creation."""
         files = [
@@ -733,6 +779,26 @@ class TestUploadToMinio:
             mock_file.read.assert_called_once()
             mock_file.seek.assert_called_once_with(0)
             mock_upload.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_upload_to_minio_uses_lifecycle_object_and_id(self):
+        """Lifecycle identity must be passed through to the storage upload."""
+        mock_file = MagicMock()
+        mock_file.filename = "test.txt"
+        mock_file.read = AsyncMock(return_value=b"test content")
+        mock_file.seek = AsyncMock()
+
+        with patch("backend.services.file_management_service.upload_fileobj", MagicMock(return_value={
+            "success": True, "file_name": "test.txt", "object_name": "folder/planned.txt"
+        })) as mock_upload:
+            results = await upload_to_minio(
+                files=[mock_file],
+                folder="folder",
+                file_records={0: {"file_id": "fid-1", "object_name": "folder/planned.txt"}},
+            )
+
+        assert results[0]["file_id"] == "fid-1"
+        assert mock_upload.call_args.kwargs["object_name"] == "folder/planned.txt"
 
     @pytest.mark.asyncio
     async def test_upload_to_minio_file_read_exception(self):
