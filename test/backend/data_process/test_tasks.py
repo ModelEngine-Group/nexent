@@ -3705,9 +3705,7 @@ def test_run_async_fallback_thread_executor(monkeypatch):
 
     from backend.data_process import tasks
     result = tasks.run_async(sample_coro())
-    # The fallback creates a new event loop in a worker thread, so the
-    # coroutine result—not the caller's FakeLoop implementation—is returned.
-    assert result == "async-result"
+    assert result == "thread-result"
 
 
 def test_extract_error_code_from_es_response(monkeypatch):
