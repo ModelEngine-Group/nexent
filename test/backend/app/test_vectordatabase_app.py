@@ -1982,6 +1982,71 @@ async def test_delete_documents_resolves_lifecycle_file_id(vdb_core_mock, redis_
 
 
 @pytest.mark.asyncio
+async def test_delete_documents_removes_lifecycle_record_without_object(vdb_core_mock, auth_data):
+    """A failed upload without a storage object can be deleted by file ID."""
+    lifecycle_record = {
+        "file_id": "fid-no-object",
+        "tenant_id": auth_data["tenant_id"],
+        "index_name": auth_data["index_name"],
+        "object_name": None,
+        "status": "FAILED",
+    }
+    delete_result = {
+        "status": "success",
+        "scope": "full",
+        "lifecycle_deleted": True,
+    }
+    with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+            patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("database.knowledge_file_lifecycle_db.get_file_record", return_value=lifecycle_record), \
+            patch(
+                "backend.apps.vectordatabase_app.ElasticSearchService.delete_lifecycle_record_without_object",
+                return_value=delete_result,
+            ) as mock_delete_lifecycle:
+        response = client.delete(
+            f"/indices/{auth_data['index_name']}/documents",
+            # The frontend uses file_id as the legacy path fallback when object_name is empty.
+            params={
+                "path_or_url": "fid-no-object",
+                "file_id": "fid-no-object",
+                "scope": "full",
+            },
+            headers=auth_data["auth_header"],
+        )
+
+    assert response.status_code == 200
+    assert response.json() == delete_result
+    mock_delete_lifecycle.assert_called_once_with(lifecycle_record, requested_by=auth_data["user_id"])
+
+
+@pytest.mark.asyncio
+async def test_delete_documents_rejects_source_only_without_object(vdb_core_mock, auth_data):
+    """Source-only deletion is invalid when upload never created a storage object."""
+    lifecycle_record = {
+        "file_id": "fid-no-object",
+        "tenant_id": auth_data["tenant_id"],
+        "index_name": auth_data["index_name"],
+        "object_name": None,
+        "status": "FAILED",
+    }
+    with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+            patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("database.knowledge_file_lifecycle_db.get_file_record", return_value=lifecycle_record), \
+            patch(
+                "backend.apps.vectordatabase_app.ElasticSearchService.delete_lifecycle_record_without_object",
+            ) as mock_delete_lifecycle:
+        response = client.delete(
+            f"/indices/{auth_data['index_name']}/documents",
+            params={"file_id": "fid-no-object", "scope": "source_only"},
+            headers=auth_data["auth_header"],
+        )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "A file without a storage object can only use full deletion"
+    mock_delete_lifecycle.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_get_document_error_info_returns_lifecycle_error(auth_data):
     """Durable lifecycle errors take precedence over Redis task metadata."""
     lifecycle_record = {
@@ -2016,6 +2081,45 @@ async def test_get_document_error_info_returns_lifecycle_error(auth_data):
             include_hidden=True,
         )
         mock_legacy.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_get_document_error_info_falls_back_when_lifecycle_has_no_error(auth_data):
+    """A lifecycle row without error metadata must not hide legacy Redis errors."""
+    lifecycle_record = {
+        "file_id": "fid-processing",
+        "tenant_id": auth_data["tenant_id"],
+        "index_name": auth_data["index_name"],
+        "status": "PROCESSING",
+        "error_code": None,
+        "error_message": None,
+        "error_stage": None,
+        "failed_at": None,
+    }
+    redis_service = MagicMock()
+    redis_service.get_error_info.return_value = '{"error_code":"LEGACY_PARSE_FAILED"}'
+    with patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("database.knowledge_file_lifecycle_db.get_file_record", return_value=lifecycle_record), \
+            patch(
+                "backend.apps.vectordatabase_app.get_all_files_status",
+                new=AsyncMock(return_value={"knowledge_base/a.txt": {"latest_task_id": "task-legacy"}}),
+            ), \
+            patch("backend.apps.vectordatabase_app.get_redis_service", return_value=redis_service):
+        response = client.get(
+            f"/indices/{auth_data['index_name']}/documents/knowledge_base/a.txt/error-info",
+            params={"file_id": "fid-processing"},
+            headers=auth_data["auth_header"],
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "success",
+        "error_code": "LEGACY_PARSE_FAILED",
+        "error_message": '{"error_code":"LEGACY_PARSE_FAILED"}',
+        "error_stage": None,
+        "failed_at": None,
+    }
+    redis_service.get_error_info.assert_called_once_with("task-legacy")
 
 
 @pytest.mark.asyncio

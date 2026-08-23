@@ -24,7 +24,6 @@ def _install_storage_import_stubs() -> None:
 
 _install_storage_import_stubs()
 lifecycle_db = importlib.import_module("backend.database.knowledge_file_lifecycle_db")
-maintenance = importlib.import_module("backend.services.knowledge_file_maintenance")
 
 
 def _session_context(session):
@@ -56,9 +55,44 @@ def test_create_file_record_persists_uploading_row(monkeypatch):
     session.flush.assert_called_once_with()
 
 
+def test_create_file_records_uses_one_transaction_for_the_whole_batch(monkeypatch):
+    session = MagicMock()
+    rows = [MagicMock(file_id="fid-1"), MagicMock(file_id="fid-2")]
+    lifecycle_model = MagicMock(side_effect=rows)
+    monkeypatch.setattr(lifecycle_db, "KnowledgeFileLifecycle", lifecycle_model)
+    monkeypatch.setattr(
+        lifecycle_db,
+        "as_dict",
+        lambda value: {"file_id": value.file_id},
+    )
+    monkeypatch.setattr(lifecycle_db, "get_db_session", _session_context(session))
+
+    result = lifecycle_db.create_file_records([
+        {
+            "file_id": "fid-1",
+            "tenant_id": "tenant-1",
+            "knowledge_id": 10,
+            "index_name": "kb-1",
+            "original_filename": "a.pdf",
+        },
+        {
+            "file_id": "fid-2",
+            "tenant_id": "tenant-1",
+            "knowledge_id": 10,
+            "index_name": "kb-1",
+            "original_filename": "b.pdf",
+        },
+    ])
+
+    assert result == [{"file_id": "fid-1"}, {"file_id": "fid-2"}]
+    session.add_all.assert_called_once_with(rows)
+    session.add.assert_not_called()
+    session.flush.assert_called_once_with()
+
+
 def test_delete_tombstone_updates_existing_row(monkeypatch):
     existing = {"file_id": "fid-2", "status": "FAILED"}
-    transition = MagicMock(return_value={"file_id": "fid-2", "status": "DELETED"})
+    transition = MagicMock(return_value={"file_id": "fid-2", "status": "DELETE_REQUESTED"})
     monkeypatch.setattr(lifecycle_db, "get_file_record", MagicMock(return_value=existing))
     monkeypatch.setattr(lifecycle_db, "transition_file_record", transition)
 
@@ -70,42 +104,16 @@ def test_delete_tombstone_updates_existing_row(monkeypatch):
         requested_by="user-1",
     )
 
-    assert result["status"] == "DELETED"
+    assert result["status"] == "DELETE_REQUESTED"
     transition.assert_called_once()
     assert transition.call_args.kwargs["delete_requested_by"] == "user-1"
+    assert "deleted_at" not in transition.call_args.kwargs
 
 
 def test_new_file_id_is_opaque_and_stable_length():
     file_id = lifecycle_db.new_file_id()
     assert len(file_id) == 32
     assert file_id.isalnum()
-
-
-def test_cleanup_uses_advisory_lock_and_removes_terminal_cache_rows(monkeypatch):
-    session = MagicMock()
-    session.execute.return_value.scalar.return_value = True
-    query = session.query.return_value
-    query.filter.return_value = query
-    query.order_by.return_value = query
-    query.limit.return_value = query
-    row = MagicMock()
-    query.all.return_value = [row]
-    monkeypatch.setattr(lifecycle_db, "get_db_session", _session_context(session))
-
-    result = lifecycle_db.cleanup_expired_file_records(retention_days=30, batch_size=1)
-
-    assert result == 1
-    session.delete.assert_called_once_with(row)
-    session.execute.assert_called_once()
-
-
-def test_cleanup_skips_when_another_worker_holds_advisory_lock(monkeypatch):
-    session = MagicMock()
-    session.execute.return_value.scalar.return_value = False
-    monkeypatch.setattr(lifecycle_db, "get_db_session", _session_context(session))
-
-    assert lifecycle_db.cleanup_expired_file_records() == 0
-    session.query.assert_not_called()
 
 
 def test_get_file_record_by_id_applies_tenant_index_and_visibility_filters(monkeypatch):
@@ -217,9 +225,9 @@ def test_transition_file_record_returns_none_for_stale_row(monkeypatch):
 
 def test_delete_tombstone_creates_and_finalizes_missing_row(monkeypatch):
     monkeypatch.setattr(lifecycle_db, "get_file_record", MagicMock(return_value=None))
-    created = {"file_id": "fid-6", "status": "DELETED"}
+    created = {"file_id": "fid-6", "status": "DELETE_REQUESTED"}
     monkeypatch.setattr(lifecycle_db, "create_file_record", MagicMock(return_value=created))
-    transition = MagicMock(return_value={"file_id": "fid-6", "status": "DELETED"})
+    transition = MagicMock(return_value={"file_id": "fid-6", "status": "DELETE_REQUESTED"})
     monkeypatch.setattr(lifecycle_db, "transition_file_record", transition)
 
     result = lifecycle_db.create_delete_tombstone(
@@ -231,43 +239,8 @@ def test_delete_tombstone_creates_and_finalizes_missing_row(monkeypatch):
         requested_by="user-1",
     )
 
-    assert result == {"file_id": "fid-6", "status": "DELETED"}
+    assert result == {"file_id": "fid-6", "status": "DELETE_REQUESTED"}
+    assert lifecycle_db.create_file_record.call_args.kwargs["status"] == "DELETE_REQUESTED"
     transition.assert_called_once()
     assert transition.call_args.args == ("fid-6",)
-
-
-def test_maintenance_loop_start_stop_and_retry(monkeypatch):
-    calls = []
-    monkeypatch.setattr(maintenance, "cleanup_expired_file_records", lambda **kwargs: calls.append(kwargs) or 1)
-    monkeypatch.setattr(maintenance.time, "sleep", lambda _seconds: setattr(maintenance, "_running", False))
-    maintenance._running = True
-    maintenance._run_loop()
-    assert calls == [{"retention_days": maintenance.KB_FILE_LIFECYCLE_RETENTION_DAYS}]
-
-    started = []
-
-    class FakeThread:
-        def __init__(self, **kwargs):
-            self.kwargs = kwargs
-
-        def start(self):
-            started.append(self.kwargs)
-
-    monkeypatch.setattr(maintenance.threading, "Thread", FakeThread)
-    maintenance._running = False
-    maintenance._thread = None
-    maintenance.start()
-    maintenance.start()
-    assert len(started) == 1
-    maintenance.stop()
-    assert maintenance._running is False
-
-
-def test_maintenance_loop_logs_database_failure(monkeypatch):
-    monkeypatch.setattr(maintenance, "cleanup_expired_file_records", MagicMock(side_effect=RuntimeError("db down")))
-    monkeypatch.setattr(maintenance.time, "sleep", lambda _seconds: setattr(maintenance, "_running", False))
-    logger = MagicMock()
-    monkeypatch.setattr(maintenance, "logger", logger)
-    maintenance._running = True
-    maintenance._run_loop()
-    logger.warning.assert_called_once()
+    assert "deleted_at" not in transition.call_args.kwargs

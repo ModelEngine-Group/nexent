@@ -163,8 +163,22 @@ async def upload_files(
                 content=response_content,
             )
         else:
-            raise HTTPException(status_code=HTTPStatus.BAD_REQUEST,
-                                detail="No valid files uploaded")
+            # Keep the legacy detail string while exposing per-file failure details for
+            # callers that need to render the actual upload error.
+            response_content = {
+                "message": "No valid files uploaded",
+                "detail": "No valid files uploaded",
+                "uploaded_filenames": uploaded_filenames,
+                "uploaded_file_paths": uploaded_file_paths,
+                "errors": errors,
+                "file_records": file_records,
+            }
+            if quota_status:
+                response_content["quota_status"] = quota_status.get("quota_status")
+            return JSONResponse(
+                status_code=HTTPStatus.BAD_REQUEST,
+                content=response_content,
+            )
     except HTTPException:
         raise
     except QuotaExceededError:
@@ -215,6 +229,7 @@ async def process_files(
 
                 record = get_file_record(
                     file_id=file_details.get("file_id"),
+                    tenant_id=tenant_id,
                     index_name=index_name,
                     object_name=file_details.get("path_or_url"),
                     include_hidden=True,

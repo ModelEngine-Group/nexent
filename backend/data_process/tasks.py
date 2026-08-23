@@ -58,6 +58,7 @@ IMAGE_METADATA_PROCESS_SOURCE = "UniversalImageExtractor"
 def _update_file_lifecycle(
     *,
     file_id: Optional[str],
+    tenant_id: Optional[str],
     index_name: Optional[str],
     source: Optional[str],
     status: Optional[str],
@@ -75,12 +76,21 @@ def _update_file_lifecycle(
     try:
         from database.knowledge_file_lifecycle_db import get_file_record, transition_file_record
 
-        record = get_file_record(
-            file_id=file_id,
-            index_name=index_name,
-            object_name=source if not file_id else None,
-            include_hidden=True,
-        )
+        record = None
+        if file_id and tenant_id:
+            record = get_file_record(
+                file_id=file_id,
+                tenant_id=tenant_id,
+                index_name=index_name,
+                include_hidden=True,
+            )
+        if not record and source:
+            record = get_file_record(
+                tenant_id=tenant_id,
+                index_name=index_name,
+                object_name=source,
+                include_hidden=True,
+            )
         if not record or record.get("status") in {"DELETE_REQUESTED", "DELETED"}:
             return
         transition_file_record(
@@ -1507,6 +1517,7 @@ def process(
     file_id = params.get("file_id")
     _update_file_lifecycle(
         file_id=file_id,
+        tenant_id=tenant_id,
         index_name=index_name,
         source=source,
         status="PROCESSING",
@@ -1664,6 +1675,7 @@ def process(
 
         _update_file_lifecycle(
             file_id=file_id,
+            tenant_id=tenant_id,
             index_name=index_name,
             source=source,
             status="FORWARDING",
@@ -1724,6 +1736,7 @@ def process(
             error_code = extract_error_code(error_message, parsed_error)
             _update_file_lifecycle(
                 file_id=file_id,
+                tenant_id=tenant_id,
                 index_name=index_name,
                 source=source,
                 status="FAILED",
@@ -1796,6 +1809,7 @@ def process(
                 error_code = extract_error_code(error_message, parsed_error)
                 _update_file_lifecycle(
                     file_id=file_id,
+                    tenant_id=tenant_id,
                     index_name=index_name,
                     source=source,
                     status="FAILED",
@@ -1841,6 +1855,7 @@ def forward(
         original_filename: Optional[str] = None,
         authorization: Optional[str] = None,
         telemetry_context: Optional[Dict[str, str]] = None,
+        tenant_id: Optional[str] = None,
         file_id: Optional[str] = None,
 ) -> Dict:
     """
@@ -1866,6 +1881,7 @@ def forward(
     file_id = file_id or (processed_data or {}).get("file_id")
     _update_file_lifecycle(
         file_id=file_id,
+        tenant_id=tenant_id,
         index_name=index_name,
         source=source,
         status="FORWARDING",
@@ -2096,6 +2112,7 @@ def forward(
 
         _update_file_lifecycle(
             file_id=file_id,
+            tenant_id=tenant_id,
             index_name=original_index_name,
             source=original_source,
             status="COMPLETED",
@@ -2134,6 +2151,7 @@ def forward(
             error_code = extract_error_code(error_message, error_info)
             _update_file_lifecycle(
                 file_id=file_id,
+                tenant_id=tenant_id,
                 index_name=error_info.get("index_name") or original_index_name,
                 source=error_info.get("source") or original_source,
                 status="FAILED",
@@ -2167,6 +2185,7 @@ def forward(
                     'index_name': error_info.get('index_name', ''),
                     'task_name': error_info.get('task_name', ''),
                     'original_filename': error_info.get('original_filename', ''),
+                    'file_id': file_id,
                     'custom_error': error_message,
                     'stage': 'forward_task_failed'
                 }
@@ -2180,6 +2199,7 @@ def forward(
                 error_code = extract_error_code(error_message, None)
                 _update_file_lifecycle(
                     file_id=file_id,
+                    tenant_id=tenant_id,
                     index_name=original_index_name,
                     source=original_source,
                     status="FAILED",
@@ -2207,6 +2227,7 @@ def forward(
                 pass
             self.update_state(
                 meta={
+                    'file_id': file_id,
                     'custom_error': str(e),
                     'stage': 'forward_task_failed'
                 }
@@ -2358,6 +2379,7 @@ def submit_process_forward_chain(
         "source_type": source_type,
         "original_filename": original_filename,
         "authorization": authorization,
+        "tenant_id": tenant_id,
         "telemetry_context": telemetry_context or {},
     }
     if file_id is not None:

@@ -897,11 +897,6 @@ class KnowledgeFileLifecycle(TableBase):
                 "object_name IS NOT NULL AND status NOT IN ('DELETE_REQUESTED', 'DELETED')"
             ),
         ),
-        Index(
-            "idx_knowledge_file_lifecycle_maintenance",
-            "status",
-            "update_time",
-        ),
         {"schema": SCHEMA},
     )
 

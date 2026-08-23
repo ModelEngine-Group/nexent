@@ -2328,13 +2328,14 @@ class TestElasticSearchService(unittest.TestCase):
         self, mock_get_knowledge, _mock_get_record, mock_create_tombstone
     ):
         mock_get_knowledge.return_value = {"tenant_id": "tenant-1", "knowledge_id": 7}
-        mock_create_tombstone.return_value = {"file_id": "fid-new", "status": "DELETED"}
+        mock_create_tombstone.return_value = {"file_id": "fid-new", "status": "DELETE_REQUESTED"}
 
         result = ElasticSearchService._mark_file_delete_requested(
             "test_index", "knowledge_base/legacy.txt"
         )
 
         assert result["file_id"] == "fid-new"
+        assert result["status"] == "DELETE_REQUESTED"
         mock_create_tombstone.assert_called_once()
 
     @patch('backend.services.vectordatabase_service.get_knowledge_record', return_value={})
@@ -2352,6 +2353,31 @@ class TestElasticSearchService(unittest.TestCase):
         mock_transition.assert_called_once()
         assert mock_transition.call_args.args == ("fid-delete",)
         assert mock_transition.call_args.kwargs["status"] == "DELETED"
+
+    @patch('backend.services.vectordatabase_service.transition_file_record')
+    def test_delete_lifecycle_record_without_object_transitions_to_deleted(self, mock_transition):
+        mock_transition.side_effect = [
+            {"file_id": "fid-no-object", "status": "DELETE_REQUESTED"},
+            {"file_id": "fid-no-object", "status": "DELETED"},
+        ]
+
+        result = ElasticSearchService.delete_lifecycle_record_without_object(
+            {
+                "file_id": "fid-no-object",
+                "tenant_id": "tenant-1",
+                "index_name": "test_index",
+                "object_name": None,
+                "status": "FAILED",
+            },
+            requested_by="user-1",
+        )
+
+        assert result["status"] == "success"
+        assert result["lifecycle_deleted"] is True
+        assert result["source_available"] is False
+        assert mock_transition.call_count == 2
+        assert mock_transition.call_args_list[0].kwargs["status"] == "DELETE_REQUESTED"
+        assert mock_transition.call_args_list[1].kwargs["status"] == "DELETED"
 
     @patch('backend.services.vectordatabase_service.get_all_files_status')
     def test_list_files_with_chunks(self, mock_get_files_status):
@@ -2577,6 +2603,38 @@ class TestElasticSearchService(unittest.TestCase):
         mock_delete_documents.assert_called_once_with(
             "test_index", "knowledge_base/doc.pdf", self.mock_vdb_core
         )
+
+    @patch.object(ElasticSearchService, "_mark_file_deleted")
+    @patch.object(
+        ElasticSearchService,
+        "delete_documents",
+        return_value={"status": "success", "deleted_minio": True},
+    )
+    @patch.object(ElasticSearchService, "_mark_file_delete_requested")
+    def test_legacy_delete_request_tombstone_uses_full_delete_flow(
+        self, mock_mark_requested, mock_delete_documents, mock_mark_deleted
+    ):
+        """A newly-created legacy tombstone must not short-circuit deletion."""
+        mock_mark_requested.return_value = {
+            "file_id": "fid-legacy",
+            "status": "DELETE_REQUESTED",
+        }
+
+        result = asyncio.run(
+            ElasticSearchService.delete_document_by_scope(
+                "test_index",
+                "knowledge_base/legacy.txt",
+                "full",
+                self.mock_vdb_core,
+            )
+        )
+
+        self.assertEqual(result["status"], "success")
+        mock_mark_requested.assert_called_once_with("test_index", "knowledge_base/legacy.txt")
+        mock_delete_documents.assert_called_once_with(
+            "test_index", "knowledge_base/legacy.txt", self.mock_vdb_core
+        )
+        mock_mark_deleted.assert_called_once_with("test_index", "knowledge_base/legacy.txt")
 
     @patch.object(
         ElasticSearchService,

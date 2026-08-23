@@ -255,53 +255,6 @@ CREATE INDEX IF NOT EXISTS "idx_knowledge_storage_object_kb_active"
   ON "knowledge_storage_object_t" ("tenant_id", "knowledge_id")
   WHERE "delete_flag" = 'N' AND "status" = 'COMMITTED';
 
-CREATE TABLE IF NOT EXISTS "knowledge_file_lifecycle_t" (
-  "file_id" varchar(64) NOT NULL,
-  "tenant_id" varchar(100) NOT NULL,
-  "knowledge_id" bigint NOT NULL,
-  "index_name" varchar(100) NOT NULL,
-  "bucket_name" varchar(255),
-  "object_name" varchar(1024),
-  "original_filename" varchar(1024) NOT NULL,
-  "file_size" bigint,
-  "create_time" timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  "update_time" timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  "uploaded_at" timestamp,
-  "completed_at" timestamp,
-  "status" varchar(30) NOT NULL DEFAULT 'UPLOADING',
-  "stage" varchar(30),
-  "process_task_id" varchar(64),
-  "forward_task_id" varchar(64),
-  "parent_task_id" varchar(64),
-  "processing_attempt" integer NOT NULL DEFAULT 0,
-  "error_code" varchar(100),
-  "error_message" text,
-  "error_stage" varchar(30),
-  "failed_at" timestamp,
-  "delete_requested_at" timestamp,
-  "deleted_at" timestamp,
-  "delete_requested_by" varchar(100),
-  "storage_object_id" bigint,
-  "created_by" varchar(100),
-  "updated_by" varchar(100),
-  "delete_flag" varchar(1) NOT NULL DEFAULT 'N',
-  "version" integer NOT NULL DEFAULT 0,
-  CONSTRAINT "knowledge_file_lifecycle_t_pk" PRIMARY KEY ("file_id"),
-  CONSTRAINT "ck_knowledge_file_lifecycle_status" CHECK (
-    "status" IN ('UPLOADING', 'UPLOADED', 'PROCESSING', 'FORWARDING',
-                  'FAILED', 'COMPLETED', 'DELETE_REQUESTED', 'DELETED')
-  )
-);
-CREATE INDEX IF NOT EXISTS "idx_knowledge_file_lifecycle_kb_status"
-  ON "knowledge_file_lifecycle_t" ("tenant_id", "knowledge_id", "status");
-CREATE INDEX IF NOT EXISTS "idx_knowledge_file_lifecycle_identity"
-  ON "knowledge_file_lifecycle_t" ("tenant_id", "index_name", "object_name");
-CREATE UNIQUE INDEX IF NOT EXISTS "uq_knowledge_file_lifecycle_active_identity"
-  ON "knowledge_file_lifecycle_t" ("tenant_id", "index_name", "object_name")
-  WHERE "object_name" IS NOT NULL AND "status" NOT IN ('DELETE_REQUESTED', 'DELETED');
-CREATE INDEX IF NOT EXISTS "idx_knowledge_file_lifecycle_maintenance"
-  ON "knowledge_file_lifecycle_t" ("status", "update_time");
-
 -- Create the ag_tool_info_t table
 CREATE TABLE IF NOT EXISTS nexent.ag_tool_info_t (
     tool_id SERIAL PRIMARY KEY NOT NULL,
@@ -371,7 +324,6 @@ CREATE TABLE IF NOT EXISTS nexent.ag_tenant_agent_t (
     tenant_id VARCHAR(100),
     enabled BOOLEAN DEFAULT FALSE,
     provide_run_summary BOOLEAN DEFAULT FALSE,
-    context_policy JSONB,
     create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     update_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     created_by VARCHAR(100),

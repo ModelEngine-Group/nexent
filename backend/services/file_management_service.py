@@ -40,7 +40,7 @@ from database.attachment_db import (
     list_files,
     upload_fileobj,
 )
-from database.knowledge_file_lifecycle_db import create_file_record, transition_file_record
+from database.knowledge_file_lifecycle_db import create_file_records, transition_file_record
 from database.model_management_db import get_model_by_model_id
 from services.vectordatabase_service import ElasticSearchService, get_vector_db_core
 from utils.config_utils import tenant_config_manager, get_model_name_from_config
@@ -426,35 +426,37 @@ async def upload_files_impl(
         storage_context = resolve_storage_context(index_name, uploader_tenant_id)
         lifecycle_records_by_index = {}
         if storage_context:
-            try:
-                for file_index, upload in enumerate(file):
-                    if not upload:
-                        continue
-                    original_filename = os.path.basename(upload.filename or "")
-                    planned_object_name = generate_object_name(
-                        original_filename, prefix=actual_folder)
-                    record = create_file_record(
-                        file_id=None,
-                        tenant_id=storage_context.tenant_id,
-                        knowledge_id=storage_context.knowledge_id,
-                        index_name=storage_context.index_name,
-                        original_filename=original_filename,
-                        bucket_name=storage_context.bucket_name,
-                        object_name=planned_object_name,
-                        file_size=getattr(upload, "size", None),
-                        status="UPLOADING",
-                        stage="UPLOAD",
-                        created_by=user_id,
-                    )
-                    lifecycle_records.append(record)
-                    lifecycle_records_by_index[file_index] = record
-            except Exception as lifecycle_exc:
-                logger.warning(
-                    "Lifecycle table unavailable during upload; preserving legacy upload behavior: %s",
-                    lifecycle_exc,
-                )
-                lifecycle_records.clear()
-                lifecycle_records_by_index.clear()
+            lifecycle_record_indices = []
+            lifecycle_record_specs = []
+            for file_index, upload in enumerate(file):
+                if not upload:
+                    continue
+                original_filename = os.path.basename(upload.filename or "")
+                planned_object_name = generate_object_name(
+                    original_filename, prefix=actual_folder)
+                lifecycle_record_indices.append(file_index)
+                lifecycle_record_specs.append({
+                    "tenant_id": storage_context.tenant_id,
+                    "knowledge_id": storage_context.knowledge_id,
+                    "index_name": storage_context.index_name,
+                    "original_filename": original_filename,
+                    "bucket_name": storage_context.bucket_name,
+                    "object_name": planned_object_name,
+                    "file_size": getattr(upload, "size", None),
+                    "status": "UPLOADING",
+                    "stage": "UPLOAD",
+                    "created_by": user_id,
+                })
+
+            if lifecycle_record_specs:
+                # Lifecycle persistence is a required upload precondition. The
+                # repository creates the whole batch in one transaction; any
+                # database error must stop before MinIO is touched.
+                lifecycle_records = create_file_records(lifecycle_record_specs)
+                if len(lifecycle_records) != len(lifecycle_record_indices):
+                    raise RuntimeError("Lifecycle record batch creation returned an incomplete result")
+                lifecycle_records_by_index = dict(
+                    zip(lifecycle_record_indices, lifecycle_records))
         quota_service = None
         if storage_context:
             from services.quota_service import QuotaService

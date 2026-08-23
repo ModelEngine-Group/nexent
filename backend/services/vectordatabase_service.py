@@ -2019,6 +2019,93 @@ class ElasticSearchService:
             )
 
     @staticmethod
+    def delete_lifecycle_record_without_object(
+            lifecycle_record: Dict[str, Any],
+            requested_by: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Delete a lifecycle row when no storage object was ever created."""
+        file_id = lifecycle_record.get("file_id") if lifecycle_record else None
+        object_name = lifecycle_record.get("object_name") if lifecycle_record else None
+        if not file_id or object_name:
+            raise ValueError("A lifecycle file ID without an object path is required")
+
+        tenant_id = lifecycle_record.get("tenant_id")
+        index_name = lifecycle_record.get("index_name")
+        current_status = str(lifecycle_record.get("status") or "").upper()
+        deleteable_statuses = (
+            "UPLOADING",
+            "UPLOADED",
+            "PROCESSING",
+            "FORWARDING",
+            "FAILED",
+            "COMPLETED",
+        )
+
+        if current_status == "DELETED":
+            return {
+                "status": "success",
+                "scope": "full",
+                "deleted_es_count": 0,
+                "deleted_minio": False,
+                "source_available": False,
+                "lifecycle_deleted": True,
+                "message": "Lifecycle record already deleted; no storage object was created.",
+            }
+
+        if current_status != "DELETE_REQUESTED":
+            requested = transition_file_record(
+                file_id,
+                status="DELETE_REQUESTED",
+                stage="DELETE",
+                expected_statuses=deleteable_statuses,
+                delete_requested_at=datetime.utcnow(),
+                delete_requested_by=requested_by,
+                updated_by=requested_by,
+            )
+            if requested is None:
+                latest = get_file_record(
+                    file_id=file_id,
+                    tenant_id=tenant_id,
+                    index_name=index_name,
+                    include_hidden=True,
+                )
+                if latest and str(latest.get("status") or "").upper() == "DELETED":
+                    current_status = "DELETED"
+                elif latest and str(latest.get("status") or "").upper() == "DELETE_REQUESTED":
+                    current_status = "DELETE_REQUESTED"
+                else:
+                    raise ValueError("Lifecycle file record could not be deleted")
+
+        if current_status != "DELETED":
+            deleted = transition_file_record(
+                file_id,
+                status="DELETED",
+                stage="DELETE",
+                expected_statuses=("DELETE_REQUESTED",),
+                deleted_at=datetime.utcnow(),
+                updated_by=requested_by,
+            )
+            if deleted is None:
+                latest = get_file_record(
+                    file_id=file_id,
+                    tenant_id=tenant_id,
+                    index_name=index_name,
+                    include_hidden=True,
+                )
+                if not latest or str(latest.get("status") or "").upper() != "DELETED":
+                    raise ValueError("Lifecycle file record could not be finalized")
+
+        return {
+            "status": "success",
+            "scope": "full",
+            "deleted_es_count": 0,
+            "deleted_minio": False,
+            "source_available": False,
+            "lifecycle_deleted": True,
+            "message": "Lifecycle record deleted; no storage object was created.",
+        }
+
+    @staticmethod
     async def delete_document_by_scope(
             index_name: str,
             path_or_url: str,

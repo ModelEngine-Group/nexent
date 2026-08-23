@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional
 from uuid import uuid4
-
-from sqlalchemy import text
 
 from .client import as_dict, get_db_session
 from .db_models import KnowledgeFileLifecycle
@@ -61,6 +59,41 @@ def create_file_record(
         session.add(row)
         session.flush()
         return as_dict(row)
+
+
+def create_file_records(records: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Create a batch of lifecycle records in one transaction.
+
+    The upload workflow must not persist a partial batch.  Keeping the whole
+    insert in one session means a constraint or database failure rolls back
+    every row before any object is written to MinIO.
+    """
+    rows = []
+    for record in records:
+        rows.append(
+            KnowledgeFileLifecycle(
+                file_id=record.get("file_id") or new_file_id(),
+                tenant_id=str(record["tenant_id"]),
+                knowledge_id=int(record["knowledge_id"]),
+                index_name=record["index_name"],
+                original_filename=record.get("original_filename") or "",
+                bucket_name=record.get("bucket_name"),
+                object_name=record.get("object_name"),
+                file_size=record.get("file_size"),
+                status=record.get("status", "UPLOADING"),
+                stage=record.get("stage", "UPLOAD"),
+                created_by=record.get("created_by"),
+                updated_by=record.get("updated_by", record.get("created_by")),
+            )
+        )
+
+    if not rows:
+        return []
+
+    with get_db_session() as session:
+        session.add_all(rows)
+        session.flush()
+        return [as_dict(row) for row in rows]
 
 
 def get_file_record(
@@ -182,12 +215,13 @@ def create_delete_tombstone(
         include_hidden=True,
     )
     if existing:
+        if str(existing.get("status") or "").upper() == "DELETED":
+            return existing
         updated = transition_file_record(
             existing["file_id"],
-            status="DELETED",
+            status="DELETE_REQUESTED",
             stage="DELETE",
             delete_requested_at=datetime.utcnow(),
-            deleted_at=datetime.utcnow(),
             delete_requested_by=requested_by,
             updated_by=requested_by,
         )
@@ -199,43 +233,13 @@ def create_delete_tombstone(
         index_name=index_name,
         original_filename=original_filename,
         object_name=object_name,
-        status="DELETED",
+        status="DELETE_REQUESTED",
         stage="DELETE",
         created_by=requested_by,
     )
     return transition_file_record(
         created["file_id"],
         delete_requested_at=datetime.utcnow(),
-        deleted_at=datetime.utcnow(),
         delete_requested_by=requested_by,
         updated_by=requested_by,
     ) or created
-
-
-def cleanup_expired_file_records(
-    *,
-    retention_days: int = 30,
-    batch_size: int = 500,
-) -> int:
-    """Delete completed cache rows and deletion tombstones after retention."""
-    cutoff = datetime.utcnow() - timedelta(days=max(1, int(retention_days)))
-    with get_db_session() as session:
-        lock_result = session.execute(
-            text("SELECT pg_try_advisory_xact_lock(:lock_key)"),
-            {"lock_key": 78231491},
-        )
-        if not bool(lock_result.scalar()):
-            return 0
-        rows = (
-            session.query(KnowledgeFileLifecycle)
-            .filter(
-                KnowledgeFileLifecycle.status.in_(("COMPLETED", "DELETED")),
-                KnowledgeFileLifecycle.update_time < cutoff,
-            )
-            .order_by(KnowledgeFileLifecycle.update_time.asc())
-            .limit(max(1, int(batch_size)))
-            .all()
-        )
-        for row in rows:
-            session.delete(row)
-        return len(rows)

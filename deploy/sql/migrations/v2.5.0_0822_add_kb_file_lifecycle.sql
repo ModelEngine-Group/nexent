@@ -44,5 +44,3 @@ CREATE INDEX IF NOT EXISTS idx_knowledge_file_lifecycle_identity
 CREATE UNIQUE INDEX IF NOT EXISTS uq_knowledge_file_lifecycle_active_identity
     ON nexent.knowledge_file_lifecycle_t (tenant_id, index_name, object_name)
     WHERE object_name IS NOT NULL AND status NOT IN ('DELETE_REQUESTED', 'DELETED');
-CREATE INDEX IF NOT EXISTS idx_knowledge_file_lifecycle_maintenance
-    ON nexent.knowledge_file_lifecycle_t (status, update_time);

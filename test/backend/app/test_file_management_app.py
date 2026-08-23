@@ -305,16 +305,35 @@ async def test_upload_files_no_files_bad_request():
 
 @pytest.mark.asyncio
 async def test_upload_files_no_valid_files_uploaded(monkeypatch):
+    class UploadResult(tuple):
+        def __new__(cls):
+            result = super().__new__(cls, (["Failed to upload x.txt: parser unavailable"], [], []))
+            result.file_records = [
+                {
+                    "file_id": "failed-file",
+                    "status": "FAILED",
+                    "error_code": "UPLOAD_FAILED",
+                    "error_message": "parser unavailable",
+                }
+            ]
+            return result
+
     async def fake_upload_impl(dest, files, folder, index_name, user_id=None, uploader_tenant_id=None):
-        return ["err"], [], []
+        return UploadResult()
 
     monkeypatch.setattr(file_management_app, "upload_files_impl", fake_upload_impl)
-    with pytest.raises(Exception) as ei:
-        await file_management_app.upload_files(
-            file=[make_upload_file("x.txt")], destination="minio", folder="attachments", index_name=None,
-            authorization=MOCK_AUTH
-        )
-    assert "No valid files uploaded" in str(ei.value)
+    response = await file_management_app.upload_files(
+        file=[make_upload_file("x.txt")], destination="minio", folder="attachments", index_name=None,
+        authorization=MOCK_AUTH
+    )
+
+    assert response.status_code == 400
+    assert response.body
+    content = response.body.decode()
+    assert '"message":"No valid files uploaded"' in content
+    assert '"detail":"No valid files uploaded"' in content
+    assert "parser unavailable" in content
+    assert "failed-file" in content
 
 
 @pytest.mark.asyncio
@@ -431,6 +450,7 @@ async def test_process_files_persists_submit_failure(monkeypatch):
     assert raised.value.detail == "queue unavailable"
     lifecycle_module.get_file_record.assert_called_once()
     lifecycle_module.transition_file_record.assert_called_once()
+    assert lifecycle_module.get_file_record.call_args.kwargs["tenant_id"] == "tenant1"
     assert lifecycle_module.transition_file_record.call_args.kwargs["error_code"] == "TASK_SUBMIT_FAILED"
 
 

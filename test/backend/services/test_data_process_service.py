@@ -669,7 +669,13 @@ class TestDataProcessService(unittest.TestCase):
                 'task1': {'id': 'task1', 'status': 'ACTIVE', 'index_name': 'index1', 'task_name': 'task_name1'},
                 'task2': {'id': 'task2', 'status': 'ACTIVE', 'index_name': 'index2', 'task_name': 'task_name2'},
                 'task3': {'id': 'task3', 'status': 'RESERVED', 'index_name': 'index3', 'task_name': 'task_name3'},
-                'task4': {'id': 'task4', 'status': 'SUCCESS', 'index_name': 'index4', 'task_name': 'task_name4'},
+                'task4': {
+                    'id': 'task4',
+                    'status': 'SUCCESS',
+                    'index_name': 'index4',
+                    'task_name': 'task_name4',
+                    'file_id': 'fid-result',
+                },
                 'task5': {'id': 'task5', 'status': 'FAILURE', 'index_name': None, 'task_name': None},
             }
             return task_data.get(task_id, {})
@@ -682,6 +688,7 @@ class TestDataProcessService(unittest.TestCase):
         # task1-task4 have index_name + task_name; task5 is filtered out
         self.assertEqual(len(result), 4)
         self.assertEqual(next(task for task in result if task['id'] == 'task1')['file_id'], 'fid-runtime')
+        self.assertEqual(next(task for task in result if task['id'] == 'task4')['file_id'], 'fid-result')
 
         # Get all tasks without filtering
         result = await self.service.get_all_tasks(filter=False)
