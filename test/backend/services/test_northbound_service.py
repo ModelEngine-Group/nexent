@@ -919,7 +919,13 @@ class TestStopChat:
 
         await ns.stop_chat(ctx=ctx, conversation_id=123, meta_data={"test": "data"})
 
-        token_db_mod.log_token_usage.assert_called()
+        token_db_mod.log_token_usage.assert_called_once_with(
+            token_id=1,
+            call_function_name="stop_chat_stream",
+            related_id=123,
+            created_by=ctx.user_id,
+            metadata={"test": "data"},
+        )
 
     async def test_stop_chat_no_token_id_no_logging(self):
         """Test that token usage is not logged when token_id is 0."""
@@ -1379,7 +1385,13 @@ class TestUpdateConversationTitle:
             meta_data={"source": "api"}
         )
 
-        token_db_mod.log_token_usage.assert_called()
+        token_db_mod.log_token_usage.assert_called_once_with(
+            token_id=1,
+            call_function_name="update_conversation_title",
+            related_id=123,
+            created_by=ctx.user_id,
+            metadata={"source": "api"},
+        )
 
     async def test_update_conversation_title_custom_idempotency_key(self):
         """Test that custom idempotency key is used when provided."""

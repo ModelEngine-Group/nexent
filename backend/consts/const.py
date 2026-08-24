@@ -506,6 +506,7 @@ MODEL_CONFIG_MAPPING = {
     "vlm": "VLM_ID",
     "vlm2": "VLM2_ID",
     "vlm3": "VLM3_ID",
+    "vlm4": "VLM4_ID",
     "stt": "STT_ID",
     "tts": "TTS_ID"
 }
@@ -714,6 +715,17 @@ NEXENT_SANDBOX_MEMORY_LIMIT_MB = int(os.getenv("NEXENT_SANDBOX_MEMORY_LIMIT_MB",
 NEXENT_SANDBOX_CPU_QUOTA = float(os.getenv("NEXENT_SANDBOX_CPU_QUOTA", "1.0"))
 
 NEXENT_SANDBOX_TIMEOUT_S = int(os.getenv("NEXENT_SANDBOX_TIMEOUT_S", "30"))
+
+_NEXENT_SANDBOX_HOST_TOOL_TIMEOUT_RAW = os.getenv(
+    "NEXENT_SANDBOX_HOST_TOOL_TIMEOUT_S", ""
+).strip()
+NEXENT_SANDBOX_HOST_TOOL_TIMEOUT_S = (
+    float(_NEXENT_SANDBOX_HOST_TOOL_TIMEOUT_RAW)
+    if _NEXENT_SANDBOX_HOST_TOOL_TIMEOUT_RAW
+    and float(_NEXENT_SANDBOX_HOST_TOOL_TIMEOUT_RAW) > 0
+    else None
+)
+"""Optional Runtime host-tool bridge timeout. Empty or non-positive disables it."""
 
 NEXENT_SANDBOX_NETWORK_DISABLED = (
     os.getenv("NEXENT_SANDBOX_NETWORK", "disabled").lower() == "disabled"

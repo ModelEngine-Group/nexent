@@ -71,6 +71,10 @@ const getModelData = (t: any) => ({
         id: MODEL_TYPES.VLM3,
         name: t("modelConfig.option.videoUnderstandingModel"),
       },
+      {
+        id: MODEL_TYPES.VLM4,
+        name: t("modelConfig.option.audioUnderstandingModel"),
+      },
     ],
   },
   voice: {
@@ -159,7 +163,7 @@ export const ModelConfigSection = forwardRef<
     llm: { main: "" },
     embedding: { embedding: "", multi_embedding: "" },
     reranker: { reranker: "" },
-    multimodal: { vlm: "", vlm2: "", vlm3: "" },
+    multimodal: { vlm: "", vlm2: "", vlm3: "", vlm4: "" },
     voice: { tts: "", stt: "" },
   });
 
@@ -308,6 +312,7 @@ export const ModelConfigSection = forwardRef<
       const vlm = modelConfig.vlm.displayName;
       const vlm2 = modelConfig.vlm2?.displayName || "";
       const vlm3 = modelConfig.vlm3?.displayName || "";
+      const vlm4 = modelConfig.vlm4?.displayName || "";
       const vlmExists = vlm
         ? allModels.some(
             (m) => m.displayName === vlm && m.type === MODEL_TYPES.VLM
@@ -321,6 +326,11 @@ export const ModelConfigSection = forwardRef<
       const vlm3Exists = vlm3
         ? allModels.some(
             (m) => m.displayName === vlm3 && m.type === MODEL_TYPES.VLM3
+          )
+        : true;
+      const vlm4Exists = vlm4
+        ? allModels.some(
+            (m) => m.displayName === vlm4 && m.type === MODEL_TYPES.VLM4
           )
         : true;
 
@@ -354,6 +364,7 @@ export const ModelConfigSection = forwardRef<
           vlm: vlmExists ? vlm : "",
           vlm2: vlm2Exists ? vlm2 : "",
           vlm3: vlm3Exists ? vlm3 : "",
+          vlm4: vlm4Exists ? vlm4 : "",
         },
         voice: {
           tts: ttsExists ? tts : "",
@@ -407,6 +418,10 @@ export const ModelConfigSection = forwardRef<
         configUpdates.vlm3 = { modelName: "", displayName: "" };
       }
 
+      if (!vlm4Exists && vlm4) {
+        configUpdates.vlm4 = { modelName: "", displayName: "" };
+      }
+
       if (!sttExists && stt) {
         configUpdates.stt = { modelName: "", displayName: "" };
       }
@@ -431,6 +446,7 @@ export const ModelConfigSection = forwardRef<
         !!modelConfig.vlm.modelName ||
         !!modelConfig.vlm2?.modelName ||
         !!modelConfig.vlm3?.modelName ||
+        !!modelConfig.vlm4?.modelName ||
         !!modelConfig.tts.modelName ||
         !!modelConfig.stt.modelName;
 
@@ -489,6 +505,7 @@ export const ModelConfigSection = forwardRef<
       const hasVlm = !!modelConfig.vlm.modelName;
       const hasVlm2 = !!modelConfig.vlm2?.modelName;
       const hasVlm3 = !!modelConfig.vlm3?.modelName;
+      const hasVlm4 = !!modelConfig.vlm4?.modelName;
       const hasTts = !!modelConfig.tts.modelName;
       const hasStt = !!modelConfig.stt.modelName;
 
@@ -499,6 +516,7 @@ export const ModelConfigSection = forwardRef<
         hasVlm ||
         hasVlm2 ||
         hasVlm3 ||
+        hasVlm4 ||
         hasTts ||
         hasStt;
 
@@ -514,6 +532,8 @@ export const ModelConfigSection = forwardRef<
           modelConfig.vlm2?.modelName || "";
         currentSelectedModels.multimodal.vlm3 =
           modelConfig.vlm3?.modelName || "";
+        currentSelectedModels.multimodal.vlm4 =
+          modelConfig.vlm4?.modelName || "";
         currentSelectedModels.voice.tts = modelConfig.tts.modelName;
         currentSelectedModels.voice.stt = modelConfig.stt.modelName;
       } else {

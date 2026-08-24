@@ -33,6 +33,7 @@ export type ModelType =
   | "vlm"
   | "vlm2"
   | "vlm3"
+  | "vlm4"
   | "multi_embedding";
 
 // Model option interface
@@ -163,6 +164,7 @@ export interface ModelConfig {
   vlm: SingleModelConfig;
   vlm2: SingleModelConfig;
   vlm3: SingleModelConfig;
+  vlm4: SingleModelConfig;
   stt: STTModelConfig;
   tts: TTSModelConfig;
 }

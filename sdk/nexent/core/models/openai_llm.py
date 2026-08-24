@@ -32,7 +32,7 @@ from .prompt_cache import (
     extract_prompt_cache_usage,
     resolve_prompt_cache_profile,
 )
-from .message_utils import prepare_messages_for_smolagents_text_flattening
+from .message_utils import content_has_multimodal_blocks, prepare_messages_for_smolagents_text_flattening
 
 logger = logging.getLogger("openai_llm")
 
@@ -229,8 +229,12 @@ class OpenAIModel(OpenAIServerModel):
                 **{f"llm.param.{k}": v for k, v in kwargs.items() if isinstance(v, (str, int, float, bool))}
             )
 
+        has_media = any(
+            content_has_multimodal_blocks(getattr(m, "content", None))
+            for m in normalized_messages
+        )
         flatten_messages_as_text = (
-            self.model_factory == "modelengine"
+            self.model_factory == "modelengine" and not has_media
             if self.flatten_messages_as_text is None
             else self.flatten_messages_as_text
         )

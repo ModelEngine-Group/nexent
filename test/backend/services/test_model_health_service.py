@@ -253,9 +253,42 @@ async def test_perform_connectivity_check_vlm():
         assert result is True
         mock_build.assert_called_once_with(
             {"base_url": "https://api.openai.com", "api_key": "test-key",
-             "ssl_verify": True},
+             "ssl_verify": True, "model_factory": None},
             "vlm", "vlm", None, model_name="gpt-4-vision",
             observer=mock_observer_instance, display_name=None,
+        )
+        mock_adapter.health_check.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_perform_connectivity_check_vlm4_modelengine_passes_factory_and_slot():
+    with mock.patch("backend.services.model_health_service.MessageObserver") as mock_observer, \
+            mock.patch("backend.services.model_health_service.build_adapter_fresh") as mock_build:
+        mock_observer_instance = mock.MagicMock()
+        mock_observer.return_value = mock_observer_instance
+
+        mock_adapter = mock.MagicMock()
+        mock_adapter.health_check = mock.AsyncMock(return_value=True)
+        mock_build.return_value = mock_adapter
+
+        result = await _perform_connectivity_check(
+            "me-asr",
+            "vlm4",
+            "http://192.168.1.10:8080/open/router/v1",
+            "test-key",
+            model_factory="modelengine",
+            display_name="ME-ASR",
+        )
+
+        assert result is True
+        # model_factory must reach build_adapter_fresh so the ModelEngineVLMAdapter
+        # is selected, and slot must be vlm4 so audio capabilities are derived.
+        mock_build.assert_called_once_with(
+            {"base_url": "http://192.168.1.10:8080/open/router/v1",
+             "api_key": "test-key", "ssl_verify": True,
+             "model_factory": "modelengine"},
+            "vlm", "vlm4", None, model_name="me-asr",
+            observer=mock_observer_instance, display_name="ME-ASR",
         )
         mock_adapter.health_check.assert_called_once()
 

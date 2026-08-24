@@ -6,7 +6,8 @@ export const TOOLS_REQUIRING_KB_SELECTION = [
 ];
 export const TOOLS_REQUIRING_EMBEDDING = ["knowledge_base_search"];
 export const TOOLS_REQUIRING_IMAGE_UNDERSTANDING = ["analyze_image"];
-export const TOOLS_REQUIRING_VIDEO_UNDERSTANDING = ["analyze_audio", "analyze_video"];
+export const TOOLS_REQUIRING_AUDIO_UNDERSTANDING = ["analyze_audio"];
+export const TOOLS_REQUIRING_VIDEO_UNDERSTANDING = ["analyze_video"];
 
 export function getToolKbType(name: string) {
   if (!TOOLS_REQUIRING_KB_SELECTION.includes(name)) return null;
