@@ -3387,6 +3387,7 @@ def test_call_forwards_metadata_to_sub_agent_run():
     """__call__ must exclude metadata from the template state and pass it via additional_args."""
     module = TestRunStreamRealExecution()._load_core_agent_in_isolation()
     agent = module.CoreAgent.__new__(module.CoreAgent)
+    agent.workspace_path = None
     agent.max_steps = 3
     agent.state = {"metadata": {"session": "abc"}, "region": "cn"}
     agent.memory = MagicMock()
