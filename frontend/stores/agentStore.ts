@@ -1,5 +1,6 @@
 import { create } from "zustand";
 
+import { safeStringify } from "@/lib/utils";
 import {
   searchToolConfig,
   updateAgentInfo,
@@ -352,11 +353,13 @@ const areToolParamsEqual = (left: Tool, right: Tool): boolean => {
   const rightKeys = Object.keys(rightParams).sort();
 
   if (leftKeys.length !== rightKeys.length) return false;
-  return leftKeys.every(
-    (key, index) =>
-      key === rightKeys[index] &&
-      JSON.stringify(leftParams[key]) === JSON.stringify(rightParams[key])
-  );
+  return leftKeys.every((key, index) => {
+    if (key !== rightKeys[index]) return false;
+
+    const leftValue = safeStringify(leftParams[key]);
+    const rightValue = safeStringify(rightParams[key]);
+    return leftValue !== null && leftValue === rightValue;
+  });
 };
 
 async function persistToolChanges(
