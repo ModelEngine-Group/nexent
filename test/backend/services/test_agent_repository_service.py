@@ -2100,3 +2100,125 @@ async def test_import_agent_from_repository_skips_increment_on_import_failure():
             )
 
     mock_increment.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_import_agent_from_repository_skip_duplicates_with_skills():
+    record = {
+        **_repository_record(agent_repository_id=42, agent_id=10, status="shared"),
+        "agent_info_json": {
+            "agent_id": 10,
+            "agent_info": {"10": {"name": "agent_one"}},
+            "mcp_info": [],
+            "skills": [
+                {"skill_name": "duplicate_skill", "skill_zip_base64": "ZmFrZQ=="}
+            ],
+        },
+    }
+
+    with patch.object(
+        ars,
+        "get_agent_repository_by_id",
+        return_value=record,
+    ), patch.object(
+        ars,
+        "import_agent_with_skills_impl",
+        new_callable=AsyncMock,
+    ) as mock_with_skills, patch.object(
+        ars,
+        "import_agent_impl",
+        new_callable=AsyncMock,
+        return_value={1: 100},
+    ) as mock_import, patch.object(
+        ars,
+        "increment_agent_repository_downloads",
+        return_value=1,
+    ):
+        result = await ars.import_agent_from_repository_impl(
+            agent_repository_id=42,
+            tenant_id="tenant_a",
+            authorization="Bearer token",
+            skip_duplicates=True,
+        )
+
+    mock_with_skills.assert_not_called()
+    mock_import.assert_called_once()
+    assert result == {1: 100}
+
+
+@pytest.mark.asyncio
+async def test_import_agent_from_repository_with_skills_no_skip():
+    record = {
+        **_repository_record(agent_repository_id=42, agent_id=10, status="shared"),
+        "agent_info_json": {
+            "agent_id": 10,
+            "agent_info": {"10": {"name": "agent_one"}},
+            "mcp_info": [],
+            "skills": [
+                {"skill_name": "skill_a", "skill_zip_base64": "ZmFrZQ=="}
+            ],
+        },
+    }
+
+    with patch.object(
+        ars,
+        "get_agent_repository_by_id",
+        return_value=record,
+    ), patch.object(
+        ars,
+        "import_agent_with_skills_impl",
+        new_callable=AsyncMock,
+        return_value={1: 100},
+    ) as mock_with_skills, patch.object(
+        ars,
+        "import_agent_impl",
+        new_callable=AsyncMock,
+    ) as mock_import, patch.object(
+        ars,
+        "increment_agent_repository_downloads",
+        return_value=1,
+    ):
+        result = await ars.import_agent_from_repository_impl(
+            agent_repository_id=42,
+            tenant_id="tenant_a",
+            authorization="Bearer token",
+        )
+
+    mock_with_skills.assert_called_once()
+    mock_import.assert_not_called()
+    assert result == {1: 100}
+
+
+@pytest.mark.asyncio
+async def test_import_agent_from_repository_increment_downloads_zero():
+    record = {
+        **_repository_record(agent_repository_id=42, agent_id=10, status="shared"),
+        "agent_info_json": {
+            "agent_id": 10,
+            "agent_info": {"10": {"name": "agent_one"}},
+            "mcp_info": [],
+        },
+    }
+
+    with patch.object(
+        ars,
+        "get_agent_repository_by_id",
+        return_value=record,
+    ), patch.object(
+        ars,
+        "import_agent_impl",
+        new_callable=AsyncMock,
+        return_value={1: 100},
+    ), patch.object(
+        ars,
+        "increment_agent_repository_downloads",
+        return_value=0,
+    ) as mock_increment:
+        result = await ars.import_agent_from_repository_impl(
+            agent_repository_id=42,
+            tenant_id="tenant_a",
+            authorization="Bearer token",
+        )
+
+    mock_increment.assert_called_once_with(42)
+    assert result == {1: 100}
