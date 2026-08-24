@@ -3,9 +3,7 @@ import { API_ENDPOINTS, ApiError } from "./api";
 import { chatConfig } from "@/const/chatConfig";
 import type {
   ConversationListResponse,
-  ConversationListMetadata,
-  ConversationListMetadataResponse,
-  ConversationListItem,
+  ConversationListPage,
   ConversationListParams,
   ApiConversationDetail,
   ApiConversationResponse,
@@ -33,29 +31,18 @@ const getWebSocketUrl = (endpoint: string): string => {
 };
 
 export const conversationService = {
-  async getListMetadata(
-    todayStartMs: number,
-    weekStartMs: number
-  ): Promise<ConversationListMetadata> {
-    const query = new URLSearchParams({
-      today_start_ms: String(todayStartMs),
-      week_start_ms: String(weekStartMs),
-    });
-    const response = await fetch(
-      `${API_ENDPOINTS.conversation.listMetadata}?${query.toString()}`
-    );
-    const data = (await response.json()) as ConversationListMetadataResponse;
-    if (data.code === 0) return data.data;
-    throw new ApiError(data.code, data.message);
-  },
-
   // Get conversation list
   async getList(
-    params: ConversationListParams
-  ): Promise<ConversationListItem[]> {
+    params: ConversationListParams & {
+      todayStartMs: number;
+      weekStartMs: number;
+    }
+  ): Promise<ConversationListPage> {
     const query = new URLSearchParams({
       offset: String(params.offset),
       limit: String(params.limit),
+      today_start_ms: String(params.todayStartMs),
+      week_start_ms: String(params.weekStartMs),
     });
     const response = await fetch(
       `${API_ENDPOINTS.conversation.list}?${query.toString()}`
@@ -64,7 +51,7 @@ export const conversationService = {
     const data = (await response.json()) as ConversationListResponse;
 
     if (data.code === 0) {
-      return data.data || [];
+      return data.data;
     }
 
     throw new ApiError(data.code, data.message);

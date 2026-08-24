@@ -4,8 +4,24 @@ import test from "node:test";
 import {
   calculateConversationViewport,
   ConversationViewportCoordinator,
-  // @ts-ignore -- Node requires the extension for this standalone test.
+  getConversationViewportGroupCounts,
+  // @ts-expect-error -- Node requires the extension for this standalone test.
 } from "../lib/conversationViewport.ts";
+
+test("requests enough rows to fill the viewport before metadata is loaded", () => {
+  const groupCounts = getConversationViewportGroupCounts();
+  const result = calculateConversationViewport({
+    containerHeight: 500,
+    rowHeight: 40,
+    groupHeaderHeight: 28,
+    groupGap: 16,
+    contentPadding: 16,
+    groupCounts,
+  });
+
+  assert.deepEqual(groupCounts, [100, 0, 0]);
+  assert.equal(result.initialLimit, 12);
+});
 
 test("calculates the exact initial rows and total virtual height", () => {
   const result = calculateConversationViewport({

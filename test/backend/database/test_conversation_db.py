@@ -213,7 +213,7 @@ from backend.database.conversation_db import (
     get_conversation_history,
     get_historical_context,
     get_conversation_list,
-    get_conversation_list_metadata,
+    get_conversation_list_page,
     get_conversation_messages,
     get_last_unit_for_message,
     get_latest_assistant_message,
@@ -1553,10 +1553,15 @@ def test_get_conversation_list_applies_offset_without_limit(monkeypatch, mock_se
     session.execute.assert_called_once_with(stmt)
 
 
-def test_get_conversation_list_metadata_returns_bucket_counts(monkeypatch, mock_session_ctx):
+def test_get_conversation_list_page_returns_rows_and_metadata_from_one_query(
+    monkeypatch, mock_session_ctx
+):
     session, ctx = mock_session_ctx
 
     class ComparableTimestamp:
+        def label(self, _name):
+            return self
+
         def __ge__(self, _value):
             return MagicMock()
 
@@ -1570,19 +1575,44 @@ def test_get_conversation_list_metadata_returns_bucket_counts(monkeypatch, mock_
         "return_value",
         ComparableTimestamp(),
     )
-    session.execute.return_value.one.return_value = types.SimpleNamespace(
-        total=30,
-        today=3,
-        last_7_days=7,
-        older=20,
-    )
+    session.execute.return_value = [
+        types.SimpleNamespace(
+            conversation_id=2,
+            conversation_title="Second",
+            agent_id=22,
+            chat_mode="execution",
+            create_time=2000,
+            update_time=2100,
+            total=30,
+            today=3,
+            last_7_days=7,
+            older=20,
+        )
+    ]
     monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
 
-    result = get_conversation_list_metadata(
-        "user-1", today_start_ms=2000, week_start_ms=1000
+    result = get_conversation_list_page(
+        "user-1",
+        today_start_ms=2000,
+        week_start_ms=1000,
+        limit=10,
+        offset=0,
     )
 
-    assert result == {"total": 30, "today": 3, "last_7_days": 7, "older": 20}
+    assert result == {
+        "items": [
+            {
+                "conversation_id": 2,
+                "conversation_title": "Second",
+                "agent_id": 22,
+                "chat_mode": "execution",
+                "create_time": 2000,
+                "update_time": 2100,
+            }
+        ],
+        "metadata": {"total": 30, "today": 3, "last_7_days": 7, "older": 20},
+    }
+    session.execute.assert_called_once()
 
 
 def test_update_conversation_agent_id_success(monkeypatch, mock_session_ctx):

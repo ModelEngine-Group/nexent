@@ -1198,13 +1198,13 @@ class TestElasticSearchService(unittest.TestCase):
 
         result = ElasticSearchService.list_indices(
             pattern="*", include_stats=True, target_tenant_id="test_tenant", user_id="test_user",
-            vdb_core=self.mock_vdb_core, offset=1, limit=1,
+            vdb_core=self.mock_vdb_core, pagination_enabled=True, offset=1, limit=1,
         )
 
         self.assertEqual(result["indices"], ["kb-2"])
         self.assertEqual(result["count"], 1)
         self.assertEqual(result["total"], 3)
-        self.assertTrue(result["has_more"])
+        self.assertNotIn("has_more", result)
         self.assertEqual(result["next_offset"], 2)
         self.assertEqual(result["estimated_item_heights"], None)
         self.assertEqual(result["facets"]["sources"], ["elasticsearch"])
@@ -8770,3 +8770,41 @@ def test_get_embedding_model_returns_none_when_lookup_raises(monkeypatch):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+def test_merge_paginated_indices_uses_ordered_service_merge():
+    primary = {
+        "indices": ["tenant-new", "tenant-old"],
+        "indices_info": [
+            {"name": "tenant-new", "update_time": "2026-08-24T10:00:00", "knowledge_id": 3},
+            {"name": "tenant-old", "update_time": "2026-08-24T08:00:00", "knowledge_id": 1},
+        ],
+        "total": 2,
+        "facets": {"sources": ["elasticsearch"], "models": ["model-a"]},
+    }
+    asset_owner = {
+        "indices": ["asset-middle"],
+        "indices_info": [
+            {
+                "name": "asset-middle",
+                "update_time": "2026-08-24T09:00:00",
+                "knowledge_id": 2,
+                "permission": "EDIT",
+            }
+        ],
+        "total": 1,
+        "facets": {"sources": ["elasticsearch"], "models": ["model-b"]},
+    }
+
+    result = ElasticSearchService.merge_paginated_list_indices_results(
+        primary,
+        asset_owner,
+        offset=0,
+        limit=2,
+    )
+
+    assert result["indices"] == ["tenant-new", "asset-middle"]
+    assert result["indices_info"][1]["permission"] == "READ_ONLY"
+    assert result["total"] == 3
+    assert result["next_offset"] == 2
+    assert "has_more" not in result

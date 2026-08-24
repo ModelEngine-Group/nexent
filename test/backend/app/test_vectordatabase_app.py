@@ -679,7 +679,7 @@ async def test_get_list_indices_passes_pagination_and_filters(vdb_core_mock, aut
             patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
             patch("backend.apps.vectordatabase_app.ElasticSearchService.list_indices") as mock_list:
         mock_list.return_value = {
-            "indices": [], "count": 0, "total": 0, "has_more": False,
+            "indices": [], "count": 0, "total": 0,
             "next_offset": None, "facets": {"sources": [], "models": []},
             "estimated_row_height": 112, "estimated_item_heights": None,
         }
@@ -695,6 +695,7 @@ async def test_get_list_indices_passes_pagination_and_filters(vdb_core_mock, aut
 
         assert response.status_code == 200
         assert mock_list.call_args.kwargs == {
+            "pagination_enabled": True,
             "offset": 10,
             "limit": 10,
             "keyword": "medical",

@@ -14,13 +14,12 @@ from consts.model import (
     RenameRequest,
 )
 from consts.exceptions import ConversationNotFoundError, ValidationError
+from database.conversation_db import get_conversation_list_page
 from services.conversation_management_service import (
     create_new_conversation,
     delete_conversation_service,
     generate_conversation_title_service,
     get_conversation_history_service,
-    get_conversation_list_service,
-    get_conversation_list_metadata_service,
     get_sources_service,
     rename_conversation_service,
     update_conversation_knowledge_scope_service,
@@ -59,6 +58,8 @@ async def create_new_conversation_endpoint(request: ConversationRequest, authori
 
 @router.get("/list", response_model=ConversationResponse)
 async def list_conversations_endpoint(
+    today_start_ms: Annotated[int, Query(ge=0)],
+    week_start_ms: Annotated[int, Query(ge=0)],
     authorization: Optional[str] = Header(None),
     offset: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[Optional[int], Query(ge=1, le=100)] = None,
@@ -76,34 +77,19 @@ async def list_conversations_endpoint(
         user_id, tenant_id = get_current_user_id(authorization)
         if not user_id:
             raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Unauthorized access, Please login first")
-        conversations = get_conversation_list_service(
-            user_id,
+        conversations = get_conversation_list_page(
+            user_id=user_id,
+            today_start_ms=today_start_ms,
+            week_start_ms=week_start_ms,
             limit=limit,
             offset=offset,
         )
         return ConversationResponse(code=0, message="success", data=conversations)
+    except HTTPException:
+        raise
     except Exception as e:
         logging.error(f"Failed to get conversation list: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
-
-
-@router.get("/list/metadata", response_model=ConversationResponse)
-async def conversation_list_metadata_endpoint(
-    today_start_ms: Annotated[int, Query(ge=0)],
-    week_start_ms: Annotated[int, Query(ge=0)],
-    authorization: Optional[str] = Header(None),
-):
-    """Return list size and date bucket counts without conversation rows."""
-    user_id, _tenant_id = get_current_user_id(authorization)
-    if not user_id:
-        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Unauthorized access, Please login first")
-    metadata = get_conversation_list_metadata_service(
-        user_id,
-        today_start_ms=today_start_ms,
-        week_start_ms=week_start_ms,
-    )
-    return ConversationResponse(code=0, message="success", data=metadata)
-
 
 @router.post("/rename", response_model=ConversationResponse)
 async def rename_conversation_endpoint(request: RenameRequest, authorization: Optional[str] = Header(None)):

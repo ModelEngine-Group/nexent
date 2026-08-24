@@ -788,33 +788,60 @@ def get_conversation_list(
         return result
 
 
-def get_conversation_list_metadata(
+def get_conversation_list_page(
     user_id: str,
     today_start_ms: int,
     week_start_ms: int,
-) -> Dict[str, int]:
-    """Return conversation counts for the browser's recency buckets."""
+    limit: Optional[int] = None,
+    offset: int = 0,
+) -> Dict[str, Any]:
+    """Return one conversation page and its bucket counts in one query."""
     with get_db_session() as session:
         created_ms = func.extract('epoch', ConversationRecord.create_time) * 1000
         stmt = select(
-            func.count().label('total'),
-            func.count().filter(created_ms >= today_start_ms).label('today'),
+            ConversationRecord.conversation_id,
+            ConversationRecord.conversation_title,
+            ConversationRecord.agent_id,
+            ConversationRecord.chat_mode,
+            created_ms.label('create_time'),
+            (func.extract('epoch', ConversationRecord.update_time) * 1000).label('update_time'),
+            func.count().over().label('total'),
+            func.count().filter(created_ms >= today_start_ms).over().label('today'),
             func.count().filter(
                 created_ms < today_start_ms,
                 created_ms >= week_start_ms,
-            ).label('last_7_days'),
-            func.count().filter(created_ms < week_start_ms).label('older'),
+            ).over().label('last_7_days'),
+            func.count().filter(created_ms < week_start_ms).over().label('older'),
         ).where(
             ConversationRecord.delete_flag == 'N',
             ConversationRecord.created_by == user_id,
+        ).order_by(
+            desc(ConversationRecord.create_time),
+            desc(ConversationRecord.conversation_id),
         )
-        row = session.execute(stmt).one()
-        return {
-            'total': int(row.total or 0),
-            'today': int(row.today or 0),
-            'last_7_days': int(row.last_7_days or 0),
-            'older': int(row.older or 0),
+        if limit is not None:
+            stmt = stmt.limit(limit)
+        if offset:
+            stmt = stmt.offset(offset)
+
+        records = list(session.execute(stmt))
+        metadata = {
+            'total': int(records[0].total or 0) if records else 0,
+            'today': int(records[0].today or 0) if records else 0,
+            'last_7_days': int(records[0].last_7_days or 0) if records else 0,
+            'older': int(records[0].older or 0) if records else 0,
         }
+        items = []
+        for record in records:
+            items.append({
+                'conversation_id': record.conversation_id,
+                'conversation_title': record.conversation_title,
+                'agent_id': record.agent_id,
+                'chat_mode': record.chat_mode or 'execution',
+                'create_time': int(record.create_time),
+                'update_time': int(record.update_time),
+            })
+        return {'items': items, 'metadata': metadata}
 
 
 def update_conversation_agent_id(conversation_id: int, agent_id: int, user_id: Optional[str] = None) -> bool:

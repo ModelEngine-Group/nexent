@@ -852,10 +852,14 @@ class KnowledgeBaseService {
             headers: getAuthHeaders(),
           });
           const data = await response.json();
+          const hasMore =
+            typeof data.next_offset === "number" &&
+            typeof data.total === "number" &&
+            data.next_offset < data.total;
           paginationData = {
             total: data.total,
             pageCount: data.count,
-            hasMore: data.has_more,
+            hasMore,
             nextOffset: data.next_offset,
             facets: data.facets
               ? {

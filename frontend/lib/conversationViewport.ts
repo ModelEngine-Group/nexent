@@ -7,6 +7,18 @@ export interface ConversationListMetadata {
   older: number;
 }
 
+// Before metadata arrives, one group header requires the most rows to fill the
+// viewport. Extra real group headers only consume more height, so this avoids
+// leaving the initial page short without a separate metadata request.
+const UNKNOWN_CONVERSATION_GROUP_COUNTS = [100, 0, 0] as const;
+
+export const getConversationViewportGroupCounts = (
+  metadata?: ConversationListMetadata | null
+): readonly number[] =>
+  metadata
+    ? [metadata.today, metadata.last_7_days, metadata.older]
+    : UNKNOWN_CONVERSATION_GROUP_COUNTS;
+
 interface ConversationViewportInput {
   containerHeight: number;
   rowHeight: number;

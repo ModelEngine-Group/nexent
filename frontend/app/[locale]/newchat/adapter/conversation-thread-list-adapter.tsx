@@ -1303,17 +1303,10 @@ export const conversationThreadListAdapter: RemoteThreadListAdapter = {
   async list({ after } = {}): Promise<RemoteThreadListResponse> {
     if (after === undefined) {
       newChatConversationViewport.reset();
-      const { todayStartMs, weekStartMs } = getConversationDateBoundaries();
-      const metadata = await conversationService.getListMetadata(
-        todayStartMs,
-        weekStartMs
-      );
-      newChatConversationViewport.setMetadata(metadata);
-      return {
-        threads: [],
-        nextCursor: metadata.total > 0 ? "0" : undefined,
-      };
+      return { threads: [], nextCursor: "0" };
     }
+
+    const { todayStartMs, weekStartMs } = getConversationDateBoundaries();
     const offset = parseConversationListOffset(after);
     const limit =
       offset === 0
@@ -1322,13 +1315,16 @@ export const conversationThreadListAdapter: RemoteThreadListAdapter = {
     const data = await conversationService.getList({
       offset,
       limit,
+      todayStartMs,
+      weekStartMs,
     });
-    const total = newChatConversationViewport.getMetadata()?.total ?? 0;
-    const nextOffset = offset + data.length;
+    newChatConversationViewport.setMetadata(data.metadata);
+    const nextOffset = offset + data.items.length;
 
     return {
-      threads: data.map(toRemoteThreadMetadata),
-      nextCursor: nextOffset < total ? String(nextOffset) : undefined,
+      threads: data.items.map(toRemoteThreadMetadata),
+      nextCursor:
+        nextOffset < data.metadata.total ? String(nextOffset) : undefined,
     };
   },
 

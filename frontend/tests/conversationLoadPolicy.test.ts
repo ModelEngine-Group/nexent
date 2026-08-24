@@ -3,8 +3,9 @@ import test from "node:test";
 
 import {
   isConversationListNearBottom,
+  shouldContinueConversationPageLoading,
   shouldLoadNextConversationPage,
-  // @ts-ignore -- Node's built-in TypeScript runner needs the extension.
+  // @ts-expect-error -- Node's built-in TypeScript runner needs the extension.
 } from "../lib/conversationLoadPolicy.ts";
 
 test("does not load without downward user intent", () => {
@@ -31,4 +32,25 @@ test("loads once downward user intent reaches the bottom", () => {
   );
   assert.equal(isConversationListNearBottom(1000, 700, 220), true);
   assert.equal(isConversationListNearBottom(1000, 600, 220), false);
+});
+
+test("continues loading after a scrollbar jump only while pages make progress", () => {
+  assert.equal(
+    shouldContinueConversationPageLoading({
+      hasMore: true,
+      loadedBefore: 20,
+      loadedAfter: 40,
+      isNearLoadedBoundary: true,
+    }),
+    true
+  );
+  assert.equal(
+    shouldContinueConversationPageLoading({
+      hasMore: true,
+      loadedBefore: 40,
+      loadedAfter: 40,
+      isNearLoadedBoundary: true,
+    }),
+    false
+  );
 });

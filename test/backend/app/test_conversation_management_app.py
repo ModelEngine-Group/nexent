@@ -41,7 +41,6 @@ patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 from backend.apps.conversation_management_app import (
     create_new_conversation_endpoint,
     list_conversations_endpoint,
-    conversation_list_metadata_endpoint,
     rename_conversation_endpoint,
     delete_conversation_endpoint,
     get_conversation_history_endpoint,
@@ -62,7 +61,7 @@ def conversation_mocks():
     """Provide fresh mocks for each conversation management test"""
     with patch('backend.apps.conversation_management_app.get_current_user_id') as mock_get_current_user_id, \
             patch('backend.apps.conversation_management_app.create_new_conversation') as mock_create_new_conv, \
-            patch('backend.apps.conversation_management_app.get_conversation_list_service') as mock_get_conv_list, \
+            patch('backend.apps.conversation_management_app.get_conversation_list_page') as mock_get_conv_list, \
             patch('backend.apps.conversation_management_app.rename_conversation_service') as mock_rename_conv, \
             patch('backend.apps.conversation_management_app.logging') as mock_logging, \
             patch('backend.apps.conversation_management_app.delete_conversation_service') as mock_delete_conv, \
@@ -162,18 +161,31 @@ async def test_list_conversations_success(conversation_mocks):
 
     conversation_mocks['get_current_user_id'].return_value = (
         "user_id", "tenant_id")
-    conversation_mocks['get_conversation_list'].return_value = dummy_list
+    dummy_page = {
+        "items": dummy_list,
+        "metadata": {"total": 2, "today": 2, "last_7_days": 0, "older": 0},
+    }
+    conversation_mocks['get_conversation_list'].return_value = dummy_page
 
     # Act
-    result = await list_conversations_endpoint(authorization=mock_auth_header)
+    result = await list_conversations_endpoint(
+        today_start_ms=2000,
+        week_start_ms=1000,
+        authorization=mock_auth_header,
+    )
 
     # Assert
     assert result.code == 0
-    assert result.data == dummy_list
+    assert result.data == dummy_page
     conversation_mocks['get_current_user_id'].assert_called_once_with(
         mock_auth_header)
     conversation_mocks['get_conversation_list'].assert_called_once_with(
-        "user_id", limit=None, offset=0)
+        user_id="user_id",
+        today_start_ms=2000,
+        week_start_ms=1000,
+        limit=None,
+        offset=0,
+    )
 
 
 @pytest.mark.asyncio
@@ -185,6 +197,8 @@ async def test_list_conversations_forwards_pagination(conversation_mocks):
 
     result = await list_conversations_endpoint(
         authorization="Bearer test-token",
+        today_start_ms=2000,
+        week_start_ms=1000,
         limit=10,
         offset=20,
     )
@@ -192,7 +206,12 @@ async def test_list_conversations_forwards_pagination(conversation_mocks):
     assert result.code == 0
     assert result.data == []
     conversation_mocks['get_conversation_list'].assert_called_once_with(
-        "user_id", limit=10, offset=20)
+        user_id="user_id",
+        today_start_ms=2000,
+        week_start_ms=1000,
+        limit=10,
+        offset=20,
+    )
 
 
 @pytest.mark.asyncio
@@ -204,6 +223,8 @@ async def test_list_conversations_forwards_offset_without_limit(conversation_moc
 
     result = await list_conversations_endpoint(
         authorization="Bearer test-token",
+        today_start_ms=2000,
+        week_start_ms=1000,
         offset=20,
         limit=None,
     )
@@ -211,26 +232,11 @@ async def test_list_conversations_forwards_offset_without_limit(conversation_moc
     assert result.code == 0
     assert result.data == []
     conversation_mocks['get_conversation_list'].assert_called_once_with(
-        "user_id", limit=None, offset=20)
-
-
-@pytest.mark.asyncio
-async def test_conversation_list_metadata_endpoint(conversation_mocks):
-    conversation_mocks['get_current_user_id'].return_value = ("user_id", "tenant_id")
-    expected = {"total": 30, "today": 3, "last_7_days": 7, "older": 20}
-    with patch(
-        'backend.apps.conversation_management_app.get_conversation_list_metadata_service',
-        return_value=expected,
-    ) as metadata_service:
-        result = await conversation_list_metadata_endpoint(
-            today_start_ms=2000,
-            week_start_ms=1000,
-            authorization="Bearer test-token",
-        )
-
-    assert result.data == expected
-    metadata_service.assert_called_once_with(
-        "user_id", today_start_ms=2000, week_start_ms=1000
+        user_id="user_id",
+        today_start_ms=2000,
+        week_start_ms=1000,
+        limit=None,
+        offset=20,
     )
 
 
@@ -240,7 +246,9 @@ def test_list_conversations_rejects_invalid_pagination(query, conversation_mocks
     app = FastAPI()
     app.include_router(router)
 
-    response = TestClient(app).get(f"/conversation/list?{query}")
+    response = TestClient(app).get(
+        f"/conversation/list?today_start_ms=2000&week_start_ms=1000&{query}"
+    )
 
     assert response.status_code == 422
     conversation_mocks['get_conversation_list'].assert_not_called()
@@ -255,9 +263,13 @@ async def test_list_conversations_unauthorized(conversation_mocks):
 
     # Act / Assert
     with pytest.raises(HTTPException) as exc_info:
-        await list_conversations_endpoint(authorization=mock_auth_header)
+        await list_conversations_endpoint(
+            today_start_ms=2000,
+            week_start_ms=1000,
+            authorization=mock_auth_header,
+        )
 
-    assert exc_info.value.status_code == 500
+    assert exc_info.value.status_code == 401
     assert "Unauthorized access" in str(exc_info.value.detail)
 
 

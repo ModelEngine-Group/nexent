@@ -13,7 +13,7 @@ export interface ConversationListParams {
 
 export interface ConversationListResponse {
   code: number;
-  data: ConversationListItem[];
+  data: ConversationListPage;
   message: string;
 }
 
@@ -24,10 +24,9 @@ export interface ConversationListMetadata {
   older: number;
 }
 
-export interface ConversationListMetadataResponse {
-  code: number;
-  data: ConversationListMetadata;
-  message: string;
+export interface ConversationListPage {
+  items: ConversationListItem[];
+  metadata: ConversationListMetadata;
 }
 
 export interface ApiMessageItem {

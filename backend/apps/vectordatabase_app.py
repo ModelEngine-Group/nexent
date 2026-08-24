@@ -7,7 +7,7 @@ from fastapi import APIRouter, Body, Depends, Header, HTTPException, Path, Query
 from fastapi.responses import JSONResponse
 import re
 
-from consts.const import ASSET_OWNER_TENANT_ID, PERMISSION_READ
+from consts.const import ASSET_OWNER_TENANT_ID
 from consts.error_code import ErrorCode
 from consts.exceptions import (
     AppException,
@@ -408,87 +408,6 @@ def update_embedding_model(
         )
 
 
-def _apply_read_only_to_asset_indices_info(asset_result: Dict[str, Any]) -> Dict[str, Any]:
-    """Force READ_ONLY permission on asset-owner indices_info before merge."""
-    indices_info = asset_result.get("indices_info")
-    if not indices_info:
-        return asset_result
-    normalized = dict(asset_result)
-    normalized["indices_info"] = [
-        {**info, "permission": PERMISSION_READ} for info in indices_info
-    ]
-    return normalized
-
-
-def _merge_list_indices_results(
-        primary: Dict[str, Any],
-        asset_owner: Dict[str, Any],
-) -> Dict[str, Any]:
-    """Merge tenant and ASSET_OWNER list_indices responses (concat, no dedup)."""
-    merged_indices = primary.get("indices", []) + \
-        asset_owner.get("indices", [])
-    merged: Dict[str, Any] = {
-        "indices": merged_indices,
-        "count": len(merged_indices),
-    }
-    if "indices_info" in primary or "indices_info" in asset_owner:
-        merged["indices_info"] = (
-            primary.get("indices_info", []) +
-            asset_owner.get("indices_info", [])
-        )
-    return merged
-
-
-def _merge_paginated_list_indices_results(
-        primary: Dict[str, Any],
-        asset_owner: Dict[str, Any],
-        offset: int,
-        limit: int,
-) -> Dict[str, Any]:
-    """Merge two independently ordered prefixes and return one global page."""
-    asset_owner = _apply_read_only_to_asset_indices_info(asset_owner)
-    combined_info = primary.get("indices_info", []) + asset_owner.get("indices_info", [])
-    combined_info.sort(
-        key=lambda item: (
-            str(item.get("update_time") or ""),
-            str(item.get("knowledge_id") or "").zfill(20),
-            str(item.get("name") or ""),
-        ),
-        reverse=True,
-    )
-    page_info = combined_info[offset:offset + limit]
-    combined_indices = primary.get("indices", []) + asset_owner.get("indices", [])
-    page_indices = (
-        [item["name"] for item in page_info]
-        if combined_info
-        else combined_indices[offset:offset + limit]
-    )
-    total = int(primary.get("total", primary.get("count", 0))) + int(
-        asset_owner.get("total", asset_owner.get("count", 0))
-    )
-    next_offset = offset + len(page_indices)
-    source_facets = set(primary.get("facets", {}).get("sources", []))
-    source_facets.update(asset_owner.get("facets", {}).get("sources", []))
-    model_facets = set(primary.get("facets", {}).get("models", []))
-    model_facets.update(asset_owner.get("facets", {}).get("models", []))
-    result = {
-        "indices": page_indices,
-        "count": len(page_indices),
-        "total": total,
-        "has_more": next_offset < total,
-        "next_offset": next_offset if next_offset < total else None,
-        "facets": {
-            "sources": sorted(source_facets),
-            "models": sorted(model_facets),
-        },
-        "estimated_row_height": 112,
-        "estimated_item_heights": None,
-    }
-    if "indices_info" in primary or "indices_info" in asset_owner:
-        result["indices_info"] = page_info
-    return result
-
-
 @router.get("")
 def get_list_indices(
         pattern: str = Query("*", description="Pattern to match index names"),
@@ -507,9 +426,11 @@ def get_list_indices(
     """List all user indices with optional stats"""
     try:
         user_id, auth_tenant_id = get_current_user_id(authorization)
+        pagination_enabled = limit is not None
         pagination_args = {}
         if limit is not None or keyword or sources or models:
             pagination_args = {
+                "pagination_enabled": pagination_enabled,
                 "offset": offset,
                 "limit": limit,
                 "keyword": keyword,
@@ -521,13 +442,15 @@ def get_list_indices(
                 prefix_limit = offset + limit
                 result = ElasticSearchService.list_indices(
                     pattern, include_stats, auth_tenant_id, user_id, vdb_core,
-                    offset=0, limit=prefix_limit, keyword=keyword, sources=sources, models=models,
+                    pagination_enabled=True, offset=0, limit=prefix_limit,
+                    keyword=keyword, sources=sources, models=models,
                 )
                 asset_result = ElasticSearchService.list_indices(
                     pattern, include_stats, ASSET_OWNER_TENANT_ID, user_id, vdb_core,
-                    offset=0, limit=prefix_limit, keyword=keyword, sources=sources, models=models,
+                    pagination_enabled=True, offset=0, limit=prefix_limit,
+                    keyword=keyword, sources=sources, models=models,
                 )
-                return _merge_paginated_list_indices_results(
+                return ElasticSearchService.merge_paginated_list_indices_results(
                     result, asset_result, offset, limit
                 )
             result = ElasticSearchService.list_indices(
@@ -537,9 +460,9 @@ def get_list_indices(
                 asset_result = ElasticSearchService.list_indices(
                     pattern, include_stats, ASSET_OWNER_TENANT_ID, user_id, vdb_core, **pagination_args
                 )
-                asset_result = _apply_read_only_to_asset_indices_info(
-                    asset_result)
-                return _merge_list_indices_results(result, asset_result)
+                return ElasticSearchService.merge_list_indices_results(
+                    result, asset_result
+                )
             return result
         return ElasticSearchService.list_indices(
             pattern, include_stats, tenant_id, user_id, vdb_core, **pagination_args

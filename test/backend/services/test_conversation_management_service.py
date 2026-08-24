@@ -207,8 +207,6 @@ from backend.services.conversation_management_service import (
         update_conversation_title,
         create_new_conversation,
         get_conversation_service,
-        get_conversation_list_service,
-        get_conversation_list_metadata_service,
         rename_conversation_service,
         delete_conversation_service,
         get_conversation_history_service,
@@ -707,65 +705,6 @@ class TestConversationManagementService(unittest.TestCase):
     def test_update_conversation_chat_mode_service_rejects_invalid_mode(self):
         with self.assertRaisesRegex(ValueError, "Invalid chat_mode 'invalid'"):
             update_conversation_chat_mode_service(123, "invalid", self.user_id)
-
-    @patch('backend.services.conversation_management_service.get_conversation_list')
-    def test_get_conversation_list_service(self, mock_get_conversation_list):
-        # Setup
-        mock_conversations = [
-            {"conversation_id": 1, "title": "Chat 1", "create_time": "2023-04-01"},
-            {"conversation_id": 2, "title": "Chat 2", "create_time": "2023-04-02"}
-        ]
-        mock_get_conversation_list.return_value = mock_conversations
-
-        # Execute
-        result = get_conversation_list_service(self.user_id)
-
-        # Assert
-        self.assertEqual(len(result), 2)
-        self.assertEqual(result[0]["conversation_id"], 1)
-        self.assertEqual(result[1]["title"], "Chat 2")
-        mock_get_conversation_list.assert_called_once_with(self.user_id)
-
-    @patch('backend.services.conversation_management_service.get_conversation_list')
-    def test_get_conversation_list_service_forwards_pagination(self, mock_get_conversation_list):
-        mock_get_conversation_list.return_value = []
-
-        result = get_conversation_list_service(self.user_id, limit=10, offset=20)
-
-        self.assertEqual(result, [])
-        mock_get_conversation_list.assert_called_once_with(
-            self.user_id,
-            limit=10,
-            offset=20,
-        )
-
-    @patch('backend.services.conversation_management_service.get_conversation_list')
-    def test_get_conversation_list_service_forwards_offset_without_limit(self, mock_get_conversation_list):
-        mock_get_conversation_list.return_value = []
-
-        result = get_conversation_list_service(self.user_id, offset=20)
-
-        self.assertEqual(result, [])
-        mock_get_conversation_list.assert_called_once_with(
-            self.user_id,
-            limit=None,
-            offset=20,
-        )
-
-    @patch('backend.services.conversation_management_service.get_conversation_list_metadata')
-    def test_get_conversation_list_metadata_service(self, mock_get_metadata):
-        mock_get_metadata.return_value = {
-            "total": 30, "today": 3, "last_7_days": 7, "older": 20
-        }
-
-        result = get_conversation_list_metadata_service(
-            self.user_id, today_start_ms=2000, week_start_ms=1000
-        )
-
-        self.assertEqual(result["total"], 30)
-        mock_get_metadata.assert_called_once_with(
-            self.user_id, today_start_ms=2000, week_start_ms=1000
-        )
 
     @patch('backend.services.conversation_management_service.get_conversation')
     def test_get_conversation_service_preserves_authorization_scope(self, mock_get_conversation):
@@ -1445,20 +1384,6 @@ class TestCreateNewConversation(unittest.TestCase):
 
         with self.assertRaises(Exception) as ctx:
             create_new_conversation("Title", "user-1")
-        self.assertIn("DB error", str(ctx.exception))
-
-
-class TestGetConversationListService(unittest.TestCase):
-    """Test get_conversation_list_service function."""
-
-    @patch('backend.services.conversation_management_service.get_conversation_list')
-    def test_get_list_exception(self, mock_get):
-        """Should re-raise exception from database layer."""
-        mock_get.side_effect = Exception("DB error")
-        from backend.services.conversation_management_service import get_conversation_list_service
-
-        with self.assertRaises(Exception) as ctx:
-            get_conversation_list_service("user-1")
         self.assertIn("DB error", str(ctx.exception))
 
 

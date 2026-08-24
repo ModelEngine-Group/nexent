@@ -32,7 +32,10 @@ import {
   isConversationListNearBottom,
   shouldLoadNextConversationPage,
 } from "@/lib/conversationLoadPolicy";
-import { calculateConversationViewport } from "@/lib/conversationViewport";
+import {
+  calculateConversationViewport,
+  getConversationViewportGroupCounts,
+} from "@/lib/conversationViewport";
 
 // conversation status indicator component
 const ConversationStatusIndicator = ({
@@ -156,7 +159,7 @@ export function ChatSidebar({
 
   useEffect(() => {
     const metadata = conversationMetadata;
-    if (!metadata || collapsed) return;
+    if (collapsed) return;
     let cancelled = false;
     void document.fonts.ready.then(() => {
       requestAnimationFrame(() => {
@@ -177,7 +180,7 @@ export function ChatSidebar({
           groupHeaderHeight: nextHeaderHeight,
           groupGap: 16,
           contentPadding: 16,
-          groupCounts: [metadata.today, metadata.last_7_days, metadata.older],
+          groupCounts: getConversationViewportGroupCounts(metadata),
         });
         setRowHeight(nextRowHeight);
         setHeaderHeight(nextHeaderHeight);
