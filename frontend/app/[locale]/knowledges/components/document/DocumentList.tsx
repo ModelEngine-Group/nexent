@@ -845,16 +845,28 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
         >
           {showChunk ? (
             <div className="flex h-full min-h-0 flex-col px-8">
-              <DocumentChunk
-                knowledgeBaseName={knowledgeBaseName}
-                knowledgeBaseId={knowledgeBaseId || knowledgeBaseName}
-                documents={documents}
-                getFileIcon={getFileIcon}
-                currentEmbeddingModel={currentModel}
-                knowledgeBaseEmbeddingModel={knowledgeBaseModel}
-                onChunkCountChange={onChunkCountChange}
-                permission={permission}
-              />
+              <div className="min-h-0 flex-1">
+                <DocumentChunk
+                  knowledgeBaseName={knowledgeBaseName}
+                  knowledgeBaseId={knowledgeBaseId || knowledgeBaseName}
+                  documents={documents}
+                  getFileIcon={getFileIcon}
+                  currentEmbeddingModel={currentModel}
+                  knowledgeBaseEmbeddingModel={knowledgeBaseModel}
+                  onChunkCountChange={onChunkCountChange}
+                  permission={permission}
+                />
+              </div>
+              <div className="flex shrink-0 justify-end py-3">
+                <Button
+                  size="large"
+                  onClick={() => {
+                    setShowChunk(false);
+                  }}
+                >
+                  {t("common.back")}
+                </Button>
+              </div>
             </div>
           ) : showDetail ? (
             <div className="px-8 py-4 h-full flex flex-col">

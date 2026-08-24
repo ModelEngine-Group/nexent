@@ -196,6 +196,27 @@ def transition_file_record(
         return as_dict(row)
 
 
+def delete_file_record(
+    file_id: str,
+    *,
+    expected_statuses: Optional[Iterable[str]] = None,
+) -> bool:
+    """Physically delete a lifecycle row, returning whether a row was removed.
+
+    Deletion is idempotent: a concurrent request may remove the row first, in
+    which case ``False`` is returned and the caller can treat it as already
+    deleted.  Status filtering prevents a stale cleanup callback from
+    deleting a newly active row that reuses an object identity.
+    """
+    with get_db_session() as session:
+        query = session.query(KnowledgeFileLifecycle).filter(
+            KnowledgeFileLifecycle.file_id == file_id,
+        )
+        if expected_statuses:
+            query = query.filter(KnowledgeFileLifecycle.status.in_(tuple(expected_statuses)))
+        return bool(query.delete(synchronize_session=False))
+
+
 def create_delete_tombstone(
     *,
     tenant_id: str,

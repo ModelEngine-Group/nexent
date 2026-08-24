@@ -251,6 +251,30 @@ def test_transition_file_record_returns_none_for_stale_row(monkeypatch):
     assert row.version == 1
 
 
+def test_delete_file_record_physically_removes_matching_row(monkeypatch):
+    session = MagicMock()
+    query = session.query.return_value
+    query.filter.return_value = query
+    query.delete.return_value = 1
+    monkeypatch.setattr(lifecycle_db, "get_db_session", _session_context(session))
+
+    assert lifecycle_db.delete_file_record(
+        "fid-delete",
+        expected_statuses=("DELETE_REQUESTED", "DELETED"),
+    ) is True
+    query.delete.assert_called_once_with(synchronize_session=False)
+
+
+def test_delete_file_record_is_idempotent_when_row_is_missing(monkeypatch):
+    session = MagicMock()
+    query = session.query.return_value
+    query.filter.return_value = query
+    query.delete.return_value = 0
+    monkeypatch.setattr(lifecycle_db, "get_db_session", _session_context(session))
+
+    assert lifecycle_db.delete_file_record("fid-missing") is False
+
+
 def test_delete_tombstone_creates_and_finalizes_missing_row(monkeypatch):
     monkeypatch.setattr(lifecycle_db, "get_file_record", MagicMock(return_value=None))
     created = {"file_id": "fid-6", "status": "DELETE_REQUESTED"}

@@ -58,6 +58,7 @@ from database.knowledge_db import (
 from database.knowledge_storage_object_db import list_committed_storage_objects
 from database.knowledge_file_lifecycle_db import (
     create_delete_tombstone,
+    delete_file_record,
     get_file_record,
     list_file_records,
     transition_file_record,
@@ -2003,12 +2004,9 @@ class ElasticSearchService:
                 include_hidden=True,
             )
             if record:
-                transition_file_record(
+                delete_file_record(
                     record["file_id"],
-                    status="DELETED",
-                    stage="DELETE",
-                    deleted_at=datetime.utcnow(),
-                    updated_by=updated_by,
+                    expected_statuses=("DELETE_REQUESTED", "DELETED"),
                 )
         except Exception as lifecycle_exc:
             logger.warning(
@@ -2042,6 +2040,7 @@ class ElasticSearchService:
         )
 
         if current_status == "DELETED":
+            delete_file_record(file_id, expected_statuses=("DELETE_REQUESTED", "DELETED"))
             return {
                 "status": "success",
                 "scope": "full",
@@ -2076,24 +2075,19 @@ class ElasticSearchService:
                 else:
                     raise ValueError("Lifecycle file record could not be deleted")
 
-        if current_status != "DELETED":
-            deleted = transition_file_record(
-                file_id,
-                status="DELETED",
-                stage="DELETE",
-                expected_statuses=("DELETE_REQUESTED",),
-                deleted_at=datetime.utcnow(),
-                updated_by=requested_by,
+        deleted = delete_file_record(
+            file_id,
+            expected_statuses=("DELETE_REQUESTED", "DELETED"),
+        )
+        if not deleted:
+            latest = get_file_record(
+                file_id=file_id,
+                tenant_id=tenant_id,
+                index_name=index_name,
+                include_hidden=True,
             )
-            if deleted is None:
-                latest = get_file_record(
-                    file_id=file_id,
-                    tenant_id=tenant_id,
-                    index_name=index_name,
-                    include_hidden=True,
-                )
-                if not latest or str(latest.get("status") or "").upper() != "DELETED":
-                    raise ValueError("Lifecycle file record could not be finalized")
+            if latest is not None:
+                raise ValueError("Lifecycle file record could not be finalized")
 
         return {
             "status": "success",
