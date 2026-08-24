@@ -278,7 +278,8 @@ class StreamingChannelManager:
         """
         key = self.get_channel_key(conversation_id, user_id)
         async with self._lock:
-            if key not in self._channels:
+            existing = self._channels.get(key)
+            if existing is None or existing.is_completed:
                 self._channels[key] = StreamingChannel(
                     conversation_id=conversation_id,
                     user_id=user_id,
@@ -312,11 +313,19 @@ class StreamingChannelManager:
             status=status,
         )
 
-    async def remove_channel(self, conversation_id: int, user_id: str):
+    async def remove_channel(
+        self,
+        conversation_id: int,
+        user_id: str,
+        expected_channel: Optional[StreamingChannel] = None,
+    ):
         """Remove a channel from the manager."""
         key = self.get_channel_key(conversation_id, user_id)
         async with self._lock:
-            if key in self._channels:
+            current = self._channels.get(key)
+            if current is not None and (
+                expected_channel is None or current is expected_channel
+            ):
                 del self._channels[key]
                 logger.debug(f"Removed channel: {key}")
 
