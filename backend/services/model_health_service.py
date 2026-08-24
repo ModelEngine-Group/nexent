@@ -17,7 +17,6 @@ DASHSCOPE_MODEL_FACTORY = "dashscope"
 TOKENPONY_MODEL_FACTORY = "tokenpony"
 SILICONFLOW_MODEL_FACTORY = "silicon"
 PROVIDER_CATALOG_HEALTHCHECK_FACTORIES = {DASHSCOPE_MODEL_FACTORY, TOKENPONY_MODEL_FACTORY}
-PROVIDER_CATALOG_HEALTHCHECK_TYPES = {"vlm", "vlm2", "vlm3"}
 
 EMBEDDING_TYPES = {"embedding", "multi_embedding"}
 
@@ -195,17 +194,13 @@ async def _perform_connectivity_check(
             "rerank", "rerank", None, model_name=model_name,
         ).health_check()
     elif model_type in ("vlm", "vlm2", "vlm3", "vlm4"):
-        if (
-            model_type in PROVIDER_CATALOG_HEALTHCHECK_TYPES
-            and (model_factory or "").lower() in PROVIDER_CATALOG_HEALTHCHECK_FACTORIES
+        if await _provider_catalog_connectivity_check(
+            model_name=model_name,
+            model_type=model_type,
+            model_api_key=model_api_key,
+            model_factory=model_factory,
         ):
-            connectivity = await _provider_catalog_connectivity_check(
-                model_name=model_name,
-                model_type=model_type,
-                model_api_key=model_api_key,
-                model_factory=model_factory,
-            )
-            return connectivity
+            return True
 
         observer = MessageObserver()
         set_monitoring_operation("connectivity_check",
