@@ -9,9 +9,11 @@ from typing import List
 from smolagents.tools import Tool
 from pydantic import Field
 
+from ..utils.pydantic_utils import unwrap_field_info
 from ..utils.tools_common_message import ToolCategory
 
 logger = logging.getLogger("get_email_tool")
+
 
 class GetEmailTool(Tool):
     name = "get_email"
@@ -78,14 +80,14 @@ class GetEmailTool(Tool):
                  username: str=Field(description="IMAP Server Username"), 
                  password: str=Field(description="IMAP Server Password"), 
                  use_ssl: bool=Field(description="Use SSL", default=True),
-                 timeout: int = Field(description="Timeout", default=30)):
+                 timeout: int = Field(description="Timeout", default=30, ge=1)):
         super().__init__()
         self.imap_server = imap_server
         self.imap_port = imap_port
         self.username = username
         self.password = password
         self.use_ssl = use_ssl
-        self.timeout = timeout
+        self.timeout = max(1, int(unwrap_field_info(timeout) or 30))
 
     def _decode_subject(self, subject):
         """Decode email subject, fallback to utf-8 or latin1 for unknown encodings"""
