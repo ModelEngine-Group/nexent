@@ -12,6 +12,7 @@ from consts.error_code import ErrorCode
 from consts.exceptions import (
     AppException,
     DuplicateError,
+    TokenExpiredError,
 )
 from consts.model import ChunkCreateRequest, ChunkUpdateRequest, HybridSearchRequest, IndexingResponse
 from consts.scheduler import VALID_SUMMARY_FREQUENCIES, SUMMARY_FREQUENCY_OPTIONS_FOR_API
@@ -73,6 +74,9 @@ async def check_knowledge_base_exist(
 
         user_id, tenant_id = get_current_user_id(authorization)
         return check_knowledge_base_exist_impl(knowledge_name=knowledge_name, vdb_core=vdb_core, user_id=user_id, tenant_id=tenant_id)
+    except TokenExpiredError as e:
+        logger.error(f"Session expired: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logger.error(
             f"Error checking knowledge base existence for '{knowledge_name}': {str(e)}", exc_info=True)
@@ -134,6 +138,9 @@ def create_new_index(
     except (TypeError, ValueError) as e:
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
+    except TokenExpiredError as e:
+        logger.error(f"Session expired: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Error creating index: {str(e)}")
@@ -155,6 +162,9 @@ async def delete_index(
         return result
     except HTTPException:
         raise
+    except TokenExpiredError as e:
+        logger.error(f"Session expired: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logger.error(
             f"Error during API call to delete index '{index_name}': {str(e)}", exc_info=True)
@@ -213,6 +223,9 @@ async def update_index(
         )
     except HTTPException:
         raise
+    except TokenExpiredError as exc:
+        logger.error(f"Session expired: {str(exc)}", exc_info=True)
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
     except Exception as exc:
         logger.error(
             f"Error updating index '{index_name}': {str(exc)}", exc_info=True)
@@ -260,6 +273,9 @@ async def update_summary_frequency_endpoint(
             )
     except HTTPException:
         raise
+    except TokenExpiredError as exc:
+        logger.error(f"Session expired: {str(exc)}", exc_info=True)
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
     except Exception as exc:
         logger.exception("Error updating summary frequency")
         raise HTTPException(
@@ -347,6 +363,9 @@ def get_embedding_model_status(
 
     except HTTPException:
         raise
+    except TokenExpiredError as e:
+        logger.error(f"Session expired: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logger.error(
             f"Error getting embedding model status for '{index_name}': {e}", exc_info=True)
@@ -399,6 +418,9 @@ def update_embedding_model(
         )
     except HTTPException:
         raise
+    except TokenExpiredError as exc:
+        logger.error(f"Session expired: {str(exc)}", exc_info=True)
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
     except Exception as exc:
         logger.error(
             f"Error updating embedding model for '{index_name}': {exc}", exc_info=True)
@@ -467,6 +489,9 @@ def get_list_indices(
         return ElasticSearchService.list_indices(
             pattern, include_stats, tenant_id, user_id, vdb_core
         )
+    except TokenExpiredError as e:
+        logger.error(f"Session expired: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Error get index: {str(e)}")
@@ -555,6 +580,9 @@ def create_index_documents(
         raise
     except HTTPException:
         raise
+    except TokenExpiredError as e:
+        logger.error(f"Session expired: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         error_msg = str(e)
         logger.error(f"Error indexing documents: {error_msg}")
@@ -583,6 +611,9 @@ async def get_index_files(
         }
     except HTTPException:
         raise
+    except TokenExpiredError as e:
+        logger.error(f"Session expired: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         error_msg = str(e)
         logger.error(f"Error indexing documents: {error_msg}")
@@ -659,6 +690,9 @@ async def delete_documents(
         )
     except HTTPException:
         raise
+    except TokenExpiredError as e:
+        logger.error(f"Session expired: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
@@ -719,6 +753,9 @@ async def get_document_error_info(
         }
     except HTTPException:
         raise
+    except TokenExpiredError as e:
+        logger.error(f"Session expired: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logger.error(
             f"Error getting error info for document {path_or_url}: {str(e)}")
@@ -781,6 +818,9 @@ def get_index_chunks(
         )
     except HTTPException:
         raise
+    except TokenExpiredError as e:
+        logger.error(f"Session expired: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         error_msg = str(e)
         raise HTTPException(
@@ -814,6 +854,9 @@ def create_chunk(
         )
     except HTTPException:
         raise
+    except TokenExpiredError as exc:
+        logger.error(f"Session expired: {str(exc)}", exc_info=True)
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
     except Exception as exc:
         logger.error(
             "Error creating chunk for index %s: %s", index_name, exc, exc_info=True
@@ -853,6 +896,9 @@ def update_chunk(
         )
     except HTTPException:
         raise
+    except TokenExpiredError as exc:
+        logger.error(f"Session expired: {str(exc)}", exc_info=True)
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
     except Exception as exc:
         logger.error(
             "Error updating chunk %s for index %s: %s",
@@ -891,6 +937,9 @@ def delete_chunk(
         )
     except HTTPException:
         raise
+    except TokenExpiredError as exc:
+        logger.error(f"Session expired: {str(exc)}", exc_info=True)
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
     except Exception as exc:
         logger.error(
             "Error deleting chunk %s for index %s: %s",
@@ -953,6 +1002,9 @@ async def hybrid_search(
     except HTTPException:
         # Re-raise HTTP exceptions (e.g. 403 from permission check) as-is
         raise
+    except TokenExpiredError as exc:
+        logger.error(f"Session expired: {str(exc)}", exc_info=True)
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
     except Exception as exc:
         logger.error(f"Hybrid search failed: {exc}", exc_info=True)
         raise HTTPException(

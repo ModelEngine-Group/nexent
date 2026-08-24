@@ -13,6 +13,7 @@ import {
 } from "@/types/modelConfig";
 
 import { getAuthHeaders } from "@/lib/auth";
+import { handleSessionExpired } from "@/lib/session";
 import { STATUS_CODES } from "@/const/auth";
 import {
   MODEL_TYPES,
@@ -154,6 +155,10 @@ export const modelService = {
       });
       const result = await response.json();
 
+      if (response.status === 401) {
+        handleSessionExpired();
+        return [];
+      }
       if (response.status === STATUS_CODES.SUCCESS && result.data) {
         return result.data.map((model: any) => ({
           id: model.model_id,
@@ -257,6 +262,10 @@ export const modelService = {
 
       const result = await response.json();
 
+      if (response.status === 401) {
+        handleSessionExpired();
+        throw new ModelError("Session expired, please log in again", 401);
+      }
       if (response.status !== 200) {
         throw new ModelError(
           result.detail || result.message || "添加自定义模型失败",
@@ -292,6 +301,10 @@ export const modelService = {
 
       const result = await response.json();
 
+      if (response.status === 401) {
+        handleSessionExpired();
+        throw new ModelError("Session expired, please log in again", 401);
+      }
       if (response.status !== 200) {
         throw new ModelError(
           result.detail || result.message || "添加自定义模型失败",
@@ -324,6 +337,10 @@ export const modelService = {
       });
       const result = await response.json();
 
+      if (response.status === 401) {
+        handleSessionExpired();
+        throw new ModelError("Session expired, please log in again", 401);
+      }
       if (response.status !== 200) {
         throw new ModelError(
           result.detail || result.message || "添加自定义模型失败",
@@ -360,6 +377,10 @@ export const modelService = {
       log.log("getProviderSelectedModalList response", response);
       const result = await response.json();
       log.log("getProviderSelectedModalList result", result);
+      if (response.status === 401) {
+        handleSessionExpired();
+        throw new ModelError("Session expired, please log in again", 401);
+      }
       if (response.status !== 200) {
         throw new ModelError(
           result.detail || result.message || "获取模型列表失败",
@@ -403,6 +424,10 @@ export const modelService = {
       log.log("getManageProviderModelList response", response);
       const result = await response.json();
       log.log("getManageProviderModelList result", result);
+      if (response.status === 401) {
+        handleSessionExpired();
+        throw new ModelError("Session expired, please log in again", 401);
+      }
       if (response.status !== 200) {
         throw new ModelError(
           result.detail ||
@@ -491,6 +516,10 @@ export const modelService = {
         }
       );
       const result = await response.json();
+      if (response.status === 401) {
+        handleSessionExpired();
+        throw new ModelError("Session expired, please log in again", 401);
+      }
       if (response.status !== 200) {
         throw new ModelError(
           result.detail ||
@@ -559,6 +588,10 @@ export const modelService = {
         ),
       });
       const result = await response.json();
+      if (response.status === 401) {
+        handleSessionExpired();
+        throw new ModelError("Session expired, please log in again", 401);
+      }
       if (response.status !== 200) {
         throw new ModelError(
           result.detail ||
@@ -589,6 +622,10 @@ export const modelService = {
         headers: getAuthHeaders(),
       });
       const result = await response.json();
+      if (response.status === 401) {
+        handleSessionExpired();
+        throw new ModelError("Session expired, please log in again", 401);
+      }
       if (response.status !== 200) {
         throw new ModelError(
           result.detail || result.message || "删除自定义模型失败",
