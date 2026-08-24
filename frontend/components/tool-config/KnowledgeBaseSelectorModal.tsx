@@ -18,6 +18,8 @@ import {
   ExclamationCircleOutlined,
 } from "@ant-design/icons";
 
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import { useGroupList } from "@/hooks/group/useGroupList";
 import { KnowledgeBase } from "@/types/knowledgeBase";
 import { ToolKbType, getKnowledgeBaseSourcesForTool } from "./index";
 import { KB_LAYOUT, KB_TAG_VARIANTS } from "@/const/knowledgeBaseLayout";
@@ -103,8 +105,23 @@ export default function KnowledgeBaseSelectorModal({
   difyConfig,
 }: KnowledgeBaseSelectorModalProps) {
   const { t } = useTranslation("common");
-  const { data: allModels = [] } = useModelList();
-  const showSourceMetadata = toolType !== "aidp_search";
+  const isAidpSearch = toolType === "aidp_search";
+  const { data: allModels = [] } = useModelList({ enabled: !isAidpSearch });
+  const showSourceMetadata = !isAidpSearch;
+  const { user } = useAuthorizationContext();
+  const { data: groupListData } = useGroupList(
+    isAidpSearch ? (user?.tenantId ?? null) : null
+  );
+  const groupNameById = useMemo(
+    () =>
+      new Map(
+        (groupListData?.groups ?? []).map((group) => [
+          group.group_id,
+          group.group_name,
+        ])
+      ),
+    [groupListData]
+  );
 
   // Memoized lookup function for model display names using the fetched model list
   const resolveModelDisplayName = useMemo(() => {
@@ -252,11 +269,13 @@ export default function KnowledgeBaseSelectorModal({
       }
 
       // Default selection logic:
-      // Only empty knowledge bases (0 documents AND 0 chunks) cannot be selected
-      const isEmpty =
-        (kb.documentCount || 0) === 0 && (kb.chunkCount || 0) === 0;
-      if (isEmpty) {
-        return false;
+      // AIDP availability is determined by the permission-filtered backend catalog.
+      if (!isAidpSearch) {
+        const isEmpty =
+          (kb.documentCount || 0) === 0 && (kb.chunkCount || 0) === 0;
+        if (isEmpty) {
+          return false;
+        }
       }
 
       // For nexent source, check model matching against current tenant config and tool multimodal constraint.
@@ -269,7 +288,12 @@ export default function KnowledgeBaseSelectorModal({
 
       return true;
     },
-    [isSelectable, isEmbeddingModelCompatible, isMultimodalConstraintMismatch]
+    [
+      isSelectable,
+      isAidpSearch,
+      isEmbeddingModelCompatible,
+      isMultimodalConstraintMismatch,
+    ]
   );
 
   const getModelMismatch = useCallback(
@@ -332,6 +356,7 @@ export default function KnowledgeBaseSelectorModal({
 
       // Model filter
       if (
+        showSourceMetadata &&
         selectedModels.length > 0 &&
         !selectedModels.includes(kb.embeddingModel)
       ) {
@@ -756,7 +781,7 @@ export default function KnowledgeBaseSelectorModal({
             </Select>
           )}
 
-          {availableModels.length > 0 && (
+          {showSourceMetadata && availableModels.length > 0 && (
             <Select
               mode="multiple"
               placeholder={t("knowledgeBase.filter.model.placeholder")}
@@ -898,6 +923,9 @@ export default function KnowledgeBaseSelectorModal({
               );
               const canSelect = checkCanSelect(kb);
               const hasModelMismatch = getModelMismatch(kb);
+              const groupNames = (kb.group_ids ?? []).map(
+                (groupId) => groupNameById.get(groupId) || `Group ${groupId}`
+              );
 
               return (
                 <div
@@ -961,91 +989,144 @@ export default function KnowledgeBaseSelectorModal({
                         </p>
                       </div>
 
-                      {/* First row: Basic info tags */}
-                      <div
-                        className={`flex flex-wrap items-center ${KB_LAYOUT.TAG_MARGIN} ${KB_LAYOUT.TAG_SPACING}`}
-                      >
-                        {/* Document count tag */}
-                        <span
-                          className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.default} mr-1`}
-                        >
-                          {t("knowledgeBase.tag.documents", {
-                            count: kb.documentCount || 0,
-                          })}
-                        </span>
-
-                        {showSourceMetadata && (
-                          <>
-                            {/* Chunk count tag */}
+                      {isAidpSearch ? (
+                        <>
+                          <div
+                            className="mt-1 line-clamp-2 text-xs text-gray-500"
+                            title={
+                              kb.description || t("aidpKnowledge.noDescription")
+                            }
+                          >
+                            {kb.description || t("aidpKnowledge.noDescription")}
+                          </div>
+                          <div
+                            className={`flex flex-wrap items-center ${KB_LAYOUT.TAG_MARGIN} ${KB_LAYOUT.TAG_SPACING}`}
+                          >
+                            {kb.ingroup_permission === "PRIVATE" ? (
+                              <span
+                                className={`${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.default}`}
+                              >
+                                {t("knowledgeBase.ingroup.permission.PRIVATE")}
+                              </span>
+                            ) : groupNames.length > 0 ? (
+                              groupNames.map((groupName) => (
+                                <span
+                                  key={groupName}
+                                  className={`${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} border border-blue-200 bg-blue-100 text-blue-800`}
+                                >
+                                  {groupName}
+                                </span>
+                              ))
+                            ) : (
+                              <span
+                                className={`${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.default}`}
+                              >
+                                {t("agent.userGroup.empty")}
+                              </span>
+                            )}
+                            <span
+                              className={`${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.default}`}
+                            >
+                              {t("knowledgeBase.tag.createdAt", {
+                                date: formatDateOrFallback(kb.createdAt),
+                              })}
+                            </span>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          {/* First row: Basic info tags */}
+                          <div
+                            className={`flex flex-wrap items-center ${KB_LAYOUT.TAG_MARGIN} ${KB_LAYOUT.TAG_SPACING}`}
+                          >
+                            {/* Document count tag */}
                             <span
                               className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.default} mr-1`}
                             >
-                              {t("knowledgeBase.tag.chunks", {
-                                count: kb.chunkCount || 0,
+                              {t("knowledgeBase.tag.documents", {
+                                count: kb.documentCount || 0,
                               })}
                             </span>
 
-                            {/* Source tag */}
-                            <span
-                              className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.default} mr-1`}
-                            >
-                              {t("knowledgeBase.tag.source", {
-                                source: t(`knowledgeBase.source.${kb.source}`, {
-                                  defaultValue: kb.source,
-                                }),
-                              })}
-                            </span>
-                          </>
-                        )}
+                            {showSourceMetadata && (
+                              <>
+                                {/* Chunk count tag */}
+                                <span
+                                  className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.default} mr-1`}
+                                >
+                                  {t("knowledgeBase.tag.chunks", {
+                                    count: kb.chunkCount || 0,
+                                  })}
+                                </span>
 
-                        {/* Creation date - only show when there are documents or chunks */}
-                        {((kb.documentCount || 0) > 0 ||
-                          (kb.chunkCount || 0) > 0) && (
-                          <span
-                            className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.default} mr-1`}
-                          >
-                            {t("knowledgeBase.tag.createdAt", {
-                              date: formatDateOrFallback(kb.createdAt),
-                            })}
-                          </span>
-                        )}
-                      </div>
+                                {/* Source tag */}
+                                <span
+                                  className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.default} mr-1`}
+                                >
+                                  {t("knowledgeBase.tag.source", {
+                                    source: t(
+                                      `knowledgeBase.source.${kb.source}`,
+                                      {
+                                        defaultValue: kb.source,
+                                      }
+                                    ),
+                                  })}
+                                </span>
+                              </>
+                            )}
 
-                      {/* Second row: Model tags */}
-                      <div
-                        className={`flex flex-wrap items-center ${KB_LAYOUT.SECOND_ROW_TAG_MARGIN} ${KB_LAYOUT.TAG_SPACING}`}
-                      >
-                        {/* Model tag - only show when model is not "unknown" and there are documents or chunks */}
-                        {((kb.documentCount || 0) > 0 ||
-                          (kb.chunkCount || 0) > 0) &&
-                          kb.embeddingModel &&
-                          kb.embeddingModel !== "unknown" && (
-                            <span
-                              className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.model} mr-1`}
-                            >
-                              {/* Use configuredModels state for updated display name, fallback to effectiveGetModelDisplayName */}
-                              {configuredModels.get(kb.id) ||
-                                effectiveGetModelDisplayName(kb.embeddingModel)}
-                              {t("knowledgeBase.tag.model", {
-                                model: "",
-                              })}
-                            </span>
-                          )}
-                        {kb.is_multimodal && (
-                          <span
-                            className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.red} mr-1`}
+                            {/* Creation date - only show when there are documents or chunks */}
+                            {((kb.documentCount || 0) > 0 ||
+                              (kb.chunkCount || 0) > 0) && (
+                              <span
+                                className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.default} mr-1`}
+                              >
+                                {t("knowledgeBase.tag.createdAt", {
+                                  date: formatDateOrFallback(kb.createdAt),
+                                })}
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Second row: Model tags */}
+                          <div
+                            className={`flex flex-wrap items-center ${KB_LAYOUT.SECOND_ROW_TAG_MARGIN} ${KB_LAYOUT.TAG_SPACING}`}
                           >
-                            multimodal
-                          </span>
-                        )}
-                        {hasModelMismatch && (
-                          <span
-                            className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.warning} mr-1`}
-                          >
-                            {t("knowledgeBase.tag.modelMismatch")}
-                          </span>
-                        )}
-                      </div>
+                            {/* Model tag - only show when model is not "unknown" and there are documents or chunks */}
+                            {((kb.documentCount || 0) > 0 ||
+                              (kb.chunkCount || 0) > 0) &&
+                              kb.embeddingModel &&
+                              kb.embeddingModel !== "unknown" && (
+                                <span
+                                  className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.model} mr-1`}
+                                >
+                                  {/* Use configuredModels state for updated display name, fallback to effectiveGetModelDisplayName */}
+                                  {configuredModels.get(kb.id) ||
+                                    effectiveGetModelDisplayName(
+                                      kb.embeddingModel
+                                    )}
+                                  {t("knowledgeBase.tag.model", {
+                                    model: "",
+                                  })}
+                                </span>
+                              )}
+                            {kb.is_multimodal && (
+                              <span
+                                className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.red} mr-1`}
+                              >
+                                multimodal
+                              </span>
+                            )}
+                            {hasModelMismatch && (
+                              <span
+                                className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.warning} mr-1`}
+                              >
+                                {t("knowledgeBase.tag.modelMismatch")}
+                              </span>
+                            )}
+                          </div>
+                        </>
+                      )}
                     </div>
                   </div>
                 </div>

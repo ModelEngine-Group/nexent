@@ -56,7 +56,6 @@ from ext_components.aidp.consts.aidp_exceptions import (  # noqa: E402
     AidpKbPermissionDeniedError,
     AidpGroupValidationError,
 )
-from consts.const import CAN_EDIT_ALL_USER_ROLES  # noqa: E402
 
 
 # --- Helpers --------------------------------------------------------------
@@ -104,11 +103,11 @@ class TestResolvePermission:
         assert decision.permission is None
         assert decision.is_management_role is False
 
-    def test_su_role_is_management(self, patched):
+    def test_su_role_requires_group_access(self, patched):
         patched["get_role"].return_value = "SU"
-        decision = svc._resolve_permission(_record(), "u", "t")
-        assert decision.permission == "EDIT"
-        assert decision.is_management_role is True
+        decision = svc._resolve_permission(_record(), "u", "t", user_groups=[1])
+        assert decision.permission == "READ_ONLY"
+        assert decision.is_management_role is False
 
     def test_asset_owner_is_management(self, patched):
         patched["get_role"].return_value = "ASSET_OWNER"
@@ -180,12 +179,13 @@ class TestResolvePermission:
 
 
 class TestRequirePermissionRewritten:
-    def test_edit_allowed_for_management_role(self):
+    def test_edit_allowed_for_management_role_with_edit_group_permission(self):
         record = {"kb_id": "kb-1", "owner_user_id": "other",
-                  "ingroup_permission": "READ_ONLY", "group_ids": [1]}
+                  "ingroup_permission": "EDIT", "group_ids": [1]}
         with patch.object(svc, "_get_permission_record",
                           return_value=record), \
-             patch.object(svc, "_get_user_role", return_value="ADMIN"):
+             patch.object(svc, "_get_user_role", return_value="ADMIN"), \
+             patch.object(svc, "_get_user_groups", return_value=[1]):
             decision = svc.require_permission("kb-1", "u", "t", required="EDIT")
         assert decision.permission == "EDIT"
 
@@ -295,7 +295,7 @@ class TestFilterAndWhitelist:
         assert "read-1" in result
         assert "priv-1" not in result
 
-    def test_get_allowed_kds_list_management_sees_shared_only(self, monkeypatch):
+    def test_get_allowed_kds_list_management_requires_group_access(self, monkeypatch):
         rows = [
             _record(kb_id="p", ingroup_permission="PRIVATE"),
             _record(kb_id="e", ingroup_permission="EDIT"),
@@ -306,7 +306,7 @@ class TestFilterAndWhitelist:
         monkeypatch.setattr(svc, "_get_user_role", lambda u, t: "ADMIN")
 
         result = svc.get_allowed_kds_list("u", "t")
-        assert result == ["e"]
+        assert result == []
 
 
 # --- get_accessible_kbs ---------------------------------------------------
@@ -345,7 +345,7 @@ class TestGetAccessibleKbs:
         out = svc.get_accessible_kbs("u", "t")
         assert [row["kb_id"] for row in out] == ["own"]
 
-    def test_filters_out_inaccessible_rows(self, monkeypatch):
+    def test_management_role_filters_out_inaccessible_rows(self, monkeypatch):
         # Regression guard: rows where the user has no access (PRIVATE / not-in-group)
         # must be dropped, not leaked with ``permission=None``.
         rows = [
@@ -356,7 +356,7 @@ class TestGetAccessibleKbs:
         monkeypatch.setattr(svc.aidp_permission_db, "list_all_permissions_by_tenant",
                             lambda tenant_id: rows)
         monkeypatch.setattr(svc, "_get_user_groups", lambda u, t: [1])
-        monkeypatch.setattr(svc, "_get_user_role", lambda u, t: "DEV")
+        monkeypatch.setattr(svc, "_get_user_role", lambda u, t: "ADMIN")
 
         out = svc.get_accessible_kbs("u", "t")
         assert [r["kb_id"] for r in out] == ["editable"]
@@ -640,7 +640,7 @@ class TestGetKdsNameToIdMap:
         result = svc.get_kds_name_to_id_map("u", "t")
         assert result == {}
 
-    def test_management_role_includes_shared_rows_with_name(self, monkeypatch):
+    def test_management_role_excludes_shared_rows_without_group_access(self, monkeypatch):
         rows = [
             _record(kb_id="kb-1", kds_name="KB One", ingroup_permission="PRIVATE"),
             _record(kb_id="kb-2", kds_name="KB Two", ingroup_permission="EDIT"),
@@ -654,7 +654,7 @@ class TestGetKdsNameToIdMap:
         monkeypatch.setattr(svc, "_get_user_role", lambda u, t: "ADMIN")
 
         result = svc.get_kds_name_to_id_map("u", "t")
-        assert result == {"KB Two": "kb-2"}
+        assert result == {}
 
     def test_creator_own_private_record_appears_in_map(self, monkeypatch):
         rows = [
