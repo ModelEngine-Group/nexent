@@ -104,6 +104,7 @@ export default function KnowledgeBaseSelectorModal({
 }: KnowledgeBaseSelectorModalProps) {
   const { t } = useTranslation("common");
   const { data: allModels = [] } = useModelList();
+  const showSourceMetadata = toolType !== "aidp_search";
 
   // Memoized lookup function for model display names using the fetched model list
   const resolveModelDisplayName = useMemo(() => {
@@ -312,7 +313,11 @@ export default function KnowledgeBaseSelectorModal({
       }
 
       // Source filter
-      if (selectedSources.length > 0 && !selectedSources.includes(kb.source)) {
+      if (
+        showSourceMetadata &&
+        selectedSources.length > 0 &&
+        !selectedSources.includes(kb.source)
+      ) {
         return false;
       }
 
@@ -339,6 +344,7 @@ export default function KnowledgeBaseSelectorModal({
     knowledgeBases,
     allowedSources,
     searchKeyword,
+    showSourceMetadata,
     selectedSources,
     selectedModels,
   ]);
@@ -698,7 +704,7 @@ export default function KnowledgeBaseSelectorModal({
             allowClear
           />
 
-          {availableSources.length > 0 && (
+          {showSourceMetadata && availableSources.length > 0 && (
             <Select
               mode="multiple"
               placeholder={t("knowledgeBase.filter.source.placeholder")}
@@ -936,25 +942,29 @@ export default function KnowledgeBaseSelectorModal({
                           })}
                         </span>
 
-                        {/* Chunk count tag */}
-                        <span
-                          className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.default} mr-1`}
-                        >
-                          {t("knowledgeBase.tag.chunks", {
-                            count: kb.chunkCount || 0,
-                          })}
-                        </span>
+                        {showSourceMetadata && (
+                          <>
+                            {/* Chunk count tag */}
+                            <span
+                              className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.default} mr-1`}
+                            >
+                              {t("knowledgeBase.tag.chunks", {
+                                count: kb.chunkCount || 0,
+                              })}
+                            </span>
 
-                        {/* Source tag */}
-                        <span
-                          className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.default} mr-1`}
-                        >
-                          {t("knowledgeBase.tag.source", {
-                            source: t(`knowledgeBase.source.${kb.source}`, {
-                              defaultValue: kb.source,
-                            }),
-                          })}
-                        </span>
+                            {/* Source tag */}
+                            <span
+                              className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.default} mr-1`}
+                            >
+                              {t("knowledgeBase.tag.source", {
+                                source: t(`knowledgeBase.source.${kb.source}`, {
+                                  defaultValue: kb.source,
+                                }),
+                              })}
+                            </span>
+                          </>
+                        )}
 
                         {/* Creation date - only show when there are documents or chunks */}
                         {((kb.documentCount || 0) > 0 ||
