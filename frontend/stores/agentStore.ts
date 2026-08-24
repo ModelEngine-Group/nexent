@@ -345,14 +345,36 @@ const toToolParams = (tool: Tool): Record<string, unknown> =>
     {}
   );
 
+const areToolParamsEqual = (left: Tool, right: Tool): boolean => {
+  const leftParams = toToolParams(left);
+  const rightParams = toToolParams(right);
+  const leftKeys = Object.keys(leftParams).sort();
+  const rightKeys = Object.keys(rightParams).sort();
+
+  if (leftKeys.length !== rightKeys.length) return false;
+  return leftKeys.every(
+    (key, index) =>
+      key === rightKeys[index] &&
+      JSON.stringify(leftParams[key]) === JSON.stringify(rightParams[key])
+  );
+};
+
 async function persistToolChanges(
   agentId: number,
   currentTools: Tool[],
   savedTools: Tool[]
 ): Promise<void> {
   const currentToolIds = new Set(currentTools.map((tool) => Number(tool.id)));
+  const savedToolsById = new Map(
+    savedTools.map((tool) => [Number(tool.id), tool])
+  );
 
   for (const tool of currentTools) {
+    const savedTool = savedToolsById.get(Number(tool.id));
+    if (savedTool && areToolParamsEqual(tool, savedTool)) {
+      continue;
+    }
+
     const result = await updateToolConfig(
       Number(tool.id),
       agentId,
