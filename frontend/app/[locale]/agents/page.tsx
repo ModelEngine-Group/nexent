@@ -107,8 +107,8 @@ function PanelCard({
 
 function AgentSetupContent() {
   const { t } = useTranslation("common");
-  const queryClient = useQueryClient();
   const searchParams = useSearchParams();
+  const queryClient = useQueryClient();
   const snapshotRefreshQueue = useRef<Promise<boolean>>(Promise.resolve(true));
   const generationPanelRef = useRef<HTMLElement>(null);
   const configPanelRef = useRef<HTMLElement>(null);
@@ -175,7 +175,6 @@ function AgentSetupContent() {
             throw new Error("Agent context changed during synchronization");
           }
 
-          queryClient.setQueryData(["agentInfo", agentId], result.data);
           await queryClient.invalidateQueries({ queryKey: ["agents"] });
           if (focusTarget) requestConfigFocus(agentId, focusTarget);
           return true;
@@ -189,7 +188,7 @@ function AgentSetupContent() {
         });
       return snapshotRefreshQueue.current;
     },
-    [queryClient, requestConfigFocus]
+    [requestConfigFocus]
   );
 
   const synchronizeCompletion = useCallback(
