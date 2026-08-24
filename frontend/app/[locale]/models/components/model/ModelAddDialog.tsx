@@ -102,11 +102,6 @@ const DEFAULT_FORM_STATE = {
   ...emptyCapacityForm,
 };
 
-const resolveConnectivityModelType = (type: ModelType): ModelType =>
-  type === MODEL_TYPES.VLM2 || type === MODEL_TYPES.VLM3 || type === MODEL_TYPES.VLM4
-    ? (MODEL_TYPES.VLM as ModelType)
-    : type;
-
 const resolveConfigKey = (type: ModelType): string => type;
 
 const isVlmConfigType = (type: ModelType): boolean =>
@@ -661,7 +656,7 @@ export const ModelAddDialog = ({
       const modelType =
         form.type === MODEL_TYPES.EMBEDDING && form.isMultimodal
           ? (MODEL_TYPES.MULTI_EMBEDDING as ModelType)
-          : resolveConnectivityModelType(form.type);
+          : form.type;
 
       let connectivity = false;
 
