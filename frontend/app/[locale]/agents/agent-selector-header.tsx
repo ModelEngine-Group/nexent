@@ -279,6 +279,23 @@ export default function AgentSelectorHeader({
     setCreateAgentModalVisible(true);
   };
 
+  const handleImportComplete = async (agentId: number) => {
+    setImportWizardVisible(false);
+    setImportWizardData(null);
+    await queryClient.invalidateQueries({ queryKey: ["agents"] });
+
+    const result = await searchAgentInfo(agentId);
+    if (!result.success || !result.data) {
+      message.error(result.message || t("agent.error.fetchAgentList"));
+      return;
+    }
+
+    initialize({ ...result.data, permission: "EDIT" });
+    const nextSearchParams = new URLSearchParams(searchParams.toString());
+    nextSearchParams.set("agent_id", String(agentId));
+    router.replace(`${pathname}?${nextSearchParams.toString()}`);
+  };
+
   const handleAgentCreated = async ({ agentId }: { agentId: number }) => {
     setCreateAgentModalVisible(false);
     queryClient.invalidateQueries({ queryKey: ["agents"] });
@@ -451,11 +468,7 @@ export default function AgentSelectorHeader({
           setImportWizardData(null);
         }}
         initialData={importWizardData}
-        onImportComplete={() => {
-          setImportWizardVisible(false);
-          setImportWizardData(null);
-          queryClient.invalidateQueries({ queryKey: ["agents"] });
-        }}
+        onImportComplete={handleImportComplete}
       />
     </>
   );
