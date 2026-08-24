@@ -39,8 +39,8 @@ class ModelRetryConfig:
             across many concurrent clients.
     """
 
-    max_attempts: int = 3
-    backoff_base_seconds: float = 1.0
+    max_attempts: int = 6
+    backoff_base_seconds: float = 2.0
     max_backoff_seconds: float = 30.0
     jitter: bool = True
 

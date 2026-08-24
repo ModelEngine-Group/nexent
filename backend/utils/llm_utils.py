@@ -14,8 +14,8 @@ logger = logging.getLogger("llm_utils")
 
 # Retry configuration for transient LLM errors (rate limits, 5xx, network).
 # Decision: global constants only for the initial rollout (not per-model / DB-driven).
-_LLM_RETRY_MAX_ATTEMPTS = 3
-_LLM_RETRY_BACKOFF_BASE = 1.0
+_LLM_RETRY_MAX_ATTEMPTS = 6
+_LLM_RETRY_BACKOFF_BASE = 2.0
 _LLM_RETRY_MAX_BACKOFF = 30.0
 
 
