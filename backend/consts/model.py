@@ -1659,24 +1659,6 @@ class ListMcpServicesQuery(BaseModel):
         return value
 
 
-class RegistryListQuery(BaseModel):
-    """Query parameters for listing MCP registry services"""
-    search: Optional[str] = Field(None, description="Search keyword")
-    include_deleted: bool = Field(default=False, description="Include deleted records")
-    updated_since: Optional[str] = Field(None, description="Filter by update time")
-    version: Optional[str] = Field(None, description="Filter by version")
-    cursor: Optional[str] = Field(None, description="Pagination cursor")
-    limit: int = Field(default=30, ge=1, le=100, description="Items per page")
-
-    @field_validator("search", "updated_since", "version", "cursor", mode="before")
-    @classmethod
-    def _strip_text(cls, value: Any):
-        if isinstance(value, str):
-            stripped = value.strip()
-            return stripped or None
-        return value
-
-
 class CommunityListRequest(BaseModel):
     """Request model for listing community MCP services"""
     search: Optional[str] = Field(None, description="Search keyword")

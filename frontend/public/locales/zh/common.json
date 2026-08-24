@@ -2812,7 +2812,6 @@
   "mcpTools.add.error.nameExists": "同租户内已存在同名 MCP 服务，请更换名称",
   "mcpTools.addModal.title": "添加 MCP 服务",
   "mcpTools.addModal.tabLocal": "自定义",
-  "mcpTools.addModal.tabRegistry": "外部市场",
   "mcpTools.addModal.serverUrl": "服务地址",
   "mcpTools.addModal.bearerTokenOptional": "Bearer Token（可选）",
   "mcpTools.addModal.bearerTokenPlaceholder": "Bearer xxx",

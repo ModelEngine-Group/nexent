@@ -2699,7 +2699,6 @@
   "mcpTools.add.error.nameExists": "An MCP service with the same name already exists in this tenant. Please use a different name.",
   "mcpTools.addModal.title": "Add MCP Service",
   "mcpTools.addModal.tabLocal": "Local",
-  "mcpTools.addModal.tabRegistry": "MCP Registry",
   "mcpTools.addModal.serverUrl": "Service URL",
   "mcpTools.addModal.bearerTokenOptional": "Bearer Token (Optional)",
   "mcpTools.addModal.bearerTokenPlaceholder": "Bearer xxx",

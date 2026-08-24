@@ -469,8 +469,7 @@ export const API_ENDPOINTS = {
     install: `${API_BASE_URL}/skills/install`,
   },
   mcpTools: {
-    // Community and Registry endpoints remain under /mcp-tools prefix
-    registryList: `${API_BASE_URL}/mcp-tools/registry/list`,
+    // Community endpoints remain under /mcp-tools prefix
     communityList: `${API_BASE_URL}/mcp-tools/community/list`,
     communityPublish: `${API_BASE_URL}/mcp-tools/community/publish`,
     communityUpdate: `${API_BASE_URL}/mcp-tools/community/update`,
