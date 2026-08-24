@@ -22,6 +22,7 @@ import { useToolList } from "@/hooks/agent/useToolList";
 import { useAgentStore } from "@/stores/agentStore";
 import { useAgentReadOnly } from "@/hooks/agent/useAgentReadOnly";
 import {
+  AIDP_NON_PERSISTED_PARAM_NAMES,
   getSemanticToolName,
   isManagedKnowledgeTool,
   type ManagedKnowledgeToolName,
@@ -51,14 +52,6 @@ const AIDP_KNOWLEDGE_PROFILE: KnowledgeToolProfile = {
   maxSelect: 10,
 };
 
-const AIDP_BACKEND_ONLY_PARAMS = new Set([
-  "server_url",
-  "api_key",
-  "tenant_id",
-  "kds_name_to_id_map",
-  "observer",
-]);
-
 const normalizeIds = (values: unknown[]): string[] =>
   Array.from(
     new Set(values.map((value) => String(value).trim()).filter(Boolean))
@@ -75,7 +68,7 @@ const parseStringListValue = (value: unknown): string[] => {
       return normalizeIds(parsed.split(","));
     }
   } catch {
-    return value.includes(",") ? normalizeIds(value.split(",")) : [];
+    return normalizeIds(value.split(","));
   }
   return [];
 };
@@ -134,7 +127,7 @@ function sanitizeManagedTool(tool: Tool, profile: KnowledgeToolProfile): Tool {
     initParams: (tool.initParams || []).filter(
       (param) =>
         profile.toolName !== "aidp_search" ||
-        !AIDP_BACKEND_ONLY_PARAMS.has(param.name)
+        !AIDP_NON_PERSISTED_PARAM_NAMES.has(param.name)
     ),
   };
 }
@@ -314,19 +307,13 @@ function useKnowledgeBaseConfigState(): KnowledgeBaseConfigState | null {
   );
 
   const selectedIds = parseSelection(selectedKnowledgeSearchTool, profile);
-  const persistedDisplayNames = parseStringListValue(
-    getParamValue(selectedKnowledgeSearchTool, "display_names")
-  );
-  const selectedDisplayNames = persistedDisplayNames.length
-    ? persistedDisplayNames
-    : selectedKnowledgeSearchTool?.display_names || [];
+  const selectedDisplayNames = selectedKnowledgeSearchTool?.display_names || [];
   const configurableParams = (
     configuredKnowledgeSearchTool?.initParams || []
   ).filter(
     (param) =>
       param.name !== profile.selectionParam &&
-      param.name !== "display_names" &&
-      !AIDP_BACKEND_ONLY_PARAMS.has(param.name)
+      !AIDP_NON_PERSISTED_PARAM_NAMES.has(param.name)
   );
   const selectedKnowledgeBases = selectedIds.map((id, index) => {
     const knowledgeBase = knowledgeBases.find((item) => {
@@ -375,20 +362,12 @@ function useKnowledgeBaseConfigState(): KnowledgeBaseConfigState | null {
       return;
     }
 
-    let updatedTool = updateParam(
+    const updatedTool = updateParam(
       configuredKnowledgeSearchTool,
       profile.selectionParam,
       serializeSelection(ids, profile),
       profile.selectionParam === "kds_list" ? "string" : "array"
     );
-    if (profile.toolName === "aidp_search") {
-      updatedTool = updateParam(
-        updatedTool,
-        "display_names",
-        displayNames,
-        "array"
-      );
-    }
     replaceManagedKnowledgeTool({
       ...updatedTool,
       display_names: displayNames,

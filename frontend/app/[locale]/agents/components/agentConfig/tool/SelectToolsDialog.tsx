@@ -99,7 +99,7 @@ export default function SelectToolsDialog({
   const { t } = useTranslation("common");
   const { confirm } = useConfirmModal();
 
-  const { availableTools } = useToolList({ enabled: open });
+  const { selectableTools } = useToolList({ enabled: open });
   const { user } = useAuthorizationContext();
   const tenantId = user?.tenantId || null;
   const { serverList: rawServers } = useMcpServerList({
@@ -144,12 +144,12 @@ export default function SelectToolsDialog({
   // Collect all unique labels from available tools for filter dropdown
   const allLabels = useMemo(() => {
     const labelSet = new Set<string>();
-    availableTools.forEach((tool: any) => {
+    selectableTools.forEach((tool: any) => {
       const labels = getToolLabels(tool);
       labels.forEach((l: string) => labelSet.add(l));
     });
     return Array.from(labelSet).sort((a, b) => a.localeCompare(b));
-  }, [availableTools]);
+  }, [selectableTools]);
 
   const [activeLabels, setActiveLabels] = useState<string[]>([]);
 
@@ -163,8 +163,8 @@ export default function SelectToolsDialog({
   const sourceGroups = useMemo(() => {
     const result: Record<string, { category: string; tools: any[] }[]> = {};
     for (const tab of SOURCE_TABS) {
-      const sourceTools = availableTools.filter(
-        (t: any) => t.source === tab.sourceValue && t.is_user_selectable !== false
+      const sourceTools = selectableTools.filter(
+        (tool: any) => tool.source === tab.sourceValue
       );
       // For MCP tools: show API-added (not in server list) or from visible servers
       const filteredTools =
@@ -196,7 +196,7 @@ export default function SelectToolsDialog({
         });
     }
     return result;
-  }, [availableTools, visibleMcpNames, allMcpServerNames]);
+  }, [selectableTools, visibleMcpNames, allMcpServerNames]);
 
   // --- Filtered current tab data by search + labels (AND) ---
   const currentGroups = useMemo(() => {

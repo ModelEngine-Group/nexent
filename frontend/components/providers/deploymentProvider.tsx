@@ -33,7 +33,6 @@ interface DeploymentVersionResponse {
   deployment_version: string;
   app_version: string;
   enable_aidp_knowledge?: boolean;
-  aidp_enabled?: boolean;
   status: string;
 }
 
@@ -53,9 +52,7 @@ export function DeploymentProvider({ children }: { children: ReactNode }) {
         const data: DeploymentVersionResponse = await response.json();
         setDeploymentVersion(data.deployment_version);
         setIsSpeedMode(data.deployment_version === "speed");
-        setEnableAidpKnowledge(
-          data.aidp_enabled ?? data.enable_aidp_knowledge ?? false
-        );
+        setEnableAidpKnowledge(data.enable_aidp_knowledge ?? false);
         if (data.app_version) {
           setAppVersion(data.app_version);
         }

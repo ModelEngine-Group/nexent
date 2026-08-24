@@ -13,7 +13,11 @@ import {
   updateToolConfig,
 } from "@/services/agentConfigService";
 import type { Agent, Skill, Tool } from "@/types/agentConfig";
-import { isManagedKnowledgeTool } from "@/lib/managedKnowledgeTools";
+import {
+  AIDP_NON_PERSISTED_PARAM_NAMES,
+  isAidpManagedKnowledgeTool,
+  isManagedKnowledgeTool,
+} from "@/lib/managedKnowledgeTools";
 
 export type AgentDraft = Pick<
   Agent,
@@ -335,6 +339,12 @@ const toAgentPayload = (agentId: number, patch: AgentDraftPatch) => ({
 const toToolParams = (tool: Tool): Record<string, unknown> =>
   (tool.initParams ?? []).reduce<Record<string, unknown>>(
     (params, parameter) => {
+      if (
+        isAidpManagedKnowledgeTool(tool) &&
+        AIDP_NON_PERSISTED_PARAM_NAMES.has(parameter.name)
+      ) {
+        return params;
+      }
       if (parameter.value !== undefined && parameter.value !== null) {
         params[parameter.name] = parameter.value;
       }

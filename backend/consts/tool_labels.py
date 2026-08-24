@@ -56,7 +56,4 @@ BUILTIN_LABEL_MAP.update(_category_memory)
 BUILTIN_LABEL_MAP.update(_category_terminal)
 
 PARALLEL_EXECUTOR_TOOL_NAME = "parallel_executor"
-MANAGED_KNOWLEDGE_TOOL_NAMES = frozenset({"knowledge_base_search", "aidp_search"})
-SYSTEM_MANAGED_TOOL_NAMES = frozenset(
-    {"store_memory", "search_memory", PARALLEL_EXECUTOR_TOOL_NAME}
-) | MANAGED_KNOWLEDGE_TOOL_NAMES
+SYSTEM_MANAGED_TOOL_NAMES = frozenset({"store_memory", "search_memory", PARALLEL_EXECUTOR_TOOL_NAME})

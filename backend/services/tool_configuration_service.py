@@ -17,13 +17,12 @@ from consts.const import (
     AIDP_SERVER_URL,
     AIDP_TENANT_ID,
     DATA_PROCESS_SERVICE,
-    ENABLE_AIDP_KNOWLEDGE,
     LOCAL_MCP_SERVER,
     MCP_MANAGEMENT_API,
 )
 from consts.exceptions import MCPConnectionError, NotFoundException, ToolExecutionException, ValidationError
 from consts.model import ToolInstanceInfoRequest, ToolInfo, ToolSourceEnum, ToolValidateRequest
-from consts.tool_labels import MANAGED_KNOWLEDGE_TOOL_NAMES, SYSTEM_MANAGED_TOOL_NAMES
+from consts.tool_labels import SYSTEM_MANAGED_TOOL_NAMES
 from database.outer_api_tool_db import (
     upsert_openapi_service,
     query_openapi_services_by_tenant,
@@ -64,16 +63,6 @@ from utils.langchain_utils import discover_langchain_modules
 from utils.tool_utils import get_local_tools_classes, get_local_tools_description_zh
 
 logger = logging.getLogger("tool_configuration_service")
-AIDP_MAX_KDS = 10
-AIDP_BACKEND_ONLY_PARAM_NAMES = frozenset(
-    {
-        "server_url",
-        "api_key",
-        "tenant_id",
-        "kds_name_to_id_map",
-        "observer",
-    }
-)
 
 
 def _parse_kds_list(value: Any) -> list[str]:
@@ -82,9 +71,7 @@ def _parse_kds_list(value: Any) -> list[str]:
         try:
             value = json.loads(value)
         except json.JSONDecodeError:
-            if "," not in value:
-                return []
-            value = value.split(",")
+            return []
     if not isinstance(value, list):
         return []
     return list(dict.fromkeys(str(item).strip() for item in value if str(item).strip()))
@@ -185,11 +172,6 @@ def get_local_tools() -> List[ToolInfo]:
     tools_info = []
     tools_classes = get_local_tools_classes()
     for tool_class in tools_classes:
-        if (
-            getattr(tool_class, "name", None) == "aidp_search"
-            and not ENABLE_AIDP_KNOWLEDGE
-        ):
-            continue
         # Get class-level init_param_descriptions for fallback
         init_param_descriptions = getattr(tool_class, 'init_param_descriptions', {})
 
@@ -404,19 +386,10 @@ def search_tool_info_impl(
         if user_id and _is_aidp_search_tool(tool_id):
             snapshot = _resolve_aidp_snapshot(user_id, tenant_id)
             existing_ids = _parse_kds_list(params.get("kds_list"))
-            display_names = _parse_kds_list(params.get("display_names"))
-            visible_pairs = [
-                (
-                    kds_id,
-                    display_names[index] if index < len(display_names) else kds_id,
-                )
-                for index, kds_id in enumerate(existing_ids)
+            params["kds_list"] = [
+                kds_id for kds_id in existing_ids
                 if kds_id in snapshot.accessible_id_set
             ]
-            params["kds_list"] = json.dumps(
-                [kds_id for kds_id, _ in visible_pairs], ensure_ascii=False
-            )
-            params["display_names"] = [name for _, name in visible_pairs]
         return {
             "params": params,
             "enabled": tool_instance["enabled"]
@@ -462,16 +435,11 @@ def update_tool_info_impl(tool_info: ToolInstanceInfoRequest, tenant_id: str, us
     if (
         tool is None
         or tool.get("is_available") is not True
-        or (
-            tool.get("name") in SYSTEM_MANAGED_TOOL_NAMES
-            and tool.get("name") not in MANAGED_KNOWLEDGE_TOOL_NAMES
-        )
+        or tool.get("name") in SYSTEM_MANAGED_TOOL_NAMES
     ):
         raise ResourceBindingError("resource_not_visible")
 
     if _is_aidp_search_tool(tool_info.tool_id, tool.get("name")):
-        if not ENABLE_AIDP_KNOWLEDGE:
-            raise ValidationError("AIDP knowledge search is not enabled")
         existing = query_tool_instances_by_id(
             tool_info.agent_id,
             tool_info.tool_id,
@@ -487,32 +455,34 @@ def update_tool_info_impl(tool_info: ToolInstanceInfoRequest, tenant_id: str, us
             params["kds_list"] = existing_ids
         else:
             submitted_ids = _parse_kds_list(params.get("kds_list"))
-            if not submitted_ids and getattr(tool_info, "enabled", True) is not False:
-                raise ValidationError(
-                    "aidp_search requires at least one selected knowledge base"
-                )
-            if len(submitted_ids) > AIDP_MAX_KDS:
-                raise ValidationError(
-                    f"aidp_search kds_list cannot contain more than {AIDP_MAX_KDS} knowledge bases"
-                )
             try:
                 snapshot = _resolve_aidp_snapshot(user_id, tenant_id)
             except Exception as exc:
-                raise ValidationError(
-                    "AIDP service is not ready; the knowledge base configuration was not changed"
-                ) from exc
-            invalid_ids = [
-                kds_id for kds_id in submitted_ids
-                if kds_id not in snapshot.accessible_id_set
-            ]
-            if invalid_ids:
-                raise ValidationError(
-                    "aidp_search kds_list contains a knowledge base the user cannot configure"
-                )
-            params["kds_list"] = submitted_ids
-        params["kds_list"] = json.dumps(
-            _parse_kds_list(params.get("kds_list")), ensure_ascii=False
-        )
+                new_ids = [kds_id for kds_id in submitted_ids if kds_id not in set(existing_ids)]
+                if new_ids:
+                    raise ValidationError(
+                        "AIDP is unavailable; the knowledge base configuration was not changed"
+                    ) from exc
+                params["kds_list"] = existing_ids
+            else:
+                existing_set = set(existing_ids)
+                invalid_ids = [
+                    kds_id for kds_id in submitted_ids
+                    if kds_id not in snapshot.accessible_id_set and kds_id not in existing_set
+                ]
+                if invalid_ids:
+                    raise ValidationError(
+                        "aidp_search kds_list contains a knowledge base the user cannot configure"
+                    )
+                hidden_existing = [
+                    kds_id for kds_id in existing_ids
+                    if kds_id not in snapshot.accessible_id_set
+                ]
+                visible_submitted = [
+                    kds_id for kds_id in submitted_ids
+                    if kds_id in snapshot.accessible_id_set
+                ]
+                params["kds_list"] = list(dict.fromkeys(hidden_existing + visible_submitted))
         tool_info.params = params
 
     tool_instance = create_or_update_tool_by_tool_info(
@@ -685,12 +655,7 @@ async def list_all_tools(tenant_id: str, labels: Optional[List[str]] = None):
     for tool in tools_info:
         tool_name = tool.get("name")
 
-        if (
-            tool_name in SYSTEM_MANAGED_TOOL_NAMES
-            and tool_name not in MANAGED_KNOWLEDGE_TOOL_NAMES
-        ):
-            continue
-        if tool_name == "aidp_search" and not ENABLE_AIDP_KNOWLEDGE:
+        if tool_name in SYSTEM_MANAGED_TOOL_NAMES:
             continue
 
         # Always use SDK inputs for local tools to stay in sync with current tool code
@@ -736,14 +701,6 @@ async def list_all_tools(tenant_id: str, labels: Optional[List[str]] = None):
             description_zh = tool.get("description_zh")
             inputs_str = tool.get("inputs", "{}")
 
-        formatted_params = tool.get("params", [])
-        if tool_name == "aidp_search":
-            formatted_params = [
-                param
-                for param in formatted_params
-                if param.get("name") not in AIDP_BACKEND_ONLY_PARAM_NAMES
-            ]
-
         formatted_tool = {
             "tool_id": tool.get("tool_id"),
             "name": tool_name,
@@ -754,15 +711,11 @@ async def list_all_tools(tenant_id: str, labels: Optional[List[str]] = None):
             "is_available": tool.get("is_available"),
             "create_time": tool.get("create_time"),
             "usage": tool.get("usage"),
-            "params": formatted_params,
+            "params": tool.get("params", []),
             "inputs": inputs_str,
             "category": tool.get("category"),
             "labels": tool.get("labels", []),
-            "is_user_selectable": (
-                False
-                if tool_name in MANAGED_KNOWLEDGE_TOOL_NAMES
-                else tool.get("is_user_selectable", True)
-            ),
+            "is_user_selectable": tool.get("is_user_selectable", True),
             "updated_by": tool.get("updated_by", ""),
             "updated_by_name": updated_by_email_map.get(tool.get("updated_by"), ""),
         }

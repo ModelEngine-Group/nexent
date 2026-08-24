@@ -21,7 +21,6 @@ def get_deployment_version():
             content={"deployment_version": DEPLOYMENT_VERSION,
                      "app_version": APP_VERSION,
                      "enable_aidp_knowledge": ENABLE_AIDP_KNOWLEDGE,
-                     "aidp_enabled": ENABLE_AIDP_KNOWLEDGE,
                      "status": "success"}
         )
     except Exception as e:
