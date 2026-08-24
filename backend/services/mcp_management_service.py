@@ -5,7 +5,6 @@ from urllib.parse import urlencode
 
 import aiohttp
 
-from consts.const import CAN_EDIT_ALL_USER_ROLES
 from consts.exceptions import (
     MCPConnectionError,
     McpNameConflictError,
@@ -30,7 +29,7 @@ from database.market_mcp_db import (
     delete_mcp_market_record_by_id,
     get_mcp_market_record_by_id,
     get_mcp_market_records,
-    get_mcp_market_tag_stats_by_tenant,
+    get_mcp_market_tag_stats,
     increment_mcp_market_download_count,
     list_mcp_market_records_by_status,
     list_mcp_market_records_by_tenant_and_user,
@@ -44,7 +43,6 @@ from database.remote_mcp_db import (
     update_mcp_record_manage_fields_by_id,
 )
 from database.user_tenant_db import get_user_tenant_by_user_id
-from database.group_db import query_group_ids_by_user
 from services.notification_service import (
     create_repository_pending_review_notification,
     create_repository_review_notification,
@@ -234,24 +232,13 @@ async def list_community_mcp_services(
     cursor: str | None = None,
     limit: int = 30,
 ) -> Dict[str, Any]:
-    """List shared (approved) community MCP services scoped to a tenant with permission filtering."""
-    user_role = _get_user_role(user_id)
-    user_group_ids = None
-    if user_role not in CAN_EDIT_ALL_USER_ROLES:
-        try:
-            user_group_ids = list(query_group_ids_by_user(user_id) or [])
-        except Exception as e:
-            logger.warning(f"Failed to query user group ids: user_id={user_id}, err={e}")
-
+    """List shared (approved) community MCP services across all tenants."""
     db_result = get_mcp_market_records(
-        tenant_id=tenant_id,
         search=search,
         tag=tag,
         transport_type=transport_type,
         cursor=cursor,
         limit=limit,
-        user_id=user_id if user_role not in CAN_EDIT_ALL_USER_ROLES else None,
-        user_group_ids=user_group_ids,
     )
     return {
         "count": db_result.get("count", 0),
@@ -261,7 +248,7 @@ async def list_community_mcp_services(
 
 
 def list_community_mcp_tag_stats(tenant_id: str) -> List[Dict[str, Any]]:
-    return get_mcp_market_tag_stats_by_tenant(tenant_id=tenant_id)
+    return get_mcp_market_tag_stats()
 
 
 def _mcp_notification_details(

@@ -497,9 +497,7 @@ class TestListCommunityMcpServices(unittest.IsolatedAsyncioTestCase):
         result = await list_community_mcp_services(tenant_id="tid", user_id="uid", limit=30)
         self.assertEqual(result["count"], 0)
         mock_get.assert_called_once_with(
-            tenant_id="tid", search=None, tag=None,
-            transport_type=None, cursor=None, limit=30,
-            user_id="uid", user_group_ids=[],
+            search=None, tag=None, transport_type=None, cursor=None, limit=30,
         )
 
     @patch('backend.services.mcp_management_service.get_mcp_market_records')
@@ -521,9 +519,20 @@ class TestListCommunityMcpServices(unittest.IsolatedAsyncioTestCase):
             transport_type="url", cursor="10", limit=20,
         )
         mock_get.assert_called_once_with(
-            tenant_id="tid", search="key", tag="python",
-            transport_type="url", cursor="10", limit=20,
-            user_id="uid", user_group_ids=[],
+            search="key", tag="python", transport_type="url", cursor="10", limit=20,
+        )
+
+    @patch('backend.services.mcp_management_service.get_mcp_market_records')
+    async def test_list_is_global_for_requesting_tenant(self, mock_get):
+        """Repository listing should not pass tenant or group visibility filters."""
+        mock_get.return_value = {"count": 0, "nextCursor": None, "items": []}
+
+        result = await list_community_mcp_services(
+            tenant_id="tid", user_id="uid", limit=30,
+        )
+        self.assertEqual(result["count"], 0)
+        mock_get.assert_called_once_with(
+            search=None, tag=None, transport_type=None, cursor=None, limit=30,
         )
 
 
@@ -531,70 +540,14 @@ class TestListCommunityMcpServices(unittest.IsolatedAsyncioTestCase):
 # list_community_mcp_tag_stats
 # ============================================================================
 
-    @patch('backend.services.mcp_management_service.query_group_ids_by_user')
-    @patch('backend.services.mcp_management_service.get_user_tenant_by_user_id')
-    @patch('backend.services.mcp_management_service.get_mcp_market_records')
-    async def test_list_with_user_group_ids(self, mock_get, mock_tenant, mock_groups):
-        """list_community_mcp_services should pass user_group_ids to get_mcp_market_records."""
-        mock_tenant.return_value = {"user_role": "DEV"}
-        mock_groups.return_value = [2, 4]
-        mock_get.return_value = {"count": 0, "nextCursor": None, "items": []}
-
-        result = await list_community_mcp_services(
-            tenant_id="tid", user_id="uid", limit=30,
-        )
-        self.assertEqual(result["count"], 0)
-        mock_get.assert_called_once_with(
-            tenant_id="tid", search=None, tag=None,
-            transport_type=None, cursor=None, limit=30,
-            user_id="uid", user_group_ids=[2, 4],
-        )
-
-    @patch('backend.services.mcp_management_service.query_group_ids_by_user', side_effect=Exception('query failed'))
-    @patch('backend.services.mcp_management_service.get_user_tenant_by_user_id')
-    @patch('backend.services.mcp_management_service.get_mcp_market_records')
-    async def test_list_handles_group_query_failure(self, mock_get, mock_tenant, mock_groups):
-        """list_community_mcp_services should handle query_group_ids_by_user failure gracefully."""
-        mock_tenant.return_value = {"user_role": "DEV"}
-        mock_get.return_value = {"count": 0, "nextCursor": None, "items": []}
-
-        result = await list_community_mcp_services(
-            tenant_id="tid", user_id="uid", limit=30,
-        )
-        self.assertEqual(result["count"], 0)
-        mock_get.assert_called_once_with(
-            tenant_id="tid", search=None, tag=None,
-            transport_type=None, cursor=None, limit=30,
-            user_id="uid", user_group_ids=None,
-        )
-
-    @patch('backend.services.mcp_management_service.query_group_ids_by_user')
-    @patch('backend.services.mcp_management_service.get_user_tenant_by_user_id')
-    @patch('backend.services.mcp_management_service.get_mcp_market_records')
-    async def test_list_skips_group_filter_for_admin(self, mock_get, mock_tenant, mock_groups):
-        """Admin users should skip group filtering (user_id None, user_group_ids None)."""
-        mock_tenant.return_value = {"user_role": "ADMIN"}
-        mock_get.return_value = {"count": 0, "nextCursor": None, "items": []}
-
-        result = await list_community_mcp_services(
-            tenant_id="tid", user_id="uid", limit=30,
-        )
-        self.assertEqual(result["count"], 0)
-        mock_get.assert_called_once_with(
-            tenant_id="tid", search=None, tag=None,
-            transport_type=None, cursor=None, limit=30,
-            user_id=None, user_group_ids=None,
-        )
-
-
 class TestListCommunityMcpTagStats(unittest.TestCase):
 
-    @patch('backend.services.mcp_management_service.get_mcp_market_tag_stats_by_tenant')
+    @patch('backend.services.mcp_management_service.get_mcp_market_tag_stats')
     def test_list_tag_stats(self, mock_get):
         mock_get.return_value = [{"tag": "python", "count": 5}]
         result = list_community_mcp_tag_stats(tenant_id="tid")
         self.assertEqual(len(result), 1)
-        mock_get.assert_called_once_with(tenant_id="tid")
+        mock_get.assert_called_once_with()
 
 
 # ============================================================================
@@ -1100,3 +1053,47 @@ class TestListMyCommunityMcpServices(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["count"], 2)
         statuses = {item["reviewStatus"] for item in result["items"]}
         self.assertEqual(statuses, {"approved", "pending"})
+
+
+# ============================================================================
+# list_registry_mcp_services
+# ============================================================================
+
+class TestListRegistryMcpServices(unittest.IsolatedAsyncioTestCase):
+
+    async def test_list_registry_services(self):
+        response = MagicMock()
+        response.status = 200
+        response.json = AsyncMock(return_value={
+            "servers": [{"name": "registry-mcp"}],
+            "metadata": {"nextCursor": "next"},
+        })
+        response_context = MagicMock()
+        response_context.__aenter__ = AsyncMock(return_value=response)
+        response_context.__aexit__ = AsyncMock(return_value=None)
+
+        session = MagicMock()
+        session.get.return_value = response_context
+        session_context = MagicMock()
+        session_context.__aenter__ = AsyncMock(return_value=session)
+        session_context.__aexit__ = AsyncMock(return_value=None)
+
+        with patch(
+            'backend.services.mcp_management_service.aiohttp.ClientSession',
+            return_value=session_context,
+        ):
+            result = await list_registry_mcp_services(
+                search="demo",
+                include_deleted=True,
+                updated_since="2026-08-01T00:00:00Z",
+                version="1.0.0",
+                cursor="cursor",
+                limit=10,
+            )
+
+        self.assertEqual(result["servers"], [{"name": "registry-mcp"}])
+        self.assertEqual(result["metadata"], {"nextCursor": "next"})
+        request_url = session.get.call_args.args[0]
+        self.assertIn("search=demo", request_url)
+        self.assertIn("include_deleted=true", request_url)
+        self.assertIn("cursor=cursor", request_url)
