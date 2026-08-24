@@ -134,6 +134,8 @@ export interface ThreadProps {
   variant?: "default" | "embedded";
   skillFiles?: readonly SkillFileContent[];
   onSkillFileSelect?: (path: string) => void;
+  runtimeMetadata?: Record<string, unknown>;
+  onRuntimeMetadataChange?: (value: Record<string, unknown>) => void;
   readOnly?: boolean;
   showComposer?: boolean;
 }
@@ -197,6 +199,8 @@ export const Thread: FC<ThreadProps> = ({
   variant = "default",
   skillFiles,
   onSkillFileSelect,
+  runtimeMetadata = {},
+  onRuntimeMetadataChange,
   readOnly = false,
   showComposer = true,
 }) => {
@@ -414,6 +418,8 @@ export const Thread: FC<ThreadProps> = ({
         variant={variant}
         skillFiles={skillFiles}
         onSkillFileSelect={onSkillFileSelect}
+        runtimeMetadata={runtimeMetadata}
+        onRuntimeMetadataChange={onRuntimeMetadataChange}
         readOnly={readOnly}
         showComposer={showComposer}
         hasMessages={hasMessages}
@@ -526,6 +532,8 @@ interface ThreadViewProps {
   variant: "default" | "embedded";
   skillFiles?: readonly SkillFileContent[];
   onSkillFileSelect?: (path: string) => void;
+  runtimeMetadata: Record<string, unknown>;
+  onRuntimeMetadataChange?: (value: Record<string, unknown>) => void;
   readOnly: boolean;
   showComposer: boolean;
 }
@@ -564,6 +572,8 @@ const ThreadView: FC<ThreadViewProps> = ({
   variant,
   skillFiles,
   onSkillFileSelect,
+  runtimeMetadata,
+  onRuntimeMetadataChange,
   readOnly,
   showComposer,
 }) => {
@@ -580,50 +590,53 @@ const ThreadView: FC<ThreadViewProps> = ({
       <div className="flex h-full min-w-0 flex-1 flex-col">
         {showConversationTitle && (
           <header className="flex items-center gap-2 border-b px-3 py-2">
-          {isShareMode ? (
-            <>
-              <div className="flex min-w-0 flex-1 justify-center text-sm font-medium text-foreground">
-                {conversationTitle}
-              </div>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={onLeaveShareMode}
-                aria-label={t("common.close", "关闭")}
-              >
-                <XIcon className="size-4" />
-              </Button>
-            </>
-          ) : (
-            <>
-              {onBack && (
-                <Button variant="ghost" size="icon" onClick={onBack}>
-                  <ArrowLeft className="size-4" />
-                </Button>
-              )}
-              <div className="flex min-w-0 flex-1 flex-col">
-                <span className="text-sm font-medium text-foreground">
-                  {hasMessages ? conversationTitle : displayName}
-                </span>
-                {hasMessages && variant !== "embedded" && (
-                  <span className="text-xs text-muted-foreground">
-                    {t("chat.thread.conversation")}
-                  </span>
-                )}
-              </div>
-              {hasMessages && conversationId && (
+            {isShareMode ? (
+              <>
+                <div className="flex min-w-0 flex-1 justify-center text-sm font-medium text-foreground">
+                  {conversationTitle}
+                </div>
                 <Button
                   variant="ghost"
                   size="icon"
-                  aria-label={t("chatInterface.shareConversation", "分享对话")}
-                  disabled={isRunning}
-                  onClick={onEnterShareMode}
+                  onClick={onLeaveShareMode}
+                  aria-label={t("common.close", "关闭")}
                 >
-                  <Share2Icon className="size-4" />
+                  <XIcon className="size-4" />
                 </Button>
-              )}
-            </>
-          )}
+              </>
+            ) : (
+              <>
+                {onBack && (
+                  <Button variant="ghost" size="icon" onClick={onBack}>
+                    <ArrowLeft className="size-4" />
+                  </Button>
+                )}
+                <div className="flex min-w-0 flex-1 flex-col">
+                  <span className="text-sm font-medium text-foreground">
+                    {hasMessages ? conversationTitle : displayName}
+                  </span>
+                  {hasMessages && variant !== "embedded" && (
+                    <span className="text-xs text-muted-foreground">
+                      {t("chat.thread.conversation")}
+                    </span>
+                  )}
+                </div>
+                {hasMessages && conversationId && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    aria-label={t(
+                      "chatInterface.shareConversation",
+                      "分享对话"
+                    )}
+                    disabled={isRunning}
+                    onClick={onEnterShareMode}
+                  >
+                    <Share2Icon className="size-4" />
+                  </Button>
+                )}
+              </>
+            )}
           </header>
         )}
 
@@ -713,6 +726,9 @@ const ThreadView: FC<ThreadViewProps> = ({
               onKnowledgeScopeChange={onKnowledgeScopeChange}
               compact={variant === "embedded"}
               skillFiles={skillFiles}
+              runtimeMetadata={runtimeMetadata}
+              onRuntimeMetadataChange={onRuntimeMetadataChange}
+              allowRuntimeMetadata={agent.allow_chat_metadata === true}
               disabled={readOnly}
             />
           </ThreadPrimitive.ViewportFooter>
@@ -906,12 +922,7 @@ export const ThreadMessages: FC<{
         />
       ),
     }),
-    [
-      agent,
-      enableSkillDirectives,
-      onSkillFileSelect,
-      readOnly,
-    ]
+    [agent, enableSkillDirectives, onSkillFileSelect, readOnly]
   );
 
   if (shareMode) {

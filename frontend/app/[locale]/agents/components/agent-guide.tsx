@@ -11,9 +11,7 @@ const MAX_EXAMPLE_QUESTIONS = 6;
 export default function AgentConversationGuide() {
   const { t } = useTranslation("common");
   const editedAgent = useAgentStore((state) => state.editedAgent!);
-  const updateAgentConfig = useAgentStore(
-    (state) => state.updateAgentConfig
-  );
+  const updateAgentConfig = useAgentStore((state) => state.updateAgentConfig);
   const exampleQuestions = editedAgent.example_questions || [];
 
   return (
@@ -28,13 +26,17 @@ export default function AgentConversationGuide() {
           autoSize={{ minRows: 3, maxRows: 6 }}
         />
       </Form.Item>
-      <div>
+      <div className="space-y-4">
         <div className="mb-2 flex items-center justify-between">
           <div className="flex items-center gap-1">
             <span className="text-sm font-medium text-gray-700">
               {t("agent.greeting.questionsTitle")}
             </span>
-            <Tooltip title={t("agent.validation.exampleQuestionsMax", { max: MAX_EXAMPLE_QUESTIONS })}>
+            <Tooltip
+              title={t("agent.validation.exampleQuestionsMax", {
+                max: MAX_EXAMPLE_QUESTIONS,
+              })}
+            >
               <span className="text-xs text-gray-400 cursor-help">
                 ({exampleQuestions.length}/{MAX_EXAMPLE_QUESTIONS})
               </span>
@@ -43,7 +45,9 @@ export default function AgentConversationGuide() {
           <Tooltip
             title={
               exampleQuestions.length >= MAX_EXAMPLE_QUESTIONS
-                ? t("agent.validation.exampleQuestionsMax", { max: MAX_EXAMPLE_QUESTIONS })
+                ? t("agent.validation.exampleQuestionsMax", {
+                    max: MAX_EXAMPLE_QUESTIONS,
+                  })
                 : undefined
             }
           >

@@ -107,6 +107,14 @@ class AnalyzeVideoTool(Tool):
         self.forward = self.mm.load_object(
             input_names=["video_url", "video_urls_list"])(self._forward_impl)
 
+    def _validate_video_capable_model(self) -> None:
+        info = self.vlm_model.get_model_info()
+        if not info.capabilities.get("video", True):
+            raise ValueError(
+                "The selected video understanding model does not support video input. "
+                "Please choose a video-capable model for analyze_video."
+            )
+
     def _forward_impl(
             self,
             video_url: Optional[bytes] = None,
@@ -119,6 +127,7 @@ class AnalyzeVideoTool(Tool):
             error_msg = error_msg_zh if self._is_chinese else error_msg_en
             logger.error(error_msg)
             raise Exception(error_msg)
+        self._validate_video_capable_model()
 
         # Tool running chunk is emitted by the SDK tool-call bridge in
         # core_agent.py so it is consistent across direct and code_action

@@ -114,6 +114,7 @@ sys.modules['sqlalchemy.exc'] = sqlalchemy_mock.exc
 # Now we can safely import the module under test
 from backend.database.tenant_config_db import (
     get_all_configs_by_tenant_id,
+    get_configs_by_tenant_id_and_keys,
     get_tenant_config_info,
     get_single_config_info,
     insert_config,
@@ -123,6 +124,39 @@ from backend.database.tenant_config_db import (
     update_config_by_tenant_config_id_and_data,
     get_all_tenant_ids
 )
+
+
+def test_get_configs_by_tenant_id_and_keys_success(monkeypatch, mock_session):
+    """Return only active configuration values for the requested keys."""
+    session, query = mock_session
+    mock_config = MockTenantConfig(
+        config_key="PERSONAL_KB_QUOTA_user-1",
+        config_value="1024",
+    )
+    mock_filter = MagicMock()
+    mock_filter.all.return_value = [mock_config]
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.tenant_config_db.get_db_session", lambda: mock_ctx)
+
+    result = get_configs_by_tenant_id_and_keys(
+        "test_tenant",
+        ["PERSONAL_KB_QUOTA_DEFAULT", "PERSONAL_KB_QUOTA_user-1"],
+    )
+
+    assert result == {"PERSONAL_KB_QUOTA_user-1": "1024"}
+
+
+def test_get_configs_by_tenant_id_and_keys_empty_keys(monkeypatch):
+    """Avoid opening a database session when no keys are requested."""
+    get_db_session = MagicMock()
+    monkeypatch.setattr("backend.database.tenant_config_db.get_db_session", get_db_session)
+
+    assert get_configs_by_tenant_id_and_keys("test_tenant", []) == {}
+    get_db_session.assert_not_called()
 
 
 @pytest.fixture

@@ -71,7 +71,10 @@ export interface ApiConversationDetail {
   agent_id?: number | null;
   chat_mode?: "planning" | "execution";
   knowledge_scope?:
-    import("./knowledgeScope").ConversationKnowledgeScope | null;
+    | import("./knowledgeScope").ConversationKnowledgeScope
+    | null;
+  runtime_metadata?: Record<string, unknown>;
+  runtime_metadata_version?: number;
   message: ApiMessage[];
   streaming_message?: StreamingMessage;
 }

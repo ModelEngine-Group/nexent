@@ -1,10 +1,12 @@
 import asyncio
+from copy import deepcopy
 import json
 import logging
 from contextvars import copy_context
 from threading import Thread
 from typing import Any, Dict, Union
 
+import httpx
 from smolagents import ToolCollection
 
 from ...monitor import (
@@ -17,6 +19,12 @@ from .nexent_agent import NexentAgent, ProcessType
 
 logger = logging.getLogger("run_agent")
 logger.setLevel(logging.DEBUG)
+
+
+def build_run_additional_args(agent_run_info: AgentRunInfo) -> Dict[str, Any]:
+    """Build isolated variables for one agent run, including empty metadata."""
+
+    return {"metadata": deepcopy(agent_run_info.runtime_metadata)}
 
 
 def _get_authorized_context_items(agent_run_info: AgentRunInfo):
@@ -124,6 +132,21 @@ def _detect_transport(url: str) -> str:
     return "streamable-http"
 
 
+def _create_mcp_http_client_without_proxy(
+    headers: dict[str, str] | None = None,
+    timeout: httpx.Timeout | None = None,
+    auth: httpx.Auth | None = None,
+) -> httpx.AsyncClient:
+    """Create an MCP HTTP client that ignores proxy environment variables."""
+    return httpx.AsyncClient(
+        headers=headers,
+        timeout=timeout,
+        auth=auth,
+        follow_redirects=True,
+        trust_env=False,
+    )
+
+
 def _normalize_mcp_config(mcp_host_item: Union[str, Dict[str, Any]]) -> Dict[str, Any]:
     """
     Normalize MCP host configuration to a dictionary format.
@@ -150,6 +173,9 @@ def _normalize_mcp_config(mcp_host_item: Union[str, Dict[str, Any]]) -> Dict[str
             raise ValueError(f"Invalid transport type: {transport}. Must be 'sse' or 'streamable-http'")
 
         result = {"url": url, "transport": transport}
+
+        if mcp_host_item.get("bypass_proxy") is True:
+            result["httpx_client_factory"] = _create_mcp_http_client_without_proxy
 
         if "authorization" in mcp_host_item and "headers" in mcp_host_item:
             headers = mcp_host_item["headers"].copy() if isinstance(mcp_host_item["headers"], dict) else {}
@@ -205,7 +231,10 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
             nexent.add_history_to_agent(_get_authorized_history(agent_run_info))
             try:
                 nexent.agent_run_with_observer(
-                    query=agent_run_info.query, reset=False)
+                    query=agent_run_info.query,
+                    reset=False,
+                    additional_args=build_run_additional_args(agent_run_info),
+                )
             finally:
                 _log_memory_value_assessment(agent)
         else:
@@ -238,7 +267,10 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
                 nexent.add_history_to_agent(_get_authorized_history(agent_run_info))
                 try:
                     nexent.agent_run_with_observer(
-                        query=agent_run_info.query, reset=False)
+                        query=agent_run_info.query,
+                        reset=False,
+                        additional_args=build_run_additional_args(agent_run_info),
+                    )
                 finally:
                     _log_memory_value_assessment(agent)
 

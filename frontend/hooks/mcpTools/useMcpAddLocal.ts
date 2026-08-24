@@ -6,7 +6,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import log from "@/lib/logger";
 import {
-  addContainerMcpToolService,
+  addContainerMcpToolServiceStream,
   addMcpToolService,
   parseContainerMcpConfigJson,
 } from "@/services/mcpToolsService";
@@ -16,18 +16,19 @@ import { McpDeploymentType, McpSource, MCP_TOOLS_QUERY_KEYS } from "@/const/mcpT
 import { MCP_SERVERS_QUERY_KEY } from "@/hooks/mcp/useMcpServerList";
 import type { LocalAddMcpDraft } from "@/types/mcpTools";
 import { refreshToolListWithToast } from "./useRefreshToolListWithToast";
-import { uploadMcpImage } from "@/services/mcpService";
+import { uploadMcpImageStream } from "@/services/mcpService";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 
 interface UseMcpAddLocalParams {
   onSuccess: () => void;
+  onContainerStarted?: (containerId: string) => void;
 }
 
 /**
  * Submission mutation for the "Add local MCP" form. The component owns the
  * draft; this hook only cares about the network call + cache invalidation.
  */
-export function useMcpAddLocal({ onSuccess }: UseMcpAddLocalParams) {
+export function useMcpAddLocal({ onSuccess, onContainerStarted }: UseMcpAddLocalParams) {
   const { message } = App.useApp();
   const { t } = useTranslation("common");
   const queryClient = useQueryClient();
@@ -119,10 +120,11 @@ export function useMcpAddLocal({ onSuccess }: UseMcpAddLocalParams) {
           ? JSON.stringify({ authorization_token: draft.authorizationToken.trim() })
           : undefined;
 
-        const result = await uploadMcpImage(
+        const result = await uploadMcpImageStream(
           file, draft.containerPort, trimmedName, envVars,
           undefined, draft.groupIds?.join(","), draft.ingroupPermission,
           draft.sharedFields ? JSON.stringify(draft.sharedFields) : undefined,
+          (containerId) => onContainerStarted?.(containerId),
         );
         if (!result.success) {
           throw new Error(result.message || t("mcpTools.add.error.imageUploadFailed"));
@@ -134,7 +136,7 @@ export function useMcpAddLocal({ onSuccess }: UseMcpAddLocalParams) {
           return false;
         }
 
-        await addContainerMcpToolService({
+        await addContainerMcpToolServiceStream({
           name: trimmedName,
           description: draft.description ?? "",
           tags: draft.tags,
@@ -146,6 +148,8 @@ export function useMcpAddLocal({ onSuccess }: UseMcpAddLocalParams) {
           group_ids: draft.groupIds?.join(",") ?? undefined,
           ingroup_permission: draft.ingroupPermission ?? undefined,
           shared_fields: draft.sharedFields ?? undefined,
+        }, (result) => {
+          if (result.container_id) onContainerStarted?.(result.container_id);
         });
       } else {
         await addMcpToolService({

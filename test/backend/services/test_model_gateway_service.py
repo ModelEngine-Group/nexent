@@ -151,6 +151,54 @@ def test_config_to_context_cfg_none_uses_defaults_and_observer():
     assert isinstance(ctx.observer, MessageObserver)
 
 
+def test_config_to_context_vlm4_defaults_audio_only_caps():
+    """vlm4 (audio understanding) slot derives audio-only capabilities by default."""
+    observer = mock.MagicMock()
+    cfg = {
+        "model_factory": "modelengine",
+        "base_url": "https://api.example.com/v1",
+        "api_key": "sk-test",
+        "display_name": "ASR Model",
+    }
+    with mock.patch.object(mgs, "get_registry") as mock_get_registry:
+        mock_get_registry.return_value.has.return_value = True
+        ctx = mgs._config_to_context(
+            cfg,
+            "vlm",
+            "vlm4",
+            "tenant-1",
+            model_name="asr-model",
+            observer=observer,
+        )
+
+    assert isinstance(ctx, VLMContext)
+    assert ctx.slot == "vlm4"
+    assert ctx.capabilities == {"audio": True, "video": False, "image": False}
+
+
+def test_config_to_context_vlm4_explicit_caps_override_default():
+    """Explicit capabilities passed for vlm4 override the audio-only default."""
+    observer = mock.MagicMock()
+    cfg = {
+        "model_factory": "modelengine",
+        "base_url": "https://api.example.com/v1",
+        "api_key": "sk-test",
+    }
+    with mock.patch.object(mgs, "get_registry") as mock_get_registry:
+        mock_get_registry.return_value.has.return_value = True
+        ctx = mgs._config_to_context(
+            cfg,
+            "vlm",
+            "vlm4",
+            "tenant-1",
+            model_name="omni-model",
+            capabilities={"audio": True, "video": True, "image": True},
+            observer=observer,
+        )
+
+    assert ctx.capabilities == {"audio": True, "video": True, "image": True}
+
+
 def test_config_to_context_unknown_modality_raises():
     with mock.patch.object(mgs, "get_registry") as mock_get_registry:
         mock_get_registry.return_value.has.return_value = False

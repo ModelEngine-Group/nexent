@@ -168,7 +168,7 @@ function reducer(
         phase: "completed",
         completionSyncFailed: false,
         isFormLocked: false,
-        isComposerDisabled: true,
+        isComposerDisabled: false,
       };
     case "completion_sync_failed":
       if (state.agentId !== action.agentId || state.phase !== "completing") {

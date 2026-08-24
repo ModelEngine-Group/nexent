@@ -9,7 +9,15 @@ import { modelService } from "@/services/modelService";
 import { getMcpServerList, addMcpServer, updateToolList } from "@/services/mcpService";
 import { McpServer } from "@/types/agentConfig";
 import { ImportAgentData } from "@/lib/agentImportUtils";
-import { importAgent, checkAgentNameConflictBatch, regenerateAgentNameBatch, fetchTools } from "@/services/agentConfigService";
+import {
+  importAgent,
+  checkAgentNameConflictBatch,
+  regenerateAgentNameBatch,
+  fetchTools,
+  checkAgentSkillConflicts,
+  type SkillConflict,
+  type SkillResolution,
+} from "@/services/agentConfigService";
 import { useQueryClient } from "@tanstack/react-query";
 import log from "@/lib/logger";
 
@@ -127,8 +135,9 @@ export default function AgentImportWizard({
   const [loadingMcpServers, setLoadingMcpServers] = useState(false);
   const [installingMcp, setInstallingMcp] = useState<Record<string, boolean>>({});
   const [isImporting, setIsImporting] = useState(false);
-  const [skillDuplicateModalVisible, setSkillDuplicateModalVisible] = useState(false);
-  const [duplicateSkillNames, setDuplicateSkillNames] = useState<string[]>([]);
+  const [checkingSkillConflicts, setCheckingSkillConflicts] = useState(false);
+  const [skillConflicts, setSkillConflicts] = useState<SkillConflict[]>([]);
+  const [skillResolutionActions, setSkillResolutionActions] = useState<Record<string, SkillResolution["action"]>>({});
   const [availableTools, setAvailableTools] = useState<Array<{ name?: string; origin_name?: string; usage?: string; source?: string }>>([]);
   const [missingTools, setMissingTools] = useState<Array<{ name: string; source?: string; usage?: string; agents: string[] }>>([]);
   const [loadingTools, setLoadingTools] = useState(false);
@@ -154,10 +163,8 @@ export default function AgentImportWizard({
     renamedName: string;
     renamedDisplayName: string;
   }>>({});
-  // Store skillZips in ref so we can clear them on "skip skills" without prop drilling
+  // Keep the original ZIP payloads available when retrying after conflict resolution.
   const skillZipsRef = useRef<Array<{ skill_name: string; skill_zip_base64: string }>>([]);
-  // Store the prepared import data so "Skip Skills" can re-import without re-preparing
-  const importDataRef = useRef<ImportAgentData | null>(null);
 
   // Helper: Refresh tools and agents after MCP changes
   const refreshToolsAndAgents = async () => {
@@ -184,6 +191,42 @@ export default function AgentImportWizard({
     if (visible && initialData) {
       checkNameConflict();
     }
+  }, [visible, initialData]);
+
+  // Check bundled skill names early so conflicts can be handled in the final wizard step.
+  useEffect(() => {
+    let cancelled = false;
+    const skillNames = initialData?.skills?.map(skill => skill.skill_name) ?? [];
+
+    if (!visible || skillNames.length === 0) {
+      setCheckingSkillConflicts(false);
+      setSkillConflicts([]);
+      setSkillResolutionActions({});
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    setSkillConflicts([]);
+    setSkillResolutionActions({});
+    setCheckingSkillConflicts(true);
+    void checkAgentSkillConflicts(skillNames).then(result => {
+      if (cancelled) return;
+      if (result.success) {
+        setSkillConflicts(result.data);
+        setSkillResolutionActions(Object.fromEntries(
+          result.data.map(conflict => [conflict.skill_name, "rename"])
+        ));
+      } else {
+        setSkillConflicts([]);
+        setSkillResolutionActions({});
+      }
+      setCheckingSkillConflicts(false);
+    });
+
+    return () => {
+      cancelled = true;
+    };
   }, [visible, initialData]);
 
   // Cleanup timer on unmount
@@ -851,11 +894,11 @@ export default function AgentImportWizard({
     await performImport();
   };
 
-  const doImport = async (data: ImportAgentData, skipSkills: boolean = false) => {
-    const skillZipsToSend = skipSkills ? [] : skillZipsRef.current;
+  const doImport = async (data: ImportAgentData, skillResolutions?: SkillResolution[]) => {
     const result = await importAgent(data, {
       forceImport: false,
-      skillZips: skillZipsToSend,
+      skillZips: skillZipsRef.current,
+      skillResolutions,
     });
 
     if (result.success) {
@@ -865,8 +908,32 @@ export default function AgentImportWizard({
     } else {
       const errDetail = (result.data as any)?.detail;
       if (errDetail?.type === "skill_duplicate" && Array.isArray(errDetail.duplicate_skills)) {
-        setSkillDuplicateModalVisible(true);
-        setDuplicateSkillNames(errDetail.duplicate_skills);
+        const conflicts: SkillConflict[] = Array.isArray(errDetail.skill_conflicts)
+          ? errDetail.skill_conflicts.filter(
+            (conflict: unknown): conflict is SkillConflict =>
+              typeof conflict === "object" &&
+              conflict !== null &&
+              typeof (conflict as SkillConflict).skill_name === "string" &&
+              typeof (conflict as SkillConflict).suggested_new_name === "string"
+          )
+          : [];
+        if (conflicts.length === 0) {
+          message.error(result.message || t("market.install.error.installFailed", "Failed to install agent"));
+          return;
+        }
+        setSkillConflicts(conflicts);
+        setSkillResolutionActions(Object.fromEntries(
+          conflicts.map(conflict => [
+            conflict.skill_name,
+            skillResolutionActions[conflict.skill_name] ?? "rename",
+          ])
+        ));
+        const skillStepIndex = steps.findIndex(step => step.key === "skills");
+        setCurrentStep(skillStepIndex >= 0 ? skillStepIndex : steps.length);
+        message.warning(t(
+          "market.install.skillDuplicate.changed",
+          "Skill names have changed. Please confirm the conflict resolutions again."
+        ));
       } else {
         message.error(result.message || t("market.install.error.installFailed", "Failed to install agent"));
       }
@@ -881,12 +948,20 @@ export default function AgentImportWizard({
       return;
     }
 
-    importDataRef.current = importData;
     log.info("Importing agent with data:", importData);
+
+    const skillResolutions: SkillResolution[] = skillConflicts.map(conflict => {
+      const action = skillResolutionActions[conflict.skill_name] ?? "rename";
+      return {
+        skill_name: conflict.skill_name,
+        action,
+        ...(action === "rename" ? { new_name: conflict.suggested_new_name } : {}),
+      };
+    });
 
     setIsImporting(true);
     try {
-      await doImport(importData);
+      await doImport(importData, skillResolutions);
     } catch (error) {
       log.error("Failed to install agent:", error);
       message.error(t("market.install.error.installFailed", "Failed to install agent"));
@@ -999,6 +1074,9 @@ export default function AgentImportWizard({
     setConfigValues({});
     setMcpServers([]);
     setIsImporting(false);
+    setCheckingSkillConflicts(false);
+    setSkillConflicts([]);
+    setSkillResolutionActions({});
     setAgentNameConflicts({});
     agentNameConflictsRef.current = {};
     setCheckingName(false);
@@ -1043,12 +1121,19 @@ export default function AgentImportWizard({
       key: "mcp",
       title: t("market.install.step.mcp", "MCP Servers"),
     },
+    skillConflicts.length > 0 && {
+      key: "skills",
+      title: t("market.install.step.skills", "Resolve Skills"),
+    },
   ].filter(Boolean) as Array<{ key: string; title: string }>;
 
   // Check if can proceed to next step
   const canProceed = () => {
     // Disable buttons while checking name conflict
     if (checkingName) {
+      return false;
+    }
+    if (checkingSkillConflicts) {
       return false;
     }
 
@@ -1079,6 +1164,8 @@ export default function AgentImportWizard({
         (mcp.isUrlEditable && mcp.editedUrl && mcp.editedUrl.trim() !== "") ||
         (!mcp.isUrlEditable && mcp.mcp_url && mcp.mcp_url.trim() !== "")
       );
+    } else if (currentStepKey === "skills") {
+      return true;
     }
 
     return true;
@@ -1892,6 +1979,62 @@ export default function AgentImportWizard({
           )}
         </div>
       );
+    } else if (currentStepKey === "skills") {
+      return (
+        <div className="space-y-4">
+          <p className="text-sm text-gray-600 dark:text-gray-400">
+            {t(
+              "market.install.skillDuplicate.message",
+              "Choose how to handle each skill that already exists in your workspace."
+            )}
+          </p>
+          <div className="space-y-3">
+            {skillConflicts.map(conflict => (
+              <div
+                key={conflict.skill_name}
+                className="rounded-lg border border-gray-200 dark:border-gray-700 p-4"
+              >
+                <div className="mb-3">
+                  <Tag color="orange" style={{ fontSize: 14 }}>{conflict.skill_name}</Tag>
+                </div>
+                <Radio.Group
+                  value={skillResolutionActions[conflict.skill_name] ?? "rename"}
+                  onChange={event => {
+                    setSkillResolutionActions(current => ({
+                      ...current,
+                      [conflict.skill_name]: event.target.value,
+                    }));
+                  }}
+                >
+                  <Space direction="vertical" size={8}>
+                    <Radio value="rename">
+                      {t("market.install.skillDuplicate.rename", "Install as a new skill")}
+                      <span className="ml-2 text-sm text-gray-700 dark:text-gray-300">
+                        {t("market.install.skillDuplicate.renameTarget", {
+                          name: conflict.suggested_new_name,
+                          defaultValue: `New name: ${conflict.suggested_new_name}`,
+                        })}
+                      </span>
+                    </Radio>
+                    <Radio value="use_existing">
+                      {t(
+                        "market.install.skillDuplicate.useExisting",
+                        "Use the existing local skill"
+                      )}
+                    </Radio>
+                  </Space>
+                </Radio.Group>
+              </div>
+            ))}
+          </div>
+          <p className="text-xs text-gray-500 dark:text-gray-400">
+            {t(
+              "market.install.skillDuplicate.hint",
+              "The imported agent will be linked to the selected skill."
+            )}
+          </p>
+        </div>
+      );
     }
 
     return null;
@@ -1957,73 +2100,19 @@ export default function AgentImportWizard({
           className="mb-6"
         />
 
+        {checkingSkillConflicts && (
+          <div className="mb-4 flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+            <Spin size="small" />
+            <span>
+              {t("market.install.checkingSkills", "Checking skill names...")}
+            </span>
+          </div>
+        )}
+
         <div className="min-h-[300px] max-h-[70vh] overflow-y-auto pr-1">
           {renderStepContent()}
         </div>
       </div>
-
-      {/* Skill Duplicate Warning Modal */}
-      <Modal
-        open={skillDuplicateModalVisible}
-        onCancel={() => setSkillDuplicateModalVisible(false)}
-        title={
-          <div className="flex items-center gap-2">
-            <AlertTriangle size={20} className="text-red-500" />
-            <span>{t("market.install.skillDuplicate.title", "Skill Name Conflict Detected")}</span>
-          </div>
-        }
-        footer={[
-          <Button
-            key="cancel"
-            onClick={() => {
-              setSkillDuplicateModalVisible(false);
-              setIsImporting(false);
-            }}
-          >
-            {t("common.cancel", "Cancel")}
-          </Button>,
-          <Button
-            key="skip"
-            type="primary"
-            onClick={async () => {
-              setSkillDuplicateModalVisible(false);
-              if (importDataRef.current) {
-                setIsImporting(true);
-                try {
-                  await doImport(importDataRef.current, true);
-                } finally {
-                  setIsImporting(false);
-                }
-              }
-            }}
-          >
-            {t("market.install.skillDuplicate.skip", "Skip Skills")}
-          </Button>,
-        ]}
-      >
-        <div className="py-2">
-          <p className="text-sm text-gray-700 dark:text-gray-300 mb-4">
-            {t(
-              "market.install.skillDuplicate.message",
-              "The following skill(s) already exist in your workspace. Please choose how to proceed."
-            )}
-          </p>
-          <div className="flex flex-wrap gap-2 mb-4">
-            {duplicateSkillNames.map((name) => (
-              <Tag key={name} color="orange">
-                {name}
-              </Tag>
-            ))}
-          </div>
-          <p className="text-xs text-gray-500 dark:text-gray-400">
-            {t(
-              "market.install.skillDuplicate.hint",
-              "You can manage your existing skills in Settings &gt; Skill Management."
-            )}
-          </p>
-        </div>
-      </Modal>
     </Modal>
   );
 }
-

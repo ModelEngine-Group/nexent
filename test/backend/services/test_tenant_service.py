@@ -671,7 +671,9 @@ class TestDeleteTenant:
             assert result is True
 
             # Verify user cleanup was called
-            mock_get_users.assert_called_once_with(tenant_id, page=1, page_size=10000)
+            mock_get_users.assert_called_once_with(
+                tenant_id, page=1, page_size=10000, email_required=False
+            )
             mock_delete_user.assert_not_called()
 
             # Verify configs deletion was called

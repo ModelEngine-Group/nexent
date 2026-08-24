@@ -1435,6 +1435,7 @@ async def create_agent_config(
         requested_output_tokens=requested_output_tokens,
         model_name=model_name,
         provide_run_summary=agent_info.get("provide_run_summary", False),
+        allow_chat_metadata=agent_info.get("allow_chat_metadata", False),
         managed_agents=managed_agents,
         external_a2a_agents=external_a2a_agents,
         context_manager_config=cm_config,
@@ -1799,7 +1800,14 @@ async def create_tool_config_list(
                 "storage_client": minio_client,
                 "validate_url_access": lambda urls: validate_urls_access(urls, user_id)
             }
-        elif tool_config.class_name in ["AnalyzeAudioTool", "AnalyzeVideoTool"]:
+        elif tool_config.class_name == "AnalyzeAudioTool":
+            selected_model_id = param_dict.get("selected_model_id")
+            tool_config.metadata = {
+                "vlm_model": get_vlm_adapter(tenant_id, selected_model_id, slot="vlm4"),
+                "storage_client": minio_client,
+                "validate_url_access": lambda urls: validate_urls_access(urls, user_id)
+            }
+        elif tool_config.class_name == "AnalyzeVideoTool":
             selected_model_id = param_dict.get("selected_model_id")
             tool_config.metadata = {
                 "vlm_model": get_vlm_adapter(tenant_id, selected_model_id, slot="vlm3"),

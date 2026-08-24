@@ -1852,7 +1852,7 @@ async def test_modelengine_get_models_all_types():
         type_map = {model["id"]: model["model_type"] for model in result}
         assert type_map["gpt-4"] == "llm"
         assert type_map["text-embedding-ada"] == "embedding"
-        assert type_map["whisper"] == "stt"
+        assert type_map["whisper"] == "vlm4"
         assert type_map["tts-model"] == "tts"
         assert type_map["rerank-model"] == "rerank"
         assert type_map["vlm-model"] == "vlm"

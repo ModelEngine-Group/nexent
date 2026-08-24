@@ -5,13 +5,10 @@ import {
   App,
   Flex,
   Button,
-  Badge,
   Dropdown,
   Tooltip,
   Col,
   Row,
-  Tag,
-  theme,
   Input,
 } from "antd";
 import {
@@ -20,7 +17,6 @@ import {
   ChevronDown,
   ChevronLeft,
   Bot,
-  Globe,
   GitBranch,
   Search,
 } from "lucide-react";
@@ -48,7 +44,6 @@ import {
 } from "@/lib/agentImportUtils";
 import log from "@/lib/logger";
 import { useAgentList } from "@/hooks/agent/useAgentList";
-import { useAgentInfo } from "@/hooks/agent/useAgentInfo";
 import AgentConfigActions from "./components/agent-config-actions";
 
 interface AgentSelectorHeaderProps {
@@ -70,10 +65,6 @@ export default function AgentSelectorHeader({
   const showBackFromRepository = true;
   const queryClient = useQueryClient();
   const waitForAutosave = useAgentStore((state) => state.waitForIdle);
-  const isSaving = useAgentStore(
-    (state) => state.isSaving || state.queue.length > 0
-  );
-  const { token } = theme?.useToken?.() || {};
 
   // Resolve tenant from auth (matches AgentManageComp / published_list; keeps ASSET_OWNER merge)
   const { agents } = useAgentList("");
@@ -81,8 +72,6 @@ export default function AgentSelectorHeader({
   // Store state
   const currentAgentId = useAgentStore((state) => state.currentAgentId);
   const initialize = useAgentStore((state) => state.initialize);
-
-  const { agentInfo } = useAgentInfo(currentAgentId);
 
   // Dropdown open state
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -385,16 +374,7 @@ export default function AgentSelectorHeader({
               >
                 <div className="flex items-center gap-2 py-2 pr-2 cursor-pointer hover:bg-gray-50 rounded-md transition-colors w-full overflow-hidden">
                   <div className="relative w-12 h-12 rounded-lg bg-blue-100 flex items-center justify-center flex-shrink-0">
-                    {isSaving && (
-                      <Badge
-                        dot
-                        color="blue"
-                        style={{ position: "absolute", top: -8, right: -8 }}
-                      >
-                        <Bot className="w-8 h-8 text-blue-600" />
-                      </Badge>
-                    )}
-                    {!isSaving && <Bot className="w-8 h-8 text-blue-600" />}
+                    <Bot className="w-8 h-8 text-blue-600" />
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="text-lg font-medium text-gray-900 leading-tight mb-2">

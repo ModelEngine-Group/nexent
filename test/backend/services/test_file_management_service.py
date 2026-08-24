@@ -19,7 +19,8 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 backend_dir = os.path.abspath(os.path.join(current_dir, "../../../backend"))
 sys.path.append(backend_dir)
 
-from consts.exceptions import QuotaExceededError
+from consts.error_code import ErrorCode
+from consts.exceptions import AppException, QuotaExceededError
 
 # Patch environment variables before any imports that might use them
 # Environment variables are now configured in conftest.py
@@ -52,6 +53,10 @@ class _StubElasticSearchService:
     async def list_files(index_name, include_chunks=False, vdb_core=None):
         return {"files": []}
 
+    @staticmethod
+    def resolve_knowledge_base_permission(index_name, user_id, tenant_id):
+        return "EDIT"
+
 
 def _stub_get_vector_db_core():
     return None
@@ -64,6 +69,7 @@ setattr(services_stub, 'vectordatabase_service', vdb_stub)
 
 knowledge_storage_stub = types.ModuleType('services.knowledge_storage_service')
 knowledge_storage_stub.resolve_storage_context = MagicMock(return_value=None)
+knowledge_storage_stub.resolve_storage_object_access = MagicMock(return_value=False)
 knowledge_storage_stub.commit_uploaded_object = MagicMock(return_value={"storage_object_id": 1})
 knowledge_storage_stub.compensate_uploaded_objects = MagicMock()
 sys.modules['services.knowledge_storage_service'] = knowledge_storage_stub
@@ -128,6 +134,11 @@ def reset_knowledge_storage_stub():
         return_value=True,
         side_effect=True,
     )
+    knowledge_storage_stub.resolve_storage_object_access.reset_mock(
+        return_value=True,
+        side_effect=True,
+    )
+    knowledge_storage_stub.resolve_storage_object_access.return_value = False
 
 
 class TestUploadFilesImpl:
@@ -856,6 +867,101 @@ class TestCheckFileAccess:
         assert check_file_access("knowledge_base/subfolder/doc.pdf", "user456") is True
         assert check_file_access("knowledge_base/", "any_user") is True
 
+    def test_check_file_access_knowledge_base_write_uses_storage_resolver(self):
+        from backend.services.file_management_service import check_file_access
+
+        assert check_file_access(
+            "knowledge_base/file.txt",
+            "user123",
+            "tenant-a",
+            required_permission="DELETE",
+        ) is False
+        knowledge_storage_stub.resolve_storage_object_access.assert_called_once_with(
+            object_name="knowledge_base/file.txt",
+            user_id="user123",
+            tenant_id="tenant-a",
+            required_permission="DELETE",
+        )
+
+    @pytest.mark.parametrize("permission", ["READ", "READ_ONLY", None])
+    def test_check_file_access_knowledge_base_reads_keep_compatibility(self, permission):
+        from backend.services.file_management_service import check_file_access
+
+        assert check_file_access(
+            "knowledge_base/file.txt",
+            "user123",
+            "tenant-a",
+            required_permission=permission,
+        ) is True
+        knowledge_storage_stub.resolve_storage_object_access.assert_not_called()
+
+    def test_check_file_access_asset_owner_write_uses_storage_resolver(self):
+        from backend.services.file_management_service import check_file_access
+        from consts.const import ASSET_OWNER_TENANT_ID
+
+        knowledge_storage_stub.resolve_storage_object_access.return_value = True
+
+        assert check_file_access(
+            "attachments/asset_owner/user1/doc.pdf",
+            "user1",
+            ASSET_OWNER_TENANT_ID,
+            required_permission="EDIT",
+        ) is True
+        knowledge_storage_stub.resolve_storage_object_access.assert_called_once_with(
+            object_name="attachments/asset_owner/user1/doc.pdf",
+            user_id="user1",
+            tenant_id=ASSET_OWNER_TENANT_ID,
+            required_permission="EDIT",
+        )
+
+    def test_check_file_access_denies_asset_owner_write_for_wrong_tenant(self):
+        from backend.services.file_management_service import check_file_access
+        from consts.const import ASSET_OWNER_TENANT_ID
+
+        assert check_file_access(
+            "attachments/asset_owner/user1/doc.pdf",
+            "user1",
+            "regular-tenant",
+            required_permission="DELETE",
+        ) is False
+        knowledge_storage_stub.resolve_storage_object_access.assert_called_once_with(
+            object_name="attachments/asset_owner/user1/doc.pdf",
+            user_id="user1",
+            tenant_id="regular-tenant",
+            required_permission="DELETE",
+        )
+
+    def test_check_file_access_image_and_skill_file_rules(self):
+        from backend.services.file_management_service import check_file_access
+
+        assert check_file_access("images_in_attachments/page.png", "user123") is True
+        assert check_file_access(
+            "images_in_attachments/page.png", "user123", required_permission="DELETE"
+        ) is False
+        assert check_file_access("skill-files/user123/result.docx", "user123") is True
+        assert check_file_access("skill-files/user123/result.docx", "user456") is False
+
+    def test_check_file_access_batch_forwards_required_permission(self, mocker):
+        from backend.services.file_management_service import check_file_access_batch
+
+        check = mocker.patch(
+            "backend.services.file_management_service.check_file_access",
+            side_effect=[True, False],
+        )
+
+        result = check_file_access_batch(
+            ["knowledge_base/a.txt", "knowledge_base/b.txt"],
+            "user123",
+            "tenant-a",
+            required_permission="DELETE",
+        )
+
+        assert result == {
+            "knowledge_base/a.txt": True,
+            "knowledge_base/b.txt": False,
+        }
+        assert check.call_args_list[0].kwargs["required_permission"] == "DELETE"
+
     def test_check_file_access_user_attachment_allows_owner(self):
         """Users can access files in their own attachments folder"""
         from backend.services.file_management_service import check_file_access
@@ -1000,6 +1106,47 @@ class TestUploadQuotaEnforcement:
         )
         quota_service.invalidate_usage_cache.assert_called_once_with("tenant-id")
         assert result.quota_status == {"stage": "post"}
+
+    @pytest.mark.asyncio
+    async def test_private_kb_upload_checks_user_quota_before_minio_write(
+        self, monkeypatch
+    ):
+        upload = MagicMock(filename="quota.txt", size=128)
+        context = SimpleNamespace(
+            tenant_id="tenant-id",
+            index_name="kb-index",
+            ingroup_permission="PRIVATE",
+        )
+        knowledge_storage_stub.resolve_storage_context.return_value = context
+        quota_service = MagicMock()
+        quota_error = AppException(
+            ErrorCode.TENANT_PERSONAL_KB_QUOTA_EXCEEDED,
+            "personal quota exceeded",
+        )
+        quota_service.check_personal_user_quota.side_effect = quota_error
+
+        monkeypatch.setitem(
+            sys.modules, "services.quota_service", self._quota_module(quota_service)
+        )
+        with patch(
+            "backend.services.file_management_service.upload_to_minio",
+            new_callable=AsyncMock,
+        ) as upload_to_minio_mock:
+            with pytest.raises(AppException) as raised:
+                await upload_files_impl(
+                    destination="minio",
+                    file=[upload],
+                    folder="knowledge_base",
+                    index_name="kb-index",
+                    user_id="user-id",
+                    uploader_tenant_id="tenant-id",
+                )
+
+        assert raised.value is quota_error
+        quota_service.check_personal_user_quota.assert_called_once_with(
+            "user-id", 128
+        )
+        upload_to_minio_mock.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_missing_sizes_read_complete_batch_and_restore_streams(self, monkeypatch):
@@ -1931,6 +2078,7 @@ class TestResolvePreviewFile:
         ("test/readme.txt", "text/plain"),
         ("test/data.csv", "text/csv"),
         ("test/readme.md", "text/markdown"),
+        ("test/config.json", "application/json"),
     ])
     async def test_direct_types_returned_as_is(self, object_name, content_type):
         """PDF, images, and text files resolve to themselves without conversion."""
