@@ -20,7 +20,7 @@ from consts.const import (
     LOCAL_MCP_SERVER,
     MCP_MANAGEMENT_API,
 )
-from consts.error_message import TOOL_PARAM_CONSTRAINT_ERROR_MESSAGES
+from consts.error_message import ErrorMessage
 from consts.exceptions import MCPConnectionError, NotFoundException, ToolExecutionException, ValidationError
 from consts.model import ToolInstanceInfoRequest, ToolInfo, ToolSourceEnum, ToolValidateRequest
 from consts.tool_labels import SYSTEM_MANAGED_TOOL_NAMES
@@ -63,6 +63,8 @@ from utils.langchain_utils import discover_langchain_modules
 from utils.tool_utils import get_local_tools_classes, get_local_tools_description_zh
 
 logger = logging.getLogger("tool_configuration_service")
+
+TOOL_PARAM_CONSTRAINT_ERROR_MESSAGES = ErrorMessage.get_param_constraint_messages()
 
 
 def _parse_kds_list(value: Any) -> list[str]:

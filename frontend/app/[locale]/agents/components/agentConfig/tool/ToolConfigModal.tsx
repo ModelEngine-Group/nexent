@@ -2322,17 +2322,6 @@ export default function ToolConfigModal({
                             t("toolConfig.validation.number.lt", { value: lt })
                           );
                         }
-                        // if (
-                        //   multiple_of !== undefined &&
-                        //   multiple_of !== 0 &&
-                        //   num % multiple_of !== 0
-                        // ) {
-                        //   return Promise.reject(
-                        //     t("toolConfig.validation.number.multipleOf", {
-                        //       value: multiple_of,
-                        //     })
-                        //   );
-                        // }
                         return Promise.resolve();
                       },
                     });

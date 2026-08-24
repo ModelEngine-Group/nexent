@@ -14,6 +14,9 @@ TOOL_PARAM_CONSTRAINT_KEYS = (
     "lt",
     "min_length",
     "max_length",
+    # ``multiple_of`` is disabled until a built-in tool exposes a Pydantic
+    # ``multiple_of`` constraint; add it back here (and the matching rule in
+    # ``TOOL_PARAM_CONSTRAINT_RULES``) when divisibility validation is required.
     # "multiple_of",
 )
 
@@ -26,5 +29,9 @@ TOOL_PARAM_CONSTRAINT_RULES = (
     ("lt", lambda v, c: v >= c),
     ("min_length", lambda v, c: v < c),
     ("max_length", lambda v, c: v > c),
+    # Enable ``multiple_of`` together with its key in
+    # ``TOOL_PARAM_CONSTRAINT_KEYS`` when a tool param needs divisibility
+    # validation. The lambda guards against ``c == 0`` before the modulo to
+    # avoid ``ZeroDivisionError``.
     # ("multiple_of", lambda v, c: c != 0 and v % c != 0),
 )
