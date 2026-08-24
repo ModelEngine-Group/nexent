@@ -21,13 +21,11 @@ export function mergeCanonicalTool(tool: Tool, tools: Tool[]): Tool {
 }
 
 export const TOOLS_REQUIRING_KB_SELECTION = [
-  "knowledge_base_search",
   "dify_search",
   "datamate_search",
   "idata_search",
   "haotian_search",
   "ragflow_search",
-  "aidp_search",
 ];
 export const TOOLS_REQUIRING_EMBEDDING = ["knowledge_base_search"];
 export const TOOLS_REQUIRING_IMAGE_UNDERSTANDING = ["analyze_image"];
