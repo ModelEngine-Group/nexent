@@ -37,6 +37,11 @@ from .retry import DEFAULT_MODEL_RETRY, ModelRetryConfig, classify_model_error
 
 logger = logging.getLogger("openai_llm")
 
+# Raised (with this message) when a model invocation is aborted because the
+# caller's stop event was set. Reused at every stop_event check site so the
+# message stays consistent and is easy to assert against in tests.
+STOP_EVENT_INTERRUPTED_MESSAGE = "Model is interrupted by stop event"
+
 
 class EmptyModelResponseError(RuntimeError):
     """Raised when a completed provider stream contains no user-visible content."""
@@ -325,7 +330,7 @@ class OpenAIModel(OpenAIServerModel):
                 if token_tracker:
                     self._monitoring.add_span_event("model_stopped", {
                         "reason": "stop_event_set"})
-                raise RuntimeError("Model is interrupted by stop event")
+                raise RuntimeError(STOP_EVENT_INTERRUPTED_MESSAGE)
             try:
                 current_request = self._dispatch_chat_completion(
                     safe_input_budget_snapshot=trusted_budget_snapshot,
@@ -416,8 +421,7 @@ class OpenAIModel(OpenAIServerModel):
                             if token_tracker:
                                 self._monitoring.add_span_event("model_stopped", {
                                     "reason": "stop_event_set"})
-                            raise RuntimeError(
-                                "Model is interrupted by stop event")
+                            raise RuntimeError(STOP_EVENT_INTERRUPTED_MESSAGE)
 
                     # Send end marker
                     self.observer.flush_remaining_tokens()
@@ -579,7 +583,7 @@ class OpenAIModel(OpenAIServerModel):
                 )
                 self.last_retry_count = attempt
                 if self.stop_event.is_set():
-                    raise RuntimeError("Model is interrupted by stop event")
+                    raise RuntimeError(STOP_EVENT_INTERRUPTED_MESSAGE)
                 self.stop_event.wait(backoff)
                 continue
 

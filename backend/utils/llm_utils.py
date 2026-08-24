@@ -196,7 +196,6 @@ def call_llm_for_system_prompt(
                 time.sleep(backoff)
                 continue
             logger.error("Failed to generate prompt from LLM: %s", str(exc))
-            logger.error("Failed to generate prompt from LLM: %s", str(exc))
             # Parse error code from exception message and raise appropriate AppException
             # Use specific error codes for different scenarios
             error_msg = str(exc)
