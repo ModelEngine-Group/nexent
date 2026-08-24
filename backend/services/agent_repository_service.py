@@ -12,7 +12,7 @@ from consts.agent_repository import (
     VALID_OWNERSHIP_FILTERS,
     VALID_REPOSITORY_STATUSES,
 )
-from consts.exceptions import UnauthorizedError
+from consts.exceptions import SkillDuplicateError, UnauthorizedError
 from consts.model import AgentRepositorySnapshot
 from consts.notification import EVENT_TYPE_REPOSITORY_REVIEW_PENDING, RESOURCE_TYPE_AGENT_REPOSITORY
 from database.agent_db import search_agent_info_by_agent_id
@@ -1045,8 +1045,13 @@ async def import_agent_from_repository_impl(
     agent_repository_id: int,
     tenant_id: str,
     authorization: str,
+    skip_duplicates: bool = False,
 ) -> Dict[int, int]:
-    """Import an agent tree from a marketplace repository listing into the current tenant."""
+    """Import an agent tree from a marketplace repository listing into the current tenant.
+
+    When skip_duplicates=True, duplicate skills are silently dropped. If all skills are
+    duplicates, the agent is imported without any skills (same as AgentImportWizard behavior).
+    """
     record = get_agent_repository_by_id(
         agent_repository_id,
         tenant_id,
@@ -1059,13 +1064,19 @@ async def import_agent_from_repository_impl(
         raise ValueError("Repository listing has no agent snapshot")
 
     snapshot = AgentRepositorySnapshot.model_validate(agent_info_json)
-    if snapshot.skills:
+
+    if snapshot.skills and not skip_duplicates:
         result = await import_agent_with_skills_impl(
             snapshot,
             snapshot.skills,
             authorization,
         )
     else:
+        if snapshot.skills and skip_duplicates:
+            logger.info(
+                "Skipping %d skills on repository import (id=%s) due to conflicts",
+                len(snapshot.skills), agent_repository_id,
+            )
         result = await import_agent_impl(snapshot, authorization)
 
     affected = increment_agent_repository_downloads(agent_repository_id)

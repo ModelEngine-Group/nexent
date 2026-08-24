@@ -13,6 +13,7 @@ import {
   ExternalLink,
   Plug,
   RefreshCw,
+  SkipForward,
   Sparkles,
   Wrench,
   X,
@@ -105,6 +106,14 @@ export function AgentRepositoryCopyDialog({
     [precheck]
   );
 
+  const skillConflictItems = useMemo(
+    () =>
+      abnormalItems.filter((item) => item.reason_code === "skill_duplicate"),
+    [abnormalItems]
+  );
+  const hasSkillConflicts = skillConflictItems.length > 0;
+  const skillConflictNames = skillConflictItems.map((item) => item.name);
+
   const percent = precheck?.percent ?? 0;
   const hasAbnormal = precheck?.has_abnormal ?? false;
 
@@ -116,14 +125,21 @@ export function AgentRepositoryCopyDialog({
     router.push(`/${locale}${path}`);
   };
 
-  const handleCopy = async () => {
+  const handleCopy = async (skipDuplicates = false) => {
     if (!agentRepositoryId) {
       return;
     }
     try {
-      await importMutation.mutateAsync(agentRepositoryId);
+      await importMutation.mutateAsync({
+        agentRepositoryId,
+        skipDuplicates,
+      });
       message.success(
-        t("agentRepository.copy.success", { name: listingTitle })
+        skipDuplicates
+          ? t("agentRepository.copy.successWithoutSkills", {
+              name: listingTitle,
+            })
+          : t("agentRepository.copy.success", { name: listingTitle })
       );
       onOpenChange(false);
       onSuccess?.();
@@ -141,7 +157,7 @@ export function AgentRepositoryCopyDialog({
         detail?.type === "skill_duplicate" &&
         Array.isArray(detail.duplicate_skills)
       ) {
-        message.error(
+        message.warning(
           t("agentRepository.copy.skillDuplicate", {
             names: detail.duplicate_skills.join(", "),
           })
@@ -169,17 +185,49 @@ export function AgentRepositoryCopyDialog({
       width={520}
       destroyOnHidden
       footer={
-        <div className="flex justify-end gap-2">
-          <Button onClick={handleClose}>{t("common.cancel")}</Button>
-          <Button
-            type="primary"
-            icon={<Copy className="size-4" />}
-            loading={importMutation.isPending}
-            disabled={!precheck || isLoading || isError}
-            onClick={handleCopy}
-          >
-            {t("agentRepository.card.copy")}
-          </Button>
+        <div className="flex flex-col gap-2">
+          {hasSkillConflicts ? (
+            <div className="flex items-center justify-between rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:bg-amber-500/10 dark:text-amber-300">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="size-4 shrink-0" />
+                <span>
+                  {t("agentRepository.copy.skillConflict", {
+                    count: skillConflictItems.length,
+                  })}
+                  <span className="ml-1 font-medium">
+                    {skillConflictNames.join(", ")}
+                  </span>
+                </span>
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  size="small"
+                  icon={<SkipForward className="size-3.5" />}
+                  loading={importMutation.isPending}
+                  onClick={() => handleCopy(true)}
+                >
+                  {t("agentRepository.copy.skipAndCopy")}
+                </Button>
+              </div>
+            </div>
+          ) : null}
+          <div className="flex justify-end gap-2">
+            <Button onClick={handleClose}>{t("common.cancel")}</Button>
+            <Button
+              type="primary"
+              icon={<Copy className="size-4" />}
+              loading={importMutation.isPending}
+              disabled={
+                !precheck ||
+                isLoading ||
+                isError ||
+                hasSkillConflicts
+              }
+              onClick={() => handleCopy(false)}
+            >
+              {t("agentRepository.card.copy")}
+            </Button>
+          </div>
         </div>
       }
       styles={{
@@ -354,6 +402,8 @@ function RequirementTypeGroup({
   const abnormal = status === "abnormal";
   const typeLabel = getRepositoryRequirementTypeLabel(type, t);
   const activatePath = getRepositoryRequirementActivatePath(type);
+  const isSkillDuplicate =
+    items.length > 0 && items[0]?.reason_code === "skill_duplicate";
 
   return (
     <div className="rounded-lg border border-slate-200 p-3 dark:border-slate-700">
@@ -363,7 +413,12 @@ function RequirementTypeGroup({
           {typeLabel}
         </div>
         {abnormal ? (
-          activatePath ? (
+          isSkillDuplicate ? (
+            <span className="flex items-center gap-1 text-xs text-amber-600">
+              <AlertCircle className="size-3.5" />
+              {getRepositoryRequirementReasonLabel("skill_duplicate", t)}
+            </span>
+          ) : activatePath ? (
             <button
               type="button"
               onClick={onActivate}

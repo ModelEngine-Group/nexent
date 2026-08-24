@@ -246,6 +246,10 @@ async def check_repository_import_precheck_api(
 @agent_repository_router.post("/{agent_repository_id}/import")
 async def import_agent_from_repository_api(
     agent_repository_id: int,
+    skip_duplicates: bool = Query(
+        False,
+        description="If True, skip duplicate skills and proceed with the remaining skills",
+    ),
     authorization: Optional[str] = Header(None),
 ):
     """Import an agent tree from a marketplace repository listing into the current tenant."""
@@ -255,6 +259,7 @@ async def import_agent_from_repository_api(
             agent_repository_id=agent_repository_id,
             tenant_id=tenant_id,
             authorization=authorization,
+            skip_duplicates=skip_duplicates,
         )
         return JSONResponse(status_code=HTTPStatus.OK, content={})
     except UnauthorizedError as e:
