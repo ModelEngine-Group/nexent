@@ -21,7 +21,9 @@ logger = logging.getLogger(__name__)
 
 
 def get_users(tenant_id: str, page: Optional[int] = 1, page_size: Optional[int] = 20,
-              sort_by: str = "created_at", sort_order: str = "desc") -> Dict[str, Any]:
+              sort_by: str = "created_at", sort_order: str = "desc",
+              search: Optional[str] = None, roles: Optional[List[str]] = None,
+              group_ids: Optional[List[int]] = None) -> Dict[str, Any]:
     """
     Get users belonging to a specific tenant with pagination and sorting
 
@@ -36,7 +38,12 @@ def get_users(tenant_id: str, page: Optional[int] = 1, page_size: Optional[int] 
         Dict[str, Any]: Dictionary containing users list and pagination info
     """
     # Get user-tenant relationships from database with pagination and sorting
-    result = get_users_by_tenant_id(tenant_id, page, page_size, sort_by, sort_order)
+    if search or roles or group_ids:
+        result = get_users_by_tenant_id(
+            tenant_id, page, page_size, sort_by, sort_order, search, roles, group_ids
+        )
+    else:
+        result = get_users_by_tenant_id(tenant_id, page, page_size, sort_by, sort_order)
 
     # Batch fetch group names for all users in a single query
     tenant_user_ids = [r["user_id"] for r in result["users"]]
@@ -74,6 +81,9 @@ def get_users_for_requester(
     page_size: Optional[int] = 20,
     sort_by: str = "created_at",
     sort_order: str = "desc",
+    search: Optional[str] = None,
+    roles: Optional[List[str]] = None,
+    group_ids: Optional[List[int]] = None,
     *,
     requester_tenant_id: str,
     requester_role: str,
@@ -88,7 +98,9 @@ def get_users_for_requester(
     else:
         raise ForbiddenError("Not authorized to list users for this tenant")
 
-    return get_users(tenant_id, page, page_size, sort_by, sort_order)
+    return get_users(
+        tenant_id, page, page_size, sort_by, sort_order, search, roles, group_ids
+    )
 
 
 async def update_user(user_id: str, update_data: Dict[str, Any], updated_by: str) -> Dict[str, Any]:
