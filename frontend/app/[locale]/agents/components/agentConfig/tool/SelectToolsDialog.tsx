@@ -21,6 +21,7 @@ import {
   TOOLS_REQUIRING_KB_SELECTION,
   TOOLS_REQUIRING_EMBEDDING,
   TOOLS_REQUIRING_IMAGE_UNDERSTANDING,
+  TOOLS_REQUIRING_AUDIO_UNDERSTANDING,
   TOOLS_REQUIRING_VIDEO_UNDERSTANDING,
   getToolKbType,
   getToolLabels,
@@ -31,9 +32,11 @@ function isToolDisabled(
   name: string,
   img: boolean,
   vid: boolean,
-  emb: boolean
+  emb: boolean,
+  audio: boolean
 ): boolean {
   if (TOOLS_REQUIRING_IMAGE_UNDERSTANDING.includes(name) && !img) return true;
+  if (TOOLS_REQUIRING_AUDIO_UNDERSTANDING.includes(name) && !audio) return true;
   if (TOOLS_REQUIRING_VIDEO_UNDERSTANDING.includes(name) && !vid) return true;
   if (TOOLS_REQUIRING_EMBEDDING.includes(name) && !emb) return true;
   return false;
@@ -43,10 +46,14 @@ function getToolDisabledTooltipKey(
   name: string,
   img: boolean,
   vid: boolean,
-  emb: boolean
+  emb: boolean,
+  audio: boolean
 ): string | null {
   if (TOOLS_REQUIRING_IMAGE_UNDERSTANDING.includes(name) && !img) {
     return "toolPool.imageUnderstandingDisabledTooltip";
+  }
+  if (TOOLS_REQUIRING_AUDIO_UNDERSTANDING.includes(name) && !audio) {
+    return "toolPool.audioUnderstandingDisabledTooltip";
   }
   if (TOOLS_REQUIRING_VIDEO_UNDERSTANDING.includes(name) && !vid) {
     return "toolPool.videoUnderstandingDisabledTooltip";
@@ -129,6 +136,7 @@ export default function SelectToolsDialog({
   const {
     isImageUnderstandingAvailable,
     isVideoUnderstandingAvailable,
+    isAudioUnderstandingAvailable,
     isEmbeddingAvailable,
   } = useConfig();
 
@@ -322,7 +330,8 @@ export default function SelectToolsDialog({
           tool.name,
           isImageUnderstandingAvailable,
           isVideoUnderstandingAvailable,
-          isEmbeddingAvailable
+          isEmbeddingAvailable,
+          isAudioUnderstandingAvailable
         ) &&
         !hasMissingRequired(tool.initParams || [])
       );
@@ -333,6 +342,7 @@ export default function SelectToolsDialog({
     isEmbeddingAvailable,
     isImageUnderstandingAvailable,
     isVideoUnderstandingAvailable,
+    isAudioUnderstandingAvailable,
     selectedTools,
   ]);
   const allVisibleSelectableToolsSelected = useMemo(
@@ -644,14 +654,16 @@ export default function SelectToolsDialog({
                         tool.name,
                         isImageUnderstandingAvailable,
                         isVideoUnderstandingAvailable,
-                        isEmbeddingAvailable
+                        isEmbeddingAvailable,
+                        isAudioUnderstandingAvailable
                       );
                       const disabledTooltipKey = disabled
                         ? getToolDisabledTooltipKey(
                             tool.name,
                             isImageUnderstandingAvailable,
                             isVideoUnderstandingAvailable,
-                            isEmbeddingAvailable
+                            isEmbeddingAvailable,
+                            isAudioUnderstandingAvailable
                           )
                         : null;
 

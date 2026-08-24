@@ -3,9 +3,10 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { App, Button, Col } from "antd";
-import { Plus, X } from "lucide-react";
+import { Plus, Search, X } from "lucide-react";
 
 import CollaborativeAgentSelectorModal from "./advanced/collaborative-agent-selector-modal";
+import A2AAgentDiscoveryModal from "./a2a/A2AAgentDiscoveryModal";
 import { useExternalAgents } from "@/hooks/agent/useExternalAgents";
 import { usePublishedAgentList } from "@/hooks/agent/usePublishedAgentList";
 import { a2aClientService, A2AExternalAgent } from "@/services/a2aService";
@@ -82,6 +83,7 @@ export function CollaborativeAgentActions() {
   const { t } = useTranslation("common");
   const { message: messageApi } = App.useApp();
   const [selectorOpen, setSelectorOpen] = useState(false);
+  const [discoveryOpen, setDiscoveryOpen] = useState(false);
   const currentAgentId = useAgentStore((state) => state.agentId);
   const editedAgent = useAgentStore((state) => state.editedAgent);
   const updateSubAgentIds = useAgentStore((state) => state.updateSubAgentIds);
@@ -92,6 +94,7 @@ export function CollaborativeAgentActions() {
     (state) => state.updateExternalSubAgentIds
   );
   const isReadOnly = useAgentReadOnly();
+  const { invalidate: invalidateExternalAgents } = useExternalAgents();
   const relatedAgentIds = Array.isArray(editedAgent?.sub_agent_id_list)
     ? editedAgent.sub_agent_id_list
     : [];
@@ -149,8 +152,24 @@ export function CollaborativeAgentActions() {
     setSelectorOpen(false);
   };
 
+  const handleAgentDiscovered = (agent: A2AExternalAgent) => {
+    const agentId = Number(agent.id);
+    if (!externalSubAgentIdList.includes(agentId)) {
+      updateExternalSubAgentIds([...externalSubAgentIdList, agentId]);
+    }
+    invalidateExternalAgents();
+  };
+
   return (
     <>
+      <Button
+        size="middle"
+        icon={<Search size={14} />}
+        disabled={isReadOnly}
+        onClick={() => setDiscoveryOpen(true)}
+      >
+        {t("a2a.discovery.button")}
+      </Button>
       <Button
         size="middle"
         icon={<Plus size={14} />}
@@ -159,6 +178,13 @@ export function CollaborativeAgentActions() {
       >
         {t("agent.collaborative.button.selectAgent")}
       </Button>
+      <A2AAgentDiscoveryModal
+        open={discoveryOpen}
+        onClose={() => setDiscoveryOpen(false)}
+        onDiscoverSuccess={invalidateExternalAgents}
+        onAgentDiscovered={handleAgentDiscovered}
+        localAgentId={currentAgentId ? Number(currentAgentId) : undefined}
+      />
       <CollaborativeAgentSelectorModal
         open={selectorOpen}
         onCancel={() => setSelectorOpen(false)}

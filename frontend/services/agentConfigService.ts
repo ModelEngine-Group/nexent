@@ -782,7 +782,7 @@ export const clearAgentNewMark = async (agentId: string | number) => {
  * @param payload name/displayName to check
  */
 export const checkAgentNameConflictBatch = async (payload: {
-  items: Array<{ name: string; display_name?: string; agent_id?: number }>;
+  items: Array<{ name?: string; display_name?: string; agent_id?: number }>;
 }) => {
   try {
     const response = await fetch(API_ENDPOINTS.agent.checkNameBatch, {
@@ -963,6 +963,14 @@ export const searchAgentInfo = async (
                     value: param.default,
                     description: param.description,
                     description_zh: param.description_zh,
+                    // Bind Pydantic Field constraints (ge/le/gt/lt/...) so the
+                    // config modal can validate non-required numeric params.
+                    constraints:
+                      param.constraints &&
+                      typeof param.constraints === "object" &&
+                      Object.keys(param.constraints).length > 0
+                        ? param.constraints
+                        : undefined,
                   }))
                 : [],
             };

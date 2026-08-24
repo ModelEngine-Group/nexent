@@ -611,7 +611,46 @@ class TestStartStreamingChat:
                 query="test query"
             )
 
-            conv_mgmt_mod.create_new_conversation.assert_called()
+            conv_mgmt_mod.create_new_conversation.assert_called_once_with(
+                title="New Conversation",
+                user_id=ctx.user_id,
+                agent_id=1,
+            )
+
+    async def test_start_streaming_chat_allows_unpublished_agent(self):
+        """Use the resolved agent ID even when it has no published version."""
+        ctx = MockNorthboundContext(token_id=0)
+        conv_mgmt_mod.create_new_conversation.reset_mock()
+        mock_response = MagicMock()
+        mock_response.headers = {}
+        runtime_proxy_mod.forward_agent_run.return_value = mock_response
+
+        with patch.object(ns, "check_and_consume_rate_limit", new_callable=AsyncMock), \
+                patch.object(ns, "idempotency_start", new_callable=AsyncMock), \
+                patch.object(ns, "get_conversation_history_internal", new_callable=AsyncMock) as mock_history, \
+                patch.object(
+                    ns,
+                    "get_agent_by_name_impl",
+                    return_value={"agent_id": 99, "latest_version_no": None},
+                ):
+            mock_history.return_value = {"data": {"history": []}}
+
+            await ns.start_streaming_chat(
+                ctx=ctx,
+                conversation_id=None,
+                agent_name="draft_agent",
+                query="test query",
+            )
+
+        conv_mgmt_mod.create_new_conversation.assert_called_once_with(
+            title="New Conversation",
+            user_id=ctx.user_id,
+            agent_id=99,
+        )
+        forwarded_request = runtime_proxy_mod.forward_agent_run.call_args.kwargs[
+            "agent_request"
+        ]
+        assert forwarded_request.version_no is None
 
     async def test_start_streaming_chat_logs_token_usage(self):
         """Test that token usage is logged when token_id > 0."""
@@ -880,7 +919,13 @@ class TestStopChat:
 
         await ns.stop_chat(ctx=ctx, conversation_id=123, meta_data={"test": "data"})
 
-        token_db_mod.log_token_usage.assert_called()
+        token_db_mod.log_token_usage.assert_called_once_with(
+            token_id=1,
+            call_function_name="stop_chat_stream",
+            related_id=123,
+            created_by=ctx.user_id,
+            metadata={"test": "data"},
+        )
 
     async def test_stop_chat_no_token_id_no_logging(self):
         """Test that token usage is not logged when token_id is 0."""
@@ -1340,7 +1385,13 @@ class TestUpdateConversationTitle:
             meta_data={"source": "api"}
         )
 
-        token_db_mod.log_token_usage.assert_called()
+        token_db_mod.log_token_usage.assert_called_once_with(
+            token_id=1,
+            call_function_name="update_conversation_title",
+            related_id=123,
+            created_by=ctx.user_id,
+            metadata={"source": "api"},
+        )
 
     async def test_update_conversation_title_custom_idempotency_key(self):
         """Test that custom idempotency key is used when provided."""

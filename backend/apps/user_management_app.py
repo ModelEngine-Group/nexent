@@ -25,7 +25,11 @@ from services.user_management_service import get_authorized_client, validate_tok
     get_session_by_authorization, get_user_info, create_token, list_tokens_by_user, delete_token, \
     update_password
 from services.user_service import delete_user_and_cleanup
-from utils.auth_utils import get_current_user_id, extract_session_id_from_authorization
+from utils.auth_utils import (
+    extract_session_id_from_authorization,
+    get_current_user_context,
+    get_current_user_id,
+)
 
 
 load_dotenv()
@@ -369,7 +373,7 @@ async def list_tokens_endpoint(
             raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED,
                                 detail="Unauthorized: No authorization header found")
 
-        request_user_id, _ = get_current_user_id(authorization)
+        request_user_id, _, requester_role = get_current_user_context(authorization)
         if not request_user_id:
             raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED,
                                 detail="Unauthorized: missing user_id in JWT token")
@@ -379,7 +383,7 @@ async def list_tokens_endpoint(
             raise HTTPException(status_code=HTTPStatus.FORBIDDEN,
                                 detail="Forbidden: cannot list tokens for other users")
 
-        tokens = list_tokens_by_user(user_id)
+        tokens = list_tokens_by_user(user_id, requester_role)
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={"message": "success", "data": tokens}

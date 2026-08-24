@@ -942,6 +942,24 @@ class TestCoverageGaps:
 
         await delete_user_and_cleanup("user-1", "tenant-1")
 
+    @pytest.mark.asyncio
+    async def test_cleanup_revokes_api_keys_and_skips_supabase_without_email(self, mocker):
+        mocker.patch(
+            "backend.services.user_service.get_user_tenant_by_user_id",
+            return_value={"user_id": "user-1", "user_email": None},
+        )
+        mocker.patch(
+            "backend.services.user_service.soft_delete_user_tenant_by_user_id",
+            return_value=True,
+        )
+        mock_revoke = mocker.patch("database.token_db.soft_delete_tokens_by_user")
+        mock_get_admin = mocker.patch("backend.services.user_service.get_supabase_admin_client")
+
+        await delete_user_and_cleanup("user-1", "tenant-1")
+
+        mock_revoke.assert_called_once_with("user-1", "user-1")
+        mock_get_admin.assert_not_called()
+
 
 # Run tests when executed directly
 if __name__ == "__main__":

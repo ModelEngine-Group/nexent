@@ -253,9 +253,42 @@ async def test_perform_connectivity_check_vlm():
         assert result is True
         mock_build.assert_called_once_with(
             {"base_url": "https://api.openai.com", "api_key": "test-key",
-             "ssl_verify": True},
+             "ssl_verify": True, "model_factory": None},
             "vlm", "vlm", None, model_name="gpt-4-vision",
             observer=mock_observer_instance, display_name=None,
+        )
+        mock_adapter.health_check.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_perform_connectivity_check_vlm4_modelengine_passes_factory_and_slot():
+    with mock.patch("backend.services.model_health_service.MessageObserver") as mock_observer, \
+            mock.patch("backend.services.model_health_service.build_adapter_fresh") as mock_build:
+        mock_observer_instance = mock.MagicMock()
+        mock_observer.return_value = mock_observer_instance
+
+        mock_adapter = mock.MagicMock()
+        mock_adapter.health_check = mock.AsyncMock(return_value=True)
+        mock_build.return_value = mock_adapter
+
+        result = await _perform_connectivity_check(
+            "me-asr",
+            "vlm4",
+            "http://192.168.1.10:8080/open/router/v1",
+            "test-key",
+            model_factory="modelengine",
+            display_name="ME-ASR",
+        )
+
+        assert result is True
+        # model_factory must reach build_adapter_fresh so the ModelEngineVLMAdapter
+        # is selected, and slot must be vlm4 so audio capabilities are derived.
+        mock_build.assert_called_once_with(
+            {"base_url": "http://192.168.1.10:8080/open/router/v1",
+             "api_key": "test-key", "ssl_verify": True,
+             "model_factory": "modelengine"},
+            "vlm", "vlm4", None, model_name="me-asr",
+            observer=mock_observer_instance, display_name="ME-ASR",
         )
         mock_adapter.health_check.assert_called_once()
 
@@ -287,13 +320,22 @@ async def test_perform_connectivity_check_dashscope_multimodal_uses_provider_cat
 
 
 @pytest.mark.asyncio
-async def test_perform_connectivity_check_tokenpony_multimodal_catalog_error_returns_false():
+async def test_perform_connectivity_check_tokenpony_multimodal_catalog_error_falls_back_to_probe():
     model_provider_service = types.ModuleType("services.model_provider_service")
     model_provider_service.get_provider_models = mock.AsyncMock(return_value=[
         {"_error": "authentication_failed", "_message": "Invalid API key"},
     ])
 
-    with mock.patch.dict(sys.modules, {"services.model_provider_service": model_provider_service}):
+    with mock.patch.dict(sys.modules, {"services.model_provider_service": model_provider_service}), \
+            mock.patch("backend.services.model_health_service.MessageObserver") as mock_observer, \
+            mock.patch("backend.services.model_health_service.build_adapter_fresh") as mock_build:
+        mock_observer_instance = mock.MagicMock()
+        mock_observer.return_value = mock_observer_instance
+
+        mock_adapter = mock.MagicMock()
+        mock_adapter.health_check = mock.AsyncMock(return_value=False)
+        mock_build.return_value = mock_adapter
+
         result = await _perform_connectivity_check(
             "qwen-vl-plus",
             "vlm3",
@@ -303,6 +345,20 @@ async def test_perform_connectivity_check_tokenpony_multimodal_catalog_error_ret
         )
 
     assert result is False
+    # Catalog error must not fail the check outright: fall through to a real
+    # adapter probe so valid-but-unlisted models are not marked unavailable.
+    model_provider_service.get_provider_models.assert_awaited_once_with({
+        "provider": "tokenpony",
+        "model_type": "vlm3",
+        "api_key": "bad-key",
+    })
+    mock_build.assert_called_once_with(
+        {"base_url": "https://api.tokenpony.cn/v1/", "api_key": "bad-key",
+         "ssl_verify": True, "model_factory": "tokenpony"},
+        "vlm", "vlm3", None, model_name="qwen-vl-plus",
+        observer=mock_observer_instance, display_name=None,
+    )
+    mock_adapter.health_check.assert_called_once()
 
 
 @pytest.mark.asyncio

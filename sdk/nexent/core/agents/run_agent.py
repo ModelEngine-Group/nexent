@@ -6,6 +6,7 @@ from contextvars import copy_context
 from threading import Thread
 from typing import Any, Dict, Union
 
+import httpx
 from smolagents import ToolCollection
 
 from ...monitor import (
@@ -13,7 +14,7 @@ from ...monitor import (
     set_monitoring_safe_input_budget_snapshot,
 )
 from .agent_model import AgentRunInfo
-from .nexent_agent import NexentAgent, ProcessType
+from .nexent_agent import NexentAgent, ProcessType, cleanup_run_workspace
 
 
 logger = logging.getLogger("run_agent")
@@ -131,6 +132,21 @@ def _detect_transport(url: str) -> str:
     return "streamable-http"
 
 
+def _create_mcp_http_client_without_proxy(
+    headers: dict[str, str] | None = None,
+    timeout: httpx.Timeout | None = None,
+    auth: httpx.Auth | None = None,
+) -> httpx.AsyncClient:
+    """Create an MCP HTTP client that ignores proxy environment variables."""
+    return httpx.AsyncClient(
+        headers=headers,
+        timeout=timeout,
+        auth=auth,
+        follow_redirects=True,
+        trust_env=False,
+    )
+
+
 def _normalize_mcp_config(mcp_host_item: Union[str, Dict[str, Any]]) -> Dict[str, Any]:
     """
     Normalize MCP host configuration to a dictionary format.
@@ -157,6 +173,9 @@ def _normalize_mcp_config(mcp_host_item: Union[str, Dict[str, Any]]) -> Dict[str
             raise ValueError(f"Invalid transport type: {transport}. Must be 'sse' or 'streamable-http'")
 
         result = {"url": url, "transport": transport}
+
+        if mcp_host_item.get("bypass_proxy") is True:
+            result["httpx_client_factory"] = _create_mcp_http_client_without_proxy
 
         if "authorization" in mcp_host_item and "headers" in mcp_host_item:
             headers = mcp_host_item["headers"].copy() if isinstance(mcp_host_item["headers"], dict) else {}
@@ -264,6 +283,15 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
             agent_run_info.observer.add_message(
                 "", ProcessType.FINAL_ANSWER, f"Run Agent Error: {e}")
         raise ValueError(f"Error in agent_run_thread: {e}")
+    finally:
+        # Agent construction, MCP setup, and executor initialization can fail
+        # before NexentAgent.agent_run_with_observer() enters its own cleanup
+        # block. This idempotent outer guard owns the complete worker lifetime.
+        cleanup_run_workspace(
+            getattr(agent_run_info, "workspace_path", None),
+            getattr(agent_run_info, "workspace_run_id", None),
+            logger,
+        )
 
 
 async def agent_run(agent_run_info: AgentRunInfo):

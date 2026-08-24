@@ -5,6 +5,12 @@ import { App, Form, Input, Modal } from "antd";
 import { useTranslation } from "react-i18next";
 
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import {
+  AGENT_NAME_MAX_LENGTH,
+  createAgentNameConflictValidator,
+  isValidAgentDisplayName,
+  isValidAgentName,
+} from "@/hooks/agent/useSaveGuard";
 import { updateAgentInfo } from "@/services/agentConfigService";
 
 export interface CreatedAgentResult {
@@ -79,22 +85,57 @@ export default function CreateAgentModal({
         <Form.Item
           name="displayName"
           label={t("agent.displayName")}
-          rules={[{ required: true, whitespace: true, message: t("agent.info.name.error.empty") }]}
+          rules={[
+            {
+              required: true,
+              whitespace: true,
+              message: t("agent.validation.displayNameRequired"),
+            },
+            {
+              validator: (_, value: string) =>
+                !value || isValidAgentDisplayName(value)
+                  ? Promise.resolve()
+                  : Promise.reject(
+                      new Error(
+                        t("agent.validation.displayNameMaxLength", {
+                          max: AGENT_NAME_MAX_LENGTH,
+                        })
+                      )
+                    ),
+            },
+            createAgentNameConflictValidator(t, "display_name"),
+          ]}
         >
-          <Input autoFocus maxLength={100} placeholder={t("agent.displayNamePlaceholder")} />
+          <Input
+            autoFocus
+            maxLength={AGENT_NAME_MAX_LENGTH}
+            showCount
+            placeholder={t("agent.displayNamePlaceholder")}
+          />
         </Form.Item>
         <Form.Item
           name="name"
           label={t("agent.name")}
           rules={[
-            { required: true, whitespace: true, message: t("agent.info.name.error.empty") },
             {
-              pattern: /^[A-Za-z_][A-Za-z0-9_]*$/,
-              message: t("agent.info.name.error.format"),
+              required: true,
+              whitespace: true,
+              message: t("agent.validation.nameRequired"),
             },
+            {
+              validator: (_, value: string) =>
+                !value || isValidAgentName(value)
+                  ? Promise.resolve()
+                  : Promise.reject(new Error(t("agent.validation.namePattern"))),
+            },
+            createAgentNameConflictValidator(t, "name"),
           ]}
         >
-          <Input maxLength={100} placeholder={t("agent.namePlaceholder")} />
+          <Input
+            maxLength={AGENT_NAME_MAX_LENGTH}
+            showCount
+            placeholder={t("agent.namePlaceholder")}
+          />
         </Form.Item>
       </Form>
     </Modal>

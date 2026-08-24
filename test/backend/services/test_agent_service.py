@@ -4,7 +4,7 @@ import json
 import io
 import types
 from contextlib import contextmanager
-from unittest.mock import patch, MagicMock, mock_open, call, Mock, AsyncMock
+from unittest.mock import ANY, patch, MagicMock, mock_open, call, Mock, AsyncMock
 import os
 
 import pytest
@@ -3683,7 +3683,6 @@ async def test_export_agent_by_agent_id_success(mock_search_agent_info, mock_cre
     assert result.agent_id == 123
     assert result.tenant_id == "test_tenant"
     assert result.name == "Test Agent"
-    assert result.business_description == "For testing purposes"
     assert len(result.tools) == 5
     assert result.managed_agents == mock_sub_agent_ids
 
@@ -4255,6 +4254,7 @@ async def test_prepare_agent_run(
         mock_agent_request,
         user_id="test_user",
         tenant_id="test_tenant",
+        reservation_token="reservation-1",
     )
 
     # Assert
@@ -4281,7 +4281,11 @@ async def test_prepare_agent_run(
         enable_planning=False,
     )
     mock_agent_run_manager.register_agent_run.assert_called_once_with(
-        123, mock_run_info, "test_user")
+        123,
+        mock_run_info,
+        "test_user",
+        reservation_token="reservation-1",
+    )
     mock_agent_run_manager.create_context_manager.assert_not_called()
     assert mock_run_info.context_input.items == ()
 
@@ -4425,6 +4429,7 @@ async def test_run_agent_stream(
         tenant_id=None,
         language="en",
         enable_memory=False,
+        reservation_token=ANY,
         channel=streaming_channel_manager_mock._latest_channel,
     )
 
@@ -4443,6 +4448,82 @@ async def test_run_agent_stream(
     mock_build_mem_ctx.return_value = MagicMock(
         user_config=MagicMock(memory_switch=True)
     )
+
+
+@pytest.mark.asyncio
+@patch(
+    "backend.services.agent_service._resolve_user_tenant_language",
+    return_value=("u", "t", "en"),
+)
+async def test_run_agent_stream_releases_reservation_when_setup_fails(
+    mock_resolve,
+    monkeypatch,
+    mock_agent_request,
+    mock_http_request,
+):
+    reserve = MagicMock(return_value="reservation-1")
+    release = MagicMock()
+    monkeypatch.setattr(agent_service.agent_run_manager, "reserve_agent_run", reserve)
+    monkeypatch.setattr(
+        agent_service.agent_run_manager,
+        "release_agent_run_reservation",
+        release,
+    )
+    monkeypatch.setattr(
+        agent_service.runtime_state_service,
+        "reset_stream_async",
+        AsyncMock(side_effect=RuntimeError("reset failed")),
+    )
+
+    with pytest.raises(RuntimeError, match="reset failed"):
+        await run_agent_stream(mock_agent_request, mock_http_request, "Bearer token")
+
+    release.assert_called_once_with(123, "u", "reservation-1")
+
+
+@pytest.mark.asyncio
+async def test_run_agent_stream_rejects_concurrent_run_with_sse_error(
+    monkeypatch,
+    mock_agent_request,
+    mock_http_request,
+):
+    class ActiveRunError(RuntimeError):
+        pass
+
+    monkeypatch.setattr(agent_service, "AgentRunAlreadyActiveError", ActiveRunError)
+    monkeypatch.setattr(
+        agent_service,
+        "_resolve_user_tenant_language",
+        lambda **_kwargs: ("user-a", "tenant-a", "zh"),
+    )
+    monkeypatch.setattr(
+        agent_service,
+        "get_conversation_service",
+        MagicMock(return_value={"conversation_id": mock_agent_request.conversation_id}),
+    )
+    monkeypatch.setattr(
+        agent_service.agent_run_manager,
+        "reserve_agent_run",
+        MagicMock(side_effect=ActiveRunError("active")),
+    )
+    save_user_message = MagicMock()
+    reset_stream = AsyncMock()
+    monkeypatch.setattr(agent_service, "save_messages", save_user_message)
+    monkeypatch.setattr(agent_service.runtime_state_service, "reset_stream_async", reset_stream)
+
+    response = await run_agent_stream(
+        mock_agent_request,
+        mock_http_request,
+        "Bearer token",
+    )
+    chunks = [chunk async for chunk in response.body_iterator]
+    body = "".join(chunk.decode() if isinstance(chunk, bytes) else chunk for chunk in chunks)
+
+    assert response.headers["x-stream-status"] == "conflict"
+    assert '"type": "error"' in body
+    assert "已有智能体任务正在运行" in body
+    save_user_message.assert_not_called()
+    reset_stream.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -4635,6 +4716,7 @@ async def test_non_debug_producer_survives_sse_disconnect(
         tenant_id="t",
         language="en",
         enable_memory=False,
+        reservation_token=ANY,
         channel=channel,
     )
 
@@ -4688,6 +4770,7 @@ async def test_debug_stream_keeps_direct_execution_path(
         tenant_id="t",
         language="en",
         enable_memory=False,
+        reservation_token=ANY,
     )
 
 
@@ -5119,7 +5202,7 @@ async def test__stream_agent_chunks_persists_and_unregisters(monkeypatch):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id, status="completed"):
+    def fake_unregister(conv_id, user_id, status="completed", **_kwargs):
         unregister_called["conv_id"] = conv_id
         unregister_called["user_id"] = user_id
 
@@ -5313,7 +5396,7 @@ async def test__stream_agent_chunks_emits_error_chunk_on_run_failure(monkeypatch
 
     called = {"unregistered": None, "user_id": None}
 
-    def fake_unregister(conv_id, user_id, status="completed"):
+    def fake_unregister(conv_id, user_id, status="completed", **_kwargs):
         called["unregistered"] = conv_id
         called["user_id"] = user_id
 
@@ -5605,14 +5688,20 @@ async def test_generate_stream_registers_and_streams(monkeypatch):
 
     registered = {}
 
-    def fake_register(conv_id, run_info, user_id):
+    def fake_register(conv_id, run_info, user_id, **kwargs):
         registered["conv_id"] = conv_id
         registered["run_info"] = run_info
         registered["user_id"] = user_id
+        registered["kwargs"] = kwargs
 
     monkeypatch.setattr(
         "backend.services.agent_service.agent_run_manager.register_agent_run",
         fake_register,
+    )
+    release_reservation = MagicMock()
+    monkeypatch.setattr(
+        "backend.services.agent_service.agent_run_manager.release_agent_run_reservation",
+        release_reservation,
     )
 
     # Stream helper will yield chunks
@@ -5628,14 +5717,63 @@ async def test_generate_stream_registers_and_streams(monkeypatch):
     # Collect output
     collected = []
     async for d in agent_service.generate_stream(
-        agent_request, user_id="u", tenant_id="t", enable_memory=False
+        agent_request,
+        user_id="u",
+        tenant_id="t",
+        enable_memory=False,
+        reservation_token="reservation-1",
     ):
         collected.append(d)
 
     assert registered.get("conv_id") == 555
     assert registered.get("user_id") == "u"
     assert registered.get("run_info") is not None
+    assert registered.get("kwargs") == {"reservation_token": "reservation-1"}
     assert collected == ["data: body1\n\n", "data: body2\n\n"]
+    release_reservation.assert_called_once_with(555, "u", "reservation-1")
+
+
+@pytest.mark.asyncio
+async def test_generate_stream_preserves_active_run_error_and_releases_reservation(
+    monkeypatch,
+):
+    agent_request = AgentRequest(
+        agent_id=2,
+        conversation_id=556,
+        query="test",
+        history=[],
+        minio_files=[],
+        is_debug=False,
+    )
+    active_error = agent_service.AgentRunAlreadyActiveError("active")
+    monkeypatch.setattr(
+        agent_service,
+        "prepare_agent_run",
+        AsyncMock(side_effect=active_error),
+    )
+    release_reservation = MagicMock()
+    monkeypatch.setattr(
+        agent_service.agent_run_manager,
+        "release_agent_run_reservation",
+        release_reservation,
+    )
+    channel = MagicMock(publish=AsyncMock())
+
+    chunks = [
+        chunk
+        async for chunk in agent_service.generate_stream(
+            agent_request,
+            user_id="u",
+            tenant_id="t",
+            enable_memory=False,
+            channel=channel,
+            reservation_token="reservation-2",
+        )
+    ]
+
+    assert len(chunks) == 1
+    assert agent_service.SAFE_AGENT_STREAM_ERROR_MESSAGE in chunks[0]
+    release_reservation.assert_called_once_with(556, "u", "reservation-2")
 
 
 @pytest.mark.asyncio
@@ -5670,6 +5808,7 @@ async def test_run_agent_stream_no_memory(
         tenant_id=None,
         language="en",
         enable_memory=False,
+        reservation_token=ANY,
         channel=streaming_channel_manager_mock._latest_channel,
     )
 
@@ -7254,7 +7393,7 @@ async def test_import_agent_all_model_fields_in_database(
     assert agent_info_dict["name"] == "complete_agent"
     assert agent_info_dict["display_name"] == "Complete Agent"
     assert agent_info_dict["description"] == "Agent with all fields"
-    assert agent_info_dict["business_description"] == "Complete test"
+    assert "business_description" not in agent_info_dict
     assert agent_info_dict["max_steps"] == 5
     assert agent_info_dict["provide_run_summary"] is True
     assert agent_info_dict["duty_prompt"] == "Complete duty"
@@ -7913,6 +8052,36 @@ async def test_check_agent_name_conflict_batch_impl_detects_conflicts(monkeypatc
     assert result[1]["name_conflict"] is False
     assert result[1]["display_name_conflict"] is False
     assert result[1]["conflict_agents"] == []
+
+
+@pytest.mark.asyncio
+async def test_check_agent_name_conflict_batch_impl_checks_display_name_without_name(monkeypatch):
+    monkeypatch.setattr(
+        "backend.services.agent_service.get_current_user_info",
+        lambda authorization: ("user-x", "tenant-x", "en"),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "backend.services.agent_service.query_all_agent_info_by_tenant_id",
+        lambda tenant_id: [
+            {"agent_id": 3, "name": "alpha", "display_name": "Shown"},
+        ],
+        raising=False,
+    )
+
+    request = AgentNameBatchCheckRequest(
+        items=[AgentNameBatchCheckItem(display_name="Shown")]
+    )
+
+    result = await agent_service.check_agent_name_conflict_batch_impl(
+        request, authorization="Bearer token"
+    )
+
+    assert result[0]["name_conflict"] is False
+    assert result[0]["display_name_conflict"] is True
+    assert result[0]["conflict_agents"] == [
+        {"name": "alpha", "display_name": "Shown"}
+    ]
 
 
 @pytest.mark.asyncio
@@ -13074,7 +13243,7 @@ async def test_stream_agent_chunks_save_message_exception(monkeypatch):
     # Track unregister calls
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id, status="completed"):
+    def fake_unregister(conv_id, user_id, status="completed", **_kwargs):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
@@ -13128,7 +13297,7 @@ async def test_stream_agent_chunks_malformed_json(monkeypatch):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id, status="completed"):
+    def fake_unregister(conv_id, user_id, status="completed", **_kwargs):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
@@ -13195,7 +13364,7 @@ async def test_stream_agent_chunks_picture_web_chunk(monkeypatch):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id, status="completed"):
+    def fake_unregister(conv_id, user_id, status="completed", **_kwargs):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
@@ -13266,7 +13435,7 @@ async def test_stream_agent_chunks_search_content_chunk(monkeypatch):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id, status="completed"):
+    def fake_unregister(conv_id, user_id, status="completed", **_kwargs):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
@@ -13501,7 +13670,7 @@ async def test_stream_agent_chunks_update_unit_content_exception(monkeypatch):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id, status="completed"):
+    def fake_unregister(conv_id, user_id, status="completed", **_kwargs):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
@@ -13583,7 +13752,7 @@ async def test_stream_agent_chunks_update_unit_status_exception(monkeypatch):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id, status="completed"):
+    def fake_unregister(conv_id, user_id, status="completed", **_kwargs):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
@@ -13664,7 +13833,7 @@ async def test_stream_agent_chunks_update_message_status_exception(monkeypatch):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id, status="completed"):
+    def fake_unregister(conv_id, user_id, status="completed", **_kwargs):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
@@ -13727,7 +13896,7 @@ async def test_stream_agent_chunks_skill_file_extraction(monkeypatch, tmp_path):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id, status="completed"):
+    def fake_unregister(conv_id, user_id, status="completed", **_kwargs):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
@@ -13831,9 +14000,16 @@ async def test_stream_agent_chunks_captures_structured_skill_artifacts(monkeypat
         fake_process_skill_file_uploads,
     )
 
+    channel = MagicMock()
+    channel.publish = AsyncMock()
     collected = []
     async for chunk in agent_service._stream_agent_chunks(
-        agent_request, "user", "tenant", MagicMock(), MagicMock()
+        agent_request,
+        "user",
+        "tenant",
+        MagicMock(),
+        MagicMock(),
+        channel=channel,
     ):
         collected.append(chunk)
 
@@ -13843,6 +14019,7 @@ async def test_stream_agent_chunks_captures_structured_skill_artifacts(monkeypat
     event = json.loads(collected[1].removeprefix("data: ").strip())
     assert event["type"] == "files"
     assert json.loads(event["content"]) == {"file_uploads": [upload_result]}
+    assert collected[1] in [call.args[0] for call in channel.publish.await_args_list]
 
 
 @pytest.mark.asyncio
@@ -13875,10 +14052,17 @@ async def test_stream_agent_chunks_emits_uploaded_workspace_artifacts(monkeypatc
         "backend.services.agent_service.agent_run", fake_agent_run, raising=False
     )
 
+    channel = MagicMock()
+    channel.publish = AsyncMock()
     collected = [
         chunk
         async for chunk in agent_service._stream_agent_chunks(
-            agent_request, "user", "tenant", MagicMock(), MagicMock()
+            agent_request,
+            "user",
+            "tenant",
+            MagicMock(),
+            MagicMock(),
+            channel=channel,
         )
     ]
 
@@ -13888,6 +14072,7 @@ async def test_stream_agent_chunks_emits_uploaded_workspace_artifacts(monkeypatc
     assert event["type"] == "files"
     content = json.loads(event["content"])
     assert content == {"file_uploads": [artifact]}
+    assert collected[1] in [call.args[0] for call in channel.publish.await_args_list]
 
 
 @pytest.mark.asyncio
@@ -13996,7 +14181,7 @@ async def test_stream_agent_chunks_picture_web_invalid_json(monkeypatch):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id, status="completed"):
+    def fake_unregister(conv_id, user_id, status="completed", **_kwargs):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
@@ -14052,7 +14237,7 @@ async def test_stream_agent_chunks_search_content_invalid_json(monkeypatch):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id, status="completed"):
+    def fake_unregister(conv_id, user_id, status="completed", **_kwargs):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
@@ -14105,7 +14290,7 @@ async def test_stream_agent_chunks_resume_mode(monkeypatch):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id, status="completed"):
+    def fake_unregister(conv_id, user_id, status="completed", **_kwargs):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
@@ -14162,7 +14347,7 @@ async def test_stream_agent_chunks_memory_disabled(monkeypatch):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id, status="completed"):
+    def fake_unregister(conv_id, user_id, status="completed", **_kwargs):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
@@ -14222,7 +14407,7 @@ async def test_stream_agent_chunks_memory_agent_share_never(monkeypatch):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id, status="completed"):
+    def fake_unregister(conv_id, user_id, status="completed", **_kwargs):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
@@ -14283,7 +14468,7 @@ async def test_stream_agent_chunks_memory_agent_disabled(monkeypatch):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id, status="completed"):
+    def fake_unregister(conv_id, user_id, status="completed", **_kwargs):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
@@ -14343,7 +14528,7 @@ async def test_stream_agent_chunks_memory_user_agent_disabled(monkeypatch):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id, status="completed"):
+    def fake_unregister(conv_id, user_id, status="completed", **_kwargs):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
@@ -15189,7 +15374,7 @@ async def test_stream_agent_chunks_marks_stopped_when_stop_event_set(monkeypatch
     monkeypatch.setattr(
         agent_service.agent_run_manager,
         "unregister_agent_run",
-        lambda conv_id, user_id, status="completed": unregister_calls.append((conv_id, user_id, status)),
+        lambda conv_id, user_id, status="completed", **_kwargs: unregister_calls.append((conv_id, user_id, status)),
         raising=False,
     )
 
@@ -16477,6 +16662,18 @@ class TestBuildSandboxPolicy:
 
         assert "tenant_id" in params
         assert "agent_type" in params
+
+    def test_build_sandbox_policy_includes_configurable_host_tool_timeout(self):
+        import consts.const as const_module
+        from backend.services.agent_service import build_sandbox_policy
+
+        with (
+            patch.object(const_module, "NEXENT_SANDBOX_DEFAULT_LEVEL", "docker"),
+            patch.object(const_module, "NEXENT_SANDBOX_HOST_TOOL_TIMEOUT_S", 900),
+        ):
+            policy = build_sandbox_policy("tenant-1", "")
+
+        assert policy["host_tool_timeout_seconds"] == 900
 
 
 class TestGetSandboxMinioClient:

@@ -534,20 +534,45 @@ def create_token(user_id: str) -> Dict[str, Any]:
     Returns:
         Dictionary containing the API token information including token_id.
     """
+    from database.client import get_db_session
+    from database.token_db import soft_delete_tokens_by_user
+
     access_key = generate_access_key()
-    return create_token_record(access_key, user_id)
+    with get_db_session() as session:
+        soft_delete_tokens_by_user(user_id, user_id, session)
+        token = create_token_record(access_key, user_id, created_by=user_id, db_session=session)
+    return {**token, "can_copy": True}
 
 
-def list_tokens_by_user(user_id: str) -> List[Dict[str, Any]]:
+def _mask_access_key(access_key: str) -> str:
+    """Keep the key prefix and suffix visible while hiding its secret middle."""
+    if len(access_key) <= 8:
+        return "*" * len(access_key)
+    prefix_length = min(10, len(access_key) - 5)
+    return f"{access_key[:prefix_length]}{'*' * (len(access_key) - prefix_length - 4)}{access_key[-4:]}"
+
+
+def list_tokens_by_user(user_id: str, actor_role: str) -> List[Dict[str, Any]]:
     """List all tokens for the specified user.
 
     Args:
         user_id: The user ID to query token pairs for.
+        actor_role: Role of the authenticated user requesting the list.
 
     Returns:
-        List of token information with masked access keys.
+        List of token information. Administrators can view and copy complete
+        keys; other roles receive masked, non-copyable values.
     """
-    return list_tokens_by_user_record(user_id)
+    can_copy = (actor_role or "").upper() in {"ADMIN", "SU"}
+    tokens = list_tokens_by_user_record(user_id)
+    return [
+        {
+            **token,
+            "access_key": token["access_key"] if can_copy else _mask_access_key(token["access_key"]),
+            "can_copy": can_copy,
+        }
+        for token in tokens
+    ]
 
 
 def delete_token(token_id: int, user_id: str) -> bool:
