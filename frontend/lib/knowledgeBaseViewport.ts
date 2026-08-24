@@ -9,3 +9,9 @@ export const calculateKnowledgeBaseInitialLimit = (
     Math.max(1, Math.ceil(containerHeight / averageRowHeight))
   );
 };
+
+export const createKnowledgeBaseFilterKey = (
+  keyword: string,
+  sources: readonly string[],
+  models: readonly string[]
+): string => JSON.stringify([keyword, sources, models]);

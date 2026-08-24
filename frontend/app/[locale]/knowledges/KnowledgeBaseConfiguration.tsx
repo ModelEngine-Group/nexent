@@ -24,6 +24,7 @@ import {
 import { ErrorCode } from "@/const/errorCode";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 import log from "@/lib/logger";
+import { createKnowledgeBaseFilterKey } from "@/lib/knowledgeBaseViewport";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
 import knowledgeBasePollingService from "@/services/knowledgeBasePollingService";
 import { isKnowledgeBaseFileSizeValid } from "@/services/uploadService";
@@ -253,7 +254,9 @@ function DataConfig({ isActive }: DataConfigProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [sourceFilter, setSourceFilter] = useState<string[]>([]);
   const [modelFilter, setModelFilter] = useState<string[]>([]);
-  const filterEffectReadyRef = useRef(false);
+  const lastRequestedFilterKeyRef = useRef(
+    createKnowledgeBaseFilterKey(searchQuery, sourceFilter, modelFilter)
+  );
   const initialLoadStartedRef = useRef(false);
   const initialCapacityRequestRef = useRef(false);
   const initialPageSizeRef = useRef(1);
@@ -305,11 +308,15 @@ function DataConfig({ isActive }: DataConfigProps) {
   );
 
   useEffect(() => {
-    if (!filterEffectReadyRef.current) {
-      filterEffectReadyRef.current = true;
-      return;
-    }
+    const filterKey = createKnowledgeBaseFilterKey(
+      searchQuery,
+      sourceFilter,
+      modelFilter
+    );
+    if (filterKey === lastRequestedFilterKeyRef.current) return;
+
     const timer = window.setTimeout(() => {
+      lastRequestedFilterKeyRef.current = filterKey;
       fetchKnowledgeBases(true, false, false, {
         keyword: searchQuery,
         sources: sourceFilter,
