@@ -4553,6 +4553,55 @@ class TestCreateBuiltinToolAndFileWorkspaceLifecycle:
 
         assert nexent_agent_instance._workspace_uploads == [upload]
 
+    def test_cleanup_run_workspace_rejects_mismatched_run_id(self, tmp_path):
+        workspace = tmp_path / "user" / "actual-run"
+        workspace.mkdir(parents=True)
+        cleanup_logger = MagicMock()
+
+        removed = nexent_agent.cleanup_run_workspace(
+            str(workspace), "different-run", cleanup_logger
+        )
+
+        assert removed is False
+        assert workspace.exists()
+        cleanup_logger.error.assert_called_once()
+
+    def test_sandbox_container_returns_none_without_docker_container(
+        self, nexent_agent_instance
+    ):
+        nexent_agent_instance._sandbox_executors = [object()]
+        nexent_agent_instance.agent = MagicMock(python_executor=None)
+
+        assert nexent_agent_instance._sandbox_container() is None
+
+    def test_initialize_sandbox_workspaces_skips_missing_workspace(
+        self, nexent_agent_instance
+    ):
+        nexent_agent_instance.workspace_path = None
+        nexent_agent_instance._sandbox_executors = [MagicMock()]
+
+        nexent_agent_instance._initialize_sandbox_workspaces()
+
+        nexent_agent_instance._sandbox_executors[0].assert_not_called()
+
+    def test_initialize_sandbox_workspaces_deduplicates_and_skips_unsupported_executors(
+        self, nexent_agent_instance, tmp_path
+    ):
+        workspace = tmp_path / "user" / "run"
+        (workspace / "outputs").mkdir(parents=True)
+        docker_executor = MagicMock(_nexent_backend="docker")
+        unsupported_executor = object()
+        nexent_agent_instance.workspace_path = str(workspace)
+        nexent_agent_instance._sandbox_executors = [
+            docker_executor,
+            docker_executor,
+            unsupported_executor,
+        ]
+
+        nexent_agent_instance._initialize_sandbox_workspaces()
+
+        docker_executor.assert_called_once()
+
     def test_prepare_workspace_rejects_files_without_download_tool(
         self, nexent_agent_instance, tmp_path
     ):
@@ -4656,6 +4705,26 @@ class TestCreateBuiltinToolAndFileWorkspaceLifecycle:
         assert executor.calls[0] == executor.calls[1]
         assert executor._unhealthy is False
         assert executor.registered_bootstrap == [executor.calls[0]]
+
+    def test_initialize_sandbox_workspaces_reports_retry_failure(
+        self, nexent_agent_instance, tmp_path
+    ):
+        class FailingKernelLease:
+            _nexent_backend = "docker"
+            _nexent_kernel_recovery_supported = True
+            _unhealthy = True
+            container = object()
+
+            def register_kernel_bootstrap_code(self, code):
+                raise RuntimeError("replacement bootstrap failed")
+
+        workspace = tmp_path / "user" / "run"
+        (workspace / "outputs").mkdir(parents=True)
+        nexent_agent_instance.workspace_path = str(workspace)
+        nexent_agent_instance._sandbox_executors = [FailingKernelLease()]
+
+        with pytest.raises(RuntimeError, match="replacement bootstrap failed"):
+            nexent_agent_instance._initialize_sandbox_workspaces()
 
     def test_initialize_sandbox_workspaces_does_not_retry_healthy_failure(
         self, nexent_agent_instance, tmp_path
@@ -6351,6 +6420,28 @@ class TestCleanupSandboxAdvanced:
         ]
         assert nexent_agent_instance._sandbox_executors == []
         assert mock_core_agent.python_executor is None
+
+    def test_cleanup_sandbox_deduplicates_executor_without_root_agent(
+        self, nexent_agent_instance
+    ):
+        executor = MagicMock()
+        nexent_agent_instance.agent = None
+        nexent_agent_instance._sandbox_executors = [executor, executor]
+        nexent_agent_instance._sandbox_scope = "session"
+        nexent_agent_instance.sandbox_config = None
+        nexent_agent_instance.minio_client = None
+
+        mock_cleanup = MagicMock()
+        mock_sandbox_module = MagicMock(cleanup_executor=mock_cleanup)
+
+        with patch.dict(
+            "sys.modules",
+            {"sdk.nexent.core.agents.sandbox": mock_sandbox_module},
+        ):
+            nexent_agent_instance._cleanup_sandbox()
+
+        mock_cleanup.assert_called_once_with(executor, ANY, timeout=5.0)
+        assert nexent_agent_instance._sandbox_executors == []
 
     def test_cleanup_sandbox_minio_sync_no_uploaded_files(self, nexent_agent_instance, mock_core_agent):
         """MinIO sync returns empty list, no log message about sync."""

@@ -315,6 +315,13 @@ class TestUploadToS3ToolPathValidation:
             os.path.normpath(os.path.join(temp_workspace, "outputs", "report.pdf"))
         ]
 
+    def test_absolute_upload_path_has_single_candidate(self, tool, temp_workspace):
+        absolute_path = os.path.join(temp_workspace, "outputs", "report.pdf")
+
+        assert tool._upload_path_candidates(absolute_path) == [
+            os.path.normpath(absolute_path)
+        ]
+
     def test_build_s3_key(self, tool):
         key = tool._build_s3_key("report.pdf")
         assert key == "workspace/user1/run1/outputs/report.pdf"

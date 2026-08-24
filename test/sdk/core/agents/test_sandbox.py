@@ -2682,6 +2682,295 @@ class TestModuleLevelTimeImport:
 class TestTargetedSandboxCoverage:
     """Execute security, lifecycle, and factory branches directly."""
 
+    def test_host_tool_bridge_registers_recoverable_proxy_as_bootstrap(self):
+        bootstrap_output = SimpleNamespace(logs="registered")
+        executor = SimpleNamespace(
+            container=object(),
+            send_tools=MagicMock(),
+            run_code_raise_errors=MagicMock(),
+            register_kernel_bootstrap_code=MagicMock(return_value=bootstrap_output),
+            cleanup=MagicMock(),
+            _nexent_kernel_recovery_supported=True,
+        )
+        logger = MagicMock()
+        sandbox_module._install_host_tool_bridge(executor, logger)
+        executor._nexent_tool_bridge._bridge_host = MagicMock(
+            return_value="bridge-host"
+        )
+
+        executor.send_tools(
+            {"host": SimpleNamespace(_nexent_execute_on_host=True)}
+        )
+
+        executor.register_kernel_bootstrap_code.assert_called_once()
+        executor.run_code_raise_errors.assert_not_called()
+        executor.cleanup()
+
+    def test_kernel_lease_rejects_non_positive_receive_timeout(self, monkeypatch):
+        remote_module = SimpleNamespace(
+            _create_kernel_http=MagicMock(return_value="kernel-1")
+        )
+        monkeypatch.setitem(sys.modules, "smolagents.remote_executors", remote_module)
+        owner = SimpleNamespace(
+            logger=MagicMock(),
+            base_url="http://sandbox:8888",
+            host="sandbox",
+            port=8888,
+        )
+
+        with pytest.raises(ValueError, match="must be positive"):
+            sandbox_module._DockerKernelLease(
+                owner,
+                MagicMock(),
+                receive_timeout_seconds=0,
+            )
+
+    def test_build_channels_url_creates_session_when_missing(self, monkeypatch):
+        lease = object.__new__(sandbox_module._DockerKernelLease)
+        lease.host = "sandbox"
+        lease.port = 8888
+        lease._channel_session_id = None
+        monkeypatch.setattr(
+            sandbox_module.secrets,
+            "token_hex",
+            MagicMock(return_value="new-session"),
+        )
+
+        assert lease._build_channels_url("kernel-1").endswith(
+            "?session_id=new-session"
+        )
+        assert lease._channel_session_id == "new-session"
+
+    def test_kernel_execution_state_returns_gateway_state(self):
+        lease = TestDockerKernelLease._lease()
+        response = MagicMock()
+        response.json.return_value = {"execution_state": "busy"}
+        lease._requests.get.return_value = response
+
+        assert lease._get_kernel_execution_state() == "busy"
+        response.raise_for_status.assert_called_once_with()
+
+    def test_kernel_watchdog_refreshes_deadline_after_busy_health_check(
+        self, monkeypatch
+    ):
+        from websocket import ABNF
+
+        websocket = MagicMock()
+        websocket.recv_data.return_value = (
+            ABNF.OPCODE_TEXT,
+            json.dumps(
+                {
+                    "parent_header": {"msg_id": "request-1"},
+                    "msg_type": "status",
+                    "content": {"execution_state": "idle"},
+                }
+            ),
+        )
+        monkeypatch.setattr("websocket.create_connection", MagicMock(return_value=websocket))
+        monkeypatch.setattr(
+            sandbox_module.time,
+            "monotonic",
+            MagicMock(side_effect=[0.0, 1.0, 2.0, 2.1]),
+        )
+        remote_module = SimpleNamespace(
+            AgentError=RuntimeError,
+            CodeOutput=lambda output, logs, is_final_answer: SimpleNamespace(
+                output=output,
+                logs=logs,
+                is_final_answer=is_final_answer,
+            ),
+            RemotePythonExecutor=SimpleNamespace(
+                FINAL_ANSWER_EXCEPTION="FinalAnswerException"
+            ),
+            _websocket_send_execute_request=lambda code, ws: "request-1",
+        )
+        monkeypatch.setitem(sys.modules, "smolagents.remote_executors", remote_module)
+        lease = TestDockerKernelLease._lease()
+        lease._check_kernel_channel_health = MagicMock()
+
+        lease.run_code_raise_errors("1 + 1")
+
+        lease._check_kernel_channel_health.assert_called_once_with(
+            "the terminal execution message was not received before the watchdog deadline"
+        )
+
+    @pytest.mark.parametrize("delete_failure", ["status", "exception"])
+    def test_kernel_replacement_logs_delete_failures(
+        self, monkeypatch, delete_failure
+    ):
+        lease = TestDockerKernelLease._lease()
+        lease._unhealthy = True
+        if delete_failure == "status":
+            lease._requests.delete.return_value = SimpleNamespace(status_code=500)
+        else:
+            lease._requests.delete.side_effect = RuntimeError("delete failed")
+        remote_module = SimpleNamespace(
+            RemotePythonExecutor=SimpleNamespace(
+                send_variables=MagicMock(),
+                send_tools=MagicMock(),
+            ),
+            _create_kernel_http=MagicMock(return_value="kernel-2"),
+        )
+        monkeypatch.setitem(sys.modules, "smolagents.remote_executors", remote_module)
+
+        lease._replace_unhealthy_kernel()
+
+        assert lease.kernel_id == "kernel-2"
+        assert lease._unhealthy is False
+        assert lease._logger.warning.call_count >= 2
+
+    def test_kernel_replacement_failure_keeps_lease_unhealthy(self, monkeypatch):
+        lease = TestDockerKernelLease._lease()
+        lease._unhealthy = True
+        lease._requests.delete.return_value = SimpleNamespace(status_code=204)
+        remote_module = SimpleNamespace(
+            RemotePythonExecutor=SimpleNamespace(),
+            _create_kernel_http=MagicMock(side_effect=RuntimeError("create failed")),
+        )
+        monkeypatch.setitem(sys.modules, "smolagents.remote_executors", remote_module)
+
+        with pytest.raises(RuntimeError, match="Failed to replace unhealthy sandbox kernel"):
+            lease._replace_unhealthy_kernel()
+
+        assert lease._unhealthy is True
+        lease._logger.exception.assert_called_once()
+
+    @pytest.mark.parametrize(
+        ("message", "expected_output", "is_final_answer", "expected_error"),
+        [
+            (
+                {"msg_type": "execute_result", "content": {"data": {"text/plain": "2"}}},
+                "2",
+                False,
+                None,
+            ),
+            (
+                {
+                    "msg_type": "error",
+                    "content": {
+                        "ename": "FinalAnswerException",
+                        "evalue": "gASVCQAAAAAAAAB9lIwBeJRLAXMu",
+                    },
+                },
+                {"x": 1},
+                True,
+                None,
+            ),
+            (
+                {
+                    "msg_type": "error",
+                    "content": {"ename": "ValueError", "traceback": ["boom"]},
+                },
+                None,
+                False,
+                "boom",
+            ),
+        ],
+    )
+    def test_kernel_lease_handles_terminal_message_types(
+        self,
+        monkeypatch,
+        message,
+        expected_output,
+        is_final_answer,
+        expected_error,
+    ):
+        from websocket import ABNF
+
+        message = {
+            "parent_header": {"msg_id": "request-1"},
+            **message,
+        }
+        idle = {
+            "parent_header": {"msg_id": "request-1"},
+            "msg_type": "status",
+            "content": {"execution_state": "idle"},
+        }
+        websocket = MagicMock()
+        websocket.recv_data.side_effect = [
+            (ABNF.OPCODE_TEXT, json.dumps(message)),
+            (ABNF.OPCODE_TEXT, json.dumps(idle)),
+        ]
+        monkeypatch.setattr("websocket.create_connection", MagicMock(return_value=websocket))
+        remote_module = SimpleNamespace(
+            AgentError=RuntimeError,
+            CodeOutput=lambda output, logs, is_final_answer: SimpleNamespace(
+                output=output,
+                logs=logs,
+                is_final_answer=is_final_answer,
+            ),
+            RemotePythonExecutor=SimpleNamespace(
+                FINAL_ANSWER_EXCEPTION="FinalAnswerException"
+            ),
+            _websocket_send_execute_request=lambda code, ws: "request-1",
+        )
+        monkeypatch.setitem(sys.modules, "smolagents.remote_executors", remote_module)
+        lease = TestDockerKernelLease._lease()
+
+        if expected_error:
+            with pytest.raises(Exception, match=expected_error):
+                lease.run_code_raise_errors("1 + 1")
+        else:
+            result = lease.run_code_raise_errors("1 + 1")
+            assert result.output == expected_output
+            assert result.is_final_answer is is_final_answer
+
+    @pytest.mark.parametrize("frame", ["close", "empty"])
+    def test_kernel_lease_rejects_closed_or_empty_frames(self, monkeypatch, frame):
+        from websocket import ABNF
+
+        websocket = MagicMock()
+        websocket.recv_data.return_value = (
+            ABNF.OPCODE_CLOSE if frame == "close" else ABNF.OPCODE_TEXT,
+            b"closed" if frame == "close" else b"",
+        )
+        monkeypatch.setattr("websocket.create_connection", MagicMock(return_value=websocket))
+        remote_module = SimpleNamespace(
+            AgentError=RuntimeError,
+            CodeOutput=MagicMock(),
+            RemotePythonExecutor=SimpleNamespace(
+                FINAL_ANSWER_EXCEPTION="FinalAnswerException"
+            ),
+            _websocket_send_execute_request=lambda code, ws: "request-1",
+        )
+        monkeypatch.setitem(sys.modules, "smolagents.remote_executors", remote_module)
+        lease = TestDockerKernelLease._lease()
+        lease._check_kernel_channel_health = MagicMock(
+            side_effect=RuntimeError("channel failed")
+        )
+
+        with pytest.raises(RuntimeError, match="channel failed"):
+            lease.run_code_raise_errors("1 + 1")
+
+        lease._check_kernel_channel_health.assert_called_once()
+
+    @pytest.mark.parametrize("setup_kind", ["variables", "tools", "bootstrap"])
+    def test_kernel_setup_propagates_healthy_failures(
+        self, monkeypatch, setup_kind
+    ):
+        lease = TestDockerKernelLease._lease()
+        failure = RuntimeError("setup failed")
+        if setup_kind == "bootstrap":
+            lease.run_code_raise_errors = MagicMock(side_effect=failure)
+            operation = lambda: lease.register_kernel_bootstrap_code("bootstrap")
+        else:
+            remote = SimpleNamespace(
+                send_variables=MagicMock(side_effect=failure),
+                send_tools=MagicMock(side_effect=failure),
+            )
+            monkeypatch.setitem(
+                sys.modules,
+                "smolagents.remote_executors",
+                SimpleNamespace(RemotePythonExecutor=remote),
+            )
+            if setup_kind == "variables":
+                operation = lambda: lease.send_variables({"x": 1})
+            else:
+                operation = lambda: lease.send_tools({"tool": object()})
+
+        with pytest.raises(RuntimeError, match="setup failed"):
+            operation()
+
     def test_shell_guard_boxed_and_wrapped_calls(self):
         executor = SimpleNamespace(__call__=MagicMock(return_value="ok"))
         logger = MagicMock()

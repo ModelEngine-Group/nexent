@@ -4254,6 +4254,7 @@ async def test_prepare_agent_run(
         mock_agent_request,
         user_id="test_user",
         tenant_id="test_tenant",
+        reservation_token="reservation-1",
     )
 
     # Assert
@@ -4280,7 +4281,11 @@ async def test_prepare_agent_run(
         enable_planning=False,
     )
     mock_agent_run_manager.register_agent_run.assert_called_once_with(
-        123, mock_run_info, "test_user")
+        123,
+        mock_run_info,
+        "test_user",
+        reservation_token="reservation-1",
+    )
     mock_agent_run_manager.create_context_manager.assert_not_called()
     assert mock_run_info.context_input.items == ()
 
@@ -4443,6 +4448,37 @@ async def test_run_agent_stream(
     mock_build_mem_ctx.return_value = MagicMock(
         user_config=MagicMock(memory_switch=True)
     )
+
+
+@pytest.mark.asyncio
+@patch(
+    "backend.services.agent_service._resolve_user_tenant_language",
+    return_value=("u", "t", "en"),
+)
+async def test_run_agent_stream_releases_reservation_when_setup_fails(
+    mock_resolve,
+    monkeypatch,
+    mock_agent_request,
+    mock_http_request,
+):
+    reserve = MagicMock(return_value="reservation-1")
+    release = MagicMock()
+    monkeypatch.setattr(agent_service.agent_run_manager, "reserve_agent_run", reserve)
+    monkeypatch.setattr(
+        agent_service.agent_run_manager,
+        "release_agent_run_reservation",
+        release,
+    )
+    monkeypatch.setattr(
+        agent_service.runtime_state_service,
+        "reset_stream_async",
+        AsyncMock(side_effect=RuntimeError("reset failed")),
+    )
+
+    with pytest.raises(RuntimeError, match="reset failed"):
+        await run_agent_stream(mock_agent_request, mock_http_request, "Bearer token")
+
+    release.assert_called_once_with(123, "u", "reservation-1")
 
 
 @pytest.mark.asyncio
@@ -5652,14 +5688,20 @@ async def test_generate_stream_registers_and_streams(monkeypatch):
 
     registered = {}
 
-    def fake_register(conv_id, run_info, user_id):
+    def fake_register(conv_id, run_info, user_id, **kwargs):
         registered["conv_id"] = conv_id
         registered["run_info"] = run_info
         registered["user_id"] = user_id
+        registered["kwargs"] = kwargs
 
     monkeypatch.setattr(
         "backend.services.agent_service.agent_run_manager.register_agent_run",
         fake_register,
+    )
+    release_reservation = MagicMock()
+    monkeypatch.setattr(
+        "backend.services.agent_service.agent_run_manager.release_agent_run_reservation",
+        release_reservation,
     )
 
     # Stream helper will yield chunks
@@ -5675,14 +5717,63 @@ async def test_generate_stream_registers_and_streams(monkeypatch):
     # Collect output
     collected = []
     async for d in agent_service.generate_stream(
-        agent_request, user_id="u", tenant_id="t", enable_memory=False
+        agent_request,
+        user_id="u",
+        tenant_id="t",
+        enable_memory=False,
+        reservation_token="reservation-1",
     ):
         collected.append(d)
 
     assert registered.get("conv_id") == 555
     assert registered.get("user_id") == "u"
     assert registered.get("run_info") is not None
+    assert registered.get("kwargs") == {"reservation_token": "reservation-1"}
     assert collected == ["data: body1\n\n", "data: body2\n\n"]
+    release_reservation.assert_called_once_with(555, "u", "reservation-1")
+
+
+@pytest.mark.asyncio
+async def test_generate_stream_preserves_active_run_error_and_releases_reservation(
+    monkeypatch,
+):
+    agent_request = AgentRequest(
+        agent_id=2,
+        conversation_id=556,
+        query="test",
+        history=[],
+        minio_files=[],
+        is_debug=False,
+    )
+    active_error = agent_service.AgentRunAlreadyActiveError("active")
+    monkeypatch.setattr(
+        agent_service,
+        "prepare_agent_run",
+        AsyncMock(side_effect=active_error),
+    )
+    release_reservation = MagicMock()
+    monkeypatch.setattr(
+        agent_service.agent_run_manager,
+        "release_agent_run_reservation",
+        release_reservation,
+    )
+    channel = MagicMock(publish=AsyncMock())
+
+    chunks = [
+        chunk
+        async for chunk in agent_service.generate_stream(
+            agent_request,
+            user_id="u",
+            tenant_id="t",
+            enable_memory=False,
+            channel=channel,
+            reservation_token="reservation-2",
+        )
+    ]
+
+    assert len(chunks) == 1
+    assert agent_service.SAFE_AGENT_STREAM_ERROR_MESSAGE in chunks[0]
+    release_reservation.assert_called_once_with(556, "u", "reservation-2")
 
 
 @pytest.mark.asyncio

@@ -341,6 +341,34 @@ class TestAgentRunManager:
         )
         assert self.manager.get_agent_run_info(conversation_id, user_id) is run_info
 
+    def test_release_agent_run_reservation_requires_matching_token(self):
+        conversation_id = 123
+        user_id = "user1"
+        token = self.manager.reserve_agent_run(conversation_id, user_id)
+
+        assert self.manager.release_agent_run_reservation(
+            conversation_id, user_id, "stale-token"
+        ) is False
+        assert self.manager.release_agent_run_reservation(
+            conversation_id, user_id, token
+        ) is True
+        assert self.manager.release_agent_run_reservation(
+            conversation_id, user_id, token
+        ) is False
+
+    def test_registration_rejects_stale_reservation_token(self):
+        conversation_id = 123
+        user_id = "user1"
+        self.manager.reserve_agent_run(conversation_id, user_id)
+
+        with pytest.raises(AgentRunAlreadyActiveError, match="no longer valid"):
+            self.manager.register_agent_run(
+                conversation_id,
+                Mock(),
+                user_id,
+                reservation_token="stale-token",
+            )
+
     def test_stale_run_cannot_unregister_current_owner(self):
         conversation_id = 123
         user_id = "user1"
