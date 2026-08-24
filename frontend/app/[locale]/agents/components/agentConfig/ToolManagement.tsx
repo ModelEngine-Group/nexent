@@ -12,13 +12,13 @@ import type { Tool, ToolParam } from "@/types/agentConfig";
 import { TOOL_SOURCE_TYPES } from "@/const/agentConfig";
 import ToolConfigModal from "./tool/ToolConfigModal";
 import {
-  TOOLS_REQUIRING_KB_SELECTION,
   TOOLS_REQUIRING_EMBEDDING,
   TOOLS_REQUIRING_IMAGE_UNDERSTANDING,
   TOOLS_REQUIRING_AUDIO_UNDERSTANDING,
   TOOLS_REQUIRING_VIDEO_UNDERSTANDING,
   getToolKbType,
   getToolLabels,
+  mergeCanonicalTool,
 } from "./tool/utils";
 import log from "@/lib/logger";
 
@@ -168,20 +168,7 @@ export default function ToolManagement({
       const configuredTool = configured
         ? { ...tool, ...configured, initParams: configured.initParams }
         : tool;
-      // Backfill fields that may be missing from the stored tool (e.g.
-      // `inputs`, which is required for the tool test panel to enter
-      // parsed mode). The canonical source for these fields is the
-      // tool list returned by /tool/list.
-      const canonical = availableTools.find(
-        (t: any) => parseInt(String(t.id)) === parseInt(tool.id)
-      );
-      const toolToUse = canonical
-        ? {
-            ...configuredTool,
-            ...canonical,
-            initParams: configuredTool.initParams,
-          }
-        : configuredTool;
+      const toolToUse = mergeCanonicalTool(configuredTool, availableTools);
       const merged = await mergeParams(toolToUse);
       setConfigTool(toolToUse);
       setConfigParams(merged);
@@ -395,14 +382,14 @@ function groupToolsBySource(tools: Tool[]): SourceGroup[] {
     SourceKey,
     (typeof SOURCE_META)[SourceKey],
   ][]) {
-    const srcTools = tools.filter((t: any) => t.source === meta.sourceValue);
+    const srcTools = tools.filter((tool) => tool.source === meta.sourceValue);
     if (srcTools.length === 0) continue;
     const catMap = new Map<string, Tool[]>();
     for (const tool of srcTools) {
       const cat =
         key === "mcp"
-          ? (tool as any).usage?.trim() || "toolPool.category.other"
-          : (tool as any).category?.trim() || "toolPool.category.other";
+          ? tool.usage?.trim() || "toolPool.category.other"
+          : tool.category?.trim() || "toolPool.category.other";
       if (!catMap.has(cat)) catMap.set(cat, []);
       catMap.get(cat)!.push(tool);
     }

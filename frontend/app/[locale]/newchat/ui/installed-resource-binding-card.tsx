@@ -14,9 +14,14 @@ import { useTranslation } from "react-i18next";
 
 import ToolConfigModal from "../../agents/components/agentConfig/tool/ToolConfigModal";
 import SkillConfigModal from "../../agents/components/agentConfig/skill/SkillConfigModal";
+import {
+  findCanonicalTool,
+  mergeCanonicalTool,
+} from "../../agents/components/agentConfig/tool/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useNl2AgentFlow } from "@/contexts/nl2AgentFlow";
+import { useToolList } from "@/hooks/agent/useToolList";
 import {
   searchAgentInfo,
   updateToolConfig,
@@ -164,7 +169,7 @@ const toPersistedBindings = (
     .filter((item) => item.resource.candidate.resource_type === "tool")
     .map((item) => {
       const toolId = parseResourceId(candidateRef(item), "tool");
-      const canonical = toolCatalog.find((tool) => Number(tool.id) === toolId);
+      const canonical = findCanonicalTool(toolCatalog, toolId);
       return {
         ...canonical,
         id: String(toolId),
@@ -250,6 +255,14 @@ export const InstalledResourceBindingCard: FC<{
   const [summaryError, setSummaryError] = useState<string | null>(null);
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [isSynchronizing, setIsSynchronizing] = useState(false);
+  const hasToolResources = payload.resources.some(
+    (resource) => resource.candidate.resource_type === "tool"
+  );
+  const {
+    availableTools,
+    isFetching: isToolCatalogFetching,
+    isError: isToolCatalogError,
+  } = useToolList({ enabled: hasToolResources });
   const waitForAutosave = useAgentStore((state) => state.waitForIdle);
   const applyPersistedResourceBindings = useAgentStore(
     (state) => state.applyPersistedResourceBindings
@@ -504,18 +517,31 @@ export const InstalledResourceBindingCard: FC<{
   };
 
   const dialogResource = configuringItem?.resource;
-  const toolForDialog: Tool | null =
+  const dialogToolId =
     dialogResource?.candidate.resource_type === "tool"
-      ? {
-          id: String(
-            parseResourceId(dialogResource.candidate.candidate_ref, "tool")
-          ),
-          name: dialogResource.candidate.name,
-          description: dialogResource.candidate.description,
-          source:
-            dialogResource.candidate.source === "LOCAL_TOOL" ? "local" : "mcp",
-          initParams: (configuringItem?.draftParams ?? []) as ToolParam[],
-        }
+      ? parseResourceId(dialogResource.candidate.candidate_ref, "tool")
+      : null;
+  const dialogCanonicalTool =
+    dialogToolId == null
+      ? undefined
+      : findCanonicalTool(availableTools, dialogToolId);
+  const toolForDialog: Tool | null =
+    dialogResource?.candidate.resource_type === "tool" &&
+    dialogToolId != null &&
+    dialogCanonicalTool
+      ? mergeCanonicalTool(
+          {
+            id: String(dialogToolId),
+            name: dialogResource.candidate.name,
+            description: dialogResource.candidate.description,
+            source:
+              dialogResource.candidate.source === "LOCAL_TOOL"
+                ? "local"
+                : "mcp",
+            initParams: (configuringItem?.draftParams ?? []) as ToolParam[],
+          },
+          availableTools
+        )
       : null;
   const skillForDialog: Skill | null =
     dialogResource?.candidate.resource_type === "skill"
@@ -554,6 +580,29 @@ export const InstalledResourceBindingCard: FC<{
         {items.map((item) => {
           const ref = candidateRef(item);
           const bound = item.bindingStatus === "bound";
+          const isToolResource =
+            item.resource.candidate.resource_type === "tool";
+          const toolId = isToolResource
+            ? /^tool:(\d+)$/.exec(ref)?.[1]
+            : undefined;
+          const canonicalTool =
+            toolId == null
+              ? undefined
+              : findCanonicalTool(availableTools, toolId);
+          const isToolCatalogPending =
+            isToolResource && !canonicalTool && isToolCatalogFetching;
+          const isToolUnavailable =
+            isToolResource && !canonicalTool && !isToolCatalogFetching;
+          const configureTitle = isToolCatalogPending
+            ? t("toolPool.loadingTools", "Loading tools...")
+            : isToolResource && isToolCatalogError
+              ? t(
+                  "agentConfig.tools.fetchFailed",
+                  "Failed to fetch tools list, please try again later"
+                )
+              : isToolUnavailable
+                ? t("toolPool.tooltip.unavailableTool", "Tool is unavailable")
+                : t("nl2agent.resourceBinding.configure", "Configure");
           return (
             <div key={ref} className="flex min-w-0 items-start gap-3 px-4 py-3">
               <input
@@ -608,14 +657,24 @@ export const InstalledResourceBindingCard: FC<{
                   type="button"
                   variant="outline"
                   size="icon"
-                  title={t("nl2agent.resourceBinding.configure", "Configure")}
-                  disabled={isLocked || bound || isBinding}
+                  title={configureTitle}
+                  disabled={
+                    isLocked ||
+                    bound ||
+                    isBinding ||
+                    isToolCatalogPending ||
+                    isToolUnavailable
+                  }
                   onClick={() => setConfiguringRef(ref)}
                   className={
                     item.configStatus === "invalid" ? "border-destructive" : ""
                   }
                 >
-                  <Settings2 className="size-4" />
+                  {isToolCatalogPending ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <Settings2 className="size-4" />
+                  )}
                 </Button>
               ) : null}
             </div>

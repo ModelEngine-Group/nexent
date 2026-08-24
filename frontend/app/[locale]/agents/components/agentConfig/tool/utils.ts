@@ -1,8 +1,33 @@
-// Shared tool helpers used by both ToolManagement and SelectToolsDialog.
+import type { Tool } from "@/types/agentConfig";
+
+// Shared tool helpers used by Agent configuration and NL2Agent resource cards.
+
+export function findCanonicalTool(
+  tools: Tool[],
+  toolId: string | number
+): Tool | undefined {
+  return tools.find((tool) => String(tool.id) === String(toolId));
+}
+
+export function mergeCanonicalTool(tool: Tool, tools: Tool[]): Tool {
+  const canonical = findCanonicalTool(tools, tool.id);
+  if (!canonical) return tool;
+
+  return {
+    ...tool,
+    ...canonical,
+    initParams: tool.initParams,
+  };
+}
 
 export const TOOLS_REQUIRING_KB_SELECTION = [
-  "knowledge_base_search", "dify_search", "datamate_search",
-  "idata_search", "haotian_search", "ragflow_search", "aidp_search",
+  "knowledge_base_search",
+  "dify_search",
+  "datamate_search",
+  "idata_search",
+  "haotian_search",
+  "ragflow_search",
+  "aidp_search",
 ];
 export const TOOLS_REQUIRING_EMBEDDING = ["knowledge_base_search"];
 export const TOOLS_REQUIRING_IMAGE_UNDERSTANDING = ["analyze_image"];
@@ -20,6 +45,6 @@ export function getToolKbType(name: string) {
   return "knowledge_base_search" as const;
 }
 
-export function getToolLabels(tool: any): string[] {
+export function getToolLabels(tool: Tool): string[] {
   return Array.isArray(tool.labels) ? tool.labels : [];
 }
