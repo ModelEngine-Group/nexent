@@ -1,5 +1,6 @@
 import { create } from "zustand";
 
+import { safeStringify } from "@/lib/utils";
 import {
   searchToolConfig,
   updateAgentInfo,
@@ -359,17 +360,41 @@ const toToolParams = (tool: Tool): Record<string, unknown> =>
     {}
   );
 
+const areToolParamsEqual = (left: Tool, right: Tool): boolean => {
+  const leftParams = toToolParams(left);
+  const rightParams = toToolParams(right);
+  const leftKeys = Object.keys(leftParams).sort();
+  const rightKeys = Object.keys(rightParams).sort();
+
+  if (leftKeys.length !== rightKeys.length) return false;
+  return leftKeys.every((key, index) => {
+    if (key !== rightKeys[index]) return false;
+
+    const leftValue = safeStringify(leftParams[key]);
+    const rightValue = safeStringify(rightParams[key]);
+    return leftValue !== null && leftValue === rightValue;
+  });
+};
+
 async function persistToolChanges(
   agentId: number,
   currentTools: Tool[],
   savedTools: Tool[]
 ): Promise<void> {
   const currentToolIds = new Set(currentTools.map((tool) => Number(tool.id)));
+  const savedToolsById = new Map(
+    savedTools.map((tool) => [Number(tool.id), tool])
+  );
 
   for (const tool of currentTools) {
     if (tool.is_available === false) {
       continue;
     }
+    const savedTool = savedToolsById.get(Number(tool.id));
+    if (savedTool && areToolParamsEqual(tool, savedTool)) {
+      continue;
+    }
+
     const result = await updateToolConfig(
       Number(tool.id),
       agentId,

@@ -4691,12 +4691,11 @@ class TestUploadZipFilesWithZipError:
         ("content", "error"),
         [
             ("# No frontmatter", "must have YAML frontmatter"),
-            ("---\n: invalid\n---\nbody", "Invalid SKILL.md frontmatter"),
-            ("---\nplain value\n---\nbody", "frontmatter must be a mapping"),
+            ("---\ndescription: A skill\n---\nbody", "must contain a name field"),
         ],
     )
-    def test_frontmatter_name_replacement_rejects_invalid_frontmatter(self, content, error):
-        """Renaming requires valid mapping-style SKILL.md frontmatter."""
+    def test_frontmatter_name_replacement_requires_name_field(self, content, error):
+        """Renaming requires frontmatter with a top-level name field."""
         with pytest.raises(skill_service.SkillException, match=error):
             skill_service._replace_skill_frontmatter_name(content, "new-skill")
 
@@ -4732,6 +4731,33 @@ class TestUploadZipFilesWithZipError:
             "custom-field": {"enabled": True},
         }
         assert match.group("body") == body
+
+    def test_frontmatter_name_replacement_keeps_legacy_description_unchanged(self):
+        """Renaming must not parse legacy descriptions that contain YAML-like colons."""
+        description = (
+            "Expert code reviewer. Performs detailed analysis using bundled tools to detect "
+            "nested loops, and other code smells. Ideal for: (1) Reviewing pull requests."
+        )
+        content = (
+            "---\n"
+            "name: code_review_expert\n"
+            f"description: {description}\n"
+            "tags:\n"
+            "  - code\n"
+            "---\n"
+            "# Code Review Expert\n"
+        )
+
+        updated = skill_service._replace_skill_frontmatter_name(
+            content,
+            "code_review_expert 副本",
+        )
+
+        assert updated == content.replace(
+            "name: code_review_expert\n",
+            'name: "code_review_expert 副本"\n',
+            1,
+        )
 
     def test_create_zip_with_name_override_extracts_updated_skill_md(self):
         """The ZIP extraction override should prevent the original name from returning."""
@@ -4778,7 +4804,7 @@ class TestUploadZipFilesWithZipError:
 
         assert result["skill_id"] == 42
         override = mock_upload.call_args.kwargs["file_overrides"]["SKILL.md"].decode("utf-8")
-        assert "name: new-skill\n" in override
+        assert 'name: "new-skill"\n' in override
         assert "author: Example Author\n" in override
         assert override.endswith("# Instructions\n\nBody stays unchanged.\n")
 

@@ -1303,6 +1303,15 @@ async def test_create_stream_yields_process_chunks_without_waiting_for_later_out
                 }
             ),
         },
+        {
+            "type": "nl2a_state",
+            "content": json.dumps(
+                {
+                    "event": "agent_generation_completed",
+                    "agent_id": 42,
+                }
+            ),
+        },
         {"type": "final_answer", "content": "plain answer"},
     ]
     release_next = [asyncio.Event() for _ in process_chunks]

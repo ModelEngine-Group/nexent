@@ -247,10 +247,8 @@ export function VersionCardItem({
         message.success(t("agent.version.rollbackSuccess"));
         setCompareModalOpen(false);
         invalidateAgentVersionList?.();
-        queryClient.invalidateQueries({ queryKey: ["agentInfo", agentId] });
         queryClient.invalidateQueries({ queryKey: ["agents"] });
 
-        // Refresh agent detail and sync to Zustand store
         const store = useAgentStore.getState();
         if (store.currentAgentId === agentId) {
           const agentResult = await searchAgentInfo(agentId);
@@ -292,7 +290,6 @@ export function VersionCardItem({
         message.success(t("agent.version.deleteSuccess"));
         setDeleteModalOpen(false);
         invalidateAgentVersionList?.();
-        queryClient.invalidateQueries({ queryKey: ["agentInfo", agentId] });
         queryClient.invalidateQueries({ queryKey: ["agents"] });
       } else {
         message.error(result.message || t("agent.version.deleteError"));
