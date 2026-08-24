@@ -51,6 +51,7 @@ def create_app(
         allow_credentials=True,
         allow_methods=cors_methods or ["*"],
         allow_headers=["*"],
+        expose_headers=["conversation_id"],
     )
 
     # Register exception handlers
