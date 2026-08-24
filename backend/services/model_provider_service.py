@@ -8,7 +8,7 @@ from consts.const import (
 from consts.model import ModelConnectStatusEnum, ModelRequest
 from consts.provider import ProviderEnum, DASHSCOPE_REALTIME_BASE_URL
 from database.model_management_db import get_models_by_tenant_factory_type
-from services.model_health_service import embedding_dimension_check
+from services.model_health_service import embedding_dimension_check, _infer_model_factory
 from services.providers.base import AbstractModelProvider
 from services.providers.silicon_provider import SiliconModelProvider
 from services.providers.tokenpony_provider import TokenPonyModelProvider
@@ -182,7 +182,7 @@ async def prepare_model_dict(provider: str, model: dict, model_url: str, model_a
         if provider == ProviderEnum.DASHSCOPE.value:
             model_dict["base_url"] = f"{model_url.replace('compatible-mode/v1','api/v1').rstrip('/')}/services/rerank/text-rerank/text-rerank"
         else:
-            model_dict["base_url"] = f"{model_url.rstrip('/')}/rerank" 
+            model_dict["base_url"] = f"{model_url.rstrip('/')}/rerank"
     else:
         # For non-embedding models
         if provider == ProviderEnum.MODELENGINE.value:
@@ -197,6 +197,13 @@ async def prepare_model_dict(provider: str, model: dict, model_url: str, model_a
 
     # All newly created models start in NOT_DETECTED status.
     model_dict["connect_status"] = ModelConnectStatusEnum.NOT_DETECTED.value
+
+    if model_type in ("vlm", "vlm2", "vlm3", "vlm4"):
+        inferred_factory = _infer_model_factory(
+            model_type, model_dict.get("base_url", ""), model_dict.get("model_factory")
+        )
+        if inferred_factory:
+            model_dict["model_factory"] = inferred_factory
 
     return model_dict
 
