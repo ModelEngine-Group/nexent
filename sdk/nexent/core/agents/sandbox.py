@@ -631,6 +631,7 @@ def cleanup_executor(executor: Any, logger_: logging.Logger, timeout: float = 5.
 SANDBOX_CONTAINER_NAME = "nexent-runtime-sandbox"
 SANDBOX_NETWORK_NAME = "nexent_network"
 SANDBOX_JUPYTER_PORT = 8888
+SANDBOX_SESSION_CONTAINER_PREFIX = "nexent-runtime-sandbox-session"
 
 
 def _is_containerized_runtime() -> bool:
@@ -672,13 +673,14 @@ class _RecoveredDockerExecutor:
         logger_: logging.Logger,
         host: str,
         additional_imports: Optional[list[str]] = None,
+        port: int = SANDBOX_JUPYTER_PORT,
     ) -> None:
         self.container = container
         self.client = container.client
         self.logger = _make_smolagents_logger(logger_)
         self._logger = logger_
         self.host = host
-        self.port = SANDBOX_JUPYTER_PORT
+        self.port = port
         self.base_url = f"http://{self.host}:{self.port}"
         self.additional_imports = additional_imports or []
         self.installed_packages = []
@@ -1061,6 +1063,73 @@ class _DockerKernelLease:
             self._closed = True
 
 
+class _SessionDockerContainerGroup:
+    """Reference-count the kernel leases that share one session container."""
+
+    def __init__(self, container_executor: Any) -> None:
+        self.container_executor = container_executor
+        self._lease_count = 0
+        self._closed = False
+        self._lock = threading.Lock()
+
+    def acquire(self) -> None:
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("Session sandbox container group is already closed")
+            self._lease_count += 1
+
+    def release(self) -> None:
+        should_cleanup = False
+        with self._lock:
+            if self._lease_count <= 0:
+                return
+            self._lease_count -= 1
+            if self._lease_count == 0 and not self._closed:
+                self._closed = True
+                should_cleanup = True
+        if should_cleanup:
+            self.container_executor.cleanup()
+
+    def close_if_unused(self) -> None:
+        """Remove the container when construction failed before a lease attached."""
+        should_cleanup = False
+        with self._lock:
+            if self._lease_count == 0 and not self._closed:
+                self._closed = True
+                should_cleanup = True
+        if should_cleanup:
+            self.container_executor.cleanup()
+
+
+class _SessionDockerExecutor(_DockerKernelLease):
+    """A dedicated kernel lease in an agent-tree-shared session container."""
+
+    def __init__(
+        self,
+        container_group: _SessionDockerContainerGroup,
+        logger_: logging.Logger,
+        receive_timeout_seconds: float = 30,
+    ) -> None:
+        self._session_container_group = container_group
+        self._session_lease_released = False
+        super().__init__(
+            container_group.container_executor,
+            logger_,
+            receive_timeout_seconds,
+        )
+        container_group.acquire()
+
+    def cleanup(self) -> None:
+        """Delete this kernel and release its shared container reference once."""
+        if self._session_lease_released:
+            return
+        try:
+            super().cleanup()
+        finally:
+            self._session_lease_released = True
+            self._session_container_group.release()
+
+
 class SandboxPoolManager:
     """
     Singleton pool manager for ``container_scope=system`` sandboxes.
@@ -1120,6 +1189,7 @@ class SandboxPoolManager:
         config: SandboxConfig,
         logger_: logging.Logger,
         host_tools_exist: bool = False,
+        session_container_group: Optional[_SessionDockerContainerGroup] = None,
     ) -> Any:
         """
         Acquire a warm executor from the pool, or create a new one if the pool
@@ -1129,7 +1199,12 @@ class SandboxPoolManager:
         For ``scope=SYSTEM`` this tries to pop from the pool first.
         """
         if config.scope == SandboxScope.SESSION:
-            return self._build_executor(config, logger_, host_tools_exist)
+            return self._build_executor(
+                config,
+                logger_,
+                host_tools_exist,
+                session_container_group=session_container_group,
+            )
 
         if config.level == SandboxLevel.DOCKER:
             return self._acquire_shared_docker_kernel(config, logger_, host_tools_exist)
@@ -1372,6 +1447,7 @@ class SandboxPoolManager:
         config: SandboxConfig,
         logger_: logging.Logger,
         host_tools_exist: bool = False,
+        session_container_group: Optional[_SessionDockerContainerGroup] = None,
     ) -> Any:
         """Construct and (for docker) eagerly start a container."""
         level = config.level
@@ -1385,7 +1461,12 @@ class SandboxPoolManager:
             )
 
         if level == SandboxLevel.DOCKER:
-            return self._build_docker_executor(config, logger_, host_tools_exist)
+            return self._build_docker_executor(
+                config,
+                logger_,
+                host_tools_exist,
+                session_container_group=session_container_group,
+            )
 
         if level == SandboxLevel.WASM:
             if host_tools_exist:
@@ -1519,6 +1600,147 @@ class SandboxPoolManager:
         except Exception as exc:
             logger_.debug("Could not inspect stale sandbox containers: %s", exc)
 
+    def _build_session_docker_executor(
+        self,
+        config: SandboxConfig,
+        logger_: logging.Logger,
+        container_run_kwargs: dict[str, Any],
+    ) -> Any:
+        """Create a per-session container without a fixed host-port binding."""
+        import docker
+        import requests
+
+        client = docker.from_env()
+        run_kwargs = dict(container_run_kwargs)
+        container_name = f"{SANDBOX_SESSION_CONTAINER_PREFIX}-{secrets.token_hex(8)}"
+        run_kwargs.update({
+            "name": container_name,
+            "labels": {"com.nexent.sandbox": "session"},
+            "command": _kernel_gateway_command(),
+            "detach": True,
+            # Kernel Gateway needs a network namespace for its HTTP/WebSocket
+            # control plane. Its published endpoint remains constrained to host
+            # loopback or to the Nexent Docker network.
+            "network_disabled": False,
+        })
+        if config.network_disabled:
+            logger_.warning(
+                "Docker NetworkDisabled cannot be used for the Jupyter control plane; "
+                "the session sandbox is reachable only through its local control endpoint. "
+                "Enforce outbound restrictions with the deployment network or firewall."
+            )
+
+        if _is_containerized_runtime():
+            # The runtime's 127.0.0.1 is not the Docker host. Connect directly
+            # over the shared Docker network using this container's unique DNS
+            # name and do not publish a host port.
+            try:
+                client.networks.get(SANDBOX_NETWORK_NAME)
+            except docker.errors.NotFound:
+                client.networks.create(SANDBOX_NETWORK_NAME, driver="bridge")
+            run_kwargs.pop("ports", None)
+            run_kwargs["network"] = SANDBOX_NETWORK_NAME
+            connection_host = container_name
+            connection_port = SANDBOX_JUPYTER_PORT
+        else:
+            # Let Docker allocate an available host port atomically. Selecting a
+            # port in Python before container creation would retain a TOCTOU race.
+            run_kwargs["ports"] = {
+                f"{SANDBOX_JUPYTER_PORT}/tcp": ("127.0.0.1", None)
+            }
+            connection_host = "127.0.0.1"
+            connection_port = 0
+
+        container = client.containers.run(config.docker_image, **run_kwargs)
+        owner = None
+        container_group = None
+        executor = None
+        try:
+            container.reload()
+            if not _is_containerized_runtime():
+                ports = (container.attrs.get("NetworkSettings") or {}).get("Ports") or {}
+                bindings = ports.get(f"{SANDBOX_JUPYTER_PORT}/tcp") or []
+                if not bindings or not bindings[0].get("HostPort"):
+                    raise RuntimeError("Docker did not allocate a Jupyter host port")
+                connection_port = int(bindings[0]["HostPort"])
+
+            deadline = time.monotonic() + max(10, config.timeout_seconds)
+            base_url = f"http://{connection_host}:{connection_port}"
+            while time.monotonic() < deadline:
+                container.reload()
+                if container.status not in (None, "created", "running"):
+                    raise RuntimeError(
+                        f"Session sandbox container stopped before Jupyter was ready "
+                        f"(status={container.status})"
+                    )
+                try:
+                    response = requests.get(f"{base_url}/api/kernels", timeout=1)
+                    response.raise_for_status()
+                    if isinstance(response.json(), list):
+                        break
+                except Exception:
+                    pass
+                time.sleep(0.5)
+            else:
+                raise RuntimeError(f"Jupyter kernel API did not become ready at {base_url}")
+
+            owner = _RecoveredDockerExecutor(
+                container,
+                logger_,
+                connection_host,
+                config.extra_kwargs.get("additional_imports", []),
+                port=connection_port,
+            )
+            container_group = _SessionDockerContainerGroup(owner)
+            executor = self._lease_session_docker_kernel(
+                config,
+                logger_,
+                container_group,
+            )
+            logger_.info(
+                "Created session Docker sandbox %s (url=%s)",
+                container.short_id,
+                executor.base_url,
+            )
+            return executor
+        except Exception:
+            if executor is not None:
+                executor.cleanup()
+            if container_group is not None:
+                container_group.close_if_unused()
+            elif owner is not None:
+                owner.cleanup()
+            else:
+                try:
+                    container.remove(force=True)
+                except Exception:
+                    pass
+            raise
+
+    def _lease_session_docker_kernel(
+        self,
+        config: SandboxConfig,
+        logger_: logging.Logger,
+        container_group: _SessionDockerContainerGroup,
+    ) -> Any:
+        """Lease an isolated kernel from an agent-tree session container."""
+        if not self._is_alive(container_group.container_executor):
+            raise RuntimeError("Shared session sandbox container is not running")
+        executor = _SessionDockerExecutor(
+            container_group,
+            logger_,
+            receive_timeout_seconds=config.timeout_seconds,
+        )
+        try:
+            executor.installed_packages = executor.install_packages(
+                executor.additional_imports
+            )
+        except Exception:
+            executor.cleanup()
+            raise
+        executor._nexent_session_container_group = container_group
+        return executor
+
     def _build_system_docker_executor(
         self,
         config: SandboxConfig,
@@ -1586,11 +1808,15 @@ class SandboxPoolManager:
         config: SandboxConfig,
         logger_: logging.Logger,
         host_tools_exist: bool = False,
+        session_container_group: Optional[_SessionDockerContainerGroup] = None,
     ) -> Any:
         """Construct a Docker executor with Nexent hardening."""
         try:
             from smolagents.remote_executors import DockerExecutor
-        except ImportError as exc:
+
+            if DockerExecutor is None:
+                raise ImportError("DockerExecutor is unavailable")
+        except ImportError:
             logger_.error(
                 "DockerExecutor requires smolagents[docker]. "
                 "Install it with: pip install 'smolagents[docker]'. "
@@ -1659,13 +1885,18 @@ class SandboxPoolManager:
                     container_run_kwargs,
                 )
             else:
-                executor = DockerExecutor(
-                    additional_imports=config.extra_kwargs.get("additional_imports", []),
-                    logger=_make_smolagents_logger(logger_),
-                    image_name=config.docker_image,
-                    build_new_image=False,
-                    container_run_kwargs=container_run_kwargs,
-                )
+                if session_container_group is None:
+                    executor = self._build_session_docker_executor(
+                        config,
+                        logger_,
+                        container_run_kwargs,
+                    )
+                else:
+                    executor = self._lease_session_docker_kernel(
+                        config,
+                        logger_,
+                        session_container_group,
+                    )
             executor._nexent_sandbox_config = config  # store for pool bookkeeping
             executor._nexent_backend = "docker"
             logger_.debug(
@@ -1821,6 +2052,7 @@ def build_python_executor(
     logger_: logging.Logger,
     managed_agents_exist: bool = False,
     host_tools_exist: bool = False,
+    session_container_group: Optional[_SessionDockerContainerGroup] = None,
 ) -> Any:
     """
     Factory function: build a python_executor from ``SandboxConfig``.
@@ -1835,6 +2067,9 @@ def build_python_executor(
         managed_agents_exist: Deprecated compatibility flag. Managed-agent
             orchestration is proxied to the Runtime process, so it no longer
             requires disabling the configured sandbox.
+        session_container_group: Internal agent-tree container group. When set,
+            a session-scoped Docker executor leases a new isolated kernel from
+            the existing container instead of starting another container.
 
     Returns:
         A wrapped python_executor.  Never raises — always returns a usable
@@ -1845,7 +2080,15 @@ def build_python_executor(
     if config.scope == SandboxScope.SESSION:
         # Per-run fresh executor — pool manager still calls _build_executor
         # but we immediately destroy it when release() is called.
-        executor = pool.acquire(config, logger_, host_tools_exist)
+        if session_container_group is None:
+            executor = pool.acquire(config, logger_, host_tools_exist)
+        else:
+            executor = pool.acquire(
+                config,
+                logger_,
+                host_tools_exist,
+                session_container_group=session_container_group,
+            )
         return executor
 
     # SYSTEM scope — pool manager handles lifecycle.
