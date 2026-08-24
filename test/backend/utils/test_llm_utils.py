@@ -873,6 +873,12 @@ class TestAdditionalLLMUtilsTests:
 class TestCallLLMForSystemPromptErrorHandling:
     """Tests for error handling in call_llm_for_system_prompt function."""
 
+    @pytest.fixture(autouse=True)
+    def _noop_sleep(self, mocker: MockFixture):
+        # Retryable errors (429/5xx/timeout) trigger exponential backoff sleeps
+        # in the real implementation; mock them out so tests run instantly.
+        mocker.patch("time.sleep")
+
     def _create_mock_llm_setup(self, mocker: MockFixture):
         """Helper to setup common mocks for LLM error tests."""
         mock_get_model_by_id = mocker.patch('backend.utils.llm_utils.get_model_by_model_id')
@@ -1244,6 +1250,11 @@ class TestCallLLMForSystemPromptErrorHandling:
 
 class TestCallLLMForSystemPromptRetry:
     """Transient-error retry behavior for call_llm_for_system_prompt."""
+
+    @pytest.fixture(autouse=True)
+    def _noop_sleep(self, mocker: MockFixture):
+        # Skip real exponential backoff sleeps during retry tests.
+        mocker.patch("time.sleep")
 
     def _create_mock_llm_setup(self, mocker: MockFixture):
         """Helper to setup common mocks for LLM retry tests."""
