@@ -1,7 +1,7 @@
 import sys
 import types
 import pytest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, ANY
 from pytest_mock import MockFixture
 
 # Mock boto3 and other external dependencies before importing modules under test
@@ -406,7 +406,7 @@ class TestProcessThinkingTokens:
         assert callback_calls == []
 
 
-class AdditionalLLMUtilsTests:
+class TestAdditionalLLMUtilsTests:
     def test_process_thinking_tokens_append_and_callback(self):
         token_join = []
         calls = []
@@ -853,18 +853,21 @@ class AdditionalLLMUtilsTests:
         mock_llm_instance.client.chat.completions.create.side_effect = Exception("LLM error")
         mock_llm_instance._prepare_completion_kwargs.return_value = {}
 
-        with pytest.raises(Exception) as exc_info:
+        from consts.error_code import ErrorCode
+        from consts.exceptions import AppException
+
+        with pytest.raises(AppException) as exc_info:
             call_llm_for_system_prompt(
                 1,
                 "user prompt",
                 "system prompt",
             )
 
-        assert "LLM error" in str(exc_info.value)
-        # Verify error was logged
-        mock_logger.error.assert_called_once()
-        call_args = mock_logger.error.call_args[0][0]
-        assert "Failed to generate prompt" in call_args
+        assert exc_info.value.error_code == ErrorCode.MODEL_PROMPT_GENERATION_FAILED
+        # Verify the failure was logged ("Failed to generate prompt...") regardless of
+        # whether logging uses logger.error or logger.exception (TRY400).
+        logged_messages = [c.args[0] for c in mock_logger.method_calls if c.args]
+        assert any("Failed to generate prompt" in m for m in logged_messages)
 
 
 class TestCallLLMForSystemPromptErrorHandling:
@@ -1441,39 +1444,42 @@ class TestCallLLMForSystemPromptCoverageGaps:
 
         mock_chunk = MagicMock()
         mock_chunk.choices = [MagicMock()]
-        # Content wrapped in think tags: start tag consumes token, end tag clears token_join,
-        # leaving result="" while content_tokens_seen >= 1
-        mock_chunk.choices[0].delta.content = "thinkdata"
+        # Content wrapped in think tags: start+end tag in one token clears token_join,
+        # leaving result="" while content_tokens_seen >= 1 -> L178 warning fires.
+        mock_chunk.choices[0].delta.content = "<think>hidden reasoning</think>"
         mock_chunk.choices[0].delta.reasoning_content = None
 
         mock_instance.client = MagicMock()
         mock_instance.client.chat.completions.create.return_value = [mock_chunk]
 
         result = call_llm_for_system_prompt(1, "u", "s")
-        assert isinstance(result, str)
-        # If result is empty and tokens were seen, L178 warning fires
-        if result == "":
-            mock_logger.warning.assert_any_call(
-                "Generated prompt is empty but %d content tokens were processed. "
-                "This suggests all content was filtered out.",
-                mocker.ANY,
-            )
+        assert result == ""
+        mock_logger.warning.assert_any_call(
+            "Generated prompt is empty but %d content tokens were processed. "
+            "This suggests all content was filtered out.",
+            ANY,
+        )
 
     def test_stream_think_tags_produce_empty_result_with_warning(self, mocker: MockFixture):
         """Explicit ... tags filter all content → result="" + tokens>0 → L178 warning."""
         mock_logger = mocker.patch('backend.utils.llm_utils.logger')
         mock_instance = self._base_setup(mocker)
 
-        # Chunk with content that starts a think block but never ends it in this chunk
-        # The  tag starts thinking mode (token counted, not appended to token_join)
+        # Chunk with content that starts a think block but never ends it in this chunk:
+        # the  tag switches to thinking mode (token counted, not appended to token_join),
+        # leaving result="" while content_tokens_seen >= 1 -> L178 warning fires.
         mock_chunk = MagicMock()
         mock_chunk.choices = [MagicMock()]
-        mock_chunk.choices[0].delta.content = "data"
+        mock_chunk.choices[0].delta.content = "<think>unterminated"
         mock_chunk.choices[0].delta.reasoning_content = None
 
         mock_instance.client = MagicMock()
         mock_instance.client.chat.completions.create.return_value = [mock_chunk]
 
         result = call_llm_for_system_prompt(1, "u", "s")
-        # We just need the code path exercised; L178 fires when result="" and tokens>0
-        assert isinstance(result, str)
+        assert result == ""
+        mock_logger.warning.assert_any_call(
+            "Generated prompt is empty but %d content tokens were processed. "
+            "This suggests all content was filtered out.",
+            ANY,
+        )
