@@ -903,6 +903,7 @@ class RepositoryImportRequirementItem(BaseModel):
     description: Optional[str] = None
     available: bool
     reason_code: Optional[str] = None
+    suggested_new_name: Optional[str] = None
 
 
 class RepositoryImportPrecheckResponse(BaseModel):

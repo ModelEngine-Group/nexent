@@ -2100,3 +2100,82 @@ async def test_import_agent_from_repository_skips_increment_on_import_failure():
             )
 
     mock_increment.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_import_agent_from_repository_passes_skill_resolutions():
+    record = {
+        **_repository_record(agent_repository_id=42, agent_id=10, status="shared"),
+        "agent_info_json": {
+            "agent_id": 10,
+            "agent_info": {"10": {"name": "agent_one"}},
+            "mcp_info": [],
+            "skills": [{"skill_name": "test_skill", "skill_zip_base64": "base64data"}],
+        },
+    }
+
+    skill_resolutions = [
+        {"skill_name": "test_skill", "action": "rename", "new_name": "test_skill 副本"}
+    ]
+
+    with patch.object(
+        ars,
+        "get_agent_repository_by_id",
+        return_value=record,
+    ), patch.object(
+        ars,
+        "import_agent_with_skills_impl",
+        new_callable=AsyncMock,
+        return_value={10: 100},
+    ) as mock_import, patch.object(
+        ars,
+        "increment_agent_repository_downloads",
+        return_value=1,
+    ):
+        await ars.import_agent_from_repository_impl(
+            agent_repository_id=42,
+            tenant_id="tenant_a",
+            authorization="Bearer token",
+            skill_resolutions=skill_resolutions,
+        )
+
+    mock_import.assert_called_once()
+    call_kwargs = mock_import.call_args[1]
+    assert call_kwargs["skill_resolutions"] == skill_resolutions
+
+
+@pytest.mark.asyncio
+async def test_import_agent_from_repository_defaults_skill_resolutions_to_none():
+    record = {
+        **_repository_record(agent_repository_id=42, agent_id=10, status="shared"),
+        "agent_info_json": {
+            "agent_id": 10,
+            "agent_info": {"10": {"name": "agent_one"}},
+            "mcp_info": [],
+            "skills": [{"skill_name": "test_skill", "skill_zip_base64": "base64data"}],
+        },
+    }
+
+    with patch.object(
+        ars,
+        "get_agent_repository_by_id",
+        return_value=record,
+    ), patch.object(
+        ars,
+        "import_agent_with_skills_impl",
+        new_callable=AsyncMock,
+        return_value={10: 100},
+    ) as mock_import, patch.object(
+        ars,
+        "increment_agent_repository_downloads",
+        return_value=1,
+    ):
+        await ars.import_agent_from_repository_impl(
+            agent_repository_id=42,
+            tenant_id="tenant_a",
+            authorization="Bearer token",
+        )
+
+    mock_import.assert_called_once()
+    call_kwargs = mock_import.call_args[1]
+    assert call_kwargs["skill_resolutions"] is None
