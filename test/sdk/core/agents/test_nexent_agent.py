@@ -503,6 +503,8 @@ def mock_core_agent():
     agent.observer = MagicMock()
     agent.stop_event = MagicMock()
     agent.run = MagicMock()  # Ensure .run exists and is mockable
+    agent.state = {}
+    agent.managed_agents = {}
     return agent
 
 
@@ -1620,6 +1622,124 @@ def test_agent_run_with_observer_success_with_agent_text(nexent_agent_instance, 
         "test_agent", ProcessType.FINAL_ANSWER, "Final answer with  content")
 
 
+def test_runtime_metadata_isolated_across_full_agent_tree(nexent_agent_instance, mock_core_agent):
+    child = mock_core_agent_class()
+    child.state = {}
+    child.managed_agents = {}
+    child_wrapper = MagicMock()
+    child_wrapper._inner = child
+    external_agent = MagicMock()
+    external_agent.get_runtime_metadata.return_value = {"external": "previous"}
+    external_wrapper = MagicMock()
+    external_wrapper._inner = external_agent
+    mock_core_agent.state = {"metadata": {"previous": True}}
+    mock_core_agent.managed_agents = {
+        "child": child_wrapper,
+        "external": external_wrapper,
+    }
+
+    snapshots = nexent_agent_instance._set_runtime_metadata_for_agent_tree(
+        mock_core_agent,
+        {"request": {"id": 7}},
+    )
+
+    assert mock_core_agent.state["metadata"] == {"request": {"id": 7}}
+    assert child.state["metadata"] == {"request": {"id": 7}}
+    assert child.state["metadata"] is not mock_core_agent.state["metadata"]
+    external_agent.set_runtime_metadata.assert_called_once_with({"request": {"id": 7}})
+
+    nexent_agent_instance._restore_runtime_metadata_for_agent_tree(snapshots)
+
+    assert mock_core_agent.state["metadata"] == {"previous": True}
+    assert "metadata" not in child.state
+    assert external_agent.set_runtime_metadata.call_args_list[-1].args[0] == {
+        "external": "previous"
+    }
+
+
+def test_runtime_metadata_tree_handles_list_tuple_and_scalar_children(
+    nexent_agent_instance, mock_core_agent
+):
+    """Metadata tree walk handles list/tuple child containers and the scalar fallback."""
+    # list children container
+    child_a = mock_core_agent_class()
+    child_a.state = {}
+    child_a.managed_agents = {}
+    root_list = mock_core_agent_class()
+    root_list.state = {}
+    root_list.managed_agents = [child_a]
+    snapshots = nexent_agent_instance._set_runtime_metadata_for_agent_tree(
+        root_list, {"list": 1}
+    )
+    assert child_a.state["metadata"] == {"list": 1}
+    assert child_a.state["metadata"] is not root_list.state["metadata"]
+
+    # tuple children container
+    child_b = mock_core_agent_class()
+    child_b.state = {}
+    child_b.managed_agents = {}
+    root_tuple = mock_core_agent_class()
+    root_tuple.state = {}
+    root_tuple.managed_agents = (child_b,)
+    nexent_agent_instance._set_runtime_metadata_for_agent_tree(root_tuple, {"tuple": 2})
+    assert child_b.state["metadata"] == {"tuple": 2}
+
+    # scalar/unknown container falls back to no children
+    root_scalar = mock_core_agent_class()
+    root_scalar.state = {}
+    root_scalar.managed_agents = "scalar-value"
+    snapshots = nexent_agent_instance._set_runtime_metadata_for_agent_tree(
+        root_scalar, {"scalar": 3}
+    )
+    assert root_scalar.state["metadata"] == {"scalar": 3}
+
+
+def test_runtime_metadata_tree_skips_duplicate_agent(
+    nexent_agent_instance, mock_core_agent
+):
+    """A node reachable twice (shared child) is only processed once."""
+    shared = mock_core_agent_class()
+    shared.state = {}
+    shared.managed_agents = {}
+    root = mock_core_agent_class()
+    root.state = {}
+    # The same inner agent is referenced from two child entries.
+    root.managed_agents = [shared, shared]
+    snapshots = nexent_agent_instance._set_runtime_metadata_for_agent_tree(
+        root, {"shared": "v"}
+    )
+    assert shared.state["metadata"] == {"shared": "v"}
+    assert len(snapshots) == 2  # root + shared, not duplicated
+
+
+def test_agent_run_with_observer_forwards_additional_args(
+    nexent_agent_instance, mock_core_agent
+):
+    """additional_args are forwarded to the underlying agent run and stored as metadata."""
+    nexent_agent_instance.agent = mock_core_agent
+    mock_action_step = MagicMock(spec=ActionStep)
+    mock_action_step.timing = MagicMock()
+    mock_action_step.timing.duration = 1.5
+    mock_action_step.step_number = 1
+    mock_action_step.error = None
+    mock_final_answer = _AgentText("metadata forwarded answer")
+    mock_action_step.output = mock_final_answer
+
+    mock_core_agent.run.return_value = [mock_action_step]
+    mock_core_agent.state = {}
+    mock_core_agent.managed_agents = {}
+
+    nexent_agent_instance.agent_run_with_observer(
+        "test query",
+        additional_args={"metadata": {"session": "s9"}},
+    )
+
+    mock_core_agent.run.assert_called_once_with(
+        "test query", stream=True, reset=True,
+        additional_args={"metadata": {"session": "s9"}},
+    )
+
+
 def test_agent_run_with_observer_emits_model_context_window(nexent_agent_instance, mock_core_agent):
     """TOKEN_COUNT exposes the stable model window and keeps the compression threshold."""
     nexent_agent_instance.agent = mock_core_agent
@@ -2693,6 +2813,7 @@ class TestCreateBuiltinTool:
             run_id="run-1",
             on_upload=nexent_agent_instance._record_workspace_upload,
             ensure_local_file=ANY,
+            uploaded_paths=nexent_agent_instance._workspace_uploaded_paths,
         )
 
 
@@ -4072,15 +4193,27 @@ class TestSandboxWarmUp:
             call_kwargs = mock_core_agent_fn.call_args[1]
             assert call_kwargs.get("executor") is None
 
-    def test_create_single_agent_managed_context_skips_executor(
+    def test_create_single_agent_managed_context_builds_executor(
         self, nexent_agent_instance, mock_model_config, mock_core_agent
     ):
-        """Test that _managed_context=True skips executor creation even with sandbox_config."""
+        """Managed sub-agents receive their own configured sandbox executor."""
         nexent_agent_instance.model_config_list = [mock_model_config]
 
+        from enum import Enum
+
+        class SandboxLevel(str, Enum):
+            LOCAL = "local"
+            DOCKER = "docker"
+
         mock_sandbox_config = MagicMock()
-        mock_sandbox_config.level = "remote"
+        mock_sandbox_config.level = SandboxLevel.LOCAL
+        mock_sandbox_config.scope.value = "system"
         nexent_agent_instance.sandbox_config = mock_sandbox_config
+        mock_executor = MagicMock()
+        mock_build = MagicMock(return_value=mock_executor)
+        mock_sandbox_module = MagicMock()
+        mock_sandbox_module.build_python_executor = mock_build
+        mock_sandbox_module.SandboxLevel = SandboxLevel
 
         mock_agent_config = AgentConfig(
             name="managed_agent",
@@ -4093,14 +4226,19 @@ class TestSandboxWarmUp:
             managed_agents=[]
         )
 
-        with patch.object(nexent_agent, "CoreAgent", return_value=mock_core_agent) as mock_core_agent_fn:
-            result = nexent_agent_instance.create_single_agent(
-                mock_agent_config, _managed_context=True
-            )
+        with patch.dict("sys.modules", {
+            "sdk.nexent.core.agents.sandbox": mock_sandbox_module,
+        }), patch.object(nexent_agent, "CoreAgent", return_value=mock_core_agent) as mock_core_agent_fn:
+            nexent_agent_instance.create_single_agent(mock_agent_config, _managed_context=True)
 
-            mock_core_agent_fn.assert_called_once()
-            call_kwargs = mock_core_agent_fn.call_args[1]
-            assert call_kwargs.get("executor") is None
+        mock_core_agent_fn.assert_called_once()
+        assert mock_core_agent_fn.call_args.kwargs["executor"] is mock_executor
+        mock_build.assert_called_once_with(
+            config=mock_sandbox_config,
+            logger_=ANY,
+            managed_agents_exist=False,
+            host_tools_exist=False,
+        )
 
 
 # ----------------------------------------------------------------------------
@@ -4415,6 +4553,55 @@ class TestCreateBuiltinToolAndFileWorkspaceLifecycle:
 
         assert nexent_agent_instance._workspace_uploads == [upload]
 
+    def test_cleanup_run_workspace_rejects_mismatched_run_id(self, tmp_path):
+        workspace = tmp_path / "user" / "actual-run"
+        workspace.mkdir(parents=True)
+        cleanup_logger = MagicMock()
+
+        removed = nexent_agent.cleanup_run_workspace(
+            str(workspace), "different-run", cleanup_logger
+        )
+
+        assert removed is False
+        assert workspace.exists()
+        cleanup_logger.error.assert_called_once()
+
+    def test_sandbox_container_returns_none_without_docker_container(
+        self, nexent_agent_instance
+    ):
+        nexent_agent_instance._sandbox_executors = [object()]
+        nexent_agent_instance.agent = MagicMock(python_executor=None)
+
+        assert nexent_agent_instance._sandbox_container() is None
+
+    def test_initialize_sandbox_workspaces_skips_missing_workspace(
+        self, nexent_agent_instance
+    ):
+        nexent_agent_instance.workspace_path = None
+        nexent_agent_instance._sandbox_executors = [MagicMock()]
+
+        nexent_agent_instance._initialize_sandbox_workspaces()
+
+        nexent_agent_instance._sandbox_executors[0].assert_not_called()
+
+    def test_initialize_sandbox_workspaces_deduplicates_and_skips_unsupported_executors(
+        self, nexent_agent_instance, tmp_path
+    ):
+        workspace = tmp_path / "user" / "run"
+        (workspace / "outputs").mkdir(parents=True)
+        docker_executor = MagicMock(_nexent_backend="docker")
+        unsupported_executor = object()
+        nexent_agent_instance.workspace_path = str(workspace)
+        nexent_agent_instance._sandbox_executors = [
+            docker_executor,
+            docker_executor,
+            unsupported_executor,
+        ]
+
+        nexent_agent_instance._initialize_sandbox_workspaces()
+
+        docker_executor.assert_called_once()
+
     def test_prepare_workspace_rejects_files_without_download_tool(
         self, nexent_agent_instance, tmp_path
     ):
@@ -4437,7 +4624,144 @@ class TestCreateBuiltinToolAndFileWorkspaceLifecycle:
             result = nexent_agent_instance._prepare_file_workspace("query")
 
         assert "Run workspace" in result
+        assert "Use bare relative paths" in result
+        assert "not 'outputs/report.pdf'" in result
         push.assert_called_once_with()
+
+    def test_initialize_sandbox_workspaces_sets_cwd_for_every_docker_kernel(
+        self, nexent_agent_instance, tmp_path
+    ):
+        class UnmarkedKernelLease:
+            def __init__(self):
+                self.container = object()
+                self.calls = []
+
+            def __call__(self, code):
+                self.calls.append(code)
+
+        workspace = tmp_path / "user" / "run"
+        (workspace / "outputs").mkdir(parents=True)
+        child_executor = MagicMock(_nexent_backend="docker")
+        parent_executor = MagicMock(_nexent_backend="docker")
+        local_executor = MagicMock(_nexent_backend="local")
+        unmarked_kernel_lease = UnmarkedKernelLease()
+        nexent_agent_instance.workspace_path = str(workspace)
+        nexent_agent_instance._sandbox_executors = [
+            child_executor,
+            parent_executor,
+            local_executor,
+            unmarked_kernel_lease,
+        ]
+
+        nexent_agent_instance._initialize_sandbox_workspaces()
+
+        for executor in (child_executor, parent_executor):
+            executor.assert_called_once()
+            bootstrap_code = executor.call_args.args[0]
+            assert json.dumps(str(workspace.resolve())) in bootstrap_code
+            assert json.dumps(str((workspace / "outputs").resolve())) in bootstrap_code
+            assert "NEXENT_WORKSPACE" in bootstrap_code
+            assert "NEXENT_OUTPUT_DIR" in bootstrap_code
+            assert "chdir" in bootstrap_code
+        local_executor.assert_not_called()
+        assert len(unmarked_kernel_lease.calls) == 1
+        assert "NEXENT_OUTPUT_DIR" in unmarked_kernel_lease.calls[0]
+
+    def test_initialize_sandbox_workspaces_retries_unhealthy_kernel_lease(
+        self, nexent_agent_instance, tmp_path
+    ):
+        class RecoveringKernelLease:
+            _nexent_backend = "docker"
+            _nexent_kernel_recovery_supported = True
+
+            def __init__(self):
+                self.container = object()
+                self._unhealthy = False
+                self.calls = []
+                self.registered_bootstrap = []
+
+            def __call__(self, code):
+                self.calls.append(code)
+                if len(self.calls) == 1:
+                    self._unhealthy = True
+                    raise RuntimeError("kernel channel failed")
+                self._unhealthy = False
+                return ["workspace", "outputs"]
+
+            def register_kernel_bootstrap_code(self, code):
+                result = self(code)
+                self.registered_bootstrap.append(code)
+                return result
+
+        workspace = tmp_path / "user" / "run"
+        (workspace / "outputs").mkdir(parents=True)
+        executor = RecoveringKernelLease()
+        nexent_agent_instance.workspace_path = str(workspace)
+        nexent_agent_instance._sandbox_executors = [executor]
+
+        nexent_agent_instance._initialize_sandbox_workspaces()
+
+        assert len(executor.calls) == 2
+        assert executor.calls[0] == executor.calls[1]
+        assert executor._unhealthy is False
+        assert executor.registered_bootstrap == [executor.calls[0]]
+
+    def test_initialize_sandbox_workspaces_reports_retry_failure(
+        self, nexent_agent_instance, tmp_path
+    ):
+        class FailingKernelLease:
+            _nexent_backend = "docker"
+            _nexent_kernel_recovery_supported = True
+            _unhealthy = True
+            container = object()
+
+            def register_kernel_bootstrap_code(self, code):
+                raise RuntimeError("replacement bootstrap failed")
+
+        workspace = tmp_path / "user" / "run"
+        (workspace / "outputs").mkdir(parents=True)
+        nexent_agent_instance.workspace_path = str(workspace)
+        nexent_agent_instance._sandbox_executors = [FailingKernelLease()]
+
+        with pytest.raises(RuntimeError, match="replacement bootstrap failed"):
+            nexent_agent_instance._initialize_sandbox_workspaces()
+
+    def test_initialize_sandbox_workspaces_does_not_retry_healthy_failure(
+        self, nexent_agent_instance, tmp_path
+    ):
+        executor = MagicMock(
+            _nexent_backend="docker",
+            _nexent_kernel_recovery_supported=True,
+            _unhealthy=False,
+        )
+        executor.side_effect = RuntimeError("bootstrap rejected")
+        workspace = tmp_path / "user" / "run"
+        (workspace / "outputs").mkdir(parents=True)
+        nexent_agent_instance.workspace_path = str(workspace)
+        nexent_agent_instance._sandbox_executors = [executor]
+
+        with pytest.raises(RuntimeError, match="bootstrap rejected"):
+            nexent_agent_instance._initialize_sandbox_workspaces()
+
+        executor.assert_called_once()
+
+    def test_sandbox_containers_include_children_and_deduplicate_shared_container(
+        self, nexent_agent_instance
+    ):
+        shared_container = MagicMock(id="shared-container")
+        child_container = MagicMock(id="child-container")
+        nexent_agent_instance._sandbox_executors = [
+            MagicMock(container=shared_container),
+            MagicMock(container=child_container),
+        ]
+        nexent_agent_instance.agent = MagicMock(
+            python_executor=MagicMock(container=shared_container)
+        )
+
+        assert nexent_agent_instance._sandbox_containers() == [
+            shared_container,
+            child_container,
+        ]
 
     @pytest.mark.parametrize("put_archive_result", [True, False])
     def test_non_shared_workspace_pushes_archive(
@@ -6068,6 +6392,57 @@ class TestCleanupSandboxAdvanced:
 
         mock_release.assert_called_once_with(mock_executor, ANY)
 
+    def test_cleanup_sandbox_releases_all_agent_executors_in_reverse_order(
+        self, nexent_agent_instance, mock_core_agent
+    ):
+        """System cleanup returns parent and child kernel leases exactly once."""
+        child_executor = MagicMock(name="child_executor")
+        parent_executor = MagicMock(name="parent_executor")
+        nexent_agent_instance.agent = mock_core_agent
+        mock_core_agent.python_executor = parent_executor
+        nexent_agent_instance._sandbox_executors = [child_executor, parent_executor]
+        nexent_agent_instance._sandbox_scope = "system"
+        nexent_agent_instance.sandbox_config = None
+        nexent_agent_instance.minio_client = None
+
+        mock_release = MagicMock()
+        mock_sandbox_module = MagicMock()
+        mock_sandbox_module.release_python_executor = mock_release
+
+        with patch.dict("sys.modules", {
+            "sdk.nexent.core.agents.sandbox": mock_sandbox_module,
+        }):
+            nexent_agent_instance._cleanup_sandbox()
+
+        assert mock_release.call_args_list == [
+            call(parent_executor, ANY),
+            call(child_executor, ANY),
+        ]
+        assert nexent_agent_instance._sandbox_executors == []
+        assert mock_core_agent.python_executor is None
+
+    def test_cleanup_sandbox_deduplicates_executor_without_root_agent(
+        self, nexent_agent_instance
+    ):
+        executor = MagicMock()
+        nexent_agent_instance.agent = None
+        nexent_agent_instance._sandbox_executors = [executor, executor]
+        nexent_agent_instance._sandbox_scope = "session"
+        nexent_agent_instance.sandbox_config = None
+        nexent_agent_instance.minio_client = None
+
+        mock_cleanup = MagicMock()
+        mock_sandbox_module = MagicMock(cleanup_executor=mock_cleanup)
+
+        with patch.dict(
+            "sys.modules",
+            {"sdk.nexent.core.agents.sandbox": mock_sandbox_module},
+        ):
+            nexent_agent_instance._cleanup_sandbox()
+
+        mock_cleanup.assert_called_once_with(executor, ANY, timeout=5.0)
+        assert nexent_agent_instance._sandbox_executors == []
+
     def test_cleanup_sandbox_minio_sync_no_uploaded_files(self, nexent_agent_instance, mock_core_agent):
         """MinIO sync returns empty list, no log message about sync."""
         nexent_agent_instance.agent = mock_core_agent
@@ -6273,6 +6648,77 @@ class TestCreateSingleAgentSandboxAndPlanning:
             )
 
         mock_build.assert_called_once()
+
+    def test_parent_and_managed_agent_get_independent_sandbox_executors(
+        self, nexent_agent_instance, mock_model_config
+    ):
+        """Parent orchestration stays on Runtime while both agents sandbox code."""
+        nexent_agent_instance.model_config_list = [mock_model_config]
+        SandboxLevel = self._make_sandbox_level()
+        nexent_agent_instance.sandbox_config = self._make_sandbox_config(
+            "local", scope_value="system"
+        )
+
+        child_executor = MagicMock(name="child_executor")
+        parent_executor = MagicMock(name="parent_executor")
+        mock_build = MagicMock(side_effect=[child_executor, parent_executor])
+        mock_sandbox_module = MagicMock()
+        mock_sandbox_module.build_python_executor = mock_build
+        mock_sandbox_module.SandboxLevel = SandboxLevel
+
+        child_agent = MagicMock(name="child_agent")
+        child_agent.name = "child"
+        child_agent.enable_planning = False
+        parent_agent = MagicMock(name="parent_agent")
+        parent_agent.enable_planning = False
+
+        child_config = AgentConfig(
+            name="child",
+            description="Managed child",
+            prompt_templates={"system": "child"},
+            tools=[],
+            max_steps=5,
+            model_name="test_model",
+            managed_agents=[],
+            enable_planning=False,
+        )
+        parent_config = AgentConfig(
+            name="parent",
+            description="Parent agent",
+            prompt_templates={"system": "parent"},
+            tools=[],
+            max_steps=5,
+            model_name="test_model",
+            managed_agents=[child_config],
+            enable_planning=False,
+        )
+
+        with patch.dict("sys.modules", {
+            "sdk.nexent.core.agents.sandbox": mock_sandbox_module,
+        }), patch.object(
+            nexent_agent,
+            "CoreAgent",
+            side_effect=[child_agent, parent_agent],
+        ) as mock_core_agent_cls:
+            result = nexent_agent_instance.create_single_agent(parent_config)
+
+        assert result is parent_agent
+        assert mock_build.call_count == 2
+        assert mock_build.call_args_list[0].kwargs["managed_agents_exist"] is False
+        assert mock_build.call_args_list[0].kwargs["host_tools_exist"] is False
+        assert mock_build.call_args_list[1].kwargs["managed_agents_exist"] is True
+        assert mock_build.call_args_list[1].kwargs["host_tools_exist"] is True
+
+        child_call, parent_call = mock_core_agent_cls.call_args_list
+        assert child_call.kwargs["executor"] is child_executor
+        assert parent_call.kwargs["executor"] is parent_executor
+        managed_wrapper = parent_call.kwargs["managed_agents"][0]
+        assert managed_wrapper._nexent_execute_on_host is True
+        assert managed_wrapper._inner is child_agent
+        assert nexent_agent_instance._sandbox_executors == [
+            child_executor,
+            parent_executor,
+        ]
 
     def test_plan_tool_wiring_when_planning_enabled(self, nexent_agent_instance, mock_model_config, mock_core_agent):
         """When enable_planning=True, plan tool deps are wired (lines 683-694)."""

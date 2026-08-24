@@ -9,6 +9,8 @@ from typing import Any, AsyncIterator, Dict, List, Optional
 from dataclasses import dataclass, field
 from uuid import uuid4
 
+from utils.runtime_metadata_utils import validate_runtime_metadata
+
 logger = logging.getLogger(__name__)
 
 # Shared A2A protocol constants
@@ -84,6 +86,12 @@ class A2AAgentAdapter:
             "metadata": context.metadata,
             "is_debug": context.is_debug,
         }
+
+    def extract_runtime_metadata(self, a2a_message: Dict[str, Any]) -> Dict[str, Any]:
+        """Extract only A2A Message.metadata, never request-level metadata."""
+
+        message = a2a_message.get("message") or {}
+        return validate_runtime_metadata(message.get("metadata") or {})
 
     def _build_history(self, a2a_message: Dict[str, Any]) -> List[Dict[str, str]]:
         """Build history list from A2A message.

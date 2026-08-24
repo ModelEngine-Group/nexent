@@ -4672,6 +4672,116 @@ class TestSkillServiceCreateOrUpdateSkillInstance:
 class TestUploadZipFilesWithZipError:
     """Test _upload_zip_files error handling."""
 
+    def test_copy_name_generator_avoids_existing_and_reserved_names(self):
+        """Copy naming should keep the repository convention and avoid bundle names."""
+        assert skill_service.generate_available_copy_skill_name("AvailableSkill") == "AvailableSkill"
+        assert skill_service.generate_available_copy_skill_name(
+            "SkillA",
+            {"SkillA", "SkillA 副本"},
+        ) == "SkillA 副本 2"
+        long_name = "A" * 120
+        generated_name = skill_service.generate_available_copy_skill_name(
+            long_name,
+            {long_name},
+        )
+        assert generated_name == f"{'A' * 97} 副本"
+        assert len(generated_name) == 100
+
+    @pytest.mark.parametrize(
+        ("content", "error"),
+        [
+            ("# No frontmatter", "must have YAML frontmatter"),
+            ("---\n: invalid\n---\nbody", "Invalid SKILL.md frontmatter"),
+            ("---\nplain value\n---\nbody", "frontmatter must be a mapping"),
+        ],
+    )
+    def test_frontmatter_name_replacement_rejects_invalid_frontmatter(self, content, error):
+        """Renaming requires valid mapping-style SKILL.md frontmatter."""
+        with pytest.raises(skill_service.SkillException, match=error):
+            skill_service._replace_skill_frontmatter_name(content, "new-skill")
+
+    def test_frontmatter_name_replacement_preserves_metadata_and_body(self):
+        """Renaming should preserve custom frontmatter fields and the body."""
+        import yaml
+
+        body = "# Instructions\n\nKeep this body exactly.\n"
+        content = (
+            "---\n"
+            "name: old-skill\n"
+            "description: Test skill\n"
+            "author: Example Author\n"
+            "custom-field:\n"
+            "  enabled: true\n"
+            "---\n"
+            f"{body}"
+        )
+
+        updated = skill_service._replace_skill_frontmatter_name(content, "new-skill")
+        match = skill_service.re.match(
+            r"\A---\n(?P<frontmatter>.*?)\n---\n(?P<body>[\s\S]*)\Z",
+            updated,
+            skill_service.re.DOTALL,
+        )
+
+        assert match is not None
+        metadata = yaml.safe_load(match.group("frontmatter"))
+        assert metadata == {
+            "name": "new-skill",
+            "description": "Test skill",
+            "author": "Example Author",
+            "custom-field": {"enabled": True},
+        }
+        assert match.group("body") == body
+
+    def test_create_zip_with_name_override_extracts_updated_skill_md(self):
+        """The ZIP extraction override should prevent the original name from returning."""
+        import zipfile
+
+        skill_md = (
+            "---\n"
+            "name: old-skill\n"
+            "description: Test skill\n"
+            "author: Example Author\n"
+            "---\n"
+            "# Instructions\n\nBody stays unchanged.\n"
+        )
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, "w") as zf:
+            zf.writestr("SKILL.md", skill_md)
+
+        service = create_test_service()
+        service.skill_manager = MagicMock()
+        service._enrich_configs_from_yaml = lambda result: result
+
+        with patch.object(skill_service.skill_db, "get_skill_by_name", return_value=None), patch.object(
+            skill_service.skill_db,
+            "create_skill",
+            return_value={"skill_id": 42, "name": "new-skill"},
+        ), patch.object(
+            skill_service,
+            "_read_schema_yaml_from_zip",
+            return_value=None,
+        ), patch.object(
+            skill_service,
+            "_get_skill_inputs_from_zip",
+            return_value={},
+        ), patch.object(
+            skill_service,
+            "_read_params_from_zip_config_yaml",
+            return_value=None,
+        ), patch.object(service, "_upload_zip_files") as mock_upload:
+            result = service.create_skill_from_zip_bytes(
+                zip_bytes=zip_buffer.getvalue(),
+                skill_name="new-skill",
+                tenant_id="test-tenant",
+            )
+
+        assert result["skill_id"] == 42
+        override = mock_upload.call_args.kwargs["file_overrides"]["SKILL.md"].decode("utf-8")
+        assert "name: new-skill\n" in override
+        assert "author: Example Author\n" in override
+        assert override.endswith("# Instructions\n\nBody stays unchanged.\n")
+
     def test_upload_zip_renamed_root_does_not_nest_target_dir(self, tmp_path):
         """Test ZIP root rename writes files directly under the target skill directory."""
         import zipfile
@@ -4699,6 +4809,33 @@ class TestUploadZipFilesWithZipError:
         assert (tmp_path / "new-skill copy" / "SKILL.md").is_file()
         assert (tmp_path / "new-skill copy" / "references" / "info.md").is_file()
         assert not (tmp_path / "new-skill copy" / "new-skill copy" / "SKILL.md").exists()
+
+    def test_upload_zip_writes_file_override(self, tmp_path):
+        """ZIP extraction should write override bytes instead of the archived file."""
+        import zipfile
+
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, "w") as zf:
+            zf.writestr("SKILL.md", "old skill content")
+            zf.writestr("references/info.md", "reference content")
+
+        mock_manager = MagicMock()
+        mock_manager.local_skills_dir = str(tmp_path)
+        mock_manager.resolve_tenant_dir.return_value = str(tmp_path)
+
+        service = SkillService()
+        service.skill_manager = mock_manager
+
+        with patch("backend.services.skill_service.CONTAINER_SKILLS_PATH", str(tmp_path)):
+            service._upload_zip_files(
+                zip_buffer.getvalue(),
+                "new-skill",
+                tenant_id=None,
+                file_overrides={"SKILL.md": b"renamed skill content"},
+            )
+
+        assert (tmp_path / "new-skill" / "SKILL.md").read_bytes() == b"renamed skill content"
+        assert (tmp_path / "new-skill" / "references" / "info.md").read_text() == "reference content"
 
     def test_upload_zip_extract_error(self, mocker):
         """Test ZIP extraction error handling."""

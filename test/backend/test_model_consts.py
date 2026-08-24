@@ -1005,7 +1005,6 @@ def test_export_import_requests():
         name="exported-agent",
         display_name="Exported Agent",
         description="An exported agent",
-        business_description="Business desc",
         max_steps=10,
         is_main_agent=True,
         provide_run_summary=True,

@@ -30,6 +30,7 @@ from database.conversation_db import (
     get_source_images_by_message,
     get_source_searches_by_conversation,
     get_source_searches_by_message,
+    persist_assistant_run_batch as persist_assistant_run_batch_db,
     rename_conversation,
     save_history_summary,
     update_conversation_agent_id,
@@ -142,6 +143,35 @@ def save_message_unit(message_id: int, conversation_id: int, unit_index: int,
         unit_status=unit_status,
         tool_call_id=tool_call_id,
         invocation_id=invocation_id,
+    )
+
+
+def persist_assistant_run_batch(
+    message_id: int,
+    conversation_id: int,
+    message_content: str,
+    terminal_status: str,
+    message_units: List[Dict[str, Any]],
+    search_records: List[Dict[str, Any]],
+    image_urls: List[str],
+    skill_files: List[Dict[str, Any]],
+    automation_proposals: List[Dict[str, Any]],
+    user_id: str,
+    tenant_id: str,
+) -> Dict[int, int]:
+    """Persist one assistant run and its related records atomically."""
+    return persist_assistant_run_batch_db(
+        message_id=message_id,
+        conversation_id=conversation_id,
+        message_content=message_content,
+        terminal_status=terminal_status,
+        message_units=message_units,
+        search_records=search_records,
+        image_urls=image_urls,
+        skill_files=skill_files,
+        automation_proposals=automation_proposals,
+        user_id=user_id,
+        tenant_id=tenant_id,
     )
 
 
@@ -354,6 +384,7 @@ def create_new_conversation(
     agent_id: Optional[int] = None,
     chat_mode: Optional[str] = None,
     knowledge_scope: Optional[Dict[str, Any]] = None,
+    runtime_metadata: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Create a new conversation
@@ -374,6 +405,8 @@ def create_new_conversation(
         }
         if knowledge_scope is not None:
             create_kwargs["knowledge_scope"] = knowledge_scope
+        if runtime_metadata is not None:
+            create_kwargs["runtime_metadata"] = runtime_metadata
         conversation_data = create_conversation(title, user_id, **create_kwargs)
         return conversation_data
     except Exception as e:
@@ -836,6 +869,8 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
             'agent_id': history_data.get('agent_id'),
             'chat_mode': history_data.get('chat_mode') or 'execution',
             'knowledge_scope': history_data.get('knowledge_scope'),
+            'runtime_metadata': history_data.get('runtime_metadata') or {},
+            'runtime_metadata_version': int(history_data.get('runtime_metadata_version') or 0),
             'create_time': history_data['create_time'],
             'message': messages
         }

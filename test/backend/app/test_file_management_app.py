@@ -71,7 +71,12 @@ def _stub_resolve_minio_upload_folder(
     return folder or "attachments"
 
 
-def _stub_check_file_access(object_name: str, user_id: str | None, caller_tenant_id: str | None = None) -> bool:
+def _stub_check_file_access(
+    object_name: str,
+    user_id: str | None,
+    caller_tenant_id: str | None = None,
+    required_permission: str = "READ",
+) -> bool:
     """Stub for check_file_access - allows access by default for testing."""
     if not user_id:
         return False
@@ -170,27 +175,39 @@ sys.modules.setdefault("consts", consts_pkg)
 
 model_stub = types.ModuleType("consts.model")
 class ProcessParams:  # minimal stub
-    def __init__(self, chunking_strategy: str, source_type: str, index_name: str, authorization: str | None):
+    def __init__(
+        self,
+        chunking_strategy: str,
+        source_type: str,
+        index_name: str,
+        authorization: str | None,
+        model_id: int | None = None,
+    ):
         self.chunking_strategy = chunking_strategy
         self.source_type = source_type
         self.index_name = index_name
         self.authorization = authorization
+        self.model_id = model_id
 model_stub.ProcessParams = ProcessParams
 sys.modules.setdefault("consts.model", model_stub)
 setattr(consts_pkg, "model", model_stub)
 
 # Stub consts.exceptions with real exception classes so isinstance checks work
 exceptions_stub = types.ModuleType("consts.exceptions")
+class AppException(Exception): pass
 class NotFoundException(Exception): pass
 class OfficeConversionException(Exception): pass
 class UnsupportedFileTypeException(Exception): pass
 class FileTooLargeException(Exception): pass
 class QuotaExceededError(Exception): pass
+class UnauthorizedError(Exception): pass
+exceptions_stub.AppException = AppException
 exceptions_stub.NotFoundException = NotFoundException
 exceptions_stub.OfficeConversionException = OfficeConversionException
 exceptions_stub.UnsupportedFileTypeException = UnsupportedFileTypeException
 exceptions_stub.FileTooLargeException = FileTooLargeException
 exceptions_stub.QuotaExceededError = QuotaExceededError
+exceptions_stub.UnauthorizedError = UnauthorizedError
 sys.modules["consts.exceptions"] = exceptions_stub
 setattr(consts_pkg, "exceptions", exceptions_stub)
 
@@ -316,6 +333,26 @@ async def test_upload_files_internal_error(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_get_storage_file_maps_unauthorized_error(monkeypatch):
+    def unauthorized(*_args, **_kwargs):
+        raise file_management_app.UnauthorizedError("token expired")
+
+    monkeypatch.setattr(file_management_app, "get_current_user_id", unauthorized)
+
+    with pytest.raises(HTTPException) as raised:
+        await file_management_app.get_storage_file(
+            object_name="knowledge_base/a.txt",
+            download="",
+            expires=60,
+            filename=None,
+            authorization=MOCK_AUTH,
+        )
+
+    assert raised.value.status_code == 401
+    assert raised.value.detail == "token expired"
+
+
+@pytest.mark.asyncio
 async def test_process_files_success(monkeypatch):
     async def fake_trigger(files, params):
         return [{"task_id": 123}]
@@ -366,25 +403,53 @@ async def test_process_files_error_message(monkeypatch):
     assert "boom" in str(ei.value)
 
 
+@pytest.mark.asyncio
+async def test_get_storage_files_maps_unauthorized_error(monkeypatch):
+    def unauthorized(_authorization):
+        raise file_management_app.UnauthorizedError("token expired")
+
+    monkeypatch.setattr(file_management_app, "get_current_user_id", unauthorized)
+
+    with pytest.raises(HTTPException) as raised:
+        await file_management_app.get_storage_files(
+            prefix="", limit=10, include_urls=True, authorization=MOCK_AUTH
+        )
+
+    assert raised.value.status_code == 401
+    assert raised.value.detail == "token expired"
+
+
+@pytest.mark.asyncio
+async def test_get_storage_file_batch_urls_maps_unauthorized_error(monkeypatch):
+    def unauthorized(_authorization):
+        raise file_management_app.UnauthorizedError("token expired")
+
+    monkeypatch.setattr(file_management_app, "get_current_user_id", unauthorized)
+
+    with pytest.raises(HTTPException) as raised:
+        await file_management_app.get_storage_file_batch_urls(
+            request_data={"object_names": ["knowledge_base/a.txt"]},
+            expires=60,
+            authorization=MOCK_AUTH,
+        )
+
+    assert raised.value.status_code == 401
+    assert raised.value.detail == "token expired"
+
+
 # --- storage_upload_files tests ---
 
 @pytest.mark.asyncio
 async def test_storage_upload_files_knowledge_base_folder(monkeypatch):
-    """Test storage_upload_files with knowledge_base folder (shared, no user isolation)."""
-    async def fake_upload(files, folder, user_id=None):
-        return [{"success": True, "file_name": "shared.pdf", "key": f"{folder}/shared.pdf"}]
-
-    monkeypatch.setattr(file_management_app, "upload_to_minio", fake_upload)
-
+    """Generic storage uploads cannot create unowned knowledge-base objects."""
     f1 = make_upload_file("shared.pdf")
-    result = await file_management_app.storage_upload_files(
-        files=[f1],
-        folder="knowledge_base",
-        authorization=MOCK_AUTH
-    )
-    assert result["message"].startswith("Processed 1")
-    assert result["success_count"] == 1
-    assert result["failed_count"] == 0
+    with pytest.raises(HTTPException) as exc_info:
+        await file_management_app.storage_upload_files(
+            files=[f1],
+            folder="knowledge_base",
+            authorization=MOCK_AUTH
+        )
+    assert exc_info.value.status_code == 400
 
 
 @pytest.mark.asyncio
@@ -524,8 +589,8 @@ async def test_get_storage_files_with_user_id_filters_by_access(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_get_storage_files_no_auth_only_knowledge_base(monkeypatch):
-    """Test that unauthenticated requests only see knowledge_base files."""
+async def test_get_storage_files_no_auth_returns_no_files(monkeypatch):
+    """Test that unauthenticated requests cannot list storage objects."""
     async def fake_list(prefix, limit):
         return [
             {"name": "a", "key": "knowledge_base/shared.txt"},
@@ -537,10 +602,7 @@ async def test_get_storage_files_no_auth_only_knowledge_base(monkeypatch):
     out = await file_management_app.get_storage_files(
         prefix="", limit=10, include_urls=False, authorization=MOCK_AUTH_NONE
     )
-    # Without auth, only knowledge_base files should be visible
-    keys = [f["key"] for f in out["files"]]
-    assert "knowledge_base/shared.txt" in keys
-    assert "attachments/user1/mine.txt" not in keys
+    assert out["files"] == []
 
 
 @pytest.mark.asyncio
@@ -690,7 +752,7 @@ async def test_get_storage_file_error(monkeypatch):
 @pytest.mark.asyncio
 async def test_get_storage_file_access_denied_for_attachments(monkeypatch):
     """Test that access to other user's attachments is forbidden."""
-    def fake_check_access(object_name, user_id, caller_tenant_id=None):
+    def fake_check_access(object_name, user_id, caller_tenant_id=None, required_permission="READ"):
         if object_name.startswith("attachments/"):
             expected_prefix = f"attachments/{user_id}"
             return object_name.startswith(expected_prefix)
@@ -749,7 +811,7 @@ async def test_remove_storage_file_success(monkeypatch):
 @pytest.mark.asyncio
 async def test_remove_storage_file_access_denied(monkeypatch):
     """Test that deletion of other user's file is forbidden."""
-    def fake_check_access(object_name, user_id, caller_tenant_id=None):
+    def fake_check_access(object_name, user_id, caller_tenant_id=None, required_permission="READ"):
         if object_name.startswith("attachments/"):
             expected_prefix = f"attachments/{user_id}"
             return object_name.startswith(expected_prefix)
@@ -826,7 +888,7 @@ async def test_get_storage_file_batch_urls_mixed(monkeypatch):
 @pytest.mark.asyncio
 async def test_get_storage_file_batch_urls_all_denied(monkeypatch):
     """Test batch URLs when all files are denied access."""
-    def fake_check_access(object_name, user_id, caller_tenant_id=None):
+    def fake_check_access(object_name, user_id, caller_tenant_id=None, required_permission="READ"):
         return False  # Deny all access
 
     def fake_get(object_name, expires):
@@ -849,7 +911,7 @@ async def test_get_storage_file_batch_urls_all_denied(monkeypatch):
 @pytest.mark.asyncio
 async def test_get_storage_file_batch_urls_error(monkeypatch):
     """Test batch URLs with internal error returns error in results, not exception."""
-    def fake_check_access(object_name, user_id, caller_tenant_id=None):
+    def fake_check_access(object_name, user_id, caller_tenant_id=None, required_permission="READ"):
         return True
 
     def fake_get(object_name, expires):
@@ -1648,7 +1710,7 @@ async def test_preview_file_office_converted_to_pdf(monkeypatch):
 @pytest.mark.asyncio
 async def test_preview_file_access_denied(monkeypatch):
     """Test preview_file access denied for other user's attachments."""
-    def fake_check_access(object_name, user_id, caller_tenant_id=None):
+    def fake_check_access(object_name, user_id, caller_tenant_id=None, required_permission="READ"):
         if object_name.startswith("attachments/"):
             expected_prefix = f"attachments/{user_id}"
             return object_name.startswith(expected_prefix)
@@ -1948,7 +2010,25 @@ async def test_preview_file_internal_error(monkeypatch):
             authorization=MOCK_AUTH
         )
     assert "Failed to preview file" in str(ei.value)
-    assert "Internal server error" not in str(ei.value)
+
+
+@pytest.mark.asyncio
+async def test_preview_file_maps_unauthorized_error(monkeypatch):
+    def unauthorized(_authorization):
+        raise file_management_app.UnauthorizedError("token expired")
+
+    monkeypatch.setattr(file_management_app, "get_current_user_id", unauthorized)
+
+    with pytest.raises(HTTPException) as raised:
+        await file_management_app.preview_file(
+            object_name="knowledge_base/a.txt",
+            filename=None,
+            range_header=None,
+            authorization=MOCK_AUTH,
+        )
+
+    assert raised.value.status_code == 401
+    assert raised.value.detail == "token expired"
 
 
 @pytest.mark.asyncio

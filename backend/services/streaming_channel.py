@@ -147,9 +147,14 @@ class StreamingChannel:
         try:
             async with self._lock:
                 history_count = len(self._history_buffer)
-                # Yield historical chunks starting from start_from_index
-                for i in range(start_from_index, history_count):
-                    yield self._history_buffer[i]
+                historical_chunks = list(
+                    self._history_buffer[start_from_index:history_count]
+                )
+
+            # Never yield while holding the channel lock. A slow subscriber
+            # must not prevent the producer from appending new chunks.
+            for chunk in historical_chunks:
+                yield chunk
 
             # Wait for new chunks using event-driven approach
             last_yielded_index = history_count
@@ -160,9 +165,12 @@ class StreamingChannel:
                     # Drain any remaining chunks before exiting
                     async with self._lock:
                         current_size = len(self._history_buffer)
-                        while last_yielded_index < current_size:
-                            yield self._history_buffer[last_yielded_index]
-                            last_yielded_index += 1
+                        pending_chunks = list(
+                            self._history_buffer[last_yielded_index:current_size]
+                        )
+                        last_yielded_index = current_size
+                    for chunk in pending_chunks:
+                        yield chunk
                     break
 
                 # Wait for data event (with timeout to check completion)
@@ -180,9 +188,12 @@ class StreamingChannel:
 
                 async with self._lock:
                     current_size = len(self._history_buffer)
-                    while last_yielded_index < current_size:
-                        yield self._history_buffer[last_yielded_index]
-                        last_yielded_index += 1
+                    pending_chunks = list(
+                        self._history_buffer[last_yielded_index:current_size]
+                    )
+                    last_yielded_index = current_size
+                for chunk in pending_chunks:
+                    yield chunk
         finally:
             self.remove_subscriber()
 
@@ -200,6 +211,14 @@ class StreamingChannel:
 
             while True:
                 if self._completed:
+                    async with self._lock:
+                        current_size = len(self._history_buffer)
+                        pending_chunks = list(
+                            self._history_buffer[last_yielded_index:current_size]
+                        )
+                        last_yielded_index = current_size
+                    for chunk in pending_chunks:
+                        yield chunk
                     break
 
                 try:
@@ -214,9 +233,12 @@ class StreamingChannel:
 
                 async with self._lock:
                     current_size = len(self._history_buffer)
-                    while last_yielded_index < current_size:
-                        yield self._history_buffer[last_yielded_index]
-                        last_yielded_index += 1
+                    pending_chunks = list(
+                        self._history_buffer[last_yielded_index:current_size]
+                    )
+                    last_yielded_index = current_size
+                for chunk in pending_chunks:
+                    yield chunk
         finally:
             self.remove_subscriber()
 
@@ -256,7 +278,8 @@ class StreamingChannelManager:
         """
         key = self.get_channel_key(conversation_id, user_id)
         async with self._lock:
-            if key not in self._channels:
+            existing = self._channels.get(key)
+            if existing is None or existing.is_completed:
                 self._channels[key] = StreamingChannel(
                     conversation_id=conversation_id,
                     user_id=user_id,
@@ -290,11 +313,19 @@ class StreamingChannelManager:
             status=status,
         )
 
-    async def remove_channel(self, conversation_id: int, user_id: str):
+    async def remove_channel(
+        self,
+        conversation_id: int,
+        user_id: str,
+        expected_channel: Optional[StreamingChannel] = None,
+    ):
         """Remove a channel from the manager."""
         key = self.get_channel_key(conversation_id, user_id)
         async with self._lock:
-            if key in self._channels:
+            current = self._channels.get(key)
+            if current is not None and (
+                expected_channel is None or current is expected_channel
+            ):
                 del self._channels[key]
                 logger.debug(f"Removed channel: {key}")
 

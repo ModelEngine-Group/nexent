@@ -261,15 +261,18 @@ class TestUploadToS3ToolInit:
         assert tool.user_id == ""
 
     def test_init_custom(self, mock_observer, mock_minio_client, temp_workspace):
+        shared_uploaded_paths = set()
         tool = UploadToS3Tool(
             workspace_path=temp_workspace,
             minio_client=mock_minio_client,
             user_id="user1",
             tenant_id="tenant1",
             observer=mock_observer,
+            uploaded_paths=shared_uploaded_paths,
         )
         assert tool.workspace_path == os.path.abspath(temp_workspace)
         assert tool.user_id == "user1"
+        assert tool.uploaded_paths is shared_uploaded_paths
 
 
 class TestUploadToS3ToolPathValidation:
@@ -294,6 +297,30 @@ class TestUploadToS3ToolPathValidation:
     def test_validate_path_outside_workspace_raises(self, tool):
         with pytest.raises(Exception, match="Permission denied"):
             tool._validate_path("../../etc/passwd")
+
+    def test_bare_upload_path_candidates_prefer_outputs(self, tool, temp_workspace):
+        candidates = tool._upload_path_candidates("reports/report.pdf")
+
+        assert candidates == [
+            os.path.normpath(
+                os.path.join(temp_workspace, "outputs", "reports", "report.pdf")
+            ),
+            os.path.normpath(os.path.join(temp_workspace, "reports", "report.pdf")),
+        ]
+
+    def test_outputs_prefixed_candidate_is_not_duplicated(self, tool, temp_workspace):
+        candidates = tool._upload_path_candidates("outputs/report.pdf")
+
+        assert candidates == [
+            os.path.normpath(os.path.join(temp_workspace, "outputs", "report.pdf"))
+        ]
+
+    def test_absolute_upload_path_has_single_candidate(self, tool, temp_workspace):
+        absolute_path = os.path.join(temp_workspace, "outputs", "report.pdf")
+
+        assert tool._upload_path_candidates(absolute_path) == [
+            os.path.normpath(absolute_path)
+        ]
 
     def test_build_s3_key(self, tool):
         key = tool._build_s3_key("report.pdf")
@@ -370,6 +397,55 @@ class TestUploadToS3ToolForward:
         assert data["status"] == "success"
         assert "custom_name.txt" in data["s3_url"]
 
+    def test_upload_bare_relative_path_falls_back_to_outputs(
+        self, mock_minio_client, temp_workspace
+    ):
+        output_dir = os.path.join(temp_workspace, "outputs")
+        os.makedirs(output_dir)
+        output_file = os.path.join(output_dir, "test.txt")
+        with open(output_file, "w", encoding="utf-8") as file_obj:
+            file_obj.write("generated in sandbox cwd")
+        tool = UploadToS3Tool(
+            workspace_path=temp_workspace,
+            minio_client=mock_minio_client,
+            user_id="user1",
+            run_id="run1",
+        )
+
+        data = json.loads(tool.forward("test.txt"))
+
+        assert data["local_path"] == os.path.join("outputs", "test.txt")
+        mock_minio_client.upload_file.assert_called_once_with(
+            output_file,
+            "workspace/user1/run1/outputs/test.txt",
+        )
+
+    def test_upload_bare_relative_path_prefers_outputs_over_workspace_root(
+        self, mock_minio_client, temp_workspace
+    ):
+        output_dir = os.path.join(temp_workspace, "outputs")
+        os.makedirs(output_dir)
+        output_file = os.path.join(output_dir, "result.txt")
+        root_file = os.path.join(temp_workspace, "result.txt")
+        with open(output_file, "w", encoding="utf-8") as file_obj:
+            file_obj.write("generated output")
+        with open(root_file, "w", encoding="utf-8") as file_obj:
+            file_obj.write("unrelated workspace file")
+        tool = UploadToS3Tool(
+            workspace_path=temp_workspace,
+            minio_client=mock_minio_client,
+            user_id="user1",
+            run_id="run1",
+        )
+
+        data = json.loads(tool.forward("result.txt"))
+
+        assert data["local_path"] == os.path.join("outputs", "result.txt")
+        mock_minio_client.upload_file.assert_called_once_with(
+            output_file,
+            "workspace/user1/run1/outputs/result.txt",
+        )
+
     def test_upload_includes_run_id_and_notifies_callback(
         self, mock_minio_client, temp_workspace
     ):
@@ -391,6 +467,25 @@ class TestUploadToS3ToolForward:
         assert data["object_name"] == "workspace/user1/run-123/outputs/result.txt"
         assert data["name"] == "result.txt"
         callback.assert_called_once_with(data)
+
+    def test_upload_updates_shared_uploaded_path_registry(
+        self, mock_minio_client, temp_workspace
+    ):
+        shared_uploaded_paths = set()
+        test_file = os.path.join(temp_workspace, "result.txt")
+        with open(test_file, "w", encoding="utf-8") as file_obj:
+            file_obj.write("result")
+        tool = UploadToS3Tool(
+            workspace_path=temp_workspace,
+            minio_client=mock_minio_client,
+            user_id="user1",
+            run_id="run-123",
+            uploaded_paths=shared_uploaded_paths,
+        )
+
+        tool.forward("result.txt")
+
+        assert os.path.normcase(os.path.abspath(test_file)) in shared_uploaded_paths
 
     def test_upload_empty_path_raises(self, tool_with_file):
         tool, _ = tool_with_file
@@ -433,7 +528,9 @@ class TestUploadToS3ToolForward:
 
         result = json.loads(tool.forward("generated.txt"))
 
-        callback.assert_called_once_with(target_path)
+        callback.assert_called_once_with(
+            os.path.join(temp_workspace, "outputs", "generated.txt")
+        )
         assert result["status"] == "success"
 
     def test_upload_directory_raises(self, mock_minio_client, temp_workspace):

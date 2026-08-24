@@ -928,6 +928,7 @@ async def build_nl2agent_run_info(
         "url": urljoin(LOCAL_MCP_SERVER, "sse"),
         "transport": "sse",
         "httpx_client_factory": create_httpx_client,
+        "bypass_proxy": True,
     }
     mcp_headers: dict[str, str] = {}
     if authorization:

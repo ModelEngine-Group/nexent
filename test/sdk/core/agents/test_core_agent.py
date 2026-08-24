@@ -3007,6 +3007,27 @@ class TestLogModelCallParameters:
         content = call_args[1]["content"]
         assert "REDACTED" in content
 
+    def test_log_model_call_parameters_redacts_runtime_metadata(self):
+        agent, _ = self._create_agent_for_log_params_test()
+        mock_msg = MagicMock()
+        mock_msg.model_dump.return_value = {
+            "role": "user",
+            "content": (
+                'question\n<runtime_metadata trust="untrusted-data">'
+                '{"secret":"must-not-leak"}</runtime_metadata>'
+            ),
+        }
+
+        agent._log_model_call_parameters(
+            [mock_msg],
+            [],
+            {"metadata": {"secret": "must-not-leak"}},
+        )
+
+        content = agent.logger.log_markdown.call_args.kwargs["content"]
+        assert "must-not-leak" not in content
+        assert "REDACTED" in content
+
     def test_log_model_call_parameters_exception_handling(self):
         """Test _log_model_call_parameters handles exceptions gracefully."""
         agent, module = self._create_agent_for_log_params_test()
@@ -3299,3 +3320,129 @@ def test_run_injects_current_time_when_missing():
 
     assert agent.task.startswith("[Current time:")
     assert "What time is it?" in agent.task
+
+
+def test_managed_agent_call_injects_workspace_instructions(tmp_path):
+    """Managed sub-agents receive the run output path in their delegated task."""
+    module = TestRunStreamRealExecution()._load_core_agent_in_isolation()
+    module.RunResult = type("RunResult", (), {})
+    workspace = tmp_path / "user" / "run"
+    agent = module.CoreAgent.__new__(module.CoreAgent)
+    agent.workspace_path = str(workspace)
+    agent.name = "file_generation_assistant"
+    agent.state = {}
+    agent.prompt_templates = {
+        "managed_agent": {
+            "task": "{{ task }}",
+            "report": "{{ final_answer }}",
+        }
+    }
+    agent.run = MagicMock(return_value="done")
+    agent.observer = MagicMock()
+    agent.provide_run_summary = False
+
+    agent("create test.txt")
+
+    render_payload = module.Template.return_value.render.call_args_list[0].args[0]
+    managed_task = render_payload["task"]
+    assert "[Nexent run workspace]" in managed_task
+    assert str(workspace / "outputs") in managed_task
+    assert "current working directory" in managed_task
+    assert "Never prefix a relative output path" in managed_task
+    assert "pass the same bare relative path" in managed_task
+
+
+def test_run_with_metadata_injects_untrusted_metadata_block():
+    """run() must serialize runtime metadata and inline extra args into the task."""
+    agent = _create_minimal_core_agent_for_time_tests()
+
+    list(agent.run(
+        task="Handle the request",
+        stream=True,
+        additional_args={"metadata": {"session": "abc", "lang": "zh"}, "window_id": "w1"},
+    ))
+
+    assert "window_id" in agent.task
+    assert '<runtime_metadata trust="untrusted-data">' in agent.task
+    assert '"session":"abc"' in agent.task
+    assert agent.state["metadata"] == {"session": "abc", "lang": "zh"}
+
+
+def test_run_with_metadata_skips_optional_sections():
+    """run() with only metadata provided must not inline extra-args or metadata text when absent."""
+    agent = _create_minimal_core_agent_for_time_tests()
+
+    list(agent.run(
+        task="Handle the request",
+        stream=True,
+        additional_args={"metadata": {"session": "abc"}},
+    ))
+
+    assert '<runtime_metadata trust="untrusted-data">' in agent.task
+    # extra-args hint is only rendered when non-metadata additional args exist
+    assert "additional arguments, that you can access" not in agent.task
+
+
+def test_call_forwards_metadata_to_sub_agent_run():
+    """__call__ must exclude metadata from the template state and pass it via additional_args."""
+    module = TestRunStreamRealExecution()._load_core_agent_in_isolation()
+    agent = module.CoreAgent.__new__(module.CoreAgent)
+    agent.workspace_path = None
+    agent.max_steps = 3
+    agent.state = {"metadata": {"session": "abc"}, "region": "cn"}
+    agent.memory = MagicMock()
+    agent.monitor = MagicMock()
+    agent.context_runtime = MagicMock()
+    agent.system_prompt = ""
+    agent.logger = MagicMock()
+    agent.model = MagicMock()
+    agent.name = "test_agent"
+    agent.observer = MagicMock()
+    agent.python_executor = None
+    agent.prompt_templates = {
+        "managed_agent": {
+            "task": "Task for {name}: {task}",
+            "report": "Report {name}: {final_answer}",
+        }
+    }
+    agent.provide_run_summary = False
+
+    # Provide a real type for the RunResult isinstance gate (the isolated-load
+    # smolagents mock leaves it as a MagicMock, which isinstance rejects).
+    fake_run_result = type("FakeRunResult", (), {})
+    module.RunResult = fake_run_result
+
+    # Replace the mocked jinja Template with a recorder so we can assert on the
+    # rendered context (template_state must drop metadata but keep state keys).
+    recorded_renders = []
+
+    class _RecorderTemplate:
+        def __init__(self, template, **kwargs):
+            self._template = template
+
+        def render(self, context, **kwargs):
+            recorded_renders.append({"template": self._template, "context": dict(context)})
+            return f"RENDERED-{len(recorded_renders)}"
+
+    module.Template = _RecorderTemplate
+
+    calls = {}
+    def fake_run(full_task, **kwargs):
+        calls["full_task"] = full_task
+        calls["kwargs"] = kwargs
+        result = fake_run_result()
+        result.output = "sub-agent-output"
+        return result
+
+    agent.run = fake_run
+
+    answer = agent(task="summarize")
+
+    task_render = recorded_renders[0]["context"]
+    # metadata was kept out of the rendered template state
+    assert "metadata" not in task_render
+    assert task_render["region"] == "cn"
+    assert "Task for {name}: {task}" in recorded_renders[0]["template"]
+    assert "Report {name}: {final_answer}" in recorded_renders[1]["template"]
+    assert calls["kwargs"]["additional_args"] == {"metadata": {"session": "abc"}}
+    assert answer == "RENDERED-2"

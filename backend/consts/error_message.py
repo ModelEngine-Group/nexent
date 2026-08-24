@@ -43,6 +43,10 @@ class ErrorMessage:
         ErrorCode.CHAT_MESSAGE_NOT_FOUND: "Message not found.",
         ErrorCode.CHAT_CONVERSATION_SAVE_FAILED: "Failed to save conversation.",
         ErrorCode.CHAT_TITLE_GENERATION_FAILED: "Failed to generate conversation title.",
+        ErrorCode.CHAT_METADATA_NOT_ALLOWED: "Runtime metadata input is disabled for this agent.",
+        ErrorCode.CHAT_METADATA_INVALID: "Runtime metadata is invalid.",
+        ErrorCode.CHAT_METADATA_TOO_LARGE: "Runtime metadata exceeds the maximum allowed size.",
+        ErrorCode.CHAT_METADATA_VERSION_CONFLICT: "Runtime metadata was updated by another request.",
 
         # ==================== 02 QuickConfig / 快速配置 ====================
         ErrorCode.QUICK_CONFIG_INVALID: "Invalid configuration.",
@@ -113,6 +117,9 @@ class ErrorMessage:
         ErrorCode.TENANT_DISABLED: "Tenant is disabled.",
         ErrorCode.TENANT_CONFIG_ERROR: "Tenant configuration error.",
         ErrorCode.TENANT_RESOURCE_EXCEEDED: "Tenant resource exceeded.",
+        ErrorCode.TENANT_PERSONAL_KB_QUOTA_EXCEEDED: "Personal knowledge base quota exceeded.",
+        ErrorCode.TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE: "Personal knowledge base quota usage is unavailable.",
+        ErrorCode.TENANT_PERSONAL_KB_QUOTA_BELOW_USAGE: "Personal knowledge base quota cannot be lower than current usage.",
 
         # ==================== 13 External / 外部服务 ====================
         ErrorCode.DATAMATE_CONNECTION_FAILED: "Failed to connect to DataMate service.",

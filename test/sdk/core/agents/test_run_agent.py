@@ -1,3 +1,4 @@
+import asyncio
 import types
 import json
 import importlib.machinery
@@ -353,7 +354,11 @@ def test_agent_run_thread_local_flow(basic_agent_run_info, monkeypatch):
     )
     mock_nexent_instance.set_agent.assert_called_once()
     mock_nexent_instance.add_history_to_agent.assert_called_once_with(basic_agent_run_info.history)
-    mock_nexent_instance.agent_run_with_observer.assert_called_once_with(query=basic_agent_run_info.query, reset=False)
+    mock_nexent_instance.agent_run_with_observer.assert_called_once_with(
+        query=basic_agent_run_info.query,
+        reset=False,
+        additional_args={"metadata": {}},
+    )
 
 
 def test_agent_run_thread_binds_capacity_and_budget_snapshots(basic_agent_run_info, monkeypatch):
@@ -462,7 +467,20 @@ def test_agent_run_thread_mcp_flow(basic_agent_run_info, mock_memory_context, mo
     )
     mock_nexent_instance.set_agent.assert_called_once()
     mock_nexent_instance.add_history_to_agent.assert_called_once_with(basic_agent_run_info.history)
-    mock_nexent_instance.agent_run_with_observer.assert_called_once_with(query=basic_agent_run_info.query, reset=False)
+    mock_nexent_instance.agent_run_with_observer.assert_called_once_with(
+        query=basic_agent_run_info.query,
+        reset=False,
+        additional_args={"metadata": {}},
+    )
+
+
+def test_build_run_additional_args_isolates_metadata_snapshot(basic_agent_run_info):
+    basic_agent_run_info.runtime_metadata = {"tenant": {"region": "cn"}}
+
+    additional_args = run_agent.build_run_additional_args(basic_agent_run_info)
+    additional_args["metadata"]["tenant"]["region"] = "us"
+
+    assert basic_agent_run_info.runtime_metadata == {"tenant": {"region": "cn"}}
 
 
 def test_agent_run_thread_mcp_flow_with_explicit_transport(basic_agent_run_info, mock_memory_context, monkeypatch):
@@ -686,6 +704,35 @@ def test_normalize_mcp_config():
         run_agent._normalize_mcp_config(None)
 
 
+def test_normalize_mcp_config_bypasses_proxy_only_when_requested():
+    """Test that proxy bypass is represented as a transport-local factory."""
+    result = run_agent._normalize_mcp_config({
+        "url": "http://localhost:5011/sse",
+        "transport": "sse",
+        "bypass_proxy": True,
+    })
+
+    assert result["url"] == "http://localhost:5011/sse"
+    assert result["transport"] == "sse"
+    assert result["httpx_client_factory"] is run_agent._create_mcp_http_client_without_proxy
+
+    client = result["httpx_client_factory"]()
+    assert client._trust_env is False
+    asyncio.run(client.aclose())
+
+
+def test_normalize_mcp_config_keeps_proxy_by_default():
+    """Test that MCP configurations without the opt-in flag remain unchanged."""
+    result = run_agent._normalize_mcp_config({
+        "url": "https://remote.example.com/mcp",
+        "transport": "streamable-http",
+    })
+
+    assert result == {
+        "url": "https://remote.example.com/mcp",
+        "transport": "streamable-http",
+    }
+
 def test_agent_run_thread_handles_internal_exception(basic_agent_run_info, mock_memory_context, monkeypatch):
     """If an internal error occurs, the observer should be notified and a ValueError propagated."""
     # Configure NexentAgent.create_single_agent to raise an exception
@@ -703,6 +750,56 @@ def test_agent_run_thread_handles_internal_exception(basic_agent_run_info, mock_
 
     # Ensure the raised error contains our message to confirm correct propagation
     assert "Error in agent_run_thread: Boom" in str(exc_info.value)
+
+
+def test_agent_run_thread_cleans_workspace_when_agent_creation_fails(
+    basic_agent_run_info, tmp_path, monkeypatch
+):
+    workspace_run_id = "run-creation-failed"
+    workspace = tmp_path / "user" / workspace_run_id
+    (workspace / "inputs").mkdir(parents=True)
+    (workspace / "inputs" / "upload.txt").write_text("temporary", encoding="utf-8")
+    basic_agent_run_info.workspace_path = str(workspace)
+    basic_agent_run_info.workspace_run_id = workspace_run_id
+
+    mock_nexent_instance = MagicMock(name="NexentAgentInstance")
+    mock_nexent_instance.create_single_agent.side_effect = RuntimeError("Boom")
+    monkeypatch.setattr(
+        run_agent,
+        "NexentAgent",
+        MagicMock(return_value=mock_nexent_instance),
+    )
+
+    with pytest.raises(ValueError, match="Error in agent_run_thread: Boom"):
+        run_agent.agent_run_thread(basic_agent_run_info)
+
+    assert not workspace.exists()
+
+
+def test_agent_run_thread_cleanup_is_idempotent_after_normal_agent_cleanup(
+    basic_agent_run_info, tmp_path, monkeypatch
+):
+    workspace_run_id = "run-normal-cleanup"
+    workspace = tmp_path / "user" / workspace_run_id
+    workspace.mkdir(parents=True)
+    basic_agent_run_info.workspace_path = str(workspace)
+    basic_agent_run_info.workspace_run_id = workspace_run_id
+
+    mock_nexent_instance = MagicMock(name="NexentAgentInstance")
+
+    def run_and_clean(**_kwargs):
+        run_agent.cleanup_run_workspace(str(workspace), workspace_run_id)
+
+    mock_nexent_instance.agent_run_with_observer.side_effect = run_and_clean
+    monkeypatch.setattr(
+        run_agent,
+        "NexentAgent",
+        MagicMock(return_value=mock_nexent_instance),
+    )
+
+    run_agent.agent_run_thread(basic_agent_run_info)
+
+    assert not workspace.exists()
 
 
 @pytest.mark.asyncio

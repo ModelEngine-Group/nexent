@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from os.path import basename
 from typing import Any, Dict, List, Optional
 
-from fastapi import HTTPException, UploadFile
+from fastapi import UploadFile
 from fastapi.responses import StreamingResponse
 
 
@@ -20,6 +20,8 @@ from consts.const import (
     NORTHBOUND_RATE_LIMIT_PER_MINUTE,
 )
 from consts.exceptions import (
+    AppException,
+    RuntimeMetadataValidationError,
     LimitExceededError,
     RuntimeServiceTimeoutError,
     RuntimeServiceUnavailableError,
@@ -27,10 +29,11 @@ from consts.exceptions import (
     UnauthorizedError,
     ConversationNotFoundError,
 )
+from consts.error_code import ErrorCode, RuntimeMetadataValidationCode
 from consts.model import AgentRequest, ToolParamsRequest
 from database.knowledge_db import get_knowledge_info_by_tenant_id
 from database.conversation_db import get_conversation_messages
-from database.token_db import log_token_usage, get_latest_usage_metadata
+from database.token_db import get_latest_usage_metadata, log_token_usage
 from services.agent_service import (
     get_agent_by_name_impl,
 )
@@ -51,6 +54,10 @@ from services.conversation_management_service import (
     get_conversation_list_service,
     create_new_conversation,
     update_conversation_title as update_conversation_title_service,
+)
+from utils.runtime_metadata_utils import (
+    runtime_metadata_hash,
+    validate_runtime_metadata,
 )
 from services.file_management_service import upload_to_minio, resolve_minio_upload_folder, validate_urls_access
 from database.attachment_db import get_file_url, get_file_size_from_minio
@@ -371,19 +378,39 @@ async def start_streaming_chat(
     agent_name: str,
     query: str,
     attachments: Optional[List[Any]] = None,
+    metadata: Optional[Dict[str, Any]] = None,
     meta_data: Optional[Dict[str, Any]] = None,
     tool_params: Optional[ToolParamsRequest] = None,
     model_id: Optional[int] = None,
     idempotency_key: Optional[str] = None
 ) -> StreamingResponse:
     try:
+        if metadata is not None:
+            try:
+                validate_runtime_metadata(metadata)
+            except RuntimeMetadataValidationError as exc:
+                error_code = (
+                    ErrorCode.CHAT_METADATA_TOO_LARGE
+                    if exc.code == RuntimeMetadataValidationCode.METADATA_TOO_LARGE
+                    else ErrorCode.CHAT_METADATA_INVALID
+                )
+                raise AppException(
+                    error_code,
+                    details={"reason": exc.code.value},
+                ) from exc
         # Simple rate limit
         await check_and_consume_rate_limit(ctx.tenant_id)
 
-        # If conversation_id is not provided, create a new conversation
+        agent_info = get_agent_by_name_impl(agent_name=agent_name, tenant_id=ctx.tenant_id)
+        agent_id = agent_info["agent_id"]
+        latest_version_no = agent_info["latest_version_no"]
         if conversation_id is None:
             logging.info("No conversation_id provided, creating a new conversation")
-            new_conversation = create_new_conversation(title="New Conversation", user_id=ctx.user_id)
+            new_conversation = create_new_conversation(
+                title="New Conversation",
+                user_id=ctx.user_id,
+                agent_id=agent_id,
+            )
             conversation_id = new_conversation["conversation_id"]
             logging.info(f"Created new conversation with id: {conversation_id}")
 
@@ -391,16 +418,20 @@ async def start_streaming_chat(
 
         # Get history according to internal_conversation_id
         history_resp = await get_conversation_history_internal(ctx, internal_conversation_id)
-        agent_info = get_agent_by_name_impl(agent_name=agent_name, tenant_id=ctx.tenant_id)
-        agent_id = agent_info["agent_id"]
-        latest_version_no = agent_info["latest_version_no"]
         normalized_attachments = _normalize_northbound_attachments(
             attachments=attachments,
             user_id=ctx.user_id,
             tenant_id=ctx.tenant_id,
         )
         # Idempotency: only prevent concurrent duplicate starts
-        composed_key = idempotency_key or _build_idempotency_key(ctx.tenant_id, str(conversation_id), agent_id, query)
+        metadata_key = "inherit" if metadata is None else runtime_metadata_hash(metadata)
+        composed_key = idempotency_key or _build_idempotency_key(
+            ctx.tenant_id,
+            str(conversation_id),
+            agent_id,
+            query,
+            metadata_key,
+        )
         await idempotency_start(composed_key)
         agent_request = AgentRequest(
             conversation_id=internal_conversation_id,
@@ -412,8 +443,10 @@ async def start_streaming_chat(
             tool_params=tool_params,
             model_id=model_id,
             version_no=latest_version_no,
+            metadata=metadata,
             enable_automation_tool=False,
         )
+        agent_request.__dict__["_runtime_metadata_entrypoint"] = "northbound"
 
         # Persist the user message off the event loop before starting the stream.
         # We deliberately keep this synchronous step (not async submit) for
@@ -435,6 +468,8 @@ async def start_streaming_chat(
         raise LimitExceededError(str(exc))
     except UnauthorizedError as _:
         raise UnauthorizedError("Cannot authenticate.")
+    except AppException:
+        raise
     except Exception as e:
         raise Exception(f"Failed to start streaming chat for conversation_id {conversation_id}: {str(e)}")
 
@@ -448,7 +483,7 @@ async def start_streaming_chat(
         if composed_key:
             asyncio.create_task(_release_idempotency_after_delay(composed_key))
 
-    # Log token usage
+    # Preserve request metadata for conversation continuation and usage auditing.
     if ctx.token_id > 0:
         try:
             log_token_usage(
@@ -456,7 +491,7 @@ async def start_streaming_chat(
                 call_function_name="run_chat",
                 related_id=conversation_id,
                 created_by=ctx.user_id,
-                metadata=meta_data
+                metadata=meta_data,
             )
         except Exception as e:
             logger.warning(f"Failed to log token usage: {str(e)}")
@@ -476,7 +511,6 @@ async def stop_chat(ctx: NorthboundContext, conversation_id: int, meta_data: Opt
             tenant_id=ctx.tenant_id,
         )
 
-        # Log token usage
         if ctx.token_id > 0:
             try:
                 log_token_usage(
@@ -484,7 +518,7 @@ async def stop_chat(ctx: NorthboundContext, conversation_id: int, meta_data: Opt
                     call_function_name="stop_chat_stream",
                     related_id=conversation_id,
                     created_by=ctx.user_id,
-                    metadata=meta_data
+                    metadata=meta_data,
                 )
             except Exception as e:
                 logger.warning(f"Failed to log token usage: {str(e)}")
@@ -780,7 +814,6 @@ async def update_conversation_title(ctx: NorthboundContext, conversation_id: int
 
         update_conversation_title_service(conversation_id, title, ctx.user_id)
 
-        # Log token usage
         if ctx.token_id > 0:
             try:
                 log_token_usage(
@@ -788,7 +821,7 @@ async def update_conversation_title(ctx: NorthboundContext, conversation_id: int
                     call_function_name="update_conversation_title",
                     related_id=conversation_id,
                     created_by=ctx.user_id,
-                    metadata=meta_data
+                    metadata=meta_data,
                 )
             except Exception as e:
                 logger.warning(f"Failed to log token usage: {str(e)}")

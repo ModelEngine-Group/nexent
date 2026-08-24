@@ -157,7 +157,7 @@ export const ModelEditDialog = ({
     form.type === MODEL_TYPES.MULTI_EMBEDDING;
   const isRerankModel = form.type === MODEL_TYPES.RERANK;
   const connectivityModelType =
-    form.type === MODEL_TYPES.VLM2 || form.type === MODEL_TYPES.VLM3
+    form.type === MODEL_TYPES.VLM2 || form.type === MODEL_TYPES.VLM3 || form.type === MODEL_TYPES.VLM4
       ? (MODEL_TYPES.VLM as ModelType)
       : form.type;
   const isVoiceModel =
@@ -500,6 +500,7 @@ export const ModelEditDialog = ({
         vlm: MODEL_TYPES.VLM,
         vlm2: MODEL_TYPES.VLM2,
         vlm3: MODEL_TYPES.VLM3,
+        vlm4: MODEL_TYPES.VLM4,
         rerank: MODEL_TYPES.RERANK,
         tts: MODEL_TYPES.TTS,
         stt: MODEL_TYPES.STT,

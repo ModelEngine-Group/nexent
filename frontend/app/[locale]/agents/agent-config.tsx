@@ -11,6 +11,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { useAgentStore } from "@/stores/agentStore";
+import { useSaveGuard } from "@/hooks/agent/useSaveGuard";
 import { useAgentReadOnly } from "@/hooks/agent/useAgentReadOnly";
 import { useNl2AgentFlow } from "@/contexts/nl2AgentFlow";
 
@@ -152,6 +153,7 @@ export default function AgentConfig({ onToggleDebug }: AgentConfigProps) {
     (state) => state.serverSnapshotRevision
   );
   const flushDraft = useAgentStore((state) => state.flushDraft);
+  const { save } = useSaveGuard();
   const { message } = App.useApp();
   const saveError = useAgentStore((state) => state.saveError);
   const clearSaveError = useAgentStore((state) => state.clearSaveError);
@@ -230,6 +232,7 @@ export default function AgentConfig({ onToggleDebug }: AgentConfigProps) {
   const handleDebug = async () => {
     try {
       await form.validateFields();
+      if (!(await save())) return;
       onToggleDebug();
     } catch {
       // Field validation errors are rendered by Ant Design.
@@ -239,6 +242,7 @@ export default function AgentConfig({ onToggleDebug }: AgentConfigProps) {
   const handlePublish = async () => {
     try {
       await form.validateFields();
+      if (!(await save())) return;
       setIsPublishModalOpen(true);
     } catch {
       // Field validation errors are rendered by Ant Design.

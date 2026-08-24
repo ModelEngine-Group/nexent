@@ -1089,10 +1089,7 @@ export default function EvaluationDetailPage() {
             <Title level={4} style={{ margin: 0 }}>
               {run.agent_name || `#${run.agent_evaluation_id}`}
             </Title>
-            <Tag
-              color={getRunStatusColor(run.status)}
-              style={{ fontSize: 13 }}
-            >
+            <Tag color={getRunStatusColor(run.status)} style={{ fontSize: 13 }}>
               {run.status}
             </Tag>
           </Flex>

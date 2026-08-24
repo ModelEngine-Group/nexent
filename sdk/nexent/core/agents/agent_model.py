@@ -263,6 +263,10 @@ class AgentConfig(BaseModel):
     )
     model_name: str = Field(description="Model alias from ModelConfig")
     provide_run_summary: Optional[bool] = Field(description="Whether to provide run summary to upper-level Agent", default=False)
+    allow_chat_metadata: bool = Field(
+        description="Whether Native Chat and Debug users may submit runtime metadata",
+        default=False,
+    )
     instructions: Optional[str] = Field(description="Additional instructions to prepend to system prompt", default=None)
     managed_agents: List["AgentConfig"] = Field(
         description="Internal managed sub-agents created locally",
@@ -310,7 +314,7 @@ class AgentConfig(BaseModel):
             "scope (session/system), "
             "docker_image, memory_limit_mb, cpu_quota, "
             "network_disabled, timeout_seconds, shell_policy, "
-            "output_dir, auto_sync_outputs.  "
+            "host_tool_timeout_seconds, output_dir, auto_sync_outputs.  "
             'Example: {"level": "docker", "scope": "session", '
             '"docker_image": "nexent/nexent-sandbox:latest"}'
         ),
@@ -362,6 +366,14 @@ class AgentRunInfo(BaseModel):
     stop_event: Event = Field(description="Stop event control")
     conversation_id: Optional[int] = Field(description="Conversation id for run-scoped persistence", default=None)
     user_id: Optional[str] = Field(description="User id for run-scoped persistence", default=None)
+    runtime_metadata: Dict[str, Any] = Field(
+        description="Immutable application-resolved runtime metadata snapshot",
+        default_factory=dict,
+    )
+    runtime_metadata_version: Optional[int] = Field(
+        description="Conversation runtime metadata version used by this run",
+        default=None,
+    )
     context_input: Optional[Any] = Field(
         description="Immutable run-scoped context snapshot supplied by the application boundary.",
         default=None,

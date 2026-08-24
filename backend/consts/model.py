@@ -86,6 +86,27 @@ class UserDeleteRequest(BaseModel):
     new_owner_id: Optional[str] = None
 
 
+class ApiUserBatchCreateRequest(BaseModel):
+    """Request model for creating API-only users in one transaction."""
+
+    role: Literal["DEV", "USER"] = "USER"
+    group_id: Optional[int] = Field(None, ge=1)
+    count: int = Field(1, ge=1, le=100)
+
+
+class ApiKeyTargetRequest(BaseModel):
+    """Identify a tenant user by exactly one supported field."""
+
+    user_id: Optional[str] = Field(None, min_length=1, max_length=100)
+    email: Optional[EmailStr] = None
+
+    @model_validator(mode="after")
+    def validate_single_target(self):
+        if bool(self.user_id) == bool(self.email):
+            raise ValueError("Exactly one of user_id or email must be provided")
+        return self
+
+
 class OAuthProviderDefinition(BaseModel):
     name: str
     display_name: str
@@ -204,7 +225,7 @@ class CapacityCoverageBareModel(BaseModel):
     model_id: int
     model_name: str
     model_factory: Optional[str] = None
-    model_type: Literal["llm", "vlm", "vlm2", "vlm3"]
+    model_type: Literal["llm", "vlm", "vlm2", "vlm3", "vlm4"]
     max_tokens: Optional[int] = None
     suggestion_available: bool = False
 
@@ -278,6 +299,7 @@ class ModelConfig(BaseModel):
     vlm: SingleModelConfig
     vlm2: SingleModelConfig = Field(default_factory=_empty_model_config)
     vlm3: SingleModelConfig = Field(default_factory=_empty_model_config)
+    vlm4: SingleModelConfig = Field(default_factory=_empty_model_config)
     stt: STTModelConfig
     tts: TTSModelConfig
 
@@ -411,11 +433,21 @@ class AgentRequest(BaseModel):
         default=None,
         description="Optional request-scoped context policy override",
     )
+    metadata: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Conversation runtime metadata available to the agent",
+    )
+    expected_metadata_version: Optional[int] = Field(
+        default=None,
+        ge=0,
+        description="Optional optimistic-lock version for runtime metadata updates",
+    )
 
     @field_validator("context_policy")
     @classmethod
     def validate_context_policy(cls, value):
         return _validated_context_policy(value)
+
     enable_plan: Optional[bool] = Field(
         default=False,
         description="Whether to enable the planning phase before execution"
@@ -720,6 +752,7 @@ class AgentInfoRequest(BaseModel):
     is_a2a: Optional[bool] = None
     verification_config: Optional[Dict[str, Any]] = None
     context_policy: Optional[Dict[str, Any]] = None
+    allow_chat_metadata: Optional[bool] = None
 
     greeting_message: Optional[str] = None
     example_questions: Optional[List[str]] = None
@@ -808,12 +841,12 @@ class ExportAndImportAgentInfo(BaseModel):
     name: str
     display_name: Optional[str] = None
     description: str
-    business_description: str
     author: Optional[str] = None
     max_steps: int
     requested_output_tokens: Optional[int] = Field(default=None, gt=0)
     is_main_agent: bool = True
     provide_run_summary: bool
+    allow_chat_metadata: bool = False
     verification_config: Optional[Dict[str, Any]] = None
     context_policy: Optional[Dict[str, Any]] = None
     duty_prompt: Optional[str] = None
@@ -829,6 +862,8 @@ class ExportAndImportAgentInfo(BaseModel):
     skill_names: Optional[List[str]] = None
     prompt_template_id: Optional[int] = None
     prompt_template_name: Optional[str] = None
+    greeting_message: Optional[str] = None
+    example_questions: Optional[List[str]] = None
 
     @field_validator("context_policy")
     @classmethod
@@ -958,10 +993,23 @@ class SkillZipEntry(BaseModel):
     skill_zip_base64: str
 
 
+class SkillResolution(BaseModel):
+    """User-selected resolution for a duplicate skill during agent import."""
+    skill_name: str
+    action: Literal["rename", "use_existing"]
+    new_name: Optional[str] = None
+
+
+class SkillConflictCheckRequest(BaseModel):
+    """Skill names to check before showing the agent import steps."""
+    skill_names: List[str]
+
+
 class AgentImportRequest(BaseModel):
     agent_info: ExportAndImportDataFormat
     force_import: bool = False
     skills: Optional[List[SkillZipEntry]] = None
+    skill_resolutions: Optional[List[SkillResolution]] = None
 
 
 class AgentNameBatchRegenerateItem(BaseModel):
@@ -976,7 +1024,7 @@ class AgentNameBatchRegenerateRequest(BaseModel):
 
 
 class AgentNameBatchCheckItem(BaseModel):
-    name: str
+    name: str = ""
     display_name: Optional[str] = None
     agent_id: Optional[int] = None
 

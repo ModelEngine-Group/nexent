@@ -1,5 +1,5 @@
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy import func
 from sqlalchemy import text
@@ -30,6 +30,26 @@ def get_all_configs_by_tenant_id(tenant_id: str):
             })
 
         return record_info
+
+
+def get_configs_by_tenant_id_and_keys(
+    tenant_id: str,
+    config_keys: List[str],
+) -> Dict[str, str]:
+    """Return active tenant configuration values for a set of keys."""
+    if not config_keys:
+        return {}
+
+    with get_db_session() as session:
+        result = session.query(TenantConfig).filter(
+            TenantConfig.tenant_id == tenant_id,
+            TenantConfig.config_key.in_(config_keys),
+            TenantConfig.delete_flag == "N",
+        ).all()
+        return {
+            item.config_key: item.config_value
+            for item in result
+        }
 
 
 def get_tenant_config_info(tenant_id: str, user_id: str, select_key: str):
