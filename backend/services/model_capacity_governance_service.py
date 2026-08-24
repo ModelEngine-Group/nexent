@@ -246,7 +246,8 @@ def catalog_adoption_preview(
             "proposed_source": "catalog",
             "changed": current != proposed,
             "blocked_by_manual": source == "operator",
-            "applicable": source in {"catalog", "unknown"} and current != proposed,
+            "applicable": source in {"catalog", "unknown", "legacy"}
+            and (current != proposed or source != "catalog"),
         }
     return {
         "schema_version": GOVERNANCE_SCHEMA_VERSION,
@@ -300,7 +301,7 @@ def apply_catalog_adoption(
         source = (metadata["fields"].get(field) or {}).get("source", "unknown")
         if source == "operator" and field not in reset_manual:
             continue
-        if source not in {"catalog", "unknown", "operator"}:
+        if source not in {"catalog", "unknown", "legacy", "operator"}:
             continue
         proposed = proposed_values[field]
         if proposed == record.get(field) and source == "catalog":

@@ -1377,6 +1377,7 @@
   "modelConfig.capacityHealth.protection": "Protection",
   "modelConfig.capacityHealth.manualProtected": "Manual value protected",
   "modelConfig.capacityHealth.applicable": "Will adopt",
+  "modelConfig.capacityHealth.noChange": "No change",
   "modelConfig.capacityHealth.applyReviewed": "Apply reviewed changes",
   "modelConfig.capacityHealth.applied": "Capacity profile applied",
   "modelConfig.capacityHealth.previewFailed": "Could not load a safe adoption preview",

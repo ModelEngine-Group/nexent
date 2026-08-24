@@ -1346,6 +1346,7 @@
   "modelConfig.capacityHealth.protection": "保护状态",
   "modelConfig.capacityHealth.manualProtected": "人工值受保护",
   "modelConfig.capacityHealth.applicable": "将采用",
+  "modelConfig.capacityHealth.noChange": "无需变更",
   "modelConfig.capacityHealth.applyReviewed": "应用已检查的更改",
   "modelConfig.capacityHealth.applied": "已采用容量配置",
   "modelConfig.capacityHealth.previewFailed": "无法加载安全的采用预览",

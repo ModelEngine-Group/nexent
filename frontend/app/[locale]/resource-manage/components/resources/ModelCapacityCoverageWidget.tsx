@@ -90,7 +90,12 @@ export default function ModelCapacityCoverageWidget() {
     }
   };
   const adopt = async () => {
-    if (!selected || !preview) return;
+    if (
+      !selected ||
+      !preview ||
+      !Object.values(preview.fields).some((field) => field.applicable)
+    )
+      return;
     setBusy(true);
     try {
       await modelService.adoptCapacity({
@@ -171,7 +176,11 @@ export default function ModelCapacityCoverageWidget() {
         title={t("modelConfig.capacityHealth.title")}
         onCancel={() => setOpen(false)}
         okText={t("modelConfig.capacityHealth.applyReviewed")}
-        okButtonProps={{ disabled: !preview }}
+        okButtonProps={{
+          disabled:
+            !preview ||
+            !Object.values(preview.fields).some((field) => field.applicable),
+        }}
         confirmLoading={busy}
         onOk={adopt}
       >
@@ -276,14 +285,15 @@ export default function ModelCapacityCoverageWidget() {
               },
               {
                 title: t("modelConfig.capacityHealth.protection"),
-                dataIndex: "blockedByManual",
-                render: (v) =>
-                  v ? (
+                render: (_: unknown, item) =>
+                  item.blockedByManual ? (
                     <Tag color="blue">
                       {t("modelConfig.capacityHealth.manualProtected")}
                     </Tag>
-                  ) : (
+                  ) : item.applicable ? (
                     <Tag>{t("modelConfig.capacityHealth.applicable")}</Tag>
+                  ) : (
+                    <Tag>{t("modelConfig.capacityHealth.noChange")}</Tag>
                   ),
               },
             ]}

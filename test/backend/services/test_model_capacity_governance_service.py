@@ -247,6 +247,37 @@ def test_ac_p1_009_manual_reset_changes_provenance_when_value_is_identical():
     )
 
 
+def test_ac_p3_002_reviewed_legacy_adoption_changes_same_value_provenance():
+    record = {
+        "model_type": "llm",
+        **CATALOG_VALUES,
+        "capacity_source": "legacy",
+    }
+    preview = catalog_adoption_preview(
+        record,
+        CATALOG_VALUES,
+        proposed_profile_version="openai/gpt-4o@2",
+    )
+
+    assert all(item["applicable"] for item in preview["fields"].values())
+    adopted = apply_catalog_adoption(
+        record,
+        CATALOG_VALUES,
+        proposed_profile_version="openai/gpt-4o@2",
+        expected_profile_version="openai/gpt-4o@2",
+        current_matcher_version="1.0.0",
+    )
+
+    assert adopted.row_capacity_source == "profile"
+    assert adopted.capability_profile_version == "openai/gpt-4o@2"
+    assert all(
+        item["source"] == "catalog"
+        for item in adopted.metadata["fields"].values()
+    )
+    assert {item["field"] for item in adopted.audit_delta} == set(CATALOG_VALUES)
+    assert all(not item["value_changed"] for item in adopted.audit_delta)
+
+
 @pytest.mark.parametrize(
     ("kwargs", "reason"),
     [
