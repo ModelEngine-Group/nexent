@@ -10,6 +10,11 @@ import {
   ModelSource,
   CapacitySuggestion,
   CapacityCoverage,
+  CapacityAdoptionPreview,
+  CapacityFieldMetadata,
+  ModelIdentityMetadata,
+  ProfileMatchMetadata,
+  TokenCountProbeMetadata,
 } from "@/types/modelConfig";
 
 import { getAuthHeaders } from "@/lib/auth";
@@ -26,6 +31,76 @@ import {
 } from "@/const/modelConfig";
 import log from "@/lib/logger";
 
+const CAPACITY_FIELD_NAMES: Record<string, string> = {
+  context_window_tokens: "contextWindowTokens",
+  max_input_tokens: "maxInputTokens",
+  max_output_tokens: "maxOutputTokens",
+  default_output_reserve_tokens: "defaultOutputReserveTokens",
+  tokenizer_family: "tokenizerFamily",
+};
+
+const mapCapacityFieldMetadata = (
+  metadata: any
+): CapacityFieldMetadata | null => {
+  if (!metadata || metadata.schema_version !== 1) return null;
+  return {
+    schemaVersion: metadata.schema_version,
+    fields: Object.fromEntries(
+      Object.entries(metadata.fields || {}).map(
+        ([field, item]: [string, any]) => [
+          CAPACITY_FIELD_NAMES[field] || field,
+          {
+            source: item.source,
+            confidence: item.confidence,
+            profileVersion: item.profile_version,
+            evidenceId: item.evidence_id,
+            verifiedAt: item.verified_at,
+            updatedAt: item.updated_at,
+          },
+        ]
+      )
+    ),
+  } as CapacityFieldMetadata;
+};
+
+const mapIdentityMetadata = (metadata: any): ModelIdentityMetadata | null =>
+  metadata
+    ? {
+        schemaVersion: metadata.schema_version,
+        canonicalId: metadata.canonical_id,
+        resolved: metadata.resolved,
+        ambiguity: metadata.ambiguity,
+        confidence: metadata.confidence,
+        matcherVersion: metadata.matcher_version,
+      }
+    : null;
+
+const mapProfileMatch = (metadata: any): ProfileMatchMetadata | null =>
+  metadata
+    ? {
+        schemaVersion: metadata.schema_version,
+        selectedProfile: metadata.selected_profile,
+        confidence: metadata.confidence,
+        source: metadata.source,
+        reason: metadata.reason,
+        matcherVersion: metadata.matcher_version,
+        candidates: metadata.candidates,
+        autoApplicable: metadata.auto_applicable,
+      }
+    : null;
+
+const mapProbeMetadata = (metadata: any): TokenCountProbeMetadata | null =>
+  metadata
+    ? {
+        schemaVersion: metadata.schema_version,
+        status: metadata.status,
+        reason: metadata.reason,
+        selectedProtocol: metadata.selected_protocol,
+        checkedAt: metadata.checked_at,
+        staleAt: metadata.stale_at,
+      }
+    : null;
+
 const mapCapacityFieldsFromApi = (model: any) => ({
   contextWindowTokens: model.context_window_tokens,
   maxInputTokens: model.max_input_tokens,
@@ -34,6 +109,13 @@ const mapCapacityFieldsFromApi = (model: any) => ({
   tokenizerFamily: model.tokenizer_family,
   capacitySource: model.capacity_source,
   capabilityProfileVersion: model.capability_profile_version,
+  capacityFieldMetadata: mapCapacityFieldMetadata(
+    model.capacity_field_metadata
+  ),
+  canonicalModelId: model.canonical_model_id,
+  modelIdentityMetadata: mapIdentityMetadata(model.model_identity_metadata),
+  tokenizerMatchMetadata: mapProfileMatch(model.tokenizer_match_metadata),
+  tokenCountProbeMetadata: mapProbeMetadata(model.token_count_probe_metadata),
 });
 
 const buildCapacityRequestBody = (model: {
@@ -45,6 +127,7 @@ const buildCapacityRequestBody = (model: {
   capacitySource?: string;
   acceptedSuggestionMatchKind?: string;
   acceptedCapabilityProfileVersion?: string;
+  capacityMode?: "auto" | "manual";
 }) => ({
   ...(model.contextWindowTokens !== undefined
     ? { context_window_tokens: model.contextWindowTokens }
@@ -63,6 +146,9 @@ const buildCapacityRequestBody = (model: {
     : {}),
   ...(model.capacitySource !== undefined
     ? { capacity_source: model.capacitySource }
+    : {}),
+  ...(model.capacityMode !== undefined
+    ? { capacity_mode: model.capacityMode }
     : {}),
   // W11 accept-signal: audit-only fields the app layer pops before the
   // service write so model_capacity_suggestion_accept_total can count
@@ -100,6 +186,12 @@ const mapCapacitySuggestionFromApi = (
     canonicalModelName: suggestion.canonical_model_name,
     capabilityProfileVersion: suggestion.capability_profile_version,
     capacitySourceOnAccept: suggestion.capacity_source_on_accept,
+    canonicalIdentity: mapIdentityMetadata(suggestion.canonical_identity),
+    capacityMatch: mapProfileMatch(suggestion.capacity_match),
+    tokenizerMatch: mapProfileMatch(suggestion.tokenizer_match),
+    governanceMetadataProposal: mapCapacityFieldMetadata(
+      suggestion.governance_metadata_proposal
+    ),
   };
 };
 
@@ -220,6 +312,7 @@ export const modelService = {
     capacitySource?: string;
     acceptedSuggestionMatchKind?: string;
     acceptedCapabilityProfileVersion?: string;
+    capacityMode?: "auto" | "manual";
   }): Promise<void> => {
     try {
       const requestBody: any = {
@@ -444,6 +537,7 @@ export const modelService = {
     capacitySource?: string;
     acceptedSuggestionMatchKind?: string;
     acceptedCapabilityProfileVersion?: string;
+    capacityMode?: "auto" | "manual";
   }): Promise<void> => {
     try {
       const response = await fetch(
@@ -856,6 +950,129 @@ export const modelService = {
     }
   },
 
+  previewCapacityAdoption: async (
+    displayName: string,
+    expectedMatcherVersion?: string,
+    tenantId?: string
+  ): Promise<CapacityAdoptionPreview> => {
+    const response = await fetch(
+      tenantId
+        ? API_ENDPOINTS.model.manageCapacityAdoptionPreview
+        : API_ENDPOINTS.model.capacityAdoptionPreview,
+      {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          display_name: displayName,
+          ...(expectedMatcherVersion
+            ? { expected_matcher_version: expectedMatcherVersion }
+            : {}),
+          ...(tenantId ? { tenant_id: tenantId } : {}),
+        }),
+      }
+    );
+    const result = await response.json();
+    if (response.status !== STATUS_CODES.SUCCESS || !result.data) {
+      throw new ModelError(
+        result.detail || "Failed to preview capacity adoption",
+        response.status
+      );
+    }
+    const data = result.data;
+    return {
+      displayName: data.display_name,
+      canonicalModelId: data.canonical_model_id,
+      matcherVersion: data.matcher_version,
+      currentProfileVersion: data.current_profile_version,
+      proposedProfileVersion: data.proposed_profile_version,
+      fields: Object.fromEntries(
+        Object.entries(data.fields || {}).map(
+          ([field, item]: [string, any]) => [
+            CAPACITY_FIELD_NAMES[field] || field,
+            {
+              currentValue: item.current_value,
+              currentSource: item.current_source,
+              proposedValue: item.proposed_value,
+              proposedSource: item.proposed_source,
+              changed: item.changed,
+              blockedByManual: item.blocked_by_manual,
+              applicable: item.applicable,
+            },
+          ]
+        )
+      ),
+    };
+  },
+
+  adoptCapacity: async (params: {
+    displayName: string;
+    expectedProfileVersion: string;
+    expectedMatcherVersion?: string;
+    fields?: string[];
+    resetManualFields?: string[];
+    tenantId?: string;
+  }): Promise<{ updatedFields: string[] }> => {
+    const response = await fetch(
+      params.tenantId
+        ? API_ENDPOINTS.model.manageCapacityAdopt
+        : API_ENDPOINTS.model.capacityAdopt,
+      {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          display_name: params.displayName,
+          expected_profile_version: params.expectedProfileVersion,
+          ...(params.expectedMatcherVersion
+            ? { expected_matcher_version: params.expectedMatcherVersion }
+            : {}),
+          ...(params.fields ? { fields: params.fields } : {}),
+          reset_manual_fields: params.resetManualFields || [],
+          ...(params.tenantId ? { tenant_id: params.tenantId } : {}),
+        }),
+      }
+    );
+    const result = await response.json();
+    if (response.status !== STATUS_CODES.SUCCESS || !result.data) {
+      throw new ModelError(
+        result.detail || "Failed to adopt capacity",
+        response.status
+      );
+    }
+    return { updatedFields: result.data.updated_fields || [] };
+  },
+
+  probeTokenCount: async (
+    displayName: string,
+    force = false,
+    tenantId?: string
+  ): Promise<TokenCountProbeMetadata> => {
+    const response = await fetch(
+      tenantId
+        ? API_ENDPOINTS.model.manageTokenCountProbe
+        : API_ENDPOINTS.model.tokenCountProbe,
+      {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          display_name: displayName,
+          force,
+          ...(tenantId ? { tenant_id: tenantId } : {}),
+        }),
+      }
+    );
+    const result = await response.json();
+    if (response.status !== STATUS_CODES.SUCCESS || !result.data) {
+      throw new ModelError(
+        result.detail || "Token-count probe failed",
+        response.status
+      );
+    }
+    const mapped = mapProbeMetadata(result.data);
+    if (!mapped)
+      throw new ModelError("Token-count probe returned no metadata", 500);
+    return mapped;
+  },
+
   // Get LLM model list for generation
   getLLMModels: async (): Promise<ModelOption[]> => {
     try {
@@ -993,6 +1210,7 @@ export const modelService = {
     capacitySource?: string;
     acceptedSuggestionMatchKind?: string;
     acceptedCapabilityProfileVersion?: string;
+    capacityMode?: "auto" | "manual";
   }): Promise<void> => {
     try {
       const requestBody: any = {
@@ -1077,6 +1295,7 @@ export const modelService = {
     capacitySource?: string;
     acceptedSuggestionMatchKind?: string;
     acceptedCapabilityProfileVersion?: string;
+    capacityMode?: "auto" | "manual";
   }): Promise<void> => {
     try {
       const response = await fetch(

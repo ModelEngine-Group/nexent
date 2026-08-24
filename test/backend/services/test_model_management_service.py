@@ -17,7 +17,13 @@ if backend_dir not in sys.path:
 if "nexent" not in sys.modules:
     sys.modules["nexent"] = mock.MagicMock()
 if "nexent.core" not in sys.modules:
-    sys.modules["nexent.core"] = mock.MagicMock()
+    nexent_core_mod = types.ModuleType("nexent.core")
+    # Keep the lightweight agent stubs below while allowing service tests to
+    # import real, dependency-free SDK model helpers.
+    nexent_core_mod.__path__ = [os.path.abspath(os.path.join(
+        os.path.dirname(__file__), "../../../sdk/nexent/core"
+    ))]
+    sys.modules["nexent.core"] = nexent_core_mod
 if "nexent.core.agents" not in sys.modules:
     sys.modules["nexent.core.agents"] = mock.MagicMock()
 if "nexent.core.agents.agent_model" not in sys.modules:
@@ -293,6 +299,7 @@ def _get_model_by_name_factory(*args, **kwargs):
 
 
 db_mm_mod.create_model_record = _noop
+db_mm_mod.apply_model_mutations = _noop
 db_mm_mod.delete_model_record = _noop
 db_mm_mod.get_model_by_display_name = _noop
 db_mm_mod.get_model_by_name_factory = _get_model_by_name_factory
@@ -453,6 +460,141 @@ async def test_create_model_for_tenant_success_llm():
             "huggingface/llama", tenant_id)
         # create_model_record called once for non-multimodal
         assert mock_create.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_create_auto_mode_persists_verified_catalog_and_match_metadata():
+    svc = import_svc()
+    payload = {
+        "model_name": "qwen-plus",
+        "display_name": "Qwen Plus Auto",
+        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "api_key": "secret",
+        "model_factory": "dashscope",
+        "model_type": "llm",
+        "capacity_mode": "auto",
+    }
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=[]), \
+            mock.patch.object(svc, "create_model_record") as mock_create, \
+            mock.patch.object(svc, "split_repo_name", return_value=("", "qwen-plus")):
+        await svc.create_model_for_tenant(
+            "u1", "t1", payload, explicit_fields=set(payload)
+        )
+    saved = mock_create.call_args.args[0]
+    assert saved["context_window_tokens"] == 131_072
+    assert saved["max_output_tokens"] == 16_384
+    assert saved["capacity_source"] == "profile"
+    assert saved["capability_profile_version"] == "dashscope/qwen-plus@1"
+    assert saved["capacity_field_metadata"]["fields"]["max_output_tokens"]["source"] == "catalog"
+    assert saved["canonical_model_id"] == "dashscope:qwen-plus"
+    assert saved["model_identity_metadata"]["schema_version"] == 1
+    assert saved["tokenizer_match_metadata"]["reason"] == "tokenizer_profile_not_found"
+    assert "capacity_mode" not in saved
+
+
+@pytest.mark.asyncio
+async def test_capacity_adoption_preview_is_read_only_and_marks_manual_block():
+    svc = import_svc()
+    record = {
+        "model_id": 1,
+        "model_type": "llm",
+        "model_factory": "dashscope",
+        "model_repo": "",
+        "model_name": "qwen-plus",
+        "display_name": "Qwen Plus",
+        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "context_window_tokens": 65_536,
+        "max_output_tokens": 8_192,
+        "default_output_reserve_tokens": 4_096,
+        "capacity_field_metadata": {
+            "schema_version": 1,
+            "fields": {
+                "context_window_tokens": {"source": "catalog", "profile_version": "dashscope/qwen-plus@0"},
+                "max_output_tokens": {"source": "operator"},
+                "default_output_reserve_tokens": {"source": "catalog", "profile_version": "dashscope/qwen-plus@0"},
+            },
+        },
+        "capability_profile_version": "dashscope/qwen-plus@0",
+    }
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=[record]), \
+            mock.patch.object(svc, "update_model_record") as mock_update:
+        preview = await svc.preview_capacity_adoption_for_tenant("t1", "Qwen Plus")
+    assert preview["proposed_profile_version"] == "dashscope/qwen-plus@1"
+    assert preview["fields"]["context_window_tokens"]["applicable"] is True
+    assert preview["fields"]["max_output_tokens"]["blocked_by_manual"] is True
+    mock_update.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_capacity_adoption_persists_only_eligible_fields():
+    svc = import_svc()
+    record = {
+        "model_id": 1,
+        "model_type": "llm",
+        "model_factory": "dashscope",
+        "model_repo": "",
+        "model_name": "qwen-plus",
+        "display_name": "Qwen Plus",
+        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "context_window_tokens": 65_536,
+        "max_output_tokens": 8_192,
+        "default_output_reserve_tokens": 4_096,
+        "capacity_field_metadata": {
+            "schema_version": 1,
+            "fields": {
+                "context_window_tokens": {"source": "catalog", "profile_version": "dashscope/qwen-plus@0"},
+                "max_output_tokens": {"source": "operator"},
+                "default_output_reserve_tokens": {"source": "catalog", "profile_version": "dashscope/qwen-plus@0"},
+            },
+        },
+        "capability_profile_version": "dashscope/qwen-plus@0",
+    }
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=[record]), \
+            mock.patch.object(svc, "update_model_record") as mock_update:
+        result = await svc.adopt_capacity_for_tenant(
+            "u1",
+            "t1",
+            "Qwen Plus",
+            expected_profile_version="dashscope/qwen-plus@1",
+            expected_matcher_version="1.0.0",
+        )
+    saved = mock_update.call_args.args[1]
+    assert saved["context_window_tokens"] == 131_072
+    assert "max_output_tokens" not in saved
+    assert saved["capacity_field_metadata"]["fields"]["max_output_tokens"]["source"] == "operator"
+    assert result["updated_fields"] == ["context_window_tokens"]
+
+
+@pytest.mark.asyncio
+async def test_explicit_probe_persists_only_sanitized_metadata():
+    svc = import_svc()
+    record = {
+        "model_id": 1,
+        "model_type": "llm",
+        "model_factory": "dashscope",
+        "model_repo": "",
+        "model_name": "qwen-plus",
+        "display_name": "Qwen Plus",
+        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "api_key": "secret-marker",
+    }
+    metadata = {
+        "schema_version": 1,
+        "status": "unsupported",
+        "reason": "unsupported_endpoint",
+        "fingerprint": "safe",
+    }
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=[record]), \
+            mock.patch.object(svc, "run_token_count_probe", return_value=metadata) as mock_probe, \
+            mock.patch.object(svc, "update_model_record") as mock_update:
+        result = await svc.probe_token_count_for_tenant(
+            "u1", "t1", "Qwen Plus", force=True
+        )
+    assert result == metadata
+    mock_probe.assert_awaited_once()
+    saved = mock_update.call_args.args[1]
+    assert saved == {"token_count_probe_metadata": metadata}
+    assert "secret-marker" not in repr(saved)
 
 
 @pytest.mark.asyncio
@@ -872,19 +1014,19 @@ async def test_batch_create_models_for_tenant_flow():
     ]
 
     with mock.patch.object(svc, "get_models_by_tenant_factory_type", return_value=existing) as mock_get_existing, \
-            mock.patch.object(svc, "delete_model_record") as mock_delete, \
-            mock.patch.object(svc, "update_model_record") as mock_update, \
             mock.patch.object(svc, "prepare_model_dict", new=mock.AsyncMock(return_value={"prepared": True})) as mock_prep, \
-            mock.patch.object(svc, "create_model_record") as mock_create:
+            mock.patch.object(svc, "apply_model_mutations") as mock_apply:
 
         await svc.batch_create_models_for_tenant("u1", "t1", batch_payload)
 
         mock_get_existing.assert_called_once_with("t1", "silicon", "llm")
-        mock_delete.assert_called_once_with("del-id", "u1", "t1")
-        mock_update.assert_called_once_with(
-            "keep-id", {"max_tokens": 4096}, "u1")
         mock_prep.assert_awaited()
-        mock_create.assert_called_once()
+        mutation = mock_apply.call_args.kwargs
+        assert mutation["deletes"] == ["del-id"]
+        assert len(mutation["creates"]) == 1
+        assert mutation["updates"][0][0] == "keep-id"
+        assert mutation["updates"][0][1]["max_output_tokens"] == 4096
+        assert "max_tokens" not in mutation["updates"][0][1]
 
 
 @pytest.mark.asyncio
@@ -1024,11 +1166,8 @@ async def test_update_single_model_for_tenant_success_single_model():
         )
 
 
-async def test_update_single_model_for_tenant_mirrors_max_output_into_legacy_max_tokens():
-    """LLM updates carrying max_output_tokens must mirror into the legacy
-    max_tokens column so the SDK's pre-W2 auto-fill cannot read a stale value
-    and trip CallerMaxTokensOverrideForbidden at the W2 dispatch boundary.
-    """
+async def test_update_single_model_for_tenant_does_not_reverse_mirror_legacy_max_tokens():
+    """P1 makes max_tokens a one-way ingress alias for capacity models."""
     svc = import_svc()
 
     existing_models = [
@@ -1047,7 +1186,8 @@ async def test_update_single_model_for_tenant_mirrors_max_output_into_legacy_max
 
         update_args = mock_update.call_args.args[1]
         assert update_args["max_output_tokens"] == 131072
-        assert update_args["max_tokens"] == 131072
+        assert "max_tokens" not in update_args
+        assert update_args["capacity_field_metadata"]["fields"]["max_output_tokens"]["source"] == "operator"
 
 
 async def test_update_single_model_for_tenant_preserves_embedding_max_tokens():
@@ -1136,11 +1276,12 @@ async def test_batch_update_models_for_tenant_success():
     svc = import_svc()
 
     models = [{"model_id": "1", "max_tokens": 4096}, {"model_id": "2", "max_tokens": 8192}]
-    with mock.patch.object(svc, "update_model_record") as mock_update:
+    with mock.patch.object(svc, "apply_model_mutations") as mock_apply:
         await svc.batch_update_models_for_tenant("u1", "t1", models)
-        assert mock_update.call_count == 2
-        mock_update.assert_any_call(1, {"max_tokens": 4096}, "u1", "t1")
-        mock_update.assert_any_call(2, {"max_tokens": 8192}, "u1", "t1")
+        assert mock_apply.call_args.kwargs["updates"] == [
+            (1, {"max_tokens": 4096}),
+            (2, {"max_tokens": 8192}),
+        ]
 
 
 async def test_batch_update_models_for_tenant_by_name_factory():
@@ -1152,17 +1293,17 @@ async def test_batch_update_models_for_tenant_by_name_factory():
         svc,
         "get_model_by_name_factory",
         return_value={"model_id": 42},
-    ) as mock_lookup, mock.patch.object(svc, "update_model_record") as mock_update:
+    ) as mock_lookup, mock.patch.object(svc, "apply_model_mutations") as mock_apply:
         await svc.batch_update_models_for_tenant("u1", "t1", models)
         mock_lookup.assert_called_once_with("gpt-4", "openai", "t1")
-        mock_update.assert_called_once_with(42, {"max_tokens": 4096}, "u1", "t1")
+        assert mock_apply.call_args.kwargs["updates"] == [(42, {"max_tokens": 4096})]
 
 
 async def test_batch_update_models_for_tenant_exception():
     svc = import_svc()
 
     models = [{"model_id": "1"}]
-    with mock.patch.object(svc, "update_model_record", side_effect=Exception("oops")):
+    with mock.patch.object(svc, "apply_model_mutations", side_effect=Exception("oops")):
         with pytest.raises(Exception) as exc:
             await svc.batch_update_models_for_tenant("u1", "t1", models)
         assert "Failed to batch update models" in str(exc.value)
@@ -1790,13 +1931,11 @@ async def test_batch_create_models_for_tenant_update_branch_persists_operator_ca
             mock.patch.object(svc, "delete_model_record"), \
             mock.patch.object(svc, "split_repo_name", return_value=("dashscope", "glm-5.2")), \
             mock.patch.object(svc, "add_repo_to_name", return_value="dashscope/glm-5.2"), \
-            mock.patch.object(svc, "update_model_record") as mock_update, \
-            mock.patch.object(svc, "create_model_record"):
+            mock.patch.object(svc, "apply_model_mutations") as mock_apply:
 
         await svc.batch_create_models_for_tenant("u1", "t1", batch_payload)
 
-        mock_update.assert_called_once()
-        called_model_id, called_update_data, *_ = mock_update.call_args[0]
+        called_model_id, called_update_data = mock_apply.call_args.kwargs["updates"][0]
         assert called_model_id == 42
         assert called_update_data["context_window_tokens"] == 200000
         assert called_update_data["max_output_tokens"] == 31920
@@ -1806,8 +1945,8 @@ async def test_batch_create_models_for_tenant_update_branch_persists_operator_ca
 
 
 @pytest.mark.asyncio
-async def test_batch_create_models_for_tenant_update_branch_skips_provider_candidate_capacity():
-    """Provider-discovered hints must not auto-overwrite an existing row.
+async def test_batch_create_models_for_tenant_tracks_provider_candidate_fields():
+    """Provider facts fill unknown fields without claiming operator provenance.
 
     Even when the catalog response contains rich inference_metadata, those
     values stay tagged capacity_source="provider_candidate" until the
@@ -1847,21 +1986,16 @@ async def test_batch_create_models_for_tenant_update_branch_skips_provider_candi
             mock.patch.object(svc, "delete_model_record"), \
             mock.patch.object(svc, "split_repo_name", return_value=("dashscope", "glm-5.1")), \
             mock.patch.object(svc, "add_repo_to_name", return_value="dashscope/glm-5.1"), \
-            mock.patch.object(svc, "update_model_record") as mock_update, \
-            mock.patch.object(svc, "create_model_record"):
+            mock.patch.object(svc, "apply_model_mutations") as mock_apply:
 
         await svc.batch_create_models_for_tenant("u1", "t1", batch_payload)
 
-        # max_tokens didn't change between existing (8192) and incoming
-        # (8192), so no update is needed at all. If the implementation
-        # were treating provider_candidate as authoritative, update would
-        # fire with the W2 fields.
-        if mock_update.called:
-            _, called_update_data, *_ = mock_update.call_args[0]
-            assert "context_window_tokens" not in called_update_data
-            assert "max_output_tokens" not in called_update_data
-            assert "tokenizer_family" not in called_update_data
-            assert called_update_data.get("capacity_source") != "provider_candidate"
+        _, called_update_data = mock_apply.call_args.kwargs["updates"][0]
+        assert called_update_data["context_window_tokens"] == 128000
+        assert called_update_data["max_output_tokens"] == 8192
+        assert called_update_data["capacity_source"] == "provider_candidate"
+        fields = called_update_data["capacity_field_metadata"]["fields"]
+        assert fields["context_window_tokens"]["source"] == "provider"
 
 
 def test_get_capacity_coverage_filters_bare_llm_vlm_rows():

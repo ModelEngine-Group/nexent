@@ -25,12 +25,10 @@ export const hasCapacityInput = (value: CapacityFormValue): boolean =>
 
 export const buildCamelCapacityPayload = (value: CapacityFormValue) => {
   if (!hasCapacityInput(value)) return {};
-  const maxOutputTokens = toOptionalPositiveInt(value.maxOutputTokens);
   return {
     contextWindowTokens: toOptionalPositiveInt(value.contextWindowTokens),
     maxInputTokens: toOptionalPositiveInt(value.maxInputTokens),
-    maxOutputTokens,
-    ...(maxOutputTokens !== undefined ? { maxTokens: maxOutputTokens } : {}),
+    maxOutputTokens: toOptionalPositiveInt(value.maxOutputTokens),
     defaultOutputReserveTokens: toOptionalPositiveInt(
       value.defaultOutputReserveTokens
     ),

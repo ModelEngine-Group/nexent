@@ -711,6 +711,9 @@ export const ModelAddDialog = ({
           result.capacitySuggestion
         ) {
           setTopSuggestion(result.capacitySuggestion);
+          if (result.capacitySuggestion.capacityMatch?.autoApplicable) {
+            applyCapacitySuggestion(result.capacitySuggestion);
+          }
         }
       }
 
@@ -824,12 +827,9 @@ export const ModelAddDialog = ({
     return {
       ...model,
       ...resolved,
-      // Mirror max_output_tokens into legacy max_tokens. Backend has a coercion
-      // helper but mirroring here keeps the wire payload self-consistent.
-      max_tokens:
-        resolved.max_output_tokens ??
-        model.max_tokens ??
-        parseMaxTokens(form.maxTokens),
+      // P1 makes max_tokens ingress-only for capacity models. Explicitly
+      // remove provider-list legacy values from the serialized batch row.
+      max_tokens: undefined,
     };
   };
 
@@ -1032,9 +1032,6 @@ export const ModelAddDialog = ({
                 capacity_source: hasAny
                   ? payload.capacity_source
                   : model.capacity_source,
-                // Mirror max_output_tokens into legacy max_tokens so the
-                // backend coercion path stays consistent for rows that bypass it.
-                max_tokens: payload.max_output_tokens ?? model.max_tokens,
                 accepted_suggestion_match_kind:
                   gearAccepted?.matchKind || undefined,
                 accepted_capability_profile_version:
@@ -1085,10 +1082,7 @@ export const ModelAddDialog = ({
       // Determine the maximum tokens value.
       // For LLM/VLM (supportsCapacityFields), the legacy form.maxTokens
       // input is hidden and must not be read here per the W1/W2 plan
-      // ("Never use legacy max_tokens"). Seed the legacy column with 0;
-      // buildCapacityPayload(form) spreads max_tokens := max_output_tokens
-      // a few lines below, keeping the deprecated NOT NULL column aligned
-      // with the W2 source of truth.
+      // ("Never use legacy max_tokens").
       let maxTokensValue = supportsCapacityFields
         ? 0
         : parseMaxTokens(form.maxTokens) || 0;
@@ -1107,7 +1101,8 @@ export const ModelAddDialog = ({
       const acceptSignalKwargs = topAccepted
         ? {
             acceptedSuggestionMatchKind: topAccepted.matchKind,
-            ...(topAccepted.capabilityProfileVersion
+            ...(topAccepted.capabilityProfileVersion &&
+            topAccepted.capacityMatch?.autoApplicable
               ? {
                   acceptedCapabilityProfileVersion:
                     topAccepted.capabilityProfileVersion,
@@ -1124,9 +1119,12 @@ export const ModelAddDialog = ({
           type: modelType,
           url: form.url,
           apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
-          maxTokens: maxTokensValue,
+          ...(!supportsCapacityFields ? { maxTokens: maxTokensValue } : {}),
           displayName: form.displayName || form.name,
           ...(supportsCapacityFields ? buildCapacityPayload(form) : {}),
+          ...(supportsCapacityFields && capacitySuggestionEnabled
+            ? { capacityMode: "auto" }
+            : {}),
           ...acceptSignalKwargs,
         };
 
@@ -1166,9 +1164,12 @@ export const ModelAddDialog = ({
           type: modelType,
           url: form.url,
           apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
-          maxTokens: maxTokensValue,
+          ...(!supportsCapacityFields ? { maxTokens: maxTokensValue } : {}),
           displayName: form.displayName || form.name,
           ...(supportsCapacityFields ? buildCapacityPayload(form) : {}),
+          ...(supportsCapacityFields && capacitySuggestionEnabled
+            ? { capacityMode: "auto" }
+            : {}),
           ...acceptSignalKwargs,
         };
 
@@ -1849,6 +1850,12 @@ export const ModelAddDialog = ({
               suggestionLoading={topChecking}
               onUseSuggestion={() => applyCapacitySuggestion(topSuggestion)}
               acceptedSuggestion={topAccepted}
+              capacityFieldMetadata={
+                topAccepted?.governanceMetadataProposal ||
+                topSuggestion?.governanceMetadataProposal
+              }
+              canonicalModelId={topSuggestion?.canonicalIdentity?.canonicalId}
+              tokenizerMatchMetadata={topSuggestion?.tokenizerMatch}
               disabled={verifyingConnectivity}
             />
           </div>

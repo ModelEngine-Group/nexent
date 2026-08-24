@@ -1,7 +1,12 @@
 import { Alert, AutoComplete, Button, Input, Space, Tag, Tooltip } from "antd";
 import { useTranslation } from "react-i18next";
 
-import type { CapacitySuggestion } from "@/types/modelConfig";
+import type {
+  CapacityFieldMetadata,
+  CapacitySuggestion,
+  ProfileMatchMetadata,
+  TokenCountProbeMetadata,
+} from "@/types/modelConfig";
 import { buildCamelCapacityPayload } from "@/lib/modelCapacityPayload";
 
 // W11 spec L767-790. Common token-count presets surfaced as a fallback
@@ -56,6 +61,14 @@ interface ModelCapacityFieldsProps {
   validationError?: string | null;
   capacitySource?: CapacitySource | null;
   capabilityProfileVersion?: string | null;
+  capacityFieldMetadata?: CapacityFieldMetadata | null;
+  canonicalModelId?: string | null;
+  tokenizerMatchMetadata?: ProfileMatchMetadata | null;
+  tokenCountProbeMetadata?: TokenCountProbeMetadata | null;
+  onReviewAutomaticUpdate?: () => void;
+  reviewingAutomaticUpdate?: boolean;
+  onProbeTokenCount?: () => void;
+  probingTokenCount?: boolean;
   /**
    * 'add' shows a flat panel with the four user-facing fields
    * (context_window, max_input, max_output, tokenizer) and supports required
@@ -231,6 +244,14 @@ export const ModelCapacityFields = ({
   validationError,
   capacitySource,
   capabilityProfileVersion,
+  capacityFieldMetadata,
+  canonicalModelId,
+  tokenizerMatchMetadata,
+  tokenCountProbeMetadata,
+  onReviewAutomaticUpdate,
+  reviewingAutomaticUpdate = false,
+  onProbeTokenCount,
+  probingTokenCount = false,
   formMode = "edit",
   requiredFields = [],
   suggestion,
@@ -306,6 +327,14 @@ export const ModelCapacityFields = ({
     presetOptions?: { value: string; label: string }[]
   ) => {
     const showPreset = presetOptions && !fieldHasSuggestion(field);
+    const provenance = capacityFieldMetadata?.fields[field];
+    const sourceLabels: Record<string, string> = {
+      catalog: "Automatic",
+      provider: "Provider",
+      operator: "Manual",
+      legacy: "Legacy",
+      unknown: "Unknown",
+    };
     const inputControl = showPreset ? (
       <AutoComplete
         className="w-full"
@@ -342,6 +371,27 @@ export const ModelCapacityFields = ({
           {requiredSet.has(field) && (
             <span className="text-red-500 ml-1">*</span>
           )}
+          {provenance?.source && (
+            <Tag
+              className="ml-2"
+              color={
+                provenance.source === "catalog"
+                  ? "green"
+                  : provenance.source === "operator"
+                    ? "blue"
+                    : provenance.source === "provider"
+                      ? "gold"
+                      : provenance.source === "legacy"
+                        ? "orange"
+                        : "default"
+              }
+            >
+              {t(`model.dialog.capacity.fieldSource.${provenance.source}`, {
+                defaultValue:
+                  sourceLabels[provenance.source] || provenance.source,
+              })}
+            </Tag>
+          )}
         </label>
         {inputControl}
       </div>
@@ -364,6 +414,51 @@ export const ModelCapacityFields = ({
               {capabilityProfileVersion}
             </span>
           )}
+        </div>
+      )}
+
+      {(canonicalModelId ||
+        tokenizerMatchMetadata ||
+        tokenCountProbeMetadata) && (
+        <div className="rounded border border-gray-200 bg-gray-50 p-2 text-xs text-gray-600 space-y-1">
+          {canonicalModelId && <div>Model identity: {canonicalModelId}</div>}
+          {tokenizerMatchMetadata && (
+            <div>
+              Tokenizer:{" "}
+              {tokenizerMatchMetadata.autoApplicable ? "Exact" : "Estimated"}
+              {tokenizerMatchMetadata.reason
+                ? ` · ${tokenizerMatchMetadata.reason}`
+                : ""}
+            </div>
+          )}
+          {tokenCountProbeMetadata && (
+            <div>
+              Count endpoint: {tokenCountProbeMetadata.status} ·{" "}
+              {tokenCountProbeMetadata.reason}
+            </div>
+          )}
+          <Space size={6} wrap>
+            {onReviewAutomaticUpdate && (
+              <Button
+                size="small"
+                onClick={onReviewAutomaticUpdate}
+                loading={reviewingAutomaticUpdate}
+                disabled={disabled}
+              >
+                Review automatic update
+              </Button>
+            )}
+            {onProbeTokenCount && (
+              <Button
+                size="small"
+                onClick={onProbeTokenCount}
+                loading={probingTokenCount}
+                disabled={disabled}
+              >
+                Test token count
+              </Button>
+            )}
+          </Space>
         </div>
       )}
 

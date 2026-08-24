@@ -22,6 +22,7 @@ CapacitySource = Literal[
 ReasoningWindowBehavior = Literal["none", "reserved", "unknown"]
 ProviderOverheadBehavior = Literal["negligible", "bounded", "unknown"]
 PromptCacheCapability = Literal["none", "supported", "unknown"]
+ProfileConfidence = Literal["high", "medium", "low", "unknown"]
 
 
 ProfileKey = Tuple[str, str]
@@ -58,6 +59,76 @@ class CapabilityProfile(BaseModel):
     reasoning_window_behavior: ReasoningWindowBehavior = "unknown"
     provider_overhead_behavior: ProviderOverheadBehavior = "unknown"
     prompt_cache: PromptCacheCapability = "unknown"
+
+    # P1 catalog-governance declarations. They intentionally default to an
+    # incomplete/suggestion-only state so old catalog rows cannot silently be
+    # promoted to verified automatic facts during rollout.
+    aliases: Tuple[str, ...] = ()
+    exclusions: Tuple[str, ...] = ()
+    evidence: Tuple[str, ...] = ()
+    verified_at: Optional[str] = None
+    shared_context: Optional[bool] = None
+    independent_input: Optional[bool] = None
+    max_output: Optional[int] = None
+    reasoning_behavior: Optional[ReasoningWindowBehavior] = None
+    overhead_behavior: Optional[ProviderOverheadBehavior] = None
+    confidence: ProfileConfidence = "unknown"
+
+    def automatic_validation_errors(self) -> Tuple[str, ...]:
+        """Return fail-closed reasons preventing automatic catalog use."""
+        errors: list[str] = []
+        if not self.aliases:
+            errors.append("aliases_missing")
+        if not self.evidence or any(not item.strip() for item in self.evidence):
+            errors.append("evidence_missing")
+        if not self.verified_at:
+            errors.append("verified_at_missing")
+        if self.shared_context is None:
+            errors.append("shared_context_missing")
+        if self.independent_input is None:
+            errors.append("independent_input_missing")
+        if self.max_output is None or self.max_output <= 0:
+            errors.append("max_output_missing")
+        elif self.max_output_tokens is not None and self.max_output != self.max_output_tokens:
+            errors.append("max_output_conflict")
+        if self.reasoning_behavior is None:
+            errors.append("reasoning_behavior_missing")
+        if self.overhead_behavior is None:
+            errors.append("overhead_behavior_missing")
+        if self.confidence != "high":
+            errors.append("confidence_not_high")
+        if self.shared_context is True and self.window_shape != "combined":
+            errors.append("shared_context_conflict")
+        if self.independent_input is True and self.max_input_tokens is None:
+            errors.append("independent_input_limit_missing")
+        return tuple(errors)
+
+    @property
+    def auto_applicable(self) -> bool:
+        return not self.automatic_validation_errors()
+
+
+def validate_capability_catalog(
+    catalog: Mapping[ProfileKey, CapabilityProfile],
+) -> Mapping[ProfileKey, Tuple[str, ...]]:
+    """Validate catalog identity and automatic-use declarations.
+
+    Incomplete legacy rows are returned with reasons and remain
+    suggestion-only. A row that claims high confidence fails closed because a
+    verified label without complete evidence is a catalog authoring error.
+    """
+    diagnostics: dict[ProfileKey, Tuple[str, ...]] = {}
+    for key, profile in catalog.items():
+        if key != (profile.provider, profile.model_name):
+            raise ValueError(f"catalog_key_mismatch:{key!r}")
+        reasons = profile.automatic_validation_errors()
+        if profile.confidence == "high" and reasons:
+            raise ValueError(
+                f"incomplete_verified_profile:{profile.capability_profile_version}:"
+                f"{','.join(reasons)}"
+            )
+        diagnostics[key] = reasons
+    return diagnostics
 
 
 class ModelCapacitySnapshot(BaseModel):

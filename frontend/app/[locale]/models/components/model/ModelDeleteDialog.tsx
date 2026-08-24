@@ -1723,7 +1723,7 @@ export const ModelDeleteDialog = ({
 
                   return (
                     <div
-                      key={model.name}
+                      key={`${model.type}-${model.id}`}
                       onClick={
                         isClickable
                           ? () =>
