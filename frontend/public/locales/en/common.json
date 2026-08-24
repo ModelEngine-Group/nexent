@@ -1857,7 +1857,7 @@
   "mcpService.message.uploadImageSuccess": "MCP image uploaded and started successfully",
   "mcpService.message.uploadImageFailed": "Failed to upload MCP image",
   "mcpService.message.invalidUploadParameters": "Invalid upload parameters",
-  "mcpService.message.serviceNameAlreadyExists": "MCP service name already exists",
+  "mcpService.message.serviceNameAlreadyExists": "An MCP service with the same name already exists. Please change the service name.",
   "mcpService.message.fileTooLarge": "File size exceeds limit",
   "mcpService.message.missingMcpImage": "Failed to add container: MCP service startup image is missing",
   "agentConfig.tools.refreshSuccess": "Tool list refreshed successfully",
