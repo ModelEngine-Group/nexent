@@ -731,7 +731,6 @@ export const API_ENDPOINTS = {
   },
   monitoring: {
     models: `${API_BASE_URL}/monitoring/models`,
-    contextBudget: `${API_BASE_URL}/monitoring/context-budget`,
     status: `${API_BASE_URL}/monitoring/status`,
   },
   notifications: {
