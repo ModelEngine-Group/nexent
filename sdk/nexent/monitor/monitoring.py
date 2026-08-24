@@ -1387,6 +1387,7 @@ class MonitoringManager:
             "context.tokens.pre_compression": getattr(evidence, "raw_token_estimate", 0),
             "context.tokens.post_compression": getattr(evidence, "final_token_estimate", 0),
             "context.budget.hard_exceeded": bool(getattr(evidence, "over_hard_budget", False)),
+            "context.budget.failure_reason": getattr(evidence, "budget_failure_reason", "") or "",
             "context.compression.attempted": bool(getattr(evidence, "compression_attempted", False)),
             "context.compression.fallback_compaction": bool(getattr(evidence, "fallback_compaction_used", False)),
             "context.compression.records": json.dumps(compression_records, ensure_ascii=False, sort_keys=True),

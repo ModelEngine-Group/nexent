@@ -12,9 +12,8 @@ import threading
 import asyncio
 import time
 import json
-from typing import List, Optional, Dict, Any
+from typing import Callable, List, Optional, Dict, Any
 
-from openai.types.chat.chat_completion_message import ChatCompletionMessage
 from smolagents import Tool
 from smolagents.models import OpenAIServerModel, ChatMessage, MessageRole
 
@@ -33,6 +32,21 @@ from .prompt_cache import (
     resolve_prompt_cache_profile,
 )
 from .message_utils import prepare_messages_for_smolagents_text_flattening
+from .final_request_budget import (
+    FinalRequestIdentity,
+    FinalRequestMeter,
+    FinalRequestPreflight,
+    FinalRequestOverHardBudget,
+    FinalRequestSoftBudgetExceeded,
+    CompactionNoReduction,
+    ProviderContextOverflowRetryExhausted,
+    ProviderContextOverflowRetryUnsafe,
+    RequestSideEffectGuard,
+    build_final_request_shape,
+    is_provider_context_overflow,
+)
+from .provider_request_count import count_final_request, endpoint_fingerprint
+from .tokenizer_registry import resolve as resolve_tokenizer
 
 logger = logging.getLogger("openai_llm")
 
@@ -91,6 +105,14 @@ class OpenAIModel(OpenAIServerModel):
         """
         capacity_snapshot: Optional[Dict[str, Any]] = kwargs.pop("capacity_snapshot", None)
         prompt_cache: Optional[Dict[str, Any]] = kwargs.pop("prompt_cache", None)
+        self.canonical_model_id = kwargs.pop("canonical_model_id", None)
+        self.model_identity_metadata = kwargs.pop("model_identity_metadata", None)
+        self.tokenizer_match_metadata = kwargs.pop("tokenizer_match_metadata", None)
+        self.tokenizer_family = kwargs.pop("tokenizer_family", None)
+        self.token_count_probe_metadata = kwargs.pop("token_count_probe_metadata", None)
+        self._token_count_api_base = str(kwargs.get("api_base") or "")
+        self._token_count_api_key = str(kwargs.get("api_key") or "")
+        self._token_count_ssl_verify = bool(ssl_verify)
 
         self.observer = observer
         self.temperature = temperature
@@ -106,6 +128,8 @@ class OpenAIModel(OpenAIServerModel):
         self.last_prompt_cache_usage = None
         self.last_cached_input_token_count = 0
         self.last_response_diagnostics = None
+        self.last_final_request_preflight: Optional[FinalRequestPreflight] = None
+        self._final_request_meter = FinalRequestMeter()
         self.safe_input_budget_snapshot = safe_input_budget_snapshot
         self.capacity_snapshot = capacity_snapshot
         if max_output_tokens is None and max_tokens is not None:
@@ -151,8 +175,14 @@ class OpenAIModel(OpenAIServerModel):
     def __call__(self, messages: List[Dict[str, Any]], stop_sequences: Optional[List[str]] = None,
                  response_format: dict[str, str] | None = None, tools_to_call_from: Optional[List[Tool]] = None,
                  _token_tracker=None, safe_input_budget_snapshot: Optional[SafeInputBudgetSnapshot] = None,
+                 context_rebuild: Optional[Callable[[int], Any]] = None,
+                 _budget_retry_ordinal: int = 0,
+                 _soft_rebuild_attempted: bool = False,
+                 _previous_preflight: Optional[FinalRequestPreflight] = None,
+                 _side_effect_guard: Optional[RequestSideEffectGuard] = None,
                  **kwargs, ) -> ChatMessage:
         _monitoring_operation.set("chat_completion")
+        side_effect_guard = _side_effect_guard or RequestSideEffectGuard()
 
         if _token_tracker is None:
             trusted_budget_snapshot = (
@@ -191,6 +221,11 @@ class OpenAIModel(OpenAIServerModel):
                     tools_to_call_from=tools_to_call_from,
                     _token_tracker=token_tracker,
                     safe_input_budget_snapshot=safe_input_budget_snapshot,
+                    context_rebuild=context_rebuild,
+                    _budget_retry_ordinal=_budget_retry_ordinal,
+                    _soft_rebuild_attempted=_soft_rebuild_attempted,
+                    _previous_preflight=_previous_preflight,
+                    _side_effect_guard=side_effect_guard,
                     **kwargs,
                 )
 
@@ -259,6 +294,8 @@ class OpenAIModel(OpenAIServerModel):
         trusted_budget_snapshot = (
             safe_input_budget_snapshot or self.safe_input_budget_snapshot
         )
+        if trusted_budget_snapshot is None:
+            self.last_final_request_preflight = None
 
         # Bound completion length unless the caller passed their own override
         # via kwargs (which already landed in completion_kwargs above).
@@ -316,12 +353,47 @@ class OpenAIModel(OpenAIServerModel):
                 }
             )
 
-        current_request = self._dispatch_chat_completion(
-            safe_input_budget_snapshot=trusted_budget_snapshot,
-            capacity_snapshot=self.capacity_snapshot,
-            stream=True,
-            **dispatch_kwargs,
-        )
+        try:
+            current_request = self._dispatch_chat_completion(
+                safe_input_budget_snapshot=trusted_budget_snapshot,
+                capacity_snapshot=self.capacity_snapshot,
+                retry_ordinal=_budget_retry_ordinal,
+                request_rebuild_available=context_rebuild is not None,
+                soft_rebuild_attempted=_soft_rebuild_attempted,
+                previous_preflight=_previous_preflight,
+                stream=True,
+                **dispatch_kwargs,
+            )
+        except FinalRequestSoftBudgetExceeded as soft_error:
+            return self._rebuild_and_retry(
+                soft_error.preflight,
+                context_rebuild=context_rebuild,
+                token_tracker=token_tracker,
+                stop_sequences=stop_sequences,
+                response_format=response_format,
+                tools_to_call_from=tools_to_call_from,
+                trusted_budget_snapshot=trusted_budget_snapshot,
+                retry_ordinal=_budget_retry_ordinal,
+                soft_rebuild_attempted=True,
+                call_kwargs=kwargs,
+            )
+        except Exception as error:
+            if not is_provider_context_overflow(error):
+                raise
+            if trusted_budget_snapshot is None:
+                raise
+            return self._recover_provider_overflow(
+                error,
+                preflight=self.last_final_request_preflight,
+                context_rebuild=context_rebuild,
+                token_tracker=token_tracker,
+                stop_sequences=stop_sequences,
+                response_format=response_format,
+                tools_to_call_from=tools_to_call_from,
+                trusted_budget_snapshot=trusted_budget_snapshot,
+                retry_ordinal=_budget_retry_ordinal,
+                call_kwargs=kwargs,
+            )
 
         # Validate response type: ensure we got a proper iterator, not error strings or dicts
         # Some APIs return error strings like "error: rate limit" or JSON dicts on failure
@@ -341,6 +413,8 @@ class OpenAIModel(OpenAIServerModel):
         reasoning_char_count = 0
         empty_choices_chunk_count = 0
         nonstandard_chunk_count = 0
+        tool_call_chunk_count = 0
+        tool_call_fragments: Dict[int, Dict[str, Any]] = {}
 
         # Reset output mode
         self.observer.current_mode = ProcessType.MODEL_OUTPUT_THINKING
@@ -351,6 +425,7 @@ class OpenAIModel(OpenAIServerModel):
 
         try:
             for chunk in current_request:
+                side_effect_guard.mark("response_started")
                 # Safety check: skip non-standard chunks that lack expected attributes
                 # This handles edge cases where API returns error responses as chunks
                 if not hasattr(chunk, 'choices'):
@@ -371,9 +446,37 @@ class OpenAIModel(OpenAIServerModel):
                 if chunk_finish_reason is not None:
                     finish_reason = str(chunk_finish_reason)
 
-                new_token = chunk.choices[0].delta.content
+                delta = chunk.choices[0].delta
+                delta_role = getattr(delta, "role", None)
+                if delta_role is not None:
+                    role = delta_role
+                new_token = delta.content
                 reasoning_content = getattr(
-                    chunk.choices[0].delta, 'reasoning_content', None)
+                    delta, 'reasoning_content', None)
+                delta_tool_calls = getattr(delta, "tool_calls", None) or []
+                for position, tool_call in enumerate(delta_tool_calls):
+                    index = getattr(tool_call, "index", position)
+                    if not isinstance(index, int):
+                        index = position
+                    fragment = tool_call_fragments.setdefault(
+                        index,
+                        {"id": "", "type": "function", "name": "", "arguments": ""},
+                    )
+                    call_id = getattr(tool_call, "id", None)
+                    call_type = getattr(tool_call, "type", None)
+                    function = getattr(tool_call, "function", None)
+                    if call_id:
+                        fragment["id"] += str(call_id)
+                    if call_type:
+                        fragment["type"] = str(call_type)
+                    if function is not None:
+                        name = getattr(function, "name", None)
+                        arguments = getattr(function, "arguments", None)
+                        if name:
+                            fragment["name"] += str(name)
+                        if arguments:
+                            fragment["arguments"] += str(arguments)
+                    tool_call_chunk_count += 1
 
                 # Handle reasoning_content if it exists and is not null
                 if reasoning_content is not None:
@@ -398,7 +501,6 @@ class OpenAIModel(OpenAIServerModel):
 
                     self.observer.add_model_new_token(new_token)
                     token_join.append(new_token)
-                    role = chunk.choices[0].delta.role
 
                 chunk_list.append(chunk)
                 if self.stop_event.is_set():
@@ -411,6 +513,17 @@ class OpenAIModel(OpenAIServerModel):
             # Send end marker
             self.observer.flush_remaining_tokens()
             model_output = "".join(token_join)
+            tool_calls = [
+                {
+                    "id": fragment["id"] or f"tool_call_{index}",
+                    "type": fragment["type"],
+                    "function": {
+                        "name": fragment["name"],
+                        "arguments": fragment["arguments"],
+                    },
+                }
+                for index, fragment in sorted(tool_call_fragments.items())
+            ]
             self.last_finish_reason = finish_reason
             if finish_reason == "length":
                 logger.warning(
@@ -452,6 +565,23 @@ class OpenAIModel(OpenAIServerModel):
                     f"input_tokens={input_tokens}, output_tokens={output_tokens}"
                 )
 
+            if (
+                usage is not None
+                and trusted_budget_snapshot is not None
+                and self.last_final_request_preflight is not None
+            ):
+                calibration_added = self._final_request_meter.observe_usage(
+                    self.last_final_request_preflight,
+                    self._build_final_request_identity(trusted_budget_snapshot),
+                    provider_prompt_tokens=input_tokens,
+                )
+                self._monitoring.set_span_attributes(
+                    **{
+                        "context.final_request.calibration_observed": calibration_added,
+                        "context.final_request.provider_prompt_tokens": input_tokens,
+                    }
+                )
+
             cache_usage = extract_prompt_cache_usage(
                 usage, input_tokens, capability_profile=selected_cache_profile
             )
@@ -483,6 +613,8 @@ class OpenAIModel(OpenAIServerModel):
                 "reasoning_char_count": reasoning_char_count,
                 "empty_choices_chunk_count": empty_choices_chunk_count,
                 "nonstandard_chunk_count": nonstandard_chunk_count,
+                "tool_call_chunk_count": tool_call_chunk_count,
+                "tool_call_count": len(tool_calls),
                 "input_tokens": input_tokens,
                 "output_tokens": output_tokens,
             }
@@ -500,7 +632,7 @@ class OpenAIModel(OpenAIServerModel):
                     "chunk_count": len(chunk_list)
                 })
 
-            if not model_output.strip():
+            if not model_output.strip() and not tool_calls:
                 logger.warning(
                     "event=empty_model_response model_id=%s provider=%s "
                     "finish_reason=%s chunk_count=%d content_chunk_count=%d "
@@ -526,9 +658,11 @@ class OpenAIModel(OpenAIServerModel):
                     f"output_tokens={output_tokens})"
                 )
 
-            message = ChatMessage.from_dict(
-                ChatCompletionMessage(role=role if role else "assistant",  # If there is no explicit role, default to "assistant"
-                                      content=model_output).model_dump(include={"role", "content", "tool_calls"}))
+            message = ChatMessage.from_dict({
+                "role": role if role else "assistant",
+                "content": model_output or None,
+                "tool_calls": tool_calls or None,
+            })
 
             from smolagents.monitoring import TokenUsage
 
@@ -546,8 +680,26 @@ class OpenAIModel(OpenAIServerModel):
                 self._monitoring.add_span_event("error_occurred", {"error_type": type(
                     e).__name__, "error_message": str(e)})
 
-            if "context_length_exceeded" in str(e):
-                raise ValueError(f"Token limit exceeded: {str(e)}")
+            if is_provider_context_overflow(e):
+                if trusted_budget_snapshot is None:
+                    raise ValueError(f"Token limit exceeded: {str(e)}") from e
+                if not side_effect_guard.recovery_safe:
+                    self._record_recovery_state("retry_unsafe_after_response")
+                    raise ProviderContextOverflowRetryUnsafe(
+                        "provider overflow arrived after response streaming started"
+                    ) from e
+                return self._recover_provider_overflow(
+                    e,
+                    preflight=self.last_final_request_preflight,
+                    context_rebuild=context_rebuild,
+                    token_tracker=token_tracker,
+                    stop_sequences=stop_sequences,
+                    response_format=response_format,
+                    tools_to_call_from=tools_to_call_from,
+                    trusted_budget_snapshot=trusted_budget_snapshot,
+                    retry_ordinal=_budget_retry_ordinal,
+                    call_kwargs=kwargs,
+                )
             raise e
 
     def _dispatch_chat_completion(
@@ -555,6 +707,10 @@ class OpenAIModel(OpenAIServerModel):
         *,
         safe_input_budget_snapshot: Optional[SafeInputBudgetSnapshot | Dict[str, Any]] = None,
         capacity_snapshot: Optional[Dict[str, Any]] = None,
+        retry_ordinal: int = 0,
+        request_rebuild_available: bool = False,
+        soft_rebuild_attempted: bool = False,
+        previous_preflight: Optional[FinalRequestPreflight] = None,
         **completion_kwargs: Any,
     ) -> Any:
         """Dispatch the OpenAI chat completion request.
@@ -574,6 +730,13 @@ class OpenAIModel(OpenAIServerModel):
                 budget_snapshot=snapshot,
                 capacity_snapshot=capacity_snapshot,
             )
+            request_model = completion_kwargs.get("model")
+            if request_model is not None and str(request_model) != snapshot.model_name:
+                raise SafeInputBudgetCapacityMismatch(
+                    field="model_name",
+                    expected=snapshot.model_name,
+                    actual=str(request_model),
+                )
             trusted_max_tokens = snapshot.requested_output_tokens
             caller_max_tokens = completion_kwargs.get("max_tokens")
             if caller_max_tokens is not None and caller_max_tokens != trusted_max_tokens:
@@ -582,7 +745,239 @@ class OpenAIModel(OpenAIServerModel):
                     caller_value=caller_max_tokens,
                 )
             completion_kwargs["max_tokens"] = trusted_max_tokens
+            identity = self._build_final_request_identity(snapshot)
+            final_shape = build_final_request_shape(completion_kwargs)
+            provider_count, fallback_reason = count_final_request(
+                final_shape,
+                metadata=self.token_count_probe_metadata,
+                base_url=self._token_count_api_base,
+                api_key=self._token_count_api_key,
+                model_name=self.model_id,
+                canonical_model_id=identity.canonical_model_id,
+                ssl_verify=self._token_count_ssl_verify,
+            )
+            tokenizer_count = self._verified_tokenizer_count(final_shape)
+            try:
+                preflight = self._final_request_meter.measure(
+                    completion_kwargs,
+                    identity=identity,
+                    soft_budget=snapshot.soft_input_budget_tokens,
+                    hard_budget=snapshot.hard_input_budget_tokens,
+                    provider_count=provider_count,
+                    tokenizer_count=tokenizer_count,
+                    fallback_reason=fallback_reason,
+                    retry_ordinal=retry_ordinal,
+                )
+            except FinalRequestOverHardBudget as budget_error:
+                if budget_error.preflight is not None:
+                    self.last_final_request_preflight = budget_error.preflight
+                    self._record_final_request_preflight(
+                        budget_error.preflight,
+                        recovery_state="hard_stop",
+                    )
+                raise
+            if retry_ordinal > 0 and previous_preflight is not None and (
+                preflight.request_fingerprint == previous_preflight.request_fingerprint
+                or preflight.hard_count >= previous_preflight.hard_count
+            ):
+                self._record_recovery_state("no_reduction")
+                raise CompactionNoReduction(
+                    "compaction_no_reduction: rebuilt final request did not strictly shrink"
+                )
+            self.last_final_request_preflight = preflight
+            self._record_final_request_preflight(
+                preflight,
+                recovery_state=(
+                    "recovered"
+                    if retry_ordinal > 0
+                    else "soft_rebuilt"
+                    if soft_rebuild_attempted
+                    else "not_attempted"
+                ),
+            )
+            if (
+                preflight.soft_exceeded
+                and request_rebuild_available
+                and not soft_rebuild_attempted
+            ):
+                raise FinalRequestSoftBudgetExceeded(preflight)
         return self.client.chat.completions.create(**completion_kwargs)
+
+    def _verified_tokenizer_count(self, shape: Any) -> Optional[int]:
+        metadata = self.tokenizer_match_metadata or {}
+        if (
+            shape.request_shape != "text"
+            or not self.tokenizer_family
+            or metadata.get("auto_applicable") is not True
+        ):
+            return None
+        adapter, mode = resolve_tokenizer(self.tokenizer_family)
+        if mode != "exact":
+            return None
+        messages = shape.semantic_request.get("messages") or []
+        message_count = adapter.count_tokens(messages)
+        return max(
+            1,
+            message_count
+            + shape.components.reasoning
+            + shape.components.other_semantic,
+        )
+
+    def _recover_provider_overflow(
+        self,
+        error: BaseException,
+        *,
+        preflight: Optional[FinalRequestPreflight],
+        context_rebuild: Optional[Callable[[int], Any]],
+        token_tracker: Any,
+        stop_sequences: Optional[List[str]],
+        response_format: Optional[dict[str, str]],
+        tools_to_call_from: Optional[List[Tool]],
+        trusted_budget_snapshot: Optional[SafeInputBudgetSnapshot | Dict[str, Any]],
+        retry_ordinal: int,
+        call_kwargs: Dict[str, Any],
+    ) -> ChatMessage:
+        if retry_ordinal >= 1:
+            self._record_recovery_state("retry_exhausted")
+            raise ProviderContextOverflowRetryExhausted(
+                "provider context overflow persisted after the single safe retry"
+            ) from error
+        if context_rebuild is None or preflight is None:
+            self._record_recovery_state("retry_unsafe")
+            raise ProviderContextOverflowRetryUnsafe(
+                "provider context overflow cannot be rebuilt from source"
+            ) from error
+        self._monitoring.add_span_event(
+            "provider_context_overflow",
+            {"retry_ordinal": retry_ordinal, "recovery_safe": True},
+        )
+        self._record_recovery_state("retrying")
+        return self._rebuild_and_retry(
+            preflight,
+            context_rebuild=context_rebuild,
+            token_tracker=token_tracker,
+            stop_sequences=stop_sequences,
+            response_format=response_format,
+            tools_to_call_from=tools_to_call_from,
+            trusted_budget_snapshot=trusted_budget_snapshot,
+            retry_ordinal=retry_ordinal + 1,
+            soft_rebuild_attempted=True,
+            call_kwargs=call_kwargs,
+        )
+
+    def _rebuild_and_retry(
+        self,
+        preflight: FinalRequestPreflight,
+        *,
+        context_rebuild: Optional[Callable[[int], Any]],
+        token_tracker: Any,
+        stop_sequences: Optional[List[str]],
+        response_format: Optional[dict[str, str]],
+        tools_to_call_from: Optional[List[Tool]],
+        trusted_budget_snapshot: Optional[SafeInputBudgetSnapshot | Dict[str, Any]],
+        retry_ordinal: int,
+        soft_rebuild_attempted: bool,
+        call_kwargs: Dict[str, Any],
+    ) -> ChatMessage:
+        if context_rebuild is None:
+            self._record_recovery_state("retry_unsafe")
+            raise ProviderContextOverflowRetryUnsafe(
+                "final request needs source-backed rebuild but none is available"
+            )
+        target = max(
+            1,
+            min(preflight.soft_budget, int(preflight.hard_count * 0.9)),
+        )
+        rebuilt = context_rebuild(target)
+        rebuilt_messages = getattr(rebuilt, "messages", rebuilt)
+        if not isinstance(rebuilt_messages, list):
+            raise TypeError("context_rebuild must return FinalContext or a message list")
+        evidence = getattr(rebuilt, "evidence", None)
+        if evidence is not None:
+            self.last_context_evidence = evidence
+        return self.__call__(
+            messages=rebuilt_messages,
+            stop_sequences=stop_sequences,
+            response_format=response_format,
+            tools_to_call_from=tools_to_call_from,
+            _token_tracker=token_tracker,
+            safe_input_budget_snapshot=trusted_budget_snapshot,
+            context_rebuild=context_rebuild,
+            _budget_retry_ordinal=retry_ordinal,
+            _soft_rebuild_attempted=soft_rebuild_attempted,
+            _previous_preflight=preflight,
+            _side_effect_guard=RequestSideEffectGuard(),
+            **call_kwargs,
+        )
+
+    def _build_final_request_identity(
+        self,
+        snapshot: SafeInputBudgetSnapshot | Dict[str, Any],
+    ) -> FinalRequestIdentity:
+        resolved = self._coerce_safe_input_budget_snapshot(snapshot)
+        if resolved is None:  # pragma: no cover - protected by callers
+            raise ValueError("safe input budget snapshot is required")
+        probe = self.token_count_probe_metadata or {}
+        runtime_endpoint = (
+            endpoint_fingerprint(self._token_count_api_base)
+            if self._token_count_api_base
+            else "unknown_endpoint"
+        )
+        return FinalRequestIdentity(
+            endpoint_fingerprint=runtime_endpoint,
+            credential_scope_fingerprint=str(
+                probe.get("credential_scope_fingerprint") or "unknown_scope"
+            ),
+            canonical_model_id=str(
+                self.canonical_model_id
+                or probe.get("model_identity")
+                or f"{resolved.provider}:{resolved.model_name}"
+            ),
+            provider=resolved.provider,
+            model_name=resolved.model_name,
+            w1_fingerprint=resolved.w1_fingerprint,
+            w2_fingerprint=resolved.fingerprint,
+        )
+
+    def _record_recovery_state(self, state: str) -> None:
+        self._monitoring.set_span_attributes(
+            **{"context.final_request.recovery_state": state}
+        )
+
+    def _record_final_request_preflight(
+        self,
+        preflight: FinalRequestPreflight,
+        *,
+        recovery_state: str,
+    ) -> None:
+        components = preflight.components
+        self._monitoring.set_span_attributes(
+            **{
+                "context.final_request.fingerprint": preflight.request_fingerprint,
+                "context.final_request.identity_fingerprint": preflight.identity_fingerprint,
+                "context.final_request.shape": preflight.request_shape,
+                "context.final_request.count_source": preflight.count_source,
+                "context.final_request.raw_estimate": preflight.raw_estimate,
+                "context.final_request.soft_count": preflight.soft_count,
+                "context.final_request.hard_count": preflight.hard_count,
+                "context.final_request.soft_exceeded": preflight.soft_exceeded,
+                "context.final_request.hard_exceeded": preflight.hard_exceeded,
+                "context.final_request.components.message_text": components.message_text,
+                "context.final_request.components.message_framing": components.message_framing,
+                "context.final_request.components.tools": components.tools,
+                "context.final_request.components.media": components.media,
+                "context.final_request.components.reasoning": components.reasoning,
+                "context.final_request.components.other_semantic": components.other_semantic,
+                "context.final_request.calibration_key": preflight.calibration_key_fingerprint,
+                "context.final_request.calibration_samples": preflight.calibration_sample_count,
+                "context.final_request.calibration_p95": preflight.calibration_p95 or 0.0,
+                "context.final_request.calibration_p99": preflight.calibration_p99 or 0.0,
+                "context.final_request.estimator_version": preflight.estimator_version,
+                "context.final_request.retry_ordinal": preflight.retry_ordinal,
+                "context.final_request.recovery_state": recovery_state,
+                "context.final_request.count_fallback_reason": preflight.fallback_reason or "",
+            }
+        )
 
     @staticmethod
     def _verify_w1_w2_consistency(

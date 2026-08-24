@@ -3774,7 +3774,14 @@ class TestCreateModelConfigList:
             mock_manager.get_model_config.return_value = {
                 "api_key": "main_key",
                 "model_name": "main_model",
-                "base_url": "http://main.url"
+                "base_url": "http://main.url",
+                "context_window_tokens": 1_000_000,
+                "max_input_tokens": 991_808,
+                "default_output_reserve_tokens": 8_192,
+                "canonical_model_id": "qwen:qwen3.7-plus",
+                "tokenizer_family": "qwen",
+                "tokenizer_match_metadata": {"auto_applicable": True},
+                "token_count_probe_metadata": {"status": "supported"},
             }
 
             # Mock utility functions
@@ -3817,12 +3824,18 @@ class TestCreateModelConfigList:
             assert calls[2][1]['api_key'] == "main_key"
             assert calls[2][1]['model_name'] == "main_model_name"
             assert calls[2][1]['url'] == "http://main.url"
+            assert calls[2][1]['context_window_tokens'] == 1_000_000
+            assert calls[2][1]['canonical_model_id'] == "qwen:qwen3.7-plus"
+            assert calls[2][1]['token_count_probe_metadata'] == {"status": "supported"}
 
             # Fourth call: sub_model
             assert calls[3][1]['cite_name'] == "sub_model"
             assert calls[3][1]['api_key'] == "main_key"
             assert calls[3][1]['model_name'] == "main_model_name"
             assert calls[3][1]['url'] == "http://main.url"
+            assert calls[3][1]['context_window_tokens'] == 1_000_000
+            assert calls[3][1]['canonical_model_id'] == "qwen:qwen3.7-plus"
+            assert calls[3][1]['token_count_probe_metadata'] == {"status": "supported"}
 
     @pytest.mark.asyncio
     async def test_create_model_config_list_empty_database(self):

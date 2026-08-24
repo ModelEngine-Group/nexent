@@ -756,8 +756,11 @@ Additional Args:
         """Stop before the provider call when safe compaction cannot fit input."""
         evidence = final_context.evidence
         if evidence.over_hard_budget is True:
+            reason = getattr(
+                evidence, "budget_failure_reason", None
+            ) or "final_request_over_hard_budget"
             raise ValueError(
-                "Context input remains over the model hard budget after compaction: "
+                f"{reason}: Context input remains over the model hard budget after compaction: "
                 f"{evidence.final_token_estimate} > {evidence.hard_budget} tokens"
             )
 
@@ -788,6 +791,7 @@ Additional Args:
         self._emit_history_summary_event()
         self._ensure_context_within_hard_budget(final_context)
         input_messages = final_context.messages
+        self.model.last_context_evidence = final_context.evidence
         chars_per_token = self.context_runtime.chars_per_token
         # Baseline for the per-step compression ratio. ``final_context.messages``
         # is already the compressed payload, so use the ContextManager's raw
@@ -831,8 +835,32 @@ Additional Args:
                 self._append_verification_feedback(memory_step, decision.verification_result)
 
         try:
-            chat_message: ChatMessage = self.model(input_messages,
-                                                   stop_sequences=stop_sequences, **additional_args)
+            model_call_args = dict(additional_args)
+            rebuild_allowed = guardrail_engine is None or decision.effective_action == "pass"
+            if (
+                rebuild_allowed
+                and getattr(self.model, "safe_input_budget_snapshot", None) is not None
+            ):
+                def rebuild_context(target_tokens: int):
+                    rebuilt = self.context_runtime.prepare_step(
+                        model=self.model,
+                        memory=self.memory,
+                        current_run_start_idx=self._history_step_count,
+                        tools=self._context_tools(),
+                        target_input_budget_tokens=target_tokens,
+                    )
+                    get_monitoring_manager().record_final_context_evidence(
+                        rebuilt.evidence, step_number=self.step_number
+                    )
+                    self._ensure_context_within_hard_budget(rebuilt)
+                    return rebuilt
+
+                model_call_args["context_rebuild"] = rebuild_context
+            chat_message: ChatMessage = self.model(
+                input_messages,
+                stop_sequences=stop_sequences,
+                **model_call_args,
+            )
             memory_step.model_output_message = chat_message
             model_output = chat_message.content
             memory_step.token_usage = chat_message.token_usage
@@ -1481,6 +1509,7 @@ You have been provided with these additional arguments, that you can access usin
         self._emit_history_summary_event()
         self._ensure_context_within_hard_budget(final_context)
         messages = final_context.messages
+        self.model.last_context_evidence = final_context.evidence
 
         # Create the final memory step with error
         final_memory_step = ActionStep(
@@ -1499,7 +1528,26 @@ You have been provided with these additional arguments, that you can access usin
             # Use streaming call (model.__call__) to generate final answer
             # This will trigger observer.add_model_new_token() and
             # observer.add_model_reasoning_content() in OpenAIModel
-            chat_message: ChatMessage = self.model(messages)
+            model_call_args = {}
+            if getattr(self.model, "safe_input_budget_snapshot", None) is not None:
+                def rebuild_final_context(target_tokens: int):
+                    rebuilt = self.context_runtime.prepare_final_answer(
+                        model=self.model,
+                        memory=self.memory,
+                        current_run_start_idx=self._history_step_count,
+                        tools=self._context_tools(),
+                        task=task,
+                        final_answer_templates=self.prompt_templates,
+                        target_input_budget_tokens=target_tokens,
+                    )
+                    get_monitoring_manager().record_final_context_evidence(
+                        rebuilt.evidence, step_number=self.step_number
+                    )
+                    self._ensure_context_within_hard_budget(rebuilt)
+                    return rebuilt
+
+                model_call_args["context_rebuild"] = rebuild_final_context
+            chat_message: ChatMessage = self.model(messages, **model_call_args)
 
             # Update role and content from the completed message
             role = chat_message.role

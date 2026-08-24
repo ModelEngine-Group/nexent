@@ -250,6 +250,17 @@ class NexentAgent:
             max_output_tokens=model_config.max_output_tokens,
             timeout_seconds=model_config.timeout_seconds,
             prompt_cache=model_config.prompt_cache,
+            **{
+                key: value
+                for key, value in {
+                    "canonical_model_id": model_config.canonical_model_id,
+                    "model_identity_metadata": model_config.model_identity_metadata,
+                    "tokenizer_match_metadata": model_config.tokenizer_match_metadata,
+                    "token_count_probe_metadata": model_config.token_count_probe_metadata,
+                    "tokenizer_family": model_config.tokenizer_family,
+                }.items()
+                if value is not None
+            },
         )
         model.stop_event = self.stop_event
         return model

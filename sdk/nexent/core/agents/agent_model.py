@@ -82,6 +82,22 @@ class ModelConfig(BaseModel):
         description="Version of the approved provider/model capability profile selected by the resolver, e.g. 'openai/gpt-4o@1'.",
         default=None,
     )
+    canonical_model_id: Optional[str] = Field(
+        description="P1 canonical model identity used to isolate P2 request calibration.",
+        default=None,
+    )
+    model_identity_metadata: Optional[Dict[str, Any]] = Field(
+        description="Sanitized P1 model-identity and matcher evidence.",
+        default=None,
+    )
+    tokenizer_match_metadata: Optional[Dict[str, Any]] = Field(
+        description="Sanitized P1 tokenizer match and conformance evidence.",
+        default=None,
+    )
+    token_count_probe_metadata: Optional[Dict[str, Any]] = Field(
+        description="Sanitized P1 Provider full-request count capability evidence.",
+        default=None,
+    )
     timeout_seconds: Optional[float] = Field(
         description="Request timeout in seconds. If None, uses provider default.",
         default=None

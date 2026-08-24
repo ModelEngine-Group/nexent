@@ -56,6 +56,7 @@ class ContextEvidence:
     representation_cache_misses: int = 0
     compact_exhausted: bool = False
     over_hard_budget: bool = False
+    budget_failure_reason: str | None = None
     model_call_count: int = 0
     loop_status: str | None = None
     messages_fingerprint: str | None = None
@@ -96,6 +97,7 @@ class ContextRuntime(Protocol):
         memory: AgentMemory,
         current_run_start_idx: int,
         tools: Sequence[ModelTool] | None = None,
+        target_input_budget_tokens: int | None = None,
     ) -> FinalContext:
         """Return all model messages for the current step."""
 
@@ -108,6 +110,7 @@ class ContextRuntime(Protocol):
         task: str,
         final_answer_templates: Mapping[str, Mapping[str, str]],
         tools: Sequence[ModelTool] | None = None,
+        target_input_budget_tokens: int | None = None,
     ) -> FinalContext:
         """Return all model messages for final-answer generation."""
 
@@ -168,6 +171,7 @@ class UnconfiguredContextRuntime:
         memory: AgentMemory,
         current_run_start_idx: int,
         tools: Sequence[ModelTool] | None = None,
+        target_input_budget_tokens: int | None = None,
     ) -> FinalContext:
         raise RuntimeError(_UNCONFIGURED_RUNTIME_ERROR)
 
@@ -180,6 +184,7 @@ class UnconfiguredContextRuntime:
         task: str,
         final_answer_templates: Mapping[str, Mapping[str, str]],
         tools: Sequence[ModelTool] | None = None,
+        target_input_budget_tokens: int | None = None,
     ) -> FinalContext:
         raise RuntimeError(_UNCONFIGURED_RUNTIME_ERROR)
 

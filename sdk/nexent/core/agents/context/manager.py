@@ -119,6 +119,7 @@ class ContextManager:
         task: str | None = None,
         final_answer_templates: Optional[Dict[str, Any]] = None,
         run_context: ManagedRunContext | None = None,
+        target_input_budget_tokens: int | None = None,
     ) -> FinalContext:
         run_context = run_context or self.prepare_run_context(memory, "")
         policy = resolve_policy(self.config.policy_layers)
@@ -143,6 +144,13 @@ class ContextManager:
         )
         canonical_tools = self._canonical_tools(tools or ())
         raw_tokens = self._estimate_items(items, purpose_stable, purpose_dynamic, canonical_tools)
+        soft_budget = self._soft_input_budget_tokens()
+        hard_budget = self._hard_input_budget_tokens()
+        if target_input_budget_tokens is not None:
+            if target_input_budget_tokens <= 0:
+                raise ValueError("target_input_budget_tokens must be positive")
+            soft_budget = min(soft_budget, target_input_budget_tokens)
+            hard_budget = min(hard_budget, target_input_budget_tokens)
         final_items = list(items)
         history_triggered = False
         new_coverage = None
@@ -151,7 +159,7 @@ class ContextManager:
 
         if (
             policy.processing_mode == ContextProcessingMode.ADAPTIVE_COMPACT
-            and raw_tokens > self._soft_input_budget_tokens()
+            and raw_tokens > soft_budget
         ):
             summary = next((item for item in final_items if item.type == ContextItemType.HISTORY_SUMMARY), None)
             turns = [item for item in final_items if item.type == ContextItemType.CONVERSATION_TURN]
@@ -187,6 +195,7 @@ class ContextManager:
                 purpose_dynamic,
                 canonical_tools,
                 model=model,
+                target_tokens=soft_budget,
             )
 
         final_items.sort(key=lambda item: item.layout_key)
@@ -198,10 +207,25 @@ class ContextManager:
         final_tokens = self._message_tokens(messages) + self._tools_tokens(canonical_tools)
         self._last_uncompressed_token_count = raw_tokens
         self._last_compressed_token_count = final_tokens
-        hard = self._hard_input_budget_tokens()
+        hard = hard_budget
         over_hard = final_tokens > hard
         compact_exhausted = over_hard
+        budget_failure_reason = None
         if over_hard:
+            budget_failure_reason = self._budget_failure_reason(
+                final_items,
+                purpose_stable,
+                purpose_dynamic,
+                canonical_tools,
+                hard_budget=hard,
+                compression_attempted=(
+                    bool(self._step_local_log)
+                    or any(
+                        str(item.metadata.get("representation", "raw")) != "raw"
+                        for item in final_items
+                    )
+                ),
+            )
             logger.warning("Context remains over hard budget after safe compact: %s > %s", final_tokens, hard)
 
         representations = tuple((item.id, str(item.metadata.get("representation", "raw"))) for item in final_items)
@@ -233,7 +257,7 @@ class ContextManager:
                 if run_context.selection_decision
                 else None,
                 processing_mode=policy.processing_mode.value,
-                soft_budget=self._soft_input_budget_tokens(),
+                soft_budget=soft_budget,
                 hard_budget=hard,
                 raw_token_estimate=raw_tokens,
                 final_token_estimate=final_tokens,
@@ -255,6 +279,7 @@ class ContextManager:
                 representation_cache_misses=misses,
                 compact_exhausted=compact_exhausted,
                 over_hard_budget=over_hard,
+                budget_failure_reason=budget_failure_reason,
                 messages_fingerprint=self._fingerprint(messages),
                 tools_fingerprint=self._fingerprint(canonical_tools),
                 system_messages_fingerprint=self._fingerprint(system_messages),
@@ -270,15 +295,51 @@ class ContextManager:
             ),
         )
 
+    def _budget_failure_reason(
+        self,
+        items,
+        purpose_stable,
+        purpose_dynamic,
+        tools,
+        *,
+        hard_budget: int,
+        compression_attempted: bool,
+    ) -> str:
+        if any(
+            self._estimate_items([item], [], [], []) > hard_budget
+            for item in items
+        ):
+            return "single_context_item_oversize"
+        fixed_types = {
+            ContextItemType.SYSTEM,
+            ContextItemType.TOOL,
+            ContextItemType.SKILL,
+            ContextItemType.MANAGED_AGENT,
+            ContextItemType.EXTERNAL_AGENT,
+        }
+        fixed_items = [item for item in items if item.type in fixed_types]
+        if (
+            self._estimate_items(
+                fixed_items, purpose_stable, purpose_dynamic, tools
+            )
+            > hard_budget
+        ):
+            return "fixed_context_over_budget"
+        if compression_attempted:
+            return "compaction_no_reduction"
+        return "final_request_over_hard_budget"
+
     def consume_history_summary_event(self) -> dict[str, Any] | None:
         """Return a newly-created summary checkpoint once for stream display."""
         event = self._pending_history_summary_event
         self._pending_history_summary_event = None
         return deepcopy(event) if event is not None else None
 
-    def _compact_to_soft_budget(self, items, purpose_stable, purpose_dynamic, tools, *, model):
+    def _compact_to_soft_budget(
+        self, items, purpose_stable, purpose_dynamic, tools, *, model, target_tokens: int
+    ):
         result = list(items)
-        if self._estimate_items(result, purpose_stable, purpose_dynamic, tools) <= self._soft_input_budget_tokens():
+        if self._estimate_items(result, purpose_stable, purpose_dynamic, tools) <= target_tokens:
             return result
         keep_recent = max(0, self.config.keep_recent_steps)
         actions = [item for item in result if item.type == ContextItemType.CURRENT_ACTION]
@@ -309,19 +370,21 @@ class ContextManager:
                 result[index] = compact
                 if (
                     self._estimate_items(result, purpose_stable, purpose_dynamic, tools)
-                    <= self._soft_input_budget_tokens()
+                    <= target_tokens
                 ):
                     return result
         if self.config.enable_long_term_memory_selection and long_term_items:
-            return self._select_long_term_memories(result, long_term_items, model=model)
+            return self._select_long_term_memories(
+                result, long_term_items, model=model, target_tokens=target_tokens
+            )
         return result
 
-    def _select_long_term_memories(self, result, memory_items, *, model):
+    def _select_long_term_memories(self, result, memory_items, *, model, target_tokens: int):
         task_item = next((item for item in result if item.type == ContextItemType.CURRENT_TASK), None)
         task = json.dumps(task_item.content, ensure_ascii=False, default=str) if task_item else ""
         model_id = str(getattr(model, "model_id", None) or getattr(model, "model_name", None)
                        or model.__class__.__name__)
-        target_tokens = max(64, self._soft_input_budget_tokens() // 4)
+        target_tokens = max(64, target_tokens // 4)
         versions = tuple(sorted(str(item.metadata.get("version_id") or item.id) for item in memory_items))
         cache_key = (*versions, task, target_tokens, model_id)
         cached = self._memory_compact_cache.get(cache_key)

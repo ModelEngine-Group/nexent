@@ -903,7 +903,11 @@ async def create_model_config_list(tenant_id):
                         default_output_reserve_tokens=record.get("default_output_reserve_tokens"),
                         tokenizer_family=record.get("tokenizer_family"),
                         capacity_source=record.get("capacity_source"),
-                        capability_profile_version=record.get("capability_profile_version")))
+                        capability_profile_version=record.get("capability_profile_version"),
+                        canonical_model_id=record.get("canonical_model_id"),
+                        model_identity_metadata=record.get("model_identity_metadata"),
+                        tokenizer_match_metadata=record.get("tokenizer_match_metadata"),
+                        token_count_probe_metadata=record.get("token_count_probe_metadata")))
     # fit for old version, main_model and sub_model use default model
     main_model_config = tenant_config_manager.get_model_config(
         key=MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id)
@@ -919,7 +923,19 @@ async def create_model_config_list(tenant_id):
                     model_factory=main_model_config.get("model_factory"),
                     timeout_seconds=main_model_config.get("timeout_seconds"),
                     concurrency_limit=main_model_config.get("concurrency_limit"),
-                    prompt_cache=main_prompt_cache))
+                    prompt_cache=main_prompt_cache,
+                    max_output_tokens=main_model_config.get("max_output_tokens"),
+                    max_tokens=main_model_config.get("max_tokens"),
+                    context_window_tokens=main_model_config.get("context_window_tokens"),
+                    max_input_tokens=main_model_config.get("max_input_tokens"),
+                    default_output_reserve_tokens=main_model_config.get("default_output_reserve_tokens"),
+                    tokenizer_family=main_model_config.get("tokenizer_family"),
+                    capacity_source=main_model_config.get("capacity_source"),
+                    capability_profile_version=main_model_config.get("capability_profile_version"),
+                    canonical_model_id=main_model_config.get("canonical_model_id"),
+                    model_identity_metadata=main_model_config.get("model_identity_metadata"),
+                    tokenizer_match_metadata=main_model_config.get("tokenizer_match_metadata"),
+                    token_count_probe_metadata=main_model_config.get("token_count_probe_metadata")))
     model_list.append(
         ModelConfig(cite_name="sub_model",
                     api_key=main_model_config.get("api_key", ""),
@@ -930,7 +946,19 @@ async def create_model_config_list(tenant_id):
                     model_factory=main_model_config.get("model_factory"),
                     timeout_seconds=main_model_config.get("timeout_seconds"),
                     concurrency_limit=main_model_config.get("concurrency_limit"),
-                    prompt_cache=main_prompt_cache))
+                    prompt_cache=main_prompt_cache,
+                    max_output_tokens=main_model_config.get("max_output_tokens"),
+                    max_tokens=main_model_config.get("max_tokens"),
+                    context_window_tokens=main_model_config.get("context_window_tokens"),
+                    max_input_tokens=main_model_config.get("max_input_tokens"),
+                    default_output_reserve_tokens=main_model_config.get("default_output_reserve_tokens"),
+                    tokenizer_family=main_model_config.get("tokenizer_family"),
+                    capacity_source=main_model_config.get("capacity_source"),
+                    capability_profile_version=main_model_config.get("capability_profile_version"),
+                    canonical_model_id=main_model_config.get("canonical_model_id"),
+                    model_identity_metadata=main_model_config.get("model_identity_metadata"),
+                    tokenizer_match_metadata=main_model_config.get("tokenizer_match_metadata"),
+                    token_count_probe_metadata=main_model_config.get("token_count_probe_metadata")))
 
     return model_list
 

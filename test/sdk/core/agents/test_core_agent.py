@@ -2264,6 +2264,44 @@ class TestRunStreamRealExecution:
 
         assert agent._last_uncompressed_est == 5000
 
+    def test_ac_p2_011_step_stream_supplies_source_backed_rebuild_for_w2(self):
+        module = self._load_core_agent_in_isolation()
+        CoreAgent = module.CoreAgent
+        agent = object.__new__(CoreAgent)
+        agent.agent_name = "test"
+        agent.observer = MagicMock()
+        agent.step_number = 1
+        agent.memory = MagicMock(steps=[], system_prompt=None)
+        agent.logger = MagicMock()
+        agent.monitor = MagicMock()
+        agent.context_runtime = self._context_runtime_mock()
+        agent.context_runtime.chars_per_token = 1.0
+        agent.context_runtime.token_counts.return_value = {"uncompressed": 10, "compressed": 10}
+        initial = MagicMock(messages=[MagicMock()])
+        initial.evidence.over_hard_budget = False
+        rebuilt = MagicMock(messages=[MagicMock()])
+        rebuilt.evidence.over_hard_budget = False
+        agent.context_runtime.prepare_step.side_effect = [initial, rebuilt]
+        response = MagicMock(content="ok")
+        agent.model = MagicMock(return_value=response)
+        agent.model.safe_input_budget_snapshot = {"fingerprint": "w2"}
+        agent._history_step_count = 0
+        agent._context_tools = MagicMock(return_value=[])
+        agent._use_structured_outputs_internally = False
+        action_step = MagicMock()
+
+        stream = agent._step_stream(action_step)
+        try:
+            next(stream)
+        except (StopIteration, ValueError):
+            pass
+
+        callback = agent.model.call_args.kwargs["context_rebuild"]
+        assert callback(123) is rebuilt
+        assert agent.context_runtime.prepare_step.call_args.kwargs[
+            "target_input_budget_tokens"
+        ] == 123
+
     def test_step_stream_falls_back_without_uncompressed_runtime_count(self):
         """_step_stream estimates messages when the runtime has no raw sample."""
         module = self._load_core_agent_in_isolation()
@@ -2913,6 +2951,25 @@ class TestHandleMaxStepsReached:
 
         # Model should be called with messages from ContextRuntime.
         assert agent.model.called
+
+    def test_ac_p2_011_final_answer_supplies_source_backed_rebuild_for_w2(self):
+        agent, _module = self._create_agent_for_handle_max_steps_test()
+        initial = agent.context_runtime.prepare_final_answer.return_value
+        rebuilt = MagicMock(messages=[{"role": "user", "content": "short"}])
+        rebuilt.evidence.over_hard_budget = False
+        agent.context_runtime.prepare_final_answer.side_effect = [initial, rebuilt]
+        response = MagicMock(role="assistant", content="Summary.", token_usage=None)
+        agent.model = MagicMock(return_value=response)
+        agent.model.safe_input_budget_snapshot = {"fingerprint": "w2"}
+        agent._finalize_step = MagicMock()
+
+        agent._handle_max_steps_reached("my task prompt")
+
+        callback = agent.model.call_args.kwargs["context_rebuild"]
+        assert callback(321) is rebuilt
+        assert agent.context_runtime.prepare_final_answer.call_args.kwargs[
+            "target_input_budget_tokens"
+        ] == 321
 
 
 # ----------------------------------------------------------------------------
