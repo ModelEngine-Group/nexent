@@ -828,6 +828,130 @@ async def test_final_prompt_batch_emits_generation_completed_state(mocker):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("fields", "updated_fields"),
+    [
+        (
+            {
+                "constraint_prompt": "Use reliable sources.",
+                "greeting_message": "Hello",
+                "example_questions": ["What should I research?"],
+            },
+            [
+                "constraint_prompt",
+                "greeting_message",
+                "example_questions",
+            ],
+        ),
+        (
+            {"example_questions": ["What should I research?"]},
+            ["example_questions"],
+        ),
+    ],
+)
+async def test_completion_validation_uses_persisted_state_for_flexible_final_saves(
+    mocker,
+    fields,
+    updated_fields,
+):
+    mocker.patch.object(
+        nl2agent_mcp_tools_module,
+        "get_http_request",
+        return_value=SimpleNamespace(headers={"Authorization": "Bearer token"}),
+    )
+    mocker.patch.object(
+        nl2agent_mcp_tools_module,
+        "get_current_user_id",
+        return_value=("user-a", "tenant-a"),
+    )
+    mocker.patch.object(
+        nl2agent_service,
+        "save_agent_draft_fields_impl",
+        return_value={
+            "status": "success",
+            "agent_id": 42,
+            "created": False,
+            "updated_fields": updated_fields,
+        },
+    )
+    validate_complete = mocker.patch.object(
+        nl2agent_service,
+        "validate_agent_generation_complete_impl",
+        new=AsyncMock(),
+    )
+
+    result_json, state_wrapper = (
+        await save_agent_draft_fields(42, fields)
+    ).split("\n", 1)
+
+    assert json.loads(result_json)["updated_fields"] == updated_fields
+    assert json.loads(
+        state_wrapper.removeprefix("<nl2a_state>").removesuffix(
+            "</nl2a_state>"
+        )
+    ) == {
+        "event": "agent_generation_completed",
+        "agent_id": 42,
+    }
+    validate_complete.assert_awaited_once_with(
+        agent_id=42,
+        tenant_id="tenant-a",
+        user_id="user-a",
+    )
+
+
+@pytest.mark.asyncio
+async def test_partial_final_prompt_save_remains_saved_when_database_is_incomplete(
+    mocker,
+):
+    mocker.patch.object(
+        nl2agent_mcp_tools_module,
+        "get_http_request",
+        return_value=SimpleNamespace(headers={"Authorization": "Bearer token"}),
+    )
+    mocker.patch.object(
+        nl2agent_mcp_tools_module,
+        "get_current_user_id",
+        return_value=("user-a", "tenant-a"),
+    )
+    mocker.patch.object(
+        nl2agent_service,
+        "save_agent_draft_fields_impl",
+        return_value={
+            "status": "success",
+            "agent_id": 42,
+            "created": False,
+            "updated_fields": ["greeting_message"],
+        },
+    )
+    mocker.patch.object(
+        nl2agent_service,
+        "validate_agent_generation_complete_impl",
+        new=AsyncMock(
+            side_effect=nl2agent_service.Nl2AgentCompletionError(
+                "prompt_fields_incomplete",
+                ["example_questions"],
+            )
+        ),
+    )
+
+    result_json, state_wrapper = (
+        await save_agent_draft_fields(42, {"greeting_message": "Hello"})
+    ).split("\n", 1)
+
+    assert json.loads(result_json)["updated_fields"] == ["greeting_message"]
+    assert json.loads(
+        state_wrapper.removeprefix("<nl2a_state>").removesuffix(
+            "</nl2a_state>"
+        )
+    ) == {
+        "event": "agent_draft_fields_saved",
+        "agent_id": 42,
+        "updated_fields": ["greeting_message"],
+    }
+
+
+@pytest.mark.asyncio
 async def test_final_prompt_batch_emits_failure_when_database_is_incomplete(mocker):
     mocker.patch.object(
         nl2agent_mcp_tools_module,
