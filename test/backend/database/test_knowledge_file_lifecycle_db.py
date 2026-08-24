@@ -214,6 +214,7 @@ def test_transition_file_record_updates_allowed_fields_and_version(monkeypatch):
         expected_statuses=("PROCESSING",),
         expected_version=2,
         updated_by="user-1",
+        original_filename="renamed.pdf",
         error_code="PARSE_FAILED",
         error_message="bad input",
         ignored_field="must not be assigned",
@@ -225,6 +226,7 @@ def test_transition_file_record_updates_allowed_fields_and_version(monkeypatch):
     assert row.error_code == "PARSE_FAILED"
     assert row.error_message == "bad input"
     assert row.updated_by == "user-1"
+    assert row.original_filename == "renamed.pdf"
     assert "ignored_field" not in row.__dict__
     session.flush.assert_called_once()
 

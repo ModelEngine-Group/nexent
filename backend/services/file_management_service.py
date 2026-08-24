@@ -498,6 +498,7 @@ async def upload_files_impl(
             )
         else:
             minio_results = await upload_to_minio(files=file, folder=actual_folder)
+        successful_lifecycle_records = []
         for file_index, result in enumerate(minio_results):
             record = lifecycle_records_by_index.get(file_index)
             file_id = result.get("file_id") or (record or {}).get("file_id")
@@ -517,6 +518,12 @@ async def upload_files_impl(
                     )
                     if updated_record:
                         lifecycle_records_by_index[file_index] = updated_record
+                        record = updated_record
+                    if record and file_id:
+                        # ``uploaded_filenames`` only contains successful uploads. Keep
+                        # the corresponding lifecycle records in the same success order
+                        # so a partial batch cannot update the wrong file name.
+                        successful_lifecycle_records.append(record)
             else:
                 file_name = result.get('file_name')
                 error_msg = result.get('error', 'Unknown error')
@@ -571,6 +578,33 @@ async def upload_files_impl(
 
                 uploaded_filenames[:] = make_unique_names(
                     uploaded_filenames, existing_names)
+
+                # The legacy UI and task metadata use the conflict-resolved name. The
+                # lifecycle row is created before this resolution, so synchronize its
+                # existing filename column after resolving names. Historical rows are
+                # intentionally not modified; only the current upload batch is updated.
+                for record, effective_filename in zip(successful_lifecycle_records, uploaded_filenames):
+                    current_filename = record.get("original_filename")
+                    if not record.get("file_id") or current_filename is None or current_filename == effective_filename:
+                        continue
+                    try:
+                        updated_record = transition_file_record(
+                            record["file_id"],
+                            original_filename=effective_filename,
+                            expected_statuses=("UPLOADED",),
+                            updated_by=user_id,
+                        )
+                        if updated_record:
+                            record.update(updated_record)
+                    except Exception as filename_exc:
+                        # MinIO and the upload response are already successful. Do not
+                        # turn a best-effort name synchronization failure into a second
+                        # upload failure; the task/ES name remains the legacy fallback.
+                        logger.warning(
+                            "Failed to synchronize lifecycle filename for file_id=%s: %s",
+                            record["file_id"],
+                            filename_exc,
+                        )
             except Exception as e:
                 logger.warning(
                     f"Failed to resolve filename conflicts for index '{index_name}': {str(e)}")

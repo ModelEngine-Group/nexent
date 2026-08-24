@@ -2312,6 +2312,44 @@ class TestElasticSearchService(unittest.TestCase):
         assert by_path["uploading.txt"]["status"] == "WAIT_FOR_PROCESSING"
         assert by_path["legacy-ms"]["create_time"] == 1700000000000
 
+    @patch('backend.services.vectordatabase_service.get_redis_service')
+    @patch('backend.services.vectordatabase_service.list_file_records')
+    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    @patch('backend.services.vectordatabase_service.get_all_files_status', new_callable=AsyncMock)
+    def test_list_files_keeps_legacy_effective_filename_over_lifecycle_name(
+        self, mock_get_files_status, mock_get_knowledge, mock_list_lifecycle, mock_redis
+    ):
+        """Existing ES/Redis effective names keep the old UI display contract."""
+        self.mock_vdb_core.get_documents_detail.return_value = [{
+            "path_or_url": "folder/data.txt",
+            "filename": "data_1.txt",
+            "file_size": 5,
+            "create_time": "2024-01-01T00:00:00",
+        }]
+        mock_get_files_status.return_value = {
+            "folder/data.txt": {
+                "state": "PROCESS_FAILED",
+                "latest_task_id": "task-1",
+                "original_filename": "data_1.txt",
+            }
+        }
+        mock_get_knowledge.return_value = {"tenant_id": "tenant-1"}
+        mock_list_lifecycle.return_value = [{
+            "file_id": "fid-1",
+            "object_name": "folder/data.txt",
+            "original_filename": "data.txt",
+            "status": "FAILED",
+            "stage": "PROCESS",
+            "error_code": "PARSE_FAILED",
+        }]
+        mock_redis.return_value.get_error_info.return_value = None
+
+        result = asyncio.run(
+            ElasticSearchService.list_files("test_index", include_chunks=False, vdb_core=self.mock_vdb_core)
+        )
+
+        assert result["files"][0]["file"] == "data_1.txt"
+
     @patch('backend.services.vectordatabase_service.get_knowledge_record')
     @patch('backend.services.vectordatabase_service.get_file_record')
     @patch('backend.services.vectordatabase_service.transition_file_record')

@@ -412,6 +412,82 @@ class TestUploadFilesImpl:
             assert uploaded_names == ["DOC_1.PDF", "doc_2.pdf"]
 
     @pytest.mark.asyncio
+    async def test_upload_files_impl_syncs_effective_name_to_successful_lifecycle_record(self):
+        """Conflict renaming updates only successful lifecycle rows in a partial batch."""
+        files = [
+            MagicMock(filename="a.txt", size=3),
+            MagicMock(filename="b.txt", size=4),
+        ]
+        context = SimpleNamespace(
+            tenant_id="tenant-1",
+            knowledge_id=7,
+            index_name="kb-1",
+            bucket_name="bucket-1",
+            ingroup_permission="SHARED",
+        )
+        records = [
+            {"file_id": "fid-a", "object_name": "folder/a.txt", "original_filename": "a.txt", "status": "UPLOADING"},
+            {"file_id": "fid-b", "object_name": "folder/b.txt", "original_filename": "b.txt", "status": "UPLOADING"},
+        ]
+        transitions = []
+
+        def transition(file_id, **kwargs):
+            transitions.append((file_id, kwargs))
+            current = next(item for item in records if item["file_id"] == file_id)
+            current.update(kwargs)
+            current["status"] = kwargs.get("status", current.get("status"))
+            return dict(current)
+
+        quota_service = MagicMock()
+        quota_service.check_hard_limit.return_value = {"quota_status": "ok"}
+        quota_service.check_hard_limit_post_write.return_value = {"quota_status": "ok"}
+        quota_module = types.ModuleType("services.quota_service")
+        quota_module.QuotaService = MagicMock(return_value=quota_service)
+
+        with patch.object(knowledge_storage_stub, "resolve_storage_context", return_value=context), \
+                patch("backend.services.file_management_service.create_file_records", return_value=records), \
+                patch("backend.services.file_management_service.transition_file_record", side_effect=transition), \
+                patch("backend.services.file_management_service.upload_to_minio", AsyncMock(return_value=[
+                    {
+                        "success": True,
+                        "file_id": "fid-a",
+                        "file_name": "a.txt",
+                        "object_name": "folder/a.txt",
+                        "file_size": 3,
+                    },
+                    {
+                        "success": False,
+                        "file_id": "fid-b",
+                        "file_name": "b.txt",
+                        "error": "read failed",
+                    },
+                ])), \
+                patch("backend.services.file_management_service.get_vector_db_core", MagicMock()), \
+                patch("backend.services.file_management_service.ElasticSearchService.list_files", AsyncMock(
+                    return_value={"files": [{"file": "a.txt"}]}
+                )), \
+                patch.dict(sys.modules, {"services.quota_service": quota_module}):
+            result = await upload_files_impl(
+                destination="minio",
+                file=files,
+                folder="folder",
+                index_name="kb-1",
+                user_id="user-1",
+            )
+
+        assert result[2] == ["a_1.txt"]
+        assert records[0]["original_filename"] == "a_1.txt"
+        assert records[1]["original_filename"] == "b.txt"
+        assert any(
+            file_id == "fid-a" and kwargs.get("original_filename") == "a_1.txt"
+            for file_id, kwargs in transitions
+        )
+        assert not any(
+            file_id == "fid-b" and "original_filename" in kwargs
+            for file_id, kwargs in transitions
+        )
+
+    @pytest.mark.asyncio
     async def test_upload_files_impl_minio_conflict_resolution_es_exception(self):
         """If ES lookup fails, service should warn and leave names unchanged."""
         mock_file = MagicMock()

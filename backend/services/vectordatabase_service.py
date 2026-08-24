@@ -1753,9 +1753,16 @@ class ElasticSearchService:
                             if str(row.get("error_stage") or row.get("stage") or "").upper() in {"FORWARD", "FORWARDING"}
                             else "PROCESS_FAILED"
                         )
+                    # Keep the pre-lifecycle display contract for rows that still
+                    # have an ES/Redis name. New rows synchronize the same effective
+                    # name into PG after conflict resolution; PG is the fallback when
+                    # no legacy name is available (for example after Redis expiry).
+                    lifecycle_filename = row.get("original_filename") or ""
+                    legacy_filename = (existing or {}).get("file") or ""
+                    display_filename = legacy_filename or lifecycle_filename
                     file_data = existing or {
                         "path_or_url": path_or_url,
-                        "file": row.get("original_filename") or "",
+                        "file": display_filename,
                         "file_size": row.get("file_size") or 0,
                         "create_time": int(timestamp * 1000),
                         "chunk_count": 0,
@@ -1764,7 +1771,7 @@ class ElasticSearchService:
                     }
                     file_data.update({
                         "path_or_url": path_or_url,
-                        "file": row.get("original_filename") or file_data.get("file", ""),
+                        "file": display_filename or file_data.get("file", ""),
                         "file_size": row.get("file_size") if row.get("file_size") is not None else file_data.get("file_size", 0),
                         "create_time": int(timestamp * 1000),
                         "status": status_map.get(lifecycle_status, lifecycle_status),

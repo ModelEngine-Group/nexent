@@ -906,7 +906,11 @@ class KnowledgeFileLifecycle(TableBase):
     index_name = Column(String(100), nullable=False, doc="Owning Elasticsearch index")
     bucket_name = Column(String(255), nullable=True, doc="MinIO bucket")
     object_name = Column(String(1024), nullable=True, doc="MinIO object name")
-    original_filename = Column(String(1024), nullable=False, doc="Original upload filename")
+    original_filename = Column(
+        String(1024),
+        nullable=False,
+        doc="Effective filename used by processing and displayed to users",
+    )
     file_size = Column(BigInteger, nullable=True, doc="Uploaded file size in bytes")
     uploaded_at = Column(TIMESTAMP(timezone=False), nullable=True, doc="Successful MinIO upload time")
     completed_at = Column(TIMESTAMP(timezone=False), nullable=True, doc="Successful ES indexing time")

@@ -40,7 +40,7 @@ def create_file_record(
     stage: str = "UPLOAD",
     created_by: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Create one lifecycle record before an object upload starts."""
+    """Create one lifecycle record before upload; filename may later be made unique."""
     row = KnowledgeFileLifecycle(
         file_id=file_id or new_file_id(),
         tenant_id=str(tenant_id),
@@ -155,6 +155,7 @@ def transition_file_record(
     allowed_fields = {
         "bucket_name",
         "object_name",
+        "original_filename",
         "file_size",
         "uploaded_at",
         "completed_at",
