@@ -2,7 +2,7 @@
 User service layer - handles user-related business logic
 """
 import logging
-from typing import Dict, Any, Optional
+from typing import Any, Dict, List, Optional
 
 from database.user_tenant_db import (
     get_users_by_tenant_id, update_user_tenant_role, get_user_tenant_by_user_id,
@@ -40,7 +40,14 @@ def get_users(tenant_id: str, page: Optional[int] = 1, page_size: Optional[int] 
     # Get user-tenant relationships from database with pagination and sorting
     if search or roles or group_ids:
         result = get_users_by_tenant_id(
-            tenant_id, page, page_size, sort_by, sort_order, search, roles, group_ids
+            tenant_id=tenant_id,
+            page=page,
+            page_size=page_size,
+            sort_by=sort_by,
+            sort_order=sort_order,
+            search=search,
+            roles=roles,
+            group_ids=group_ids,
         )
     else:
         result = get_users_by_tenant_id(tenant_id, page, page_size, sort_by, sort_order)
