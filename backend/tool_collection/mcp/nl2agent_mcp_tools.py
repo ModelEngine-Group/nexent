@@ -952,7 +952,8 @@ async def save_agent_draft_fields(
             user_id=user_id,
         )
         success = SaveAgentDraftFieldsSuccess.model_validate(result)
-        if set(success.updated_fields) == _NL2AGENT_FINAL_PROMPT_BATCH:
+        updated_fields = set(success.updated_fields)
+        if updated_fields & _NL2AGENT_FINAL_PROMPT_BATCH:
             try:
                 await validate_agent_generation_complete_impl(
                     agent_id=resolved_agent_id,
@@ -960,6 +961,8 @@ async def save_agent_draft_fields(
                     user_id=user_id,
                 )
             except Nl2AgentCompletionError as exc:
+                if not _NL2AGENT_FINAL_PROMPT_BATCH.issubset(updated_fields):
+                    return _serialize_agent_draft_save_result(success)
                 return _serialize_agent_draft_save_result(
                     SaveAgentDraftFieldsError(
                         agent_id=resolved_agent_id,
