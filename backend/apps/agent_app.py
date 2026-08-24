@@ -514,7 +514,7 @@ async def import_agent_api(request: AgentImportRequest, authorization: Optional[
     """
     try:
         if request.skills:
-            await import_agent_with_skills_impl(
+            agent_id_mapping = await import_agent_with_skills_impl(
                 request.agent_info,
                 request.skills,
                 authorization,
@@ -522,12 +522,15 @@ async def import_agent_api(request: AgentImportRequest, authorization: Optional[
                 skill_resolutions=request.skill_resolutions,
             )
         else:
-            await import_agent_impl(
+            agent_id_mapping = await import_agent_impl(
                 request.agent_info,
                 authorization,
                 force_import=request.force_import
             )
-        return {}
+        return {
+            "agent_id": agent_id_mapping.get(request.agent_info.agent_id),
+            "agent_id_mapping": agent_id_mapping,
+        }
     except SkillDuplicateError as exc:
         raise HTTPException(status_code=409, detail={
             "type": "skill_duplicate",

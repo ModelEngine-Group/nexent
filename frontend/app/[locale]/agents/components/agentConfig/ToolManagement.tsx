@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect, useMemo } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Tooltip } from "antd";
 import { useToolList } from "@/hooks/agent/useToolList";
@@ -98,25 +98,13 @@ export default function ToolManagement({
   // Canonical tool list (with `inputs`) — used to backfill any missing
   // fields on the stored tool object so the tool test panel always
   // operates in parsed mode and shows the manual-input toggle.
-  const { availableTools, isSuccess: toolsLoaded } = useToolList({
+  const { availableTools } = useToolList({
     enabled: true,
   });
 
-  // Reconcile the selected-tools draft against the canonical tool list.
-  // When an MCP is deleted, its tools are marked unavailable and dropped from
-  // /tool/list; without this reconciliation those stale selections would stay
-  // visible in the panel (and be re-persisted on save) until a page refresh.
-  // Gated on the tool list having loaded so we never blank out the panel while
-  // `availableTools` is still empty on the initial fetch.
-  useEffect(() => {
-    if (!toolsLoaded) return;
-    const availableIds = new Set(availableTools.map((t: any) => String(t.id)));
-    const current = useAgentStore.getState().editedAgent?.tools ?? [];
-    const next = current.filter((t) => availableIds.has(String(t.id)));
-    if (next.length !== current.length) {
-      updateTools(next);
-    }
-  }, [availableTools, toolsLoaded, selectedTools, updateTools]);
+  // Tool availability is refreshed independently from the agent draft. Do not
+  // persist a cleanup during initialization because it is indistinguishable
+  // from a user tool edit and can race with agent switching.
 
   // Keep system-managed tools in the draft for persistence, but omit them from
   // the user-facing selected-tools list.
