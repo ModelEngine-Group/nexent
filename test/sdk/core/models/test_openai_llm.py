@@ -2217,5 +2217,29 @@ def test_coerce_budget_snapshot_from_dict():
     assert result.w1_fingerprint == "fp1"
 
 
+def test_streaming_without_usage_falls_back_to_input_text(openai_model_instance):
+    """When chunk has no usage info, input_text is extracted from messages (L454-L465).
+
+    This covers:
+      L460: string content concatenation into input_text
+      The else branch at L454 (chunk_list[-1].usage is None)
+    """
+    # Create chunk with usage explicitly set to None to trigger fallback path
+    clean_chunk = types.SimpleNamespace()
+    clean_choice = types.SimpleNamespace()
+    clean_delta = types.SimpleNamespace()
+    clean_delta.content = "ok"
+    clean_delta.role = "assistant"
+    clean_delta.reasoning_content = None
+    clean_choice.delta = clean_delta
+    clean_chunk.choices = [clean_choice]
+    clean_chunk.usage = None  # Explicitly None → else branch at L454 → L460 string concat
+
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}):
+        openai_model_instance.client.chat.completions.create.return_value = [clean_chunk]
+        result = openai_model_instance.__call__([{"role": "user", "content": "hello"}])
+        assert result is not None
+
+
 if __name__ == "__main__":
     pytest.main([__file__])
