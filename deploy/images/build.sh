@@ -369,7 +369,7 @@ case "$REGISTRY" in
     ;;
   mainland)
     PY_MIRROR_ARGS=(--build-arg MIRROR=https://pypi.tuna.tsinghua.edu.cn/simple --build-arg APT_MIRROR=tsinghua)
-    WEB_MIRROR_ARGS=(--build-arg MIRROR=https://registry.npmmirror.com --build-arg APK_MIRROR=tsinghua)
+    WEB_MIRROR_ARGS=(--build-arg MIRROR=https://repo.huaweicloud.com/repository/npm/ --build-arg APK_MIRROR=tsinghua)
     ;;
   *)
     if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then

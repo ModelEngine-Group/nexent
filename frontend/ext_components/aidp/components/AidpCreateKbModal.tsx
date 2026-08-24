@@ -25,6 +25,7 @@ import { InboxOutlined, QuestionCircleOutlined } from "@ant-design/icons";
 import type { AidpKnowledgeBaseItem } from "@/types/agentConfig";
 import type { AidpModelItem } from "@/ext_components/aidp/services/aidpKnowledgeService";
 import aidpKnowledgeService from "@/ext_components/aidp/services/aidpKnowledgeService";
+import { USER_ROLES } from "@/const/auth";
 
 /**
  * Antd's Upload component (Dragger) requires ``originFileObj`` to satisfy
@@ -115,8 +116,12 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
   // named ``useAuthenticationContext`` only carries ``session`` and the
   // plain ``useAuthentication`` hook doesn't carry ``user`` at all.
   const { user } = useAuthorizationContext();
+  const isUser = user?.role === USER_ROLES.USER;
+  const canConfigureGroupPermissions = !!user && !isUser;
   const tenantId = user?.tenantId ?? null;
-  const { data: groupListData } = useGroupList(tenantId);
+  const { data: groupListData } = useGroupList(
+    canConfigureGroupPermissions ? tenantId : null
+  );
   const groupOptions = useMemo(
     () =>
       (groupListData?.groups ?? []).map((g) => ({
@@ -139,7 +144,7 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
     chunk_token_num: AIDP_CREATE_DEFAULTS.chunk_token_num,
     chunk_overlap_num: AIDP_CREATE_DEFAULTS.chunk_overlap_num,
     caption_enable: AIDP_CREATE_DEFAULTS.caption_enable,
-    ingroup_permission: "READ_ONLY",
+    ingroup_permission: isUser ? "PRIVATE" : "READ_ONLY",
     group_ids: [],
   });
 
@@ -151,6 +156,19 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
   // at PRIVATE without calling Form.useWatch inside a conditional sub-render
   // (which would violate the Rules of Hooks).
   const ingroupPermission = Form.useWatch("ingroup_permission", form);
+
+  useEffect(() => {
+    if (!open) return;
+    form.setFieldsValue({
+      ingroup_permission: isUser ? "PRIVATE" : "READ_ONLY",
+      group_ids: [],
+    });
+    setFormValues((previous) => ({
+      ...previous,
+      ingroup_permission: isUser ? "PRIVATE" : previous.ingroup_permission,
+      group_ids: isUser ? [] : previous.group_ids,
+    }));
+  }, [form, isUser, open]);
 
   // Fetch applicable VLM models from AIDP. Only run when modal is open to
   // avoid hitting the (relatively slow) admin endpoint unnecessarily.
@@ -227,9 +245,11 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
         caption_enable: values.caption_enable ? 1 : 0,
         // The permission select is disabled at PRIVATE so users cannot pick
         // group_ids while PRIVATE; we always coerce to [] for safety.
-        ingroup_permission: values.ingroup_permission ?? "READ_ONLY",
+        ingroup_permission: isUser
+          ? "PRIVATE"
+          : (values.ingroup_permission ?? "READ_ONLY"),
         group_ids:
-          (values.ingroup_permission ?? "READ_ONLY") === "PRIVATE"
+          isUser || (values.ingroup_permission ?? "READ_ONLY") === "PRIVATE"
             ? []
             : Array.isArray(values.group_ids)
               ? values.group_ids
@@ -260,6 +280,9 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
       }
       setLoading(true);
 
+      const permission = isUser ? "PRIVATE" : formValues.ingroup_permission;
+      const groupIds = isUser ? [] : formValues.group_ids;
+
       // Defense-in-depth: re-validate every file in case beforeUpload was bypassed
       if (!skipUpload && fileList.length > 0) {
         const validation = validateAidpFiles(fileList);
@@ -289,8 +312,8 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
         caption_enable: formValues.caption_enable,
         // v7.1: forward in-group permission + groups to the backend so the
         // knowledge-base permission row is created in lockstep with the KB.
-        ingroup_permission: formValues.ingroup_permission,
-        group_ids: formValues.group_ids,
+        ingroup_permission: permission,
+        group_ids: groupIds,
       });
       knowledgeBaseCreated = true;
       createdKdsId = String(created.kds_id || "");
@@ -300,11 +323,8 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
         kds_name: created.kds_name || formValues.name.trim(),
         description: created.description ?? formValues.description ?? "",
         permission: "EDIT",
-        ingroup_permission: formValues.ingroup_permission,
-        group_ids:
-          formValues.ingroup_permission === "PRIVATE"
-            ? []
-            : formValues.group_ids,
+        ingroup_permission: permission,
+        group_ids: permission === "PRIVATE" ? [] : groupIds,
         resource_status: "ACTIVE",
         is_multimodal: formValues.caption_enable === 1,
       };
@@ -404,7 +424,7 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
       chunk_token_num: AIDP_CREATE_DEFAULTS.chunk_token_num,
       chunk_overlap_num: AIDP_CREATE_DEFAULTS.chunk_overlap_num,
       caption_enable: AIDP_CREATE_DEFAULTS.caption_enable,
-      ingroup_permission: "READ_ONLY",
+      ingroup_permission: isUser ? "PRIVATE" : "READ_ONLY",
       group_ids: [],
     });
   };
@@ -435,66 +455,68 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
           />
         </Form.Item>
 
-        {/* v7.1: in-group permission controls.
-            PRIVATE disallows picking groups (groups are forced to []).
-            Non-PRIVATE selections REQUIRE a non-empty group_ids list. */}
-        <Form.Item
-          name="ingroup_permission"
-          label={t("aidpKnowledge.createIngroupPermission")}
-          initialValue="READ_ONLY"
-          rules={[
-            {
-              required: true,
-              message: t("aidpKnowledge.createIngroupPermissionRequired"),
-            },
-          ]}
-        >
-          <Select
-            options={[
-              {
-                value: "EDIT",
-                label: t("aidpKnowledge.createIngroupPermissionEdit"),
-              },
-              {
-                value: "READ_ONLY",
-                label: t("aidpKnowledge.createIngroupPermissionRead"),
-              },
-              {
-                value: "PRIVATE",
-                label: t("aidpKnowledge.createIngroupPermissionPrivate"),
-              },
-            ]}
-          />
-        </Form.Item>
+        {canConfigureGroupPermissions && (
+          <>
+            {/* USER creation is always a personal PRIVATE KB. */}
+            <Form.Item
+              name="ingroup_permission"
+              label={t("aidpKnowledge.createIngroupPermission")}
+              initialValue="READ_ONLY"
+              rules={[
+                {
+                  required: true,
+                  message: t("aidpKnowledge.createIngroupPermissionRequired"),
+                },
+              ]}
+            >
+              <Select
+                options={[
+                  {
+                    value: "EDIT",
+                    label: t("aidpKnowledge.createIngroupPermissionEdit"),
+                  },
+                  {
+                    value: "READ_ONLY",
+                    label: t("aidpKnowledge.createIngroupPermissionRead"),
+                  },
+                  {
+                    value: "PRIVATE",
+                    label: t("aidpKnowledge.createIngroupPermissionPrivate"),
+                  },
+                ]}
+              />
+            </Form.Item>
 
-        <Form.Item
-          name="group_ids"
-          label={t("aidpKnowledge.createAccessGroups")}
-          required={ingroupPermission !== "PRIVATE"}
-          dependencies={["ingroup_permission"]}
-          rules={[
-            ({ getFieldValue }) => ({
-              validator(_rule, value) {
-                const level =
-                  getFieldValue("ingroup_permission") || "READ_ONLY";
-                if (level === "PRIVATE") return Promise.resolve();
-                if (Array.isArray(value) && value.length > 0) {
-                  return Promise.resolve();
-                }
-                return Promise.reject(
-                  new Error(t("aidpKnowledge.createAccessGroupsRequired"))
-                );
-              },
-            }),
-          ]}
-        >
-          <Select
-            mode="multiple"
-            placeholder={t("aidpKnowledge.createAccessGroupsPlaceholder")}
-            disabled={ingroupPermission === "PRIVATE"}
-            options={groupOptions}
-          />
-        </Form.Item>
+            <Form.Item
+              name="group_ids"
+              label={t("aidpKnowledge.createAccessGroups")}
+              required={ingroupPermission !== "PRIVATE"}
+              dependencies={["ingroup_permission"]}
+              rules={[
+                ({ getFieldValue }) => ({
+                  validator(_rule, value) {
+                    const level =
+                      getFieldValue("ingroup_permission") || "READ_ONLY";
+                    if (level === "PRIVATE") return Promise.resolve();
+                    if (Array.isArray(value) && value.length > 0) {
+                      return Promise.resolve();
+                    }
+                    return Promise.reject(
+                      new Error(t("aidpKnowledge.createAccessGroupsRequired"))
+                    );
+                  },
+                }),
+              ]}
+            >
+              <Select
+                mode="multiple"
+                placeholder={t("aidpKnowledge.createAccessGroupsPlaceholder")}
+                disabled={ingroupPermission === "PRIVATE"}
+                options={groupOptions}
+              />
+            </Form.Item>
+          </>
+        )}
 
         <Form.Item
           name="caption_enable"

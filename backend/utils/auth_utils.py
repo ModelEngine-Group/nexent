@@ -39,6 +39,11 @@ logger = logging.getLogger(__name__)
 # Fixed test secret used by generate_test_jwt and unit tests.
 MOCK_JWT_SECRET_KEY = "nexent-mock-jwt-secret"
 
+INTERNAL_RUNTIME_JWT_ISSUER = "nexent-northbound"
+INTERNAL_RUNTIME_JWT_AUDIENCE = "nexent-runtime"
+INTERNAL_RUNTIME_JWT_SCOPE = "northbound:runtime"
+INTERNAL_RUNTIME_JWT_TTL_SECONDS = 60
+
 # ---------------------------------------------------------------------------
 # AK/SK (Access Key / Secret Key) authentication helpers
 # ---------------------------------------------------------------------------
@@ -219,13 +224,9 @@ def get_user_and_tenant_by_access_key(access_key: str) -> Dict[str, str]:
 
     # Query tenant from user_tenant_t
     user_tenant_record = get_user_tenant_by_user_id(user_id)
-    if user_tenant_record and user_tenant_record.get("tenant_id"):
-        tenant_id = user_tenant_record["tenant_id"]
-    else:
-        tenant_id = DEFAULT_TENANT_ID
-        logger.warning(
-            f"No tenant relationship found for user {user_id}, using default tenant"
-        )
+    if not user_tenant_record or not user_tenant_record.get("tenant_id"):
+        raise UnauthorizedError("No active tenant relationship for this access key")
+    tenant_id = user_tenant_record["tenant_id"]
 
     return {
         "user_id": user_id,
@@ -606,6 +607,68 @@ def generate_session_jwt(
     if session_id:
         payload["sid"] = session_id
     return jwt.encode(payload, SUPABASE_JWT_SECRET, algorithm="HS256")
+
+
+def generate_internal_runtime_jwt(
+    user_id: str,
+    tenant_id: str,
+    expires_in: int = INTERNAL_RUNTIME_JWT_TTL_SECONDS,
+) -> str:
+    """Generate a short-lived token for northbound-to-runtime requests."""
+    if not SUPABASE_JWT_SECRET:
+        raise ValueError("JWT verification is not configured")
+    if not user_id or not tenant_id:
+        raise ValueError("user_id and tenant_id are required")
+
+    now = int(time.time())
+    payload = {
+        "sub": user_id,
+        "tenant_id": tenant_id,
+        "scope": INTERNAL_RUNTIME_JWT_SCOPE,
+        "iss": INTERNAL_RUNTIME_JWT_ISSUER,
+        "aud": INTERNAL_RUNTIME_JWT_AUDIENCE,
+        "iat": now,
+        "exp": now + expires_in,
+    }
+    return jwt.encode(payload, SUPABASE_JWT_SECRET, algorithm="HS256")
+
+
+def verify_internal_runtime_jwt(authorization: Optional[str]) -> tuple[str, str]:
+    """Verify a northbound runtime token and return its user and tenant."""
+    if not SUPABASE_JWT_SECRET:
+        raise UnauthorizedError("JWT verification is not configured")
+    if not authorization or not authorization.strip():
+        raise UnauthorizedError("No authorization header provided")
+
+    token = (
+        authorization.replace("Bearer ", "", 1)
+        if authorization.startswith("Bearer ")
+        else authorization
+    )
+    try:
+        claims = jwt.decode(
+            token,
+            SUPABASE_JWT_SECRET,
+            algorithms=["HS256"],
+            audience=INTERNAL_RUNTIME_JWT_AUDIENCE,
+            issuer=INTERNAL_RUNTIME_JWT_ISSUER,
+            options={"verify_exp": True},
+        )
+    except jwt.ExpiredSignatureError as exc:
+        raise UnauthorizedError("Internal runtime token has expired") from exc
+    except jwt.InvalidTokenError as exc:
+        raise UnauthorizedError("Invalid internal runtime token") from exc
+
+    if claims.get("scope") != INTERNAL_RUNTIME_JWT_SCOPE:
+        raise UnauthorizedError("Invalid internal runtime token scope")
+
+    user_id = claims.get("sub")
+    tenant_id = claims.get("tenant_id")
+    if not isinstance(user_id, str) or not user_id.strip():
+        raise UnauthorizedError("Internal runtime token is missing user identity")
+    if not isinstance(tenant_id, str) or not tenant_id.strip():
+        raise UnauthorizedError("Internal runtime token is missing tenant identity")
+    return user_id, tenant_id
 
 
 def get_current_user_info(

@@ -1015,13 +1015,16 @@ export const conversationService = {
       is_resume?: boolean; // Add resume mode parameter for streaming recovery
       enable_plan?: boolean;
       knowledge_scope?: ConversationKnowledgeScope;
+      metadata?: Record<string, unknown> | null;
+      expected_metadata_version?: number;
       runtime_mode?: "nl2agent" | "nl2skill";
       draft_snapshot?: Record<string, unknown>;
       complexity?: "simple" | "complicated";
       language?: "zh" | "en";
     },
     signal?: AbortSignal,
-    onConversationId?: (id: string) => void
+    onConversationId?: (id: string) => void,
+    onRuntimeMetadataVersion?: (version: number) => void
   ): Promise<
     ReadableStreamDefaultReader<Uint8Array> | { type: "json"; data: unknown }
   > {
@@ -1062,6 +1065,13 @@ export const conversationService = {
       if (params.knowledge_scope !== undefined) {
         requestParams.knowledge_scope = params.knowledge_scope;
       }
+      if (params.metadata !== undefined) {
+        requestParams.metadata = params.metadata;
+      }
+      if (params.expected_metadata_version !== undefined) {
+        requestParams.expected_metadata_version =
+          params.expected_metadata_version;
+      }
 
       // Build URL with query parameters for resume mode
       let url = API_ENDPOINTS.agent.run;
@@ -1088,6 +1098,15 @@ export const conversationService = {
       const conversationId = response.headers.get("conversation_id");
       if (conversationId && onConversationId) {
         onConversationId(conversationId);
+      }
+      const runtimeMetadataVersion = response.headers.get(
+        "X-Runtime-Metadata-Version"
+      );
+      if (runtimeMetadataVersion !== null && onRuntimeMetadataVersion) {
+        const parsedVersion = Number(runtimeMetadataVersion);
+        if (Number.isInteger(parsedVersion) && parsedVersion >= 0) {
+          onRuntimeMetadataVersion(parsedVersion);
+        }
       }
 
       if (!response.ok) {

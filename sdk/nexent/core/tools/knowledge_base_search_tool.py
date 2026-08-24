@@ -8,8 +8,8 @@ from pydantic.fields import FieldInfo
 from smolagents.tools import Tool
 
 from ...vector_database.base import VectorDatabaseCore
-from ..models.embedding_model import BaseEmbedding
-from ..models.rerank_model import BaseRerank
+from ..gateway.modality import EmbeddingAdapter
+from ..gateway.modality import RerankAdapter
 from ..utils.constants import RERANK_OVERSEARCH_MULTIPLIER
 from ..utils.observer import MessageObserver, ProcessType
 from ..utils.tools_common_message import (
@@ -40,6 +40,7 @@ class KnowledgeBaseSearchTool(Tool):
     """Knowledge base search tool"""
 
     name = "knowledge_base_search"
+    is_user_selectable: bool = False
     description = (
         "Performs a local knowledge base search based on your query then returns the top search results. "
         "A tool for retrieving domain-specific knowledge, documents, and information stored in the local knowledge base. "
@@ -104,10 +105,10 @@ class KnowledgeBaseSearchTool(Tool):
         observer: MessageObserver = Field(
             description="Message observer", default=None, exclude=True
         ),
-        embedding_model: BaseEmbedding = Field(
+        embedding_model: EmbeddingAdapter = Field(
             description="The embedding model to use", default=None, exclude=True
         ),
-        rerank_model: BaseRerank = Field(
+        rerank_model: RerankAdapter = Field(
             description="The rerank model to use", default=None, exclude=True
         ),
         vdb_core: VectorDatabaseCore = Field(

@@ -27,6 +27,7 @@ from sqlalchemy.exc import IntegrityError
 from consts.const import AIDP_API_KEY, AIDP_SERVER_URL
 from consts.error_code import ErrorCode
 from consts.exceptions import AppException, UnauthorizedError
+from database.user_tenant_db import get_user_role_by_tenant
 from ext_components.aidp.consts.aidp_exceptions import (
     AidpKbConflictError,
     AidpKbNotFoundError,
@@ -57,6 +58,7 @@ from ext_components.aidp.services.aidp_service import (
 )
 from ext_components.aidp.services.aidp_permission_service import (
     EDIT,
+    PRIVATE,
     READ_ONLY,
     _validate_group_ids_strict,
 )
@@ -234,6 +236,17 @@ from fastapi import HTTPException  # noqa: E402  (placed here to avoid editing m
 
 def _credentials() -> tuple[str, str]:
     return AIDP_SERVER_URL, AIDP_API_KEY
+
+
+def _is_user_role(user_id: str, tenant_id: str) -> bool:
+    """Return whether the caller is a regular USER in the current tenant.
+
+    Missing tenant-role data is treated as USER so an authenticated caller
+    cannot bypass the personal-KB boundary while its tenant context is being
+    provisioned.
+    """
+    role = get_user_role_by_tenant(user_id, tenant_id)
+    return (role or "USER").upper() == "USER"
 
 
 def _current_accessible_rows(user_id: str, tenant_id: str) -> list[dict]:
@@ -425,13 +438,20 @@ async def create_knowledge_base(
     user_id, tenant_id = await _auth(request)
 
     ingroup = body.ingroup_permission or READ_ONLY
-    if ingroup not in {EDIT, READ_ONLY, "PRIVATE"}:
+    is_user = _is_user_role(user_id, tenant_id)
+    if is_user:
+        # Personal KB is the only KB type a USER may create. Normalize rather
+        # than trusting the client, so direct API callers cannot create a
+        # shared AIDP KB by sending EDIT/READ_ONLY and group_ids.
+        ingroup = PRIVATE
+        valid_group_ids: list[int] = []
+    elif ingroup not in {EDIT, READ_ONLY, PRIVATE}:
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST,
             detail=f"Unsupported ingroup_permission: {ingroup!r}",
         )
 
-    if ingroup != "PRIVATE":
+    elif ingroup != PRIVATE:
         if not body.group_ids:
             raise HTTPException(
                 status_code=HTTPStatus.BAD_REQUEST,
@@ -739,13 +759,19 @@ async def set_permission(
     user_id, tenant_id = await _auth(request)
     perms.require_permission(kds_id, user_id, tenant_id, required="EDIT")
 
-    if body.ingroup_permission not in {EDIT, READ_ONLY, "PRIVATE"}:
+    if _is_user_role(user_id, tenant_id) and body.ingroup_permission != PRIVATE:
+        raise HTTPException(
+            status_code=HTTPStatus.FORBIDDEN,
+            detail="USER role can only manage PRIVATE personal knowledge bases",
+        )
+
+    if body.ingroup_permission not in {EDIT, READ_ONLY, PRIVATE}:
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST,
             detail=f"Unsupported ingroup_permission: {body.ingroup_permission!r}",
         )
 
-    if body.ingroup_permission == "PRIVATE":
+    if body.ingroup_permission == PRIVATE:
         final_group_ids: list[int] = []
     else:
         if not body.group_ids:

@@ -42,8 +42,8 @@ from utils.model_name_utils import (
 
 logger = logging.getLogger("model_management_service")
 
-INDEPENDENT_MULTIMODAL_MODEL_TYPES = {"vlm", "vlm2", "vlm3"}
-CAPACITY_COVERAGE_MODEL_TYPES = {"llm", "vlm", "vlm2", "vlm3"}
+INDEPENDENT_MULTIMODAL_MODEL_TYPES = {"vlm", "vlm2", "vlm3", "vlm4"}
+CAPACITY_COVERAGE_MODEL_TYPES = {"llm", "vlm", "vlm2", "vlm3", "vlm4"}
 
 
 # OpenTelemetry counter for silent catalog-matcher failures during the

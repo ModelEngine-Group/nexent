@@ -1396,6 +1396,7 @@ class TestLoadConfigImpl:
                 "VLM_ID": {},
                 "VLM2_ID": {},
                 "VLM3_ID": {},
+                "VLM4_ID": {},
                 "STT_ID": {},
                 "TTS_ID": {}
             }
@@ -1408,7 +1409,7 @@ class TestLoadConfigImpl:
 
         # Assert
         assert isinstance(result, dict)
-        assert len(result) == 9  # All model types should be present
+        assert len(result) == 10  # All model types should be present
 
         # Verify successful configs
         assert result["llm"]["displayName"] == "GPT-4"
@@ -1432,20 +1433,20 @@ class TestLoadConfigImpl:
         # Assert
         assert isinstance(result, dict)
         # All model types should still be present with empty configs
-        assert len(result) == 9
+        assert len(result) == 10
 
         # All configs should be empty due to exceptions
-        for model_key in ["llm", "embedding", "multiEmbedding", "rerank", "vlm", "vlm2", "vlm3", "stt", "tts"]:
+        for model_key in ["llm", "embedding", "multiEmbedding", "rerank", "vlm", "vlm2", "vlm3", "vlm4", "stt", "tts"]:
             assert result[model_key]["name"] == ""
             assert result[model_key]["displayName"] == ""
             assert result[model_key]["apiConfig"]["apiKey"] == ""
             assert result[model_key]["apiConfig"]["modelUrl"] == ""
 
         # Verify that logger.warning was called for each model type
-        assert service_mocks['logger'].warning.call_count == 9
+        assert service_mocks['logger'].warning.call_count == 10
         warning_calls = service_mocks['logger'].warning.call_args_list
         expected_configs = ["LLM_ID", "EMBEDDING_ID", "MULTI_EMBEDDING_ID",
-                            "RERANK_ID", "VLM_ID", "VLM2_ID", "VLM3_ID", "STT_ID", "TTS_ID"]
+                            "RERANK_ID", "VLM_ID", "VLM2_ID", "VLM3_ID", "VLM4_ID", "STT_ID", "TTS_ID"]
         for i, config_key in enumerate(expected_configs):
             assert f"Failed to get config for {config_key}: Database completely down" in warning_calls[
                 i][0][0]

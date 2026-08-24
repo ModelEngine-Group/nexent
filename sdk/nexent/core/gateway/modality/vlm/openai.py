@@ -55,6 +55,7 @@ class OpenAIVLMAdapter(VLMAdapter, HttpTransportMixin):
             api_key=self._api_key,
             ssl_verify=self._ssl_verify,
             model_factory=self.factory,
+            flatten_messages_as_text=False,
             display_name=ctx.display_name,
             temperature=ctx.temperature if ctx.temperature is not None else 0.7,
             top_p=ctx.top_p if ctx.top_p is not None else 0.7,

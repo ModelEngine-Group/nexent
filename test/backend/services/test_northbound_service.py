@@ -10,6 +10,7 @@ This module tests the northbound-facing service layer functions including:
 import sys
 import os
 import types
+from enum import Enum
 from unittest.mock import MagicMock, AsyncMock, patch
 
 import pytest
@@ -21,6 +22,30 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 # Mock all required modules BEFORE importing northbound_service
 # =============================================================================
 
+class ErrorCode:
+    CHAT_METADATA_INVALID = "010106"
+    CHAT_METADATA_TOO_LARGE = "010107"
+
+
+class RuntimeMetadataValidationCode(str, Enum):
+    INVALID_METADATA_TYPE = "INVALID_METADATA_TYPE"
+    METADATA_TOO_LARGE = "METADATA_TOO_LARGE"
+
+
+class AppException(Exception):
+    def __init__(self, error_code, message=None, details=None):
+        self.error_code = error_code
+        self.message = message
+        self.details = details or {}
+        super().__init__(message)
+
+
+class RuntimeMetadataValidationError(ValueError):
+    def __init__(self, code, message):
+        self.code = code
+        super().__init__(message)
+
+
 # Mock consts.exceptions
 class LimitExceededError(Exception):
     pass
@@ -31,12 +56,33 @@ class UnauthorizedError(Exception):
 class ConversationNotFoundError(Exception):
     pass
 
+class RuntimeServiceTimeoutError(Exception):
+    pass
+
+class RuntimeServiceUnavailableError(Exception):
+    pass
+
+class RuntimeUpstreamError(Exception):
+    pass
+
+
 consts_exceptions_mod = types.ModuleType("consts.exceptions")
 consts_exceptions_mod.LimitExceededError = LimitExceededError
 consts_exceptions_mod.UnauthorizedError = UnauthorizedError
 consts_exceptions_mod.ConversationNotFoundError = ConversationNotFoundError
+consts_exceptions_mod.RuntimeServiceTimeoutError = RuntimeServiceTimeoutError
+consts_exceptions_mod.RuntimeServiceUnavailableError = RuntimeServiceUnavailableError
+consts_exceptions_mod.RuntimeUpstreamError = RuntimeUpstreamError
+consts_exceptions_mod.AppException = AppException
+consts_exceptions_mod.RuntimeMetadataValidationError = RuntimeMetadataValidationError
 sys.modules["consts.exceptions"] = consts_exceptions_mod
 sys.modules["backend.consts.exceptions"] = consts_exceptions_mod
+
+consts_error_code_mod = types.ModuleType("consts.error_code")
+consts_error_code_mod.ErrorCode = ErrorCode
+consts_error_code_mod.RuntimeMetadataValidationCode = RuntimeMetadataValidationCode
+sys.modules["consts.error_code"] = consts_error_code_mod
+sys.modules["backend.consts.error_code"] = consts_error_code_mod
 
 # Mock consts.const
 consts_const_mod = types.ModuleType("consts.const")
@@ -58,6 +104,7 @@ sys.modules["consts.const"] = consts_const_mod
 consts_package = types.ModuleType("consts")
 consts_package.exceptions = consts_exceptions_mod
 consts_package.const = consts_const_mod
+consts_package.error_code = consts_error_code_mod
 sys.modules["consts"] = consts_package
 
 # Mock database modules
@@ -118,10 +165,14 @@ sys.modules["services.runtime_state_service"] = runtime_state_service_mod
 
 # Mock agent_service
 agent_service_mod = types.ModuleType("services.agent_service")
-agent_service_mod.run_agent_stream = AsyncMock()
-agent_service_mod.stop_agent_tasks = MagicMock(return_value={"message": "stopped"})
 agent_service_mod.get_agent_by_name_impl = MagicMock(return_value={"agent_id": 1, "latest_version_no": 1})
 sys.modules["services.agent_service"] = agent_service_mod
+
+# Mock runtime forwarding service
+runtime_proxy_mod = types.ModuleType("services.runtime_proxy_service")
+runtime_proxy_mod.forward_agent_run = AsyncMock()
+runtime_proxy_mod.forward_agent_stop = AsyncMock(return_value={"message": "stopped"})
+sys.modules["services.runtime_proxy_service"] = runtime_proxy_mod
 
 # Mock conversation_management_service
 conv_mgmt_mod = types.ModuleType("services.conversation_management_service")
@@ -163,6 +214,7 @@ sys.modules["services.file_management_service"] = file_mgmt_mod
 
 # Add to services package
 services_package.agent_service = agent_service_mod
+services_package.runtime_proxy_service = runtime_proxy_mod
 services_package.agent_version_service = agent_version_mod
 services_package.conversation_management_service = conv_mgmt_mod
 services_package.file_management_service = file_mgmt_mod
@@ -211,6 +263,9 @@ def reset_test_isolation():
     agent_version_mod.list_published_agents_impl.return_value = [
         {"agent_id": 1, "name": "test_agent", "description": "Test agent"}
     ]
+    runtime_proxy_mod.forward_agent_run.reset_mock(side_effect=True)
+    runtime_proxy_mod.forward_agent_stop.reset_mock(side_effect=True)
+    runtime_proxy_mod.forward_agent_stop.return_value = {"message": "stopped"}
     yield
     ns._IDEMPOTENCY_RUNNING.clear()
     ns._RATE_STATE.clear()
@@ -496,13 +551,53 @@ class TestRateLimiting:
 class TestStartStreamingChat:
     """Tests for start_streaming_chat function."""
 
+    async def test_start_streaming_chat_rejects_invalid_metadata(self):
+        """Non-object runtime metadata must be rejected with HTTP 422."""
+        ctx = MockNorthboundContext(token_id=0)
+
+        with pytest.raises(AppException) as exc_info:
+            await ns.start_streaming_chat(
+                ctx=ctx,
+                conversation_id=None,
+                agent_name="test_agent",
+                query="test query",
+                metadata=["not", "an", "object"],
+            )
+
+        assert exc_info.value.error_code == ErrorCode.CHAT_METADATA_INVALID
+        assert exc_info.value.details == {"reason": "INVALID_METADATA_TYPE"}
+
+    async def test_start_streaming_chat_oversized_metadata_returns_413(self):
+        """METADATA_TOO_LARGE validation failures map to HTTP 413."""
+        ctx = MockNorthboundContext(token_id=0)
+
+        with patch.object(
+            ns,
+            "validate_runtime_metadata",
+            side_effect=RuntimeMetadataValidationError(
+                RuntimeMetadataValidationCode.METADATA_TOO_LARGE,
+                "too large",
+            ),
+        ):
+            with pytest.raises(AppException) as exc_info:
+                await ns.start_streaming_chat(
+                    ctx=ctx,
+                    conversation_id=None,
+                    agent_name="test_agent",
+                    query="test query",
+                    metadata={"payload": "x"},
+                )
+
+        assert exc_info.value.error_code == ErrorCode.CHAT_METADATA_TOO_LARGE
+        assert exc_info.value.details == {"reason": "METADATA_TOO_LARGE"}
+
     async def test_start_streaming_chat_creates_conversation(self):
         """Test that new conversation is created when conversation_id is None."""
         ctx = MockNorthboundContext(token_id=0)
 
         mock_response = MagicMock()
         mock_response.headers = {}
-        agent_service_mod.run_agent_stream.return_value = mock_response
+        runtime_proxy_mod.forward_agent_run.return_value = mock_response
 
         with patch.object(ns, 'check_and_consume_rate_limit', new_callable=AsyncMock), \
                 patch.object(ns, 'idempotency_start', new_callable=AsyncMock), \
@@ -516,7 +611,46 @@ class TestStartStreamingChat:
                 query="test query"
             )
 
-            conv_mgmt_mod.create_new_conversation.assert_called()
+            conv_mgmt_mod.create_new_conversation.assert_called_once_with(
+                title="New Conversation",
+                user_id=ctx.user_id,
+                agent_id=1,
+            )
+
+    async def test_start_streaming_chat_allows_unpublished_agent(self):
+        """Use the resolved agent ID even when it has no published version."""
+        ctx = MockNorthboundContext(token_id=0)
+        conv_mgmt_mod.create_new_conversation.reset_mock()
+        mock_response = MagicMock()
+        mock_response.headers = {}
+        runtime_proxy_mod.forward_agent_run.return_value = mock_response
+
+        with patch.object(ns, "check_and_consume_rate_limit", new_callable=AsyncMock), \
+                patch.object(ns, "idempotency_start", new_callable=AsyncMock), \
+                patch.object(ns, "get_conversation_history_internal", new_callable=AsyncMock) as mock_history, \
+                patch.object(
+                    ns,
+                    "get_agent_by_name_impl",
+                    return_value={"agent_id": 99, "latest_version_no": None},
+                ):
+            mock_history.return_value = {"data": {"history": []}}
+
+            await ns.start_streaming_chat(
+                ctx=ctx,
+                conversation_id=None,
+                agent_name="draft_agent",
+                query="test query",
+            )
+
+        conv_mgmt_mod.create_new_conversation.assert_called_once_with(
+            title="New Conversation",
+            user_id=ctx.user_id,
+            agent_id=99,
+        )
+        forwarded_request = runtime_proxy_mod.forward_agent_run.call_args.kwargs[
+            "agent_request"
+        ]
+        assert forwarded_request.version_no is None
 
     async def test_start_streaming_chat_logs_token_usage(self):
         """Test that token usage is logged when token_id > 0."""
@@ -524,7 +658,7 @@ class TestStartStreamingChat:
 
         mock_response = MagicMock()
         mock_response.headers = {}
-        agent_service_mod.run_agent_stream.return_value = mock_response
+        runtime_proxy_mod.forward_agent_run.return_value = mock_response
 
         with patch.object(ns, 'check_and_consume_rate_limit', new_callable=AsyncMock), \
                 patch.object(ns, 'idempotency_start', new_callable=AsyncMock), \
@@ -563,7 +697,7 @@ class TestStartStreamingChat:
 
         mock_response = MagicMock()
         mock_response.headers = {}
-        agent_service_mod.run_agent_stream.return_value = mock_response
+        runtime_proxy_mod.forward_agent_run.return_value = mock_response
 
         async def mock_get_history(*args, **kwargs):
             return {"data": {"history": []}}
@@ -588,7 +722,7 @@ class TestStartStreamingChat:
 
         mock_response = MagicMock()
         mock_response.headers = {}
-        agent_service_mod.run_agent_stream.return_value = mock_response
+        runtime_proxy_mod.forward_agent_run.return_value = mock_response
 
         async def mock_get_history(*args, **kwargs):
             return {"data": {"history": []}}
@@ -613,7 +747,7 @@ class TestStartStreamingChat:
 
         mock_response = MagicMock()
         mock_response.headers = {}
-        agent_service_mod.run_agent_stream.return_value = mock_response
+        runtime_proxy_mod.forward_agent_run.return_value = mock_response
 
         with patch.object(ns, 'check_and_consume_rate_limit', new_callable=AsyncMock), \
                 patch.object(ns, 'idempotency_start', new_callable=AsyncMock), \
@@ -631,6 +765,10 @@ class TestStartStreamingChat:
             )
 
             mock_norm.assert_called_once()
+            forwarded_request = runtime_proxy_mod.forward_agent_run.call_args.kwargs[
+                "agent_request"
+            ]
+            assert forwarded_request.minio_files == [{"name": "file.txt"}]
 
     async def test_start_streaming_chat_with_model_id_override(self):
         """Test that model_id is passed through to AgentRequest to override the agent's default model."""
@@ -639,7 +777,7 @@ class TestStartStreamingChat:
 
         mock_response = MagicMock()
         mock_response.headers = {}
-        agent_service_mod.run_agent_stream.return_value = mock_response
+        runtime_proxy_mod.forward_agent_run.return_value = mock_response
 
         async def mock_get_history(*args, **kwargs):
             return {"data": {"history": []}}
@@ -657,10 +795,12 @@ class TestStartStreamingChat:
             )
 
             # Verify run_agent_stream was called with an AgentRequest that has the override model_id
-            call_kwargs = agent_service_mod.run_agent_stream.call_args.kwargs
+            call_kwargs = runtime_proxy_mod.forward_agent_run.call_args.kwargs
             agent_request = call_kwargs.get("agent_request")
             assert agent_request is not None
             assert getattr(agent_request, "model_id", None) == override_model_id
+            assert call_kwargs["user_id"] == ctx.user_id
+            assert call_kwargs["tenant_id"] == ctx.tenant_id
 
     async def test_start_streaming_chat_model_id_null_uses_agent_default(self):
         """Test that omitting model_id results in None, preserving agent's default model."""
@@ -668,7 +808,7 @@ class TestStartStreamingChat:
 
         mock_response = MagicMock()
         mock_response.headers = {}
-        agent_service_mod.run_agent_stream.return_value = mock_response
+        runtime_proxy_mod.forward_agent_run.return_value = mock_response
 
         async def mock_get_history(*args, **kwargs):
             return {"data": {"history": []}}
@@ -685,7 +825,7 @@ class TestStartStreamingChat:
                 # model_id not provided -> defaults to None
             )
 
-            call_kwargs = agent_service_mod.run_agent_stream.call_args.kwargs
+            call_kwargs = runtime_proxy_mod.forward_agent_run.call_args.kwargs
             agent_request = call_kwargs.get("agent_request")
             assert agent_request is not None
             assert getattr(agent_request, "model_id", None) is None
@@ -697,7 +837,7 @@ class TestStartStreamingChat:
 
         mock_response = MagicMock()
         mock_response.headers = {}
-        agent_service_mod.run_agent_stream.return_value = mock_response
+        runtime_proxy_mod.forward_agent_run.return_value = mock_response
 
         with patch.object(ns, 'check_and_consume_rate_limit', new_callable=AsyncMock), \
                 patch.object(ns, 'idempotency_start', new_callable=AsyncMock), \
@@ -716,7 +856,7 @@ class TestStartStreamingChat:
             )
 
             mock_norm.assert_called_once()
-            call_kwargs = agent_service_mod.run_agent_stream.call_args.kwargs
+            call_kwargs = runtime_proxy_mod.forward_agent_run.call_args.kwargs
             agent_request = call_kwargs.get("agent_request")
             assert agent_request is not None
             assert getattr(agent_request, "model_id", None) == 99
@@ -732,7 +872,7 @@ class TestStartStreamingChat:
         mock_response.headers = {"x-existing": "1"}
         mock_response.media_type = "text/event-stream"
         mock_response.body_iterator = _body_iterator()
-        agent_service_mod.run_agent_stream.return_value = mock_response
+        runtime_proxy_mod.forward_agent_run.return_value = mock_response
 
         with patch.object(ns, "check_and_consume_rate_limit", new_callable=AsyncMock), \
                 patch.object(ns, "idempotency_start", new_callable=AsyncMock), \
@@ -765,7 +905,7 @@ class TestStopChat:
     async def test_stop_chat_success(self):
         """Test successful stop chat."""
         ctx = MockNorthboundContext(token_id=1)
-        agent_service_mod.stop_agent_tasks.return_value = {"message": "stopped"}
+        runtime_proxy_mod.forward_agent_stop.return_value = {"message": "stopped"}
 
         result = await ns.stop_chat(ctx=ctx, conversation_id=123)
 
@@ -779,7 +919,13 @@ class TestStopChat:
 
         await ns.stop_chat(ctx=ctx, conversation_id=123, meta_data={"test": "data"})
 
-        token_db_mod.log_token_usage.assert_called()
+        token_db_mod.log_token_usage.assert_called_once_with(
+            token_id=1,
+            call_function_name="stop_chat_stream",
+            related_id=123,
+            created_by=ctx.user_id,
+            metadata={"test": "data"},
+        )
 
     async def test_stop_chat_no_token_id_no_logging(self):
         """Test that token usage is not logged when token_id is 0."""
@@ -789,6 +935,23 @@ class TestStopChat:
         await ns.stop_chat(ctx=ctx, conversation_id=123)
 
         token_db_mod.log_token_usage.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "runtime_error",
+        [
+            RuntimeServiceTimeoutError("timed out"),
+            RuntimeServiceUnavailableError("unavailable"),
+            RuntimeUpstreamError("upstream error"),
+        ],
+    )
+    async def test_stop_chat_preserves_runtime_errors(self, runtime_error):
+        ctx = MockNorthboundContext(token_id=0)
+        runtime_proxy_mod.forward_agent_stop.side_effect = runtime_error
+
+        with pytest.raises(type(runtime_error)) as exc_info:
+            await ns.stop_chat(ctx=ctx, conversation_id=123)
+
+        assert exc_info.value is runtime_error
 
 
 @pytest.mark.asyncio
@@ -1222,7 +1385,13 @@ class TestUpdateConversationTitle:
             meta_data={"source": "api"}
         )
 
-        token_db_mod.log_token_usage.assert_called()
+        token_db_mod.log_token_usage.assert_called_once_with(
+            token_id=1,
+            call_function_name="update_conversation_title",
+            related_id=123,
+            created_by=ctx.user_id,
+            metadata={"source": "api"},
+        )
 
     async def test_update_conversation_title_custom_idempotency_key(self):
         """Test that custom idempotency key is used when provided."""
@@ -1322,7 +1491,7 @@ class TestStartStreamingChatErrorHandling:
 
         mock_response = MagicMock()
         mock_response.headers = {}
-        agent_service_mod.run_agent_stream.return_value = mock_response
+        runtime_proxy_mod.forward_agent_run.return_value = mock_response
 
         async def mock_get_history(*args, **kwargs):
             return {"data": {"history": []}}
@@ -1347,7 +1516,7 @@ class TestStartStreamingChatErrorHandling:
 
         mock_response = MagicMock()
         mock_response.headers = {}
-        agent_service_mod.run_agent_stream.return_value = mock_response
+        runtime_proxy_mod.forward_agent_run.return_value = mock_response
         token_db_mod.log_token_usage.side_effect = Exception("Logging failed")
 
         async def mock_get_history(*args, **kwargs):
@@ -1391,7 +1560,7 @@ class TestStartStreamingChatErrorHandling:
                     "latest_version_no": 5
                 }), \
                 patch.object(ns, 'save_conversation_user', side_effect=lambda *args: None), \
-                patch.object(ns, 'run_agent_stream', new_callable=AsyncMock, return_value=mock_response) as mock_stream:
+                patch.object(ns, 'forward_agent_run', new_callable=AsyncMock, return_value=mock_response) as mock_stream:
             conv_mgmt_mod.save_conversation_user.reset_mock()
 
             await ns.start_streaming_chat(
@@ -1418,7 +1587,7 @@ class TestStartStreamingChatErrorHandling:
 
         mock_response = MagicMock()
         mock_response.headers = {}
-        agent_service_mod.run_agent_stream.return_value = mock_response
+        runtime_proxy_mod.forward_agent_run.return_value = mock_response
 
         async def mock_get_history(*args, **kwargs):
             return {"data": {"history": []}}
@@ -1474,7 +1643,7 @@ class TestStopChatErrorHandling:
     async def test_stop_chat_error(self):
         """Test that errors in stop_chat are wrapped properly."""
         ctx = MockNorthboundContext(token_id=0)
-        agent_service_mod.stop_agent_tasks.side_effect = Exception("Stop failed")
+        runtime_proxy_mod.forward_agent_stop.side_effect = Exception("Stop failed")
 
         with pytest.raises(Exception) as exc_info:
             await ns.stop_chat(ctx=ctx, conversation_id=123)
@@ -1485,7 +1654,11 @@ class TestStopChatErrorHandling:
         ctx = MockNorthboundContext(token_id=1)
         token_db_mod.log_token_usage.side_effect = Exception("Logging failed")
 
-        with patch("backend.services.northbound_service.stop_agent_tasks", return_value={"message": "stopped"}):
+        with patch(
+            "backend.services.northbound_service.forward_agent_stop",
+            new_callable=AsyncMock,
+            return_value={"message": "stopped"},
+        ):
             # Should not raise even if token logging fails
             result = await ns.stop_chat(ctx=ctx, conversation_id=123, meta_data={"key": "value"})
             assert result is not None

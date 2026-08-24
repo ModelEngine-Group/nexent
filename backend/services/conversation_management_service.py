@@ -31,6 +31,7 @@ from database.conversation_db import (
     get_source_images_by_message,
     get_source_searches_by_conversation,
     get_source_searches_by_message,
+    persist_assistant_run_batch as persist_assistant_run_batch_db,
     rename_conversation,
     save_history_summary,
     update_conversation_agent_id,
@@ -44,8 +45,8 @@ from database.conversation_db import (
     update_message_unit_status,
 )
 from nexent.monitor import set_monitoring_context, set_monitoring_operation
-from nexent.core.models import OpenAIModel
-from utils.config_utils import get_model_name_from_config, tenant_config_manager
+from services.model_gateway_service import get_llm_adapter_from_config
+from utils.config_utils import tenant_config_manager
 from utils.prompt_template_utils import get_generate_title_prompt_template
 from utils.str_utils import remove_think_blocks
 
@@ -143,6 +144,35 @@ def save_message_unit(message_id: int, conversation_id: int, unit_index: int,
         unit_status=unit_status,
         tool_call_id=tool_call_id,
         invocation_id=invocation_id,
+    )
+
+
+def persist_assistant_run_batch(
+    message_id: int,
+    conversation_id: int,
+    message_content: str,
+    terminal_status: str,
+    message_units: List[Dict[str, Any]],
+    search_records: List[Dict[str, Any]],
+    image_urls: List[str],
+    skill_files: List[Dict[str, Any]],
+    automation_proposals: List[Dict[str, Any]],
+    user_id: str,
+    tenant_id: str,
+) -> Dict[int, int]:
+    """Persist one assistant run and its related records atomically."""
+    return persist_assistant_run_batch_db(
+        message_id=message_id,
+        conversation_id=conversation_id,
+        message_content=message_content,
+        terminal_status=terminal_status,
+        message_units=message_units,
+        search_records=search_records,
+        image_urls=image_urls,
+        skill_files=skill_files,
+        automation_proposals=automation_proposals,
+        user_id=user_id,
+        tenant_id=tenant_id,
     )
 
 
@@ -299,17 +329,15 @@ def call_llm_for_title(question: str, tenant_id: str, language: str = LANGUAGE["
 
     timeout_seconds = model_config.get("timeout_seconds") if model_config else None
 
-    # Create OpenAIModel instance
-    llm = OpenAIModel(
-        model_id=get_model_name_from_config(model_config) if model_config.get("model_name") else "",
-        api_base=model_config.get("base_url", ""),
-        api_key=model_config.get("api_key", ""),
+    # Create OpenAIModel instance via the gateway
+    llm = get_llm_adapter_from_config(
+        model_config,
+        tenant_id,
         temperature=0.7,
         top_p=0.95,
-        model_factory=model_config.get("model_factory", None),
-        ssl_verify=model_config.get("ssl_verify", True),
-        timeout_seconds=timeout_seconds,
         stream=False,
+        timeout_seconds=timeout_seconds,
+        display_name=display_name or None,
     )
 
     # Build messages - use new template variable 'question' instead of 'content'
@@ -325,8 +353,8 @@ def call_llm_for_title(question: str, tenant_id: str, language: str = LANGUAGE["
     if model_config.get("model_factory", "").lower() == "modelengine":
         messages = [{"role": msg["role"], "content": str(msg.get("content", ""))} for msg in messages]
 
-    # Call the model
-    response = llm.generate(messages)
+    # Call the model (gateway adapter forwards to the wrapped OpenAIModel)
+    response = llm(messages)
     if not response or not response.content or not response.content.strip():
         return DEFAULT_EN_TITLE if language == LANGUAGE["EN"] else DEFAULT_ZH_TITLE
     return remove_think_blocks(response.content.strip())
@@ -357,6 +385,7 @@ def create_new_conversation(
     agent_id: Optional[int] = None,
     chat_mode: Optional[str] = None,
     knowledge_scope: Optional[Dict[str, Any]] = None,
+    runtime_metadata: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Create a new conversation
@@ -377,6 +406,8 @@ def create_new_conversation(
         }
         if knowledge_scope is not None:
             create_kwargs["knowledge_scope"] = knowledge_scope
+        if runtime_metadata is not None:
+            create_kwargs["runtime_metadata"] = runtime_metadata
         conversation_data = create_conversation(title, user_id, **create_kwargs)
         return conversation_data
     except Exception as e:
@@ -864,6 +895,8 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
             'agent_id': history_data.get('agent_id'),
             'chat_mode': history_data.get('chat_mode') or 'execution',
             'knowledge_scope': history_data.get('knowledge_scope'),
+            'runtime_metadata': history_data.get('runtime_metadata') or {},
+            'runtime_metadata_version': int(history_data.get('runtime_metadata_version') or 0),
             'create_time': history_data['create_time'],
             'message': messages
         }

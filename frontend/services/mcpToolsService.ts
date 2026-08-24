@@ -112,6 +112,7 @@ export const fetchRegistryMcpCards = async (params: {
 export const fetchCommunityMcpCards = async (params: {
   search?: string;
   cursor?: string | null;
+  page?: number;
   transportType?: McpTransportType;
   tag?: string;
   limit?: number;
@@ -119,6 +120,7 @@ export const fetchCommunityMcpCards = async (params: {
   const result = await listCommunityMcpTools({
     search: params.search?.trim() || undefined,
     cursor: params.cursor || undefined,
+    page: params.page,
     transport_type: params.transportType,
     tag: params.tag?.trim() || undefined,
     limit: params.limit ?? 30,
@@ -129,10 +131,12 @@ export const fetchCommunityMcpCards = async (params: {
     data: {
       items: result.data.items,
       nextCursor: result.data.nextCursor ?? null,
+      total: result.data.total,
     },
   } as McpToolsApiResult<{
     items: CommunityMcpCard[];
     nextCursor: string | null;
+    total?: number;
   }>;
 };
 
@@ -276,11 +280,71 @@ export const addContainerMcpToolService = async (
     if (data.status !== "success") {
       throw new Error("Failed to add container MCP service");
     }
-    return { success: true, data: data.data } as McpToolsApiResult<unknown>;
+    return { success: true, data: data.data } as McpToolsApiResult<{
+      container_id?: string;
+      container_name?: string;
+      host_port?: number;
+      mcp_url?: string;
+      service_name?: string;
+    }>;
   } catch (error) {
     log.error("addContainerMcpToolService failed", error);
     throw error;
   }
+};
+
+type ContainerMcpDeploymentResult = {
+  container_id?: string;
+  container_name?: string;
+  host_port?: number;
+  mcp_url?: string;
+  service_name?: string;
+};
+
+/**
+ * Add a container MCP through an SSE response. The container ID is emitted as
+ * soon as Docker creates it; the returned promise resolves only after the MCP
+ * health check and tool scan have completed.
+ */
+export const addContainerMcpToolServiceStream = async (
+  payload: AddContainerMcpToolPayload,
+  onContainerStarted: (result: ContainerMcpDeploymentResult) => void,
+): Promise<ContainerMcpDeploymentResult> => {
+  const response = await fetchWithAuth(API_ENDPOINTS.mcp.addFromConfigStream, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok || !response.body) {
+    const errorBody = await parseJson<{ detail?: string }>(response);
+    throw new Error(errorBody.detail || `Request failed (${response.status})`);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder("utf-8");
+  let buffer = "";
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const events = buffer.split("\n\n");
+      buffer = events.pop() || "";
+      for (const event of events) {
+        if (!event.startsWith("data: ")) continue;
+        const message = JSON.parse(event.slice(6));
+        if (message.status === "container_started") {
+          onContainerStarted(message.data || {});
+        } else if (message.status === "success") {
+          return message.data || {};
+        } else if (message.status === "error") {
+          throw new Error(message.detail || "Failed to add container MCP service");
+        }
+      }
+    }
+  } finally {
+    await reader.cancel().catch(() => undefined);
+  }
+  throw new Error("Container MCP deployment ended before completion");
 };
 
 export const listMcpTools = async (params?: { tag?: string }) => {
@@ -366,6 +430,7 @@ type CommunityMcpListPayload = {
   tag?: string;
   transport_type?: McpTransportType;
   cursor?: string;
+  page?: number;
   limit?: number;
 };
 
@@ -380,7 +445,11 @@ export const listCommunityMcpTools = async (payload: CommunityMcpListPayload) =>
     );
     const data =
       await parseJson<
-        ApiEnvelope<{ items: CommunityMcpCard[]; nextCursor: string | null }>
+        ApiEnvelope<{
+          items: CommunityMcpCard[];
+          nextCursor: string | null;
+          total?: number;
+        }>
       >(response);
     if (data.status !== "success") {
       throw new Error("Failed to load community mcp list");
@@ -388,6 +457,7 @@ export const listCommunityMcpTools = async (payload: CommunityMcpListPayload) =>
     return { success: true, data: data.data } as McpToolsApiResult<{
       items: CommunityMcpCard[];
       nextCursor: string | null;
+      total?: number;
     }>;
   } catch (error) {
     log.error("listCommunityMcpTools failed", error);
@@ -446,6 +516,7 @@ const buildCommunityMcpListUrl = (
     query.set("transport_type", payload.transport_type.toString());
   if (payload.status) query.set("status", payload.status);
   if (payload.cursor) query.set("cursor", payload.cursor);
+  if (typeof payload.page === "number") query.set("page", String(payload.page));
   if (typeof payload.limit === "number") query.set("limit", String(payload.limit));
 
   const queryString = query.toString();

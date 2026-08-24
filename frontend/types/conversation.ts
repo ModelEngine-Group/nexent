@@ -91,6 +91,8 @@ export interface ApiConversationDetail {
   knowledge_scope?:
     | import("./knowledgeScope").ConversationKnowledgeScope
     | null;
+  runtime_metadata?: Record<string, unknown>;
+  runtime_metadata_version?: number;
   message: ApiMessage[];
   streaming_message?: StreamingMessage;
 }

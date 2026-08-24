@@ -308,6 +308,7 @@ setattr(sys.modules['services'], 'asset_owner_visibility', asset_owner_visibilit
 storage_service_mock = types.ModuleType('services.knowledge_storage_service')
 storage_service_mock.release_storage_charge = MagicMock(return_value=True)
 storage_service_mock.resolve_storage_reference = MagicMock(return_value=None)
+storage_service_mock.resolve_storage_object_knowledge = MagicMock(return_value=None)
 sys.modules[
     'services.knowledge_storage_service'
 ] = storage_service_mock
@@ -315,6 +316,19 @@ setattr(
     sys.modules['services'],
     'knowledge_storage_service',
     storage_service_mock,
+)
+
+# Mock services.model_gateway_service so vectordatabase_service can import
+# ``build_adapter_fresh`` (the gateway bridge). Tests that exercise the
+# embedding/rerank paths patch the bound name on vectordatabase_service
+# directly, so this mock only needs to satisfy the import.
+model_gateway_service_mock = types.ModuleType('services.model_gateway_service')
+model_gateway_service_mock.build_adapter_fresh = MagicMock()
+sys.modules['services.model_gateway_service'] = model_gateway_service_mock
+setattr(
+    sys.modules['services'],
+    'model_gateway_service',
+    model_gateway_service_mock,
 )
 
 # Create mock utils modules - backend.utils needs __path__ for submodule lookups
@@ -606,6 +620,23 @@ class TestElasticSearchService(unittest.TestCase):
             "7-uuid", embedding_dim=256
         )
         call_kwargs = mock_create_knowledge.call_args[0][0]
+
+    @patch(
+        'backend.services.vectordatabase_service.create_knowledge_record',
+        side_effect=DuplicateError("Knowledge base name 'kb1' already exists"),
+    )
+    def test_create_knowledge_base_name_conflict_does_not_create_es_index(self, _mock_create_knowledge):
+        with self.assertRaises(DuplicateError):
+            ElasticSearchService.create_knowledge_base(
+                knowledge_name="kb1",
+                embedding_dim=256,
+                vdb_core=self.mock_vdb_core,
+                user_id="user-1",
+                tenant_id="tenant-1",
+                embedding_model_id=1,
+            )
+
+        self.mock_vdb_core.create_index.assert_not_called()
 
     @patch('backend.services.vectordatabase_service.get_embedding_model')
     @patch('backend.services.vectordatabase_service.create_knowledge_record')
@@ -1349,13 +1380,13 @@ class TestElasticSearchService(unittest.TestCase):
         )
 
         # Assert
-        self.assertEqual(len(result["indices"]), 2)
-        self.assertEqual(result["count"], 2)
+        self.assertEqual(len(result["indices"]), 1)
+        self.assertEqual(result["count"], 1)
 
         # When include_stats=False, indices is just a list of names
         # When include_stats=True, indices_info contains the detailed info with permissions
         self.assertIn("index1", result["indices"])
-        self.assertIn("index2", result["indices"])
+        self.assertNotIn("index2", result["indices"])
 
     @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
     @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
@@ -1387,7 +1418,7 @@ class TestElasticSearchService(unittest.TestCase):
             }
         ]
         mock_get_user_tenant.return_value = {
-            "user_role": "USER", "tenant_id": "test_tenant"}
+            "user_role": "DEV", "tenant_id": "test_tenant"}
         mock_get_group_ids.return_value = [1]  # User belongs to group 1
 
         # Execute
@@ -1434,7 +1465,7 @@ class TestElasticSearchService(unittest.TestCase):
             }
         ]
         mock_get_user_tenant.return_value = {
-            "user_role": "USER", "tenant_id": "test_tenant"}
+            "user_role": "DEV", "tenant_id": "test_tenant"}
         mock_get_group_ids.return_value = [1]  # User belongs to group 1
 
         # Execute
@@ -1520,7 +1551,7 @@ class TestElasticSearchService(unittest.TestCase):
             }
         ]
         mock_get_user_tenant.return_value = {
-            "user_role": "USER", "tenant_id": "test_tenant"}
+            "user_role": "DEV", "tenant_id": "test_tenant"}
         mock_get_group_ids.return_value = [1]  # User belongs to group 1
 
         # Execute
@@ -1566,7 +1597,7 @@ class TestElasticSearchService(unittest.TestCase):
             }
         ]
         mock_get_user_tenant.return_value = {
-            "user_role": "USER", "tenant_id": "test_tenant"}
+            "user_role": "DEV", "tenant_id": "test_tenant"}
         mock_get_group_ids.return_value = []  # Empty user groups
 
         # Execute
@@ -1612,7 +1643,7 @@ class TestElasticSearchService(unittest.TestCase):
             }
         ]
         mock_get_user_tenant.return_value = {
-            "user_role": "USER", "tenant_id": "test_tenant"}
+            "user_role": "DEV", "tenant_id": "test_tenant"}
         mock_get_group_ids.return_value = []  # Empty user groups
 
         # Execute
@@ -1710,7 +1741,7 @@ class TestElasticSearchService(unittest.TestCase):
                 "index_name": "index1",
                 "embedding_model_name": "test-model",
                 "group_ids": "1,2",
-                "tenant_id": "tenant_id",  # DEFAULT_TENANT_ID
+                "tenant_id": "user_id",  # matches the legacy admin tenant
                 "knowledge_sources": "elasticsearch",
                 "ingroup_permission": "EDIT"
             },
@@ -1718,7 +1749,7 @@ class TestElasticSearchService(unittest.TestCase):
                 "index_name": "index2",
                 "embedding_model_name": "test-model",
                 "group_ids": "3",
-                "tenant_id": "tenant_id",  # DEFAULT_TENANT_ID
+                "tenant_id": "user_id",  # matches the legacy admin tenant
                 "knowledge_sources": "elasticsearch",
                 "ingroup_permission": "EDIT"
             }
@@ -1797,7 +1828,7 @@ class TestElasticSearchService(unittest.TestCase):
             }
         ]
         mock_get_user_tenant.return_value = {
-            "user_role": "USER", "tenant_id": "test_tenant"}
+            "user_role": "DEV", "tenant_id": "test_tenant"}
         mock_get_group_ids.return_value = [1, 2]
 
         # Execute
@@ -1827,8 +1858,9 @@ class TestElasticSearchService(unittest.TestCase):
 
         This test verifies that:
         1. The method filters knowledge bases by the tenant_id parameter
-        2. Only knowledge bases belonging to the target tenant are returned
-        3. The user's tenant_id from auth is used for permission checking, not for filtering
+        2. DAC denies records outside the caller's tenant, so a tenant_A
+           admin querying tenant_B gets no visible knowledge bases
+        3. get_knowledge_info_by_tenant_id is still called with the requested tenant
         """
         # Setup - Simulate user from tenant_A querying for tenant_B's knowledge bases
         self.mock_vdb_core.get_user_indices.return_value = [
@@ -1877,13 +1909,10 @@ class TestElasticSearchService(unittest.TestCase):
         )
 
         # Assert
-        # The mock returns all records without filtering by tenant_id
-        # So all 3 indices are returned (the filtering is expected to happen in the DB function)
-        self.assertEqual(len(result["indices"]), 3)
-        self.assertEqual(result["count"], 3)
-        self.assertIn("kb1", result["indices"])
-        self.assertIn("kb2", result["indices"])
-        self.assertIn("kb3", result["indices"])
+        # Cross-tenant records are denied by DAC even though the mock returns
+        # all records without applying the tenant filter.
+        self.assertEqual(result["indices"], [])
+        self.assertEqual(result["count"], 0)
 
         # Verify that get_knowledge_info_by_tenant_id was called with tenant_id
         mock_get_knowledge.assert_called_once_with("tenant_B")
@@ -2427,6 +2456,29 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertEqual(result["scope"], "source_only")
         self.assertEqual(result["deleted_es_count"], 0)
         self.mock_vdb_core.delete_documents.assert_not_called()
+
+    @patch.object(
+        ElasticSearchService,
+        'delete_documents',
+        return_value={"status": "success", "deleted_minio": True},
+    )
+    def test_delete_document_by_scope_does_not_require_storage_ledger(
+        self, mock_delete_documents
+    ):
+        result = asyncio.run(
+            ElasticSearchService.delete_document_by_scope(
+                "test_index",
+                "knowledge_base/doc.pdf",
+                "full",
+                self.mock_vdb_core,
+            )
+        )
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["scope"], "full")
+        mock_delete_documents.assert_called_once_with(
+            "test_index", "knowledge_base/doc.pdf", self.mock_vdb_core
+        )
 
     @patch.object(
         ElasticSearchService,
@@ -3731,6 +3783,97 @@ class TestElasticSearchService(unittest.TestCase):
         call_args = mock_update_record.call_args[0][0]
         self.assertEqual(call_args["group_ids"], "5")
 
+    @patch('backend.services.vectordatabase_service.update_knowledge_record')
+    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    def test_update_knowledge_base_user_can_rename_own_private_kb(
+        self, mock_get_record, mock_update_record
+    ):
+        """A USER may update non-permission fields of their own PRIVATE KB."""
+        mock_get_record.return_value = {
+            "index_name": "test_index",
+            "ingroup_permission": "PRIVATE",
+            "created_by": "test_user",
+        }
+        mock_update_record.return_value = True
+
+        result = self.es_service.update_knowledge_base(
+            index_name="test_index",
+            knowledge_name="New Name",
+            user_id="test_user",
+            user_role="USER",
+        )
+
+        self.assertTrue(result)
+        call_args = mock_update_record.call_args[0][0]
+        self.assertEqual(call_args["knowledge_name"], "New Name")
+        self.assertNotIn("ingroup_permission", call_args)
+        self.assertNotIn("group_ids", call_args)
+
+    @patch('backend.services.vectordatabase_service.update_knowledge_record')
+    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    def test_update_knowledge_base_user_cannot_make_private_shared(
+        self, mock_get_record, mock_update_record
+    ):
+        """A USER changing a PRIVATE KB to EDIT is rejected."""
+        mock_get_record.return_value = {
+            "index_name": "test_index",
+            "ingroup_permission": "PRIVATE",
+            "created_by": "test_user",
+        }
+
+        with self.assertRaises(PermissionError) as context:
+            self.es_service.update_knowledge_base(
+                index_name="test_index",
+                ingroup_permission="EDIT",
+                user_id="test_user",
+                user_role="USER",
+            )
+
+        self.assertIn("cannot turn a personal knowledge base", str(context.exception))
+        mock_update_record.assert_not_called()
+
+    @patch('backend.services.vectordatabase_service.update_knowledge_record')
+    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    def test_update_knowledge_base_user_cannot_assign_groups(
+        self, mock_get_record, mock_update_record
+    ):
+        """A USER assigning groups to a PRIVATE KB is rejected."""
+        mock_get_record.return_value = {
+            "index_name": "test_index",
+            "ingroup_permission": "PRIVATE",
+            "created_by": "test_user",
+        }
+
+        with self.assertRaises(PermissionError) as context:
+            self.es_service.update_knowledge_base(
+                index_name="test_index",
+                group_ids=[10],
+                user_id="test_user",
+                user_role="USER",
+            )
+
+        self.assertIn("cannot assign groups", str(context.exception))
+        mock_update_record.assert_not_called()
+
+    @patch('backend.services.vectordatabase_service.update_knowledge_record')
+    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    def test_update_knowledge_base_user_missing_record_raises(
+        self, mock_get_record, mock_update_record
+    ):
+        """A USER updating a missing KB gets a not-found error."""
+        mock_get_record.return_value = None
+
+        with self.assertRaises(ValueError) as context:
+            self.es_service.update_knowledge_base(
+                index_name="missing",
+                knowledge_name="New Name",
+                user_id="test_user",
+                user_role="USER",
+            )
+
+        self.assertIn("not found", str(context.exception))
+        mock_update_record.assert_not_called()
+
     @patch('backend.services.vectordatabase_service.get_knowledge_record')
     def test_get_summary(self, mock_get_record):
         """
@@ -4501,8 +4644,8 @@ class TestElasticSearchService(unittest.TestCase):
         Test get_embedding_model with embedding model type.
 
         This test verifies that:
-        1. When model_name is provided and model_type is "embedding", OpenAICompatibleEmbedding is returned
-        2. The correct parameters are passed to the embedding model
+        1. When model_name is provided and model_type is "embedding", the adapter is built via build_adapter_fresh
+        2. The correct parameters are passed to build_adapter_fresh
         """
         # Setup
         mock_get_model_by_display_name.return_value = {
@@ -4520,24 +4663,29 @@ class TestElasticSearchService(unittest.TestCase):
         self.get_embedding_model_patcher.stop()
 
         try:
-            with patch('backend.services.vectordatabase_service.OpenAICompatibleEmbedding') as mock_embedding_class, \
-                    patch('backend.services.vectordatabase_service.get_model_name_from_config') as mock_get_model_name:
-                mock_embedding_instance = MagicMock()
-                mock_embedding_class.return_value = mock_embedding_instance
-                mock_get_model_name.return_value = "test-model"
+            with patch('backend.services.vectordatabase_service.build_adapter_fresh') as mock_build:
+                mock_adapter = MagicMock()
+                mock_build.return_value = mock_adapter
 
                 # Execute - now we can call the real function
                 from backend.services.vectordatabase_service import get_embedding_model
                 result, _ = get_embedding_model("test_tenant", model_name="test-model")
 
                 # Assert
-                self.assertEqual(result, mock_embedding_instance)
-                mock_embedding_class.assert_called_once_with(
-                    api_key="test_api_key",
-                    base_url="https://test.api.com",
-                    model_name="test-model",
-                    embedding_dim=1024,
-                    ssl_verify=True
+                self.assertEqual(result, mock_adapter)
+                mock_build.assert_called_once_with(
+                    {
+                        "model_repo": "test-repo",
+                        "model_name": "test-model",
+                        "api_key": "test_api_key",
+                        "base_url": "https://test.api.com",
+                        "model_type": "embedding",
+                        "max_tokens": 1024,
+                        "ssl_verify": True,
+                    },
+                    "embedding",
+                    "embedding",
+                    None,
                 )
         finally:
             # Restart the mock for other tests
@@ -4549,8 +4697,8 @@ class TestElasticSearchService(unittest.TestCase):
         Test get_embedding_model with multi_embedding model type.
 
         This test verifies that:
-        1. When model_name is provided and model_type is "multi_embedding", JinaEmbedding is returned
-        2. The correct parameters are passed to the embedding model
+        1. When model_name is provided and model_type is "multi_embedding", the adapter is built via build_adapter_fresh
+        2. The correct parameters are passed to build_adapter_fresh
         """
         # Setup
         mock_get_model_by_display_name.return_value = {
@@ -4568,26 +4716,31 @@ class TestElasticSearchService(unittest.TestCase):
         self.get_embedding_model_patcher.stop()
 
         try:
-            with patch('backend.services.vectordatabase_service.JinaEmbedding') as mock_embedding_class, \
-                    patch('backend.services.vectordatabase_service.get_model_name_from_config') as mock_get_model_name:
-                mock_embedding_instance = MagicMock()
-                mock_embedding_class.return_value = mock_embedding_instance
-                mock_get_model_name.return_value = "test-model"
+            with patch('backend.services.vectordatabase_service.build_adapter_fresh') as mock_build:
+                mock_adapter = MagicMock()
+                mock_build.return_value = mock_adapter
 
                 # Execute - now we can call the real function
                 from backend.services.vectordatabase_service import get_embedding_model
                 result, model_id = get_embedding_model("test_tenant", model_name="test-model")
 
                 # Assert
-                self.assertEqual(result, mock_embedding_instance)
+                self.assertEqual(result, mock_adapter)
                 self.assertEqual(model_id, 456)
                 mock_get_model_by_display_name.assert_called_once_with("test-model", "test_tenant")
-                mock_embedding_class.assert_called_once_with(
-                    api_key="test_api_key",
-                    base_url="https://test.api.com",
-                    model_name="test-model",
-                    embedding_dim=2048,
-                    ssl_verify=True
+                mock_build.assert_called_once_with(
+                    {
+                        "model_repo": "test-repo",
+                        "model_name": "test-model",
+                        "api_key": "test_api_key",
+                        "base_url": "https://test.api.com",
+                        "model_type": "multi_embedding",
+                        "max_tokens": 2048,
+                        "ssl_verify": True,
+                    },
+                    "multi_embedding",
+                    "multiEmbedding",
+                    None,
                 )
         finally:
             # Restart the mock for other tests
@@ -4639,18 +4792,30 @@ class TestElasticSearchService(unittest.TestCase):
         self.get_embedding_model_patcher.stop()
 
         try:
-            with patch('backend.services.vectordatabase_service.OpenAICompatibleEmbedding') as mock_embedding_class, \
-                    patch('backend.services.vectordatabase_service.get_model_name_from_config') as mock_get_model_name:
-                mock_embedding_instance = MagicMock()
-                mock_embedding_class.return_value = mock_embedding_instance
-                mock_get_model_name.return_value = "default-embedding"
+            with patch('backend.services.vectordatabase_service.build_adapter_fresh') as mock_build:
+                mock_adapter = MagicMock()
+                mock_build.return_value = mock_adapter
 
                 from backend.services.vectordatabase_service import get_embedding_model
                 result, model_id = get_embedding_model("test_tenant")
 
-                self.assertEqual(result, mock_embedding_instance)
+                self.assertEqual(result, mock_adapter)
                 self.assertEqual(model_id, 101)
                 mock_get_model_records.assert_called_once_with({"model_type": "embedding"}, "test_tenant")
+                mock_build.assert_called_once_with(
+                    {
+                        "model_repo": "openai",
+                        "model_name": "default-embedding",
+                        "api_key": "test_api_key",
+                        "base_url": "https://test.api.com",
+                        "model_type": "embedding",
+                        "max_tokens": 1024,
+                        "ssl_verify": True,
+                    },
+                    "embedding",
+                    "embedding",
+                    None,
+                )
         finally:
             self.get_embedding_model_patcher.start()
 
@@ -4676,18 +4841,30 @@ class TestElasticSearchService(unittest.TestCase):
         self.get_embedding_model_patcher.stop()
 
         try:
-            with patch('backend.services.vectordatabase_service.JinaEmbedding') as mock_embedding_class, \
-                    patch('backend.services.vectordatabase_service.get_model_name_from_config') as mock_get_model_name:
-                mock_embedding_instance = MagicMock()
-                mock_embedding_class.return_value = mock_embedding_instance
-                mock_get_model_name.return_value = "default-multi-embedding"
+            with patch('backend.services.vectordatabase_service.build_adapter_fresh') as mock_build:
+                mock_adapter = MagicMock()
+                mock_build.return_value = mock_adapter
 
                 from backend.services.vectordatabase_service import get_embedding_model
                 result, model_id = get_embedding_model("test_tenant")
 
-                self.assertEqual(result, mock_embedding_instance)
+                self.assertEqual(result, mock_adapter)
                 self.assertEqual(model_id, 202)
                 self.assertEqual(mock_get_model_records.call_count, 2)
+                mock_build.assert_called_once_with(
+                    {
+                        "model_repo": "jina",
+                        "model_name": "default-multi-embedding",
+                        "api_key": "test_api_key",
+                        "base_url": "https://test.api.com",
+                        "model_type": "multi_embedding",
+                        "max_tokens": 2048,
+                        "ssl_verify": True,
+                    },
+                    "multi_embedding",
+                    "multiEmbedding",
+                    None,
+                )
         finally:
             self.get_embedding_model_patcher.start()
 
@@ -4710,18 +4887,30 @@ class TestElasticSearchService(unittest.TestCase):
         self.get_embedding_model_patcher.stop()
 
         try:
-            with patch('backend.services.vectordatabase_service.OpenAICompatibleEmbedding') as mock_embedding_class, \
-                    patch('backend.services.vectordatabase_service.get_model_name_from_config') as mock_get_model_name:
-                mock_embedding_instance = MagicMock()
-                mock_embedding_class.return_value = mock_embedding_instance
-                mock_get_model_name.return_value = "typed-embedding"
+            with patch('backend.services.vectordatabase_service.build_adapter_fresh') as mock_build:
+                mock_adapter = MagicMock()
+                mock_build.return_value = mock_adapter
 
                 from backend.services.vectordatabase_service import get_embedding_model
                 result, model_id = get_embedding_model("test_tenant", model_type="embedding")
 
-                self.assertEqual(result, mock_embedding_instance)
+                self.assertEqual(result, mock_adapter)
                 self.assertEqual(model_id, 303)
                 mock_get_model_records.assert_called_once_with({"model_type": "embedding"}, "test_tenant")
+                mock_build.assert_called_once_with(
+                    {
+                        "model_repo": "openai",
+                        "model_name": "typed-embedding",
+                        "api_key": "test_api_key",
+                        "base_url": "https://test.api.com",
+                        "model_type": "embedding",
+                        "max_tokens": 1024,
+                        "ssl_verify": True,
+                    },
+                    "embedding",
+                    "embedding",
+                    None,
+                )
         finally:
             self.get_embedding_model_patcher.start()
 
@@ -4744,19 +4933,31 @@ class TestElasticSearchService(unittest.TestCase):
         self.get_embedding_model_patcher.stop()
 
         try:
-            with patch('backend.services.vectordatabase_service.JinaEmbedding') as mock_embedding_class, \
-                    patch('backend.services.vectordatabase_service.get_model_name_from_config') as mock_get_model_name:
-                mock_embedding_instance = MagicMock()
-                mock_embedding_class.return_value = mock_embedding_instance
-                mock_get_model_name.return_value = "typed-multi-embedding"
+            with patch('backend.services.vectordatabase_service.build_adapter_fresh') as mock_build:
+                mock_adapter = MagicMock()
+                mock_build.return_value = mock_adapter
 
                 from backend.services.vectordatabase_service import get_embedding_model
                 result, model_id = get_embedding_model("test_tenant", model_type="multi_embedding")
 
-                self.assertEqual(result, mock_embedding_instance)
+                self.assertEqual(result, mock_adapter)
                 self.assertEqual(model_id, 404)
                 mock_get_model_records.assert_called_once_with(
                     {"model_type": "multi_embedding"}, "test_tenant"
+                )
+                mock_build.assert_called_once_with(
+                    {
+                        "model_repo": "jina",
+                        "model_name": "typed-multi-embedding",
+                        "api_key": "test_api_key",
+                        "base_url": "https://test.api.com",
+                        "model_type": "multi_embedding",
+                        "max_tokens": 2048,
+                        "ssl_verify": True,
+                    },
+                    "multi_embedding",
+                    "multiEmbedding",
+                    None,
                 )
         finally:
             self.get_embedding_model_patcher.start()
@@ -4767,8 +4968,8 @@ class TestElasticSearchService(unittest.TestCase):
         Test get_embedding_model with model_name parameter when the model is found.
 
         This test verifies that:
-        1. When model_name is provided and found, OpenAICompatibleEmbedding is returned
-        2. The correct parameters are passed to the embedding model
+        1. When model_name is provided and found, the adapter is built via build_adapter_fresh
+        2. The correct parameters are passed to build_adapter_fresh
         """
         # Setup - mock get_model_by_display_name to return a model
         mock_get_model_by_display_name.return_value = {
@@ -4786,26 +4987,31 @@ class TestElasticSearchService(unittest.TestCase):
         self.get_embedding_model_patcher.stop()
 
         try:
-            with patch('backend.services.vectordatabase_service.OpenAICompatibleEmbedding') as mock_embedding_class, \
-                    patch('backend.services.vectordatabase_service.get_model_name_from_config') as mock_get_model_name:
-                mock_embedding_instance = MagicMock()
-                mock_embedding_class.return_value = mock_embedding_instance
-                mock_get_model_name.return_value = "text-embedding-ada-002"
+            with patch('backend.services.vectordatabase_service.build_adapter_fresh') as mock_build:
+                mock_adapter = MagicMock()
+                mock_build.return_value = mock_adapter
 
                 # Execute - now we can call the real function
                 from backend.services.vectordatabase_service import get_embedding_model
                 result, model_id = get_embedding_model("test_tenant", model_name="openai/text-embedding-ada-002")
 
                 # Assert
-                self.assertEqual(result, mock_embedding_instance)
+                self.assertEqual(result, mock_adapter)
                 self.assertEqual(model_id, 123)
                 mock_get_model_by_display_name.assert_called_once_with("openai/text-embedding-ada-002", "test_tenant")
-                mock_embedding_class.assert_called_once_with(
-                    api_key="test_api_key",
-                    base_url="https://test.api.com",
-                    model_name="text-embedding-ada-002",
-                    embedding_dim=1024,
-                    ssl_verify=True
+                mock_build.assert_called_once_with(
+                    {
+                        "model_repo": "openai",
+                        "model_name": "text-embedding-ada-002",
+                        "api_key": "test_api_key",
+                        "base_url": "https://test.api.com",
+                        "model_type": "embedding",
+                        "max_tokens": 1024,
+                        "ssl_verify": True,
+                    },
+                    "embedding",
+                    "embedding",
+                    None,
                 )
         finally:
             # Restart the mock for other tests
@@ -4826,11 +5032,9 @@ class TestElasticSearchService(unittest.TestCase):
         self.get_embedding_model_patcher.stop()
 
         try:
-            with patch('backend.services.vectordatabase_service.JinaEmbedding') as mock_embedding_class, \
-                    patch('backend.services.vectordatabase_service.get_model_name_from_config') as mock_get_model_name:
-                mock_embedding_instance = MagicMock()
-                mock_embedding_class.return_value = mock_embedding_instance
-                mock_get_model_name.return_value = "jina-clip-v2"
+            with patch('backend.services.vectordatabase_service.build_adapter_fresh') as mock_build:
+                mock_adapter = MagicMock()
+                mock_build.return_value = mock_adapter
 
                 from backend.services.vectordatabase_service import get_embedding_model
                 result, model_id = get_embedding_model(
@@ -4839,14 +5043,21 @@ class TestElasticSearchService(unittest.TestCase):
                     model_type="multi_embedding",
                 )
 
-                self.assertEqual(result, mock_embedding_instance)
+                self.assertEqual(result, mock_adapter)
                 self.assertEqual(model_id, 789)
-                mock_embedding_class.assert_called_once_with(
-                    api_key="test_api_key",
-                    base_url="https://test.api.com",
-                    model_name="jina-clip-v2",
-                    embedding_dim=1024,
-                    ssl_verify=True
+                mock_build.assert_called_once_with(
+                    {
+                        "model_repo": "",
+                        "model_name": "jina-clip-v2",
+                        "api_key": "test_api_key",
+                        "base_url": "https://test.api.com",
+                        "model_type": "multi_embedding",
+                        "max_tokens": 1024,
+                        "ssl_verify": True,
+                    },
+                    "multi_embedding",
+                    "multiEmbedding",
+                    None,
                 )
                 mock_get_model_by_display_name.assert_called_once_with(
                     "jina/jina-clip-v2", "test_tenant", "multi_embedding"
@@ -4860,7 +5071,7 @@ class TestElasticSearchService(unittest.TestCase):
         Test get_embedding_model with model_name when model is found without model_repo.
 
         This test verifies that:
-        1. When model_name is provided and found (without model_repo), OpenAICompatibleEmbedding is returned
+        1. When model_name is provided and found (without model_repo), the adapter is built via build_adapter_fresh
         2. The function handles models without model_repo correctly using just model_name
         """
 
@@ -4879,20 +5090,31 @@ class TestElasticSearchService(unittest.TestCase):
         self.get_embedding_model_patcher.stop()
 
         try:
-            with patch('backend.services.vectordatabase_service.OpenAICompatibleEmbedding') as mock_embedding_class, \
-                    patch('backend.services.vectordatabase_service.get_model_name_from_config') as mock_get_model_name:
-                mock_embedding_instance = MagicMock()
-                mock_embedding_class.return_value = mock_embedding_instance
-                mock_get_model_name.return_value = "simple-model"
+            with patch('backend.services.vectordatabase_service.build_adapter_fresh') as mock_build:
+                mock_adapter = MagicMock()
+                mock_build.return_value = mock_adapter
 
                 # Execute - now we can call the real function
                 from backend.services.vectordatabase_service import get_embedding_model
                 result, model_id = get_embedding_model("test_tenant", model_name="simple-model")
 
                 # Assert
-                self.assertEqual(result, mock_embedding_instance)
+                self.assertEqual(result, mock_adapter)
                 self.assertEqual(model_id, 456)
-                mock_embedding_class.assert_called_once()
+                mock_build.assert_called_once_with(
+                    {
+                        "model_repo": "",
+                        "model_name": "simple-model",
+                        "api_key": "test_api_key",
+                        "base_url": "https://test.api.com",
+                        "model_type": "embedding",
+                        "max_tokens": 1024,
+                        "ssl_verify": True,
+                    },
+                    "embedding",
+                    "embedding",
+                    None,
+                )
         finally:
             # Restart the mock for other tests
             self.get_embedding_model_patcher.start()
@@ -5597,9 +5819,8 @@ class TestRethrowOrPlain(unittest.TestCase):
     # Tests for get_rerank_model function
     @patch('backend.services.vectordatabase_service.get_model_records')
     @patch('backend.services.vectordatabase_service.tenant_config_manager')
-    @patch('backend.services.vectordatabase_service.get_model_name_from_config')
     def test_get_rerank_model_with_specific_model_name_found(
-        self, mock_get_model_name, mock_tenant_config, mock_get_records
+        self, mock_tenant_config, mock_get_records
     ):
         """Test get_rerank_model when specific model name is provided and found."""
         # Setup
@@ -5612,7 +5833,6 @@ class TestRethrowOrPlain(unittest.TestCase):
                 "ssl_verify": True
             }
         ]
-        mock_get_model_name.return_value = "gte-rerank-v2"
 
         mock_config = {"model_type": "embedding"}
         mock_tenant_config.get_model_config.return_value = mock_config
@@ -5621,31 +5841,36 @@ class TestRethrowOrPlain(unittest.TestCase):
         self.get_rerank_model_patcher.stop()
 
         try:
-            with patch('backend.services.vectordatabase_service.OpenAICompatibleRerank') as mock_rerank_class:
-                mock_rerank_instance = MagicMock()
-                mock_rerank_class.return_value = mock_rerank_instance
+            with patch('backend.services.vectordatabase_service.build_adapter_fresh') as mock_build:
+                mock_adapter = MagicMock()
+                mock_build.return_value = mock_adapter
 
                 # Execute
                 from backend.services.vectordatabase_service import get_rerank_model
                 result = get_rerank_model("tenant-123", "Alibaba-NLP/gte-rerank-v2")
 
                 # Assert
-                self.assertIsNotNone(result)
+                self.assertEqual(result, mock_adapter)
                 mock_get_records.assert_called_once_with({"model_type": "rerank"}, "tenant-123")
-                mock_rerank_class.assert_called_once_with(
-                    model_name="gte-rerank-v2",
-                    base_url="https://api.example.com",
-                    api_key="test-key",
-                    ssl_verify=True
+                mock_build.assert_called_once_with(
+                    {
+                        "model_name": "gte-rerank-v2",
+                        "model_repo": "Alibaba-NLP",
+                        "base_url": "https://api.example.com",
+                        "api_key": "test-key",
+                        "ssl_verify": True,
+                    },
+                    "rerank",
+                    "rerank",
+                    "tenant-123",
                 )
         finally:
             self.get_rerank_model_patcher.start()
 
     @patch('backend.services.vectordatabase_service.get_model_records')
     @patch('backend.services.vectordatabase_service.tenant_config_manager')
-    @patch('backend.services.vectordatabase_service.get_model_name_from_config')
     def test_get_rerank_model_with_specific_model_name_not_found(
-        self, mock_get_model_name, mock_tenant_config, mock_get_records
+        self, mock_tenant_config, mock_get_records
     ):
         """Test get_rerank_model when specific model name is not found, falls back to default."""
         # Setup
@@ -5658,7 +5883,6 @@ class TestRethrowOrPlain(unittest.TestCase):
                 "ssl_verify": False
             }
         ]
-        mock_get_model_name.return_value = "other-model"
 
         mock_config = {
             "model_type": "rerank",
@@ -5673,28 +5897,39 @@ class TestRethrowOrPlain(unittest.TestCase):
         self.get_rerank_model_patcher.stop()
 
         try:
-            with patch('backend.services.vectordatabase_service.OpenAICompatibleRerank') as mock_rerank_class:
-                mock_rerank_instance = MagicMock()
-                mock_rerank_class.return_value = mock_rerank_instance
+            with patch('backend.services.vectordatabase_service.build_adapter_fresh') as mock_build:
+                mock_adapter = MagicMock()
+                mock_build.return_value = mock_adapter
 
                 # Execute
                 from backend.services.vectordatabase_service import get_rerank_model
                 result = get_rerank_model("tenant-123", "nonexistent-model")
 
                 # Assert
-                self.assertIsNotNone(result)
+                self.assertEqual(result, mock_adapter)
                 mock_get_records.assert_called_once()
                 mock_tenant_config.get_model_config.assert_called_with(
                     key="RERANK_ID", tenant_id="tenant-123"
+                )
+                mock_build.assert_called_once_with(
+                    {
+                        "model_type": "rerank",
+                        "model_name": "default-rerank",
+                        "base_url": "https://default.api.com",
+                        "api_key": "default-key",
+                        "ssl_verify": True,
+                    },
+                    "rerank",
+                    "rerank",
+                    "tenant-123",
                 )
         finally:
             self.get_rerank_model_patcher.start()
 
     @patch('backend.services.vectordatabase_service.get_model_records')
     @patch('backend.services.vectordatabase_service.tenant_config_manager')
-    @patch('backend.services.vectordatabase_service.get_model_name_from_config')
     def test_get_rerank_model_with_specific_model_name_exception(
-        self, mock_get_model_name, mock_tenant_config, mock_get_records
+        self, mock_tenant_config, mock_get_records
     ):
         """Test get_rerank_model when get_model_records throws an exception."""
         # Setup
@@ -5713,9 +5948,9 @@ class TestRethrowOrPlain(unittest.TestCase):
         self.get_rerank_model_patcher.stop()
 
         try:
-            with patch('backend.services.vectordatabase_service.OpenAICompatibleRerank') as mock_rerank_class:
-                mock_rerank_instance = MagicMock()
-                mock_rerank_class.return_value = mock_rerank_instance
+            with patch('backend.services.vectordatabase_service.build_adapter_fresh') as mock_build:
+                mock_adapter = MagicMock()
+                mock_build.return_value = mock_adapter
 
                 # Execute
                 from backend.services.vectordatabase_service import get_rerank_model
@@ -5723,17 +5958,26 @@ class TestRethrowOrPlain(unittest.TestCase):
 
                 # Assert
                 # Should fall back to default model when exception occurs
-                self.assertIsNotNone(result)
+                self.assertEqual(result, mock_adapter)
+                mock_build.assert_called_once_with(
+                    {
+                        "model_type": "rerank",
+                        "model_name": "default-rerank",
+                        "base_url": "https://default.api.com",
+                        "api_key": "default-key",
+                        "ssl_verify": True,
+                    },
+                    "rerank",
+                    "rerank",
+                    "tenant-123",
+                )
         finally:
             self.get_rerank_model_patcher.start()
 
     @patch('backend.services.vectordatabase_service.tenant_config_manager')
-    @patch('backend.services.vectordatabase_service.get_model_name_from_config')
-    def test_get_rerank_model_default_rerank_type(self, mock_get_model_name, mock_tenant_config):
+    def test_get_rerank_model_default_rerank_type(self, mock_tenant_config):
         """Test get_rerank_model with default rerank model when model_type is rerank."""
         # Setup
-        mock_get_model_name.return_value = "default-rerank"
-
         mock_config = {
             "model_type": "rerank",
             "model_name": "default-rerank",
@@ -5747,31 +5991,36 @@ class TestRethrowOrPlain(unittest.TestCase):
         self.get_rerank_model_patcher.stop()
 
         try:
-            with patch('backend.services.vectordatabase_service.OpenAICompatibleRerank') as mock_rerank_class:
-                mock_rerank_instance = MagicMock()
-                mock_rerank_class.return_value = mock_rerank_instance
+            with patch('backend.services.vectordatabase_service.build_adapter_fresh') as mock_build:
+                mock_adapter = MagicMock()
+                mock_build.return_value = mock_adapter
 
                 # Execute
                 from backend.services.vectordatabase_service import get_rerank_model
                 result = get_rerank_model("tenant-123")
 
                 # Assert
-                self.assertIsNotNone(result)
+                self.assertEqual(result, mock_adapter)
                 mock_tenant_config.get_model_config.assert_called_once_with(
                     key="RERANK_ID", tenant_id="tenant-123"
                 )
-                mock_rerank_class.assert_called_once_with(
-                    model_name="default-rerank",
-                    base_url="https://api.dashscope.aliyuncs.com",
-                    api_key="secret-key",
-                    ssl_verify=True
+                mock_build.assert_called_once_with(
+                    {
+                        "model_type": "rerank",
+                        "model_name": "default-rerank",
+                        "base_url": "https://api.dashscope.aliyuncs.com",
+                        "api_key": "secret-key",
+                        "ssl_verify": True,
+                    },
+                    "rerank",
+                    "rerank",
+                    "tenant-123",
                 )
         finally:
             self.get_rerank_model_patcher.start()
 
     @patch('backend.services.vectordatabase_service.tenant_config_manager')
-    @patch('backend.services.vectordatabase_service.get_model_name_from_config')
-    def test_get_rerank_model_non_rerank_type_returns_none(self, mock_get_model_name, mock_tenant_config):
+    def test_get_rerank_model_non_rerank_type_returns_none(self, mock_tenant_config):
         """Test get_rerank_model returns None when model_type is not rerank."""
         # Setup
         mock_config = {
@@ -5786,19 +6035,17 @@ class TestRethrowOrPlain(unittest.TestCase):
         self.get_rerank_model_patcher.stop()
 
         try:
-            with patch('backend.services.vectordatabase_service.OpenAICompatibleRerank') as mock_rerank_class:
-                # Execute
-                from backend.services.vectordatabase_service import get_rerank_model
-                result = get_rerank_model("tenant-123")
+            # Execute
+            from backend.services.vectordatabase_service import get_rerank_model
+            result = get_rerank_model("tenant-123")
 
-                # Assert
-                self.assertIsNone(result)
+            # Assert
+            self.assertIsNone(result)
         finally:
             self.get_rerank_model_patcher.start()
 
     @patch('backend.services.vectordatabase_service.tenant_config_manager')
-    @patch('backend.services.vectordatabase_service.get_model_name_from_config')
-    def test_get_rerank_model_empty_config(self, mock_get_model_name, mock_tenant_config):
+    def test_get_rerank_model_empty_config(self, mock_tenant_config):
         """Test get_rerank_model returns None when model config is empty."""
         # Setup
         mock_tenant_config.get_model_config.return_value = {}
@@ -5807,21 +6054,19 @@ class TestRethrowOrPlain(unittest.TestCase):
         self.get_rerank_model_patcher.stop()
 
         try:
-            with patch('backend.services.vectordatabase_service.OpenAICompatibleRerank') as mock_rerank_class:
-                # Execute
-                from backend.services.vectordatabase_service import get_rerank_model
-                result = get_rerank_model("tenant-123")
+            # Execute
+            from backend.services.vectordatabase_service import get_rerank_model
+            result = get_rerank_model("tenant-123")
 
-                # Assert
-                self.assertIsNone(result)
+            # Assert
+            self.assertIsNone(result)
         finally:
             self.get_rerank_model_patcher.start()
 
     @patch('backend.services.vectordatabase_service.get_model_records')
     @patch('backend.services.vectordatabase_service.tenant_config_manager')
-    @patch('backend.services.vectordatabase_service.get_model_name_from_config')
     def test_get_rerank_model_with_model_name_no_repo(
-        self, mock_get_model_name, mock_tenant_config, mock_get_records
+        self, mock_tenant_config, mock_get_records
     ):
         """Test get_rerank_model when model has no model_repo."""
         # Setup
@@ -5834,7 +6079,6 @@ class TestRethrowOrPlain(unittest.TestCase):
                 "ssl_verify": True
             }
         ]
-        mock_get_model_name.return_value = "gte-rerank-v2"
 
         mock_config = {"model_type": "embedding"}
         mock_tenant_config.get_model_config.return_value = mock_config
@@ -5843,17 +6087,28 @@ class TestRethrowOrPlain(unittest.TestCase):
         self.get_rerank_model_patcher.stop()
 
         try:
-            with patch('backend.services.vectordatabase_service.OpenAICompatibleRerank') as mock_rerank_class:
-                mock_rerank_instance = MagicMock()
-                mock_rerank_class.return_value = mock_rerank_instance
+            with patch('backend.services.vectordatabase_service.build_adapter_fresh') as mock_build:
+                mock_adapter = MagicMock()
+                mock_build.return_value = mock_adapter
 
                 # Execute
                 from backend.services.vectordatabase_service import get_rerank_model
                 result = get_rerank_model("tenant-123", "gte-rerank-v2")
 
                 # Assert
-                self.assertIsNotNone(result)
-                mock_rerank_class.assert_called_once()
+                self.assertEqual(result, mock_adapter)
+                mock_build.assert_called_once_with(
+                    {
+                        "model_name": "gte-rerank-v2",
+                        "model_repo": None,
+                        "base_url": "https://api.example.com",
+                        "api_key": "test-key",
+                        "ssl_verify": True,
+                    },
+                    "rerank",
+                    "rerank",
+                    "tenant-123",
+                )
         finally:
             self.get_rerank_model_patcher.start()
 
@@ -6220,15 +6475,14 @@ class TestNewEmbeddingModelMethods(unittest.TestCase):
 
     # Tests for get_embedding_model_by_id (lines 338-383)
     @patch('backend.services.vectordatabase_service.get_model_by_model_id')
-    @patch('backend.services.vectordatabase_service.OpenAICompatibleEmbedding')
-    @patch('backend.services.vectordatabase_service.get_model_name_from_config')
-    def test_get_embedding_model_by_id_embedding_type(self, mock_get_model_name, mock_embedding_class, mock_get_model):
+    @patch('backend.services.vectordatabase_service.build_adapter_fresh')
+    def test_get_embedding_model_by_id_embedding_type(self, mock_build, mock_get_model):
         """
         Test get_embedding_model_by_id with embedding model type.
 
         This test verifies that:
-        1. When model_type is 'embedding', OpenAICompatibleEmbedding is created
-        2. Correct parameters are passed to embedding model
+        1. When model_type is 'embedding', the adapter is built via build_adapter_fresh
+        2. Correct parameters are passed to build_adapter_fresh
         3. Model instance and model_id are returned
         """
         from backend.services.vectordatabase_service import get_embedding_model_by_id
@@ -6244,33 +6498,38 @@ class TestNewEmbeddingModelMethods(unittest.TestCase):
             "ssl_verify": True
         }
 
-        mock_embedding_instance = MagicMock()
-        mock_embedding_class.return_value = mock_embedding_instance
-        mock_get_model_name.return_value = "text-embedding-3-small"
+        mock_adapter = MagicMock()
+        mock_build.return_value = mock_adapter
 
         model, model_id = get_embedding_model_by_id("tenant-1", 123)
 
-        self.assertIsNotNone(model)
+        self.assertEqual(model, mock_adapter)
         self.assertEqual(model_id, 123)
         mock_get_model.assert_called_once_with(123, "tenant-1")
-        mock_embedding_class.assert_called_once_with(
-            api_key="test-key",
-            base_url="https://api.openai.com",
-            model_name="text-embedding-3-small",
-            embedding_dim=1536,
-            ssl_verify=True
+        mock_build.assert_called_once_with(
+            {
+                "model_repo": "openai",
+                "model_name": "text-embedding-3-small",
+                "api_key": "test-key",
+                "base_url": "https://api.openai.com",
+                "model_type": "embedding",
+                "max_tokens": 1536,
+                "ssl_verify": True,
+            },
+            "embedding",
+            "embedding",
+            None,
         )
 
     @patch('backend.services.vectordatabase_service.get_model_by_model_id')
-    @patch('backend.services.vectordatabase_service.JinaEmbedding')
-    @patch('backend.services.vectordatabase_service.get_model_name_from_config')
-    def test_get_embedding_model_by_id_multi_embedding_type(self, mock_get_model_name, mock_jina_class, mock_get_model):
+    @patch('backend.services.vectordatabase_service.build_adapter_fresh')
+    def test_get_embedding_model_by_id_multi_embedding_type(self, mock_build, mock_get_model):
         """
         Test get_embedding_model_by_id with multi_embedding model type.
 
         This test verifies that:
-        1. When model_type is 'multi_embedding', JinaEmbedding is created
-        2. Correct parameters are passed to Jina embedding model
+        1. When model_type is 'multi_embedding', the adapter is built via build_adapter_fresh
+        2. Correct parameters are passed to build_adapter_fresh
         """
         from backend.services.vectordatabase_service import get_embedding_model_by_id
 
@@ -6285,27 +6544,32 @@ class TestNewEmbeddingModelMethods(unittest.TestCase):
             "ssl_verify": False
         }
 
-        mock_jina_instance = MagicMock()
-        mock_jina_class.return_value = mock_jina_instance
-        mock_get_model_name.return_value = "jina-embeddings-v2"
+        mock_adapter = MagicMock()
+        mock_build.return_value = mock_adapter
 
         model, model_id = get_embedding_model_by_id("tenant-1", 456)
 
-        self.assertIsNotNone(model)
+        self.assertEqual(model, mock_adapter)
         self.assertEqual(model_id, 456)
-        mock_jina_class.assert_called_once_with(
-            api_key="jina-key",
-            base_url="https://api.jina.ai",
-            model_name="jina-embeddings-v2",
-            embedding_dim=2048,
-            ssl_verify=False
+        mock_build.assert_called_once_with(
+            {
+                "model_repo": "jinaai",
+                "model_name": "jina-embeddings-v2",
+                "api_key": "jina-key",
+                "base_url": "https://api.jina.ai",
+                "model_type": "multi_embedding",
+                "max_tokens": 2048,
+                "ssl_verify": False,
+            },
+            "multi_embedding",
+            "multiEmbedding",
+            None,
         )
 
     @patch('backend.services.vectordatabase_service.get_model_by_model_id')
-    @patch('backend.services.vectordatabase_service.OpenAICompatibleEmbedding')
-    @patch('backend.services.vectordatabase_service.get_model_name_from_config')
+    @patch('backend.services.vectordatabase_service.build_adapter_fresh')
     def test_get_embedding_model_by_id_uses_declared_embedding_type(
-        self, mock_get_model_name, mock_embedding_class, mock_get_model
+        self, mock_build, mock_get_model
     ):
         """Endpoint shape cannot override a model record declared as text embedding."""
         from backend.services.vectordatabase_service import get_embedding_model_by_id
@@ -6321,29 +6585,35 @@ class TestNewEmbeddingModelMethods(unittest.TestCase):
             "max_tokens": 2560,
             "ssl_verify": True,
         }
-        mock_get_model_name.return_value = "qwen3-vl-embedding"
-        mock_instance = MagicMock()
-        mock_embedding_class.return_value = mock_instance
+        mock_adapter = MagicMock()
+        mock_build.return_value = mock_adapter
 
         model, model_id = get_embedding_model_by_id("tenant-1", 61)
 
-        self.assertIs(model, mock_instance)
+        self.assertEqual(model, mock_adapter)
         self.assertEqual(model_id, 61)
-        mock_embedding_class.assert_called_once_with(
-            api_key="dashscope-key",
-            base_url="https://dashscope.aliyuncs.com/api/v1/services/embeddings/multimodal-embedding/multimodal-embedding",
-            model_name="qwen3-vl-embedding",
-            embedding_dim=2560,
-            ssl_verify=True,
+        mock_build.assert_called_once_with(
+            {
+                "model_repo": "dashscope",
+                "model_name": "qwen3-vl-embedding",
+                "api_key": "dashscope-key",
+                "base_url": "https://dashscope.aliyuncs.com/api/v1/services/embeddings/multimodal-embedding/multimodal-embedding",
+                "model_type": "embedding",
+                "model_factory": "dashscope",
+                "max_tokens": 2560,
+                "ssl_verify": True,
+            },
+            "embedding",
+            "embedding",
+            None,
         )
 
     @patch('backend.services.vectordatabase_service.get_model_by_model_id')
-    @patch('backend.services.vectordatabase_service.DashScopeMultimodalEmbedding')
-    @patch('backend.services.vectordatabase_service.get_model_name_from_config')
+    @patch('backend.services.vectordatabase_service.build_adapter_fresh')
     def test_get_embedding_model_by_id_dashscope_multi_embedding(
-        self, mock_get_model_name, mock_dashscope_class, mock_get_model
+        self, mock_build, mock_get_model
     ):
-        """Test that a DashScope model selected by ID uses its matching client."""
+        """Test that a DashScope model selected by ID is built via the adapter registry."""
         from backend.services.vectordatabase_service import get_embedding_model_by_id
 
         mock_get_model.return_value = {
@@ -6357,20 +6627,27 @@ class TestNewEmbeddingModelMethods(unittest.TestCase):
             "max_tokens": 1024,
             "ssl_verify": True,
         }
-        mock_get_model_name.return_value = "multimodal-embedding-v1"
-        mock_instance = MagicMock()
-        mock_dashscope_class.return_value = mock_instance
+        mock_adapter = MagicMock()
+        mock_build.return_value = mock_adapter
 
         model, model_id = get_embedding_model_by_id("tenant-1", 48)
 
-        self.assertIs(model, mock_instance)
+        self.assertEqual(model, mock_adapter)
         self.assertEqual(model_id, 48)
-        mock_dashscope_class.assert_called_once_with(
-            api_key="dashscope-key",
-            base_url="https://dashscope.aliyuncs.com/api/v1/services/embeddings/multimodal-embedding/multimodal-embedding",
-            model_name="multimodal-embedding-v1",
-            embedding_dim=1024,
-            ssl_verify=True,
+        mock_build.assert_called_once_with(
+            {
+                "model_repo": "dashscope",
+                "model_name": "multimodal-embedding-v1",
+                "api_key": "dashscope-key",
+                "base_url": "https://dashscope.aliyuncs.com/api/v1/services/embeddings/multimodal-embedding/multimodal-embedding",
+                "model_type": "multi_embedding",
+                "model_factory": "dashscope",
+                "max_tokens": 1024,
+                "ssl_verify": True,
+            },
+            "multi_embedding",
+            "multiEmbedding",
+            None,
         )
 
     @patch('backend.services.vectordatabase_service.get_model_by_model_id')
@@ -7094,7 +7371,7 @@ class TestCoverageImprovement(unittest.TestCase):
     def test_list_indices_empty_both_groups_backward_compat(self, mock_get_info, mock_group_ids, mock_user_tenant):
         """Test list_indices backward compat when both kb and user groups are empty (line 939)."""
         mock_user_tenant.return_value = {
-            "user_id": "user-1", "tenant_id": "tenant-1", "user_role": "USER"
+            "user_id": "user-1", "tenant_id": "tenant-1", "user_role": "DEV"
         }
         mock_group_ids.return_value = []  # User has no groups
         # Knowledge base also has no groups (empty string)
@@ -7318,12 +7595,13 @@ class TestCoverageImprovement(unittest.TestCase):
         result = _normalize_model_type("embedding")
         self.assertEqual(result, "embedding")
 
-    # Tests for _create_embedding_model - DashScopeMultimodalEmbedding branch (line 340)
+    # Tests for _create_embedding_model - multi_embedding dispatch via build_adapter_fresh
     def test_create_embedding_model_dashscope(self):
-        """Test _create_embedding_model creates DashScopeMultimodalEmbedding when model_factory is dashscope."""
+        """Test _create_embedding_model builds a dashscope multi_embedding adapter via build_adapter_fresh."""
         from backend.services.vectordatabase_service import _create_embedding_model
-        with patch('backend.services.vectordatabase_service.get_model_name_from_config',
-                   return_value="bge-m3"):
+        with patch('backend.services.vectordatabase_service.build_adapter_fresh') as mock_build:
+            mock_adapter = MagicMock()
+            mock_build.return_value = mock_adapter
             result = _create_embedding_model({
                 "model_name": "bge-m3",
                 "model_type": "multi_embedding",
@@ -7331,14 +7609,30 @@ class TestCoverageImprovement(unittest.TestCase):
                 "api_key": "test-key",
                 "base_url": "https://api.example.com",
             })
-        # Should return a DashScopeMultimodalEmbedding instance (mocked)
-        self.assertIsNotNone(result)
+        # Should return the adapter built via build_adapter_fresh
+        self.assertEqual(result, mock_adapter)
+        mock_build.assert_called_once_with(
+            {
+                "model_repo": "",
+                "model_name": "bge-m3",
+                "api_key": "test-key",
+                "base_url": "https://api.example.com",
+                "model_type": "multi_embedding",
+                "model_factory": "dashscope",
+                "max_tokens": 1024,
+                "ssl_verify": True,
+            },
+            "multi_embedding",
+            "multiEmbedding",
+            None,
+        )
 
     def test_create_embedding_model_siliconflow(self):
-        """Siliconflow multi-embedding models use their provider-specific client."""
+        """Siliconflow multi-embedding models are built via build_adapter_fresh with the multiEmbedding slot."""
         from backend.services.vectordatabase_service import _create_embedding_model
-        with patch('backend.services.vectordatabase_service.get_model_name_from_config',
-                   return_value="Qwen/Qwen3-VL-Embedding-8B"):
+        with patch('backend.services.vectordatabase_service.build_adapter_fresh') as mock_build:
+            mock_adapter = MagicMock()
+            mock_build.return_value = mock_adapter
             result = _create_embedding_model({
                 "model_name": "Qwen/Qwen3-VL-Embedding-8B",
                 "model_type": "multi_embedding",
@@ -7347,7 +7641,22 @@ class TestCoverageImprovement(unittest.TestCase):
                 "base_url": "https://api.siliconflow.cn/v1/embeddings",
             })
 
-        self.assertIsInstance(result, MockSiliconflowMultimodalEmbedding)
+        self.assertEqual(result, mock_adapter)
+        mock_build.assert_called_once_with(
+            {
+                "model_repo": "",
+                "model_name": "Qwen/Qwen3-VL-Embedding-8B",
+                "api_key": "test-key",
+                "base_url": "https://api.siliconflow.cn/v1/embeddings",
+                "model_type": "multi_embedding",
+                "model_factory": "silicon",
+                "max_tokens": 1024,
+                "ssl_verify": True,
+            },
+            "multi_embedding",
+            "multiEmbedding",
+            None,
+        )
 
     # Tests for create_knowledge_base model ID validation
     @patch('backend.services.vectordatabase_service.get_model_by_model_id')
@@ -7599,7 +7908,7 @@ class TestCoverageImprovement(unittest.TestCase):
     @patch('backend.services.vectordatabase_service.IS_SPEED_MODE', new=False)
     def test_list_indices_both_empty_groups_backward_compat(self, mock_get_info, mock_group_ids, mock_user_tenant):
         """Test list_indices backward compat when both kb and user groups are empty (line 999-1001)."""
-        mock_user_tenant.return_value = {"user_role": "USER", "tenant_id": "tenant-1"}
+        mock_user_tenant.return_value = {"user_role": "DEV", "tenant_id": "tenant-1"}
         mock_group_ids.return_value = []  # Empty user groups
         mock_get_info.return_value = [{
             "index_name": "legacy-kb",
@@ -7662,7 +7971,7 @@ class TestCoverageImprovement(unittest.TestCase):
     @patch('backend.services.vectordatabase_service.IS_SPEED_MODE', new=False)
     def test_list_indices_non_creator_edit_permission(self, mock_update_model, mock_get_info, mock_group_ids, mock_user_tenant):
         """Test list_indices grants EDIT permission when user is not creator but ingroup_permission is EDIT (line 1014-1016)."""
-        mock_user_tenant.return_value = {"user_role": "USER", "tenant_id": "tenant-1"}
+        mock_user_tenant.return_value = {"user_role": "DEV", "tenant_id": "tenant-1"}
         mock_group_ids.return_value = [1]
         mock_get_info.return_value = [{
             "index_name": "shared-kb",
@@ -7911,10 +8220,16 @@ def test_resolve_knowledge_base_permission_not_found(monkeypatch):
         )
 
 
-def test_resolve_knowledge_base_permission_datamate_is_read_only(monkeypatch):
+def test_resolve_knowledge_base_permission_datamate_creator_is_read_only(monkeypatch):
     _patch_kb_permission_context(
         monkeypatch,
-        record={"index_name": "datamate-kb", "knowledge_sources": "datamate"},
+        record={
+            "index_name": "datamate-kb",
+            "knowledge_sources": "datamate",
+            "tenant_id": "tenant-1",
+            "created_by": "user-1",
+        },
+        user_tenant={"user_role": "USER", "tenant_id": "tenant-1"},
     )
 
     permission = ElasticSearchService.resolve_knowledge_base_permission(
@@ -7922,6 +8237,74 @@ def test_resolve_knowledge_base_permission_datamate_is_read_only(monkeypatch):
     )
 
     assert permission == "READ_ONLY"
+
+
+def test_resolve_knowledge_base_permission_speed_mode_uses_record_tenant_when_user_has_no_tenant(
+    monkeypatch,
+):
+    _patch_kb_permission_context(
+        monkeypatch,
+        record={
+            "index_name": "kb",
+            "knowledge_sources": "elasticsearch",
+            "tenant_id": "tenant-from-record",
+            "created_by": "other-user",
+            "ingroup_permission": "EDIT",
+        },
+        user_tenant=None,
+        speed_mode=True,
+    )
+    monkeypatch.setattr(
+        "backend.services.vectordatabase_service.ResourceAccessControl.check",
+        lambda resource, **kwargs: SimpleNamespace(permission_label="EDIT"),
+    )
+
+    assert (
+        ElasticSearchService.resolve_knowledge_base_permission(
+            "kb", "speed-user", tenant_id=None
+        )
+        == "EDIT"
+    )
+
+
+def test_resolve_knowledge_base_permission_datamate_cross_tenant_denied(monkeypatch):
+    _patch_kb_permission_context(
+        monkeypatch,
+        record={
+            "index_name": "datamate-kb",
+            "knowledge_sources": "datamate",
+            "tenant_id": "tenant-2",
+            "created_by": "admin-user",
+        },
+        user_tenant={"user_role": "ADMIN", "tenant_id": "tenant-1"},
+    )
+
+    assert (
+        ElasticSearchService.resolve_knowledge_base_permission(
+            "datamate-kb", "admin-user", "tenant-1"
+        )
+        is None
+    )
+
+
+def test_resolve_knowledge_base_permission_datamate_user_non_owner_denied(monkeypatch):
+    _patch_kb_permission_context(
+        monkeypatch,
+        record={
+            "index_name": "datamate-kb",
+            "knowledge_sources": "datamate",
+            "tenant_id": "tenant-1",
+            "created_by": "other-user",
+        },
+        user_tenant={"user_role": "USER", "tenant_id": "tenant-1"},
+    )
+
+    assert (
+        ElasticSearchService.resolve_knowledge_base_permission(
+            "datamate-kb", "user-1", "tenant-1"
+        )
+        is None
+    )
 
 
 def test_resolve_knowledge_base_permission_without_user_tenant_returns_none(monkeypatch):
@@ -8036,14 +8419,14 @@ def test_resolve_knowledge_base_permission_unknown_role_returns_none(monkeypatch
 @pytest.mark.parametrize(
     "record,user_group_ids,expected",
     [
-        ({"group_ids": "1,2", "created_by": "other", "ingroup_permission": "EDIT"}, [2], "EDIT"),
-        ({"group_ids": "1", "created_by": "other", "ingroup_permission": "READ_ONLY"}, [1], "READ_ONLY"),
+        ({"group_ids": "1,2", "created_by": "other", "ingroup_permission": "EDIT"}, [2], None),
+        ({"group_ids": "1", "created_by": "other", "ingroup_permission": "READ_ONLY"}, [1], None),
         ({"group_ids": "1", "created_by": "other", "ingroup_permission": "PRIVATE"}, [1], None),
         ({"group_ids": "1", "created_by": "other", "ingroup_permission": "UNKNOWN"}, [1], None),
         ({"group_ids": "1", "created_by": "other", "ingroup_permission": "EDIT"}, [3], None),
         ({"group_ids": "", "created_by": "user-1", "ingroup_permission": "READ_ONLY"}, [], "CREATOR"),
         ({"group_ids": "9", "created_by": "user-1", "ingroup_permission": "PRIVATE"}, [], "CREATOR"),
-        ({"group_ids": None, "created_by": "other"}, [], "READ_ONLY"),
+        ({"group_ids": None, "created_by": "other"}, [], None),
     ],
 )
 def test_resolve_knowledge_base_permission_user_group_rules(
@@ -8091,6 +8474,68 @@ def test_resolve_knowledge_base_permission_private_dev_creator_ignores_groups(mo
         ElasticSearchService.resolve_knowledge_base_permission("kb", "dev-user", "tenant-1")
         == ElasticSearchService.CREATOR_PERMISSION
     )
+
+
+def test_create_knowledge_base_forces_user_to_private_without_groups(monkeypatch):
+    model = {
+        "model_id": 1,
+        "model_name": "embedding-model",
+        "display_name": "Embedding model",
+        "model_type": "embedding",
+    }
+    monkeypatch.setattr(
+        "backend.services.vectordatabase_service.get_model_by_model_id",
+        lambda model_id, tenant_id: model,
+    )
+    record = {
+        "knowledge_id": 7,
+        "index_name": "7-abc",
+        "knowledge_name": "personal-kb",
+    }
+    create_record = MagicMock(return_value=record)
+    monkeypatch.setattr(
+        "backend.services.vectordatabase_service.create_knowledge_record",
+        create_record,
+    )
+    monkeypatch.setattr(
+        "backend.services.vectordatabase_service._create_embedding_model",
+        lambda _model: object(),
+    )
+    vdb_core = MagicMock()
+    vdb_core.create_index.return_value = True
+
+    result = ElasticSearchService.create_knowledge_base(
+        knowledge_name="personal-kb",
+        embedding_dim=128,
+        vdb_core=vdb_core,
+        user_id="user-1",
+        tenant_id="tenant-1",
+        ingroup_permission="EDIT",
+        group_ids=[1, 2],
+        embedding_model_id=1,
+        user_role="USER",
+    )
+
+    assert result["status"] == "success"
+    data = create_record.call_args.args[0]
+    assert data["ingroup_permission"] == "PRIVATE"
+    assert data["group_ids"] is None
+    vdb_core.create_index.assert_called_once_with("7-abc", embedding_dim=128)
+
+
+def test_update_knowledge_base_user_rejects_shared_record(monkeypatch):
+    monkeypatch.setattr(
+        "backend.services.vectordatabase_service.get_knowledge_record",
+        lambda _filters: {"ingroup_permission": "EDIT"},
+    )
+
+    with pytest.raises(PermissionError, match="only manage PRIVATE"):
+        ElasticSearchService.update_knowledge_base(
+            index_name="shared-kb",
+            knowledge_name="renamed",
+            user_id="user-1",
+            user_role="USER",
+        )
 
 
 @pytest.mark.parametrize("permission", ["EDIT", "CREATOR"])

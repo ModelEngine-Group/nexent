@@ -1,3 +1,4 @@
+import asyncio
 import types
 import json
 import importlib.machinery
@@ -225,6 +226,22 @@ module_mocks = {
     "nexent.skills.skill_manager": MagicMock(),
 }
 
+# Stub the gateway bridge: ``sdk.nexent.memory.embedding_model`` and the vector
+# database core import gateway adapter symbols at module level, and the real
+# gateway eagerly registers every vendor adapter (absolute ``nexent.*`` imports
+# that the mocked environment cannot satisfy). The mocked modules only need the
+# adapter names for typing / construction stubs.
+_gateway_mod = ModuleType("sdk.nexent.core.gateway")
+_gateway_mod.__path__ = []
+_gateway_modality_mod = ModuleType("sdk.nexent.core.gateway.modality")
+_gateway_modality_mod.__path__ = []
+for _name in ("OpenAICompatibleEmbeddingAdapter", "EmbeddingAdapter", "RerankAdapter", "VLMRequest"):
+    setattr(_gateway_modality_mod, _name, MagicMock(name=f"gateway.modality.{_name}"))
+_gateway_mod.modality = _gateway_modality_mod
+_gateway_mod.EmbeddingContext = MagicMock(name="gateway.EmbeddingContext")
+sys.modules["sdk.nexent.core.gateway"] = _gateway_mod
+sys.modules["sdk.nexent.core.gateway.modality"] = _gateway_modality_mod
+
 # ---------------------------------------------------------------------------
 # Import modules under test with patched dependencies in place
 # ---------------------------------------------------------------------------
@@ -324,6 +341,10 @@ def test_agent_run_thread_local_flow(basic_agent_run_info, monkeypatch):
         minio_client=None,
         conversation_id=basic_agent_run_info.conversation_id,
         user_id=basic_agent_run_info.user_id,
+        tenant_id=None,
+        workspace_path=None,
+        workspace_run_id=None,
+        minio_files=None,
     )
 
     # Following methods on the NexentAgent instance should be invoked
@@ -333,7 +354,11 @@ def test_agent_run_thread_local_flow(basic_agent_run_info, monkeypatch):
     )
     mock_nexent_instance.set_agent.assert_called_once()
     mock_nexent_instance.add_history_to_agent.assert_called_once_with(basic_agent_run_info.history)
-    mock_nexent_instance.agent_run_with_observer.assert_called_once_with(query=basic_agent_run_info.query, reset=False)
+    mock_nexent_instance.agent_run_with_observer.assert_called_once_with(
+        query=basic_agent_run_info.query,
+        reset=False,
+        additional_args={"metadata": {}},
+    )
 
 
 def test_agent_run_thread_binds_capacity_and_budget_snapshots(basic_agent_run_info, monkeypatch):
@@ -429,6 +454,10 @@ def test_agent_run_thread_mcp_flow(basic_agent_run_info, mock_memory_context, mo
         minio_client=None,
         conversation_id=basic_agent_run_info.conversation_id,
         user_id=basic_agent_run_info.user_id,
+        tenant_id=None,
+        workspace_path=None,
+        workspace_run_id=None,
+        minio_files=None,
     )
 
     # Subsequent calls on NexentAgent instance should mirror the local flow
@@ -438,7 +467,20 @@ def test_agent_run_thread_mcp_flow(basic_agent_run_info, mock_memory_context, mo
     )
     mock_nexent_instance.set_agent.assert_called_once()
     mock_nexent_instance.add_history_to_agent.assert_called_once_with(basic_agent_run_info.history)
-    mock_nexent_instance.agent_run_with_observer.assert_called_once_with(query=basic_agent_run_info.query, reset=False)
+    mock_nexent_instance.agent_run_with_observer.assert_called_once_with(
+        query=basic_agent_run_info.query,
+        reset=False,
+        additional_args={"metadata": {}},
+    )
+
+
+def test_build_run_additional_args_isolates_metadata_snapshot(basic_agent_run_info):
+    basic_agent_run_info.runtime_metadata = {"tenant": {"region": "cn"}}
+
+    additional_args = run_agent.build_run_additional_args(basic_agent_run_info)
+    additional_args["metadata"]["tenant"]["region"] = "us"
+
+    assert basic_agent_run_info.runtime_metadata == {"tenant": {"region": "cn"}}
 
 
 def test_agent_run_thread_mcp_flow_with_explicit_transport(basic_agent_run_info, mock_memory_context, monkeypatch):
@@ -552,6 +594,23 @@ def test_normalize_mcp_config():
     result = run_agent._normalize_mcp_config({"url": "http://server/mcp", "transport": None})
     assert result == {"url": "http://server/mcp", "transport": "streamable-http"}
 
+    httpx_client_factory = MagicMock()
+    result = run_agent._normalize_mcp_config({
+        "url": "http://server/sse",
+        "httpx_client_factory": httpx_client_factory,
+    })
+    assert result == {
+        "url": "http://server/sse",
+        "transport": "sse",
+        "httpx_client_factory": httpx_client_factory,
+    }
+
+    with pytest.raises(ValueError, match="httpx_client_factory must be callable"):
+        run_agent._normalize_mcp_config({
+            "url": "http://server/sse",
+            "httpx_client_factory": "not-callable",
+        })
+
     # Test dict format with only authorization
     result = run_agent._normalize_mcp_config({
         "url": "http://server/mcp",
@@ -644,6 +703,35 @@ def test_normalize_mcp_config():
     with pytest.raises(ValueError, match="Invalid MCP host item type"):
         run_agent._normalize_mcp_config(None)
 
+
+def test_normalize_mcp_config_bypasses_proxy_only_when_requested():
+    """Test that proxy bypass is represented as a transport-local factory."""
+    result = run_agent._normalize_mcp_config({
+        "url": "http://localhost:5011/sse",
+        "transport": "sse",
+        "bypass_proxy": True,
+    })
+
+    assert result["url"] == "http://localhost:5011/sse"
+    assert result["transport"] == "sse"
+    assert result["httpx_client_factory"] is run_agent._create_mcp_http_client_without_proxy
+
+    client = result["httpx_client_factory"]()
+    assert client._trust_env is False
+    asyncio.run(client.aclose())
+
+
+def test_normalize_mcp_config_keeps_proxy_by_default():
+    """Test that MCP configurations without the opt-in flag remain unchanged."""
+    result = run_agent._normalize_mcp_config({
+        "url": "https://remote.example.com/mcp",
+        "transport": "streamable-http",
+    })
+
+    assert result == {
+        "url": "https://remote.example.com/mcp",
+        "transport": "streamable-http",
+    }
 
 def test_agent_run_thread_handles_internal_exception(basic_agent_run_info, mock_memory_context, monkeypatch):
     """If an internal error occurs, the observer should be notified and a ValueError propagated."""

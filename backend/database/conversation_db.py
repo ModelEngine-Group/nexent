@@ -1,8 +1,14 @@
 import json
+from copy import deepcopy
 from datetime import datetime
 from typing import Any, Dict, List, Optional, TypedDict
 
 from sqlalchemy import asc, desc, func, insert, select, update
+
+from consts.exceptions import (
+    ConversationNotFoundError,
+    RuntimeMetadataVersionConflict,
+)
 
 from .client import as_dict, db_client, get_db_session
 from .db_models import (
@@ -56,6 +62,8 @@ class ConversationHistory(TypedDict):
     conversation_title: str
     agent_id: Optional[int]
     knowledge_scope: Optional[Dict[str, Any]]
+    runtime_metadata: Dict[str, Any]
+    runtime_metadata_version: int
     create_time: int
     message_records: List[MessageRecord]
     search_records: List[SearchRecord]
@@ -106,7 +114,8 @@ def _get_effective_tenant_id(user_tenant: Dict[str, Any]) -> str:
 def create_conversation(conversation_title: str, user_id: Optional[str] = None,
                         agent_id: Optional[int] = None,
                         chat_mode: Optional[str] = None,
-                        knowledge_scope: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                        knowledge_scope: Optional[Dict[str, Any]] = None,
+                        runtime_metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """
     Create a new conversation record
 
@@ -129,6 +138,9 @@ def create_conversation(conversation_title: str, user_id: Optional[str] = None,
             data["chat_mode"] = chat_mode
         if knowledge_scope is not None:
             data["knowledge_scope"] = knowledge_scope
+        if runtime_metadata is not None:
+            data["runtime_metadata"] = deepcopy(runtime_metadata)
+            data["runtime_metadata_version"] = 1
         if user_id:
             data = add_creation_tracking(data, user_id)
 
@@ -138,6 +150,8 @@ def create_conversation(conversation_title: str, user_id: Optional[str] = None,
             ConversationRecord.agent_id,
             ConversationRecord.chat_mode,
             ConversationRecord.knowledge_scope,
+            ConversationRecord.runtime_metadata,
+            ConversationRecord.runtime_metadata_version,
             (func.extract('epoch', ConversationRecord.create_time)
              * 1000).label('create_time'),
             (func.extract('epoch', ConversationRecord.update_time)
@@ -153,6 +167,8 @@ def create_conversation(conversation_title: str, user_id: Optional[str] = None,
             "agent_id": record.agent_id,
             "chat_mode": record.chat_mode or "execution",
             "knowledge_scope": record.knowledge_scope,
+            "runtime_metadata": record.runtime_metadata or {},
+            "runtime_metadata_version": record.runtime_metadata_version or 0,
             "create_time": int(record.create_time),
             "update_time": int(record.update_time)
         }
@@ -256,6 +272,171 @@ def create_message_units(message_units: List[Dict[str, Any]], message_id: int, c
             unit_ids.append(unit_id)
 
         return unit_ids
+
+
+def persist_assistant_run_batch(
+    message_id: int,
+    conversation_id: int,
+    message_content: str,
+    terminal_status: str,
+    message_units: List[Dict[str, Any]],
+    search_records: List[Dict[str, Any]],
+    image_urls: List[str],
+    skill_files: List[Dict[str, Any]],
+    automation_proposals: List[Dict[str, Any]],
+    user_id: str,
+    tenant_id: str,
+) -> Dict[int, int]:
+    """Persist one completed assistant stream in a single transaction.
+
+    The assistant parent row is created before streaming starts. This function
+    performs the only normal-path commit after streaming: it inserts all message
+    units and sources, links automation proposal cards, attaches generated files,
+    and moves the parent row to its terminal status.
+
+    Returns:
+        Mapping from unit_index to the generated unit_id.
+    """
+    if terminal_status not in {"completed", "failed", "stopped"}:
+        raise ValueError(f"Unsupported assistant terminal status: {terminal_status}")
+
+    message_id = int(message_id)
+    conversation_id = int(conversation_id)
+
+    with get_db_session() as session:
+        parent = session.execute(
+            select(ConversationMessage).where(
+                ConversationMessage.message_id == message_id,
+                ConversationMessage.conversation_id == conversation_id,
+                ConversationMessage.message_role == "assistant",
+                ConversationMessage.created_by == user_id,
+                ConversationMessage.delete_flag == "N",
+            ).with_for_update()
+        ).scalar_one_or_none()
+        if parent is None:
+            raise ValueError("Assistant streaming message does not exist or is not accessible")
+        if parent.status != "streaming":
+            raise ValueError(
+                f"Assistant message is already finalized with status {parent.status}"
+            )
+
+        unit_rows: List[Dict[str, Any]] = []
+        for unit in message_units:
+            unit_rows.append(add_creation_tracking({
+                "message_id": message_id,
+                "conversation_id": conversation_id,
+                "unit_index": int(unit["unit_index"]),
+                "unit_type": unit["unit_type"],
+                "unit_content": _serialize_unit_content(unit.get("unit_content", "")),
+                "unit_status": "completed",
+                "tool_call_id": unit.get("tool_call_id"),
+                "invocation_id": unit.get("invocation_id"),
+                "delete_flag": "N",
+            }, user_id))
+
+        unit_id_by_index: Dict[int, int] = {}
+        if unit_rows:
+            inserted_units = session.execute(
+                insert(ConversationMessageUnit)
+                .returning(
+                    ConversationMessageUnit.unit_id,
+                    ConversationMessageUnit.unit_index,
+                ),
+                unit_rows,
+            ).all()
+            unit_id_by_index = {
+                int(row.unit_index): int(row.unit_id)
+                for row in inserted_units
+            }
+
+        source_rows: List[Dict[str, Any]] = []
+        for record in search_records:
+            unit_index = int(record["unit_index"])
+            unit_id = unit_id_by_index.get(unit_index)
+            if unit_id is None:
+                raise ValueError(
+                    f"Search source references missing unit_index {unit_index}"
+                )
+            source_rows.append(add_creation_tracking({
+                "message_id": message_id,
+                "conversation_id": conversation_id,
+                "unit_id": unit_id,
+                "source_type": record.get("source_type", ""),
+                "source_title": record.get("source_title", ""),
+                "source_location": record.get("source_location", ""),
+                "source_content": record.get("source_content", ""),
+                "score_overall": record.get("score_overall"),
+                "score_accuracy": record.get("score_accuracy"),
+                "score_semantic": record.get("score_semantic"),
+                "published_date": record.get("published_date"),
+                "cite_index": record.get("cite_index"),
+                "search_type": record.get("search_type"),
+                "tool_sign": record.get("tool_sign", ""),
+                "delete_flag": "N",
+            }, user_id))
+        if source_rows:
+            session.execute(insert(ConversationSourceSearch), source_rows)
+
+        unique_image_urls = list(dict.fromkeys(url for url in image_urls if url))
+        if unique_image_urls:
+            image_rows = [
+                add_creation_tracking({
+                    "message_id": message_id,
+                    "conversation_id": conversation_id,
+                    "image_url": image_url,
+                    "delete_flag": "N",
+                }, user_id)
+                for image_url in unique_image_urls
+            ]
+            session.execute(insert(ConversationSourceImage), image_rows)
+
+        if automation_proposals:
+            from .db_models import AgentAutomationProposal
+
+        for proposal_link in automation_proposals:
+            unit_index = int(proposal_link["unit_index"])
+            unit_id = unit_id_by_index.get(unit_index)
+            if unit_id is None:
+                raise ValueError(
+                    f"Automation proposal references missing unit_index {unit_index}"
+                )
+            proposal = session.execute(
+                select(AgentAutomationProposal).where(
+                    AgentAutomationProposal.proposal_id == int(proposal_link["proposal_id"]),
+                    AgentAutomationProposal.tenant_id == tenant_id,
+                    AgentAutomationProposal.user_id == user_id,
+                    AgentAutomationProposal.delete_flag == "N",
+                ).with_for_update()
+            ).scalar_one_or_none()
+            if proposal is None:
+                raise ValueError("Automation proposal does not exist or is not accessible")
+            proposed_task = dict(proposal.proposed_task or {})
+            proposed_task["_conversation_message_id"] = message_id
+            proposed_task["_conversation_unit_id"] = unit_id
+            proposal.proposed_task = proposed_task
+            proposal.updated_by = user_id
+            proposal.update_time = func.current_timestamp()
+
+        if skill_files:
+            existing_files = parent.minio_files
+            if isinstance(existing_files, str) and existing_files:
+                try:
+                    existing_files = json.loads(existing_files)
+                except (TypeError, json.JSONDecodeError):
+                    existing_files = []
+            if not isinstance(existing_files, list):
+                existing_files = []
+            parent.minio_files = json.dumps(
+                [*existing_files, *skill_files],
+                ensure_ascii=False,
+            )
+
+        parent.message_content = message_content or ""
+        parent.status = terminal_status
+        parent.updated_by = user_id
+        parent.update_time = func.current_timestamp()
+
+        return unit_id_by_index
 
 
 def create_message_unit(message_id: int, conversation_id: int, unit_index: int,
@@ -454,6 +635,45 @@ def get_conversation(
         # Execute the query
         record = session.scalars(stmt).first()
         return None if record is None else as_dict(record)
+
+
+def resolve_conversation_runtime_metadata(
+    conversation_id: int,
+    user_id: str,
+    request_metadata: Optional[Dict[str, Any]],
+    update_requested: bool,
+    expected_version: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Atomically resolve and optionally replace conversation runtime metadata."""
+
+    with get_db_session() as session:
+        stmt = (
+            select(ConversationRecord)
+            .where(
+                ConversationRecord.conversation_id == int(conversation_id),
+                ConversationRecord.created_by == user_id,
+                ConversationRecord.delete_flag == 'N',
+            )
+            .with_for_update()
+        )
+        record = session.scalars(stmt).first()
+        if record is None:
+            raise ConversationNotFoundError("Conversation not found")
+
+        current_version = int(record.runtime_metadata_version or 0)
+        if update_requested:
+            if expected_version is not None and expected_version != current_version:
+                raise RuntimeMetadataVersionConflict(current_version)
+            record.runtime_metadata = deepcopy(request_metadata or {})
+            record.runtime_metadata_version = current_version + 1
+            record.updated_by = user_id
+            record.update_time = func.current_timestamp()
+            session.flush()
+
+        return {
+            "runtime_metadata": deepcopy(record.runtime_metadata or {}),
+            "runtime_metadata_version": int(record.runtime_metadata_version or 0),
+        }
 
 
 def get_conversation_messages(conversation_id: int) -> List[Dict[str, Any]]:
@@ -919,6 +1139,8 @@ def get_conversation_history(conversation_id: int, user_id: Optional[str] = None
             ConversationRecord.agent_id,
             ConversationRecord.chat_mode,
             ConversationRecord.knowledge_scope,
+            ConversationRecord.runtime_metadata,
+            ConversationRecord.runtime_metadata_version,
             (func.extract('epoch', ConversationRecord.create_time)
              * 1000).label('create_time')
         ).where(
@@ -1019,6 +1241,8 @@ def get_conversation_history(conversation_id: int, user_id: Optional[str] = None
             'agent_id': conversation.get('agent_id'),
             'chat_mode': conversation.get('chat_mode') or 'execution',
             'knowledge_scope': conversation.get('knowledge_scope'),
+            'runtime_metadata': conversation.get('runtime_metadata') or {},
+            'runtime_metadata_version': int(conversation.get('runtime_metadata_version') or 0),
             'create_time': int(conversation['create_time']),
             'message_records': message_list,
             'search_records': [as_dict(record) for record in search_records],

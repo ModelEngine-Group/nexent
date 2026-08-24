@@ -332,6 +332,32 @@ class TestConversationManagementService(unittest.TestCase):
             invocation_id="subagent-invocation-1",
         )
 
+    @patch('backend.services.conversation_management_service.persist_assistant_run_batch_db')
+    def test_persist_assistant_run_batch_forwards_all_fields(self, mock_persist_batch):
+        """The service boundary forwards the complete atomic batch contract."""
+        from backend.services.conversation_management_service import persist_assistant_run_batch
+
+        expected = {0: 555}
+        mock_persist_batch.return_value = expected
+        params = {
+            "message_id": 1,
+            "conversation_id": 456,
+            "message_content": "done",
+            "terminal_status": "completed",
+            "message_units": [{"unit_index": 0, "unit_type": "final_answer"}],
+            "search_records": [{"unit_index": 0, "source_title": "Result"}],
+            "image_urls": ["https://example.com/image.png"],
+            "skill_files": [{"object_name": "generated/report.txt"}],
+            "automation_proposals": [{"unit_index": 0, "proposal_id": 77}],
+            "user_id": self.user_id,
+            "tenant_id": self.tenant_id,
+        }
+
+        result = persist_assistant_run_batch(**params)
+
+        self.assertEqual(result, expected)
+        mock_persist_batch.assert_called_once_with(**params)
+
     @patch('backend.services.conversation_management_service.create_source_image')
     def test_save_source_image_passes_through(self, mock_create_source_image):
         """save_source_image is a thin pass-through to create_source_image."""
@@ -461,7 +487,7 @@ class TestConversationManagementService(unittest.TestCase):
         request_arg = mock_save_message.call_args[0][0]
         self.assertEqual(request_arg.message[0].content, "[Current time: no closing bracket here")
 
-    @patch('backend.services.conversation_management_service.OpenAIModel')
+    @patch('backend.services.conversation_management_service.get_llm_adapter_from_config')
     @patch('backend.services.conversation_management_service.get_generate_title_prompt_template')
     @patch('backend.services.conversation_management_service.tenant_config_manager.get_model_config')
     def test_call_llm_for_title(self, mock_get_model_config, mock_get_prompt_template, mock_openai):
@@ -482,7 +508,7 @@ class TestConversationManagementService(unittest.TestCase):
         mock_llm_instance = mock_openai.return_value
         mock_response = MagicMock()
         mock_response.content = "AI Discussion"
-        mock_llm_instance.generate.return_value = mock_response
+        mock_llm_instance.return_value = mock_response
 
         # Execute
         result = call_llm_for_title(
@@ -491,7 +517,7 @@ class TestConversationManagementService(unittest.TestCase):
         # Assert
         self.assertEqual(result, "AI Discussion")
         mock_openai.assert_called_once()
-        mock_llm_instance.generate.assert_called_once()
+        mock_llm_instance.assert_called_once()
         mock_get_prompt_template.assert_called_once_with(language='zh')
 
     @patch('backend.services.conversation_management_service.rename_conversation')
@@ -556,6 +582,31 @@ class TestConversationManagementService(unittest.TestCase):
         self.assertEqual(result["chat_mode"], "planning")
         mock_create_conversation.assert_called_once_with(
             "New Chat", self.user_id, agent_id=7, chat_mode="planning"
+        )
+
+    @patch('backend.services.conversation_management_service.create_conversation')
+    def test_create_new_conversation_with_runtime_metadata(self, mock_create_conversation):
+        mock_create_conversation.return_value = {
+            "conversation_id": 123,
+            "title": "New Chat",
+            "runtime_metadata": {"session": "s1"},
+        }
+
+        result = create_new_conversation(
+            "New Chat",
+            self.user_id,
+            agent_id=7,
+            chat_mode="planning",
+            runtime_metadata={"session": "s1"},
+        )
+
+        self.assertEqual(result["runtime_metadata"], {"session": "s1"})
+        mock_create_conversation.assert_called_once_with(
+            "New Chat",
+            self.user_id,
+            agent_id=7,
+            chat_mode="planning",
+            runtime_metadata={"session": "s1"},
         )
 
     @patch('backend.services.conversation_management_service.update_conversation_agent_id')
@@ -759,6 +810,8 @@ class TestConversationManagementService(unittest.TestCase):
             "conversation_id": 123,
             "conversation_title": "AI Chat",
             "agent_id": 7,
+            "runtime_metadata": {"tenant": {"region": "cn"}},
+            "runtime_metadata_version": 3,
             "create_time": "2023-04-01",
             "message_records": [
                 {
@@ -792,6 +845,11 @@ class TestConversationManagementService(unittest.TestCase):
                          "123")  # Converted to string
         self.assertEqual(result[0]["conversation_title"], "AI Chat")
         self.assertEqual(result[0]["agent_id"], 7)
+        self.assertEqual(
+            result[0]["runtime_metadata"],
+            {"tenant": {"region": "cn"}},
+        )
+        self.assertEqual(result[0]["runtime_metadata_version"], 3)
         self.assertEqual(len(result[0]["message"]), 2)
         # Check message structure
         user_message = result[0]["message"][0]
@@ -1083,7 +1141,7 @@ class TestConversationManagementService(unittest.TestCase):
 class TestCallLlmForTitleMonitoring(unittest.TestCase):
     """Verify call_llm_for_title sets monitoring context and operation."""
 
-    @patch('backend.services.conversation_management_service.OpenAIModel')
+    @patch('backend.services.conversation_management_service.get_llm_adapter_from_config')
     @patch('backend.services.conversation_management_service.tenant_config_manager')
     @patch('backend.services.conversation_management_service.set_monitoring_operation')
     @patch('backend.services.conversation_management_service.set_monitoring_context')
@@ -1095,14 +1153,14 @@ class TestCallLlmForTitleMonitoring(unittest.TestCase):
             "display_name": "GPT-4",
         }
         mock_llm = MagicMock()
-        mock_llm.generate.return_value = MagicMock(content="Title")
+        mock_llm.return_value = MagicMock(content="Title")
         mock_model_cls.return_value = mock_llm
 
         call_llm_for_title("hello?", "tenant-123", "en")
 
         mock_ctx.assert_called_once_with(tenant_id="tenant-123", user_id=None)
 
-    @patch('backend.services.conversation_management_service.OpenAIModel')
+    @patch('backend.services.conversation_management_service.get_llm_adapter_from_config')
     @patch('backend.services.conversation_management_service.tenant_config_manager')
     @patch('backend.services.conversation_management_service.set_monitoring_operation')
     @patch('backend.services.conversation_management_service.set_monitoring_context')
@@ -1114,7 +1172,7 @@ class TestCallLlmForTitleMonitoring(unittest.TestCase):
             "display_name": "GPT-4",
         }
         mock_llm = MagicMock()
-        mock_llm.generate.return_value = MagicMock(content="Title")
+        mock_llm.return_value = MagicMock(content="Title")
         mock_model_cls.return_value = mock_llm
 
         call_llm_for_title("hello?", "tenant-123", "zh")
@@ -1223,7 +1281,7 @@ class TestUpdateFunctions(unittest.TestCase):
 class TestCallLlmForTitleEdgeCases(unittest.TestCase):
     """Test edge cases for call_llm_for_title."""
 
-    @patch('backend.services.conversation_management_service.OpenAIModel')
+    @patch('backend.services.conversation_management_service.get_llm_adapter_from_config')
     @patch('backend.services.conversation_management_service.get_generate_title_prompt_template')
     @patch('backend.services.conversation_management_service.tenant_config_manager.get_model_config')
     def test_modelengine_factory_uses_flat_messages(self, mock_get_config, mock_get_prompt, mock_model):
@@ -1240,20 +1298,20 @@ class TestCallLlmForTitleEdgeCases(unittest.TestCase):
             "USER_PROMPT": "{{question}}"
         }
         mock_llm = MagicMock()
-        mock_llm.generate.return_value = MagicMock(content="Title")
+        mock_llm.return_value = MagicMock(content="Title")
         mock_model.return_value = mock_llm
 
         call_llm_for_title("test question", "tenant-1", "zh")
 
         # Verify messages were flattened
-        call_args = mock_llm.generate.call_args[0][0]
+        call_args = mock_llm.call_args[0][0]
         self.assertIsInstance(call_args, list)
         for msg in call_args:
             self.assertIsInstance(msg, dict)
             self.assertIn("role", msg)
             self.assertIn("content", msg)
 
-    @patch('backend.services.conversation_management_service.OpenAIModel')
+    @patch('backend.services.conversation_management_service.get_llm_adapter_from_config')
     @patch('backend.services.conversation_management_service.get_generate_title_prompt_template')
     @patch('backend.services.conversation_management_service.tenant_config_manager.get_model_config')
     def test_empty_response_returns_default_zh_title(self, mock_get_config, mock_get_prompt, mock_model):
@@ -1269,13 +1327,13 @@ class TestCallLlmForTitleEdgeCases(unittest.TestCase):
             "USER_PROMPT": "{{question}}"
         }
         mock_llm = MagicMock()
-        mock_llm.generate.return_value = MagicMock(content="  ")  # whitespace only
+        mock_llm.return_value = MagicMock(content="  ")  # whitespace only
         mock_model.return_value = mock_llm
 
         result = call_llm_for_title("test", "tenant-1", "zh")
         self.assertEqual(result, "新对话")  # DEFAULT_ZH_TITLE
 
-    @patch('backend.services.conversation_management_service.OpenAIModel')
+    @patch('backend.services.conversation_management_service.get_llm_adapter_from_config')
     @patch('backend.services.conversation_management_service.get_generate_title_prompt_template')
     @patch('backend.services.conversation_management_service.tenant_config_manager.get_model_config')
     def test_none_response_returns_default_zh_title(self, mock_get_config, mock_get_prompt, mock_model):
@@ -1291,13 +1349,13 @@ class TestCallLlmForTitleEdgeCases(unittest.TestCase):
             "USER_PROMPT": "{{question}}"
         }
         mock_llm = MagicMock()
-        mock_llm.generate.return_value = MagicMock(content=None)
+        mock_llm.return_value = MagicMock(content=None)
         mock_model.return_value = mock_llm
 
         result = call_llm_for_title("test", "tenant-1", "zh")
         self.assertEqual(result, "新对话")
 
-    @patch('backend.services.conversation_management_service.OpenAIModel')
+    @patch('backend.services.conversation_management_service.get_llm_adapter_from_config')
     @patch('backend.services.conversation_management_service.get_generate_title_prompt_template')
     @patch('backend.services.conversation_management_service.tenant_config_manager.get_model_config')
     def test_english_title_response(self, mock_get_config, mock_get_prompt, mock_model):
@@ -1313,13 +1371,13 @@ class TestCallLlmForTitleEdgeCases(unittest.TestCase):
             "USER_PROMPT": "{{question}}"
         }
         mock_llm = MagicMock()
-        mock_llm.generate.return_value = MagicMock(content="  ")
+        mock_llm.return_value = MagicMock(content="  ")
         mock_model.return_value = mock_llm
 
         result = call_llm_for_title("test", "tenant-1", "en")
         self.assertEqual(result, "New Conversation")  # DEFAULT_EN_TITLE
 
-    @patch('backend.services.conversation_management_service.OpenAIModel')
+    @patch('backend.services.conversation_management_service.get_llm_adapter_from_config')
     @patch('backend.services.conversation_management_service.get_generate_title_prompt_template')
     @patch('backend.services.conversation_management_service.tenant_config_manager.get_model_config')
     def test_remove_think_blocks(self, mock_get_config, mock_get_prompt, mock_model):
@@ -1335,13 +1393,13 @@ class TestCallLlmForTitleEdgeCases(unittest.TestCase):
             "USER_PROMPT": "{{question}}"
         }
         mock_llm = MagicMock()
-        mock_llm.generate.return_value = MagicMock(content="<think>reasoning</think>Actual Title")
+        mock_llm.return_value = MagicMock(content="<think>reasoning</think>Actual Title")
         mock_model.return_value = mock_llm
 
         result = call_llm_for_title("test", "tenant-1", "zh")
         self.assertEqual(result, "Actual Title")
 
-    @patch('backend.services.conversation_management_service.OpenAIModel')
+    @patch('backend.services.conversation_management_service.get_llm_adapter_from_config')
     @patch('backend.services.conversation_management_service.get_generate_title_prompt_template')
     @patch('backend.services.conversation_management_service.tenant_config_manager.get_model_config')
     def test_no_model_config_returns_empty_display_name(self, mock_get_config, mock_get_prompt, mock_model):
@@ -1352,7 +1410,7 @@ class TestCallLlmForTitleEdgeCases(unittest.TestCase):
             "USER_PROMPT": "{{question}}"
         }
         mock_llm = MagicMock()
-        mock_llm.generate.return_value = MagicMock(content="Title")
+        mock_llm.return_value = MagicMock(content="Title")
         mock_model.return_value = mock_llm
 
         # Note: This test documents that call_llm_for_title crashes when model_config is None
