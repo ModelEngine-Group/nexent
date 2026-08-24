@@ -328,6 +328,32 @@ export interface StepTokenCount {
   estimatedContextTokens: number;
   tokenThreshold: number | null;
   contextWindowTokens: number | null;
+  contextBudget?: ContextBudgetEvent;
+}
+
+export interface ContextBudgetEvent {
+  schema_version: 1;
+  step_number: number;
+  raw_tokens: number;
+  final_tokens: number;
+  soft_budget: number;
+  hard_budget: number;
+  hard_count: number;
+  components: Record<string, number>;
+  count_source: string;
+  compression: { attempted: boolean; saved_tokens: number; ratio: number };
+  recovery_state: string;
+}
+
+export function parseContextBudget(content: string): ContextBudgetEvent | null {
+  try {
+    const data = JSON.parse(content);
+    return data?.schema_version === 1 && typeof data.step_number === "number"
+      ? (data as ContextBudgetEvent)
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -1936,6 +1962,16 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           if (chunk.type === "token_count") {
             storedTiming = buildTimingFromTokenCount(chunk.content);
             continue; // Don't yield for internal data chunks
+          }
+          if (chunk.type === "context_budget") {
+            const budget = parseContextBudget(chunk.content);
+            if (budget) {
+              const step = [...stepTokenCounts]
+                .reverse()
+                .find((item) => item.stepNumber === budget.step_number);
+              if (step) step.contextBudget = budget;
+            }
+            continue;
           }
 
           if (chunk.type === "plan") {

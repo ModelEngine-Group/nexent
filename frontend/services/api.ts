@@ -275,6 +275,8 @@ export const API_ENDPOINTS = {
     verifyModelConfig: `${API_BASE_URL}/model/temporary_healthcheck`,
     suggestCapacity: `${API_BASE_URL}/model/suggest-capacity`,
     capacityCoverage: `${API_BASE_URL}/model/capacity-coverage`,
+    capacityHealth: `${API_BASE_URL}/model/capacity-health`,
+    capacityCatalogStatus: `${API_BASE_URL}/model/capacity-catalog-status`,
     capacityAdoptionPreview: `${API_BASE_URL}/model/capacity-adoption-preview`,
     capacityAdopt: `${API_BASE_URL}/model/capacity-adopt`,
     tokenCountProbe: `${API_BASE_URL}/model/token-count-probe`,
@@ -729,6 +731,7 @@ export const API_ENDPOINTS = {
   },
   monitoring: {
     models: `${API_BASE_URL}/monitoring/models`,
+    contextBudget: `${API_BASE_URL}/monitoring/context-budget`,
     status: `${API_BASE_URL}/monitoring/status`,
   },
   notifications: {

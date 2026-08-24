@@ -599,6 +599,34 @@ class TestResolveInputBudget:
         assert isinstance(resolved_capacity_snapshot, MockModelCapacitySnapshot)
         assert safe_budget_snapshot["model_name"] == resolved_capacity_snapshot.model_name
 
+    def test_persisted_profile_identity_overrides_compatibility_factory(self):
+        profile = types.SimpleNamespace(
+            capability_profile_version="dashscope/qwen3.7-plus@1"
+        )
+        snapshot = MockModelCapacitySnapshot(
+            model_name="qwen3.7-plus",
+            capability_profile_version="dashscope/qwen3.7-plus@1",
+        )
+        with patch.object(
+            create_agent_info_module,
+            "CAPABILITY_CATALOG",
+            {("dashscope", "qwen3.7-plus"): profile},
+        ), patch.object(
+            create_agent_info_module,
+            "resolve_capacity",
+            return_value=snapshot,
+        ) as resolver:
+            _resolve_input_budget(
+                {
+                    "model_factory": "OpenAI-API-Compatible",
+                    "model_name": "qwen3.7-plus",
+                    "capability_profile_version": "dashscope/qwen3.7-plus@1",
+                }
+            )
+
+        assert resolver.call_args.kwargs["provider"] == "dashscope"
+        assert resolver.call_args.kwargs["model_id"] == "qwen3.7-plus"
+
 
 class TestGetSkillsForTemplate:
     """Tests for the _get_skills_for_template function"""

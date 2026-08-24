@@ -39,6 +39,7 @@ import {
   skillFileUploadsRegistry,
   remoteChatModelAdapter,
   parseStepTokenCount,
+  parseContextBudget,
   parsePlan,
   parsePlanStepUpdate,
   planRegistry,
@@ -63,8 +64,7 @@ type HistoricalChatMode = "planning" | "execution";
 let activeHistoricalConversationId: string | undefined;
 let activeHistoricalChatModeConversationId: string | undefined;
 let historicalChatModeListener:
-  | ((mode: HistoricalChatMode) => void)
-  | undefined;
+  ((mode: HistoricalChatMode) => void) | undefined;
 const historicalChatModeCache = new Map<string, HistoricalChatMode>();
 
 export const restoreHistoricalPlan = (conversationId?: string): void => {
@@ -221,7 +221,7 @@ const buildBranchableHistory = (
   const branchableMessages: BranchableHistoryMessage[] = [];
   let visibleHeadId: string | null = null;
 
-  for (let groupStart = 0; groupStart < messages.length; ) {
+  for (let groupStart = 0; groupStart < messages.length;) {
     const role = messages[groupStart].role;
     let groupEnd = groupStart + 1;
     while (groupEnd < messages.length && messages[groupEnd].role === role) {
@@ -586,6 +586,16 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
             if (parsed) stepTokenCounts.push(parsed);
             continue;
           }
+          if (part.type === "context_budget") {
+            const budget = parseContextBudget(part.content);
+            if (budget) {
+              const step = [...stepTokenCounts]
+                .reverse()
+                .find((item) => item.stepNumber === budget.step_number);
+              if (step) step.contextBudget = budget;
+            }
+            continue;
+          }
 
           // Restore per-tool search sources from the persisted placeholder.
           // The backend keeps the full results in `searchByUnitId`, keyed by
@@ -944,8 +954,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
             if (typeof searchItem === "object" && searchItem !== null) {
               const item = searchItem as Record<string, unknown>;
               const scoreDetails = item.score_details as
-                | Record<string, unknown>
-                | undefined;
+                Record<string, unknown> | undefined;
               const searchImageKey = `${item.tool_sign ?? ""}${item.cite_index ?? ""}`;
               if (
                 scoreDetails?.chunk_type === "image" ||

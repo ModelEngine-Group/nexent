@@ -1,7 +1,12 @@
 // Tool function for processing chat streaming response
 
 import { chatConfig } from "@/const/chatConfig";
-import { ChatMessageType, AgentStep } from "@/types/chat";
+import {
+  ChatMessageType,
+  AgentStep,
+  ContextBudgetMetrics,
+  TokenMetrics,
+} from "@/types/chat";
 import log from "@/lib/logger";
 import { MESSAGE_ROLES } from "@/const/chatConfig";
 
@@ -97,7 +102,14 @@ type ReconstructionState = {
   finalAnswer: string;
   steps: AgentStep[];
   stepCounter: number;
+  metricsByStep: Map<string, TokenMetrics>;
+  budgetEventsByStep: Map<string, AgentStep["contents"]>;
 };
+
+const isContextBudgetTimelineEvent = (budget: ContextBudgetMetrics): boolean =>
+  Boolean(budget?.compression?.attempted) ||
+  Number(budget?.retry_ordinal || 0) > 0 ||
+  !["not_needed", "not_attempted"].includes(budget?.recovery_state);
 
 // Helper to create a new step
 const createNewStep = (
@@ -287,7 +299,6 @@ const processThinkingCodeUnit = (
 const isSkippedUnitType = (unitType: string): boolean => {
   const skippedTypes = [
     "search_content_placeholder",
-    "token_count",
     "parse",
     "execution_logs",
     "agent_new_run",
@@ -319,6 +330,8 @@ export function reconstructFromStreamingMessage(
     finalAnswer: streamingMessage.message_content || "",
     steps: [],
     stepCounter: 0,
+    metricsByStep: new Map(),
+    budgetEventsByStep: new Map(),
   };
 
   // Sort units by index (should already be sorted)
@@ -353,6 +366,60 @@ export function reconstructFromStreamingMessage(
         state.finalAnswer = unit.unit_content;
         break;
 
+      case "token_count":
+        try {
+          const metrics = JSON.parse(unit.unit_content) as TokenMetrics;
+          const stepId = `step-${metrics.step_number}`;
+          const existing = state.metricsByStep.get(stepId);
+          state.metricsByStep.set(stepId, {
+            ...(existing || {}),
+            ...metrics,
+            context_budget: existing?.context_budget,
+          });
+        } catch {
+          /* Ignore malformed optional metrics from older runtimes. */
+        }
+        break;
+
+      case "context_budget":
+        try {
+          const budget = JSON.parse(unit.unit_content) as ContextBudgetMetrics;
+          const stepId = `step-${budget.step_number}`;
+          const existing = state.metricsByStep.get(stepId);
+          state.metricsByStep.set(
+            stepId,
+            existing
+              ? { ...existing, context_budget: budget }
+              : {
+                  step_number: budget.step_number,
+                  duration: 0,
+                  step_input_tokens: null,
+                  step_output_tokens: null,
+                  total_output_tokens: 0,
+                  estimated_context_tokens: budget.final_tokens,
+                  token_threshold: budget.soft_budget,
+                  hard_input_budget_tokens: budget.hard_budget,
+                  context_processing_mode: null,
+                  output_finish_reason: null,
+                  context_budget: budget,
+                }
+          );
+          if (isContextBudgetTimelineEvent(budget)) {
+            const events = state.budgetEventsByStep.get(stepId) || [];
+            events.push({
+              id: `context-budget-${unit.unit_index}`,
+              type: chatConfig.messageTypes.CONTEXT_BUDGET,
+              content: unit.unit_content,
+              expanded: true,
+              timestamp: Date.now(),
+            });
+            state.budgetEventsByStep.set(stepId, events);
+          }
+        } catch {
+          /* Ignore malformed optional events for forward compatibility. */
+        }
+        break;
+
       default: {
         if (isSkippedUnitType(unit.unit_type)) {
           break;
@@ -376,6 +443,16 @@ export function reconstructFromStreamingMessage(
 
   // Don't forget to save the last currentStep if it has contents
   finalizeCurrentStep(state);
+
+  state.steps = state.steps.map((step) => {
+    const metrics = state.metricsByStep.get(step.id);
+    const budgetEvents = state.budgetEventsByStep.get(step.id) || [];
+    return {
+      ...step,
+      ...(metrics ? { metrics } : {}),
+      contents: [...budgetEvents, ...step.contents],
+    };
+  });
 
   return {
     currentStep: state.steps[state.steps.length - 1] || null,
@@ -535,6 +612,7 @@ export const handleStreamResponse = async (
                 resumeConfig &&
                 (messageType === chatConfig.messageTypes.STEP_COUNT ||
                   messageType === chatConfig.messageTypes.TOKEN_COUNT ||
+                  messageType === chatConfig.messageTypes.CONTEXT_BUDGET ||
                   messageType ===
                     chatConfig.messageTypes.SEARCH_CONTENT_PLACEHOLDER ||
                   messageType === chatConfig.messageTypes.PARSE ||
@@ -599,13 +677,73 @@ export const handleStreamResponse = async (
 
                     // If currentStep matches the metrics step number, set directly
                     if (currentStep && currentStep.id === metricsStepId) {
-                      currentStep.metrics = metricsData;
+                      currentStep.metrics = {
+                        ...(currentStep.metrics || {}),
+                        ...metricsData,
+                        context_budget:
+                          currentStep.metrics?.context_budget ||
+                          metricsData.context_budget,
+                      };
                     } else {
                       // currentStep was already reset to a new step, store metrics for later application
-                      pendingMetrics.set(metricsStepId, metricsData);
+                      const existing = pendingMetrics.get(metricsStepId) || {};
+                      pendingMetrics.set(metricsStepId, {
+                        ...existing,
+                        ...metricsData,
+                        context_budget:
+                          existing.context_budget || metricsData.context_budget,
+                      });
                     }
                   } catch {
                     // Failed to parse metrics
+                  }
+                  break;
+
+                case chatConfig.messageTypes.CONTEXT_BUDGET:
+                  try {
+                    const budgetData = JSON.parse(messageContent);
+                    const metricsStepId = `step-${budgetData.step_number}`;
+                    if (currentStep && currentStep.id === metricsStepId) {
+                      currentStep.metrics = {
+                        ...(currentStep.metrics || {
+                          step_number: budgetData.step_number,
+                          duration: 0,
+                          step_input_tokens: null,
+                          step_output_tokens: null,
+                          total_output_tokens: 0,
+                          estimated_context_tokens: budgetData.final_tokens,
+                          token_threshold: budgetData.soft_budget,
+                          hard_input_budget_tokens: budgetData.hard_budget,
+                          context_processing_mode: null,
+                          output_finish_reason: null,
+                        }),
+                        context_budget: budgetData,
+                      };
+                      if (
+                        isContextBudgetTimelineEvent(budgetData) &&
+                        !currentStep.contents.some(
+                          (content) =>
+                            content.id ===
+                            `context-budget-${budgetData.step_number}-${budgetData.retry_ordinal}`
+                        )
+                      ) {
+                        currentStep.contents.push({
+                          id: `context-budget-${budgetData.step_number}-${budgetData.retry_ordinal}`,
+                          type: chatConfig.messageTypes.CONTEXT_BUDGET,
+                          content: messageContent,
+                          expanded: true,
+                          timestamp: Date.now(),
+                        });
+                      }
+                    } else {
+                      const existing = pendingMetrics.get(metricsStepId);
+                      pendingMetrics.set(metricsStepId, {
+                        ...(existing || {}),
+                        context_budget: budgetData,
+                      });
+                    }
+                  } catch {
+                    /* optional forward-compatible event */
                   }
                   break;
 

@@ -246,6 +246,7 @@ async def test_suggest_capacity_bad_request(client, auth_header, user_credential
 @pytest.mark.asyncio
 async def test_capacity_adoption_preview_success(client, auth_header, user_credentials, mocker):
     mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+    mocker.patch('backend.apps.model_managment_app.get_user_tenant_by_user_id', return_value={"user_role": "ADMIN"})
     preview = mocker.patch(
         'backend.apps.model_managment_app.preview_capacity_adoption_for_tenant',
         return_value={"matcher_version": "1.0.0", "fields": {}},
@@ -265,6 +266,7 @@ async def test_capacity_adoption_preview_success(client, auth_header, user_crede
 @pytest.mark.asyncio
 async def test_capacity_adopt_success(client, auth_header, user_credentials, mocker):
     mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+    mocker.patch('backend.apps.model_managment_app.get_user_tenant_by_user_id', return_value={"user_role": "ADMIN"})
     adopt = mocker.patch(
         'backend.apps.model_managment_app.adopt_capacity_for_tenant',
         return_value={"updated_fields": ["context_window_tokens"]},
@@ -295,6 +297,7 @@ async def test_capacity_adopt_success(client, auth_header, user_credentials, moc
 @pytest.mark.asyncio
 async def test_token_count_probe_success_is_sanitized(client, auth_header, user_credentials, mocker):
     mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+    mocker.patch('backend.apps.model_managment_app.get_user_tenant_by_user_id', return_value={"user_role": "ADMIN"})
     probe = mocker.patch(
         'backend.apps.model_managment_app.probe_token_count_for_tenant',
         return_value={"schema_version": 1, "status": "unsupported", "reason": "unsupported_endpoint"},
@@ -327,6 +330,30 @@ async def test_p1_governance_actions_require_authorization(client, path, payload
     )
     response = await client.post(path, json=payload)
     assert response.status_code == HTTPStatus.UNAUTHORIZED
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "path,payload",
+    [
+        ("/model/capacity-adoption-preview", {"display_name": "Qwen"}),
+        ("/model/capacity-adopt", {"display_name": "Qwen", "expected_profile_version": "v1"}),
+        ("/model/token-count-probe", {"display_name": "Qwen"}),
+    ],
+)
+async def test_p3_governance_actions_require_model_manager_role(
+    client, auth_header, user_credentials, path, payload, mocker
+):
+    mocker.patch(
+        'backend.apps.model_managment_app.get_current_user_id',
+        return_value=user_credentials,
+    )
+    mocker.patch(
+        'backend.apps.model_managment_app.get_user_tenant_by_user_id',
+        return_value={"user_role": "USER"},
+    )
+    response = await client.post(path, json=payload, headers=auth_header)
+    assert response.status_code == HTTPStatus.FORBIDDEN
 
 
 @pytest.mark.asyncio

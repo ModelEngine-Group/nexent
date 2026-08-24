@@ -36,14 +36,18 @@ export const TokenUsage: FC<TokenUsageProps> = ({ className }) => {
       >
         <Zap className="size-3 text-amber-500" />
         <span className="font-medium text-foreground">{usagePercent}%</span>
-        <span className="text-muted-foreground/70">{t("chat.tokenUsage.used")}</span>
+        <span className="text-muted-foreground/70">
+          {t("chat.tokenUsage.used")}
+        </span>
       </button>
 
       {/* Expanded details popover */}
       {expanded && (
         <div className="absolute bottom-full right-0 z-50 mb-1 w-64 rounded-lg border border-border bg-popover p-3 shadow-lg">
           <div className="mb-3 flex items-center justify-between">
-            <span className="text-xs font-medium text-foreground">{t("chat.tokenUsage.details")}</span>
+            <span className="text-xs font-medium text-foreground">
+              {t("chat.tokenUsage.details")}
+            </span>
             <button
               type="button"
               onClick={() => setExpanded(false)}
@@ -69,7 +73,9 @@ export const TokenUsage: FC<TokenUsageProps> = ({ className }) => {
           {/* Progress bar */}
           <div className="mb-3">
             <div className="mb-1 flex justify-between text-xs">
-              <span className="text-muted-foreground">{t("chat.tokenUsage.context")}</span>
+              <span className="text-muted-foreground">
+                {t("chat.tokenUsage.context")}
+              </span>
               <span className="font-medium text-foreground">
                 {tokenCount.toLocaleString()} / 128000
               </span>
@@ -132,14 +138,15 @@ interface SingleTurnTokenUsageProps {
  * - Fall back to the global `stepTokenCounts` registry written during live
  *   streaming runs.
  */
-export const SingleTurnTokenUsage: FC<SingleTurnTokenUsageProps> = ({ className }) => {
+export const SingleTurnTokenUsage: FC<SingleTurnTokenUsageProps> = ({
+  className,
+}) => {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
 
   const messageSteps = useAuiState((s) => {
     const custom = s.message.metadata?.custom as
-      | { stepTokenCounts?: StepTokenCount[] }
-      | undefined;
+      { stepTokenCounts?: StepTokenCount[] } | undefined;
     return custom?.stepTokenCounts;
   });
 
@@ -151,6 +158,7 @@ export const SingleTurnTokenUsage: FC<SingleTurnTokenUsageProps> = ({ className 
   if (steps.length === 0) return null;
 
   const latestStep = steps[steps.length - 1];
+  const budget = latestStep.contextBudget;
   const contextWindowTokens = latestStep.contextWindowTokens;
   const tokenThreshold = latestStep.tokenThreshold;
   const maxTokens = contextWindowTokens ?? tokenThreshold;
@@ -176,7 +184,9 @@ export const SingleTurnTokenUsage: FC<SingleTurnTokenUsageProps> = ({ className 
       >
         <Zap className="size-3 text-amber-500" />
         <span className="font-medium text-foreground">{usagePercent}%</span>
-        <span className="text-muted-foreground/70">{t("chat.tokenUsage.turn")}</span>
+        <span className="text-muted-foreground/70">
+          {t("chat.tokenUsage.turn")}
+        </span>
       </button>
 
       {/* Expanded details popover */}
@@ -211,9 +221,12 @@ export const SingleTurnTokenUsage: FC<SingleTurnTokenUsageProps> = ({ className 
           {/* Stacked progress bar */}
           <div className="mb-3">
             <div className="mb-1.5 flex justify-between text-xs">
-              <span className="text-muted-foreground">{t("chat.tokenUsage.context")}</span>
+              <span className="text-muted-foreground">
+                {t("chat.tokenUsage.context")}
+              </span>
               <span className="font-medium text-foreground">
-                {totalTokensUsed.toLocaleString()} / {maxTokens.toLocaleString()}
+                {totalTokensUsed.toLocaleString()} /{" "}
+                {maxTokens.toLocaleString()}
               </span>
             </div>
             <div className="flex h-3 overflow-hidden rounded-full bg-muted">
@@ -230,12 +243,18 @@ export const SingleTurnTokenUsage: FC<SingleTurnTokenUsageProps> = ({ className 
                     style={{
                       width: `${Math.min(stepPercent, 100 - (index > 0 ? steps.slice(0, index).reduce((sum, s) => sum + ((s.stepInputTokens + s.stepOutputTokens) / maxTokens) * 100, 0) : 0))}%`,
                     }}
-                    title={t("chat.tokenUsage.stepSummary", { step: step.stepNumber, input: step.stepInputTokens, output: step.stepOutputTokens })}
+                    title={t("chat.tokenUsage.stepSummary", {
+                      step: step.stepNumber,
+                      input: step.stepInputTokens,
+                      output: step.stepOutputTokens,
+                    })}
                   >
                     {/* Input portion (blue) */}
                     <div
                       className="absolute inset-y-0 left-0 bg-blue-500"
-                      style={{ width: `${(inputPercent / stepPercent) * 100}%` }}
+                      style={{
+                        width: `${(inputPercent / stepPercent) * 100}%`,
+                      }}
                     />
                     {/* Output portion (amber) */}
                     <div
@@ -262,11 +281,15 @@ export const SingleTurnTokenUsage: FC<SingleTurnTokenUsageProps> = ({ className 
             <div className="flex items-center gap-4">
               <div className="flex items-center gap-1.5">
                 <span className="size-2.5 rounded-sm bg-blue-500" />
-                <span className="text-muted-foreground">{t("chat.tokenUsage.input")}</span>
+                <span className="text-muted-foreground">
+                  {t("chat.tokenUsage.input")}
+                </span>
               </div>
               <div className="flex items-center gap-1.5">
                 <span className="size-2.5 rounded-sm bg-amber-500" />
-                <span className="text-muted-foreground">{t("chat.tokenUsage.output")}</span>
+                <span className="text-muted-foreground">
+                  {t("chat.tokenUsage.output")}
+                </span>
               </div>
             </div>
             <span className="rounded bg-primary/10 px-1.5 py-0.5 font-medium text-primary">
@@ -276,12 +299,56 @@ export const SingleTurnTokenUsage: FC<SingleTurnTokenUsageProps> = ({ className 
 
           {/* Step details */}
           <div className="space-y-2 text-xs">
+            {budget && (
+              <div className="border-t border-border pt-2 space-y-1">
+                <div className="flex justify-between font-medium">
+                  <span>{t("chat.tokenUsage.finalRequest")}</span>
+                  <span>
+                    {budget.hard_count.toLocaleString()} /{" "}
+                    {budget.hard_budget.toLocaleString()}
+                  </span>
+                </div>
+                {Object.entries(budget.components)
+                  .filter(([, value]) => value > 0)
+                  .map(([name, value]) => (
+                    <div
+                      key={name}
+                      className="flex justify-between text-muted-foreground"
+                    >
+                      <span>{name.replaceAll("_", " ")}</span>
+                      <span>{value.toLocaleString()}</span>
+                    </div>
+                  ))}
+                <div className="flex justify-between text-muted-foreground">
+                  <span>{t("chat.tokenUsage.countSource")}</span>
+                  <span>{budget.count_source}</span>
+                </div>
+                {budget.compression.attempted && (
+                  <div className="flex justify-between text-green-600">
+                    <span>{t("chat.tokenUsage.compactionSaved")}</span>
+                    <span>
+                      {budget.compression.saved_tokens.toLocaleString()} (
+                      {Math.round(budget.compression.ratio * 100)}%)
+                    </span>
+                  </div>
+                )}
+                {budget.recovery_state !== "not_needed" && (
+                  <div className="flex justify-between text-muted-foreground">
+                    <span>{t("chat.tokenUsage.recovery")}</span>
+                    <span>{budget.recovery_state}</span>
+                  </div>
+                )}
+              </div>
+            )}
             <div className="flex items-center justify-between border-t border-border pt-2">
               <span className="flex items-center gap-1.5 text-muted-foreground">
-                <span className="font-medium">{t("chat.tokenUsage.total")}</span>
+                <span className="font-medium">
+                  {t("chat.tokenUsage.total")}
+                </span>
               </span>
               <span className="font-medium text-foreground">
-                {totalTokensUsed.toLocaleString()} / {maxTokens.toLocaleString()}
+                {totalTokensUsed.toLocaleString()} /{" "}
+                {maxTokens.toLocaleString()}
               </span>
             </div>
           </div>

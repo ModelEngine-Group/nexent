@@ -1,5 +1,6 @@
 import logging
 import threading
+from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
 
 from consts.const import (
@@ -55,6 +56,8 @@ from services.model_profile_match_service import (
     resolve_model_profiles,
     serialize_profile_match,
 )
+from services.model_capacity_health_service import classify_capacity_health
+from consts.capability_profiles import CATALOG, CATALOG_REVISION
 from utils.model_name_utils import (
     add_repo_to_name,
     split_repo_name,
@@ -370,6 +373,37 @@ def get_capacity_coverage(tenant_id: str) -> Dict[str, Any]:
         "total_llm_vlm": len(scoped_records),
         "bare_count": len(bare_models),
         "bare_models": bare_models,
+    }
+
+
+def get_capacity_health(tenant_id: str) -> Dict[str, Any]:
+    """Return deterministic P3 health for every tenant LLM/VLM."""
+    profiles = {item.capability_profile_version: item for item in CATALOG.values()}
+    items: list[dict[str, Any]] = []
+    counts: dict[str, int] = {}
+    for record in get_model_records(None, tenant_id):
+        if record.get("model_type") not in CAPACITY_COVERAGE_MODEL_TYPES:
+            continue
+        resolution = _resolution_for_record(record)
+        match = serialize_profile_match(resolution.capacity_match)
+        profile = profiles.get(record.get("capability_profile_version")) or profiles.get(
+            resolution.capacity_match.selected_profile
+        )
+        health = classify_capacity_health(
+            record, match=match, profile_verified_at=getattr(profile, "verified_at", None)
+        )
+        item = {
+            "model_id": record.get("model_id"), "display_name": record.get("display_name"),
+            "model_name": add_repo_to_name(record.get("model_repo", ""), record.get("model_name", "")),
+            "model_factory": record.get("model_factory"), "model_type": record.get("model_type"),
+            "matcher_version": MATCHER_VERSION, **health,
+        }
+        items.append(item)
+        counts[item["status"]] = counts.get(item["status"], 0) + 1
+    return {
+        "catalog_revision": CATALOG_REVISION,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "total": len(items), "counts": counts, "items": items,
     }
 
 

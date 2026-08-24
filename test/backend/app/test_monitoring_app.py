@@ -88,6 +88,55 @@ class TestQueryModelMetrics:
         assert isinstance(record["total_tokens"], int)
 
 
+class TestContextBudgetMetrics:
+    @patch("apps.monitoring_app.get_monitoring_db_session")
+    def test_rates_and_null_denominators(self, mock_session_fn):
+        from apps.monitoring_app import _query_context_budget_metrics_from_db
+
+        row = MagicMock()
+        row.provider_protocol = "dashscope"
+        row.model_name = "qwen3.7-plus"
+        row.capability_profile_version = "dashscope/qwen3.7-plus@1"
+        row.request_count = 4
+        row.overflow_count = 1
+        row.compacted_count = 2
+        row.avg_compression_ratio = 0.25
+        row.estimate_sample_count = 4
+        row.mean_absolute_estimate_error = 0.08
+        row.recovery_attempt_count = 1
+        row.recovery_success_count = 1
+        session = MagicMock()
+        mock_session_fn.return_value.__enter__ = MagicMock(return_value=session)
+        mock_session_fn.return_value.__exit__ = MagicMock(return_value=None)
+        session.execute.return_value.fetchall.return_value = [row]
+
+        result = _query_context_budget_metrics_from_db("24h", tenant_id="tenant-a")[0]
+
+        assert result["overflow_rate"] == 0.25
+        assert result["compaction_incidence"] == 0.5
+        assert result["recovery_success_rate"] == 1.0
+        sql, params = session.execute.call_args.args
+        assert "tenant_id = :tenant_id" in str(sql)
+        assert "compression_attempted')::boolean" in str(sql)
+        assert params == {"tenant_id": "tenant-a"}
+
+    @patch("apps.monitoring_app.get_monitoring_db_session")
+    def test_non_applicable_recovery_rate_is_null(self, mock_session_fn):
+        from apps.monitoring_app import _query_context_budget_metrics_from_db
+
+        row = MagicMock(provider_protocol="test", model_name="m", capability_profile_version="unknown")
+        row.request_count = 1
+        row.overflow_count = row.compacted_count = row.estimate_sample_count = 0
+        row.avg_compression_ratio = row.mean_absolute_estimate_error = None
+        row.recovery_attempt_count = row.recovery_success_count = 0
+        session = MagicMock()
+        mock_session_fn.return_value.__enter__ = MagicMock(return_value=session)
+        mock_session_fn.return_value.__exit__ = MagicMock(return_value=None)
+        session.execute.return_value.fetchall.return_value = [row]
+        result = _query_context_budget_metrics_from_db("7d", tenant_id="t")[0]
+        assert result["recovery_success_rate"] is None
+
+
 class TestListModelsEndpoint:
     """Verify list_models_endpoint does not accept model_type parameter."""
 

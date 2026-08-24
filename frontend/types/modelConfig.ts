@@ -235,6 +235,59 @@ export interface CapacityCoverage {
   bareModels: CapacityCoverageBareModel[];
 }
 
+export type CapacityHealthStatus =
+  | "healthy"
+  | "review_due"
+  | "expired"
+  | "estimated"
+  | "unconfigured"
+  | "invalid"
+  | "probe_degraded";
+
+export interface CapacityHealthItem {
+  modelId: number;
+  displayName: string;
+  modelName: string;
+  modelFactory?: string | null;
+  modelType: "llm" | "vlm" | "vlm2" | "vlm3";
+  status: CapacityHealthStatus;
+  reasons: string[];
+  action:
+    "none" | "edit" | "review_profile" | "review_evidence" | "retry_probe";
+  matcherVersion: string;
+  profileVersion?: string | null;
+  verifiedAt?: string | null;
+  reviewAt?: string | null;
+  expiresAt?: string | null;
+  suggestionAvailable: boolean;
+}
+
+export interface CapacityHealth {
+  catalogRevision: string;
+  generatedAt: string;
+  total: number;
+  counts: Partial<Record<CapacityHealthStatus, number>>;
+  items: CapacityHealthItem[];
+}
+
+export interface CapacityCatalogCandidate {
+  revision: string;
+  sourceIdentity: string;
+  stagedAt: string;
+  added: string[];
+  changed: string[];
+  removed: string[];
+}
+
+export interface CapacityCatalogStatus {
+  activeRevision: string;
+  profileCount: number;
+  lifecycleCounts: Partial<
+    Record<"current" | "review_due" | "expired", number>
+  >;
+  candidate?: CapacityCatalogCandidate | null;
+}
+
 // Model configuration interface
 export interface ModelConfig {
   llm: SingleModelConfig;

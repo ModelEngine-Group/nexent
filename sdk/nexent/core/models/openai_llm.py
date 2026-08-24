@@ -129,6 +129,8 @@ class OpenAIModel(OpenAIServerModel):
         self.last_cached_input_token_count = 0
         self.last_response_diagnostics = None
         self.last_final_request_preflight: Optional[FinalRequestPreflight] = None
+        self.last_recovery_state = "not_needed"
+        self.context_budget_step_number = 0
         self._final_request_meter = FinalRequestMeter()
         self.safe_input_budget_snapshot = safe_input_budget_snapshot
         self.capacity_snapshot = capacity_snapshot
@@ -339,7 +341,7 @@ class OpenAIModel(OpenAIServerModel):
                 **{
                     "llm.prompt_cache.stable_prefix_fingerprint": getattr(
                         context_evidence, "stable_prefix_fingerprint", None
-                    ),
+                    ) or "",
                     "llm.prompt_cache.prefix_change_reasons": json.dumps(
                         list(getattr(context_evidence, "prefix_change_reasons", ())),
                         ensure_ascii=False,
@@ -724,6 +726,8 @@ class OpenAIModel(OpenAIServerModel):
         identity to catch a stale or cross-model W2 snapshot before the
         provider call.
         """
+        from ...monitor.monitoring import set_monitoring_final_request_evidence
+        set_monitoring_final_request_evidence(None)
         snapshot = self._coerce_safe_input_budget_snapshot(safe_input_budget_snapshot)
         if snapshot is not None:
             self._verify_w1_w2_consistency(
@@ -940,6 +944,14 @@ class OpenAIModel(OpenAIServerModel):
         )
 
     def _record_recovery_state(self, state: str) -> None:
+        self.last_recovery_state = state
+        from ...monitor.monitoring import update_monitoring_final_request_evidence
+        update_monitoring_final_request_evidence(
+            recovery_state=state,
+            provider_overflow=state in {"retrying", "retry_exhausted", "retry_unsafe", "retry_unsafe_after_response"},
+            recovery_attempted=state in {"retrying", "recovered", "retry_exhausted"},
+            recovery_succeeded=state == "recovered",
+        )
         self._monitoring.set_span_attributes(
             **{"context.final_request.recovery_state": state}
         )
@@ -950,7 +962,41 @@ class OpenAIModel(OpenAIServerModel):
         *,
         recovery_state: str,
     ) -> None:
+        self.last_recovery_state = recovery_state
         components = preflight.components
+        from ...monitor.monitoring import set_monitoring_final_request_evidence
+        context_evidence = getattr(self, "last_context_evidence", None)
+        set_monitoring_final_request_evidence({
+            "schema_version": 1,
+            "provider_protocol": getattr(self, "model_factory", None),
+            "count_source": getattr(preflight.count_source, "value", str(preflight.count_source)),
+            "raw_estimate_tokens": preflight.raw_estimate,
+            "hard_count_tokens": preflight.hard_count,
+            "context_raw_tokens": int(getattr(context_evidence, "raw_token_estimate", 0) or 0),
+            "context_final_tokens": int(getattr(context_evidence, "final_token_estimate", 0) or 0),
+            "compression_attempted": bool(getattr(context_evidence, "compression_attempted", False)),
+            "request_fingerprint": preflight.request_fingerprint,
+            "retry_ordinal": preflight.retry_ordinal,
+            "recovery_state": recovery_state,
+            "provider_overflow": recovery_state in {"retrying", "retry_exhausted", "retry_unsafe"},
+            "recovery_attempted": preflight.retry_ordinal > 0,
+            "recovery_succeeded": recovery_state == "recovered",
+        })
+        context_budget_type = getattr(ProcessType, "CONTEXT_BUDGET", None)
+        if self.observer is not None and context_budget_type is not None:
+            # Keep Agent-layer event projection optional for lightweight SDK
+            # integrations that import the model package without Agent modules.
+            from ..agents.context_budget_event import build_context_budget_event
+
+            budget_event = build_context_budget_event(
+                preflight, context_evidence,
+                step_number=self.context_budget_step_number,
+                recovery_state=recovery_state,
+            )
+            self.observer.add_message(
+                "", context_budget_type,
+                json.dumps(budget_event, ensure_ascii=False),
+            )
         self._monitoring.set_span_attributes(
             **{
                 "context.final_request.fingerprint": preflight.request_fingerprint,

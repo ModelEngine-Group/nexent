@@ -7,6 +7,7 @@ import type {
   ModelMonitoringItem,
   MonitoringFilter,
   MonitoringStatus,
+  ContextBudgetMonitoringItem,
 } from "@/types/monitoring";
 
 function buildQueryString(
@@ -50,6 +51,22 @@ export const monitoringService = {
       return result.code === 0 && result.data ? result.data : [];
     } catch (error) {
       log.warn("Failed to fetch monitoring models:", error);
+      return [];
+    }
+  },
+
+  fetchContextBudget: async (
+    timeRange = "24h"
+  ): Promise<ContextBudgetMonitoringItem[]> => {
+    try {
+      const response = await fetch(
+        `${API_ENDPOINTS.monitoring.contextBudget}?time_range=${encodeURIComponent(timeRange)}`,
+        { headers: getAuthHeaders() }
+      );
+      const result = await response.json();
+      return result.code === 0 && result.data ? result.data : [];
+    } catch (error) {
+      log.warn("Failed to fetch context budget metrics:", error);
       return [];
     }
   },

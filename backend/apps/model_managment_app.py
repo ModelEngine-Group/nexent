@@ -50,6 +50,7 @@ from services.model_health_service import (
     verify_model_config_connectivity,
 )
 from services.model_capacity_suggestion_service import suggest_capacity
+from services.model_capacity_catalog_service import catalog_status
 from services.model_profile_match_service import (
     resolve_model_profiles,
     serialize_profile_match,
@@ -66,6 +67,7 @@ from services.model_management_service import (
     list_llm_models_for_tenant,
     list_models_for_admin,
     get_capacity_coverage,
+    get_capacity_health,
     pop_capacity_accept_signal,
     _record_capacity_suggestion_accept,
     adopt_capacity_for_tenant,
@@ -85,6 +87,18 @@ def _require_super_admin(authorization: Optional[str]) -> tuple[str, str]:
     info = get_user_tenant_by_user_id(user_id)
     if not info or (info.get("user_role") or "").upper() not in {"SU", "SUPER_ADMIN"}:
         raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail="Super administrator role required")
+    return user_id, tenant_id
+
+
+def _require_model_manager(authorization: Optional[str]) -> tuple[str, str]:
+    user_id, tenant_id = _get_authenticated_user(authorization)
+    info = get_user_tenant_by_user_id(user_id)
+    role = (info.get("user_role") if info else "") or ""
+    if role.upper() not in {"ADMIN", "DEV", "SPEED", "SU", "SUPER_ADMIN"}:
+        raise HTTPException(
+            status_code=HTTPStatus.FORBIDDEN,
+            detail="Model management role required",
+        )
     return user_id, tenant_id
 
 
@@ -287,13 +301,42 @@ async def get_model_capacity_coverage(authorization: Optional[str] = Header(None
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
 
+@router.get("/capacity-health")
+async def get_model_capacity_health(authorization: Optional[str] = Header(None)):
+    """Return tenant-isolated P3 capacity health and remediation metadata."""
+    try:
+        _, tenant_id = get_current_user_id(authorization)
+        result = get_capacity_health(tenant_id)
+        return JSONResponse(status_code=HTTPStatus.OK, content={
+            "message": "Successfully retrieved model capacity health",
+            "data": jsonable_encoder(result),
+        })
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Capacity health query failed")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Capacity health query failed",
+        ) from e
+
+
+@router.get("/capacity-catalog-status")
+async def get_capacity_catalog_status(authorization: Optional[str] = Header(None)):
+    get_current_user_id(authorization)
+    return JSONResponse(status_code=HTTPStatus.OK, content={
+        "message": "Successfully retrieved capacity catalog status",
+        "data": jsonable_encoder(catalog_status()),
+    })
+
+
 @router.post("/capacity-adoption-preview")
 async def preview_capacity_adoption(
     request: CapacityAdoptionPreviewRequest,
     authorization: Optional[str] = Header(None),
 ):
     try:
-        _, tenant_id = _get_authenticated_user(authorization)
+        _, tenant_id = _require_model_manager(authorization)
         result = await preview_capacity_adoption_for_tenant(
             tenant_id,
             request.display_name,
@@ -320,7 +363,7 @@ async def adopt_capacity(
     authorization: Optional[str] = Header(None),
 ):
     try:
-        user_id, tenant_id = _get_authenticated_user(authorization)
+        user_id, tenant_id = _require_model_manager(authorization)
         result = await adopt_capacity_for_tenant(
             user_id,
             tenant_id,
@@ -351,7 +394,7 @@ async def probe_token_count(
     authorization: Optional[str] = Header(None),
 ):
     try:
-        user_id, tenant_id = _get_authenticated_user(authorization)
+        user_id, tenant_id = _require_model_manager(authorization)
         result = await probe_token_count_for_tenant(
             user_id, tenant_id, request.display_name, force=request.force
         )

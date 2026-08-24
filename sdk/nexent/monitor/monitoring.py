@@ -76,6 +76,19 @@ _monitoring_capacity_snapshot: ContextVar[Optional[Dict[str, Any]]] = ContextVar
     "_monitoring_capacity_snapshot", default=None)
 _monitoring_safe_input_budget_snapshot: ContextVar[Optional[Dict[str, Any]]] = ContextVar(
     "_monitoring_safe_input_budget_snapshot", default=None)
+_monitoring_final_request_evidence: ContextVar[Optional[Dict[str, Any]]] = ContextVar(
+    "_monitoring_final_request_evidence", default=None)
+
+
+def set_monitoring_final_request_evidence(evidence: Optional[Dict[str, Any]]) -> None:
+    """Set allowlisted P3 evidence for the current physical request."""
+    _monitoring_final_request_evidence.set(dict(evidence or {}))
+
+
+def update_monitoring_final_request_evidence(**values: Any) -> None:
+    current = dict(_monitoring_final_request_evidence.get() or {})
+    current.update({key: value for key, value in values.items() if value is not None})
+    _monitoring_final_request_evidence.set(current)
 
 
 def set_monitoring_context(
@@ -2108,6 +2121,21 @@ def _enrich_record_with_safe_input_budget_snapshot(record: Dict[str, Any]) -> No
         record.update(budget_fields)
 
 
+def _enrich_record_with_final_request_evidence(record: Dict[str, Any]) -> None:
+    evidence = dict(_monitoring_final_request_evidence.get() or {})
+    if not evidence:
+        return
+    prompt_usage = record.get("input_tokens")
+    if isinstance(prompt_usage, int) and prompt_usage > 0:
+        evidence["provider_prompt_usage_tokens"] = prompt_usage
+    error_text = str(record.get("error_message") or "").lower()
+    if any(marker in error_text for marker in (
+        "context_length_exceeded", "maximum context length", "input tokens exceed",
+    )):
+        evidence["provider_overflow"] = True
+    record["context_budget_evidence"] = evidence
+
+
 def record_model_call(
     model_type: str,
     model_name: str,
@@ -2192,6 +2220,7 @@ class RecordModelCallContext:
 
             _enrich_record_with_capacity_snapshot(record)
             _enrich_record_with_safe_input_budget_snapshot(record)
+            _enrich_record_with_final_request_evidence(record)
 
             buffer = get_monitoring_buffer()
             if buffer and buffer.is_enabled:
@@ -2423,6 +2452,7 @@ def _enqueue_client_monitoring_record(
 
         _enrich_record_with_capacity_snapshot(record)
         _enrich_record_with_safe_input_budget_snapshot(record)
+        _enrich_record_with_final_request_evidence(record)
 
         buffer.add_record(record)
     except Exception:
@@ -2511,6 +2541,7 @@ def _enrich_record_with_context(record, tracker, kwargs):
 
     _enrich_record_with_capacity_snapshot(record)
     _enrich_record_with_safe_input_budget_snapshot(record)
+    _enrich_record_with_final_request_evidence(record)
 
     return tenant_id
 

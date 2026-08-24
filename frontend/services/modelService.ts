@@ -10,6 +10,9 @@ import {
   ModelSource,
   CapacitySuggestion,
   CapacityCoverage,
+  CapacityHealth,
+  CapacityHealthItem,
+  CapacityCatalogStatus,
   CapacityAdoptionPreview,
   CapacityFieldMetadata,
   ModelIdentityMetadata,
@@ -205,6 +208,56 @@ const mapCapacityCoverageFromApi = (coverage: any): CapacityCoverage => ({
     modelType: model.model_type,
     maxTokens: model.max_tokens,
     suggestionAvailable: Boolean(model.suggestion_available),
+  })),
+});
+
+interface CapacityHealthApiItem {
+  model_id: number;
+  display_name: string;
+  model_name: string;
+  model_factory?: string | null;
+  model_type: CapacityHealthItem["modelType"];
+  status: CapacityHealthItem["status"];
+  reasons?: string[];
+  action: CapacityHealthItem["action"];
+  matcher_version: string;
+  profile_version?: string | null;
+  verified_at?: string | null;
+  review_at?: string | null;
+  expires_at?: string | null;
+  suggestion_available?: boolean;
+}
+
+interface CapacityHealthApiResponse {
+  catalog_revision?: string;
+  generated_at?: string;
+  total?: number;
+  counts?: CapacityHealth["counts"];
+  items?: CapacityHealthApiItem[];
+}
+
+const mapCapacityHealthFromApi = (
+  data: CapacityHealthApiResponse
+): CapacityHealth => ({
+  catalogRevision: data?.catalog_revision || "unknown",
+  generatedAt: data?.generated_at || "",
+  total: data?.total || 0,
+  counts: data?.counts || {},
+  items: (data?.items || []).map((item) => ({
+    modelId: item.model_id,
+    displayName: item.display_name,
+    modelName: item.model_name,
+    modelFactory: item.model_factory,
+    modelType: item.model_type,
+    status: item.status,
+    reasons: item.reasons || [],
+    action: item.action,
+    matcherVersion: item.matcher_version,
+    profileVersion: item.profile_version,
+    verifiedAt: item.verified_at,
+    reviewAt: item.review_at,
+    expiresAt: item.expires_at,
+    suggestionAvailable: Boolean(item.suggestion_available),
   })),
 });
 
@@ -948,6 +1001,49 @@ export const modelService = {
       log.warn("Failed to load model capacity coverage:", error);
       return { totalLlmVlm: 0, bareCount: 0, bareModels: [] };
     }
+  },
+
+  getCapacityHealth: async (): Promise<CapacityHealth> => {
+    const response = await fetch(API_ENDPOINTS.model.capacityHealth, {
+      headers: getAuthHeaders(),
+    });
+    const result = await response.json();
+    if (response.status !== STATUS_CODES.SUCCESS || !result.data) {
+      throw new ModelError(
+        result.detail || "Failed to load capacity health",
+        response.status
+      );
+    }
+    return mapCapacityHealthFromApi(result.data);
+  },
+
+  getCapacityCatalogStatus: async (): Promise<CapacityCatalogStatus> => {
+    const response = await fetch(API_ENDPOINTS.model.capacityCatalogStatus, {
+      headers: getAuthHeaders(),
+    });
+    const result = await response.json();
+    if (response.status !== STATUS_CODES.SUCCESS || !result.data) {
+      throw new ModelError(
+        result.detail || "Failed to load capacity catalog status",
+        response.status
+      );
+    }
+    const data = result.data;
+    return {
+      activeRevision: data.active_revision,
+      profileCount: data.profile_count || 0,
+      lifecycleCounts: data.lifecycle_counts || {},
+      candidate: data.candidate
+        ? {
+            revision: data.candidate.revision,
+            sourceIdentity: data.candidate.source_identity,
+            stagedAt: data.candidate.staged_at,
+            added: data.candidate.added || [],
+            changed: data.candidate.changed || [],
+            removed: data.candidate.removed || [],
+          }
+        : null,
+    };
   },
 
   previewCapacityAdoption: async (

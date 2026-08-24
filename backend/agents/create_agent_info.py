@@ -363,6 +363,12 @@ def _resolve_input_budget(
     provider_raw = model_info.get("model_factory")
     provider = provider_raw.lower().strip() if isinstance(provider_raw, str) else ""
     model_id = model_info.get("model_name") or ""
+    persisted_profile_version = model_info.get("capability_profile_version")
+    if persisted_profile_version:
+        for (catalog_provider, catalog_model), profile in CAPABILITY_CATALOG.items():
+            if profile.capability_profile_version == persisted_profile_version:
+                provider, model_id = catalog_provider, catalog_model
+                break
     provider_missing_detail = None
     if not provider:
         provider_missing_detail = (

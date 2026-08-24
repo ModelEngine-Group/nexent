@@ -569,6 +569,9 @@ class ModelMonitoringRecord(SimpleTableBase):
     budget_warnings = Column(
         JSONB, doc="Structured W2 budget warnings active for this request"
     )
+    context_budget_evidence = Column(
+        JSONB, doc="Content-free P3 final request, compaction, overflow and recovery evidence"
+    )
     generation_rate = Column(
         Float, doc="Token generation rate (tokens per second)")
     is_streaming = Column(

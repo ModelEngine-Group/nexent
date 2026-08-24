@@ -792,6 +792,7 @@ Additional Args:
         self._ensure_context_within_hard_budget(final_context)
         input_messages = final_context.messages
         self.model.last_context_evidence = final_context.evidence
+        self.model.context_budget_step_number = self.step_number
         chars_per_token = self.context_runtime.chars_per_token
         # Baseline for the per-step compression ratio. ``final_context.messages``
         # is already the compressed payload, so use the ContextManager's raw
@@ -1510,6 +1511,7 @@ You have been provided with these additional arguments, that you can access usin
         self._ensure_context_within_hard_budget(final_context)
         messages = final_context.messages
         self.model.last_context_evidence = final_context.evidence
+        self.model.context_budget_step_number = self.step_number
 
         # Create the final memory step with error
         final_memory_step = ActionStep(
