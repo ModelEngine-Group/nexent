@@ -674,6 +674,36 @@ async def test_get_list_indices_with_tenant_id_filter(vdb_core_mock, auth_data):
 
 
 @pytest.mark.asyncio
+async def test_get_list_indices_passes_pagination_and_filters(vdb_core_mock, auth_data):
+    with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+            patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.ElasticSearchService.list_indices") as mock_list:
+        mock_list.return_value = {
+            "indices": [], "count": 0, "total": 0, "has_more": False,
+            "next_offset": None, "facets": {"sources": [], "models": []},
+            "estimated_row_height": 112, "estimated_item_heights": None,
+        }
+
+        response = client.get(
+            "/indices",
+            params=[
+                ("tenant_id", auth_data["tenant_id"]), ("offset", "10"), ("limit", "10"),
+                ("keyword", "medical"), ("sources", "elasticsearch"), ("models", "model-a"),
+            ],
+            headers=auth_data["auth_header"],
+        )
+
+        assert response.status_code == 200
+        assert mock_list.call_args.kwargs == {
+            "offset": 10,
+            "limit": 10,
+            "keyword": "medical",
+            "sources": ["elasticsearch"],
+            "models": ["model-a"],
+        }
+
+
+@pytest.mark.asyncio
 async def test_get_list_indices_uses_auth_tenant_id_when_no_query_param(vdb_core_mock, auth_data):
     """
     Test listing indices uses auth tenant_id when tenant_id query parameter is not provided.

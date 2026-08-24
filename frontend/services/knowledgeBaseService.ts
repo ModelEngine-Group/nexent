@@ -15,6 +15,7 @@ import {
   KnowledgeBase,
   KnowledgeBaseCreateParams,
   KnowledgeBasesWithDataMateStatus,
+  KnowledgeBaseListQuery,
   DataMateSyncError,
 } from "@/types/knowledgeBase";
 import type {
@@ -802,112 +803,147 @@ class KnowledgeBaseService {
     skipHealthCheck = false,
     includeDataMateSync = true,
     tenantId: string | null = null,
-    datamateUrl: string | null = null
+    datamateUrl: string | null = null,
+    query?: KnowledgeBaseListQuery
   ): Promise<KnowledgeBasesWithDataMateStatus> {
     try {
       const knowledgeBases: KnowledgeBase[] = [];
       let dataMateSyncError: string | undefined;
+      let paginationData: Omit<
+        KnowledgeBasesWithDataMateStatus,
+        "knowledgeBases"
+      > = {};
 
       // Get knowledge bases from Elasticsearch
       try {
-        // First check Elasticsearch health (unless skipped)
-        if (!skipHealthCheck) {
-          const isElasticsearchHealthy = await this.checkHealth();
-          if (!isElasticsearchHealthy) {
-            log.warn("Elasticsearch service unavailable");
-          } else {
-            // Build URL with tenant_id parameter for filtering
-            const url = new URL(
-              `${API_ENDPOINTS.knowledgeBase.indices}?include_stats=true`,
-              window.location.origin
-            );
-            if (tenantId) {
-              url.searchParams.set("tenant_id", tenantId);
-            }
-            const response = await fetch(url.toString(), {
-              headers: getAuthHeaders(),
-            });
-            const data = await response.json();
-
-            log.log("Elasticsearch indices response:", data);
-
-            if (data.indices && data.indices_info) {
-              log.log(
-                "Processing indices_info:",
-                data.indices_info.length,
-                "items"
-              );
-              // Convert Elasticsearch indices to knowledge base format
-              const esKnowledgeBases = data.indices_info.map(
-                (indexInfo: any) => {
-                  const stats = indexInfo.stats?.base_info || {};
-                  // Backend returns:
-                  // - name: internal index_name
-                  // - display_name: user-facing knowledge_name (fallback to index_name)
-                  // - update_time: timestamp from database for sorting
-                  const kbId = indexInfo.name;
-                  const kbName = indexInfo.display_name || indexInfo.name;
-
-                  return {
-                    id: kbId,
-                    knowledge_id: indexInfo.knowledge_id,
-                    name: kbName,
-                    index_name: kbId, // Internal index_name for API calls
-                    display_name: indexInfo.display_name || indexInfo.name,
-                    description: "Elasticsearch index",
-                    documentCount: stats.doc_count || 0,
-                    chunkCount: stats.chunk_count || 0,
-                    createdAt: stats.creation_date || null,
-                    // Use update_time from database for sorting, fallback to ES update_date
-                    updatedAt:
-                      indexInfo.update_time ||
-                      stats.update_date ||
-                      stats.creation_date ||
-                      null,
-                    is_multimodal: resolveIsMultimodal(indexInfo, stats),
-                    // Use embedding_model_name (display_name) from backend, fallback to ES stats
-                    embeddingModel:
-                      indexInfo.embedding_model_name ||
-                      stats.embedding_model ||
-                      "unknown",
-                    embeddingModelId: indexInfo.embedding_model_id ?? null,
-                    summaryFrequency: indexInfo.summary_frequency || null,
-                    lastSummaryTime: indexInfo.last_summary_time || null,
-                    knowledge_sources:
-                      indexInfo.knowledge_sources || "elasticsearch",
-                    ingroup_permission: indexInfo.ingroup_permission || "",
-                    group_ids: indexInfo.group_ids || [],
-                    store_size: stats.store_size || "",
-                    process_source: stats.process_source || "",
-                    avatar: "",
-                    chunkNum: 0,
-                    language: "",
-                    nickname: "",
-                    parserId: "",
-                    permission: indexInfo.permission || "",
-                    tokenNum: 0,
-                    source: "nexent",
-                    tenant_id: indexInfo.tenant_id,
-                    preserve_source_file:
-                      indexInfo.preserve_source_file ?? true,
-                  };
+        // Skip only the health probe, never the actual list request.
+        const isElasticsearchHealthy =
+          skipHealthCheck || (await this.checkHealth());
+        if (!isElasticsearchHealthy) {
+          log.warn("Elasticsearch service unavailable");
+        } else {
+          // Build URL with tenant_id parameter for filtering
+          const url = new URL(
+            `${API_ENDPOINTS.knowledgeBase.indices}?include_stats=true`,
+            window.location.origin
+          );
+          if (tenantId) {
+            url.searchParams.set("tenant_id", tenantId);
+          }
+          if (query?.offset !== undefined) {
+            url.searchParams.set("offset", String(query.offset));
+          }
+          if (query?.limit !== undefined) {
+            url.searchParams.set("limit", String(query.limit));
+          }
+          if (query?.keyword?.trim()) {
+            url.searchParams.set("keyword", query.keyword.trim());
+          }
+          query?.sources?.forEach((source) =>
+            url.searchParams.append(
+              "sources",
+              source === "nexent" ? "elasticsearch" : source
+            )
+          );
+          query?.models?.forEach((model) =>
+            url.searchParams.append("models", model)
+          );
+          const response = await fetch(url.toString(), {
+            headers: getAuthHeaders(),
+          });
+          const data = await response.json();
+          paginationData = {
+            total: data.total,
+            pageCount: data.count,
+            hasMore: data.has_more,
+            nextOffset: data.next_offset,
+            facets: data.facets
+              ? {
+                  sources: data.facets.sources.map((source: string) =>
+                    source === "elasticsearch" ? "nexent" : source
+                  ),
+                  models: data.facets.models,
                 }
-              );
-              log.log("Converted knowledge bases:", esKnowledgeBases);
-              knowledgeBases.push(...esKnowledgeBases);
-            } else {
-              log.log(
-                "Skipping indices processing:",
-                "indices exists:",
-                !!data.indices,
-                "indices_info exists:",
-                !!data.indices_info,
-                "indices length:",
-                data.indices?.length,
-                "indices_info length:",
-                data.indices_info?.length
-              );
-            }
+              : undefined,
+            estimatedRowHeight: data.estimated_row_height,
+            estimatedItemHeights: data.estimated_item_heights,
+          };
+
+          log.log("Elasticsearch indices response:", data);
+
+          if (data.indices && data.indices_info) {
+            log.log(
+              "Processing indices_info:",
+              data.indices_info.length,
+              "items"
+            );
+            // Convert Elasticsearch indices to knowledge base format
+            const esKnowledgeBases = data.indices_info.map((indexInfo: any) => {
+              const stats = indexInfo.stats?.base_info || {};
+              // Backend returns:
+              // - name: internal index_name
+              // - display_name: user-facing knowledge_name (fallback to index_name)
+              // - update_time: timestamp from database for sorting
+              const kbId = indexInfo.name;
+              const kbName = indexInfo.display_name || indexInfo.name;
+
+              return {
+                id: kbId,
+                knowledge_id: indexInfo.knowledge_id,
+                name: kbName,
+                index_name: kbId, // Internal index_name for API calls
+                display_name: indexInfo.display_name || indexInfo.name,
+                description: "Elasticsearch index",
+                documentCount: stats.doc_count || 0,
+                chunkCount: stats.chunk_count || 0,
+                createdAt: stats.creation_date || null,
+                // Use update_time from database for sorting, fallback to ES update_date
+                updatedAt:
+                  indexInfo.update_time ||
+                  stats.update_date ||
+                  stats.creation_date ||
+                  null,
+                is_multimodal: resolveIsMultimodal(indexInfo, stats),
+                // Use embedding_model_name (display_name) from backend, fallback to ES stats
+                embeddingModel:
+                  indexInfo.embedding_model_name ||
+                  stats.embedding_model ||
+                  "unknown",
+                embeddingModelId: indexInfo.embedding_model_id ?? null,
+                summaryFrequency: indexInfo.summary_frequency || null,
+                lastSummaryTime: indexInfo.last_summary_time || null,
+                knowledge_sources:
+                  indexInfo.knowledge_sources || "elasticsearch",
+                ingroup_permission: indexInfo.ingroup_permission || "",
+                group_ids: indexInfo.group_ids || [],
+                store_size: stats.store_size || "",
+                process_source: stats.process_source || "",
+                avatar: "",
+                chunkNum: 0,
+                language: "",
+                nickname: "",
+                parserId: "",
+                permission: indexInfo.permission || "",
+                tokenNum: 0,
+                source: "nexent",
+                tenant_id: indexInfo.tenant_id,
+                preserve_source_file: indexInfo.preserve_source_file ?? true,
+              };
+            });
+            log.log("Converted knowledge bases:", esKnowledgeBases);
+            knowledgeBases.push(...esKnowledgeBases);
+          } else {
+            log.log(
+              "Skipping indices processing:",
+              "indices exists:",
+              !!data.indices,
+              "indices_info exists:",
+              !!data.indices_info,
+              "indices length:",
+              data.indices?.length,
+              "indices_info length:",
+              data.indices_info?.length
+            );
           }
         }
       } catch (error) {
@@ -975,6 +1011,7 @@ class KnowledgeBaseService {
       return {
         knowledgeBases,
         dataMateSyncError,
+        ...paginationData,
       };
     } catch (error) {
       log.error("Failed to get knowledge base list:", error);

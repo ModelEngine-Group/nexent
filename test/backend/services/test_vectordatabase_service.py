@@ -1170,6 +1170,50 @@ class TestElasticSearchService(unittest.TestCase):
     @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
     @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
     @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
+    def test_list_indices_paginates_before_loading_stats(
+            self, mock_get_knowledge, mock_get_user_tenant, mock_get_group_ids):
+        self.mock_vdb_core.get_user_indices.return_value = ["kb-1", "kb-2", "kb-3"]
+        self.mock_vdb_core.get_indices_detail.return_value = {
+            "kb-2": {"base_info": {"doc_count": 2}}
+        }
+        mock_get_knowledge.return_value = [
+            {
+                "knowledge_id": 1, "index_name": "kb-1", "knowledge_name": "Alpha",
+                "embedding_model_name": "model-a", "group_ids": "", "knowledge_sources": "elasticsearch",
+                "ingroup_permission": "EDIT", "tenant_id": "test_tenant", "update_time": "2026-08-24T10:00:00",
+            },
+            {
+                "knowledge_id": 2, "index_name": "kb-2", "knowledge_name": "Beta",
+                "embedding_model_name": "model-b", "group_ids": "", "knowledge_sources": "elasticsearch",
+                "ingroup_permission": "EDIT", "tenant_id": "test_tenant", "update_time": "2026-08-24T09:00:00",
+            },
+            {
+                "knowledge_id": 3, "index_name": "kb-3", "knowledge_name": "Gamma",
+                "embedding_model_name": "model-a", "group_ids": "", "knowledge_sources": "elasticsearch",
+                "ingroup_permission": "EDIT", "tenant_id": "test_tenant", "update_time": "2026-08-24T08:00:00",
+            },
+        ]
+        mock_get_user_tenant.return_value = {"user_role": "SU", "tenant_id": "test_tenant"}
+        mock_get_group_ids.return_value = []
+
+        result = ElasticSearchService.list_indices(
+            pattern="*", include_stats=True, target_tenant_id="test_tenant", user_id="test_user",
+            vdb_core=self.mock_vdb_core, offset=1, limit=1,
+        )
+
+        self.assertEqual(result["indices"], ["kb-2"])
+        self.assertEqual(result["count"], 1)
+        self.assertEqual(result["total"], 3)
+        self.assertTrue(result["has_more"])
+        self.assertEqual(result["next_offset"], 2)
+        self.assertEqual(result["estimated_item_heights"], None)
+        self.assertEqual(result["facets"]["sources"], ["elasticsearch"])
+        self.assertEqual(result["facets"]["models"], ["model-a", "model-b"])
+        self.mock_vdb_core.get_indices_detail.assert_called_once_with(["kb-2"])
+
+    @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
+    @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
+    @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
     def test_list_indices_skips_missing_indices(self, mock_get_info, mock_get_user_tenant, mock_get_group_ids):
         """
         Test that list_indices skips indices that exist in database but not in Elasticsearch.

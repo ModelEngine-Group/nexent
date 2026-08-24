@@ -1188,7 +1188,12 @@ class ElasticSearchService:
             include_stats: bool = False,
             target_tenant_id: str = "",
             user_id: str = "",
-            vdb_core: VectorDatabaseCore | None = None
+            vdb_core: VectorDatabaseCore | None = None,
+            offset: int = 0,
+            limit: int | None = None,
+            keyword: str | None = None,
+            sources: List[str] | None = None,
+            models: List[str] | None = None,
     ):
         """
         List all indices that the current user has permissions to access based on role and group permissions.
@@ -1305,6 +1310,60 @@ class ElasticSearchService:
             caller_role=user_role,
             caller_tenant_id=target_tenant_id,
         )
+
+        all_visible_knowledgebases = visible_knowledgebases
+        facets = {
+            "sources": sorted({
+                str(record.get("knowledge_sources"))
+                for record in all_visible_knowledgebases
+                if record.get("knowledge_sources")
+            }),
+            "models": sorted({
+                str(record.get("embedding_model_name"))
+                for record in all_visible_knowledgebases
+                if record.get("embedding_model_name")
+            }),
+        }
+
+        normalized_keyword = (keyword or "").strip().lower()
+        selected_sources = {source for source in (sources or []) if source}
+        selected_models = {model for model in (models or []) if model}
+        if normalized_keyword or selected_sources or selected_models:
+            visible_knowledgebases = [
+                record for record in visible_knowledgebases
+                if (
+                    not normalized_keyword
+                    or normalized_keyword in str(record.get("knowledge_name") or "").lower()
+                    or normalized_keyword in str(record.get("description") or "").lower()
+                    or normalized_keyword in str(record.get("nickname") or "").lower()
+                )
+                and (
+                    not selected_sources
+                    or record.get("knowledge_sources") in selected_sources
+                )
+                and (
+                    not selected_models
+                    or record.get("embedding_model_name") in selected_models
+                )
+            ]
+
+        pagination_enabled = limit is not None
+        if pagination_enabled:
+            visible_knowledgebases = sorted(
+                visible_knowledgebases,
+                key=lambda record: (
+                    str(record.get("update_time") or ""),
+                    str(record.get("knowledge_id") or "").zfill(20),
+                    str(record.get("index_name") or ""),
+                ),
+                reverse=True,
+            )
+
+        total = len(visible_knowledgebases)
+        if pagination_enabled:
+            page_end = offset + limit
+            visible_knowledgebases = visible_knowledgebases[offset:page_end]
+
         indices = [record["index_name"] for record in visible_knowledgebases]
 
         response = {
@@ -1315,6 +1374,16 @@ class ElasticSearchService:
                 for record in visible_knowledgebases
             },
         }
+        if pagination_enabled:
+            next_offset = offset + len(indices)
+            response.update({
+                "total": total,
+                "has_more": next_offset < total,
+                "next_offset": next_offset if next_offset < total else None,
+                "facets": facets,
+                "estimated_row_height": 112,
+                "estimated_item_heights": None,
+            })
 
         if include_stats:
             stats_info = []

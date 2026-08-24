@@ -207,6 +207,9 @@ function DataConfig({ isActive }: DataConfigProps) {
   const {
     state: kbState,
     fetchKnowledgeBases,
+    loadMoreKnowledgeBases,
+    listPagination,
+    isLoadingMore,
     createKnowledgeBase,
     deleteKnowledgeBase,
     setActiveKnowledgeBase,
@@ -250,7 +253,72 @@ function DataConfig({ isActive }: DataConfigProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [sourceFilter, setSourceFilter] = useState<string[]>([]);
   const [modelFilter, setModelFilter] = useState<string[]>([]);
+  const filterEffectReadyRef = useRef(false);
+  const initialLoadStartedRef = useRef(false);
+  const initialCapacityRequestRef = useRef(false);
+  const initialPageSizeRef = useRef(1);
+  const [initialListPending, setInitialListPending] = useState(true);
   const contentRef = useRef<HTMLDivElement | null>(null);
+
+  const handleViewportCapacityChange = useCallback(
+    (capacity: number, hasMeasuredRows: boolean) => {
+      const pageSize = Math.max(1, Math.ceil(capacity));
+      initialPageSizeRef.current = pageSize;
+      const loadedCount = kbState.knowledgeBases.length;
+      if (initialLoadStartedRef.current && !listPagination.hasMore) {
+        setInitialListPending(false);
+        return;
+      }
+      if (
+        kbState.isLoading ||
+        isLoadingMore ||
+        initialCapacityRequestRef.current ||
+        (initialLoadStartedRef.current &&
+          (!hasMeasuredRows || loadedCount >= pageSize))
+      ) {
+        return;
+      }
+
+      initialLoadStartedRef.current = true;
+      initialCapacityRequestRef.current = true;
+      setInitialListPending(true);
+      void fetchKnowledgeBases(false, true, true, {
+        keyword: searchQuery,
+        sources: sourceFilter,
+        models: modelFilter,
+        limit: pageSize,
+      }).finally(() => {
+        initialCapacityRequestRef.current = false;
+        setInitialListPending(false);
+      });
+    },
+    [
+      fetchKnowledgeBases,
+      kbState.isLoading,
+      kbState.knowledgeBases.length,
+      isLoadingMore,
+      listPagination.hasMore,
+      modelFilter,
+      searchQuery,
+      sourceFilter,
+    ]
+  );
+
+  useEffect(() => {
+    if (!filterEffectReadyRef.current) {
+      filterEffectReadyRef.current = true;
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      fetchKnowledgeBases(true, false, false, {
+        keyword: searchQuery,
+        sources: sourceFilter,
+        models: modelFilter,
+        limit: initialPageSizeRef.current,
+      });
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [fetchKnowledgeBases, modelFilter, searchQuery, sourceFilter]);
 
   const availableEmbeddingModels = useMemo(() => {
     const embeddingRelatedModels = models.filter(
@@ -1103,7 +1171,18 @@ function DataConfig({ isActive }: DataConfigProps) {
                 knowledgeBases={kbState.knowledgeBases}
                 activeKnowledgeBase={kbState.activeKnowledgeBase}
                 isLoading={kbState.isLoading}
+                isLoadingMore={isLoadingMore}
                 syncLoading={kbState.syncLoading}
+                totalCount={listPagination.total}
+                hasMore={listPagination.hasMore}
+                estimatedRowHeight={listPagination.estimatedRowHeight}
+                estimatedItemHeights={listPagination.estimatedItemHeights}
+                availableSources={listPagination.facets.sources}
+                availableModels={listPagination.facets.models}
+                onLoadMore={loadMoreKnowledgeBases}
+                serverFiltered
+                initialLoadPending={initialListPending}
+                onViewportCapacityChange={handleViewportCapacityChange}
                 onClick={handleKnowledgeBaseClick}
                 onDelete={handleDelete}
                 onSync={handleSync}
