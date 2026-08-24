@@ -574,7 +574,7 @@ class OpenAIModel(OpenAIServerModel):
                 if classify_model_error(e) != "retryable":
                     raise
                 if attempt >= self.retry_config.max_attempts:
-                    logger.error(
+                    logging.exception(
                         "Model call failed after %d attempts: %s",
                         attempt, str(e),
                     )
