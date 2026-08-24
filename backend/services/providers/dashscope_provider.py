@@ -38,7 +38,9 @@ DASHSCOPE_VIDEO_UNDERSTANDING_KEYWORDS = ("omni", "video-understanding", "video-
 
 
 def _extract_capacity_hints(raw: Dict) -> Dict:
-    return _extract_capacity_hints_from_raw(raw, nested_keys=("inference_metadata",))
+    return _extract_capacity_hints_from_raw(
+        raw, nested_keys=("model_info", "inference_metadata")
+    )
 
 
 def _modality_set(value) -> set:

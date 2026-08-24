@@ -127,6 +127,23 @@ interface SingleTurnTokenUsageProps {
   className?: string;
 }
 
+const CONTEXT_COMPONENTS = [
+  ["message_text", "chat.tokenUsage.components.messageText", "bg-blue-500"],
+  [
+    "message_framing",
+    "chat.tokenUsage.components.messageFraming",
+    "bg-cyan-500",
+  ],
+  ["tools", "chat.tokenUsage.components.tools", "bg-violet-500"],
+  ["media", "chat.tokenUsage.components.media", "bg-pink-500"],
+  ["reasoning", "chat.tokenUsage.components.reasoning", "bg-amber-500"],
+  [
+    "other_semantic",
+    "chat.tokenUsage.components.otherSemantic",
+    "bg-emerald-500",
+  ],
+] as const;
+
 /**
  * Displays per-step token consumption with a stacked progress bar.
  * Each step shows input tokens (blue) + output tokens (amber) relative to the token threshold.
@@ -167,13 +184,42 @@ export const SingleTurnTokenUsage: FC<SingleTurnTokenUsageProps> = ({
 
   const stepCount = steps.length;
 
-  // Calculate total tokens used (sum of step_input_tokens + step_output_tokens for all steps)
-  const totalTokensUsed = steps.reduce(
-    (sum, step) => sum + step.stepInputTokens + step.stepOutputTokens,
+  const finalInputTokens = budget?.final_tokens ?? latestStep.stepInputTokens;
+  const compositionDenominator = Math.max(1, finalInputTokens);
+  const effectiveLimit = budget?.hard_budget ?? maxTokens;
+  const outputTokens = latestStep.totalOutputTokens;
+  const usagePercent = Math.round((finalInputTokens / effectiveLimit) * 100);
+  const knownComponents = budget
+    ? CONTEXT_COMPONENTS.map(([key, label, color]) => ({
+        key,
+        label,
+        color,
+        tokens: Math.max(0, budget.components[key] ?? 0),
+      })).filter((item) => item.tokens > 0)
+    : [];
+  const knownComponentTotal = knownComponents.reduce(
+    (sum, item) => sum + item.tokens,
     0
   );
-
-  const usagePercent = Math.round((totalTokensUsed / maxTokens) * 100);
+  const unclassifiedTokens = Math.max(
+    0,
+    finalInputTokens - knownComponentTotal
+  );
+  const composition = budget
+    ? [
+        ...knownComponents,
+        ...(unclassifiedTokens > 0
+          ? [
+              {
+                key: "unclassified",
+                label: "chat.tokenUsage.components.unclassified",
+                color: "bg-slate-400",
+                tokens: unclassifiedTokens,
+              },
+            ]
+          : []),
+      ]
+    : [];
 
   return (
     <div className="relative">
@@ -191,7 +237,7 @@ export const SingleTurnTokenUsage: FC<SingleTurnTokenUsageProps> = ({
 
       {/* Expanded details popover */}
       {expanded && (
-        <div className="absolute bottom-full right-0 z-50 mb-1 w-72 rounded-lg border border-border bg-popover p-3 shadow-lg">
+        <div className="absolute bottom-full right-0 z-50 mb-1 w-80 rounded-lg border border-border bg-popover p-4 shadow-lg">
           <div className="mb-3 flex items-center justify-between">
             <span className="text-xs font-medium text-foreground">
               {t("chat.tokenUsage.turnDetails")}
@@ -218,107 +264,73 @@ export const SingleTurnTokenUsage: FC<SingleTurnTokenUsageProps> = ({
             </button>
           </div>
 
-          {/* Stacked progress bar */}
+          {/* Final request and context composition */}
           <div className="mb-3">
             <div className="mb-1.5 flex justify-between text-xs">
-              <span className="text-muted-foreground">
-                {t("chat.tokenUsage.context")}
+              <span className="font-medium text-foreground">
+                {t("chat.tokenUsage.finalRequest")}
               </span>
               <span className="font-medium text-foreground">
-                {totalTokensUsed.toLocaleString()} /{" "}
-                {maxTokens.toLocaleString()}
+                {finalInputTokens.toLocaleString()} /{" "}
+                {effectiveLimit.toLocaleString()}
               </span>
             </div>
-            <div className="flex h-3 overflow-hidden rounded-full bg-muted">
-              {steps.map((step, index) => {
-                const stepTotal = step.stepInputTokens + step.stepOutputTokens;
-                const stepPercent = (stepTotal / maxTokens) * 100;
-                const inputPercent = (step.stepInputTokens / maxTokens) * 100;
-                const outputPercent = (step.stepOutputTokens / maxTokens) * 100;
-
-                return (
-                  <div
-                    key={step.stepNumber}
-                    className="group relative"
-                    style={{
-                      width: `${Math.min(stepPercent, 100 - (index > 0 ? steps.slice(0, index).reduce((sum, s) => sum + ((s.stepInputTokens + s.stepOutputTokens) / maxTokens) * 100, 0) : 0))}%`,
-                    }}
-                    title={t("chat.tokenUsage.stepSummary", {
-                      step: step.stepNumber,
-                      input: step.stepInputTokens,
-                      output: step.stepOutputTokens,
-                    })}
-                  >
-                    {/* Input portion (blue) */}
-                    <div
-                      className="absolute inset-y-0 left-0 bg-blue-500"
-                      style={{
-                        width: `${(inputPercent / stepPercent) * 100}%`,
-                      }}
-                    />
-                    {/* Output portion (amber) */}
-                    <div
-                      className="absolute inset-y-0 bg-amber-500"
-                      style={{
-                        left: `${(inputPercent / stepPercent) * 100}%`,
-                        width: `${(outputPercent / stepPercent) * 100}%`,
-                      }}
-                    />
-                    {/* Step number label on hover */}
-                    <div className="absolute inset-0 flex items-center justify-center opacity-0 transition-opacity group-hover:opacity-100">
-                      <span className="text-[9px] font-medium text-white drop-shadow-md">
-                        {step.stepNumber}
-                      </span>
-                    </div>
-                  </div>
-                );
-              })}
+            <div
+              className="flex h-3 overflow-hidden rounded-full bg-muted"
+              aria-label={t("chat.tokenUsage.composition")}
+            >
+              {composition.map((item) => (
+                <div
+                  key={item.key}
+                  className={item.color}
+                  style={{ width: `${(item.tokens / effectiveLimit) * 100}%` }}
+                  title={`${t(item.label)}: ${item.tokens.toLocaleString()}`}
+                />
+              ))}
             </div>
           </div>
 
-          {/* Legend */}
-          <div className="mb-3 flex items-center justify-between text-xs">
-            <div className="flex items-center gap-4">
-              <div className="flex items-center gap-1.5">
-                <span className="size-2.5 rounded-sm bg-blue-500" />
-                <span className="text-muted-foreground">
-                  {t("chat.tokenUsage.input")}
-                </span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <span className="size-2.5 rounded-sm bg-amber-500" />
-                <span className="text-muted-foreground">
-                  {t("chat.tokenUsage.output")}
-                </span>
-              </div>
-            </div>
+          <div className="mb-2 flex items-center justify-between text-xs">
+            <span className="font-medium text-foreground">
+              {t("chat.tokenUsage.composition")}
+            </span>
             <span className="rounded bg-primary/10 px-1.5 py-0.5 font-medium text-primary">
               {t("chat.tokenUsage.steps", { count: stepCount })}
             </span>
           </div>
 
-          {/* Step details */}
           <div className="space-y-2 text-xs">
             {budget && (
-              <div className="border-t border-border pt-2 space-y-1">
-                <div className="flex justify-between font-medium">
-                  <span>{t("chat.tokenUsage.finalRequest")}</span>
-                  <span>
-                    {budget.hard_count.toLocaleString()} /{" "}
-                    {budget.hard_budget.toLocaleString()}
-                  </span>
+              <div className="space-y-1">
+                {composition.map((item) => (
+                  <div
+                    key={item.key}
+                    className="flex justify-between text-muted-foreground"
+                  >
+                    <span className="flex items-center gap-1.5">
+                      <span className={`size-2 rounded-sm ${item.color}`} />
+                      {t(item.label)}
+                    </span>
+                    <span>
+                      {item.tokens.toLocaleString()} ·{" "}
+                      {Math.round((item.tokens / compositionDenominator) * 100)}
+                      %
+                    </span>
+                  </div>
+                ))}
+                <div className="mt-2 border-t border-border pt-2 font-medium text-foreground">
+                  {t("chat.tokenUsage.responseOutput")}
                 </div>
-                {Object.entries(budget.components)
-                  .filter(([, value]) => value > 0)
-                  .map(([name, value]) => (
-                    <div
-                      key={name}
-                      className="flex justify-between text-muted-foreground"
-                    >
-                      <span>{name.replaceAll("_", " ")}</span>
-                      <span>{value.toLocaleString()}</span>
-                    </div>
-                  ))}
+                <div className="flex justify-between text-muted-foreground">
+                  <span>{t("chat.tokenUsage.generated")}</span>
+                  <span>{outputTokens.toLocaleString()}</span>
+                </div>
+                {latestStep.outputFinishReason && (
+                  <div className="flex justify-between text-muted-foreground">
+                    <span>{t("chat.tokenUsage.finishReason")}</span>
+                    <span>{latestStep.outputFinishReason}</span>
+                  </div>
+                )}
                 <div className="flex justify-between text-muted-foreground">
                   <span>{t("chat.tokenUsage.countSource")}</span>
                   <span>{budget.count_source}</span>
@@ -340,17 +352,11 @@ export const SingleTurnTokenUsage: FC<SingleTurnTokenUsageProps> = ({
                 )}
               </div>
             )}
-            <div className="flex items-center justify-between border-t border-border pt-2">
-              <span className="flex items-center gap-1.5 text-muted-foreground">
-                <span className="font-medium">
-                  {t("chat.tokenUsage.total")}
-                </span>
-              </span>
-              <span className="font-medium text-foreground">
-                {totalTokensUsed.toLocaleString()} /{" "}
-                {maxTokens.toLocaleString()}
-              </span>
-            </div>
+            {!budget && (
+              <div className="text-muted-foreground">
+                {t("chat.tokenUsage.breakdownUnavailable")}
+              </div>
+            )}
           </div>
         </div>
       )}

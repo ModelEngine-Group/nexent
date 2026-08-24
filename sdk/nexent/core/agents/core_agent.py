@@ -252,8 +252,6 @@ def _looks_like_incomplete_action_output(
     """
     if not isinstance(text, str) or not text.strip():
         return False
-    if finish_reason == "length":
-        return True
     if _looks_like_invalid_action_output(text):
         return True
 

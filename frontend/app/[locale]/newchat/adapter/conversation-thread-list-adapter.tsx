@@ -45,6 +45,7 @@ import {
   planRegistry,
   type PlanData,
   type SearchSource,
+  type ContextBudgetEvent,
   type StepTokenCount,
 } from "./remote-chat-model-adapter";
 
@@ -383,6 +384,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
       // the same data into the global registry, but historical restores have
       // no streaming run to read from.
       const stepTokenCounts: StepTokenCount[] = [];
+      const pendingContextBudgets = new Map<number, ContextBudgetEvent>();
 
       // Populate conversationSourcesRegistry for historical assistant messages
       // and build the matching `source` parts that drive the
@@ -583,7 +585,16 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
           // `SingleTurnTokenUsage` via message metadata.
           if (part.type === "token_count") {
             const parsed = parseStepTokenCount(part.content);
-            if (parsed) stepTokenCounts.push(parsed);
+            if (parsed) {
+              const pendingBudget = pendingContextBudgets.get(
+                parsed.stepNumber
+              );
+              if (pendingBudget) {
+                parsed.contextBudget = pendingBudget;
+                pendingContextBudgets.delete(parsed.stepNumber);
+              }
+              stepTokenCounts.push(parsed);
+            }
             continue;
           }
           if (part.type === "context_budget") {
@@ -593,6 +604,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
                 .reverse()
                 .find((item) => item.stepNumber === budget.step_number);
               if (step) step.contextBudget = budget;
+              else pendingContextBudgets.set(budget.step_number, budget);
             }
             continue;
           }

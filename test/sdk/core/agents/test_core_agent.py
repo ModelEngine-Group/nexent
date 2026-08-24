@@ -375,9 +375,17 @@ def test_complete_answer_that_names_tool_is_not_misclassified():
     ) is False
 
 
-def test_length_truncated_non_code_output_is_not_a_final_answer():
+def test_length_truncated_prose_is_not_misclassified_as_an_action():
     assert core_agent_module._looks_like_incomplete_action_output(
         "这是一个尚未完成的回答",
+        finish_reason="length",
+    ) is False
+
+
+def test_length_truncated_action_preamble_still_requires_a_tool_call():
+    assert core_agent_module._looks_like_incomplete_action_output(
+        "思考：我需要先调用 knowledge_base_search",
+        available_tool_names={"knowledge_base_search"},
         finish_reason="length",
     ) is True
 

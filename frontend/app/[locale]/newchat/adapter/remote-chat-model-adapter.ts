@@ -328,6 +328,7 @@ export interface StepTokenCount {
   estimatedContextTokens: number;
   tokenThreshold: number | null;
   contextWindowTokens: number | null;
+  outputFinishReason: string | null;
   contextBudget?: ContextBudgetEvent;
 }
 
@@ -397,6 +398,7 @@ export function parseStepTokenCount(content: string): StepTokenCount | null {
       estimated_context_tokens?: number;
       token_threshold?: number | null;
       context_window_tokens?: number | null;
+      output_finish_reason?: string | null;
     };
     return {
       stepNumber: data.step_number ?? 0,
@@ -407,6 +409,7 @@ export function parseStepTokenCount(content: string): StepTokenCount | null {
       estimatedContextTokens: data.estimated_context_tokens ?? 0,
       tokenThreshold: data.token_threshold ?? null,
       contextWindowTokens: data.context_window_tokens ?? null,
+      outputFinishReason: data.output_finish_reason ?? null,
     };
   } catch {
     return null;
@@ -1909,6 +1912,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     let firstTokenTime: number | undefined;
     let toolCallCount = 0;
     let storedTiming: ReturnType<typeof buildTimingResult> | null = null;
+    const pendingContextBudgets = new Map<number, ContextBudgetEvent>();
 
     try {
       while (true) {
@@ -1961,6 +1965,19 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           // Handle token_count - store timing for final yield
           if (chunk.type === "token_count") {
             storedTiming = buildTimingFromTokenCount(chunk.content);
+            const parsedStep = parseStepTokenCount(chunk.content);
+            if (parsedStep) {
+              const step = [...stepTokenCounts]
+                .reverse()
+                .find((item) => item.stepNumber === parsedStep.stepNumber);
+              const pendingBudget = pendingContextBudgets.get(
+                parsedStep.stepNumber
+              );
+              if (step && pendingBudget) {
+                step.contextBudget = pendingBudget;
+                pendingContextBudgets.delete(parsedStep.stepNumber);
+              }
+            }
             continue; // Don't yield for internal data chunks
           }
           if (chunk.type === "context_budget") {
@@ -1970,6 +1987,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                 .reverse()
                 .find((item) => item.stepNumber === budget.step_number);
               if (step) step.contextBudget = budget;
+              else pendingContextBudgets.set(budget.step_number, budget);
             }
             continue;
           }
