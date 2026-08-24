@@ -73,6 +73,10 @@ def test_production_catalog_verified_rows_are_complete_and_legacy_rows_are_sugge
     assert diagnostics[("dashscope", "qwen-plus")] == ()
     qwen_37 = CATALOG[("dashscope", "qwen3.7-plus")]
     assert qwen_37.auto_applicable is True
+
+    silicon_qwen = CATALOG[("silicon", "Qwen/Qwen3.6-27B")]
+    assert silicon_qwen.auto_applicable is True
+    assert silicon_qwen.capability_profile_version == "silicon/qwen3.6-27b@2"
     assert qwen_37.max_input_tokens == 991_808
     assert diagnostics[("dashscope", "qwen3.7-plus")] == ()
     assert CATALOG[("openai", "gpt-4o")].auto_applicable is False

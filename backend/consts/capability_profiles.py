@@ -22,7 +22,7 @@ from nexent.core.models.capacity_resolver import CapabilityProfile, ProfileKey
 logger = logging.getLogger(__name__)
 
 
-CATALOG_REVISION = "2026-08-24.1"
+CATALOG_REVISION = "2026-08-24.2"
 
 
 CATALOG: Dict[ProfileKey, CapabilityProfile] = {
@@ -122,15 +122,33 @@ CATALOG: Dict[ProfileKey, CapabilityProfile] = {
         default_output_reserve_tokens=8_192,
         tokenizer_family="chatglm",
     ),
+    # Verified 2026-08-24 against SiliconFlow's model center and launch note.
+    # The list-models API exposes identity only, so this complete catalog row is
+    # the capacity fallback for the hosted model.
+    # https://www.siliconflow.cn/models
+    # https://www.siliconflow.cn/news/grz0d71bw8xguh4n6lnjqkw9
     ("silicon", "Qwen/Qwen3.6-27B"): CapabilityProfile(
         provider="silicon",
         model_name="Qwen/Qwen3.6-27B",
-        capability_profile_version="silicon/qwen3.6-27b@1",
+        capability_profile_version="silicon/qwen3.6-27b@2",
         window_shape="combined",
         context_window_tokens=262_144,
         max_output_tokens=65_536,
         default_output_reserve_tokens=8_192,
         tokenizer_family="qwen",
+        aliases=("Qwen/Qwen3.6-27B", "Qwen3.6-27B"),
+        exclusions=("Qwen3.6-35B-A3B",),
+        evidence=(
+            "https://www.siliconflow.cn/models",
+            "https://www.siliconflow.cn/news/grz0d71bw8xguh4n6lnjqkw9",
+        ),
+        verified_at="2026-08-24T00:00:00Z",
+        shared_context=True,
+        independent_input=False,
+        max_output=65_536,
+        reasoning_behavior="reserved",
+        overhead_behavior="bounded",
+        confidence="high",
     ),
     ("silicon", "Pro/moonshotai/Kimi-K2.6"): CapabilityProfile(
         provider="silicon",

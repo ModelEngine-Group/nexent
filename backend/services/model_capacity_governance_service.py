@@ -61,7 +61,19 @@ def normalize_legacy_capacity_ingress(
     output_value = normalized.get("max_output_tokens")
     used_legacy = False
 
-    if legacy_explicit and output_explicit and legacy_value is not None and output_value is not None:
+    provider_capacity = normalized.get("capacity_source") == "provider_candidate"
+    if (
+        legacy_explicit
+        and output_explicit
+        and legacy_value is not None
+        and output_value is not None
+        and provider_capacity
+    ):
+        # Provider adapters retain `max_tokens` as a generation default for
+        # compatibility while exposing authoritative capacity in
+        # `max_output_tokens`. It is not a second capacity declaration.
+        pass
+    elif legacy_explicit and output_explicit and legacy_value is not None and output_value is not None:
         if legacy_value != output_value:
             _fail(
                 "capacity_legacy_conflict",
@@ -168,19 +180,25 @@ def merge_capacity_governance(
         old_value = previous.get(field)
         new_value = payload.get(field)
         previous_source = (fields.get(field) or {}).get("source")
-        provenance_changes = (
-            field in accepted
-            and accepted_profile_version is not None
-            and new_value is not None
-            and previous_source != "catalog"
+        provenance_changes = new_value is not None and (
+            (
+                field in accepted
+                and accepted_profile_version is not None
+                and previous_source != "catalog"
+            )
+            or (field in provider and previous_source != "provider")
         )
         if existing and new_value == old_value and not provenance_changes:
             continue
         if field in provider and previous_source == "operator":
+            values[field] = old_value
             continue
         if new_value is None:
             fields.pop(field, None)
             new_source = "unknown"
+        elif field in provider:
+            new_source = "provider"
+            fields[field] = _field_metadata(new_source)
         elif field in accepted and accepted_profile_version:
             new_source = "catalog"
             fields[field] = _field_metadata(
@@ -189,9 +207,6 @@ def merge_capacity_governance(
                 evidence_id=profile_evidence_id,
                 verified_at=profile_verified_at,
             )
-        elif field in provider:
-            new_source = "provider"
-            fields[field] = _field_metadata(new_source)
         elif legacy_ingress_used and field == "max_output_tokens":
             new_source = "legacy"
             fields[field] = _field_metadata(new_source)

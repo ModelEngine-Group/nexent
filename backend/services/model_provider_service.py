@@ -117,12 +117,11 @@ async def prepare_model_dict(provider: str, model: dict, model_url: str, model_a
     #     in (all None) and every freshly batch-created row lands with
     #     context_window_tokens=NULL, max_output_tokens=NULL even though
     #     the user filled the panel -- the glm-5.1/glm-5.2 incident.
-    #   - capacity_source="provider_candidate" (or anything else): per the
-    #     W1 design these are advisory UI hints surfaced from the catalog
-    #     by _extract_capacity_hints. They are shown to the user as
-    #     suggestions but not auto-persisted; only operator acceptance
-    #     should write them.
+    #   - capacity_source="provider_candidate": these are authoritative
+    #     field-scoped provider facts. Persist only the fields returned by the
+    #     provider; governance keeps operator-owned fields authoritative.
     is_operator_capacity = model.get("capacity_source") == "operator"
+    is_provider_capacity = model.get("capacity_source") == "provider_candidate"
     capacity_kwargs = (
         {
             "context_window_tokens": model.get("context_window_tokens"),
@@ -130,10 +129,12 @@ async def prepare_model_dict(provider: str, model: dict, model_url: str, model_a
             "max_output_tokens": model.get("max_output_tokens"),
             "default_output_reserve_tokens": model.get("default_output_reserve_tokens"),
             "tokenizer_family": model.get("tokenizer_family"),
-            "capacity_source": "operator",
+            "capacity_source": (
+                "operator" if is_operator_capacity else "provider_candidate"
+            ),
             "capability_profile_version": model.get("capability_profile_version"),
         }
-        if is_operator_capacity
+        if is_operator_capacity or is_provider_capacity
         else {}
     )
 

@@ -63,6 +63,42 @@ def test_ac_p2_002_unified_components_cover_tools_media_reasoning_and_other():
     assert "secret" not in repr(shape)
 
 
+def test_ac_p5_002_generation_controls_are_not_prompt_tokens():
+    base = build_final_request_shape({
+        "messages": [{"role": "user", "content": "hello"}],
+    })
+    controlled = build_final_request_shape({
+        "model": "Qwen/Qwen3.6-27B",
+        "messages": [{"role": "user", "content": "hello"}],
+        "max_tokens": 1,
+        "temperature": 0,
+        "top_p": 0.9,
+        "seed": 7,
+    })
+
+    assert controlled.components.raw_total == base.components.raw_total
+    assert controlled.fingerprint != base.fingerprint
+
+
+def test_ac_p5_002_tools_include_provider_protocol_envelope():
+    without_tools = build_final_request_shape({
+        "messages": [{"role": "user", "content": "weather"}],
+    })
+    with_tools = build_final_request_shape({
+        "messages": [{"role": "user", "content": "weather"}],
+        "tools": [{
+            "type": "function",
+            "function": {
+                "name": "weather",
+                "parameters": {"type": "object"},
+            },
+        }],
+    })
+
+    assert with_tools.components.tools >= 208
+    assert with_tools.components.raw_total > without_tools.components.raw_total + 208
+
+
 def test_ac_p2_004_exact_boundary_and_no_over_hard_dispatch_decision():
     meter = FinalRequestMeter(CalibrationStore(minimum_samples=2))
     kwargs = {"model": "m", "messages": [{"role": "user", "content": "x"}]}

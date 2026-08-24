@@ -82,6 +82,69 @@ def test_ac_p1_001_omitted_fields_and_equal_echo_preserve_metadata():
     assert result.audit_delta == ()
 
 
+def test_ac_p5_003_provider_wins_catalog_but_not_operator():
+    existing = catalog_row()
+    existing["max_output_tokens"] = 8_192
+    existing["capacity_field_metadata"]["fields"]["max_output_tokens"] = {
+        "source": "operator"
+    }
+    result = merge_capacity_governance(
+        {
+            "context_window_tokens": 262_144,
+            "max_output_tokens": 65_536,
+        },
+        explicit_fields={"context_window_tokens", "max_output_tokens"},
+        existing=existing,
+        accepted_profile_version="silicon/qwen3.6-27b@2",
+        accepted_profile_fields={"context_window_tokens", "max_output_tokens"},
+        provider_fields={"context_window_tokens", "max_output_tokens"},
+    )
+
+    assert result.values["context_window_tokens"] == 262_144
+    assert result.metadata["fields"]["context_window_tokens"]["source"] == "provider"
+    assert result.values["max_output_tokens"] == 8_192
+    assert result.metadata["fields"]["max_output_tokens"]["source"] == "operator"
+    assert result.row_capacity_source == "operator"
+
+
+def test_ac_p5_003_provider_capacity_ignores_legacy_generation_default():
+    normalized, explicit, used_legacy = normalize_legacy_capacity_ingress(
+        {
+            "model_type": "llm",
+            "capacity_source": "provider_candidate",
+            "max_tokens": 4_096,
+            "max_output_tokens": 131_072,
+        },
+        explicit_fields={"max_tokens", "max_output_tokens"},
+    )
+
+    assert normalized["max_output_tokens"] == 131_072
+    assert "max_tokens" not in normalized
+    assert explicit == {"max_output_tokens"}
+    assert used_legacy is False
+
+
+def test_ac_p5_003_equal_provider_value_replaces_catalog_provenance():
+    existing = catalog_row()
+    result = merge_capacity_governance(
+        {"context_window_tokens": existing["context_window_tokens"]},
+        explicit_fields={"context_window_tokens"},
+        existing=existing,
+        provider_fields={"context_window_tokens"},
+    )
+
+    assert result.values["context_window_tokens"] == existing["context_window_tokens"]
+    assert result.metadata["fields"]["context_window_tokens"]["source"] == "provider"
+    assert result.audit_delta == (
+        {
+            "field": "context_window_tokens",
+            "previous_source": "catalog",
+            "new_source": "provider",
+            "value_changed": False,
+        },
+    )
+
+
 def test_ac_p1_002_explicit_clear_becomes_unknown_without_fabrication():
     existing = catalog_row()
     result = merge_capacity_governance(

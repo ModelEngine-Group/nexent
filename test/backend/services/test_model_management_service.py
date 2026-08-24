@@ -1948,11 +1948,9 @@ async def test_batch_create_models_for_tenant_update_branch_persists_operator_ca
 async def test_batch_create_models_for_tenant_tracks_provider_candidate_fields():
     """Provider facts fill unknown fields without claiming operator provenance.
 
-    Even when the catalog response contains rich inference_metadata, those
-    values stay tagged capacity_source="provider_candidate" until the
-    operator accepts them. Refreshing the provider list must not
-    silently rewrite a row's operator-set capacity (or its NULLs) with
-    catalog hints.
+    The provider's compatibility `max_tokens` generation default is not a
+    competing capacity declaration. Field governance still prevents refresh
+    from rewriting operator-owned capacity.
     """
     svc = import_svc()
 
@@ -1972,7 +1970,7 @@ async def test_batch_create_models_for_tenant_tracks_provider_candidate_fields()
         "models": [
             {
                 "id": "dashscope/glm-5.1",
-                "max_tokens": 8192,
+                "max_tokens": 4096,
                 "context_window_tokens": 128000,
                 "max_output_tokens": 8192,
                 "tokenizer_family": "qwen",
@@ -1996,6 +1994,60 @@ async def test_batch_create_models_for_tenant_tracks_provider_candidate_fields()
         assert called_update_data["capacity_source"] == "provider_candidate"
         fields = called_update_data["capacity_field_metadata"]["fields"]
         assert fields["context_window_tokens"]["source"] == "provider"
+
+
+@pytest.mark.asyncio
+async def test_ac_p5_003_provider_refresh_keeps_different_operator_values():
+    svc = import_svc()
+    existing_row = {
+        "model_id": 7,
+        "model_repo": "",
+        "model_name": "qwen3.7-plus",
+        "max_tokens": 4096,
+        "context_window_tokens": 16_384,
+        "max_input_tokens": 15_360,
+        "max_output_tokens": 1_024,
+        "default_output_reserve_tokens": 512,
+        "capacity_source": "operator",
+        "capacity_field_metadata": {
+            "schema_version": 1,
+            "fields": {
+                field: {"source": "operator"}
+                for field in (
+                    "context_window_tokens",
+                    "max_input_tokens",
+                    "max_output_tokens",
+                    "default_output_reserve_tokens",
+                )
+            },
+        },
+    }
+    batch_payload = {
+        "provider": "dashscope",
+        "type": "llm",
+        "api_key": "dash-key",
+        "models": [
+            {
+                "id": "qwen3.7-plus",
+                "max_tokens": 4096,
+                "context_window_tokens": 1_000_000,
+                "max_input_tokens": 991_808,
+                "max_output_tokens": 131_072,
+                "capacity_source": "provider_candidate",
+            }
+        ],
+    }
+
+    with mock.patch.object(svc, "get_models_by_tenant_factory_type", return_value=[existing_row]), \
+            mock.patch.object(svc, "apply_model_mutations") as mock_apply:
+        await svc.batch_create_models_for_tenant("u1", "t1", batch_payload)
+
+    _, update = mock_apply.call_args.kwargs["updates"][0]
+    assert update["context_window_tokens"] == 16_384
+    assert update["max_input_tokens"] == 15_360
+    assert update["max_output_tokens"] == 1_024
+    assert "default_output_reserve_tokens" not in update
+    assert update["capacity_source"] == "operator"
 
 
 def test_get_capacity_coverage_filters_bare_llm_vlm_rows():

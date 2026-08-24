@@ -28,6 +28,7 @@ MAX_CALIBRATION_SAMPLES = 256
 CALIBRATION_TTL_SECONDS = 24 * 60 * 60
 MAX_OBSERVED_RATIO = 4.0
 MAX_GATE_MULTIPLIER = 2.0
+TOOL_PROTOCOL_OVERHEAD_TOKENS = 208
 
 RequestShape = Literal["text", "tools", "media", "tools_media"]
 CountSource = Literal["provider", "tokenizer", "estimated"]
@@ -42,6 +43,22 @@ _TRANSPORT_KEYS = frozenset(
         "timeout",
         "request_timeout",
         "http_client",
+    }
+)
+_NON_TOKEN_CONTROL_KEYS = frozenset(
+    {
+        "model",
+        "max_tokens",
+        "max_completion_tokens",
+        "temperature",
+        "top_p",
+        "n",
+        "stop",
+        "frequency_penalty",
+        "presence_penalty",
+        "seed",
+        "parallel_tool_calls",
+        "tool_choice",
     }
 )
 _REASONING_KEYS = frozenset(
@@ -373,7 +390,11 @@ def build_final_request_shape(completion_kwargs: Mapping[str, Any]) -> FinalRequ
         media_count += _count_media(message)
     framing = (3 * len(message_list) + (3 if message_list else 0))
     tools = semantic.get("tools") or semantic.get("functions")
-    tool_tokens = _json_tokens(tools) if tools else 0
+    tool_tokens = (
+        _json_tokens(tools) + TOOL_PROTOCOL_OVERHEAD_TOKENS
+        if tools
+        else 0
+    )
     media_tokens = media_count * 256
 
     reasoning_values: dict[str, Any] = {}
@@ -386,7 +407,13 @@ def build_final_request_shape(completion_kwargs: Mapping[str, Any]) -> FinalRequ
             if key in _REASONING_KEYS:
                 reasoning_values[key] = value
 
-    consumed = {"messages", "tools", "functions", *reasoning_values.keys()}
+    consumed = {
+        "messages",
+        "tools",
+        "functions",
+        *_NON_TOKEN_CONTROL_KEYS,
+        *reasoning_values.keys(),
+    }
     other = {
         key: value
         for key, value in semantic.items()

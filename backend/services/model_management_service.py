@@ -247,6 +247,8 @@ def _apply_capacity_governance(
             ",".join(item["new_source"] for item in result.audit_delta),
         )
     output = dict(normalized)
+    for field in governed_explicit:
+        output[field] = result.values.get(field)
     output["capacity_field_metadata"] = result.metadata
     output["capacity_source"] = result.row_capacity_source
     output["capability_profile_version"] = result.capability_profile_version
@@ -639,7 +641,8 @@ async def batch_create_models_for_tenant(user_id: str, tenant_id: str, batch_pay
                     governed = {
                         key: value
                         for key, value in model.items()
-                        if key in GOVERNED_FIELDS or key in {"model_type", "max_tokens"}
+                        if key in GOVERNED_FIELDS
+                        or key in {"model_type", "max_tokens", "capacity_source"}
                     }
                     explicit = set(governed)
                     governed = _apply_capacity_governance(
