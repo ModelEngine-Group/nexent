@@ -263,6 +263,10 @@ class AgentConfig(BaseModel):
     )
     model_name: str = Field(description="Model alias from ModelConfig")
     provide_run_summary: Optional[bool] = Field(description="Whether to provide run summary to upper-level Agent", default=False)
+    allow_chat_metadata: bool = Field(
+        description="Whether Native Chat and Debug users may submit runtime metadata",
+        default=False,
+    )
     instructions: Optional[str] = Field(description="Additional instructions to prepend to system prompt", default=None)
     managed_agents: List["AgentConfig"] = Field(
         description="Internal managed sub-agents created locally",
@@ -362,6 +366,14 @@ class AgentRunInfo(BaseModel):
     stop_event: Event = Field(description="Stop event control")
     conversation_id: Optional[int] = Field(description="Conversation id for run-scoped persistence", default=None)
     user_id: Optional[str] = Field(description="User id for run-scoped persistence", default=None)
+    runtime_metadata: Dict[str, Any] = Field(
+        description="Immutable application-resolved runtime metadata snapshot",
+        default_factory=dict,
+    )
+    runtime_metadata_version: Optional[int] = Field(
+        description="Conversation runtime metadata version used by this run",
+        default=None,
+    )
     context_input: Optional[Any] = Field(
         description="Immutable run-scoped context snapshot supplied by the application boundary.",
         default=None,

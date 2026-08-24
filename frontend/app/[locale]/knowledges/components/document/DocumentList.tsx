@@ -1123,7 +1123,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                                   fileSize: doc.size,
                                 });
                               }}
-                              className={LAYOUT.ACTION_TEXT}
+                              className={LAYOUT.PREVIEW_TEXT}
                               title={t("common.preview")}
                             >
                               {t("common.preview")}

@@ -24,8 +24,16 @@ from consts.const import TOOL_TYPE_MAPPING, \
     LANGUAGE, MESSAGE_ROLE, MODEL_CONFIG_MAPPING, CAN_EDIT_ALL_USER_ROLES, PERMISSION_PRIVATE, STREAM_STATUS_EVENT, \
     DEFAULT_EN_TITLE, DEFAULT_ZH_TITLE, RUNTIME_CANCEL_POLL_INTERVAL_SECONDS
 from consts.agent import SAFE_AGENT_STREAM_ERROR_MESSAGE
-from consts.exceptions import AppException, ForbiddenError, MemoryPreparationException, SkillDuplicateError
-from consts.error_code import ErrorCode
+from consts.exceptions import (
+    AppException,
+    ConversationNotFoundError,
+    ForbiddenError,
+    MemoryPreparationException,
+    RuntimeMetadataValidationError,
+    RuntimeMetadataVersionConflict,
+    SkillDuplicateError,
+)
+from consts.error_code import ErrorCode, RuntimeMetadataValidationCode
 from consts.agent_unavailable_reasons import AgentUnavailableReason
 from nexent.core.utils.observer import ProcessType
 from consts.model import (
@@ -65,6 +73,12 @@ from database.agent_db import (
     clear_agent_new_mark
 )
 from database import a2a_agent_db
+from database.conversation_db import (
+    resolve_conversation_runtime_metadata,
+)
+from utils.runtime_metadata_utils import (
+    validate_runtime_metadata,
+)
 from database.model_management_db import (
     get_model_by_model_id,
     get_model_by_model_id_ignore_delete,
@@ -788,14 +802,6 @@ async def check_agent_name_conflict_batch_impl(
 
     results: list[dict] = []
     for item in request.items:
-        if not item.name:
-            results.append({
-                "name_conflict": False,
-                "display_name_conflict": False,
-                "conflict_agents": []
-            })
-            continue
-
         conflicts: list[dict] = []
         name_conflict = False
         display_name_conflict = False
@@ -1775,6 +1781,7 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
                 "requested_output_tokens": request.requested_output_tokens,
                 "is_main_agent": request.is_main_agent if request.is_main_agent is not None else True,
                 "provide_run_summary": request.provide_run_summary,
+                "allow_chat_metadata": request.allow_chat_metadata if request.allow_chat_metadata is not None else False,
                 "is_a2a": request.is_a2a if request.is_a2a is not None else False,
                 "verification_config": request.verification_config,
                 "context_policy": request.context_policy,
@@ -2297,12 +2304,12 @@ async def export_agent_by_agent_id(
                                           name=agent_info["name"],
                                           display_name=agent_info["display_name"],
                                           description=agent_info["description"],
-                                          business_description=agent_info["business_description"],
                                           author=agent_info.get("author"),
                                           max_steps=agent_info["max_steps"],
                                           requested_output_tokens=agent_info.get("requested_output_tokens"),
                                           is_main_agent=agent_info.get("is_main_agent", True),
                                           provide_run_summary=agent_info["provide_run_summary"],
+                                          allow_chat_metadata=agent_info.get("allow_chat_metadata", False),
                                           verification_config=agent_info.get("verification_config"),
                                           context_policy=agent_info.get("context_policy"),
                                           duty_prompt=agent_info.get(
@@ -2456,7 +2463,6 @@ async def import_agent_by_agent_id(
     new_agent = create_agent(agent_info={"name": agent_name,
                                          "display_name": agent_display_name,
                                          "description": import_agent_info.description,
-                                         "business_description": import_agent_info.business_description,
                                          "author": import_agent_info.author,
                                          "model_ids": model_ids,
                                          "business_logic_model_id": (
@@ -2470,6 +2476,7 @@ async def import_agent_by_agent_id(
                                          "requested_output_tokens": import_agent_info.requested_output_tokens,
                                          "is_main_agent": getattr(import_agent_info, "is_main_agent", True),
                                          "provide_run_summary": import_agent_info.provide_run_summary,
+                                         "allow_chat_metadata": import_agent_info.allow_chat_metadata,
                                          "verification_config": getattr(import_agent_info, "verification_config", None),
                                          "context_policy": getattr(import_agent_info, "context_policy", None),
                                          "duty_prompt": import_agent_info.duty_prompt,
@@ -2652,6 +2659,7 @@ async def list_all_agent_info_impl(tenant_id: str, user_id: str) -> list[dict]:
                 "is_published": agent.get("current_version_no") is not None,
                 "current_version_no": agent.get("current_version_no"),
                 "is_a2a_server": agent["agent_id"] in a2a_server_agent_ids,
+                "allow_chat_metadata": bool(agent.get("allow_chat_metadata", False)),
             })
 
         return simple_agent_list
@@ -2889,6 +2897,14 @@ async def prepare_agent_run(
         create_run_kwargs["enable_automation_tool"] = False
     agent_run_info = await create_agent_run_info(
         **create_run_kwargs,
+    )
+    agent_run_info.runtime_metadata = dict(
+        getattr(agent_request, "_runtime_metadata_snapshot", {}) or {}
+    )
+    agent_run_info.runtime_metadata_version = getattr(
+        agent_request,
+        "_runtime_metadata_version",
+        None,
     )
 
     historical_context = None
@@ -3188,6 +3204,31 @@ async def run_agent_stream(
         if conversation is None:
             raise ForbiddenError("Conversation is not accessible to the current identity")
 
+    metadata_supplied = "metadata" in agent_request.model_fields_set
+    metadata_update_requested = metadata_supplied and agent_request.metadata is not None
+    if metadata_update_requested:
+        try:
+            validate_runtime_metadata(agent_request.metadata)
+        except RuntimeMetadataValidationError as exc:
+            error_code = (
+                ErrorCode.CHAT_METADATA_TOO_LARGE
+                if exc.code == RuntimeMetadataValidationCode.METADATA_TOO_LARGE
+                else ErrorCode.CHAT_METADATA_INVALID
+            )
+            raise AppException(
+                error_code,
+                details={"reason": exc.code.value},
+            ) from exc
+    metadata_entrypoint = getattr(agent_request, "_runtime_metadata_entrypoint", "native")
+    if metadata_update_requested and metadata_entrypoint in {"native", "debug"}:
+        agent_record = search_agent_info_by_agent_id(
+            agent_id=agent_request.agent_id,
+            tenant_id=resolved_tenant_id,
+            version_no=agent_request.version_no or 0,
+        )
+        if not bool(agent_record.get("allow_chat_metadata", False)):
+            raise AppException(ErrorCode.CHAT_METADATA_NOT_ALLOWED)
+
     raw_request_scope = None if resume else getattr(agent_request, "knowledge_scope", None)
     if isinstance(raw_request_scope, ConversationKnowledgeScopeRequest):
         request_scope = raw_request_scope
@@ -3266,6 +3307,8 @@ async def run_agent_stream(
         }
         if resolved_scope is not None:
             conversation_kwargs["knowledge_scope"] = resolved_scope.desired_scope
+        if metadata_update_requested:
+            conversation_kwargs["runtime_metadata"] = agent_request.metadata or {}
         conversation_data = create_new_conversation(**conversation_kwargs)
         agent_request.conversation_id = conversation_data["conversation_id"]
         is_new_conversation = True
@@ -3274,6 +3317,52 @@ async def run_agent_stream(
             agent_request.conversation_id,
             resolved_user_id,
         )
+
+    if not resume:
+        if agent_request.is_debug:
+            metadata_snapshot = dict(agent_request.metadata or {}) if metadata_update_requested else {}
+            metadata_version = None
+        elif is_new_conversation:
+            metadata_snapshot = dict(
+                conversation_data.get(
+                    "runtime_metadata",
+                    agent_request.metadata if metadata_update_requested else {},
+                )
+                or {}
+            )
+            metadata_version = int(
+                conversation_data.get(
+                    "runtime_metadata_version",
+                    1 if metadata_update_requested else 0,
+                )
+                or 0
+            )
+        elif not metadata_update_requested:
+            metadata_snapshot = dict((conversation or {}).get("runtime_metadata") or {})
+            metadata_version = int((conversation or {}).get("runtime_metadata_version") or 0)
+        else:
+            try:
+                resolved_metadata = resolve_conversation_runtime_metadata(
+                    conversation_id=agent_request.conversation_id,
+                    user_id=resolved_user_id,
+                    request_metadata=agent_request.metadata,
+                    update_requested=metadata_update_requested,
+                    expected_version=agent_request.expected_metadata_version,
+                )
+            except ConversationNotFoundError as exc:
+                raise AppException(
+                    ErrorCode.CHAT_CONVERSATION_NOT_FOUND,
+                ) from exc
+            except RuntimeMetadataVersionConflict as exc:
+                raise AppException(
+                    ErrorCode.CHAT_METADATA_VERSION_CONFLICT,
+                    details={"current_version": exc.current_version},
+                ) from exc
+            metadata_snapshot = resolved_metadata["runtime_metadata"]
+            metadata_version = resolved_metadata["runtime_metadata_version"]
+
+        agent_request.__dict__["_runtime_metadata_snapshot"] = metadata_snapshot
+        agent_request.__dict__["_runtime_metadata_version"] = metadata_version
 
     if (
         not agent_request.is_debug
@@ -3597,6 +3686,11 @@ async def run_agent_stream(
     headers = {"Cache-Control": "no-cache", "Connection": "keep-alive"}
     if agent_request.conversation_id is not None:
         headers["conversation_id"] = str(agent_request.conversation_id)
+    runtime_metadata_version = getattr(
+        agent_request, "_runtime_metadata_version", None
+    )
+    if runtime_metadata_version is not None:
+        headers["X-Runtime-Metadata-Version"] = str(runtime_metadata_version)
 
     return StreamingResponse(
         stream_with_agent_context(),

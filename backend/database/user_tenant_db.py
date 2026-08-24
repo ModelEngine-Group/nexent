@@ -13,7 +13,7 @@ from consts.const import (
 from database.client import as_dict, get_db_session
 from database.db_models import UserTenant
 from consts.exceptions import TenantResourceLimitError
-from sqlalchemy import text
+from sqlalchemy import func, text
 
 logger = logging.getLogger(__name__)
 
@@ -156,7 +156,14 @@ def get_all_tenant_ids() -> list[str]:
         return tenant_ids
 
 
-def insert_user_tenant(user_id: str, tenant_id: str, user_role: str = "USER", user_email: str = None):
+def insert_user_tenant(
+    user_id: str,
+    tenant_id: str,
+    user_role: str = "USER",
+    user_email: str = None,
+    created_by: Optional[str] = None,
+    db_session=None,
+) -> Dict[str, Any]:
     """
     Insert user tenant relationship
 
@@ -166,17 +173,48 @@ def insert_user_tenant(user_id: str, tenant_id: str, user_role: str = "USER", us
         user_role (str): User role (SUPER_ADMIN, ADMIN, DEV, USER)
         user_email (str): User email address
     """
-    with get_db_session() as session:
+    session_context = get_db_session() if db_session is None else get_db_session(db_session)
+    with session_context as session:
         _validate_user_tenant_limit(session, tenant_id, user_role)
+        actor = created_by or user_id
         user_tenant = UserTenant(
             user_id=user_id,
             tenant_id=tenant_id,
             user_role=user_role,
             user_email=user_email,
-            created_by=user_id,
-            updated_by=user_id
+            created_by=actor,
+            updated_by=actor
         )
         session.add(user_tenant)
+        session.flush()
+        return as_dict(user_tenant)
+
+
+def get_user_tenant_in_tenant(user_id: str, tenant_id: str) -> Optional[Dict[str, Any]]:
+    """Return an active user relationship scoped to a tenant."""
+    with get_db_session() as session:
+        result = session.query(UserTenant).filter(
+            UserTenant.user_id == user_id,
+            UserTenant.tenant_id == tenant_id,
+            UserTenant.delete_flag == "N",
+        ).first()
+        return as_dict(result) if result else None
+
+
+def get_user_tenant_by_email(email: str, tenant_id: str) -> Optional[Dict[str, Any]]:
+    """Return an active tenant user matching an email address."""
+    normalized_email = (email or "").strip().lower()
+    if not normalized_email:
+        return None
+    with get_db_session() as session:
+        results = session.query(UserTenant).filter(
+            UserTenant.tenant_id == tenant_id,
+            UserTenant.delete_flag == "N",
+            func.lower(UserTenant.user_email) == normalized_email,
+        ).limit(2).all()
+        if len(results) > 1:
+            raise ValueError("Multiple active users match the requested email")
+        return as_dict(results[0]) if results else None
 
 
 def upsert_user_tenant(user_id: str, tenant_id: str, user_role: str = "USER", user_email: str = None) -> Dict[str, Any]:
@@ -217,7 +255,8 @@ def upsert_user_tenant(user_id: str, tenant_id: str, user_role: str = "USER", us
 
 
 def get_users_by_tenant_id(tenant_id: str, page: Optional[int] = 1, page_size: Optional[int] = 20,
-                           sort_by: str = "created_at", sort_order: str = "desc") -> Dict[str, Any]:
+                           sort_by: str = "created_at", sort_order: str = "desc",
+                           email_required: bool = True) -> Dict[str, Any]:
     """
     Get users belonging to a specific tenant with pagination and sorting
 
@@ -232,17 +271,21 @@ def get_users_by_tenant_id(tenant_id: str, page: Optional[int] = 1, page_size: O
         Dict[str, Any]: Dictionary containing users list and total count
     """
     with get_db_session() as session:
-        # Get total count
-        total_count = session.query(UserTenant).filter(
+        filters = [
             UserTenant.tenant_id == tenant_id,
-            UserTenant.delete_flag == "N"
-        ).count()
+            UserTenant.delete_flag == "N",
+        ]
+        if email_required:
+            filters.extend([
+                UserTenant.user_email.isnot(None),
+                func.trim(UserTenant.user_email) != "",
+            ])
+
+        # Get total count
+        total_count = session.query(UserTenant).filter(*filters).count()
 
         # Build base query
-        query = session.query(UserTenant).filter(
-            UserTenant.tenant_id == tenant_id,
-            UserTenant.delete_flag == "N"
-        )
+        query = session.query(UserTenant).filter(*filters)
 
         # Add sorting
         if sort_by == "created_at":

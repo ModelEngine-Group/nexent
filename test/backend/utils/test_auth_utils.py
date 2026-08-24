@@ -914,8 +914,8 @@ class TestGetUserAndTenantByAccessKey:
         assert result["tenant_id"] == "tenant456"
         assert result["token_id"] == 1
 
-    def test_get_user_and_tenant_default_tenant(self, monkeypatch):
-        """Test that DEFAULT_TENANT_ID is used when no tenant mapping exists."""
+    def test_get_user_and_tenant_no_tenant_record_raises(self, monkeypatch):
+        """Test that UnauthorizedError is raised when no tenant relationship exists."""
         mock_token_info = {
             "token_id": 1,
             "access_key": "nexent-abc123",
@@ -926,14 +926,11 @@ class TestGetUserAndTenantByAccessKey:
         monkeypatch.setattr(au, "get_token_by_access_key", lambda key: mock_token_info)
         monkeypatch.setattr(au, "get_user_tenant_by_user_id", lambda uid: None)
 
-        result = au.get_user_and_tenant_by_access_key("nexent-abc123")
+        with pytest.raises(au.UnauthorizedError, match="No active tenant relationship"):
+            au.get_user_and_tenant_by_access_key("nexent-abc123")
 
-        assert result["user_id"] == "user123"
-        assert result["tenant_id"] == au.DEFAULT_TENANT_ID
-        assert result["token_id"] == 1
-
-    def test_get_user_and_tenant_empty_tenant_id(self, monkeypatch):
-        """Test that DEFAULT_TENANT_ID is used when tenant_id is empty."""
+    def test_get_user_and_tenant_empty_tenant_id_raises(self, monkeypatch):
+        """Test that UnauthorizedError is raised when tenant_id is empty."""
         mock_token_info = {
             "token_id": 1,
             "access_key": "nexent-abc123",
@@ -945,9 +942,8 @@ class TestGetUserAndTenantByAccessKey:
         monkeypatch.setattr(au, "get_token_by_access_key", lambda key: mock_token_info)
         monkeypatch.setattr(au, "get_user_tenant_by_user_id", lambda uid: mock_user_tenant)
 
-        result = au.get_user_and_tenant_by_access_key("nexent-abc123")
-
-        assert result["tenant_id"] == au.DEFAULT_TENANT_ID
+        with pytest.raises(au.UnauthorizedError, match="No active tenant relationship"):
+            au.get_user_and_tenant_by_access_key("nexent-abc123")
 
     def test_get_user_and_tenant_empty_access_key(self):
         """Test with empty access key."""

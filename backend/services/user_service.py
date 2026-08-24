@@ -232,6 +232,8 @@ async def delete_user_and_cleanup(user_id: str, tenant_id: str) -> None:
     """
     try:
         logger.debug(f"Start permanently deleting user {user_id} and all related data...")
+        user_tenant = get_user_tenant_by_user_id(user_id)
+        has_supabase_identity = bool(user_tenant and user_tenant.get("user_email"))
 
         # 1) Core user deletion (soft-delete user-tenant and groups)
         try:
@@ -269,16 +271,26 @@ async def delete_user_and_cleanup(user_id: str, tenant_id: str) -> None:
         except Exception as e:
             logger.error(f"Failed deleting OAuth accounts for user {user_id}: {e}")
 
-        # 6) Delete from Supabase
+        # 6) Revoke all API keys before the identity is removed.
         try:
-            admin_client = get_supabase_admin_client()
-            if admin_client and hasattr(admin_client.auth, "admin"):
-                admin_client.auth.admin.delete_user(user_id)
-                logger.debug("\tSupabase user deleted.")
-            else:
-                raise RuntimeError("Supabase admin client not available")
+            from database.token_db import soft_delete_tokens_by_user
+
+            soft_delete_tokens_by_user(user_id, user_id)
+            logger.debug("\tUser API keys revoked.")
         except Exception as e:
-            logger.error(f"Failed deleting Supabase user {user_id}: {e}")
+            logger.error(f"Failed revoking API keys for user {user_id}: {e}")
+
+        # 7) Delete from Supabase
+        if has_supabase_identity:
+            try:
+                admin_client = get_supabase_admin_client()
+                if admin_client and hasattr(admin_client.auth, "admin"):
+                    admin_client.auth.admin.delete_user(user_id)
+                    logger.debug("\tSupabase user deleted.")
+                else:
+                    raise RuntimeError("Supabase admin client not available")
+            except Exception as e:
+                logger.error(f"Failed deleting Supabase user {user_id}: {e}")
 
         # 7) Delete PRIVATE personal KBs created by the user. Shared KBs
         # created by the user are intentionally left untouched.

@@ -36,6 +36,8 @@ export interface ChatProps {
   variant?: "default" | "embedded";
   skillFiles?: readonly SkillFileContent[];
   onSkillFileSelect?: (path: string) => void;
+  runtimeMetadata?: Record<string, unknown>;
+  onRuntimeMetadataChange?: (value: Record<string, unknown>) => void;
   readOnly?: boolean;
 }
 
@@ -73,6 +75,8 @@ export const Chat: FC<ChatProps> = ({
   variant = "default",
   skillFiles,
   onSkillFileSelect,
+  runtimeMetadata = {},
+  onRuntimeMetadataChange,
   readOnly = false,
 }) => {
   const handleSelectAgent = useCallback(
@@ -111,6 +115,8 @@ export const Chat: FC<ChatProps> = ({
       variant={variant}
       skillFiles={skillFiles}
       onSkillFileSelect={onSkillFileSelect}
+      runtimeMetadata={runtimeMetadata}
+      onRuntimeMetadataChange={onRuntimeMetadataChange}
       readOnly={readOnly}
     />
   );
