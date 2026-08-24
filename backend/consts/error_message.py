@@ -80,6 +80,17 @@ class ErrorMessage:
         ErrorCode.MCP_CONNECTION_FAILED: "Failed to connect to MCP service.",
         ErrorCode.MCP_CONTAINER_ERROR: "MCP container operation failed.",
         ErrorCode.MCP_NAME_ILLEGAL: "MCP name contains invalid characters.",
+        ErrorCode.MCP_PARAM_CONSTRAINT_ERROR_MESSAGES: {
+            "valid_type": "{tool_name} {param_name} must be a valid {value_type}",
+            "integer": "{tool_name} {param_name} must be an integer",
+            "ge": "{tool_name} {param_name} must be >= {value}",
+            "gt": "{tool_name} {param_name} must be > {value}",
+            "le": "{tool_name} {param_name} must be <= {value}",
+            "lt": "{tool_name} {param_name} must be < {value}",
+            "min_length": "{tool_name} {param_name} length must be >= {value}",
+            "max_length": "{tool_name} {param_name} length must be <= {value}",
+            # "multiple_of": "{tool_name} {param_name} must be a multiple of {value}",
+        },
 
         # ==================== 08 MonitorOps / 监控与运维 ====================
         ErrorCode.MONITOROPS_METRIC_QUERY_FAILED: "Metric query failed.",
@@ -197,6 +208,11 @@ class ErrorMessage:
     def get_message(cls, error_code: ErrorCode) -> str:
         """Get error message by error code."""
         return cls._MESSAGES.get(error_code, "An error occurred. Please try again later.")
+
+    @classmethod
+    def get_param_constraint_messages(cls) -> Dict[str, str]:
+        """Get tool parameter constraint validation message templates."""
+        return cls._MESSAGES.get(ErrorCode.MCP_PARAM_CONSTRAINT_ERROR_MESSAGES, {})
 
     @classmethod
     def get_message_with_code(cls, error_code: ErrorCode) -> Tuple[int, str]:

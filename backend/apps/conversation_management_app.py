@@ -13,7 +13,7 @@ from consts.model import (
     OpinionRequest,
     RenameRequest,
 )
-from consts.exceptions import ConversationNotFoundError, ValidationError
+from consts.exceptions import ConversationNotFoundError, ValidationError, TokenExpiredError
 from services.conversation_management_service import (
     create_new_conversation,
     delete_conversation_service,
@@ -51,6 +51,9 @@ async def create_new_conversation_endpoint(request: ConversationRequest, authori
         user_id, tenant_id = get_current_user_id(authorization)
         conversation_data = create_new_conversation(request.title, user_id)
         return ConversationResponse(code=0, message="success", data=conversation_data)
+    except TokenExpiredError as e:
+        logging.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logging.error(f"Failed to create conversation: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
@@ -73,6 +76,9 @@ async def list_conversations_endpoint(authorization: Optional[str] = Header(None
             raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Unauthorized access, Please login first")
         conversations = get_conversation_list_service(user_id)
         return ConversationResponse(code=0, message="success", data=conversations)
+    except TokenExpiredError as e:
+        logging.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logging.error(f"Failed to get conversation list: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
@@ -97,6 +103,9 @@ async def rename_conversation_endpoint(request: RenameRequest, authorization: Op
         rename_conversation_service(
             request.conversation_id, request.name, user_id)
         return ConversationResponse(code=0, message="success", data=True)
+    except TokenExpiredError as e:
+        logging.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logging.error(f"Failed to rename conversation: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
@@ -118,6 +127,9 @@ async def delete_conversation_endpoint(conversation_id: int, authorization: Opti
         user_id, tenant_id = get_current_user_id(authorization)
         delete_conversation_service(conversation_id, user_id)
         return ConversationResponse(code=0, message="success", data=True)
+    except TokenExpiredError as e:
+        logging.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logging.error(f"Failed to delete conversation: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
@@ -140,6 +152,9 @@ async def get_conversation_history_endpoint(conversation_id: int, authorization:
         history_data = get_conversation_history_service(
             conversation_id, user_id)
         return ConversationResponse(code=0, message="success", data=history_data)
+    except TokenExpiredError as e:
+        logging.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logging.error(f"Failed to get conversation history: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
@@ -175,6 +190,9 @@ async def update_conversation_knowledge_scope_endpoint(
         ) from exc
     except HTTPException:
         raise
+    except TokenExpiredError as exc:
+        logging.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
     except Exception as exc:
         logging.error("Failed to update conversation knowledge scope: %s", exc)
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
@@ -201,6 +219,9 @@ async def get_sources_endpoint(request: Dict[str, Any], authorization: Optional[
         message_id = request.get("message_id")
         source_type = request.get("type", "all")
         return get_sources_service(conversation_id, message_id, source_type, user_id)
+    except TokenExpiredError as e:
+        logging.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logging.error(f"Failed to get message sources: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
@@ -234,6 +255,9 @@ async def generate_conversation_title_endpoint(
         title = await generate_conversation_title_service(
             request.conversation_id, request.question, user_id, tenant_id=tenant_id, language=language)
         return ConversationResponse(code=0, message="success", data=title)
+    except TokenExpiredError as e:
+        logging.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logging.error(f"Failed to generate conversation title: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))

@@ -128,9 +128,13 @@ function ConfigSection({
 
 interface AgentConfigProps {
   onToggleDebug: () => void;
+  actionAreaRef?: React.Ref<HTMLDivElement>;
 }
 
-export default function AgentConfig({ onToggleDebug }: AgentConfigProps) {
+export default function AgentConfig({
+  onToggleDebug,
+  actionAreaRef,
+}: AgentConfigProps) {
   const { t } = useTranslation("common");
   const [form] = Form.useForm();
   const [isPublishModalOpen, setIsPublishModalOpen] = useState(false);
@@ -438,7 +442,10 @@ export default function AgentConfig({ onToggleDebug }: AgentConfigProps) {
           </ConfigSection>
         </TabsContent>
       </Tabs>
-      <div className="flex shrink-0 justify-end gap-2 border-t border-gray-200 bg-white pt-3 pb-1">
+      <div
+        ref={actionAreaRef}
+        className="flex shrink-0 justify-end gap-2 border-t border-gray-200 bg-white pt-3 pb-1"
+      >
         <div className="flex items-center gap-2">
           <Button
             icon={<Bug size={16} />}

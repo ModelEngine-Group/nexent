@@ -74,7 +74,15 @@ def read_active_entity(entity_id: int):
         return None if record is None else as_dict(record)
 ```
 
-## 7) Validation checklist
+## 7) Database migrations
+- Migration and initialization SQL files are located under `deploy/sql/`.
+- Every existing `.sql` file in the target branch is immutable after it has been merged.
+- This immutability rule applies to migration, initialization, and Supabase SQL files without exception.
+- Never modify, rename, or delete an existing SQL file after it has been merged.
+- Make database changes only by adding a new versioned migration file under `deploy/sql/migrations/`.
+- Track the application version in `backend/consts/const.py` as `APP_VERSION`.
+
+## 8) Validation checklist
 - All models inherit `TableBase`; no duplicated audit fields.
 - Deletes are soft deletes (`delete_flag='Y'`) and set `updated_by`.
 - No direct `commit`/`rollback`/`close` outside `get_db_session()`.

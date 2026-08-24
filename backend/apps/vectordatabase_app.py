@@ -75,7 +75,7 @@ async def check_knowledge_base_exist(
         user_id, tenant_id = get_current_user_id(authorization)
         return check_knowledge_base_exist_impl(knowledge_name=knowledge_name, vdb_core=vdb_core, user_id=user_id, tenant_id=tenant_id)
     except TokenExpiredError as e:
-        logger.error(f"Session expired: {str(e)}", exc_info=True)
+        logger.warning("Session expired")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logger.error(
@@ -139,7 +139,7 @@ def create_new_index(
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
     except TokenExpiredError as e:
-        logger.error(f"Session expired: {str(e)}", exc_info=True)
+        logger.warning("Session expired")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         raise HTTPException(
@@ -163,7 +163,7 @@ async def delete_index(
     except HTTPException:
         raise
     except TokenExpiredError as e:
-        logger.error(f"Session expired: {str(e)}", exc_info=True)
+        logger.warning("Session expired")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logger.error(
@@ -224,7 +224,7 @@ async def update_index(
     except HTTPException:
         raise
     except TokenExpiredError as exc:
-        logger.error(f"Session expired: {str(exc)}", exc_info=True)
+        logger.warning("Session expired")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
     except Exception as exc:
         logger.error(
@@ -274,7 +274,7 @@ async def update_summary_frequency_endpoint(
     except HTTPException:
         raise
     except TokenExpiredError as exc:
-        logger.error(f"Session expired: {str(exc)}", exc_info=True)
+        logger.warning("Session expired")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
     except Exception as exc:
         logger.exception("Error updating summary frequency")
@@ -364,7 +364,7 @@ def get_embedding_model_status(
     except HTTPException:
         raise
     except TokenExpiredError as e:
-        logger.error(f"Session expired: {str(e)}", exc_info=True)
+        logger.warning("Session expired")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logger.error(
@@ -419,7 +419,7 @@ def update_embedding_model(
     except HTTPException:
         raise
     except TokenExpiredError as exc:
-        logger.error(f"Session expired: {str(exc)}", exc_info=True)
+        logger.warning("Session expired")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
     except Exception as exc:
         logger.error(
@@ -490,7 +490,7 @@ def get_list_indices(
             pattern, include_stats, tenant_id, user_id, vdb_core
         )
     except TokenExpiredError as e:
-        logger.error(f"Session expired: {str(e)}", exc_info=True)
+        logger.warning("Session expired")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         raise HTTPException(
@@ -581,7 +581,7 @@ def create_index_documents(
     except HTTPException:
         raise
     except TokenExpiredError as e:
-        logger.error(f"Session expired: {str(e)}", exc_info=True)
+        logger.warning("Session expired")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         error_msg = str(e)
@@ -612,7 +612,7 @@ async def get_index_files(
     except HTTPException:
         raise
     except TokenExpiredError as e:
-        logger.error(f"Session expired: {str(e)}", exc_info=True)
+        logger.warning("Session expired")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         error_msg = str(e)
@@ -691,7 +691,7 @@ async def delete_documents(
     except HTTPException:
         raise
     except TokenExpiredError as e:
-        logger.error(f"Session expired: {str(e)}", exc_info=True)
+        logger.warning("Session expired")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         raise HTTPException(
@@ -754,7 +754,7 @@ async def get_document_error_info(
     except HTTPException:
         raise
     except TokenExpiredError as e:
-        logger.error(f"Session expired: {str(e)}", exc_info=True)
+        logger.warning("Session expired")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logger.error(
@@ -819,7 +819,7 @@ def get_index_chunks(
     except HTTPException:
         raise
     except TokenExpiredError as e:
-        logger.error(f"Session expired: {str(e)}", exc_info=True)
+        logger.warning("Session expired")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         error_msg = str(e)
@@ -855,7 +855,7 @@ def create_chunk(
     except HTTPException:
         raise
     except TokenExpiredError as exc:
-        logger.error(f"Session expired: {str(exc)}", exc_info=True)
+        logger.warning("Session expired")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
     except Exception as exc:
         logger.error(
@@ -897,7 +897,7 @@ def update_chunk(
     except HTTPException:
         raise
     except TokenExpiredError as exc:
-        logger.error(f"Session expired: {str(exc)}", exc_info=True)
+        logger.warning("Session expired")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
     except Exception as exc:
         logger.error(
@@ -938,7 +938,7 @@ def delete_chunk(
     except HTTPException:
         raise
     except TokenExpiredError as exc:
-        logger.error(f"Session expired: {str(exc)}", exc_info=True)
+        logger.warning("Session expired")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
     except Exception as exc:
         logger.error(
@@ -1003,7 +1003,7 @@ async def hybrid_search(
         # Re-raise HTTP exceptions (e.g. 403 from permission check) as-is
         raise
     except TokenExpiredError as exc:
-        logger.error(f"Session expired: {str(exc)}", exc_info=True)
+        logger.warning("Session expired")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
     except Exception as exc:
         logger.error(f"Hybrid search failed: {exc}", exc_info=True)

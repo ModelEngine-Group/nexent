@@ -18,6 +18,7 @@ from consts.const import (
     MONITORING_PROVIDER,
 )
 from consts.model import ConversationResponse
+from consts.exceptions import TokenExpiredError
 from database.client import get_monitoring_db_session
 from utils.auth_utils import get_current_user_id
 
@@ -133,6 +134,9 @@ async def list_models_endpoint(
         paginated = all_metrics[start:end]
 
         return ConversationResponse(code=0, message="success", data=paginated)
+    except TokenExpiredError as e:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logger.error(f"Failed to list monitoring models: {str(e)}")
         raise HTTPException(
