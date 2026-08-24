@@ -72,6 +72,7 @@ from consts.const import (
     AIDP_API_KEY,
     AIDP_SERVER_URL,
     AIDP_TENANT_ID,
+    ENABLE_AIDP_KNOWLEDGE,
     DATA_PROCESS_SERVICE,
     LANGUAGE,
     LOCAL_MCP_SERVER,
@@ -1547,6 +1548,12 @@ async def create_tool_config_list(
 
     tool_keys_seen = set()
     for tool in tools_list:
+        if (
+            tool.get("class_name") == "AidpSearchTool"
+            and not ENABLE_AIDP_KNOWLEDGE
+        ):
+            logger.info("Skipping aidp_search because AIDP knowledge is disabled")
+            continue
         tool_identifier = tool.get("name") or tool.get("class_name")
         if tool_identifier in tool_keys_seen:
             raise ValidationError(
@@ -1588,10 +1595,8 @@ async def create_tool_config_list(
                     "Independent AIDP search requires server_url and api_key in its tool configuration."
                 )
 
-        # Inject the runtime whitelist for AidpSearchTool. ``param_dict``
-        # already contains the resolved per-run range (inherit/override/
-        # disabled). Intersect it with the current remote catalog and local
-        # permissions, but never intersect it with the agent defaults again.
+        # Validate the configured AIDP scope against the current user's
+        # permissions, then install that exact scope as the runtime whitelist.
         _allowed_kds_set: set[str] = set()
         _kds_name_to_id_map: dict[str, str] = {}
         if tool.get("class_name") == "AidpSearchTool":
@@ -1608,27 +1613,47 @@ async def create_tool_config_list(
                 )
                 _allowed_kds_set = set(_snapshot.accessible_id_set)
                 _kds_name_to_id_map = dict(_snapshot.name_to_id)
-            except Exception as exc:  # pragma: no cover - defensive
-                logger.warning(
-                    "AIDP access snapshot lookup failed: %s", exc,
-                )
+            except Exception as exc:
+                raise ValidationError(
+                    "AIDP service is not ready; unable to validate knowledge base access"
+                ) from exc
 
             configured_kds = param_dict.get("kds_list") or []
             if isinstance(configured_kds, str):
                 try:
                     configured_kds = json.loads(configured_kds)
-                except json.JSONDecodeError:
-                    configured_kds = []
+                except json.JSONDecodeError as exc:
+                    raise ValidationError(
+                        "aidp_search kds_list must be a JSON array"
+                    ) from exc
             if not isinstance(configured_kds, list):
-                configured_kds = []
-            configured_kds = [str(kds_id) for kds_id in configured_kds]
-            # The execution whitelist is the effective tool range, not every
-            # KDS the user could access. This prevents model-supplied arguments
-            # from expanding a conversation-scoped selection.
-            _allowed_kds_set.intersection_update(configured_kds)
-            param_dict["kds_list"] = [
-                kds_id for kds_id in configured_kds if kds_id in _allowed_kds_set
+                raise ValidationError("aidp_search kds_list must be a JSON array")
+            configured_kds = list(
+                dict.fromkeys(
+                    str(kds_id).strip()
+                    for kds_id in configured_kds
+                    if str(kds_id).strip()
+                )
+            )
+            if not configured_kds:
+                raise ValidationError(
+                    "aidp_search requires at least one selected knowledge base"
+                )
+            if len(configured_kds) > 10:
+                raise ValidationError(
+                    "aidp_search kds_list cannot contain more than 10 knowledge bases"
+                )
+            unauthorized_kds = [
+                kds_id
+                for kds_id in configured_kds
+                if kds_id not in _allowed_kds_set
             ]
+            if unauthorized_kds:
+                raise ValidationError(
+                    "aidp_search contains a knowledge base the user cannot access"
+                )
+            _allowed_kds_set = set(configured_kds)
+            param_dict["kds_list"] = json.dumps(configured_kds, ensure_ascii=False)
             _kds_name_to_id_map = {
                 name: kds_id
                 for name, kds_id in _kds_name_to_id_map.items()

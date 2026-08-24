@@ -48,8 +48,7 @@ from apps.memory_long_term_app import router as memory_long_term_router
 from apps.memory_dreaming_app import router as memory_dreaming_router
 from apps.quota_app import tenant_quota_router, platform_quota_router, personal_quota_router
 from consts.const import (
-    AIDP_API_KEY,
-    AIDP_SERVER_URL,
+    AIDP_CONFIG_READY,
     ENABLE_AIDP_KNOWLEDGE,
     IS_SPEED_MODE,
 )
@@ -65,9 +64,10 @@ app = create_app(title="Nexent Config API", description="Configuration APIs")
 @app.on_event("startup")
 async def sync_default_prompt_template_on_startup():
     """Sync defaults and validate enabled external service configuration."""
-    if ENABLE_AIDP_KNOWLEDGE and (not AIDP_SERVER_URL or not AIDP_API_KEY):
+    if ENABLE_AIDP_KNOWLEDGE and not AIDP_CONFIG_READY:
         raise RuntimeError(
-            "AIDP_SERVER_URL and AIDP_API_KEY are required when ENABLE_AIDP_KNOWLEDGE=true"
+            "AIDP service is not ready: AIDP_SERVER_URL, AIDP_API_KEY, and "
+            "AIDP_TENANT_ID are required when ENABLE_AIDP_KNOWLEDGE=true"
         )
 
     try:

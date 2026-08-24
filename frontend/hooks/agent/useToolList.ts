@@ -3,6 +3,7 @@ import { fetchTools } from "@/services/agentConfigService";
 import { useMemo, useCallback } from "react";
 import type { Tool, ToolGroup, ToolSubGroup } from "@/types/agentConfig";
 import { TOOL_SOURCE_TYPES } from "@/const/agentConfig";
+import { isManagedKnowledgeTool } from "@/lib/managedKnowledgeTools";
 
 export function useToolList(options?: { enabled?: boolean; staleTime?: number }) {
 	const queryClient = useQueryClient();
@@ -31,6 +32,7 @@ export function useToolList(options?: { enabled?: boolean; staleTime?: number })
 	// Extract all unique labels from available tools (used by LabelManagementModal suggestions)
 	const isUserSelectable = useCallback(
 		(tool: Tool) => {
+			if (isManagedKnowledgeTool(tool)) return false;
 			const canonicalTool = availableTools.find(
 				(availableTool: Tool) => String(availableTool.id) === String(tool.id)
 			);
@@ -40,7 +42,11 @@ export function useToolList(options?: { enabled?: boolean; staleTime?: number })
 	);
 
 	const selectableTools = useMemo(
-		() => availableTools.filter((tool: Tool) => tool.is_user_selectable !== false),
+		() =>
+			availableTools.filter(
+				(tool: Tool) =>
+					!isManagedKnowledgeTool(tool) && tool.is_user_selectable !== false
+			),
 		[availableTools]
 	);
 	const allLabels = useMemo(() => {

@@ -10,6 +10,7 @@ import { useConfig } from "@/hooks/useConfig";
 import { ChevronRight, Settings, X, AlertTriangle } from "lucide-react";
 import type { Tool, ToolParam } from "@/types/agentConfig";
 import { TOOL_SOURCE_TYPES } from "@/const/agentConfig";
+import { isManagedKnowledgeTool } from "@/lib/managedKnowledgeTools";
 import ToolConfigModal from "./tool/ToolConfigModal";
 import {
   TOOLS_REQUIRING_KB_SELECTION,
@@ -108,7 +109,10 @@ export default function ToolManagement({
     if (!toolsLoaded) return;
     const availableIds = new Set(availableTools.map((t: any) => String(t.id)));
     const current = useAgentStore.getState().editedAgent?.tools ?? [];
-    const next = current.filter((t) => availableIds.has(String(t.id)));
+    const next = current.filter(
+      (tool) =>
+        isManagedKnowledgeTool(tool) || availableIds.has(String(tool.id))
+    );
     if (next.length !== current.length) {
       updateTools(next);
     }
@@ -118,6 +122,7 @@ export default function ToolManagement({
   // the user-facing selected-tools list.
   const visibleSelectedTools = useMemo(() => {
     return selectedTools.filter((tool) => {
+      if (isManagedKnowledgeTool(tool)) return false;
       const canonicalTool = availableTools.find(
         (availableTool: Tool) => String(availableTool.id) === String(tool.id)
       );

@@ -13,6 +13,7 @@ import {
   updateToolConfig,
 } from "@/services/agentConfigService";
 import type { Agent, Skill, Tool } from "@/types/agentConfig";
+import { isManagedKnowledgeTool } from "@/lib/managedKnowledgeTools";
 
 export type AgentDraft = Pick<
   Agent,
@@ -284,7 +285,10 @@ const toAgentPayload = (agentId: number, patch: AgentDraftPatch) => ({
   ...(patch.tools !== undefined
     ? {
         enabled_tool_ids: patch.tools
-          .filter((tool) => tool.is_available !== false)
+          .filter(
+            (tool) =>
+              tool.is_available !== false || isManagedKnowledgeTool(tool)
+          )
           .map((tool) => Number(tool.id))
           .filter(Number.isFinite),
       }
@@ -347,6 +351,9 @@ async function persistToolChanges(
   const currentToolIds = new Set(currentTools.map((tool) => Number(tool.id)));
 
   for (const tool of currentTools) {
+    if (tool.is_available === false) {
+      continue;
+    }
     const result = await updateToolConfig(
       Number(tool.id),
       agentId,
@@ -361,6 +368,9 @@ async function persistToolChanges(
   for (const tool of savedTools) {
     const toolId = Number(tool.id);
     if (currentToolIds.has(toolId)) {
+      continue;
+    }
+    if (tool.is_available === false) {
       continue;
     }
 

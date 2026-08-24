@@ -125,7 +125,9 @@ class TestTenantConfigApp(unittest.TestCase):
         self.assertIn("deployment_version", data)
         self.assertIn("app_version", data)
         self.assertIn("enable_aidp_knowledge", data)
-        self.assertEqual(len(data.keys()), 4)
+        self.assertIn("aidp_enabled", data)
+        self.assertEqual(data["aidp_enabled"], data["enable_aidp_knowledge"])
+        self.assertEqual(len(data.keys()), 5)
 
 
 if __name__ == '__main__':

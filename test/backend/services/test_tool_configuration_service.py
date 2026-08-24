@@ -5282,6 +5282,10 @@ class TestUpdateToolInfoImplAidpPermission:
     @pytest.fixture(autouse=True)
     def mock_binding_preconditions(self, mocker):
         mocker.patch(
+            "backend.services.tool_configuration_service.ENABLE_AIDP_KNOWLEDGE",
+            True,
+        )
+        mocker.patch(
             "backend.services.tool_configuration_service.require_agent_draft_edit"
         )
         mocker.patch(
@@ -5317,7 +5321,7 @@ class TestUpdateToolInfoImplAidpPermission:
         result = update_tool_info_impl(tool_info, "tenant1", "user1")
 
         assert result["tool_instance"] == {"id": 1}
-        assert tool_info.params["kds_list"] == ["kb3", "kb2", "kb4"]
+        assert tool_info.params["kds_list"] == '["kb2", "kb4"]'
 
     @patch("backend.services.tool_configuration_service.create_or_update_tool_by_tool_info")
     @patch("backend.services.tool_configuration_service.query_tool_instances_by_id")
@@ -5332,14 +5336,14 @@ class TestUpdateToolInfoImplAidpPermission:
         tool_info = self._request(["kb1", "kb-forged"])
 
         from backend.services.tool_configuration_service import update_tool_info_impl
-        with pytest.raises(ValidationError, match="cannot configure"):
+        with pytest.raises(_tool_cfg_service.ValidationError, match="cannot configure"):
             update_tool_info_impl(tool_info, "tenant1", "user1")
         mock_create_update.assert_not_called()
 
     @patch("backend.services.tool_configuration_service.create_or_update_tool_by_tool_info")
     @patch("backend.services.tool_configuration_service.query_tool_instances_by_id")
     @patch("backend.services.tool_configuration_service._resolve_aidp_snapshot")
-    def test_existing_hidden_id_from_legacy_client_is_not_rejected(
+    def test_existing_hidden_id_from_legacy_client_is_rejected(
         self, mock_snapshot, mock_existing, mock_create_update
     ):
         mock_snapshot.return_value = types.SimpleNamespace(accessible_id_set={"kb1"})
@@ -5348,25 +5352,25 @@ class TestUpdateToolInfoImplAidpPermission:
         tool_info = self._request('["kb-hidden", "kb1"]')
 
         from backend.services.tool_configuration_service import update_tool_info_impl
-        update_tool_info_impl(tool_info, "tenant1", "user1")
-
-        assert tool_info.params["kds_list"] == ["kb-hidden", "kb1"]
+        with pytest.raises(_tool_cfg_service.ValidationError, match="cannot configure"):
+            update_tool_info_impl(tool_info, "tenant1", "user1")
+        mock_create_update.assert_not_called()
 
     @patch("backend.services.tool_configuration_service.create_or_update_tool_by_tool_info")
     @patch("backend.services.tool_configuration_service.query_tool_instances_by_id")
     @patch("backend.services.tool_configuration_service._resolve_aidp_snapshot")
-    def test_snapshot_failure_preserves_existing_when_no_new_id(
+    def test_snapshot_failure_rejects_configuration_save(
         self, mock_snapshot, mock_existing, mock_create_update
     ):
         mock_snapshot.side_effect = TimeoutError("AIDP unavailable")
         mock_existing.return_value = {"params": {"kds_list": ["kb-old"]}}
         mock_create_update.return_value = {"id": 3}
-        tool_info = self._request([])
+        tool_info = self._request(["kb-old"])
 
         from backend.services.tool_configuration_service import update_tool_info_impl
-        update_tool_info_impl(tool_info, "tenant1", "user1")
-
-        assert tool_info.params["kds_list"] == ["kb-old"]
+        with pytest.raises(_tool_cfg_service.ValidationError, match="service is not ready"):
+            update_tool_info_impl(tool_info, "tenant1", "user1")
+        mock_create_update.assert_not_called()
 
     @patch("backend.services.tool_configuration_service.create_or_update_tool_by_tool_info")
     def test_non_aidp_tool_skips_merge(self, mock_create_update):
@@ -5388,7 +5392,11 @@ def test_search_aidp_tool_config_only_returns_visible_selected_ids(
     mock_existing, _mock_is_aidp, mock_snapshot
 ):
     mock_existing.return_value = {
-        "params": {"kds_list": ["visible", "hidden"], "top_k": 5},
+        "params": {
+            "kds_list": ["visible", "hidden"],
+            "display_names": ["Visible label", "Hidden label"],
+            "top_k": 5,
+        },
         "enabled": True,
     }
     mock_snapshot.return_value = types.SimpleNamespace(
@@ -5398,7 +5406,11 @@ def test_search_aidp_tool_config_only_returns_visible_selected_ids(
     from backend.services.tool_configuration_service import search_tool_info_impl
     result = search_tool_info_impl(3, 9, "tenant1", "user1")
 
-    assert result["params"] == {"kds_list": ["visible"], "top_k": 5}
+    assert result["params"] == {
+        "kds_list": '["visible"]',
+        "display_names": ["Visible label"],
+        "top_k": 5,
+    }
 
 
 class TestValidateLocalToolAidpSearch:
@@ -5554,6 +5566,7 @@ def test_parse_kds_list_invalid_json_returns_empty():
     assert _tool_cfg_service._parse_kds_list("{not-json") == []
     assert _tool_cfg_service._parse_kds_list(None) == []
     assert _tool_cfg_service._parse_kds_list(["a", " a ", "b", "a"]) == ["a", "b"]
+    assert _tool_cfg_service._parse_kds_list("a, b,a") == ["a", "b"]
 
 
 def test_is_aidp_search_tool_by_explicit_name():
@@ -5600,6 +5613,10 @@ class _AnonymousToolInfo:
 def test_update_tool_info_preserves_existing_kds_when_key_missing(mocker):
     """A missing kds_list key means the scope was not edited; keep existing ids."""
     mocker.patch(
+        "backend.services.tool_configuration_service.ENABLE_AIDP_KNOWLEDGE",
+        True,
+    )
+    mocker.patch(
         "backend.services.tool_configuration_service.require_agent_draft_edit"
     )
     mocker.patch(
@@ -5630,12 +5647,16 @@ def test_update_tool_info_preserves_existing_kds_when_key_missing(mocker):
 
     assert result["tool_instance"] == {"id": 9}
     saved = mock_create.call_args[0][0]
-    assert saved.params["kds_list"] == ["existing-kds"]
+    assert saved.params["kds_list"] == '["existing-kds"]'
 
 
 def test_update_tool_info_rejects_new_kds_when_aidp_unavailable(mocker):
     """When AIDP is unreachable and the submission adds ids, the edit must fail."""
     from consts.exceptions import ValidationError
+    mocker.patch(
+        "backend.services.tool_configuration_service.ENABLE_AIDP_KNOWLEDGE",
+        True,
+    )
 
     mocker.patch(
         "backend.services.tool_configuration_service.require_agent_draft_edit"
@@ -5664,7 +5685,7 @@ def test_update_tool_info_rejects_new_kds_when_aidp_unavailable(mocker):
     )
 
     tool_info = _AnonymousToolInfo(params={"kds_list": ["new-kds"]})
-    with pytest.raises(ValidationError, match="not changed"):
+    with pytest.raises(_tool_cfg_service.ValidationError, match="not changed"):
         _tool_cfg_service.update_tool_info_impl(tool_info, "tenant-1", "user-1")
 
 

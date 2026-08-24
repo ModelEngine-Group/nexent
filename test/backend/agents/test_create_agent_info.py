@@ -7202,10 +7202,13 @@ class TestCreateToolConfigListAidpSearch:
              patch("backend.agents.create_agent_info.AIDP_API_KEY", "key-123"), \
              patch("backend.agents.create_agent_info.AIDP_TENANT_ID", "aidp-tenant"), \
              patch.dict(sys.modules, {
-                 "ext_components.aidp.services": MagicMock(
-                     aidp_permission_service=MagicMock(
-                         get_allowed_kds_list=MagicMock(return_value=["kb1"]),
-                     ),
+                 "ext_components.aidp.services.aidp_access_service": MagicMock(
+                     resolve_current_aidp_access=MagicMock(
+                         return_value=types.SimpleNamespace(
+                             accessible_id_set={"kb1"},
+                             name_to_id={"KB 1": "kb1"},
+                         )
+                     )
                  ),
              }):
 
@@ -7280,7 +7283,7 @@ class TestCreateToolConfigListAidpSearch:
                 "output_type": "string",
                 "params": [{
                     "name": "kds_list",
-                    "default": ["kb_allowed_2", "kb_not_accessible"],
+                    "default": ["kb_allowed_2"],
                 }],
                 "source": "langchain",
                 "usage": None,
@@ -7304,7 +7307,7 @@ class TestCreateToolConfigListAidpSearch:
             assert len(result) == 1
             assert mock_tc_instance.metadata is not None
             assert "allowed_kds_set" in mock_tc_instance.metadata
-            assert mock_tc_instance.params["kds_list"] == ["kb_allowed_2"]
+            assert mock_tc_instance.params["kds_list"] == '["kb_allowed_2"]'
             assert mock_tc_instance.metadata["allowed_kds_set"] == ["kb_allowed_2"]
             assert mock_tc_instance.metadata["kds_name_to_id_map"] == {
                 "Allowed 2": "kb_allowed_2",
@@ -7350,15 +7353,11 @@ class TestCreateToolConfigListAidpSearch:
 
             mock_tool_config.side_effect = capture_and_return
 
-            result = await create_agent_info_module.create_tool_config_list(
-                agent_id="agent_1", tenant_id="tenant_1", user_id="user_1",
-            )
-
-            assert len(result) == 1
-            # Snapshot failure is fail-closed even when the tool requested a KB.
-            assert mock_tc_instance.params["kds_list"] == []
-            assert mock_tc_instance.metadata is not None
-            assert mock_tc_instance.metadata["allowed_kds_set"] == []
+            with pytest.raises(ValidationError, match="service is not ready"):
+                await create_agent_info_module.create_tool_config_list(
+                    agent_id="agent_1", tenant_id="tenant_1", user_id="user_1",
+                )
+            mock_tool_config.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_aidp_search_metadata_merges_langchain_tool(self):
@@ -7376,10 +7375,13 @@ class TestCreateToolConfigListAidpSearch:
              patch("backend.agents.create_agent_info.AIDP_API_KEY", "key"), \
              patch("backend.agents.create_agent_info.AIDP_TENANT_ID", "tenant"), \
              patch.dict(sys.modules, {
-                 "ext_components.aidp.services": MagicMock(
-                     aidp_permission_service=MagicMock(
-                         get_allowed_kds_list=MagicMock(return_value=[]),
-                     ),
+                 "ext_components.aidp.services.aidp_access_service": MagicMock(
+                     resolve_current_aidp_access=MagicMock(
+                         return_value=types.SimpleNamespace(
+                             accessible_id_set={"kb1"},
+                             name_to_id={"KB 1": "kb1"},
+                         )
+                     )
                  ),
              }):
 
@@ -7389,7 +7391,7 @@ class TestCreateToolConfigListAidpSearch:
                 "description": "AIDP search",
                 "inputs": "{}",
                 "output_type": "string",
-                "params": [],
+                "params": [{"name": "kds_list", "default": ["kb1"]}],
                 "source": "langchain",
                 "usage": None,
             }]
@@ -7413,6 +7415,64 @@ class TestCreateToolConfigListAidpSearch:
             assert "langchain_tool" in mock_tc_instance.metadata
             assert mock_tc_instance.metadata["langchain_tool"] is matching_langchain_tool
             assert "allowed_kds_set" in mock_tc_instance.metadata
+
+    @pytest.mark.asyncio
+    async def test_aidp_search_is_skipped_when_capability_is_disabled(self):
+        with patch(
+            "backend.agents.create_agent_info.discover_langchain_tools",
+            new_callable=AsyncMock,
+            return_value=[],
+        ), patch(
+            "backend.agents.create_agent_info.search_tools_for_sub_agent",
+            return_value=[{
+                "class_name": "AidpSearchTool",
+                "name": "aidp_search",
+                "params": [{"name": "kds_list", "default": ["kb1"]}],
+            }],
+        ), patch(
+            "backend.agents.create_agent_info.search_agent_info_by_agent_id",
+            return_value={"name": "test_agent"},
+        ), patch(
+            "backend.agents.create_agent_info.ENABLE_AIDP_KNOWLEDGE",
+            False,
+        ):
+            result = await create_agent_info_module.create_tool_config_list(
+                agent_id="agent_1", tenant_id="tenant_1", user_id="user_1",
+            )
+
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_aidp_search_rejects_runtime_scope_user_cannot_access(self):
+        access_module = MagicMock()
+        access_module.resolve_current_aidp_access.return_value = types.SimpleNamespace(
+            accessible_id_set={"allowed-kds"},
+            name_to_id={"Allowed": "allowed-kds"},
+        )
+        with patch(
+            "backend.agents.create_agent_info.discover_langchain_tools",
+            new_callable=AsyncMock,
+            return_value=[],
+        ), patch(
+            "backend.agents.create_agent_info.search_tools_for_sub_agent",
+            return_value=[{
+                "class_name": "AidpSearchTool",
+                "name": "aidp_search",
+                "params": [{"name": "kds_list", "default": ["forged-kds"]}],
+            }],
+        ), patch(
+            "backend.agents.create_agent_info.search_agent_info_by_agent_id",
+            return_value={"name": "test_agent"},
+        ), patch(
+            "backend.agents.create_agent_info.ENABLE_AIDP_KNOWLEDGE",
+            True,
+        ), patch.dict(sys.modules, {
+            "ext_components.aidp.services.aidp_access_service": access_module,
+        }):
+            with pytest.raises(ValidationError, match="cannot access"):
+                await create_agent_info_module.create_tool_config_list(
+                    agent_id="agent_1", tenant_id="tenant_1", user_id="user_1",
+                )
 
 
 class TestBuildSecurityHeaders:

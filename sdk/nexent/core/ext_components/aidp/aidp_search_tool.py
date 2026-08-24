@@ -69,6 +69,7 @@ def _coerce_choice(raw: str, valid: set, default: str, label: str) -> str:
 
 class AidpSearchTool(Tool):
     name = "aidp_search"
+    is_user_selectable: bool = False
     description = (
         "Performs a multimodal search on AIDP knowledge bases using FusionSearch. "
         "Returns text, table, and image chunks with title and text content. "
@@ -167,6 +168,10 @@ class AidpSearchTool(Tool):
             description="Mapping from kds_name to kds_id for LLM parameter conversion",
         ),
         kds_list: str = Field(description="JSON string array of knowledge base IDs"),
+        display_names: List[str] = Field(
+            default_factory=list,
+            description="Display names corresponding to configured knowledge base IDs",
+        ),
         search_method: str = Field(default="hybrid_search", description="Search method"),
         reranking_enable: bool = Field(default=True, description="Enable reranking"),
         reranking_mode: str = Field(default="performance", description="Reranking mode"),
@@ -179,6 +184,7 @@ class AidpSearchTool(Tool):
     ):
         super().__init__()
         self.kds_list: List[str] = _parse_kds_list(kds_list)
+        self.display_names = [str(name) for name in display_names]
 
         self.base_url = server_url.rstrip("/") if isinstance(server_url, str) else ""
         self.api_key = api_key if isinstance(api_key, str) else ""
