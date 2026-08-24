@@ -1576,6 +1576,29 @@ class TestBuildPythonExecutor:
         assert cfg.level == SandboxLevel.DOCKER
         acquire.assert_called_once_with(cfg, logger, True)
 
+    def test_session_container_group_is_forwarded_to_pool(self, mocker):
+        cfg = SandboxConfig(level=SandboxLevel.DOCKER, scope=SandboxScope.SESSION)
+        logger = sandbox_module.logging.getLogger("test")
+        group = sandbox_module._SessionDockerContainerGroup(SimpleNamespace())
+        expected_executor = MagicMock()
+        pool = SandboxPoolManager.get_instance()
+        acquire = mocker.patch.object(pool, "acquire", return_value=expected_executor)
+
+        result = sandbox_module.build_python_executor(
+            cfg,
+            logger,
+            host_tools_exist=True,
+            session_container_group=group,
+        )
+
+        assert result is expected_executor
+        acquire.assert_called_once_with(
+            cfg,
+            logger,
+            True,
+            session_container_group=group,
+        )
+
     def test_session_scope_creates_fresh_executor(self):
         """SESSION scope should always create fresh executor."""
         cfg = SandboxConfig(level=SandboxLevel.LOCAL, scope=SandboxScope.SESSION)
@@ -1767,6 +1790,30 @@ class TestBuildDockerExecutor:
 
         # Should fall back to local executor
         assert getattr(executor, "_nexent_backend", None) == "local"
+
+    def test_none_docker_executor_falls_back_to_local(self, monkeypatch):
+        pm = SandboxPoolManager.get_instance()
+        cfg = SandboxConfig(level=SandboxLevel.DOCKER, scope=SandboxScope.SESSION)
+        local_executor = SimpleNamespace(_nexent_backend="local")
+        monkeypatch.setitem(
+            sys.modules,
+            "smolagents.remote_executors",
+            SimpleNamespace(DockerExecutor=None),
+        )
+        monkeypatch.setattr(
+            sandbox_module,
+            "_make_local_executor",
+            MagicMock(return_value=local_executor),
+        )
+        monkeypatch.setattr(
+            sandbox_module,
+            "_wrap_executor",
+            lambda executor, config, logger_: executor,
+        )
+
+        result = pm._build_docker_executor(cfg, MagicMock())
+
+        assert result is local_executor
 
 
 class TestRecoverDockerContainer:
@@ -2144,11 +2191,15 @@ class TestBuildSessionDockerExecutor:
         docker_module = SimpleNamespace(
             from_env=lambda: SimpleNamespace(containers=SimpleNamespace(run=run))
         )
-        response = SimpleNamespace(raise_for_status=lambda: None, json=lambda: [])
+        response = SimpleNamespace(
+            raise_for_status=lambda: None,
+            json=MagicMock(side_effect=[{}, []]),
+        )
         captured = {}
         monkeypatch.setitem(sys.modules, "docker", docker_module)
         monkeypatch.setitem(sys.modules, "requests", SimpleNamespace(get=lambda *args, **kwargs: response))
         monkeypatch.setattr(sandbox_module, "_is_containerized_runtime", lambda: False)
+        monkeypatch.setattr(sandbox_module.time, "sleep", MagicMock())
         self._mock_session_executor(monkeypatch, captured)
 
         executor = pm._build_session_docker_executor(cfg, logger, {"network_disabled": True})
@@ -2162,7 +2213,11 @@ class TestBuildSessionDockerExecutor:
     def test_container_runtime_uses_unique_dns_name_without_host_port(self, monkeypatch):
         pm = SandboxPoolManager.get_instance()
         logger = sandbox_module.logging.getLogger("test")
-        cfg = SandboxConfig(level=SandboxLevel.DOCKER, scope=SandboxScope.SESSION)
+        cfg = SandboxConfig(
+            level=SandboxLevel.DOCKER,
+            scope=SandboxScope.SESSION,
+            network_disabled=False,
+        )
         container = MagicMock(
             short_id="session2",
             status="running",
@@ -2170,10 +2225,17 @@ class TestBuildSessionDockerExecutor:
             attrs={"NetworkSettings": {"Ports": {}}},
         )
         run = MagicMock(return_value=container)
-        networks = SimpleNamespace(get=MagicMock(return_value=object()), create=MagicMock())
+
+        class NotFound(Exception):
+            pass
+
+        networks = SimpleNamespace(
+            get=MagicMock(side_effect=NotFound()),
+            create=MagicMock(),
+        )
         docker_module = SimpleNamespace(
             from_env=lambda: SimpleNamespace(containers=SimpleNamespace(run=run), networks=networks),
-            errors=SimpleNamespace(NotFound=KeyError),
+            errors=SimpleNamespace(NotFound=NotFound),
         )
         response = SimpleNamespace(raise_for_status=lambda: None, json=lambda: [])
         captured = {}
@@ -2189,6 +2251,10 @@ class TestBuildSessionDockerExecutor:
         assert kwargs["name"] == "nexent-runtime-sandbox-session-unique"
         assert kwargs["network"] == sandbox_module.SANDBOX_NETWORK_NAME
         assert "ports" not in kwargs
+        networks.create.assert_called_once_with(
+            sandbox_module.SANDBOX_NETWORK_NAME,
+            driver="bridge",
+        )
         assert captured["owner"].base_url == (
             "http://nexent-runtime-sandbox-session-unique:8888"
         )
@@ -2214,6 +2280,260 @@ class TestBuildSessionDockerExecutor:
 
         assert parent_cleanup.call_count == 2
         owner.cleanup.assert_called_once_with()
+
+    def test_container_group_rejects_acquire_after_close(self):
+        owner = SimpleNamespace(cleanup=MagicMock())
+        group = sandbox_module._SessionDockerContainerGroup(owner)
+        group.close_if_unused()
+
+        with pytest.raises(RuntimeError, match="already closed"):
+            group.acquire()
+
+        group.release()
+        owner.cleanup.assert_called_once_with()
+
+    def test_container_group_close_if_unused_waits_for_active_lease(self):
+        owner = SimpleNamespace(cleanup=MagicMock())
+        group = sandbox_module._SessionDockerContainerGroup(owner)
+        group.acquire()
+
+        group.close_if_unused()
+        owner.cleanup.assert_not_called()
+        group.release()
+
+        owner.cleanup.assert_called_once_with()
+
+    def test_session_executor_initializes_and_acquires_group(self, monkeypatch):
+        parent_init = MagicMock()
+        monkeypatch.setattr(sandbox_module._DockerKernelLease, "__init__", parent_init)
+        owner = SimpleNamespace()
+        group = sandbox_module._SessionDockerContainerGroup(owner)
+
+        executor = sandbox_module._SessionDockerExecutor(
+            group,
+            MagicMock(),
+            receive_timeout_seconds=12,
+        )
+
+        parent_init.assert_called_once_with(owner, ANY, 12)
+        assert executor._session_container_group is group
+        assert executor._session_lease_released is False
+        assert group._lease_count == 1
+
+    def test_missing_dynamic_port_removes_container(self, monkeypatch):
+        pm = SandboxPoolManager.get_instance()
+        container = MagicMock(
+            attrs={"NetworkSettings": {"Ports": {}}},
+            status="running",
+        )
+        run = MagicMock(return_value=container)
+        monkeypatch.setitem(
+            sys.modules,
+            "docker",
+            SimpleNamespace(
+                from_env=lambda: SimpleNamespace(containers=SimpleNamespace(run=run))
+            ),
+        )
+        monkeypatch.setitem(sys.modules, "requests", SimpleNamespace())
+        monkeypatch.setattr(sandbox_module, "_is_containerized_runtime", lambda: False)
+
+        with pytest.raises(RuntimeError, match="did not allocate"):
+            pm._build_session_docker_executor(
+                SandboxConfig(level=SandboxLevel.DOCKER, scope=SandboxScope.SESSION),
+                MagicMock(),
+                {},
+            )
+
+        container.remove.assert_called_once_with(force=True)
+
+    def test_stopped_container_is_removed_before_jupyter_ready(self, monkeypatch):
+        pm = SandboxPoolManager.get_instance()
+        container = MagicMock(
+            attrs={
+                "NetworkSettings": {
+                    "Ports": {"8888/tcp": [{"HostPort": "49153"}]}
+                }
+            },
+            status="exited",
+        )
+        monkeypatch.setitem(
+            sys.modules,
+            "docker",
+            SimpleNamespace(
+                from_env=lambda: SimpleNamespace(
+                    containers=SimpleNamespace(run=MagicMock(return_value=container))
+                )
+            ),
+        )
+        monkeypatch.setitem(sys.modules, "requests", SimpleNamespace())
+        monkeypatch.setattr(sandbox_module, "_is_containerized_runtime", lambda: False)
+
+        with pytest.raises(RuntimeError, match="stopped before Jupyter"):
+            pm._build_session_docker_executor(
+                SandboxConfig(level=SandboxLevel.DOCKER, scope=SandboxScope.SESSION),
+                MagicMock(),
+                {},
+            )
+
+        container.remove.assert_called_once_with(force=True)
+
+    def test_jupyter_timeout_preserves_error_when_container_remove_fails(self, monkeypatch):
+        pm = SandboxPoolManager.get_instance()
+        container = MagicMock(
+            attrs={
+                "NetworkSettings": {
+                    "Ports": {"8888/tcp": [{"HostPort": "49154"}]}
+                }
+            },
+            status="running",
+        )
+        container.remove.side_effect = RuntimeError("remove failed")
+        monkeypatch.setitem(
+            sys.modules,
+            "docker",
+            SimpleNamespace(
+                from_env=lambda: SimpleNamespace(
+                    containers=SimpleNamespace(run=MagicMock(return_value=container))
+                )
+            ),
+        )
+        monkeypatch.setitem(
+            sys.modules,
+            "requests",
+            SimpleNamespace(get=MagicMock(side_effect=RuntimeError("not ready"))),
+        )
+        monkeypatch.setattr(sandbox_module, "_is_containerized_runtime", lambda: False)
+        monkeypatch.setattr(
+            sandbox_module.time,
+            "monotonic",
+            MagicMock(side_effect=[0, 0, 11]),
+        )
+        monkeypatch.setattr(sandbox_module.time, "sleep", MagicMock())
+
+        with pytest.raises(RuntimeError, match="did not become ready"):
+            pm._build_session_docker_executor(
+                SandboxConfig(
+                    level=SandboxLevel.DOCKER,
+                    scope=SandboxScope.SESSION,
+                    timeout_seconds=1,
+                ),
+                MagicMock(),
+                {},
+            )
+
+    def test_owner_cleanup_runs_when_group_construction_fails(self, monkeypatch):
+        pm = SandboxPoolManager.get_instance()
+        container = MagicMock(
+            client=MagicMock(),
+            attrs={
+                "NetworkSettings": {
+                    "Ports": {"8888/tcp": [{"HostPort": "49155"}]}
+                }
+            },
+            status="running",
+        )
+        monkeypatch.setitem(
+            sys.modules,
+            "docker",
+            SimpleNamespace(
+                from_env=lambda: SimpleNamespace(
+                    containers=SimpleNamespace(run=MagicMock(return_value=container))
+                )
+            ),
+        )
+        response = SimpleNamespace(raise_for_status=lambda: None, json=lambda: [])
+        monkeypatch.setitem(sys.modules, "requests", SimpleNamespace(get=lambda *args, **kwargs: response))
+        monkeypatch.setattr(sandbox_module, "_is_containerized_runtime", lambda: False)
+        monkeypatch.setattr(
+            sandbox_module,
+            "_SessionDockerContainerGroup",
+            MagicMock(side_effect=RuntimeError("group failed")),
+        )
+
+        with pytest.raises(RuntimeError, match="group failed"):
+            pm._build_session_docker_executor(
+                SandboxConfig(level=SandboxLevel.DOCKER, scope=SandboxScope.SESSION),
+                MagicMock(),
+                {},
+            )
+
+        container.remove.assert_called_once_with(force=True)
+
+    def test_post_lease_failure_cleans_executor_and_unused_group(self, monkeypatch):
+        pm = SandboxPoolManager.get_instance()
+        container = MagicMock(
+            client=MagicMock(),
+            short_id="session3",
+            attrs={
+                "NetworkSettings": {
+                    "Ports": {"8888/tcp": [{"HostPort": "49156"}]}
+                }
+            },
+            status="running",
+        )
+        monkeypatch.setitem(
+            sys.modules,
+            "docker",
+            SimpleNamespace(
+                from_env=lambda: SimpleNamespace(
+                    containers=SimpleNamespace(run=MagicMock(return_value=container))
+                )
+            ),
+        )
+        response = SimpleNamespace(raise_for_status=lambda: None, json=lambda: [])
+        monkeypatch.setitem(sys.modules, "requests", SimpleNamespace(get=lambda *args, **kwargs: response))
+        monkeypatch.setattr(sandbox_module, "_is_containerized_runtime", lambda: False)
+        executor = SimpleNamespace(base_url="http://127.0.0.1:49156", cleanup=MagicMock())
+        monkeypatch.setattr(pm, "_lease_session_docker_kernel", MagicMock(return_value=executor))
+        logger = MagicMock()
+        logger.info.side_effect = RuntimeError("log failed")
+
+        with pytest.raises(RuntimeError, match="log failed"):
+            pm._build_session_docker_executor(
+                SandboxConfig(level=SandboxLevel.DOCKER, scope=SandboxScope.SESSION),
+                logger,
+                {},
+            )
+
+        executor.cleanup.assert_called_once_with()
+        container.remove.assert_called_once_with(force=True)
+
+    def test_lease_rejects_dead_container(self, monkeypatch):
+        pm = SandboxPoolManager.get_instance()
+        group = sandbox_module._SessionDockerContainerGroup(SimpleNamespace())
+        monkeypatch.setattr(pm, "_is_alive", lambda executor: False)
+
+        with pytest.raises(RuntimeError, match="not running"):
+            pm._lease_session_docker_kernel(
+                SandboxConfig(level=SandboxLevel.DOCKER, scope=SandboxScope.SESSION),
+                MagicMock(),
+                group,
+            )
+
+    def test_lease_cleanup_runs_when_package_installation_fails(self, monkeypatch):
+        pm = SandboxPoolManager.get_instance()
+        owner = SimpleNamespace(cleanup=MagicMock())
+        group = sandbox_module._SessionDockerContainerGroup(owner)
+        executor = SimpleNamespace(
+            additional_imports=["broken"],
+            install_packages=MagicMock(side_effect=RuntimeError("install failed")),
+            cleanup=MagicMock(),
+        )
+        monkeypatch.setattr(pm, "_is_alive", lambda item: True)
+        monkeypatch.setattr(
+            sandbox_module,
+            "_SessionDockerExecutor",
+            MagicMock(return_value=executor),
+        )
+
+        with pytest.raises(RuntimeError, match="install failed"):
+            pm._lease_session_docker_kernel(
+                SandboxConfig(level=SandboxLevel.DOCKER, scope=SandboxScope.SESSION),
+                MagicMock(),
+                group,
+            )
+
+        executor.cleanup.assert_called_once_with()
 
 
 class TestMakeLocalExecutor:
@@ -3535,6 +3855,32 @@ class TestTargetedSandboxCoverage:
             ANY,
             request_timeout_seconds=None,
         )
+
+    def test_build_docker_executor_leases_from_existing_session_group(self, monkeypatch):
+        pool = SandboxPoolManager.get_instance()
+        executor = SimpleNamespace(
+            __call__=MagicMock(return_value="ok"),
+            send_tools=MagicMock(),
+            cleanup=MagicMock(),
+        )
+        group = sandbox_module._SessionDockerContainerGroup(SimpleNamespace())
+        monkeypatch.setitem(
+            sys.modules,
+            "smolagents.remote_executors",
+            SimpleNamespace(DockerExecutor=MagicMock()),
+        )
+        lease = MagicMock(return_value=executor)
+        monkeypatch.setattr(pool, "_lease_session_docker_kernel", lease)
+        monkeypatch.setattr(sandbox_module, "_wrap_executor", lambda item, config, logger_: item)
+
+        result = pool._build_docker_executor(
+            SandboxConfig(level=SandboxLevel.DOCKER, scope=SandboxScope.SESSION),
+            MagicMock(),
+            session_container_group=group,
+        )
+
+        assert result is executor
+        lease.assert_called_once_with(ANY, ANY, group)
 
     def test_system_docker_creates_missing_network(self, monkeypatch):
         pool = SandboxPoolManager.get_instance()
