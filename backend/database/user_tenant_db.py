@@ -11,7 +11,7 @@ from consts.const import (
     MAX_USERS_PER_TENANT,
 )
 from database.client import as_dict, get_db_session
-from database.db_models import UserTenant
+from database.db_models import TenantGroupInfo, TenantGroupUser, UserTenant
 from consts.exceptions import TenantResourceLimitError
 from sqlalchemy import text
 
@@ -217,7 +217,9 @@ def upsert_user_tenant(user_id: str, tenant_id: str, user_role: str = "USER", us
 
 
 def get_users_by_tenant_id(tenant_id: str, page: Optional[int] = 1, page_size: Optional[int] = 20,
-                           sort_by: str = "created_at", sort_order: str = "desc") -> Dict[str, Any]:
+                           sort_by: str = "created_at", sort_order: str = "desc",
+                           search: Optional[str] = None, roles: Optional[List[str]] = None,
+                           group_ids: Optional[List[int]] = None) -> Dict[str, Any]:
     """
     Get users belonging to a specific tenant with pagination and sorting
 
@@ -232,17 +234,33 @@ def get_users_by_tenant_id(tenant_id: str, page: Optional[int] = 1, page_size: O
         Dict[str, Any]: Dictionary containing users list and total count
     """
     with get_db_session() as session:
-        # Get total count
-        total_count = session.query(UserTenant).filter(
+        filters = [
             UserTenant.tenant_id == tenant_id,
             UserTenant.delete_flag == "N"
-        ).count()
+        ]
+        if search and search.strip():
+            filters.append(UserTenant.user_email.ilike(f"%{search.strip()}%"))
+        if roles:
+            filters.append(UserTenant.user_role.in_(roles))
+        if group_ids:
+            matching_user_ids = (
+                session.query(TenantGroupUser.user_id)
+                .join(TenantGroupInfo, TenantGroupInfo.group_id == TenantGroupUser.group_id)
+                .filter(
+                    TenantGroupUser.group_id.in_(group_ids),
+                    TenantGroupUser.delete_flag == "N",
+                    TenantGroupInfo.tenant_id == tenant_id,
+                    TenantGroupInfo.delete_flag == "N",
+                )
+                .subquery()
+            )
+            filters.append(UserTenant.user_id.in_(matching_user_ids))
+
+        # Count after all filters, before pagination.
+        total_count = session.query(UserTenant).filter(*filters).count()
 
         # Build base query
-        query = session.query(UserTenant).filter(
-            UserTenant.tenant_id == tenant_id,
-            UserTenant.delete_flag == "N"
-        )
+        query = session.query(UserTenant).filter(*filters)
 
         # Add sorting
         if sort_by == "created_at":
