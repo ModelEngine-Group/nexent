@@ -54,6 +54,38 @@ def get_local_python_authorized_imports() -> List[str]:
 logger = logging.getLogger(__name__)
 
 
+def cleanup_run_workspace(
+    workspace_path: str | None,
+    workspace_run_id: str | None,
+    logger_: logging.Logger | None = None,
+) -> bool:
+    """Delete one exact run workspace and its empty user directory."""
+    if not workspace_path or not workspace_run_id:
+        return False
+
+    cleanup_logger = logger_ or logger
+    workspace = Path(workspace_path).resolve()
+    if workspace.name != workspace_run_id:
+        cleanup_logger.error(
+            "Refusing to clean workspace whose final component does not match run id: %s",
+            workspace,
+        )
+        return False
+
+    try:
+        removed = workspace.exists()
+        if removed:
+            shutil.rmtree(workspace)
+        try:
+            workspace.parent.rmdir()
+        except OSError:
+            pass
+        return removed
+    except Exception as exc:
+        cleanup_logger.error("Failed to clean run workspace %s: %s", workspace, exc)
+        return False
+
+
 def _ensure_non_empty_final_answer(answer: str, lang: str) -> str:
     """Return a user-visible fallback when final-answer cleanup removes all content."""
     if answer.strip():
@@ -224,6 +256,8 @@ class NexentAgent:
         self.workspace_run_id = workspace_run_id
         self.minio_files = list(minio_files or [])
         self._workspace_uploads: List[Dict[str, Any]] = []
+        self._workspace_uploaded_paths: set[str] = set()
+        self._sandbox_executors: List[Any] = []
 
         self.agent = None
 
@@ -542,6 +576,7 @@ class NexentAgent:
                 run_id=metadata.get("run_id", self.workspace_run_id or ""),
                 on_upload=self._record_workspace_upload,
                 ensure_local_file=lambda _path: self._pull_file_workspace_from_sandbox(),
+                uploaded_paths=self._workspace_uploaded_paths,
             )
         elif class_name == "CreatePlanTool":
             from nexent.core.tools.plan_tools import CreatePlanTool
@@ -633,8 +668,8 @@ class NexentAgent:
 
         Args:
             agent_config: AgentConfig describing this agent.
-            _managed_context: Internal flag.  When True, skip sandbox creation so that
-                managed sub-agents share the parent's python_executor (smolagents contract).
+            _managed_context: Deprecated internal compatibility flag. Managed
+                sub-agents now receive independent sandbox executors.
         """
         if not isinstance(agent_config, AgentConfig):
             raise TypeError("agent_config must be a AgentConfig object")
@@ -665,7 +700,9 @@ class NexentAgent:
                 raise ValueError(f"Error in creating tool: {e}")
 
             try:
-                # Create managed agents recursively without creating a second sandbox.
+                # Create managed agents recursively. Each internal agent receives
+                # an independent executor/kernel so its generated code remains
+                # inside the configured sandbox.
                 raw_managed_agents = []
                 for sub_agent_config in agent_config.managed_agents:
                     inner_agent = self.create_single_agent(
@@ -724,11 +761,11 @@ class NexentAgent:
                 items=context_items,
             )
 
-            # Build the code executor unless this is a managed sub-agent that
-            # shares the parent's executor. Generated Python remains in the
-            # configured sandbox; host-marked tools are exposed through proxies.
+            # Build one code executor for this agent. Managed-agent orchestration
+            # is a host-marked tool, while generated Python remains in this
+            # agent's independent sandbox executor/kernel.
             python_executor = None
-            if not _managed_context and self.sandbox_config is not None:
+            if self.sandbox_config is not None:
                 from .sandbox import build_python_executor, SandboxLevel
                 has_managed = bool(
                     agent_config.managed_agents
@@ -738,8 +775,12 @@ class NexentAgent:
                     config=self.sandbox_config,
                     logger_=logger,
                     managed_agents_exist=has_managed,
-                    host_tools_exist=_has_host_tools(tool_list),
+                    host_tools_exist=_has_host_tools([
+                        *tool_list,
+                        *managed_agents_list,
+                    ]),
                 )
+                self._sandbox_executors.append(python_executor)
                 # Eager warm-up for remote executors (skip for LOCAL which is instant).
                 if self.sandbox_config.level != SandboxLevel.LOCAL:
                     try:
@@ -792,6 +833,7 @@ class NexentAgent:
                 user_id=self.user_id,
                 executor=python_executor,
                 verification_config=getattr(agent_config, "verification_config", None),
+                workspace_path=self.workspace_path,
             )
             agent.stop_event = self.stop_event
 
@@ -1111,17 +1153,44 @@ class NexentAgent:
         workspace_note = (
             f"\n\nRun workspace: {workspace}\n"
             f"Write every generated file under: {workspace / 'outputs'}\n"
+            "The code executor already runs in that outputs directory. Use bare relative "
+            "paths such as 'report.pdf', not 'outputs/report.pdf', to avoid creating an "
+            "outputs/outputs directory.\n"
             "Files created there are uploaded to MinIO automatically when the run finishes."
         )
         if file_lines:
             workspace_note += f"\nUploaded files are available locally:\n{file_lines}"
         self._push_file_workspace_to_sandbox()
+        self._initialize_sandbox_workspaces()
         return query + workspace_note
 
     def _sandbox_container(self) -> Any:
         """Return the active Docker container when the executor exposes one."""
-        executor = getattr(self.agent, "python_executor", None)
-        return getattr(executor, "container", None) if executor is not None else None
+        containers = self._sandbox_containers()
+        return containers[0] if containers else None
+
+    def _sandbox_containers(self) -> List[Any]:
+        """Return every distinct Docker container used by this agent tree."""
+        executors = list(self._sandbox_executors)
+        root_executor = getattr(self.agent, "python_executor", None)
+        if root_executor is not None and all(
+            executor is not root_executor for executor in executors
+        ):
+            executors.append(root_executor)
+
+        containers: List[Any] = []
+        seen_keys = set()
+        for executor in executors:
+            container = getattr(executor, "container", None)
+            if container is None:
+                continue
+            container_id = getattr(container, "id", None)
+            key = container_id if isinstance(container_id, str) and container_id else id(container)
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            containers.append(container)
+        return containers
 
     def _uses_shared_file_workspace(self) -> bool:
         """Return whether the runtime and sandbox use the same workspace volume."""
@@ -1132,21 +1201,88 @@ class NexentAgent:
         )
 
     def _push_file_workspace_to_sandbox(self) -> None:
-        """Copy the prepared host workspace into a Docker sandbox."""
-        container = self._sandbox_container()
-        if container is None or not self.workspace_path:
+        """Copy the prepared host workspace into every Docker sandbox."""
+        containers = self._sandbox_containers()
+        if not containers or not self.workspace_path:
             return
         workspace = Path(self.workspace_path).resolve()
         if not workspace.exists() or workspace.drive:
             return
-        if not self._uses_shared_file_workspace():
+        shared_workspace = self._uses_shared_file_workspace()
+        archive_bytes = None
+        if not shared_workspace:
             archive = io.BytesIO()
             with tarfile.open(fileobj=archive, mode="w") as tar:
                 tar.add(workspace, arcname=str(workspace).lstrip("/"), recursive=True)
-            archive.seek(0)
-            if not container.put_archive("/", archive.getvalue()):
+            archive_bytes = archive.getvalue()
+
+        for container in containers:
+            if archive_bytes is not None and not container.put_archive("/", archive_bytes):
                 raise RuntimeError("Failed to copy run workspace into the sandbox")
-        self._grant_sandbox_output_access(container, workspace)
+            self._grant_sandbox_output_access(container, workspace)
+
+    def _initialize_sandbox_workspaces(self) -> None:
+        """Set every Docker kernel's cwd and workspace environment for this run."""
+        if not self.workspace_path:
+            return
+        workspace = Path(self.workspace_path).resolve()
+        output_dir = workspace / "outputs"
+        bootstrap_code = (
+            "import os as _nexent_os\n"
+            f"_nexent_workspace = {json.dumps(str(workspace))}\n"
+            f"_nexent_output_dir = {json.dumps(str(output_dir))}\n"
+            "_nexent_os.environ['NEXENT_WORKSPACE'] = _nexent_workspace\n"
+            "_nexent_os.environ['NEXENT_OUTPUT_DIR'] = _nexent_output_dir\n"
+            "_nexent_os.chdir(_nexent_output_dir)\n"
+            "[_nexent_workspace, _nexent_output_dir]"
+        )
+        seen_executor_ids = set()
+        for executor in self._sandbox_executors:
+            executor_id = id(executor)
+            if executor_id in seen_executor_ids:
+                continue
+            seen_executor_ids.add(executor_id)
+            backend = getattr(executor, "_nexent_backend", None)
+            if backend == "local":
+                continue
+            if backend != "docker" and getattr(executor, "container", None) is None:
+                continue
+            register_bootstrap = None
+            if (
+                getattr(executor, "_nexent_kernel_recovery_supported", False)
+                is True
+                and callable(
+                    getattr(type(executor), "register_kernel_bootstrap_code", None)
+                )
+            ):
+                register_bootstrap = executor.register_kernel_bootstrap_code
+            execute_bootstrap = (
+                register_bootstrap if callable(register_bootstrap) else executor
+            )
+            try:
+                execute_bootstrap(bootstrap_code)
+            except Exception as exc:
+                # Workspace initialization is idempotent. If the kernel channel
+                # failed and marked this lease unhealthy, retry the bootstrap in
+                # the same run so the lease can replace its kernel immediately.
+                # Do not apply this retry to arbitrary generated code because a
+                # lost terminal message does not prove that code had no effects.
+                if (
+                    getattr(executor, "_nexent_kernel_recovery_supported", False)
+                    and getattr(executor, "_unhealthy", False)
+                ):
+                    logger.warning(
+                        "Retrying sandbox workspace initialization with a replacement kernel: %s",
+                        exc,
+                    )
+                    try:
+                        execute_bootstrap(bootstrap_code)
+                        continue
+                    except Exception as retry_exc:
+                        exc = retry_exc
+                raise RuntimeError(
+                    f"Failed to initialize sandbox workspace '{workspace}': {exc}"
+                ) from exc
 
     @staticmethod
     def _grant_sandbox_output_access(container: Any, workspace: Path) -> None:
@@ -1180,33 +1316,34 @@ class NexentAgent:
                 )
 
     def _pull_file_workspace_from_sandbox(self) -> None:
-        """Copy sandbox outputs back to the host workspace with safe extraction."""
-        container = self._sandbox_container()
-        if container is None or not self.workspace_path:
+        """Copy outputs from every Docker sandbox back to the host workspace."""
+        containers = self._sandbox_containers()
+        if not containers or not self.workspace_path:
             return
         if self._uses_shared_file_workspace():
             return
         workspace = Path(self.workspace_path).resolve()
         if workspace.drive:
             return
-        try:
-            chunks, _ = container.get_archive(str(workspace))
-            archive = io.BytesIO(b"".join(chunks))
-            with tarfile.open(fileobj=archive, mode="r:*") as tar:
-                members = []
-                extraction_root = workspace.parent.resolve()
-                for member in tar.getmembers():
-                    if not (member.isfile() or member.isdir()):
-                        raise RuntimeError("Sandbox workspace archive contains an unsupported entry")
-                    target = (extraction_root / member.name).resolve()
-                    try:
-                        target.relative_to(extraction_root)
-                    except ValueError as exc:
-                        raise RuntimeError("Sandbox workspace archive escapes the run root") from exc
-                    members.append(member)
-                tar.extractall(extraction_root, members=members)
-        except Exception as exc:
-            logger.warning("Failed to copy sandbox workspace back to host: %s", exc)
+        for container in containers:
+            try:
+                chunks, _ = container.get_archive(str(workspace))
+                archive = io.BytesIO(b"".join(chunks))
+                with tarfile.open(fileobj=archive, mode="r:*") as tar:
+                    members = []
+                    extraction_root = workspace.parent.resolve()
+                    for member in tar.getmembers():
+                        if not (member.isfile() or member.isdir()):
+                            raise RuntimeError("Sandbox workspace archive contains an unsupported entry")
+                        target = (extraction_root / member.name).resolve()
+                        try:
+                            target.relative_to(extraction_root)
+                        except ValueError as exc:
+                            raise RuntimeError("Sandbox workspace archive escapes the run root") from exc
+                        members.append(member)
+                    tar.extractall(extraction_root, members=members)
+            except Exception as exc:
+                logger.warning("Failed to copy sandbox workspace back to host: %s", exc)
 
     def _finalize_file_workspace(self) -> None:
         """Upload all workspace outputs that were not already uploaded explicitly."""
@@ -1250,8 +1387,7 @@ class NexentAgent:
         if workspace.name != self.workspace_run_id:
             return
         try:
-            container = self._sandbox_container()
-            if container is not None:
+            for container in self._sandbox_containers():
                 try:
                     result = container.exec_run(
                         ["rm", "-rf", "--", str(workspace)],
@@ -1268,12 +1404,11 @@ class NexentAgent:
                         )
                 except Exception as exc:
                     logger.warning("Failed to clean sandbox run workspace %s: %s", workspace, exc)
-            if workspace.exists():
-                shutil.rmtree(workspace)
-            try:
-                workspace.parent.rmdir()
-            except OSError:
-                pass
+            cleanup_run_workspace(
+                self.workspace_path,
+                self.workspace_run_id,
+                logger,
+            )
         except Exception as exc:
             logger.error("Failed to clean run workspace %s: %s", workspace, exc)
 
@@ -1382,8 +1517,13 @@ class NexentAgent:
         Must run AFTER any output-sync logic, because the container filesystem
         is inaccessible after the executor is released / destroyed.
         """
-        executor = getattr(self.agent, "python_executor", None)
-        if executor is None:
+        root_executor = getattr(self.agent, "python_executor", None)
+        executors = list(self._sandbox_executors)
+        if root_executor is not None and all(
+            item is not root_executor for item in executors
+        ):
+            executors.append(root_executor)
+        if not executors:
             return
 
         scope = getattr(self, "_sandbox_scope", None)
@@ -1415,14 +1555,22 @@ class NexentAgent:
                 logger.error("Output sync to MinIO failed: %s", exc)
 
         # Release or destroy the executor.
-        if scope == "system":
-            # Return to pool for reuse.
-            from .sandbox import release_python_executor
-            release_python_executor(executor, logger)
-        else:
-            # Session scope or unknown — destroy the container.
-            from .sandbox import cleanup_executor
-            cleanup_executor(executor, logger, timeout=5.0)
+        seen_executor_ids = set()
+        for executor in reversed(executors):
+            executor_id = id(executor)
+            if executor_id in seen_executor_ids:
+                continue
+            seen_executor_ids.add(executor_id)
+            if scope == "system":
+                # Return every kernel lease to the shared system sandbox.
+                from .sandbox import release_python_executor
+                release_python_executor(executor, logger)
+            else:
+                # Session scope or unknown — destroy every per-agent container.
+                from .sandbox import cleanup_executor
+                cleanup_executor(executor, logger, timeout=5.0)
 
         # Clear the reference so GC can collect the wrapper objects.
-        self.agent.python_executor = None
+        if self.agent is not None:
+            self.agent.python_executor = None
+        self._sandbox_executors.clear()

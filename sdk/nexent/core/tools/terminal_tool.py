@@ -9,6 +9,7 @@ from smolagents.tools import Tool
 import paramiko
 
 from ..utils.observer import MessageObserver, ProcessType
+from ..utils.pydantic_utils import unwrap_field_info
 from ..utils.tools_common_message import ToolSign, ToolCategory
 
 logger = logging.getLogger("terminal_tool")
@@ -77,7 +78,7 @@ class TerminalTool(Tool):
                  init_path: str = Field(description="Initial workspace path", default="~"),
                  observer: MessageObserver = Field(description="Message observer", default=None, exclude=True),
                  ssh_host: str = Field(description="SSH host", default="nexent-openssh-server"),
-                 ssh_port: int = Field(description="SSH port", default=22),
+                 ssh_port: int = Field(description="SSH port", default=22, ge=1, le=65535),
                  ssh_user: str = Field(description="SSH username"),
                  password: str = Field(description="SSH password")):
         """Initialize the TerminalTool.
@@ -91,6 +92,13 @@ class TerminalTool(Tool):
             password (str): SSH password for authentication. Required parameter.
         """
         super().__init__()
+        # smolagents passes Field defaults as FieldInfo when a parameter is not
+        # provided explicitly; unwrap them to their declared default values.
+        init_path = unwrap_field_info(init_path)
+        observer = unwrap_field_info(observer)
+        ssh_host = unwrap_field_info(ssh_host)
+        ssh_port = unwrap_field_info(ssh_port)
+
         # Handle ~ for home directory and None values
         if init_path == "~":
             self.init_path = "~"
@@ -104,7 +112,7 @@ class TerminalTool(Tool):
 
         self.observer = observer
         self.ssh_host = ssh_host
-        self.ssh_port = ssh_port
+        self.ssh_port = max(1, min(int(ssh_port or 22), 65535))
         self.ssh_user = ssh_user
         self.password = password
 

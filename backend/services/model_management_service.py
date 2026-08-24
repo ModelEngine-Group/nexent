@@ -296,6 +296,12 @@ async def create_model_for_tenant(user_id: str, tenant_id: str, model_data: Dict
         # Set model_factory to modelengine when using open/router URL
         if "open/router" in model_base_url:
             model_data["model_factory"] = "modelengine"
+
+        if model_data.get("model_type") in ("vlm", "vlm2", "vlm3", "vlm4"):
+            model_data["model_factory"] = _infer_model_factory(
+                model_data["model_type"], model_data["base_url"], model_data.get("model_factory")
+            )
+
         # Split model_name into repo and name
         model_repo, model_name = split_repo_name(
             model_data["model_name"]) if model_data.get("model_name") else ("", "")

@@ -117,11 +117,13 @@ bash deploy.sh        # Interactive deployment
 
 ## Database Migrations
 
-**Location**: `docker/sql/*.sql` (versioned migration scripts)
+**Location**: `deploy/sql/`
 
-**Critical rule**: When adding columns/tables via migration script:
-- Update `docker/init.sql` (Docker Compose fresh deploy)
-- Update `k8s/helm/nexent/charts/nexent-common/files/init.sql` (K8s fresh deploy)
+**Critical rule**: Every `.sql` file that already exists in the target branch is immutable.
+
+- This rule applies to all migration, init, and Supabase SQL files without exception.
+- Do not modify, rename, or delete an existing SQL file after it has been merged.
+- Make database changes only by adding a new versioned migration file under `deploy/sql/migrations/`.
 
 **Version**: Tracked in `backend/consts/const.py` as `APP_VERSION`
 

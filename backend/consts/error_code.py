@@ -121,6 +121,7 @@ class ErrorCode(Enum):
 
     # 03 - Configuration
     MCP_NAME_ILLEGAL = "070301"  # Illegal MCP name
+    MCP_PARAM_CONSTRAINT_ERROR_MESSAGES = "070302"  # MCP parameter constraint error messages
 
     # ==================== 08 MonitorOps / 监控与运维 ====================
     # 01 - Monitoring
