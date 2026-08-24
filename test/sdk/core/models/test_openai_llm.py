@@ -135,8 +135,8 @@ def make_chunk(content, reasoning=None, role=None):
     return chunk
 
 
-def test_modelengine_message_flattening(monkeypatch):
-    # Create instance with model_factory set to 'modelengine'
+def _make_modelengine_model():
+    """Build a modelengine OpenAI model wired to capture completion kwargs."""
     ModelClass = OpenAIModel or globals().get("ImportedOpenAIModel")
     m = ModelClass(model_id="m", api_base="u", api_key="k", model_factory="modelengine")
 
@@ -148,23 +148,29 @@ def test_modelengine_message_flattening(monkeypatch):
         return {}
 
     m._prepare_completion_kwargs = fake_prepare_completion_kwargs
-    # Ensure required attributes exist
     m.model_id = "m"
     m.custom_role_conversions = {}
-    # Provide a writable observer with required methods/attributes
     m.observer = types.SimpleNamespace(current_mode=None,
                                       add_model_new_token=lambda token: None,
                                       add_model_reasoning_content=lambda rc: None,
                                       flush_remaining_tokens=lambda: None)
 
-    # client.chat.completions.create should return an iterable of chunks
     chunk = make_chunk("hi")
     client_ns = types.SimpleNamespace()
     client_ns.chat = types.SimpleNamespace()
+
     def fake_create(stream=True, **kw):
         return [chunk]
+
     client_ns.chat.completions = types.SimpleNamespace(create=fake_create)
     m.client = client_ns
+    return m, captured
+
+
+
+def test_modelengine_message_flattening(monkeypatch):
+    # Create instance with model_factory set to 'modelengine'
+    m, captured = _make_modelengine_model()
 
     # Call with dict messages (as external callers might)
     messages = [{"role": "system", "content": "SYS"}, {"role": "user", "content": ["a", {"text": "b"}]}]
@@ -177,6 +183,73 @@ def test_modelengine_message_flattening(monkeypatch):
     assert all(hasattr(x, 'role') and hasattr(x, 'content') for x in captured['messages'])
     # second message content should contain 'b' (either as list or flattened string)
     assert "b" in str(captured['messages'][1].content)
+
+
+def test_modelengine_multimodal_not_flattened(monkeypatch):
+    """ModelEngine must NOT flatten messages carrying audio/video/image blocks."""
+    m, captured = _make_modelengine_model()
+
+    # A multimodal user message carrying an audio_url block must stay structured.
+    messages = [{"role": "user", "content": [
+        {"type": "audio_url", "audio_url": {"url": "data:audio/mpeg;base64,xxx"}},
+        {"type": "text", "text": "describe"},
+    ]}]
+    m.__call__(messages)
+
+    # Must NOT flatten — audio payload would be lost.
+    assert captured['flatten_messages_as_text'] is False
+    # The audio_url block must survive into the messages handed to completion,
+    # proving ModelEngine audio models receive the base64 payload intact.
+    sent_content = captured['messages'][0].content
+    assert isinstance(sent_content, list)
+    assert sent_content[0]["type"] == "audio_url"
+    assert sent_content[0]["audio_url"]["url"] == "data:audio/mpeg;base64,xxx"
+
+
+def test_modelengine_message_flattening_can_be_disabled_for_vlm():
+    ModelClass = OpenAIModel or globals().get("ImportedOpenAIModel")
+    model = ModelClass(
+        model_id="m",
+        api_base="u",
+        api_key="k",
+        model_factory="modelengine",
+        flatten_messages_as_text=False,
+    )
+    captured = {}
+
+    def fake_prepare_completion_kwargs(messages=None, **kwargs):
+        captured["messages"] = messages
+        captured["flatten_messages_as_text"] = kwargs["flatten_messages_as_text"]
+        return {}
+
+    model._prepare_completion_kwargs = fake_prepare_completion_kwargs
+    model.model_id = "m"
+    model.custom_role_conversions = {}
+    model.observer = types.SimpleNamespace(
+        current_mode=None,
+        add_model_new_token=lambda token: None,
+        add_model_reasoning_content=lambda reasoning: None,
+        flush_remaining_tokens=lambda: None,
+    )
+    model.client = types.SimpleNamespace(
+        chat=types.SimpleNamespace(
+            completions=types.SimpleNamespace(create=lambda stream=True, **kwargs: [make_chunk("ok")])
+        )
+    )
+    messages = [
+        {"role": "system", "content": [{"type": "text", "text": "Describe the image"}]},
+        {
+            "role": "user",
+            "content": [
+                {"type": "image_url", "image_url": {"url": "data:image/png;base64,aW1hZ2U="}}
+            ],
+        },
+    ]
+
+    model(messages)
+
+    assert captured["flatten_messages_as_text"] is False
+    assert captured["messages"][1].content[0]["type"] == "image_url"
 
 from unittest.mock import AsyncMock, MagicMock, patch, ANY
 import importlib.util
@@ -1798,83 +1871,6 @@ def test_provider_adapter_preserves_context_manager_tool_order(openai_model_inst
     assert create_kwargs["tools"] == tools
     assert create_kwargs["stream"] is True
     assert openai_model_instance.last_provider_cache_advice.supported is True
-
-
-def test_prepare_completion_kwargs_forces_flatten_false_for_vlm(openai_model_instance):
-    """OpenAIModel._prepare_completion_kwargs must force flatten_messages_as_text=False.
-
-    This is critical for VLM: VLM content is always a list of typed blocks
-    (image_url + text) and must never be flattened into a plain string.
-    """
-    # Patch the base class method to capture what it receives
-    original_prepare = openai_model_instance.__class__.__bases__[0]._prepare_completion_kwargs
-
-    captured_kwargs = {}
-
-    def capture_base_prepare(self, *args, **kwargs):
-        captured_kwargs.update(kwargs)
-        return original_prepare(self, *args, **kwargs)
-
-    # Replace base class method temporarily
-    openai_model_instance.__class__.__bases__[0]._prepare_completion_kwargs = capture_base_prepare
-
-    try:
-        result = openai_model_instance._prepare_completion_kwargs(messages=[{"role": "user", "content": "hi"}])
-        # The override must ensure flatten_messages_as_text=False reaches the base class
-        assert captured_kwargs.get("flatten_messages_as_text") is False
-    finally:
-        # Restore original
-        openai_model_instance.__class__.__bases__[0]._prepare_completion_kwargs = original_prepare
-
-
-def test_prepare_completion_kwargs_preserves_explicit_flatten_setting(openai_model_instance):
-    """When flatten_messages_as_text is already in kwargs, setdefault must not overwrite it."""
-    original_prepare = openai_model_instance.__class__.__bases__[0]._prepare_completion_kwargs
-
-    captured_kwargs = {}
-
-    def capture_base_prepare(self, *args, **kwargs):
-        captured_kwargs.update(kwargs)
-        return original_prepare(self, *args, **kwargs)
-
-    openai_model_instance.__class__.__bases__[0]._prepare_completion_kwargs = capture_base_prepare
-
-    try:
-        # Pass flatten_messages_as_text explicitly as True (should be preserved by setdefault)
-        result = openai_model_instance._prepare_completion_kwargs(
-            messages=[{"role": "user", "content": "hi"}],
-            flatten_messages_as_text=True,
-        )
-        # setdefault only sets when key is absent, so existing True should be preserved
-        assert captured_kwargs.get("flatten_messages_as_text") is True
-    finally:
-        openai_model_instance.__class__.__bases__[0]._prepare_completion_kwargs = original_prepare
-
-
-def test_prepare_completion_kwargs_forces_flatten_false_regardless_of_model_factory(openai_model_instance):
-    """flatten_messages_as_text=False must be enforced even when model_factory=modelengine.
-
-    The modelengine factory defaults flatten_messages_as_text=True in OpenAIServerModel,
-    but OpenAIModel override forces it back to False for VLM compatibility.
-    """
-    openai_model_instance.model_factory = "modelengine"
-
-    original_prepare = openai_model_instance.__class__.__bases__[0]._prepare_completion_kwargs
-
-    captured_kwargs = {}
-
-    def capture_base_prepare(self, *args, **kwargs):
-        captured_kwargs.update(kwargs)
-        return original_prepare(self, *args, **kwargs)
-
-    openai_model_instance.__class__.__bases__[0]._prepare_completion_kwargs = capture_base_prepare
-
-    try:
-        result = openai_model_instance._prepare_completion_kwargs(messages=[{"role": "user", "content": "hi"}])
-        # Override must force False even though modelengine would set True
-        assert captured_kwargs.get("flatten_messages_as_text") is False
-    finally:
-        openai_model_instance.__class__.__bases__[0]._prepare_completion_kwargs = original_prepare
 
 
 if __name__ == "__main__":

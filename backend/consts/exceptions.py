@@ -20,9 +20,9 @@ This module provides two types of exceptions:
 The exception handler automatically maps legacy exception class names to ErrorCode.
 """
 
-from .error_code import ErrorCode, ERROR_CODE_HTTP_STATUS
+from .error_code import ErrorCode, ERROR_CODE_HTTP_STATUS, RuntimeMetadataValidationCode
 from .error_message import ErrorMessage
-from typing import List
+from typing import Dict, List, Optional
 
 
 # ==================== New Framework: AppException with ErrorCode ====================
@@ -81,6 +81,28 @@ class AgentRunException(Exception):
     """Exception raised when agent run fails."""
 
     pass
+
+
+class RuntimeServiceUnavailableError(Exception):
+    """Raised when northbound cannot connect to the runtime service."""
+
+    pass
+
+
+class RuntimeServiceTimeoutError(Exception):
+    """Raised when a request to the runtime service times out."""
+
+    pass
+
+
+class RuntimeUpstreamError(Exception):
+    """Preserve an explicit error response returned by the runtime service."""
+
+    def __init__(self, status_code: int, content: bytes, headers: dict[str, str]):
+        super().__init__(f"Runtime service returned HTTP {status_code}")
+        self.status_code = status_code
+        self.content = content
+        self.headers = headers
 
 
 class LimitExceededError(Exception):
@@ -193,6 +215,23 @@ class ValidationError(Exception):
     pass
 
 
+class RuntimeMetadataValidationError(ValueError):
+    """Describe a runtime metadata validation failure without retaining values."""
+
+    def __init__(self, code: RuntimeMetadataValidationCode, message: str):
+        self.code = code
+        self.message = message
+        super().__init__(message)
+
+
+class RuntimeMetadataVersionConflict(ValueError):
+    """Raised when a runtime metadata optimistic-lock check fails."""
+
+    def __init__(self, current_version: int):
+        self.current_version = current_version
+        super().__init__("Runtime metadata version conflict")
+
+
 class TenantResourceLimitError(ValidationError, ValueError):
     """Raised when a platform or tenant hard resource limit is reached."""
 
@@ -261,8 +300,14 @@ class DataMateConnectionError(Exception):
 
 class SkillDuplicateError(Exception):
     """Raised when importing an agent with skills that have duplicate names in target tenant."""
-    def __init__(self, duplicate_names: List[str]):
+    def __init__(
+        self,
+        duplicate_names: List[str],
+        skill_conflicts: Optional[List[Dict[str, str]]] = None,
+    ):
         self.duplicate_names = duplicate_names
+        self.skill_conflicts = skill_conflicts or []
+        super().__init__(f"Duplicate skills: {', '.join(duplicate_names)}")
 
 
 class SkillException(Exception):

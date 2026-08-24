@@ -6,6 +6,7 @@ functions in the remote_mcp_service module.
 """
 
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch, MagicMock, AsyncMock
 import importlib.machinery
 import types
@@ -1496,6 +1497,18 @@ class TestCheckMcpServiceHealthCustomHeaders(unittest.IsolatedAsyncioTestCase):
             custom_headers=None,
         )
 
+    @patch('backend.services.remote_mcp_service._mcp_protocol_health_check', new_callable=AsyncMock)
+    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    async def test_protocol_health_check_requires_service_name(self, mock_get, mock_protocol):
+        """A healthy protocol response still requires a configured MCP name."""
+        mock_get.return_value = {"mcp_server": "https://srv/mcp", "mcp_name": None}
+        mock_protocol.return_value = ["tool"]
+
+        with self.assertRaises(McpValidationError):
+            await refresh_mcp_service_tool_count(
+                tenant_id='tid', user_id='uid', mcp_id=1,
+            )
+
 
 # ============================================================================
 # list_mcp_service_tools_by_id - custom_headers tests (lines 1024-1025, 1031-1032)
@@ -1622,6 +1635,67 @@ class TestAddContainerMcpServicePortConflict(unittest.IsolatedAsyncioTestCase):
         mock_port_check.assert_called_once_with(port=8080)
         mock_mgr.start_mcp_container.assert_awaited_once()
         mock_add.assert_awaited_once()
+
+    @patch('backend.services.remote_mcp_service.asyncio.sleep', new_callable=AsyncMock)
+    @patch('backend.services.remote_mcp_service.mcp_server_health')
+    @patch('backend.services.remote_mcp_service.add_mcp_service')
+    @patch('backend.services.remote_mcp_service.MCPContainerManager')
+    @patch('backend.services.remote_mcp_service.check_container_port_conflict')
+    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
+    async def test_streaming_deploy_notifies_and_waits_for_readiness(
+        self, mock_check_name, mock_port_check, mock_mgr_cls, mock_add,
+        mock_health, mock_sleep,
+    ):
+        """Streaming deployment invokes the callback and retries readiness checks."""
+        mock_check_name.return_value = False
+        mock_port_check.return_value = True
+        mock_mgr = MagicMock()
+        mock_mgr.start_mcp_container = AsyncMock(return_value={
+            "container_id": "cid", "mcp_url": "https://localhost:8080/mcp",
+            "host_port": 8080, "container_name": "test-svc-xyz",
+        })
+        mock_mgr_cls.return_value = mock_mgr
+        mock_health.side_effect = [MCPConnectionError("starting"), True]
+        on_started = AsyncMock()
+
+        await add_container_mcp_service(
+            tenant_id='tid', user_id='uid', name='test-svc', description='desc',
+            source='local', tags=[], authorization_token=None, registry_json=None,
+            market_id=None, port=8080, mcp_config=self._make_mcp_config(),
+            wait_for_ready=False, on_container_started=on_started,
+        )
+
+        on_started.assert_awaited_once_with(mock_mgr.start_mcp_container.return_value)
+        self.assertEqual(mock_health.await_count, 2)
+        mock_sleep.assert_awaited_once_with(5)
+
+    @patch('backend.services.remote_mcp_service.asyncio.sleep', new_callable=AsyncMock)
+    @patch('backend.services.remote_mcp_service.mcp_server_health')
+    @patch('backend.services.remote_mcp_service.MCPContainerManager')
+    @patch('backend.services.remote_mcp_service.check_container_port_conflict', return_value=True)
+    @patch('backend.services.remote_mcp_service.check_mcp_name_exists', return_value=False)
+    async def test_streaming_deploy_raises_after_readiness_retries(
+        self, mock_check_name, mock_port_check, mock_mgr_cls, mock_health, mock_sleep,
+    ):
+        mock_mgr = MagicMock()
+        mock_mgr.start_mcp_container = AsyncMock(return_value={
+            "container_id": "cid", "mcp_url": "https://localhost:8080/mcp",
+            "host_port": 8080, "container_name": "test-svc-xyz",
+        })
+        mock_mgr_cls.return_value = mock_mgr
+        error = MCPConnectionError("not ready")
+        mock_health.side_effect = error
+
+        with self.assertRaises(MCPConnectionError):
+            await add_container_mcp_service(
+                tenant_id='tid', user_id='uid', name='test-svc', description='desc',
+                source='local', tags=[], authorization_token=None, registry_json=None,
+                market_id=None, port=8080, mcp_config=self._make_mcp_config(),
+                wait_for_ready=False,
+            )
+
+        self.assertEqual(mock_health.await_count, 30)
+        self.assertEqual(mock_sleep.await_count, 30)
 
 
 # ============================================================================
@@ -1970,15 +2044,21 @@ class TestRefreshMcpServiceToolCount(unittest.IsolatedAsyncioTestCase):
     @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
     @patch('backend.services.remote_mcp_service._mcp_protocol_health_check')
     @patch('backend.services.remote_mcp_service.update_mcp_record_registry_json_by_id')
-    async def test_success(self, mock_update, mock_health, mock_get):
-        """Tool names fetched and persisted successfully."""
+    @patch('services.tool_configuration_service.get_tool_from_remote_mcp_server')
+    async def test_success(self, mock_tools, mock_update, mock_health, mock_get):
+        """Complete tool snapshot is fetched and persisted successfully."""
         mock_get.return_value = {
+            "mcp_name": "example",
             "mcp_server": "https://srv/mcp",
             "authorization_token": None,
             "custom_headers": None,
             "registry_json": {},
         }
         mock_health.return_value = ["tool1", "tool2"]
+        mock_tools.return_value = [
+            SimpleNamespace(name="tool1", description="First tool"),
+            SimpleNamespace(name="tool2", description="Second tool"),
+        ]
 
         result = await refresh_mcp_service_tool_count(
             tenant_id="tid", user_id="uid", mcp_id=1,
@@ -1987,7 +2067,13 @@ class TestRefreshMcpServiceToolCount(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, ["tool1", "tool2"])
         mock_update.assert_called_once_with(
             mcp_id=1, tenant_id="tid", user_id="uid",
-            registry_json={"_toolNames": ["tool1", "tool2"]},
+            registry_json={
+                "_toolNames": ["tool1", "tool2"],
+                "tools": [
+                    {"name": "tool1", "description": "First tool"},
+                    {"name": "tool2", "description": "Second tool"},
+                ],
+            },
         )
 
     @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
@@ -2033,15 +2119,18 @@ class TestRefreshMcpServiceToolCount(unittest.IsolatedAsyncioTestCase):
     @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
     @patch('backend.services.remote_mcp_service._mcp_protocol_health_check')
     @patch('backend.services.remote_mcp_service.update_mcp_record_registry_json_by_id')
-    async def test_with_auth_token_and_custom_headers(self, mock_update, mock_health, mock_get):
+    @patch('services.tool_configuration_service.get_tool_from_remote_mcp_server')
+    async def test_with_auth_token_and_custom_headers(self, mock_tools, mock_update, mock_health, mock_get):
         """Auth token and custom headers are passed to health check."""
         mock_get.return_value = {
+            "mcp_name": "example",
             "mcp_server": "https://srv/mcp",
             "authorization_token": "Bearer tok",
             "custom_headers": {"X-Custom": "val"},
             "registry_json": None,
         }
         mock_health.return_value = ["tool1"]
+        mock_tools.return_value = [SimpleNamespace(name="tool1", description="Tool description")]
 
         result = await refresh_mcp_service_tool_count(
             tenant_id="tid", user_id="uid", mcp_id=1,
@@ -2054,7 +2143,38 @@ class TestRefreshMcpServiceToolCount(unittest.IsolatedAsyncioTestCase):
         )
         mock_update.assert_called_once_with(
             mcp_id=1, tenant_id="tid", user_id="uid",
-            registry_json={"_toolNames": ["tool1"]},
+            registry_json={
+                "_toolNames": ["tool1"],
+                "tools": [{"name": "tool1", "description": "Tool description"}],
+            },
+        )
+
+    @patch('backend.services.remote_mcp_service.update_mcp_market_record')
+    @patch('backend.services.remote_mcp_service.get_mcp_market_record_by_source_mcp_id')
+    @patch('backend.services.remote_mcp_service.update_mcp_record_registry_json_by_id')
+    @patch('services.tool_configuration_service.get_tool_from_remote_mcp_server')
+    @patch('backend.services.remote_mcp_service._mcp_protocol_health_check')
+    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    async def test_syncs_tool_snapshot_to_market_record(
+        self, mock_get, mock_health, mock_tools, mock_update_record,
+        mock_market_lookup, mock_market_update,
+    ):
+        mock_get.return_value = {
+            "mcp_name": "example", "mcp_server": "https://srv/mcp",
+            "market_id": None, "registry_json": {},
+        }
+        mock_health.return_value = ["tool1"]
+        mock_tools.return_value = [SimpleNamespace(name="tool1", description="desc")]
+        mock_market_lookup.return_value = {"market_id": 42}
+
+        await refresh_mcp_service_tool_count(tenant_id="tid", user_id="uid", mcp_id=1)
+
+        mock_market_update.assert_called_once_with(
+            market_id=42, user_id="uid",
+            registry_json={
+                "_toolNames": ["tool1"],
+                "tools": [{"name": "tool1", "description": "desc"}],
+            },
         )
 
 
@@ -2671,3 +2791,62 @@ class TestUploadAndStartMcpImageCleanupOnFailure(unittest.IsolatedAsyncioTestCas
 
         mock_mgr_cls.assert_not_called()
 
+    @patch('backend.services.remote_mcp_service.asyncio.sleep', new_callable=AsyncMock)
+    @patch('backend.services.remote_mcp_service.mcp_server_health')
+    @patch('backend.services.remote_mcp_service.add_remote_mcp_server_list')
+    @patch('backend.services.remote_mcp_service.MCPContainerManager')
+    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
+    async def test_upload_notifies_and_retries_readiness(
+        self, mock_check_name, mock_mgr_cls, mock_add, mock_health, mock_sleep,
+    ):
+        mock_check_name.return_value = False
+        mock_mgr = self._mock_container_manager(mock_mgr_cls)
+        mock_health.side_effect = [MCPConnectionError("starting"), True]
+        on_started = AsyncMock()
+
+        result = await upload_and_start_mcp_image(
+            tenant_id='tid', user_id='uid', file_content=b'dummy tar bytes',
+            filename='test.tar', port=8080, env_vars='{"authorization_token": "tok"}',
+            wait_for_ready=False, on_container_started=on_started,
+        )
+
+        assert result["status"] == "success"
+        on_started.assert_awaited_once_with(mock_mgr.start_mcp_container_from_tar.return_value)
+        assert mock_health.await_count == 2
+        mock_sleep.assert_awaited_once_with(5)
+
+    @patch('backend.services.remote_mcp_service.os.unlink', side_effect=OSError("cleanup failed"))
+    @patch('backend.services.remote_mcp_service.add_remote_mcp_server_list')
+    @patch('backend.services.remote_mcp_service.MCPContainerManager')
+    @patch('backend.services.remote_mcp_service.check_mcp_name_exists', return_value=False)
+    async def test_upload_continues_when_temp_file_cleanup_fails(
+        self, mock_check_name, mock_mgr_cls, mock_add, mock_unlink,
+    ):
+        self._mock_container_manager(mock_mgr_cls)
+
+        result = await upload_and_start_mcp_image(
+            tenant_id='tid', user_id='uid', file_content=b'dummy tar bytes',
+            filename='test.tar', port=8080,
+        )
+
+        assert result["status"] == "success"
+        mock_unlink.assert_called_once()
+
+    @patch('backend.services.remote_mcp_service.asyncio.sleep', new_callable=AsyncMock)
+    @patch('backend.services.remote_mcp_service.mcp_server_health')
+    @patch('backend.services.remote_mcp_service.MCPContainerManager')
+    @patch('backend.services.remote_mcp_service.check_mcp_name_exists', return_value=False)
+    async def test_upload_raises_after_readiness_retries(
+        self, mock_check_name, mock_mgr_cls, mock_health, mock_sleep,
+    ):
+        self._mock_container_manager(mock_mgr_cls)
+        mock_health.side_effect = MCPConnectionError("not ready")
+
+        with self.assertRaises(MCPConnectionError):
+            await upload_and_start_mcp_image(
+                tenant_id='tid', user_id='uid', file_content=b'dummy tar bytes',
+                filename='test.tar', port=8080, wait_for_ready=False,
+            )
+
+        assert mock_health.await_count == 30
+        assert mock_sleep.await_count == 30

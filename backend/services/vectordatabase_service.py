@@ -31,16 +31,17 @@ from nexent.vector_database.datamate_core import DataMateCore
 from consts.const import (
     ASSET_OWNER_ATTACHMENTS_PREFIX,
     ASSET_OWNER_TENANT_ID,
-    CAN_EDIT_ALL_USER_ROLES,
     DATAMATE_URL,
     ES_API_KEY,
     ES_HOST,
     IS_SPEED_MODE,
     LANGUAGE,
     PERMISSION_EDIT,
+    PERMISSION_PRIVATE,
     PERMISSION_READ,
     VectorDatabaseType,
 )
+from consts.exceptions import DuplicateError
 from consts.model import ChunkCreateRequest, ChunkUpdateRequest
 from database.attachment_db import delete_file, file_exists, get_file_stream
 from database.knowledge_db import (
@@ -63,6 +64,8 @@ from utils.str_utils import convert_list_to_string
 from database.user_tenant_db import get_user_tenant_by_user_id
 from database.group_db import query_group_ids_by_user
 from database.model_management_db import get_model_by_display_name, get_model_by_model_id, get_model_records
+from permissions.dac import ResourceAccessControl
+from permissions.models import Resource
 from services.redis_service import get_redis_service
 from services.group_service import get_tenant_default_group_id
 from services.asset_owner_visibility import postprocess_knowledge_visibility
@@ -510,9 +513,6 @@ class ElasticSearchService:
         if not record:
             raise ValueError(f"Knowledge base '{index_name}' not found")
 
-        if record.get("knowledge_sources") == "datamate":
-            return PERMISSION_READ
-
         user_tenant = get_user_tenant_by_user_id(user_id)
         if not user_tenant and not IS_SPEED_MODE:
             return None
@@ -523,59 +523,34 @@ class ElasticSearchService:
         if user_id == user_tenant_id:
             effective_user_role = "ADMIN"
             logger.info(f"User {user_id} identified as legacy admin")
-        elif IS_SPEED_MODE:
+        elif IS_SPEED_MODE and not user_role:
             effective_user_role = "SPEED"
             logger.info("User under SPEED version is treated as admin")
 
         role = (effective_user_role or "").upper()
-        record_tenant_id = str(record.get("tenant_id") or "")
-        is_asset_owner_record = record_tenant_id == ASSET_OWNER_TENANT_ID
+        if IS_SPEED_MODE and not user_tenant_id:
+            # Speed mode may run without a user_tenant_t row; keep the legacy
+            # behavior where the caller's tenant is trusted for the check.
+            user_tenant_id = str(record.get("tenant_id") or tenant_id or "")
 
-        if is_asset_owner_record:
-            if role == "ASSET_OWNER":
-                return PERMISSION_EDIT
-            if role in {"SU", "ADMIN", "SPEED", "DEV"}:
-                return PERMISSION_READ
-            return None
-
-        if record_tenant_id and user_tenant_id and record_tenant_id != user_tenant_id:
-            return None
-
-        if role in CAN_EDIT_ALL_USER_ROLES:
-            return PERMISSION_EDIT
-
-        if role in {"USER", "DEV"}:
-            if str(record.get("created_by")) == str(user_id):
-                return ElasticSearchService.CREATOR_PERMISSION
-
-            kb_group_ids_str = record.get("group_ids")
-            kb_group_ids = convert_string_to_list(kb_group_ids_str or "")
-            user_group_ids = query_group_ids_by_user(user_id)
-
-            kb_groups_empty = (
-                kb_group_ids_str is None
-                or (isinstance(kb_group_ids_str, str) and kb_group_ids_str.strip() == "")
-                or len(kb_group_ids) == 0
-            )
-            user_groups_empty = len(user_group_ids) == 0
-
-            has_group_intersection = (
-                True
-                if kb_groups_empty and user_groups_empty
-                else bool(set(user_group_ids) & set(kb_group_ids))
-            )
-            if not has_group_intersection:
-                return None
-
-            ingroup_permission = record.get("ingroup_permission") or PERMISSION_READ
-            if ingroup_permission == PERMISSION_EDIT:
-                return PERMISSION_EDIT
-            if ingroup_permission == PERMISSION_READ:
-                return PERMISSION_READ
-            if ingroup_permission == "PRIVATE":
-                return None
-
-        return None
+        user_group_ids = query_group_ids_by_user(user_id)
+        access = ResourceAccessControl.check(
+            Resource(
+                resource_type="knowledge_base",
+                resource_id=index_name,
+                tenant_id=record.get("tenant_id"),
+                created_by=record.get("created_by"),
+                ingroup_permission=record.get("ingroup_permission"),
+                group_ids=record.get("group_ids"),
+                knowledge_sources=record.get("knowledge_sources"),
+            ),
+            user_id=user_id,
+            role=role,
+            user_groups=user_group_ids,
+            user_tenant_id=user_tenant_id,
+            asset_owner_tenant_id=ASSET_OWNER_TENANT_ID,
+        )
+        return access.permission_label
 
     @staticmethod
     def require_knowledge_base_edit_permission(
@@ -916,6 +891,7 @@ class ElasticSearchService:
             embedding_model_id: Optional[int] = None,
             preserve_source_file: Optional[bool] = None,
             quota_limit_bytes: Optional[int] = None,
+            user_role: Optional[str] = None,
     ):
         """
         Create a new knowledge base with a user-facing name and an internal Elasticsearch index name.
@@ -936,11 +912,15 @@ class ElasticSearchService:
             embedding_model_id: Unique ID of the selected embedding model.
             preserve_source_file: Whether to preserve uploaded source documents after
                                    vectorization (optional; defaults to True when omitted).
+            user_role: Normalized user role. USER callers are forced to PRIVATE.
 
         For backward compatibility, legacy callers can still use create_index() directly
         with an explicit index_name.
         """
         try:
+            knowledge_name = knowledge_name.strip()
+            if not knowledge_name:
+                raise ValueError("Knowledge base name is required")
             if embedding_model_id is None:
                 raise ValueError("embedding_model_id is required")
 
@@ -965,11 +945,15 @@ class ElasticSearchService:
                 "embedding_model_id": embedding_model_id,
             }
 
-            # Add group permission and group IDs if provided
-            if ingroup_permission is not None:
-                knowledge_data["ingroup_permission"] = ingroup_permission
-            if group_ids is not None:
-                knowledge_data["group_ids"] = group_ids
+            # Add group permission and group IDs if provided.
+            if str(user_role or "").upper() == "USER":
+                knowledge_data["ingroup_permission"] = PERMISSION_PRIVATE
+                knowledge_data["group_ids"] = None
+            else:
+                if ingroup_permission is not None:
+                    knowledge_data["ingroup_permission"] = ingroup_permission
+                if group_ids is not None:
+                    knowledge_data["group_ids"] = group_ids
             if preserve_source_file is not None:
                 knowledge_data["preserve_source_file"] = preserve_source_file
             if quota_limit_bytes is not None:
@@ -996,7 +980,7 @@ class ElasticSearchService:
                 "knowledge_id": record_info["knowledge_id"],
                 "name": record_info.get("knowledge_name", knowledge_name),
             }
-        except ValueError:
+        except (DuplicateError, ValueError):
             raise
         except Exception as e:
             raise Exception(f"Error creating knowledge base: {str(e)}")
@@ -1010,6 +994,7 @@ class ElasticSearchService:
             tenant_id: Optional[str] = None,
             user_id: Optional[str] = None,
             quota_limit_bytes: Any = _QUOTA_LIMIT_UNSET,
+            user_role: Optional[str] = None,
     ) -> bool:
         """
         Update knowledge base information (name, group permission, group assignments).
@@ -1022,6 +1007,8 @@ class ElasticSearchService:
             tenant_id: ID of the tenant (optional, for validation)
             user_id: ID of the user making the update
             quota_limit_bytes: New soft quota in bytes; None removes the quota
+            user_role: Caller role. USER callers may only manage PRIVATE
+                personal knowledge bases and cannot turn them into shared KBs.
 
         Returns:
             bool: Whether the update was successful
@@ -1034,6 +1021,26 @@ class ElasticSearchService:
             raise ValueError(
                 f"Invalid ingroup_permission. Must be one of: {valid_permissions}"
             )
+
+        if str(user_role or "").upper() == "USER":
+            record = get_knowledge_record({"index_name": index_name})
+            if not record:
+                raise ValueError(f"Knowledge base '{index_name}' not found")
+            if str(record.get("ingroup_permission") or "").upper() != PERMISSION_PRIVATE:
+                raise PermissionError(
+                    "USER role can only manage PRIVATE personal knowledge bases"
+                )
+            if (
+                ingroup_permission is not None
+                and str(ingroup_permission).upper() != PERMISSION_PRIVATE
+            ):
+                raise PermissionError(
+                    "USER role cannot turn a personal knowledge base into a shared knowledge base"
+                )
+            if group_ids is not None:
+                raise PermissionError(
+                    "USER role cannot assign groups to a personal knowledge base"
+                )
 
         # Build update data for database
         update_data = {
@@ -1215,7 +1222,7 @@ class ElasticSearchService:
             return {"indices": [], "count": 0}
 
         user_role = user_tenant.get("user_role")
-        user_tenant_id = user_tenant.get("tenant_id")
+        user_tenant_id = str(user_tenant.get("tenant_id") or target_tenant_id or "")
         # Get user group IDs from tenant_group_user_t table
         user_group_ids = query_group_ids_by_user(user_id)
 
@@ -1239,70 +1246,38 @@ class ElasticSearchService:
             if index_name not in es_indices_list:
                 continue
 
-            # Check permission based on user role
-            permission = None
-            record_tenant_id = str(record.get("tenant_id") or "")
-            is_asset_owner_record = record_tenant_id == ASSET_OWNER_TENANT_ID
-
             # Fallback logic: if user_id equals user_tenant_id, treat as legacy admin user
             # even if user_role is None or empty
             effective_user_role = user_role
             if user_id == user_tenant_id:
                 effective_user_role = "ADMIN"
                 logger.info(f"User {user_id} identified as legacy admin")
-            elif IS_SPEED_MODE:
+            elif IS_SPEED_MODE and not user_role:
                 effective_user_role = "SPEED"
                 logger.info("User under SPEED version is treated as admin")
 
-            if is_asset_owner_record:
-                if effective_user_role in ["ASSET_OWNER"]:
-                    permission = PERMISSION_EDIT
-                elif effective_user_role in ["SU", "ADMIN", "SPEED", "DEV"]:
-                    permission = PERMISSION_READ
-            elif effective_user_role in ["SU", "ADMIN", "SPEED", "ASSET_OWNER"]:
-                # SU, ADMIN and SPEED roles can see all knowledgebases
-                permission = PERMISSION_EDIT
-            elif effective_user_role in ["USER", "DEV"]:
-                # USER/DEV need group-based permission checking
-                kb_group_ids_str = record.get("group_ids")
-                kb_group_ids = convert_string_to_list(kb_group_ids_str or "")
-                kb_created_by = record.get("created_by")
-                kb_ingroup_permission = record.get(
-                    "ingroup_permission") or PERMISSION_READ
-
-                if str(kb_created_by) == str(user_id):
-                    permission = "CREATOR"
-                else:
-                    # Check if user belongs to any of the knowledgebase groups
-                    # Compatibility logic for legacy data:
-                    # - If both kb_group_ids and user_group_ids are effectively empty (None or empty lists),
-                    #   consider them intersecting (backward compatibility)
-                    # - If either side has groups but they don't intersect, no intersection
-                    kb_groups_empty = kb_group_ids_str is None or (isinstance(
-                        kb_group_ids_str, str) and kb_group_ids_str.strip() == "") or len(kb_group_ids) == 0
-                    user_groups_empty = len(user_group_ids) == 0
-
-                    if kb_groups_empty and user_groups_empty:
-                        # Both are empty/None - consider intersecting for backward compatibility
-                        has_group_intersection = True
-                    else:
-                        # Normal intersection check
-                        has_group_intersection = bool(
-                            set(user_group_ids) & set(kb_group_ids))
-
-                    if has_group_intersection:
-                        # Determine permission level
-                        permission = PERMISSION_READ  # Default
-
-                        # Group permission allows editing
-                        if kb_ingroup_permission == PERMISSION_EDIT:
-                            permission = PERMISSION_EDIT
-                        # Group permission is read-only: already set
-                        elif kb_ingroup_permission == PERMISSION_READ:
-                            permission = PERMISSION_READ
-                        # Group permission is private: not visible
-                        elif kb_ingroup_permission == "PRIVATE":
-                            permission = None
+            # SPEED mode may run without a user_tenant_t row; trust the
+            # requested tenant for the check in that legacy deployment.
+            effective_user_tenant_id = user_tenant_id or str(
+                record.get("tenant_id") or ""
+            )
+            access = ResourceAccessControl.check(
+                Resource(
+                    resource_type="knowledge_base",
+                    resource_id=index_name,
+                    tenant_id=record.get("tenant_id"),
+                    created_by=record.get("created_by"),
+                    ingroup_permission=record.get("ingroup_permission"),
+                    group_ids=record.get("group_ids"),
+                    knowledge_sources=record.get("knowledge_sources"),
+                ),
+                user_id=user_id,
+                role=(effective_user_role or "").upper(),
+                user_groups=user_group_ids,
+                user_tenant_id=effective_user_tenant_id,
+                asset_owner_tenant_id=ASSET_OWNER_TENANT_ID,
+            )
+            permission = access.permission_label
 
             # Add to visible list if permission is granted
             if permission:

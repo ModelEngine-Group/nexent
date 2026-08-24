@@ -13,9 +13,15 @@ from io import BytesIO
 # Import from conftest (which sets up mocks automatically)
 from apps.northbound_app import router
 from consts.exceptions import (
+    ForbiddenError,
     LimitExceededError,
+    RuntimeServiceTimeoutError,
+    RuntimeServiceUnavailableError,
+    RuntimeUpstreamError,
+    NotFoundException,
     UnauthorizedError,
     SignatureValidationError,
+    ValidationError,
 )
 
 
@@ -50,6 +56,216 @@ def test_health_check():
     data = resp.json()
     assert data["status"] == "healthy"
     assert data["service"] == "northbound-api"
+
+
+def test_role_for_context_normalizes_database_role():
+    with patch("apps.northbound_app.get_user_role_by_tenant", return_value="admin") as mock_role:
+        from apps.northbound_app import _role_for_context
+
+        assert _role_for_context("user-1", "tenant-1") == "ADMIN"
+
+    mock_role.assert_called_once_with("user-1", "tenant-1")
+
+
+@pytest.mark.parametrize(
+    ("exception", "expected_status"),
+    [
+        (ForbiddenError("not allowed"), 403),
+        (NotFoundException("missing"), 404),
+        (ValidationError("invalid request"), 400),
+        (ValueError("invalid value"), 400),
+    ],
+)
+def test_raise_api_key_http_exception_maps_expected_errors(exception, expected_status):
+    from apps.northbound_app import _raise_api_key_http_exception
+
+    with pytest.raises(Exception) as raised:
+        _raise_api_key_http_exception(exception)
+
+    assert raised.value.status_code == expected_status
+
+
+def test_raise_api_key_http_exception_reraises_unexpected_error():
+    from apps.northbound_app import _raise_api_key_http_exception
+
+    with pytest.raises(RuntimeError, match="database unavailable"):
+        _raise_api_key_http_exception(RuntimeError("database unavailable"))
+
+
+def test_get_northbound_context_logs_non_service_request_usage():
+    from starlette.requests import Request
+    from apps.northbound_app import _get_northbound_context
+
+    request = Request({
+        "type": "http",
+        "method": "GET",
+        "scheme": "http",
+        "path": "/nb/v1/api-keys",
+        "raw_path": b"/nb/v1/api-keys",
+        "query_string": b"",
+        "headers": [(b"authorization", b"Bearer api-key"), (b"x-request-id", b"req-1")],
+        "server": ("testserver", 80),
+        "client": ("testclient", 50000),
+    })
+    with patch("apps.northbound_app.validate_bearer_token", return_value=(True, {"sub": "user-1"})), \
+            patch("apps.northbound_app.get_user_and_tenant_by_access_key", return_value={
+                "user_id": "user-1", "tenant_id": "tenant-1", "token_id": 9,
+            }), \
+            patch("apps.northbound_app.log_token_usage") as mock_log:
+        context = __import__("asyncio").run(_get_northbound_context(request))
+
+    assert context.request_id == "req-1"
+    assert context.authorization == "Bearer api-key"
+    mock_log.assert_called_once_with(
+        token_id=9,
+        call_function_name="/nb/v1/api-keys",
+        related_id=None,
+        created_by="user-1",
+        metadata={"method": "GET", "request_id": "req-1"},
+    )
+
+
+def test_get_northbound_context_skips_usage_log_for_service_logged_paths():
+    from starlette.requests import Request
+    from apps.northbound_app import _get_northbound_context
+
+    request = Request({
+        "type": "http",
+        "method": "POST",
+        "scheme": "http",
+        "path": "/nb/v1/chat/run",
+        "raw_path": b"/nb/v1/chat/run",
+        "query_string": b"",
+        "headers": [(b"authorization", b"Bearer api-key")],
+        "server": ("testserver", 80),
+        "client": ("testclient", 50000),
+    })
+    with patch("apps.northbound_app.validate_bearer_token", return_value=(True, {"sub": "user-1"})), \
+            patch("apps.northbound_app.get_user_and_tenant_by_access_key", return_value={
+                "user_id": "user-1", "tenant_id": "tenant-1", "token_id": 9,
+            }), \
+            patch("apps.northbound_app.log_token_usage") as mock_log:
+        __import__("asyncio").run(_get_northbound_context(request))
+
+    mock_log.assert_not_called()
+
+
+def test_create_api_users_batch_endpoint_is_exposed_by_northbound_router():
+    ctx = MagicMock(user_id="admin-1", tenant_id="tenant-1", request_id="req-123")
+    created = [{
+        "user_id": "api-user-1",
+        "role": "USER",
+        "group_id": 1,
+        "group_name": "Default",
+        "api_key": "nexent-complete-key",
+    }]
+    with patch('apps.northbound_app._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('apps.northbound_app._role_for_context', return_value="ADMIN"), \
+            patch('apps.northbound_app.create_api_users_batch', return_value=created) as mock_create:
+        mock_ctx.return_value = ctx
+
+        response = client.post(
+            "/nb/v1/api-users/batch",
+            headers=_build_headers(),
+            json={"role": "USER", "count": 1},
+        )
+
+    assert response.status_code == 201
+    assert response.json()["data"] == created
+    mock_create.assert_called_once_with(
+        actor_user_id="admin-1",
+        actor_tenant_id="tenant-1",
+        actor_role="ADMIN",
+        role="USER",
+        group_id=None,
+        count=1,
+    )
+
+
+def test_create_api_users_batch_endpoint_maps_validation_error():
+    ctx = MagicMock(user_id="admin-1", tenant_id="tenant-1", request_id="req-123")
+    with patch("apps.northbound_app._get_northbound_context", new_callable=AsyncMock) as mock_ctx, \
+            patch("apps.northbound_app._role_for_context", return_value="ADMIN"), \
+            patch("apps.northbound_app.create_api_users_batch", side_effect=ValidationError("invalid group")):
+        mock_ctx.return_value = ctx
+        response = client.post(
+            "/nb/v1/api-users/batch",
+            headers=_build_headers(),
+            json={"role": "USER", "count": 1},
+        )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "invalid group"
+
+
+def test_refresh_api_key_endpoint_is_exposed_by_northbound_router():
+    ctx = MagicMock(user_id="admin-1", tenant_id="tenant-1", request_id="req-123")
+    refreshed = {
+        "user_id": "api-user-1",
+        "email": None,
+        "api_key": "nexent-new-key",
+        "revoked_count": 1,
+    }
+    with patch('apps.northbound_app._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('apps.northbound_app._role_for_context', return_value="SU"), \
+            patch('apps.northbound_app.refresh_user_api_key', return_value=refreshed):
+        mock_ctx.return_value = ctx
+
+        response = client.post(
+            "/nb/v1/api-keys/refresh",
+            headers=_build_headers(),
+            json={"user_id": "api-user-1"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["data"] == refreshed
+
+
+def test_refresh_api_key_endpoint_returns_mapped_forbidden_error():
+    ctx = MagicMock(user_id="admin-1", tenant_id="tenant-1", request_id="req-123")
+    with patch("apps.northbound_app._get_northbound_context", new_callable=AsyncMock) as mock_ctx, \
+            patch("apps.northbound_app._role_for_context", return_value="ADMIN"), \
+            patch("apps.northbound_app.refresh_user_api_key", side_effect=ForbiddenError("not allowed")):
+        mock_ctx.return_value = ctx
+        response = client.post(
+            "/nb/v1/api-keys/refresh",
+            headers=_build_headers(),
+            json={"email": "api.user@example.com"},
+        )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "not allowed"
+
+
+def test_revoke_api_key_endpoint_forwards_email_target():
+    ctx = MagicMock(user_id="admin-1", tenant_id="tenant-1", request_id="req-123")
+    with patch("apps.northbound_app._get_northbound_context", new_callable=AsyncMock) as mock_ctx, \
+            patch("apps.northbound_app._role_for_context", return_value="ADMIN"), \
+            patch("apps.northbound_app.revoke_user_api_keys", return_value={"revoked_count": 1}) as mock_revoke:
+        mock_ctx.return_value = ctx
+        response = client.delete(
+            "/nb/v1/api-keys?email=api.user@example.com",
+            headers=_build_headers(),
+        )
+
+    assert response.status_code == 200
+    assert response.json()["requestId"] == "req-123"
+    mock_revoke.assert_called_once_with(
+        actor_user_id="admin-1",
+        actor_tenant_id="tenant-1",
+        actor_role="ADMIN",
+        user_id=None,
+        email="api.user@example.com",
+    )
+
+
+def test_revoke_api_key_endpoint_rejects_missing_target():
+    ctx = MagicMock(user_id="admin-1", tenant_id="tenant-1", request_id="req-123")
+    with patch('apps.northbound_app._get_northbound_context', new_callable=AsyncMock) as mock_ctx:
+        mock_ctx.return_value = ctx
+        response = client.delete("/nb/v1/api-keys", headers=_build_headers())
+
+    assert response.status_code == 400
 
 
 # =============================================================================
@@ -189,6 +405,33 @@ def test_run_chat_unauthorized():
         assert resp.status_code == 500
 
 
+@pytest.mark.parametrize(
+    ("error", "expected_status"),
+    [
+        (RuntimeServiceUnavailableError("unavailable"), 502),
+        (RuntimeServiceTimeoutError("timed out"), 504),
+    ],
+)
+def test_run_chat_maps_runtime_transport_errors(error, expected_status):
+    with patch(
+        "apps.northbound_app._get_northbound_context",
+        new_callable=AsyncMock,
+    ) as mock_ctx, patch(
+        "apps.northbound_app.start_streaming_chat",
+        new_callable=AsyncMock,
+        side_effect=error,
+    ):
+        mock_ctx.return_value = MagicMock()
+
+        response = client.post(
+            "/nb/v1/chat/run",
+            json={"agent_name": "general-assistant", "query": "Hello"},
+            headers=_build_headers(),
+        )
+
+    assert response.status_code == expected_status
+
+
 # =============================================================================
 # Stop Chat Tests
 # =============================================================================
@@ -207,6 +450,57 @@ def test_stop_chat_success():
         )
 
         assert resp.status_code == 200
+
+
+def test_stop_chat_preserves_runtime_error_response():
+    upstream_error = RuntimeUpstreamError(
+        status_code=403,
+        content=b'{"message":"forbidden"}',
+        headers={"content-type": "application/json"},
+    )
+    with patch(
+        "apps.northbound_app._get_northbound_context",
+        new_callable=AsyncMock,
+    ) as mock_ctx, patch(
+        "apps.northbound_app.stop_chat",
+        new_callable=AsyncMock,
+        side_effect=upstream_error,
+    ):
+        mock_ctx.return_value = MagicMock()
+
+        response = client.get(
+            "/nb/v1/chat/stop/123",
+            headers=_build_headers(),
+        )
+
+    assert response.status_code == 403
+    assert response.json() == {"message": "forbidden"}
+
+
+@pytest.mark.parametrize(
+    ("error", "expected_status"),
+    [
+        (RuntimeServiceUnavailableError("unavailable"), 502),
+        (RuntimeServiceTimeoutError("timed out"), 504),
+    ],
+)
+def test_stop_chat_maps_runtime_transport_errors(error, expected_status):
+    with patch(
+        "apps.northbound_app._get_northbound_context",
+        new_callable=AsyncMock,
+    ) as mock_ctx, patch(
+        "apps.northbound_app.stop_chat",
+        new_callable=AsyncMock,
+        side_effect=error,
+    ):
+        mock_ctx.return_value = MagicMock()
+
+        response = client.get(
+            "/nb/v1/chat/stop/123",
+            headers=_build_headers(),
+        )
+
+    assert response.status_code == expected_status
 
 
 # =============================================================================

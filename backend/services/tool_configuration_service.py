@@ -48,6 +48,11 @@ from database.knowledge_db import get_knowledge_name_map_by_index_names
 from database.user_tenant_db import get_user_email_map
 from mcpadapt.smolagents_adapter import _sanitize_function_name
 from services.file_management_service import validate_urls_access
+from .agent_draft_permission_service import (
+    AgentDraftEditError,
+    ResourceBindingError,
+    require_agent_draft_edit,
+)
 from services.vectordatabase_service import get_embedding_model_by_index_name, get_rerank_model
 from utils.http_client_utils import create_httpx_client
 from database.client import minio_client
@@ -245,6 +250,7 @@ def get_local_tools() -> List[ToolInfo]:
             output_type=getattr(tool_class, 'output_type'),
             category=getattr(tool_class, 'category'),
             labels=getattr(tool_class, 'labels', None),
+            is_user_selectable=getattr(tool_class, 'is_user_selectable', True),
             class_name=tool_class.__name__,
             usage=None,
             origin_name=getattr(tool_class, 'name')
@@ -291,7 +297,8 @@ def _build_tool_info_from_langchain(obj) -> ToolInfo:
         usage=None,
         origin_name=tool_name,
         category=None,
-        labels=None
+        labels=None,
+        is_user_selectable=True,
     )
     return tool_info
 
@@ -409,9 +416,30 @@ def update_tool_info_impl(tool_info: ToolInstanceInfoRequest, tenant_id: str, us
     Raises:
         ValueError: If database update fails
     """
-    # Use version_no from request if provided, otherwise default to 0
-    version_no = getattr(tool_info, 'version_no', 0)
-    if _is_aidp_search_tool(tool_info.tool_id, getattr(tool_info, "name", None)):
+    version_no = getattr(tool_info, "version_no", 0)
+    if version_no != 0:
+        raise AgentDraftEditError("agent_not_draft")
+    require_agent_draft_edit(
+        agent_id=tool_info.agent_id,
+        tenant_id=tenant_id,
+        user_id=user_id,
+    )
+    tool = next(
+        (
+            item
+            for item in query_all_tools(tenant_id)
+            if item.get("tool_id") == tool_info.tool_id
+        ),
+        None,
+    )
+    if (
+        tool is None
+        or tool.get("is_available") is not True
+        or tool.get("name") in SYSTEM_MANAGED_TOOL_NAMES
+    ):
+        raise ResourceBindingError("resource_not_visible")
+
+    if _is_aidp_search_tool(tool_info.tool_id, tool.get("name")):
         existing = query_tool_instances_by_id(
             tool_info.agent_id,
             tool_info.tool_id,
@@ -533,7 +561,8 @@ async def get_tool_from_remote_mcp_server(
                                      class_name=sanitized_tool_name,
                                      usage=mcp_server_name,
                                      origin_name=tool.name,
-                                     category=None)
+                                     category=None,
+                                     is_user_selectable=True)
                 tools_info.append(tool_info)
             return tools_info
     except BaseException as e:
@@ -686,6 +715,7 @@ async def list_all_tools(tenant_id: str, labels: Optional[List[str]] = None):
             "inputs": inputs_str,
             "category": tool.get("category"),
             "labels": tool.get("labels", []),
+            "is_user_selectable": tool.get("is_user_selectable", True),
             "updated_by": tool.get("updated_by", ""),
             "updated_by_name": updated_by_email_map.get(tool.get("updated_by"), ""),
         }
@@ -1025,15 +1055,16 @@ def _validate_local_tool(
                 raise ToolExecutionException(
                     f"Tenant ID and User ID are required for {tool_name} validation")
             selected_model_id = instantiation_params.get("selected_model_id")
-            video_understanding_model = get_vlm_adapter(tenant_id, selected_model_id, slot="vlm3")
+            slot = "vlm4" if tool_name == "analyze_audio" else "vlm3"
+            understanding_model = get_vlm_adapter(tenant_id, selected_model_id, slot=slot)
             model_display_name = getattr(
-                video_understanding_model, 'display_name', None)
+                understanding_model, 'display_name', None)
             set_monitoring_context(tenant_id=tenant_id)
             set_monitoring_operation(
                 "tool_validation", display_name=model_display_name)
             params = {
                 **instantiation_params,
-                'vlm_model': video_understanding_model,
+                'vlm_model': understanding_model,
                 'storage_client': minio_client,
                 'validate_url_access': lambda urls: validate_urls_access(urls, user_id)
             }

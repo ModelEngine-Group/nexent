@@ -19,6 +19,7 @@ import os
 import sys
 import time
 import threading
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import ANY, MagicMock, patch
 
@@ -350,6 +351,40 @@ class TestDockerRecovery:
 
         assert pm._recover_docker_container(cfg, logger, host_tools_exist=False) is None
 
+    def test_recovery_rejects_container_with_wrong_workspace_mount(self, monkeypatch):
+        pm = SandboxPoolManager.get_instance()
+        logger = sandbox_module.logging.getLogger("test_sandbox")
+        workspace_root = str(Path("/mnt/nexent/workdir").resolve())
+        cfg = SandboxConfig(
+            level=SandboxLevel.DOCKER,
+            scope=SandboxScope.SYSTEM,
+            extra_kwargs={
+                "workspace_root": "/mnt/nexent/workdir",
+                "workspace_volume_name": "nexent-agent-workspace",
+            },
+        )
+        container = MagicMock()
+        container.name = sandbox_module.SANDBOX_CONTAINER_NAME
+        container.status = "running"
+        container.labels = {"com.nexent.sandbox": "runtime"}
+        container.attrs = {
+            "Mounts": [{
+                "Type": "bind",
+                "Source": "/mnt/nexent/workdir",
+                "Destination": workspace_root,
+                "RW": True,
+            }],
+            "NetworkSettings": {
+                "Networks": {sandbox_module.SANDBOX_NETWORK_NAME: {}},
+            },
+        }
+        docker_module = SimpleNamespace(from_env=lambda: SimpleNamespace(
+            containers=SimpleNamespace(list=lambda **kwargs: [container])
+        ))
+        monkeypatch.setitem(sys.modules, "docker", docker_module)
+
+        assert pm._recover_docker_container(cfg, logger, host_tools_exist=False) is None
+
 
 class TestPoolManagerLogic:
     """Pure-Python pool semantics that the user's request depends on."""
@@ -398,6 +433,45 @@ class TestPoolManagerLogic:
 
         assert executor is owner
         bridge_installer.assert_not_called()
+
+    def test_system_docker_mounts_named_workspace_volume(self, monkeypatch):
+        pm = self._build_pool()
+        logger = sandbox_module.logging.getLogger("test_sandbox")
+        owner = SimpleNamespace(container=MagicMock())
+        captured_kwargs = {}
+        networks = SimpleNamespace(get=lambda name: object())
+        docker_module = SimpleNamespace(
+            from_env=lambda: SimpleNamespace(networks=networks),
+            errors=SimpleNamespace(NotFound=RuntimeError),
+        )
+        monkeypatch.setitem(sys.modules, "docker", docker_module)
+        monkeypatch.setitem(
+            sys.modules,
+            "smolagents.remote_executors",
+            SimpleNamespace(DockerExecutor=MagicMock()),
+        )
+        monkeypatch.setattr(
+            pm,
+            "_build_system_docker_executor",
+            lambda config, logger_, kwargs: captured_kwargs.update(kwargs) or owner,
+        )
+        cfg = SandboxConfig(
+            level=SandboxLevel.DOCKER,
+            scope=SandboxScope.SYSTEM,
+            extra_kwargs={
+                "workspace_root": "/mnt/nexent/workdir",
+                "workspace_volume_name": "nexent-agent-workspace",
+            },
+        )
+
+        assert pm._build_docker_executor(cfg, logger) is owner
+        expected_destination = str(Path("/mnt/nexent/workdir").resolve())
+        assert captured_kwargs["volumes"] == {
+            "nexent-agent-workspace": {
+                "bind": expected_destination,
+                "mode": "rw",
+            }
+        }
 
     def test_system_docker_uses_one_container_and_distinct_kernel_leases(self, monkeypatch):
         """SYSTEM Docker shares one container while isolating each run by kernel."""

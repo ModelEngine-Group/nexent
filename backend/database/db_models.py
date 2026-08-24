@@ -1,4 +1,6 @@
 from sqlalchemy import (
+    JSON,
+    TIMESTAMP,
     BigInteger,
     Boolean,
     CheckConstraint,
@@ -7,12 +9,10 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
-    JSON,
     Numeric,
     Sequence,
     String,
     Text,
-    TIMESTAMP,
     UniqueConstraint,
     text,
 )
@@ -76,6 +76,18 @@ class ConversationRecord(TableBase):
         JSONB,
         nullable=True,
         doc="Conversation-scoped desired policy for local and AIDP knowledge retrieval",
+    )
+    runtime_metadata = Column(
+        JSONB,
+        nullable=False,
+        server_default=text("'{}'::jsonb"),
+        doc="Conversation-scoped runtime metadata available to agent runs",
+    )
+    runtime_metadata_version = Column(
+        Integer,
+        nullable=False,
+        server_default=text("0"),
+        doc="Monotonic version of conversation runtime metadata",
     )
 
 
@@ -609,6 +621,8 @@ class ToolInfo(TableBase):
     output_type = Column(String(100), doc="Prompt tool output description")
     category = Column(String(100), doc="Tool category description")
     labels = Column(JSONB, default=[], doc="JSON array of label strings for filtering/grouping tools")
+    is_user_selectable = Column(
+        Boolean, default=True, nullable=False, doc="Whether users can actively select the tool in agent configuration")
     is_available = Column(
         Boolean, doc="Whether the tool can be used under the current main service")
 
@@ -662,10 +676,19 @@ class AgentInfo(TableBase):
         ),
     )
     enable_context_manager = Column(Boolean, default=True, doc="Whether to enable context management (compression) for this agent")
+    is_a2a = Column(Boolean, default=False, nullable=False, doc="Whether to publish this agent as an A2A Server agent")
     verification_config = Column(JSONB, doc="Layered ReAct self-verification configuration")
     context_policy = Column(JSONB, doc="Agent-level context processing policy override")
+    allow_chat_metadata = Column(
+        Boolean,
+        default=False,
+        nullable=False,
+        server_default=text("false"),
+        doc="Whether Native Chat and Debug users may submit runtime metadata",
+    )
     greeting_message = Column(Text, doc="Agent greeting message displayed on chat initial screen")
     example_questions = Column(JSONB, doc="List of example questions for starting a conversation with this agent")
+    icon_url = Column(String(1024), doc="Object storage key for the agent icon")
 
 
 class PromptTemplate(TableBase):
@@ -1487,8 +1510,6 @@ class AgentVersion(TableBase):
         30), doc="Source type: NORMAL (normal publish) / ROLLBACK (rollback and republish)")
     status = Column(String(30), default="RELEASED",
                     doc="Version status: RELEASED / DISABLED / ARCHIVED")
-    is_a2a = Column(Boolean, default=False,
-                    doc="Whether this version is published as an A2A Server agent")
 
 
 class AgentRepository(TableBase):
@@ -1559,7 +1580,11 @@ class UserTokenInfo(TableBase):
     User token (AK/SK) information table
     """
     __tablename__ = "user_token_info_t"
-    __table_args__ = {"schema": SCHEMA}
+    __table_args__ = (
+        Index("ux_user_token_access_key", "access_key", unique=True),
+        Index("ix_user_token_user_active", "user_id", "delete_flag"),
+        {"schema": SCHEMA},
+    )
 
     token_id = Column(Integer, Sequence("user_token_info_t_token_id_seq", schema=SCHEMA),
                       primary_key=True, nullable=False, doc="Token ID, unique primary key")
@@ -1573,7 +1598,16 @@ class UserTokenUsageLog(TableBase):
     User token usage log table
     """
     __tablename__ = "user_token_usage_log_t"
-    __table_args__ = {"schema": SCHEMA}
+    __table_args__ = (
+        Index(
+            "ix_user_token_usage_active_token_time",
+            "token_id",
+            text("create_time DESC"),
+            postgresql_include=["token_usage_id"],
+            postgresql_where=text("delete_flag = 'N'"),
+        ),
+        {"schema": SCHEMA},
+    )
 
     token_usage_id = Column(Integer, Sequence("user_token_usage_log_t_token_usage_id_seq", schema=SCHEMA),
                             primary_key=True, nullable=False, doc="Token usage log ID, unique primary key")

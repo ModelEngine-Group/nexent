@@ -170,6 +170,32 @@ def get_storage_object(
         return as_dict(row) if row is not None else None
 
 
+def get_storage_object_by_identity(
+    bucket_name: str,
+    object_name: str,
+    *,
+    include_deleted: bool = False,
+) -> Optional[Dict[str, Any]]:
+    """Return the ledger row identified by its durable storage identity.
+
+    This lookup intentionally does not accept a tenant filter. The caller must
+    first resolve the owning row and then compare its tenant with the caller's
+    tenant before using any ownership data for authorization.
+    """
+    with get_db_session() as session:
+        query = session.query(KnowledgeStorageObject).filter(
+            KnowledgeStorageObject.bucket_name == bucket_name,
+            KnowledgeStorageObject.object_name == object_name,
+        )
+        if not include_deleted:
+            query = query.filter(
+                KnowledgeStorageObject.delete_flag == "N",
+                KnowledgeStorageObject.status == COMMITTED_STATUS,
+            )
+        row = query.first()
+        return as_dict(row) if row is not None else None
+
+
 def aggregate_committed_bytes_by_kb(
     tenant_id: str,
     knowledge_ids: Optional[Sequence[int]] = None,
@@ -193,6 +219,34 @@ def aggregate_committed_bytes_by_kb(
         return {
             int(knowledge_id): int(committed_bytes or 0)
             for knowledge_id, committed_bytes in rows
+        }
+
+
+def get_committed_source_bytes_by_object_names(
+    tenant_id: str,
+    knowledge_id: int,
+    bucket_name: str,
+    object_names: Sequence[str],
+) -> Dict[str, int]:
+    """Return active committed source sizes for selected object identities."""
+    if not object_names:
+        return {}
+
+    with get_db_session() as session:
+        rows = session.query(
+            KnowledgeStorageObject.object_name,
+            KnowledgeStorageObject.raw_bytes,
+        ).filter(
+            KnowledgeStorageObject.tenant_id == tenant_id,
+            KnowledgeStorageObject.knowledge_id == knowledge_id,
+            KnowledgeStorageObject.bucket_name == bucket_name,
+            KnowledgeStorageObject.object_name.in_(object_names),
+            KnowledgeStorageObject.delete_flag == "N",
+            KnowledgeStorageObject.status == COMMITTED_STATUS,
+        ).all()
+        return {
+            object_name: int(raw_bytes or 0)
+            for object_name, raw_bytes in rows
         }
 
 

@@ -141,7 +141,9 @@ def _config_to_context(
             truncation_strategy=cfg.get("truncation_strategy"),
         )
     elif modality == "vlm":
-        caps = construct_extras.pop("capabilities", None) or {}
+        explicit_caps = construct_extras.pop("capabilities", None) or {}
+        caps = {"audio": True, "video": False, "image": False} if slot == "vlm4" else {}
+        caps.update(explicit_caps)
         return VLMContext(
             **common,
             temperature=_coalesce(construct_extras.pop("temperature", None), cfg.get("temperature")),

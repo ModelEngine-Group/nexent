@@ -9,6 +9,7 @@ import {
   deleteMcpToolService,
   healthcheckMcpToolService,
   listMcpRuntimeTools,
+  refreshMcpToolCount,
   parseContainerMcpConfigJson,
   publishCommunityMcpTool,
   updateMcpToolService,
@@ -73,59 +74,69 @@ export function useMcpServiceDetail({
     queryClient.invalidateQueries({ queryKey: MCP_SERVERS_QUERY_KEY });
   }, [queryClient]);
 
-  const updateTagsToServer = useCallback(async (newTags: string[]) => {
-    const currentDraft = draftRef.current;
-    if (!currentDraft) return;
-    setTagSaving(true);
-    try {
-      await updateMcpToolService({
-        mcp_id: currentDraft.mcpId,
-        name: currentDraft.name.trim(),
-        description: currentDraft.description,
-        server_url: (currentDraft.serverUrl || "").trim(),
-        tags: newTags,
-        version: currentDraft.version,
-        authorization_token: (currentDraft.authorizationToken ?? "").trim() || undefined,
-        custom_headers: currentDraft.customHeaders,
-        group_ids: currentDraft.groupIds ?? undefined,
-        ingroup_permission: currentDraft.ingroupPermission ?? undefined,
-      });
-      // Update local state
-      setDraft((prev) => {
-        const updated = prev ? { ...prev, tags: newTags } : prev;
-        draftRef.current = updated;
-        return updated;
-      });
-      invalidateServices();
-    } catch (error) {
-      log.error("[useMcpServiceDetail] Update tags failed", { error });
-      message.error(t("mcpTools.service.saveFailed"));
-      // Revert local state on error
-      setDraft((prev) => {
-        const reverted = prev ? { ...prev, tags: currentDraft.tags } : prev;
-        draftRef.current = reverted;
-        return reverted;
-      });
-    } finally {
-      setTagSaving(false);
-    }
-  }, [invalidateServices, message, t]);
+  const updateTagsToServer = useCallback(
+    async (newTags: string[]) => {
+      const currentDraft = draftRef.current;
+      if (!currentDraft) return;
+      setTagSaving(true);
+      try {
+        await updateMcpToolService({
+          mcp_id: currentDraft.mcpId,
+          name: currentDraft.name.trim(),
+          description: currentDraft.description,
+          server_url: (currentDraft.serverUrl || "").trim(),
+          tags: newTags,
+          version: currentDraft.version,
+          authorization_token:
+            (currentDraft.authorizationToken ?? "").trim() || undefined,
+          custom_headers: currentDraft.customHeaders,
+          group_ids: currentDraft.groupIds ?? undefined,
+          ingroup_permission: currentDraft.ingroupPermission ?? undefined,
+        });
+        // Update local state
+        setDraft((prev) => {
+          const updated = prev ? { ...prev, tags: newTags } : prev;
+          draftRef.current = updated;
+          return updated;
+        });
+        invalidateServices();
+      } catch (error) {
+        log.error("[useMcpServiceDetail] Update tags failed", { error });
+        message.error(t("mcpTools.service.saveFailed"));
+        // Revert local state on error
+        setDraft((prev) => {
+          const reverted = prev ? { ...prev, tags: currentDraft.tags } : prev;
+          draftRef.current = reverted;
+          return reverted;
+        });
+      } finally {
+        setTagSaving(false);
+      }
+    },
+    [invalidateServices, message, t]
+  );
 
-  const addTag = useCallback((tag: string) => {
-    const next = tag.trim();
-    if (!next) return;
-    const currentDraft = draftRef.current;
-    if (!currentDraft) return;
-    if (currentDraft.tags.includes(next)) return;
-    updateTagsToServer([...currentDraft.tags, next]);
-  }, [updateTagsToServer]);
+  const addTag = useCallback(
+    (tag: string) => {
+      const next = tag.trim();
+      if (!next) return;
+      const currentDraft = draftRef.current;
+      if (!currentDraft) return;
+      if (currentDraft.tags.includes(next)) return;
+      updateTagsToServer([...currentDraft.tags, next]);
+    },
+    [updateTagsToServer]
+  );
 
-  const removeTag = useCallback((index: number) => {
-    const currentDraft = draftRef.current;
-    if (!currentDraft) return;
-    const newTags = currentDraft.tags.filter((_, i) => i !== index);
-    updateTagsToServer(newTags);
-  }, [updateTagsToServer]);
+  const removeTag = useCallback(
+    (index: number) => {
+      const currentDraft = draftRef.current;
+      if (!currentDraft) return;
+      const newTags = currentDraft.tags.filter((_, i) => i !== index);
+      updateTagsToServer(newTags);
+    },
+    [updateTagsToServer]
+  );
 
   const runHealthCheck = useCallback(async () => {
     if (!draft || draft.mcpId < 0) return;
@@ -165,9 +176,18 @@ export function useMcpServiceDetail({
   const refreshTools = useCallback(async () => {
     if (!draft || draft.mcpId < 0) return;
     setLoadingTools(true);
+    setToolsState((prev) => ({ ...prev, visible: true }));
     try {
+      await refreshMcpToolCount(draft.mcpId);
       const result = await listMcpRuntimeTools(draft.mcpId);
-      setToolsState((prev) => ({ ...prev, tools: result.data || [] }));
+      setToolsState({ visible: true, tools: result.data || [] });
+      invalidateServices();
+      queryClient.invalidateQueries({
+        queryKey: MCP_TOOLS_QUERY_KEYS.myCommunity,
+      });
+      queryClient.invalidateQueries({
+        queryKey: MCP_TOOLS_QUERY_KEYS.communityList,
+      });
     } catch (error) {
       log.error("[useMcpServiceDetail] Failed to refresh tools", { error });
       message.error(t("mcpTools.tools.loadFailed"));
@@ -193,58 +213,63 @@ export function useMcpServiceDetail({
     );
   }, [draft, selectedService]);
 
-  const save = useCallback(async (draftOverride?: McpServiceItem | null): Promise<boolean> => {
-    const currentDraft = draftOverride ?? draftRef.current;
-    const currentSelected = selectedService;
-    if (!currentDraft || !currentSelected) return false;
-    const nextName = currentDraft.name.trim();
-    const nextUrl = (currentDraft.serverUrl || "").trim();
-    const nextToken = (currentDraft.authorizationToken ?? "").trim();
-    const nextTags = currentDraft.tags;
+  const save = useCallback(
+    async (draftOverride?: McpServiceItem | null): Promise<boolean> => {
+      const currentDraft = draftOverride ?? draftRef.current;
+      const currentSelected = selectedService;
+      if (!currentDraft || !currentSelected) return false;
+      const nextName = currentDraft.name.trim();
+      const nextUrl = (currentDraft.serverUrl || "").trim();
+      const nextToken = (currentDraft.authorizationToken ?? "").trim();
+      const nextTags = currentDraft.tags;
 
-    if (!nextName) {
-      message.warning(t("mcpTools.add.validate.nameRequired"));
-      return false;
-    }
-    if (currentDraft.transportType === McpTransportType.URL && !isHttpUrl(nextUrl)
-    ) {
-      message.warning(t("mcpTools.add.validate.httpUrlFormat"));
-      return false;
-    }
-
-    setSaving(true);
-    try {
-      await updateMcpToolService({
-        mcp_id: currentDraft.mcpId,
-        name: nextName,
-        description: currentDraft.description,
-        server_url: nextUrl,
-        tags: nextTags,
-        version: currentDraft.version,
-        authorization_token: nextToken || undefined,
-        custom_headers: currentDraft.customHeaders,
-        config_json: currentDraft.configJson,
-        group_ids: currentDraft.groupIds ?? undefined,
-        ingroup_permission: currentDraft.ingroupPermission ?? undefined,
-        shared_fields: currentDraft.sharedFields ?? undefined,
-      });
-      message.success(t("mcpTools.service.saveSuccess"));
-      invalidateServices();
-      return true;
-    } catch (error) {
-      log.error("[useMcpServiceDetail] Failed to save service", { error });
-      // Show user-friendly message for known errors
-      const msg = error instanceof Error ? error.message : "";
-      if (msg.includes("MCP name already exists")) {
-        message.error(t("mcpTools.add.error.nameExists"));
-      } else {
-        message.error(msg || t("mcpTools.service.saveFailed"));
+      if (!nextName) {
+        message.warning(t("mcpTools.add.validate.nameRequired"));
+        return false;
       }
-      return false;
-    } finally {
-      setSaving(false);
-    }
-  }, [invalidateServices, message, selectedService, t]);
+      if (
+        currentDraft.transportType === McpTransportType.URL &&
+        !isHttpUrl(nextUrl)
+      ) {
+        message.warning(t("mcpTools.add.validate.httpUrlFormat"));
+        return false;
+      }
+
+      setSaving(true);
+      try {
+        await updateMcpToolService({
+          mcp_id: currentDraft.mcpId,
+          name: nextName,
+          description: currentDraft.description,
+          server_url: nextUrl,
+          tags: nextTags,
+          version: currentDraft.version,
+          authorization_token: nextToken || undefined,
+          custom_headers: currentDraft.customHeaders,
+          config_json: currentDraft.configJson,
+          group_ids: currentDraft.groupIds ?? undefined,
+          ingroup_permission: currentDraft.ingroupPermission ?? undefined,
+          shared_fields: currentDraft.sharedFields ?? undefined,
+        });
+        message.success(t("mcpTools.service.saveSuccess"));
+        invalidateServices();
+        return true;
+      } catch (error) {
+        log.error("[useMcpServiceDetail] Failed to save service", { error });
+        // Show user-friendly message for known errors
+        const msg = error instanceof Error ? error.message : "";
+        if (msg.includes("MCP name already exists")) {
+          message.error(t("mcpTools.add.error.nameExists"));
+        } else {
+          message.error(msg || t("mcpTools.service.saveFailed"));
+        }
+        return false;
+      } finally {
+        setSaving(false);
+      }
+    },
+    [invalidateServices, message, selectedService, t]
+  );
 
   const remove = useCallback(async () => {
     if (!selectedService || selectedService.mcpId < 0) return;
@@ -308,7 +333,9 @@ export function useMcpServiceDetail({
         const editedVersion = (override?.version ?? sourceVersion).trim();
         const editedTags = override?.tags ?? selectedService.tags ?? [];
         const editedServerUrl = (
-          override?.serverUrl ?? selectedService.serverUrl ?? ""
+          override?.serverUrl ??
+          selectedService.serverUrl ??
+          ""
         ).trim();
 
         await publishCommunityMcpTool({
@@ -319,9 +346,15 @@ export function useMcpServiceDetail({
           tags: editedTags,
           ...(!isContainer ? { mcp_server: editedServerUrl } : {}),
           ...(parsedConfig ? { config_json: parsedConfig } : {}),
-          ...(override?.groupIds !== undefined ? { group_ids: override.groupIds } : {}),
-          ...(override?.ingroupPermission !== undefined ? { ingroup_permission: override.ingroupPermission } : {}),
-          ...(override?.sharedFields !== undefined ? { shared_fields: override.sharedFields } : {}),
+          ...(override?.groupIds !== undefined
+            ? { group_ids: override.groupIds }
+            : {}),
+          ...(override?.ingroupPermission !== undefined
+            ? { ingroup_permission: override.ingroupPermission }
+            : {}),
+          ...(override?.sharedFields !== undefined
+            ? { shared_fields: override.sharedFields }
+            : {}),
         });
 
         message.success(t("mcpTools.community.publishSuccess"));
@@ -344,7 +377,14 @@ export function useMcpServiceDetail({
     draft,
     setDraft: ((updater: React.SetStateAction<McpServiceItem | null>) => {
       setDraft((prev) => {
-        const next = typeof updater === "function" ? (updater as (prev: McpServiceItem | null) => McpServiceItem | null)(prev) : updater;
+        const next =
+          typeof updater === "function"
+            ? (
+                updater as (
+                  prev: McpServiceItem | null
+                ) => McpServiceItem | null
+              )(prev)
+            : updater;
         draftRef.current = next;
         return next;
       });

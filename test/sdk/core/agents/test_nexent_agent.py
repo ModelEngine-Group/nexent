@@ -1,11 +1,12 @@
 import importlib
 import json
+import os
 import sys
 import types
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Event
-from unittest.mock import MagicMock, patch, ANY
+from unittest.mock import ANY, MagicMock, call, patch
 
 import pytest
 
@@ -120,6 +121,7 @@ class _MockProcessType:
     FINAL_ANSWER = "final_answer"
     ERROR = "error"
     NL2A = "nl2a"
+    FILE_ARTIFACT = "file_artifact"
 
 
 @dataclass
@@ -501,6 +503,8 @@ def mock_core_agent():
     agent.observer = MagicMock()
     agent.stop_event = MagicMock()
     agent.run = MagicMock()  # Ensure .run exists and is mockable
+    agent.state = {}
+    agent.managed_agents = {}
     return agent
 
 
@@ -1618,6 +1622,124 @@ def test_agent_run_with_observer_success_with_agent_text(nexent_agent_instance, 
         "test_agent", ProcessType.FINAL_ANSWER, "Final answer with  content")
 
 
+def test_runtime_metadata_isolated_across_full_agent_tree(nexent_agent_instance, mock_core_agent):
+    child = mock_core_agent_class()
+    child.state = {}
+    child.managed_agents = {}
+    child_wrapper = MagicMock()
+    child_wrapper._inner = child
+    external_agent = MagicMock()
+    external_agent.get_runtime_metadata.return_value = {"external": "previous"}
+    external_wrapper = MagicMock()
+    external_wrapper._inner = external_agent
+    mock_core_agent.state = {"metadata": {"previous": True}}
+    mock_core_agent.managed_agents = {
+        "child": child_wrapper,
+        "external": external_wrapper,
+    }
+
+    snapshots = nexent_agent_instance._set_runtime_metadata_for_agent_tree(
+        mock_core_agent,
+        {"request": {"id": 7}},
+    )
+
+    assert mock_core_agent.state["metadata"] == {"request": {"id": 7}}
+    assert child.state["metadata"] == {"request": {"id": 7}}
+    assert child.state["metadata"] is not mock_core_agent.state["metadata"]
+    external_agent.set_runtime_metadata.assert_called_once_with({"request": {"id": 7}})
+
+    nexent_agent_instance._restore_runtime_metadata_for_agent_tree(snapshots)
+
+    assert mock_core_agent.state["metadata"] == {"previous": True}
+    assert "metadata" not in child.state
+    assert external_agent.set_runtime_metadata.call_args_list[-1].args[0] == {
+        "external": "previous"
+    }
+
+
+def test_runtime_metadata_tree_handles_list_tuple_and_scalar_children(
+    nexent_agent_instance, mock_core_agent
+):
+    """Metadata tree walk handles list/tuple child containers and the scalar fallback."""
+    # list children container
+    child_a = mock_core_agent_class()
+    child_a.state = {}
+    child_a.managed_agents = {}
+    root_list = mock_core_agent_class()
+    root_list.state = {}
+    root_list.managed_agents = [child_a]
+    snapshots = nexent_agent_instance._set_runtime_metadata_for_agent_tree(
+        root_list, {"list": 1}
+    )
+    assert child_a.state["metadata"] == {"list": 1}
+    assert child_a.state["metadata"] is not root_list.state["metadata"]
+
+    # tuple children container
+    child_b = mock_core_agent_class()
+    child_b.state = {}
+    child_b.managed_agents = {}
+    root_tuple = mock_core_agent_class()
+    root_tuple.state = {}
+    root_tuple.managed_agents = (child_b,)
+    nexent_agent_instance._set_runtime_metadata_for_agent_tree(root_tuple, {"tuple": 2})
+    assert child_b.state["metadata"] == {"tuple": 2}
+
+    # scalar/unknown container falls back to no children
+    root_scalar = mock_core_agent_class()
+    root_scalar.state = {}
+    root_scalar.managed_agents = "scalar-value"
+    snapshots = nexent_agent_instance._set_runtime_metadata_for_agent_tree(
+        root_scalar, {"scalar": 3}
+    )
+    assert root_scalar.state["metadata"] == {"scalar": 3}
+
+
+def test_runtime_metadata_tree_skips_duplicate_agent(
+    nexent_agent_instance, mock_core_agent
+):
+    """A node reachable twice (shared child) is only processed once."""
+    shared = mock_core_agent_class()
+    shared.state = {}
+    shared.managed_agents = {}
+    root = mock_core_agent_class()
+    root.state = {}
+    # The same inner agent is referenced from two child entries.
+    root.managed_agents = [shared, shared]
+    snapshots = nexent_agent_instance._set_runtime_metadata_for_agent_tree(
+        root, {"shared": "v"}
+    )
+    assert shared.state["metadata"] == {"shared": "v"}
+    assert len(snapshots) == 2  # root + shared, not duplicated
+
+
+def test_agent_run_with_observer_forwards_additional_args(
+    nexent_agent_instance, mock_core_agent
+):
+    """additional_args are forwarded to the underlying agent run and stored as metadata."""
+    nexent_agent_instance.agent = mock_core_agent
+    mock_action_step = MagicMock(spec=ActionStep)
+    mock_action_step.timing = MagicMock()
+    mock_action_step.timing.duration = 1.5
+    mock_action_step.step_number = 1
+    mock_action_step.error = None
+    mock_final_answer = _AgentText("metadata forwarded answer")
+    mock_action_step.output = mock_final_answer
+
+    mock_core_agent.run.return_value = [mock_action_step]
+    mock_core_agent.state = {}
+    mock_core_agent.managed_agents = {}
+
+    nexent_agent_instance.agent_run_with_observer(
+        "test query",
+        additional_args={"metadata": {"session": "s9"}},
+    )
+
+    mock_core_agent.run.assert_called_once_with(
+        "test query", stream=True, reset=True,
+        additional_args={"metadata": {"session": "s9"}},
+    )
+
+
 def test_agent_run_with_observer_emits_model_context_window(nexent_agent_instance, mock_core_agent):
     """TOKEN_COUNT exposes the stable model window and keeps the compression threshold."""
     nexent_agent_instance.agent = mock_core_agent
@@ -2614,6 +2736,84 @@ class TestCreateBuiltinTool:
             config_overrides=None,
         )
         assert result is mock_tool_instance
+
+    def test_create_builtin_download_from_s3_tool(self, nexent_agent_instance):
+        validator = MagicMock()
+        storage = MagicMock()
+        tool_instance = MagicMock()
+        tool_class = MagicMock(return_value=tool_instance)
+        tool_config = ToolConfig(
+            class_name="DownloadFromS3Tool",
+            name="download_from_s3",
+            description="desc",
+            inputs="{}",
+            output_type="string",
+            params={"workspace_path": "/tmp/workspace"},
+            source="builtin",
+            metadata={
+                "minio_client": storage,
+                "user_id": "user-1",
+                "tenant_id": "tenant-1",
+                "validate_url_access": validator,
+            },
+        )
+
+        with patch.dict("sys.modules", {
+            "nexent.core.tools.download_from_s3_tool": MagicMock(
+                DownloadFromS3Tool=tool_class,
+            )
+        }):
+            result = nexent_agent_instance.create_builtin_tool(tool_config)
+
+        assert result is tool_instance
+        tool_class.assert_called_once_with(
+            workspace_path="/tmp/workspace",
+            minio_client=storage,
+            user_id="user-1",
+            tenant_id="tenant-1",
+            observer=nexent_agent_instance.observer,
+            validate_url_access=validator,
+            on_download=ANY,
+        )
+
+    def test_create_builtin_upload_to_s3_tool(self, nexent_agent_instance):
+        storage = MagicMock()
+        tool_instance = MagicMock()
+        tool_class = MagicMock(return_value=tool_instance)
+        tool_config = ToolConfig(
+            class_name="UploadToS3Tool",
+            name="upload_to_s3",
+            description="desc",
+            inputs="{}",
+            output_type="string",
+            params={"workspace_path": "/tmp/workspace"},
+            source="builtin",
+            metadata={
+                "minio_client": storage,
+                "user_id": "user-1",
+                "tenant_id": "tenant-1",
+                "run_id": "run-1",
+            },
+        )
+
+        with patch.dict("sys.modules", {
+            "nexent.core.tools.upload_to_s3_tool": MagicMock(
+                UploadToS3Tool=tool_class,
+            )
+        }):
+            result = nexent_agent_instance.create_builtin_tool(tool_config)
+
+        assert result is tool_instance
+        tool_class.assert_called_once_with(
+            workspace_path="/tmp/workspace",
+            minio_client=storage,
+            user_id="user-1",
+            tenant_id="tenant-1",
+            observer=nexent_agent_instance.observer,
+            run_id="run-1",
+            on_upload=nexent_agent_instance._record_workspace_upload,
+            ensure_local_file=ANY,
+        )
 
 
 class TestCreateToolExceptionHandling:
@@ -4265,6 +4465,481 @@ class TestCreateBuiltinTool:
                 version_no=1,
                 observer=nexent_agent_instance.observer,
             )
+
+
+class TestCreateBuiltinToolAndFileWorkspaceLifecycle:
+    @pytest.mark.parametrize("class_name", ["DownloadFromS3Tool", "UploadToS3Tool"])
+    def test_create_local_s3_tool_injects_runtime_context(
+        self, nexent_agent_instance, class_name
+    ):
+        tool_class = MagicMock(return_value=MagicMock(inputs={}, output_type="string"))
+        tool_config = ToolConfig(
+            class_name=class_name,
+            name=class_name,
+            description="S3 file tool",
+            inputs="{}",
+            output_type="string",
+            params={"workspace_path": "/mnt/nexent/workdir/user/run"},
+            source="local",
+            metadata={
+                "minio_client": "storage",
+                "user_id": "user",
+                "tenant_id": "tenant",
+            },
+        )
+
+        with patch.object(nexent_agent, class_name, tool_class, create=True):
+            result = nexent_agent_instance.create_local_tool(tool_config)
+
+        assert result is tool_class.return_value
+        tool_class.assert_called_once_with(
+            workspace_path="/mnt/nexent/workdir/user/run",
+            minio_client="storage",
+            user_id="user",
+            tenant_id="tenant",
+            observer=nexent_agent_instance.observer,
+        )
+
+    def test_builtin_skill_workspace_callback_pushes_files(self, nexent_agent_instance):
+        tool_class = MagicMock(return_value=MagicMock())
+        tool_config = ToolConfig(
+            class_name="RunSkillScriptTool",
+            name="run_skill_script",
+            description="Run a skill",
+            inputs="{}",
+            output_type="string",
+            params={
+                "local_skills_dir": "/tmp/skills",
+                "workspace_path": "/mnt/nexent/workdir/user/run",
+            },
+            source="builtin",
+            metadata={},
+        )
+
+        with patch.dict("sys.modules", {
+            "nexent.core.tools.run_skill_script_tool": MagicMock(
+                RunSkillScriptTool=tool_class,
+            )
+        }), patch.object(nexent_agent_instance, "_push_file_workspace_to_sandbox") as push:
+            nexent_agent_instance.create_builtin_tool(tool_config)
+            tool_class.call_args.kwargs["on_complete"]("done")
+
+        assert tool_class.call_args.kwargs["workspace_path"] == tool_config.params["workspace_path"]
+        push.assert_called_once_with()
+
+    def test_record_workspace_upload_deduplicates_object_name(self, nexent_agent_instance):
+        upload = {"object_name": "workspace/user/run/outputs/report.txt"}
+
+        nexent_agent_instance._record_workspace_upload(upload)
+        nexent_agent_instance._record_workspace_upload(dict(upload))
+
+        assert nexent_agent_instance._workspace_uploads == [upload]
+
+    def test_prepare_workspace_rejects_files_without_download_tool(
+        self, nexent_agent_instance, tmp_path
+    ):
+        nexent_agent_instance.workspace_path = str(tmp_path / "user" / "run")
+        nexent_agent_instance.minio_files = [{"object_name": "attachments/user/a.txt"}]
+        nexent_agent_instance.agent = MagicMock(tools={})
+
+        with pytest.raises(RuntimeError, match="download_from_s3 is unavailable"):
+            nexent_agent_instance._prepare_file_workspace("query")
+
+    def test_prepare_workspace_skips_invalid_and_empty_file_entries(
+        self, nexent_agent_instance, tmp_path
+    ):
+        workspace = tmp_path / "user" / "run"
+        nexent_agent_instance.workspace_path = str(workspace)
+        nexent_agent_instance.minio_files = ["invalid", {}, {"url": ""}]
+        nexent_agent_instance.agent = MagicMock(tools={"download_from_s3": MagicMock()})
+
+        with patch.object(nexent_agent_instance, "_push_file_workspace_to_sandbox") as push:
+            result = nexent_agent_instance._prepare_file_workspace("query")
+
+        assert "Run workspace" in result
+        push.assert_called_once_with()
+
+    @pytest.mark.parametrize("put_archive_result", [True, False])
+    def test_non_shared_workspace_pushes_archive(
+        self, nexent_agent_instance, put_archive_result
+    ):
+        workspace = MagicMock()
+        workspace.resolve.return_value = workspace
+        workspace.exists.return_value = True
+        workspace.drive = ""
+        workspace.__str__.return_value = "/mnt/nexent/workdir/user/run"
+        container = MagicMock()
+        container.put_archive.return_value = put_archive_result
+        nexent_agent_instance.workspace_path = "/mnt/nexent/workdir/user/run"
+        nexent_agent_instance.sandbox_config = MagicMock(extra_kwargs={})
+        nexent_agent_instance.agent = MagicMock(
+            python_executor=MagicMock(container=container)
+        )
+        archive_writer = MagicMock()
+        archive_context = MagicMock()
+        archive_context.__enter__.return_value = archive_writer
+
+        with patch.object(nexent_agent, "Path", return_value=workspace), patch.object(
+            nexent_agent.tarfile, "open", return_value=archive_context
+        ), patch.object(nexent_agent_instance, "_grant_sandbox_output_access") as grant:
+            if put_archive_result:
+                nexent_agent_instance._push_file_workspace_to_sandbox()
+            else:
+                with pytest.raises(RuntimeError, match="Failed to copy run workspace"):
+                    nexent_agent_instance._push_file_workspace_to_sandbox()
+
+        archive_writer.add.assert_called_once()
+        if put_archive_result:
+            grant.assert_called_once_with(container, workspace)
+        else:
+            grant.assert_not_called()
+
+    def test_grant_sandbox_output_access_uses_sandbox_group(self, tmp_path):
+        workspace = tmp_path / "tenant" / "user" / "run-1"
+        input_dir = workspace / "inputs"
+        output_dir = workspace / "outputs"
+        input_dir.mkdir(parents=True)
+        output_dir.mkdir(parents=True)
+        container = MagicMock()
+        container.exec_run.side_effect = [
+            MagicMock(exit_code=0, output=b"1000\n"),
+            MagicMock(exit_code=0, output=b""),
+            MagicMock(exit_code=0, output=b""),
+            MagicMock(exit_code=0, output=b""),
+        ]
+
+        NexentAgent._grant_sandbox_output_access(container, workspace)
+
+        assert container.exec_run.call_args_list == [
+            call(["id", "-g"]),
+            call(["chgrp", "-R", "1000", str(workspace)], user="0"),
+            call(["chmod", "-R", "g+rwX", str(workspace)], user="0"),
+            call(
+                ["find", str(workspace), "-type", "d", "-exec", "chmod", "g+s", "{}", "+"],
+                user="0",
+            ),
+        ]
+
+    def test_shared_workspace_skips_archive_copy(self, nexent_agent_instance, tmp_path):
+        workspace = MagicMock()
+        workspace.resolve.return_value = workspace
+        workspace.exists.return_value = True
+        workspace.drive = ""
+        container = MagicMock()
+        nexent_agent_instance.workspace_path = "/mnt/nexent/workdir/user/run-1"
+        nexent_agent_instance.sandbox_config = MagicMock(
+            extra_kwargs={
+                "shared_workspace": True,
+                "workspace_volume_name": "nexent-agent-workspace",
+            }
+        )
+        nexent_agent_instance.agent = MagicMock(
+            python_executor=MagicMock(container=container)
+        )
+
+        with patch.object(nexent_agent, "Path", return_value=workspace), patch.object(
+            nexent_agent_instance, "_grant_sandbox_output_access"
+        ) as grant_access:
+            nexent_agent_instance._push_file_workspace_to_sandbox()
+
+        container.put_archive.assert_not_called()
+        grant_access.assert_called_once_with(container, workspace)
+
+    def test_shared_workspace_skips_archive_pull(self, nexent_agent_instance, tmp_path):
+        workspace = tmp_path / "user" / "run-1"
+        workspace.mkdir(parents=True)
+        container = MagicMock()
+        nexent_agent_instance.workspace_path = str(workspace)
+        nexent_agent_instance.sandbox_config = MagicMock(
+            extra_kwargs={
+                "shared_workspace": True,
+                "workspace_volume_name": "nexent-agent-workspace",
+            }
+        )
+        nexent_agent_instance.agent = MagicMock(
+            python_executor=MagicMock(container=container)
+        )
+
+        nexent_agent_instance._pull_file_workspace_from_sandbox()
+
+        container.get_archive.assert_not_called()
+
+    def test_grant_sandbox_output_access_rejects_invalid_gid(self, tmp_path):
+        container = MagicMock()
+        container.exec_run.return_value = MagicMock(exit_code=0, output=b"sandbox\n")
+
+        with pytest.raises(RuntimeError, match="invalid group ID"):
+            NexentAgent._grant_sandbox_output_access(container, tmp_path)
+
+    def test_grant_sandbox_output_access_rejects_gid_command_failure(self, tmp_path):
+        container = MagicMock()
+        container.exec_run.return_value = MagicMock(exit_code=1, output=b"denied")
+
+        with pytest.raises(RuntimeError, match="determine the sandbox user's group"):
+            NexentAgent._grant_sandbox_output_access(container, tmp_path)
+
+    def test_grant_sandbox_output_access_reports_permission_command_failure(self, tmp_path):
+        container = MagicMock()
+        container.exec_run.side_effect = [
+            MagicMock(exit_code=0, output=b"1000\n"),
+            MagicMock(exit_code=1, output=b"operation not permitted"),
+        ]
+
+        with pytest.raises(RuntimeError, match="operation not permitted"):
+            NexentAgent._grant_sandbox_output_access(container, tmp_path)
+
+    def test_pull_workspace_extracts_safe_archive(self, nexent_agent_instance):
+        workspace = MagicMock()
+        workspace.resolve.return_value = workspace
+        workspace.drive = ""
+        workspace.__str__.return_value = "/mnt/nexent/workdir/user/run"
+        extraction_root = MagicMock()
+        workspace.parent.resolve.return_value = extraction_root
+        target = MagicMock()
+        extraction_root.__truediv__.return_value.resolve.return_value = target
+        member = MagicMock(name="safe-member")
+        member.name = "run/outputs/report.txt"
+        member.isfile.return_value = True
+        member.isdir.return_value = False
+        archive_reader = MagicMock()
+        archive_reader.getmembers.return_value = [member]
+        archive_context = MagicMock()
+        archive_context.__enter__.return_value = archive_reader
+        container = MagicMock()
+        container.get_archive.return_value = ([b"archive"], {})
+        nexent_agent_instance.workspace_path = "/mnt/nexent/workdir/user/run"
+        nexent_agent_instance.sandbox_config = MagicMock(extra_kwargs={})
+        nexent_agent_instance.agent = MagicMock(
+            python_executor=MagicMock(container=container)
+        )
+
+        with patch.object(nexent_agent, "Path", return_value=workspace), patch.object(
+            nexent_agent.tarfile, "open", return_value=archive_context
+        ):
+            nexent_agent_instance._pull_file_workspace_from_sandbox()
+
+        target.relative_to.assert_called_once_with(extraction_root)
+        archive_reader.extractall.assert_called_once_with(extraction_root, members=[member])
+
+    @pytest.mark.parametrize("escape_archive", [False, True])
+    def test_pull_workspace_rejects_unsafe_archive(
+        self, nexent_agent_instance, escape_archive
+    ):
+        workspace = MagicMock()
+        workspace.resolve.return_value = workspace
+        workspace.drive = ""
+        extraction_root = MagicMock()
+        workspace.parent.resolve.return_value = extraction_root
+        member = MagicMock()
+        member.name = "unsafe"
+        member.isfile.return_value = escape_archive
+        member.isdir.return_value = False
+        target = extraction_root.__truediv__.return_value.resolve.return_value
+        if escape_archive:
+            target.relative_to.side_effect = ValueError("escape")
+        archive_reader = MagicMock()
+        archive_reader.getmembers.return_value = [member]
+        archive_context = MagicMock()
+        archive_context.__enter__.return_value = archive_reader
+        container = MagicMock()
+        container.get_archive.return_value = ([b"archive"], {})
+        nexent_agent_instance.workspace_path = "/mnt/nexent/workdir/user/run"
+        nexent_agent_instance.sandbox_config = MagicMock(extra_kwargs={})
+        nexent_agent_instance.agent = MagicMock(
+            python_executor=MagicMock(container=container)
+        )
+
+        with patch.object(nexent_agent, "Path", return_value=workspace), patch.object(
+            nexent_agent.tarfile, "open", return_value=archive_context
+        ), patch.object(nexent_agent.logger, "warning") as warning:
+            nexent_agent_instance._pull_file_workspace_from_sandbox()
+
+        warning.assert_called_once()
+
+    def test_finalize_workspace_handles_missing_upload_tool(
+        self, nexent_agent_instance, tmp_path
+    ):
+        nexent_agent_instance.workspace_path = str(tmp_path / "user" / "run")
+        nexent_agent_instance.agent = MagicMock(tools={})
+
+        with patch.object(nexent_agent_instance, "_pull_file_workspace_from_sandbox"), patch.object(
+            nexent_agent.logger, "error"
+        ) as error:
+            nexent_agent_instance._finalize_file_workspace()
+
+        error.assert_called_once()
+
+    def test_finalize_workspace_skips_inputs_and_uploaded_files_and_reports_failure(
+        self, nexent_agent_instance, tmp_path
+    ):
+        workspace = tmp_path / "user" / "run"
+        input_file = workspace / "inputs" / "input.txt"
+        uploaded_file = workspace / "outputs" / "uploaded.txt"
+        failed_file = workspace / "outputs" / "failed.txt"
+        for path in (input_file, uploaded_file, failed_file):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("data", encoding="utf-8")
+        upload_tool = MagicMock()
+        upload_tool.uploaded_paths = {
+            os.path.normcase(os.path.abspath(str(uploaded_file)))
+        }
+        upload_tool.forward.side_effect = RuntimeError("upload failed")
+        nexent_agent_instance.workspace_path = str(workspace)
+        nexent_agent_instance.agent = MagicMock(tools={"upload_to_s3": upload_tool})
+
+        with patch.object(nexent_agent_instance, "_pull_file_workspace_from_sandbox"):
+            nexent_agent_instance._finalize_file_workspace()
+
+        upload_tool.forward.assert_called_once_with(str(failed_file), "outputs/failed.txt")
+        assert any(
+            call_args.args[1] == ProcessType.ERROR
+            for call_args in nexent_agent_instance.observer.add_message.call_args_list
+        )
+
+    def test_cleanup_rejects_mismatched_run_directory(self, nexent_agent_instance, tmp_path):
+        workspace = tmp_path / "user" / "actual-run"
+        workspace.mkdir(parents=True)
+        nexent_agent_instance.workspace_path = str(workspace)
+        nexent_agent_instance.workspace_run_id = "different-run"
+
+        nexent_agent_instance._cleanup_file_workspace()
+
+        assert workspace.exists()
+
+    @pytest.mark.parametrize("exec_failure", [False, True])
+    def test_cleanup_logs_sandbox_failures(
+        self, nexent_agent_instance, tmp_path, exec_failure
+    ):
+        workspace = tmp_path / "user" / "run"
+        workspace.mkdir(parents=True)
+        container = MagicMock()
+        if exec_failure:
+            container.exec_run.side_effect = RuntimeError("docker unavailable")
+        else:
+            container.exec_run.return_value = MagicMock(
+                exit_code=1, output=b"permission denied"
+            )
+        nexent_agent_instance.workspace_path = str(workspace)
+        nexent_agent_instance.workspace_run_id = "run"
+        nexent_agent_instance.agent = MagicMock(
+            python_executor=MagicMock(container=container)
+        )
+
+        with patch.object(nexent_agent.logger, "warning") as warning:
+            nexent_agent_instance._cleanup_file_workspace()
+
+        warning.assert_called_once()
+
+    def test_cleanup_logs_host_removal_failure(self, nexent_agent_instance, tmp_path):
+        workspace = tmp_path / "user" / "run"
+        workspace.mkdir(parents=True)
+        nexent_agent_instance.workspace_path = str(workspace)
+        nexent_agent_instance.workspace_run_id = "run"
+        nexent_agent_instance.agent = MagicMock(python_executor=None)
+
+        with patch.object(nexent_agent.shutil, "rmtree", side_effect=OSError("busy")), patch.object(
+            nexent_agent.logger, "error"
+        ) as error:
+            nexent_agent_instance._cleanup_file_workspace()
+
+        error.assert_called_once()
+
+    def test_cleanup_removes_exact_sandbox_run_directory_as_root(
+        self, nexent_agent_instance, tmp_path
+    ):
+        workspace_root = tmp_path / "workdir"
+        workspace = workspace_root / "user" / "run-1"
+        (workspace / "outputs").mkdir(parents=True)
+        (workspace / "outputs" / "result.txt").write_text("result", encoding="utf-8")
+        container = MagicMock()
+        container.exec_run.return_value = MagicMock(exit_code=0, output=b"")
+        nexent_agent_instance.workspace_path = str(workspace)
+        nexent_agent_instance.workspace_run_id = "run-1"
+        nexent_agent_instance.agent = MagicMock(
+            python_executor=MagicMock(container=container)
+        )
+
+        nexent_agent_instance._cleanup_file_workspace()
+
+        container.exec_run.assert_called_once_with(
+            ["rm", "-rf", "--", str(workspace.resolve())],
+            user="0",
+        )
+        assert not workspace.exists()
+        assert not workspace.parent.exists()
+        assert workspace_root.exists()
+
+    def test_cleanup_removes_sandbox_directory_when_host_copy_is_missing(
+        self, nexent_agent_instance, tmp_path
+    ):
+        workspace = tmp_path / "workdir" / "user" / "run-1"
+        container = MagicMock()
+        container.exec_run.return_value = MagicMock(exit_code=0, output=b"")
+        nexent_agent_instance.workspace_path = str(workspace)
+        nexent_agent_instance.workspace_run_id = "run-1"
+        nexent_agent_instance.agent = MagicMock(
+            python_executor=MagicMock(container=container)
+        )
+
+        nexent_agent_instance._cleanup_file_workspace()
+
+        container.exec_run.assert_called_once_with(
+            ["rm", "-rf", "--", str(workspace.resolve())],
+            user="0",
+        )
+
+    def test_download_finalize_emit_and_cleanup(self, nexent_agent_instance, tmp_path):
+        workspace = tmp_path / "user" / "run-1"
+        nexent_agent_instance.workspace_path = str(workspace)
+        nexent_agent_instance.workspace_run_id = "run-1"
+        nexent_agent_instance.minio_files = [
+            {"name": "input.csv", "object_name": "attachments/user/input.csv"}
+        ]
+
+        download_tool = MagicMock()
+        download_tool.minio_client.default_bucket = "nexent"
+
+        def download_file(_source, local_filename):
+            path = workspace / local_filename
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("input", encoding="utf-8")
+            return json.dumps({"local_path": str(path)})
+
+        download_tool.forward.side_effect = download_file
+        upload_tool = MagicMock()
+        upload_tool.uploaded_paths = set()
+
+        def upload_file(file_path, _target_filename):
+            payload = {
+                "object_name": "workspace/user/run-1/outputs/result.txt",
+                "name": Path(file_path).name,
+                "file_size_bytes": Path(file_path).stat().st_size,
+            }
+            nexent_agent_instance._record_workspace_upload(payload)
+            return json.dumps(payload)
+
+        upload_tool.forward.side_effect = upload_file
+        nexent_agent_instance.agent = MagicMock(
+            tools={
+                "download_from_s3": download_tool,
+                "upload_to_s3": upload_tool,
+            },
+            python_executor=None,
+        )
+
+        query = nexent_agent_instance._prepare_file_workspace("analyze")
+        output = workspace / "outputs" / "result.txt"
+        output.write_text("result", encoding="utf-8")
+        nexent_agent_instance._finalize_file_workspace()
+        nexent_agent_instance._cleanup_file_workspace()
+
+        assert str(workspace / "inputs" / "000_input.csv") in query
+        upload_tool.forward.assert_called_once_with(str(output), "outputs/result.txt")
+        assert not workspace.exists()
+        assert any(
+            call.args[1] == ProcessType.FILE_ARTIFACT
+            for call in nexent_agent_instance.observer.add_message.call_args_list
+        )
 
     def test_create_builtin_tool_read_skill_md(self, nexent_agent_instance):
         """Test create_builtin_tool with ReadSkillMdTool."""
