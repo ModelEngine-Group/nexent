@@ -6,14 +6,15 @@ from typing import Optional
 from fastapi import APIRouter, File, Form, Header, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
 
+from consts.exceptions import OfficeConversionException
 from consts.model import (
     BatchTaskRequest,
     ConvertStateRequest,
     TaskRequest,
 )
-from consts.exceptions import OfficeConversionException
 from data_process.tasks import process_and_forward, process_sync
 from services.data_process_service import get_data_process_service
+
 
 logger = logging.getLogger("data_process.app")
 
@@ -134,8 +135,18 @@ async def create_batch_tasks(request: BatchTaskRequest, authorization: Optional[
     Processing happens in the background for each file independently.
     """
     try:
-        task_ids = await service.create_batch_tasks_impl(authorization=authorization, request=request)
-        return JSONResponse(status_code=HTTPStatus.CREATED, content={"task_ids": task_ids})
+        submission_result = await service.create_batch_tasks_impl(
+            authorization=authorization, request=request)
+        # Keep compatibility with service implementations that still return a plain task-id list.
+        if isinstance(submission_result, list):
+            submission_result = {
+                "status": "success" if submission_result else "failed",
+                "task_ids": submission_result,
+                "results": [],
+                "submitted_count": len(submission_result),
+                "failed_count": 0,
+            }
+        return JSONResponse(status_code=HTTPStatus.CREATED, content=submission_result)
     except HTTPException:
         raise
     except Exception as e:

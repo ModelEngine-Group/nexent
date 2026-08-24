@@ -457,6 +457,122 @@ async def test_process_files_persists_submit_failure(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_process_files_persists_only_failed_item_for_partial_batch(monkeypatch):
+    """Partial task submission keeps successful files running and fails only the omitted file."""
+    async def fake_trigger(files, params):
+        return {
+            "status": "partial_success",
+            "task_ids": ["task-a"],
+            "results": [
+                {"file_id": "fid-a", "status": "SUBMITTED", "task_id": "task-a"},
+                {
+                    "file_id": "fid-b",
+                    "status": "FAILED",
+                    "error_code": "TASK_SUBMIT_FAILED",
+                    "error_message": "broker unavailable",
+                },
+            ],
+            "submitted_count": 1,
+            "failed_count": 1,
+        }
+
+    lifecycle_module = types.ModuleType("database.knowledge_file_lifecycle_db")
+    lifecycle_module.get_file_record = MagicMock(return_value={"file_id": "fid-b"})
+    lifecycle_module.transition_file_record = MagicMock()
+    database_module = types.ModuleType("database")
+    database_module.__path__ = []
+    monkeypatch.setitem(sys.modules, "database", database_module)
+    monkeypatch.setitem(sys.modules, "database.knowledge_file_lifecycle_db", lifecycle_module)
+    monkeypatch.setattr(file_management_app, "trigger_data_process", fake_trigger)
+
+    resp = await file_management_app.process_files(
+        files=[
+            {"file_id": "fid-a", "path_or_url": "knowledge_base/a.txt", "filename": "a.txt"},
+            {"file_id": "fid-b", "path_or_url": "knowledge_base/b.txt", "filename": "b.txt"},
+        ],
+        chunking_strategy="basic",
+        index_name="kb",
+        destination="minio",
+        authorization=MOCK_AUTH,
+    )
+
+    assert resp.status_code == 201
+    assert resp.body
+    lifecycle_module.transition_file_record.assert_called_once()
+    assert lifecycle_module.transition_file_record.call_args.args[0] == "fid-b"
+    assert lifecycle_module.transition_file_record.call_args.kwargs["error_message"] == "broker unavailable"
+
+
+@pytest.mark.asyncio
+async def test_process_files_all_batch_submissions_failed(monkeypatch):
+    """All failed submissions retain failure details and preserve the 500 contract."""
+    async def fake_trigger(files, params):
+        return {
+            "status": "failed",
+            "task_ids": [],
+            "results": [
+                {"file_id": "fid-a", "status": "FAILED", "error_message": "queue down"},
+                {"file_id": "fid-b", "status": "FAILED", "error_message": "queue down"},
+            ],
+            "submitted_count": 0,
+            "failed_count": 2,
+        }
+
+    lifecycle_module = types.ModuleType("database.knowledge_file_lifecycle_db")
+    lifecycle_module.get_file_record = MagicMock(side_effect=[{"file_id": "fid-a"}, {"file_id": "fid-b"}])
+    lifecycle_module.transition_file_record = MagicMock()
+    database_module = types.ModuleType("database")
+    database_module.__path__ = []
+    monkeypatch.setitem(sys.modules, "database", database_module)
+    monkeypatch.setitem(sys.modules, "database.knowledge_file_lifecycle_db", lifecycle_module)
+    monkeypatch.setattr(file_management_app, "trigger_data_process", fake_trigger)
+
+    with pytest.raises(HTTPException) as raised:
+        await file_management_app.process_files(
+            files=[
+                {"file_id": "fid-a", "path_or_url": "knowledge_base/a.txt", "filename": "a.txt"},
+                {"file_id": "fid-b", "path_or_url": "knowledge_base/b.txt", "filename": "b.txt"},
+            ],
+            chunking_strategy="basic",
+            index_name="kb",
+            destination="minio",
+            authorization=MOCK_AUTH,
+        )
+
+    assert raised.value.status_code == 500
+    assert raised.value.detail == "queue down"
+    assert lifecycle_module.transition_file_record.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_process_files_legacy_empty_task_ids_mark_all_failed(monkeypatch):
+    """Old data-process responses with no task ids must not leave UPLOADED rows behind."""
+    async def fake_trigger(files, params):
+        return {"task_ids": []}
+
+    lifecycle_module = types.ModuleType("database.knowledge_file_lifecycle_db")
+    lifecycle_module.get_file_record = MagicMock(return_value={"file_id": "fid-a"})
+    lifecycle_module.transition_file_record = MagicMock()
+    database_module = types.ModuleType("database")
+    database_module.__path__ = []
+    monkeypatch.setitem(sys.modules, "database", database_module)
+    monkeypatch.setitem(sys.modules, "database.knowledge_file_lifecycle_db", lifecycle_module)
+    monkeypatch.setattr(file_management_app, "trigger_data_process", fake_trigger)
+
+    with pytest.raises(HTTPException) as raised:
+        await file_management_app.process_files(
+            files=[{"file_id": "fid-a", "path_or_url": "knowledge_base/a.txt", "filename": "a.txt"}],
+            chunking_strategy="basic",
+            index_name="kb",
+            destination="minio",
+            authorization=MOCK_AUTH,
+        )
+
+    assert raised.value.status_code == 500
+    assert lifecycle_module.transition_file_record.call_args.kwargs["error_code"] == "TASK_SUBMIT_FAILED"
+
+
+@pytest.mark.asyncio
 async def test_get_storage_files_maps_unauthorized_error(monkeypatch):
     def unauthorized(_authorization):
         raise file_management_app.UnauthorizedError("token expired")
