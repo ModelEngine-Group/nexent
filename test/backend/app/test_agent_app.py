@@ -7,6 +7,7 @@ from apps.agent_app import (
     agent_config_router,
     agent_runtime_router,
     nl2agent_run_api,
+    nl2agent_skill_creation_event_api,
 )
 import atexit
 from unittest.mock import AsyncMock, patch, Mock, MagicMock, ANY
@@ -25,7 +26,7 @@ from fastapi.testclient import TestClient
 
 from consts.const import AGENT_PROMPTS_HIDDEN_FLAG, ASSET_OWNER_TENANT_ID
 from consts.exceptions import ForbiddenError, UnauthorizedError, ValidationError
-from consts.model import NL2AgentRunRequest
+from consts.model import NL2AgentRunRequest, NL2AgentSkillCreationEventRequest
 from services.agent_draft_permission_service import AgentDraftEditError
 from services.nl2agent_service import Nl2AgentDraftSaveError
 
@@ -245,6 +246,59 @@ async def test_nl2agent_run_api_streams_for_existing_draft(
     assert not hasattr(request, "conversation_id")
     assert create_stream.call_args.kwargs["tenant_id"] == "tenant-a"
     assert create_stream.call_args.kwargs["language"] == "en"
+
+
+@pytest.mark.asyncio
+async def test_nl2agent_skill_creation_event_api_records_authenticated_event(
+    mocker, mock_auth_header
+):
+    authenticate = mocker.patch(
+        "apps.agent_app.get_current_user_id",
+        return_value=("user-a", "tenant-a"),
+    )
+    record = mocker.patch(
+        "apps.agent_app.record_nl2agent_skill_creation_event"
+    )
+
+    response = await nl2agent_skill_creation_event_api(
+        event_request=NL2AgentSkillCreationEventRequest(
+            event="create_click",
+            non_skill_coverage="installed",
+            has_weak_matches=True,
+        ),
+        authorization=mock_auth_header["Authorization"],
+    )
+
+    assert response.status_code == 204
+    authenticate.assert_called_once_with(mock_auth_header["Authorization"])
+    record.assert_called_once_with(
+        event="create_click",
+        non_skill_coverage="installed",
+        created_skill_status="none",
+        has_weak_matches=True,
+    )
+
+
+@pytest.mark.asyncio
+async def test_nl2agent_skill_creation_event_api_rejects_unauthenticated_request(
+    mocker,
+):
+    mocker.patch(
+        "apps.agent_app.get_current_user_id",
+        side_effect=UnauthorizedError("Invalid credentials"),
+    )
+    record = mocker.patch(
+        "apps.agent_app.record_nl2agent_skill_creation_event"
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await nl2agent_skill_creation_event_api(
+            event_request=NL2AgentSkillCreationEventRequest(event="exposure"),
+            authorization=None,
+        )
+
+    assert exc_info.value.status_code == 401
+    record.assert_not_called()
 
 
 @pytest.mark.asyncio

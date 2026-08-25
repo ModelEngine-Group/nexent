@@ -246,7 +246,7 @@ export async function fetchSkillsList(
 export const submitSkillForm = async (
   values: SkillData,
   _allSkills: SkillListItem[],
-  onSuccess: () => void | Promise<void>,
+  onSuccess: (skill?: CreatedSkillResult) => void | Promise<void>,
   onCancel: () => void,
   t: (key: string) => string,
   options: { mode?: "create" | "edit"; skillId?: number } = { mode: "create" }
@@ -283,7 +283,11 @@ export const submitSkillForm = async (
           ? t("skillManagement.message.updateSuccess")
           : t("skillManagement.message.createSuccess")
       );
-      await onSuccess();
+      const createdSkill =
+        options.mode === "create" && result.data
+          ? (result.data as CreatedSkillResult)
+          : undefined;
+      await onSuccess(createdSkill);
       onCancel();
       return true;
     } else {
@@ -296,6 +300,14 @@ export const submitSkillForm = async (
     throw error;
   }
 };
+
+export interface CreatedSkillResult {
+  skill_id: number;
+  name?: string;
+  description?: string;
+  source?: string;
+  tags?: string[];
+}
 
 /**
  * Submit skill from file upload

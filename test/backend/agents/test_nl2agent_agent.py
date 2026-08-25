@@ -121,7 +121,7 @@ def test_build_nl2agent_system_prompt_configures_existing_draft(
     assert description_save < resource_search
 
     code_blocks = re.findall(r"<code>\n(.*?)\n</code>", prompt, re.DOTALL)
-    assert len(code_blocks) == 7
+    assert len(code_blocks) == 8
     for code_block in code_blocks:
         ast.parse(code_block)
 
@@ -332,6 +332,13 @@ def test_current_wrapper_models_require_existing_agent_id():
         score=0.9,
     )
     assert RecommendResourcesInput(candidates=[candidate]).recommended_refs == []
+    skill_creation = RecommendResourcesInput(
+        requirements=[requirement],
+        include_skill_creation=True,
+    )
+    assert skill_creation.candidates == []
+    with pytest.raises(ValidationError):
+        RecommendResourcesInput(candidates=[])
 
     wrapped = build_nl2a_wrapper(
         subtype="requirement_clarification",
@@ -407,6 +414,41 @@ def test_installed_resource_binding_wrapper_preserves_verified_contract():
         "agent_id": 42,
         "resources": [],
     }
+
+
+def test_installation_wrapper_accepts_verified_skill_creation_without_resources():
+    wrapped = build_nl2a_wrapper(
+        subtype="suggested_resource_installation",
+        agent_id=42,
+        resource_result={
+            "status": "success",
+            "resources": [],
+            "requirements": [
+                {
+                    "requirement_id": "research",
+                    "query": "Research project material",
+                }
+            ],
+            "skill_creation_requests": [
+                {
+                    "requirement": {
+                        "requirement_id": "research",
+                        "query": "Research project material",
+                    },
+                    "non_skill_coverage": {
+                        "status": "installed",
+                        "candidate_refs": ["tool:7"],
+                    },
+                    "can_create_skill": True,
+                }
+            ],
+        },
+    )
+    payload = json.loads(wrapped.split("<nl2a>", 1)[1].split("</nl2a>", 1)[0])
+    assert payload["resources"] == []
+    assert payload["skill_creation_requests"][0]["requirement"][
+        "requirement_id"
+    ] == "research"
 
 
 def test_requirement_clarification_accepts_at_most_five_questions():

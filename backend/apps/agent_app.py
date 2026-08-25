@@ -23,6 +23,7 @@ from consts.model import (
     VersionRollbackRequest,
     VersionStatusRequest,
     CurrentVersionResponse,
+    NL2AgentSkillCreationEventRequest,
     VersionCompareRequest,
     VersionUpdateRequest,
     NL2AgentRunRequest,
@@ -60,7 +61,11 @@ from services.agent_service import (
 from services.prompt_service import generate_guardrail_rules_impl
 from services.knowledge_scope_service import get_agent_knowledge_capabilities
 from services.agent_draft_permission_service import AgentDraftEditError
-from services.nl2agent_service import Nl2AgentDraftSaveError, create_nl2agent_stream
+from services.nl2agent_service import (
+    Nl2AgentDraftSaveError,
+    create_nl2agent_stream,
+    record_nl2agent_skill_creation_event,
+)
 from services.agent_version_service import (
     publish_version_impl,
     get_version_list_impl,
@@ -244,6 +249,24 @@ async def nl2agent_run_api(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail="NL2Agent run error.",
         ) from exc
+
+
+@agent_runtime_router.post("/nl2agent/skill-creation/events", status_code=204)
+async def nl2agent_skill_creation_event_api(
+    event_request: NL2AgentSkillCreationEventRequest,
+    authorization: Optional[str] = Header(None),
+):
+    """Record aggregate Skill creation funnel telemetry for authenticated users."""
+
+    try:
+        get_current_user_id(authorization)
+    except UnauthorizedError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.UNAUTHORIZED,
+            detail=str(exc),
+        ) from exc
+    record_nl2agent_skill_creation_event(**event_request.model_dump())
+    return Response(status_code=HTTPStatus.NO_CONTENT)
 
 
 @agent_runtime_router.get("/stop/{conversation_id}")

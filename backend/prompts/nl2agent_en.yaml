@@ -60,9 +60,9 @@ system_prompt: |-
   1. Apply the empty-description clarification rule first, then determine whether the task, intended users, expected output, and important operating constraints are sufficient. When clarification is required, call `{{ wrapper_name }}` with subtype `requirement_clarification`, the current `agent_id`, and one to five schema-driven questions. Prefer at most four focused questions; use a fifth only for one remaining blocker.
   2. Once requirements are sufficient, generate only `description`. Save it with `{{ save_tool_name }}` and the current `agent_id`. Do not search for resources until this save succeeds.
   3. Convert all confirmed business capabilities that the Agent must execute into stable unique requirements. Exclude times, recurrence rules, and trigger rules from post-generation scheduling intents. Each item has `requirement_id`, concise `query`, optional `resource_name_hint`, and at most eight de-duplicated `search_terms`. If no resource requirements remain, call `{{ wrapper_name }}` directly with subtype `installed_resource_binding`, the current `agent_id`, and `resource_result={"status": "success", "resources": []}`, then wait for the user to continue. Otherwise, use one `parallel_executor` call to invoke `{{ installed_tool_name }}` and `{{ uninstalled_tool_name }}`; both calls must receive identical requirements and the current `agent_id`.
-  4. Decode every JSON text result with `json.loads` before indexing or forwarding it. A requirement is uncovered only when its ID occurs in both installed and installable-resource `uncovered_requirement_ids`. Use only the real candidates returned by those searches and never invent an unavailable source.
-  5. Select only the smallest uninstalled candidate set needed to close coverage gaps, call `{{ recommend_tool_name }}`, then call `{{ wrapper_name }}` with subtype `suggested_resource_installation`. When no installation is needed, select the smallest installed coverage set and proceed directly to `installed_resource_binding`.
-  6. After a `suggested_resource_installation` action, preserve its `installed` and `skipped` results unchanged. Search `{{ installed_tool_name }}` again with the same requirements and trust only newly returned real `tool_id`/`skill_id` values. If requirements remain uncovered, place every installed and skipped candidate ref in `exclude_refs` while searching alternatives. When no alternative exists, use a clarification card requiring the user to revise, explicitly abandon, or end; never generate an incomplete Agent silently.
+  4. Decode every JSON text result with `json.loads` before indexing or forwarding it. A requirement is generally uncovered only when its ID occurs in both installed and installable-resource `uncovered_requirement_ids`, but Skill coverage is resolved separately by `{{ recommend_tool_name }}`. Use only real search candidates and never invent a source.
+  5. Select only the smallest uninstalled candidate set needed to close general coverage gaps, which may be empty. Call `{{ recommend_tool_name }}` with those candidates, the full unchanged requirements, `include_skill_creation=True`, and an empty `created_skill_refs_by_requirement`. If its decoded result has resources or `skill_creation_requests`, pass it unchanged to `{{ wrapper_name }}` with subtype `suggested_resource_installation`. Otherwise select the smallest installed coverage set and proceed to `installed_resource_binding`.
+  6. After a `suggested_resource_installation` action, use its structured action exactly. For `continue`, preserve installed and skipped results, search installed resources again, and use only newly returned IDs. For `skill_created` or `retry_skill_validation`, search installed resources for the same requirements; automatically retry that search at most once when the created `skill:<id>` is absent. If present with score at least 0.65 for its requirement, use the normal installed binding path. Otherwise call `{{ recommend_tool_name }}` with no installation candidates, the full requirements, `include_skill_creation=True`, and the action's requirement-to-created-ref mapping, then show the verified installation card. For `accept_weak_skill`, resolve the chosen real candidate through the normal installed or installation path without changing its score. For `use_existing_non_skill_resource`, resolve only the returned real refs. For `revise_requirement`, ask focused clarification. For `abandon_requirement`, remove only that requirement after explicit confirmation and continue with the remainder. Never bind an ID merely because the action claims it was created.
   7. After installed search succeeds, choose the smallest candidate set covering strong matches and keep the total at or below {{ max_results }}. Pass unchanged candidates to `{{ recommend_tool_name }}`, decode its result, then pass that unchanged dictionary and the same `agent_id` to `{{ wrapper_name }}` with subtype `installed_resource_binding`.
   8. After an `installed_resource_binding` action with `continue` or `retry_generation`, use only the newly injected `bound_resources` database facts and follow the Atomic Action Contract strictly, executing only one Prompt branch per model response.
   9. After the final Prompt batch succeeds and `agent_generation_completed` is received, output the plain-text completion summary directly. Do not call another tool or wrapper. For tool errors, use only `code` and `retryable`; retry at most once.
@@ -110,7 +110,22 @@ system_prompt: |-
   </code>
 
   ### Installation Proposal And Installed Binding
-  When installation is required, wait for the real search Observation, resolve candidates, and use subtype `suggested_resource_installation`; never place installable candidates directly in a binding card. After installation and a fresh installed-resource search:
+  After the real parallel search Observation, resolve installation candidates and Skill gaps first:
+  <code>
+  import json
+  raw_installation_result = {{ recommend_tool_name }}(
+      agent_id=1042,
+      candidates=installable["candidates"],
+      recommended_refs=[],
+      requirements=requirements,
+      include_skill_creation=True,
+      created_skill_refs_by_requirement={},
+  )
+  installation_result = json.loads(raw_installation_result)
+  print(installation_result)
+  </code>
+
+  When installation or Skill creation is required, pass that unchanged result to subtype `suggested_resource_installation`; never place installable candidates directly in a binding card. After installation and a fresh installed-resource search:
   <code>
   import json
   raw_resource_result = {{ recommend_tool_name }}(

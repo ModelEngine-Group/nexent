@@ -28,7 +28,11 @@ from agents.create_agent_info import (
     join_minio_file_description_to_query,
 )
 from agents.nl2agent_agent import create_nl2agent_agent_config
-from consts.const import LOCAL_MCP_SERVER, MODEL_CONFIG_MAPPING
+from consts.const import (
+    ENABLE_NL2AGENT_SKILL_CREATION,
+    LOCAL_MCP_SERVER,
+    MODEL_CONFIG_MAPPING,
+)
 from consts.model import HistoryItem, NL2AgentRunRequest, ToolSourceEnum
 from database.agent_db import update_agent_draft_fields
 from database.skill_db import query_enabled_skill_instances
@@ -44,6 +48,7 @@ from tool_collection.mcp.nl2agent_mcp_tools import (
     NL2AGENT_AGENT_ID_HEADER,
     NL2A_MCP_LEGACY_TOOL_NAMES,
     NL2A_MCP_TOOL_NAMES,
+    NonSkillCoverage,
     RecommendResourcesOutput,
     RecommendedResource,
     ResourceCandidate,
@@ -51,6 +56,7 @@ from tool_collection.mcp.nl2agent_mcp_tools import (
     ResourceRequirement,
     ResourceSearchOutput,
     SEARCH_UNINSTALLED_RESOURCES_NAME,
+    SkillCreationRequest,
     UNINSTALLED_RESOURCE_SOURCES,
 )
 from utils.auth_utils import get_current_user_id
@@ -59,6 +65,18 @@ from utils.context_utils import build_authorized_context_input
 from utils.http_client_utils import create_httpx_client
 
 logger = logging.getLogger(__name__)
+
+try:
+    from opentelemetry import metrics as _otel_metrics
+
+    _nl2agent_meter = _otel_metrics.get_meter(__name__)
+    _nl2agent_skill_creation_events_total = _nl2agent_meter.create_counter(
+        name="nl2agent_skill_creation_events_total",
+        description="Count of events in the NL2Agent Skill creation funnel.",
+        unit="events",
+    )
+except Exception:  # pragma: no cover - OpenTelemetry is optional at runtime
+    _nl2agent_skill_creation_events_total = None
 
 MINIMUM_RECOMMENDATION_SCORE = 0.45
 MAX_RECOMMENDATIONS = 5
@@ -77,6 +95,31 @@ AGENT_DRAFT_FIELD_ORDER = (
     "greeting_message",
     "example_questions",
 )
+
+
+def record_nl2agent_skill_creation_event(
+    *,
+    event: str,
+    non_skill_coverage: str = "none",
+    created_skill_status: str = "none",
+    has_weak_matches: bool = False,
+) -> None:
+    """Record aggregate funnel state without user text or resource identifiers."""
+
+    if _nl2agent_skill_creation_events_total is None:
+        return
+    try:
+        _nl2agent_skill_creation_events_total.add(
+            1,
+            {
+                "event": event,
+                "non_skill_coverage": non_skill_coverage,
+                "created_skill_status": created_skill_status,
+                "has_weak_matches": str(has_weak_matches).lower(),
+            },
+        )
+    except Exception:  # pragma: no cover - telemetry must not break the flow
+        pass
 
 
 class _Nl2AgentBoundaryObserver(MessageObserver):
@@ -902,9 +945,6 @@ async def _load_internal_uninstalled_resource_catalog(
             "containerPort": item.get("containerPort"),
             "tags": _normalize_labels(item.get("tags")),
             "version": item.get("version"),
-            "registryJson": _redact_installation_snapshot(
-                item.get("registryJson") or {}
-            ),
             "marketId": market_id,
         }
         option = ResourceInstallationOption(
@@ -930,7 +970,6 @@ async def _load_internal_uninstalled_resource_catalog(
             "interfaces": _flatten_resource_text({
                 "server": item.get("serverUrl"),
                 "config": item.get("configJson"),
-                "registry": item.get("registryJson"),
             }),
             "installed": False,
             "quality": 1.0,
@@ -1014,13 +1053,16 @@ async def recommend_uninstalled_resources_impl(
     recommended_refs: list[str],
     tenant_id: str,
     user_id: str,
+    catalog: list[dict[str, Any]] | None = None,
 ) -> RecommendResourcesOutput:
     """Resolve installable candidates against their current source records."""
 
-    internal_catalog = await _load_internal_uninstalled_resource_catalog(
-        tenant_id=tenant_id,
-        user_id=user_id,
-    )
+    internal_catalog = catalog
+    if internal_catalog is None:
+        internal_catalog = await _load_internal_uninstalled_resource_catalog(
+            tenant_id=tenant_id,
+            user_id=user_id,
+        )
     by_ref = {item["candidate_ref"]: item for item in internal_catalog}
     recommended = set(recommended_refs)
     resources: list[RecommendedResource] = []
@@ -1034,6 +1076,152 @@ async def recommend_uninstalled_resources_impl(
             recommended_refs=recommended,
         ))
     return RecommendResourcesOutput(resources=resources)
+
+
+def _candidate_for_requirement(
+    *,
+    resource: dict[str, Any],
+    requirement_id: str,
+    score: float,
+) -> ResourceCandidate:
+    return ResourceCandidate(
+        candidate_ref=resource["candidate_ref"],
+        resource_type=resource["resource_type"],
+        source=resource["source"],
+        name=resource["name"],
+        description=resource["description"],
+        requirement_ids=[requirement_id],
+        score=round(score, 4),
+    )
+
+
+def _build_skill_creation_requests(
+    *,
+    requirements: list[ResourceRequirement],
+    installed_catalog: list[dict[str, Any]],
+    uninstalled_catalog: list[dict[str, Any]],
+    created_skill_refs_by_requirement: dict[str, str],
+    agent_description: str,
+) -> list[SkillCreationRequest]:
+    if not ENABLE_NL2AGENT_SKILL_CREATION:
+        return []
+
+    all_catalog = [*installed_catalog, *uninstalled_catalog]
+    installed_by_ref = {
+        item["candidate_ref"]: item for item in installed_catalog
+    }
+    requests: list[SkillCreationRequest] = []
+    for requirement in requirements:
+        skill_scores = [
+            (_score_resource_requirement(requirement, resource), resource)
+            for resource in all_catalog
+            if resource["resource_type"] == "skill"
+        ]
+        created_ref = created_skill_refs_by_requirement.get(
+            requirement.requirement_id
+        )
+        created_resource = (
+            installed_by_ref.get(created_ref) if created_ref else None
+        )
+        created_score = (
+            _score_resource_requirement(requirement, created_resource)
+            if created_resource is not None
+            else None
+        )
+        if created_ref:
+            record_nl2agent_skill_creation_event(
+                event=(
+                    "verification_success"
+                    if created_score is not None
+                    and created_score >= STRONG_RESOURCE_SCORE
+                    else "verification_failed"
+                ),
+                created_skill_status=(
+                    "none"
+                    if created_score is not None
+                    and created_score >= STRONG_RESOURCE_SCORE
+                    else "weak_match"
+                    if created_resource is not None
+                    else "unverified"
+                ),
+            )
+
+        if any(score >= STRONG_RESOURCE_SCORE for score, _ in skill_scores):
+            continue
+
+        skill_scores.sort(key=lambda item: (-item[0], item[1]["candidate_ref"]))
+        weak_candidates = [
+            _candidate_for_requirement(
+                resource=resource,
+                requirement_id=requirement.requirement_id,
+                score=score,
+            )
+            for score, resource in skill_scores
+            if score >= MINIMUM_RESOURCE_SCORE
+        ][:3]
+
+        non_skill_scores = [
+            (_score_resource_requirement(requirement, resource), resource)
+            for resource in all_catalog
+            if resource["resource_type"] != "skill"
+        ]
+        strong_non_skill = [
+            (score, resource)
+            for score, resource in non_skill_scores
+            if score >= STRONG_RESOURCE_SCORE
+        ]
+        strong_non_skill.sort(
+            key=lambda item: (-item[0], item[1]["candidate_ref"])
+        )
+        if any(resource.get("installed") for _, resource in strong_non_skill):
+            coverage_status = "installed"
+            coverage_items = [
+                resource
+                for _, resource in strong_non_skill
+                if resource.get("installed")
+            ]
+        elif strong_non_skill:
+            coverage_status = "installable"
+            coverage_items = [resource for _, resource in strong_non_skill]
+        else:
+            coverage_status = "none"
+            coverage_items = []
+
+        created_status = None
+        if created_ref:
+            if created_resource is None:
+                created_status = "unverified"
+            else:
+                created_status = "weak_match"
+                if all(
+                    candidate.candidate_ref != created_ref
+                    for candidate in weak_candidates
+                ):
+                    weak_candidates = [
+                        _candidate_for_requirement(
+                            resource=created_resource,
+                            requirement_id=requirement.requirement_id,
+                            score=created_score,
+                        ),
+                        *weak_candidates,
+                    ][:3]
+
+        requests.append(SkillCreationRequest(
+            requirement=requirement,
+            agent_description=agent_description,
+            confirmed_constraints=[],
+            weak_skill_candidates=weak_candidates,
+            non_skill_coverage=NonSkillCoverage(
+                status=coverage_status,
+                candidate_refs=[
+                    resource["candidate_ref"] for resource in coverage_items[:3]
+                ],
+            ),
+            can_create_skill=True,
+            created_skill_ref=created_ref,
+            created_skill_status=created_status,
+        ))
+    return requests
 
 
 async def recommend_installed_resources_impl(
@@ -1068,12 +1256,50 @@ async def recommend_resources_impl(
     *,
     candidates: list[ResourceCandidate],
     recommended_refs: list[str],
+    requirements: list[ResourceRequirement] | None = None,
+    include_skill_creation: bool = False,
+    created_skill_refs_by_requirement: dict[str, str] | None = None,
+    agent_description: str = "",
     tenant_id: str,
     user_id: str,
 ) -> RecommendResourcesOutput:
     """Dispatch a homogeneous candidate set to its trusted source resolver."""
 
     sources = {candidate.source for candidate in candidates}
+    if include_skill_creation:
+        if sources and not sources.issubset(UNINSTALLED_RESOURCE_SOURCES):
+            raise Nl2AgentResourceError("invalid_candidates")
+        installed_catalog, uninstalled_catalog = await asyncio.gather(
+            _load_installed_resource_catalog(
+                tenant_id=tenant_id,
+                user_id=user_id,
+            ),
+            _load_internal_uninstalled_resource_catalog(
+                tenant_id=tenant_id,
+                user_id=user_id,
+            ),
+        )
+        resolved = await recommend_uninstalled_resources_impl(
+            candidates=candidates,
+            recommended_refs=recommended_refs,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            catalog=uninstalled_catalog,
+        )
+        supplied_requirements = requirements or []
+        return RecommendResourcesOutput(
+            resources=resolved.resources,
+            requirements=supplied_requirements,
+            skill_creation_requests=_build_skill_creation_requests(
+                requirements=supplied_requirements,
+                installed_catalog=installed_catalog,
+                uninstalled_catalog=uninstalled_catalog,
+                created_skill_refs_by_requirement=(
+                    created_skill_refs_by_requirement or {}
+                ),
+                agent_description=agent_description,
+            ),
+        )
     if sources and sources.issubset(INSTALLED_RESOURCE_SOURCES):
         return await recommend_installed_resources_impl(
             candidates=candidates,

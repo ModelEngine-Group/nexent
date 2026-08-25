@@ -467,6 +467,27 @@ class NL2AgentRunRequest(BaseModel):
     agent_id: int = Field(gt=0)
 
 
+class NL2AgentSkillCreationEventRequest(BaseModel):
+    """Low-cardinality telemetry for the NL2Agent Skill creation funnel."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    event: Literal[
+        "exposure",
+        "create_click",
+        "create_cancel",
+        "create_success",
+        "verification_success",
+        "verification_failed",
+        "weak_match_accepted",
+        "non_skill_resource_selected",
+        "requirement_abandoned",
+    ]
+    non_skill_coverage: Literal["installed", "installable", "none"] = "none"
+    created_skill_status: Literal["unverified", "weak_match", "none"] = "none"
+    has_weak_matches: bool = False
+
+
 class NL2SkillRunRequest(BaseModel):
     """Request payload for one ephemeral NL2Skill conversation turn."""
 

@@ -15,6 +15,7 @@ from services.nl2agent_service import (
     Nl2AgentResourceError,
     _Nl2AgentBoundaryObserver,
     _build_verified_bound_resources_context,
+    _build_skill_creation_requests,
     _load_internal_uninstalled_resource_catalog,
     _load_installed_resource_catalog,
     _normalize_skill_config,
@@ -983,6 +984,134 @@ async def test_recommend_resources_dispatches_homogeneous_sources(mocker):
                 tenant_id="tenant-a",
                 user_id="user-a",
             )
+
+
+def test_skill_creation_requests_use_skill_specific_coverage(mocker):
+    requirement = ResourceRequirement(
+        requirement_id="research",
+        query="Research project material",
+    )
+    installed_tool = {
+        "candidate_ref": "tool:7",
+        "resource_type": "tool",
+        "source": "MCP_TOOL",
+        "name": "project-search",
+        "description": "Search projects",
+        "installed": True,
+    }
+    weak_skill = {
+        "candidate_ref": "tenant_skill_repository:31",
+        "resource_type": "skill",
+        "source": "TENANT_SKILL_REPOSITORY",
+        "name": "general-research",
+        "description": "General research",
+        "installed": False,
+    }
+    scores = {"tool:7": 0.92, "tenant_skill_repository:31": 0.61}
+    mocker.patch(
+        "services.nl2agent_service._score_resource_requirement",
+        side_effect=lambda _requirement, resource: scores[resource["candidate_ref"]],
+    )
+
+    requests = _build_skill_creation_requests(
+        requirements=[requirement],
+        installed_catalog=[installed_tool],
+        uninstalled_catalog=[weak_skill],
+        created_skill_refs_by_requirement={},
+        agent_description="A research Agent",
+    )
+
+    assert len(requests) == 1
+    request = requests[0]
+    assert request.non_skill_coverage.status == "installed"
+    assert request.non_skill_coverage.candidate_refs == ["tool:7"]
+    assert request.weak_skill_candidates[0].candidate_ref == (
+        "tenant_skill_repository:31"
+    )
+    assert request.agent_description == "A research Agent"
+
+    mocker.patch(
+        "services.nl2agent_service.ENABLE_NL2AGENT_SKILL_CREATION",
+        False,
+    )
+    assert _build_skill_creation_requests(
+        requirements=[requirement],
+        installed_catalog=[installed_tool],
+        uninstalled_catalog=[weak_skill],
+        created_skill_refs_by_requirement={},
+        agent_description="A research Agent",
+    ) == []
+
+
+def test_skill_creation_requests_suppress_strong_skill_and_track_created_state(mocker):
+    requirement = ResourceRequirement(
+        requirement_id="research",
+        query="Research project material",
+    )
+    installed_skill = {
+        "candidate_ref": "skill:19",
+        "resource_type": "skill",
+        "source": "INSTALLED_SKILL",
+        "name": "research",
+        "description": "Research projects",
+        "installed": True,
+    }
+    score = mocker.patch(
+        "services.nl2agent_service._score_resource_requirement",
+        return_value=0.8,
+    )
+    record_event = mocker.patch(
+        "services.nl2agent_service.record_nl2agent_skill_creation_event"
+    )
+    assert _build_skill_creation_requests(
+        requirements=[requirement],
+        installed_catalog=[installed_skill],
+        uninstalled_catalog=[],
+        created_skill_refs_by_requirement={},
+        agent_description="",
+    ) == []
+
+    assert _build_skill_creation_requests(
+        requirements=[requirement],
+        installed_catalog=[installed_skill],
+        uninstalled_catalog=[],
+        created_skill_refs_by_requirement={"research": "skill:19"},
+        agent_description="",
+    ) == []
+    record_event.assert_called_once_with(
+        event="verification_success",
+        created_skill_status="none",
+    )
+
+    score.return_value = 0.55
+    record_event.reset_mock()
+    weak = _build_skill_creation_requests(
+        requirements=[requirement],
+        installed_catalog=[installed_skill],
+        uninstalled_catalog=[],
+        created_skill_refs_by_requirement={"research": "skill:19"},
+        agent_description="",
+    )[0]
+    assert weak.created_skill_status == "weak_match"
+    assert weak.weak_skill_candidates[0].candidate_ref == "skill:19"
+    record_event.assert_called_once_with(
+        event="verification_failed",
+        created_skill_status="weak_match",
+    )
+
+    record_event.reset_mock()
+    unverified = _build_skill_creation_requests(
+        requirements=[requirement],
+        installed_catalog=[],
+        uninstalled_catalog=[],
+        created_skill_refs_by_requirement={"research": "skill:20"},
+        agent_description="",
+    )[0]
+    assert unverified.created_skill_status == "unverified"
+    record_event.assert_called_once_with(
+        event="verification_failed",
+        created_skill_status="unverified",
+    )
 
 
 @pytest.mark.asyncio

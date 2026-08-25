@@ -79,8 +79,10 @@ SEARCH_UNINSTALLED_RESOURCES_DESCRIPTION = (
 )
 RECOMMEND_RESOURCES_DESCRIPTION = (
     "Resolve installed or installable resource candidates into verified card "
-    "details. Pass unchanged candidates returned by resource searches and a "
-    "unique recommended_refs subset. Decode the JSON result, then pass it "
+    "details. For installation planning, also pass the full requirements, set "
+    "include_skill_creation=true, and allow candidates to be empty so verified "
+    "Skill-creation fallbacks can be returned. Pass unchanged search candidates "
+    "and a unique recommended_refs subset. Decode the JSON result, then pass it "
     f"unchanged to {NL2A_WRAPPER_NAME} with the matching installation or binding subtype."
 )
 NL2A_WRAPPER_DESCRIPTION = (
@@ -226,8 +228,14 @@ class RecommendResourcesInput(BaseModel):
     """Frozen input for resolving selected candidates into card data (PR2)."""
 
     model_config = ConfigDict(extra="forbid")
-    candidates: list[ResourceCandidate] = Field(min_length=1, max_length=12)
+    candidates: list[ResourceCandidate] = Field(default_factory=list, max_length=12)
     recommended_refs: list[str] = Field(default_factory=list, max_length=12)
+    requirements: list[ResourceRequirement] = Field(default_factory=list, max_length=8)
+    include_skill_creation: bool = False
+    created_skill_refs_by_requirement: dict[str, str] = Field(
+        default_factory=dict,
+        max_length=8,
+    )
 
     @model_validator(mode="after")
     def validate_refs(self) -> "RecommendResourcesInput":
@@ -238,6 +246,25 @@ class RecommendResourcesInput(BaseModel):
             raise ValueError("recommended_refs must be unique")
         if not set(self.recommended_refs).issubset(candidate_refs):
             raise ValueError("recommended_refs must be a subset of candidates")
+        requirement_ids = [item.requirement_id for item in self.requirements]
+        if len(requirement_ids) != len(set(requirement_ids)):
+            raise ValueError("requirement_id values must be unique")
+        if self.include_skill_creation:
+            if not self.requirements:
+                raise ValueError("skill creation requires requirements")
+            if not set(self.created_skill_refs_by_requirement).issubset(
+                requirement_ids
+            ):
+                raise ValueError("created Skill requirements must be supplied")
+            if any(
+                not ref.startswith("skill:")
+                for ref in self.created_skill_refs_by_requirement.values()
+            ):
+                raise ValueError("created Skill refs must be installed Skill refs")
+        elif not self.candidates:
+            raise ValueError("candidates cannot be empty")
+        elif self.requirements or self.created_skill_refs_by_requirement:
+            raise ValueError("requirements are only valid for Skill creation")
         return self
 
 
@@ -286,12 +313,53 @@ class RecommendedResource(BaseModel):
         return self
 
 
+class NonSkillCoverage(BaseModel):
+    """Strong non-Skill coverage for one requirement."""
+
+    model_config = ConfigDict(extra="forbid")
+    status: Literal["installed", "installable", "none"]
+    candidate_refs: list[str] = Field(default_factory=list, max_length=3)
+
+
+class SkillCreationRequest(BaseModel):
+    """Verified Skill-creation fallback for one uncovered Skill requirement."""
+
+    model_config = ConfigDict(extra="forbid")
+    requirement: ResourceRequirement
+    agent_description: str = ""
+    confirmed_constraints: list[str] = Field(default_factory=list, max_length=8)
+    weak_skill_candidates: list[ResourceCandidate] = Field(
+        default_factory=list,
+        max_length=3,
+    )
+    non_skill_coverage: NonSkillCoverage
+    can_create_skill: bool
+    disabled_reason: Literal["feature_disabled", "unauthorized"] | None = None
+    created_skill_ref: str | None = None
+    created_skill_status: Literal["unverified", "weak_match"] | None = None
+
+    @model_validator(mode="after")
+    def validate_created_skill(self) -> "SkillCreationRequest":
+        if (self.created_skill_ref is None) != (self.created_skill_status is None):
+            raise ValueError("created Skill ref and status must be supplied together")
+        if self.created_skill_ref and not self.created_skill_ref.startswith("skill:"):
+            raise ValueError("created Skill ref must be installed")
+        if self.can_create_skill and self.disabled_reason is not None:
+            raise ValueError("enabled Skill creation cannot have a disabled reason")
+        return self
+
+
 class RecommendResourcesOutput(BaseModel):
     """Frozen successful recommend-resources output (implemented in PR2)."""
 
     model_config = ConfigDict(extra="forbid")
     status: Literal["success"] = "success"
     resources: list[RecommendedResource]
+    requirements: list[ResourceRequirement] = Field(default_factory=list, max_length=8)
+    skill_creation_requests: list[SkillCreationRequest] = Field(
+        default_factory=list,
+        max_length=8,
+    )
 
 
 class ResourceToolError(BaseModel):
@@ -346,7 +414,12 @@ class SuggestedResourceInstallationPayload(BaseModel):
         "suggested_resource_installation"
     )
     agent_id: int = Field(gt=0)
-    resources: list[RecommendedResource] = Field(min_length=1, max_length=12)
+    resources: list[RecommendedResource] = Field(default_factory=list, max_length=12)
+    requirements: list[ResourceRequirement] = Field(default_factory=list, max_length=8)
+    skill_creation_requests: list[SkillCreationRequest] = Field(
+        default_factory=list,
+        max_length=8,
+    )
 
     @model_validator(mode="after")
     def validate_installable_sources(
@@ -358,6 +431,16 @@ class SuggestedResourceInstallationPayload(BaseModel):
             for resource in self.resources
         ):
             raise ValueError("installation resources must be installable")
+        if not self.resources and not self.skill_creation_requests:
+            raise ValueError("installation payload cannot be empty")
+        requirement_ids = {
+            requirement.requirement_id for requirement in self.requirements
+        }
+        if any(
+            item.requirement.requirement_id not in requirement_ids
+            for item in self.skill_creation_requests
+        ):
+            raise ValueError("Skill creation requests require matching requirements")
         return self
 
 
@@ -564,9 +647,16 @@ def build_nl2a_wrapper(
             if subtype == "suggested_resource_installation"
             else InstalledResourceBindingPayload
         )
-        output = payload_model(
-            agent_id=agent_id, resources=verified.resources
-        ).model_dump(mode="json")
+        payload_args: dict[str, Any] = {
+            "agent_id": agent_id,
+            "resources": verified.resources,
+        }
+        if subtype == "suggested_resource_installation":
+            payload_args.update({
+                "requirements": verified.requirements,
+                "skill_creation_requests": verified.skill_creation_requests,
+            })
+        output = payload_model(**payload_args).model_dump(mode="json")
     else:
         raise ValueError(f"unsupported nl2a subtype: {subtype}")
 
@@ -620,7 +710,10 @@ def create_nl2agent_mcp_tool_configs() -> list[ToolConfig]:
             inputs=(
                 '{"agent_id":"int",'
                 '"candidates":"list[ResourceCandidate]",'
-                '"recommended_refs":"list[str]"}'
+                '"recommended_refs":"list[str]",'
+                '"requirements":"list[ResourceRequirement]",'
+                '"include_skill_creation":"bool",'
+                '"created_skill_refs_by_requirement":"dict[str,str]"}'
             ),
             output_type="object",
             params={},
@@ -904,15 +997,23 @@ async def search_uninstalled_resources(
 
 async def recommend_resources(
     agent_id: int,
-    candidates: list[dict[str, Any]],
-    recommended_refs: list[str],
+    candidates: list[dict[str, Any]] | None = None,
+    recommended_refs: list[str] | None = None,
+    requirements: list[dict[str, Any]] | None = None,
+    include_skill_creation: bool = False,
+    created_skill_refs_by_requirement: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Resolve candidates into verified installation or binding metadata."""
 
     try:
         payload = RecommendResourcesInput(
-            candidates=candidates,
-            recommended_refs=recommended_refs,
+            candidates=candidates or [],
+            recommended_refs=recommended_refs or [],
+            requirements=requirements or [],
+            include_skill_creation=include_skill_creation,
+            created_skill_refs_by_requirement=(
+                created_skill_refs_by_requirement or {}
+            ),
         )
     except ValidationError:
         return _dump_resource_tool_error("invalid_candidates", retryable=False)
@@ -937,7 +1038,7 @@ async def recommend_resources(
 
         authorization = get_http_request().headers.get("Authorization")
         user_id, tenant_id = get_current_user_id(authorization)
-        require_agent_draft_edit(
+        draft = require_agent_draft_edit(
             agent_id=resolved_agent_id,
             tenant_id=tenant_id,
             user_id=user_id,
@@ -945,6 +1046,12 @@ async def recommend_resources(
         result = await recommend_resources_impl(
             candidates=payload.candidates,
             recommended_refs=payload.recommended_refs,
+            requirements=payload.requirements,
+            include_skill_creation=payload.include_skill_creation,
+            created_skill_refs_by_requirement=(
+                payload.created_skill_refs_by_requirement
+            ),
+            agent_description=str(draft.get("description") or ""),
             tenant_id=tenant_id,
             user_id=user_id,
         )
@@ -987,7 +1094,7 @@ async def nl2a_wrapper(
         resolved_agent_id = _resolve_agent_context_id(agent_id)
         authorization = get_http_request().headers.get("Authorization")
         user_id, tenant_id = get_current_user_id(authorization)
-        require_agent_draft_edit(
+        draft = require_agent_draft_edit(
             agent_id=resolved_agent_id,
             tenant_id=tenant_id,
             user_id=user_id,
@@ -1014,8 +1121,11 @@ async def nl2a_wrapper(
             if subtype == "suggested_resource_installation"
             else INSTALLED_RESOURCE_SOURCES
         )
-        if not sources or not sources.issubset(required_sources):
+        if sources and not sources.issubset(required_sources):
             raise ValueError(f"invalid resources for {subtype}")
+        if subtype == "installed_resource_binding" and not sources:
+            raise ValueError(f"invalid resources for {subtype}")
+        include_skill_creation = subtype == "suggested_resource_installation"
         verified = await recommend_resources_impl(
             candidates=[resource.candidate for resource in supplied.resources],
             recommended_refs=[
@@ -1023,6 +1133,14 @@ async def nl2a_wrapper(
                 for resource in supplied.resources
                 if resource.recommendation == "recommended"
             ],
+            requirements=(supplied.requirements if include_skill_creation else []),
+            include_skill_creation=include_skill_creation,
+            created_skill_refs_by_requirement={
+                request.requirement.requirement_id: request.created_skill_ref
+                for request in supplied.skill_creation_requests
+                if request.created_skill_ref is not None
+            },
+            agent_description=str(draft.get("description") or ""),
             tenant_id=tenant_id,
             user_id=user_id,
         )

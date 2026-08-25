@@ -537,6 +537,11 @@ TASK_STATUS = {
 THINK_START_PATTERN = "<think>"
 THINK_END_PATTERN = "</think>"
 
+# NL2Agent feature switches
+ENABLE_NL2AGENT_SKILL_CREATION = (
+    os.getenv("ENABLE_NL2AGENT_SKILL_CREATION", "true").lower() == "true"
+)
+
 
 # Telemetry and Monitoring Configuration (OTLP Protocol)
 MONITORING_PROVIDER = os.getenv("MONITORING_PROVIDER", "")

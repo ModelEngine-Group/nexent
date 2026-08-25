@@ -1,16 +1,21 @@
 "use client";
 
-import { useEffect, useId, useMemo, useReducer, useState } from "react";
+import { useEffect, useId, useMemo, useReducer, useRef, useState } from "react";
 import { useAui } from "@assistant-ui/react";
 import { useQueryClient } from "@tanstack/react-query";
 import { App, Input, InputNumber, Modal, Select } from "antd";
+import dynamic from "next/dynamic";
 import {
   AlertTriangle,
   CheckCircle2,
   Download,
   Loader2,
+  Pencil,
+  RefreshCw,
   Settings2,
   SkipForward,
+  WandSparkles,
+  Wrench,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -30,19 +35,29 @@ import {
   suggestMcpContainerPortService,
 } from "@/services/mcpToolsService";
 import {
+  type CreatedSkillResult,
   installOfficialSkills,
   fetchOfficialSkillsWithStatus,
 } from "@/services/skillService";
 import skillRepositoryService from "@/services/skillRepositoryService";
 import { toApiError, type ApiError } from "@/services/api";
+import {
+  recordNl2AgentSkillCreationEvent,
+  type Nl2AgentSkillCreationEvent,
+} from "@/services/nl2AgentService";
 import type { CommunityQuickAddDraft } from "@/types/mcpTools";
 import type {
   Nl2AgentCardAction,
   Nl2aInstallableResource,
   Nl2aResourceInstallationOption,
+  Nl2aSkillCreationRequest,
   Nl2aSuggestedResourceInstallationPayload,
 } from "../adapter/remote-chat-model-adapter";
 import { Nl2AgentResourceSourceBadge } from "./nl2agent-resource-source-badge";
+
+const SkillBuildModal = dynamic(
+  () => import("../../agents/components/agentConfig/SkillBuildModal")
+);
 
 type InstallationStatus =
   | "not_started"
@@ -206,6 +221,58 @@ const requireMcpId = async (name: string): Promise<number> => {
 const needsConfiguration = (resource: Nl2aInstallableResource): boolean =>
   resource.candidate.source !== "NEXENT_OFFICIAL_SKILL";
 
+const installedSkillId = (ref: string | null): number | null => {
+  if (!ref?.startsWith("skill:")) return null;
+  const skillId = Number(ref.slice("skill:".length));
+  return Number.isInteger(skillId) && skillId > 0 ? skillId : null;
+};
+
+const buildInitialSkillPrompt = (
+  request: Nl2aSkillCreationRequest,
+  language: string
+): string => {
+  const isZh = language.startsWith("zh");
+  const lines = isZh
+    ? [
+        "请为以下能力需求创建一个可复用的 Skill。",
+        `能力需求：${request.requirement.query}`,
+      ]
+    : [
+        "Create a reusable Skill for the following capability requirement.",
+        `Requirement: ${request.requirement.query}`,
+      ];
+  if (request.agent_description) {
+    lines.push(
+      isZh
+        ? `当前 Agent：${request.agent_description}`
+        : `Current Agent: ${request.agent_description}`
+    );
+  }
+  if (request.requirement.search_terms.length > 0) {
+    lines.push(
+      `${isZh ? "关键词" : "Search terms"}: ${request.requirement.search_terms.join(", ")}`
+    );
+  }
+  if (request.confirmed_constraints.length > 0) {
+    lines.push(
+      `${isZh ? "已确认约束" : "Confirmed constraints"}: ${request.confirmed_constraints.join("; ")}`
+    );
+  }
+  return lines.join("\n");
+};
+
+const recordSkillCreationEvent = (
+  request: Nl2aSkillCreationRequest,
+  event: Nl2AgentSkillCreationEvent
+) => {
+  recordNl2AgentSkillCreationEvent({
+    event,
+    non_skill_coverage: request.non_skill_coverage.status,
+    created_skill_status: request.created_skill_status || "none",
+    has_weak_matches: request.weak_skill_candidates.length > 0,
+  }).catch(() => undefined);
+};
+
 export function SuggestedResourceInstallationCard({
   payload,
   disabled = false,
@@ -233,10 +300,27 @@ export function SuggestedResourceInstallationCard({
     "not_started" | "failed"
   >("not_started");
   const [submitted, setSubmitted] = useState(false);
+  const [activeSkillRequirementId, setActiveSkillRequirementId] = useState<
+    string | null
+  >(null);
+  const [openedSkillRequirementIds, setOpenedSkillRequirementIds] = useState<
+    string[]
+  >([]);
+  const exposedSkillRequirementIds = useRef(new Set<string>());
+  const completedSkillModalRequirementIds = useRef(new Set<string>());
 
   useEffect(() => {
     registerCard(cardKey, payload.subtype);
   }, [cardKey, payload.subtype, registerCard]);
+
+  useEffect(() => {
+    payload.skill_creation_requests.forEach((request) => {
+      const requirementId = request.requirement.requirement_id;
+      if (exposedSkillRequirementIds.current.has(requirementId)) return;
+      exposedSkillRequirementIds.current.add(requirementId);
+      recordSkillCreationEvent(request, "exposure");
+    });
+  }, [payload.skill_creation_requests]);
 
   const interactive = !disabled && !submitted && isCardInteractive(cardKey);
   const dialogItem = items.find((item) => candidateRef(item) === dialogRef);
@@ -248,6 +332,95 @@ export function SuggestedResourceInstallationCard({
     (item) => item.status === "installed"
   ).length;
   const canContinue = interactive && !hasFailed && !isBusy;
+
+  const resourceActionState = () => ({
+    installed: items
+      .filter((item) => item.status === "installed")
+      .map((item) => ({
+        candidate_ref: candidateRef(item),
+        resource_type: item.resource.candidate.resource_type,
+        resource_id: item.resourceId,
+      })),
+    skipped: items
+      .filter((item) => item.status === "skipped")
+      .map((item) => ({
+        candidate_ref: candidateRef(item),
+        reason: item.skipReason || "user_skipped",
+      })),
+    pending: items
+      .filter(
+        (item) => item.status !== "installed" && item.status !== "skipped"
+      )
+      .map((item) => candidateRef(item)),
+  });
+
+  const submitAction = (
+    actionName: string,
+    summary: string,
+    result: Record<string, unknown>
+  ) => {
+    if (!interactive) return;
+    const action: Nl2AgentCardAction = {
+      type: "nl2agent_card_action",
+      subtype: payload.subtype,
+      agent_id: payload.agent_id,
+      action: actionName,
+      result: {
+        requirements: payload.requirements,
+        ...resourceActionState(),
+        ...result,
+      },
+    };
+    setSubmitted(true);
+    submitCard(cardKey);
+    aui.thread().append({
+      role: "user",
+      content: [{ type: "text", text: summary }],
+      metadata: { custom: { nl2agentCardAction: action } },
+      startRun: true,
+    });
+  };
+
+  const openSkillBuilder = (request: Nl2aSkillCreationRequest) => {
+    if (!interactive || !request.can_create_skill) return;
+    recordSkillCreationEvent(request, "create_click");
+    const requirementId = request.requirement.requirement_id;
+    setOpenedSkillRequirementIds((current) =>
+      current.includes(requirementId) ? current : [...current, requirementId]
+    );
+    setActiveSkillRequirementId(requirementId);
+  };
+
+  const handleSkillCreated = async (
+    request: Nl2aSkillCreationRequest,
+    skill: CreatedSkillResult
+  ) => {
+    if (!Number.isInteger(skill.skill_id) || skill.skill_id <= 0) {
+      message.error(
+        t(
+          "nl2agent.skillCreation.invalidResult",
+          "Created Skill could not be resolved"
+        )
+      );
+      return;
+    }
+    completedSkillModalRequirementIds.current.add(
+      request.requirement.requirement_id
+    );
+    recordSkillCreationEvent(request, "create_success");
+    await queryClient.invalidateQueries({ queryKey: ["skills"] });
+    submitAction(
+      "skill_created",
+      t("nl2agent.skillCreation.createdSummary", "Skill created"),
+      {
+        requirement: request.requirement,
+        created_skill: {
+          skill_id: skill.skill_id,
+          candidate_ref: `skill:${skill.skill_id}`,
+        },
+      }
+    );
+  };
 
   const openConfig = async (item: InstallationItem) => {
     if (!interactive || item.status === "installed") return;
@@ -406,7 +579,6 @@ export function SuggestedResourceInstallationCard({
           container_port: draft.containerPort,
           tags: config.tags || [],
           version: config.version,
-          registry_json: config.registryJson,
           market_id: marketId,
           skip_health_check: true,
           enabled: true,
@@ -420,7 +592,6 @@ export function SuggestedResourceInstallationCard({
           tags: config.tags || [],
           source: McpSource.COMMUNITY,
           authorization_token: draft.authorizationToken.trim() || undefined,
-          registry_json: config.registryJson,
           market_id: marketId,
           port,
           mcp_config: mcpConfig,
@@ -438,7 +609,6 @@ export function SuggestedResourceInstallationCard({
         custom_headers: customHeaders,
         tags: config.tags || [],
         version: config.version,
-        registry_json: config.registryJson,
         market_id: marketId,
       });
     }
@@ -579,7 +749,9 @@ export function SuggestedResourceInstallationCard({
             )}
           </p>
         </div>
-        <Badge variant="outline">{items.length}</Badge>
+        <Badge variant="outline">
+          {items.length + payload.skill_creation_requests.length}
+        </Badge>
       </div>
 
       <div className="divide-y">
@@ -697,15 +869,258 @@ export function SuggestedResourceInstallationCard({
             </div>
           </div>
         ))}
+        {payload.skill_creation_requests.map((request) => {
+          const requirementId = request.requirement.requirement_id;
+          return (
+            <div
+              key={requirementId}
+              className="space-y-3 px-4 py-4"
+              data-testid={`skill-creation-request-${requirementId}`}
+            >
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="break-words text-sm font-medium">
+                      {request.requirement.query}
+                    </span>
+                    <Badge variant="secondary">
+                      {t(
+                        "nl2agent.skillCreation.noStrongMatch",
+                        "No strongly matching Skill"
+                      )}
+                    </Badge>
+                  </div>
+                  {request.non_skill_coverage.status !== "none" ? (
+                    <p className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
+                      <Wrench className="size-3.5 shrink-0" />
+                      {request.non_skill_coverage.status === "installed"
+                        ? t(
+                            "nl2agent.skillCreation.installedToolCoverage",
+                            "An installed tool or MCP already covers this requirement."
+                          )
+                        : t(
+                            "nl2agent.skillCreation.installableToolCoverage",
+                            "An installable tool or MCP can cover this requirement."
+                          )}
+                    </p>
+                  ) : (
+                    <p className="mt-1 flex items-center gap-1 text-xs text-amber-700">
+                      <AlertTriangle className="size-3.5 shrink-0" />
+                      {t(
+                        "nl2agent.skillCreation.noResourceCoverage",
+                        "No strongly matching resource currently covers this requirement."
+                      )}
+                    </p>
+                  )}
+                  {request.created_skill_status ? (
+                    <p className="mt-2 text-xs text-amber-700">
+                      {request.created_skill_status === "unverified"
+                        ? t(
+                            "nl2agent.skillCreation.unverified",
+                            "The Skill was created but is not visible to resource search yet."
+                          )
+                        : t(
+                            "nl2agent.skillCreation.weakAfterCreation",
+                            "The created Skill is visible but remains a weak match."
+                          )}
+                    </p>
+                  ) : null}
+                </div>
+
+                <div className="flex flex-wrap justify-end gap-2">
+                  {request.created_skill_status === "unverified" ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={!interactive}
+                      onClick={() =>
+                        submitAction(
+                          "retry_skill_validation",
+                          t(
+                            "nl2agent.skillCreation.retrySummary",
+                            "Retry Skill validation"
+                          ),
+                          {
+                            requirement: request.requirement,
+                            created_skill_ref: request.created_skill_ref,
+                          }
+                        )
+                      }
+                    >
+                      <RefreshCw className="mr-1 size-4" />
+                      {t("common.retry", "Retry")}
+                    </Button>
+                  ) : null}
+                  {request.created_skill_ref ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={!interactive}
+                      onClick={() => openSkillBuilder(request)}
+                    >
+                      <Pencil className="mr-1 size-4" />
+                      {t(
+                        "nl2agent.skillCreation.continueEditing",
+                        "Continue editing"
+                      )}
+                    </Button>
+                  ) : (
+                    <Button
+                      type="button"
+                      size="sm"
+                      disabled={!interactive || !request.can_create_skill}
+                      title={
+                        request.can_create_skill
+                          ? undefined
+                          : t(
+                              "nl2agent.skillCreation.unauthorized",
+                              "You do not have permission to create a Skill."
+                            )
+                      }
+                      onClick={() => openSkillBuilder(request)}
+                    >
+                      <WandSparkles className="mr-1 size-4" />
+                      {t("nl2agent.skillCreation.create", "Create Skill")}
+                    </Button>
+                  )}
+                </div>
+              </div>
+
+              {request.weak_skill_candidates.length > 0 ? (
+                <div className="space-y-2">
+                  <p className="text-xs font-medium text-muted-foreground">
+                    {t(
+                      "nl2agent.skillCreation.weakMatches",
+                      "Possible Skill matches"
+                    )}
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {request.weak_skill_candidates.map((candidate) => (
+                      <Button
+                        key={candidate.candidate_ref}
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={!interactive}
+                        onClick={() => {
+                          recordSkillCreationEvent(
+                            request,
+                            "weak_match_accepted"
+                          );
+                          submitAction(
+                            "accept_weak_skill",
+                            t(
+                              "nl2agent.skillCreation.acceptWeakSummary",
+                              "Use a possible Skill match"
+                            ),
+                            {
+                              requirement: request.requirement,
+                              accepted_candidate: candidate,
+                              accept_weak_match: true,
+                            }
+                          );
+                        }}
+                      >
+                        {candidate.name} ({candidate.score.toFixed(2)})
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
+              <div className="flex flex-wrap gap-2">
+                {request.non_skill_coverage.status !== "none" ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    disabled={!interactive}
+                    onClick={() => {
+                      recordSkillCreationEvent(
+                        request,
+                        "non_skill_resource_selected"
+                      );
+                      submitAction(
+                        "use_existing_non_skill_resource",
+                        t(
+                          "nl2agent.skillCreation.useToolSummary",
+                          "Continue with the existing tool or MCP"
+                        ),
+                        {
+                          requirement: request.requirement,
+                          candidate_refs:
+                            request.non_skill_coverage.candidate_refs,
+                        }
+                      );
+                    }}
+                  >
+                    <Wrench className="mr-1 size-4" />
+                    {t(
+                      "nl2agent.skillCreation.useExistingTool",
+                      "Use existing tool or MCP"
+                    )}
+                  </Button>
+                ) : null}
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  disabled={!interactive}
+                  onClick={() => {
+                    recordSkillCreationEvent(request, "requirement_abandoned");
+                    submitAction(
+                      "revise_requirement",
+                      t(
+                        "nl2agent.skillCreation.reviseSummary",
+                        "Revise this requirement"
+                      ),
+                      { requirement: request.requirement }
+                    );
+                  }}
+                >
+                  {t(
+                    "nl2agent.skillCreation.reviseRequirement",
+                    "Revise requirement"
+                  )}
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  disabled={!interactive}
+                  onClick={() =>
+                    submitAction(
+                      "abandon_requirement",
+                      t(
+                        "nl2agent.skillCreation.abandonSummary",
+                        "Abandon this requirement"
+                      ),
+                      { requirement: request.requirement }
+                    )
+                  }
+                >
+                  {t(
+                    "nl2agent.skillCreation.abandonRequirement",
+                    "Abandon requirement"
+                  )}
+                </Button>
+              </div>
+            </div>
+          );
+        })}
       </div>
 
-      <div className="flex justify-end border-t px-4 py-3">
-        <Button type="button" disabled={!canContinue} onClick={continueFlow}>
-          {installedCount > 0
-            ? t("nl2agent.resourceBinding.continue", "Continue")
-            : t("nl2agent.resourceBinding.skip", "Skip")}
-        </Button>
-      </div>
+      {payload.skill_creation_requests.length === 0 ? (
+        <div className="flex justify-end border-t px-4 py-3">
+          <Button type="button" disabled={!canContinue} onClick={continueFlow}>
+            {installedCount > 0
+              ? t("nl2agent.resourceBinding.continue", "Continue")
+              : t("nl2agent.resourceBinding.skip", "Skip")}
+          </Button>
+        </div>
+      ) : null}
 
       <Modal
         open={Boolean(dialogItem && dialogDraft)}
@@ -872,6 +1287,60 @@ export function SuggestedResourceInstallationCard({
           </div>
         ) : null}
       </Modal>
+      {openedSkillRequirementIds.map((requirementId) => {
+        const request = payload.skill_creation_requests.find(
+          (item) => item.requirement.requirement_id === requirementId
+        );
+        if (!request) return null;
+        const skillId = installedSkillId(request.created_skill_ref);
+        const createdCandidate = request.weak_skill_candidates.find(
+          (candidate) => candidate.candidate_ref === request.created_skill_ref
+        );
+        return (
+          <SkillBuildModal
+            key={requirementId}
+            isOpen={activeSkillRequirementId === requirementId}
+            onCancel={() => {
+              if (
+                !completedSkillModalRequirementIds.current.delete(requirementId)
+              ) {
+                recordSkillCreationEvent(request, "create_cancel");
+              }
+              setActiveSkillRequirementId(null);
+            }}
+            onSuccess={async () => {
+              if (!request.created_skill_ref) return;
+              completedSkillModalRequirementIds.current.add(requirementId);
+              await queryClient.invalidateQueries({ queryKey: ["skills"] });
+              submitAction(
+                "retry_skill_validation",
+                t(
+                  "nl2agent.skillCreation.retrySummary",
+                  "Retry Skill validation"
+                ),
+                {
+                  requirement: request.requirement,
+                  created_skill_ref: request.created_skill_ref,
+                }
+              );
+            }}
+            onCreated={(skill) => handleSkillCreated(request, skill)}
+            editingSkill={
+              skillId
+                ? {
+                    skill_id: skillId,
+                    name: createdCandidate?.name,
+                    description: createdCandidate?.description,
+                    repository_info: [],
+                  }
+                : null
+            }
+            initialPrompt={buildInitialSkillPrompt(request, i18n.language)}
+            preserveDraftOnClose
+            zIndex={1200}
+          />
+        );
+      })}
     </section>
   );
 }

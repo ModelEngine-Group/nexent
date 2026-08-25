@@ -163,6 +163,30 @@ export interface Nl2aSuggestedResourceInstallationPayload {
   subtype: "suggested_resource_installation";
   agent_id: number;
   resources: Nl2aInstallableResource[];
+  requirements: Nl2aResourceRequirement[];
+  skill_creation_requests: Nl2aSkillCreationRequest[];
+}
+
+export interface Nl2aResourceRequirement {
+  requirement_id: string;
+  query: string;
+  resource_name_hint: string | null;
+  search_terms: string[];
+}
+
+export interface Nl2aSkillCreationRequest {
+  requirement: Nl2aResourceRequirement;
+  agent_description: string;
+  confirmed_constraints: string[];
+  weak_skill_candidates: Nl2aResourceCandidate[];
+  non_skill_coverage: {
+    status: "installed" | "installable" | "none";
+    candidate_refs: string[];
+  };
+  can_create_skill: boolean;
+  disabled_reason: "feature_disabled" | "unauthorized" | null;
+  created_skill_ref: string | null;
+  created_skill_status: "unverified" | "weak_match" | null;
 }
 
 export interface Nl2aInstalledResourceBindingPayload {
@@ -827,12 +851,21 @@ function parseNl2aMessage(chunk: SseChunk): Nl2aMessage | null {
       }
     }
     if (content.subtype === "suggested_resource_installation") {
+      content.requirements = Array.isArray(content.requirements)
+        ? content.requirements
+        : [];
+      content.skill_creation_requests = Array.isArray(
+        content.skill_creation_requests
+      )
+        ? content.skill_creation_requests
+        : [];
       if (
         !Number.isInteger(content.agent_id) ||
         content.agent_id <= 0 ||
         !Array.isArray(content.resources) ||
-        content.resources.length === 0 ||
         content.resources.length > 12 ||
+        (content.resources.length === 0 &&
+          content.skill_creation_requests.length === 0) ||
         content.resources.some(
           (resource) =>
             !resource?.candidate?.candidate_ref ||
@@ -845,6 +878,17 @@ function parseNl2aMessage(chunk: SseChunk): Nl2aMessage | null {
             !resource.installation_options.some(
               (option) => option.option_id === resource.default_option_id
             )
+        ) ||
+        content.skill_creation_requests.some(
+          (request) =>
+            !request?.requirement?.requirement_id ||
+            !request.requirement.query ||
+            !Array.isArray(request.weak_skill_candidates) ||
+            !request.non_skill_coverage ||
+            !["installed", "installable", "none"].includes(
+              request.non_skill_coverage.status
+            ) ||
+            typeof request.can_create_skill !== "boolean"
         )
       ) {
         log.warn(

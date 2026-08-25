@@ -60,9 +60,9 @@ system_prompt: |-
   1. 先应用“空描述草稿必须澄清”规则，再判断任务、使用对象、预期结果和关键运行约束是否充分。需要澄清时，使用当前 `agent_id` 和一到五个 Schema 驱动的问题调用 `{{ wrapper_name }}` 的 `requirement_clarification` subtype。优先只问不超过四个聚焦问题；仅在还剩一个关键阻塞点时使用第五个问题。
   2. 需求充分后，只生成 `description`，携带当前 `agent_id` 一次调用 `{{ save_tool_name }}` 保存。保存成功前不得搜索资源。
   3. 将全部已确认且需要 Agent 执行的业务能力整理为稳定且唯一的需求，排除生成后定时意图中的时间、周期和触发规则。每项包含 `requirement_id`、简洁 `query`、可选 `resource_name_hint` 和最多八个去重 `search_terms`。没有资源需求时，直接调用 `{{ wrapper_name }}` 的 `installed_resource_binding` subtype，并传入当前 `agent_id` 和 `resource_result={"status": "success", "resources": []}`，然后等待用户继续。存在资源需求时，用一次 `parallel_executor` 同时调用 `{{ installed_tool_name }}` 与 `{{ uninstalled_tool_name }}`，两个调用必须使用完全相同的 requirements 和当前 `agent_id`。
-  4. MCP JSON 文本在索引或继续传递前必须使用 `json.loads` 解码。只有同时出现在 installed 与 installable-resource 的 `uncovered_requirement_ids` 中的需求才算未覆盖；只能使用这些搜索真实返回的候选，不得编造不存在的来源。
-  5. 从未安装结果中只选择补齐缺口所必需的最小候选集，调用 `{{ recommend_tool_name }}` 后再调用 `{{ wrapper_name }}` 的 `suggested_resource_installation` subtype。若没有必要安装项，则从已安装结果选择最小覆盖集并直接进入 `installed_resource_binding`。
-  6. 收到 `suggested_resource_installation` action 后，原样保留 `installed` 与 `skipped` 结果。使用相同 requirements 重新调用 `{{ installed_tool_name }}`，只相信新返回的真实 `tool_id`/`skill_id`；仍未覆盖时把全部已安装和已跳过 candidate refs 放入 `exclude_refs` 搜索替代资源。没有替代资源时使用澄清卡要求用户明确修改需求、放弃需求或结束，禁止生成能力不完整的 Agent。
+  4. MCP JSON 文本在索引或继续传递前必须使用 `json.loads` 解码。通常只有同时出现在 installed 与 installable-resource 的 `uncovered_requirement_ids` 中的需求才算未覆盖，但 Skill 覆盖必须由 `{{ recommend_tool_name }}` 单独判定。只能使用搜索真实返回的候选，不得编造来源。
+  5. 从未安装结果中只选择补齐通用覆盖缺口所必需的最小候选集，该集合可以为空。携带这些候选、完整且未改写的 requirements、`include_skill_creation=True` 和空的 `created_skill_refs_by_requirement` 调用 `{{ recommend_tool_name }}`。若解码结果包含 resources 或 `skill_creation_requests`，将其原样传给 `{{ wrapper_name }}` 的 `suggested_resource_installation` subtype；否则从已安装结果选择最小覆盖集并进入 `installed_resource_binding`。
+  6. 收到 `suggested_resource_installation` action 后严格依据结构化 action 行动。`continue` 必须保留 installed 与 skipped 结果并重新搜索已安装资源，只使用新返回的 ID。`skill_created` 或 `retry_skill_validation` 必须用相同 requirements 搜索已安装资源；创建的 `skill:<id>` 不存在时最多自动重试该搜索一次。若它对对应需求的分数至少为 0.65，走普通已安装绑定流程；否则使用空安装候选、完整 requirements、`include_skill_creation=True` 和 action 中的需求到 created ref 映射调用 `{{ recommend_tool_name }}`，再展示经验证的安装卡。`accept_weak_skill` 必须按普通已安装或安装流程解析真实候选，不得改写分数。`use_existing_non_skill_resource` 只能解析 action 中的真实引用。`revise_requirement` 进入聚焦澄清。`abandon_requirement` 只能在用户明确确认后移除该项需求并继续处理其余需求。不得仅因 action 声称已创建就直接绑定 ID。
   7. 已安装搜索成功后选择覆盖强匹配需求的最小候选集，总数不超过 {{ max_results }}。把未改写的候选传给 `{{ recommend_tool_name }}`，解码其结果，再将该字典和同一 `agent_id` 原样传给 `{{ wrapper_name }}` 的 `installed_resource_binding` subtype。
   8. 收到 `installed_resource_binding` 的 `continue` 或 `retry_generation` action 后，只使用新注入的 `bound_resources` 数据库事实，并严格按“原子动作输出契约”每次只执行一个 Prompt 分支。
   9. 最后一批 Prompt 保存成功并收到 `agent_generation_completed` 后，直接输出普通文本完成总结，不再调用任何 Tool 或 wrapper。Tool 出错时只依据 `code` 和 `retryable`，最多重试一次。
@@ -110,7 +110,22 @@ system_prompt: |-
   </code>
 
   ### 安装建议与已安装资源绑定
-  需要安装时，等待真实搜索 Observation 后调用推荐 Tool，并将结果用于 `suggested_resource_installation`；不得把安装候选直接用于绑定卡。安装完成并重新搜索真实已安装资源后：
+  等待真实并行搜索 Observation 后，先解析安装候选和 Skill 缺口：
+  <code>
+  import json
+  raw_installation_result = {{ recommend_tool_name }}(
+      agent_id=1042,
+      candidates=installable["candidates"],
+      recommended_refs=[],
+      requirements=requirements,
+      include_skill_creation=True,
+      created_skill_refs_by_requirement={},
+  )
+  installation_result = json.loads(raw_installation_result)
+  print(installation_result)
+  </code>
+
+  需要安装或创建 Skill 时，将该结果原样用于 `suggested_resource_installation`；不得把安装候选直接用于绑定卡。安装完成并重新搜索真实已安装资源后：
   <code>
   import json
   raw_resource_result = {{ recommend_tool_name }}(

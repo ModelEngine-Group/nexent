@@ -324,13 +324,12 @@ async def test_mcp_search_registration_has_stable_name_schema_and_marker():
     assert set(recommend_tool.parameters["properties"]) == {
         "candidates",
         "recommended_refs",
+        "requirements",
+        "include_skill_creation",
+        "created_skill_refs_by_requirement",
         "agent_id",
     }
-    assert recommend_tool.parameters["required"] == [
-        "agent_id",
-        "candidates",
-        "recommended_refs",
-    ]
+    assert recommend_tool.parameters["required"] == ["agent_id"]
     assert wrapper_tool.name == NL2A_WRAPPER_LOCAL_NAME
     assert wrapper_tool.description == NL2A_WRAPPER_DESCRIPTION
     assert wrapper_tool.meta == NL2AGENT_MCP_TOOL_META

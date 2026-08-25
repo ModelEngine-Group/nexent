@@ -29,6 +29,7 @@ import {
   submitSkillForm,
   submitSkillFromFile,
   findSkillByName,
+  type CreatedSkillResult,
   type SkillListItem,
   type SkillData,
 } from "@/services/skillService";
@@ -64,6 +65,9 @@ interface SkillBuildModalProps {
   editingSkill?: MyEditableSkillItem | null;
   onBeforeEditSave?: (skill: MyEditableSkillItem) => Promise<boolean>;
   zIndex?: number;
+  initialPrompt?: string;
+  preserveDraftOnClose?: boolean;
+  onCreated?: (skill: CreatedSkillResult) => void | Promise<void>;
 }
 
 interface StreamedFrontmatter {
@@ -149,6 +153,9 @@ export default function SkillBuildModal({
   editingSkill,
   onBeforeEditSave,
   zIndex = 1000,
+  initialPrompt,
+  preserveDraftOnClose = false,
+  onCreated,
 }: SkillBuildModalProps) {
   const { t, i18n } = useTranslation("common");
   const { user, getAccessibleGroupIds } = useAuthorizationContext();
@@ -275,13 +282,13 @@ export default function SkillBuildModal({
   useEffect(() => {
     if (!isOpen || isEditMode) return;
     form.setFieldsValue({
-      group_ids: accessibleGroupIds,
-      ingroup_permission: "READ_ONLY",
+      group_ids: preserveDraftOnClose ? [] : accessibleGroupIds,
+      ingroup_permission: preserveDraftOnClose ? "PRIVATE" : "READ_ONLY",
     });
-  }, [accessibleGroupIds, form, isEditMode, isOpen]);
+  }, [accessibleGroupIds, form, isEditMode, isOpen, preserveDraftOnClose]);
 
   useEffect(() => {
-    if (!isOpen) {
+    if (!isOpen && !preserveDraftOnClose) {
       setActiveTab("interactive");
       setUploadFile(null);
       setInteractiveSkillName("");
@@ -301,7 +308,7 @@ export default function SkillBuildModal({
       setEditFilesError(null);
       setIsLoadingEditFiles(false);
     }
-  }, [isOpen]);
+  }, [isOpen, preserveDraftOnClose]);
 
   // Detect create/update mode when extracted skill name changes (upload tab)
   const [uploadIsCreateMode, setUploadIsCreateMode] = useState(true);
@@ -442,9 +449,24 @@ export default function SkillBuildModal({
     onCancel();
   };
 
-  // Cleanup when modal is closed
   const handleModalClose = () => {
-    closeModal();
+    if (!preserveDraftOnClose) {
+      closeModal();
+      return;
+    }
+    Modal.confirm({
+      title: t(
+        "skillManagement.host.closeTitle",
+        "Temporarily close Skill creation?"
+      ),
+      content: t(
+        "skillManagement.host.closeDescription",
+        "The current draft will remain available in this card until the page is refreshed."
+      ),
+      okText: t("skillManagement.host.saveAndClose", "Keep draft and close"),
+      cancelText: t("skillManagement.host.continueEditing", "Continue editing"),
+      onOk: onCancel,
+    });
   };
 
   const handleManualSubmit = async () => {
@@ -487,7 +509,10 @@ export default function SkillBuildModal({
           files: extraFiles.length > 0 ? extraFiles : undefined,
         } as SkillData,
         allSkills,
-        onSuccess,
+        async (createdSkill) => {
+          await onSuccess();
+          if (createdSkill) await onCreated?.(createdSkill);
+        },
         closeModal,
         t,
         isEditMode && editingSkill?.skill_id
@@ -868,6 +893,7 @@ export default function SkillBuildModal({
         (tab) => tab.status !== "unsupported" && tab.status !== "read_error"
       )}
       onSkillFileSelect={setActiveSkillTab}
+      initialPrompt={initialPrompt}
     />
   );
 
@@ -885,7 +911,7 @@ export default function SkillBuildModal({
       onTextareaScroll={handleTextareaScroll}
       groupSelectOptions={groupSelectOptions}
       groupNamesById={groupNamesById}
-      canEditGroupSettings={canEditGroupSettings}
+      canEditGroupSettings={preserveDraftOnClose ? false : canEditGroupSettings}
     />
   );
 
@@ -909,7 +935,8 @@ export default function SkillBuildModal({
       ),
     },
   ];
-  const visibleTabItems = isEditMode ? [tabItems[0]] : tabItems;
+  const visibleTabItems =
+    isEditMode || preserveDraftOnClose ? [tabItems[0]] : tabItems;
 
   const getConfirmButtonText = () => {
     if (isEditMode) {
@@ -939,7 +966,7 @@ export default function SkillBuildModal({
       }
       open={isOpen}
       onCancel={handleModalClose}
-      destroyOnHidden
+      destroyOnHidden={!preserveDraftOnClose}
       zIndex={zIndex}
       centered
       width="min(1180px, calc(100vw - 32px))"

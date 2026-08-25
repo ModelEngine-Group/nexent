@@ -1,8 +1,9 @@
 "use client";
 
-import { useMemo, type FC } from "react";
+import { useEffect, useMemo, useRef, type FC } from "react";
 import {
   AssistantRuntimeProvider,
+  useAui,
   useLocalRuntime,
   type ChatModelAdapter,
 } from "@assistant-ui/react";
@@ -24,7 +25,21 @@ interface Nl2SkillChatPanelProps {
   language: "zh" | "en";
   availableFiles: readonly SkillFileContent[];
   onSkillFileSelect?: (path: string) => void;
+  initialPrompt?: string;
 }
+
+const InitialPromptSeeder: FC<{ prompt?: string }> = ({ prompt }) => {
+  const aui = useAui();
+  const seededPromptRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!prompt || seededPromptRef.current === prompt) return;
+    aui.composer().setText(prompt);
+    seededPromptRef.current = prompt;
+  }, [aui, prompt]);
+
+  return null;
+};
 
 const NL2SKILL_DISPLAY_BASE: Agent = {
   id: "__skill_creator__",
@@ -42,6 +57,7 @@ export const Nl2SkillChatPanel: FC<Nl2SkillChatPanelProps> = ({
   language,
   availableFiles,
   onSkillFileSelect,
+  initialPrompt,
 }) => {
   const { t } = useTranslation("common");
   // Get the current tenant's configured LLM model ID for NL2Skill
@@ -79,6 +95,7 @@ export const Nl2SkillChatPanel: FC<Nl2SkillChatPanelProps> = ({
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
+      <InitialPromptSeeder prompt={initialPrompt} />
       <TooltipProvider>
         <div className="h-full min-h-0 w-full overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
           <Chat
