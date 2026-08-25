@@ -88,6 +88,13 @@ def test_build_nl2agent_system_prompt_configures_existing_draft(
     assert "fixed_recommended_refs" in prompt
     assert "user_confirmed_requirement_ids" in prompt
     assert "accept_weak_skill" not in prompt
+    assert 'installed_result = results["installed"]' in prompt
+    assert 'installable_result = results["installable"]' in prompt
+    assert "resource_result=installation_result" in prompt
+    assert "installation_result=installation_result" not in prompt
+    assert "raw_installed_result = runtime_search(" in prompt
+    assert "recommended_refs=installation_candidate_refs" in prompt
+    assert "recommended_refs=binding_candidate_refs" in prompt
 
     if language == "en":
         assert "### State And Completion Rules" in prompt
@@ -124,8 +131,31 @@ def test_build_nl2agent_system_prompt_configures_existing_draft(
     resource_search = prompt.index("raw_results = parallel_executor")
     assert description_save < resource_search
 
+    installation_recommend = prompt.index(
+        "raw_installation_result = runtime_recommend("
+    )
+    installation_wrapper = prompt.index(
+        'wrapped = runtime_wrapper(\n    subtype="suggested_resource_installation"'
+    )
+    fresh_installed_search = prompt.index(
+        "raw_installed_result = runtime_search("
+    )
+    binding_recommend = prompt.index(
+        "raw_resource_result = runtime_recommend("
+    )
+    binding_wrapper = prompt.index(
+        'wrapped = runtime_wrapper(\n    subtype="installed_resource_binding"'
+    )
+    assert (
+        installation_recommend
+        < installation_wrapper
+        < fresh_installed_search
+        < binding_recommend
+        < binding_wrapper
+    )
+
     code_blocks = re.findall(r"<code>\n(.*?)\n</code>", prompt, re.DOTALL)
-    assert len(code_blocks) == 8
+    assert len(code_blocks) == 10
     for code_block in code_blocks:
         ast.parse(code_block)
 

@@ -106,17 +106,23 @@ system_prompt: |-
       ({{ uninstalled_tool_name }}, {"agent_id": 1042, "requirements": requirements, "exclude_refs": []}, "installable"),
   ])
   results = {key: json.loads(value) for key, value in raw_results.items()}
+  installed_result = results["installed"]
+  installable_result = results["installable"]
   print(results)
   </code>
 
   ### Installation Proposal And Installed Binding
-  After the real parallel search Observation, resolve installation candidates and Skill gaps first:
+  After the real parallel search Observation, select the minimum installation set. In this single-requirement example, that set contains at most the first returned installable candidate:
   <code>
   import json
+  installation_candidates = installable_result["candidates"][:1]
+  installation_candidate_refs = [
+      candidate["candidate_ref"] for candidate in installation_candidates
+  ]
   raw_installation_result = {{ recommend_tool_name }}(
       agent_id=1042,
-      candidates=installable["candidates"],
-      recommended_refs=[],
+      candidates=installation_candidates,
+      recommended_refs=installation_candidate_refs,
       requirements=requirements,
       include_skill_creation=True,
       created_skill_refs_by_requirement={},
@@ -125,13 +131,38 @@ system_prompt: |-
   print(installation_result)
   </code>
 
-  When installation or Skill creation is required, pass that unchanged result to subtype `suggested_resource_installation`; never place installable candidates directly in a binding card. After installation and a fresh installed-resource search:
+  After the real recommendation Observation, when installation or Skill creation is required, pass that unchanged result through the exact `resource_result` parameter. This wrapper call is the final action of the run:
+  <code>
+  wrapped = {{ wrapper_name }}(
+      subtype="suggested_resource_installation",
+      agent_id=1042,
+      resource_result=installation_result,
+  )
+  print(wrapped)
+  </code>
+
+  Wait for the structured installation-card action. After `continue`, search installed resources again with the same requirements; never reuse the initial installed search result:
   <code>
   import json
+  raw_installed_result = {{ installed_tool_name }}(
+      agent_id=1042,
+      requirements=requirements,
+  )
+  installed_result = json.loads(raw_installed_result)
+  print(installed_result)
+  </code>
+
+  After the real fresh installed-search Observation, select the minimum binding set from that result. For a `continue` action containing fixed candidates, first apply rule 6 and merge those exact candidates and recommended refs into this set:
+  <code>
+  import json
+  binding_candidates = installed_result["candidates"][:1]
+  binding_candidate_refs = [
+      candidate["candidate_ref"] for candidate in binding_candidates
+  ]
   raw_resource_result = {{ recommend_tool_name }}(
       agent_id=1042,
-      candidates=installed["candidates"],
-      recommended_refs=["tool:7", "skill:12"],
+      candidates=binding_candidates,
+      recommended_refs=binding_candidate_refs,
   )
   resource_result = json.loads(raw_resource_result)
   print(resource_result)

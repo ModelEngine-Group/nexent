@@ -1235,10 +1235,16 @@ export function SuggestedResourceInstallationCard({
                         type="button"
                         size="sm"
                         variant="outline"
+                        className="h-auto max-w-full flex-wrap whitespace-normal py-1.5"
                         disabled={!interactive}
                         onClick={() => acceptWeakSkill(request, candidate)}
                       >
-                        {candidate.name} ({candidate.score.toFixed(2)})
+                        <span className="min-w-0 break-words">
+                          {candidate.name} ({candidate.score.toFixed(2)})
+                        </span>
+                        <Nl2AgentResourceSourceBadge
+                          source={candidate.source}
+                        />
                       </Button>
                     ))}
                   </div>

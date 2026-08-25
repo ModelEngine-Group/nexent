@@ -106,17 +106,23 @@ system_prompt: |-
       ({{ uninstalled_tool_name }}, {"agent_id": 1042, "requirements": requirements, "exclude_refs": []}, "installable"),
   ])
   results = {key: json.loads(value) for key, value in raw_results.items()}
+  installed_result = results["installed"]
+  installable_result = results["installable"]
   print(results)
   </code>
 
   ### 安装建议与已安装资源绑定
-  等待真实并行搜索 Observation 后，先解析安装候选和 Skill 缺口：
+  等待真实并行搜索 Observation 后，选择最小安装候选集。在这个单需求示例中，该集合最多包含返回的第一个可安装候选：
   <code>
   import json
+  installation_candidates = installable_result["candidates"][:1]
+  installation_candidate_refs = [
+      candidate["candidate_ref"] for candidate in installation_candidates
+  ]
   raw_installation_result = {{ recommend_tool_name }}(
       agent_id=1042,
-      candidates=installable["candidates"],
-      recommended_refs=[],
+      candidates=installation_candidates,
+      recommended_refs=installation_candidate_refs,
       requirements=requirements,
       include_skill_creation=True,
       created_skill_refs_by_requirement={},
@@ -125,13 +131,38 @@ system_prompt: |-
   print(installation_result)
   </code>
 
-  需要安装或创建 Skill 时，将该结果原样用于 `suggested_resource_installation`；不得把安装候选直接用于绑定卡。安装完成并重新搜索真实已安装资源后：
+  等待真实推荐 Observation 后，需要安装或创建 Skill 时，通过准确的 `resource_result` 参数原样传递该结果。这个 wrapper 调用是当前 run 的最后一个动作：
+  <code>
+  wrapped = {{ wrapper_name }}(
+      subtype="suggested_resource_installation",
+      agent_id=1042,
+      resource_result=installation_result,
+  )
+  print(wrapped)
+  </code>
+
+  等待结构化安装卡 action。收到 `continue` 后，使用相同 requirements 重新搜索已安装资源；不得复用首次已安装搜索结果：
   <code>
   import json
+  raw_installed_result = {{ installed_tool_name }}(
+      agent_id=1042,
+      requirements=requirements,
+  )
+  installed_result = json.loads(raw_installed_result)
+  print(installed_result)
+  </code>
+
+  等待真实的最新已安装搜索 Observation 后，从该结果选择最小绑定集。`continue` action 包含固定候选时，先按规则 6 将这些准确候选和推荐 refs 合并到该集合：
+  <code>
+  import json
+  binding_candidates = installed_result["candidates"][:1]
+  binding_candidate_refs = [
+      candidate["candidate_ref"] for candidate in binding_candidates
+  ]
   raw_resource_result = {{ recommend_tool_name }}(
       agent_id=1042,
-      candidates=installed["candidates"],
-      recommended_refs=["tool:7", "skill:12"],
+      candidates=binding_candidates,
+      recommended_refs=binding_candidate_refs,
   )
   resource_result = json.loads(raw_resource_result)
   print(resource_result)
