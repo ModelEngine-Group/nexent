@@ -725,8 +725,11 @@ function MineView({
   };
 
   const refreshMineData = async () => {
-    await queryClient.invalidateQueries({
+    // Refetch the review query immediately so the admin tab badge updates
+    // without requiring a full page reload.
+    await queryClient.refetchQueries({
       queryKey: MCP_TOOLS_QUERY_KEYS.communityReview,
+      type: "all",
     });
     await Promise.all([localList.refetch(), myPublished.refetch()]);
   };
@@ -804,9 +807,9 @@ function MineView({
       updateLocalReviewStatus(item, "pending");
     } catch {
       message.error(t("mcpTools.mine.publishApplyFailed"));
+      return;
     } finally {
       setPublishingKey(null);
-      return;
     }
     // Refresh caches after successful submission; never fail the submission
     // when a cache refresh has a transient error.
