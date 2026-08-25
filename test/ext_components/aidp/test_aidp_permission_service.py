@@ -170,6 +170,41 @@ class TestResolvePermission:
         )
         assert decision.permission is None
 
+    @pytest.mark.parametrize("role", ["ADMIN", "SU", "SPEED", "ASSET_OWNER"])
+    def test_management_roles_cannot_bypass_shared_kb_groups(self, patched, role):
+        patched["get_role"].return_value = role
+
+        decision = svc._resolve_permission(
+            _record(
+                owner_user_id="another-user",
+                ingroup_permission="READ_ONLY",
+                group_ids=[8],
+            ),
+            user_id="management-user",
+            tenant_id="t",
+            user_groups=[7],
+        )
+
+        assert decision.permission is None
+        assert decision.matched_group_ids == ()
+
+    def test_unknown_role_cannot_access_shared_kb_even_with_group_intersection(self, patched):
+        patched["get_role"].return_value = "UNKNOWN"
+
+        decision = svc._resolve_permission(
+            _record(
+                owner_user_id="another-user",
+                ingroup_permission="READ_ONLY",
+                group_ids=[1],
+            ),
+            user_id="u",
+            tenant_id="t",
+            user_groups=[1],
+        )
+
+        assert decision.permission is None
+        assert decision.matched_group_ids == ()
+
     def test_missing_record_raises_not_found(self, patched):
         with pytest.raises(AidpKbNotFoundError):
             svc._resolve_permission(record={}, user_id="u", tenant_id="t")
@@ -793,3 +828,19 @@ class TestIntersectAccessibleKbs:
             result = svc.intersect_accessible_kbs([{"kds_id": 7}], "u", "t")
 
         assert result[0]["kds_id"] == "7"
+
+    def test_tolerates_missing_optional_protected_local_fields(self, patched):
+        local_rows = [{"kb_id": "k1", "permission": "EDIT"}]
+        with patch.object(svc, "_compute_accessible_rows", return_value=local_rows):
+            result = svc.intersect_accessible_kbs(
+                [{"kds_id": "k1", "kds_name": "Remote KB"}],
+                "u",
+                "t",
+            )
+
+        assert result == [{
+            "kb_id": "k1",
+            "permission": "EDIT",
+            "kds_id": "k1",
+            "kds_name": "Remote KB",
+        }]
