@@ -22,7 +22,7 @@ import {
 import { useConfig } from "@/hooks/useConfig";
 import { useCapacitySuggestion } from "@/hooks/useCapacitySuggestion";
 import { getConnectivityMeta, ConnectivityStatusType } from "@/lib/utils";
-import { modelService } from "@/services/modelService";
+import { modelService, isSessionExpiredError } from "@/services/modelService";
 import {
   ModelType,
   SingleModelConfig,
@@ -750,6 +750,8 @@ export const ModelAddDialog = ({
         });
       }
     } catch (error) {
+      // session expired — redirect already triggered, skip the toast
+      if (isSessionExpiredError(error)) return;
       const errorMessage =
         error instanceof Error ? error.message : String(error);
       setConnectivityStatus({
@@ -970,6 +972,8 @@ export const ModelAddDialog = ({
       }));
       await onSuccess(addedModels.length > 0 ? addedModels[0] : undefined);
     } catch (error: any) {
+      // session expired — redirect already triggered, skip the toast
+      if (isSessionExpiredError(error)) return;
       const errorMessage =
         error?.message || t("model.dialog.error.addFailedLog");
       const translatedError = translateError(errorMessage, t);
@@ -1364,6 +1368,8 @@ export const ModelAddDialog = ({
       // Close the dialog
       handleClose();
     } catch (error) {
+      // session expired — redirect already triggered, skip the toast
+      if (isSessionExpiredError(error)) return;
       const errorMessage =
         error instanceof Error ? error.message : String(error);
       const translatedError = translateError(errorMessage, t);
