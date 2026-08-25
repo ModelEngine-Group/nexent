@@ -205,33 +205,6 @@ def _skill_file_preview_status(
         return "readable"
 
 
-def _truncate_skill_copy_base_name(base_name: str, suffix: str) -> str:
-    """Trim a copied skill base name so the final name fits the database limit."""
-    max_base_length = max(_MAX_SKILL_NAME_LENGTH - len(suffix), 1)
-    if len(base_name) <= max_base_length:
-        return base_name
-    return base_name[:max_base_length].rstrip() or base_name[:max_base_length]
-
-
-def generate_available_copy_skill_name(
-    base_name: str,
-    unavailable_names: Optional[set[str]] = None,
-) -> str:
-    """Generate the first available copy name using the repository naming convention."""
-    normalized_base = (base_name or "Skill").strip() or "Skill"
-    unavailable = unavailable_names or set()
-    if normalized_base not in unavailable:
-        return normalized_base
-
-    index = 1
-    while True:
-        suffix = " 副本" if index == 1 else f" 副本 {index}"
-        candidate = f"{_truncate_skill_copy_base_name(normalized_base, suffix)}{suffix}"
-        if candidate not in unavailable:
-            return candidate
-        index += 1
-
-
 def _replace_skill_frontmatter_name(content: str, new_name: str) -> str:
     """Replace only the name value in SKILL.md frontmatter and preserve the body."""
     match = re.match(
