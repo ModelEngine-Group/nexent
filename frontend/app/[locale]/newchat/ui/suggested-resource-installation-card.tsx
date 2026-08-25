@@ -42,6 +42,7 @@ import type {
   Nl2aResourceInstallationOption,
   Nl2aSuggestedResourceInstallationPayload,
 } from "../adapter/remote-chat-model-adapter";
+import { Nl2AgentResourceSourceBadge } from "./nl2agent-resource-source-badge";
 
 type InstallationStatus =
   | "not_started"
@@ -593,6 +594,9 @@ export function SuggestedResourceInstallationCard({
                 <span className="break-words text-sm font-medium">
                   {item.resource.candidate.name}
                 </span>
+                <Nl2AgentResourceSourceBadge
+                  source={item.resource.candidate.source}
+                />
                 <Badge
                   variant={
                     item.resource.recommendation === "recommended"
