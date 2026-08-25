@@ -3351,3 +3351,46 @@ async def test_delete_documents_maps_storage_permission_error(vdb_core_mock, aut
     assert response.status_code == 403
     assert response.json()["detail"] == "read-only KB"
     mock_delete.assert_not_called()
+
+# TokenExpiredError -> 401 mapping for every VDB endpoint guarded by auth.
+
+
+TOKEN_EXPIRED_ENDPOINTS = [
+    ("post", "/indices/check_exist", {"json": {"knowledge_name": "kb1"}}, "get_current_user_id"),
+    ("post", "/indices/kb1", {"json": {"embedding_model_id": 101}}, "get_current_user_context"),
+    ("delete", "/indices/kb1", {}, "get_current_user_id"),
+    ("patch", "/indices/kb1", {"json": {"knowledge_name": "kb2"}}, "get_current_user_context"),
+    ("patch", "/indices/kb1/summary_frequency", {"json": {"summary_frequency": "daily"}}, "get_current_user_id"),
+    ("get", "/indices/kb1/embedding-model-status", {}, "get_current_user_id"),
+    ("put", "/indices/kb1/embedding-model", {"json": {"model_id": 123}}, "get_current_user_id"),
+    ("get", "/indices", {}, "get_current_user_id"),
+    ("post", "/indices/kb1/documents", {"json": [{"content": "doc"}]}, "get_current_user_id"),
+    ("get", "/indices/kb1/files", {}, "get_current_user_id"),
+    ("delete", "/indices/kb1/documents", {"params": {"path_or_url": "a.pdf"}}, "get_current_user_id"),
+    ("get", "/indices/kb1/documents/a.pdf/error-info", {}, "get_current_user_id"),
+    ("post", "/indices/kb1/chunks", {}, "get_current_user_id"),
+    ("post", "/indices/kb1/chunk", {"json": {"content": "chunk"}}, "get_current_user_id"),
+    ("put", "/indices/kb1/chunk/ch1", {"json": {"content": "updated"}}, "get_current_user_id"),
+    ("delete", "/indices/kb1/chunk/ch1", {}, "get_current_user_id"),
+    ("post", "/indices/search/hybrid", {"json": {"index_names": ["kb1"], "query": "q"}}, "get_current_user_id"),
+]
+
+
+@pytest.mark.parametrize(
+    "method,url,kwargs,auth_fn", TOKEN_EXPIRED_ENDPOINTS
+)
+def test_vdb_endpoints_return_401_on_token_expired(method, url, kwargs, auth_fn):
+    """Expired token maps to 401 on every authenticated VDB endpoint."""
+    from consts.exceptions import TokenExpiredError
+    from http import HTTPStatus
+
+    with patch(
+        f"backend.apps.vectordatabase_app.{auth_fn}",
+        side_effect=TokenExpiredError("expired"),
+    ):
+        response = getattr(client, method)(
+            url, headers={"Authorization": "Bearer expired"}, **kwargs
+        )
+
+    assert response.status_code == HTTPStatus.UNAUTHORIZED
+    assert "expired" in response.json()["detail"]

@@ -897,3 +897,50 @@ async def test_datamate_connection_endpoint_empty_url_in_request(datamate_mocks)
     datamate_mocks['check_connection'].assert_called_once_with(
         "test_tenant_id", empty_datamate_url
     )
+
+
+@pytest.mark.asyncio
+async def test_sync_datamate_knowledges_token_expired(datamate_mocks):
+    """Expired token on sync_datamate_knowledges maps to 401."""
+    from consts.exceptions import TokenExpiredError
+
+    datamate_mocks['get_current_user_id'].side_effect = TokenExpiredError(
+        "expired")
+
+    with pytest.raises(HTTPException) as exc_info:
+        await sync_datamate_knowledges(authorization="Bearer expired-token")
+
+    assert exc_info.value.status_code == HTTPStatus.UNAUTHORIZED
+
+
+@pytest.mark.asyncio
+async def test_get_datamate_knowledge_base_files_token_expired(datamate_mocks):
+    """Expired token on file list endpoint maps to 401."""
+    from consts.exceptions import TokenExpiredError
+
+    datamate_mocks['get_current_user_id'].side_effect = TokenExpiredError(
+        "expired")
+
+    with pytest.raises(HTTPException) as exc_info:
+        await get_datamate_knowledge_base_files_endpoint(
+            knowledge_base_id="kb-1", authorization="Bearer expired-token")
+
+    assert exc_info.value.status_code == HTTPStatus.UNAUTHORIZED
+
+
+@pytest.mark.asyncio
+async def test_datamate_connection_endpoint_token_expired(datamate_mocks):
+    """Expired token on connection test endpoint maps to 401."""
+    from backend.apps.datamate_app import SyncDatamateRequest
+    from consts.exceptions import TokenExpiredError
+
+    datamate_mocks['get_current_user_id'].side_effect = TokenExpiredError(
+        "expired")
+
+    with pytest.raises(HTTPException) as exc_info:
+        await datamate_connection_endpoint(
+            authorization="Bearer expired-token",
+            request=SyncDatamateRequest(datamate_url="http://datamate:8080"),
+        )
+
+    assert exc_info.value.status_code == HTTPStatus.UNAUTHORIZED

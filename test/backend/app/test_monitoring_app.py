@@ -260,3 +260,21 @@ class TestMonitoringStatus:
         body = response.json()
         assert body["code"] == 0
         assert body["data"]["dashboard_url"] == "http://localhost:6006"
+
+    @patch("apps.monitoring_app.get_current_user_id")
+    def test_endpoint_returns_401_on_token_expired(self, mock_auth):
+        """Expired token maps to 401 for /monitoring/models."""
+        from apps.monitoring_app import router
+        from consts.exceptions import TokenExpiredError
+
+        app = FastAPI()
+        app.include_router(router)
+        client = TestClient(app)
+
+        mock_auth.side_effect = TokenExpiredError("expired")
+        response = client.get(
+            "/monitoring/models",
+            params={"time_range": "24h"},
+            headers={"Authorization": "Bearer expired"},
+        )
+        assert response.status_code == 401
