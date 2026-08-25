@@ -596,6 +596,9 @@ export function SuggestedResourceInstallationCard({
                 </span>
                 <Nl2AgentResourceSourceBadge
                   source={item.resource.candidate.source}
+                  availability={
+                    item.status === "installed" ? "installed" : undefined
+                  }
                 />
                 <Badge
                   variant={
@@ -705,11 +708,8 @@ export function SuggestedResourceInstallationCard({
       <div className="flex justify-end border-t px-4 py-3">
         <Button type="button" disabled={!canContinue} onClick={continueFlow}>
           {installedCount > 0
-            ? t(
-                "nl2agent.resourceInstallation.continue",
-                "Installation complete, continue"
-              )
-            : t("common.skip", "Skip")}
+            ? t("nl2agent.resourceBinding.continue", "Continue")
+            : t("nl2agent.resourceBinding.skip", "Skip")}
         </Button>
       </div>
 
