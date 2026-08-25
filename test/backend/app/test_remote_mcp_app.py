@@ -358,6 +358,23 @@ class TestAddFromConfig:
         assert "internal upload details" not in resp.text
         assert '"detail": "Failed to upload and start MCP container"' in resp.text
 
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.upload_and_start_mcp_image')
+    def test_upload_image_stream_returns_name_conflict(self, mock_upload, mock_auth):
+        mock_auth.return_value = ("uid", "auth-tenant", "en")
+        mock_upload.side_effect = MCPNameIllegal("MCP service name already exists")
+
+        resp = client.post(
+            "/mcp/upload-image/stream",
+            files={"file": ("test.tar", b"tar-data", "application/x-tar")},
+            data={"port": "8080", "service_name": "svc"},
+            headers=AUTH_HEADER,
+        )
+
+        assert resp.status_code == HTTPStatus.OK
+        assert '"status": "error"' in resp.text
+        assert '"detail": "MCP service name already exists"' in resp.text
+
 
 # ============================================================================
 # PUT /mcp/update

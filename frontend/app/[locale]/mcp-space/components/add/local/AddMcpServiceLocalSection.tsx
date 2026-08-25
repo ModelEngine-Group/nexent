@@ -273,12 +273,12 @@ export default function AddMcpServiceLocalSection({
   const isGroupSelectDisabled = draft.ingroupPermission === "PRIVATE" || isApi;
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex flex-col">
       <Form
         form={form}
         layout="vertical"
         requiredMark={false}
-        className="flex-1 space-y-5 px-6 py-5"
+        className="space-y-5 px-6 py-5"
       >
         <Tabs
           activeKey={activeTabKey}
@@ -676,6 +676,13 @@ export default function AddMcpServiceLocalSection({
               name="group_ids"
               label={t("tenantResources.knowledgeBase.groupNames")}
               className="mb-0"
+              help={
+                isApi ? (
+                  <span style={{ fontSize: 12, color: "rgba(0,0,0,0.45)" }}>
+                    {t("mcpTools.detail.groupPermissionUnsupported")}
+                  </span>
+                ) : undefined
+              }
             >
               <Select
                 mode="multiple"
@@ -727,12 +734,6 @@ export default function AddMcpServiceLocalSection({
             </Can>
           </div>
         </Can>
-        {isApi ? (
-          <p className="text-xs text-slate-400">
-            {t("mcpTools.detail.groupPermissionUnsupported")}
-          </p>
-        ) : null}
-
         <div className="flex flex-col gap-4">
           <TagEditor
             title={t("mcpTools.detail.tags")}
@@ -746,7 +747,7 @@ export default function AddMcpServiceLocalSection({
         </div>
       </Form>
 
-      <div className="sticky bottom-0 flex items-center justify-between border-t border-slate-100 bg-white px-6 py-4">
+      <div className="flex items-center justify-between border-t border-slate-100 bg-white px-6 py-4">
         <div>
           {deploymentStarted ? (
             <Button onClick={() => setLogsOpen(true)}>
