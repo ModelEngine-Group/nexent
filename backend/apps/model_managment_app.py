@@ -503,13 +503,17 @@ async def check_model_health(
 
 
 @router.post("/temporary_healthcheck")
-async def check_temporary_model_health(request: ModelRequest):
+async def check_temporary_model_health(
+    request: ModelRequest, authorization: Optional[str] = Header(None)
+):
     """Verify connectivity for the provided model configuration without persisting it.
 
     Args:
         request: Model configuration to verify.
+        authorization: Bearer token header used to enforce authentication.
     """
     try:
+        get_current_user_id(authorization)
         result = await verify_model_config_connectivity(request.model_dump())
         result["capacity_suggestion"] = (
             _capacity_suggestion_for_model_request(request)
