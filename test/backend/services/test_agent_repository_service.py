@@ -4,6 +4,8 @@ import sys
 import types
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, call, patch
+from enum import Enum
+from pydantic import BaseModel
 
 import pytest
 
@@ -45,6 +47,16 @@ _agent_version_db_mock = MagicMock()
 _agent_version_db_mock.search_version_by_version_no = MagicMock()
 sys.modules["database.agent_version_db"] = _agent_version_db_mock
 
+# Additional DB mocks required because agent_repository_service imports
+# repository_import_precheck → skill_service, which depends on these modules.
+sys.modules.setdefault("database.skill_db", MagicMock())
+sys.modules.setdefault("database.group_db", MagicMock())
+sys.modules.setdefault("database.client", MagicMock())
+sys.modules.setdefault("database.knowledge_db", MagicMock())
+sys.modules.setdefault("database.model_management_db", MagicMock())
+sys.modules.setdefault("database.remote_mcp_db", MagicMock())
+sys.modules.setdefault("database.tool_db", MagicMock())
+
 
 class _SkillZipEntryMock:
     def __init__(self, skill_name: str, skill_zip_base64: str):
@@ -79,9 +91,48 @@ class _AgentRepositorySnapshotMock:
         return data
 
 
+class _ModelConnectStatusEnum(str, Enum):
+    AVAILABLE = "available"
+
+    @classmethod
+    def get_value(cls, status):
+        return status or cls.AVAILABLE.value
+
+
+class _ToolSourceEnum(str, Enum):
+    LOCAL = "local"
+    MCP = "mcp"
+    LANGCHAIN = "langchain"
+    BUILTIN = "builtin"
+
+
+class _RepositoryImportRequirementItem(BaseModel):
+    type: str
+    key: str
+    name: str
+    description: str | None = None
+    available: bool
+    reason_code: str | None = None
+    suggested_new_name: str | None = None
+
+
+class _RepositoryImportPrecheckResponse(BaseModel):
+    agent_repository_id: int
+    display_name: str
+    total_count: int
+    available_count: int
+    percent: int
+    has_abnormal: bool
+    items: list
+
+
 _consts_model_mock = MagicMock()
 _consts_model_mock.AgentRepositorySnapshot = _AgentRepositorySnapshotMock
 _consts_model_mock.SkillZipEntry = _SkillZipEntryMock
+_consts_model_mock.ModelConnectStatusEnum = _ModelConnectStatusEnum
+_consts_model_mock.ToolSourceEnum = _ToolSourceEnum
+_consts_model_mock.RepositoryImportRequirementItem = _RepositoryImportRequirementItem
+_consts_model_mock.RepositoryImportPrecheckResponse = _RepositoryImportPrecheckResponse
 sys.modules["consts.model"] = _consts_model_mock
 
 _agent_service_mock = MagicMock()
@@ -105,10 +156,6 @@ _agent_service_mock.export_agent_dict_for_repository_impl = AsyncMock(return_val
 })
 _agent_service_mock.list_all_agent_info_impl = AsyncMock(return_value=[])
 sys.modules["services.agent_service"] = _agent_service_mock
-
-_precheck_mock = MagicMock()
-_precheck_mock.build_repository_import_precheck = MagicMock()
-sys.modules["services.repository_import_precheck"] = _precheck_mock
 
 _notification_service_mock = MagicMock()
 sys.modules["services.notification_service"] = _notification_service_mock

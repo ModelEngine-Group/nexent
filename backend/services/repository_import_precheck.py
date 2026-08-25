@@ -21,7 +21,7 @@ from database.model_management_db import (
 )
 from database.remote_mcp_db import get_mcp_server_by_name_and_tenant
 from database.tool_db import query_all_tools
-from services.skill_service import generate_available_copy_skill_name
+from utils.skill_import_utils import generate_available_copy_skill_name
 
 _KB_TOOL_CLASS_NAMES = frozenset({
     "KnowledgeBaseSearchTool",
