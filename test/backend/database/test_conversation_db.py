@@ -1596,7 +1596,7 @@ def test_get_conversation_list_page_returns_rows_and_metadata_from_one_query(
         today_start_ms=2000,
         week_start_ms=1000,
         limit=10,
-        offset=0,
+        offset=5,
     )
 
     assert result == {
@@ -1611,6 +1611,44 @@ def test_get_conversation_list_page_returns_rows_and_metadata_from_one_query(
             }
         ],
         "metadata": {"total": 30, "today": 3, "last_7_days": 7, "older": 20},
+    }
+    session.execute.assert_called_once()
+
+
+def test_get_conversation_list_page_supports_unpaginated_empty_result(
+    monkeypatch, mock_session_ctx
+):
+    session, ctx = mock_session_ctx
+
+    class ComparableTimestamp:
+        def label(self, _name):
+            return self
+
+        def __ge__(self, _value):
+            return MagicMock()
+
+        def __lt__(self, _value):
+            return MagicMock()
+
+    from backend.database import conversation_db
+
+    monkeypatch.setattr(
+        conversation_db.func.extract.return_value.__mul__,
+        "return_value",
+        ComparableTimestamp(),
+    )
+    session.execute.return_value = []
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    result = get_conversation_list_page(
+        "user-1",
+        today_start_ms=2000,
+        week_start_ms=1000,
+    )
+
+    assert result == {
+        "items": [],
+        "metadata": {"total": 0, "today": 0, "last_7_days": 0, "older": 0},
     }
     session.execute.assert_called_once()
 

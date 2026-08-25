@@ -8,7 +8,7 @@ import sys
 import pytest
 import types
 import importlib.machinery
-from unittest.mock import patch, MagicMock, ANY, AsyncMock
+from unittest.mock import patch, MagicMock, ANY, AsyncMock, call
 from fastapi.testclient import TestClient
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
@@ -702,6 +702,67 @@ async def test_get_list_indices_passes_pagination_and_filters(vdb_core_mock, aut
             "sources": ["elasticsearch"],
             "models": ["model-a"],
         }
+
+
+@pytest.mark.asyncio
+async def test_get_list_indices_merges_tenant_and_asset_pages(vdb_core_mock, auth_data):
+    primary = {"indices": ["tenant-kb"], "count": 1, "total": 1}
+    asset = {"indices": ["asset-kb"], "count": 1, "total": 1}
+    merged = {
+        "indices": ["tenant-kb", "asset-kb"],
+        "count": 2,
+        "total": 2,
+        "next_offset": None,
+    }
+
+    with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+            patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.ASSET_OWNER_TENANT_ID", "asset-tenant"), \
+            patch("backend.apps.vectordatabase_app.ElasticSearchService.list_indices", side_effect=[primary, asset]) as mock_list, \
+            patch("backend.apps.vectordatabase_app.ElasticSearchService.merge_paginated_list_indices_results", return_value=merged) as mock_merge:
+        response = client.get(
+            "/indices",
+            params={"offset": 3, "limit": 10, "keyword": "medical"},
+            headers=auth_data["auth_header"],
+        )
+
+    assert response.status_code == 200
+    assert response.json() == merged
+    assert mock_list.call_args_list == [
+        call(
+            "*", False, auth_data["tenant_id"], auth_data["user_id"], ANY,
+            pagination_enabled=True, offset=0, limit=13,
+            keyword="medical", sources=None, models=None,
+        ),
+        call(
+            "*", False, "asset-tenant", auth_data["user_id"], ANY,
+            pagination_enabled=True, offset=0, limit=13,
+            keyword="medical", sources=None, models=None,
+        ),
+    ]
+    mock_merge.assert_called_once_with(primary, asset, 3, 10)
+
+
+@pytest.mark.asyncio
+async def test_get_list_indices_merges_tenant_and_asset_without_pagination(vdb_core_mock, auth_data):
+    primary = {"indices": ["tenant-kb"], "count": 1}
+    asset = {"indices": ["asset-kb"], "count": 1}
+    merged = {"indices": ["tenant-kb", "asset-kb"], "count": 2}
+
+    with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+            patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.ASSET_OWNER_TENANT_ID", "asset-tenant"), \
+            patch("backend.apps.vectordatabase_app.ElasticSearchService.list_indices", side_effect=[primary, asset]) as mock_list, \
+            patch("backend.apps.vectordatabase_app.ElasticSearchService.merge_list_indices_results", return_value=merged) as mock_merge:
+        response = client.get("/indices", headers=auth_data["auth_header"])
+
+    assert response.status_code == 200
+    assert response.json() == merged
+    assert mock_list.call_args_list == [
+        call("*", False, auth_data["tenant_id"], auth_data["user_id"], ANY),
+        call("*", False, "asset-tenant", auth_data["user_id"], ANY),
+    ]
+    mock_merge.assert_called_once_with(primary, asset)
 
 
 @pytest.mark.asyncio

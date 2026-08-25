@@ -8808,3 +8808,101 @@ def test_merge_paginated_indices_uses_ordered_service_merge():
     assert result["total"] == 3
     assert result["next_offset"] == 2
     assert "has_more" not in result
+
+
+def test_prepare_indices_page_requires_limit_when_pagination_is_enabled():
+    with pytest.raises(ValueError, match="limit is required"):
+        ElasticSearchService._prepare_indices_page(
+            visible_knowledgebases=[],
+            pagination_enabled=True,
+            offset=0,
+            limit=None,
+            keyword=None,
+            sources=None,
+            models=None,
+        )
+
+
+def test_apply_read_only_returns_unchanged_result_without_indices_info():
+    result = {"indices": ["asset-kb"], "count": 1}
+
+    assert ElasticSearchService._apply_read_only_to_asset_indices_info(result) is result
+
+
+def test_merge_non_paginated_indices_applies_asset_read_only_permission():
+    primary = {
+        "indices": ["tenant-kb"],
+        "count": 1,
+        "indices_info": [{"name": "tenant-kb", "permission": "EDIT"}],
+    }
+    asset = {
+        "indices": ["asset-kb"],
+        "count": 1,
+        "indices_info": [{"name": "asset-kb", "permission": "EDIT"}],
+    }
+
+    result = ElasticSearchService.merge_list_indices_results(primary, asset)
+
+    assert result["indices"] == ["tenant-kb", "asset-kb"]
+    assert result["count"] == 2
+    assert result["indices_info"] == [
+        {"name": "tenant-kb", "permission": "EDIT"},
+        {"name": "asset-kb", "permission": "READ_ONLY"},
+    ]
+
+
+def test_merge_non_paginated_indices_without_info_returns_names_only():
+    result = ElasticSearchService.merge_list_indices_results(
+        {"indices": ["tenant-kb"], "count": 1},
+        {"indices": ["asset-kb"], "count": 1},
+    )
+
+    assert result == {
+        "indices": ["tenant-kb", "asset-kb"],
+        "count": 2,
+    }
+
+
+def test_merge_paginated_indices_supports_asset_first_and_last_page():
+    primary = {
+        "indices": ["tenant-old"],
+        "indices_info": [
+            {"name": "tenant-old", "update_time": "2026-08-24T08:00:00", "knowledge_id": 1}
+        ],
+        "total": 1,
+        "facets": {"sources": ["elasticsearch"], "models": ["model-a"]},
+    }
+    asset = {
+        "indices": ["asset-new"],
+        "indices_info": [
+            {"name": "asset-new", "update_time": "2026-08-24T10:00:00", "knowledge_id": 2}
+        ],
+        "total": 1,
+        "facets": {"sources": ["asset"], "models": ["model-b"]},
+    }
+
+    result = ElasticSearchService.merge_paginated_list_indices_results(
+        primary, asset, offset=0, limit=2
+    )
+
+    assert result["indices"] == ["asset-new", "tenant-old"]
+    assert result["next_offset"] is None
+    assert result["facets"] == {
+        "sources": ["asset", "elasticsearch"],
+        "models": ["model-a", "model-b"],
+    }
+
+
+def test_merge_paginated_indices_falls_back_to_index_names_without_info():
+    result = ElasticSearchService.merge_paginated_list_indices_results(
+        {"indices": ["tenant-kb"], "count": 1},
+        {"indices": ["asset-kb"], "count": 1},
+        offset=1,
+        limit=1,
+    )
+
+    assert result["indices"] == ["asset-kb"]
+    assert result["count"] == 1
+    assert result["total"] == 2
+    assert result["next_offset"] is None
+    assert "indices_info" not in result
