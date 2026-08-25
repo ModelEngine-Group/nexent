@@ -363,6 +363,7 @@ export interface ApiMessage {
 export interface ApiConversationDetail {
   create_time: number;
   conversation_id: number;
+  conversation_title?: string;
   agent_id?: number | null;
   message: ApiMessage[];
 }

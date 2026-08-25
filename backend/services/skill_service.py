@@ -32,11 +32,12 @@ from database import skill_db
 from database.group_db import query_group_ids_by_user
 from database.user_tenant_db import get_user_tenant_by_user_id
 from utils.str_utils import convert_list_to_string
+from utils.skill_import_utils import generate_available_copy_skill_name
 
 logger = logging.getLogger(__name__)
 _SKILL_UPDATE_FORBIDDEN_MESSAGE = "Not authorized to update this skill"
 _SKILL_ACCESS_UPDATE_FORBIDDEN_MESSAGE = "Not authorized to update skill access"
-_MAX_SKILL_NAME_LENGTH = 100
+
 
 _skill_manager: Optional[SkillManager] = None
 
@@ -204,33 +205,6 @@ def _skill_file_preview_status(
         return "readable"
 
 
-def _truncate_skill_copy_base_name(base_name: str, suffix: str) -> str:
-    """Trim a copied skill base name so the final name fits the database limit."""
-    max_base_length = max(_MAX_SKILL_NAME_LENGTH - len(suffix), 1)
-    if len(base_name) <= max_base_length:
-        return base_name
-    return base_name[:max_base_length].rstrip() or base_name[:max_base_length]
-
-
-def generate_available_copy_skill_name(
-    base_name: str,
-    unavailable_names: Optional[set[str]] = None,
-) -> str:
-    """Generate the first available copy name using the repository naming convention."""
-    normalized_base = (base_name or "Skill").strip() or "Skill"
-    unavailable = unavailable_names or set()
-    if normalized_base not in unavailable:
-        return normalized_base
-
-    index = 1
-    while True:
-        suffix = " 副本" if index == 1 else f" 副本 {index}"
-        candidate = f"{_truncate_skill_copy_base_name(normalized_base, suffix)}{suffix}"
-        if candidate not in unavailable:
-            return candidate
-        index += 1
-
-
 def _replace_skill_frontmatter_name(content: str, new_name: str) -> str:
     """Replace only the name value in SKILL.md frontmatter and preserve the body."""
     match = re.match(
@@ -241,22 +215,22 @@ def _replace_skill_frontmatter_name(content: str, new_name: str) -> str:
     if not match:
         raise SkillException("SKILL.md must have YAML frontmatter")
 
-    try:
-        frontmatter = yaml.safe_load(match.group("frontmatter"))
-    except yaml.YAMLError as exc:
-        raise SkillException(f"Invalid SKILL.md frontmatter: {exc}") from exc
-    if not isinstance(frontmatter, dict):
-        raise SkillException("SKILL.md frontmatter must be a mapping")
+    frontmatter = match.group("frontmatter")
+    name_match = re.search(r"(?m)^name[ \t]*:[^\r\n]*(?P<line_end>\r?\n|$)", frontmatter)
+    if not name_match:
+        raise SkillException("SKILL.md frontmatter must contain a name field")
 
-    frontmatter["name"] = new_name
-    yaml_content = yaml.safe_dump(
-        frontmatter,
-        allow_unicode=True,
-        sort_keys=False,
-        default_flow_style=False,
-        width=float("inf"),
+    replacement = f"name: {json.dumps(new_name, ensure_ascii=False)}{name_match.group('line_end')}"
+    updated_frontmatter = (
+        frontmatter[:name_match.start()]
+        + replacement
+        + frontmatter[name_match.end():]
     )
-    return f"---\n{yaml_content}---\n{match.group('body')}"
+    return (
+        content[:match.start("frontmatter")]
+        + updated_frontmatter
+        + content[match.end("frontmatter"):]
+    )
 
 
 def _to_group_id_set(group_ids: Any) -> set[int]:

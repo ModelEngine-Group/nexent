@@ -54,7 +54,7 @@ export const API_ENDPOINTS = {
     rename: `${API_BASE_URL}/conversation/rename`,
     detail: (id: number) => `${API_BASE_URL}/conversation/${id}`,
     knowledgeScope: (id: number) =>
-      `${API_BASE_URL}/conversation/${id}/knowledge-scope`,
+       `${API_BASE_URL}/conversation/${id}/knowledge-scope`,
     delete: (id: number) => `${API_BASE_URL}/conversation/${id}`,
     generateTitle: `${API_BASE_URL}/conversation/generate_title`,
     // TODO: Remove this endpoint
@@ -470,8 +470,7 @@ export const API_ENDPOINTS = {
     install: `${API_BASE_URL}/skills/install`,
   },
   mcpTools: {
-    // Community and Registry endpoints remain under /mcp-tools prefix
-    registryList: `${API_BASE_URL}/mcp-tools/registry/list`,
+    // Community endpoints remain under /mcp-tools prefix
     communityList: `${API_BASE_URL}/mcp-tools/community/list`,
     communityPublish: `${API_BASE_URL}/mcp-tools/community/publish`,
     communityUpdate: `${API_BASE_URL}/mcp-tools/community/update`,

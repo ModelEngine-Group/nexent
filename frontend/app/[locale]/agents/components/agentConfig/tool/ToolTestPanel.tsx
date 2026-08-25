@@ -110,6 +110,8 @@ export interface ToolTestPanelProps {
   testPanelKbDisplayNames?: string[];
   /** Callback to notify parent when testPanelKbIds should change (e.g., from manual JSON edit) */
   onTestPanelKbIdsChange?: (ids: string[], displayNames: string[]) => void;
+  /** Whether the tool configuration has validation errors (empty required or constraint violations) */
+  configInvalid?: boolean;
   /** Tool type for KB selection (used to determine parameter name) */
   toolKbType?:
     | "knowledge_base_search"
@@ -143,6 +145,7 @@ export default function ToolTestPanel({
   testPanelKbIds = [],
   testPanelKbDisplayNames = [],
   onTestPanelKbIdsChange,
+  configInvalid = false,
   toolKbType = null,
 }: ToolTestPanelProps) {
   const { t } = useTranslation("common");
@@ -1139,7 +1142,7 @@ export default function ToolTestPanel({
           type="primary"
           onClick={executeTest}
           loading={testExecuting}
-          disabled={testExecuting}
+          disabled={testExecuting || configInvalid}
           style={{ width: "100%" }}
         >
           {testExecuting

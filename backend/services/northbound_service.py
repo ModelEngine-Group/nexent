@@ -32,7 +32,7 @@ from consts.exceptions import (
 from consts.error_code import ErrorCode, RuntimeMetadataValidationCode
 from consts.model import AgentRequest, ToolParamsRequest
 from database.knowledge_db import get_knowledge_info_by_tenant_id
-from database.conversation_db import get_conversation_messages
+from database.conversation_db import get_conversation_list, get_conversation_messages
 from database.token_db import get_latest_usage_metadata, log_token_usage
 from services.agent_service import (
     get_agent_by_name_impl,
@@ -51,10 +51,11 @@ from services.vectordatabase_service import (
 )
 from services.conversation_management_service import (
     save_conversation_user,
-    get_conversation_list_service,
     create_new_conversation,
+    generate_conversation_title_service,
     update_conversation_title as update_conversation_title_service,
 )
+from services.model_management_service import list_models_for_tenant
 from utils.runtime_metadata_utils import (
     runtime_metadata_hash,
     validate_runtime_metadata,
@@ -535,11 +536,16 @@ async def stop_chat(ctx: NorthboundContext, conversation_id: int, meta_data: Opt
 
 
 async def list_conversations(ctx: NorthboundContext) -> Dict[str, Any]:
-    conversations = get_conversation_list_service(ctx.user_id)
-    # get_conversation_list_service is sync
+    conversations = get_conversation_list(ctx.user_id)
 
     # Now return internal conversation_id directly
     return {"message": "success", "data": conversations, "requestId": ctx.request_id}
+
+
+async def list_configured_models(ctx: NorthboundContext) -> Dict[str, Any]:
+    """List the models configured for the authenticated tenant."""
+    models = await list_models_for_tenant(ctx.tenant_id)
+    return {"message": "success", "data": models, "requestId": ctx.request_id}
 
 
 async def get_conversation_history_internal(ctx: NorthboundContext, conversation_id: int) -> Dict[str, Any]:
@@ -841,3 +847,20 @@ async def update_conversation_title(ctx: NorthboundContext, conversation_id: int
     finally:
         if composed_key:
             asyncio.create_task(_release_idempotency_after_delay(composed_key))
+
+
+async def generate_conversation_title(
+    ctx: NorthboundContext,
+    conversation_id: int,
+    question: str,
+    language: str,
+) -> Dict[str, Any]:
+    """Generate and persist a conversation title from the user's question."""
+    title = await generate_conversation_title_service(
+        conversation_id=conversation_id,
+        question=question,
+        user_id=ctx.user_id,
+        tenant_id=ctx.tenant_id,
+        language=language,
+    )
+    return {"message": "success", "data": title, "requestId": ctx.request_id}

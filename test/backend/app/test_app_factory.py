@@ -909,3 +909,24 @@ class TestGenericHandlerAppExceptionDelegation:
         body = __import__("json").loads(response.body)
         assert body["message"] == "Delegated error"
         assert body["code"] == ErrorCode.COMMON_VALIDATION_ERROR.value
+
+    def test_token_expired_exception_handler(self):
+        """Test TokenExpiredError handler returns 401 with TOKEN_EXPIRED code."""
+        from consts.exceptions import TokenExpiredError
+
+        app = FastAPI()
+        register_exception_handlers(app)
+
+        @app.get("/test-token-expired")
+        def raise_token_expired():
+            raise TokenExpiredError("expired")
+
+        client = TestClient(app, raise_server_exceptions=False)
+        response = client.get("/test-token-expired")
+
+        assert response.status_code == 401
+        assert response.json() == {
+            "message": "Session expired, please log in again",
+            "code": "TOKEN_EXPIRED",
+        }
+

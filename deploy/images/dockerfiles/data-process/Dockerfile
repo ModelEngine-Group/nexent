@@ -160,6 +160,7 @@ RUN --mount=type=cache,id=nexent-data-process-apt-cache-${TARGETARCH},target=/va
         fontconfig \
         fonts-noto-cjk \
         libreoffice \
+        pandoc \
         poppler-utils \
         tesseract-ocr && \
     fc-cache -fv && \

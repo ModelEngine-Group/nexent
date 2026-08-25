@@ -7,11 +7,12 @@ from fastapi import APIRouter, Body, Depends, Header, HTTPException, Path, Query
 from fastapi.responses import JSONResponse
 import re
 
-from consts.const import ASSET_OWNER_TENANT_ID, PERMISSION_READ
+from consts.const import ASSET_OWNER_TENANT_ID
 from consts.error_code import ErrorCode
 from consts.exceptions import (
     AppException,
     DuplicateError,
+    TokenExpiredError,
 )
 from consts.model import ChunkCreateRequest, ChunkUpdateRequest, HybridSearchRequest, IndexingResponse
 from consts.scheduler import VALID_SUMMARY_FREQUENCIES, SUMMARY_FREQUENCY_OPTIONS_FOR_API
@@ -73,6 +74,9 @@ async def check_knowledge_base_exist(
 
         user_id, tenant_id = get_current_user_id(authorization)
         return check_knowledge_base_exist_impl(knowledge_name=knowledge_name, vdb_core=vdb_core, user_id=user_id, tenant_id=tenant_id)
+    except TokenExpiredError as e:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logger.error(
             f"Error checking knowledge base existence for '{knowledge_name}': {str(e)}", exc_info=True)
@@ -134,6 +138,9 @@ def create_new_index(
     except (TypeError, ValueError) as e:
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
+    except TokenExpiredError as e:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Error creating index: {str(e)}")
@@ -155,6 +162,9 @@ async def delete_index(
         return result
     except HTTPException:
         raise
+    except TokenExpiredError as e:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logger.error(
             f"Error during API call to delete index '{index_name}': {str(e)}", exc_info=True)
@@ -213,6 +223,9 @@ async def update_index(
         )
     except HTTPException:
         raise
+    except TokenExpiredError as exc:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
     except Exception as exc:
         logger.error(
             f"Error updating index '{index_name}': {str(exc)}", exc_info=True)
@@ -260,6 +273,9 @@ async def update_summary_frequency_endpoint(
             )
     except HTTPException:
         raise
+    except TokenExpiredError as exc:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
     except Exception as exc:
         logger.exception("Error updating summary frequency")
         raise HTTPException(
@@ -347,6 +363,9 @@ def get_embedding_model_status(
 
     except HTTPException:
         raise
+    except TokenExpiredError as e:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logger.error(
             f"Error getting embedding model status for '{index_name}': {e}", exc_info=True)
@@ -399,6 +418,9 @@ def update_embedding_model(
         )
     except HTTPException:
         raise
+    except TokenExpiredError as exc:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
     except Exception as exc:
         logger.error(
             f"Error updating embedding model for '{index_name}': {exc}", exc_info=True)
@@ -408,37 +430,6 @@ def update_embedding_model(
         )
 
 
-def _apply_read_only_to_asset_indices_info(asset_result: Dict[str, Any]) -> Dict[str, Any]:
-    """Force READ_ONLY permission on asset-owner indices_info before merge."""
-    indices_info = asset_result.get("indices_info")
-    if not indices_info:
-        return asset_result
-    normalized = dict(asset_result)
-    normalized["indices_info"] = [
-        {**info, "permission": PERMISSION_READ} for info in indices_info
-    ]
-    return normalized
-
-
-def _merge_list_indices_results(
-        primary: Dict[str, Any],
-        asset_owner: Dict[str, Any],
-) -> Dict[str, Any]:
-    """Merge tenant and ASSET_OWNER list_indices responses (concat, no dedup)."""
-    merged_indices = primary.get("indices", []) + \
-        asset_owner.get("indices", [])
-    merged: Dict[str, Any] = {
-        "indices": merged_indices,
-        "count": len(merged_indices),
-    }
-    if "indices_info" in primary or "indices_info" in asset_owner:
-        merged["indices_info"] = (
-            primary.get("indices_info", []) +
-            asset_owner.get("indices_info", [])
-        )
-    return merged
-
-
 @router.get("")
 def get_list_indices(
         pattern: str = Query("*", description="Pattern to match index names"),
@@ -446,27 +437,61 @@ def get_list_indices(
             False, description="Whether to include index stats"),
         tenant_id: Optional[str] = Query(
             None, description="Tenant ID for filtering (uses auth if not provided)"),
+        offset: int = Query(0, ge=0, description="Number of visible knowledge bases to skip"),
+        limit: Optional[int] = Query(None, ge=1, le=100, description="Maximum knowledge bases to return"),
+        keyword: Optional[str] = Query(None, description="Search knowledge base name and description"),
+        sources: Optional[List[str]] = Query(None, description="Knowledge base sources to include"),
+        models: Optional[List[str]] = Query(None, description="Embedding model names to include"),
         vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
         authorization: Optional[str] = Header(None),
 ):
     """List all user indices with optional stats"""
     try:
         user_id, auth_tenant_id = get_current_user_id(authorization)
+        pagination_enabled = limit is not None
+        pagination_args = {}
+        if limit is not None or keyword or sources or models:
+            pagination_args = {
+                "pagination_enabled": pagination_enabled,
+                "offset": offset,
+                "limit": limit,
+                "keyword": keyword,
+                "sources": sources,
+                "models": models,
+            }
         if tenant_id is None:
+            if limit is not None and auth_tenant_id != ASSET_OWNER_TENANT_ID:
+                prefix_limit = offset + limit
+                result = ElasticSearchService.list_indices(
+                    pattern, include_stats, auth_tenant_id, user_id, vdb_core,
+                    pagination_enabled=True, offset=0, limit=prefix_limit,
+                    keyword=keyword, sources=sources, models=models,
+                )
+                asset_result = ElasticSearchService.list_indices(
+                    pattern, include_stats, ASSET_OWNER_TENANT_ID, user_id, vdb_core,
+                    pagination_enabled=True, offset=0, limit=prefix_limit,
+                    keyword=keyword, sources=sources, models=models,
+                )
+                return ElasticSearchService.merge_paginated_list_indices_results(
+                    result, asset_result, offset, limit
+                )
             result = ElasticSearchService.list_indices(
-                pattern, include_stats, auth_tenant_id, user_id, vdb_core
+                pattern, include_stats, auth_tenant_id, user_id, vdb_core, **pagination_args
             )
             if auth_tenant_id != ASSET_OWNER_TENANT_ID:
                 asset_result = ElasticSearchService.list_indices(
-                    pattern, include_stats, ASSET_OWNER_TENANT_ID, user_id, vdb_core
+                    pattern, include_stats, ASSET_OWNER_TENANT_ID, user_id, vdb_core, **pagination_args
                 )
-                asset_result = _apply_read_only_to_asset_indices_info(
-                    asset_result)
-                return _merge_list_indices_results(result, asset_result)
+                return ElasticSearchService.merge_list_indices_results(
+                    result, asset_result
+                )
             return result
         return ElasticSearchService.list_indices(
-            pattern, include_stats, tenant_id, user_id, vdb_core
+            pattern, include_stats, tenant_id, user_id, vdb_core, **pagination_args
         )
+    except TokenExpiredError as e:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Error get index: {str(e)}")
@@ -555,6 +580,9 @@ def create_index_documents(
         raise
     except HTTPException:
         raise
+    except TokenExpiredError as e:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         error_msg = str(e)
         logger.error(f"Error indexing documents: {error_msg}")
@@ -583,6 +611,9 @@ async def get_index_files(
         }
     except HTTPException:
         raise
+    except TokenExpiredError as e:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         error_msg = str(e)
         logger.error(f"Error indexing documents: {error_msg}")
@@ -593,8 +624,10 @@ async def get_index_files(
 @router.delete("/{index_name}/documents")
 async def delete_documents(
         index_name: str = Path(..., description="Name of the index"),
-        path_or_url: str = Query(...,
-                                 description="Path or URL of documents to delete"),
+        path_or_url: Optional[str] = Query(None,
+                                           description="Legacy object path to delete"),
+        file_id: Optional[str] = Query(
+            None, description="Durable lifecycle file ID (preferred for new clients)"),
         scope: str = Query(
             "full",
             description=(
@@ -609,6 +642,36 @@ async def delete_documents(
     try:
         user_id, tenant_id = get_current_user_id(authorization)
         require_knowledge_base_edit_permission(index_name, user_id, tenant_id)
+        if file_id:
+            try:
+                from database.knowledge_file_lifecycle_db import get_file_record
+
+                lifecycle_record = get_file_record(
+                    file_id=file_id,
+                    index_name=index_name,
+                    tenant_id=tenant_id,
+                    include_hidden=True,
+                )
+            except Exception as lifecycle_exc:
+                logger.warning("Lifecycle file ID lookup unavailable: %s", lifecycle_exc)
+                lifecycle_record = None
+            if lifecycle_record and lifecycle_record.get("object_name"):
+                path_or_url = lifecycle_record["object_name"]
+            elif lifecycle_record and not lifecycle_record.get("object_name"):
+                if scope != "full":
+                    raise HTTPException(
+                        status_code=HTTPStatus.BAD_REQUEST,
+                        detail="A file without a storage object can only use full deletion",
+                    )
+                return ElasticSearchService.delete_lifecycle_record_without_object(
+                    lifecycle_record,
+                    requested_by=user_id,
+                )
+        if not path_or_url:
+            raise HTTPException(
+                status_code=HTTPStatus.BAD_REQUEST,
+                detail="Either path_or_url or file_id is required",
+            )
         result = await ElasticSearchService.delete_document_by_scope(
             index_name, path_or_url, scope, vdb_core
         )
@@ -659,6 +722,9 @@ async def delete_documents(
         )
     except HTTPException:
         raise
+    except TokenExpiredError as e:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
@@ -671,16 +737,58 @@ async def get_document_error_info(
         index_name: str = Path(..., description="Name of the index"),
         path_or_url: str = Path(...,
                                 description="Path or URL of the document"),
+        file_id: Optional[str] = Query(None, description="Durable lifecycle file ID"),
         authorization: Optional[str] = Header(None)
 ):
     """Get error information for a document"""
     try:
         user_id, tenant_id = get_current_user_id(authorization)
         require_knowledge_base_read_permission(index_name, user_id, tenant_id)
+        try:
+            from database.knowledge_file_lifecycle_db import get_file_record
+
+            lifecycle_record = get_file_record(
+                file_id=file_id,
+                index_name=index_name,
+                tenant_id=tenant_id,
+                object_name=None if file_id else path_or_url,
+                include_hidden=True,
+            )
+        except Exception as lifecycle_exc:
+            logger.warning("Lifecycle error lookup unavailable: %s", lifecycle_exc)
+            lifecycle_record = None
+        lifecycle_has_error = bool(
+            lifecycle_record
+            and any(
+                lifecycle_record.get(field)
+                for field in ("error_code", "error_message", "error_stage", "failed_at")
+            )
+        )
+        lifecycle_stage = (
+            (lifecycle_record.get("error_stage") or lifecycle_record.get("stage"))
+            if lifecycle_record
+            else None
+        )
+        if lifecycle_has_error:
+            return {
+                "status": "success",
+                "error_code": lifecycle_record.get("error_code"),
+                "error_message": lifecycle_record.get("error_message"),
+                "error_stage": lifecycle_record.get("error_stage") or lifecycle_record.get("stage"),
+                "failed_at": lifecycle_record.get("failed_at"),
+            }
         celery_task_files = await get_all_files_status(index_name)
         file_status = celery_task_files.get(path_or_url)
 
         if not file_status:
+            if lifecycle_record:
+                return {
+                    "status": "success",
+                    "error_code": None,
+                    "error_message": None,
+                    "error_stage": lifecycle_stage,
+                    "failed_at": lifecycle_record.get("failed_at") if lifecycle_record else None,
+                }
             raise HTTPException(
                 status_code=HTTPStatus.NOT_FOUND,
                 detail=f"Document {path_or_url} not found in index {index_name}"
@@ -691,6 +799,9 @@ async def get_document_error_info(
             return {
                 "status": "success",
                 "error_code": None,
+                "error_message": None,
+                "error_stage": lifecycle_stage,
+                "failed_at": lifecycle_record.get("failed_at") if lifecycle_record else None,
             }
 
         redis_service = get_redis_service()
@@ -716,9 +827,15 @@ async def get_document_error_info(
         return {
             "status": "success",
             "error_code": error_code,
+            "error_message": raw_error,
+            "error_stage": file_status.get("stage") or lifecycle_stage,
+            "failed_at": lifecycle_record.get("failed_at") if lifecycle_record else None,
         }
     except HTTPException:
         raise
+    except TokenExpiredError as e:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logger.error(
             f"Error getting error info for document {path_or_url}: {str(e)}")
@@ -781,6 +898,9 @@ def get_index_chunks(
         )
     except HTTPException:
         raise
+    except TokenExpiredError as e:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         error_msg = str(e)
         raise HTTPException(
@@ -814,6 +934,9 @@ def create_chunk(
         )
     except HTTPException:
         raise
+    except TokenExpiredError as exc:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
     except Exception as exc:
         logger.error(
             "Error creating chunk for index %s: %s", index_name, exc, exc_info=True
@@ -853,6 +976,9 @@ def update_chunk(
         )
     except HTTPException:
         raise
+    except TokenExpiredError as exc:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
     except Exception as exc:
         logger.error(
             "Error updating chunk %s for index %s: %s",
@@ -891,6 +1017,9 @@ def delete_chunk(
         )
     except HTTPException:
         raise
+    except TokenExpiredError as exc:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
     except Exception as exc:
         logger.error(
             "Error deleting chunk %s for index %s: %s",
@@ -953,6 +1082,9 @@ async def hybrid_search(
     except HTTPException:
         # Re-raise HTTP exceptions (e.g. 403 from permission check) as-is
         raise
+    except TokenExpiredError as exc:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
     except Exception as exc:
         logger.error(f"Hybrid search failed: {exc}", exc_info=True)
         raise HTTPException(

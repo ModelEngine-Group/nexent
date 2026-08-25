@@ -13,6 +13,7 @@ import {
 export type Nl2AgentFlowPhase =
   | "idle"
   | "clarifying"
+  | "installing"
   | "binding"
   | "generating"
   | "generation_failed"
@@ -101,9 +102,11 @@ function reducer(
         phase:
           action.card.subtype === "requirement_clarification"
             ? "clarifying"
-            : action.card.subtype === "installed_resource_binding"
-              ? "binding"
-              : state.phase,
+            : action.card.subtype === "suggested_resource_installation"
+              ? "installing"
+              : action.card.subtype === "installed_resource_binding"
+                ? "binding"
+                : state.phase,
         activeCard: action.card,
         isFormLocked: state.agentId !== null || state.isFormLocked,
       };

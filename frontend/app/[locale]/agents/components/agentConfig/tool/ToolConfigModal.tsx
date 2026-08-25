@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
@@ -243,6 +243,9 @@ export default function ToolConfigModal({
 
   // Track if user has attempted to submit the form
   const [hasSubmitted, setHasSubmitted] = useState(false);
+
+  // Track whether any form field currently has a validation error
+  const [hasFormErrors, setHasFormErrors] = useState(false);
 
   // Dify configuration state
   const [difyConfig, setDifyConfig] = useState<{
@@ -1373,6 +1376,24 @@ export default function ToolConfigModal({
 
   // Watch all form values and sync to currentParams
   const formValues = Form.useWatch([], form);
+
+  // Detect required fields that are still empty so the save/test buttons stay
+  // disabled until they are filled in. Uses currentParams.value instead of
+  // formValues because the KB selector fields (index_names/dataset_ids/
+  // kds_list) have no Form.Item name and are not tracked by useWatch.
+  const hasEmptyRequired = useMemo(() => {
+    return currentParams.some((param) => {
+      if (!param.required) return false;
+      const value = param.value;
+      return (
+        value === undefined ||
+        value === null ||
+        value === "" ||
+        (Array.isArray(value) && value.length === 0)
+      );
+    });
+  }, [currentParams]);
+
   useEffect(() => {
     if (formValues) {
       const newParams = [...currentParams];
@@ -1508,6 +1529,9 @@ export default function ToolConfigModal({
     setTestPanelVisible(false);
     // Reset user modification tracking state for datamate URL
     setHasUserModifiedDatamateUrl(false);
+    // Reset validation tracking so the next open starts with an enabled save button
+    setHasSubmitted(false);
+    setHasFormErrors(false);
 
     // Clear knowledge base cache to ensure fresh data on next open
     // This is especially important after saving tool config with KB changes
@@ -1994,6 +2018,8 @@ export default function ToolConfigModal({
         const currentValue = form.getFieldValue(fieldName);
         return (
           <Select
+            showSearch
+            optionFilterProp="label"
             placeholder={t("toolConfig.input.string.placeholder", {
               name: param.description,
             })}
@@ -2190,7 +2216,7 @@ export default function ToolConfigModal({
               </button>
               <button
                 onClick={handleSave}
-                disabled={isLoading}
+                disabled={isLoading || hasFormErrors || hasEmptyRequired}
                 className="flex items-center justify-center px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200 h-8"
               >
                 {isLoading
@@ -2233,6 +2259,11 @@ export default function ToolConfigModal({
                   }
                 }
               }}
+              onFieldsChange={(_, allFields) => {
+                setHasFormErrors(
+                  allFields.some((field) => (field.errors?.length ?? 0) > 0)
+                );
+              }}
             >
               <div className="pr-2 mt-3">
                 {currentParams.map((param, index) => {
@@ -2254,6 +2285,52 @@ export default function ToolConfigModal({
                     rules.push({
                       required: true,
                       message: t("toolConfig.validation.required"),
+                    });
+                  }
+
+                  // Add numeric constraint validation (ge/gt/le/lt)
+                  if (
+                    param.type === TOOL_PARAM_TYPES.NUMBER &&
+                    param.constraints
+                  ) {
+                    const { ge, gt, le, lt } = param.constraints;
+                    rules.push({
+                      validator: async (_: any, value: any) => {
+                        if (
+                          value === undefined ||
+                          value === null ||
+                          value === ""
+                        ) {
+                          return Promise.resolve();
+                        }
+                        const num = Number(value);
+                        if (Number.isNaN(num)) {
+                          return Promise.reject(
+                            t("toolConfig.validation.number.invalid")
+                          );
+                        }
+                        if (ge !== undefined && num < ge) {
+                          return Promise.reject(
+                            t("toolConfig.validation.number.min", { min: ge })
+                          );
+                        }
+                        if (gt !== undefined && num <= gt) {
+                          return Promise.reject(
+                            t("toolConfig.validation.number.gt", { value: gt })
+                          );
+                        }
+                        if (le !== undefined && num > le) {
+                          return Promise.reject(
+                            t("toolConfig.validation.number.max", { max: le })
+                          );
+                        }
+                        if (lt !== undefined && num >= lt) {
+                          return Promise.reject(
+                            t("toolConfig.validation.number.lt", { value: lt })
+                          );
+                        }
+                        return Promise.resolve();
+                      },
                     });
                   }
 
@@ -2499,6 +2576,7 @@ export default function ToolConfigModal({
                 onTestPanelKbIdsChange={handleTestPanelKbIdsChange}
                 testPanelKbIds={testPanelKbIds}
                 testPanelKbDisplayNames={testPanelKbDisplayNames}
+                configInvalid={hasFormErrors || hasEmptyRequired}
                 toolKbType={toolKbType}
                 haotianKnowledgeSets={haotianKnowledgeSets}
               />

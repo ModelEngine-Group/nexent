@@ -1,11 +1,17 @@
 import { create } from "zustand";
 
+import { safeStringify } from "@/lib/utils";
 import {
   searchToolConfig,
   updateAgentInfo,
   updateToolConfig,
 } from "@/services/agentConfigService";
 import type { Agent, Skill, Tool } from "@/types/agentConfig";
+import {
+  AIDP_NON_PERSISTED_PARAM_NAMES,
+  isAidpManagedKnowledgeTool,
+  isManagedKnowledgeTool,
+} from "@/lib/managedKnowledgeTools";
 
 export type AgentDraft = Pick<
   Agent,
@@ -290,7 +296,10 @@ const toAgentPayload = (agentId: number, patch: AgentDraftPatch) => ({
   ...(patch.tools !== undefined
     ? {
         enabled_tool_ids: patch.tools
-          .filter((tool) => tool.is_available !== false)
+          .filter(
+            (tool) =>
+              tool.is_available !== false || isManagedKnowledgeTool(tool)
+          )
           .map((tool) => Number(tool.id))
           .filter(Number.isFinite),
       }
@@ -337,6 +346,12 @@ const toAgentPayload = (agentId: number, patch: AgentDraftPatch) => ({
 const toToolParams = (tool: Tool): Record<string, unknown> =>
   (tool.initParams ?? []).reduce<Record<string, unknown>>(
     (params, parameter) => {
+      if (
+        isAidpManagedKnowledgeTool(tool) &&
+        AIDP_NON_PERSISTED_PARAM_NAMES.has(parameter.name)
+      ) {
+        return params;
+      }
       if (parameter.value !== undefined && parameter.value !== null) {
         params[parameter.name] = parameter.value;
       }
@@ -345,14 +360,41 @@ const toToolParams = (tool: Tool): Record<string, unknown> =>
     {}
   );
 
+const areToolParamsEqual = (left: Tool, right: Tool): boolean => {
+  const leftParams = toToolParams(left);
+  const rightParams = toToolParams(right);
+  const leftKeys = Object.keys(leftParams).sort();
+  const rightKeys = Object.keys(rightParams).sort();
+
+  if (leftKeys.length !== rightKeys.length) return false;
+  return leftKeys.every((key, index) => {
+    if (key !== rightKeys[index]) return false;
+
+    const leftValue = safeStringify(leftParams[key]);
+    const rightValue = safeStringify(rightParams[key]);
+    return leftValue !== null && leftValue === rightValue;
+  });
+};
+
 async function persistToolChanges(
   agentId: number,
   currentTools: Tool[],
   savedTools: Tool[]
 ): Promise<void> {
   const currentToolIds = new Set(currentTools.map((tool) => Number(tool.id)));
+  const savedToolsById = new Map(
+    savedTools.map((tool) => [Number(tool.id), tool])
+  );
 
   for (const tool of currentTools) {
+    if (tool.is_available === false) {
+      continue;
+    }
+    const savedTool = savedToolsById.get(Number(tool.id));
+    if (savedTool && areToolParamsEqual(tool, savedTool)) {
+      continue;
+    }
+
     const result = await updateToolConfig(
       Number(tool.id),
       agentId,
@@ -367,6 +409,9 @@ async function persistToolChanges(
   for (const tool of savedTools) {
     const toolId = Number(tool.id);
     if (currentToolIds.has(toolId)) {
+      continue;
+    }
+    if (tool.is_available === false) {
       continue;
     }
 

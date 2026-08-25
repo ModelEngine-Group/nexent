@@ -126,6 +126,9 @@ sys.modules["database.token_db"] = token_db_mod
 
 # Mock conversation_db
 conversation_db_mod = types.ModuleType("database.conversation_db")
+conversation_db_mod.get_conversation_list = MagicMock(return_value=[
+    {"conversation_id": "1", "title": "Test"}
+])
 conversation_db_mod.get_conversation_messages = MagicMock(return_value=[
     {"message_role": "user", "message_content": "Hello"}
 ])
@@ -177,12 +180,15 @@ sys.modules["services.runtime_proxy_service"] = runtime_proxy_mod
 # Mock conversation_management_service
 conv_mgmt_mod = types.ModuleType("services.conversation_management_service")
 conv_mgmt_mod.save_conversation_user = MagicMock()
-conv_mgmt_mod.get_conversation_list_service = MagicMock(return_value=[
-    {"conversation_id": "1", "title": "Test"}
-])
 conv_mgmt_mod.create_new_conversation = MagicMock(return_value={"conversation_id": 123})
+conv_mgmt_mod.generate_conversation_title_service = AsyncMock(return_value="Generated title")
 conv_mgmt_mod.update_conversation_title = MagicMock()
 sys.modules["services.conversation_management_service"] = conv_mgmt_mod
+
+# Mock model_management_service
+model_mgmt_mod = types.ModuleType("services.model_management_service")
+model_mgmt_mod.list_models_for_tenant = AsyncMock(return_value=[])
+sys.modules["services.model_management_service"] = model_mgmt_mod
 
 # Mock agent_version_service
 agent_version_mod = types.ModuleType("services.agent_version_service")
@@ -217,6 +223,7 @@ services_package.agent_service = agent_service_mod
 services_package.runtime_proxy_service = runtime_proxy_mod
 services_package.agent_version_service = agent_version_mod
 services_package.conversation_management_service = conv_mgmt_mod
+services_package.model_management_service = model_mgmt_mod
 services_package.file_management_service = file_mgmt_mod
 services_package.runtime_state_service = runtime_state_service_mod
 services_package.knowledge_scope_service = knowledge_scope_service_mod
@@ -979,6 +986,49 @@ class TestListConversations:
 
 
 @pytest.mark.asyncio
+class TestNorthboundModelAndGeneratedTitleServices:
+    async def test_list_configured_models_uses_context_tenant(self):
+        ctx = MockNorthboundContext(tenant_id="tenant-models")
+        models = [{"model_id": 7, "display_name": "Main model"}]
+        model_mgmt_mod.list_models_for_tenant.reset_mock(side_effect=True)
+        model_mgmt_mod.list_models_for_tenant.return_value = models
+
+        result = await ns.list_configured_models(ctx)
+
+        assert result == {
+            "message": "success",
+            "data": models,
+            "requestId": "req-123",
+        }
+        model_mgmt_mod.list_models_for_tenant.assert_awaited_once_with("tenant-models")
+
+    async def test_generate_conversation_title_uses_context_identity(self):
+        ctx = MockNorthboundContext(user_id="user-title", tenant_id="tenant-title")
+        conv_mgmt_mod.generate_conversation_title_service.reset_mock(side_effect=True)
+        conv_mgmt_mod.generate_conversation_title_service.return_value = "Generated title"
+
+        result = await ns.generate_conversation_title(
+            ctx=ctx,
+            conversation_id=42,
+            question="Summarize this conversation",
+            language="en",
+        )
+
+        assert result == {
+            "message": "success",
+            "data": "Generated title",
+            "requestId": "req-123",
+        }
+        conv_mgmt_mod.generate_conversation_title_service.assert_awaited_once_with(
+            conversation_id=42,
+            question="Summarize this conversation",
+            user_id="user-title",
+            tenant_id="tenant-title",
+            language="en",
+        )
+
+
+@pytest.mark.asyncio
 class TestGetConversationHistory:
     """Tests for get_conversation_history function."""
 
@@ -1673,7 +1723,7 @@ class TestListConversationsErrorHandling:
         conversations = [
             {"conversation_id": "1", "title": "Test", "meta_data": {}}
         ]
-        conv_mgmt_mod.get_conversation_list_service.return_value = conversations
+        conversation_db_mod.get_conversation_list.return_value = conversations
         token_db_mod.get_latest_usage_metadata.reset_mock(side_effect=True)
 
         result = await ns.list_conversations(ctx=ctx)
@@ -1688,7 +1738,7 @@ class TestListConversationsErrorHandling:
         conversations = [
             {"conversation_id": "1", "title": "Test", "meta_data": {"query": "stored query"}}
         ]
-        conv_mgmt_mod.get_conversation_list_service.return_value = conversations
+        conversation_db_mod.get_conversation_list.return_value = conversations
         token_db_mod.get_latest_usage_metadata.reset_mock(side_effect=True)
 
         result = await ns.list_conversations(ctx=ctx)
@@ -1700,7 +1750,7 @@ class TestListConversationsErrorHandling:
         """Test that usage metadata is not injected into conversation items."""
         ctx = MockNorthboundContext(token_id=1)
         conversations = [{"conversation_id": "1", "title": "Test"}]
-        conv_mgmt_mod.get_conversation_list_service.return_value = conversations
+        conversation_db_mod.get_conversation_list.return_value = conversations
         token_db_mod.get_latest_usage_metadata.reset_mock(side_effect=True)
         token_db_mod.get_latest_usage_metadata.return_value = {"query": "test query"}
 

@@ -39,12 +39,19 @@ async def get_users_endpoint(
     """
     try:
         _, requester_tenant_id, requester_role = get_current_user_context(authorization)
+        filter_kwargs = {
+            "search": request.search,
+            "roles": request.roles,
+            "group_ids": request.group_ids,
+        }
+        filter_kwargs = {key: value for key, value in filter_kwargs.items() if value}
         result = get_users_for_requester(
             request.tenant_id,
             request.page,
             request.page_size,
             request.sort_by,
             request.sort_order,
+            **filter_kwargs,
             requester_tenant_id=requester_tenant_id,
             requester_role=requester_role,
         )

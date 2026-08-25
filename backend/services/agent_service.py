@@ -15,7 +15,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from nexent.core.agents.run_agent import agent_run
 from jinja2 import Template
 
-from agents.agent_run_manager import agent_run_manager
+from agents.agent_run_manager import AgentRunAlreadyActiveError, agent_run_manager
 from agents.create_agent_info import create_agent_run_info, create_tool_config_list
 from agents.preprocess_manager import preprocess_manager
 from services.agent_version_service import publish_version_impl
@@ -138,6 +138,7 @@ from services.streaming_channel import streaming_channel_manager
 from services.runtime_state_service import runtime_state_service
 from utils.auth_utils import get_current_user_info, get_user_language
 from utils.agent_stream_utils import (
+    enrich_file_uploads_with_presigned_urls as _enrich_file_uploads_with_presigned_urls,
     extract_json_objects_from_text as _extract_json_objects_from_text,
     extract_skill_file_upload_payloads as _extract_skill_file_upload_payloads,
     process_skill_file_uploads as _process_skill_file_uploads,
@@ -232,13 +233,25 @@ async def get_agent_icon_impl(agent_id: int, tenant_id: str, user_id: str) -> tu
 
 
 
-async def _cleanup_channel_later(conversation_id: int, user_id: str, delay: float = 5.0):
+async def _cleanup_channel_later(
+    conversation_id: int,
+    user_id: str,
+    delay: float = 5.0,
+    expected_channel=None,
+):
     """
     Remove the streaming channel after a delay to allow subscribers to finish.
     This gives reconnected clients time to receive the final chunks before cleanup.
     """
     await asyncio.sleep(delay)
-    await streaming_channel_manager.remove_channel(conversation_id, user_id)
+    remove_kwargs = {}
+    if expected_channel is not None:
+        remove_kwargs["expected_channel"] = expected_channel
+    await streaming_channel_manager.remove_channel(
+        conversation_id,
+        user_id,
+        **remove_kwargs,
+    )
 
 
 async def _consume_agent_stream_producer(
@@ -306,6 +319,7 @@ async def _consume_agent_stream_producer(
                 _cleanup_channel_later(
                     conversation_id=conversation_id,
                     user_id=user_id,
+                    expected_channel=channel,
                 )
             )
             _channel_cleanup_tasks.add(cleanup_task)
@@ -1301,6 +1315,10 @@ async def _stream_agent_chunks(
                     user_id=user_id,
                     tenant_id=tenant_id,
                 )
+                skill_file_uploads = await asyncio.to_thread(
+                    _enrich_file_uploads_with_presigned_urls,
+                    skill_file_uploads,
+                )
                 logger.info(
                     "[skill-file] upload finished conversation=%s result_count=%s results=%s",
                     agent_request.conversation_id,
@@ -1311,8 +1329,17 @@ async def _stream_agent_chunks(
                         {"file_uploads": skill_file_uploads},
                         ensure_ascii=False,
                     )
+                    files_chunk = (
+                        "data: "
+                        + json.dumps(
+                            {"type": "files", "content": files_payload},
+                            ensure_ascii=False,
+                        )
+                        + "\n\n"
+                    )
                     try:
-                        yield f"data: {json.dumps({'type': 'files', 'content': files_payload}, ensure_ascii=False)}\n\n"
+                        await channel.publish(files_chunk)
+                        yield files_chunk
                     except RuntimeError:
                         # Stream is closing (e.g., client disconnect). Avoid raising during generator teardown.
                         pass
@@ -1323,13 +1350,25 @@ async def _stream_agent_chunks(
             logger.exception("Failed to process skill file uploads")
 
         if workspace_file_uploads:
-            uploaded_files = list(workspace_file_uploads.values())
+            uploaded_files = await asyncio.to_thread(
+                _enrich_file_uploads_with_presigned_urls,
+                list(workspace_file_uploads.values()),
+            )
             files_payload = json.dumps(
                 {"file_uploads": uploaded_files},
                 ensure_ascii=False,
             )
+            files_chunk = (
+                "data: "
+                + json.dumps(
+                    {"type": "files", "content": files_payload},
+                    ensure_ascii=False,
+                )
+                + "\n\n"
+            )
             try:
-                yield f"data: {json.dumps({'type': 'files', 'content': files_payload}, ensure_ascii=False)}\n\n"
+                await channel.publish(files_chunk)
+                yield files_chunk
             except RuntimeError:
                 pass
             frontend_skill_files.extend(
@@ -1382,7 +1421,11 @@ async def _stream_agent_chunks(
                 pass
 
         agent_run_manager.unregister_agent_run(
-            agent_request.conversation_id, user_id, status=terminal_status)
+            agent_request.conversation_id,
+            user_id,
+            status=terminal_status,
+            agent_run_info=agent_run_info,
+        )
 
         if channel is not None:
             await streaming_channel_manager.complete_channel(
@@ -1393,7 +1436,8 @@ async def _stream_agent_chunks(
             cleanup_task = asyncio.create_task(
                 _cleanup_channel_later(
                     conversation_id=agent_request.conversation_id,
-                    user_id=user_id
+                    user_id=user_id,
+                    expected_channel=channel,
                 )
             )
             _channel_cleanup_tasks.add(cleanup_task)
@@ -2864,6 +2908,7 @@ async def prepare_agent_run(
     tenant_id: str,
     language: str = LANGUAGE["ZH"],
     allow_memory_search: bool = True,
+    reservation_token: Optional[str] = None,
 ):
     """
     Prepare for an agent run by creating context and run info, and registering the run.
@@ -2936,8 +2981,15 @@ async def prepare_agent_run(
                 agent_request.conversation_id, candidate, user_id, tenant_id
             )) if historical_context is not None else None
         )
+    register_kwargs = {}
+    if reservation_token is not None:
+        register_kwargs["reservation_token"] = reservation_token
     agent_run_manager.register_agent_run(
-        agent_request.conversation_id, agent_run_info, user_id)
+        agent_request.conversation_id,
+        agent_run_info,
+        user_id,
+        **register_kwargs,
+    )
     return agent_run_info, memory_context
 
 
@@ -2970,6 +3022,7 @@ async def generate_stream(
     language: str = LANGUAGE["ZH"],
     enable_memory: bool = False,
     channel: Optional[Any] = None,
+    reservation_token: Optional[str] = None,
 ):
     """Unified streaming entry point.
 
@@ -3020,13 +3073,19 @@ async def generate_stream(
         # Prepare the agent with or without memory. The preparation path runs
         # fixed retrieval before the model loop and exposes only store_memory.
         try:
+            prepare_kwargs = {}
+            if reservation_token is not None:
+                prepare_kwargs["reservation_token"] = reservation_token
             agent_run_info, memory_context = await prepare_agent_run(
                 agent_request=agent_request,
                 user_id=user_id,
                 tenant_id=tenant_id,
                 language=language,
                 allow_memory_search=memory_enabled_runtime,
+                **prepare_kwargs,
             )
+        except AgentRunAlreadyActiveError:
+            raise
         except Exception as prep_err:
             # Normalize any preparation error to MemoryPreparationException so
             # the memory-enabled path can decide between retry-without-memory
@@ -3063,6 +3122,7 @@ async def generate_stream(
                 language=language,
                 enable_memory=False,
                 channel=channel,
+                reservation_token=reservation_token,
             ):
                 yield data_chunk
         except Exception as run_exc:
@@ -3086,6 +3146,12 @@ async def generate_stream(
     finally:
         if cancel_poll_task and not cancel_poll_task.done():
             cancel_poll_task.cancel()
+        if reservation_token is not None:
+            agent_run_manager.release_agent_run_reservation(
+                agent_request.conversation_id,
+                user_id,
+                reservation_token,
+            )
 
 
 def _detect_resume_position(
@@ -3571,63 +3637,106 @@ async def run_agent_stream(
         )
 
     # Normal mode: start new stream
-    await runtime_state_service.reset_stream_async(
-        user_id=resolved_user_id,
-        conversation_id=agent_request.conversation_id,
-    )
-
-    if not agent_request.is_debug and not skip_user_save:
-        save_messages(
-            agent_request,
-            target=MESSAGE_ROLE["USER"],
-            user_id=resolved_user_id,
-            tenant_id=resolved_tenant_id,
+    try:
+        reservation_token = agent_run_manager.reserve_agent_run(
+            agent_request.conversation_id,
+            resolved_user_id,
+        )
+    except AgentRunAlreadyActiveError:
+        logger.warning(
+            "Rejected concurrent agent run, user_id=%s, conversation_id=%s",
+            resolved_user_id,
+            agent_request.conversation_id,
+        )
+        active_message = (
+            "当前会话已有智能体任务正在运行，请等待任务完成或先停止任务后再重试。"
+            if language == LANGUAGE["ZH"]
+            else "An agent run is already active for this conversation. Wait for it to finish or stop it before retrying."
         )
 
-    memory_ctx_preview = build_memory_context(
-        resolved_user_id, resolved_tenant_id, agent_request.agent_id, skip_query=agent_request.is_debug
-    )
-    memory_enabled = memory_ctx_preview.user_config.memory_switch
+        async def active_run_error_stream():
+            payload = json.dumps(
+                {"type": "error", "content": active_message},
+                ensure_ascii=False,
+            )
+            yield f"data: {payload}\n\n"
 
-    agent_metadata = monitoring_manager.bind_agent_context(AgentRunMetadata(
-        agent_id=agent_request.agent_id,
-        conversation_id=agent_request.conversation_id,
-        user_id=resolved_user_id,
-        tenant_id=resolved_tenant_id,
-        query=agent_request.query,
-        is_debug=agent_request.is_debug,
-        language=language,
-        memory_enabled=memory_enabled,
-        history_count=len(
-            agent_request.history) if agent_request.history else 0,
-        minio_files_count=len(
-            agent_request.minio_files) if agent_request.minio_files else 0,
-        extra_metadata={
-            "agent_share_option": getattr(
-                memory_ctx_preview.user_config,
-                "agent_share_option",
-                "unknown",
-            ),
-            "skip_user_save": skip_user_save,
-            "has_override_user_id": user_id is not None,
-            "has_override_tenant_id": tenant_id is not None,
-        },
-    ))
+        return StreamingResponse(
+            active_run_error_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Stream-Status": "conflict",
+            },
+        )
 
-    use_memory_stream = memory_enabled and not agent_request.is_debug
+    try:
+        await runtime_state_service.reset_stream_async(
+            user_id=resolved_user_id,
+            conversation_id=agent_request.conversation_id,
+        )
 
-    channel = None
-    if not agent_request.is_debug:
-        channel = await streaming_channel_manager.get_or_create_channel(
+        if not agent_request.is_debug and not skip_user_save:
+            save_messages(
+                agent_request,
+                target=MESSAGE_ROLE["USER"],
+                user_id=resolved_user_id,
+                tenant_id=resolved_tenant_id,
+            )
+
+        memory_ctx_preview = build_memory_context(
+            resolved_user_id, resolved_tenant_id, agent_request.agent_id, skip_query=agent_request.is_debug
+        )
+        memory_enabled = memory_ctx_preview.user_config.memory_switch
+
+        agent_metadata = monitoring_manager.bind_agent_context(AgentRunMetadata(
+            agent_id=agent_request.agent_id,
             conversation_id=agent_request.conversation_id,
             user_id=resolved_user_id,
+            tenant_id=resolved_tenant_id,
+            query=agent_request.query,
+            is_debug=agent_request.is_debug,
+            language=language,
+            memory_enabled=memory_enabled,
+            history_count=len(
+                agent_request.history) if agent_request.history else 0,
+            minio_files_count=len(
+                agent_request.minio_files) if agent_request.minio_files else 0,
+            extra_metadata={
+                "agent_share_option": getattr(
+                    memory_ctx_preview.user_config,
+                    "agent_share_option",
+                    "unknown",
+                ),
+                "skip_user_save": skip_user_save,
+                "has_override_user_id": user_id is not None,
+                "has_override_tenant_id": tenant_id is not None,
+            },
+        ))
+
+        use_memory_stream = memory_enabled and not agent_request.is_debug
+
+        channel = None
+        if not agent_request.is_debug:
+            channel = await streaming_channel_manager.get_or_create_channel(
+                conversation_id=agent_request.conversation_id,
+                user_id=resolved_user_id,
+            )
+    except Exception:
+        agent_run_manager.release_agent_run_reservation(
+            agent_request.conversation_id,
+            resolved_user_id,
+            reservation_token,
         )
+        raise
 
     stream_kwargs = {
         "user_id": resolved_user_id,
         "tenant_id": resolved_tenant_id,
         "language": language,
         "enable_memory": use_memory_stream,
+        "reservation_token": reservation_token,
     }
     if channel is not None:
         stream_kwargs["channel"] = channel
@@ -3682,6 +3791,12 @@ async def run_agent_stream(
                 exc_info=True,
             )
             yield _safe_agent_stream_error_chunk()
+        finally:
+            agent_run_manager.release_agent_run_reservation(
+                agent_request.conversation_id,
+                resolved_user_id,
+                reservation_token,
+            )
 
     headers = {"Cache-Control": "no-cache", "Connection": "keep-alive"}
     if agent_request.conversation_id is not None:
@@ -4204,6 +4319,7 @@ def build_sandbox_policy(tenant_id: str, agent_type: str) -> Optional[dict]:
         NEXENT_SANDBOX_MEMORY_LIMIT_MB,
         NEXENT_SANDBOX_CPU_QUOTA,
         NEXENT_SANDBOX_TIMEOUT_S,
+        NEXENT_SANDBOX_HOST_TOOL_TIMEOUT_S,
         NEXENT_SANDBOX_NETWORK_DISABLED,
         NEXENT_SANDBOX_SHELL_POLICY,
         NEXENT_SANDBOX_AUTO_SYNC_OUTPUTS,
@@ -4220,6 +4336,7 @@ def build_sandbox_policy(tenant_id: str, agent_type: str) -> Optional[dict]:
         "memory_limit_mb": NEXENT_SANDBOX_MEMORY_LIMIT_MB,
         "cpu_quota": NEXENT_SANDBOX_CPU_QUOTA,
         "timeout_seconds": NEXENT_SANDBOX_TIMEOUT_S,
+        "host_tool_timeout_seconds": NEXENT_SANDBOX_HOST_TOOL_TIMEOUT_S,
         "network_disabled": NEXENT_SANDBOX_NETWORK_DISABLED,
         "shell_policy": NEXENT_SANDBOX_SHELL_POLICY,
         "auto_sync_outputs": NEXENT_SANDBOX_AUTO_SYNC_OUTPUTS,

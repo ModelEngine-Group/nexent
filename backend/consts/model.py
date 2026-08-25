@@ -519,6 +519,7 @@ class TaskRequest(BaseModel):
     original_filename: Optional[str] = None
     embedding_model_id: Optional[int] = None
     tenant_id: Optional[str] = None
+    file_id: Optional[str] = None
     telemetry_context: Dict[str, str] = Field(default_factory=dict)
     additional_params: Dict[str, Any] = Field(default_factory=dict)
 
@@ -903,6 +904,7 @@ class RepositoryImportRequirementItem(BaseModel):
     description: Optional[str] = None
     available: bool
     reason_code: Optional[str] = None
+    suggested_new_name: Optional[str] = None
 
 
 class RepositoryImportPrecheckResponse(BaseModel):
@@ -1193,6 +1195,8 @@ class GroupListRequest(BaseModel):
         "created_at", description="Field to sort by")
     sort_order: Optional[str] = Field(
         "desc", description="Sort order (asc or desc)")
+    search: Optional[str] = Field(
+        None, max_length=200, description="Search group name")
 
 
 class UserListRequest(BaseModel):
@@ -1206,6 +1210,12 @@ class UserListRequest(BaseModel):
         "created_at", description="Field to sort by")
     sort_order: Optional[str] = Field(
         "desc", description="Sort order (asc or desc)")
+    search: Optional[str] = Field(
+        None, max_length=200, description="Search user email")
+    roles: Optional[List[str]] = Field(
+        None, description="Filter by user roles")
+    group_ids: Optional[List[int]] = Field(
+        None, description="Filter by user group IDs")
 
 
 class GroupUserRequest(BaseModel):
@@ -1701,24 +1711,6 @@ class ListMcpServicesQuery(BaseModel):
     @field_validator("tag", mode="before")
     @classmethod
     def _strip_tag(cls, value: Any):
-        if isinstance(value, str):
-            stripped = value.strip()
-            return stripped or None
-        return value
-
-
-class RegistryListQuery(BaseModel):
-    """Query parameters for listing MCP registry services"""
-    search: Optional[str] = Field(None, description="Search keyword")
-    include_deleted: bool = Field(default=False, description="Include deleted records")
-    updated_since: Optional[str] = Field(None, description="Filter by update time")
-    version: Optional[str] = Field(None, description="Filter by version")
-    cursor: Optional[str] = Field(None, description="Pagination cursor")
-    limit: int = Field(default=30, ge=1, le=100, description="Items per page")
-
-    @field_validator("search", "updated_since", "version", "cursor", mode="before")
-    @classmethod
-    def _strip_text(cls, value: Any):
         if isinstance(value, str):
             stripped = value.strip()
             return stripped or None

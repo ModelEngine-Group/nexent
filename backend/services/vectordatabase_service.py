@@ -56,6 +56,13 @@ from database.knowledge_db import (
     update_embedding_model_by_index_name,
 )
 from database.knowledge_storage_object_db import list_committed_storage_objects
+from database.knowledge_file_lifecycle_db import (
+    create_delete_tombstone,
+    delete_file_record,
+    get_file_record,
+    list_file_records,
+    transition_file_record,
+)
 from services.knowledge_storage_service import (
     release_storage_charge,
     resolve_storage_reference,
@@ -1183,12 +1190,166 @@ class ElasticSearchService:
             raise Exception(f"Error deleting index: {str(e)}")
 
     @staticmethod
+    def _prepare_indices_page(
+            visible_knowledgebases: List[Dict[str, Any]],
+            pagination_enabled: bool,
+            offset: int,
+            limit: int | None,
+            keyword: str | None,
+            sources: List[str] | None,
+            models: List[str] | None,
+    ) -> tuple[List[Dict[str, Any]], Dict[str, Any]]:
+        """Apply list filters and optional pagination to ordered visible records."""
+        facets = {
+            "sources": sorted({
+                str(record.get("knowledge_sources"))
+                for record in visible_knowledgebases
+                if record.get("knowledge_sources")
+            }),
+            "models": sorted({
+                str(record.get("embedding_model_name"))
+                for record in visible_knowledgebases
+                if record.get("embedding_model_name")
+            }),
+        }
+        normalized_keyword = (keyword or "").strip().lower()
+        selected_sources = {source for source in (sources or []) if source}
+        selected_models = {model for model in (models or []) if model}
+        filtered = [
+            record for record in visible_knowledgebases
+            if (
+                not normalized_keyword
+                or normalized_keyword in str(record.get("knowledge_name") or "").lower()
+                or normalized_keyword in str(record.get("description") or "").lower()
+                or normalized_keyword in str(record.get("nickname") or "").lower()
+            )
+            and (
+                not selected_sources
+                or record.get("knowledge_sources") in selected_sources
+            )
+            and (
+                not selected_models
+                or record.get("embedding_model_name") in selected_models
+            )
+        ]
+        if not pagination_enabled:
+            return filtered, {}
+        if limit is None:
+            raise ValueError("limit is required when pagination is enabled")
+
+        total = len(filtered)
+        page = filtered[offset:offset + limit]
+        next_offset = offset + len(page)
+        return page, {
+            "total": total,
+            "next_offset": next_offset if next_offset < total else None,
+            "facets": facets,
+        }
+
+    @staticmethod
+    def _apply_read_only_to_asset_indices_info(result: Dict[str, Any]) -> Dict[str, Any]:
+        indices_info = result.get("indices_info")
+        if not indices_info:
+            return result
+        normalized = dict(result)
+        normalized["indices_info"] = [
+            {**info, "permission": PERMISSION_READ} for info in indices_info
+        ]
+        return normalized
+
+    @staticmethod
+    def merge_list_indices_results(
+            primary: Dict[str, Any],
+            asset_owner: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Merge non-paginated tenant and asset-owner results."""
+        asset_owner = ElasticSearchService._apply_read_only_to_asset_indices_info(asset_owner)
+        merged_indices = primary.get("indices", []) + asset_owner.get("indices", [])
+        result: Dict[str, Any] = {
+            "indices": merged_indices,
+            "count": len(merged_indices),
+        }
+        if "indices_info" in primary or "indices_info" in asset_owner:
+            result["indices_info"] = (
+                primary.get("indices_info", []) + asset_owner.get("indices_info", [])
+            )
+        return result
+
+    @staticmethod
+    def merge_paginated_list_indices_results(
+            primary: Dict[str, Any],
+            asset_owner: Dict[str, Any],
+            offset: int,
+            limit: int,
+    ) -> Dict[str, Any]:
+        """Merge two database-ordered tenant prefixes and return one global page."""
+        asset_owner = ElasticSearchService._apply_read_only_to_asset_indices_info(asset_owner)
+        primary_info = primary.get("indices_info", [])
+        asset_info = asset_owner.get("indices_info", [])
+        combined_info: List[Dict[str, Any]] = []
+        primary_index = asset_index = 0
+
+        def sort_key(item: Dict[str, Any]) -> tuple[str, str, str]:
+            return (
+                str(item.get("update_time") or ""),
+                str(item.get("knowledge_id") or "").zfill(20),
+                str(item.get("name") or ""),
+            )
+
+        while primary_index < len(primary_info) and asset_index < len(asset_info):
+            if sort_key(primary_info[primary_index]) >= sort_key(asset_info[asset_index]):
+                combined_info.append(primary_info[primary_index])
+                primary_index += 1
+            else:
+                combined_info.append(asset_info[asset_index])
+                asset_index += 1
+        combined_info.extend(primary_info[primary_index:])
+        combined_info.extend(asset_info[asset_index:])
+
+        page_info = combined_info[offset:offset + limit]
+        combined_indices = primary.get("indices", []) + asset_owner.get("indices", [])
+        page_indices = (
+            [item["name"] for item in page_info]
+            if combined_info
+            else combined_indices[offset:offset + limit]
+        )
+        total = int(primary.get("total", primary.get("count", 0))) + int(
+            asset_owner.get("total", asset_owner.get("count", 0))
+        )
+        next_offset = offset + len(page_indices)
+        source_facets = set(primary.get("facets", {}).get("sources", []))
+        source_facets.update(asset_owner.get("facets", {}).get("sources", []))
+        model_facets = set(primary.get("facets", {}).get("models", []))
+        model_facets.update(asset_owner.get("facets", {}).get("models", []))
+        result = {
+            "indices": page_indices,
+            "count": len(page_indices),
+            "total": total,
+            "next_offset": next_offset if next_offset < total else None,
+            "facets": {
+                "sources": sorted(source_facets),
+                "models": sorted(model_facets),
+            },
+            "estimated_row_height": 112,
+            "estimated_item_heights": None,
+        }
+        if "indices_info" in primary or "indices_info" in asset_owner:
+            result["indices_info"] = page_info
+        return result
+
+    @staticmethod
     def list_indices(
             pattern: str = "*",
             include_stats: bool = False,
             target_tenant_id: str = "",
             user_id: str = "",
-            vdb_core: VectorDatabaseCore | None = None
+            vdb_core: VectorDatabaseCore | None = None,
+            pagination_enabled: bool = False,
+            offset: int = 0,
+            limit: int | None = None,
+            keyword: str | None = None,
+            sources: List[str] | None = None,
+            models: List[str] | None = None,
     ):
         """
         List all indices that the current user has permissions to access based on role and group permissions.
@@ -1230,9 +1391,13 @@ class ElasticSearchService:
         es_indices_list = vdb_core.get_user_indices(pattern)
 
         # Get all knowledgebase records from database (for cleanup and permission checking)
-        all_db_records = get_knowledge_info_by_tenant_id(
-            target_tenant_id
-        )
+        if pagination_enabled:
+            all_db_records = get_knowledge_info_by_tenant_id(
+                target_tenant_id,
+                ordered=True,
+            )
+        else:
+            all_db_records = get_knowledge_info_by_tenant_id(target_tenant_id)
 
         # Filter visible knowledgebases based on user role and permissions
         visible_knowledgebases = []
@@ -1305,6 +1470,17 @@ class ElasticSearchService:
             caller_role=user_role,
             caller_tenant_id=target_tenant_id,
         )
+
+        visible_knowledgebases, pagination = ElasticSearchService._prepare_indices_page(
+            visible_knowledgebases=visible_knowledgebases,
+            pagination_enabled=pagination_enabled,
+            offset=offset,
+            limit=limit,
+            keyword=keyword,
+            sources=sources,
+            models=models,
+        )
+
         indices = [record["index_name"] for record in visible_knowledgebases]
 
         response = {
@@ -1315,6 +1491,12 @@ class ElasticSearchService:
                 for record in visible_knowledgebases
             },
         }
+        if pagination_enabled:
+            response.update({
+                **pagination,
+                "estimated_row_height": 112,
+                "estimated_item_heights": None,
+            })
 
         if include_stats:
             stats_info = []
@@ -1657,11 +1839,25 @@ class ElasticSearchService:
                 if path_or_url in files_map:
                     file_data = files_map[path_or_url]
                 else:
+                    legacy_created_at = status_dict.get("created_at")
+                    try:
+                        if isinstance(legacy_created_at, (int, float)):
+                            legacy_timestamp = (
+                                float(legacy_created_at) / 1000
+                                if legacy_created_at > 10_000_000_000
+                                else float(legacy_created_at)
+                            )
+                        else:
+                            legacy_timestamp = datetime.fromisoformat(
+                                str(legacy_created_at).replace("Z", "+00:00")
+                            ).timestamp()
+                    except (TypeError, ValueError, OverflowError):
+                        legacy_timestamp = time.time()
                     file_data = {
                         'path_or_url': path_or_url,
                         'file': filename,
                         'file_size': file_size,
-                        'create_time': int(time.time() * 1000),
+                        'create_time': int(legacy_timestamp * 1000),
                         'chunk_count': 0,
                         'error_reason': None,
                         'has_error_info': False
@@ -1685,6 +1881,89 @@ class ElasticSearchService:
                         pass  # Error info is optional, don't fail the request
             step4_duration = time.time() - step4_start
             logger.info(f"[list_files:step4] Merge celery tasks: {celery_file_count} tasks in {step4_duration:.3f}s")
+
+            # Durable lifecycle rows are authoritative for upload failures,
+            # timestamps, and deletion tombstones. If the migration is not
+            # present yet, retain the legacy ES/Redis result unchanged.
+            try:
+                knowledge_record = get_knowledge_record({"index_name": index_name}) or {}
+                lifecycle_rows = list_file_records(
+                    index_name=index_name,
+                    tenant_id=knowledge_record.get("tenant_id"),
+                    include_hidden=True,
+                )
+                hidden_paths = {
+                    row.get("object_name")
+                    for row in lifecycle_rows
+                    if row.get("status") in {"DELETE_REQUESTED", "DELETED"}
+                    and row.get("object_name")
+                }
+                for hidden_path in hidden_paths:
+                    files_map.pop(hidden_path, None)
+
+                status_map = {
+                    "UPLOADING": "WAIT_FOR_PROCESSING",
+                    "UPLOADED": "WAIT_FOR_PROCESSING",
+                    "PROCESSING": "PROCESSING",
+                    "FORWARDING": "FORWARDING",
+                    "COMPLETED": "COMPLETED",
+                }
+                for row in lifecycle_rows:
+                    if row.get("status") in {"DELETE_REQUESTED", "DELETED"}:
+                        continue
+                    path_or_url = row.get("object_name")
+                    row_key = path_or_url or f"lifecycle:{row.get('file_id')}"
+                    existing = files_map.get(path_or_url) if path_or_url else None
+                    timestamp_value = row.get("uploaded_at") or row.get("create_time")
+                    try:
+                        timestamp = datetime.fromisoformat(
+                            str(timestamp_value).replace("Z", "+00:00")
+                        ).timestamp()
+                    except (TypeError, ValueError, OverflowError):
+                        timestamp = time.time()
+                    lifecycle_status = row.get("status") or "UPLOADING"
+                    if lifecycle_status == "FAILED":
+                        lifecycle_status = (
+                            "FORWARD_FAILED"
+                            if str(row.get("error_stage") or row.get("stage") or "").upper() in {"FORWARD", "FORWARDING"}
+                            else "PROCESS_FAILED"
+                        )
+                    # Keep the pre-lifecycle display contract for rows that still
+                    # have an ES/Redis name. New rows synchronize the same effective
+                    # name into PG after conflict resolution; PG is the fallback when
+                    # no legacy name is available (for example after Redis expiry).
+                    lifecycle_filename = row.get("original_filename") or ""
+                    legacy_filename = (existing or {}).get("file") or ""
+                    display_filename = legacy_filename or lifecycle_filename
+                    file_data = existing or {
+                        "path_or_url": path_or_url,
+                        "file": display_filename,
+                        "file_size": row.get("file_size") or 0,
+                        "create_time": int(timestamp * 1000),
+                        "chunk_count": 0,
+                        "error_reason": None,
+                        "has_error_info": False,
+                    }
+                    file_data.update({
+                        "path_or_url": path_or_url,
+                        "file": display_filename or file_data.get("file", ""),
+                        "file_size": row.get("file_size") if row.get("file_size") is not None else file_data.get("file_size", 0),
+                        "create_time": int(timestamp * 1000),
+                        "status": status_map.get(lifecycle_status, lifecycle_status),
+                        "latest_task_id": row.get("forward_task_id") or row.get("process_task_id") or "",
+                        "file_id": row.get("file_id"),
+                        "error_reason": row.get("error_message") or row.get("error_code"),
+                        "error_code": row.get("error_code"),
+                        "error_stage": row.get("error_stage") or row.get("stage"),
+                        "failed_at": row.get("failed_at"),
+                        "has_error_info": bool(row.get("error_message") or row.get("error_code")),
+                    })
+                    files_map[row_key] = file_data
+            except Exception as lifecycle_exc:
+                logger.warning(
+                    "[list_files] Lifecycle table unavailable; using legacy ES/Redis data: %s",
+                    lifecycle_exc,
+                )
 
             files = list(files_map.values())
             logger.info(f"[list_files:step4] Total files built: {len(files)}")
@@ -1849,6 +2128,156 @@ class ElasticSearchService:
             )
 
     @staticmethod
+    def _mark_file_delete_requested(
+            index_name: str,
+            path_or_url: str,
+            requested_by: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Hide a file from list results before deleting external data."""
+        try:
+            knowledge = get_knowledge_record({"index_name": index_name}) or {}
+            tenant_id = knowledge.get("tenant_id")
+            knowledge_id = knowledge.get("knowledge_id")
+            if tenant_id is None or knowledge_id is None:
+                return None
+            record = get_file_record(
+                tenant_id=tenant_id,
+                index_name=index_name,
+                object_name=path_or_url,
+                include_hidden=True,
+            )
+            if record:
+                return transition_file_record(
+                    record["file_id"],
+                    status="DELETE_REQUESTED",
+                    stage="DELETE",
+                    updated_by=requested_by,
+                ) or record
+            return create_delete_tombstone(
+                tenant_id=str(tenant_id),
+                knowledge_id=int(knowledge_id),
+                index_name=index_name,
+                object_name=path_or_url,
+                requested_by=requested_by,
+            )
+        except Exception as lifecycle_exc:
+            logger.warning(
+                "Failed to write deletion tombstone for index=%s path=%s: %s",
+                index_name,
+                path_or_url,
+                lifecycle_exc,
+            )
+            return None
+
+    @staticmethod
+    def _mark_file_deleted(
+            index_name: str,
+            path_or_url: str,
+            updated_by: Optional[str] = None,
+    ) -> None:
+        try:
+            knowledge = get_knowledge_record({"index_name": index_name}) or {}
+            record = get_file_record(
+                tenant_id=knowledge.get("tenant_id"),
+                index_name=index_name,
+                object_name=path_or_url,
+                include_hidden=True,
+            )
+            if record:
+                delete_file_record(
+                    record["file_id"],
+                    expected_statuses=("DELETE_REQUESTED", "DELETED"),
+                )
+        except Exception as lifecycle_exc:
+            logger.warning(
+                "Failed to finalize deletion tombstone for index=%s path=%s: %s",
+                index_name,
+                path_or_url,
+                lifecycle_exc,
+            )
+
+    @staticmethod
+    def delete_lifecycle_record_without_object(
+            lifecycle_record: Dict[str, Any],
+            requested_by: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Delete a lifecycle row when no storage object was ever created."""
+        file_id = lifecycle_record.get("file_id") if lifecycle_record else None
+        object_name = lifecycle_record.get("object_name") if lifecycle_record else None
+        if not file_id or object_name:
+            raise ValueError("A lifecycle file ID without an object path is required")
+
+        tenant_id = lifecycle_record.get("tenant_id")
+        index_name = lifecycle_record.get("index_name")
+        current_status = str(lifecycle_record.get("status") or "").upper()
+        deleteable_statuses = (
+            "UPLOADING",
+            "UPLOADED",
+            "PROCESSING",
+            "FORWARDING",
+            "FAILED",
+            "COMPLETED",
+        )
+
+        if current_status == "DELETED":
+            delete_file_record(file_id, expected_statuses=("DELETE_REQUESTED", "DELETED"))
+            return {
+                "status": "success",
+                "scope": "full",
+                "deleted_es_count": 0,
+                "deleted_minio": False,
+                "source_available": False,
+                "lifecycle_deleted": True,
+                "message": "Lifecycle record already deleted; no storage object was created.",
+            }
+
+        if current_status != "DELETE_REQUESTED":
+            requested = transition_file_record(
+                file_id,
+                status="DELETE_REQUESTED",
+                stage="DELETE",
+                expected_statuses=deleteable_statuses,
+                updated_by=requested_by,
+            )
+            if requested is None:
+                latest = get_file_record(
+                    file_id=file_id,
+                    tenant_id=tenant_id,
+                    index_name=index_name,
+                    include_hidden=True,
+                )
+                if latest and str(latest.get("status") or "").upper() == "DELETED":
+                    current_status = "DELETED"
+                elif latest and str(latest.get("status") or "").upper() == "DELETE_REQUESTED":
+                    current_status = "DELETE_REQUESTED"
+                else:
+                    raise ValueError("Lifecycle file record could not be deleted")
+
+        deleted = delete_file_record(
+            file_id,
+            expected_statuses=("DELETE_REQUESTED", "DELETED"),
+        )
+        if not deleted:
+            latest = get_file_record(
+                file_id=file_id,
+                tenant_id=tenant_id,
+                index_name=index_name,
+                include_hidden=True,
+            )
+            if latest is not None:
+                raise ValueError("Lifecycle file record could not be finalized")
+
+        return {
+            "status": "success",
+            "scope": "full",
+            "deleted_es_count": 0,
+            "deleted_minio": False,
+            "source_available": False,
+            "lifecycle_deleted": True,
+            "message": "Lifecycle record deleted; no storage object was created.",
+        }
+
+    @staticmethod
     async def delete_document_by_scope(
             index_name: str,
             path_or_url: str,
@@ -1865,6 +2294,7 @@ class ElasticSearchService:
             await ElasticSearchService._assert_source_only_deletable(
                 index_name, path_or_url
             )
+            ElasticSearchService._mark_file_delete_requested(index_name, path_or_url)
             try:
                 knowledge = get_knowledge_record({"index_name": index_name}) or {}
             except Exception:
@@ -1878,6 +2308,7 @@ class ElasticSearchService:
                 tenant_id=knowledge.get("tenant_id"),
             )
             deleted_minio = minio_part.get("deleted_minio", False)
+            ElasticSearchService._mark_file_deleted(index_name, path_or_url)
             return {
                 "status": "success" if deleted_minio else "failed",
                 "scope": scope,
@@ -1891,9 +2322,11 @@ class ElasticSearchService:
                 ),
             }
 
+        ElasticSearchService._mark_file_delete_requested(index_name, path_or_url)
         result = ElasticSearchService.delete_documents(
             index_name, path_or_url, vdb_core
         )
+        ElasticSearchService._mark_file_deleted(index_name, path_or_url)
         result["scope"] = scope
         result["source_available"] = not result.get("deleted_minio", False)
         return result

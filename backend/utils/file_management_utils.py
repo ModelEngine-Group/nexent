@@ -87,6 +87,7 @@ async def trigger_data_process(files: List[dict], process_params: ProcessParams)
                 "chunking_strategy": process_params.chunking_strategy,
                 "index_name": process_params.index_name,
                 "original_filename": file_details.get("filename"),
+                "file_id": file_details.get("file_id"),
                 "embedding_model_id": embedding_model_id,
                 "tenant_id": tenant_id
             }
@@ -119,6 +120,7 @@ async def trigger_data_process(files: List[dict], process_params: ProcessParams)
                     "chunking_strategy": process_params.chunking_strategy,
                     "index_name": process_params.index_name,
                     "original_filename": file_details.get("filename"),
+                    "file_id": file_details.get("file_id"),
                     "embedding_model_id": embedding_model_id,
                     "tenant_id": tenant_id
                 }
@@ -202,6 +204,7 @@ async def get_all_files_status(index_name: str):
                         'forward_state': '',
                         'latest_process_created_at': 0,
                         'latest_forward_created_at': 0,
+                        'created_at': 0,
                         'latest_task_id': '',
                         'original_filename': '',
                         'source_type': '',
@@ -217,6 +220,7 @@ async def get_all_files_status(index_name: str):
                     file_state['latest_task_id'] = task_id
                     file_state['original_filename'] = original_filename
                     file_state['source_type'] = source_type
+                    file_state['created_at'] = task_created_at
                     # Update optional progress metrics if present
                     file_state['processed_chunks'] = task_info.get(
                         'processed_chunks', file_state.get('processed_chunks'))
@@ -229,6 +233,7 @@ async def get_all_files_status(index_name: str):
                     file_state['latest_task_id'] = task_id
                     file_state['original_filename'] = original_filename
                     file_state['source_type'] = source_type
+                    file_state['created_at'] = max(file_state.get('created_at', 0), task_created_at)
                     # Forward tasks may also carry progress metrics
                     file_state['processed_chunks'] = task_info.get(
                         'processed_chunks', file_state.get('processed_chunks'))
@@ -281,6 +286,7 @@ async def get_all_files_status(index_name: str):
                 'latest_task_id': task_id,
                 'original_filename': file_state['original_filename'] or '',
                 'source_type': file_state['source_type'] or '',
+                'created_at': file_state.get('created_at', 0),
                 # Expose optional progress metrics for downstream consumers
                 'processed_chunks': processed_chunks,
                 'total_chunks': total_chunks,

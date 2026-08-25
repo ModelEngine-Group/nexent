@@ -20,23 +20,29 @@ class UploadToS3Tool(Tool):
     name = "upload_to_s3"
     description = (
         "Upload a file from the local workspace to S3/MinIO storage. "
-        "The file path must be within the workspace directory (use relative or absolute paths). "
-        "Returns the S3 URL and a presigned download URL that can be shared with users."
+        "The file path must be within the workspace directory. A relative path such as "
+        "'report.pdf' is resolved from the run outputs directory; do not prefix it with "
+        "'outputs/' when creating the file because code already runs in that directory. "
+        "Returns a permanent S3 URL. Use that S3 URL in user-facing Markdown links "
+        "and images; never create or expose a presigned URL in the final answer."
     )
     description_zh = (
         "将当前运行工作区中的文件上传到 S3/MinIO。"
-        "文件路径必须位于隔离工作区内；返回对象地址和供用户下载的预签名链接。"
+        "相对路径（如 report.pdf）从本次运行的 outputs 目录解析；代码已经在该目录运行，"
+        "创建文件时不要再添加 outputs/ 前缀。返回永久 S3 对象地址；最终回答中的文件链接和"
+        "图片必须使用该 S3 地址，不要创建或暴露预签名链接。"
     )
 
     inputs = {
         "file_path": {
             "type": "string",
             "description": (
-                "Local file path within the workspace. "
-                "Can be relative (e.g., 'outputs/report.pdf') or absolute."
+                "Local file path within the workspace. Use a bare path relative to the "
+                "run outputs directory (e.g., 'report.pdf') or an absolute path."
             ),
             "description_zh": (
-                "工作区内的本地文件路径，可以是相对路径（如 outputs/report.pdf）或绝对路径。"
+                "工作区内的本地文件路径，可以使用相对于本次 outputs 目录的裸路径"
+                "（如 report.pdf）或绝对路径。"
             ),
         },
         "target_filename": {
@@ -68,6 +74,7 @@ class UploadToS3Tool(Tool):
         run_id: str = Field(description="Current agent run ID", default="", exclude=True),
         on_upload: object = Field(description="Upload event callback", default=None, exclude=True),
         ensure_local_file: object = Field(description="Sandbox file materializer", default=None, exclude=True),
+        uploaded_paths: object = Field(description="Shared uploaded path registry", default=None, exclude=True),
     ):
         super().__init__()
         # Guard against FieldInfo objects when called without arguments
@@ -82,7 +89,7 @@ class UploadToS3Tool(Tool):
         self.run_id = run_id if isinstance(run_id, str) else ""
         self.on_upload = on_upload if callable(on_upload) else None
         self.ensure_local_file = ensure_local_file if callable(ensure_local_file) else None
-        self.uploaded_paths: set[str] = set()
+        self.uploaded_paths: set[str] = uploaded_paths if isinstance(uploaded_paths, set) else set()
 
     def _validate_path(self, file_path: str) -> str:
         """Validate and resolve file path within the workspace.
@@ -135,6 +142,23 @@ class UploadToS3Tool(Tool):
             raise ValueError("User and run IDs must be single path segments")
         return f"workspace/{safe_user}/{safe_run}/outputs/{safe_name}"
 
+    def _upload_path_candidates(self, file_path: str) -> list[str]:
+        """Return safe local candidates in generated-output lookup order."""
+        if os.path.isabs(file_path):
+            return [self._validate_path(file_path)]
+
+        normalized = str(file_path).replace("\\", "/")
+        relative_path = PurePosixPath(normalized)
+        if relative_path.parts[:1] == ("outputs",):
+            # Accept the workspace-root form for compatibility, but never add a
+            # second outputs segment.
+            return [self._validate_path(normalized)]
+
+        return [
+            self._validate_path(str(PurePosixPath("outputs") / relative_path)),
+            self._validate_path(normalized),
+        ]
+
     def forward(self, file_path: str, target_filename: str = None) -> str:
         try:
             if self.observer:
@@ -151,10 +175,15 @@ class UploadToS3Tool(Tool):
             if not self.user_id:
                 raise Exception("User authentication required for uploading files to S3.")
             # 2. Validate local path
-            abs_path = self._validate_path(file_path)
+            candidates = self._upload_path_candidates(file_path)
+            abs_path = next((path for path in candidates if os.path.exists(path)), candidates[0])
 
             if not os.path.exists(abs_path) and self.ensure_local_file is not None:
                 self.ensure_local_file(abs_path)
+                abs_path = next(
+                    (path for path in candidates if os.path.exists(path)),
+                    candidates[0],
+                )
 
             # 3. Check file exists and is a regular file
             if not os.path.exists(abs_path):
@@ -183,30 +212,19 @@ class UploadToS3Tool(Tool):
             if not success:
                 raise Exception(f"Failed to upload file to S3: {result}")
 
-            # 7. Generate presigned URL for download
-            presigned_url = ""
-            try:
-                presigned_ok, presigned_result = self.minio_client.get_file_url(
-                    s3_key, expires=86400  # 24 hours
-                )
-                if presigned_ok:
-                    presigned_url = presigned_result
-            except Exception as e:
-                logger.warning(f"Failed to generate presigned URL: {e}")
-
-            # 8. Build S3 URL
+            # 7. Build the permanent S3 reference. Browser-facing URLs are
+            # derived by the frontend and authenticated file API at render time.
             bucket = self.minio_client.default_bucket or "default"
             s3_url = f"s3://{bucket}/{s3_key}"
 
             logger.info(f"Successfully uploaded {abs_path} -> {s3_url} ({file_size} bytes)")
 
-            # 9. Return result
+            # 8. Return result
             relative_path = os.path.relpath(abs_path, self.workspace_path)
             response = {
                 "status": "success",
                 "local_path": relative_path,
                 "s3_url": s3_url,
-                "presigned_url": presigned_url,
                 "filename": filename,
                 "object_name": s3_key,
                 "name": filename,

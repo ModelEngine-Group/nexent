@@ -72,7 +72,7 @@ const TITLE_BAR_HEIGHT_CLASS_MAP: Record<string, string> = {
 
 interface DocumentListProps {
   documents: Document[];
-  onDelete: (id: string) => void;
+  onDelete: (id: string, fileId?: string) => void;
   // Knowledge base source, e.g. "nexent" or "datamate"
   knowledgeBaseSource?: string;
   // User-facing knowledge base name (display name)
@@ -845,16 +845,28 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
         >
           {showChunk ? (
             <div className="flex h-full min-h-0 flex-col px-8">
-              <DocumentChunk
-                knowledgeBaseName={knowledgeBaseName}
-                knowledgeBaseId={knowledgeBaseId || knowledgeBaseName}
-                documents={documents}
-                getFileIcon={getFileIcon}
-                currentEmbeddingModel={currentModel}
-                knowledgeBaseEmbeddingModel={knowledgeBaseModel}
-                onChunkCountChange={onChunkCountChange}
-                permission={permission}
-              />
+              <div className="min-h-0 flex-1">
+                <DocumentChunk
+                  knowledgeBaseName={knowledgeBaseName}
+                  knowledgeBaseId={knowledgeBaseId || knowledgeBaseName}
+                  documents={documents}
+                  getFileIcon={getFileIcon}
+                  currentEmbeddingModel={currentModel}
+                  knowledgeBaseEmbeddingModel={knowledgeBaseModel}
+                  onChunkCountChange={onChunkCountChange}
+                  permission={permission}
+                />
+              </div>
+              <div className="flex shrink-0 justify-end py-3">
+                <Button
+                  size="large"
+                  onClick={() => {
+                    setShowChunk(false);
+                  }}
+                >
+                  {t("common.back")}
+                </Button>
+              </div>
             </div>
           ) : showDetail ? (
             <div className="px-8 py-4 h-full flex flex-col">
@@ -1085,6 +1097,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                             errorReason={doc.error_reason}
                             kbId={knowledgeBaseId}
                             docId={doc.id}
+                            fileId={doc.file_id}
                             processedChunkNum={doc.processed_chunk_num}
                             totalChunkNum={doc.total_chunk_num}
                           />
@@ -1123,15 +1136,15 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                                   fileSize: doc.size,
                                 });
                               }}
-                              className={LAYOUT.PREVIEW_TEXT}
+                              className={LAYOUT.ACTION_PREVIEW_TEXT}
                               title={t("common.preview")}
                             >
                               {t("common.preview")}
                             </button>
                             {!isReadOnlyMode && (
                               <button
-                                onClick={() => onDelete(doc.id)}
-                                className={LAYOUT.ACTION_TEXT}
+                                onClick={() => onDelete(doc.id, doc.file_id)}
+                                className={LAYOUT.ACTION_DELETE_TEXT}
                                 title={
                                   doc.status === DOCUMENT_STATUS.PROCESSING ||
                                   doc.status === DOCUMENT_STATUS.FORWARDING

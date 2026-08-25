@@ -180,6 +180,11 @@ class SkillException(Exception):
     pass
 consts_exceptions_mock.SkillException = SkillException
 consts_exceptions_mock.ForbiddenError = type('ForbiddenError', (Exception,), {})
+consts_exceptions_mock.UnauthorizedError = type('UnauthorizedError', (Exception,), {})
+consts_exceptions_mock.NotFoundException = type('NotFoundException', (Exception,), {})
+consts_exceptions_mock.ValidationError = type('ValidationError', (Exception,), {})
+consts_exceptions_mock.AppException = type('AppException', (Exception,), {})
+consts_exceptions_mock.SkillDuplicateError = type('SkillDuplicateError', (Exception,), {})
 
 sys.modules['consts'] = consts_mock
 sys.modules['consts.const'] = consts_const_mock
@@ -248,6 +253,11 @@ utils_str_utils_mock.convert_list_to_string = MagicMock(
     side_effect=lambda items: "" if items is None else ",".join(str(item) for item in items)
 )
 
+# Import generate_available_copy_skill_name before utils is mocked
+from utils.skill_import_utils import generate_available_copy_skill_name  # noqa: E402,F811
+utils_skill_import_utils_mock = types.ModuleType('utils.skill_import_utils')
+utils_skill_import_utils_mock.generate_available_copy_skill_name = generate_available_copy_skill_name
+
 class MockContentClassifier:
     def classify(self, content):
         return []
@@ -258,6 +268,7 @@ sys.modules['utils.skill_params_utils'] = utils_skill_params_utils_mock
 sys.modules['utils.prompt_template_utils'] = utils_prompt_template_utils_mock
 sys.modules['utils.content_classifier_utils'] = utils_content_classifier_utils_mock
 sys.modules['utils.str_utils'] = utils_str_utils_mock
+sys.modules['utils.skill_import_utils'] = utils_skill_import_utils_mock
 
 # Set up database mocks
 database_mock = types.ModuleType('database')
@@ -4691,12 +4702,11 @@ class TestUploadZipFilesWithZipError:
         ("content", "error"),
         [
             ("# No frontmatter", "must have YAML frontmatter"),
-            ("---\n: invalid\n---\nbody", "Invalid SKILL.md frontmatter"),
-            ("---\nplain value\n---\nbody", "frontmatter must be a mapping"),
+            ("---\ndescription: A skill\n---\nbody", "must contain a name field"),
         ],
     )
-    def test_frontmatter_name_replacement_rejects_invalid_frontmatter(self, content, error):
-        """Renaming requires valid mapping-style SKILL.md frontmatter."""
+    def test_frontmatter_name_replacement_requires_name_field(self, content, error):
+        """Renaming requires frontmatter with a top-level name field."""
         with pytest.raises(skill_service.SkillException, match=error):
             skill_service._replace_skill_frontmatter_name(content, "new-skill")
 
@@ -4732,6 +4742,33 @@ class TestUploadZipFilesWithZipError:
             "custom-field": {"enabled": True},
         }
         assert match.group("body") == body
+
+    def test_frontmatter_name_replacement_keeps_legacy_description_unchanged(self):
+        """Renaming must not parse legacy descriptions that contain YAML-like colons."""
+        description = (
+            "Expert code reviewer. Performs detailed analysis using bundled tools to detect "
+            "nested loops, and other code smells. Ideal for: (1) Reviewing pull requests."
+        )
+        content = (
+            "---\n"
+            "name: code_review_expert\n"
+            f"description: {description}\n"
+            "tags:\n"
+            "  - code\n"
+            "---\n"
+            "# Code Review Expert\n"
+        )
+
+        updated = skill_service._replace_skill_frontmatter_name(
+            content,
+            "code_review_expert 副本",
+        )
+
+        assert updated == content.replace(
+            "name: code_review_expert\n",
+            'name: "code_review_expert 副本"\n',
+            1,
+        )
 
     def test_create_zip_with_name_override_extracts_updated_skill_md(self):
         """The ZIP extraction override should prevent the original name from returning."""
@@ -4778,7 +4815,7 @@ class TestUploadZipFilesWithZipError:
 
         assert result["skill_id"] == 42
         override = mock_upload.call_args.kwargs["file_overrides"]["SKILL.md"].decode("utf-8")
-        assert "name: new-skill\n" in override
+        assert 'name: "new-skill"\n' in override
         assert "author: Example Author\n" in override
         assert override.endswith("# Instructions\n\nBody stays unchanged.\n")
 

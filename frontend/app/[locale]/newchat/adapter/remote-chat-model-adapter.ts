@@ -159,11 +159,10 @@ export interface Nl2aAgentDraftPayload {
   example_questions: string[];
 }
 
-// PR1 freezes the future card identity boundary only. Resource and summary
-// fields are added with their implementations in PR2 through PR4.
 export interface Nl2aSuggestedResourceInstallationPayload {
   subtype: "suggested_resource_installation";
   agent_id: number;
+  resources: Nl2aInstallableResource[];
 }
 
 export interface Nl2aInstalledResourceBindingPayload {
@@ -174,12 +173,39 @@ export interface Nl2aInstalledResourceBindingPayload {
 
 export interface Nl2aResourceCandidate {
   candidate_ref: string;
-  resource_type: "tool" | "skill";
-  source: "LOCAL_TOOL" | "MCP_TOOL" | "INSTALLED_SKILL";
+  resource_type: "tool" | "skill" | "mcp_server";
+  source:
+    | "LOCAL_TOOL"
+    | "MCP_TOOL"
+    | "INSTALLED_SKILL"
+    | "NEXENT_OFFICIAL_SKILL"
+    | "TENANT_SKILL_REPOSITORY"
+    | "TENANT_MCP_REPOSITORY";
   name: string;
   description: string;
   requirement_ids: string[];
   score: number;
+}
+
+export type Nl2aInstallationFormKind =
+  "SKILL_CONFIG" | "MCP_REMOTE" | "MCP_CONTAINER";
+
+export interface Nl2aResourceInstallationOption {
+  option_id: string;
+  label: string;
+  form_kind: Nl2aInstallationFormKind;
+  config: Record<string, unknown> | SkillParam[];
+}
+
+export interface Nl2aInstallableResource {
+  candidate: Nl2aResourceCandidate & {
+    resource_type: "skill" | "mcp_server";
+  };
+  recommendation: "recommended" | "optional";
+  form_kind: Nl2aInstallationFormKind;
+  config: Record<string, unknown> | SkillParam[];
+  installation_options: Nl2aResourceInstallationOption[];
+  default_option_id: string;
 }
 
 export type Nl2aRecommendedResource =
@@ -780,6 +806,33 @@ function parseNl2aMessage(chunk: SseChunk): Nl2aMessage | null {
         )
       ) {
         log.warn("[ChatModelAdapter] Ignored invalid binding-card payload");
+        return null;
+      }
+    }
+    if (content.subtype === "suggested_resource_installation") {
+      if (
+        !Number.isInteger(content.agent_id) ||
+        content.agent_id <= 0 ||
+        !Array.isArray(content.resources) ||
+        content.resources.length === 0 ||
+        content.resources.length > 12 ||
+        content.resources.some(
+          (resource) =>
+            !resource?.candidate?.candidate_ref ||
+            !["skill", "mcp_server"].includes(
+              resource.candidate.resource_type
+            ) ||
+            !Array.isArray(resource.installation_options) ||
+            resource.installation_options.length === 0 ||
+            !resource.default_option_id ||
+            !resource.installation_options.some(
+              (option) => option.option_id === resource.default_option_id
+            )
+        )
+      ) {
+        log.warn(
+          "[ChatModelAdapter] Ignored invalid installation-card payload"
+        );
         return null;
       }
     }
@@ -1447,6 +1500,15 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       await backendStopPromise;
     };
     const handleAbort = () => {
+      const abortReason = abortSignal?.reason as
+        | { detach?: boolean }
+        | undefined;
+      if (abortReason?.detach) {
+        log.log(
+          `[ChatModelAdapter] Local stream detached from conversation ${backendConversationId ?? "unknown"}`
+        );
+        return;
+      }
       if (backendConversationId !== null) {
         void stopBackendConversation(backendConversationId);
       }
@@ -1457,8 +1519,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     };
 
     let agentResponse:
-      | ReadableStreamDefaultReader<Uint8Array>
-      | { type: "json"; data: unknown };
+      ReadableStreamDefaultReader<Uint8Array> | { type: "json"; data: unknown };
     let returnedRuntimeMetadataVersion: number | undefined;
     try {
       agentResponse = await conversationService.runAgent(

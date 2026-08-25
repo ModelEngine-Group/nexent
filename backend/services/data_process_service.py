@@ -9,24 +9,25 @@ import tempfile
 import threading
 import time
 import warnings
-from typing import Optional, List, Dict, Any
+from typing import Any, Dict, List, Optional
 
 import aiohttp
 import redis
 import torch
-from PIL import Image
 from celery import states
-from transformers import CLIPProcessor, CLIPModel
 from nexent.data_process.core import DataProcessCore
+from PIL import Image
+from transformers import CLIPModel, CLIPProcessor
 
 from consts.const import CLIP_MODEL_PATH, IMAGE_FILTER, MAX_CONCURRENT_CONVERSIONS, REDIS_BACKEND_URL, REDIS_URL
 from consts.exceptions import OfficeConversionException
 from consts.model import BatchTaskRequest
-from database.attachment_db import delete_file, file_exists, get_file_size_from_minio, get_file_stream, upload_file
-from utils.file_management_utils import convert_office_to_pdf
 from data_process.app import app as celery_app
 from data_process.tasks import submit_process_forward_chain
-from data_process.utils import get_task_info, get_all_task_ids_from_redis
+from data_process.utils import get_all_task_ids_from_redis, get_task_info
+from database.attachment_db import delete_file, file_exists, get_file_size_from_minio, get_file_stream, upload_file
+from utils.file_management_utils import convert_office_to_pdf
+
 
 # Limit concurrent LibreOffice processes to avoid resource exhaustion
 _conversion_semaphore = asyncio.Semaphore(MAX_CONCURRENT_CONVERSIONS)
@@ -142,10 +143,7 @@ class DataProcessService:
         """
         all_tasks = []
         try:
-            start_time = time.time()
-            inspector_start = time.time()
-            inspector = self._get_celery_inspector()
-            inspector_duration = time.time() - inspector_start
+            self._get_celery_inspector()
 
             # Collect task IDs from different sources and keep runtime metadata
             task_ids = set()
@@ -169,6 +167,7 @@ class DataProcessService:
                     'index_name': kwargs.get('index_name', ''),
                     'path_or_url': kwargs.get('source', ''),
                     'original_filename': kwargs.get('original_filename', ''),
+                    'file_id': kwargs.get('file_id'),
                 }
 
             celery_start = time.time()
@@ -260,6 +259,8 @@ class DataProcessService:
                     if not task_info.get('original_filename') and runtime_meta.get('original_filename'):
                         task_info['original_filename'] = runtime_meta.get(
                             'original_filename')
+                    if not task_info.get('file_id') and runtime_meta.get('file_id'):
+                        task_info['file_id'] = runtime_meta.get('file_id')
 
                 if filter and not (task_info.get('index_name') and task_info.get('task_name')):
                     # Keep user-visible queued tasks even before worker updates task meta.
@@ -531,29 +532,51 @@ class DataProcessService:
 
     async def create_batch_tasks_impl(self, authorization: Optional[str], request: BatchTaskRequest):
         task_ids = []
+        results = []
+
+        def config_value(source_config: Any, key: str, default: Any = None) -> Any:
+            if isinstance(source_config, dict):
+                return source_config.get(key, default)
+            return getattr(source_config, key, default)
+
+        def build_failure_result(source_config: dict, message: str) -> dict:
+            return {
+                "file_id": config_value(source_config, "file_id"),
+                "source": config_value(source_config, "source"),
+                "original_filename": config_value(source_config, "original_filename"),
+                "status": "FAILED",
+                "error_code": "TASK_SUBMIT_FAILED",
+                "error_message": str(message)[:500],
+            }
+
         # Create individual tasks for each source
         for source_config in request.sources:
             # Extract parameters
-            source = source_config.get('source')
-            source_type = source_config.get('source_type')
-            chunking_strategy = source_config.get('chunking_strategy')
-            index_name = source_config.get('index_name')
-            original_filename = source_config.get('original_filename')
-            embedding_model_id = source_config.get('embedding_model_id')
-            tenant_id = source_config.get('tenant_id')
-            telemetry_context = source_config.get('telemetry_context') or {}
+            source = config_value(source_config, 'source')
+            source_type = config_value(source_config, 'source_type')
+            chunking_strategy = config_value(source_config, 'chunking_strategy')
+            index_name = config_value(source_config, 'index_name')
+            original_filename = config_value(source_config, 'original_filename')
+            embedding_model_id = config_value(source_config, 'embedding_model_id')
+            tenant_id = config_value(source_config, 'tenant_id')
+            file_id = config_value(source_config, 'file_id')
+            telemetry_context = config_value(source_config, 'telemetry_context') or {}
 
             # Validate required fields
             if not source:
                 logger.error(
                     f"Missing required field 'source' in source config: {source_config}")
+                results.append(build_failure_result(
+                    source_config, "Missing required field 'source'"))
                 continue
             if not index_name:
                 logger.error(
                     f"Missing required field 'index_name' in source config: {source_config}")
+                results.append(build_failure_result(
+                    source_config, "Missing required field 'index_name'"))
                 continue
 
-            chain_id = submit_process_forward_chain(
+            chain_kwargs = dict(
                 source=source,
                 source_type=source_type,
                 chunking_strategy=chunking_strategy,
@@ -564,16 +587,52 @@ class DataProcessService:
                 tenant_id=tenant_id,
                 telemetry_context=telemetry_context,
             )
+            if file_id is not None:
+                chain_kwargs["file_id"] = file_id
+            try:
+                chain_id = submit_process_forward_chain(**chain_kwargs)
+            except Exception as exc:
+                logger.exception(
+                    "Failed to enqueue process-forward chain for source: %s", source)
+                results.append(build_failure_result(
+                    source_config, f"Failed to enqueue process-forward chain: {exc}"))
+                continue
             if not chain_id:
                 logger.error(
                     f"Failed to enqueue process-forward chain for source: {source}")
+                results.append(build_failure_result(
+                    source_config, "Failed to enqueue process-forward chain"))
                 continue
 
             task_ids.append(chain_id)
+            results.append({
+                "file_id": file_id,
+                "source": source,
+                "original_filename": original_filename,
+                "status": "SUBMITTED",
+                "task_id": chain_id,
+            })
             logger.debug(f"Created task {chain_id} for source: {source}")
+
+        failed_count = len(results) - len(task_ids)
+        if failed_count == 0:
+            status = "success"
+        elif task_ids:
+            status = "partial_success"
+        else:
+            status = "failed"
         logger.info(
-            f"Created {len(task_ids)} individual tasks for batch processing")
-        return task_ids
+            "Created %s individual tasks for batch processing; %s failed",
+            len(task_ids),
+            failed_count,
+        )
+        return {
+            "status": status,
+            "task_ids": task_ids,
+            "results": results,
+            "submitted_count": len(task_ids),
+            "failed_count": failed_count,
+        }
 
     async def convert_to_base64(self, image):
         # Convert PIL image to base64

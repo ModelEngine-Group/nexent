@@ -13,7 +13,7 @@ from consts.agent_repository import (
     VALID_REPOSITORY_STATUSES,
 )
 from consts.exceptions import UnauthorizedError
-from consts.model import AgentRepositorySnapshot
+from consts.model import AgentRepositorySnapshot, SkillResolution
 from consts.notification import EVENT_TYPE_REPOSITORY_REVIEW_PENDING, RESOURCE_TYPE_AGENT_REPOSITORY
 from database.agent_db import search_agent_info_by_agent_id
 from database.agent_version_db import search_version_by_version_no
@@ -1045,6 +1045,7 @@ async def import_agent_from_repository_impl(
     agent_repository_id: int,
     tenant_id: str,
     authorization: str,
+    skill_resolutions: Optional[List[SkillResolution]] = None,
 ) -> Dict[int, int]:
     """Import an agent tree from a marketplace repository listing into the current tenant."""
     record = get_agent_repository_by_id(
@@ -1064,6 +1065,7 @@ async def import_agent_from_repository_impl(
             snapshot,
             snapshot.skills,
             authorization,
+            skill_resolutions=skill_resolutions,
         )
     else:
         result = await import_agent_impl(snapshot, authorization)

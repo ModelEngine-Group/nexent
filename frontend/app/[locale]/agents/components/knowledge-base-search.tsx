@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Button,
+  Input,
   InputNumber,
   Modal,
   Select,
@@ -15,50 +16,120 @@ import {
 import { Settings, Plus, Info } from "lucide-react";
 
 import KnowledgeBaseSelectorModal from "@/components/tool-config/KnowledgeBaseSelectorModal";
+import { useDeployment } from "@/components/providers/deploymentProvider";
 import { useKnowledgeBasesForToolConfig } from "@/hooks/useKnowledgeBaseSelector";
 import { useToolList } from "@/hooks/agent/useToolList";
 import { useAgentStore } from "@/stores/agentStore";
 import { useAgentReadOnly } from "@/hooks/agent/useAgentReadOnly";
+import {
+  AIDP_NON_PERSISTED_PARAM_NAMES,
+  getSemanticToolName,
+  isManagedKnowledgeTool,
+  type ManagedKnowledgeToolName,
+} from "@/lib/managedKnowledgeTools";
 import type { Tool, ToolParam } from "@/types/agentConfig";
 import type { KnowledgeBase } from "@/types/knowledgeBase";
 
-const KNOWLEDGE_BASE_SEARCH = "knowledge_base_search";
-const INDEX_NAMES_PARAM = "index_names";
+type KnowledgeSelectorType = "knowledge_base_search" | "aidp_search";
 
-function parseSelectedIds(value: unknown): string[] {
-  if (Array.isArray(value)) return value.map(String).filter(Boolean);
+export interface KnowledgeToolProfile {
+  toolName: ManagedKnowledgeToolName;
+  selectorType: KnowledgeSelectorType;
+  selectionParam: "index_names" | "kds_list";
+  maxSelect?: number;
+}
+
+const LOCAL_KNOWLEDGE_PROFILE: KnowledgeToolProfile = {
+  toolName: "knowledge_base_search",
+  selectorType: "knowledge_base_search",
+  selectionParam: "index_names",
+};
+
+const AIDP_KNOWLEDGE_PROFILE: KnowledgeToolProfile = {
+  toolName: "aidp_search",
+  selectorType: "aidp_search",
+  selectionParam: "kds_list",
+  maxSelect: 10,
+};
+
+const normalizeIds = (values: unknown[]): string[] =>
+  Array.from(
+    new Set(values.map((value) => String(value).trim()).filter(Boolean))
+  );
+
+const parseStringListValue = (value: unknown): string[] => {
+  if (Array.isArray(value)) return normalizeIds(value);
   if (typeof value !== "string" || !value.trim()) return [];
 
   try {
     const parsed = JSON.parse(value);
-    return Array.isArray(parsed) ? parsed.map(String).filter(Boolean) : [];
+    if (Array.isArray(parsed)) return normalizeIds(parsed);
+    if (typeof parsed === "string") {
+      return normalizeIds(parsed.split(","));
+    }
   } catch {
-    return value
-      .split(",")
-      .map((item) => item.trim())
-      .filter(Boolean);
+    return normalizeIds(value.split(","));
   }
+  return [];
+};
+
+export function parseSelection(
+  tool: Tool | undefined,
+  profile: KnowledgeToolProfile
+): string[] {
+  const value = tool?.initParams?.find(
+    (param) => param.name === profile.selectionParam
+  )?.value;
+  return parseStringListValue(value);
+}
+
+export function serializeSelection(
+  ids: string[],
+  profile: KnowledgeToolProfile
+): string[] | string {
+  const normalizedIds = normalizeIds(ids);
+  return profile.selectionParam === "kds_list"
+    ? JSON.stringify(normalizedIds)
+    : normalizedIds;
 }
 
 function getParamValue(tool: Tool | undefined, name: string): unknown {
   return tool?.initParams?.find((param) => param.name === name)?.value;
 }
 
-function updateParam(tool: Tool, name: string, value: unknown): Tool {
+function updateParam(
+  tool: Tool,
+  name: string,
+  value: unknown,
+  type: ToolParam["type"] = "string"
+): Tool {
   const params = [...(tool.initParams || [])];
   const index = params.findIndex((param) => param.name === name);
   if (index < 0) {
     params.push({
       name,
-      type: "array",
+      type,
       required: false,
       value,
-      description: "Knowledge base index names used for retrieval",
+      description: "Knowledge bases used for retrieval",
     });
   } else {
     params[index] = { ...params[index], value };
   }
   return { ...tool, initParams: params };
+}
+
+function sanitizeManagedTool(tool: Tool, profile: KnowledgeToolProfile): Tool {
+  return {
+    ...tool,
+    name: tool.name || profile.toolName,
+    origin_name: tool.origin_name || profile.toolName,
+    initParams: (tool.initParams || []).filter(
+      (param) =>
+        profile.toolName !== "aidp_search" ||
+        !AIDP_NON_PERSISTED_PARAM_NAMES.has(param.name)
+    ),
+  };
 }
 
 function getLocalizedParamDescription(
@@ -69,22 +140,6 @@ function getLocalizedParamDescription(
     return param.description_zh || param.description;
   }
   return param.description || param.description_zh;
-}
-
-function isKnowledgeBaseSearchTool(tool: Tool): boolean {
-  return (
-    tool.name === KNOWLEDGE_BASE_SEARCH ||
-    tool.origin_name === KNOWLEDGE_BASE_SEARCH
-  );
-}
-
-function prepareKnowledgeBaseSearchTool(tool: Tool): Tool {
-  return {
-    ...tool,
-    name: tool.name || KNOWLEDGE_BASE_SEARCH,
-    origin_name: tool.origin_name || KNOWLEDGE_BASE_SEARCH,
-    initParams: tool.initParams || [],
-  };
 }
 
 function renderParamInput(
@@ -106,6 +161,50 @@ function renderParamInput(
         placeholder={
           param.default || t("agent.knowledge.inputNumberPlaceholder")
         }
+      />
+    );
+  }
+
+  if (param.name === "search_method") {
+    return (
+      <Select
+        className="w-full"
+        value={typeof value === "string" ? value : undefined}
+        onChange={onChange}
+        options={[
+          {
+            label: "hybrid_search",
+            value: "hybrid_search",
+          },
+          {
+            label: "vector_search",
+            value: "vector_search",
+          },
+          {
+            label: "full_text_search",
+            value: "full_text_search",
+          },
+        ]}
+      />
+    );
+  }
+
+  if (param.name === "reranking_mode" || param.name === "rerank_mode") {
+    return (
+      <Select
+        className="w-full"
+        value={typeof value === "string" ? value : undefined}
+        onChange={onChange}
+        options={[
+          {
+            label: "performance",
+            value: "performance",
+          },
+          {
+            label: "high_accuracy",
+            value: "high_accuracy",
+          },
+        ]}
       />
     );
   }
@@ -132,8 +231,7 @@ function renderParamInput(
   }
 
   return (
-    <input
-      className="h-8 w-full rounded-md border border-gray-200 bg-white px-2 text-sm outline-none focus:border-primary"
+    <Input
       value={typeof value === "string" ? value : ""}
       onChange={(event) => onChange(event.target.value)}
       placeholder={param.default || t("agent.knowledge.paramPlaceholder")}
@@ -141,18 +239,26 @@ function renderParamInput(
   );
 }
 
+interface SelectedKnowledgeBase {
+  id: string;
+  displayName: string;
+}
+
 interface KnowledgeBaseConfigState {
+  profile: KnowledgeToolProfile;
   selectedIds: string[];
-  selectedKnowledgeBases: KnowledgeBase[];
+  selectedKnowledgeBases: SelectedKnowledgeBase[];
   knowledgeBases: KnowledgeBase[];
   configurableParams: ToolParam[];
   knowledgeSearchTool: Tool;
+  hasCurrentTool: boolean;
+  requiresReselection: boolean;
   isReadOnly: boolean;
   isLoading: boolean;
   isError: boolean;
   refetch: () => Promise<unknown>;
   onKnowledgeBaseConfirm: (knowledgeBaseList: KnowledgeBase[]) => void;
-  onKnowledgeBaseRemove: (knowledgeBase: KnowledgeBase) => void;
+  onKnowledgeBaseRemove: (knowledgeBaseId: string) => void;
   onParamChange: (param: ToolParam, value: unknown) => void;
 }
 
@@ -162,65 +268,117 @@ function useKnowledgeBaseConfigState(): KnowledgeBaseConfigState | null {
   );
   const updateTools = useAgentStore((state) => state.updateTools);
   const isReadOnly = useAgentReadOnly();
+  const { aidpEnabled, isDeploymentReady } = useDeployment();
+  const profile = aidpEnabled
+    ? AIDP_KNOWLEDGE_PROFILE
+    : LOCAL_KNOWLEDGE_PROFILE;
 
   const { availableTools, isLoading: isToolsLoading } = useToolList({
-    enabled: true,
+    enabled: isDeploymentReady,
   });
   const availableKnowledgeSearchTool = useMemo(
-    () => availableTools.find((tool) => isKnowledgeBaseSearchTool(tool)),
-    [availableTools]
+    () =>
+      availableTools.find(
+        (tool) => getSemanticToolName(tool) === profile.toolName
+      ),
+    [availableTools, profile.toolName]
   );
   const selectedKnowledgeSearchTool = useMemo(
-    () => selectedTools.find((tool) => isKnowledgeBaseSearchTool(tool)),
-    [selectedTools]
+    () =>
+      selectedTools.find(
+        (tool) => getSemanticToolName(tool) === profile.toolName
+      ),
+    [selectedTools, profile.toolName]
   );
-  const knowledgeSearchTool =
-    selectedKnowledgeSearchTool || availableKnowledgeSearchTool;
-  const configuredKnowledgeSearchTool = knowledgeSearchTool
-    ? prepareKnowledgeBaseSearchTool(knowledgeSearchTool)
-    : undefined;
+  const configuredKnowledgeSearchTool =
+    selectedKnowledgeSearchTool || availableKnowledgeSearchTool
+      ? sanitizeManagedTool(
+          (selectedKnowledgeSearchTool || availableKnowledgeSearchTool) as Tool,
+          profile
+        )
+      : undefined;
   const {
     data: knowledgeBases = [],
     isLoading,
     isError,
     refetch,
-  } = useKnowledgeBasesForToolConfig(KNOWLEDGE_BASE_SEARCH);
-
-  const selectedIds = parseSelectedIds(
-    getParamValue(configuredKnowledgeSearchTool, INDEX_NAMES_PARAM)
+  } = useKnowledgeBasesForToolConfig(
+    isDeploymentReady ? profile.selectorType : null
   );
+
+  const selectedIds = parseSelection(selectedKnowledgeSearchTool, profile);
+  const selectedDisplayNames = selectedKnowledgeSearchTool?.display_names || [];
   const configurableParams = (
     configuredKnowledgeSearchTool?.initParams || []
-  ).filter((param) => param.name !== INDEX_NAMES_PARAM);
-  const selectedKnowledgeBases = knowledgeBases.filter((knowledgeBase) =>
-    selectedIds.includes(String(knowledgeBase.index_name || knowledgeBase.id))
+  ).filter(
+    (param) =>
+      param.name !== profile.selectionParam &&
+      !AIDP_NON_PERSISTED_PARAM_NAMES.has(param.name)
   );
-
-  const updateKnowledgeSearchTool = (updatedTool: Tool) => {
-    const existingToolIndex = selectedTools.findIndex(
-      (tool) => String(tool.id) === String(updatedTool.id)
+  const selectedKnowledgeBases = selectedIds.map((id, index) => {
+    const knowledgeBase = knowledgeBases.find((item) => {
+      const itemId =
+        profile.toolName === "aidp_search"
+          ? String(item.id)
+          : String(item.index_name || item.id);
+      return itemId === id;
+    });
+    return {
+      id,
+      displayName:
+        knowledgeBase?.display_name ||
+        knowledgeBase?.name ||
+        selectedDisplayNames[index] ||
+        id,
+    };
+  });
+  const requiresReselection =
+    !selectedKnowledgeSearchTool &&
+    selectedTools.some(
+      (tool) =>
+        isManagedKnowledgeTool(tool) &&
+        getSemanticToolName(tool) !== profile.toolName
     );
-    if (existingToolIndex < 0) {
-      updateTools([...selectedTools, updatedTool]);
-      return;
-    }
-    const nextTools = [...selectedTools];
-    nextTools[existingToolIndex] = updatedTool;
-    updateTools(nextTools);
+
+  const replaceManagedKnowledgeTool = (updatedTool?: Tool) => {
+    const otherTools = selectedTools.filter(
+      (tool) => !isManagedKnowledgeTool(tool)
+    );
+    updateTools(updatedTool ? [...otherTools, updatedTool] : otherTools);
   };
 
   const onParamChange = (param: ToolParam, value: unknown) => {
-    if (!selectedKnowledgeSearchTool) return;
-    updateKnowledgeSearchTool(
-      updateParam(selectedKnowledgeSearchTool, param.name, value)
+    if (!selectedKnowledgeSearchTool || !configuredKnowledgeSearchTool) return;
+    replaceManagedKnowledgeTool(
+      updateParam(configuredKnowledgeSearchTool, param.name, value, param.type)
     );
   };
 
-  const onKnowledgeBaseConfirm = (knowledgeBaseList: KnowledgeBase[]) => {
+  const updateSelection = (ids: string[], displayNames: string[]) => {
     if (!configuredKnowledgeSearchTool) return;
-    if (!selectedKnowledgeSearchTool && knowledgeBaseList.length === 0) return;
-    const indexNames = knowledgeBaseList.map((knowledgeBase) =>
-      String(knowledgeBase.index_name || knowledgeBase.id)
+    if (!selectedKnowledgeSearchTool && ids.length === 0) return;
+    if (ids.length === 0) {
+      replaceManagedKnowledgeTool();
+      return;
+    }
+
+    const updatedTool = updateParam(
+      configuredKnowledgeSearchTool,
+      profile.selectionParam,
+      serializeSelection(ids, profile),
+      profile.selectionParam === "kds_list" ? "string" : "array"
+    );
+    replaceManagedKnowledgeTool({
+      ...updatedTool,
+      display_names: displayNames,
+    });
+  };
+
+  const onKnowledgeBaseConfirm = (knowledgeBaseList: KnowledgeBase[]) => {
+    const ids = knowledgeBaseList.map((knowledgeBase) =>
+      profile.toolName === "aidp_search"
+        ? String(knowledgeBase.id)
+        : String(knowledgeBase.index_name || knowledgeBase.id)
     );
     const displayNames = knowledgeBaseList.map(
       (knowledgeBase) =>
@@ -228,36 +386,32 @@ function useKnowledgeBaseConfigState(): KnowledgeBaseConfigState | null {
         knowledgeBase.name ||
         String(knowledgeBase.id)
     );
-    const updatedTool = updateParam(
-      configuredKnowledgeSearchTool,
-      INDEX_NAMES_PARAM,
-      indexNames
-    );
-    updateKnowledgeSearchTool({ ...updatedTool, display_names: displayNames });
+    updateSelection(ids, displayNames);
   };
 
-  const onKnowledgeBaseRemove = (knowledgeBase: KnowledgeBase) => {
-    const knowledgeBaseKey = String(
-      knowledgeBase.index_name || knowledgeBase.id
+  const onKnowledgeBaseRemove = (knowledgeBaseId: string) => {
+    const nextItems = selectedKnowledgeBases.filter(
+      (knowledgeBase) => knowledgeBase.id !== knowledgeBaseId
     );
-    onKnowledgeBaseConfirm(
-      selectedKnowledgeBases.filter(
-        (selectedKnowledgeBase) =>
-          String(
-            selectedKnowledgeBase.index_name || selectedKnowledgeBase.id
-          ) !== knowledgeBaseKey
-      )
+    updateSelection(
+      nextItems.map((knowledgeBase) => knowledgeBase.id),
+      nextItems.map((knowledgeBase) => knowledgeBase.displayName)
     );
   };
 
-  if (isToolsLoading || !configuredKnowledgeSearchTool) return null;
+  if (!isDeploymentReady || isToolsLoading || !configuredKnowledgeSearchTool) {
+    return null;
+  }
 
   return {
+    profile,
     selectedIds,
     selectedKnowledgeBases,
     knowledgeBases,
     configurableParams,
     knowledgeSearchTool: configuredKnowledgeSearchTool,
+    hasCurrentTool: Boolean(selectedKnowledgeSearchTool),
+    requiresReselection,
     isReadOnly,
     isLoading,
     isError,
@@ -281,7 +435,7 @@ export function KnowledgeBaseConfigActions() {
       <Button
         size="middle"
         icon={<Settings size={14} />}
-        disabled={state.isReadOnly}
+        disabled={state.isReadOnly || !state.hasCurrentTool}
         onClick={() => setConfigOpen(true)}
       >
         {t("agent.knowledge.button.configure")}
@@ -303,7 +457,8 @@ export function KnowledgeBaseConfigActions() {
           setSelectorOpen(false);
         }}
         selectedIds={state.selectedIds}
-        toolType={KNOWLEDGE_BASE_SEARCH}
+        toolType={state.profile.selectorType}
+        maxSelect={state.profile.maxSelect}
         knowledgeBases={state.knowledgeBases}
         isLoading={state.isLoading}
         showCheckbox
@@ -382,27 +537,24 @@ export default function KnowledgeBaseConfig() {
               closable={!state.isReadOnly}
               onClose={
                 !state.isReadOnly
-                  ? () => state.onKnowledgeBaseRemove(knowledgeBase)
+                  ? () => state.onKnowledgeBaseRemove(knowledgeBase.id)
                   : undefined
               }
               className="!inline-flex !items-center !gap-1 !whitespace-nowrap !px-2.5 !py-1 !text-sm !text-foreground !bg-primary/5 !border !border-primary/20 !rounded-full transition-colors hover:!border-primary/40 hover:!shadow-sm"
             >
               <span className="max-w-full truncate">
-                {knowledgeBase.display_name || knowledgeBase.name}
+                {knowledgeBase.displayName}
               </span>
             </Tag>
           ))}
         </div>
       ) : (
         <div className="flex min-h-20 items-center justify-center gap-4 rounded-md border border-dashed border-gray-300 bg-white px-4 py-3">
-          <div className="flex items-center gap-3">
-            <div>
-              <p className="text-sm font-medium text-gray-700"></p>
-              <p className="mt-0.5 text-xs text-gray-400">
-                {t("agent.knowledge.emptyHint")}
-              </p>
-            </div>
-          </div>
+          <p className="text-xs text-gray-400">
+            {state.requiresReselection
+              ? t("agent.knowledge.reselectionRequired")
+              : t("agent.knowledge.emptyHint")}
+          </p>
         </div>
       )}
     </div>

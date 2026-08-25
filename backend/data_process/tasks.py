@@ -8,6 +8,7 @@ import math
 import os
 import threading
 import time
+from datetime import datetime
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, List, Tuple
 
@@ -52,6 +53,61 @@ ASYNC_SPLIT_RETRY_MAX = max(
     FORWARD_REDIS_RETRY_MAX * 5, FORWARD_REDIS_RETRY_MAX)
 FORWARD_ES_CHUNK_BATCH_SIZE = 64
 IMAGE_METADATA_PROCESS_SOURCE = "UniversalImageExtractor"
+
+
+def _update_file_lifecycle(
+    *,
+    file_id: Optional[str],
+    tenant_id: Optional[str],
+    index_name: Optional[str],
+    source: Optional[str],
+    status: Optional[str],
+    stage: str,
+    updated_by: Optional[str] = None,
+    **fields: Any,
+) -> None:
+    """Best-effort durable status update with a legacy path fallback.
+
+    Data-process workers can be deployed before the lifecycle migration, so a
+    missing table must never turn a processing result into a second failure.
+    """
+    if not index_name:
+        return
+    try:
+        from database.knowledge_file_lifecycle_db import get_file_record, transition_file_record
+
+        record = None
+        if file_id and tenant_id:
+            record = get_file_record(
+                file_id=file_id,
+                tenant_id=tenant_id,
+                index_name=index_name,
+                include_hidden=True,
+            )
+        if not record and source:
+            record = get_file_record(
+                tenant_id=tenant_id,
+                index_name=index_name,
+                object_name=source,
+                include_hidden=True,
+            )
+        if not record or record.get("status") in {"DELETE_REQUESTED", "DELETED"}:
+            return
+        transition_file_record(
+            record["file_id"],
+            status=status,
+            stage=stage,
+            expected_statuses=(record.get("status"),),
+            updated_by=updated_by,
+            **fields,
+        )
+    except Exception as lifecycle_exc:
+        logger.warning(
+            "Failed to update file lifecycle for index=%s source=%s: %s",
+            index_name,
+            source,
+            lifecycle_exc,
+        )
 
 
 @trace_knowledge_operation("knowledge.minio.fetch", "minio.fetch")
@@ -1458,6 +1514,16 @@ def process(
     """
     start_time = time.time()
     task_id = self.request.id
+    file_id = params.get("file_id")
+    _update_file_lifecycle(
+        file_id=file_id,
+        tenant_id=tenant_id,
+        index_name=index_name,
+        source=source,
+        status="PROCESSING",
+        stage="PROCESS",
+        process_task_id=task_id,
+    )
     # _warn_if_queue_mismatch("PROCESS TASK", "process_q", self.request)
 
     logger.info(
@@ -1470,6 +1536,7 @@ def process(
             'source_type': source_type,
             'index_name': index_name,
             'original_filename': original_filename,
+            'file_id': file_id,
             'task_name': 'process',
             'start_time': start_time,
             'stage': 'extracting_text'
@@ -1598,11 +1665,22 @@ def process(
                 'source': source,
                 'index_name': index_name,
                 'original_filename': original_filename,
+                'file_id': file_id,
                 'task_name': 'process',
                 'stage': 'text_extracted',
                 'file_size_mb': file_size_mb,
                 'processing_speed_mb_s': file_size_mb / elapsed_time if file_size_mb > 0 and elapsed_time > 0 else 0
             }
+        )
+
+        _update_file_lifecycle(
+            file_id=file_id,
+            tenant_id=tenant_id,
+            index_name=index_name,
+            source=source,
+            status="FORWARDING",
+            stage="FORWARD",
+            process_task_id=task_id,
         )
 
         logger.info(
@@ -1618,6 +1696,7 @@ def process(
             'task_id': task_id,
             'split_async': split_async,
             'image_metadata_chunk_count': image_metadata_chunk_count,
+            'file_id': file_id,
         }
 
         return returned_data
@@ -1650,10 +1729,24 @@ def process(
                 "task_name": "process",
                 "source": source,
                 "original_filename": original_filename,
+                "file_id": file_id,
             }
 
             # Extract error code from parsed error or error message
             error_code = extract_error_code(error_message, parsed_error)
+            _update_file_lifecycle(
+                file_id=file_id,
+                tenant_id=tenant_id,
+                index_name=index_name,
+                source=source,
+                status="FAILED",
+                stage="PROCESS",
+                error_code=error_code,
+                error_message=str(error_message)[:500],
+                error_stage="PROCESS",
+                failed_at=datetime.utcnow(),
+                process_task_id=task_id,
+            )
             if error_code:
                 error_info["error_code"] = error_code
 
@@ -1682,6 +1775,7 @@ def process(
                     "original_filename": error_info.get(
                         "original_filename", ""
                     ),
+                    "file_id": file_id,
                     "custom_error": error_info.get("message", str(e)),
                     "stage": "text_extraction_failed",
                 }
@@ -1713,6 +1807,19 @@ def process(
 
                 # Extract error code from parsed error or error message
                 error_code = extract_error_code(error_message, parsed_error)
+                _update_file_lifecycle(
+                    file_id=file_id,
+                    tenant_id=tenant_id,
+                    index_name=index_name,
+                    source=source,
+                    status="FAILED",
+                    stage="PROCESS",
+                    error_code=error_code,
+                    error_message=str(error_message)[:500],
+                    error_stage="PROCESS",
+                    failed_at=datetime.utcnow(),
+                    process_task_id=task_id,
+                )
 
                 # Store only error code (if available) or raw error message
                 if error_code:
@@ -1748,6 +1855,8 @@ def forward(
         original_filename: Optional[str] = None,
         authorization: Optional[str] = None,
         telemetry_context: Optional[Dict[str, str]] = None,
+        tenant_id: Optional[str] = None,
+        file_id: Optional[str] = None,
 ) -> Dict:
     """
     Vectorize and store processed chunks in Elasticsearch
@@ -1769,6 +1878,16 @@ def forward(
     original_source = source
     original_index_name = index_name
     filename = original_filename
+    file_id = file_id or (processed_data or {}).get("file_id")
+    _update_file_lifecycle(
+        file_id=file_id,
+        tenant_id=tenant_id,
+        index_name=index_name,
+        source=source,
+        status="FORWARDING",
+        stage="FORWARD",
+        forward_task_id=task_id,
+    )
 
     try:
         ctx = _init_forward_context(
@@ -1852,6 +1971,7 @@ def forward(
                 'source': original_source,
                 'index_name': original_index_name,
                 'original_filename': filename,
+                'file_id': file_id,
                 'task_name': 'forward',
                 'start_time': start_time,
                 'stage': 'vectorizing_and_storing',
@@ -1859,6 +1979,7 @@ def forward(
                 'processed_chunks': 0  # Will be updated during vectorization via Redis
             }
         )
+
         try:
             redis_service = get_redis_service()
             redis_service.save_progress_info(task_id, 0, total_chunks)
@@ -1980,6 +2101,7 @@ def forward(
                 'source': original_source,
                 'index_name': original_index_name,
                 'original_filename': original_filename,
+                'file_id': file_id,
                 'task_name': 'forward',
                 'es_result': es_result,
                 'stage': 'completed',
@@ -1988,11 +2110,23 @@ def forward(
             }
         )
 
+        _update_file_lifecycle(
+            file_id=file_id,
+            tenant_id=tenant_id,
+            index_name=original_index_name,
+            source=original_source,
+            status="COMPLETED",
+            stage="COMPLETED",
+            forward_task_id=task_id,
+            completed_at=datetime.utcnow(),
+        )
+
         logger.info(
             f"[{self.request.id}] FORWARD TASK: Successfully stored {len(chunks)} chunks to index {original_index_name} in {end_time - start_time:.2f}s")
 
         return {
             'task_id': task_id,
+            'file_id': file_id,
             'source': original_source,
             'index_name': original_index_name,
             'original_filename': original_filename,
@@ -2015,6 +2149,19 @@ def forward(
 
             # Extract error code from parsed error or error message
             error_code = extract_error_code(error_message, error_info)
+            _update_file_lifecycle(
+                file_id=file_id,
+                tenant_id=tenant_id,
+                index_name=error_info.get("index_name") or original_index_name,
+                source=error_info.get("source") or original_source,
+                status="FAILED",
+                stage="FORWARD",
+                error_code=error_code,
+                error_message=str(error_message)[:500],
+                error_stage="FORWARD",
+                failed_at=datetime.utcnow(),
+                forward_task_id=task_id,
+            )
 
             # Store only error code (if available) or raw error message
             if error_code:
@@ -2038,6 +2185,7 @@ def forward(
                     'index_name': error_info.get('index_name', ''),
                     'task_name': error_info.get('task_name', ''),
                     'original_filename': error_info.get('original_filename', ''),
+                    'file_id': file_id,
                     'custom_error': error_message,
                     'stage': 'forward_task_failed'
                 }
@@ -2049,6 +2197,19 @@ def forward(
                 error_message = str(e)
                 # Extract error code from error message
                 error_code = extract_error_code(error_message, None)
+                _update_file_lifecycle(
+                    file_id=file_id,
+                    tenant_id=tenant_id,
+                    index_name=original_index_name,
+                    source=original_source,
+                    status="FAILED",
+                    stage="FORWARD",
+                    error_code=error_code,
+                    error_message=str(error_message)[:500],
+                    error_stage="FORWARD",
+                    failed_at=datetime.utcnow(),
+                    forward_task_id=task_id,
+                )
 
                 # Store only error code (if available) or raw error message
                 if error_code:
@@ -2066,6 +2227,7 @@ def forward(
                 pass
             self.update_state(
                 meta={
+                    'file_id': file_id,
                     'custom_error': str(e),
                     'stage': 'forward_task_failed'
                 }
@@ -2193,6 +2355,7 @@ def submit_process_forward_chain(
         embedding_model_id: Optional[int] = None,
         tenant_id: Optional[str] = None,
         telemetry_context: Optional[Dict[str, str]] = None,
+        file_id: Optional[str] = None,
 ) -> str:
     """
     Build and enqueue a Celery chain: process -> forward.
@@ -2200,24 +2363,35 @@ def submit_process_forward_chain(
     Returns:
         Celery chain task ID, or empty string if enqueue failed.
     """
+    process_kwargs = {
+        "source": source,
+        "source_type": source_type,
+        "chunking_strategy": chunking_strategy,
+        "index_name": index_name,
+        "original_filename": original_filename,
+        "embedding_model_id": embedding_model_id,
+        "tenant_id": tenant_id,
+        "telemetry_context": telemetry_context or {},
+    }
+    forward_kwargs = {
+        "index_name": index_name,
+        "source": source,
+        "source_type": source_type,
+        "original_filename": original_filename,
+        "authorization": authorization,
+        "tenant_id": tenant_id,
+        "telemetry_context": telemetry_context or {},
+    }
+    if file_id is not None:
+        process_kwargs["file_id"] = file_id
+        forward_kwargs["file_id"] = file_id
+
     task_chain = chain(
         process.s(
-            source=source,
-            source_type=source_type,
-            chunking_strategy=chunking_strategy,
-            index_name=index_name,
-            original_filename=original_filename,
-            embedding_model_id=embedding_model_id,
-            tenant_id=tenant_id,
-            telemetry_context=telemetry_context or {},
+            **process_kwargs,
         ).set(queue='process_q'),
         forward.s(
-            index_name=index_name,
-            source=source,
-            source_type=source_type,
-            original_filename=original_filename,
-            authorization=authorization,
-            telemetry_context=telemetry_context or {},
+            **forward_kwargs,
         ).set(queue='forward_q'),
         cleanup_source.s(
             authorization=authorization,
@@ -2245,6 +2419,7 @@ def process_and_forward(
         embedding_model_id: Optional[int] = None,
         tenant_id: Optional[str] = None,
         telemetry_context: Optional[Dict[str, str]] = None,
+        file_id: Optional[str] = None,
 ) -> str:
     """
     Combined task that chains processing and forwarding
@@ -2267,7 +2442,7 @@ def process_and_forward(
     logger.info(
         f"Starting processing chain for {source}, original_filename={original_filename}, strategy={chunking_strategy}, index={index_name}, model_id={embedding_model_id}")
 
-    chain_id = submit_process_forward_chain(
+    chain_kwargs = dict(
         source=source,
         source_type=source_type,
         chunking_strategy=chunking_strategy,
@@ -2278,6 +2453,9 @@ def process_and_forward(
         tenant_id=tenant_id,
         telemetry_context=telemetry_context or {},
     )
+    if file_id is not None:
+        chain_kwargs["file_id"] = file_id
+    chain_id = submit_process_forward_chain(**chain_kwargs)
     if chain_id:
         logger.info(f"Created task chain ID: {chain_id}")
     return chain_id

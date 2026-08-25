@@ -25,7 +25,7 @@ export interface AgentImportWizardProps {
   visible: boolean;
   onCancel: () => void;
   initialData: ImportAgentData | null; // ExportAndImportDataFormat structure
-  onImportComplete?: () => void;
+  onImportComplete?: (agentId: number) => void;
   title?: string; // Optional custom title
   agentDisplayName?: string; // Optional display name for preview
   agentDescription?: string; // Optional description for preview
@@ -902,8 +902,13 @@ export default function AgentImportWizard({
     });
 
     if (result.success) {
+      const importedAgentId = Number(result.data?.agent_id);
+      if (!Number.isInteger(importedAgentId) || importedAgentId <= 0) {
+        message.error(t("market.install.error.installFailed", "Failed to install agent"));
+        return;
+      }
       queryClient.invalidateQueries({ queryKey: ["agents"] });
-      onImportComplete?.();
+      onImportComplete?.(importedAgentId);
       handleCancel();
     } else {
       const errDetail = (result.data as any)?.detail;
