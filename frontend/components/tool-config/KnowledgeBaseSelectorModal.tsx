@@ -19,6 +19,7 @@ import {
 } from "@ant-design/icons";
 
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import { Can } from "@/components/permission/Can";
 import { useGroupList } from "@/hooks/group/useGroupList";
 import { KnowledgeBase } from "@/types/knowledgeBase";
 import { ToolKbType, getKnowledgeBaseSourcesForTool } from "./index";
@@ -923,9 +924,9 @@ export default function KnowledgeBaseSelectorModal({
               );
               const canSelect = checkCanSelect(kb);
               const hasModelMismatch = getModelMismatch(kb);
-              const groupNames = (kb.group_ids ?? []).map(
-                (groupId) => groupNameById.get(groupId) || `Group ${groupId}`
-              );
+              const groupNames = (kb.group_ids ?? [])
+                .map((groupId) => groupNameById.get(groupId))
+                .filter((groupName): groupName is string => Boolean(groupName));
 
               return (
                 <div
@@ -1008,21 +1009,17 @@ export default function KnowledgeBaseSelectorModal({
                               >
                                 {t("knowledgeBase.ingroup.permission.PRIVATE")}
                               </span>
-                            ) : groupNames.length > 0 ? (
-                              groupNames.map((groupName) => (
-                                <span
-                                  key={groupName}
-                                  className={`${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} border border-blue-200 bg-blue-100 text-blue-800`}
-                                >
-                                  {groupName}
-                                </span>
-                              ))
                             ) : (
-                              <span
-                                className={`${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.default}`}
-                              >
-                                {t("agent.userGroup.empty")}
-                              </span>
+                              <Can permission="group:read">
+                                {groupNames.map((groupName) => (
+                                  <span
+                                    key={groupName}
+                                    className={`${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} border border-blue-200 bg-blue-100 text-blue-800`}
+                                  >
+                                    {groupName}
+                                  </span>
+                                ))}
+                              </Can>
                             )}
                             <span
                               className={`${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.default}`}
@@ -1039,6 +1036,14 @@ export default function KnowledgeBaseSelectorModal({
                           <div
                             className={`flex flex-wrap items-center ${KB_LAYOUT.TAG_MARGIN} ${KB_LAYOUT.TAG_SPACING}`}
                           >
+                            {kb.ingroup_permission === "PRIVATE" && (
+                              <span
+                                className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.default} mr-1`}
+                              >
+                                {t("knowledgeBase.ingroup.permission.PRIVATE")}
+                              </span>
+                            )}
+
                             {/* Document count tag */}
                             <span
                               className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.default} mr-1`}
