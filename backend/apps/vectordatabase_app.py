@@ -593,8 +593,10 @@ async def get_index_files(
 @router.delete("/{index_name}/documents")
 async def delete_documents(
         index_name: str = Path(..., description="Name of the index"),
-        path_or_url: str = Query(...,
-                                 description="Path or URL of documents to delete"),
+        path_or_url: Optional[str] = Query(None,
+                                           description="Legacy object path to delete"),
+        file_id: Optional[str] = Query(
+            None, description="Durable lifecycle file ID (preferred for new clients)"),
         scope: str = Query(
             "full",
             description=(
@@ -609,6 +611,36 @@ async def delete_documents(
     try:
         user_id, tenant_id = get_current_user_id(authorization)
         require_knowledge_base_edit_permission(index_name, user_id, tenant_id)
+        if file_id:
+            try:
+                from database.knowledge_file_lifecycle_db import get_file_record
+
+                lifecycle_record = get_file_record(
+                    file_id=file_id,
+                    index_name=index_name,
+                    tenant_id=tenant_id,
+                    include_hidden=True,
+                )
+            except Exception as lifecycle_exc:
+                logger.warning("Lifecycle file ID lookup unavailable: %s", lifecycle_exc)
+                lifecycle_record = None
+            if lifecycle_record and lifecycle_record.get("object_name"):
+                path_or_url = lifecycle_record["object_name"]
+            elif lifecycle_record and not lifecycle_record.get("object_name"):
+                if scope != "full":
+                    raise HTTPException(
+                        status_code=HTTPStatus.BAD_REQUEST,
+                        detail="A file without a storage object can only use full deletion",
+                    )
+                return ElasticSearchService.delete_lifecycle_record_without_object(
+                    lifecycle_record,
+                    requested_by=user_id,
+                )
+        if not path_or_url:
+            raise HTTPException(
+                status_code=HTTPStatus.BAD_REQUEST,
+                detail="Either path_or_url or file_id is required",
+            )
         result = await ElasticSearchService.delete_document_by_scope(
             index_name, path_or_url, scope, vdb_core
         )
@@ -671,16 +703,58 @@ async def get_document_error_info(
         index_name: str = Path(..., description="Name of the index"),
         path_or_url: str = Path(...,
                                 description="Path or URL of the document"),
+        file_id: Optional[str] = Query(None, description="Durable lifecycle file ID"),
         authorization: Optional[str] = Header(None)
 ):
     """Get error information for a document"""
     try:
         user_id, tenant_id = get_current_user_id(authorization)
         require_knowledge_base_read_permission(index_name, user_id, tenant_id)
+        try:
+            from database.knowledge_file_lifecycle_db import get_file_record
+
+            lifecycle_record = get_file_record(
+                file_id=file_id,
+                index_name=index_name,
+                tenant_id=tenant_id,
+                object_name=None if file_id else path_or_url,
+                include_hidden=True,
+            )
+        except Exception as lifecycle_exc:
+            logger.warning("Lifecycle error lookup unavailable: %s", lifecycle_exc)
+            lifecycle_record = None
+        lifecycle_has_error = bool(
+            lifecycle_record
+            and any(
+                lifecycle_record.get(field)
+                for field in ("error_code", "error_message", "error_stage", "failed_at")
+            )
+        )
+        lifecycle_stage = (
+            (lifecycle_record.get("error_stage") or lifecycle_record.get("stage"))
+            if lifecycle_record
+            else None
+        )
+        if lifecycle_has_error:
+            return {
+                "status": "success",
+                "error_code": lifecycle_record.get("error_code"),
+                "error_message": lifecycle_record.get("error_message"),
+                "error_stage": lifecycle_record.get("error_stage") or lifecycle_record.get("stage"),
+                "failed_at": lifecycle_record.get("failed_at"),
+            }
         celery_task_files = await get_all_files_status(index_name)
         file_status = celery_task_files.get(path_or_url)
 
         if not file_status:
+            if lifecycle_record:
+                return {
+                    "status": "success",
+                    "error_code": None,
+                    "error_message": None,
+                    "error_stage": lifecycle_stage,
+                    "failed_at": lifecycle_record.get("failed_at") if lifecycle_record else None,
+                }
             raise HTTPException(
                 status_code=HTTPStatus.NOT_FOUND,
                 detail=f"Document {path_or_url} not found in index {index_name}"
@@ -691,6 +765,9 @@ async def get_document_error_info(
             return {
                 "status": "success",
                 "error_code": None,
+                "error_message": None,
+                "error_stage": lifecycle_stage,
+                "failed_at": lifecycle_record.get("failed_at") if lifecycle_record else None,
             }
 
         redis_service = get_redis_service()
@@ -716,6 +793,9 @@ async def get_document_error_info(
         return {
             "status": "success",
             "error_code": error_code,
+            "error_message": raw_error,
+            "error_stage": file_status.get("stage") or lifecycle_stage,
+            "failed_at": lifecycle_record.get("failed_at") if lifecycle_record else None,
         }
     except HTTPException:
         raise

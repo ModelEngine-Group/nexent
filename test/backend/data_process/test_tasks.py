@@ -3436,10 +3436,33 @@ def test_submit_process_forward_chain(monkeypatch):
     from backend.data_process import tasks
 
     captured_chain = []
+    captured_signatures = {}
+
+    class MockSignature:
+        def __init__(self, task_name, kwargs):
+            self.task_name = task_name
+            self.kwargs = kwargs
+
+        def set(self, queue=None):
+            self.queue = queue
+            return self
+
+    class MockTask:
+        def __init__(self, task_name):
+            self.task_name = task_name
+
+        def s(self, **kwargs):
+            captured_signatures[self.task_name] = kwargs
+            return MockSignature(self.task_name, kwargs)
+
+    monkeypatch.setattr(tasks, "process", MockTask("process"))
+    monkeypatch.setattr(tasks, "forward", MockTask("forward"))
+    monkeypatch.setattr(tasks, "cleanup_source", MockTask("cleanup_source"))
 
     class MockChain:
         def __init__(self, *steps):
             self.steps = steps
+            captured_chain.extend(steps)
 
         def set(self, queue=None):
             return self
@@ -3460,9 +3483,14 @@ def test_submit_process_forward_chain(monkeypatch):
         authorization="Bearer token",
         embedding_model_id=1,
         tenant_id="tenant-1",
+        file_id="fid-1",
     )
 
     assert chain_id == "chain-id-123"
+    assert captured_signatures["process"]["tenant_id"] == "tenant-1"
+    assert captured_signatures["forward"]["tenant_id"] == "tenant-1"
+    assert captured_signatures["process"]["file_id"] == "fid-1"
+    assert captured_signatures["forward"]["file_id"] == "fid-1"
 
 
 def test_aggregate_parts_empty_results(monkeypatch):
@@ -3528,6 +3556,7 @@ def test_process_and_forward_delegates_to_chain(monkeypatch):
     class MockChain:
         def __init__(self, *steps):
             captured["steps"] = len(steps)
+            captured["signatures"] = steps
 
         def set(self, queue=None):
             return self
@@ -3544,10 +3573,95 @@ def test_process_and_forward_delegates_to_chain(monkeypatch):
         source_type="local",
         chunking_strategy="basic",
         index_name="test-index",
+        tenant_id="tenant-2",
+        file_id="fid-2",
     )
 
     assert result == "chain-456"
     assert captured["steps"] == 3  # process, forward, cleanup_source
+
+
+def test_update_file_lifecycle_uses_file_id_and_legacy_source_fallback(monkeypatch):
+    """Lifecycle updates enforce tenant scope and fall back from stale IDs to paths."""
+    import_tasks_with_fake_ray(monkeypatch)
+    from backend.data_process import tasks
+
+    calls = []
+    lookups = []
+    lifecycle_module = types.ModuleType("database.knowledge_file_lifecycle_db")
+
+    def get_file_record(**kwargs):
+        lookups.append(kwargs)
+        if kwargs.get("file_id") == "fid-missing":
+            return None
+        if kwargs.get("object_name") == "knowledge_base/a.txt":
+            return {"file_id": "fid-3", "status": "PROCESSING"}
+        if kwargs.get("object_name") == "knowledge_base/fallback.txt":
+            return {"file_id": "fid-5", "status": "PROCESSING"}
+        return {"file_id": "fid-4", "status": "DELETED"}
+
+    lifecycle_module.get_file_record = get_file_record
+    lifecycle_module.transition_file_record = lambda file_id, **kwargs: calls.append((file_id, kwargs))
+    monkeypatch.setitem(sys.modules, "database.knowledge_file_lifecycle_db", lifecycle_module)
+
+    tasks._update_file_lifecycle(
+        file_id=None,
+        tenant_id="tenant-1",
+        index_name="idx",
+        source="knowledge_base/a.txt",
+        status="PROCESSING",
+        stage="PROCESS",
+    )
+    assert calls[0][0] == "fid-3"
+    assert calls[0][1]["expected_statuses"] == ("PROCESSING",)
+    assert lookups[0] == {
+        "tenant_id": "tenant-1",
+        "index_name": "idx",
+        "object_name": "knowledge_base/a.txt",
+        "include_hidden": True,
+    }
+
+    tasks._update_file_lifecycle(
+        file_id="fid-missing",
+        tenant_id="tenant-1",
+        index_name="idx",
+        source="knowledge_base/fallback.txt",
+        status="FAILED",
+        stage="PROCESS",
+    )
+    assert calls[1][0] == "fid-5"
+    assert lookups[1] == {
+        "file_id": "fid-missing",
+        "tenant_id": "tenant-1",
+        "index_name": "idx",
+        "include_hidden": True,
+    }
+    assert lookups[2] == {
+        "tenant_id": "tenant-1",
+        "index_name": "idx",
+        "object_name": "knowledge_base/fallback.txt",
+        "include_hidden": True,
+    }
+
+    lifecycle_module.get_file_record = lambda **kwargs: {"file_id": "fid-4", "status": "DELETED"}
+    tasks._update_file_lifecycle(
+        file_id="fid-4",
+        tenant_id="tenant-1",
+        index_name="idx",
+        source="knowledge_base/deleted.txt",
+        status="FAILED",
+        stage="PROCESS",
+    )
+    assert len(calls) == 2
+
+    tasks._update_file_lifecycle(
+        file_id="fid-5",
+        tenant_id="tenant-1",
+        index_name=None,
+        source="knowledge_base/no-index.txt",
+        status="FAILED",
+        stage="PROCESS",
+    )
 
 
 def test_estimate_parallel_parts_edge_cases(monkeypatch):

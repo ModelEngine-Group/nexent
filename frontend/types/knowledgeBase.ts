@@ -69,7 +69,10 @@ export interface Document {
   status: string;
   selected?: boolean; // For UI selection status
   latest_task_id: string; // For marking the latest celery task
+  file_id?: string;
   error_reason?: string; // Error reason for failed documents
+  error_stage?: string;
+  failed_at?: string;
   // Optional ingestion progress metrics
   processed_chunk_num?: number | null;
   total_chunk_num?: number | null;
