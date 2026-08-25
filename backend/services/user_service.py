@@ -105,9 +105,14 @@ def get_users_for_requester(
     else:
         raise ForbiddenError("Not authorized to list users for this tenant")
 
-    return get_users(
-        tenant_id, page, page_size, sort_by, sort_order, search, roles, group_ids
-    )
+    # Keep the legacy call shape when no filters are supplied. Besides avoiding
+    # unnecessary arguments, this preserves compatibility with callers that
+    # mock the pre-filter signature.
+    if search or roles or group_ids:
+        return get_users(
+            tenant_id, page, page_size, sort_by, sort_order, search, roles, group_ids
+        )
+    return get_users(tenant_id, page, page_size, sort_by, sort_order)
 
 
 async def update_user(user_id: str, update_data: Dict[str, Any], updated_by: str) -> Dict[str, Any]:
