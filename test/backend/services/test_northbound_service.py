@@ -126,6 +126,9 @@ sys.modules["database.token_db"] = token_db_mod
 
 # Mock conversation_db
 conversation_db_mod = types.ModuleType("database.conversation_db")
+conversation_db_mod.get_conversation_list = MagicMock(return_value=[
+    {"conversation_id": "1", "title": "Test"}
+])
 conversation_db_mod.get_conversation_messages = MagicMock(return_value=[
     {"message_role": "user", "message_content": "Hello"}
 ])
@@ -177,9 +180,6 @@ sys.modules["services.runtime_proxy_service"] = runtime_proxy_mod
 # Mock conversation_management_service
 conv_mgmt_mod = types.ModuleType("services.conversation_management_service")
 conv_mgmt_mod.save_conversation_user = MagicMock()
-conv_mgmt_mod.get_conversation_list_service = MagicMock(return_value=[
-    {"conversation_id": "1", "title": "Test"}
-])
 conv_mgmt_mod.create_new_conversation = MagicMock(return_value={"conversation_id": 123})
 conv_mgmt_mod.update_conversation_title = MagicMock()
 sys.modules["services.conversation_management_service"] = conv_mgmt_mod
@@ -1673,7 +1673,7 @@ class TestListConversationsErrorHandling:
         conversations = [
             {"conversation_id": "1", "title": "Test", "meta_data": {}}
         ]
-        conv_mgmt_mod.get_conversation_list_service.return_value = conversations
+        conversation_db_mod.get_conversation_list.return_value = conversations
         token_db_mod.get_latest_usage_metadata.reset_mock(side_effect=True)
 
         result = await ns.list_conversations(ctx=ctx)
@@ -1688,7 +1688,7 @@ class TestListConversationsErrorHandling:
         conversations = [
             {"conversation_id": "1", "title": "Test", "meta_data": {"query": "stored query"}}
         ]
-        conv_mgmt_mod.get_conversation_list_service.return_value = conversations
+        conversation_db_mod.get_conversation_list.return_value = conversations
         token_db_mod.get_latest_usage_metadata.reset_mock(side_effect=True)
 
         result = await ns.list_conversations(ctx=ctx)
@@ -1700,7 +1700,7 @@ class TestListConversationsErrorHandling:
         """Test that usage metadata is not injected into conversation items."""
         ctx = MockNorthboundContext(token_id=1)
         conversations = [{"conversation_id": "1", "title": "Test"}]
-        conv_mgmt_mod.get_conversation_list_service.return_value = conversations
+        conversation_db_mod.get_conversation_list.return_value = conversations
         token_db_mod.get_latest_usage_metadata.reset_mock(side_effect=True)
         token_db_mod.get_latest_usage_metadata.return_value = {"query": "test query"}
 

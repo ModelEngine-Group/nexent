@@ -241,22 +241,22 @@ def _replace_skill_frontmatter_name(content: str, new_name: str) -> str:
     if not match:
         raise SkillException("SKILL.md must have YAML frontmatter")
 
-    try:
-        frontmatter = yaml.safe_load(match.group("frontmatter"))
-    except yaml.YAMLError as exc:
-        raise SkillException(f"Invalid SKILL.md frontmatter: {exc}") from exc
-    if not isinstance(frontmatter, dict):
-        raise SkillException("SKILL.md frontmatter must be a mapping")
+    frontmatter = match.group("frontmatter")
+    name_match = re.search(r"(?m)^name[ \t]*:[^\r\n]*(?P<line_end>\r?\n|$)", frontmatter)
+    if not name_match:
+        raise SkillException("SKILL.md frontmatter must contain a name field")
 
-    frontmatter["name"] = new_name
-    yaml_content = yaml.safe_dump(
-        frontmatter,
-        allow_unicode=True,
-        sort_keys=False,
-        default_flow_style=False,
-        width=float("inf"),
+    replacement = f"name: {json.dumps(new_name, ensure_ascii=False)}{name_match.group('line_end')}"
+    updated_frontmatter = (
+        frontmatter[:name_match.start()]
+        + replacement
+        + frontmatter[name_match.end():]
     )
-    return f"---\n{yaml_content}---\n{match.group('body')}"
+    return (
+        content[:match.start("frontmatter")]
+        + updated_frontmatter
+        + content[match.end("frontmatter"):]
+    )
 
 
 def _to_group_id_set(group_ids: Any) -> set[int]:

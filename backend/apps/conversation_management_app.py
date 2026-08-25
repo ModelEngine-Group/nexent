@@ -1,12 +1,12 @@
 import logging
 from http import HTTPStatus
-from typing import Any, Dict, Optional
+from typing import Annotated, Any, Dict, Optional
 
-from fastapi import APIRouter, Header, HTTPException, Request
+from fastapi import APIRouter, Header, HTTPException, Query, Request
 
 from consts.model import (
-    ConversationRequest,
     ConversationKnowledgeScopeUpdateRequest,
+    ConversationRequest,
     ConversationResponse,
     GenerateTitleRequest,
     MessageIdRequest,
@@ -14,16 +14,16 @@ from consts.model import (
     RenameRequest,
 )
 from consts.exceptions import ConversationNotFoundError, ValidationError
+from database.conversation_db import get_conversation_list_page
 from services.conversation_management_service import (
     create_new_conversation,
     delete_conversation_service,
     generate_conversation_title_service,
     get_conversation_history_service,
-    get_conversation_list_service,
     get_sources_service,
     rename_conversation_service,
-    update_message_opinion_service, get_message_id_by_index_impl,
     update_conversation_knowledge_scope_service,
+    update_message_opinion_service, get_message_id_by_index_impl,
 )
 from utils.auth_utils import get_current_user_id, get_current_user_info
 
@@ -57,7 +57,13 @@ async def create_new_conversation_endpoint(request: ConversationRequest, authori
 
 
 @router.get("/list", response_model=ConversationResponse)
-async def list_conversations_endpoint(authorization: Optional[str] = Header(None)):
+async def list_conversations_endpoint(
+    today_start_ms: Annotated[int, Query(ge=0)],
+    week_start_ms: Annotated[int, Query(ge=0)],
+    authorization: Optional[str] = Header(None),
+    offset: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[Optional[int], Query(ge=1, le=100)] = None,
+):
     """
     Get all conversation list
 
@@ -71,12 +77,19 @@ async def list_conversations_endpoint(authorization: Optional[str] = Header(None
         user_id, tenant_id = get_current_user_id(authorization)
         if not user_id:
             raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Unauthorized access, Please login first")
-        conversations = get_conversation_list_service(user_id)
+        conversations = get_conversation_list_page(
+            user_id=user_id,
+            today_start_ms=today_start_ms,
+            week_start_ms=week_start_ms,
+            limit=limit,
+            offset=offset,
+        )
         return ConversationResponse(code=0, message="success", data=conversations)
+    except HTTPException:
+        raise
     except Exception as e:
         logging.error(f"Failed to get conversation list: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
-
 
 @router.post("/rename", response_model=ConversationResponse)
 async def rename_conversation_endpoint(request: RenameRequest, authorization: Optional[str] = Header(None)):

@@ -207,7 +207,6 @@ from backend.services.conversation_management_service import (
         update_conversation_title,
         create_new_conversation,
         get_conversation_service,
-        get_conversation_list_service,
         rename_conversation_service,
         delete_conversation_service,
         get_conversation_history_service,
@@ -707,24 +706,6 @@ class TestConversationManagementService(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid chat_mode 'invalid'"):
             update_conversation_chat_mode_service(123, "invalid", self.user_id)
 
-    @patch('backend.services.conversation_management_service.get_conversation_list')
-    def test_get_conversation_list_service(self, mock_get_conversation_list):
-        # Setup
-        mock_conversations = [
-            {"conversation_id": 1, "title": "Chat 1", "create_time": "2023-04-01"},
-            {"conversation_id": 2, "title": "Chat 2", "create_time": "2023-04-02"}
-        ]
-        mock_get_conversation_list.return_value = mock_conversations
-
-        # Execute
-        result = get_conversation_list_service(self.user_id)
-
-        # Assert
-        self.assertEqual(len(result), 2)
-        self.assertEqual(result[0]["conversation_id"], 1)
-        self.assertEqual(result[1]["title"], "Chat 2")
-        mock_get_conversation_list.assert_called_once_with(self.user_id)
-
     @patch('backend.services.conversation_management_service.get_conversation')
     def test_get_conversation_service_preserves_authorization_scope(self, mock_get_conversation):
         mock_get_conversation.return_value = {"conversation_id": 123}
@@ -766,6 +747,7 @@ class TestConversationManagementService(unittest.TestCase):
         # Setup
         mock_history = {
             "conversation_id": 123,
+            "conversation_title": "AI Chat",
             "agent_id": 7,
             "runtime_metadata": {"tenant": {"region": "cn"}},
             "runtime_metadata_version": 3,
@@ -800,6 +782,7 @@ class TestConversationManagementService(unittest.TestCase):
         self.assertEqual(len(result), 1)  # Result is wrapped in a list
         self.assertEqual(result[0]["conversation_id"],
                          "123")  # Converted to string
+        self.assertEqual(result[0]["conversation_title"], "AI Chat")
         self.assertEqual(result[0]["agent_id"], 7)
         self.assertEqual(
             result[0]["runtime_metadata"],
@@ -1404,20 +1387,6 @@ class TestCreateNewConversation(unittest.TestCase):
         self.assertIn("DB error", str(ctx.exception))
 
 
-class TestGetConversationListService(unittest.TestCase):
-    """Test get_conversation_list_service function."""
-
-    @patch('backend.services.conversation_management_service.get_conversation_list')
-    def test_get_list_exception(self, mock_get):
-        """Should re-raise exception from database layer."""
-        mock_get.side_effect = Exception("DB error")
-        from backend.services.conversation_management_service import get_conversation_list_service
-
-        with self.assertRaises(Exception) as ctx:
-            get_conversation_list_service("user-1")
-        self.assertIn("DB error", str(ctx.exception))
-
-
 class TestRenameConversationService(unittest.TestCase):
     """Test rename_conversation_service function."""
 
@@ -1754,8 +1723,8 @@ class TestGetSourcesServiceEdgeCases(unittest.TestCase):
         self.assertEqual(search_item["message_id"], 1)
 
     @patch('backend.services.conversation_management_service.get_conversation')
-    @patch('backend.services.conversation_management_service.get_source_searches_by_message')
-    @patch('backend.services.conversation_management_service.get_source_images_by_message')
+    @patch('backend.services.conversation_management_service.get_source_searches_by_conversation')
+    @patch('backend.services.conversation_management_service.get_source_images_by_conversation')
     def test_no_message_id_uses_conversation_id(self, mock_get_images, mock_get_searches, mock_get_conv):
         """When message_id is None but conversation_id is provided."""
         mock_get_conv.return_value = {"conversation_id": 123}

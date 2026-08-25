@@ -662,17 +662,22 @@ class NexentAgent:
         _managed_context: bool = False,
         *,
         context_items_override: Sequence["ContextItemInput"] | None = None,
+        _sandbox_tree_context: Optional[Dict[str, Any]] = None,
     ) -> CoreAgent:
         """
         Build a CoreAgent from ``agent_config``.
 
         Args:
             agent_config: AgentConfig describing this agent.
-            _managed_context: Deprecated internal compatibility flag. Managed
-                sub-agents now receive independent sandbox executors.
+            _managed_context: Internal compatibility flag for managed agents.
+            _sandbox_tree_context: Internal construction context used to share
+                one session Docker container across the agent tree while each
+                agent retains an isolated kernel.
         """
         if not isinstance(agent_config, AgentConfig):
             raise TypeError("agent_config must be a AgentConfig object")
+        if _sandbox_tree_context is None:
+            _sandbox_tree_context = {}
 
         try:
             model = self.create_model(agent_config.model_name)
@@ -700,14 +705,14 @@ class NexentAgent:
                 raise ValueError(f"Error in creating tool: {e}")
 
             try:
-                # Create managed agents recursively. Each internal agent receives
-                # an independent executor/kernel so its generated code remains
-                # inside the configured sandbox.
+                # Create managed agents recursively. Session-scoped Docker agents
+                # share one container for the tree but retain independent kernels.
                 raw_managed_agents = []
                 for sub_agent_config in agent_config.managed_agents:
                     inner_agent = self.create_single_agent(
                         sub_agent_config,
                         _managed_context=True,
+                        _sandbox_tree_context=_sandbox_tree_context,
                     )
                     raw_managed_agents.append((inner_agent, sub_agent_config))
                 managed_agents_list = [
@@ -762,8 +767,8 @@ class NexentAgent:
             )
 
             # Build one code executor for this agent. Managed-agent orchestration
-            # is a host-marked tool, while generated Python remains in this
-            # agent's independent sandbox executor/kernel.
+            # is a host-marked tool, so every agent needs its own kernel to avoid
+            # nested execution deadlocks; session containers can still be shared.
             python_executor = None
             if self.sandbox_config is not None:
                 from .sandbox import build_python_executor, SandboxLevel
@@ -779,7 +784,29 @@ class NexentAgent:
                         *tool_list,
                         *managed_agents_list,
                     ]),
+                    session_container_group=_sandbox_tree_context.get(
+                        "session_container_group"
+                    ),
                 )
+                session_container_group = None
+                if (
+                    self.sandbox_config.level == SandboxLevel.DOCKER
+                    and self.sandbox_config.scope.value == "session"
+                ):
+                    session_container_group = getattr(
+                        python_executor,
+                        "_nexent_session_container_group",
+                        None,
+                    )
+                if session_container_group is not None:
+                    existing_group = _sandbox_tree_context.setdefault(
+                        "session_container_group",
+                        session_container_group,
+                    )
+                    if existing_group is not session_container_group:
+                        raise RuntimeError(
+                            "Agent tree received multiple session sandbox containers"
+                        )
                 self._sandbox_executors.append(python_executor)
                 # Eager warm-up for remote executors (skip for LOCAL which is instant).
                 if self.sandbox_config.level != SandboxLevel.LOCAL:
@@ -1566,7 +1593,8 @@ class NexentAgent:
                 from .sandbox import release_python_executor
                 release_python_executor(executor, logger)
             else:
-                # Session scope or unknown — destroy every per-agent container.
+                # Session kernel leases are released independently; their
+                # agent-tree container is deleted after the final lease closes.
                 from .sandbox import cleanup_executor
                 cleanup_executor(executor, logger, timeout=5.0)
 

@@ -1392,6 +1392,16 @@ export function ChatInterface() {
 
           if (data.code === 0 && data.data && data.data.length > 0) {
             const conversationData = data.data[0] as ApiConversationDetail;
+            if (
+              conversationData.conversation_title &&
+              new URL(window.location.href).searchParams.get(
+                "conversation_id"
+              ) === String(dialog.conversation_id)
+            ) {
+              conversationManagement.setConversationTitle(
+                conversationData.conversation_title
+              );
+            }
             restoreConversationAgent(
               conversationData.agent_id ?? dialog.agent_id ?? null
             );
@@ -1521,6 +1531,16 @@ export function ChatInterface() {
 
         if (data.code === 0 && data.data && data.data.length > 0) {
           const conversationData = data.data[0] as ApiConversationDetail;
+          if (
+            conversationData.conversation_title &&
+            new URL(window.location.href).searchParams.get(
+              "conversation_id"
+            ) === String(dialog.conversation_id)
+          ) {
+            conversationManagement.setConversationTitle(
+              conversationData.conversation_title
+            );
+          }
           restoreConversationAgent(
             conversationData.agent_id ?? dialog.agent_id ?? null
           );
@@ -1629,11 +1649,19 @@ export function ChatInterface() {
 
     if (conversationManagement.conversationListQuery.isFetched) {
       linkedConversationHandledRef.current = true;
+      void handleDialogClickRef.current({
+        conversation_id: conversationId,
+        conversation_title: t("chatInterface.newConversation"),
+        agent_id: null,
+        create_time: 0,
+        update_time: 0,
+      });
     }
   }, [
     conversationManagement.conversationList,
     conversationManagement.conversationListQuery.isFetched,
     conversationManagement.conversationListQuery.isLoading,
+    t,
   ]);
 
   // Add function to asynchronously load attachment URLs

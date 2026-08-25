@@ -59,6 +59,7 @@ class ImageRecord(TypedDict):
 
 class ConversationHistory(TypedDict):
     conversation_id: int
+    conversation_title: str
     agent_id: Optional[int]
     knowledge_scope: Optional[Dict[str, Any]]
     runtime_metadata: Dict[str, Any]
@@ -729,12 +730,18 @@ def get_message_units(message_id: int) -> List[Dict[str, Any]]:
         return list(map(as_dict, records))
 
 
-def get_conversation_list(user_id: Optional[str] = None) -> List[Dict[str, Any]]:
+def get_conversation_list(
+    user_id: Optional[str] = None,
+    limit: Optional[int] = None,
+    offset: int = 0,
+) -> List[Dict[str, Any]]:
     """
     Get list of all undeleted conversations, sorted by creation time in descending order
 
     Args:
         user_id: Reserved parameter for filtering conversations created by this user
+        limit: Maximum number of conversations to return. None returns all conversations.
+        offset: Number of conversations to skip when limit is provided.
 
     Returns:
         List[Dict[str, Any]]: List of conversations, each containing id, title and timestamp information
@@ -753,12 +760,18 @@ def get_conversation_list(user_id: Optional[str] = None) -> List[Dict[str, Any]]
         ).where(
             ConversationRecord.delete_flag == 'N'
         ).order_by(
-            desc(ConversationRecord.create_time)
+            desc(ConversationRecord.create_time),
+            desc(ConversationRecord.conversation_id),
         )
 
         # If user_id is provided, additional filter conditions can be added here
         if user_id:
             stmt = stmt.where(ConversationRecord.created_by == user_id)
+
+        if limit is not None:
+            stmt = stmt.limit(limit)
+        if offset:
+            stmt = stmt.offset(offset)
 
         # Execute the query
         records = session.execute(stmt)
@@ -773,6 +786,62 @@ def get_conversation_list(user_id: Optional[str] = None) -> List[Dict[str, Any]]
             result.append(conversation)
 
         return result
+
+
+def get_conversation_list_page(
+    user_id: str,
+    today_start_ms: int,
+    week_start_ms: int,
+    limit: Optional[int] = None,
+    offset: int = 0,
+) -> Dict[str, Any]:
+    """Return one conversation page and its bucket counts in one query."""
+    with get_db_session() as session:
+        created_ms = func.extract('epoch', ConversationRecord.create_time) * 1000
+        stmt = select(
+            ConversationRecord.conversation_id,
+            ConversationRecord.conversation_title,
+            ConversationRecord.agent_id,
+            ConversationRecord.chat_mode,
+            created_ms.label('create_time'),
+            (func.extract('epoch', ConversationRecord.update_time) * 1000).label('update_time'),
+            func.count().over().label('total'),
+            func.count().filter(created_ms >= today_start_ms).over().label('today'),
+            func.count().filter(
+                created_ms < today_start_ms,
+                created_ms >= week_start_ms,
+            ).over().label('last_7_days'),
+            func.count().filter(created_ms < week_start_ms).over().label('older'),
+        ).where(
+            ConversationRecord.delete_flag == 'N',
+            ConversationRecord.created_by == user_id,
+        ).order_by(
+            desc(ConversationRecord.create_time),
+            desc(ConversationRecord.conversation_id),
+        )
+        if limit is not None:
+            stmt = stmt.limit(limit)
+        if offset:
+            stmt = stmt.offset(offset)
+
+        records = list(session.execute(stmt))
+        metadata = {
+            'total': int(records[0].total or 0) if records else 0,
+            'today': int(records[0].today or 0) if records else 0,
+            'last_7_days': int(records[0].last_7_days or 0) if records else 0,
+            'older': int(records[0].older or 0) if records else 0,
+        }
+        items = []
+        for record in records:
+            items.append({
+                'conversation_id': record.conversation_id,
+                'conversation_title': record.conversation_title,
+                'agent_id': record.agent_id,
+                'chat_mode': record.chat_mode or 'execution',
+                'create_time': int(record.create_time),
+                'update_time': int(record.update_time),
+            })
+        return {'items': items, 'metadata': metadata}
 
 
 def update_conversation_agent_id(conversation_id: int, agent_id: int, user_id: Optional[str] = None) -> bool:
@@ -1093,6 +1162,7 @@ def get_conversation_history(conversation_id: int, user_id: Optional[str] = None
         # First check if conversation exists
         check_stmt = select(
             ConversationRecord.conversation_id,
+            ConversationRecord.conversation_title,
             ConversationRecord.agent_id,
             ConversationRecord.chat_mode,
             ConversationRecord.knowledge_scope,
@@ -1194,6 +1264,7 @@ def get_conversation_history(conversation_id: int, user_id: Optional[str] = None
 
         return {
             'conversation_id': conversation['conversation_id'],
+            'conversation_title': conversation.get('conversation_title'),
             'agent_id': conversation.get('agent_id'),
             'chat_mode': conversation.get('chat_mode') or 'execution',
             'knowledge_scope': conversation.get('knowledge_scope'),
