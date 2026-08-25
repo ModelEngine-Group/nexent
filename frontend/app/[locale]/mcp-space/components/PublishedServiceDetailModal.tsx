@@ -429,6 +429,7 @@ export default function PublishedServiceDetailModal({
                     <Form.Item name="group_ids" className="mb-0">
                       <Select
                         mode="multiple"
+                        showSearch={{ optionFilterProp: "label" }}
                         placeholder={t("tenantResources.knowledgeBase.groupNames")}
                         value={draft.ingroupPermission === "PRIVATE" ? [] : (draft.groupIds ? draft.groupIds.split(",").map(Number) : [])}
                         options={groups.map((g: { group_id: number; group_name: string }) => ({
