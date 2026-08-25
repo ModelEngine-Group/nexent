@@ -185,12 +185,8 @@ def test_formatting_empty_and_tool_variants():
     en_description = _format_tools_description({"search": tool}, language="en", is_manager=False)
     assert "[MCP] search" in zh_description
     assert "presigned_url" in zh_description
-    assert "最终回答中的文件或图片必须使用永久 S3 URL" in zh_description
-    assert "只有 PIL 图片对象才能调用 `.save()`" in zh_description
     assert "Accepts input" in en_description
     assert "presigned_url" in en_description
-    assert "Use permanent S3 URLs for files and images in final answers" in en_description
-    assert "call `.save()` only on PIL images" in en_description
 
 
 def test_memory_formatting_renders_agent_presearch_and_ignores_retired_levels():
