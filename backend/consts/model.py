@@ -1194,6 +1194,8 @@ class GroupListRequest(BaseModel):
         "created_at", description="Field to sort by")
     sort_order: Optional[str] = Field(
         "desc", description="Sort order (asc or desc)")
+    search: Optional[str] = Field(
+        None, max_length=200, description="Search group name")
 
 
 class UserListRequest(BaseModel):
@@ -1207,6 +1209,12 @@ class UserListRequest(BaseModel):
         "created_at", description="Field to sort by")
     sort_order: Optional[str] = Field(
         "desc", description="Sort order (asc or desc)")
+    search: Optional[str] = Field(
+        None, max_length=200, description="Search user email")
+    roles: Optional[List[str]] = Field(
+        None, description="Filter by user roles")
+    group_ids: Optional[List[int]] = Field(
+        None, description="Filter by user group IDs")
 
 
 class GroupUserRequest(BaseModel):

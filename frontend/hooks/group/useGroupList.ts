@@ -3,13 +3,18 @@ import { useQuery } from "@tanstack/react-query";
 import { listGroups } from "@/services/groupService";
 import type { Group } from "@/services/groupService";
 
-export function useGroupList(tenantId: string | null, page?: number, pageSize?: number) {
+export function useGroupList(
+  tenantId: string | null,
+  page?: number,
+  pageSize?: number,
+  search?: string
+) {
   const query = useQuery({
-    queryKey: ["groups", tenantId, page, pageSize],
-    queryFn: () => listGroups(tenantId!, page, pageSize),
+    queryKey: ["groups", tenantId, page, pageSize, search],
+    queryFn: () => listGroups(tenantId!, page, pageSize, search),
     enabled: tenantId !== null,
     staleTime: 1000 * 30,
-    refetchOnMount: 'always',
+    refetchOnMount: "always",
   });
 
   const allGroupIds = useMemo(
@@ -31,7 +36,9 @@ export function useGroupList(tenantId: string | null, page?: number, pageSize?: 
 export function useGroupDetails(groups: Group[], groupIds: number[]) {
   const filteredGroups = useMemo(() => {
     const groupsById = new Map(groups.map((g) => [g.group_id, g]));
-    return groupIds.map((id) => groupsById.get(id)).filter((g): g is Group => g !== undefined);
+    return groupIds
+      .map((id) => groupsById.get(id))
+      .filter((g): g is Group => g !== undefined);
   }, [groups, groupIds]);
 
   return { groups: filteredGroups };

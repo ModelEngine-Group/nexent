@@ -111,6 +111,7 @@ import type { SkillFileContent } from "@/types/skill";
 export interface ThreadProps {
   agent: Agent | PublishedAgent;
   generatedTitle?: string;
+  welcomeTitle?: string;
   conversationId?: number;
   onBack?: () => void;
   selectedModelId?: string;
@@ -179,6 +180,7 @@ const useAgentModels = (
 export const Thread: FC<ThreadProps> = ({
   agent,
   generatedTitle,
+  welcomeTitle,
   conversationId,
   onBack,
   selectedModelId,
@@ -398,6 +400,7 @@ export const Thread: FC<ThreadProps> = ({
     <SourcesPanelProvider value={panelContextValue}>
       <ThreadView
         agent={agent}
+        welcomeTitle={welcomeTitle}
         onBack={onBack}
         models={models}
         selectedModelId={selectedModelId}
@@ -493,6 +496,7 @@ export const Thread: FC<ThreadProps> = ({
 
 interface ThreadViewProps {
   agent: Agent | PublishedAgent;
+  welcomeTitle?: string;
   onBack?: () => void;
   models: readonly ModelOption[];
   selectedModelId?: string;
@@ -536,6 +540,7 @@ interface ThreadViewProps {
 
 const ThreadView: FC<ThreadViewProps> = ({
   agent,
+  welcomeTitle,
   onBack,
   models,
   selectedModelId,
@@ -696,7 +701,7 @@ const ThreadView: FC<ThreadViewProps> = ({
               onToggleShareMessage={onToggleShareMessage}
             />
           ) : (
-            <ThreadWelcomeContent agent={agent} />
+            <ThreadWelcomeContent agent={agent} title={welcomeTitle} />
           )}
         </ThreadPrimitive.Viewport>
 
@@ -797,9 +802,13 @@ export const ReadOnlyConversation: FC<{
 
 interface ThreadWelcomeContentProps {
   agent: Agent | PublishedAgent;
+  title?: string;
 }
 
-const ThreadWelcomeContent: FC<ThreadWelcomeContentProps> = ({ agent }) => {
+const ThreadWelcomeContent: FC<ThreadWelcomeContentProps> = ({
+  agent,
+  title,
+}) => {
   const aui = useAui();
   const { t } = useTranslation();
   const Icon = getAgentIcon(agent);
@@ -823,7 +832,7 @@ const ThreadWelcomeContent: FC<ThreadWelcomeContentProps> = ({ agent }) => {
 
           <div className="text-center">
             <h1 className="text-balance text-2xl font-bold text-foreground md:text-3xl">
-              {t("chat.thread.helloAgent", { agent: displayName })}
+              {title ?? t("chat.thread.helloAgent", { agent: displayName })}
             </h1>
             <p className="mx-auto mt-3 max-w-xl text-pretty text-sm leading-relaxed text-muted-foreground">
               {agent.greeting_message || agent.description}

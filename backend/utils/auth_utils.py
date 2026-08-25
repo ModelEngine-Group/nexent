@@ -25,7 +25,7 @@ from consts.const import (
     JWT_EXPIRY_SECONDS,
     LANGUAGE,
 )
-from consts.exceptions import LimitExceededError, UnauthorizedError
+from consts.exceptions import LimitExceededError, UnauthorizedError, TokenExpiredError
 from database.user_tenant_db import get_user_tenant_by_user_id
 from database.token_db import get_token_by_access_key
 
@@ -76,13 +76,13 @@ def validate_timestamp(timestamp: str) -> bool:
 
 
 def extract_aksk_headers(headers: Dict[str, str]) -> Tuple[str, str, str]:
-    """Extract AK/SK headers or raise UnauthorizedError when missing."""
+    """Extract AK/SK headers or raise TokenExpiredError when missing."""
     access_key = headers.get("X-Access-Key") if headers else None
     timestamp = headers.get("X-Timestamp") if headers else None
     signature = headers.get("X-Signature") if headers else None
 
     if not access_key or not timestamp or not signature:
-        raise UnauthorizedError("Missing AK/SK authentication headers")
+        raise TokenExpiredError("Missing AK/SK authentication headers")
 
     return access_key, timestamp, signature
 
@@ -93,7 +93,7 @@ def get_aksk_config(tenant_id: str) -> Tuple[str, str]:
 
     This is intentionally a thin indirection so tests can monkeypatch it.
     """
-    raise UnauthorizedError("AK/SK authentication is not configured")
+    raise TokenExpiredError("AK/SK authentication is not configured")
 
 
 def verify_aksk_signature(
@@ -130,7 +130,7 @@ def validate_aksk_authentication(
         access_key, ts, sig = extract_aksk_headers(headers)
 
         if not validate_timestamp(ts):
-            raise UnauthorizedError("Invalid or expired timestamp")
+            raise TokenExpiredError("Invalid or expired timestamp")
 
         # Call with positional args so tests can monkeypatch with simple lambdas.
         if tenant_id is None:
@@ -146,7 +146,7 @@ def validate_aksk_authentication(
         raise
     except Exception as exc:
         logger.exception("Unexpected error during AK/SK authentication")
-        raise UnauthorizedError("Authentication failed") from exc
+        raise TokenExpiredError("Authentication failed") from exc
 
 
 # ---------------------------------------------------------------------------
@@ -211,21 +211,21 @@ def get_user_and_tenant_by_access_key(access_key: str) -> Dict[str, str]:
         UnauthorizedError: If the access key is not found or invalid.
     """
     if not access_key:
-        raise UnauthorizedError("Invalid access key")
+        raise TokenExpiredError("Invalid access key")
 
     # Query token from user_token_info_t
     token_info = get_token_by_access_key(access_key)
     if not token_info or token_info.get("delete_flag") == "Y":
-        raise UnauthorizedError("Invalid or inactive access key")
+        raise TokenExpiredError("Invalid or inactive access key")
 
     user_id = token_info.get("user_id")
     if not user_id:
-        raise UnauthorizedError("No user associated with this access key")
+        raise TokenExpiredError("No user associated with this access key")
 
     # Query tenant from user_tenant_t
     user_tenant_record = get_user_tenant_by_user_id(user_id)
     if not user_tenant_record or not user_tenant_record.get("tenant_id"):
-        raise UnauthorizedError("No active tenant relationship for this access key")
+        raise TokenExpiredError("No active tenant relationship for this access key")
     tenant_id = user_tenant_record["tenant_id"]
 
     return {
@@ -376,7 +376,7 @@ def _decode_jwt_token_for_expiry(token: str) -> dict:
     original token lifetime even when the token is already expired.
     """
     if not SUPABASE_JWT_SECRET:
-        raise UnauthorizedError("JWT verification is not configured")
+        raise TokenExpiredError("JWT verification is not configured")
 
     return jwt.decode(
         token,
@@ -400,7 +400,7 @@ def _decode_jwt_token(authorization: str) -> dict:
         logging.error(
             "SUPABASE_JWT_SECRET (or JWT_SECRET) is not configured; cannot verify JWT"
         )
-        raise UnauthorizedError("JWT verification is not configured")
+        raise TokenExpiredError("JWT verification is not configured")
 
     try:
         # Format authorization header
@@ -420,18 +420,18 @@ def _decode_jwt_token(authorization: str) -> dict:
         )
     except jwt.ExpiredSignatureError:
         logging.warning("Token expired")
-        raise UnauthorizedError("Token has expired")
+        raise TokenExpiredError("Token has expired")
     except jwt.InvalidSignatureError:
         logging.warning("JWT signature verification failed")
-        raise UnauthorizedError("Invalid or expired authentication token")
+        raise TokenExpiredError("Invalid or expired authentication token")
     except jwt.InvalidTokenError as e:
         logging.warning(f"Invalid JWT: {e}")
-        raise UnauthorizedError("Invalid or expired authentication token")
+        raise TokenExpiredError("Invalid or expired authentication token")
     except UnauthorizedError:
         raise
     except Exception as e:
         logging.error(f"Failed to decode token: {str(e)}")
-        raise UnauthorizedError("Invalid or expired authentication token")
+        raise TokenExpiredError("Invalid or expired authentication token")
 
 
 def _extract_user_id_from_jwt_token(authorization: str) -> Optional[str]:
@@ -468,7 +468,7 @@ def ensure_cas_session_active_from_authorization(authorization: Optional[str]) -
     from database.cas_session_db import is_cas_session_active
 
     if not is_cas_session_active(str(session_id)):
-        raise UnauthorizedError("CAS session has expired or been revoked")
+        raise TokenExpiredError("CAS session has expired or been revoked")
 
 
 def get_current_user_id(authorization: Optional[str] = None) -> tuple[str, str]:
@@ -491,13 +491,13 @@ def get_current_user_id(authorization: Optional[str] = None) -> tuple[str, str]:
     if authorization is None or (
         isinstance(authorization, str) and not authorization.strip()
     ):
-        raise UnauthorizedError("No authorization header provided")
+        raise TokenExpiredError("No authorization header provided")
 
     try:
         decoded = _decode_jwt_token(authorization)
         user_id = decoded.get("sub")
         if not user_id:
-            raise UnauthorizedError("Invalid or expired authentication token")
+            raise TokenExpiredError("Invalid or expired authentication token")
 
         ensure_cas_session_active_from_authorization(authorization)
 
@@ -517,7 +517,7 @@ def get_current_user_id(authorization: Optional[str] = None) -> tuple[str, str]:
         raise
     except Exception as e:
         logging.error(f"Failed to get user ID and tenant ID: {str(e)}")
-        raise UnauthorizedError("Invalid or expired authentication token")
+        raise TokenExpiredError("Invalid or expired authentication token")
 
 
 def get_current_user_context(
@@ -531,11 +531,11 @@ def get_current_user_context(
 
     user_tenant_record = get_user_tenant_by_user_id(user_id)
     if not user_tenant_record:
-        raise UnauthorizedError("User tenant relationship not found")
+        raise TokenExpiredError("User tenant relationship not found")
 
     user_role = str(user_tenant_record.get("user_role") or "").upper()
     if not user_role:
-        raise UnauthorizedError("User role not found")
+        raise TokenExpiredError("User role not found")
 
     return user_id, resolve_tenant_id_from_user_tenant_record(user_tenant_record), user_role
 
@@ -636,9 +636,9 @@ def generate_internal_runtime_jwt(
 def verify_internal_runtime_jwt(authorization: Optional[str]) -> tuple[str, str]:
     """Verify a northbound runtime token and return its user and tenant."""
     if not SUPABASE_JWT_SECRET:
-        raise UnauthorizedError("JWT verification is not configured")
+        raise TokenExpiredError("JWT verification is not configured")
     if not authorization or not authorization.strip():
-        raise UnauthorizedError("No authorization header provided")
+        raise TokenExpiredError("No authorization header provided")
 
     token = (
         authorization.replace("Bearer ", "", 1)
@@ -655,19 +655,19 @@ def verify_internal_runtime_jwt(authorization: Optional[str]) -> tuple[str, str]
             options={"verify_exp": True},
         )
     except jwt.ExpiredSignatureError as exc:
-        raise UnauthorizedError("Internal runtime token has expired") from exc
+        raise TokenExpiredError("Internal runtime token has expired") from exc
     except jwt.InvalidTokenError as exc:
-        raise UnauthorizedError("Invalid internal runtime token") from exc
+        raise TokenExpiredError("Invalid internal runtime token") from exc
 
     if claims.get("scope") != INTERNAL_RUNTIME_JWT_SCOPE:
-        raise UnauthorizedError("Invalid internal runtime token scope")
+        raise TokenExpiredError("Invalid internal runtime token scope")
 
     user_id = claims.get("sub")
     tenant_id = claims.get("tenant_id")
     if not isinstance(user_id, str) or not user_id.strip():
-        raise UnauthorizedError("Internal runtime token is missing user identity")
+        raise TokenExpiredError("Internal runtime token is missing user identity")
     if not isinstance(tenant_id, str) or not tenant_id.strip():
-        raise UnauthorizedError("Internal runtime token is missing tenant identity")
+        raise TokenExpiredError("Internal runtime token is missing tenant identity")
     return user_id, tenant_id
 
 

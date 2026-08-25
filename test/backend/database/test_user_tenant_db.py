@@ -508,6 +508,41 @@ def test_get_users_by_tenant_id_success_with_pagination(monkeypatch, mock_sessio
     mock_paginated_offset.limit.assert_called_once_with(10)
 
 
+def test_get_users_by_tenant_id_with_search_roles_and_groups(monkeypatch, mock_session):
+    """Test applying email, role, and group membership filters together."""
+    session, _ = mock_session
+    count_query = MagicMock()
+    count_query.filter.return_value.count.return_value = 1
+    membership_query = MagicMock()
+    membership_query.join.return_value.filter.return_value.subquery.return_value = MagicMock()
+    result_query = MagicMock()
+    filtered = MagicMock()
+    ordered = MagicMock()
+    offset = MagicMock()
+    limit = MagicMock()
+    limit.all.return_value = [MockUserTenant(user_id="u1", user_email="alice@example.com", user_role="ADMIN")]
+    offset.limit.return_value = limit
+    ordered.offset.return_value = offset
+    filtered.order_by.return_value = ordered
+    result_query.filter.return_value = filtered
+    session.query = MagicMock(side_effect=[membership_query, count_query, result_query])
+
+    context = MagicMock()
+    context.__enter__.return_value = session
+    context.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.user_tenant_db.get_db_session", lambda: context)
+    monkeypatch.setattr("backend.database.user_tenant_db.as_dict", lambda obj: obj.__dict__)
+
+    result = get_users_by_tenant_id(
+        "test_tenant", 1, 10, search=" alice ", roles=["ADMIN"], group_ids=[3]
+    )
+
+    assert result["total"] == 1
+    assert result["users"][0]["user_email"] == "alice@example.com"
+    membership_query.join.assert_called_once()
+    membership_query.join.return_value.filter.assert_called_once()
+
+
 def test_get_users_by_tenant_id_success_without_pagination(monkeypatch, mock_session):
     """Test successfully getting users by tenant ID without pagination (returns all data)"""
     session, query = mock_session
