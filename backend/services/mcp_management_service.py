@@ -1,10 +1,6 @@
 import logging
 from datetime import datetime
 from typing import Any, Dict, FrozenSet, List, Tuple
-from urllib.parse import urlencode
-
-import aiohttp
-
 from consts.const import CAN_EDIT_ALL_USER_ROLES
 from consts.exceptions import (
     MCPConnectionError,
@@ -60,7 +56,6 @@ def get_mcp_record_by_id_and_tenant(*args, **kwargs):
 
     return load_record(*args, **kwargs)
 
-MCP_REGISTRY_BASE_URL = "https://registry.modelcontextprotocol.io/v0.1/servers"
 ADMIN_ROLES = {"ADMIN", "SUPER_ADMIN", "SU"}
 SUPER_ADMIN_ROLES = {"SUPER_ADMIN", "SU"}
 
@@ -747,68 +742,4 @@ async def reject_community_mcp_service(
         market_id=market_id,
         new_status=STATUS_REJECTED,
         content=content,
-    )
-
-
-# ---------------------------------------------------------------------------
-# Registry Functions
-# ---------------------------------------------------------------------------
-
-async def _list_official_registry_mcp_services(
-    *,
-    search: str | None = None,
-    include_deleted: bool = False,
-    updated_since: str | None = None,
-    version: str | None = None,
-    cursor: str | None = None,
-    limit: int = 30,
-) -> Dict[str, Any]:
-    """List MCP services from the official MCP Registry."""
-    params: Dict[str, Any] = {"limit": limit}
-    if search:
-        params["search"] = search
-    if include_deleted:
-        params["include_deleted"] = "true"
-    if updated_since:
-        params["updated_since"] = updated_since
-    if version:
-        params["version"] = version
-    if cursor:
-        params["cursor"] = cursor
-
-    request_url = f"{MCP_REGISTRY_BASE_URL}?{urlencode(params)}"
-    timeout = aiohttp.ClientTimeout(total=20)
-
-    async with aiohttp.ClientSession(timeout=timeout, trust_env=True) as session:
-        async with session.get(request_url) as response:
-            if response.status >= 400:
-                raise RuntimeError(f"Registry request failed with status {response.status}")
-            payload = await response.json(content_type=None)
-
-    raw_servers = payload.get("servers") if isinstance(payload, dict) else []
-    metadata = payload.get("metadata") if isinstance(payload, dict) and isinstance(payload.get("metadata"), dict) else {}
-
-    return {
-        "servers": raw_servers if isinstance(raw_servers, list) else [],
-        "metadata": metadata,
-    }
-
-
-async def list_registry_mcp_services(
-    *,
-    search: str | None = None,
-    include_deleted: bool = False,
-    updated_since: str | None = None,
-    version: str | None = None,
-    cursor: str | None = None,
-    limit: int = 30,
-) -> Dict[str, Any]:
-    """List MCP services from the official registry."""
-    return await _list_official_registry_mcp_services(
-        search=search,
-        include_deleted=include_deleted,
-        updated_since=updated_since,
-        version=version,
-        cursor=cursor,
-        limit=limit,
     )

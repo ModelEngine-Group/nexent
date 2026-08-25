@@ -672,6 +672,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                     <Can permission="kb.groups:update">
                       <Select
                         mode="multiple"
+                        showSearch={{ optionFilterProp: "label" }}
                         value={isGroupSelectDisabled ? [] : selectedGroupIds}
                         onChange={onSelectedGroupIdsChange}
                         style={{

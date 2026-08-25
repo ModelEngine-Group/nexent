@@ -964,6 +964,9 @@ if ENABLE_UPLOAD_IMAGE:
                 yield f"data: {json.dumps({'status': 'container_started', 'data': container_info}, ensure_ascii=False)}\n\n"
                 result = await deployment_task
                 yield f"data: {json.dumps({'status': 'success', 'data': result}, ensure_ascii=False)}\n\n"
+            except MCPNameIllegal as exc:
+                logger.warning(f"MCP service name conflict during image upload: {exc}")
+                yield f"data: {json.dumps({'status': 'error', 'detail': str(exc)}, ensure_ascii=False)}\n\n"
             except Exception:
                 # Keep internal exception details out of the externally visible SSE
                 # payload; the server log retains the traceback for diagnostics.

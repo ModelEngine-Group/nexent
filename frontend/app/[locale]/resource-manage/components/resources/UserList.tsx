@@ -395,6 +395,7 @@ export default function UserList({
           >
             <Select
               mode="multiple"
+              showSearch={{ optionFilterProp: "label" }}
               placeholder={t("tenantResources.groups.selectUsers")}
               options={groups.map((g) => ({
                 label: g.group_name,

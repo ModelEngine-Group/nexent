@@ -722,19 +722,6 @@ def test_community_list_request():
     assert req.limit == 50
 
 
-def test_registry_list_query():
-    """Test RegistryListQuery with strip validators"""
-    req = model_consts.RegistryListQuery(
-        search="  test  ",
-        version="  v1  ",
-        limit=25
-    )
-    assert req.search == "test"
-    assert req.version == "v1"
-    assert req.limit == 25
-    assert req.include_deleted is False
-
-
 def test_capacity_bare_model():
     """Test CapacityCoverageBareModel"""
     model = model_consts.CapacityCoverageBareModel(

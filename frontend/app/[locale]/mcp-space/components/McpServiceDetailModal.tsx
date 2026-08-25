@@ -511,6 +511,16 @@ export default function McpServiceDetailModal({
     <>
       <Modal
         open
+        title={
+          <div>
+            <div className="text-xl font-semibold leading-7 text-slate-900">
+              {t("mcpTools.detail.editTitle")}
+            </div>
+            <div className="mt-1 text-sm font-normal text-slate-500">
+              {t("mcpTools.detail.editSubtitle")}
+            </div>
+          </div>
+        }
         footer={null}
         closable
         centered
@@ -520,15 +530,6 @@ export default function McpServiceDetailModal({
         styles={mcpToolsModalChromeStyles()}
       >
         <div className="bg-white">
-          <div className="border-b border-slate-100 px-6 py-5">
-            <h2 className="text-2xl font-semibold text-slate-900">
-              {t("mcpTools.detail.editTitle")}
-            </h2>
-            <p className="mt-1 text-sm text-slate-500">
-              {t("mcpTools.detail.editSubtitle")}
-            </p>
-          </div>
-
           <Form
             form={form}
             layout="vertical"
@@ -868,9 +869,17 @@ export default function McpServiceDetailModal({
                   name="group_ids"
                   label={t("tenantResources.knowledgeBase.groupNames")}
                   className="mb-0"
+                  help={
+                    isApi ? (
+                      <span style={{ fontSize: 12, color: "rgba(0,0,0,0.45)" }}>
+                        {t("mcpTools.detail.groupPermissionUnsupported")}
+                      </span>
+                    ) : undefined
+                  }
                 >
                   <Select
                     mode="multiple"
+                    showSearch={{ optionFilterProp: "label" }}
                     placeholder={t("tenantResources.knowledgeBase.groupNames")}
                     disabled={isReadOnly || isApi}
                     value={
@@ -942,12 +951,6 @@ export default function McpServiceDetailModal({
                 </Can>
               </div>
             </Can>
-            {isApi ? (
-              <p className="text-xs text-slate-400 -mt-3">
-                {t("mcpTools.detail.groupPermissionUnsupported")}
-              </p>
-            ) : null}
-
             <div className="flex flex-col gap-4">
               <TagEditor
                 title={t("mcpTools.detail.tags")}

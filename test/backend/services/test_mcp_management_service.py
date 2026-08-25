@@ -71,7 +71,6 @@ from backend.services.mcp_management_service import (
     change_mcp_market_status,
     delete_community_mcp_service,
     list_my_community_mcp_services,
-    list_registry_mcp_services,
 )
 
 # Re-patch exception references in the module

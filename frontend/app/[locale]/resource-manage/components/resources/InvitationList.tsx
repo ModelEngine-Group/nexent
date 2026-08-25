@@ -644,6 +644,7 @@ export default function InvitationList({
             >
               <Select
                 mode="multiple"
+                showSearch={{ optionFilterProp: "label" }}
                 placeholder={t("tenantResources.invitation.groupNames")}
                 options={groups.map((group) => ({
                   label: group.group_name,
