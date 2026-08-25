@@ -708,7 +708,9 @@ async def get_tool_from_remote_mcp_server(
                                      params=[],
                                      source=ToolSourceEnum.MCP.value,
                                      inputs=str(input_schema["properties"]),
-                                     output_type="string",
+                                     # MCP results may contain text, structured data, images, audio, or files.
+                                     # "object" matches the runtime adapter and avoids advertising every result as text.
+                                     output_type="object",
                                      class_name=sanitized_tool_name,
                                      usage=mcp_server_name,
                                      origin_name=tool.name,

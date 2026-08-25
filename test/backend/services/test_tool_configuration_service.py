@@ -1424,6 +1424,7 @@ class TestGetToolFromRemoteMcpServer:
         assert result[0].name == "test_tool_1"
         assert result[0].description == "Test tool 1 description"
         assert result[0].source == ToolSourceEnum.MCP.value
+        assert result[0].output_type == "object"
         assert result[0].usage == "test_server"
         assert result[1].name == "test_tool_2"
         assert result[1].description == "Test tool 2 description"

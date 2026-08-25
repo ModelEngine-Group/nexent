@@ -6,7 +6,7 @@ import os
 from typing import Any, Dict
 
 from consts.agent import SAFE_AGENT_STREAM_ERROR_MESSAGE
-from database.attachment_db import upload_fileobj
+from database.attachment_db import _build_mcp_presigned_url, get_file_url, upload_fileobj
 from services.file_management_service import is_allowed_skill_upload_path
 
 logger = logging.getLogger(__name__)
@@ -62,18 +62,51 @@ def serialize_stream_unit_content(data: Dict[str, Any], content: str) -> str:
 
 def transform_skill_files_to_standard_format(upload_results: list[dict]) -> list[dict]:
     """Transform skill upload results to the frontend attachment format."""
-    return [
-        {
+    attachments = []
+    for result in upload_results:
+        attachment = {
             "object_name": result.get("object_name", ""),
             "name": result.get("file_name", result.get("name", "")),
             "type": "file",
             "size": result.get("file_size", result.get("size", 0)),
             "url": result.get("url", ""),
-            "presigned_url": result.get("presigned_url", result.get("preview_url", "")),
             "description": "",
         }
-        for result in upload_results
-    ]
+        if result.get("presigned_url"):
+            attachment["presigned_url"] = result["presigned_url"]
+        attachments.append(attachment)
+    return attachments
+
+
+def enrich_file_uploads_with_presigned_urls(
+    upload_results: list[dict],
+    expires: int = 86400,
+) -> list[dict]:
+    """Add short-lived northbound URLs to response metadata without mutating tool results."""
+    enriched_results: list[dict] = []
+    for result in upload_results:
+        enriched_result = dict(result)
+        object_name = str(result.get("object_name") or "").strip()
+        if object_name and not enriched_result.get("presigned_url"):
+            try:
+                url_result = get_file_url(object_name=object_name, expires=expires)
+                if url_result.get("success") and url_result.get("url"):
+                    enriched_result["presigned_url"] = _build_mcp_presigned_url(
+                        url_result["url"]
+                    )
+                else:
+                    logger.warning(
+                        "Failed to generate presigned URL object_name=%s error=%s",
+                        object_name,
+                        url_result.get("error"),
+                    )
+            except Exception:
+                logger.exception(
+                    "Failed to enrich file upload with presigned URL object_name=%s",
+                    object_name,
+                )
+        enriched_results.append(enriched_result)
+    return enriched_results
 
 
 async def process_skill_file_uploads(
@@ -118,7 +151,7 @@ async def process_skill_file_uploads(
                     file_obj=file_obj,
                     file_name=file_name,
                     prefix=actual_prefix,
-                    generate_presigned_url=True,
+                    generate_presigned_url=False,
                     file_size=file_size,
                 )
 
@@ -129,9 +162,7 @@ async def process_skill_file_uploads(
                         "file_name": file_name,
                         "absolute_path": absolute_path,
                         "object_name": upload_result.get("object_name"),
-                        "preview_url": upload_result.get("presigned_url") or upload_result.get("url"),
                         "url": upload_result.get("url"),
-                        "presigned_url": upload_result.get("presigned_url"),
                         "mime_type": mime_type,
                         "file_size": upload_result.get("file_size", file_size),
                     }

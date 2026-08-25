@@ -237,6 +237,89 @@ class TestHostToolBridge:
         finally:
             bridge.close()
 
+    def test_host_tool_proxy_preserves_image_result_and_save(self, tmp_path):
+        from PIL import Image
+        from smolagents.agent_types import AgentImage
+
+        bridge = sandbox_module._ToolBridge(
+            sandbox_module.logging.getLogger("test_sandbox")
+        )
+        bridge.register({
+            "generate_chart": lambda: AgentImage(Image.new("RGB", (4, 3), "red")),
+        })
+        try:
+            namespace = {}
+            exec(
+                bridge.proxy_code(
+                    {"generate_chart": object()},
+                    bridge_host="127.0.0.1",
+                ),
+                namespace,
+            )
+
+            result = namespace["generate_chart"]()
+            output_path = tmp_path / "chart.png"
+            result.save(output_path)
+
+            assert isinstance(result, Image.Image)
+            assert result.size == (4, 3)
+            with Image.open(output_path) as saved_image:
+                assert saved_image.size == (4, 3)
+        finally:
+            bridge.close()
+
+    def test_host_tool_proxy_preserves_nested_binary_result(self):
+        bridge = sandbox_module._ToolBridge(
+            sandbox_module.logging.getLogger("test_sandbox")
+        )
+        bridge.register({"binary_tool": lambda: {"items": [b"chart-bytes"]}})
+        try:
+            namespace = {}
+            exec(
+                bridge.proxy_code(
+                    {"binary_tool": object()},
+                    bridge_host="127.0.0.1",
+                ),
+                namespace,
+            )
+
+            assert namespace["binary_tool"]() == {"items": [b"chart-bytes"]}
+        finally:
+            bridge.close()
+
+    def test_host_parallel_executor_restores_bridged_tool_references(self):
+        def host_add(left, right=0):
+            return left + right
+
+        def parallel_executor(tasks):
+            return [func(**kwargs) for func, kwargs in tasks]
+
+        tools = {
+            "host_add": host_add,
+            "parallel_executor": parallel_executor,
+        }
+        bridge = sandbox_module._ToolBridge(
+            sandbox_module.logging.getLogger("test_sandbox")
+        )
+        bridge.register(tools)
+        try:
+            namespace = {}
+            exec(
+                bridge.proxy_code(tools, bridge_host="127.0.0.1"),
+                namespace,
+            )
+
+            result = namespace["parallel_executor"](
+                tasks=[
+                    (namespace["host_add"], {"left": 1, "right": 2}),
+                    (namespace["host_add"], {"left": 4, "right": 5}),
+                ]
+            )
+
+            assert result == [3, 9]
+        finally:
+            bridge.close()
+
 
 class TestKernelGatewayConfiguration:
     """Kernel Gateway exposes the APIs required by the sandbox pool."""
