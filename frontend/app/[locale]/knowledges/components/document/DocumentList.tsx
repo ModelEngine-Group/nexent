@@ -188,7 +188,10 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
       () => getAccessibleGroupIds(),
       [getAccessibleGroupIds]
     );
-    const { groups } = useGroupDetails(groupData?.groups ?? [], accessibleGroupIds);
+    const { groups } = useGroupDetails(
+      groupData?.groups ?? [],
+      accessibleGroupIds
+    );
 
     const groupOptions = groups.map((group) => ({
       label: group.group_name,
@@ -345,7 +348,12 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
         };
         initDefaultGroup();
       }
-    }, [isCreatingMode, tenantId, accessibleGroupIds, onSelectedGroupIdsChange]);
+    }, [
+      isCreatingMode,
+      tenantId,
+      accessibleGroupIds,
+      onSelectedGroupIdsChange,
+    ]);
 
     // Clear group IDs when permission is set to PRIVATE
     React.useEffect(() => {
@@ -1094,6 +1102,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                           <DocumentStatus
                             status={doc.status}
                             showIcon={true}
+                            errorCode={doc.error_code}
                             errorReason={doc.error_reason}
                             kbId={knowledgeBaseId}
                             docId={doc.id}

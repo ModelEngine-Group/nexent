@@ -1246,6 +1246,7 @@ class KnowledgeBaseService {
         token_num: 0,
         status: file.status || "UNKNOWN",
         latest_task_id: file.latest_task_id || "",
+        error_code: file.error_code,
         error_reason: file.error_reason,
         error_stage: file.error_stage,
         failed_at: file.failed_at,
@@ -1957,7 +1958,8 @@ class KnowledgeBaseService {
       }
 
       const errorCode = (data.error_code && String(data.error_code)) || null;
-      const errorReason = (data.error_message && String(data.error_message)) || null;
+      const errorReason =
+        (data.error_message && String(data.error_message)) || null;
       const errorStage = (data.error_stage && String(data.error_stage)) || null;
       const failedAt = (data.failed_at && String(data.failed_at)) || null;
 

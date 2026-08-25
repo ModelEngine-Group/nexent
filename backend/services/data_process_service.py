@@ -20,13 +20,15 @@ from PIL import Image
 from transformers import CLIPModel, CLIPProcessor
 
 from consts.const import CLIP_MODEL_PATH, IMAGE_FILTER, MAX_CONCURRENT_CONVERSIONS, REDIS_BACKEND_URL, REDIS_URL
-from consts.exceptions import OfficeConversionException
+from consts.error_code import ErrorCode
+from consts.exceptions import AppException, OfficeConversionException
 from consts.model import BatchTaskRequest
 from data_process.app import app as celery_app
 from data_process.tasks import submit_process_forward_chain
 from data_process.utils import get_all_task_ids_from_redis, get_task_info
 from database.attachment_db import delete_file, file_exists, get_file_size_from_minio, get_file_stream, upload_file
 from utils.file_management_utils import convert_office_to_pdf
+from utils.knowledge_ingestion_errors import classify_ingestion_exception
 
 
 # Limit concurrent LibreOffice processes to avoid resource exhaustion
@@ -539,14 +541,15 @@ class DataProcessService:
                 return source_config.get(key, default)
             return getattr(source_config, key, default)
 
-        def build_failure_result(source_config: dict, message: str) -> dict:
+        def build_failure_result(source_config: dict, error: object) -> dict:
+            classified = classify_ingestion_exception(error, "TASK_SUBMIT")
             return {
                 "file_id": config_value(source_config, "file_id"),
                 "source": config_value(source_config, "source"),
                 "original_filename": config_value(source_config, "original_filename"),
                 "status": "FAILED",
-                "error_code": "TASK_SUBMIT_FAILED",
-                "error_message": str(message)[:500],
+                "error_code": classified.error_code,
+                "error_message": classified.error_message,
             }
 
         # Create individual tasks for each source
@@ -567,13 +570,23 @@ class DataProcessService:
                 logger.error(
                     f"Missing required field 'source' in source config: {source_config}")
                 results.append(build_failure_result(
-                    source_config, "Missing required field 'source'"))
+                    source_config,
+                    AppException(
+                        ErrorCode.COMMON_MISSING_REQUIRED_FIELD,
+                        "Missing required field 'source'",
+                    ),
+                ))
                 continue
             if not index_name:
                 logger.error(
                     f"Missing required field 'index_name' in source config: {source_config}")
                 results.append(build_failure_result(
-                    source_config, "Missing required field 'index_name'"))
+                    source_config,
+                    AppException(
+                        ErrorCode.COMMON_MISSING_REQUIRED_FIELD,
+                        "Missing required field 'index_name'",
+                    ),
+                ))
                 continue
 
             chain_kwargs = dict(
