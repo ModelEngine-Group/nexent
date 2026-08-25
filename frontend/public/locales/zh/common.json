@@ -1646,6 +1646,7 @@
   "skillManagement.chat.userRequestWithContext": "用户需求：{{request}}\n\n{{context}}",
   "skillManagement.chat.editGreetingTitle": "你好！我是 Skill 构建助手，当前正在编辑「{{name}}」。",
   "skillManagement.chat.editGreetingBody": "你可以告诉我需要优化或调整的地方，我会帮你更新对应的文件内容。",
+  "skillManagement.chat.createWelcomeTitle": "您好，我是交互式创建助手",
   "skillManagement.chat.createGreetingTitle": "你好！我是 Skill 构建助手。请告诉我你想创建什么样的技能，我来帮你生成 Skill 的结构和代码。",
   "skillManagement.chat.createGreetingExample": "例如：「创建一个能够分析 CSV 文件并生成数据报告的技能」",
   "skillManagement.chat.editPlaceholder": "告诉我需要如何优化这个技能...",
