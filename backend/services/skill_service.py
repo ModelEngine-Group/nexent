@@ -3202,3 +3202,5 @@ def get_official_skills_with_status(
             "source": "official",
             "status": status,
         })
+
+    return result
