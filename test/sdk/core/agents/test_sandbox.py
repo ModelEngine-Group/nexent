@@ -21,7 +21,7 @@ import sys
 import time
 import threading
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from unittest.mock import ANY, MagicMock, call, patch
 
 import pytest
@@ -319,6 +319,61 @@ class TestHostToolBridge:
             assert result == [3, 9]
         finally:
             bridge.close()
+
+    def test_serialize_tool_bridge_value_handles_audio_paths_and_models(
+        self,
+        tmp_path,
+        monkeypatch,
+    ):
+        class FakeAgentAudio:
+            def __init__(self, location):
+                self.location = location
+
+            def to_string(self):
+                return self.location
+
+        class JsonModel:
+            def model_dump(self, mode):
+                assert mode == "json"
+                return {"output_path": tmp_path / "report.txt"}
+
+        smolagents_module = ModuleType("smolagents")
+        agent_types_module = ModuleType("smolagents.agent_types")
+        agent_types_module.AgentAudio = FakeAgentAudio
+        agent_types_module.AgentImage = ()
+        smolagents_module.agent_types = agent_types_module
+        monkeypatch.setitem(sys.modules, "smolagents", smolagents_module)
+        monkeypatch.setitem(sys.modules, "smolagents.agent_types", agent_types_module)
+        audio_path = tmp_path / "sample.wav"
+        audio_path.write_bytes(b"audio-bytes")
+
+        serialized_audio = sandbox_module._serialize_tool_bridge_value(
+            FakeAgentAudio(audio_path)
+        )
+
+        assert serialized_audio[sandbox_module._TOOL_BRIDGE_VALUE_MARKER] == 1
+        assert serialized_audio["kind"] == "audio"
+        assert serialized_audio["mime_type"] in {"audio/wav", "audio/x-wav"}
+        assert serialized_audio["encoding"] == "base64"
+        assert serialized_audio["data"] == "YXVkaW8tYnl0ZXM="
+        assert sandbox_module._serialize_tool_bridge_value(
+            FakeAgentAudio(tmp_path / "missing.wav")
+        ) == str(tmp_path / "missing.wav")
+        assert sandbox_module._serialize_tool_bridge_value(JsonModel()) == {
+            "output_path": str(tmp_path / "report.txt")
+        }
+
+    def test_tool_bridge_value_rejects_unsupported_results_and_unknown_references(self):
+        with pytest.raises(TypeError, match="Host tool returned unsupported result type: builtins.object"):
+            sandbox_module._serialize_tool_bridge_value(object())
+
+        unknown_reference = {
+            sandbox_module._TOOL_BRIDGE_VALUE_MARKER: 1,
+            "kind": "tool_reference",
+            "name": "missing_tool",
+        }
+        with pytest.raises(ValueError, match="Unknown local tool reference: missing_tool"):
+            sandbox_module._deserialize_tool_bridge_value(unknown_reference, {})
 
 
 class TestKernelGatewayConfiguration:
