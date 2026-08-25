@@ -1264,7 +1264,7 @@ def test_import_agent_api_success_without_skills(mocker, mock_auth_header):
     """Test import_agent_api success case without skills."""
     mock_import_agent = mocker.patch(
         "apps.agent_app.import_agent_impl", new_callable=AsyncMock)
-    mock_import_agent.return_value = None
+    mock_import_agent.return_value = {123: 456}
 
     response = config_client.post(
         "/agent/import",
@@ -1292,14 +1292,17 @@ def test_import_agent_api_success_without_skills(mocker, mock_auth_header):
 
     assert response.status_code == 200
     mock_import_agent.assert_called_once()
-    assert response.json() == {}
+    assert response.json() == {
+        "agent_id": 456,
+        "agent_id_mapping": {"123": 456},
+    }
 
 
 def test_import_agent_api_success_with_skills(mocker, mock_auth_header):
     """Test import_agent_api success case with skills."""
     mock_import_with_skills = mocker.patch(
         "apps.agent_app.import_agent_with_skills_impl", new_callable=AsyncMock)
-    mock_import_with_skills.return_value = None
+    mock_import_with_skills.return_value = {123: 456}
 
     response = config_client.post(
         "/agent/import",

@@ -6,10 +6,11 @@ import {
   useRef,
   useState,
   type ReactNode,
+  type Ref,
 } from "react";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
-import { Button, Switch, Tag } from "antd";
+import { Button, Switch, Tag, Tour } from "antd";
 import {
   History,
   Maximize2,
@@ -65,6 +66,8 @@ function resolveDraftFocusTarget(
   return null;
 }
 
+const AGENT_TOUR_SEEN_STORAGE_KEY = "nexent.agent-tour.seen";
+
 interface PanelCardProps {
   title: string;
   children: ReactNode;
@@ -72,6 +75,7 @@ interface PanelCardProps {
   leftAction?: ReactNode;
   rightAction?: ReactNode;
   icon?: ReactNode;
+  panelRef?: Ref<HTMLElement>;
 }
 
 function PanelCard({
@@ -81,18 +85,20 @@ function PanelCard({
   leftAction,
   rightAction,
   icon,
+  panelRef,
 }: PanelCardProps) {
   return (
     <section
+      ref={panelRef}
       className={`flex min-h-0 flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm ${className}`}
     >
-        <div className="flex min-h-12 shrink-0 items-center justify-between border-b border-gray-200 px-4">
-          <div className="flex items-center gap-2">
-            {icon}
-            <h3 className="text-base font-medium text-gray-900">{title}</h3>
-            {leftAction}
-          </div>
-          {rightAction}
+      <div className="flex min-h-12 shrink-0 items-center justify-between border-b border-gray-200 px-4">
+        <div className="flex items-center gap-2">
+          {icon}
+          <h3 className="text-base font-medium text-gray-900">{title}</h3>
+          {leftAction}
+        </div>
+        {rightAction}
       </div>
       {children}
     </section>
@@ -101,10 +107,16 @@ function PanelCard({
 
 function AgentSetupContent() {
   const { t } = useTranslation("common");
-  const queryClient = useQueryClient();
   const searchParams = useSearchParams();
+  const queryClient = useQueryClient();
   const snapshotRefreshQueue = useRef<Promise<boolean>>(Promise.resolve(true));
+  const generationPanelRef = useRef<HTMLElement>(null);
+  const configPanelRef = useRef<HTMLElement>(null);
+  const actionAreaRef = useRef<HTMLDivElement>(null);
   const [isGenerationVisible, setIsGenerationVisible] = useState(true);
+  const [isAgentTourOpen, setIsAgentTourOpen] = useState(false);
+  const [agentTourCurrent, setAgentTourCurrent] = useState(0);
+  const [isAgentTourPending, setIsAgentTourPending] = useState(false);
   const [isDebugVisible, setIsDebugVisible] = useState(false);
   const [isCompareMode, setIsCompareMode] = useState(false);
   const [isDebugFullscreen, setIsDebugFullscreen] = useState(false);
@@ -163,7 +175,6 @@ function AgentSetupContent() {
             throw new Error("Agent context changed during synchronization");
           }
 
-          queryClient.setQueryData(["agentInfo", agentId], result.data);
           await queryClient.invalidateQueries({ queryKey: ["agents"] });
           if (focusTarget) requestConfigFocus(agentId, focusTarget);
           return true;
@@ -177,7 +188,7 @@ function AgentSetupContent() {
         });
       return snapshotRefreshQueue.current;
     },
-    [queryClient, requestConfigFocus]
+    [requestConfigFocus]
   );
 
   const synchronizeCompletion = useCallback(
@@ -220,6 +231,37 @@ function AgentSetupContent() {
     if (currentAgentId !== null) synchronizeCompletion(currentAgentId);
   }, [currentAgentId, synchronizeCompletion]);
 
+  const handleAgentCreated = useCallback(() => {
+    setIsGenerationVisible(true);
+    if (
+      typeof window !== "undefined" &&
+      window.localStorage.getItem(AGENT_TOUR_SEEN_STORAGE_KEY) === "true"
+    ) {
+      return;
+    }
+    setAgentTourCurrent(0);
+    setIsAgentTourPending(true);
+  }, []);
+
+  useEffect(() => {
+    if (
+      !isAgentTourPending ||
+      !generationPanelRef.current ||
+      !configPanelRef.current ||
+      !actionAreaRef.current
+    ) {
+      return;
+    }
+
+    const animationFrame = requestAnimationFrame(() => {
+      setIsAgentTourOpen(true);
+      setIsAgentTourPending(false);
+      window.localStorage.setItem(AGENT_TOUR_SEEN_STORAGE_KEY, "true");
+    });
+
+    return () => cancelAnimationFrame(animationFrame);
+  }, [isAgentTourPending, isGenerationVisible]);
+
   return (
     <div className="flex h-full w-full min-h-0 flex-col bg-gray-50">
       <div className="h-auto min-h-0 shrink-0 bg-white">
@@ -228,6 +270,7 @@ function AgentSetupContent() {
             setIsShowVersionManagePanel((visible) => !visible)
           }
           isVersionManageVisible={isShowVersionManagePanel}
+          onAgentCreated={handleAgentCreated}
         />
       </div>
 
@@ -235,6 +278,7 @@ function AgentSetupContent() {
         <div className="flex min-w-0 min-h-0 flex-1 flex-row gap-4">
           {isGenerationVisible && (
             <PanelCard
+              panelRef={generationPanelRef}
               title={t("agent.page.panel.nl2agent")}
               className={isDebugVisible ? "flex-1" : "flex-[1]"}
               rightAction={
@@ -295,6 +339,7 @@ function AgentSetupContent() {
           )}
 
           <PanelCard
+            panelRef={configPanelRef}
             title={t("agent.page.panel.config")}
             className={isDebugFullscreen ? "flex-1" : "flex-[2]"}
             leftAction={
@@ -329,6 +374,7 @@ function AgentSetupContent() {
           >
             <div className="min-h-0 flex-1 overflow-auto px-4 py-2">
               <AgentConfig
+                actionAreaRef={actionAreaRef}
                 onToggleDebug={() => setIsDebugVisible((visible) => !visible)}
               />
             </div>
@@ -417,6 +463,44 @@ function AgentSetupContent() {
           )}
         </div>
       </main>
+      <Tour
+        open={isAgentTourOpen}
+        current={agentTourCurrent}
+        onChange={setAgentTourCurrent}
+        onClose={() => setIsAgentTourOpen(false)}
+        steps={[
+          {
+            title: t("agent.tour.generation.title"),
+            description: t("agent.tour.generation.description"),
+            target: generationPanelRef.current,
+            nextButtonProps: {
+              children: t("agent.tour.next"),
+            },
+          },
+          {
+            title: t("agent.tour.configuration.title"),
+            description: t("agent.tour.configuration.description"),
+            target: configPanelRef.current,
+            prevButtonProps: {
+              children: t("agent.tour.previous"),
+            },
+            nextButtonProps: {
+              children: t("agent.tour.next"),
+            },
+          },
+          {
+            title: t("agent.tour.actions.title"),
+            description: t("agent.tour.actions.description"),
+            target: actionAreaRef.current,
+            prevButtonProps: {
+              children: t("agent.tour.previous"),
+            },
+            nextButtonProps: {
+              children: t("agent.tour.finish"),
+            },
+          },
+        ]}
+      />
     </div>
   );
 }

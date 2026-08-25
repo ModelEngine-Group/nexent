@@ -462,6 +462,7 @@ export interface UpdateAgentInfoPayload {
   provide_run_summary?: boolean;
   allow_chat_metadata?: boolean;
   enable_context_manager?: boolean;
+  is_a2a?: boolean;
   verification_config?: Record<string, any>;
   enabled?: boolean;
   business_description?: string;
@@ -906,6 +907,7 @@ export const searchAgentInfo = async (
       prompt_template_id: data.prompt_template_id ?? 0,
       prompt_template_name: data.prompt_template_name ?? "system_default",
       provide_run_summary: data.provide_run_summary,
+      is_a2a: data.is_a2a ?? false,
       verification_config: data.verification_config,
       enabled: data.enabled,
       is_available: data.is_available,

@@ -1183,12 +1183,166 @@ class ElasticSearchService:
             raise Exception(f"Error deleting index: {str(e)}")
 
     @staticmethod
+    def _prepare_indices_page(
+            visible_knowledgebases: List[Dict[str, Any]],
+            pagination_enabled: bool,
+            offset: int,
+            limit: int | None,
+            keyword: str | None,
+            sources: List[str] | None,
+            models: List[str] | None,
+    ) -> tuple[List[Dict[str, Any]], Dict[str, Any]]:
+        """Apply list filters and optional pagination to ordered visible records."""
+        facets = {
+            "sources": sorted({
+                str(record.get("knowledge_sources"))
+                for record in visible_knowledgebases
+                if record.get("knowledge_sources")
+            }),
+            "models": sorted({
+                str(record.get("embedding_model_name"))
+                for record in visible_knowledgebases
+                if record.get("embedding_model_name")
+            }),
+        }
+        normalized_keyword = (keyword or "").strip().lower()
+        selected_sources = {source for source in (sources or []) if source}
+        selected_models = {model for model in (models or []) if model}
+        filtered = [
+            record for record in visible_knowledgebases
+            if (
+                not normalized_keyword
+                or normalized_keyword in str(record.get("knowledge_name") or "").lower()
+                or normalized_keyword in str(record.get("description") or "").lower()
+                or normalized_keyword in str(record.get("nickname") or "").lower()
+            )
+            and (
+                not selected_sources
+                or record.get("knowledge_sources") in selected_sources
+            )
+            and (
+                not selected_models
+                or record.get("embedding_model_name") in selected_models
+            )
+        ]
+        if not pagination_enabled:
+            return filtered, {}
+        if limit is None:
+            raise ValueError("limit is required when pagination is enabled")
+
+        total = len(filtered)
+        page = filtered[offset:offset + limit]
+        next_offset = offset + len(page)
+        return page, {
+            "total": total,
+            "next_offset": next_offset if next_offset < total else None,
+            "facets": facets,
+        }
+
+    @staticmethod
+    def _apply_read_only_to_asset_indices_info(result: Dict[str, Any]) -> Dict[str, Any]:
+        indices_info = result.get("indices_info")
+        if not indices_info:
+            return result
+        normalized = dict(result)
+        normalized["indices_info"] = [
+            {**info, "permission": PERMISSION_READ} for info in indices_info
+        ]
+        return normalized
+
+    @staticmethod
+    def merge_list_indices_results(
+            primary: Dict[str, Any],
+            asset_owner: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Merge non-paginated tenant and asset-owner results."""
+        asset_owner = ElasticSearchService._apply_read_only_to_asset_indices_info(asset_owner)
+        merged_indices = primary.get("indices", []) + asset_owner.get("indices", [])
+        result: Dict[str, Any] = {
+            "indices": merged_indices,
+            "count": len(merged_indices),
+        }
+        if "indices_info" in primary or "indices_info" in asset_owner:
+            result["indices_info"] = (
+                primary.get("indices_info", []) + asset_owner.get("indices_info", [])
+            )
+        return result
+
+    @staticmethod
+    def merge_paginated_list_indices_results(
+            primary: Dict[str, Any],
+            asset_owner: Dict[str, Any],
+            offset: int,
+            limit: int,
+    ) -> Dict[str, Any]:
+        """Merge two database-ordered tenant prefixes and return one global page."""
+        asset_owner = ElasticSearchService._apply_read_only_to_asset_indices_info(asset_owner)
+        primary_info = primary.get("indices_info", [])
+        asset_info = asset_owner.get("indices_info", [])
+        combined_info: List[Dict[str, Any]] = []
+        primary_index = asset_index = 0
+
+        def sort_key(item: Dict[str, Any]) -> tuple[str, str, str]:
+            return (
+                str(item.get("update_time") or ""),
+                str(item.get("knowledge_id") or "").zfill(20),
+                str(item.get("name") or ""),
+            )
+
+        while primary_index < len(primary_info) and asset_index < len(asset_info):
+            if sort_key(primary_info[primary_index]) >= sort_key(asset_info[asset_index]):
+                combined_info.append(primary_info[primary_index])
+                primary_index += 1
+            else:
+                combined_info.append(asset_info[asset_index])
+                asset_index += 1
+        combined_info.extend(primary_info[primary_index:])
+        combined_info.extend(asset_info[asset_index:])
+
+        page_info = combined_info[offset:offset + limit]
+        combined_indices = primary.get("indices", []) + asset_owner.get("indices", [])
+        page_indices = (
+            [item["name"] for item in page_info]
+            if combined_info
+            else combined_indices[offset:offset + limit]
+        )
+        total = int(primary.get("total", primary.get("count", 0))) + int(
+            asset_owner.get("total", asset_owner.get("count", 0))
+        )
+        next_offset = offset + len(page_indices)
+        source_facets = set(primary.get("facets", {}).get("sources", []))
+        source_facets.update(asset_owner.get("facets", {}).get("sources", []))
+        model_facets = set(primary.get("facets", {}).get("models", []))
+        model_facets.update(asset_owner.get("facets", {}).get("models", []))
+        result = {
+            "indices": page_indices,
+            "count": len(page_indices),
+            "total": total,
+            "next_offset": next_offset if next_offset < total else None,
+            "facets": {
+                "sources": sorted(source_facets),
+                "models": sorted(model_facets),
+            },
+            "estimated_row_height": 112,
+            "estimated_item_heights": None,
+        }
+        if "indices_info" in primary or "indices_info" in asset_owner:
+            result["indices_info"] = page_info
+        return result
+
+    @staticmethod
     def list_indices(
             pattern: str = "*",
             include_stats: bool = False,
             target_tenant_id: str = "",
             user_id: str = "",
-            vdb_core: VectorDatabaseCore | None = None
+            vdb_core: VectorDatabaseCore | None = None,
+            pagination_enabled: bool = False,
+            offset: int = 0,
+            limit: int | None = None,
+            keyword: str | None = None,
+            sources: List[str] | None = None,
+            models: List[str] | None = None,
     ):
         """
         List all indices that the current user has permissions to access based on role and group permissions.
@@ -1230,9 +1384,13 @@ class ElasticSearchService:
         es_indices_list = vdb_core.get_user_indices(pattern)
 
         # Get all knowledgebase records from database (for cleanup and permission checking)
-        all_db_records = get_knowledge_info_by_tenant_id(
-            target_tenant_id
-        )
+        if pagination_enabled:
+            all_db_records = get_knowledge_info_by_tenant_id(
+                target_tenant_id,
+                ordered=True,
+            )
+        else:
+            all_db_records = get_knowledge_info_by_tenant_id(target_tenant_id)
 
         # Filter visible knowledgebases based on user role and permissions
         visible_knowledgebases = []
@@ -1305,6 +1463,17 @@ class ElasticSearchService:
             caller_role=user_role,
             caller_tenant_id=target_tenant_id,
         )
+
+        visible_knowledgebases, pagination = ElasticSearchService._prepare_indices_page(
+            visible_knowledgebases=visible_knowledgebases,
+            pagination_enabled=pagination_enabled,
+            offset=offset,
+            limit=limit,
+            keyword=keyword,
+            sources=sources,
+            models=models,
+        )
+
         indices = [record["index_name"] for record in visible_knowledgebases]
 
         response = {
@@ -1315,6 +1484,12 @@ class ElasticSearchService:
                 for record in visible_knowledgebases
             },
         }
+        if pagination_enabled:
+            response.update({
+                **pagination,
+                "estimated_row_height": 112,
+                "estimated_item_heights": None,
+            })
 
         if include_stats:
             stats_info = []
