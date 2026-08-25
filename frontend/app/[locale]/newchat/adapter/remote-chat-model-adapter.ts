@@ -1471,6 +1471,15 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       await backendStopPromise;
     };
     const handleAbort = () => {
+      const abortReason = abortSignal?.reason as
+        | { detach?: boolean }
+        | undefined;
+      if (abortReason?.detach) {
+        log.log(
+          `[ChatModelAdapter] Local stream detached from conversation ${backendConversationId ?? "unknown"}`
+        );
+        return;
+      }
       if (backendConversationId !== null) {
         void stopBackendConversation(backendConversationId);
       }
