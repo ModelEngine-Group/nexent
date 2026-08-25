@@ -49,9 +49,11 @@ import type { CommunityQuickAddDraft } from "@/types/mcpTools";
 import type {
   Nl2AgentCardAction,
   Nl2aInstallableResource,
+  Nl2aResourceCandidate,
   Nl2aResourceInstallationOption,
   Nl2aSkillCreationRequest,
   Nl2aSuggestedResourceInstallationPayload,
+  Nl2aWeakSkillResource,
 } from "../adapter/remote-chat-model-adapter";
 import { Nl2AgentResourceSourceBadge } from "./nl2agent-resource-source-badge";
 
@@ -79,7 +81,7 @@ interface InstallationDraft {
 }
 
 interface InstallationItem {
-  resource: Nl2aInstallableResource;
+  resource: Nl2aInstallableResource | Nl2aWeakSkillResource;
   status: InstallationStatus;
   draft: InstallationDraft;
   resourceId?: number;
@@ -107,18 +109,65 @@ type InstallationAction =
       type: "skip";
       ref: string;
       reason: "install_failed" | "user_skipped";
+    }
+  | {
+      type: "accept_weak_resource";
+      resource: Nl2aWeakSkillResource;
+      requirementId: string;
     };
 
 const candidateRef = (item: InstallationItem) =>
   item.resource.candidate.candidate_ref;
+
+const installedCandidateRef = (item: InstallationItem): string =>
+  item.resource.candidate.resource_type === "skill" && item.resourceId
+    ? `skill:${item.resourceId}`
+    : candidateRef(item);
 
 const optionConfig = (
   option: Nl2aResourceInstallationOption
 ): Record<string, unknown> =>
   !Array.isArray(option.config) && option.config ? option.config : {};
 
-const initialDraft = (resource: Nl2aInstallableResource): InstallationDraft => {
-  const optionId = resource.default_option_id;
+const uniqueValues = (values: string[]): string[] => [...new Set(values)];
+
+const mergeCandidateCoverage = (
+  current: Nl2aResourceCandidate,
+  added: Nl2aResourceCandidate
+): Nl2aResourceCandidate => ({
+  ...current,
+  requirement_ids: uniqueValues([
+    ...current.requirement_ids,
+    ...added.requirement_ids,
+  ]),
+  user_confirmed_requirement_ids: uniqueValues([
+    ...current.user_confirmed_requirement_ids,
+    ...added.user_confirmed_requirement_ids,
+  ]),
+});
+
+const confirmCandidateRequirement = (
+  candidate: Nl2aResourceCandidate,
+  requirementId: string
+): Nl2aResourceCandidate => ({
+  ...candidate,
+  requirement_ids: uniqueValues([...candidate.requirement_ids, requirementId]),
+  user_confirmed_requirement_ids: uniqueValues([
+    ...candidate.user_confirmed_requirement_ids,
+    requirementId,
+  ]),
+});
+
+const candidateInstalledSkillId = (ref: string): number | undefined => {
+  if (!ref.startsWith("skill:")) return undefined;
+  const skillId = Number(ref.slice("skill:".length));
+  return Number.isInteger(skillId) && skillId > 0 ? skillId : undefined;
+};
+
+const initialDraft = (
+  resource: Nl2aInstallableResource | Nl2aWeakSkillResource
+): InstallationDraft => {
+  const optionId = resource.default_option_id || "";
   const option = resource.installation_options.find(
     (item) => item.option_id === optionId
   );
@@ -153,10 +202,60 @@ const initializeItems = (
     draft: initialDraft(resource),
   }));
 
+const initializeWeakResource = (
+  resource: Nl2aWeakSkillResource
+): InstallationItem => {
+  const resourceId = candidateInstalledSkillId(
+    resource.candidate.candidate_ref
+  );
+  return {
+    resource,
+    status: resourceId ? "installed" : "not_started",
+    draft: initialDraft(resource),
+    resourceId,
+  };
+};
+
 function reducer(
   state: InstallationItem[],
   action: InstallationAction
 ): InstallationItem[] {
+  if (action.type === "accept_weak_resource") {
+    const acceptedCandidate = confirmCandidateRequirement(
+      action.resource.candidate,
+      action.requirementId
+    );
+    const existing = state.find(
+      (item) => candidateRef(item) === acceptedCandidate.candidate_ref
+    );
+    if (!existing) {
+      return [
+        ...state,
+        initializeWeakResource({
+          ...action.resource,
+          candidate: acceptedCandidate,
+          recommendation: "recommended",
+        }),
+      ];
+    }
+    return state.map((item) =>
+      candidateRef(item) === acceptedCandidate.candidate_ref
+        ? {
+            ...item,
+            status: item.status === "skipped" ? "not_started" : item.status,
+            skipReason: undefined,
+            resource: {
+              ...item.resource,
+              candidate: mergeCandidateCoverage(
+                item.resource.candidate,
+                acceptedCandidate
+              ),
+              recommendation: "recommended",
+            },
+          }
+        : item
+    );
+  }
   return state.map((item) => {
     if (candidateRef(item) !== action.ref) return item;
     switch (action.type) {
@@ -218,7 +317,10 @@ const requireMcpId = async (name: string): Promise<number> => {
   return service.mcpId;
 };
 
-const needsConfiguration = (resource: Nl2aInstallableResource): boolean =>
+const needsConfiguration = (
+  resource: Nl2aInstallableResource | Nl2aWeakSkillResource
+): boolean =>
+  resource.candidate.source !== "INSTALLED_SKILL" &&
   resource.candidate.source !== "NEXENT_OFFICIAL_SKILL";
 
 const installedSkillId = (ref: string | null): number | null => {
@@ -300,6 +402,9 @@ export function SuggestedResourceInstallationCard({
     "not_started" | "failed"
   >("not_started");
   const [submitted, setSubmitted] = useState(false);
+  const [acceptedWeakSkills, setAcceptedWeakSkills] = useState<
+    Record<string, Nl2aResourceCandidate>
+  >({});
   const [activeSkillRequirementId, setActiveSkillRequirementId] = useState<
     string | null
   >(null);
@@ -322,24 +427,78 @@ export function SuggestedResourceInstallationCard({
     });
   }, [payload.skill_creation_requests]);
 
+  const unresolvedSkillRequests = useMemo(
+    () =>
+      payload.skill_creation_requests.filter(
+        (request) => !acceptedWeakSkills[request.requirement.requirement_id]
+      ),
+    [acceptedWeakSkills, payload.skill_creation_requests]
+  );
+  const fixedCandidates = useMemo(() => {
+    const byOriginalRef = new Map<string, Nl2aResourceCandidate>();
+    Object.values(acceptedWeakSkills).forEach((candidate) => {
+      const current = byOriginalRef.get(candidate.candidate_ref);
+      byOriginalRef.set(
+        candidate.candidate_ref,
+        current ? mergeCandidateCoverage(current, candidate) : candidate
+      );
+    });
+    const byInstalledRef = new Map<string, Nl2aResourceCandidate>();
+    byOriginalRef.forEach((candidate, ref) => {
+      const item = items.find((current) => candidateRef(current) === ref);
+      let fixed = item
+        ? mergeCandidateCoverage(item.resource.candidate, candidate)
+        : candidate;
+      if (
+        item?.status === "installed" &&
+        item.resourceId &&
+        fixed.resource_type === "skill"
+      ) {
+        fixed = {
+          ...fixed,
+          candidate_ref: `skill:${item.resourceId}`,
+          source: "INSTALLED_SKILL",
+        };
+      }
+      const current = byInstalledRef.get(fixed.candidate_ref);
+      byInstalledRef.set(
+        fixed.candidate_ref,
+        current ? mergeCandidateCoverage(current, fixed) : fixed
+      );
+    });
+    return [...byInstalledRef.values()];
+  }, [acceptedWeakSkills, items]);
+
   const interactive = !disabled && !submitted && isCardInteractive(cardKey);
   const dialogItem = items.find((item) => candidateRef(item) === dialogRef);
   const hasFailed = items.some((item) => item.status === "failed");
   const isBusy = items.some(
     (item) => item.status === "installing" || item.status === "configuring"
   );
+  const hasPendingConfirmedSkill = items.some(
+    (item) =>
+      item.resource.candidate.user_confirmed_requirement_ids.length > 0 &&
+      item.status !== "installed"
+  );
   const installedCount = items.filter(
     (item) => item.status === "installed"
   ).length;
-  const canContinue = interactive && !hasFailed && !isBusy;
+  const canContinue =
+    interactive &&
+    !hasFailed &&
+    !isBusy &&
+    !hasPendingConfirmedSkill &&
+    unresolvedSkillRequests.length === 0;
 
   const resourceActionState = () => ({
     installed: items
       .filter((item) => item.status === "installed")
       .map((item) => ({
-        candidate_ref: candidateRef(item),
+        candidate_ref: installedCandidateRef(item),
         resource_type: item.resource.candidate.resource_type,
         resource_id: item.resourceId,
+        user_confirmed_requirement_ids:
+          item.resource.candidate.user_confirmed_requirement_ids,
       })),
     skipped: items
       .filter((item) => item.status === "skipped")
@@ -359,7 +518,7 @@ export function SuggestedResourceInstallationCard({
     summary: string,
     result: Record<string, unknown>
   ) => {
-    if (!interactive) return;
+    if (!interactive || hasPendingConfirmedSkill) return;
     const action: Nl2AgentCardAction = {
       type: "nl2agent_card_action",
       subtype: payload.subtype,
@@ -368,6 +527,10 @@ export function SuggestedResourceInstallationCard({
       result: {
         requirements: payload.requirements,
         ...resourceActionState(),
+        fixed_candidates: fixedCandidates,
+        fixed_recommended_refs: fixedCandidates.map(
+          (candidate) => candidate.candidate_ref
+        ),
         ...result,
       },
     };
@@ -382,13 +545,47 @@ export function SuggestedResourceInstallationCard({
   };
 
   const openSkillBuilder = (request: Nl2aSkillCreationRequest) => {
-    if (!interactive || !request.can_create_skill) return;
+    if (!interactive || hasPendingConfirmedSkill || !request.can_create_skill) {
+      return;
+    }
     recordSkillCreationEvent(request, "create_click");
     const requirementId = request.requirement.requirement_id;
     setOpenedSkillRequirementIds((current) =>
       current.includes(requirementId) ? current : [...current, requirementId]
     );
     setActiveSkillRequirementId(requirementId);
+  };
+
+  const acceptWeakSkill = (
+    request: Nl2aSkillCreationRequest,
+    candidate: Nl2aResourceCandidate
+  ) => {
+    if (!interactive) return;
+    const resource = request.weak_skill_resources.find(
+      (item) => item.candidate.candidate_ref === candidate.candidate_ref
+    );
+    if (!resource) return;
+    const requirementId = request.requirement.requirement_id;
+    const confirmedCandidate = confirmCandidateRequirement(
+      resource.candidate,
+      requirementId
+    );
+    recordSkillCreationEvent(request, "weak_match_accepted");
+    setAcceptedWeakSkills((current) => ({
+      ...current,
+      [requirementId]: confirmedCandidate,
+    }));
+    dispatch({
+      type: "accept_weak_resource",
+      resource,
+      requirementId,
+    });
+    message.success(
+      t(
+        "nl2agent.skillCreation.weakMatchAccepted",
+        "Skill added to recommended resources"
+      )
+    );
   };
 
   const handleSkillCreated = async (
@@ -662,12 +859,15 @@ export function SuggestedResourceInstallationCard({
       agent_id: payload.agent_id,
       action: "continue",
       result: {
+        requirements: payload.requirements,
         installed: items
           .filter((item) => item.status === "installed")
           .map((item) => ({
-            candidate_ref: candidateRef(item),
+            candidate_ref: installedCandidateRef(item),
             resource_type: item.resource.candidate.resource_type,
             resource_id: item.resourceId,
+            user_confirmed_requirement_ids:
+              item.resource.candidate.user_confirmed_requirement_ids,
           })),
         skipped: items
           .filter((item) => item.status !== "installed")
@@ -677,6 +877,10 @@ export function SuggestedResourceInstallationCard({
               item.skipReason ||
               (item.status === "failed" ? "install_failed" : "not_selected"),
           })),
+        fixed_candidates: fixedCandidates,
+        fixed_recommended_refs: fixedCandidates.map(
+          (candidate) => candidate.candidate_ref
+        ),
       },
     };
     setSubmitted(true);
@@ -750,7 +954,7 @@ export function SuggestedResourceInstallationCard({
           </p>
         </div>
         <Badge variant="outline">
-          {items.length + payload.skill_creation_requests.length}
+          {items.length + unresolvedSkillRequests.length}
         </Badge>
       </div>
 
@@ -787,6 +991,28 @@ export function SuggestedResourceInstallationCard({
                 {t("nl2agent.resourceBinding.matches", "Matches")}:{" "}
                 {item.resource.candidate.requirement_ids.join(", ")}
               </p>
+              {item.resource.candidate.user_confirmed_requirement_ids.length >
+              0 ? (
+                <p className="mt-1 break-words text-xs font-medium text-primary">
+                  {t(
+                    "nl2agent.skillCreation.userConfirmedFor",
+                    "User-confirmed for"
+                  )}
+                  :{" "}
+                  {item.resource.candidate.user_confirmed_requirement_ids.join(
+                    ", "
+                  )}
+                </p>
+              ) : null}
+              {item.resource.candidate.user_confirmed_requirement_ids.length >
+                0 && item.status !== "installed" ? (
+                <p className="mt-1 text-xs text-amber-700">
+                  {t(
+                    "nl2agent.skillCreation.manualInstallRequired",
+                    "Configure and install this Skill before continuing."
+                  )}
+                </p>
+              ) : null}
               {item.error ? (
                 <p
                   className="mt-1 flex items-center gap-1 text-xs text-destructive"
@@ -845,7 +1071,9 @@ export function SuggestedResourceInstallationCard({
                       ? t("common.retry", "Retry")
                       : t("nl2agent.resourceInstallation.install", "Install")}
                   </Button>
-                  {item.status === "failed" ? (
+                  {item.status === "failed" &&
+                  item.resource.candidate.user_confirmed_requirement_ids
+                    .length === 0 ? (
                     <Button
                       type="button"
                       size="icon"
@@ -869,7 +1097,7 @@ export function SuggestedResourceInstallationCard({
             </div>
           </div>
         ))}
-        {payload.skill_creation_requests.map((request) => {
+        {unresolvedSkillRequests.map((request) => {
           const requirementId = request.requirement.requirement_id;
           return (
             <div
@@ -933,7 +1161,7 @@ export function SuggestedResourceInstallationCard({
                       type="button"
                       size="sm"
                       variant="outline"
-                      disabled={!interactive}
+                      disabled={!interactive || hasPendingConfirmedSkill}
                       onClick={() =>
                         submitAction(
                           "retry_skill_validation",
@@ -957,7 +1185,7 @@ export function SuggestedResourceInstallationCard({
                       type="button"
                       size="sm"
                       variant="outline"
-                      disabled={!interactive}
+                      disabled={!interactive || hasPendingConfirmedSkill}
                       onClick={() => openSkillBuilder(request)}
                     >
                       <Pencil className="mr-1 size-4" />
@@ -970,7 +1198,11 @@ export function SuggestedResourceInstallationCard({
                     <Button
                       type="button"
                       size="sm"
-                      disabled={!interactive || !request.can_create_skill}
+                      disabled={
+                        !interactive ||
+                        hasPendingConfirmedSkill ||
+                        !request.can_create_skill
+                      }
                       title={
                         request.can_create_skill
                           ? undefined
@@ -1004,24 +1236,7 @@ export function SuggestedResourceInstallationCard({
                         size="sm"
                         variant="outline"
                         disabled={!interactive}
-                        onClick={() => {
-                          recordSkillCreationEvent(
-                            request,
-                            "weak_match_accepted"
-                          );
-                          submitAction(
-                            "accept_weak_skill",
-                            t(
-                              "nl2agent.skillCreation.acceptWeakSummary",
-                              "Use a possible Skill match"
-                            ),
-                            {
-                              requirement: request.requirement,
-                              accepted_candidate: candidate,
-                              accept_weak_match: true,
-                            }
-                          );
-                        }}
+                        onClick={() => acceptWeakSkill(request, candidate)}
                       >
                         {candidate.name} ({candidate.score.toFixed(2)})
                       </Button>
@@ -1036,7 +1251,7 @@ export function SuggestedResourceInstallationCard({
                     type="button"
                     size="sm"
                     variant="ghost"
-                    disabled={!interactive}
+                    disabled={!interactive || hasPendingConfirmedSkill}
                     onClick={() => {
                       recordSkillCreationEvent(
                         request,
@@ -1067,9 +1282,8 @@ export function SuggestedResourceInstallationCard({
                   type="button"
                   size="sm"
                   variant="ghost"
-                  disabled={!interactive}
+                  disabled={!interactive || hasPendingConfirmedSkill}
                   onClick={() => {
-                    recordSkillCreationEvent(request, "requirement_abandoned");
                     submitAction(
                       "revise_requirement",
                       t(
@@ -1089,8 +1303,9 @@ export function SuggestedResourceInstallationCard({
                   type="button"
                   size="sm"
                   variant="ghost"
-                  disabled={!interactive}
-                  onClick={() =>
+                  disabled={!interactive || hasPendingConfirmedSkill}
+                  onClick={() => {
+                    recordSkillCreationEvent(request, "requirement_abandoned");
                     submitAction(
                       "abandon_requirement",
                       t(
@@ -1098,8 +1313,8 @@ export function SuggestedResourceInstallationCard({
                         "Abandon this requirement"
                       ),
                       { requirement: request.requirement }
-                    )
-                  }
+                    );
+                  }}
                 >
                   {t(
                     "nl2agent.skillCreation.abandonRequirement",
@@ -1112,7 +1327,7 @@ export function SuggestedResourceInstallationCard({
         })}
       </div>
 
-      {payload.skill_creation_requests.length === 0 ? (
+      {unresolvedSkillRequests.length === 0 ? (
         <div className="flex justify-end border-t px-4 py-3">
           <Button type="button" disabled={!canContinue} onClick={continueFlow}>
             {installedCount > 0

@@ -84,6 +84,10 @@ def test_build_nl2agent_system_prompt_configures_existing_draft(
     assert 'subtype="local_mcp_recommendation"' not in prompt
     assert "<nl2a>" not in prompt
     assert "```" not in prompt
+    assert "fixed_candidates" in prompt
+    assert "fixed_recommended_refs" in prompt
+    assert "user_confirmed_requirement_ids" in prompt
+    assert "accept_weak_skill" not in prompt
 
     if language == "en":
         assert "### State And Completion Rules" in prompt
@@ -339,6 +343,38 @@ def test_current_wrapper_models_require_existing_agent_id():
     assert skill_creation.candidates == []
     with pytest.raises(ValidationError):
         RecommendResourcesInput(candidates=[])
+
+    confirmed_skill = ResourceCandidate(
+        candidate_ref="skill:8",
+        resource_type="skill",
+        source="INSTALLED_SKILL",
+        name="research",
+        requirement_ids=["source", "summary"],
+        user_confirmed_requirement_ids=["summary"],
+        score=0.55,
+    )
+    assert confirmed_skill.score == 0.55
+    assert confirmed_skill.user_confirmed_requirement_ids == ["summary"]
+    with pytest.raises(ValidationError, match="must match the candidate"):
+        ResourceCandidate(
+            candidate_ref="skill:8",
+            resource_type="skill",
+            source="INSTALLED_SKILL",
+            name="research",
+            requirement_ids=["source"],
+            user_confirmed_requirement_ids=["summary"],
+            score=0.55,
+        )
+    with pytest.raises(ValidationError, match="only Skill coverage"):
+        ResourceCandidate(
+            candidate_ref="tool:8",
+            resource_type="tool",
+            source="LOCAL_TOOL",
+            name="research",
+            requirement_ids=["source"],
+            user_confirmed_requirement_ids=["source"],
+            score=0.55,
+        )
 
     wrapped = build_nl2a_wrapper(
         subtype="requirement_clarification",

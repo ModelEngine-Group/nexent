@@ -1005,6 +1005,17 @@ def test_skill_creation_requests_use_skill_specific_coverage(mocker):
         "source": "TENANT_SKILL_REPOSITORY",
         "name": "general-research",
         "description": "General research",
+        "form_kind": "SKILL_CONFIG",
+        "config": [],
+        "installation_options": [
+            {
+                "option_id": "repository",
+                "label": "Install",
+                "form_kind": "SKILL_CONFIG",
+                "config": [],
+            }
+        ],
+        "default_option_id": "repository",
         "installed": False,
     }
     scores = {"tool:7": 0.92, "tenant_skill_repository:31": 0.61}
@@ -1028,6 +1039,11 @@ def test_skill_creation_requests_use_skill_specific_coverage(mocker):
     assert request.weak_skill_candidates[0].candidate_ref == (
         "tenant_skill_repository:31"
     )
+    assert request.weak_skill_resources[0].candidate == (
+        request.weak_skill_candidates[0]
+    )
+    assert request.weak_skill_resources[0].default_option_id == "repository"
+    assert len(request.weak_skill_resources[0].installation_options) == 1
     assert request.agent_description == "A research Agent"
 
     mocker.patch(
@@ -1054,6 +1070,8 @@ def test_skill_creation_requests_suppress_strong_skill_and_track_created_state(m
         "source": "INSTALLED_SKILL",
         "name": "research",
         "description": "Research projects",
+        "form_kind": "SKILL_CONFIG",
+        "config": [],
         "installed": True,
     }
     score = mocker.patch(
@@ -1094,6 +1112,8 @@ def test_skill_creation_requests_suppress_strong_skill_and_track_created_state(m
     )[0]
     assert weak.created_skill_status == "weak_match"
     assert weak.weak_skill_candidates[0].candidate_ref == "skill:19"
+    assert weak.weak_skill_resources[0].candidate.candidate_ref == "skill:19"
+    assert weak.weak_skill_resources[0].installation_options == []
     record_event.assert_called_once_with(
         event="verification_failed",
         created_skill_status="weak_match",

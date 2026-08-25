@@ -172,12 +172,26 @@ class ResourceCandidate(BaseModel):
     name: str = Field(min_length=1)
     description: str = ""
     requirement_ids: list[str] = Field(min_length=1)
+    user_confirmed_requirement_ids: list[str] = Field(
+        default_factory=list,
+        max_length=8,
+    )
     score: float = Field(ge=0, le=1)
 
     @model_validator(mode="after")
     def validate_requirement_ids(self) -> "ResourceCandidate":
         if len(self.requirement_ids) != len(set(self.requirement_ids)):
             raise ValueError("requirement_ids must be unique")
+        if len(self.user_confirmed_requirement_ids) != len(
+            set(self.user_confirmed_requirement_ids)
+        ):
+            raise ValueError("user-confirmed requirement IDs must be unique")
+        if not set(self.user_confirmed_requirement_ids).issubset(
+            self.requirement_ids
+        ):
+            raise ValueError("user-confirmed requirements must match the candidate")
+        if self.user_confirmed_requirement_ids and self.resource_type != "skill":
+            raise ValueError("only Skill coverage can be user-confirmed")
         return self
 
 
@@ -332,6 +346,10 @@ class SkillCreationRequest(BaseModel):
         default_factory=list,
         max_length=3,
     )
+    weak_skill_resources: list[RecommendedResource] = Field(
+        default_factory=list,
+        max_length=3,
+    )
     non_skill_coverage: NonSkillCoverage
     can_create_skill: bool
     disabled_reason: Literal["feature_disabled", "unauthorized"] | None = None
@@ -340,6 +358,36 @@ class SkillCreationRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_created_skill(self) -> "SkillCreationRequest":
+        weak_refs = [
+            candidate.candidate_ref for candidate in self.weak_skill_candidates
+        ]
+        resource_refs = [
+            resource.candidate.candidate_ref
+            for resource in self.weak_skill_resources
+        ]
+        if weak_refs != resource_refs:
+            raise ValueError("weak Skill resources must match weak candidates")
+        if any(
+            resource.candidate != candidate
+            for candidate, resource in zip(
+                self.weak_skill_candidates,
+                self.weak_skill_resources,
+            )
+        ):
+            raise ValueError("weak Skill resource details must match candidates")
+        for resource in self.weak_skill_resources:
+            source = resource.candidate.source
+            if resource.candidate.resource_type != "skill" or source not in {
+                "INSTALLED_SKILL",
+                "NEXENT_OFFICIAL_SKILL",
+                "TENANT_SKILL_REPOSITORY",
+            }:
+                raise ValueError("weak Skill resources must contain only Skills")
+            if source == "INSTALLED_SKILL":
+                if resource.installation_options:
+                    raise ValueError("installed weak Skills cannot be installable")
+            elif not resource.installation_options:
+                raise ValueError("uninstalled weak Skills require installation options")
         if (self.created_skill_ref is None) != (self.created_skill_status is None):
             raise ValueError("created Skill ref and status must be supplied together")
         if self.created_skill_ref and not self.created_skill_ref.startswith("skill:"):

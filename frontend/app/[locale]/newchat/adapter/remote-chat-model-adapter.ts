@@ -179,6 +179,7 @@ export interface Nl2aSkillCreationRequest {
   agent_description: string;
   confirmed_constraints: string[];
   weak_skill_candidates: Nl2aResourceCandidate[];
+  weak_skill_resources: Nl2aWeakSkillResource[];
   non_skill_coverage: {
     status: "installed" | "installable" | "none";
     candidate_refs: string[];
@@ -208,6 +209,7 @@ export interface Nl2aResourceCandidate {
   name: string;
   description: string;
   requirement_ids: string[];
+  user_confirmed_requirement_ids: string[];
   score: number;
 }
 
@@ -230,6 +232,15 @@ export interface Nl2aInstallableResource {
   config: Record<string, unknown> | SkillParam[];
   installation_options: Nl2aResourceInstallationOption[];
   default_option_id: string;
+}
+
+export interface Nl2aWeakSkillResource {
+  candidate: Nl2aResourceCandidate & { resource_type: "skill" };
+  recommendation: "recommended" | "optional";
+  form_kind: "SKILL_CONFIG";
+  config: SkillParam[];
+  installation_options: Nl2aResourceInstallationOption[];
+  default_option_id: string | null;
 }
 
 export type Nl2aRecommendedResource =
@@ -802,6 +813,38 @@ function formatToolArguments(raw: unknown): string {
   }
 }
 
+const isValidNl2aResourceCandidate = (
+  candidate: Nl2aResourceCandidate | undefined
+): candidate is Nl2aResourceCandidate => {
+  if (
+    !candidate?.candidate_ref ||
+    !["tool", "skill", "mcp_server"].includes(candidate.resource_type) ||
+    !Array.isArray(candidate.requirement_ids) ||
+    candidate.requirement_ids.length === 0 ||
+    !Array.isArray(candidate.user_confirmed_requirement_ids)
+  ) {
+    return false;
+  }
+  const requirementIds = new Set(candidate.requirement_ids);
+  const confirmedIds = candidate.user_confirmed_requirement_ids;
+  return (
+    requirementIds.size === candidate.requirement_ids.length &&
+    new Set(confirmedIds).size === confirmedIds.length &&
+    confirmedIds.every((requirementId) => requirementIds.has(requirementId)) &&
+    (confirmedIds.length === 0 || candidate.resource_type === "skill")
+  );
+};
+
+const hasValidInstallationOptions = (
+  resource: Nl2aInstallableResource | Nl2aWeakSkillResource
+): boolean =>
+  Array.isArray(resource.installation_options) &&
+  resource.installation_options.length > 0 &&
+  Boolean(resource.default_option_id) &&
+  resource.installation_options.some(
+    (option) => option.option_id === resource.default_option_id
+  );
+
 /**
  * Appends a tool-call to `contentParts`. We always push a standalone
  * tool-call part; assistant-ui's `MessagePrimitive.GroupedParts` will
@@ -840,7 +883,7 @@ function parseNl2aMessage(chunk: SseChunk): Nl2aMessage | null {
         content.resources.length > 12 ||
         content.resources.some(
           (resource) =>
-            !resource?.candidate?.candidate_ref ||
+            !isValidNl2aResourceCandidate(resource?.candidate) ||
             !["tool", "skill"].includes(resource.candidate.resource_type) ||
             !["recommended", "optional"].includes(resource.recommendation) ||
             !Array.isArray(resource.config)
@@ -868,28 +911,46 @@ function parseNl2aMessage(chunk: SseChunk): Nl2aMessage | null {
           content.skill_creation_requests.length === 0) ||
         content.resources.some(
           (resource) =>
-            !resource?.candidate?.candidate_ref ||
+            !isValidNl2aResourceCandidate(resource?.candidate) ||
             !["skill", "mcp_server"].includes(
               resource.candidate.resource_type
             ) ||
-            !Array.isArray(resource.installation_options) ||
-            resource.installation_options.length === 0 ||
-            !resource.default_option_id ||
-            !resource.installation_options.some(
-              (option) => option.option_id === resource.default_option_id
-            )
+            !hasValidInstallationOptions(resource)
         ) ||
-        content.skill_creation_requests.some(
-          (request) =>
+        content.skill_creation_requests.some((request) => {
+          if (
             !request?.requirement?.requirement_id ||
             !request.requirement.query ||
             !Array.isArray(request.weak_skill_candidates) ||
+            !Array.isArray(request.weak_skill_resources) ||
+            request.weak_skill_candidates.length !==
+              request.weak_skill_resources.length ||
             !request.non_skill_coverage ||
             !["installed", "installable", "none"].includes(
               request.non_skill_coverage.status
             ) ||
             typeof request.can_create_skill !== "boolean"
-        )
+          ) {
+            return true;
+          }
+          return request.weak_skill_candidates.some((candidate, index) => {
+            const resource = request.weak_skill_resources[index];
+            if (
+              !isValidNl2aResourceCandidate(candidate) ||
+              !resource ||
+              !isValidNl2aResourceCandidate(resource.candidate) ||
+              resource.candidate.resource_type !== "skill" ||
+              resource.candidate.candidate_ref !== candidate.candidate_ref
+            ) {
+              return true;
+            }
+            const installed = resource.candidate.source === "INSTALLED_SKILL";
+            return installed
+              ? resource.installation_options.length > 0 ||
+                  resource.default_option_id !== null
+              : !hasValidInstallationOptions(resource);
+          });
+        })
       ) {
         log.warn(
           "[ChatModelAdapter] Ignored invalid installation-card payload"

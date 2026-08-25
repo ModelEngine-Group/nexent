@@ -1019,6 +1019,9 @@ def _verified_resource_candidate(
         name=actual["name"],
         description=actual["description"],
         requirement_ids=supplied.requirement_ids,
+        user_confirmed_requirement_ids=(
+            supplied.user_confirmed_requirement_ids
+        ),
         score=supplied.score,
     )
 
@@ -1159,6 +1162,17 @@ def _build_skill_creation_requests(
             for score, resource in skill_scores
             if score >= MINIMUM_RESOURCE_SCORE
         ][:3]
+        catalog_by_ref = {
+            resource["candidate_ref"]: resource for resource in all_catalog
+        }
+        weak_resources = [
+            _recommended_resource(
+                actual=catalog_by_ref[candidate.candidate_ref],
+                supplied=candidate,
+                recommended_refs=set(),
+            )
+            for candidate in weak_candidates
+        ]
 
         non_skill_scores = [
             (_score_resource_requirement(requirement, resource), resource)
@@ -1205,12 +1219,21 @@ def _build_skill_creation_requests(
                         ),
                         *weak_candidates,
                     ][:3]
+                    weak_resources = [
+                        _recommended_resource(
+                            actual=created_resource,
+                            supplied=weak_candidates[0],
+                            recommended_refs=set(),
+                        ),
+                        *weak_resources,
+                    ][:3]
 
         requests.append(SkillCreationRequest(
             requirement=requirement,
             agent_description=agent_description,
             confirmed_constraints=[],
             weak_skill_candidates=weak_candidates,
+            weak_skill_resources=weak_resources,
             non_skill_coverage=NonSkillCoverage(
                 status=coverage_status,
                 candidate_refs=[
