@@ -930,6 +930,23 @@ class TestCoverageGaps:
         ) == {"users": [], "total": 0}
         mock_get_users.assert_called_once_with("tenant-2", 1, 20, "created_at", "desc")
 
+    def test_requester_forwards_resource_filters(self, mocker):
+        """Test that authorized requests with filters use the filtered call path."""
+        mock_get_users = mocker.patch(
+            "backend.services.user_service.get_users",
+            return_value={"users": [], "total": 0},
+        )
+
+        result = get_users_for_requester(
+            "tenant-1", 1, 20, "created_at", "desc",
+            search="alice", requester_tenant_id="tenant-1", requester_role="ADMIN",
+        )
+
+        assert result == {"users": [], "total": 0}
+        mock_get_users.assert_called_once_with(
+            "tenant-1", 1, 20, "created_at", "desc", "alice", None, None
+        )
+
     @pytest.mark.asyncio
     async def test_superuser_can_update_any_user(self, mocker):
         mocker.patch(
