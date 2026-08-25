@@ -22,8 +22,10 @@ from services.nl2agent_service import (
     build_nl2agent_run_info,
     create_nl2agent_stream,
     recommend_installed_resources_impl,
+    recommend_uninstalled_resources_impl,
     save_agent_draft_fields_impl,
     search_installed_resources_impl,
+    search_uninstalled_resources_impl,
     search_installed_mcp_tools_by_query,
     validate_agent_generation_complete_impl,
 )
@@ -606,6 +608,140 @@ def test_resource_config_normalization_is_frontend_safe():
         {"name": "region", "type": "string", "required": True, "value": "eu"}
     ]
     assert _resource_similarity("", "search") == 0
+
+
+@pytest.mark.asyncio
+async def test_search_internal_uninstalled_resources_aggregates_sources_and_excludes_refs(
+    mocker,
+):
+    mocker.patch(
+        "services.skill_service.get_official_skills_with_status",
+        return_value=[
+            {
+                "skill_id": 0,
+                "name": "daily-report",
+                "description": "Create daily reports",
+                "status": "installable",
+            },
+            {
+                "skill_id": 9,
+                "name": "installed-skill",
+                "description": "Already installed",
+                "status": "installed",
+            },
+        ],
+    )
+    mocker.patch(
+        "services.skill_repository_service.list_skill_repository_listings_impl",
+        return_value={
+            "items": [
+                {
+                    "skill_repository_id": 31,
+                    "name": "email-report",
+                    "description": "Send reports by email",
+                    "content": "email report delivery",
+                    "tags": ["email"],
+                }
+            ],
+            "pagination": {"total_pages": 1},
+        },
+    )
+    mocker.patch(
+        "services.mcp_management_service.list_community_mcp_services",
+        new=AsyncMock(
+            return_value={
+                "items": [
+                    {
+                        "marketId": 42,
+                        "name": "github-search",
+                        "description": "Search GitHub projects",
+                        "content": "GitHub repository search",
+                        "transportType": "url",
+                        "serverUrl": "https://mcp.example.test/mcp",
+                        "authorizationToken": "persisted-secret",
+                        "customHeaders": {"X-Secret": "persisted-secret"},
+                        "tags": ["github"],
+                    }
+                ],
+                "nextCursor": None,
+            }
+        ),
+    )
+
+    result = await search_uninstalled_resources_impl(
+        requirements=[
+            ResourceRequirement(
+                requirement_id="github",
+                query="GitHub project search",
+                search_terms=["github-search"],
+            ),
+            ResourceRequirement(
+                requirement_id="email",
+                query="email report delivery",
+                search_terms=["email-report"],
+            ),
+        ],
+        exclude_refs=["nexent_official_skill:daily-report"],
+        tenant_id="tenant-a",
+        user_id="user-a",
+    )
+
+    refs = {candidate.candidate_ref for candidate in result.candidates}
+    assert "nexent_official_skill:daily-report" not in refs
+    assert refs == {
+        "tenant_skill_repository:31",
+        "tenant_mcp_repository:42",
+    }
+    assert result.uncovered_requirement_ids == []
+
+
+@pytest.mark.asyncio
+async def test_recommend_uninstalled_resources_overwrites_snapshot_and_redacts_secrets(
+    mocker,
+):
+    actual = {
+        "candidate_ref": "tenant_mcp_repository:42",
+        "resource_type": "mcp_server",
+        "source": "TENANT_MCP_REPOSITORY",
+        "name": "verified-name",
+        "description": "Verified description",
+        "form_kind": "MCP_REMOTE",
+        "config": {"authorizationToken": ""},
+        "installation_options": [
+            {
+                "option_id": "repository",
+                "label": "Install",
+                "form_kind": "MCP_REMOTE",
+                "config": {"authorizationToken": ""},
+            }
+        ],
+        "default_option_id": "repository",
+    }
+    mocker.patch(
+        "services.nl2agent_service._load_internal_uninstalled_resource_catalog",
+        new=AsyncMock(return_value=[actual]),
+    )
+    supplied = ResourceCandidate(
+        candidate_ref="tenant_mcp_repository:42",
+        resource_type="mcp_server",
+        source="TENANT_MCP_REPOSITORY",
+        name="tampered-name",
+        description="Tampered description",
+        requirement_ids=["search"],
+        score=0.91,
+    )
+
+    result = await recommend_uninstalled_resources_impl(
+        candidates=[supplied],
+        recommended_refs=[supplied.candidate_ref],
+        tenant_id="tenant-a",
+        user_id="user-a",
+    )
+
+    resource = result.resources[0]
+    assert resource.candidate.name == "verified-name"
+    assert resource.config == {"authorizationToken": ""}
+    assert resource.default_option_id == "repository"
 
 
 @pytest.mark.asyncio

@@ -80,6 +80,7 @@ import { ToolRecommendations } from "../ui/tool-recommendations";
 import { AgentDraftCard } from "../ui/agent-draft-card";
 import { RequirementClarificationCard } from "../ui/requirement-clarification-card";
 import { InstalledResourceBindingCard } from "../ui/installed-resource-binding-card";
+import { SuggestedResourceInstallationCard } from "../ui/suggested-resource-installation-card";
 import {
   ToolGroupContent,
   ToolGroupRoot,
@@ -1349,6 +1350,11 @@ const AssistantMessage: FC<{
           <ToolRecommendations payload={nl2a.content} disabled={readOnly} />
         ) : nl2a?.content.subtype === "agent_draft" ? (
           <AgentDraftCard draft={nl2a.content} disabled={readOnly} />
+        ) : nl2a?.content.subtype === "suggested_resource_installation" ? (
+          <SuggestedResourceInstallationCard
+            payload={nl2a.content}
+            disabled={readOnly}
+          />
         ) : nl2a?.content.subtype === "installed_resource_binding" ? (
           <InstalledResourceBindingCard
             payload={nl2a.content}
