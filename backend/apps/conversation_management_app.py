@@ -5,6 +5,7 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, Header, HTTPException, Request
 
 from consts.model import (
+    BatchDeleteConversationRequest,
     ConversationRequest,
     ConversationKnowledgeScopeUpdateRequest,
     ConversationResponse,
@@ -15,6 +16,7 @@ from consts.model import (
 )
 from consts.exceptions import ConversationNotFoundError, ValidationError
 from services.conversation_management_service import (
+    batch_delete_conversations_service,
     create_new_conversation,
     delete_conversation_service,
     generate_conversation_title_service,
@@ -99,6 +101,33 @@ async def rename_conversation_endpoint(request: RenameRequest, authorization: Op
         return ConversationResponse(code=0, message="success", data=True)
     except Exception as e:
         logging.error(f"Failed to rename conversation: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.delete("/batch_delete", response_model=ConversationResponse)
+async def batch_delete_conversations_endpoint(
+    request: BatchDeleteConversationRequest,
+    authorization: Optional[str] = Header(None),
+):
+    """
+    Batch delete conversations
+
+    Args:
+        request: BatchDeleteConversationRequest containing:
+            - conversation_ids: List of conversation IDs to delete
+        authorization: Authorization header
+
+    Returns:
+        ConversationResponse object containing the number of deleted conversations.
+    """
+    try:
+        user_id, tenant_id = get_current_user_id(authorization)
+        deleted = batch_delete_conversations_service(
+            request.conversation_ids, user_id)
+        return ConversationResponse(code=0, message="success",
+                                    data={"deleted": deleted})
+    except Exception as e:
+        logging.error(f"Failed to batch delete conversations: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
 

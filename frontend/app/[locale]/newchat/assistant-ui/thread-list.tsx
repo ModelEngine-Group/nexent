@@ -26,6 +26,7 @@ import {
 import { Fragment, useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import log from "@/lib/logger";
+import { cn } from "@/lib/utils";
 import type { FC } from "react";
 
 // Conversation status indicator component
@@ -58,9 +59,15 @@ const ConversationStatusIndicator: FC<{
 
 interface ThreadListProps {
   generatedTitles?: ReadonlyMap<string, string>;
+  selectedThreadIds: Set<string>;
+  onToggleThreadSelect: (remoteId: string) => void;
 }
 
-export const ThreadList: FC<ThreadListProps> = ({ generatedTitles }) => {
+export const ThreadList: FC<ThreadListProps> = ({
+  generatedTitles,
+  selectedThreadIds,
+  onToggleThreadSelect,
+}) => {
   const { t } = useTranslation();
 
   // Placeholder for completed set - currently not used since status only has completed/running
@@ -78,6 +85,8 @@ export const ThreadList: FC<ThreadListProps> = ({ generatedTitles }) => {
         <ThreadListItems
           completedConversations={completedConversations}
           generatedTitles={generatedTitles}
+          selectedThreadIds={selectedThreadIds}
+          onToggleThreadSelect={onToggleThreadSelect}
         />
       </AuiIf>
     </div>
@@ -102,11 +111,15 @@ const ThreadListEmpty: FC = () => {
 interface ThreadListItemsProps {
   completedConversations: Set<string>;
   generatedTitles?: ReadonlyMap<string, string>;
+  selectedThreadIds: Set<string>;
+  onToggleThreadSelect: (remoteId: string) => void;
 }
 
 const ThreadListItems: FC<ThreadListItemsProps> = ({
   completedConversations,
   generatedTitles,
+  selectedThreadIds,
+  onToggleThreadSelect,
 }) => {
   const { t } = useTranslation();
 
@@ -118,9 +131,11 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
       <ThreadListItem
         completedConversations={completedConversations}
         generatedTitles={generatedTitles}
+        selectedThreadIds={selectedThreadIds}
+        onToggleThreadSelect={onToggleThreadSelect}
       />
     ),
-    [completedConversations, generatedTitles],
+    [completedConversations, generatedTitles, selectedThreadIds, onToggleThreadSelect],
   );
 
   if (!groups) {
@@ -130,6 +145,8 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
           <ThreadListItem
             completedConversations={completedConversations}
             generatedTitles={generatedTitles}
+            selectedThreadIds={selectedThreadIds}
+            onToggleThreadSelect={onToggleThreadSelect}
           />
         )}
       </ThreadListPrimitive.Items>
@@ -256,17 +273,31 @@ const ThreadListSkeleton: FC = () => {
 interface ThreadListItemProps {
   completedConversations: Set<string>;
   generatedTitles?: ReadonlyMap<string, string>;
+  selectedThreadIds: Set<string>;
+  onToggleThreadSelect: (remoteId: string) => void;
 }
 
 const ThreadListItem: FC<ThreadListItemProps> = ({
   completedConversations,
   generatedTitles,
+  selectedThreadIds,
+  onToggleThreadSelect,
 }) => {
+  const aui = useAui();
+  const remoteId = aui.threadListItem.getState().remoteId;
+  const isSelected = remoteId ? selectedThreadIds.has(remoteId) : false;
   return (
-    <ThreadListItemPrimitive.Root className="group/item flex h-9 items-center rounded-lg hover:bg-muted data-[active=true]:bg-muted">
+    <ThreadListItemPrimitive.Root
+      className={cn(
+        "group/item flex h-9 items-center rounded-lg hover:bg-muted data-[active=true]:bg-muted",
+        isSelected && "bg-[#DCE9FF] hover:bg-[#DCE9FF]",
+      )}
+    >
       <ThreadListItemContent
         completedConversations={completedConversations}
         generatedTitles={generatedTitles}
+        selectedThreadIds={selectedThreadIds}
+        onToggleThreadSelect={onToggleThreadSelect}
       />
     </ThreadListItemPrimitive.Root>
   );
@@ -275,11 +306,15 @@ const ThreadListItem: FC<ThreadListItemProps> = ({
 interface ThreadListItemContentProps {
   completedConversations: Set<string>;
   generatedTitles?: ReadonlyMap<string, string>;
+  selectedThreadIds: Set<string>;
+  onToggleThreadSelect: (remoteId: string) => void;
 }
 
 const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
   completedConversations,
   generatedTitles,
+  selectedThreadIds,
+  onToggleThreadSelect,
 }) => {
   const aui = useAui();
   const { t } = useTranslation();
@@ -288,6 +323,8 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
   const threadListItem = aui.threadListItem;
   const thread = threadListItem.getState();
   const title = generatedTitles?.get(thread.id) ?? thread.title ?? t("chat.thread.newChat");
+  const remoteId = thread.remoteId;
+  const isSelected = remoteId ? selectedThreadIds.has(remoteId) : false;
 
   const handleRename = useCallback(async (newTitle: string) => {
     try {
@@ -334,6 +371,16 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
         />
       ) : (
         <>
+          {!isEditing && remoteId && (
+            <input
+              type="checkbox"
+              checked={isSelected}
+              onClick={(e) => e.stopPropagation()}
+              onChange={() => onToggleThreadSelect(remoteId)}
+              className="ml-2 mr-1 size-4 shrink-0 cursor-pointer rounded border-input accent-[#4379EE]"
+              aria-label={t("chat.threadList.batch.select")}
+            />
+          )}
           <ThreadListItemPrimitive.Trigger className="flex min-w-0 flex-1 justify-start px-3 text-left text-sm">
             <div className="flex min-w-0 flex-1 items-center text-left">
               <ConversationStatusIndicatorWrapper

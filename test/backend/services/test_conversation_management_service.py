@@ -1476,6 +1476,42 @@ class TestDeleteConversationService(unittest.TestCase):
         self.assertIn("DB error", str(ctx.exception))
 
 
+class TestBatchDeleteConversationsService(unittest.TestCase):
+    """Test batch_delete_conversations_service function."""
+
+    @patch('backend.services.conversation_management_service.batch_delete_conversations')
+    def test_batch_delete_returns_count(self, mock_batch_delete):
+        """Should return the count from the database layer."""
+        mock_batch_delete.return_value = 3
+        from backend.services.conversation_management_service import batch_delete_conversations_service
+
+        result = batch_delete_conversations_service([1, 2, 3], "user-1")
+
+        self.assertEqual(result, 3)
+        mock_batch_delete.assert_called_once_with([1, 2, 3], "user-1")
+
+    @patch('backend.services.conversation_management_service.batch_delete_conversations')
+    def test_batch_delete_automation_failure_does_not_block(self, mock_batch_delete):
+        """Per-conversation automation cleanup is best-effort; DB delete still runs."""
+        mock_batch_delete.return_value = 2
+        from backend.services.conversation_management_service import batch_delete_conversations_service
+
+        result = batch_delete_conversations_service([1, 2], "user-1")
+
+        self.assertEqual(result, 2)
+        mock_batch_delete.assert_called_once_with([1, 2], "user-1")
+
+    @patch('backend.services.conversation_management_service.batch_delete_conversations')
+    def test_batch_delete_exception(self, mock_batch_delete):
+        """Should re-raise exception from database layer."""
+        mock_batch_delete.side_effect = Exception("DB error")
+        from backend.services.conversation_management_service import batch_delete_conversations_service
+
+        with self.assertRaises(Exception) as ctx:
+            batch_delete_conversations_service([1, 2], "user-1")
+        self.assertIn("DB error", str(ctx.exception))
+
+
 class TestBuildStreamingMessage(unittest.TestCase):
     """Test _build_streaming_message function."""
 

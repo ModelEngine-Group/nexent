@@ -200,6 +200,7 @@ sys.modules["backend.database.utils"] = utils_mod
 from backend.database.conversation_db import (
     HistorySummaryPersistenceError,
     _parse_history_summary_content,
+    batch_delete_conversations,
     create_conversation,
     create_conversation_message,
     create_message_unit,
@@ -301,6 +302,50 @@ def test_soft_delete_all_conversations_by_user_some(monkeypatch, mock_session_ct
     count = soft_delete_all_conversations_by_user("user-2")
 
     assert count == 3
+    session.scalars.assert_called_once()
+    # conversations, messages, units, searches, images
+    assert session.execute.call_count == 5
+
+
+# =============================================================================
+# Tests for batch_delete_conversations
+# =============================================================================
+
+
+def test_batch_delete_conversations_empty(monkeypatch, mock_session_ctx):
+    """Return 0 and do no writes when the id list is empty."""
+    session, ctx = mock_session_ctx
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    count = batch_delete_conversations([], "user-1")
+
+    assert count == 0
+    session.scalars.assert_not_called()
+    session.execute.assert_not_called()
+
+
+def test_batch_delete_conversations_none_owned(monkeypatch, mock_session_ctx):
+    """Return 0 and do no writes when user owns none of the ids."""
+    session, ctx = mock_session_ctx
+    session.scalars.return_value.all.return_value = []
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    count = batch_delete_conversations([1, 2, 3], "user-1")
+
+    assert count == 0
+    session.scalars.assert_called_once()
+    session.execute.assert_not_called()
+
+
+def test_batch_delete_conversations_some(monkeypatch, mock_session_ctx):
+    """Soft-delete across all related tables for owned conversations."""
+    session, ctx = mock_session_ctx
+    session.scalars.return_value.all.return_value = [101, 102]
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    count = batch_delete_conversations([101, 102, 999], "user-2")
+
+    assert count == 2
     session.scalars.assert_called_once()
     # conversations, messages, units, searches, images
     assert session.execute.call_count == 5

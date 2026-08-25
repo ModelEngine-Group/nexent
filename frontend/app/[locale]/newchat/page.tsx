@@ -629,6 +629,9 @@ const HomeContent: FC<{
             generatedTitles={generatedTitles}
             onPrepareNewConversation={handlePrepareNewConversation}
             onNewConversation={handleNewConversation}
+            onReloadThreadList={() => runtime.threads.reload()}
+            activeRemoteId={activeThread?.remoteId}
+            onSwitchToNewThread={handleNewConversation}
           />
         </SidebarProvider>
       </div>

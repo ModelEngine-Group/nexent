@@ -1037,6 +1037,65 @@ def soft_delete_all_conversations_by_user(user_id: str) -> int:
         return len(conv_ids)
 
 
+def batch_delete_conversations(
+    conversation_ids: List[int],
+    user_id: Optional[str] = None,
+) -> int:
+    """
+    Soft-delete a list of conversations owned by user_id, cascading to
+    messages, units and source records.
+
+    Args:
+        conversation_ids: List of conversation IDs to delete.
+        user_id: Owner of the conversations; only records created by this
+            user are deleted.
+
+    Returns:
+        int: Number of conversations actually marked as deleted.
+    """
+    if not conversation_ids:
+        return 0
+
+    with get_db_session() as session:
+        update_data = {
+            "delete_flag": 'Y',
+            "update_time": func.current_timestamp()
+        }
+        if user_id:
+            update_data = add_update_tracking(update_data, user_id)
+
+        # 1) Ownership filter: only the current user's non-deleted conversations
+        conv_ids = session.scalars(
+            select(ConversationRecord.conversation_id).where(
+                ConversationRecord.delete_flag == 'N',
+                ConversationRecord.created_by == user_id,
+                ConversationRecord.conversation_id.in_(conversation_ids),
+            )
+        ).all()
+
+        if not conv_ids:
+            return 0
+
+        # 2) Cascade soft-delete across the 5 related tables (same transaction)
+        for model in (
+            ConversationRecord,
+            ConversationMessage,
+            ConversationMessageUnit,
+            ConversationSourceSearch,
+            ConversationSourceImage,
+        ):
+            session.execute(
+                update(model)
+                .where(
+                    model.conversation_id.in_(conv_ids),
+                    model.delete_flag == 'N',
+                )
+                .values(update_data)
+            )
+
+        return len(conv_ids)
+
+
 def update_message_opinion(message_id: int, opinion: str, user_id: Optional[str] = None) -> bool:
     """
     Update message like/dislike status

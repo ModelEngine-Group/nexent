@@ -11,6 +11,7 @@ from consts.model import AgentRequest, MessageRequest, MessageUnit
 from consts.exceptions import ConversationNotFoundError, ValidationError
 from database.conversation_db import (
     CHAT_MODE_VALUES,
+    batch_delete_conversations,
     create_conversation,
     create_conversation_message,
     create_message_unit,
@@ -630,6 +631,35 @@ def delete_conversation_service(conversation_id: int, user_id: str) -> bool:
     except Exception as e:
         logging.error(f"Failed to delete conversation: {str(e)}")
         raise Exception(str(e))
+
+
+def batch_delete_conversations_service(
+    conversation_ids: List[int],
+    user_id: str,
+) -> int:
+    """
+    Batch delete conversations: clean up automation bindings per conversation,
+    then soft-delete the conversations and all related records.
+
+    Args:
+        conversation_ids: List of conversation IDs to delete.
+        user_id: User ID.
+
+    Returns:
+        int: Number of conversations actually deleted.
+    """
+    for conversation_id in conversation_ids:
+        try:
+            from services.agent_automation.facade import agent_automation_facade
+            agent_automation_facade.on_conversation_deleted(conversation_id, user_id)
+        except Exception as automation_error:
+            logging.warning(
+                "Failed to cleanup automation task for conversation %s: %s",
+                conversation_id,
+                automation_error,
+            )
+
+    return batch_delete_conversations(conversation_ids, user_id)
 
 
 def _build_streaming_message(message_records: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:

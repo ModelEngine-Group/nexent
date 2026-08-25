@@ -56,6 +56,7 @@ export const API_ENDPOINTS = {
     knowledgeScope: (id: number) =>
       `${API_BASE_URL}/conversation/${id}/knowledge-scope`,
     delete: (id: number) => `${API_BASE_URL}/conversation/${id}`,
+    batchDelete: `${API_BASE_URL}/conversation/batch_delete`,
     generateTitle: `${API_BASE_URL}/conversation/generate_title`,
     // TODO: Remove this endpoint
     sources: `${API_BASE_URL}/conversation/sources`,
