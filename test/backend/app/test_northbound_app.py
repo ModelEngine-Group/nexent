@@ -722,6 +722,57 @@ def test_update_conversation_title_success():
 
 
 # =============================================================================
+# Model List and Generated Title Tests
+# =============================================================================
+
+def test_list_configured_models_success():
+    ctx = MagicMock(tenant_id="tenant-1", request_id="req-123")
+    models = [{"model_id": 7, "display_name": "Main model"}]
+    with patch('apps.northbound_app._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('apps.northbound_app.list_configured_models', new_callable=AsyncMock) as mock_list:
+        mock_ctx.return_value = ctx
+        mock_list.return_value = {
+            "message": "success",
+            "data": models,
+            "requestId": "req-123",
+        }
+
+        resp = client.get("/nb/v1/models", headers=_build_headers())
+
+    assert resp.status_code == 200
+    assert resp.json()["data"] == models
+    mock_list.assert_awaited_once_with(ctx=ctx)
+
+
+def test_generate_title_success():
+    ctx = MagicMock(user_id="user-1", tenant_id="tenant-1", request_id="req-123")
+    with patch('apps.northbound_app._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('apps.northbound_app.get_user_language', return_value="en"), \
+            patch('apps.northbound_app.generate_conversation_title', new_callable=AsyncMock) as mock_generate:
+        mock_ctx.return_value = ctx
+        mock_generate.return_value = {
+            "message": "success",
+            "data": "Generated title",
+            "requestId": "req-123",
+        }
+
+        resp = client.post(
+            "/nb/v1/generate_title",
+            headers=_build_headers(),
+            json={"conversation_id": 42, "question": "Summarize this conversation"},
+        )
+
+    assert resp.status_code == 200
+    assert resp.json()["data"] == "Generated title"
+    mock_generate.assert_awaited_once_with(
+        ctx=ctx,
+        conversation_id=42,
+        question="Summarize this conversation",
+        language="en",
+    )
+
+
+# =============================================================================
 # File Fetch Tests
 # =============================================================================
 

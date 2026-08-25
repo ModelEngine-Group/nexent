@@ -52,8 +52,10 @@ from services.vectordatabase_service import (
 from services.conversation_management_service import (
     save_conversation_user,
     create_new_conversation,
+    generate_conversation_title_service,
     update_conversation_title as update_conversation_title_service,
 )
+from services.model_management_service import list_models_for_tenant
 from utils.runtime_metadata_utils import (
     runtime_metadata_hash,
     validate_runtime_metadata,
@@ -540,6 +542,12 @@ async def list_conversations(ctx: NorthboundContext) -> Dict[str, Any]:
     return {"message": "success", "data": conversations, "requestId": ctx.request_id}
 
 
+async def list_configured_models(ctx: NorthboundContext) -> Dict[str, Any]:
+    """List the models configured for the authenticated tenant."""
+    models = await list_models_for_tenant(ctx.tenant_id)
+    return {"message": "success", "data": models, "requestId": ctx.request_id}
+
+
 async def get_conversation_history_internal(ctx: NorthboundContext, conversation_id: int) -> Dict[str, Any]:
     """Internal helper to get conversation history without logging."""
     history = get_conversation_messages(conversation_id)
@@ -839,3 +847,20 @@ async def update_conversation_title(ctx: NorthboundContext, conversation_id: int
     finally:
         if composed_key:
             asyncio.create_task(_release_idempotency_after_delay(composed_key))
+
+
+async def generate_conversation_title(
+    ctx: NorthboundContext,
+    conversation_id: int,
+    question: str,
+    language: str,
+) -> Dict[str, Any]:
+    """Generate and persist a conversation title from the user's question."""
+    title = await generate_conversation_title_service(
+        conversation_id=conversation_id,
+        question=question,
+        user_id=ctx.user_id,
+        tenant_id=ctx.tenant_id,
+        language=language,
+    )
+    return {"message": "success", "data": title, "requestId": ctx.request_id}
