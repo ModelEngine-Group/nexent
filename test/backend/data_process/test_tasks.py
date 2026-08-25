@@ -2861,6 +2861,64 @@ def test_forward_part_success_and_progress(monkeypatch):
     assert calls["inc"] == 1
 
 
+def test_forward_part_returns_cancelled_when_parent_is_cancelled(monkeypatch):
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+
+    class _Svc:
+        def is_task_cancelled(self, _task_id):
+            return True
+
+    monkeypatch.setattr(tasks, "get_redis_service", lambda: _Svc())
+    monkeypatch.setattr(
+        tasks,
+        "_send_chunks_to_es",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("cancelled batch must not be sent")),
+    )
+    self = types.SimpleNamespace(
+        request=types.SimpleNamespace(id="fp-cancelled", retries=0),
+        retry=lambda **kwargs: (_ for _ in ()).throw(AssertionError("must not retry")),
+    )
+
+    out = tasks.forward_part(
+        self,
+        chunks=[{"content": "x"}],
+        index_name="idx",
+        parent_task_id="parent-cancelled",
+        batch_index=2,
+        total_batches=3,
+    )
+
+    assert out["cancelled"] is True
+    assert out["total_indexed"] == 0
+    assert out["total_submitted"] == 0
+
+
+def test_forward_part_continues_when_parent_cancellation_lookup_fails(monkeypatch):
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+    monkeypatch.setattr(tasks, "get_redis_service", lambda: (_ for _ in ()).throw(RuntimeError("redis down")))
+    monkeypatch.setattr(
+        tasks,
+        "_send_chunks_to_es",
+        lambda **kwargs: {"success": True, "total_indexed": 1, "total_submitted": 1},
+    )
+    self = types.SimpleNamespace(
+        request=types.SimpleNamespace(id="fp-lookup-error", retries=0),
+        retry=lambda **kwargs: (_ for _ in ()).throw(AssertionError("must not retry")),
+    )
+
+    out = tasks.forward_part(
+        self,
+        chunks=[{"content": "x"}],
+        index_name="idx",
+        parent_task_id="parent-lookup-error",
+        batch_index=1,
+        total_batches=1,
+    )
+
+    assert out["success"] is True
+    assert out["total_indexed"] == 1
+
+
 def test_forward_part_failure_retries(monkeypatch):
     tasks, _ = import_tasks_with_fake_ray(monkeypatch)
     monkeypatch.setattr(tasks, "_send_chunks_to_es", lambda **
@@ -2995,6 +3053,40 @@ def test_forward_part_long_nested_storage_block_does_not_retry(monkeypatch):
         )
 
     assert cancelled == ["parent-long-blocked"]
+
+
+def test_forward_part_swallows_parent_cancel_mark_failure(monkeypatch):
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+    monkeypatch.setattr(
+        tasks,
+        "_send_chunks_to_es",
+        lambda **kwargs: (_ for _ in ()).throw(
+            Exception('{"error_code":"es_disk_watermark"}')
+        ),
+    )
+
+    class _Svc:
+        def is_task_cancelled(self, _task_id):
+            return False
+
+        def mark_task_cancelled(self, _task_id):
+            raise RuntimeError("redis write failed")
+
+    monkeypatch.setattr(tasks, "get_redis_service", lambda: _Svc())
+    self = types.SimpleNamespace(
+        request=types.SimpleNamespace(id="fp-mark-error", retries=0),
+        retry=lambda **kwargs: (_ for _ in ()).throw(AssertionError("must not retry")),
+    )
+
+    with pytest.raises(Exception, match="es_disk_watermark"):
+        tasks.forward_part(
+            self,
+            chunks=[{"content": "x"}],
+            index_name="idx",
+            parent_task_id="parent-mark-error",
+            batch_index=1,
+            total_batches=1,
+        )
 
 
 def test_aggregate_forward_parts_paths(monkeypatch):

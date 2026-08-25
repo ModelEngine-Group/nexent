@@ -1,5 +1,11 @@
 from consts.error_code import ErrorCode
-from consts.exceptions import AppException
+from consts.exceptions import (
+    AppException,
+    FileTooLargeException,
+    OfficeConversionException,
+    QuotaExceededError,
+    UnsupportedFileTypeException,
+)
 from utils.knowledge_ingestion_errors import classify_ingestion_exception
 
 
@@ -99,3 +105,42 @@ def test_long_nested_exception_code_is_preserved_before_message_truncation():
     assert classified.error_code == ErrorCode.KNOWLEDGE_INDEX_WRITE_BLOCKED.value
     assert classified.error_message is None
     assert classified.retryable is False
+
+
+def test_known_file_and_quota_exception_types_get_stable_codes():
+    cases = [
+        (FileTooLargeException("too large"), ErrorCode.FILE_TOO_LARGE.value),
+        (UnsupportedFileTypeException("bad type"), ErrorCode.FILE_TYPE_NOT_ALLOWED.value),
+        (OfficeConversionException("conversion failed"), ErrorCode.FILE_PREPROCESS_FAILED.value),
+        (QuotaExceededError("quota exceeded"), ErrorCode.TENANT_RESOURCE_EXCEEDED.value),
+        (FileNotFoundError("missing source"), ErrorCode.FILE_NOT_FOUND.value),
+    ]
+
+    for exception, expected_code in cases:
+        classified = classify_ingestion_exception(exception, "PROCESS")
+        assert classified.error_code == expected_code
+        assert classified.error_message is None
+        assert classified.retryable is False
+
+
+def test_explicit_error_code_attribute_is_supported_for_proxy_exceptions():
+    class UpstreamException(Exception):
+        error_code = ErrorCode.FILE_UPLOAD_FAILED
+
+    classified = classify_ingestion_exception(UpstreamException("upload failed"), "UPLOAD")
+
+    assert classified.error_code == ErrorCode.FILE_UPLOAD_FAILED.value
+    assert classified.error_message is None
+
+
+def test_timeout_and_connection_failures_are_retryable():
+    class RequestError(Exception):
+        pass
+
+    timeout = classify_ingestion_exception(TimeoutError("request timed out"), "FORWARD")
+    connection = classify_ingestion_exception(RequestError("connection refused"), "TASK_SUBMIT")
+
+    assert timeout.error_code == ErrorCode.SYSTEM_TIMEOUT.value
+    assert timeout.retryable is True
+    assert connection.error_code == ErrorCode.SYSTEM_SERVICE_UNAVAILABLE.value
+    assert connection.retryable is True

@@ -2083,6 +2083,17 @@ class TestRedisService(unittest.TestCase):
         result = self.redis_service._extract_error_metadata_from_exc_message(_Boom())
         self.assertIsNone(result)
 
+    def test_extract_error_metadata_from_exc_message_bytes(self):
+        """Bytes returned by a result backend are decoded before JSON parsing."""
+        msg = json.dumps({"index_name": "idx", "source": "/a.txt"}).encode("utf-8")
+        result = self.redis_service._extract_error_metadata_from_exc_message(msg)
+        self.assertEqual(result, {"index_name": "idx", "source": "/a.txt"})
+
+    def test_extract_error_metadata_from_exc_message_empty_sequence(self):
+        """An empty Celery args sequence has no metadata."""
+        result = self.redis_service._extract_error_metadata_from_exc_message([])
+        self.assertIsNone(result)
+
     def test_cleanup_celery_tasks_parent_id_lookup_exception(self):
         """When task_info.get('parent_id') raises, the inner except is hit."""
         self.redis_service._backend_client = self.mock_backend_client
