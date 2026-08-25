@@ -2018,6 +2018,8 @@ export default function ToolConfigModal({
         const currentValue = form.getFieldValue(fieldName);
         return (
           <Select
+            showSearch
+            optionFilterProp="label"
             placeholder={t("toolConfig.input.string.placeholder", {
               name: param.description,
             })}
