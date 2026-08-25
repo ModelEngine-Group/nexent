@@ -600,13 +600,7 @@ export function SuggestedResourceInstallationCard({
                     item.status === "installed" ? "installed" : undefined
                   }
                 />
-                <Badge
-                  variant={
-                    item.resource.recommendation === "recommended"
-                      ? "success"
-                      : "secondary"
-                  }
-                >
+                <Badge variant="outline" className="rounded-md text-[10px]">
                   {item.resource.recommendation === "recommended"
                     ? t("nl2agent.resourceBinding.recommended", "Recommended")
                     : t("nl2agent.resourceBinding.optional", "Optional")}
