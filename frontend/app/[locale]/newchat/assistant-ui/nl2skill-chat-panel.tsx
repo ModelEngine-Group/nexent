@@ -84,6 +84,7 @@ export const Nl2SkillChatPanel: FC<Nl2SkillChatPanelProps> = ({
           <Chat
             selectedAgent={displayAgent}
             generatedTitle={assistantTitle}
+            welcomeTitle={t("skillManagement.chat.createWelcomeTitle")}
             isLoadingAgents={false}
             showModelSelector={false}
             variant="embedded"
