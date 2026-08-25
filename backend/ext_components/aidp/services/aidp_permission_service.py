@@ -13,8 +13,8 @@ Decision order:
     2. ``PRIVATE`` -> no access for every non-creator, including management
        roles.
     3. USER -> no access to any non-owned KB.
-    4. DEV and management roles require a group intersection for shared KBs.
-    5. A matching group grants ``ingroup_permission``.
+    4. Management roles (SU/ADMIN/SPEED/ASSET_OWNER) -> EDIT for shared KBs.
+    5. DEV with a group intersection -> ``ingroup_permission``.
     6. Empty ``group_ids`` or no intersection -> no access.
 
 Errors raised here map to HTTP status codes in ``aidp_mgmt_app``:
@@ -185,7 +185,17 @@ def _resolve_permission(
             matched_group_ids=tuple(),
         )
 
-    if (role != "DEV" and role not in CAN_EDIT_ALL_USER_ROLES) or not record_groups:
+    if role in CAN_EDIT_ALL_USER_ROLES:
+        return AidpPermissionDecision(
+            kb_id=kb_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            permission=EDIT,
+            is_management_role=True,
+            matched_group_ids=tuple(),
+        )
+
+    if role != "DEV" or not record_groups:
         return AidpPermissionDecision(
             kb_id=kb_id,
             tenant_id=tenant_id,
@@ -262,7 +272,7 @@ def _compute_accessible_rows(user_id: str, tenant_id: str) -> list[dict]:
     """Return KB rows where the user has non-null permission.
 
     Pulls ALL active rows for the tenant, applies the permission matrix
-    (owner / PRIVATE / role / group intersection), and keeps only
+    (management / owner / PRIVATE / group intersection), and keeps only
     the rows the user can see. Used by both :func:`get_accessible_kbs`
     and :func:`count_accessible_kbs` so the page slice and the count
     never disagree on what is visible.
