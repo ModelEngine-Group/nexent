@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import logging
 import os
+from datetime import datetime
 from io import BytesIO
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -35,9 +36,11 @@ from database.attachment_db import (
     get_file_stream,
     get_file_stream_raw,
     get_file_url,
+    generate_object_name,
     list_files,
     upload_fileobj,
 )
+from database.knowledge_file_lifecycle_db import create_file_records, transition_file_record
 from database.model_management_db import get_model_by_model_id
 from services.vectordatabase_service import ElasticSearchService, get_vector_db_core
 from utils.config_utils import tenant_config_manager, get_model_name_from_config
@@ -305,9 +308,10 @@ def validate_urls_access(
 
 
 class UploadFilesResult(tuple):
-    """Backward-compatible three-item upload result with optional quota metadata."""
+    """Backward-compatible upload result with optional quota and lifecycle metadata."""
 
     quota_status: Optional[dict]
+    file_records: list
 
     def __new__(
         cls,
@@ -315,10 +319,12 @@ class UploadFilesResult(tuple):
         uploaded_file_paths: list,
         uploaded_filenames: list,
         quota_status: Optional[dict] = None,
+        file_records: Optional[list] = None,
     ):
         result = super().__new__(
             cls, (errors, uploaded_file_paths, uploaded_filenames))
         result.quota_status = quota_status
+        result.file_records = file_records or []
         return result
 
 
@@ -392,6 +398,7 @@ async def upload_files_impl(
     uploaded_file_paths = []
     errors = []
     quota_status = None
+    lifecycle_records = []
     if destination == "local":
         async with upload_semaphore:
             for f in file:
@@ -417,34 +424,124 @@ async def upload_files_impl(
         from services.knowledge_storage_service import resolve_storage_context
 
         storage_context = resolve_storage_context(index_name, uploader_tenant_id)
+        lifecycle_records_by_index = {}
+        if storage_context:
+            lifecycle_record_indices = []
+            lifecycle_record_specs = []
+            for file_index, upload in enumerate(file):
+                if not upload:
+                    continue
+                original_filename = os.path.basename(upload.filename or "")
+                planned_object_name = generate_object_name(
+                    original_filename, prefix=actual_folder)
+                lifecycle_record_indices.append(file_index)
+                lifecycle_record_specs.append({
+                    "tenant_id": storage_context.tenant_id,
+                    "knowledge_id": storage_context.knowledge_id,
+                    "index_name": storage_context.index_name,
+                    "original_filename": original_filename,
+                    "bucket_name": storage_context.bucket_name,
+                    "object_name": planned_object_name,
+                    "file_size": getattr(upload, "size", None),
+                    "status": "UPLOADING",
+                    "stage": "UPLOAD",
+                    "created_by": user_id,
+                })
+
+            if lifecycle_record_specs:
+                # Lifecycle persistence is a required upload precondition. The
+                # repository creates the whole batch in one transaction; any
+                # database error must stop before MinIO is touched.
+                lifecycle_records = create_file_records(lifecycle_record_specs)
+                if len(lifecycle_records) != len(lifecycle_record_indices):
+                    raise RuntimeError("Lifecycle record batch creation returned an incomplete result")
+                lifecycle_records_by_index = dict(
+                    zip(lifecycle_record_indices, lifecycle_records))
         quota_service = None
         if storage_context:
             from services.quota_service import QuotaService
 
             total_file_size = await _get_complete_upload_batch_size(file)
             quota_service = QuotaService(storage_context.tenant_id, user_id)
-            quota_status = quota_service.check_hard_limit(
-                total_file_size,
-                index_name=storage_context.index_name,
-            )
-            if (
-                getattr(storage_context, "ingroup_permission", None) == "PRIVATE"
-                and user_id
-            ):
-                quota_service.check_personal_user_quota(
-                    user_id,
+            try:
+                quota_status = quota_service.check_hard_limit(
                     total_file_size,
+                    index_name=storage_context.index_name,
                 )
+                if (
+                    getattr(storage_context, "ingroup_permission", None) == "PRIVATE"
+                    and user_id
+                ):
+                    quota_service.check_personal_user_quota(
+                        user_id,
+                        total_file_size,
+                    )
+            except Exception as quota_exc:
+                for record in lifecycle_records_by_index.values():
+                    transition_file_record(
+                        record["file_id"],
+                        status="FAILED",
+                        stage="QUOTA",
+                        error_code="QUOTA_CHECK_FAILED",
+                        error_message=str(quota_exc)[:500],
+                        error_stage="QUOTA",
+                        failed_at=datetime.utcnow(),
+                        updated_by=user_id,
+                    )
+                raise
 
-        minio_results = await upload_to_minio(files=file, folder=actual_folder)
-        for result in minio_results:
+        if lifecycle_records_by_index:
+            minio_results = await upload_to_minio(
+                files=file,
+                folder=actual_folder,
+                file_records=lifecycle_records_by_index,
+            )
+        else:
+            minio_results = await upload_to_minio(files=file, folder=actual_folder)
+        successful_lifecycle_records = []
+        for file_index, result in enumerate(minio_results):
+            record = lifecycle_records_by_index.get(file_index)
+            file_id = result.get("file_id") or (record or {}).get("file_id")
             if result.get("success"):
                 uploaded_filenames.append(result.get("file_name"))
                 uploaded_file_paths.append(result.get("object_name"))
+                if file_id:
+                    updated_record = transition_file_record(
+                        file_id,
+                        status="UPLOADED",
+                        stage="UPLOAD",
+                        object_name=result.get("object_name"),
+                        file_size=result.get("file_size"),
+                        uploaded_at=datetime.utcnow(),
+                        expected_statuses=("UPLOADING",),
+                        updated_by=user_id,
+                    )
+                    if updated_record:
+                        lifecycle_records_by_index[file_index] = updated_record
+                        record = updated_record
+                    if record and file_id:
+                        # ``uploaded_filenames`` only contains successful uploads. Keep
+                        # the corresponding lifecycle records in the same success order
+                        # so a partial batch cannot update the wrong file name.
+                        successful_lifecycle_records.append(record)
             else:
                 file_name = result.get('file_name')
                 error_msg = result.get('error', 'Unknown error')
                 errors.append(f"Failed to upload {file_name}: {error_msg}")
+                if file_id:
+                    updated_record = transition_file_record(
+                        file_id,
+                        status="FAILED",
+                        stage="UPLOAD",
+                        error_code="UPLOAD_FAILED",
+                        error_message=str(error_msg)[:500],
+                        error_stage="UPLOAD",
+                        failed_at=datetime.utcnow(),
+                        expected_statuses=("UPLOADING",),
+                        updated_by=user_id,
+                    )
+                    if updated_record:
+                        lifecycle_records_by_index[file_index] = updated_record
 
         # Resolve filename conflicts against existing KB documents by renaming (e.g., name -> name_1)
         if index_name:
@@ -481,6 +578,33 @@ async def upload_files_impl(
 
                 uploaded_filenames[:] = make_unique_names(
                     uploaded_filenames, existing_names)
+
+                # The legacy UI and task metadata use the conflict-resolved name. The
+                # lifecycle row is created before this resolution, so synchronize its
+                # existing filename column after resolving names. Historical rows are
+                # intentionally not modified; only the current upload batch is updated.
+                for record, effective_filename in zip(successful_lifecycle_records, uploaded_filenames):
+                    current_filename = record.get("original_filename")
+                    if not record.get("file_id") or current_filename is None or current_filename == effective_filename:
+                        continue
+                    try:
+                        updated_record = transition_file_record(
+                            record["file_id"],
+                            original_filename=effective_filename,
+                            expected_statuses=("UPLOADED",),
+                            updated_by=user_id,
+                        )
+                        if updated_record:
+                            record.update(updated_record)
+                    except Exception as filename_exc:
+                        # MinIO and the upload response are already successful. Do not
+                        # turn a best-effort name synchronization failure into a second
+                        # upload failure; the task/ES name remains the legacy fallback.
+                        logger.warning(
+                            "Failed to synchronize lifecycle filename for file_id=%s: %s",
+                            record["file_id"],
+                            filename_exc,
+                        )
             except Exception as e:
                 logger.warning(
                     f"Failed to resolve filename conflicts for index '{index_name}': {str(e)}")
@@ -493,17 +617,42 @@ async def upload_files_impl(
 
             try:
                 for object_name in uploaded_file_paths:
-                    commit_uploaded_object(
+                    committed = commit_uploaded_object(
                         context=storage_context,
                         object_name=object_name,
                         created_by=user_id,
                     )
+                    if committed:
+                        for record in lifecycle_records_by_index.values():
+                            if record.get("object_name") == object_name and committed.get("storage_object_id"):
+                                updated_record = transition_file_record(
+                                    record["file_id"],
+                                    storage_object_id=committed["storage_object_id"],
+                                    expected_statuses=("UPLOADED",),
+                                    updated_by=user_id,
+                                )
+                                if updated_record:
+                                    record.update(updated_record)
+                                break
                 quota_service.invalidate_usage_cache(storage_context.tenant_id)
                 quota_status = quota_service.check_hard_limit_post_write(
                     0,
                     index_name=storage_context.index_name,
                 )
-            except Exception:
+            except Exception as exc:
+                for record in lifecycle_records_by_index.values():
+                    if record.get("status") in {"UPLOADING", "UPLOADED"}:
+                        transition_file_record(
+                            record["file_id"],
+                            status="FAILED",
+                            stage="STORAGE_COMMIT",
+                            error_code="STORAGE_COMMIT_FAILED",
+                            error_message=str(exc)[:500],
+                            error_stage="STORAGE_COMMIT",
+                            failed_at=datetime.utcnow(),
+                            expected_statuses=("UPLOADING", "UPLOADED"),
+                            updated_by=user_id,
+                        )
                 compensate_uploaded_objects(
                     context=storage_context,
                     object_names=uploaded_file_paths,
@@ -515,7 +664,12 @@ async def upload_files_impl(
         raise Exception("Invalid destination. Must be 'local' or 'minio'.")
 
     return UploadFilesResult(
-        errors, uploaded_file_paths, uploaded_filenames, quota_status)
+        errors,
+        uploaded_file_paths,
+        uploaded_filenames,
+        quota_status,
+        list(lifecycle_records_by_index.values()) if destination == "minio" else lifecycle_records,
+    )
 
 
 @trace_knowledge_operation("knowledge.upload.batch", "upload")
@@ -524,6 +678,7 @@ async def upload_to_minio(
     folder: str,
     user_id: Optional[str] = None,
     uploader_tenant_id: Optional[str] = None,
+    file_records: Optional[dict] = None,
 ) -> List[dict]:
     """
     Helper function to upload files to MinIO and return results.
@@ -540,7 +695,8 @@ async def upload_to_minio(
     actual_folder = resolve_minio_upload_folder(
         folder, user_id, uploader_tenant_id)
     results = []
-    for f in files:
+    for file_index, f in enumerate(files):
+        lifecycle_record = (file_records or {}).get(file_index)
         try:
             # Read file content
             file_content = await f.read()
@@ -552,15 +708,20 @@ async def upload_to_minio(
             original_filename = f.filename or ""
 
             # Upload file
-            result = upload_fileobj(
-                file_obj=file_obj,
-                file_name=original_filename,
-                prefix=actual_folder,
-                file_size=len(file_content)
-            )
+            upload_kwargs = {
+                "file_obj": file_obj,
+                "file_name": original_filename,
+                "prefix": actual_folder,
+                "file_size": len(file_content),
+            }
+            if lifecycle_record and lifecycle_record.get("object_name"):
+                upload_kwargs["object_name"] = lifecycle_record["object_name"]
+            result = upload_fileobj(**upload_kwargs)
 
             # Preserve original filename in result (upload_fileobj uses it for object name generation)
             result["original_file_name"] = original_filename
+            if lifecycle_record:
+                result["file_id"] = lifecycle_record.get("file_id")
 
             # Reset file pointer for potential re-reading
             await f.seek(0)
@@ -574,7 +735,8 @@ async def upload_to_minio(
                 "success": False,
                 "file_name": f.filename,
                 "original_file_name": f.filename,
-                "error": "An error occurred while processing the file."
+                "file_id": (lifecycle_record or {}).get("file_id"),
+                "error": str(e)[:500] or "An error occurred while processing the file."
             })
     return results
 
@@ -712,8 +874,18 @@ async def resolve_preview_file(object_name: str) -> Tuple[str, str, int]:
 
     content_type = get_content_type(object_name)
 
-    # PDF, images, and text files - return directly
-    if content_type.startswith('image/') or content_type in ['text/plain', 'text/csv', 'text/markdown', 'application/json', 'application/pdf']:
+    # PDF, images, and directly readable text files - return directly
+    direct_preview_types = {
+        'text/plain',
+        'text/csv',
+        'text/markdown',
+        'application/json',
+    }
+    if (
+        content_type == 'application/pdf'
+        or content_type.startswith('image/')
+        or content_type in direct_preview_types
+    ):
         return object_name, content_type, file_size
 
     # Office documents - convert to PDF with caching
