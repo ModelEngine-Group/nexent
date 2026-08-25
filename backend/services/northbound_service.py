@@ -32,7 +32,7 @@ from consts.exceptions import (
 from consts.error_code import ErrorCode, RuntimeMetadataValidationCode
 from consts.model import AgentRequest, ToolParamsRequest
 from database.knowledge_db import get_knowledge_info_by_tenant_id
-from database.conversation_db import get_conversation_messages
+from database.conversation_db import get_conversation_list, get_conversation_messages
 from database.token_db import get_latest_usage_metadata, log_token_usage
 from services.agent_service import (
     get_agent_by_name_impl,
@@ -51,7 +51,6 @@ from services.vectordatabase_service import (
 )
 from services.conversation_management_service import (
     save_conversation_user,
-    get_conversation_list_service,
     create_new_conversation,
     update_conversation_title as update_conversation_title_service,
 )
@@ -535,8 +534,7 @@ async def stop_chat(ctx: NorthboundContext, conversation_id: int, meta_data: Opt
 
 
 async def list_conversations(ctx: NorthboundContext) -> Dict[str, Any]:
-    conversations = get_conversation_list_service(ctx.user_id)
-    # get_conversation_list_service is sync
+    conversations = get_conversation_list(ctx.user_id)
 
     # Now return internal conversation_id directly
     return {"message": "success", "data": conversations, "requestId": ctx.request_id}

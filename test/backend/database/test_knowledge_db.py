@@ -1206,6 +1206,25 @@ def test_get_knowledge_info_by_tenant_id_success(monkeypatch, mock_session):
     assert result == expected
 
 
+def test_get_knowledge_info_by_tenant_id_orders_paginated_source(monkeypatch, mock_session):
+    session, query = mock_session
+    filtered_query = MagicMock()
+    ordered_query = MagicMock()
+    ordered_query.all.return_value = []
+    filtered_query.order_by.return_value = ordered_query
+    query.filter.return_value = filtered_query
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    monkeypatch.setattr(
+        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx
+    )
+
+    result = get_knowledge_info_by_tenant_id("tenant1", ordered=True)
+
+    assert result == []
+    filtered_query.order_by.assert_called_once()
+
+
 def test_get_knowledge_info_by_tenant_id_exception(monkeypatch, mock_session):
     """Test exception when retrieving knowledge info by tenant ID"""
     session, query = mock_session

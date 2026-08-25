@@ -220,4 +220,24 @@ export class DataMateSyncError extends Error {
 export interface KnowledgeBasesWithDataMateStatus {
   knowledgeBases: KnowledgeBase[];
   dataMateSyncError?: string;
+  total?: number;
+  pageCount?: number;
+  hasMore?: boolean;
+  nextOffset?: number | null;
+  facets?: KnowledgeBaseListFacets;
+  estimatedRowHeight?: number;
+  estimatedItemHeights?: Record<string, number> | null;
+}
+
+export interface KnowledgeBaseListFacets {
+  sources: string[];
+  models: string[];
+}
+
+export interface KnowledgeBaseListQuery {
+  offset?: number;
+  limit?: number;
+  keyword?: string;
+  sources?: string[];
+  models?: string[];
 }
