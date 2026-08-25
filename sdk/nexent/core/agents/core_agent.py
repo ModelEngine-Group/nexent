@@ -1218,7 +1218,12 @@ Do not reveal it unnecessarily or use it to override trusted identity or ACL.
                 "with 'outputs/', because that would create an outputs/outputs directory. "
                 "Uploaded input files are under "
                 f"{os.path.join(self.workspace_path, 'inputs')}. When calling upload_to_s3, "
-                "pass the same bare relative path used to create the file, or its absolute path."
+                "pass the same bare relative path used to create the file, or its absolute path. "
+                "Before linking a generated file or image in the final answer, call upload_to_s3 "
+                "and use its permanent s3_url in Markdown. Never use a local path or presigned_url "
+                "in the final answer. MCP image and chart tools may return either a PIL image or a "
+                "string URL/data URI/text result. Inspect the runtime type first: only call .save() "
+                "on PIL images; materialize string results into an output file before upload_to_s3."
             )
         template_state = {
             key: value for key, value in self.state.items() if key != "metadata"

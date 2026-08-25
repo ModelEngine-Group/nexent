@@ -23,12 +23,14 @@ class UploadToS3Tool(Tool):
         "The file path must be within the workspace directory. A relative path such as "
         "'report.pdf' is resolved from the run outputs directory; do not prefix it with "
         "'outputs/' when creating the file because code already runs in that directory. "
-        "Returns the S3 URL and a presigned download URL that can be shared with users."
+        "Returns a permanent S3 URL. Use that S3 URL in user-facing Markdown links "
+        "and images; never create or expose a presigned URL in the final answer."
     )
     description_zh = (
         "将当前运行工作区中的文件上传到 S3/MinIO。"
         "相对路径（如 report.pdf）从本次运行的 outputs 目录解析；代码已经在该目录运行，"
-        "创建文件时不要再添加 outputs/ 前缀。返回对象地址和供用户下载的预签名链接。"
+        "创建文件时不要再添加 outputs/ 前缀。返回永久 S3 对象地址；最终回答中的文件链接和"
+        "图片必须使用该 S3 地址，不要创建或暴露预签名链接。"
     )
 
     inputs = {
@@ -210,30 +212,19 @@ class UploadToS3Tool(Tool):
             if not success:
                 raise Exception(f"Failed to upload file to S3: {result}")
 
-            # 7. Generate presigned URL for download
-            presigned_url = ""
-            try:
-                presigned_ok, presigned_result = self.minio_client.get_file_url(
-                    s3_key, expires=86400  # 24 hours
-                )
-                if presigned_ok:
-                    presigned_url = presigned_result
-            except Exception as e:
-                logger.warning(f"Failed to generate presigned URL: {e}")
-
-            # 8. Build S3 URL
+            # 7. Build the permanent S3 reference. Browser-facing URLs are
+            # derived by the frontend and authenticated file API at render time.
             bucket = self.minio_client.default_bucket or "default"
             s3_url = f"s3://{bucket}/{s3_key}"
 
             logger.info(f"Successfully uploaded {abs_path} -> {s3_url} ({file_size} bytes)")
 
-            # 9. Return result
+            # 8. Return result
             relative_path = os.path.relpath(abs_path, self.workspace_path)
             response = {
                 "status": "success",
                 "local_path": relative_path,
                 "s3_url": s3_url,
-                "presigned_url": presigned_url,
                 "filename": filename,
                 "object_name": s3_key,
                 "name": filename,

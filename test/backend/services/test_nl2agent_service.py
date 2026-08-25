@@ -15,15 +15,20 @@ from services.nl2agent_service import (
     Nl2AgentResourceError,
     _Nl2AgentBoundaryObserver,
     _build_verified_bound_resources_context,
+    _load_internal_uninstalled_resource_catalog,
     _load_installed_resource_catalog,
     _normalize_skill_config,
     _normalize_tool_config,
+    _redact_installation_snapshot,
     _resource_similarity,
     build_nl2agent_run_info,
     create_nl2agent_stream,
     recommend_installed_resources_impl,
+    recommend_resources_impl,
+    recommend_uninstalled_resources_impl,
     save_agent_draft_fields_impl,
     search_installed_resources_impl,
+    search_uninstalled_resources_impl,
     search_installed_mcp_tools_by_query,
     validate_agent_generation_complete_impl,
 )
@@ -606,6 +611,378 @@ def test_resource_config_normalization_is_frontend_safe():
         {"name": "region", "type": "string", "required": True, "value": "eu"}
     ]
     assert _resource_similarity("", "search") == 0
+
+
+@pytest.mark.asyncio
+async def test_search_internal_uninstalled_resources_aggregates_sources_and_excludes_refs(
+    mocker,
+):
+    mocker.patch(
+        "services.skill_service.get_official_skills_with_status",
+        return_value=[
+            {
+                "skill_id": 0,
+                "name": "daily-report",
+                "description": "Create daily reports",
+                "status": "installable",
+            },
+            {
+                "skill_id": 9,
+                "name": "installed-skill",
+                "description": "Already installed",
+                "status": "installed",
+            },
+        ],
+    )
+    mocker.patch(
+        "services.skill_repository_service.list_skill_repository_listings_impl",
+        return_value={
+            "items": [
+                {
+                    "skill_repository_id": 31,
+                    "name": "email-report",
+                    "description": "Send reports by email",
+                    "content": "email report delivery",
+                    "tags": ["email"],
+                }
+            ],
+            "pagination": {"total_pages": 1},
+        },
+    )
+    mocker.patch(
+        "services.mcp_management_service.list_community_mcp_services",
+        new=AsyncMock(
+            return_value={
+                "items": [
+                    {
+                        "marketId": 42,
+                        "name": "github-search",
+                        "description": "Search GitHub projects",
+                        "content": "GitHub repository search",
+                        "transportType": "url",
+                        "serverUrl": "https://mcp.example.test/mcp",
+                        "authorizationToken": "persisted-secret",
+                        "customHeaders": {"X-Secret": "persisted-secret"},
+                        "tags": ["github"],
+                    }
+                ],
+                "nextCursor": None,
+            }
+        ),
+    )
+
+    result = await search_uninstalled_resources_impl(
+        requirements=[
+            ResourceRequirement(
+                requirement_id="github",
+                query="GitHub project search",
+                search_terms=["github-search"],
+            ),
+            ResourceRequirement(
+                requirement_id="email",
+                query="email report delivery",
+                search_terms=["email-report"],
+            ),
+        ],
+        exclude_refs=["nexent_official_skill:daily-report"],
+        tenant_id="tenant-a",
+        user_id="user-a",
+    )
+
+    refs = {candidate.candidate_ref for candidate in result.candidates}
+    assert "nexent_official_skill:daily-report" not in refs
+    assert refs == {
+        "tenant_skill_repository:31",
+        "tenant_mcp_repository:42",
+    }
+    assert result.uncovered_requirement_ids == []
+
+
+@pytest.mark.asyncio
+async def test_recommend_uninstalled_resources_overwrites_snapshot_and_redacts_secrets(
+    mocker,
+):
+    actual = {
+        "candidate_ref": "tenant_mcp_repository:42",
+        "resource_type": "mcp_server",
+        "source": "TENANT_MCP_REPOSITORY",
+        "name": "verified-name",
+        "description": "Verified description",
+        "form_kind": "MCP_REMOTE",
+        "config": {"authorizationToken": ""},
+        "installation_options": [
+            {
+                "option_id": "repository",
+                "label": "Install",
+                "form_kind": "MCP_REMOTE",
+                "config": {"authorizationToken": ""},
+            }
+        ],
+        "default_option_id": "repository",
+    }
+    mocker.patch(
+        "services.nl2agent_service._load_internal_uninstalled_resource_catalog",
+        new=AsyncMock(return_value=[actual]),
+    )
+    supplied = ResourceCandidate(
+        candidate_ref="tenant_mcp_repository:42",
+        resource_type="mcp_server",
+        source="TENANT_MCP_REPOSITORY",
+        name="tampered-name",
+        description="Tampered description",
+        requirement_ids=["search"],
+        score=0.91,
+    )
+
+    result = await recommend_uninstalled_resources_impl(
+        candidates=[supplied],
+        recommended_refs=[supplied.candidate_ref],
+        tenant_id="tenant-a",
+        user_id="user-a",
+    )
+
+    resource = result.resources[0]
+    assert resource.candidate.name == "verified-name"
+    assert resource.config == {"authorizationToken": ""}
+    assert resource.default_option_id == "repository"
+
+
+def test_installation_snapshot_redacts_nested_secret_shapes():
+    redacted = _redact_installation_snapshot({
+        "customHeaders": {
+            "Authorization": "Bearer private-token",
+            "X-Trace": "private-trace",
+        },
+        "environment": {
+            "API_TOKEN": "private-token",
+            "REGION": "private-region",
+        },
+        "fields": [
+            {
+                "name": "password",
+                "value": "private-password",
+                "default": "private-default",
+                "isSecret": True,
+            },
+            {"name": "region", "value": "eu-west"},
+        ],
+        "api_key": "private-key",
+        "nested": {
+            "accessToken": "private-access-token",
+            "safe": "visible",
+        },
+    })
+
+    assert redacted == {
+        "customHeaders": {"Authorization": "", "X-Trace": ""},
+        "environment": {"API_TOKEN": "", "REGION": ""},
+        "fields": [
+            {
+                "name": "password",
+                "value": "",
+                "default": "",
+                "isSecret": True,
+            },
+            {"name": "region", "value": "eu-west"},
+        ],
+        "api_key": "",
+        "nested": {"accessToken": "", "safe": "visible"},
+    }
+    assert _redact_installation_snapshot(
+        "private-value", parent_key="environment"
+    ) == ""
+    assert _redact_installation_snapshot("visible", parent_key="name") == "visible"
+
+
+@pytest.mark.asyncio
+async def test_uninstalled_catalog_paginates_and_filters_invalid_entries(mocker):
+    mocker.patch(
+        "services.skill_service.get_official_skills_with_status",
+        return_value=[
+            {
+                "name": "PDF report",
+                "description": "Create a PDF report",
+                "status": "installable",
+            },
+            {"name": "", "status": "installable"},
+        ],
+    )
+    list_skills = mocker.patch(
+        "services.skill_repository_service.list_skill_repository_listings_impl",
+        side_effect=[
+            {
+                "items": [
+                    None,
+                    {
+                        "id": 32,
+                        "name": "tenant-report",
+                        "description": "Create tenant reports",
+                    },
+                    {"skill_repository_id": 0, "name": "invalid-id"},
+                    {"skill_repository_id": 33, "name": ""},
+                ],
+                "pagination": {"total_pages": 2},
+            },
+            {"items": [], "pagination": {"total_pages": 2}},
+        ],
+    )
+    list_community = mocker.patch(
+        "services.mcp_management_service.list_community_mcp_services",
+        new=AsyncMock(
+            side_effect=[
+                {
+                    "items": [
+                        None,
+                        {
+                            "communityId": 55,
+                            "name": "container-mcp",
+                            "description": "Run a container MCP service",
+                            "transportType": "container",
+                            "configJson": {
+                                "env": {"API_TOKEN": "private-token"}
+                            },
+                            "registryJson": {"apiKey": "private-key"},
+                        },
+                        {
+                            "marketId": 56,
+                            "name": "invalid-container",
+                            "transportType": "container",
+                            "configJson": "not-an-object",
+                        },
+                        {
+                            "marketId": 0,
+                            "name": "invalid-id",
+                            "transportType": "url",
+                            "serverUrl": "https://mcp.example.test",
+                        },
+                        {
+                            "marketId": 57,
+                            "name": "invalid-url",
+                            "transportType": "url",
+                            "serverUrl": "ftp://mcp.example.test",
+                        },
+                    ],
+                    "nextCursor": "next-page",
+                },
+                {"items": [], "nextCursor": None},
+            ]
+        ),
+    )
+
+    catalog = await _load_internal_uninstalled_resource_catalog(
+        tenant_id="tenant-a",
+        user_id="user-a",
+    )
+
+    by_ref = {item["candidate_ref"]: item for item in catalog}
+    assert set(by_ref) == {
+        "nexent_official_skill:PDF%20report",
+        "tenant_skill_repository:32",
+        "tenant_mcp_repository:55",
+    }
+    container = by_ref["tenant_mcp_repository:55"]
+    assert container["form_kind"] == "MCP_CONTAINER"
+    assert json.loads(container["config"]["containerConfigJson"]) == {
+        "env": {"API_TOKEN": ""}
+    }
+    assert container["config"]["registryJson"] == {"apiKey": ""}
+    assert [call.kwargs["page"] for call in list_skills.call_args_list] == [1, 2]
+    assert [
+        call.kwargs["cursor"] for call in list_community.await_args_list
+    ] == [None, "next-page"]
+
+
+@pytest.mark.asyncio
+async def test_recommend_uninstalled_resources_rejects_missing_and_mismatched_entries(
+    mocker,
+):
+    load_catalog = mocker.patch(
+        "services.nl2agent_service._load_internal_uninstalled_resource_catalog",
+        new=AsyncMock(return_value=[]),
+    )
+    supplied = ResourceCandidate(
+        candidate_ref="tenant_skill_repository:31",
+        resource_type="skill",
+        source="TENANT_SKILL_REPOSITORY",
+        name="tenant-report",
+        requirement_ids=["report"],
+        score=0.9,
+    )
+
+    with pytest.raises(Nl2AgentResourceError, match="resource_not_visible"):
+        await recommend_uninstalled_resources_impl(
+            candidates=[supplied],
+            recommended_refs=[],
+            tenant_id="tenant-a",
+            user_id="user-a",
+        )
+
+    load_catalog.return_value = [{
+        "candidate_ref": supplied.candidate_ref,
+        "resource_type": "mcp_server",
+        "source": "TENANT_MCP_REPOSITORY",
+    }]
+    with pytest.raises(Nl2AgentResourceError, match="invalid_candidates"):
+        await recommend_uninstalled_resources_impl(
+            candidates=[supplied],
+            recommended_refs=[],
+            tenant_id="tenant-a",
+            user_id="user-a",
+        )
+
+
+@pytest.mark.asyncio
+async def test_recommend_resources_dispatches_homogeneous_sources(mocker):
+    installed = ResourceCandidate(
+        candidate_ref="tool:7",
+        resource_type="tool",
+        source="LOCAL_TOOL",
+        name="search",
+        requirement_ids=["lookup"],
+        score=0.9,
+    )
+    uninstalled = ResourceCandidate(
+        candidate_ref="tenant_skill_repository:31",
+        resource_type="skill",
+        source="TENANT_SKILL_REPOSITORY",
+        name="tenant-report",
+        requirement_ids=["report"],
+        score=0.9,
+    )
+    installed_result = MagicMock()
+    uninstalled_result = MagicMock()
+    installed_resolver = mocker.patch(
+        "services.nl2agent_service.recommend_installed_resources_impl",
+        new=AsyncMock(return_value=installed_result),
+    )
+    uninstalled_resolver = mocker.patch(
+        "services.nl2agent_service.recommend_uninstalled_resources_impl",
+        new=AsyncMock(return_value=uninstalled_result),
+    )
+
+    assert await recommend_resources_impl(
+        candidates=[installed],
+        recommended_refs=[installed.candidate_ref],
+        tenant_id="tenant-a",
+        user_id="user-a",
+    ) is installed_result
+    assert await recommend_resources_impl(
+        candidates=[uninstalled],
+        recommended_refs=[],
+        tenant_id="tenant-a",
+        user_id="user-a",
+    ) is uninstalled_result
+    installed_resolver.assert_awaited_once()
+    uninstalled_resolver.assert_awaited_once()
+
+    for candidates in ([], [installed, uninstalled]):
+        with pytest.raises(Nl2AgentResourceError, match="invalid_candidates"):
+            await recommend_resources_impl(
+                candidates=candidates,
+                recommended_refs=[],
+                tenant_id="tenant-a",
+                user_id="user-a",
+            )
 
 
 @pytest.mark.asyncio

@@ -16,23 +16,119 @@ in via ``SandboxConfig`` — this module never calls ``os.getenv()`` directly.
 from __future__ import annotations
 
 import ast
+import base64
 import hashlib
 import hmac
+import io
 import json
 import logging
+import mimetypes
 import re
 import secrets
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FuturesTimeoutError
 from contextlib import closing
 from dataclasses import dataclass, field
 from enum import Enum, IntEnum
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Optional
+
 
 logger = logging.getLogger(__name__)
+
+
+_TOOL_BRIDGE_VALUE_MARKER = "__nexent_tool_bridge_value__"
+
+
+def _serialize_tool_bridge_value(value: Any) -> Any:
+    """Convert host-tool results into a lossless JSON-compatible value."""
+    try:
+        from smolagents.agent_types import AgentAudio, AgentImage
+    except ImportError:  # pragma: no cover - smolagents is a runtime dependency
+        AgentAudio = AgentImage = ()
+
+    if AgentImage and isinstance(value, AgentImage):
+        value = value.to_raw()
+
+    try:
+        from PIL import Image
+    except ImportError:  # pragma: no cover - Pillow is a smolagents dependency
+        Image = None
+
+    if Image is not None and isinstance(value, Image.Image):
+        buffer = io.BytesIO()
+        value.save(buffer, format="PNG")
+        return {
+            _TOOL_BRIDGE_VALUE_MARKER: 1,
+            "kind": "image",
+            "mime_type": "image/png",
+            "encoding": "base64",
+            "data": base64.b64encode(buffer.getvalue()).decode("ascii"),
+        }
+
+    # AgentAudio inherits from str, so it must be handled before primitive strings.
+    if AgentAudio and isinstance(value, AgentAudio):
+        audio_location = str(value.to_string())
+        audio_path = Path(audio_location)
+        if audio_path.is_file():
+            mime_type = mimetypes.guess_type(audio_path.name)[0] or "audio/wav"
+            return {
+                _TOOL_BRIDGE_VALUE_MARKER: 1,
+                "kind": "audio",
+                "mime_type": mime_type,
+                "encoding": "base64",
+                "data": base64.b64encode(audio_path.read_bytes()).decode("ascii"),
+            }
+        return audio_location
+
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return {
+            _TOOL_BRIDGE_VALUE_MARKER: 1,
+            "kind": "binary",
+            "mime_type": "application/octet-stream",
+            "encoding": "base64",
+            "data": base64.b64encode(bytes(value)).decode("ascii"),
+        }
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, dict):
+        return {key: _serialize_tool_bridge_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_serialize_tool_bridge_value(item) for item in value]
+
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        return _serialize_tool_bridge_value(model_dump(mode="json"))
+
+    raise TypeError(
+        f"Host tool returned unsupported result type: {type(value).__module__}.{type(value).__name__}"
+    )
+
+
+def _deserialize_tool_bridge_value(value: Any, tools: dict[str, Any]) -> Any:
+    """Restore bridge-owned references in arguments received from a sandbox."""
+    if (
+        isinstance(value, dict)
+        and value.get(_TOOL_BRIDGE_VALUE_MARKER) == 1
+        and value.get("kind") == "tool_reference"
+    ):
+        tool_name = value.get("name")
+        if not isinstance(tool_name, str) or tool_name not in tools:
+            raise ValueError(f"Unknown local tool reference: {tool_name}")
+        return tools[tool_name]
+    if isinstance(value, dict):
+        return {
+            key: _deserialize_tool_bridge_value(item, tools)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_deserialize_tool_bridge_value(item, tools) for item in value]
+    return value
 
 
 # ----------------------------------------------------------------------
@@ -320,8 +416,15 @@ class _ToolBridge:
                     tool = bridge._tools.get(tool_name)
                     if tool is None:
                         raise ValueError(f"Unknown local tool: {tool_name}")
-                    result = tool(*payload.get("args", []), **payload.get("kwargs", {}))
-                    body = json.dumps({"result": result}, ensure_ascii=False, default=str).encode("utf-8")
+                    args = _deserialize_tool_bridge_value(
+                        payload.get("args", []), bridge._tools
+                    )
+                    kwargs = _deserialize_tool_bridge_value(
+                        payload.get("kwargs", {}), bridge._tools
+                    )
+                    result = tool(*args, **kwargs)
+                    serialized_result = _serialize_tool_bridge_value(result)
+                    body = json.dumps({"result": serialized_result}, ensure_ascii=False).encode("utf-8")
                     self.send_response(200)
                 except Exception as exc:
                     bridge._logger.exception("Local tool bridge invocation failed")
@@ -356,18 +459,63 @@ class _ToolBridge:
         for name in tools:
             definitions.append(
                 f"def {name}(*args, **kwargs):\n"
-                f"    return _nexent_call_host_tool({name!r}, args, kwargs)"
+                f"    return _nexent_call_host_tool({name!r}, args, kwargs)\n"
+                f"{name}._nexent_tool_bridge_name = {name!r}"
             )
         host = bridge_host or self._bridge_host()
         return (
+            "import base64 as _nexent_base64\n"
+            "import io as _nexent_io\n"
             "import json as _nexent_json\n"
             "import urllib.request as _nexent_urllib\n"
             "import urllib.error as _nexent_urllib_error\n"
+            "class _NexentBridgedMedia:\n"
+            "    def __init__(self, data, mime_type):\n"
+            "        self.data = data\n"
+            "        self.mime_type = mime_type\n"
+            "    def save(self, destination, *args, **kwargs):\n"
+            "        if hasattr(destination, 'write'):\n"
+            "            destination.write(self.data)\n"
+            "        else:\n"
+            "            with open(destination, 'wb') as output_file:\n"
+            "                output_file.write(self.data)\n"
+            "    def to_bytes(self):\n"
+            "        return self.data\n"
+            "def _nexent_decode_tool_bridge_value(value):\n"
+            f"    if isinstance(value, dict) and value.get({_TOOL_BRIDGE_VALUE_MARKER!r}) == 1:\n"
+            "        raw = _nexent_base64.b64decode(value['data'])\n"
+            "        kind = value.get('kind')\n"
+            "        if kind == 'image':\n"
+            "            try:\n"
+            "                from PIL import Image as _nexent_pil_image\n"
+            "                image = _nexent_pil_image.open(_nexent_io.BytesIO(raw))\n"
+            "                image.load()\n"
+            "                return image\n"
+            "            except ImportError:\n"
+            "                return _NexentBridgedMedia(raw, value.get('mime_type'))\n"
+            "        if kind == 'binary':\n"
+            "            return raw\n"
+            "        return _NexentBridgedMedia(raw, value.get('mime_type'))\n"
+            "    if isinstance(value, dict):\n"
+            "        return {key: _nexent_decode_tool_bridge_value(item) for key, item in value.items()}\n"
+            "    if isinstance(value, list):\n"
+            "        return [_nexent_decode_tool_bridge_value(item) for item in value]\n"
+            "    return value\n"
+            "def _nexent_encode_tool_bridge_value(value):\n"
+            "    tool_name = getattr(value, '_nexent_tool_bridge_name', None)\n"
+            "    if isinstance(tool_name, str):\n"
+            f"        return {{{_TOOL_BRIDGE_VALUE_MARKER!r}: 1, 'kind': 'tool_reference', 'name': tool_name}}\n"
+            "    raise TypeError(\n"
+            "        'Object of type ' + type(value).__name__ + ' is not JSON serializable'\n"
+            "    )\n"
             f"_NEXENT_TOOL_BRIDGE_URL = 'http://{host}:{self.port}/invoke'\n"
             f"_NEXENT_TOOL_BRIDGE_TOKEN = {self._token!r}\n"
             f"_NEXENT_TOOL_BRIDGE_TIMEOUT = {self._request_timeout_seconds!r}\n"
             "def _nexent_call_host_tool(name, args, kwargs):\n"
-            "    payload = _nexent_json.dumps({'tool': name, 'args': args, 'kwargs': kwargs}).encode('utf-8')\n"
+            "    payload = _nexent_json.dumps(\n"
+            "        {'tool': name, 'args': args, 'kwargs': kwargs},\n"
+            "        default=_nexent_encode_tool_bridge_value,\n"
+            "    ).encode('utf-8')\n"
             "    request = _nexent_urllib.Request(_NEXENT_TOOL_BRIDGE_URL, data=payload, headers={\n"
             "        'Authorization': 'Bearer ' + _NEXENT_TOOL_BRIDGE_TOKEN,\n"
             "        'Content-Type': 'application/json',\n"
@@ -386,7 +534,7 @@ class _ToolBridge:
             "        raise RuntimeError('Local tool bridge request failed: ' + str(exc)) from exc\n"
             "    if 'error' in result:\n"
             "        raise RuntimeError(result['error'])\n"
-            "    return result.get('result')\n\n"
+            "    return _nexent_decode_tool_bridge_value(result.get('result'))\n\n"
             + "\n\n".join(definitions)
         )
 

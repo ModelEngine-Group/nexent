@@ -48,6 +48,7 @@ import {
   type Nl2AgentConfigFieldError,
   type Nl2AgentResourceParam,
 } from "./nl2agent-resource-config";
+import { Nl2AgentResourceSourceBadge } from "./nl2agent-resource-source-badge";
 
 type ConfigStatus = "unconfigured" | "valid" | "invalid";
 type BindingStatus = "idle" | "binding" | "bound" | "failed";
@@ -618,6 +619,9 @@ export const InstalledResourceBindingCard: FC<{
                   <span className="break-words text-sm font-medium">
                     {item.resource.candidate.name}
                   </span>
+                  <Nl2AgentResourceSourceBadge
+                    source={item.resource.candidate.source}
+                  />
                   <Badge variant="outline" className="rounded-md text-[10px]">
                     {item.resource.recommendation === "recommended"
                       ? t("nl2agent.resourceBinding.recommended", "Recommended")

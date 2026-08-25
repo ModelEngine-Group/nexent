@@ -3350,6 +3350,9 @@ def test_managed_agent_call_injects_workspace_instructions(tmp_path):
     assert "current working directory" in managed_task
     assert "Never prefix a relative output path" in managed_task
     assert "pass the same bare relative path" in managed_task
+    assert "use its permanent s3_url in Markdown" in managed_task
+    assert "Never use a local path or presigned_url" in managed_task
+    assert "only call .save() on PIL images" in managed_task
 
 
 def test_run_with_metadata_injects_untrusted_metadata_block():

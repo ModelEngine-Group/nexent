@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 import pytest
 from jinja2 import UndefinedError
 from nexent.core.agents.context import ContextItemInput, ContextManager, ContextManagerConfig
+from nexent.core.tools.parallel_executor import ParallelExecutorTool
 from pydantic import ValidationError
 from smolagents import CodeAgent
 from smolagents.memory import TaskStep
@@ -25,6 +26,7 @@ from tool_collection.mcp.nl2agent_mcp_tools import (
     ResourceRequirement,
     SAVE_AGENT_DRAFT_FIELDS_NAME,
     SEARCH_INSTALLED_RESOURCES_NAME,
+    SEARCH_UNINSTALLED_RESOURCES_NAME,
     SearchInstalledResourcesInput,
     build_nl2a_wrapper,
 )
@@ -102,7 +104,7 @@ def test_build_nl2agent_system_prompt_configures_existing_draft(
         assert "### 状态判定与完成标准" in prompt
         assert "不证明该 Agent 已完成配置" in prompt
         assert "空描述草稿必须先输出一次" in prompt
-        assert "只有描述已保存、资源需求已绑定或明确放弃" in prompt
+        assert "只有描述已保存、资源需求已安装并绑定或明确放弃" in prompt
         assert "收到 `agent_generation_completed` 前，禁止输出普通最终答案" in prompt
         assert "### 完成总结" in prompt
         assert "新智能体已完成生成" in prompt
@@ -115,7 +117,7 @@ def test_build_nl2agent_system_prompt_configures_existing_draft(
         assert '"question_id": "expected_output"' in prompt
 
     description_save = prompt.index('"description":')
-    resource_search = prompt.index("raw_result = runtime_search")
+    resource_search = prompt.index("raw_results = parallel_executor")
     assert description_save < resource_search
 
     code_blocks = re.findall(r"<code>\n(.*?)\n</code>", prompt, re.DOTALL)
@@ -294,10 +296,13 @@ def test_build_nl2agent_system_prompt_prioritizes_completed_draft_revisions(
 def test_build_nl2agent_system_prompt_uses_mounted_tool_names(language):
     prompt = build_nl2agent_system_prompt(language)
 
-    assert f"raw_result = {SEARCH_INSTALLED_RESOURCES_NAME}(" in prompt
+    assert f"({SEARCH_INSTALLED_RESOURCES_NAME}," in prompt
+    assert f"({SEARCH_UNINSTALLED_RESOURCES_NAME}," in prompt
     assert f"raw_resource_result = {RECOMMEND_RESOURCES_NAME}(" in prompt
     assert f"saved = {SAVE_AGENT_DRAFT_FIELDS_NAME}(" in prompt
     assert f"wrapped = {NL2A_WRAPPER_NAME}(" in prompt
+    assert "external_registry" not in prompt
+    assert "MCP_OFFICIAL_REGISTRY" not in prompt
 
 
 def test_build_nl2agent_system_prompt_rejects_unknown_template_variables(mocker):
@@ -437,19 +442,24 @@ async def test_create_nl2agent_agent_config_has_only_current_runtime_tools(langu
 
     assert [tool.name for tool in config.tools] == [
         SEARCH_INSTALLED_RESOURCES_NAME,
+        SEARCH_UNINSTALLED_RESOURCES_NAME,
         RECOMMEND_RESOURCES_NAME,
         SAVE_AGENT_DRAFT_FIELDS_NAME,
         NL2A_WRAPPER_NAME,
+        ParallelExecutorTool.name,
     ]
     assert [tool.description for tool in config.tools] == [
         registered_tools[SEARCH_INSTALLED_RESOURCES_NAME].description,
+        registered_tools[SEARCH_UNINSTALLED_RESOURCES_NAME].description,
         registered_tools[RECOMMEND_RESOURCES_NAME].description,
         registered_tools[SAVE_AGENT_DRAFT_FIELDS_NAME].description,
         registered_tools[NL2A_WRAPPER_NAME].description,
+        ParallelExecutorTool.description,
     ]
     assert json.loads(config.tools[0].inputs)["agent_id"] == "int"
     assert json.loads(config.tools[1].inputs)["agent_id"] == "int"
-    save_inputs = json.loads(config.tools[2].inputs)
+    assert json.loads(config.tools[2].inputs)["agent_id"] == "int"
+    save_inputs = json.loads(config.tools[3].inputs)
     assert save_inputs["agent_id"] == "int"
     assert set(save_inputs["fields"]) == {
         "description",
@@ -459,7 +469,7 @@ async def test_create_nl2agent_agent_config_has_only_current_runtime_tools(langu
         "greeting_message",
         "example_questions",
     }
-    assert set(json.loads(config.tools[3].inputs)) == {
+    assert set(json.loads(config.tools[4].inputs)) == {
         "subtype",
         "agent_id",
         "resource_result",

@@ -21,7 +21,7 @@ import sys
 import time
 import threading
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from unittest.mock import ANY, MagicMock, call, patch
 
 import pytest
@@ -236,6 +236,144 @@ class TestHostToolBridge:
                 namespace["missing_tool"]()
         finally:
             bridge.close()
+
+    def test_host_tool_proxy_preserves_image_result_and_save(self, tmp_path):
+        from PIL import Image
+        from smolagents.agent_types import AgentImage
+
+        bridge = sandbox_module._ToolBridge(
+            sandbox_module.logging.getLogger("test_sandbox")
+        )
+        bridge.register({
+            "generate_chart": lambda: AgentImage(Image.new("RGB", (4, 3), "red")),
+        })
+        try:
+            namespace = {}
+            exec(
+                bridge.proxy_code(
+                    {"generate_chart": object()},
+                    bridge_host="127.0.0.1",
+                ),
+                namespace,
+            )
+
+            result = namespace["generate_chart"]()
+            output_path = tmp_path / "chart.png"
+            result.save(output_path)
+
+            assert isinstance(result, Image.Image)
+            assert result.size == (4, 3)
+            with Image.open(output_path) as saved_image:
+                assert saved_image.size == (4, 3)
+        finally:
+            bridge.close()
+
+    def test_host_tool_proxy_preserves_nested_binary_result(self):
+        bridge = sandbox_module._ToolBridge(
+            sandbox_module.logging.getLogger("test_sandbox")
+        )
+        bridge.register({"binary_tool": lambda: {"items": [b"chart-bytes"]}})
+        try:
+            namespace = {}
+            exec(
+                bridge.proxy_code(
+                    {"binary_tool": object()},
+                    bridge_host="127.0.0.1",
+                ),
+                namespace,
+            )
+
+            assert namespace["binary_tool"]() == {"items": [b"chart-bytes"]}
+        finally:
+            bridge.close()
+
+    def test_host_parallel_executor_restores_bridged_tool_references(self):
+        def host_add(left, right=0):
+            return left + right
+
+        def parallel_executor(tasks):
+            return [func(**kwargs) for func, kwargs in tasks]
+
+        tools = {
+            "host_add": host_add,
+            "parallel_executor": parallel_executor,
+        }
+        bridge = sandbox_module._ToolBridge(
+            sandbox_module.logging.getLogger("test_sandbox")
+        )
+        bridge.register(tools)
+        try:
+            namespace = {}
+            exec(
+                bridge.proxy_code(tools, bridge_host="127.0.0.1"),
+                namespace,
+            )
+
+            result = namespace["parallel_executor"](
+                tasks=[
+                    (namespace["host_add"], {"left": 1, "right": 2}),
+                    (namespace["host_add"], {"left": 4, "right": 5}),
+                ]
+            )
+
+            assert result == [3, 9]
+        finally:
+            bridge.close()
+
+    def test_serialize_tool_bridge_value_handles_audio_paths_and_models(
+        self,
+        tmp_path,
+        monkeypatch,
+    ):
+        class FakeAgentAudio:
+            def __init__(self, location):
+                self.location = location
+
+            def to_string(self):
+                return self.location
+
+        class JsonModel:
+            def model_dump(self, mode):
+                assert mode == "json"
+                return {"output_path": tmp_path / "report.txt"}
+
+        smolagents_module = ModuleType("smolagents")
+        agent_types_module = ModuleType("smolagents.agent_types")
+        agent_types_module.AgentAudio = FakeAgentAudio
+        agent_types_module.AgentImage = ()
+        smolagents_module.agent_types = agent_types_module
+        monkeypatch.setitem(sys.modules, "smolagents", smolagents_module)
+        monkeypatch.setitem(sys.modules, "smolagents.agent_types", agent_types_module)
+        audio_path = tmp_path / "sample.wav"
+        audio_path.write_bytes(b"audio-bytes")
+
+        serialized_audio = sandbox_module._serialize_tool_bridge_value(
+            FakeAgentAudio(audio_path)
+        )
+
+        assert serialized_audio[sandbox_module._TOOL_BRIDGE_VALUE_MARKER] == 1
+        assert serialized_audio["kind"] == "audio"
+        assert serialized_audio["mime_type"] in {"audio/wav", "audio/x-wav"}
+        assert serialized_audio["encoding"] == "base64"
+        assert serialized_audio["data"] == "YXVkaW8tYnl0ZXM="
+        assert sandbox_module._serialize_tool_bridge_value(
+            FakeAgentAudio(tmp_path / "missing.wav")
+        ) == str(tmp_path / "missing.wav")
+        assert sandbox_module._serialize_tool_bridge_value(JsonModel()) == {
+            "output_path": str(tmp_path / "report.txt")
+        }
+
+    def test_tool_bridge_value_rejects_unsupported_results_and_unknown_references(self):
+        with pytest.raises(TypeError, match="Host tool returned unsupported result type: builtins.object"):
+            sandbox_module._serialize_tool_bridge_value(object())
+
+        unknown_reference = {
+            sandbox_module._TOOL_BRIDGE_VALUE_MARKER: 1,
+            "kind": "tool_reference",
+            "name": "missing_tool",
+        }
+        with pytest.raises(ValueError, match="Unknown local tool reference: missing_tool"):
+            sandbox_module._deserialize_tool_bridge_value(unknown_reference, {})
 
 
 class TestKernelGatewayConfiguration:
