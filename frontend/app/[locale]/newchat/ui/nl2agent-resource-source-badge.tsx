@@ -28,10 +28,21 @@ export function Nl2AgentResourceSourceBadge({
 }) {
   const { t } = useTranslation("common");
   const availability = availabilityOverride || AVAILABILITY_BY_SOURCE[source];
+  const isTenantRepository =
+    source === "TENANT_SKILL_REPOSITORY" ||
+    source === "TENANT_MCP_REPOSITORY";
   const label = {
     local: t("nl2agent.resourceSource.local", "Local"),
     installed: t("nl2agent.resourceSource.installed", "Installed"),
-    uninstalled: t("nl2agent.resourceSource.uninstalled", "Not installed"),
+    uninstalled: isTenantRepository
+      ? t(
+          "nl2agent.resourceSource.uninstalledTenantRepository",
+          "Not installed · Tenant repository"
+        )
+      : t(
+          "nl2agent.resourceSource.uninstalledOther",
+          "Not installed · Other"
+        ),
   }[availability];
 
   return (
