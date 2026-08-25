@@ -15,6 +15,7 @@ import {
   History,
   Maximize2,
   Minimize2,
+  Pencil,
   RefreshCw,
   Sparkles,
   X,
@@ -343,33 +344,46 @@ function AgentSetupContent() {
             title={t("agent.page.panel.config")}
             className={isDebugFullscreen ? "flex-1" : "flex-[2]"}
             leftAction={
-              currentAgentId !== null &&
-              agentInfo?.current_version_no !== 0 &&
-              total > 0 ? (
-                <div className="flex shrink-0 items-center gap-1 rounded-lg px-3 py-1.5 text-gray-700">
-                  <History size={16} />
-                  <Tag
-                    color="cyan"
-                    variant="outlined"
-                    className="cursor-pointer rounded-md font-mono text-sm"
-                    onClick={() => setIsShowVersionManagePanel(true)}
-                  >
-                    {agentVersionDetail?.version.version_name}
+              currentAgentId !== null ? (
+                <div className="flex shrink-0 items-center gap-2 px-3 py-1.5 text-gray-700">
+                  <Tag color="orange" className="rounded-md text-sm">
+                    <span className="inline-flex items-center gap-1 whitespace-nowrap">
+                      <Pencil size={12} aria-hidden="true" />
+                      {t("agent.version.draftStatus")}
+                    </span>
                   </Tag>
-                  <span className="text-xs text-gray-500">
-                    / {t("agent.version.totalVersions", { count: total })}
-                  </span>
+                 
                 </div>
               ) : null
             }
             rightAction={
-              <Button
-                icon={<Sparkles size={16} />}
-                onClick={() => setIsGenerationVisible((visible) => !visible)}
-                type={isGenerationVisible ? "primary" : "default"}
-              >
-                {t("agent.page.panel.nl2agent")}
-              </Button>
+              <div className="flex items-center gap-2">
+                {agentInfo?.current_version_no && total > 0 ? (
+                  <div className="flex items-center gap-1">
+                    <History size={16} />
+                    {t("agent.version.current")}:
+                    <Tag
+                      color="cyan"
+                      variant="outlined"
+                      className="cursor-pointer rounded-md font-mono text-sm"
+                      onClick={() => setIsShowVersionManagePanel(true)}
+                    >
+                      {agentVersionDetail?.version.version_name ||
+                        `V${agentInfo.current_version_no}`}
+                    </Tag>
+                    <span className="text-xs text-gray-500">
+                      / {t("agent.version.totalVersions", { count: total })}
+                    </span>
+                  </div>
+                ) : null}
+                <Button
+                  icon={<Sparkles size={16} />}
+                  onClick={() => setIsGenerationVisible((visible) => !visible)}
+                  type={isGenerationVisible ? "primary" : "default"}
+                >
+                  {t("agent.page.panel.nl2agent")}
+                </Button>
+              </div>
             }
           >
             <div className="min-h-0 flex-1 overflow-auto px-4 py-2">
