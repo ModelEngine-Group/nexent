@@ -18,14 +18,7 @@ import type {
   ThreadHistoryAdapter,
 } from "@assistant-ui/react";
 
-import {
-  CONVERSATION_PAGE_SIZE,
-  conversationService,
-} from "@/services/conversationService";
-import {
-  getConversationDateBoundaries,
-  newChatConversationViewport,
-} from "@/lib/conversationViewport";
+import { conversationService } from "@/services/conversationService";
 import { toMessageCreatedAt } from "@/lib/messageDate";
 
 import { storageService } from "@/services/storageService";
