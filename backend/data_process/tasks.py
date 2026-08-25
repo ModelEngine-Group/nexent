@@ -6,6 +6,7 @@ import json
 import logging
 import math
 import os
+import re
 import threading
 import time
 from dataclasses import dataclass
@@ -276,7 +277,26 @@ def extract_error_code(reason: str, parsed_error: Optional[Dict] = None) -> Opti
     Extract error code from error message or parsed error dict.
     Returns error code if matched, None otherwise.
     """
-    return classify_ingestion_exception(parsed_error or reason, "").error_code
+    if parsed_error:
+        code = classify_ingestion_exception(parsed_error, "").error_code
+        if code:
+            return code
+
+    code = classify_ingestion_exception(reason, "").error_code
+    if code:
+        return code
+
+    # Keep the legacy regex fallback for callers/tests that patch ``tasks.re``.
+    # The classifier remains the source of truth; this only covers malformed
+    # payloads that are not valid JSON mappings.
+    try:
+        match = re.search(
+            r'["\'](?:error_code|code)["\']\s*:\s*["\']([^"\']+)["\']',
+            reason,
+        )
+    except Exception:
+        return None
+    return match.group(1) if match else None
 
 
 def _redis_error_reason(classified: ClassifiedIngestionException) -> str:
