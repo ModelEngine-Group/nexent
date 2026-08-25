@@ -16,6 +16,7 @@ import type { SkillFileContent } from "@/types/skill";
 
 export interface ChatProps {
   generatedTitle?: string;
+  welcomeTitle?: string;
   conversationId?: number;
   isLoadingAgents?: boolean;
   selectedAgent: Agent | null;
@@ -58,6 +59,7 @@ const AgentsLoadingState: FC = () => {
 
 export const Chat: FC<ChatProps> = ({
   generatedTitle,
+  welcomeTitle,
   conversationId,
   isLoadingAgents = false,
   selectedAgent,
@@ -101,6 +103,7 @@ export const Chat: FC<ChatProps> = ({
     <Thread
       agent={selectedAgent}
       generatedTitle={generatedTitle}
+      welcomeTitle={welcomeTitle}
       conversationId={conversationId}
       onBack={onBack}
       chatMode={chatMode}

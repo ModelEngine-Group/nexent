@@ -1660,6 +1660,7 @@
   "skillManagement.chat.userRequestWithContext": "User request: {{request}}\n\n{{context}}",
   "skillManagement.chat.editGreetingTitle": "Hi, I am the Skill builder, currently editing \"{{name}}\".",
   "skillManagement.chat.editGreetingBody": "Tell me what you want to optimize or adjust, and I will help update the corresponding files.",
+  "skillManagement.chat.createWelcomeTitle": "Hello, I am the Interactive Creation Assistant",
   "skillManagement.chat.createGreetingTitle": "Hi, I am the Skill builder. Tell me what skill you want to create, and I will help generate the Skill structure and code.",
   "skillManagement.chat.createGreetingExample": "For example: \"Create a skill that analyzes CSV files and generates data reports\"",
   "skillManagement.chat.editPlaceholder": "Tell me how to improve this skill...",
