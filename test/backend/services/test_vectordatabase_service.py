@@ -1170,6 +1170,50 @@ class TestElasticSearchService(unittest.TestCase):
     @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
     @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
     @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
+    def test_list_indices_paginates_before_loading_stats(
+            self, mock_get_knowledge, mock_get_user_tenant, mock_get_group_ids):
+        self.mock_vdb_core.get_user_indices.return_value = ["kb-1", "kb-2", "kb-3"]
+        self.mock_vdb_core.get_indices_detail.return_value = {
+            "kb-2": {"base_info": {"doc_count": 2}}
+        }
+        mock_get_knowledge.return_value = [
+            {
+                "knowledge_id": 1, "index_name": "kb-1", "knowledge_name": "Alpha",
+                "embedding_model_name": "model-a", "group_ids": "", "knowledge_sources": "elasticsearch",
+                "ingroup_permission": "EDIT", "tenant_id": "test_tenant", "update_time": "2026-08-24T10:00:00",
+            },
+            {
+                "knowledge_id": 2, "index_name": "kb-2", "knowledge_name": "Beta",
+                "embedding_model_name": "model-b", "group_ids": "", "knowledge_sources": "elasticsearch",
+                "ingroup_permission": "EDIT", "tenant_id": "test_tenant", "update_time": "2026-08-24T09:00:00",
+            },
+            {
+                "knowledge_id": 3, "index_name": "kb-3", "knowledge_name": "Gamma",
+                "embedding_model_name": "model-a", "group_ids": "", "knowledge_sources": "elasticsearch",
+                "ingroup_permission": "EDIT", "tenant_id": "test_tenant", "update_time": "2026-08-24T08:00:00",
+            },
+        ]
+        mock_get_user_tenant.return_value = {"user_role": "SU", "tenant_id": "test_tenant"}
+        mock_get_group_ids.return_value = []
+
+        result = ElasticSearchService.list_indices(
+            pattern="*", include_stats=True, target_tenant_id="test_tenant", user_id="test_user",
+            vdb_core=self.mock_vdb_core, pagination_enabled=True, offset=1, limit=1,
+        )
+
+        self.assertEqual(result["indices"], ["kb-2"])
+        self.assertEqual(result["count"], 1)
+        self.assertEqual(result["total"], 3)
+        self.assertNotIn("has_more", result)
+        self.assertEqual(result["next_offset"], 2)
+        self.assertEqual(result["estimated_item_heights"], None)
+        self.assertEqual(result["facets"]["sources"], ["elasticsearch"])
+        self.assertEqual(result["facets"]["models"], ["model-a", "model-b"])
+        self.mock_vdb_core.get_indices_detail.assert_called_once_with(["kb-2"])
+
+    @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
+    @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
+    @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
     def test_list_indices_skips_missing_indices(self, mock_get_info, mock_get_user_tenant, mock_get_group_ids):
         """
         Test that list_indices skips indices that exist in database but not in Elasticsearch.
@@ -8726,3 +8770,139 @@ def test_get_embedding_model_returns_none_when_lookup_raises(monkeypatch):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+def test_merge_paginated_indices_uses_ordered_service_merge():
+    primary = {
+        "indices": ["tenant-new", "tenant-old"],
+        "indices_info": [
+            {"name": "tenant-new", "update_time": "2026-08-24T10:00:00", "knowledge_id": 3},
+            {"name": "tenant-old", "update_time": "2026-08-24T08:00:00", "knowledge_id": 1},
+        ],
+        "total": 2,
+        "facets": {"sources": ["elasticsearch"], "models": ["model-a"]},
+    }
+    asset_owner = {
+        "indices": ["asset-middle"],
+        "indices_info": [
+            {
+                "name": "asset-middle",
+                "update_time": "2026-08-24T09:00:00",
+                "knowledge_id": 2,
+                "permission": "EDIT",
+            }
+        ],
+        "total": 1,
+        "facets": {"sources": ["elasticsearch"], "models": ["model-b"]},
+    }
+
+    result = ElasticSearchService.merge_paginated_list_indices_results(
+        primary,
+        asset_owner,
+        offset=0,
+        limit=2,
+    )
+
+    assert result["indices"] == ["tenant-new", "asset-middle"]
+    assert result["indices_info"][1]["permission"] == "READ_ONLY"
+    assert result["total"] == 3
+    assert result["next_offset"] == 2
+    assert "has_more" not in result
+
+
+def test_prepare_indices_page_requires_limit_when_pagination_is_enabled():
+    with pytest.raises(ValueError, match="limit is required"):
+        ElasticSearchService._prepare_indices_page(
+            visible_knowledgebases=[],
+            pagination_enabled=True,
+            offset=0,
+            limit=None,
+            keyword=None,
+            sources=None,
+            models=None,
+        )
+
+
+def test_apply_read_only_returns_unchanged_result_without_indices_info():
+    result = {"indices": ["asset-kb"], "count": 1}
+
+    assert ElasticSearchService._apply_read_only_to_asset_indices_info(result) is result
+
+
+def test_merge_non_paginated_indices_applies_asset_read_only_permission():
+    primary = {
+        "indices": ["tenant-kb"],
+        "count": 1,
+        "indices_info": [{"name": "tenant-kb", "permission": "EDIT"}],
+    }
+    asset = {
+        "indices": ["asset-kb"],
+        "count": 1,
+        "indices_info": [{"name": "asset-kb", "permission": "EDIT"}],
+    }
+
+    result = ElasticSearchService.merge_list_indices_results(primary, asset)
+
+    assert result["indices"] == ["tenant-kb", "asset-kb"]
+    assert result["count"] == 2
+    assert result["indices_info"] == [
+        {"name": "tenant-kb", "permission": "EDIT"},
+        {"name": "asset-kb", "permission": "READ_ONLY"},
+    ]
+
+
+def test_merge_non_paginated_indices_without_info_returns_names_only():
+    result = ElasticSearchService.merge_list_indices_results(
+        {"indices": ["tenant-kb"], "count": 1},
+        {"indices": ["asset-kb"], "count": 1},
+    )
+
+    assert result == {
+        "indices": ["tenant-kb", "asset-kb"],
+        "count": 2,
+    }
+
+
+def test_merge_paginated_indices_supports_asset_first_and_last_page():
+    primary = {
+        "indices": ["tenant-old"],
+        "indices_info": [
+            {"name": "tenant-old", "update_time": "2026-08-24T08:00:00", "knowledge_id": 1}
+        ],
+        "total": 1,
+        "facets": {"sources": ["elasticsearch"], "models": ["model-a"]},
+    }
+    asset = {
+        "indices": ["asset-new"],
+        "indices_info": [
+            {"name": "asset-new", "update_time": "2026-08-24T10:00:00", "knowledge_id": 2}
+        ],
+        "total": 1,
+        "facets": {"sources": ["asset"], "models": ["model-b"]},
+    }
+
+    result = ElasticSearchService.merge_paginated_list_indices_results(
+        primary, asset, offset=0, limit=2
+    )
+
+    assert result["indices"] == ["asset-new", "tenant-old"]
+    assert result["next_offset"] is None
+    assert result["facets"] == {
+        "sources": ["asset", "elasticsearch"],
+        "models": ["model-a", "model-b"],
+    }
+
+
+def test_merge_paginated_indices_falls_back_to_index_names_without_info():
+    result = ElasticSearchService.merge_paginated_list_indices_results(
+        {"indices": ["tenant-kb"], "count": 1},
+        {"indices": ["asset-kb"], "count": 1},
+        offset=1,
+        limit=1,
+    )
+
+    assert result["indices"] == ["asset-kb"]
+    assert result["count"] == 1
+    assert result["total"] == 2
+    assert result["next_offset"] is None
+    assert "indices_info" not in result

@@ -4238,6 +4238,7 @@ class TestSandboxWarmUp:
             logger_=ANY,
             managed_agents_exist=False,
             host_tools_exist=False,
+            session_container_group=None,
         )
 
 
@@ -6649,18 +6650,21 @@ class TestCreateSingleAgentSandboxAndPlanning:
 
         mock_build.assert_called_once()
 
-    def test_parent_and_managed_agent_get_independent_sandbox_executors(
+    def test_parent_and_managed_agent_share_session_container_with_distinct_kernels(
         self, nexent_agent_instance, mock_model_config
     ):
-        """Parent orchestration stays on Runtime while both agents sandbox code."""
+        """Agent-tree executors share a session container but keep separate kernels."""
         nexent_agent_instance.model_config_list = [mock_model_config]
         SandboxLevel = self._make_sandbox_level()
         nexent_agent_instance.sandbox_config = self._make_sandbox_config(
-            "local", scope_value="system"
+            "docker", scope_value="session"
         )
 
+        shared_group = object()
         child_executor = MagicMock(name="child_executor")
+        child_executor._nexent_session_container_group = shared_group
         parent_executor = MagicMock(name="parent_executor")
+        parent_executor._nexent_session_container_group = shared_group
         mock_build = MagicMock(side_effect=[child_executor, parent_executor])
         mock_sandbox_module = MagicMock()
         mock_sandbox_module.build_python_executor = mock_build
@@ -6706,8 +6710,13 @@ class TestCreateSingleAgentSandboxAndPlanning:
         assert mock_build.call_count == 2
         assert mock_build.call_args_list[0].kwargs["managed_agents_exist"] is False
         assert mock_build.call_args_list[0].kwargs["host_tools_exist"] is False
+        assert mock_build.call_args_list[0].kwargs["session_container_group"] is None
         assert mock_build.call_args_list[1].kwargs["managed_agents_exist"] is True
         assert mock_build.call_args_list[1].kwargs["host_tools_exist"] is True
+        assert (
+            mock_build.call_args_list[1].kwargs["session_container_group"]
+            is shared_group
+        )
 
         child_call, parent_call = mock_core_agent_cls.call_args_list
         assert child_call.kwargs["executor"] is child_executor
@@ -6719,6 +6728,51 @@ class TestCreateSingleAgentSandboxAndPlanning:
             child_executor,
             parent_executor,
         ]
+
+    def test_agent_tree_rejects_multiple_session_container_groups(
+        self, nexent_agent_instance, mock_model_config
+    ):
+        nexent_agent_instance.model_config_list = [mock_model_config]
+        SandboxLevel = self._make_sandbox_level()
+        nexent_agent_instance.sandbox_config = self._make_sandbox_config(
+            "docker", scope_value="session"
+        )
+        child_executor = MagicMock()
+        child_executor._nexent_session_container_group = object()
+        parent_executor = MagicMock()
+        parent_executor._nexent_session_container_group = object()
+        mock_sandbox_module = MagicMock()
+        mock_sandbox_module.build_python_executor = MagicMock(
+            side_effect=[child_executor, parent_executor]
+        )
+        mock_sandbox_module.SandboxLevel = SandboxLevel
+        child_config = AgentConfig(
+            name="child",
+            description="Managed child",
+            prompt_templates={"system": "child"},
+            tools=[],
+            max_steps=5,
+            model_name="test_model",
+            managed_agents=[],
+            enable_planning=False,
+        )
+        parent_config = AgentConfig(
+            name="parent",
+            description="Parent agent",
+            prompt_templates={"system": "parent"},
+            tools=[],
+            max_steps=5,
+            model_name="test_model",
+            managed_agents=[child_config],
+            enable_planning=False,
+        )
+
+        with patch.dict(
+            "sys.modules",
+            {"sdk.nexent.core.agents.sandbox": mock_sandbox_module},
+        ), patch.object(nexent_agent, "CoreAgent", return_value=MagicMock()):
+            with pytest.raises(ValueError, match="multiple session sandbox containers"):
+                nexent_agent_instance.create_single_agent(parent_config)
 
     def test_plan_tool_wiring_when_planning_enabled(self, nexent_agent_instance, mock_model_config, mock_core_agent):
         """When enable_planning=True, plan tool deps are wired (lines 683-694)."""
