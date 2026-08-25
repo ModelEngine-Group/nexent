@@ -138,6 +138,7 @@ from services.streaming_channel import streaming_channel_manager
 from services.runtime_state_service import runtime_state_service
 from utils.auth_utils import get_current_user_info, get_user_language
 from utils.agent_stream_utils import (
+    enrich_file_uploads_with_presigned_urls as _enrich_file_uploads_with_presigned_urls,
     extract_json_objects_from_text as _extract_json_objects_from_text,
     extract_skill_file_upload_payloads as _extract_skill_file_upload_payloads,
     process_skill_file_uploads as _process_skill_file_uploads,
@@ -1314,6 +1315,10 @@ async def _stream_agent_chunks(
                     user_id=user_id,
                     tenant_id=tenant_id,
                 )
+                skill_file_uploads = await asyncio.to_thread(
+                    _enrich_file_uploads_with_presigned_urls,
+                    skill_file_uploads,
+                )
                 logger.info(
                     "[skill-file] upload finished conversation=%s result_count=%s results=%s",
                     agent_request.conversation_id,
@@ -1345,7 +1350,10 @@ async def _stream_agent_chunks(
             logger.exception("Failed to process skill file uploads")
 
         if workspace_file_uploads:
-            uploaded_files = list(workspace_file_uploads.values())
+            uploaded_files = await asyncio.to_thread(
+                _enrich_file_uploads_with_presigned_urls,
+                list(workspace_file_uploads.values()),
+            )
             files_payload = json.dumps(
                 {"file_uploads": uploaded_files},
                 ensure_ascii=False,

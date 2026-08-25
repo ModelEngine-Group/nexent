@@ -386,9 +386,11 @@ class TestUploadToS3ToolForward:
         data = json.loads(result)
         assert data["status"] == "success"
         assert "s3://" in data["s3_url"]
-        assert data["presigned_url"] == "https://minio.example.com/presigned-url"
+        assert data["url"] == data["s3_url"]
+        assert "presigned_url" not in data
         assert data["file_size_bytes"] == len("Hello, world!")
         mock_minio_client.upload_file.assert_called_once()
+        mock_minio_client.get_file_url.assert_not_called()
 
     def test_upload_with_target_filename(self, tool_with_file, mock_minio_client):
         tool, test_file = tool_with_file
@@ -585,7 +587,7 @@ class TestUploadToS3ToolForward:
         with pytest.raises(Exception, match="Failed to upload"):
             tool.forward("test_report.txt")
 
-    def test_upload_succeeds_when_presigned_url_generation_fails(
+    def test_upload_does_not_generate_presigned_url(
         self, tool_with_file, mock_minio_client
     ):
         tool, _ = tool_with_file
@@ -594,4 +596,5 @@ class TestUploadToS3ToolForward:
         result = json.loads(tool.forward("test_report.txt"))
 
         assert result["status"] == "success"
-        assert result["presigned_url"] == ""
+        assert "presigned_url" not in result
+        mock_minio_client.get_file_url.assert_not_called()

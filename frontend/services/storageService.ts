@@ -142,6 +142,24 @@ export function getLocalFilePreviewUrl(
 }
 
 /**
+ * Convert a permanent local-storage reference into an authenticated backend
+ * download URL. The permanent reference (normally s3://bucket/object_name) is
+ * safe to persist in Markdown; the browser-facing URL is derived at render
+ * time and therefore never contains an expiring MinIO signature.
+ */
+export function getLocalFileDownloadUrl(
+  url: string | undefined,
+  filename?: string
+): string | undefined {
+  if (!url || !isLocalStorageObjectUrl(url)) return undefined;
+
+  const objectName = extractObjectNameFromUrl(url);
+  if (!objectName) return undefined;
+
+  return API_ENDPOINTS.storage.file(objectName, "stream", filename);
+}
+
+/**
  * Convert image URL to backend API URL
  * @param url Original image URL (can be MinIO URL or local path)
  * @returns Backend API URL for the image
