@@ -4772,6 +4772,7 @@
   "agent.knowledge.loading": "Loading knowledge bases...",
   "agent.knowledge.loadFailed": "Failed to load knowledge bases",
   "agent.knowledge.emptyHint": "No knowledge base selected. Click 'Select Knowledge Base' to add one.",
+  "agent.knowledge.reselectionRequired": "The knowledge system has changed. Re-select knowledge bases for the current system to migrate this agent.",
   "agent.guide.opening.label": "Opening Message",
   "agent.guide.opening.placeholder": "Enter the greeting shown when users first enter a conversation",
   "agent.guide.example.placeholder": "Enter an example question",

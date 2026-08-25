@@ -4786,6 +4786,7 @@
   "agent.knowledge.loading": "正在加载知识库",
   "agent.knowledge.loadFailed": "知识库加载失败",
   "agent.knowledge.emptyHint": "暂未选择知识库，点击「选择知识库」添加",
+  "agent.knowledge.reselectionRequired": "知识库系统已切换，请重新选择当前系统的知识库以迁移此智能体。",
   "agent.guide.opening.label": "开场白",
   "agent.guide.opening.placeholder": "请输入用户首次进入会话时看到的开场白",
   "agent.guide.example.placeholder": "请输入示例问题",

@@ -10,6 +10,7 @@ import { useConfig } from "@/hooks/useConfig";
 import { ChevronRight, Settings, X, AlertTriangle } from "lucide-react";
 import type { Tool, ToolParam } from "@/types/agentConfig";
 import { TOOL_SOURCE_TYPES } from "@/const/agentConfig";
+import { isManagedKnowledgeTool } from "@/lib/managedKnowledgeTools";
 import ToolConfigModal from "./tool/ToolConfigModal";
 import {
   TOOLS_REQUIRING_EMBEDDING,
@@ -110,6 +111,7 @@ export default function ToolManagement({
   // the user-facing selected-tools list.
   const visibleSelectedTools = useMemo(() => {
     return selectedTools.filter((tool) => {
+      if (isManagedKnowledgeTool(tool)) return false;
       const canonicalTool = availableTools.find(
         (availableTool: Tool) => String(availableTool.id) === String(tool.id)
       );
