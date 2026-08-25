@@ -180,16 +180,17 @@ export async function fetchRepositoryImportPrecheck(
 }
 
 export async function importAgentFromRepository(
-  agentRepositoryId: number
+  agentRepositoryId: number,
+  skipDuplicates?: boolean
 ): Promise<void> {
   try {
-    const response = await fetch(
-      API_ENDPOINTS.agentRepository.import(agentRepositoryId),
-      {
-        method: "POST",
-        headers: getAuthHeaders(),
-      }
-    );
+    const url = skipDuplicates
+      ? `${API_ENDPOINTS.agentRepository.import(agentRepositoryId)}?skip_duplicates=true`
+      : API_ENDPOINTS.agentRepository.import(agentRepositoryId);
+    const response = await fetch(url, {
+      method: "POST",
+      headers: getAuthHeaders(),
+    });
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));

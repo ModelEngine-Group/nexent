@@ -722,6 +722,37 @@ def test_import_agent_from_repository_api_passes_tenant_id(
         agent_repository_id=42,
         tenant_id="test_tenant_id",
         authorization=mock_auth_header["Authorization"],
+        skip_duplicates=False,
+    )
+
+
+def test_import_agent_from_repository_api_skip_duplicates(
+    mocker,
+    mock_auth_header,
+):
+    """Test import API forwards skip_duplicates query param to service."""
+    mock_get_user_id = mocker.patch(
+        "apps.agent_repository_app.get_current_user_id"
+    )
+    mock_import = mocker.patch(
+        "apps.agent_repository_app.import_agent_from_repository_impl",
+        new_callable=AsyncMock,
+    )
+
+    mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
+    mock_import.return_value = {}
+
+    response = client.post(
+        "/repository/agent/42/import?skip_duplicates=true",
+        headers=mock_auth_header,
+    )
+
+    assert response.status_code == 200
+    mock_import.assert_awaited_once_with(
+        agent_repository_id=42,
+        tenant_id="test_tenant_id",
+        authorization=mock_auth_header["Authorization"],
+        skip_duplicates=True,
     )
 
 

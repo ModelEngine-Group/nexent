@@ -140,8 +140,11 @@ export function useImportAgentFromRepository() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (agentRepositoryId: number) =>
-      agentRepositoryService.importAgentFromRepository(agentRepositoryId),
+    mutationFn: (params: { agentRepositoryId: number; skipDuplicates?: boolean }) =>
+      agentRepositoryService.importAgentFromRepository(
+        params.agentRepositoryId,
+        params.skipDuplicates
+      ),
     onSuccess: async () => {
       await Promise.all([
         invalidateAgentRepositoryCaches(queryClient),
