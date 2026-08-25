@@ -930,9 +930,7 @@ class KnowledgeFileLifecycle(TableBase):
     error_message = Column(Text, nullable=True, doc="Sanitized user-facing error summary")
     error_stage = Column(String(30), nullable=True, doc="Failure stage")
     failed_at = Column(TIMESTAMP(timezone=False), nullable=True, doc="Failure time")
-    delete_requested_at = Column(TIMESTAMP(timezone=False), nullable=True)
-    deleted_at = Column(TIMESTAMP(timezone=False), nullable=True)
-    delete_requested_by = Column(String(100), nullable=True)
+    deleted_at = Column(TIMESTAMP(timezone=False), nullable=True, doc="Time when the record reached DELETED status")
     storage_object_id = Column(BigInteger, nullable=True, doc="Linked storage ledger ID")
     version = Column(Integer, nullable=False, default=0, server_default=text("0"), doc="Optimistic-lock version")
 

@@ -1976,8 +1976,6 @@ class ElasticSearchService:
                     record["file_id"],
                     status="DELETE_REQUESTED",
                     stage="DELETE",
-                    delete_requested_at=datetime.utcnow(),
-                    delete_requested_by=requested_by,
                     updated_by=requested_by,
                 ) or record
             return create_delete_tombstone(
@@ -2064,8 +2062,6 @@ class ElasticSearchService:
                 status="DELETE_REQUESTED",
                 stage="DELETE",
                 expected_statuses=deleteable_statuses,
-                delete_requested_at=datetime.utcnow(),
-                delete_requested_by=requested_by,
                 updated_by=requested_by,
             )
             if requested is None:

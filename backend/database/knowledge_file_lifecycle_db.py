@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional
 from uuid import uuid4
 
@@ -167,9 +166,7 @@ def transition_file_record(
         "error_message",
         "error_stage",
         "failed_at",
-        "delete_requested_at",
         "deleted_at",
-        "delete_requested_by",
         "storage_object_id",
     }
     with get_db_session() as session:
@@ -243,8 +240,6 @@ def create_delete_tombstone(
             existing["file_id"],
             status="DELETE_REQUESTED",
             stage="DELETE",
-            delete_requested_at=datetime.utcnow(),
-            delete_requested_by=requested_by,
             updated_by=requested_by,
         )
         return updated or existing
@@ -261,7 +256,5 @@ def create_delete_tombstone(
     )
     return transition_file_record(
         created["file_id"],
-        delete_requested_at=datetime.utcnow(),
-        delete_requested_by=requested_by,
         updated_by=requested_by,
     ) or created

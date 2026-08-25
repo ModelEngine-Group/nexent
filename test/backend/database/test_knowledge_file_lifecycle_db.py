@@ -116,8 +116,9 @@ def test_delete_tombstone_updates_existing_row(monkeypatch):
 
     assert result["status"] == "DELETE_REQUESTED"
     transition.assert_called_once()
-    assert transition.call_args.kwargs["delete_requested_by"] == "user-1"
-    assert "deleted_at" not in transition.call_args.kwargs
+    assert transition.call_args.kwargs["updated_by"] == "user-1"
+    assert "delete_requested_at" not in transition.call_args.kwargs
+    assert "delete_requested_by" not in transition.call_args.kwargs
 
 
 def test_delete_tombstone_keeps_existing_deleted_row(monkeypatch):
