@@ -379,6 +379,7 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
             >
               <Select
                 mode="multiple"
+                showSearch={{ optionFilterProp: "label" }}
                 placeholder={t("tenantResources.groups.selectUsers")}
                 options={allUsers.map((user) => ({
                   label: user.username,
