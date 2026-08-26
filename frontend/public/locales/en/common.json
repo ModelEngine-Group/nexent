@@ -879,6 +879,8 @@
   "nl2agent.resourceBinding.continue": "Continue",
   "nl2agent.resourceBinding.validationSummary": "Complete the configuration for every selected resource.",
   "nl2agent.resourceBinding.syncFailed": "Resources were saved, but the Agent view could not be refreshed. Retry to continue.",
+  "nl2agent.resourceBinding.loadingExistingConfig": "Loading the current resource configuration...",
+  "nl2agent.resourceBinding.loadExistingConfigFailed": "Failed to load the current resource configuration.",
   "nl2agent.resourceBinding.submittedSummary": "Resource selection completed",
   "nl2agent.resourceBinding.retryGeneration": "Retry Prompt generation",
   "nl2agent.resourceBinding.retryGenerationSummary": "Retrying Prompt generation",

@@ -67,6 +67,7 @@ STRONG_RESOURCE_SCORE = 0.65
 MINIMUM_RESOURCE_SCORE = 0.50
 UNINSTALLED_SOURCE_PAGE_SIZE = 100
 MAX_INTERNAL_SOURCE_ITEMS = 300
+NL2AGENT_VISIBLE_NON_SELECTABLE_TOOLS = frozenset({"knowledge_base_search"})
 AGENT_DRAFT_FIELD_ORDER = (
     "name",
     "display_name",
@@ -392,6 +393,38 @@ def _normalize_tool_config(params: Any) -> list[dict[str, Any]]:
     return normalized
 
 
+def _normalize_nl2agent_tool_config(
+    *,
+    tool_name: str,
+    params: Any,
+) -> list[dict[str, Any]]:
+    config = _normalize_tool_config(params)
+    if tool_name != "knowledge_base_search":
+        return config
+
+    index_names = next(
+        (param for param in config if param["name"] == "index_names"),
+        None,
+    )
+    if index_names is None:
+        config.append(
+            {
+                "name": "index_names",
+                "type": "array",
+                "required": True,
+                "value": [],
+                "description": "The list of index names to search",
+                "description_zh": "要索引的知识库",
+            }
+        )
+    else:
+        index_names["type"] = "array"
+        index_names["required"] = True
+        if not isinstance(index_names.get("value"), list):
+            index_names["value"] = []
+    return config
+
+
 def _normalize_skill_config(skill: dict[str, Any]) -> list[dict[str, Any]]:
     schemas = skill.get("config_schemas")
     defaults = skill.get("config_values")
@@ -443,7 +476,10 @@ async def _load_installed_resource_catalog(
         if (
             source not in {ToolSourceEnum.LOCAL.value, ToolSourceEnum.MCP.value}
             or tool.get("is_available") is not True
-            or tool.get("is_user_selectable") is False
+            or (
+                tool.get("is_user_selectable") is False
+                and name not in NL2AGENT_VISIBLE_NON_SELECTABLE_TOOLS
+            )
             or name in internal_names
         ):
             continue
@@ -468,7 +504,10 @@ async def _load_installed_resource_catalog(
                 "params": tool.get("params"),
                 "inputs": inputs,
             }),
-            "config": _normalize_tool_config(tool.get("params")),
+            "config": _normalize_nl2agent_tool_config(
+                tool_name=name,
+                params=tool.get("params"),
+            ),
             "form_kind": "TOOL_CONFIG",
             "inputs": inputs,
             "installed": True,

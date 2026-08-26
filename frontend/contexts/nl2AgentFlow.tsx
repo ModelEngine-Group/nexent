@@ -30,6 +30,7 @@ export type Nl2AgentConfigFocusTarget =
       section: "tools_skills";
       capabilityTab: "tools" | "skills";
     }
+  | { section: "knowledge_base" }
   | { section: "conversation_guide" };
 
 export interface Nl2AgentConfigFocusRequest {
