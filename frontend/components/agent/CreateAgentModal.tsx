@@ -85,6 +85,7 @@ export default function CreateAgentModal({
         <Form.Item
           name="displayName"
           label={t("agent.displayName")}
+          validateTrigger={["onChange", "onBlur"]}
           rules={[
             {
               required: true,
@@ -103,7 +104,10 @@ export default function CreateAgentModal({
                       )
                     ),
             },
-            createAgentNameConflictValidator(t, "display_name"),
+            {
+              ...createAgentNameConflictValidator(t, "display_name"),
+              validateTrigger: "onBlur",
+            },
           ]}
         >
           <Input
@@ -116,6 +120,7 @@ export default function CreateAgentModal({
         <Form.Item
           name="name"
           label={t("agent.name")}
+          validateTrigger={["onChange", "onBlur"]}
           rules={[
             {
               required: true,
@@ -128,7 +133,10 @@ export default function CreateAgentModal({
                   ? Promise.resolve()
                   : Promise.reject(new Error(t("agent.validation.namePattern"))),
             },
-            createAgentNameConflictValidator(t, "name"),
+            {
+              ...createAgentNameConflictValidator(t, "name"),
+              validateTrigger: "onBlur",
+            },
           ]}
         >
           <Input
