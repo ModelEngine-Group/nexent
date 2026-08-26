@@ -629,23 +629,6 @@ function parseSseChunk(line: string): SseChunk | null {
 }
 
 /**
- * Extracts the agent run start time from an agent_new_run content string.
- * The backend prepends `[Current time: YYYY-MM-DD HH:MM:SS±HHMM]` to the task text.
- * Returns undefined when the prefix is absent or unparseable.
- */
-const AGENT_RUN_TIME_PREFIX = "[Current time:";
-function extractAgentRunTime(content: string): string | undefined {
-  if (!content || !content.startsWith(AGENT_RUN_TIME_PREFIX)) return undefined;
-  const closeIdx = content.indexOf("]", AGENT_RUN_TIME_PREFIX.length);
-  if (closeIdx < 0) return undefined;
-  const raw = content.slice(AGENT_RUN_TIME_PREFIX.length, closeIdx).trim();
-  // Format check: "YYYY-MM-DD HH:MM:SS" with optional timezone offset "±HHMM"
-  if (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}([+-]\d{4})?$/.test(raw))
-    return undefined;
-  return raw;
-}
-
-/**
  * Maps a backend chunk type to an assistant-ui part type.
  * Returns null for types that should be handled internally (not rendered).
  *
@@ -1285,12 +1268,6 @@ export function pushStepTokenCount(step: StepTokenCount): void {
   stepTokenCounts.push(step);
 }
 
-let agentRunTime: string | undefined;
-
-export function getAgentRunTime(): string | undefined {
-  return agentRunTime;
-}
-
 /**
  * Clears the global step token counts registry and resets the shared plan
  * state. Called from `remoteChatModelAdapter.run()` so a fresh assistant
@@ -1299,7 +1276,6 @@ export function getAgentRunTime(): string | undefined {
 export function clearStepTokenCounts(): void {
   stepTokenCounts.length = 0;
   accumulatedDuration = 0;
-  agentRunTime = undefined;
   planRegistry.set(null);
 }
 
@@ -2024,12 +2000,6 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             const update = parsePlanStepUpdate(chunk.content);
             if (update) planRegistry.updateStep(update.stepId, update.status);
             continue;
-          }
-
-          // Handle agent_new_run - capture the agent start time before stripping the prefix
-          if (chunk.type === "agent_new_run") {
-            const captured = extractAgentRunTime(chunk.content);
-            if (captured) agentRunTime = captured;
           }
 
           // Track timing for first content token

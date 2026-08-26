@@ -52,6 +52,7 @@ export interface ApiMessage {
   message: ApiMessageItem[] | string;
   message_id?: number;
   message_index?: number;
+  create_time?: number | null;
   picture?: string[];
   search?: any[];
   searchByUnitId?: Record<string, any[]>;
