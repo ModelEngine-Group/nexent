@@ -97,6 +97,8 @@ def test_build_nl2agent_system_prompt_configures_existing_draft(
     assert "recommended_refs=binding_candidate_refs" in prompt
 
     if language == "en":
+        assert "never discard it merely because it appears in `bound_resources`" in prompt
+        assert "Already-bound Tools remain normal candidates" in prompt
         assert "### State And Completion Rules" in prompt
         assert "They never prove that its configuration is complete" in prompt
         assert "an empty-description draft must produce" in prompt
@@ -112,6 +114,8 @@ def test_build_nl2agent_system_prompt_configures_existing_draft(
         assert "Describe the tasks this Agent must perform" not in prompt
         assert '"question_id": "expected_output"' in prompt
     else:
+        assert "不得仅因它出现在 `bound_resources` 中就丢弃" in prompt
+        assert "已绑定 Tool 仍是普通候选" in prompt
         assert "### 状态判定与完成标准" in prompt
         assert "不证明该 Agent 已完成配置" in prompt
         assert "空描述草稿必须先输出一次" in prompt

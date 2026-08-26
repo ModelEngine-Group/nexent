@@ -18,6 +18,7 @@ from services.nl2agent_service import (
     _build_skill_creation_requests,
     _load_internal_uninstalled_resource_catalog,
     _load_installed_resource_catalog,
+    _normalize_nl2agent_tool_config,
     _normalize_skill_config,
     _normalize_tool_config,
     _redact_installation_snapshot,
@@ -511,6 +512,27 @@ async def test_search_installed_resources_covers_visible_tools_and_skills(mocker
                     "source": "local",
                     "is_available": True,
                 },
+                {
+                    "tool_id": 12,
+                    "name": "knowledge_base_search",
+                    "description": "Search private knowledge bases",
+                    "description_zh": "检索私有知识库",
+                    "source": "local",
+                    "is_available": True,
+                    "is_user_selectable": False,
+                    "params": [],
+                    "inputs": {},
+                },
+                {
+                    "tool_id": 13,
+                    "name": "aidp_search",
+                    "description": "Search AIDP",
+                    "source": "local",
+                    "is_available": True,
+                    "is_user_selectable": False,
+                    "params": [],
+                    "inputs": {},
+                },
                 *[
                     {
                         "tool_id": tool_id,
@@ -545,7 +567,20 @@ async def test_search_installed_resources_covers_visible_tools_and_skills(mocker
         tenant_id="tenant-a",
         user_id="user-a",
     )
-    assert "wrapper" in {item["name"] for item in catalog}
+    catalog_by_name = {item["name"]: item for item in catalog}
+    assert "wrapper" in catalog_by_name
+    assert "knowledge_base_search" in catalog_by_name
+    assert "aidp_search" not in catalog_by_name
+    assert catalog_by_name["knowledge_base_search"]["config"] == [
+        {
+            "name": "index_names",
+            "type": "array",
+            "required": True,
+            "value": [],
+            "description": "The list of index names to search",
+            "description_zh": "要索引的知识库",
+        }
+    ]
 
     result = await search_installed_resources_impl(
         requirements=[
@@ -571,6 +606,20 @@ async def test_search_installed_resources_covers_visible_tools_and_skills(mocker
         "INSTALLED_SKILL",
     }
 
+    knowledge_result = await search_installed_resources_impl(
+        requirements=[
+            ResourceRequirement(
+                requirement_id="knowledge",
+                query="knowledge base search",
+                resource_name_hint="knowledge_base_search",
+            )
+        ],
+        tenant_id="tenant-a",
+        user_id="user-a",
+    )
+    assert knowledge_result.candidates[0].candidate_ref == "tool:12"
+    assert knowledge_result.uncovered_requirement_ids == []
+
 
 def test_resource_config_normalization_is_frontend_safe():
     assert _normalize_tool_config(None) == []
@@ -595,6 +644,26 @@ def test_resource_config_normalization_is_frontend_safe():
             "description": "",
             "description_zh": "",
             "depends_on": "enabled",
+        }
+    ]
+    assert _normalize_nl2agent_tool_config(
+        tool_name="knowledge_base_search",
+        params=[
+            {
+                "name": "index_names",
+                "type": "string",
+                "optional": True,
+                "default": None,
+            }
+        ],
+    ) == [
+        {
+            "name": "index_names",
+            "type": "array",
+            "required": True,
+            "value": [],
+            "description": "",
+            "description_zh": "",
         }
     ]
     assert _normalize_skill_config({"config_schemas": None}) == []
