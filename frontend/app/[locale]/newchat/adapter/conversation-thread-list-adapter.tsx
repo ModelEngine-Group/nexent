@@ -1263,6 +1263,12 @@ export const setServerConversationIdState = (
   serverConversationIdState = state;
 };
 
+let pendingThreadOperationId: string | undefined;
+
+export const setPendingThreadOperationId = (threadId: string | undefined) => {
+  pendingThreadOperationId = threadId;
+};
+
 const MAX_TITLE_WAIT_MS = 5_000;
 const TITLE_POLL_INTERVAL_MS = 50;
 
@@ -1282,13 +1288,21 @@ const waitForServerConversationId = async (
   // reliable than the active-thread registry while the sidebar is switching.
   if (isValidConversationId(fallbackRemoteId)) return fallbackRemoteId;
 
-  // Fast path: the ref is already populated for a new thread after its first
-  // agent run has returned the server-side conversation ID.
+  // New threads use an empty remoteId until they are reloaded from the
+  // backend. The sidebar captures the local ID before calling rename/delete,
+  // because assistant-ui may switch the active thread as part of that action.
   const readNow = (): string | undefined => {
+    if (pendingThreadOperationId) {
+      const fromPendingThread = idsRef.current.get(pendingThreadOperationId);
+      if (isValidConversationId(fromPendingThread)) return fromPendingThread;
+    }
+
     const activeThreadId = getActiveThreadId();
     if (!activeThreadId) return undefined;
-    const fromRef = idsRef.current.get(activeThreadId);
-    return isValidConversationId(fromRef) ? fromRef : undefined;
+    const fromActiveThread = idsRef.current.get(activeThreadId);
+    return isValidConversationId(fromActiveThread)
+      ? fromActiveThread
+      : undefined;
   };
 
   const immediate = readNow();
@@ -1348,19 +1362,6 @@ export const conversationThreadListAdapter: RemoteThreadListAdapter = {
     // doing so would create a second, empty conversation that the agent
     // run never reuses (see commit history for details).
     //
-    // We return an empty-string `remoteId` rather than `undefined` because
-    // the assistant-ui `RemoteThreadListAdapter["initialize"]` contract
-    // requires a string. The empty string is a safe placeholder: the page
-    // resolves `activeConversationId` with priority
-    // `serverConversationIdsRef → remoteId → activeThreadId`, so as soon as
-    // the adapter captures the server id from the response header the page
-    // starts using the real id instead of this placeholder.
-    //
-    // `generateTitle` follows the same priority chain: it consults the page's
-    // `serverConversationIdsRef` via `waitForServerConversationId` before
-    // falling back to the raw `remoteId`, so a brand-new thread no longer
-    // triggers a `conversation_id: 0` request (which would silently fail on
-    // the backend's `WHERE conversation_id = 0` filter).
     return {
       remoteId: "",
       externalId: "",
@@ -1417,8 +1418,7 @@ export const conversationThreadListAdapter: RemoteThreadListAdapter = {
 
     return toRemoteThreadMetadata({
       conversation_id: Number(detail.conversation_id),
-      conversation_title:
-        detail.conversation_title ?? "Untitled conversation",
+      conversation_title: detail.conversation_title ?? "Untitled conversation",
       agent_id: detail.agent_id,
       create_time: detail.create_time,
       update_time: detail.create_time,
