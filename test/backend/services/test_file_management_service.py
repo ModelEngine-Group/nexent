@@ -764,7 +764,8 @@ class TestUploadFilesImpl:
         transition.assert_called_once()
         assert transition.call_args.kwargs["status"] == "FAILED"
         assert transition.call_args.kwargs["stage"] == "QUOTA"
-        assert transition.call_args.kwargs["error_code"] == "QUOTA_CHECK_FAILED"
+        assert transition.call_args.kwargs["error_code"] == "120104"
+        assert transition.call_args.kwargs["error_message"] is None
         upload_mock.assert_not_awaited()
 
     @pytest.mark.asyncio
@@ -807,7 +808,8 @@ class TestUploadFilesImpl:
                 patch.object(knowledge_storage_stub, "compensate_uploaded_objects") as compensate, \
                 patch.dict(sys.modules, {"services.quota_service": quota_module}):
             result = await upload_files_impl(destination="minio", file=[mock_file], folder="folder", index_name="kb-1")
-            assert "UPLOAD_FAILED" in str(transition.call_args_list[0])
+            assert transition.call_args_list[0].kwargs["error_code"] == "000402"
+            assert transition.call_args_list[0].kwargs["error_message"] is None
             assert result[0] == ["Failed to upload broken.txt: read failed"]
 
         with patch.object(knowledge_storage_stub, "resolve_storage_context", return_value=context), \
@@ -826,6 +828,8 @@ class TestUploadFilesImpl:
                 await upload_files_impl(destination="minio", file=[mock_file], folder="folder", index_name="kb-1")
 
         assert commit_transition.call_args_list[-1].kwargs["stage"] == "STORAGE_COMMIT"
+        assert commit_transition.call_args_list[-1].kwargs["error_code"] == "060107"
+        assert commit_transition.call_args_list[-1].kwargs["error_message"] is None
         compensate.assert_called_once()
 
 

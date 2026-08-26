@@ -749,8 +749,18 @@ class ElasticSearchCore(VectorDatabaseCore):
                 if cause_reason:
                     reason_text = f"{reason_text}; caused by: {cause_reason}"
 
-                # Derive a precise error code without chaining through es_bulk_failed
-                if "dense_vector" in reason_text and "different number of dimensions" in reason_text:
+                # Keep storage-protection failures distinguishable from generic bulk errors.
+                normalized_reason = reason_text.lower()
+                if any(marker in normalized_reason for marker in (
+                    "cluster_block_exception",
+                    "disk watermark",
+                    "flood-stage watermark",
+                    "flood stage watermark",
+                    "read-only-allow-delete",
+                    "read_only_allow_delete",
+                )):
+                    error_code = "es_disk_watermark"
+                elif "dense_vector" in reason_text and "different number of dimensions" in reason_text:
                     error_code = "es_dim_mismatch"
                 else:
                     error_code = "es_bulk_failed"

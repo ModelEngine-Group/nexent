@@ -9,6 +9,9 @@ from typing import Dict, List, Optional, Tuple
 
 import httpx
 from fastapi import UploadFile
+from nexent import MessageObserver
+from nexent.core.models import OpenAILongContextModel
+from nexent.multi_modal.utils import parse_s3_url
 
 from consts.const import (
     ASSET_OWNER_ATTACHMENTS_PREFIX,
@@ -30,26 +33,24 @@ from database.attachment_db import (
     copy_file,
     delete_file,
     file_exists,
+    generate_object_name,
     get_content_type,
     get_file_range,
     get_file_size_from_minio,
     get_file_stream,
     get_file_stream_raw,
     get_file_url,
-    generate_object_name,
     list_files,
     upload_fileobj,
 )
 from database.knowledge_file_lifecycle_db import create_file_records, transition_file_record
 from database.model_management_db import get_model_by_model_id
 from services.vectordatabase_service import ElasticSearchService, get_vector_db_core
-from utils.config_utils import tenant_config_manager, get_model_name_from_config
+from utils.config_utils import get_model_name_from_config, tenant_config_manager
 from utils.file_management_utils import save_upload_file
+from utils.knowledge_ingestion_errors import ingestion_error_fields
 from utils.knowledge_telemetry import trace_knowledge_operation
 
-from nexent import MessageObserver
-from nexent.multi_modal.utils import parse_s3_url
-from nexent.core.models import OpenAILongContextModel
 
 # Create upload directory
 upload_dir = Path(UPLOAD_FOLDER)
@@ -477,13 +478,13 @@ async def upload_files_impl(
                         total_file_size,
                     )
             except Exception as quota_exc:
+                error_fields = ingestion_error_fields(quota_exc, "QUOTA")
                 for record in lifecycle_records_by_index.values():
                     transition_file_record(
                         record["file_id"],
                         status="FAILED",
                         stage="QUOTA",
-                        error_code="QUOTA_CHECK_FAILED",
-                        error_message=str(quota_exc)[:500],
+                        **error_fields,
                         error_stage="QUOTA",
                         failed_at=datetime.utcnow(),
                         updated_by=user_id,
@@ -529,12 +530,12 @@ async def upload_files_impl(
                 error_msg = result.get('error', 'Unknown error')
                 errors.append(f"Failed to upload {file_name}: {error_msg}")
                 if file_id:
+                    error_fields = ingestion_error_fields(result, "UPLOAD")
                     updated_record = transition_file_record(
                         file_id,
                         status="FAILED",
                         stage="UPLOAD",
-                        error_code="UPLOAD_FAILED",
-                        error_message=str(error_msg)[:500],
+                        **error_fields,
                         error_stage="UPLOAD",
                         failed_at=datetime.utcnow(),
                         expected_statuses=("UPLOADING",),
@@ -640,14 +641,14 @@ async def upload_files_impl(
                     index_name=storage_context.index_name,
                 )
             except Exception as exc:
+                error_fields = ingestion_error_fields(exc, "STORAGE_COMMIT")
                 for record in lifecycle_records_by_index.values():
                     if record.get("status") in {"UPLOADING", "UPLOADED"}:
                         transition_file_record(
                             record["file_id"],
                             status="FAILED",
                             stage="STORAGE_COMMIT",
-                            error_code="STORAGE_COMMIT_FAILED",
-                            error_message=str(exc)[:500],
+                            **error_fields,
                             error_stage="STORAGE_COMMIT",
                             failed_at=datetime.utcnow(),
                             expected_statuses=("UPLOADING", "UPLOADED"),
@@ -829,7 +830,7 @@ def get_llm_model(tenant_id: str, model_id: Optional[int] = None):
             key=MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id)
     timeout_seconds = main_model_config.get(
         "timeout_seconds") if main_model_config else None
-    
+
     resolved_model_name = get_model_name_from_config(main_model_config)
 
     logger.info(

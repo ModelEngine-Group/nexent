@@ -36,6 +36,7 @@ from services.file_management_service import (
 )
 from utils.auth_utils import get_current_user_id
 from utils.file_management_utils import trigger_data_process
+from utils.knowledge_ingestion_errors import classify_ingestion_exception
 
 
 logger = logging.getLogger("file_management_app")
@@ -229,7 +230,7 @@ async def process_files(
 
     process_result = await trigger_data_process(files, process_params)
 
-    def persist_submit_failure(file_details: dict, error_message: str):
+    def persist_submit_failure(file_details: dict, error: object):
         """Persist a durable task-submit failure without hiding other batch results."""
         try:
             from database.knowledge_file_lifecycle_db import get_file_record, transition_file_record
@@ -242,13 +243,14 @@ async def process_files(
                 include_hidden=True,
             )
             if record:
+                classified = classify_ingestion_exception(error, "TASK_SUBMIT")
                 transition_file_record(
                     record["file_id"],
                     status="FAILED",
                     stage="TASK_SUBMIT",
                     expected_statuses=("UPLOADED", "UPLOADING", "PROCESSING", "FORWARDING"),
-                    error_code="TASK_SUBMIT_FAILED",
-                    error_message=str(error_message)[:500],
+                    error_code=classified.error_code,
+                    error_message=classified.error_message,
                     error_stage="TASK_SUBMIT",
                     failed_at=datetime.utcnow(),
                     updated_by=user_id,
@@ -261,7 +263,7 @@ async def process_files(
         if isinstance(process_result, dict) and "message" in process_result:
             error_message = process_result["message"]
         for file_details in files:
-            persist_submit_failure(file_details, error_message)
+            persist_submit_failure(file_details, process_result or error_message)
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=error_message)
 
@@ -289,7 +291,7 @@ async def process_files(
             if file_details is not None:
                 persist_submit_failure(
                     file_details,
-                    failed_result.get("error_message") or "Failed to enqueue process-forward chain",
+                    failed_result,
                 )
 
         submitted_count = process_result.get("submitted_count")
@@ -323,7 +325,7 @@ async def process_files(
     ):
         error_message = process_result.get("message") or "No processing tasks were submitted"
         for file_details in files:
-            persist_submit_failure(file_details, error_message)
+            persist_submit_failure(file_details, process_result)
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=error_message)
 

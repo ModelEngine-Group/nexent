@@ -10,6 +10,7 @@ import log from "@/lib/logger";
 interface DocumentStatusProps {
   status: string;
   showIcon?: boolean;
+  errorCode?: string;
   errorReason?: string;
   suggestion?: string;
   kbId?: string;
@@ -38,6 +39,7 @@ const inferErrorCodeFromReason = (errorReason?: string): string | null => {
 export const DocumentStatus: React.FC<DocumentStatusProps> = ({
   status,
   showIcon = false,
+  errorCode,
   errorReason,
   suggestion,
   kbId,
@@ -216,7 +218,8 @@ export const DocumentStatus: React.FC<DocumentStatusProps> = ({
       docId &&
       !isFetching &&
       !hasFetched &&
-      !errorCodeState
+      !errorCodeState &&
+      !errorCode
     ) {
       fetchErrorInfo();
     }
@@ -224,8 +227,14 @@ export const DocumentStatus: React.FC<DocumentStatusProps> = ({
 
   // Keep old task records compatible when only the backend error reason is available.
   const localizedError = getLocalizedError(
-    errorCodeState || inferErrorCodeFromReason(errorReasonState || errorReason)
+    errorCodeState ||
+      errorCode ||
+      inferErrorCodeFromReason(errorReasonState || errorReason)
   );
+  const effectiveErrorCode =
+    errorCodeState ||
+    errorCode ||
+    inferErrorCodeFromReason(errorReasonState || errorReason);
   const rawErrorReason = errorReasonState || errorReason;
 
   const popoverContent = (
@@ -252,7 +261,9 @@ export const DocumentStatus: React.FC<DocumentStatusProps> = ({
         </div>
       ) : (
         <div className="text-sm text-gray-500">
-          {rawErrorReason || t("document.error.noReason")}
+          {effectiveErrorCode
+            ? t("document.error.code.unknown")
+            : rawErrorReason || t("document.error.noReason")}
         </div>
       )}
     </div>

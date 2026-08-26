@@ -17,9 +17,34 @@ from consts.model import ProcessParams
 from database.attachment_db import get_file_size_from_minio
 from database.knowledge_db import get_knowledge_record
 from utils.auth_utils import get_current_user_id
+from utils.knowledge_ingestion_errors import classify_ingestion_exception
 from utils.knowledge_telemetry import inject_trace_context, set_span_attributes, trace_knowledge_operation
 
+
 logger = logging.getLogger("file_management_utils")
+
+
+def _data_process_error_result(
+    error: object,
+    stage: str = "TASK_SUBMIT",
+    legacy_code: object = None,
+) -> dict:
+    """Keep an upstream stable code when data-process rejects a request."""
+    classified = classify_ingestion_exception(error, stage)
+    if legacy_code is not None:
+        compatibility_code = legacy_code
+    elif isinstance(error, httpx.RequestError):
+        # Preserve the pre-lifecycle response contract for callers that still
+        # branch on CONNECTION_ERROR while exposing the new error_code too.
+        compatibility_code = "CONNECTION_ERROR"
+    else:
+        compatibility_code = "INTERNAL_ERROR"
+    return {
+        "status": "error",
+        "code": compatibility_code,
+        "error_code": classified.error_code,
+        "message": classified.error_message or "Data process service failed",
+    }
 
 
 def ensure_secure_libreoffice_profile_dir(profile_dir: str) -> Path:
@@ -103,12 +128,16 @@ async def trigger_data_process(files: List[dict], process_params: ProcessParams)
                     logger.error(
                         "Error from data process service: %s - %s", response,
                         response.text if hasattr(response, 'text') else 'No response text')
-                    return {"status": "error", "code": response.status_code,
-                            "message": f"Data process service error: {response.status_code}"}
+                    try:
+                        error_payload = response.json()
+                    except ValueError:
+                        error_payload = response.text or f"Data process service error: {response.status_code}"
+                    return _data_process_error_result(
+                        error_payload, legacy_code=response.status_code
+                    )
             except httpx.RequestError as e:
                 logger.error("Failed to connect to data process service: %s", str(e))
-                return {"status": "error", "code": "CONNECTION_ERROR",
-                        "message": f"Failed to connect to data process service: {str(e)}"}
+                return _data_process_error_result(e)
 
         else:
             # Batch file request
@@ -140,15 +169,19 @@ async def trigger_data_process(files: List[dict], process_params: ProcessParams)
                     logger.error(
                         "Error from data process service: %s - %s", response,
                         response.text if hasattr(response, 'text') else 'No response text')
-                    return {"status": "error", "code": response.status_code,
-                            "message": f"Data process service error: {response.status_code}"}
+                    try:
+                        error_payload = response.json()
+                    except ValueError:
+                        error_payload = response.text or f"Data process service error: {response.status_code}"
+                    return _data_process_error_result(
+                        error_payload, legacy_code=response.status_code
+                    )
             except httpx.RequestError as e:
                 logger.error("Failed to connect to data process service: %s", str(e))
-                return {"status": "error", "code": "CONNECTION_ERROR",
-                        "message": f"Failed to connect to data process service: {str(e)}"}
+                return _data_process_error_result(e)
     except Exception as e:
         logger.error("Error triggering data process: %s", str(e))
-        return {"status": "error", "code": "INTERNAL_ERROR", "message": f"Internal error: {str(e)}"}
+        return _data_process_error_result(e)
 
 
 async def get_all_files_status(index_name: str):

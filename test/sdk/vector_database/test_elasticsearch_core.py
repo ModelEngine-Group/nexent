@@ -1910,6 +1910,34 @@ def test_handle_bulk_errors_dim_mismatch_sets_specific_code(elasticsearch_core_i
     assert "es_dim_mismatch" in payload
     assert "Bulk indexing failed" in payload
 
+
+def test_handle_bulk_errors_disk_watermark_sets_specific_code(elasticsearch_core_instance):
+    """ES storage protection errors should produce the non-retryable watermark code."""
+    response = {
+        "errors": True,
+        "items": [
+            {
+                "index": {
+                    "error": {
+                        "type": "cluster_block_exception",
+                        "reason": (
+                            "index [knowledge] blocked by: [TOO_MANY_REQUESTS/12/disk usage exceeded "
+                            "flood-stage watermark; index has read-only-allow-delete block]"
+                        ),
+                    }
+                }
+            }
+        ],
+    }
+
+    with pytest.raises(Exception) as exc_info:
+        elasticsearch_core_instance._handle_bulk_errors(response)
+
+    payload = str(exc_info.value)
+    assert "es_disk_watermark" in payload
+    assert "Bulk indexing failed" in payload
+
+
 def test_bulk_operation_context(elasticsearch_core_instance):
     """Test bulk operation context manager."""
     with patch.object(elasticsearch_core_instance, '_apply_bulk_settings') as mock_apply, \
