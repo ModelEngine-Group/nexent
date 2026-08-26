@@ -2666,6 +2666,55 @@ class TestDataProcessService(unittest.TestCase):
             file_id="file-deleted",
         )
 
+    @patch('backend.services.data_process_service.get_redis_service', side_effect=RuntimeError("redis unavailable"))
+    @patch('backend.services.data_process_service.celery_app')
+    @patch('backend.services.data_process_service.get_all_task_ids_from_redis', return_value=[])
+    @patch('backend.services.data_process_service.get_task_info')
+    def test_get_all_tasks_continues_when_delete_fence_service_unavailable(
+        self, mock_get_task_info, _mock_ids, mock_celery_app, _mock_get_redis_service
+    ):
+        mock_inspector = MagicMock()
+        mock_inspector.active.return_value = {}
+        mock_inspector.reserved.return_value = {}
+        mock_celery_app.control.inspect.return_value = mock_inspector
+        mock_celery_app.conf.broker_url = "redis://mock:6379/0"
+        mock_celery_app.conf.result_backend = "redis://mock:6379/0"
+
+        rows = asyncio.run(self.service.get_all_tasks(filter=False))
+
+        assert rows == []
+        mock_get_task_info.assert_not_called()
+
+    @patch('backend.services.data_process_service.get_redis_service')
+    @patch('backend.services.data_process_service.celery_app')
+    @patch('backend.services.data_process_service.get_all_task_ids_from_redis', return_value=['fenced-task'])
+    @patch('backend.services.data_process_service.get_task_info')
+    def test_get_all_tasks_keeps_task_when_delete_fence_lookup_fails(
+        self, mock_get_task_info, _mock_ids, mock_celery_app, mock_get_redis_service
+    ):
+        mock_inspector = MagicMock()
+        mock_inspector.active.return_value = {}
+        mock_inspector.reserved.return_value = {}
+        mock_celery_app.control.inspect.return_value = mock_inspector
+        mock_celery_app.conf.broker_url = "redis://mock:6379/0"
+        mock_celery_app.conf.result_backend = "redis://mock:6379/0"
+        async def _task_info(task_id):
+            return {
+                "id": task_id,
+                "task_name": "forward",
+                "index_name": "idx",
+                "path_or_url": "knowledge_base/a.txt",
+            }
+
+        mock_get_task_info.side_effect = _task_info
+        fence_service = MagicMock()
+        fence_service.is_document_delete_requested.side_effect = RuntimeError("lookup failed")
+        mock_get_redis_service.return_value = fence_service
+
+        rows = asyncio.run(self.service.get_all_tasks(filter=False))
+
+        assert [row["id"] for row in rows] == ["fenced-task"]
+
 
     # ---- Additional coverage tests ----
 

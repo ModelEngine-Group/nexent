@@ -550,6 +550,7 @@ def _is_document_delete_requested(
 
 def _build_forward_cancelled_result(ctx: _ForwardContext) -> Dict[str, Any]:
     return {
+        'cancelled': True,
         'task_id': ctx.task_id,
         'source': ctx.source,
         'index_name': ctx.index_name,

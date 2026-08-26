@@ -3025,6 +3025,146 @@ def test_aggregate_forward_parts_returns_cancelled_when_document_is_deleted(monk
     assert out["total_indexed"] == 0
 
 
+def test_process_returns_cancelled_when_document_is_deleted_before_start(monkeypatch):
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+    monkeypatch.setattr(tasks, "_is_document_delete_requested", lambda *args, **kwargs: True)
+    monkeypatch.setattr(
+        tasks,
+        "_update_file_lifecycle",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("deleted process must not update lifecycle")),
+    )
+
+    out = tasks.process(
+        FakeSelf("process-deleted-before-start"),
+        source="knowledge_base/deleted.txt",
+        source_type="local",
+        index_name="idx",
+        original_filename="deleted.txt",
+        file_id="file-deleted",
+    )
+
+    assert out["cancelled"] is True
+    assert out["file_id"] == "file-deleted"
+
+
+def test_process_returns_cancelled_when_deleted_after_local_extraction(monkeypatch, tmp_path):
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+    source = tmp_path / "deleted-after-extraction.txt"
+    source.write_text("content")
+    checks = iter([False, True])
+    monkeypatch.setattr(tasks, "_is_document_delete_requested", lambda *args, **kwargs: next(checks))
+    monkeypatch.setattr(tasks, "_update_file_lifecycle", lambda **kwargs: None)
+    monkeypatch.setattr(
+        tasks,
+        "_process_source_with_split",
+        lambda **kwargs: (False, [{"content": "chunk", "metadata": {}}], None),
+    )
+
+    out = tasks.process(
+        FakeSelf("process-deleted-after-local"),
+        source=str(source),
+        source_type="local",
+        chunking_strategy="basic",
+        index_name="idx",
+        file_id="file-deleted",
+    )
+
+    assert out["cancelled"] is True
+
+
+def test_process_returns_cancelled_when_deleted_after_minio_extraction(monkeypatch):
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+    checks = iter([False, False, True])
+    monkeypatch.setattr(tasks, "_is_document_delete_requested", lambda *args, **kwargs: next(checks))
+    monkeypatch.setattr(tasks, "_update_file_lifecycle", lambda **kwargs: None)
+    monkeypatch.setattr(tasks, "_fetch_minio_source", lambda source: b"content")
+    monkeypatch.setattr(
+        tasks,
+        "_process_source_with_split",
+        lambda **kwargs: (False, [{"content": "chunk", "metadata": {}}], None),
+    )
+
+    out = tasks.process(
+        FakeSelf("process-deleted-after-minio"),
+        source="knowledge_base/deleted.txt",
+        source_type="minio",
+        chunking_strategy="basic",
+        index_name="idx",
+        file_id="file-deleted",
+    )
+
+    assert out["cancelled"] is True
+
+
+def test_forward_returns_cancelled_when_document_is_deleted_before_load(monkeypatch):
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+
+    class _Service:
+        def is_task_cancelled(self, _task_id):
+            return False
+
+        def is_document_delete_requested(self, **kwargs):
+            return True
+
+    monkeypatch.setattr(tasks, "get_redis_service", lambda: _Service())
+    monkeypatch.setattr(tasks, "_update_file_lifecycle", lambda **kwargs: None)
+
+    out = tasks.forward(
+        FakeSelf("forward-deleted-before-load"),
+        processed_data={"chunks": [{"content": "x", "metadata": {}}]},
+        index_name="idx",
+        source="knowledge_base/deleted.txt",
+        file_id="file-deleted",
+    )
+
+    assert out["cancelled"] is True
+
+
+def test_forward_returns_cancelled_when_deleted_after_loading_chunks(monkeypatch):
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+    checks = iter([False, True])
+    monkeypatch.setattr(tasks, "_is_document_delete_requested", lambda *args, **kwargs: next(checks))
+    monkeypatch.setattr(tasks, "_update_file_lifecycle", lambda **kwargs: None)
+    monkeypatch.setattr(
+        tasks,
+        "_load_forward_chunks",
+        lambda _self, **kwargs: ([{"content": "x", "metadata": {}}], False, "knowledge_base/deleted.txt", "idx", "deleted.txt"),
+    )
+
+    out = tasks.forward(
+        FakeSelf("forward-deleted-after-load"),
+        processed_data={"chunks": [{"content": "x", "metadata": {}}]},
+        index_name="idx",
+        source="knowledge_base/deleted.txt",
+        file_id="file-deleted",
+    )
+
+    assert out["cancelled"] is True
+
+
+def test_forward_returns_cancelled_before_first_es_write(monkeypatch):
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+    checks = iter([False, False, True])
+    monkeypatch.setattr(tasks, "_is_document_delete_requested", lambda *args, **kwargs: next(checks))
+    monkeypatch.setattr(tasks, "_update_file_lifecycle", lambda **kwargs: None)
+    monkeypatch.setattr(tasks, "get_file_size", lambda *args, **kwargs: 0)
+    monkeypatch.setattr(
+        tasks,
+        "_load_forward_chunks",
+        lambda _self, **kwargs: ([{"content": "x", "metadata": {}}], False, "knowledge_base/deleted.txt", "idx", "deleted.txt"),
+    )
+
+    out = tasks.forward(
+        FakeSelf("forward-deleted-before-es"),
+        processed_data={"chunks": [{"content": "x", "metadata": {}}]},
+        index_name="idx",
+        source="knowledge_base/deleted.txt",
+        file_id="file-deleted",
+    )
+
+    assert out["cancelled"] is True
+
+
 def test_forward_part_continues_when_parent_cancellation_lookup_fails(monkeypatch):
     tasks, _ = import_tasks_with_fake_ray(monkeypatch)
     monkeypatch.setattr(tasks, "get_redis_service", lambda: (_ for _ in ()).throw(RuntimeError("redis down")))
@@ -3372,6 +3512,23 @@ def test_cleanup_source_skips_when_preserve_true(monkeypatch):
     assert out["source_cleanup"]["attempted"] is False
     assert out["source_cleanup"]["skipped_reason"] == "preserve_source_file_true"
     assert called["delete"] == 0
+
+
+def test_cleanup_source_skips_when_forward_was_cancelled(monkeypatch):
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+    monkeypatch.setattr(
+        tasks,
+        "_delete_source_file_via_http_sync",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("cancelled forward must not delete source")),
+    )
+
+    out = tasks.cleanup_source(
+        FakeSelf("cleanup-cancelled"),
+        {"cancelled": True, "index_name": "idx", "source": "/a.txt"},
+    )
+
+    assert out["source_cleanup"]["skipped_reason"] == "forward_cancelled"
+    assert out["source_cleanup"]["attempted"] is False
 
 
 def test_cleanup_source_calls_delete_with_scope_source_only(monkeypatch):
