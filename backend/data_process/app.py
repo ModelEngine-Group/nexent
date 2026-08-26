@@ -44,18 +44,14 @@ app.conf.update(
     # Explicitly set result backend
     broker_url=REDIS_URL,
     result_backend=REDIS_BACKEND_URL,
-    # Dedicated queues keep parent, part, and aggregate tasks from starving
-    # one another when a parent task waits for a Celery chord.
+    # Explicitly route the newly isolated forward child and aggregate tasks.
+    # Other tasks keep their queue from the @app.task declaration.
     task_routes={
         f'{import_path}.process': {'queue': 'process_q'},
         f'{import_path}.forward': {'queue': 'forward_q'},
         f'{import_path}.process_and_forward': {'queue': 'process_q'},
-        f'{import_path}.process_part': {'queue': 'process_part_q'},
-        f'{import_path}.aggregate_parts': {'queue': 'process_part_q'},
-        f'{import_path}.aggregate_store_chunks': {'queue': 'process_part_q'},
         f'{import_path}.forward_part': {'queue': 'forward_part_q'},
         f'{import_path}.aggregate_forward_parts': {'queue': 'forward_aggregate_q'},
-        f'{import_path}.cleanup_source': {'queue': 'forward_q'},
     },
     task_serializer='json',
     accept_content=['json'],
