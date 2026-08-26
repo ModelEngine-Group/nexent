@@ -519,7 +519,14 @@ async def test_search_installed_resources_covers_visible_tools_and_skills(mocker
                     "source": "local",
                     "is_available": True,
                     "is_user_selectable": False,
-                    "params": [],
+                    "params": [
+                        {
+                            "name": "top_k",
+                            "type": "integer",
+                            "optional": False,
+                            "default": 5,
+                        }
+                    ],
                     "inputs": {},
                 },
                 {
@@ -569,15 +576,33 @@ async def test_search_installed_resources_covers_visible_tools_and_skills(mocker
     catalog_by_name = {item["name"]: item for item in catalog}
     assert "wrapper" in catalog_by_name
     assert "knowledge_base_search" in catalog_by_name
-    assert "aidp_search" not in catalog_by_name
+    assert "aidp_search" in catalog_by_name
     assert catalog_by_name["knowledge_base_search"]["config"] == [
+        {
+            "name": "top_k",
+            "type": "number",
+            "required": True,
+            "value": 5,
+            "description": "",
+            "description_zh": "",
+        },
         {
             "name": "index_names",
             "type": "array",
             "required": True,
             "value": [],
-            "description": "The list of index names to search",
-            "description_zh": "要索引的知识库",
+            "description": "The knowledge bases used by this tool",
+            "description_zh": "该工具使用的知识库",
+        }
+    ]
+    assert catalog_by_name["aidp_search"]["config"] == [
+        {
+            "name": "kds_list",
+            "type": "array",
+            "required": True,
+            "value": [],
+            "description": "The knowledge bases used by this tool",
+            "description_zh": "该工具使用的知识库",
         }
     ]
 
@@ -655,6 +680,7 @@ def test_resource_config_normalization_is_frontend_safe():
                 "default": None,
             }
         ],
+        is_user_selectable=False,
     ) == [
         {
             "name": "index_names",
@@ -665,6 +691,16 @@ def test_resource_config_normalization_is_frontend_safe():
             "description_zh": "",
         }
     ]
+    assert _normalize_nl2agent_tool_config(
+        tool_name="ordinary_tool",
+        params=[],
+        is_user_selectable=True,
+    ) == []
+    assert _normalize_nl2agent_tool_config(
+        tool_name="managed_tool",
+        params=[],
+        is_user_selectable=False,
+    )[0]["name"] == "index_names"
     assert _normalize_skill_config({"config_schemas": None}) == []
     skill_config = _normalize_skill_config(
         {
@@ -1030,12 +1066,14 @@ async def test_recommend_resources_dispatches_homogeneous_sources(mocker):
     )
 
     assert await recommend_resources_impl(
+        agent_id=42,
         candidates=[installed],
         recommended_refs=[installed.candidate_ref],
         tenant_id="tenant-a",
         user_id="user-a",
     ) is installed_result
     assert await recommend_resources_impl(
+        agent_id=42,
         candidates=[uninstalled],
         recommended_refs=[],
         tenant_id="tenant-a",
@@ -1047,6 +1085,7 @@ async def test_recommend_resources_dispatches_homogeneous_sources(mocker):
     for candidates in ([], [installed, uninstalled]):
         with pytest.raises(Nl2AgentResourceError, match="invalid_candidates"):
             await recommend_resources_impl(
+                agent_id=42,
                 candidates=candidates,
                 recommended_refs=[],
                 tenant_id="tenant-a",
@@ -1078,6 +1117,10 @@ async def test_recommend_resources_overwrites_model_display_fields(mocker):
             ]
         ),
     )
+    query_bound_tools = mocker.patch(
+        "services.nl2agent_service.query_all_enabled_tool_instances",
+        return_value=[{"tool_id": 7}],
+    )
     supplied = ResourceCandidate(
         candidate_ref="tool:7",
         resource_type="tool",
@@ -1089,6 +1132,7 @@ async def test_recommend_resources_overwrites_model_display_fields(mocker):
     )
 
     result = await recommend_installed_resources_impl(
+        agent_id=42,
         candidates=[supplied],
         recommended_refs=["tool:7"],
         tenant_id="tenant-a",
@@ -1100,7 +1144,13 @@ async def test_recommend_resources_overwrites_model_display_fields(mocker):
     assert resource.candidate.description == "Verified description"
     assert resource.candidate.requirement_ids == ["search"]
     assert resource.recommendation == "recommended"
+    assert resource.is_bound is True
     assert resource.form_kind == "TOOL_CONFIG"
+    query_bound_tools.assert_called_once_with(
+        agent_id=42,
+        tenant_id="tenant-a",
+        version_no=0,
+    )
 
 
 @pytest.mark.asyncio
@@ -1117,9 +1167,14 @@ async def test_recommend_resources_rejects_missing_or_mismatched_catalog_entries
         requirement_ids=["lookup"],
         score=0.9,
     )
+    mocker.patch(
+        "services.nl2agent_service.query_all_enabled_tool_instances",
+        return_value=[],
+    )
 
     with pytest.raises(Nl2AgentResourceError) as missing:
         await recommend_installed_resources_impl(
+            agent_id=42,
             candidates=[supplied],
             recommended_refs=[],
             tenant_id="tenant-a",
@@ -1136,6 +1191,7 @@ async def test_recommend_resources_rejects_missing_or_mismatched_catalog_entries
     ]
     with pytest.raises(Nl2AgentResourceError) as mismatched:
         await recommend_installed_resources_impl(
+            agent_id=42,
             candidates=[supplied],
             recommended_refs=[],
             tenant_id="tenant-a",

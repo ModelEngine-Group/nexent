@@ -2,7 +2,16 @@
 
 import { useState, useMemo, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { Modal, Tabs, Input, Checkbox, Button, Select, Tooltip } from "antd";
+import {
+  App,
+  Modal,
+  Tabs,
+  Input,
+  Checkbox,
+  Button,
+  Select,
+  Tooltip,
+} from "antd";
 import type { TabsProps } from "antd";
 import { Search, Settings, Wrench, Tag } from "lucide-react";
 import i18n from "i18next";
@@ -14,6 +23,7 @@ import { useAgentStore } from "@/stores/agentStore";
 import { usePrefetchKnowledgeBases } from "@/hooks/useKnowledgeBaseSelector";
 import { useConfig } from "@/hooks/useConfig";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
+import { searchToolConfig } from "@/services/agentConfigService";
 import { TOOL_SOURCE_TYPES } from "@/const/agentConfig";
 import type { Tool, ToolParam } from "@/types/agentConfig";
 import ToolConfigModal from "./ToolConfigModal";
@@ -25,6 +35,7 @@ import {
   TOOLS_REQUIRING_VIDEO_UNDERSTANDING,
   getToolKbType,
   getToolLabels,
+  mergeToolParamValues,
 } from "./utils";
 import log from "@/lib/logger";
 
@@ -104,6 +115,7 @@ export default function SelectToolsDialog({
   currentAgentId,
 }: SelectToolsDialogProps) {
   const { t } = useTranslation("common");
+  const { message } = App.useApp();
   const { confirm } = useConfirmModal();
 
   const { selectableTools } = useToolList({ enabled: open });
@@ -265,41 +277,38 @@ export default function SelectToolsDialog({
 
   // --- Merge instance params for a tool ---
   const mergeInstanceParams = useCallback(
-    async (tool: any, forceFetch?: boolean): Promise<ToolParam[]> => {
+    async (tool: any): Promise<ToolParam[] | null> => {
       const params = tool.initParams || [];
-      // If tool already has stored params with non-empty values, the user's
-      // unsaved modifications are already reflected in those params — skip the
-      // API call to avoid overwriting them with stale server data.
-      const hasStoredParams = params.some(
-        (p: ToolParam) =>
-          p.value !== undefined && p.value !== null && p.value !== ""
+      const currentSelected = useAgentStore.getState().editedAgent?.tools ?? [];
+      const selectedTool = currentSelected.find(
+        (item) => parseInt(item.id) === parseInt(tool.id)
       );
-      if (!forceFetch && hasStoredParams) {
-        return params;
+      if (selectedTool) {
+        return mergeToolParamValues(
+          params,
+          Object.fromEntries(
+            selectedTool.initParams.map((param) => [param.name, param.value])
+          )
+        );
       }
       if (!currentAgentId) return params;
-      try {
-        const { searchToolConfig } =
-          await import("@/services/agentConfigService");
-        const instance = await searchToolConfig(
-          parseInt(tool.id),
-          currentAgentId
+      const instance = await searchToolConfig(
+        parseInt(tool.id),
+        currentAgentId
+      );
+      if (!instance.success || !instance.data) {
+        log.error("Failed to fetch tool instance params:", instance.message);
+        message.error(
+          t(
+            "nl2agent.resourceBinding.loadExistingConfigFailed",
+            "Failed to load the current resource configuration."
+          )
         );
-        if (instance.success && instance.data) {
-          return params.map((p: ToolParam) => ({
-            ...p,
-            value:
-              instance.data?.params?.[p.name] !== undefined
-                ? instance.data.params[p.name]
-                : p.value,
-          }));
-        }
-      } catch (err) {
-        log.error("Failed to fetch tool instance params:", err);
+        return null;
       }
-      return params;
+      return mergeToolParamValues(params, instance.data.params);
     },
-    [currentAgentId]
+    [currentAgentId, message, t]
   );
 
   // --- Check if tool has missing required params ---
@@ -370,6 +379,7 @@ export default function SelectToolsDialog({
         : tool;
 
       const mergedParams = await mergeInstanceParams(toolToUse);
+      if (!mergedParams) return;
       setConfigTool(toolToUse);
       setConfigParams(mergedParams);
       setConfigModalOpen(true);
@@ -400,6 +410,7 @@ export default function SelectToolsDialog({
       const dup = currentSelected.find((s) => s.name === tool.name);
       const doAdd = async () => {
         const mergedParams = await mergeInstanceParams(tool);
+        if (!mergedParams) return;
         const toolToUse = { ...tool, initParams: mergedParams };
         if (hasMissingRequired(mergedParams)) {
           setConfigTool(toolToUse);
@@ -451,17 +462,18 @@ export default function SelectToolsDialog({
     setIsSelectingAll(true);
     try {
       const toolsWithParams = await Promise.all(
-        toolsToAdd.map(async (tool: any) => ({
-          ...tool,
-          initParams: await mergeInstanceParams(tool),
-        }))
+        toolsToAdd.map(async (tool: any) => {
+          const initParams = await mergeInstanceParams(tool);
+          return initParams ? { ...tool, initParams } : null;
+        })
       );
       const latestSelected = useAgentStore.getState().editedAgent?.tools ?? [];
       const latestIds = new Set(
         latestSelected.map((tool) => parseInt(tool.id))
       );
       const names = new Set(latestSelected.map((tool) => tool.name));
-      const additions = toolsWithParams.filter((tool) => {
+      const additions = toolsWithParams.filter((tool): tool is Tool => {
+        if (!tool) return false;
         if (
           latestIds.has(parseInt(tool.id)) ||
           names.has(tool.name) ||

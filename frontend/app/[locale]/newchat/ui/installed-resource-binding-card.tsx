@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useReducer, useState, type FC } from "react";
 import { useAui, useAuiState } from "@assistant-ui/react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -17,14 +17,15 @@ import SkillConfigModal from "../../agents/components/agentConfig/skill/SkillCon
 import {
   findCanonicalTool,
   mergeCanonicalTool,
+  mergeToolParamValues,
 } from "../../agents/components/agentConfig/tool/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useNl2AgentFlow } from "@/contexts/nl2AgentFlow";
 import { useToolList } from "@/hooks/agent/useToolList";
-import { useKnowledgeBasesForToolConfig } from "@/hooks/useKnowledgeBaseSelector";
 import {
   searchAgentInfo,
+  searchToolConfig,
   updateToolConfig,
   saveSkillInstance,
 } from "@/services/agentConfigService";
@@ -53,7 +54,6 @@ import { Nl2AgentResourceSourceBadge } from "./nl2agent-resource-source-badge";
 
 type ConfigStatus = "unconfigured" | "valid" | "invalid";
 type BindingStatus = "idle" | "binding" | "bound" | "failed";
-const KNOWLEDGE_BASE_SEARCH_TOOL_NAME = "knowledge_base_search";
 
 interface BindingItemState {
   resource: Nl2aRecommendedResource;
@@ -69,11 +69,8 @@ type BindingAction =
   | { type: "toggle"; ref: string }
   | { type: "save_config"; ref: string; params: Nl2AgentResourceParam[] }
   | {
-      type: "hydrate_tool_configs";
-      configs: Map<
-        string,
-        { params: Nl2AgentResourceParam[]; requiresConfirmation: boolean }
-      >;
+      type: "sync_bound_tools";
+      refs: Set<string>;
     }
   | {
       type: "validation_failed";
@@ -95,76 +92,6 @@ const parseResourceId = (ref: string, expected: "tool" | "skill"): number => {
   return resourceId;
 };
 
-const parseStringArray = (value: unknown): string[] => {
-  if (Array.isArray(value)) {
-    return value
-      .map(String)
-      .map((item) => item.trim())
-      .filter(Boolean);
-  }
-  if (typeof value !== "string" || !value.trim()) return [];
-  try {
-    const parsed = JSON.parse(value);
-    return Array.isArray(parsed)
-      ? parsed
-          .map(String)
-          .map((item) => item.trim())
-          .filter(Boolean)
-      : [];
-  } catch {
-    return value
-      .split(",")
-      .map((item) => item.trim())
-      .filter(Boolean);
-  }
-};
-
-const hydrateBoundToolConfigs = (
-  resources: Nl2aRecommendedResource[],
-  boundTools: Tool[],
-  accessibleKnowledgeBaseIds: ReadonlySet<string>
-): Map<
-  string,
-  { params: Nl2AgentResourceParam[]; requiresConfirmation: boolean }
-> => {
-  const configs = new Map<
-    string,
-    { params: Nl2AgentResourceParam[]; requiresConfirmation: boolean }
-  >();
-  resources.forEach((resource) => {
-    if (resource.candidate.resource_type !== "tool") return;
-    const toolId = parseResourceId(resource.candidate.candidate_ref, "tool");
-    const boundTool = findCanonicalTool(boundTools, toolId);
-    if (!boundTool) return;
-
-    const values = new Map(
-      boundTool.initParams.map((param) => [param.name, param.value])
-    );
-    let requiresConfirmation = false;
-    const params = resource.config.map((param) => {
-      if (!values.has(param.name)) return { ...param };
-      let value = values.get(param.name);
-      if (
-        resource.candidate.name === KNOWLEDGE_BASE_SEARCH_TOOL_NAME &&
-        param.name === "index_names"
-      ) {
-        const savedIds = parseStringArray(value);
-        const accessibleIds = savedIds.filter((id) =>
-          accessibleKnowledgeBaseIds.has(id)
-        );
-        requiresConfirmation = accessibleIds.length !== savedIds.length;
-        value = accessibleIds;
-      }
-      return { ...param, value };
-    });
-    configs.set(resource.candidate.candidate_ref, {
-      params,
-      requiresConfirmation,
-    });
-  });
-  return configs;
-};
-
 const initializeItems = (
   resources: Nl2aRecommendedResource[]
 ): BindingItemState[] =>
@@ -173,14 +100,14 @@ const initializeItems = (
     const errors = validateNl2AgentResourceConfig(draftParams);
     return {
       resource,
-      selected: resource.recommendation === "recommended",
+      selected: resource.is_bound || resource.recommendation === "recommended",
       configStatus:
         draftParams.length === 0
           ? "valid"
           : errors.length
             ? "unconfigured"
             : "valid",
-      bindingStatus: "idle",
+      bindingStatus: resource.is_bound ? "bound" : "idle",
       draftParams,
       fieldErrors: [],
     };
@@ -209,18 +136,17 @@ function reducer(
         error: undefined,
       };
     }
-    if (action.type === "hydrate_tool_configs") {
-      const hydrated = action.configs.get(ref);
-      if (!hydrated) return item;
-      const fieldErrors = validateNl2AgentResourceConfig(hydrated.params);
+    if (
+      action.type === "sync_bound_tools" &&
+      item.resource.candidate.resource_type === "tool" &&
+      item.bindingStatus !== "binding"
+    ) {
+      const isBound = action.refs.has(ref);
       return {
         ...item,
-        draftParams: hydrated.params,
-        configStatus:
-          hydrated.requiresConfirmation || fieldErrors.length
-            ? "unconfigured"
-            : "valid",
-        fieldErrors: [],
+        selected: isBound ? true : item.selected,
+        bindingStatus: isBound ? "bound" : "idle",
+        error: undefined,
       };
     }
     if (action.type === "validation_failed") {
@@ -347,46 +273,11 @@ export const InstalledResourceBindingCard: FC<{
   );
   const [configuringRef, setConfiguringRef] = useState<string | null>(null);
   const [summaryError, setSummaryError] = useState<string | null>(null);
+  const [loadingConfigRef, setLoadingConfigRef] = useState<string | null>(null);
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [isSynchronizing, setIsSynchronizing] = useState(false);
   const hasToolResources = payload.resources.some(
     (resource) => resource.candidate.resource_type === "tool"
-  );
-  const hasKnowledgeBaseSearchResource = payload.resources.some(
-    (resource) =>
-      resource.candidate.resource_type === "tool" &&
-      resource.candidate.name === KNOWLEDGE_BASE_SEARCH_TOOL_NAME
-  );
-  const [hasHydratedToolConfigs, setHasHydratedToolConfigs] =
-    useState(!hasToolResources);
-  const {
-    data: agentSnapshot,
-    isFetchedAfterMount: isAgentSnapshotFetched,
-    isError: isAgentSnapshotError,
-    refetch: refetchAgentSnapshot,
-  } = useQuery({
-    queryKey: ["agentInfo", payload.agent_id],
-    queryFn: async () => {
-      const result = await searchAgentInfo(payload.agent_id, undefined, 0);
-      if (!result.success || !result.data) {
-        throw new Error(result.message);
-      }
-      return result.data;
-    },
-    enabled: hasToolResources,
-    staleTime: 0,
-    refetchOnMount: "always",
-  });
-  const {
-    data: accessibleKnowledgeBases = [],
-    isSuccess: isKnowledgeBaseListLoaded,
-    isError: isKnowledgeBaseListError,
-    refetch: refetchKnowledgeBases,
-  } = useKnowledgeBasesForToolConfig(
-    hasKnowledgeBaseSearchResource ? KNOWLEDGE_BASE_SEARCH_TOOL_NAME : null
-  );
-  const [hasRefreshedKnowledgeBases, setHasRefreshedKnowledgeBases] = useState(
-    !hasKnowledgeBaseSearchResource
   );
   const {
     availableTools,
@@ -394,6 +285,8 @@ export const InstalledResourceBindingCard: FC<{
     isError: isToolCatalogError,
   } = useToolList({ enabled: hasToolResources });
   const waitForAutosave = useAgentStore((state) => state.waitForIdle);
+  const currentAgentId = useAgentStore((state) => state.currentAgentId);
+  const editedAgent = useAgentStore((state) => state.editedAgent);
   const applyPersistedResourceBindings = useAgentStore(
     (state) => state.applyPersistedResourceBindings
   );
@@ -402,64 +295,19 @@ export const InstalledResourceBindingCard: FC<{
   );
 
   useEffect(() => {
-    if (!hasKnowledgeBaseSearchResource) return;
-    let active = true;
-    void refetchKnowledgeBases().finally(() => {
-      if (active) setHasRefreshedKnowledgeBases(true);
-    });
-    return () => {
-      active = false;
-    };
-  }, [hasKnowledgeBaseSearchResource, refetchKnowledgeBases]);
-
-  useEffect(() => {
-    if (
-      hasHydratedToolConfigs ||
-      !agentSnapshot ||
-      !isAgentSnapshotFetched ||
-      isAgentSnapshotError ||
-      (hasKnowledgeBaseSearchResource &&
-        (!hasRefreshedKnowledgeBases ||
-          !isKnowledgeBaseListLoaded ||
-          isKnowledgeBaseListError))
-    ) {
-      return;
-    }
+    if (currentAgentId !== payload.agent_id || !editedAgent) return;
     dispatch({
-      type: "hydrate_tool_configs",
-      configs: hydrateBoundToolConfigs(
-        payload.resources,
-        agentSnapshot.tools ?? [],
-        new Set(accessibleKnowledgeBases.map((kb) => String(kb.id).trim()))
-      ),
+      type: "sync_bound_tools",
+      refs: new Set(editedAgent.tools.map((tool) => `tool:${tool.id}`)),
     });
-    setHasHydratedToolConfigs(true);
-  }, [
-    accessibleKnowledgeBases,
-    agentSnapshot,
-    hasHydratedToolConfigs,
-    hasKnowledgeBaseSearchResource,
-    hasRefreshedKnowledgeBases,
-    isAgentSnapshotFetched,
-    isAgentSnapshotError,
-    isKnowledgeBaseListError,
-    isKnowledgeBaseListLoaded,
-    payload.resources,
-  ]);
+  }, [currentAgentId, editedAgent, payload.agent_id]);
 
   useEffect(() => {
     registerCard(cardKey, payload.subtype);
   }, [cardKey, payload.subtype, registerCard]);
 
-  const isConfigHydrationFailed =
-    !hasHydratedToolConfigs &&
-    (isAgentSnapshotError ||
-      (hasKnowledgeBaseSearchResource && isKnowledgeBaseListError));
-  const isConfigHydrating =
-    hasToolResources && !hasHydratedToolConfigs && !isConfigHydrationFailed;
   const isLocked = disabled || isSubmitted || !isCardInteractive(cardKey);
-  const isInteractionLocked =
-    isLocked || isConfigHydrating || isConfigHydrationFailed;
+  const isInteractionLocked = isLocked || loadingConfigRef !== null;
   const selectedItems = items.filter((item) => item.selected);
   const isBinding = items.some((item) => item.bindingStatus === "binding");
   const canContinue =
@@ -510,20 +358,81 @@ export const InstalledResourceBindingCard: FC<{
     );
   };
 
+  const openResourceConfig = async (
+    item: BindingItemState,
+    canonicalTool?: Tool
+  ) => {
+    const ref = candidateRef(item);
+    if (item.resource.candidate.resource_type === "skill") {
+      setConfiguringRef(ref);
+      return;
+    }
+    if (!canonicalTool) return;
+    setLoadingConfigRef(ref);
+    setSummaryError(null);
+    try {
+      const autosaveSucceeded = await waitForAutosave();
+      if (!autosaveSucceeded) {
+        setSummaryError(
+          t(
+            "nl2agent.resourceBinding.autosaveFailed",
+            "Save the pending Agent changes before binding resources."
+          )
+        );
+        return;
+      }
+      const result = await searchToolConfig(
+        parseResourceId(ref, "tool"),
+        payload.agent_id
+      );
+      if (!result.success || !result.data) {
+        setSummaryError(
+          t(
+            "nl2agent.resourceBinding.loadExistingConfigFailed",
+            "Failed to load the current resource configuration."
+          )
+        );
+        return;
+      }
+      dispatch({
+        type: "save_config",
+        ref,
+        params: mergeToolParamValues(
+          item.resource.config as ToolParam[],
+          result.data.params
+        ),
+      });
+      setConfiguringRef(ref);
+    } finally {
+      setLoadingConfigRef(null);
+    }
+  };
+
   const bindSelected = async () => {
     if (isInteractionLocked || isBinding || isSynchronizing) return;
     const pending = items.filter(
       (item) => item.selected && item.bindingStatus !== "bound"
     );
+    const pendingToolWithoutCatalog = pending.some(
+      (item) =>
+        item.resource.candidate.resource_type === "tool" &&
+        !findCanonicalTool(
+          availableTools,
+          parseResourceId(candidateRef(item), "tool")
+        )
+    );
+    if (pendingToolWithoutCatalog) {
+      setSummaryError(
+        t(
+          "agentConfig.tools.fetchFailed",
+          "Failed to fetch tools list, please try again later"
+        )
+      );
+      return;
+    }
     const validationErrors = new Map<string, Nl2AgentConfigFieldError[]>();
     pending.forEach((item) => {
       const errors = validateNl2AgentResourceConfig(item.draftParams);
-      if (item.configStatus === "unconfigured" && errors.length === 0) {
-        errors.push({
-          field: "index_names",
-          message: "Review the available knowledge bases before binding",
-        });
-      }
       if (errors.length) validationErrors.set(candidateRef(item), errors);
     });
     if (validationErrors.size) {
@@ -618,24 +527,18 @@ export const InstalledResourceBindingCard: FC<{
       if (!synchronized) {
         showSynchronizationError();
       } else {
-        const ordinaryBoundItems = boundItems.filter(
-          (item) =>
-            item.resource.candidate.name !== KNOWLEDGE_BASE_SEARCH_TOOL_NAME
-        );
-        if (
-          ordinaryBoundItems.length === 0 &&
-          boundItems.some(
-            (item) =>
-              item.resource.candidate.name === KNOWLEDGE_BASE_SEARCH_TOOL_NAME
-          )
-        ) {
-          requestConfigFocus(payload.agent_id, {
-            section: "knowledge_base",
-          });
-        } else {
+        const visibleBoundItems = boundItems.filter((item) => {
+          if (item.resource.candidate.resource_type === "skill") return true;
+          const toolId = parseResourceId(candidateRef(item), "tool");
+          return (
+            findCanonicalTool(availableTools, toolId)?.is_user_selectable !==
+            false
+          );
+        });
+        if (visibleBoundItems.length) {
           requestConfigFocus(payload.agent_id, {
             section: "tools_skills",
-            capabilityTab: ordinaryBoundItems.some(
+            capabilityTab: visibleBoundItems.some(
               (item) => item.resource.candidate.resource_type === "tool"
             )
               ? "tools"
@@ -649,6 +552,16 @@ export const InstalledResourceBindingCard: FC<{
   const continueFlow = async () => {
     if (isInteractionLocked || !canContinue || isSynchronizing) return;
     setSummaryError(null);
+    const autosaveSucceeded = await waitForAutosave();
+    if (!autosaveSucceeded) {
+      setSummaryError(
+        t(
+          "nl2agent.resourceBinding.autosaveFailed",
+          "Save the pending Agent changes before binding resources."
+        )
+      );
+      return;
+    }
     const synchronized = await reloadAgentSnapshot(
       items.filter((item) => item.bindingStatus === "bound")
     );
@@ -799,6 +712,7 @@ export const InstalledResourceBindingCard: FC<{
             isToolResource && !canonicalTool && isToolCatalogFetching;
           const isToolUnavailable =
             isToolResource && !canonicalTool && !isToolCatalogFetching;
+          const isConfigLoading = loadingConfigRef === ref;
           const configureTitle = isToolCatalogPending
             ? t("toolPool.loadingTools", "Loading tools...")
             : isToolResource && isToolCatalogError
@@ -869,17 +783,16 @@ export const InstalledResourceBindingCard: FC<{
                   title={configureTitle}
                   disabled={
                     isInteractionLocked ||
-                    bound ||
                     isBinding ||
                     isToolCatalogPending ||
                     isToolUnavailable
                   }
-                  onClick={() => setConfiguringRef(ref)}
+                  onClick={() => void openResourceConfig(item, canonicalTool)}
                   className={
                     item.configStatus === "invalid" ? "border-destructive" : ""
                   }
                 >
-                  {isToolCatalogPending ? (
+                  {isToolCatalogPending || isConfigLoading ? (
                     <Loader2 className="size-4 animate-spin" />
                   ) : (
                     <Settings2 className="size-4" />
@@ -892,38 +805,6 @@ export const InstalledResourceBindingCard: FC<{
       </div>
 
       <div className="border-t px-4 py-3">
-        {isConfigHydrating ? (
-          <p className="mb-3 inline-flex items-center gap-2 text-xs text-muted-foreground">
-            <Loader2 className="size-3.5 animate-spin" />
-            {t(
-              "nl2agent.resourceBinding.loadingExistingConfig",
-              "Loading the current resource configuration..."
-            )}
-          </p>
-        ) : null}
-        {isConfigHydrationFailed ? (
-          <div className="mb-3 flex items-center justify-between gap-3">
-            <p className="text-xs text-destructive" role="alert">
-              {t(
-                "nl2agent.resourceBinding.loadExistingConfigFailed",
-                "Failed to load the current resource configuration."
-              )}
-            </p>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                void refetchAgentSnapshot();
-                if (hasKnowledgeBaseSearchResource) {
-                  void refetchKnowledgeBases();
-                }
-              }}
-            >
-              {t("common.retry", "Retry")}
-            </Button>
-          </div>
-        ) : null}
         {summaryError ? (
           <p className="mb-3 text-xs text-destructive" role="alert">
             {summaryError}
@@ -957,8 +838,7 @@ export const InstalledResourceBindingCard: FC<{
               isLocked ||
               !canContinue ||
               isSynchronizing ||
-              isConfigHydrating ||
-              isConfigHydrationFailed
+              loadingConfigRef !== null
             }
             onClick={continueFlow}
           >
@@ -987,7 +867,7 @@ export const InstalledResourceBindingCard: FC<{
           initialParams={configuringItem.draftParams as ToolParam[]}
           selectedTool={toolForDialog}
           currentAgentId={payload.agent_id}
-          localOnly
+          localOnly={configuringItem.bindingStatus !== "bound"}
         />
       ) : null}
       {skillForDialog && configuringItem ? (

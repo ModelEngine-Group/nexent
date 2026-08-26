@@ -261,6 +261,7 @@ class RecommendedResource(BaseModel):
     model_config = ConfigDict(extra="forbid")
     candidate: ResourceCandidate
     recommendation: Literal["recommended", "optional"]
+    is_bound: bool = False
     form_kind: Literal[
         "TOOL_CONFIG",
         "SKILL_CONFIG",
@@ -943,6 +944,7 @@ async def recommend_resources(
             user_id=user_id,
         )
         result = await recommend_resources_impl(
+            agent_id=resolved_agent_id,
             candidates=payload.candidates,
             recommended_refs=payload.recommended_refs,
             tenant_id=tenant_id,
@@ -1017,6 +1019,7 @@ async def nl2a_wrapper(
         if not sources or not sources.issubset(required_sources):
             raise ValueError(f"invalid resources for {subtype}")
         verified = await recommend_resources_impl(
+            agent_id=resolved_agent_id,
             candidates=[resource.candidate for resource in supplied.resources],
             recommended_refs=[
                 resource.candidate.candidate_ref

@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { Tooltip } from "antd";
+import { App, Tooltip } from "antd";
 import { useToolList } from "@/hooks/agent/useToolList";
 import { useAgentStore } from "@/stores/agentStore";
 import { usePrefetchKnowledgeBases } from "@/hooks/useKnowledgeBaseSelector";
@@ -11,6 +11,7 @@ import { ChevronRight, Settings, X, AlertTriangle } from "lucide-react";
 import type { Tool, ToolParam } from "@/types/agentConfig";
 import { TOOL_SOURCE_TYPES } from "@/const/agentConfig";
 import { isManagedKnowledgeTool } from "@/lib/managedKnowledgeTools";
+import { searchToolConfig } from "@/services/agentConfigService";
 import ToolConfigModal from "./tool/ToolConfigModal";
 import {
   TOOLS_REQUIRING_EMBEDDING,
@@ -20,6 +21,7 @@ import {
   getToolKbType,
   getToolLabels,
   mergeCanonicalTool,
+  mergeToolParamValues,
 } from "./tool/utils";
 import log from "@/lib/logger";
 
@@ -76,6 +78,7 @@ export default function ToolManagement({
   currentAgentId,
 }: ToolManagementProps) {
   const { t } = useTranslation("common");
+  const { message } = App.useApp();
   const { prefetchKnowledgeBases } = usePrefetchKnowledgeBases();
   const {
     isImageUnderstandingAvailable,
@@ -123,40 +126,38 @@ export default function ToolManagement({
   const grouped = groupToolsBySource(visibleSelectedTools);
 
   const mergeParams = useCallback(
-    async (tool: Tool, forceFetch?: boolean): Promise<ToolParam[]> => {
+    async (tool: Tool): Promise<ToolParam[] | null> => {
       const params = tool.initParams || [];
-      // If tool already has stored params in the agent config store, the user's
-      // unsaved modifications are already reflected in those params — skip the
-      // API call to avoid overwriting them with stale server data.
-      const hasStoredParams = params.some(
-        (p) => p.value !== undefined && p.value !== null && p.value !== ""
+      const current = useAgentStore.getState().editedAgent?.tools ?? [];
+      const selectedTool = current.find(
+        (item) => parseInt(item.id) === parseInt(tool.id)
       );
-      if (!forceFetch && hasStoredParams) {
-        return params;
+      if (selectedTool) {
+        return mergeToolParamValues(
+          params,
+          Object.fromEntries(
+            selectedTool.initParams.map((param) => [param.name, param.value])
+          )
+        );
       }
       if (!currentAgentId) return params;
-      try {
-        const { searchToolConfig } =
-          await import("@/services/agentConfigService");
-        const instance = await searchToolConfig(
-          parseInt(tool.id),
-          currentAgentId
+      const instance = await searchToolConfig(
+        parseInt(tool.id),
+        currentAgentId
+      );
+      if (!instance.success || !instance.data) {
+        log.error("mergeParams:", instance.message);
+        message.error(
+          t(
+            "nl2agent.resourceBinding.loadExistingConfigFailed",
+            "Failed to load the current resource configuration."
+          )
         );
-        if (instance.success && instance.data) {
-          return params.map((p) => ({
-            ...p,
-            value:
-              instance.data?.params?.[p.name] !== undefined
-                ? instance.data.params[p.name]
-                : p.value,
-          }));
-        }
-      } catch (err) {
-        log.error("mergeParams:", err);
+        return null;
       }
-      return params;
+      return mergeToolParamValues(params, instance.data.params);
     },
-    [currentAgentId]
+    [currentAgentId, message, t]
   );
 
   const openConfig = useCallback(
@@ -172,6 +173,7 @@ export default function ToolManagement({
         : tool;
       const toolToUse = mergeCanonicalTool(configuredTool, availableTools);
       const merged = await mergeParams(toolToUse);
+      if (!merged) return;
       setConfigTool(toolToUse);
       setConfigParams(merged);
       setModalOpen(true);
