@@ -156,56 +156,7 @@ def filter_resource_tag_assignments(
 
 
 @router.get(
-    "/assignments/{resource_type}/{resource_id}",
-    response_model=TagAssignmentResponse,
-)
-async def get_resource_tag_assignments(
-    resource_type: str,
-    resource_id: str,
-    authorization: str | None = Header(None),
-    provider: Annotated[str | None, Query(min_length=1)] = None,
-    knowledge_base_id: Annotated[str | None, Query(min_length=1)] = None,
-):
-    caller = _assignment_caller(authorization)
-    return await _run_async(
-        lambda: TagManagementService.get_resource_assignments(
-            caller,
-            resource_type,
-            resource_id,
-            provider=provider,
-            knowledge_base_id=knowledge_base_id,
-        )
-    )
-
-
-@router.put(
-    "/assignments/{resource_type}/{resource_id}",
-    response_model=TagAssignmentResponse,
-    responses=TAG_CONFLICT_RESPONSES,
-)
-async def replace_resource_tag_assignments(
-    resource_type: str,
-    resource_id: str,
-    request: TagAssignmentReplaceRequest,
-    authorization: str | None = Header(None),
-    provider: Annotated[str | None, Query(min_length=1)] = None,
-    knowledge_base_id: Annotated[str | None, Query(min_length=1)] = None,
-):
-    caller = _assignment_caller(authorization)
-    return await _run_async(
-        lambda: TagManagementService.replace_resource_assignments(
-            caller,
-            resource_type,
-            resource_id,
-            request.value_ids,
-            provider=provider,
-            knowledge_base_id=knowledge_base_id,
-        )
-    )
-
-
-@router.get(
-    "/assignments/{resource_type}/{resource_id}/projection-status",
+    "/assignments/{resource_type}/{resource_id:path}/projection-status",
     response_model=TagDocumentProjectionStatusResponse,
 )
 async def get_document_tag_projection_status(
@@ -228,7 +179,7 @@ async def get_document_tag_projection_status(
 
 
 @router.get(
-    "/assignments/{resource_type}/{resource_id}/compatibility/flat-tags",
+    "/assignments/{resource_type}/{resource_id:path}/compatibility/flat-tags",
     response_model=TagLegacyFlatTagsProjectionResponse,
 )
 async def get_resource_legacy_flat_tags_projection(
@@ -246,6 +197,58 @@ async def get_resource_legacy_flat_tags_projection(
             caller,
             resource_type,
             resource_id,
+            provider=provider,
+            knowledge_base_id=knowledge_base_id,
+        )
+    )
+
+
+# Keep this catch-all route after the suffix-specific assignment routes above.
+# Document identifiers may contain slashes (for example, a MinIO object path),
+# which the standard single-segment converter cannot accept.
+@router.get(
+    "/assignments/{resource_type}/{resource_id:path}",
+    response_model=TagAssignmentResponse,
+)
+async def get_resource_tag_assignments(
+    resource_type: str,
+    resource_id: str,
+    authorization: str | None = Header(None),
+    provider: Annotated[str | None, Query(min_length=1)] = None,
+    knowledge_base_id: Annotated[str | None, Query(min_length=1)] = None,
+):
+    caller = _assignment_caller(authorization)
+    return await _run_async(
+        lambda: TagManagementService.get_resource_assignments(
+            caller,
+            resource_type,
+            resource_id,
+            provider=provider,
+            knowledge_base_id=knowledge_base_id,
+        )
+    )
+
+
+@router.put(
+    "/assignments/{resource_type}/{resource_id:path}",
+    response_model=TagAssignmentResponse,
+    responses=TAG_CONFLICT_RESPONSES,
+)
+async def replace_resource_tag_assignments(
+    resource_type: str,
+    resource_id: str,
+    request: TagAssignmentReplaceRequest,
+    authorization: str | None = Header(None),
+    provider: Annotated[str | None, Query(min_length=1)] = None,
+    knowledge_base_id: Annotated[str | None, Query(min_length=1)] = None,
+):
+    caller = _assignment_caller(authorization)
+    return await _run_async(
+        lambda: TagManagementService.replace_resource_assignments(
+            caller,
+            resource_type,
+            resource_id,
+            request.value_ids,
             provider=provider,
             knowledge_base_id=knowledge_base_id,
         )

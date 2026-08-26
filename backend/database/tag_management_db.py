@@ -813,8 +813,15 @@ class TagManagementDB:
             )
             TagManagementDB._validate_replacement_values(value_ids, value_rows)
 
-            for assignment in existing_assignments:
-                session.delete(assignment)
+            existing_by_value_id = {
+                assignment.value_id: assignment for assignment in existing_assignments
+            }
+            target_value_ids = {value.value_id for value, _ in value_rows}
+
+            for value_id, assignment in existing_by_value_id.items():
+                if value_id not in target_value_ids:
+                    session.delete(assignment)
+
             assignments = [
                 ResourceTagAssignment(
                     tenant_id=tenant_id,
@@ -828,9 +835,15 @@ class TagManagementDB:
                     delete_flag=ACTIVE_DELETE_FLAG,
                 )
                 for value, definition in value_rows
+                if value.value_id not in existing_by_value_id
             ]
-            session.add_all(assignments)
-            session.flush()
+            if assignments:
+                session.add_all(assignments)
+            if any(
+                value_id not in target_value_ids
+                for value_id in existing_by_value_id
+            ) or assignments:
+                session.flush()
             return [_assignment_data(definition, value) for value, definition in value_rows]
 
     @staticmethod

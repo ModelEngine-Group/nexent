@@ -39,7 +39,7 @@ interface DefinitionFormValues {
   definition_key: string;
   definition_name: string;
   selection_mode: TagSelectionMode;
-  initial_values?: string;
+  initial_values?: string[];
 }
 
 interface ValueFormValues {
@@ -80,9 +80,8 @@ export default function TagDefinitionManagementModal({
 
   const handleCreateDefinition = useCallback(async () => {
     const values = await definitionForm.validateFields();
-    const initialValues = (values.initial_values ?? "")
-      .split(/[,，\n]/)
-      .map((item: string) => item.trim())
+    const initialValues = (values.initial_values ?? [])
+      .map((item) => item.trim())
       .filter(Boolean);
     try {
       await tagManagementApi.createDefinition(bucketId, {
@@ -435,7 +434,7 @@ export default function TagDefinitionManagementModal({
       onCancel={onClose}
       footer={null}
       width={1100}
-      zIndex={1100}
+      zIndex={1200}
     centered
     destroyOnHidden
     >
@@ -508,7 +507,7 @@ export default function TagDefinitionManagementModal({
             : handleCreateDefinition()
         }
         destroyOnHidden
-        zIndex={1200}
+        zIndex={1300}
       >
         <Form form={definitionForm} layout="vertical">
           <Form.Item
@@ -547,10 +546,25 @@ export default function TagDefinitionManagementModal({
             <Form.Item
               name="initial_values"
               label={t("tagManagement.form.initialValues")}
+              rules={[
+                {
+                  validator: (_, values?: string[]) =>
+                    Array.isArray(values) &&
+                    values.some((value) => value.trim())
+                      ? Promise.resolve()
+                      : Promise.reject(
+                          new Error(
+                            t("tagManagement.validation.initialValuesRequired")
+                          )
+                        ),
+                },
+              ]}
             >
-              <Input.TextArea
-                rows={3}
+              <Select
+                mode="tags"
                 placeholder={t("tagManagement.form.initialValuesPlaceholder")}
+                tokenSeparators={[]}
+                maxCount={1000}
               />
             </Form.Item>
           )}
@@ -569,7 +583,7 @@ export default function TagDefinitionManagementModal({
         }
         onOk={handleSaveValue}
         destroyOnHidden
-        zIndex={1200}
+        zIndex={1300}
       >
         <Form form={valueForm} layout="vertical">
           <Form.Item

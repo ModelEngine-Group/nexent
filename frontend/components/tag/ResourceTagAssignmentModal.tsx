@@ -4,9 +4,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
   App,
+  Badge,
   Button,
   Empty,
+  Flex,
   Modal,
+  Pagination,
   Progress,
   Select,
   Table,
@@ -42,6 +45,8 @@ interface BulkTarget {
   knowledgeBaseId?: string | null;
 }
 
+const DEFINITION_PAGE_SIZE = 8;
+
 export default function ResourceTagAssignmentModal({
   open,
   onClose,
@@ -67,11 +72,17 @@ export default function ResourceTagAssignmentModal({
   const [bulkOutcomes, setBulkOutcomes] = useState<TagAssignmentBulkOutcome[]>(
     []
   );
+  const [activeDefinitionId, setActiveDefinitionId] = useState<number | null>(
+    null
+  );
+  const [definitionPage, setDefinitionPage] = useState(1);
 
   useEffect(() => {
     if (!open) {
       setSelected({});
       setBulkOutcomes([]);
+      setActiveDefinitionId(null);
+      setDefinitionPage(1);
       return;
     }
     const next: Record<number, number[]> = {};
@@ -99,6 +110,30 @@ export default function ResourceTagAssignmentModal({
     () => definitions.filter((definition) => definition.status === "active"),
     [definitions]
   );
+
+  useEffect(() => {
+    if (!open || activeDefinitions.length === 0) return;
+    setActiveDefinitionId((current) =>
+      activeDefinitions.some(
+        (definition) => definition.definition_id === current
+      )
+        ? current
+        : activeDefinitions[0].definition_id
+    );
+  }, [activeDefinitions, open]);
+
+  const definitionPageCount = Math.max(
+    1,
+    Math.ceil(activeDefinitions.length / DEFINITION_PAGE_SIZE)
+  );
+  const visibleDefinitions = activeDefinitions.slice(
+    (definitionPage - 1) * DEFINITION_PAGE_SIZE,
+    definitionPage * DEFINITION_PAGE_SIZE
+  );
+
+  useEffect(() => {
+    setDefinitionPage((current) => Math.min(current, definitionPageCount));
+  }, [definitionPageCount]);
 
   const totalSelected = useMemo(
     () => Object.values(selected).reduce((sum, ids) => sum + ids.length, 0),
@@ -205,8 +240,15 @@ export default function ResourceTagAssignmentModal({
     const single =
       definition.selection_mode === ("single_select" as TagSelectionMode);
     return (
-      <div key={definition.definition_id} className="flex flex-col gap-1">
-        <Typography.Text strong>{definition.definition_name}</Typography.Text>
+      <div className="flex flex-col gap-2">
+        <div>
+          <Typography.Text strong>{definition.definition_name}</Typography.Text>
+          <Typography.Paragraph type="secondary" className="!mb-0 !text-xs">
+            {single
+              ? t("tagManagement.form.singleSelectHint")
+              : t("tagManagement.form.multiSelectHint")}
+          </Typography.Paragraph>
+        </div>
         <Select
           mode={single ? undefined : "multiple"}
           allowClear
@@ -234,16 +276,28 @@ export default function ResourceTagAssignmentModal({
     100,
     Math.round((totalSelected / 100) * 100)
   );
+  const activeDefinition = activeDefinitions.find(
+    (definition) => definition.definition_id === activeDefinitionId
+  );
 
   return (
     <Modal
-      title={t("tagManagement.title.assignTags")}
+      title={
+        <Flex align="center" gap={8}>
+          <span>{t("tagManagement.title.assignTags")}</span>
+          {onManageDefinitions ? (
+            <Button type="link" size="small" onClick={onManageDefinitions}>
+              {t("tagManagement.action.manageDefinitions")}
+            </Button>
+          ) : null}
+        </Flex>
+      }
       open={open}
       onCancel={onClose}
       onOk={() => (bulkTargets.length > 1 ? saveBulk() : saveSingle())}
       okText={t("tagManagement.action.save")}
       confirmLoading={saving}
-      width={720}
+      width={880}
       zIndex={1100}
       centered
       destroyOnHidden
@@ -254,8 +308,61 @@ export default function ResourceTagAssignmentModal({
           size="small"
           format={() => `${totalSelected}/100`}
         />
-        {activeDefinitions.length > 0 ? (
-          activeDefinitions.map(renderDefinitionControl)
+        {activeDefinition ? (
+          <div className="grid min-h-[320px] grid-cols-1 gap-4 md:grid-cols-[220px_minmax(0,1fr)]">
+            <div className="rounded-md border border-slate-200 bg-slate-50 p-2">
+              <div className="mb-2 px-2 text-xs font-medium text-slate-500">
+                {t("tagManagement.form.keys")}
+              </div>
+              <div className="flex flex-col gap-1">
+                {visibleDefinitions.map((definition) => {
+                  const selectedCount =
+                    selected[definition.definition_id]?.length ?? 0;
+                  const isActive =
+                    definition.definition_id === activeDefinition.definition_id;
+                  return (
+                    <Button
+                      key={definition.definition_id}
+                      type={isActive ? "primary" : "text"}
+                      className="!flex !h-auto !items-center !justify-between !px-3 !py-2 !text-left"
+                      onClick={() =>
+                        setActiveDefinitionId(definition.definition_id)
+                      }
+                    >
+                      <span className="truncate">
+                        {definition.definition_name}
+                      </span>
+                      {selectedCount > 0 ? (
+                        <Badge
+                          count={selectedCount}
+                          overflowCount={99}
+                          color={isActive ? "#ffffff" : "#1677ff"}
+                          className={
+                            isActive
+                              ? "[&_.ant-badge-count]:!text-blue-600"
+                              : ""
+                          }
+                        />
+                      ) : null}
+                    </Button>
+                  );
+                })}
+              </div>
+              <Pagination
+                className="mt-3 flex justify-center"
+                current={definitionPage}
+                pageSize={DEFINITION_PAGE_SIZE}
+                total={activeDefinitions.length}
+                size="small"
+                showSizeChanger={false}
+                hideOnSinglePage
+                onChange={setDefinitionPage}
+              />
+            </div>
+            <div className="rounded-md border border-slate-200 p-4">
+              {renderDefinitionControl(activeDefinition)}
+            </div>
+          </div>
         ) : (
           <Empty
             image={Empty.PRESENTED_IMAGE_SIMPLE}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import TagChips from "@/components/tag/TagChips";
 import { tagManagementApi } from "@/services/tagManagementService";
@@ -10,6 +10,9 @@ interface ResourceTagChipsProps {
   resourceType: string;
   resourceId: string;
   max?: number;
+  refreshKey?: string | number;
+  singleLine?: boolean;
+  emptyText?: ReactNode;
   options?: {
     provider?: string | null;
     knowledgeBaseId?: string | null;
@@ -25,6 +28,9 @@ export default function ResourceTagChips({
   resourceType,
   resourceId,
   max,
+  refreshKey,
+  singleLine,
+  emptyText,
   options,
 }: ResourceTagChipsProps) {
   const [assignments, setAssignments] = useState<TagAssignmentValue[]>([]);
@@ -48,8 +54,10 @@ export default function ResourceTagChips({
     return () => {
       cancelled = true;
     };
-  }, [resourceType, resourceId, optionsKey]);
+  }, [resourceType, resourceId, optionsKey, refreshKey]);
 
-  if (assignments.length === 0) return null;
-  return <TagChips assignments={assignments} max={max} />;
+  if (assignments.length === 0) return emptyText ?? null;
+  return (
+    <TagChips assignments={assignments} max={max} singleLine={singleLine} />
+  );
 }

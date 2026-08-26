@@ -231,9 +231,10 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
     const documentLibrary =
       tagLibraries?.find((lib) => lib.bucket_key === "knowledge_content") ??
       null;
-    const { data: assignDefinitions } = useTagDefinitions(
-      documentLibrary?.bucket_id ?? null
-    );
+    const {
+      data: assignDefinitions,
+      refresh: refreshAssignDefinitions,
+    } = useTagDefinitions(documentLibrary?.bucket_id ?? null);
 
     const [tagManagementOpen, setTagManagementOpen] = useState(false);
     const [documentPredicates, setDocumentPredicates] = useState<
@@ -1405,7 +1406,10 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
         {/* File preview drawer */}
         <TagDefinitionManagementModal
           open={tagManagementOpen}
-          onClose={() => setTagManagementOpen(false)}
+          onClose={() => {
+            setTagManagementOpen(false);
+            void refreshAssignDefinitions();
+          }}
           bucketId={documentLibrary?.bucket_id ?? 0}
           bucketName={documentLibrary?.bucket_name ?? ""}
           canManage={!isReadOnlyMode}
@@ -1421,7 +1425,6 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
           provider="local"
           knowledgeBaseId={knowledgeBaseId}
           onManageDefinitions={() => {
-            setAssignTarget(null);
             setTagManagementOpen(true);
           }}
         />

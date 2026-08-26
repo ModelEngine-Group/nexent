@@ -7,18 +7,27 @@ import type { TagAssignmentValue } from "@/types/tagManagement";
 interface TagChipsProps {
   assignments: TagAssignmentValue[];
   max?: number;
+  singleLine?: boolean;
 }
 
 /**
  * Compact value chips that preserve the owning tag name in the tooltip and
  * accessible label so value-only chips never lose their tag context.
  */
-export default function TagChips({ assignments, max = 6 }: TagChipsProps) {
+export default function TagChips({
+  assignments,
+  max = 6,
+  singleLine = false,
+}: TagChipsProps) {
   const visible = assignments.slice(0, max);
   const overflow = assignments.length - visible.length;
 
   return (
-    <span className="inline-flex flex-wrap items-center gap-1">
+    <span
+      className={`inline-flex items-center gap-1 ${
+        singleLine ? "flex-nowrap" : "flex-wrap"
+      }`}
+    >
       {visible.map((assignment) => {
         const label = `${assignment.definition_name}: ${assignment.display_value}`;
         return (

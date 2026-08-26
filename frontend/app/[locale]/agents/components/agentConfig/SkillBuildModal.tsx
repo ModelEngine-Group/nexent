@@ -20,7 +20,7 @@ import {
   Spin,
   Tooltip,
 } from "antd";
-import { Upload as UploadIcon, Trash2, MessageCircle, Box, Tags } from "lucide-react";
+import { Upload as UploadIcon, Trash2, MessageCircle, Box } from "lucide-react";
 import { extractSkillInfo } from "@/lib/skillFileUtils";
 import yaml from "js-yaml";
 import { type SkillFormData, type SkillFileContent } from "@/types/skill";
@@ -46,6 +46,7 @@ import { USER_ROLES } from "@/const/auth";
 import { useGroupDetails, useGroupList } from "@/hooks/group/useGroupList";
 import SkillDraftPanel from "./SkillDraftPanel";
 import ResourceTagAssignmentModal from "@/components/tag/ResourceTagAssignmentModal";
+import TagDefinitionManagementModal from "@/components/tag/TagDefinitionManagementModal";
 import { useTagDefinitions, useTagLibraries } from "@/hooks/useTagManagement";
 import { Nl2SkillChatPanel } from "../../../newchat/assistant-ui/nl2skill-chat-panel";
 import type { Nl2SkillStreamEvent } from "../../../newchat/adapter/remote-chat-model-adapter";
@@ -203,13 +204,16 @@ export default function SkillBuildModal({
     useState<string>("");
   const [uploadExtractingName, setUploadExtractingName] = useState(false);
   const [assignTagsOpen, setAssignTagsOpen] = useState(false);
+  const [tagPreviewRefreshKey, setTagPreviewRefreshKey] = useState(0);
+  const [tagManagementOpen, setTagManagementOpen] = useState(false);
   const { data: tagLibraries } = useTagLibraries();
   const defaultTagLibrary =
     tagLibraries?.find((library) => library.bucket_key === "default_resource") ??
     null;
-  const { data: tagDefinitions } = useTagDefinitions(
-    defaultTagLibrary?.bucket_id ?? null
-  );
+  const {
+    data: tagDefinitions,
+    refresh: refreshTagDefinitions,
+  } = useTagDefinitions(defaultTagLibrary?.bucket_id ?? null);
 
   const [interactiveSkillName, setInteractiveSkillName] = useState<string>("");
 
@@ -899,6 +903,14 @@ export default function SkillBuildModal({
       groupSelectOptions={groupSelectOptions}
       groupNamesById={groupNamesById}
       canEditGroupSettings={canEditGroupSettings}
+      tagResourceId={
+        isEditMode && editingSkill?.skill_id
+          ? String(editingSkill.skill_id)
+          : undefined
+      }
+      tagPreviewRefreshKey={tagPreviewRefreshKey}
+      onAssignTags={() => setAssignTagsOpen(true)}
+      canAssignTags={editingSkill?.permission !== "READ_ONLY"}
     />
   );
 
@@ -975,16 +987,6 @@ export default function SkillBuildModal({
         },
       }}
       footer={[
-        isEditMode && editingSkill?.skill_id ? (
-          <Button
-            key="assign-tags"
-            icon={<Tags size={15} />}
-            onClick={() => setAssignTagsOpen(true)}
-            disabled={editingSkill.permission === "READ_ONLY"}
-          >
-            {t("tagManagement.title.assignTags")}
-          </Button>
-        ) : null,
         <Button key="cancel" onClick={handleModalClose}>
           {t("common.cancel")}
         </Button>,
@@ -1066,11 +1068,27 @@ export default function SkillBuildModal({
     </Modal>
     <ResourceTagAssignmentModal
       open={assignTagsOpen}
-      onClose={() => setAssignTagsOpen(false)}
+      onClose={() => {
+        setAssignTagsOpen(false);
+        setTagPreviewRefreshKey((current) => current + 1);
+      }}
       resourceType="skill"
       resourceId={String(editingSkill?.skill_id ?? "")}
       definitions={tagDefinitions ?? []}
       canEdit={editingSkill?.permission !== "READ_ONLY"}
+      onManageDefinitions={() => {
+        setTagManagementOpen(true);
+      }}
+    />
+    <TagDefinitionManagementModal
+      open={tagManagementOpen}
+      onClose={() => {
+        setTagManagementOpen(false);
+        void refreshTagDefinitions();
+      }}
+      bucketId={defaultTagLibrary?.bucket_id ?? 0}
+      bucketName={defaultTagLibrary?.bucket_name ?? ""}
+      canManage={editingSkill?.permission !== "READ_ONLY"}
     />
     </>
   );

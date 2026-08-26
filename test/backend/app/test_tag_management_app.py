@@ -1,6 +1,9 @@
 from unittest.mock import MagicMock
 
 import pytest
+from fastapi import HTTPException
+from pydantic import ValidationError as PydanticValidationError
+
 from apps import tag_management_app as tag_app
 from consts.exceptions import (
     TagManagementConflictError,
@@ -16,7 +19,6 @@ from consts.model import (
     TagValueCreateRequest,
     TagValueUpdateRequest,
 )
-from fastapi import HTTPException
 
 AUTHORIZATION = "Bearer auth-token"
 
@@ -75,6 +77,18 @@ def test_management_permission_is_derived_from_auth_and_tenant_cannot_be_overrid
         tag_app.list_tag_libraries(AUTHORIZATION)
     assert error.value.status_code == 403
     assert error.value.detail == "Tag library management permission is required"
+
+
+def test_tag_definition_requires_at_least_one_initial_value_with_clear_message():
+    with pytest.raises(
+        PydanticValidationError, match="At least one tag value is required"
+    ):
+        TagDefinitionCreateRequest(
+            definition_key="color",
+            definition_name="Color",
+            selection_mode="single_select",
+            initial_values=[],
+        )
 
 
 def test_run_maps_not_found_validation_and_conflict_to_http_schemas():

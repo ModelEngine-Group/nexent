@@ -172,7 +172,7 @@ class TagDefinitionCreateRequest(BaseModel):
     definition_key: str = Field(..., min_length=1, max_length=100)
     definition_name: str = Field(..., min_length=1, max_length=255)
     selection_mode: Literal["single_select", "multi_select"]
-    initial_values: list[str] = Field(..., min_length=1, max_length=1000)
+    initial_values: list[str] = Field(..., max_length=1000)
     sort_order: int = 0
 
     @field_validator("definition_key", "definition_name")
@@ -186,6 +186,8 @@ class TagDefinitionCreateRequest(BaseModel):
     @field_validator("initial_values")
     @classmethod
     def validate_initial_values(cls, values: list[str]) -> list[str]:
+        if not values:
+            raise ValueError("At least one tag value is required")
         normalized_values = []
         seen = set()
         for value in values:

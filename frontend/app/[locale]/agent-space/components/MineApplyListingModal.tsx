@@ -4,13 +4,18 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { App, Button, Dropdown, Input, Modal, Select, Spin } from "antd";
 import { ChevronDown, Share2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import {
-  AGENT_REPOSITORY_ICONS,
-} from "@/const/agentRepository";
+import { AGENT_REPOSITORY_ICONS } from "@/const/agentRepository";
 import { useAgentRepositoryListings } from "@/hooks/agentRepository/useAgentRepositoryListings";
-import { getAgentRepositoryTagLabel, resolveAgentRepositoryTagForSubmit } from "@/lib/agentRepositoryLabels";
+import {
+  getAgentRepositoryTagLabel,
+  resolveAgentRepositoryTagForSubmit,
+} from "@/lib/agentRepositoryLabels";
 import { isSingleSimpleEmoji } from "@/lib/agentRepositoryIcon";
-import { useTagDefinitions, useTagLibraries } from "@/hooks/useTagManagement";
+import {
+  useTagAssignments,
+  useTagDefinitions,
+  useTagLibraries,
+} from "@/hooks/useTagManagement";
 import {
   buildApplyListingFormPrefill,
   pickApplyListingPrefillSource,
@@ -29,7 +34,7 @@ interface MineApplyListingModalProps {
   agent: MyEditableAgentItem | null;
   isSubmitting?: boolean;
   onClose: () => void;
-  onSubmit: (payload: AgentRepositoryListingCreatePayload) => void;
+  onSubmit: (payload: AgentRepositoryListingCreatePayload) => Promise<void>;
 }
 
 export function MineApplyListingModal({
@@ -43,13 +48,6 @@ export function MineApplyListingModal({
   const { message } = App.useApp();
 
   const icons = AGENT_REPOSITORY_ICONS;
-  // Resolve the preset tag candidates from the unified tag library so the
-  // publish flow shares one source of truth with the rest of the platform.
-  // The "agent_category" multi-select definition is seeded per tenant (see
-  // deploy/sql/migrations/v2.5.3_0819_agent_category_preset_tags.sql and the
-  // provision function in deploy/sql/init.sql). Its values use stable keys as
-  // normalized_value/display_value; the frontend still resolves localized
-  // labels via i18n for backwards-compatible marketplace persistence.
   const { data: tagLibraries } = useTagLibraries();
   const defaultResourceLibrary = useMemo(
     () =>
@@ -61,21 +59,29 @@ export function MineApplyListingModal({
   const { data: tagDefinitions } = useTagDefinitions(
     defaultResourceLibrary?.bucket_id ?? null
   );
-  const presetTags = useMemo(() => {
-    const agentCategory = (tagDefinitions ?? []).find(
-      (definition) => definition.definition_key === "agent_category"
-    );
-    return (agentCategory?.values ?? []).map((value) => value.normalized_value);
-  }, [tagDefinitions]);
+  const agentCategory = useMemo(
+    () =>
+      (tagDefinitions ?? []).find(
+        (definition) => definition.definition_key === "agent_category"
+      ) ?? null,
+    [tagDefinitions]
+  );
+  const categoryValues = agentCategory?.values ?? [];
 
   const [selectedIcon, setSelectedIcon] = useState<string | null>(null);
   const [iconInput, setIconInput] = useState("");
   const [iconError, setIconError] = useState<string | null>(null);
   const [presetDropdownOpen, setPresetDropdownOpen] = useState(false);
-  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [selectedTagValueIds, setSelectedTagValueIds] = useState<number[]>([]);
   const [listingContent, setListingContent] = useState("");
+  const [isSavingTags, setIsSavingTags] = useState(false);
+  const [formInitialized, setFormInitialized] = useState(false);
 
   const agentId = agent?.agent_id;
+  const agentTagAssignments = useTagAssignments(
+    "agent",
+    agentId == null ? null : String(agentId)
+  );
   const {
     data: listingsData,
     isSuccess: isListingsSuccess,
@@ -89,11 +95,11 @@ export function MineApplyListingModal({
 
   const tagOptions = useMemo(
     () =>
-      presetTags.map((tag) => ({
-        label: getAgentRepositoryTagLabel(tag, t),
-        value: tag,
+      categoryValues.map((value) => ({
+        label: getAgentRepositoryTagLabel(value.normalized_value, t),
+        value: value.value_id,
       })),
-    [presetTags, t]
+    [categoryValues, t]
   );
 
   const invalidIconMessage = t(
@@ -131,13 +137,26 @@ export function MineApplyListingModal({
 
   useEffect(() => {
     if (!open) {
+      setFormInitialized(false);
       return;
     }
 
-    if (!agent || !isListingsSuccess) {
+    if (
+      !agent ||
+      !isListingsSuccess ||
+      tagDefinitions === null ||
+      (agentTagAssignments.data === null &&
+        agentTagAssignments.error === null) ||
+      formInitialized
+    ) {
+      return;
+    }
+
+    if (!agentCategory) {
       clearIconState();
-      setSelectedTags([]);
+      setSelectedTagValueIds([]);
       setListingContent("");
+      setFormInitialized(true);
       return;
     }
 
@@ -151,8 +170,21 @@ export function MineApplyListingModal({
 
     if (!prefill) {
       clearIconState();
-      setSelectedTags([]);
+      const assignedIds = new Set(
+        (agentTagAssignments.data?.assignments ?? [])
+          .filter(
+            (assignment) =>
+              assignment.definition_id === agentCategory.definition_id
+          )
+          .map((assignment) => assignment.value_id)
+      );
+      setSelectedTagValueIds(
+        categoryValues
+          .filter((value) => assignedIds.has(value.value_id))
+          .map((value) => value.value_id)
+      );
       setListingContent("");
+      setFormInitialized(true);
       return;
     }
 
@@ -163,8 +195,36 @@ export function MineApplyListingModal({
       clearIconState();
     }
 
-    setSelectedTags(prefill.tags);
+    const assignedIds = new Set(
+      (agentTagAssignments.data?.assignments ?? [])
+        .filter(
+          (assignment) =>
+            assignment.definition_id === agentCategory.definition_id
+        )
+        .map((assignment) => assignment.value_id)
+    );
+    const hasAssignedCategory = assignedIds.size > 0;
+    const legacyTags = new Set(
+      prefill.tags.map((tag) => tag.trim().toLocaleLowerCase())
+    );
+    setSelectedTagValueIds(
+      categoryValues
+        .filter(
+          (value) =>
+            assignedIds.has(value.value_id) ||
+            (!hasAssignedCategory &&
+              [
+                value.normalized_value,
+                value.display_value,
+                getAgentRepositoryTagLabel(value.normalized_value, t),
+              ].some((candidate) =>
+                legacyTags.has(candidate.trim().toLocaleLowerCase())
+              ))
+        )
+        .map((value) => value.value_id)
+    );
     setListingContent("");
+    setFormInitialized(true);
   }, [
     open,
     agent,
@@ -172,24 +232,16 @@ export function MineApplyListingModal({
     listingsData,
     clearIconState,
     applyIconInputFromValue,
+    tagDefinitions,
+    agentTagAssignments.data,
+    agentTagAssignments.error,
+    formInitialized,
+    agentCategory,
+    categoryValues,
+    t,
   ]);
 
-  const title =
-    agent?.name?.trim() || t("agentRepository.card.untitled");
-
-  const normalizeTags = (tags: string[]) => {
-    const normalized: string[] = [];
-    const seen = new Set<string>();
-    for (const rawTag of tags) {
-      const tag = rawTag.trim();
-      if (!tag || seen.has(tag)) {
-        continue;
-      }
-      seen.add(tag);
-      normalized.push(tag);
-    }
-    return normalized;
-  };
+  const title = agent?.name?.trim() || t("agentRepository.card.untitled");
 
   const handlePresetIconClick = (icon: string) => {
     applyIconInputFromValue(icon, false);
@@ -214,7 +266,7 @@ export function MineApplyListingModal({
     </div>
   );
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (iconInput.trim() && !isSingleSimpleEmoji(iconInput)) {
       setIconError(invalidIconMessage);
       message.warning(invalidIconMessage);
@@ -226,14 +278,14 @@ export function MineApplyListingModal({
       return;
     }
 
-    const tags = normalizeTags(selectedTags).map((tag) =>
-      resolveAgentRepositoryTagForSubmit(tag, t)
+    const selectedTagValues = categoryValues.filter((value) =>
+      selectedTagValueIds.includes(value.value_id)
     );
-    if (tags.length === 0) {
+    if (selectedTagValues.length === 0 || !agentCategory) {
       message.warning(t("agentRepository.mine.applyModal.validation.tags"));
       return;
     }
-    if (tags.length > MAX_TAGS) {
+    if (selectedTagValues.length > MAX_TAGS) {
       message.warning(
         t("agentRepository.mine.applyModal.validation.tagsMax", {
           count: MAX_TAGS,
@@ -241,6 +293,9 @@ export function MineApplyListingModal({
       );
       return;
     }
+    const tags = selectedTagValues.map((value) =>
+      resolveAgentRepositoryTagForSubmit(value.normalized_value, t)
+    );
     if (tags.some((tag) => tag.length > MAX_TAG_LENGTH)) {
       message.warning(
         t("agentRepository.mine.applyModal.validation.tagLength", {
@@ -250,11 +305,32 @@ export function MineApplyListingModal({
       return;
     }
 
-    onSubmit({
-      icon: selectedIcon,
-      tags,
-      content: listingContent.trim(),
-    });
+    const preservedValueIds = (agentTagAssignments.data?.assignments ?? [])
+      .filter(
+        (assignment) => assignment.definition_id !== agentCategory.definition_id
+      )
+      .map((assignment) => assignment.value_id);
+
+    setIsSavingTags(true);
+    try {
+      await agentTagAssignments.replace({
+        value_ids: Array.from(
+          new Set([
+            ...preservedValueIds,
+            ...selectedTagValues.map((value) => value.value_id),
+          ])
+        ),
+      });
+      await onSubmit({
+        icon: selectedIcon,
+        tags,
+        content: listingContent.trim(),
+      });
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setIsSavingTags(false);
+    }
   };
 
   return (
@@ -271,10 +347,14 @@ export function MineApplyListingModal({
       }
       footer={
         <div className="flex flex-wrap justify-end gap-2">
-          <Button onClick={onClose} disabled={isSubmitting}>
+          <Button onClick={onClose} disabled={isSubmitting || isSavingTags}>
             {t("common.cancel")}
           </Button>
-          <Button type="primary" loading={isSubmitting} onClick={handleSubmit}>
+          <Button
+            type="primary"
+            loading={isSubmitting || isSavingTags}
+            onClick={() => void handleSubmit()}
+          >
             {t("agentRepository.mine.applyModal.submit")}
           </Button>
         </div>
@@ -292,9 +372,7 @@ export function MineApplyListingModal({
             </p>
             <Input
               value={iconInput}
-              onChange={(event) =>
-                applyIconInputFromValue(event.target.value)
-              }
+              onChange={(event) => applyIconInputFromValue(event.target.value)}
               maxLength={MAX_ICON_LENGTH}
               status={iconError ? "error" : undefined}
               className="!h-[3.75rem] !w-[6.5rem] shrink-0 !text-4xl"
@@ -346,10 +424,10 @@ export function MineApplyListingModal({
               {t("agentRepository.mine.applyModal.tags")}
             </p>
             <Select
-              mode="tags"
+              mode="multiple"
               className="w-full"
-              value={selectedTags}
-              onChange={setSelectedTags}
+              value={selectedTagValueIds}
+              onChange={setSelectedTagValueIds}
               options={tagOptions}
               maxCount={MAX_TAGS}
               placeholder={t("agentRepository.mine.applyModal.tagsPlaceholder")}
@@ -369,9 +447,7 @@ export function MineApplyListingModal({
               value={listingContent}
               onChange={(event) => setListingContent(event.target.value)}
               rows={4}
-              placeholder={t(
-                "repository.mine.applyModal.contentPlaceholder"
-              )}
+              placeholder={t("repository.mine.applyModal.contentPlaceholder")}
             />
           </section>
         </div>

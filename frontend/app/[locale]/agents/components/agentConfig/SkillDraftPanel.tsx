@@ -24,6 +24,7 @@ import { useTranslation } from "react-i18next";
 
 import { Can } from "@/components/permission/Can";
 import { MarkdownRenderer } from "@/components/common/markdownRenderer";
+import ResourceTagChips from "@/components/tag/ResourceTagChips";
 import type { SkillFileContent, SkillFormData } from "@/types/skill";
 import { SkillCodePreview } from "./SkillCodePreview";
 import { isCodeFile, resolveLanguageFromPath } from "./skillFileLanguage";
@@ -44,6 +45,10 @@ interface SkillDraftPanelProps {
   groupSelectOptions?: Array<{ label: string; value: number }>;
   groupNamesById?: Map<number, string>;
   canEditGroupSettings?: boolean;
+  tagResourceId?: string;
+  tagPreviewRefreshKey?: number;
+  onAssignTags?: () => void;
+  canAssignTags?: boolean;
   className?: string;
 }
 
@@ -62,6 +67,10 @@ export default function SkillDraftPanel({
   groupSelectOptions = [],
   groupNamesById = new Map(),
   canEditGroupSettings = true,
+  tagResourceId,
+  tagPreviewRefreshKey,
+  onAssignTags,
+  canAssignTags = false,
   className,
 }: SkillDraftPanelProps) {
   const { t } = useTranslation("common");
@@ -348,6 +357,29 @@ export default function SkillDraftPanel({
               style={{ resize: "none" }}
             />
           </Form.Item>
+          {tagResourceId ? (
+            <Form.Item
+              label={t("skillManagement.form.tags")}
+              style={{ marginBottom: 10 }}
+            >
+              <div className="flex min-w-0 items-center gap-2">
+                <div className="min-w-0 flex-1 overflow-hidden whitespace-nowrap">
+                  <ResourceTagChips
+                    resourceType="skill"
+                    resourceId={tagResourceId}
+                    max={4}
+                    refreshKey={tagPreviewRefreshKey}
+                    singleLine
+                  />
+                </div>
+                {canAssignTags && onAssignTags ? (
+                  <Button type="link" size="small" onClick={onAssignTags}>
+                    {t("tagManagement.title.assignTags")}
+                  </Button>
+                ) : null}
+              </div>
+            </Form.Item>
+          ) : null}
         </Form>
       </div>
 

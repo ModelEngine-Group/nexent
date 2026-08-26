@@ -7,10 +7,13 @@ from consts.model import (
 )
 from fastapi import HTTPException
 from pydantic import ValidationError
+from starlette.routing import Match
 
 
 @pytest.mark.asyncio
-async def test_assignment_route_uses_authenticated_context_not_library_manage_permission(monkeypatch):
+async def test_assignment_route_uses_authenticated_context_not_library_manage_permission(
+    monkeypatch,
+):
     captured = {}
     monkeypatch.setattr(
         tag_management_app,
@@ -66,11 +69,15 @@ async def test_assignment_route_hides_missing_or_forbidden_resource(monkeypatch)
         raise TagManagementNotFoundError("Resource not found")
 
     monkeypatch.setattr(
-        tag_management_app.TagManagementService, "get_resource_assignments", get_assignments
+        tag_management_app.TagManagementService,
+        "get_resource_assignments",
+        get_assignments,
     )
 
     with pytest.raises(HTTPException) as error:
-        await tag_management_app.get_resource_tag_assignments("skill", "12", "Bearer token")
+        await tag_management_app.get_resource_tag_assignments(
+            "skill", "12", "Bearer token"
+        )
 
     assert error.value.status_code == 404
     assert error.value.detail == "Resource not found"
@@ -95,7 +102,9 @@ async def test_document_assignment_route_forwards_provider_identity(monkeypatch)
             "assignments": [],
         }
 
-    monkeypatch.setattr(tag_management_app.TagManagementService, "replace_resource_assignments", replace)
+    monkeypatch.setattr(
+        tag_management_app.TagManagementService, "replace_resource_assignments", replace
+    )
 
     response = await tag_management_app.replace_resource_tag_assignments(
         "knowledge_document",
@@ -108,6 +117,30 @@ async def test_document_assignment_route_forwards_provider_identity(monkeypatch)
 
     assert response["resource_type"] == "knowledge_document"
     assert captured == {"provider": "aidp", "knowledge_base_id": "kb-1"}
+
+
+def test_document_assignment_routes_accept_slash_containing_resource_ids():
+    request_scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/tag-libraries/assignments/knowledge_document/knowledge_base/file.pdf",
+        "headers": [],
+        "query_string": b"",
+    }
+    assignment_route = next(
+        route
+        for route in tag_management_app.router.routes
+        if route.path == "/tag-libraries/assignments/{resource_type}/{resource_id:path}"
+        and "GET" in route.methods
+    )
+
+    match, child_scope = assignment_route.matches(request_scope)
+
+    assert match is Match.FULL
+    assert child_scope["path_params"] == {
+        "resource_type": "knowledge_document",
+        "resource_id": "knowledge_base/file.pdf",
+    }
 
 
 @pytest.mark.asyncio
