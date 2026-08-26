@@ -375,11 +375,32 @@ def test_complete_answer_that_names_tool_is_not_misclassified():
     ) is False
 
 
+@pytest.mark.parametrize(
+    "output",
+    [
+        (
+            "思考：工具调用成功。根据策略，我需要用 `final_answer` 返回工具结果。\n\n"
+            "最终回答：\n定时任务提案已生成，请核对任务内容和执行时间后确认创建。"
+        ),
+        (
+            "Analysis: The tool call succeeded, so I will use `final_answer` to return the result.\n\n"
+            "Final answer:\nThe scheduled-task proposal is ready for confirmation."
+        ),
+    ],
+)
+def test_complete_explicit_final_answer_is_not_misclassified(output):
+    assert core_agent_module._looks_like_incomplete_action_output(
+        output,
+        available_tool_names={"final_answer", "create_scheduled_task_proposal"},
+    ) is False
+
+
 def test_length_truncated_non_code_output_is_not_a_final_answer():
     assert core_agent_module._looks_like_incomplete_action_output(
         "这是一个尚未完成的回答",
         finish_reason="length",
     ) is True
+
 
 def test_parse_code_blobs_run_format():
     """Test parse_code_blobs with <code>...</code> pattern (new format)."""
