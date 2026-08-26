@@ -87,7 +87,6 @@ import {
   ToolGroupTrigger,
 } from "../ui/tool-group";
 import {
-  getAgentRunTime,
   searchSourcesRegistry,
   conversationSourcesRegistry,
   skillFileUploadsRegistry,
@@ -95,6 +94,11 @@ import {
   type Nl2SkillFileCardData,
   type VerificationContent,
 } from "../adapter/remote-chat-model-adapter";
+import {
+  formatMessageDate,
+  formatMessageTime,
+  shouldShowDateSeparator,
+} from "@/lib/messageDate";
 import { VerificationPanel } from "../ui/verification-panel";
 import { cn } from "@/lib/utils";
 import { AuthenticatedImage } from "../ui/authenticated-image";
@@ -1071,6 +1075,67 @@ const AssistantCompletionIndicator: FC = () => {
   );
 };
 
+type DatabaseTimeMetadata = {
+  databaseCreateTime?: number;
+};
+
+const getDatabaseCreateTime = (metadata: unknown): number | undefined => {
+  if (!metadata || typeof metadata !== "object") return undefined;
+  const custom = (metadata as { custom?: DatabaseTimeMetadata }).custom;
+  return custom?.databaseCreateTime;
+};
+
+const MessageTimestamp: FC<{ className?: string }> = ({ className }) => {
+  const createTime = useAuiState((s) =>
+    getDatabaseCreateTime(s.message.metadata)
+  );
+  const displayTime = formatMessageTime(createTime);
+
+  if (!displayTime) return null;
+
+  return (
+    <time
+      dateTime={new Date(createTime!).toISOString()}
+      className={cn("text-xs text-muted-foreground", className)}
+    >
+      {displayTime}
+    </time>
+  );
+};
+
+const MessageDateSeparator: FC = () => {
+  const { i18n } = useTranslation();
+  const createTime = useAuiState((s) =>
+    getDatabaseCreateTime(s.message.metadata)
+  );
+  const previousCreateTime = useAuiState((s) => {
+    if (s.message.index <= 0) return undefined;
+    return getDatabaseCreateTime(
+      s.thread.messages.at(s.message.index - 1)?.metadata
+    );
+  });
+
+  if (!shouldShowDateSeparator(createTime, previousCreateTime)) return null;
+
+  const label = formatMessageDate(
+    createTime,
+    i18n.resolvedLanguage ?? i18n.language
+  );
+  if (!label) return null;
+
+  return (
+    <div
+      role="separator"
+      aria-label={label}
+      className="col-span-full !col-start-1 mx-auto my-4 flex w-full max-w-(--thread-max-width) items-center gap-3 px-2 text-xs text-muted-foreground"
+    >
+      <span className="h-px flex-1 bg-border" aria-hidden />
+      <time dateTime={new Date(createTime!).toISOString()}>{label}</time>
+      <span className="h-px flex-1 bg-border" aria-hidden />
+    </div>
+  );
+};
+
 const AssistantMessage: FC<{
   agent: Agent | PublishedAgent;
   readOnly?: boolean;
@@ -1086,7 +1151,6 @@ const AssistantMessage: FC<{
   const AgentIcon = getAgentIcon(agent);
   const agentName = agent.display_name || agent.name;
 
-  const agentRunTime = getAgentRunTime();
   const nl2a = useAuiState(
     (s) =>
       (s.message.metadata?.custom as { nl2a?: Nl2aMessage } | undefined)?.nl2a
@@ -1115,6 +1179,7 @@ const AssistantMessage: FC<{
       data-role="assistant"
       className="fade-in slide-in-from-bottom-1 animate-in relative mx-auto min-w-0 w-full max-w-(--thread-max-width) duration-150"
     >
+      <MessageDateSeparator />
       <div
         data-slot="aui_assistant-message-content"
         className="text-foreground min-w-0 px-2 pt-3 pb-1 leading-relaxed wrap-break-word"
@@ -1133,16 +1198,7 @@ const AssistantMessage: FC<{
             </span>
             <AssistantCompletionIndicator />
           </div>
-          {agentRunTime && (
-            <span
-              data-slot="aui_assistant-message-run-time"
-              className="text-xs text-muted-foreground"
-              aria-label={t("chat.thread.runStartedAt", { time: agentRunTime })}
-              title={t("chat.thread.runStartedAt", { time: agentRunTime })}
-            >
-              {agentRunTime}
-            </span>
-          )}
+          <MessageTimestamp />
         </header>
         <MessagePrimitive.GroupedParts
           groupBy={(part) => {
@@ -1459,6 +1515,7 @@ const UserMessage: FC<{
       data-role="user"
       className="relative fade-in slide-in-from-bottom-1 animate-in mx-auto grid w-full max-w-(--thread-max-width) auto-rows-auto grid-cols-[minmax(72px,1fr)_auto] content-start gap-y-2 px-2 duration-150 [&:where(>*)]:col-start-2"
     >
+      <MessageDateSeparator />
       {shareMode && backendMessageId !== undefined && (
         <label className="absolute left-2 top-1/2 z-10 flex -translate-y-1/2 cursor-pointer items-center justify-center">
           <input
@@ -1494,6 +1551,7 @@ const UserMessage: FC<{
             </div>
           )}
         </div>
+        <MessageTimestamp className="self-end" />
       </div>
 
       {!readOnly && (

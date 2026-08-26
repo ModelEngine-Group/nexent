@@ -730,6 +730,7 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
                     'role': role,
                     'message': message_content,
                     'message_id': message_id,
+                    'create_time': msg.get('create_time'),
                     'opinion_flag': None
                 }
 
@@ -812,6 +813,7 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
                     'role': role,
                     'message': processed_units,
                     'message_id': message_id,
+                    'create_time': msg.get('create_time'),
                     'opinion_flag': msg['opinion_flag']
                 }
 

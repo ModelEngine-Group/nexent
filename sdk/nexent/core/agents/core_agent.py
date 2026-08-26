@@ -215,6 +215,9 @@ _ACTION_INTENT_RE = re.compile(
     r"|(?:我(?:将|需要|先)|接下来|下一步|i\s+(?:will|need\s+to|should)\b|next\b).{0,240})"
     r"(?:调用|使用|检索|搜索|call|use|search|invoke)"
 )
+_EXPLICIT_FINAL_ANSWER_RE = re.compile(
+    r"(?is)(?:^|\n)\s*(?:最终回答|final\s+answer)\s*[:：]\s*\S"
+)
 
 
 def _looks_like_invalid_action_output(text: Any) -> bool:
@@ -263,6 +266,8 @@ def _looks_like_incomplete_action_output(
         return True
     if _looks_like_invalid_action_output(text):
         return True
+    if _EXPLICIT_FINAL_ANSWER_RE.search(text):
+        return False
 
     normalized = text.casefold()
     mentioned_tool = any(
