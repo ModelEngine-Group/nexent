@@ -17,7 +17,6 @@ from services.nl2agent_service import (
     _build_verified_bound_resources_context,
     _load_internal_uninstalled_resource_catalog,
     _load_installed_resource_catalog,
-    _normalize_nl2agent_tool_config,
     _normalize_skill_config,
     _normalize_tool_config,
     _redact_installation_snapshot,
@@ -585,26 +584,9 @@ async def test_search_installed_resources_covers_visible_tools_and_skills(mocker
             "value": 5,
             "description": "",
             "description_zh": "",
-        },
-        {
-            "name": "index_names",
-            "type": "array",
-            "required": True,
-            "value": [],
-            "description": "The knowledge bases used by this tool",
-            "description_zh": "该工具使用的知识库",
         }
     ]
-    assert catalog_by_name["aidp_search"]["config"] == [
-        {
-            "name": "kds_list",
-            "type": "array",
-            "required": True,
-            "value": [],
-            "description": "The knowledge bases used by this tool",
-            "description_zh": "该工具使用的知识库",
-        }
-    ]
+    assert catalog_by_name["aidp_search"]["config"] == []
 
     result = await search_installed_resources_impl(
         requirements=[
@@ -670,37 +652,25 @@ def test_resource_config_normalization_is_frontend_safe():
             "depends_on": "enabled",
         }
     ]
-    assert _normalize_nl2agent_tool_config(
-        tool_name="knowledge_base_search",
-        params=[
+    assert _normalize_tool_config(
+        [
             {
                 "name": "index_names",
                 "type": "string",
                 "optional": True,
                 "default": None,
             }
-        ],
-        is_user_selectable=False,
+        ]
     ) == [
         {
             "name": "index_names",
-            "type": "array",
-            "required": True,
-            "value": [],
+            "type": "string",
+            "required": False,
+            "value": None,
             "description": "",
             "description_zh": "",
         }
     ]
-    assert _normalize_nl2agent_tool_config(
-        tool_name="ordinary_tool",
-        params=[],
-        is_user_selectable=True,
-    ) == []
-    assert _normalize_nl2agent_tool_config(
-        tool_name="managed_tool",
-        params=[],
-        is_user_selectable=False,
-    )[0]["name"] == "index_names"
     assert _normalize_skill_config({"config_schemas": None}) == []
     skill_config = _normalize_skill_config(
         {

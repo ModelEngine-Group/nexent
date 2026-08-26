@@ -303,11 +303,8 @@ export default function ToolConfigModal({
 
   // Check if current tool requires knowledge base selection (must be declared before toolKbType)
   const toolRequiresKbSelection = useMemo(() => {
-    return (
-      tool?.is_user_selectable === false ||
-      TOOLS_REQUIRING_KB_SELECTION.includes(tool?.name)
-    );
-  }, [tool?.is_user_selectable, tool?.name]);
+    return TOOLS_REQUIRING_KB_SELECTION.includes(tool?.name);
+  }, [tool?.name]);
 
   // Get tool type for knowledge base selection
   const toolKbType = useMemo(():

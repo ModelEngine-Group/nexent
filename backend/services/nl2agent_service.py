@@ -392,44 +392,6 @@ def _normalize_tool_config(params: Any) -> list[dict[str, Any]]:
     return normalized
 
 
-def _normalize_nl2agent_tool_config(
-    *,
-    tool_name: str,
-    params: Any,
-    is_user_selectable: bool,
-) -> list[dict[str, Any]]:
-    config = _normalize_tool_config(params)
-    if is_user_selectable:
-        return config
-
-    selection_param = next(
-        (
-            param
-            for param in config
-            if param["name"] in {"index_names", "dataset_ids", "kds_list"}
-        ),
-        None,
-    )
-    if selection_param is None:
-        selection_name = "kds_list" if tool_name == "aidp_search" else "index_names"
-        config.append(
-            {
-                "name": selection_name,
-                "type": "array",
-                "required": True,
-                "value": [],
-                "description": "The knowledge bases used by this tool",
-                "description_zh": "该工具使用的知识库",
-            }
-        )
-    else:
-        selection_param["type"] = "array"
-        selection_param["required"] = True
-        if not isinstance(selection_param.get("value"), list):
-            selection_param["value"] = []
-    return config
-
-
 def _normalize_skill_config(skill: dict[str, Any]) -> list[dict[str, Any]]:
     schemas = skill.get("config_schemas")
     defaults = skill.get("config_values")
@@ -505,11 +467,7 @@ async def _load_installed_resource_catalog(
                 "params": tool.get("params"),
                 "inputs": inputs,
             }),
-            "config": _normalize_nl2agent_tool_config(
-                tool_name=name,
-                params=tool.get("params"),
-                is_user_selectable=tool.get("is_user_selectable") is not False,
-            ),
+            "config": _normalize_tool_config(tool.get("params")),
             "form_kind": "TOOL_CONFIG",
             "inputs": inputs,
             "installed": True,
