@@ -629,6 +629,11 @@ async def test_save_agent_draft_fields_reuses_trusted_context_across_rounds(mock
         "save_agent_draft_fields_impl",
         side_effect=save_impl,
     )
+    validate_complete = mocker.patch.object(
+        nl2agent_service,
+        "validate_agent_generation_complete_impl",
+        new=AsyncMock(),
+    )
     first = await save_agent_draft_fields(1042, {"description": "Updated"})
     second = await save_agent_draft_fields(
         1042,
@@ -645,7 +650,15 @@ async def test_save_agent_draft_fields_reuses_trusted_context_across_rounds(mock
     )["updated_fields"] == ["description"]
     assert json.loads(
         second_state.removeprefix("<nl2a_state>").removesuffix("</nl2a_state>")
-    )["updated_fields"] == ["duty_prompt"]
+    ) == {
+        "event": "agent_generation_completed",
+        "agent_id": 1042,
+    }
+    validate_complete.assert_awaited_once_with(
+        agent_id=1042,
+        tenant_id="tenant-a",
+        user_id="user-a",
+    )
 
 
 @pytest.mark.asyncio
@@ -1214,9 +1227,18 @@ async def test_final_prompt_batch_emits_generation_completed_state(mocker):
             {"example_questions": ["What should I research?"]},
             ["example_questions"],
         ),
+        ({"duty_prompt": "Research the requested topic."}, ["duty_prompt"]),
+        (
+            {"constraint_prompt": "Use reliable sources."},
+            ["constraint_prompt"],
+        ),
+        (
+            {"few_shots_prompt": "Question: Example\nAnswer: Example"},
+            ["few_shots_prompt"],
+        ),
     ],
 )
-async def test_completion_validation_uses_persisted_state_for_flexible_final_saves(
+async def test_completion_validation_uses_persisted_state_for_prompt_saves(
     mocker,
     fields,
     updated_fields,
@@ -1268,8 +1290,15 @@ async def test_completion_validation_uses_persisted_state_for_flexible_final_sav
 
 
 @pytest.mark.asyncio
-async def test_partial_final_prompt_save_remains_saved_when_database_is_incomplete(
-    mocker,
+@pytest.mark.parametrize(
+    ("fields", "updated_fields"),
+    [
+        ({"greeting_message": "Hello"}, ["greeting_message"]),
+        ({"duty_prompt": "Research the requested topic."}, ["duty_prompt"]),
+    ],
+)
+async def test_partial_prompt_save_remains_saved_when_database_is_incomplete(
+    mocker, fields, updated_fields
 ):
     mocker.patch.object(
         nl2agent_mcp_tools_module,
@@ -1288,7 +1317,7 @@ async def test_partial_final_prompt_save_remains_saved_when_database_is_incomple
             "status": "success",
             "agent_id": 42,
             "created": False,
-            "updated_fields": ["greeting_message"],
+            "updated_fields": updated_fields,
         },
     )
     mocker.patch.object(
@@ -1302,11 +1331,11 @@ async def test_partial_final_prompt_save_remains_saved_when_database_is_incomple
         ),
     )
 
-    result_json, state_wrapper = (
-        await save_agent_draft_fields(42, {"greeting_message": "Hello"})
-    ).split("\n", 1)
+    result_json, state_wrapper = (await save_agent_draft_fields(42, fields)).split(
+        "\n", 1
+    )
 
-    assert json.loads(result_json)["updated_fields"] == ["greeting_message"]
+    assert json.loads(result_json)["updated_fields"] == updated_fields
     assert json.loads(
         state_wrapper.removeprefix("<nl2a_state>").removesuffix(
             "</nl2a_state>"
@@ -1314,7 +1343,7 @@ async def test_partial_final_prompt_save_remains_saved_when_database_is_incomple
     ) == {
         "event": "agent_draft_fields_saved",
         "agent_id": 42,
-        "updated_fields": ["greeting_message"],
+        "updated_fields": updated_fields,
     }
 
 

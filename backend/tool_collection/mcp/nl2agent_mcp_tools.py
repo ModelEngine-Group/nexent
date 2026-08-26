@@ -1140,7 +1140,7 @@ async def save_agent_draft_fields(
         )
         success = SaveAgentDraftFieldsSuccess.model_validate(result)
         updated_fields = set(success.updated_fields)
-        if updated_fields & _NL2AGENT_FINAL_PROMPT_BATCH:
+        if updated_fields & _NL2AGENT_PROMPT_FIELDS:
             try:
                 await validate_agent_generation_complete_impl(
                     agent_id=resolved_agent_id,
