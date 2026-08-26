@@ -9,7 +9,6 @@ import {
   Modal,
   Form,
   Input,
-  Popconfirm,
   message,
   Select,
   Tooltip,
@@ -18,6 +17,7 @@ import { Edit, Trash2 } from "lucide-react";
 import { ColumnsType } from "antd/es/table";
 import { useGroupList } from "@/hooks/group/useGroupList";
 import { useUserList } from "@/hooks/user/useUserList";
+import { useConfirmModal } from "@/hooks/useConfirmModal";
 import {
   createGroup,
   updateGroup,
@@ -33,6 +33,7 @@ import {
 import { type User } from "@/services/userService";
 
 export default function GroupList({ tenantId }: { tenantId: string | null }) {
+  const { confirm } = useConfirmModal();
   const { t } = useTranslation("common");
   const queryClient = useQueryClient();
 
@@ -272,23 +273,21 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
                 size="small"
               />
             </Tooltip>
-            <Popconfirm
-              title={t("tenantResources.groups.confirmDelete", {
-                name: record.group_name,
-              })}
-              onConfirm={() => handleDelete(record.group_id)}
-              okText={t("common.confirm")}
-              cancelText={t("common.cancel")}
-            >
-              <Tooltip title={t("tenantResources.groups.deleteGroup")}>
-                <Button
-                  type="text"
-                  danger
-                  icon={<Trash2 className="h-4 w-4" />}
-                  size="small"
-                />
-              </Tooltip>
-            </Popconfirm>
+            <Tooltip title={t("tenantResources.groups.deleteGroup")}>
+              <Button
+                type="text"
+                danger
+                icon={<Trash2 className="h-4 w-4" />}
+                size="small"
+                onClick={() => confirm({
+                  title: t("tenantResources.groups.confirmDelete", { name: record.group_name }),
+                  content: "",
+                  okText: t("common.confirm"),
+                  cancelText: t("common.cancel"),
+                  onOk: () => handleDelete(record.group_id),
+                })}
+              />
+            </Tooltip>
           </div>
         ),
       },
