@@ -41,6 +41,7 @@ import {
   shouldContinueConversationPageLoading,
   shouldLoadNextConversationPage,
 } from "@/lib/conversationLoadPolicy";
+import { setPendingThreadOperationId } from "../adapter/conversation-thread-list-adapter";
 import {
   calculateConversationViewport,
   getConversationViewportGroupCounts,
@@ -337,7 +338,6 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
 
   const groups = useThreadListGroups();
 
-
   const GroupedThreadListItem = useMemo<FC>(
     () => () => (
       <ThreadListItem
@@ -399,7 +399,7 @@ type ThreadListGroup = {
 // using the day boundaries of the user's local timezone.
 const dateGroupLabel = (
   date: Date | undefined,
-  startOfToday: number,
+  startOfToday: number
 ): string => {
   if (!date || date.getTime() >= startOfToday) return "chat.threadList.today";
   if (date.getTime() >= startOfToday - 7 * DAY_IN_MS) {
@@ -416,10 +416,12 @@ const useThreadListGroups = (): ThreadListGroup[] | null => {
 
   return useMemo<ThreadListGroup[] | null>(() => {
     const itemsById = new Map(
-      (threadItems as ReadonlyArray<{
-        id: string;
-        custom?: { lastMessageAt?: string };
-      }>).map((item) => [item.id, item]),
+      (
+        threadItems as ReadonlyArray<{
+          id: string;
+          custom?: { lastMessageAt?: string };
+        }>
+      ).map((item) => [item.id, item])
     );
     const dates: (Date | undefined)[] = threadIds.map((id) => {
       const raw = itemsById.get(id)?.custom?.lastMessageAt;
@@ -431,7 +433,7 @@ const useThreadListGroups = (): ThreadListGroup[] | null => {
     const startOfToday = new Date(
       now.getFullYear(),
       now.getMonth(),
-      now.getDate(),
+      now.getDate()
     ).getTime();
 
     const time = (index: number) =>
@@ -512,18 +514,25 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
   const [isEditing, setIsEditing] = useState(false);
   const threadListItem = aui.threadListItem;
   const thread = threadListItem.getState();
-  const title = generatedTitles?.get(thread.id) ?? thread.title ?? t("chat.thread.newChat");
+  const title =
+    generatedTitles?.get(thread.id) ?? thread.title ?? t("chat.thread.newChat");
 
-  const handleRename = useCallback(async (newTitle: string) => {
-    try {
-      await threadListItem.rename(newTitle);
-      log.log(`[ThreadList] Renamed thread to "${newTitle}"`);
-      setIsEditing(false);
-    } catch (error) {
-      log.error("[ThreadList] Failed to rename thread:", error);
-      message.error(t("chat.threadList.renameFailed"));
-    }
-  }, [threadListItem, t]);
+  const handleRename = useCallback(
+    async (newTitle: string) => {
+      setPendingThreadOperationId(thread.id);
+      try {
+        await threadListItem.rename(newTitle);
+        log.log(`[ThreadList] Renamed thread to "${newTitle}"`);
+        setIsEditing(false);
+      } catch (error) {
+        log.error("[ThreadList] Failed to rename thread:", error);
+        message.error(t("chat.threadList.renameFailed"));
+      } finally {
+        setPendingThreadOperationId(undefined);
+      }
+    },
+    [thread.id, threadListItem, t]
+  );
 
   const handleRenameClick = useCallback(() => {
     setIsEditing(true);
@@ -538,6 +547,7 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
       title: t("chat.threadList.delete"),
       content: t("chat.threadList.confirmDeletionDescription"),
       onOk: async () => {
+        setPendingThreadOperationId(thread.id);
         try {
           await threadListItem.delete();
           await aui.threads.reload();
@@ -545,6 +555,8 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
           log.error("[ThreadList] Failed to delete thread:", error);
           message.error(t("chatInterface.deleteFailed"));
           throw error;
+        } finally {
+          setPendingThreadOperationId(undefined);
         }
       },
     });
@@ -619,10 +631,7 @@ const ConversationStatusIndicatorWrapper: FC<{
   const isRunning = status === "running" || status === "streaming";
 
   return (
-    <ConversationStatusIndicator
-      isStreaming={isRunning}
-      isCompleted={false}
-    />
+    <ConversationStatusIndicator isStreaming={isRunning} isCompleted={false} />
   );
 };
 
@@ -643,7 +652,7 @@ const InlineRenameEditor: FC<{
         onCancel();
       }
     },
-    [title, currentTitle, onRename, onCancel],
+    [title, currentTitle, onRename, onCancel]
   );
 
   const handleKeyDown = useCallback(
@@ -652,13 +661,13 @@ const InlineRenameEditor: FC<{
         onCancel();
       }
     },
-    [onCancel],
+    [onCancel]
   );
 
   return (
     <form
       onSubmit={handleSubmit}
-      className="flex min-w-0 flex-1 items-center gap-1 px-3"
+      className="flex min-w-0 flex-1 items-center gap-1 px-3 overflow-hidden"
     >
       <input
         type="text"
@@ -673,21 +682,20 @@ const InlineRenameEditor: FC<{
           }
         }}
         autoFocus
-        className="flex-1 bg-background border border-input rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+        className="shrink min-w-0 flex-1 rounded border border-input px-2 py-1 text-sm outline-none focus:border-ring"
       />
-      <button
-        type="submit"
-        className="p-1 hover:bg-accent rounded"
-      >
-        <CheckIcon className="size-4" />
-      </button>
-      <button
-        type="button"
-        onClick={onCancel}
-        className="p-1 hover:bg-accent rounded"
-      >
-        <XIcon className="size-4" />
-      </button>
+      <div className="flex shrink-0 gap-1">
+        <button type="submit" className="p-1 hover:bg-accent rounded">
+          <CheckIcon className="size-4" />
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="p-1 hover:bg-accent rounded"
+        >
+          <XIcon className="size-4" />
+        </button>
+      </div>
     </form>
   );
 };
