@@ -9,7 +9,6 @@ import {
   Form,
   Input,
   Select,
-  Popconfirm,
   message,
   Tag,
   Tooltip,
@@ -18,6 +17,7 @@ import { Edit, Trash2 } from "lucide-react";
 import { ColumnsType } from "antd/es/table";
 import { useUserList } from "@/hooks/user/useUserList";
 import { useGroupList } from "@/hooks/group/useGroupList";
+import { useConfirmModal } from "@/hooks/useConfirmModal";
 import {
   updateUser,
   deleteUser,
@@ -32,13 +32,8 @@ import {
   type CreateGroupRequest,
 } from "@/services/groupService";
 
-export default function UserList({
-  tenantId,
-  refreshKey,
-}: {
-  tenantId: string | null;
-  refreshKey?: number;
-}) {
+export default function UserList({ tenantId, refreshKey }: { tenantId: string | null; refreshKey?: number }) {
+  const { confirm } = useConfirmModal();
   const { t } = useTranslation("common");
 
   // Pagination state
@@ -260,23 +255,25 @@ export default function UserList({
                 size="small"
               />
             </Tooltip>
-            <Popconfirm
-              title={t("tenantResources.users.confirmDelete", {
-                name: record.username,
-              })}
-              onConfirm={() => handleDelete(record.id)}
-              okText={t("common.confirm")}
-              cancelText={t("common.cancel")}
-            >
-              <Tooltip title={t("tenantResources.users.deleteUser")}>
-                <Button
-                  type="text"
-                  danger
-                  icon={<Trash2 className="h-4 w-4" />}
-                  size="small"
-                />
-              </Tooltip>
-            </Popconfirm>
+            <Tooltip title={t("tenantResources.users.deleteUser")}>
+              <Button
+                type="text"
+                danger
+                icon={<Trash2 className="h-4 w-4" />}
+                size="small"
+                onClick={() =>
+                  confirm({
+                    title: t("tenantResources.users.confirmDelete", {
+                      name: record.username,
+                    }),
+                    content: "",
+                    okText: t("common.confirm"),
+                    cancelText: t("common.cancel"),
+                    onOk: () => handleDelete(record.id),
+                  })
+                }
+              />
+            </Tooltip>
           </div>
         ),
         width: "30%",

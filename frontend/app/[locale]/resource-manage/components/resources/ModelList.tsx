@@ -5,7 +5,6 @@ import { useTranslation } from "react-i18next";
 import {
   Table,
   Button,
-  Popconfirm,
   message,
   Tag,
   Segmented,
@@ -32,6 +31,7 @@ import { modelService } from "@/services/modelService";
 import { type ModelOption, type ModelType } from "@/types/modelConfig";
 import type { ModelMonitoringItem } from "@/types/monitoring";
 import { MODEL_TYPES } from "@/const/modelConfig";
+import { useConfirmModal } from "@/hooks/useConfirmModal";
 import { ModelAddDialog } from "../../../models/components/model/ModelAddDialog";
 import { ModelEditDialog } from "../../../models/components/model/ModelEditDialog";
 import ModelCapacityCoverageWidget from "./ModelCapacityCoverageWidget";
@@ -46,6 +46,7 @@ interface UnifiedModelRow extends ModelOption {
 
 export default function ModelList({ tenantId }: { tenantId: string | null }) {
   const { t } = useTranslation("common");
+  const { confirm } = useConfirmModal();
 
   const { bareModelIds } = useCapacityCoverage();
 
@@ -474,22 +475,23 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
               size="small"
             />
           </Tooltip>
-          <Popconfirm
-            title={t("tenantResources.models.confirmDelete")}
-            description={t("common.cannotBeUndone")}
-            onConfirm={() => handleDelete(record.displayName, record.source)}
-            okText={t("common.confirm")}
-            cancelText={t("common.cancel")}
-          >
-            <Tooltip title={t("tenantResources.models.deleteModel")}>
-              <Button
-                type="text"
-                danger
-                icon={<Trash2 className="h-4 w-4" />}
-                size="small"
-              />
-            </Tooltip>
-          </Popconfirm>
+          <Tooltip title={t("tenantResources.models.deleteModel")}>
+            <Button
+              type="text"
+              danger
+              icon={<Trash2 className="h-4 w-4" />}
+              size="small"
+              onClick={() =>
+                confirm({
+                  title: t("tenantResources.models.confirmDelete"),
+                  content: t("common.cannotBeUndone"),
+                  okText: t("common.confirm"),
+                  cancelText: t("common.cancel"),
+                  onOk: () => handleDelete(record.displayName, record.source),
+                })
+              }
+            />
+          </Tooltip>
         </div>
       ),
     },

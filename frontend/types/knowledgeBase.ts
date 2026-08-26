@@ -70,6 +70,7 @@ export interface Document {
   selected?: boolean; // For UI selection status
   latest_task_id: string; // For marking the latest celery task
   file_id?: string;
+  error_code?: string;
   error_reason?: string; // Error reason for failed documents
   error_stage?: string;
   failed_at?: string;

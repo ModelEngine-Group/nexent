@@ -142,7 +142,7 @@ setattr(services_pkg, "vectordatabase_service", vdb_service_stub)
 
 # Stub utils.auth_utils.get_current_user_id (the function actually used in the app)
 utils_pkg = types.ModuleType("utils")
-utils_pkg.__path__ = []
+utils_pkg.__path__ = [os.path.join(BACKEND_ROOT, "utils")]
 sys.modules.setdefault("utils", utils_pkg)
 
 auth_utils_stub = types.ModuleType("utils.auth_utils")
@@ -170,7 +170,7 @@ setattr(utils_pkg, "file_management_utils", fmu_stub)
 
 # Stub consts.model.ProcessParams
 consts_pkg = types.ModuleType("consts")
-consts_pkg.__path__ = []
+consts_pkg.__path__ = [os.path.join(BACKEND_ROOT, "consts")]
 sys.modules.setdefault("consts", consts_pkg)
 
 model_stub = types.ModuleType("consts.model")
@@ -453,7 +453,8 @@ async def test_process_files_persists_submit_failure(monkeypatch):
     lifecycle_module.get_file_record.assert_called_once()
     lifecycle_module.transition_file_record.assert_called_once()
     assert lifecycle_module.get_file_record.call_args.kwargs["tenant_id"] == "tenant1"
-    assert lifecycle_module.transition_file_record.call_args.kwargs["error_code"] == "TASK_SUBMIT_FAILED"
+    assert lifecycle_module.transition_file_record.call_args.kwargs["error_code"] == "060108"
+    assert lifecycle_module.transition_file_record.call_args.kwargs["error_message"] is None
 
 
 @pytest.mark.asyncio
@@ -500,7 +501,8 @@ async def test_process_files_persists_only_failed_item_for_partial_batch(monkeyp
     assert resp.body
     lifecycle_module.transition_file_record.assert_called_once()
     assert lifecycle_module.transition_file_record.call_args.args[0] == "fid-b"
-    assert lifecycle_module.transition_file_record.call_args.kwargs["error_message"] == "broker unavailable"
+    assert lifecycle_module.transition_file_record.call_args.kwargs["error_code"] == "060108"
+    assert lifecycle_module.transition_file_record.call_args.kwargs["error_message"] is None
 
 
 @pytest.mark.asyncio
@@ -569,7 +571,7 @@ async def test_process_files_legacy_empty_task_ids_mark_all_failed(monkeypatch):
         )
 
     assert raised.value.status_code == 500
-    assert lifecycle_module.transition_file_record.call_args.kwargs["error_code"] == "TASK_SUBMIT_FAILED"
+    assert lifecycle_module.transition_file_record.call_args.kwargs["error_code"] == "060108"
 
 
 @pytest.mark.asyncio

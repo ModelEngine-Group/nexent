@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
-import { App, Button, Popconfirm, Table, Tag } from "antd";
+import { App, Button, Table, Tag } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { RefreshCw, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -155,35 +155,36 @@ export default function ApiKeyList({ tenantId }: { tenantId: string | null }) {
         width: 100,
         render: (_, record) => (
           <div className="flex items-center gap-1">
-            <Popconfirm
-              title={t("tenantResources.apiKeys.confirmRefresh")}
-              description={t("tenantResources.apiKeys.affectsAll")}
-              onConfirm={() => refreshKey(record)}
-              okText={t("common.confirm")}
-              cancelText={t("common.cancel")}
-            >
-              <Button
-                type="text"
-                size="small"
-                loading={pendingUserId === record.user_id}
-                icon={<RefreshCw className="h-4 w-4" />}
-              />
-            </Popconfirm>
-            <Popconfirm
-              title={t("tenantResources.apiKeys.confirmRevoke")}
-              description={t("tenantResources.apiKeys.affectsAll")}
-              onConfirm={() => revokeKey(record)}
-              okText={t("common.confirm")}
-              cancelText={t("common.cancel")}
-            >
-              <Button
-                type="text"
-                danger
-                size="small"
-                disabled={pendingUserId === record.user_id}
-                icon={<Trash2 className="h-4 w-4" />}
-              />
-            </Popconfirm>
+            <Button
+              type="text"
+              size="small"
+              loading={pendingUserId === record.user_id}
+              icon={<RefreshCw className="h-4 w-4" />}
+              onClick={() => modal.confirm({
+                title: t("tenantResources.apiKeys.confirmRefresh"),
+                content: t("tenantResources.apiKeys.affectsAll"),
+                centered: true,
+                okText: t("common.confirm"),
+                cancelText: t("common.cancel"),
+                onOk: () => refreshKey(record),
+              })}
+            />
+            <Button
+              type="text"
+              danger
+              size="small"
+              disabled={pendingUserId === record.user_id}
+              icon={<Trash2 className="h-4 w-4" />}
+              onClick={() => modal.confirm({
+                title: t("tenantResources.apiKeys.confirmRevoke"),
+                content: t("tenantResources.apiKeys.affectsAll"),
+                centered: true,
+                okText: t("common.confirm"),
+                cancelText: t("common.cancel"),
+                okButtonProps: { danger: true },
+                onOk: () => revokeKey(record),
+              })}
+            />
           </div>
         ),
       },

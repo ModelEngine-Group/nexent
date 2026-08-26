@@ -161,6 +161,11 @@ class _Resp:
         return self._body
 
 
+class _InvalidJsonResp(_Resp):
+    def json(self):
+        raise ValueError("not json")
+
+
 class _FakeRequestError(Exception):
     pass
 
@@ -374,6 +379,67 @@ async def test_trigger_data_process_batch_non201_and_request_error(fmu, monkeypa
     monkeypatch.setattr(fmu, "httpx", fake_httpx2)
     out2 = await fmu.trigger_data_process(files, params)
     assert out2["status"] == "error" and out2["code"] == "CONNECTION_ERROR"
+
+
+@pytest.mark.asyncio
+async def test_trigger_data_process_non201_with_invalid_json_uses_response_text(fmu, monkeypatch):
+    fake_client = _FakeAsyncClient(_InvalidJsonResp(502, text="gateway unavailable"))
+    monkeypatch.setattr(
+        fmu,
+        "httpx",
+        types.SimpleNamespace(AsyncClient=lambda: fake_client, RequestError=_FakeRequestError),
+    )
+
+    params = _ProcessParams("tok", "local", "basic", "idx")
+    out = await fmu.trigger_data_process(
+        [{"path_or_url": "/data/a.txt", "filename": "a.txt"}], params
+    )
+
+    assert out["status"] == "error"
+    assert out["code"] == 502
+    assert out["error_code"]
+
+
+@pytest.mark.asyncio
+async def test_trigger_data_process_batch_non201_with_invalid_json_uses_response_text(fmu, monkeypatch):
+    fake_client = _FakeAsyncClient(_InvalidJsonResp(503, text="service unavailable"))
+    monkeypatch.setattr(
+        fmu,
+        "httpx",
+        types.SimpleNamespace(AsyncClient=lambda: fake_client, RequestError=_FakeRequestError),
+    )
+
+    params = _ProcessParams("tok", "minio", "basic", "idx")
+    out = await fmu.trigger_data_process(
+        [
+            {"path_or_url": "/data/a.txt", "filename": "a.txt"},
+            {"path_or_url": "/data/b.txt", "filename": "b.txt"},
+        ],
+        params,
+    )
+
+    assert out["status"] == "error"
+    assert out["code"] == 503
+    assert out["error_code"]
+
+
+@pytest.mark.asyncio
+async def test_trigger_data_process_unexpected_client_error_uses_internal_code(fmu, monkeypatch):
+    fake_client = _FakeAsyncClient(RuntimeError("unexpected client failure"))
+    monkeypatch.setattr(
+        fmu,
+        "httpx",
+        types.SimpleNamespace(AsyncClient=lambda: fake_client, RequestError=_FakeRequestError),
+    )
+
+    params = _ProcessParams("tok", "local", "basic", "idx")
+    out = await fmu.trigger_data_process(
+        [{"path_or_url": "/data/a.txt", "filename": "a.txt"}], params
+    )
+
+    assert out["status"] == "error"
+    assert out["code"] == "INTERNAL_ERROR"
+    assert out["error_code"]
 
 
 # -------------------- get_all_files_status --------------------

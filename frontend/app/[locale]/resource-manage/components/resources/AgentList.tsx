@@ -7,7 +7,6 @@ import {
   Button,
   App,
   Tooltip,
-  Popconfirm,
   Typography,
   Tag,
   Modal,
@@ -24,6 +23,7 @@ import {
   Clock,
   Eye,
 } from "lucide-react";
+import { useConfirmModal } from "@/hooks/useConfirmModal";
 import { useQueryClient } from "@tanstack/react-query";
 
 import { useAgentList } from "@/hooks/agent/useAgentList";
@@ -63,6 +63,7 @@ type AgentListRow = Pick<
 };
 
 export default function AgentList({ tenantId }: { tenantId: string | null }) {
+  const { confirm } = useConfirmModal();
   const { t } = useTranslation("common");
   const { message } = App.useApp();
   const [form] = Form.useForm();
@@ -506,24 +507,21 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
               size="small"
             />
           </Tooltip>
-          <Popconfirm
-            title={t("businessLogic.config.modal.deleteTitle")}
-            description={t("businessLogic.config.modal.deleteContent", {
-              name: record.display_name,
-            })}
-            onConfirm={() => handleDelete(record)}
-            okText={t("common.confirm")}
-            cancelText={t("common.cancel")}
-          >
-            <Tooltip title={t("common.delete")}>
-              <Button
-                type="text"
-                danger
-                icon={<Trash2 className="h-4 w-4" />}
-                size="small"
-              />
-            </Tooltip>
-          </Popconfirm>
+          <Tooltip title={t("common.delete")}>
+            <Button
+              type="text"
+              danger
+              icon={<Trash2 className="h-4 w-4" />}
+              size="small"
+              onClick={() => confirm({
+                title: t("businessLogic.config.modal.deleteTitle"),
+                content: t("businessLogic.config.modal.deleteContent", { name: record.display_name }),
+                okText: t("common.confirm"),
+                cancelText: t("common.cancel"),
+                onOk: () => handleDelete(record),
+              })}
+            />
+          </Tooltip>
         </div>
       ),
     },

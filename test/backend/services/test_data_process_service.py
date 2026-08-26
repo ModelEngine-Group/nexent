@@ -71,15 +71,40 @@ class _BatchTaskRequest:
 _model_mod.BatchTaskRequest = _BatchTaskRequest
 sys.modules.setdefault('consts.model', _model_mod)
 
-# Stub consts.exceptions with a *real* exception class so assertRaises works correctly
+# Stub consts.exceptions with real exception classes so assertRaises works correctly
 _exceptions_mod = types.ModuleType('consts.exceptions')
+
+
+class AppException(Exception):
+    """Stub AppException carrying the production error-code contract."""
+
+    def __init__(self, error_code=None, message=None):
+        self.error_code = error_code
+        self.message = message
+        super().__init__(message or error_code or "application error")
 
 
 class OfficeConversionException(Exception):
     """Stub OfficeConversionException used in tests."""
 
 
+class FileTooLargeException(Exception):
+    """Stub file-size validation exception."""
+
+
+class UnsupportedFileTypeException(Exception):
+    """Stub file-type validation exception."""
+
+
+class QuotaExceededError(Exception):
+    """Stub quota exception."""
+
+
+_exceptions_mod.AppException = AppException
 _exceptions_mod.OfficeConversionException = OfficeConversionException
+_exceptions_mod.FileTooLargeException = FileTooLargeException
+_exceptions_mod.UnsupportedFileTypeException = UnsupportedFileTypeException
+_exceptions_mod.QuotaExceededError = QuotaExceededError
 sys.modules['consts.exceptions'] = _exceptions_mod
 
 # Stub utils.file_management_utils (new import in data_process_service)
@@ -1773,7 +1798,7 @@ class TestDataProcessService(unittest.TestCase):
 
         self.assertEqual(result["task_ids"], ["task_id_1"])
         self.assertEqual(result["status"], "partial_success")
-        self.assertEqual(result["results"][0]["error_code"], "TASK_SUBMIT_FAILED")
+        self.assertEqual(result["results"][0]["error_code"], "000103")
         mock_submit_chain.assert_called_once()
         self.assertEqual(
             mock_submit_chain.call_args[1]['source'], 'http://example.com/doc2.pdf')
@@ -1819,7 +1844,7 @@ class TestDataProcessService(unittest.TestCase):
 
         self.assertEqual(result["task_ids"], ["task_id_1"])
         self.assertEqual(result["status"], "partial_success")
-        self.assertEqual(result["results"][0]["error_code"], "TASK_SUBMIT_FAILED")
+        self.assertEqual(result["results"][0]["error_code"], "000103")
         mock_submit_chain.assert_called_once()
         self.assertEqual(
             mock_submit_chain.call_args[1]['source'], 'http://example.com/doc2.pdf')
@@ -1998,7 +2023,7 @@ class TestDataProcessService(unittest.TestCase):
         self.assertEqual(result["task_ids"], ["task_id_2"])
         self.assertEqual(result["status"], "partial_success")
         self.assertEqual(result["results"][0]["file_id"], "fid-a")
-        self.assertEqual(result["results"][0]["error_code"], "TASK_SUBMIT_FAILED")
+        self.assertEqual(result["results"][0]["error_code"], "060108")
         self.assertEqual(result["results"][1]["task_id"], "task_id_2")
 
     def test_create_batch_tasks_impl_submission_exception(self):
@@ -2009,13 +2034,13 @@ class TestDataProcessService(unittest.TestCase):
     async def async_test_create_batch_tasks_impl_empty_task_id(self, mock_submit_chain):
         """An empty task id is reported as a durable per-file submission failure."""
         from consts.model import BatchTaskRequest
-        request = BatchTaskRequest(sources=[types.SimpleNamespace(
-            source="/tmp/a.txt",
-            source_type="local",
-            index_name="idx",
-            original_filename="a.txt",
-            file_id="fid-a",
-        )])
+        request = BatchTaskRequest(sources=[{
+            "source": "/tmp/a.txt",
+            "source_type": "local",
+            "index_name": "idx",
+            "original_filename": "a.txt",
+            "file_id": "fid-a",
+        }])
 
         result = await self.service.create_batch_tasks_impl("Bearer token", request)
 

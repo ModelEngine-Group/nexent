@@ -4,7 +4,6 @@ import React, { useMemo, useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Table,
-  Popconfirm,
   message,
   Button,
   Input,
@@ -28,6 +27,7 @@ import { MarkdownRenderer } from "@/components/common/markdownRenderer";
 import { useKnowledgeList } from "@/hooks/knowledge/useKnowledgeList";
 import { useGroupList } from "@/hooks/group/useGroupList";
 import { useAuthorization } from "@/hooks/auth/useAuthorization";
+import { useConfirmModal } from "@/hooks/useConfirmModal";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
 import quotaService from "@/services/quotaService";
 import { type KnowledgeBase } from "@/types/knowledgeBase";
@@ -62,6 +62,7 @@ export default function KnowledgeList({
 }: {
   tenantId: string | null;
 }) {
+  const { confirm } = useConfirmModal();
   const { t } = useTranslation("common");
   const [kbView, setKbView] = useState<"shared" | "personal">("shared");
   const { data, isLoading, refetch } = useKnowledgeList(tenantId);
@@ -531,22 +532,23 @@ export default function KnowledgeList({
                 size="small"
               />
             </Tooltip>
-            <Popconfirm
-              title={t("knowledgeBase.modal.deleteConfirm.title")}
-              description={t("common.cannotBeUndone")}
-              onConfirm={() => handleDelete(record.id)}
-              okText={t("common.confirm")}
-              cancelText={t("common.cancel")}
-            >
-              <Tooltip title={t("common.delete")}>
-                <Button
-                  type="text"
-                  danger
-                  icon={<Trash2 className="h-4 w-4" />}
-                  size="small"
-                />
-              </Tooltip>
-            </Popconfirm>
+            <Tooltip title={t("common.delete")}>
+              <Button
+                type="text"
+                danger
+                icon={<Trash2 className="h-4 w-4" />}
+                size="small"
+                onClick={() =>
+                  confirm({
+                    title: t("knowledgeBase.modal.deleteConfirm.title"),
+                    content: t("common.cannotBeUndone"),
+                    okText: t("common.confirm"),
+                    cancelText: t("common.cancel"),
+                    onOk: () => handleDelete(record.id),
+                  })
+                }
+              />
+            </Tooltip>
           </div>
         );
       },
