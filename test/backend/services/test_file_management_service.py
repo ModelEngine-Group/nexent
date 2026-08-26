@@ -568,20 +568,13 @@ class TestUploadFilesImpl:
 
         quota_module = types.ModuleType("services.quota_service")
         quota_module.QuotaService = FakeQuota
-        redis_module = types.ModuleType("services.redis_service")
-        redis_module.get_redis_service = MagicMock(
-            side_effect=RuntimeError("redis unavailable")
-        )
         with patch.object(knowledge_storage_stub, "resolve_storage_context", return_value=context), \
                 patch("backend.services.file_management_service.create_file_records", return_value=[record]) as create_records, \
                 patch("backend.services.file_management_service.transition_file_record", side_effect=transition) as transition_record, \
                 patch("backend.services.file_management_service.upload_to_minio", AsyncMock(return_value=[
                     {"success": True, "file_id": "fid-1", "file_name": "a.txt", "object_name": "folder/a.txt", "file_size": 3}
                 ])) as upload_mock, \
-                patch.dict(sys.modules, {
-                    "services.quota_service": quota_module,
-                    "services.redis_service": redis_module,
-                }):
+                patch.dict(sys.modules, {"services.quota_service": quota_module}):
             result = await upload_files_impl(
                 destination="minio", file=[mock_file], folder="folder", index_name="kb-1", user_id="user-1"
             )

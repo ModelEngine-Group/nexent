@@ -2456,12 +2456,9 @@ class TestElasticSearchService(unittest.TestCase):
         ElasticSearchService._mark_file_deleted("test_index", "knowledge_base/missing.txt")
         mock_delete.assert_not_called()
 
-    @patch('backend.services.vectordatabase_service.get_redis_service', side_effect=RuntimeError("redis unavailable"))
     @patch('backend.services.vectordatabase_service.delete_file_record', return_value=True)
     @patch('backend.services.vectordatabase_service.transition_file_record')
-    def test_delete_lifecycle_record_without_object_hard_deletes(
-        self, mock_transition, mock_delete, _mock_redis
-    ):
+    def test_delete_lifecycle_record_without_object_hard_deletes(self, mock_transition, mock_delete):
         mock_transition.return_value = {"file_id": "fid-no-object", "status": "DELETE_REQUESTED"}
 
         result = ElasticSearchService.delete_lifecycle_record_without_object(
@@ -2785,14 +2782,13 @@ class TestElasticSearchService(unittest.TestCase):
             updated_by=None,
         )
 
-    @patch('backend.services.vectordatabase_service.get_redis_service', side_effect=RuntimeError("redis unavailable"))
     @patch(
         'backend.services.vectordatabase_service.get_all_files_status',
         new_callable=AsyncMock,
     )
     @patch('backend.services.vectordatabase_service.delete_file')
     def test_delete_document_by_scope_source_only(
-        self, mock_delete_file, mock_get_status, _mock_redis
+        self, mock_delete_file, mock_get_status
     ):
         mock_get_status.return_value = {
             "knowledge_base/doc.pdf": {"state": "COMPLETED"}
@@ -2817,9 +2813,8 @@ class TestElasticSearchService(unittest.TestCase):
         'delete_documents',
         return_value={"status": "success", "deleted_minio": True},
     )
-    @patch('backend.services.vectordatabase_service.get_redis_service', side_effect=RuntimeError("redis unavailable"))
     def test_delete_document_by_scope_does_not_require_storage_ledger(
-        self, _mock_redis, mock_delete_documents
+        self, mock_delete_documents
     ):
         result = asyncio.run(
             ElasticSearchService.delete_document_by_scope(

@@ -519,38 +519,8 @@ def _is_forward_task_cancelled(ctx: _ForwardContext) -> bool:
         return False
 
 
-def _is_document_delete_requested(
-    index_name: Optional[str],
-    source: Optional[str],
-    file_id: Optional[str],
-) -> bool:
-    """Check the durable file-level deletion fence used by delete + sync."""
-    if not index_name:
-        return False
-    try:
-        return bool(
-            get_redis_service().is_document_delete_requested(
-                index_name=index_name,
-                path_or_url=source,
-                file_id=file_id,
-            )
-        )
-    except Exception as exc:
-        # Deletion fencing is best effort when Redis is unavailable. The task
-        # still follows the existing task-cancellation/lifecycle safeguards.
-        logger.warning(
-            "Failed to check document deletion fence for index=%s source=%s file_id=%s: %s",
-            index_name,
-            source,
-            file_id,
-            exc,
-        )
-        return False
-
-
 def _build_forward_cancelled_result(ctx: _ForwardContext) -> Dict[str, Any]:
     return {
-        'cancelled': True,
         'task_id': ctx.task_id,
         'source': ctx.source,
         'index_name': ctx.index_name,
@@ -1132,30 +1102,11 @@ def forward_part(
         batch_index: Optional[int] = None,
         total_batches: Optional[int] = None,
         large_mode: Optional[bool] = False,
-        file_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Forward sub-task that indexes a chunk batch.
     """
     try:
-        if _is_document_delete_requested(index_name, source, file_id):
-            logger.info(
-                "Skipping forward batch %s/%s because document was deleted: index=%s source=%s file_id=%s",
-                batch_index,
-                total_batches,
-                index_name,
-                source,
-                file_id,
-            )
-            return {
-                "success": True,
-                "total_indexed": 0,
-                "total_submitted": 0,
-                "batch_index": batch_index,
-                "total_batches": total_batches,
-                "cancelled": True,
-            }
-
         # Respect cancellation from parent task if available
         if parent_task_id:
             try:
@@ -1272,29 +1223,10 @@ def aggregate_forward_parts(
         source: Optional[str] = None,
         index_name: Optional[str] = None,
         original_filename: Optional[str] = None,
-        file_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Aggregate forward_part results.
     """
-    if _is_document_delete_requested(index_name, source, file_id):
-        logger.info(
-            "Skipping forward aggregate because document was deleted: index=%s source=%s file_id=%s",
-            index_name,
-            source,
-            file_id,
-        )
-        return {
-            "success": True,
-            "total_indexed": 0,
-            "total_submitted": 0,
-            "source": source,
-            "index_name": index_name,
-            "original_filename": original_filename,
-            "file_id": file_id,
-            "cancelled": True,
-        }
-
     total_indexed = 0
     total_submitted = 0
     for result in parts_results or []:
@@ -1631,21 +1563,6 @@ def process(
     start_time = time.time()
     task_id = self.request.id
     file_id = params.get("file_id")
-    if _is_document_delete_requested(index_name, source, file_id):
-        logger.info(
-            "Skipping process task because document was deleted: index=%s source=%s file_id=%s",
-            index_name,
-            source,
-            file_id,
-        )
-        return {
-            "cancelled": True,
-            "source": source,
-            "index_name": index_name,
-            "original_filename": original_filename,
-            "file_id": file_id,
-            "task_id": task_id,
-        }
     _update_file_lifecycle(
         file_id=file_id,
         tenant_id=tenant_id,
@@ -1705,22 +1622,6 @@ def process(
                 tenant_id=tenant_id,
                 params=params,
             )
-            if _is_document_delete_requested(index_name, source, file_id):
-                logger.info(
-                    "Stopping process task after source extraction because document was deleted: "
-                    "index=%s source=%s file_id=%s",
-                    index_name,
-                    source,
-                    file_id,
-                )
-                return {
-                    "cancelled": True,
-                    "source": source,
-                    "index_name": index_name,
-                    "original_filename": original_filename,
-                    "file_id": file_id,
-                    "task_id": task_id,
-                }
             elapsed_time = time.time() - start_time
             processing_speed = file_size_mb / \
                 elapsed_time if file_size_mb > 0 and elapsed_time > 0 else 0
@@ -1760,23 +1661,6 @@ def process(
             # For other source types, implement accordingly
             raise NotImplementedError(
                 f"Source type '{source_type}' not yet supported")
-
-        if _is_document_delete_requested(index_name, source, file_id):
-            logger.info(
-                "Stopping process task after extraction because document was deleted: "
-                "index=%s source=%s file_id=%s",
-                index_name,
-                source,
-                file_id,
-            )
-            return {
-                "cancelled": True,
-                "source": source,
-                "index_name": index_name,
-                "original_filename": original_filename,
-                "file_id": file_id,
-                "task_id": task_id,
-            }
 
         if split_async:
             chunk_count = split_chunk_count or 0
@@ -2054,13 +1938,6 @@ def forward(
             )
             return _build_forward_cancelled_result(ctx)
 
-        if _is_document_delete_requested(index_name, source, file_id):
-            logger.info(
-                f"[{self.request.id}] FORWARD TASK: Document deletion fence is set; "
-                f"skipping chunk forwarding for source '{source}' in index '{index_name}'."
-            )
-            return _build_forward_cancelled_result(ctx)
-
         chunks, split_async, original_source, original_index_name, filename = _load_forward_chunks(
             self,
             processed_data=processed_data,
@@ -2068,13 +1945,6 @@ def forward(
             original_index_name=original_index_name,
             filename=filename,
         )
-
-        if _is_document_delete_requested(original_index_name, original_source, file_id):
-            logger.info(
-                f"[{self.request.id}] FORWARD TASK: Document was deleted while loading chunks; "
-                f"skipping ES indexing for source '{original_source}'."
-            )
-            return _build_forward_cancelled_result(ctx)
 
         # Calculate total chunks for progress tracking
         total_chunks = len(chunks) if chunks else 0
@@ -2140,15 +2010,6 @@ def forward(
             }
         )
 
-        # Re-check immediately before the first ES write. A delete may race
-        # with formatting or progress initialization after the earlier check.
-        if _is_document_delete_requested(original_index_name, original_source, file_id):
-            logger.info(
-                f"[{self.request.id}] FORWARD TASK: Document was deleted before ES indexing; "
-                f"skipping source '{original_source}'."
-            )
-            return _build_forward_cancelled_result(ctx)
-
         try:
             redis_service = get_redis_service()
             redis_service.save_progress_info(task_id, 0, total_chunks)
@@ -2198,7 +2059,6 @@ def forward(
                     parent_total_chunks=total_chunks,
                     source=original_source,
                     original_filename=original_filename,
-                    file_id=file_id,
                     batch_index=idx + 1,
                     total_batches=total_batches,
                     # If request was split into multiple groups, force all groups to use large path.
@@ -2209,7 +2069,6 @@ def forward(
                 source=original_source,
                 index_name=original_index_name,
                 original_filename=original_filename,
-                file_id=file_id,
             ).set(queue='forward_aggregate_q')
             result = chord(group_tasks)(callback)
             with allow_join_result():
@@ -2421,12 +2280,6 @@ def cleanup_source(
         "response": None,
         "error": None,
     }
-
-    if (forward_result or {}).get("cancelled"):
-        cleanup_info["skipped_reason"] = "forward_cancelled"
-        forward_result = dict(forward_result or {})
-        forward_result["source_cleanup"] = cleanup_info
-        return forward_result
 
     if not index_name or not source:
         cleanup_info["skipped_reason"] = "missing_index_name_or_source"

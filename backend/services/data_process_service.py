@@ -27,7 +27,6 @@ from data_process.app import app as celery_app
 from data_process.tasks import submit_process_forward_chain
 from data_process.utils import get_all_task_ids_from_redis, get_task_info
 from database.attachment_db import delete_file, file_exists, get_file_size_from_minio, get_file_stream, upload_file
-from services.redis_service import get_redis_service
 from utils.file_management_utils import convert_office_to_pdf
 from utils.knowledge_ingestion_errors import classify_ingestion_exception
 
@@ -147,14 +146,6 @@ class DataProcessService:
         all_tasks = []
         try:
             self._get_celery_inspector()
-            delete_fence_service = None
-            try:
-                delete_fence_service = get_redis_service()
-            except Exception as redis_init_exc:
-                logger.debug(
-                    "Deletion-fence filtering unavailable while listing tasks: %s",
-                    redis_init_exc,
-                )
 
             # Collect task IDs from different sources and keep runtime metadata
             task_ids = set()
@@ -272,31 +263,6 @@ class DataProcessService:
                             'original_filename')
                     if not task_info.get('file_id') and runtime_meta.get('file_id'):
                         task_info['file_id'] = runtime_meta.get('file_id')
-
-                # A task can remain in Celery's result backend or broker after
-                # the file row and external document were deleted. Hide it
-                # from the user-visible task/file list; the worker-side fence
-                # also prevents a late task from recreating the document.
-                if delete_fence_service:
-                    try:
-                        document_deleted = delete_fence_service.is_document_delete_requested(
-                            index_name=task_info.get('index_name'),
-                            path_or_url=task_info.get('path_or_url'),
-                            file_id=task_info.get('file_id'),
-                        )
-                    except Exception as fence_exc:
-                        logger.debug(
-                            "Unable to check deletion fence for task %s: %s",
-                            task_id,
-                            fence_exc,
-                        )
-                        document_deleted = False
-                    if document_deleted:
-                        logger.info(
-                            "Skipping task %s because its document deletion fence is set",
-                            task_id,
-                        )
-                        continue
 
                 if filter and not (task_info.get('index_name') and task_info.get('task_name')):
                     # Keep user-visible queued tasks even before worker updates task meta.

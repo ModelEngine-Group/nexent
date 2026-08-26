@@ -450,25 +450,6 @@ async def upload_files_impl(
                 })
 
             if lifecycle_record_specs:
-                # A new upload may reuse an object path after a previous
-                # delete. Clear the old deletion fence before workers see the
-                # new lifecycle row; the file-id fence remains unique to the
-                # old record.
-                try:
-                    from services.redis_service import get_redis_service
-
-                    redis_service = get_redis_service()
-                    for spec in lifecycle_record_specs:
-                        redis_service.clear_document_delete_marker(
-                            index_name=spec["index_name"],
-                            path_or_url=spec["object_name"],
-                        )
-                except Exception as deletion_fence_exc:
-                    logger.warning(
-                        "Failed to clear an old document deletion fence before upload: %s",
-                        deletion_fence_exc,
-                    )
-
                 # Lifecycle persistence is a required upload precondition. The
                 # repository creates the whole batch in one transaction; any
                 # database error must stop before MinIO is touched.
