@@ -21,7 +21,10 @@ import {
 } from "../../agents/components/agentConfig/tool/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { useNl2AgentFlow } from "@/contexts/nl2AgentFlow";
+import {
+  useNl2AgentFlow,
+  type Nl2AgentConfigFocusTarget,
+} from "@/contexts/nl2AgentFlow";
 import { useToolList } from "@/hooks/agent/useToolList";
 import { isManagedKnowledgeTool } from "@/lib/managedKnowledgeTools";
 import {
@@ -91,6 +94,45 @@ const parseResourceId = (ref: string, expected: "tool" | "skill"): number => {
     throw new Error(`Invalid ${expected} candidate reference`);
   }
   return resourceId;
+};
+
+const findBindingTool = (item: BindingItemState, tools: Tool[]) =>
+  findCanonicalTool(tools, parseResourceId(candidateRef(item), "tool"));
+
+const isManagedKnowledgeBinding = (
+  item: BindingItemState,
+  tools: Tool[]
+): boolean => {
+  if (item.resource.candidate.resource_type !== "tool") return false;
+  const tool = findBindingTool(item, tools);
+  return tool ? isManagedKnowledgeTool(tool) : false;
+};
+
+const isVisibleBinding = (item: BindingItemState, tools: Tool[]): boolean => {
+  if (item.resource.candidate.resource_type === "skill") return true;
+  return findBindingTool(item, tools)?.is_user_selectable !== false;
+};
+
+const resolveBindingFocusTarget = (
+  boundItems: BindingItemState[],
+  tools: Tool[]
+): Nl2AgentConfigFocusTarget | null => {
+  if (boundItems.every((item) => isManagedKnowledgeBinding(item, tools))) {
+    return { section: "knowledge_base" };
+  }
+
+  const visibleBoundItems = boundItems.filter((item) =>
+    isVisibleBinding(item, tools)
+  );
+  if (!visibleBoundItems.length) return null;
+  return {
+    section: "tools_skills",
+    capabilityTab: visibleBoundItems.some(
+      (item) => item.resource.candidate.resource_type === "tool"
+    )
+      ? "tools"
+      : "skills",
+  };
 };
 
 const initializeItems = (
@@ -509,55 +551,30 @@ export const InstalledResourceBindingCard: FC<{
       }
     });
 
-    if (boundItems.length) {
-      const persistedBindings = toPersistedBindings(
-        boundItems,
-        queryClient.getQueryData<Tool[]>(["tools"]) ?? [],
-        queryClient.getQueryData<Skill[]>(["skills"]) ?? []
-      );
-      const applied = applyPersistedResourceBindings(
-        payload.agent_id,
-        persistedBindings
-      );
-      const synchronized =
-        applied &&
-        (await reloadAgentSnapshot([
-          ...items.filter((item) => item.bindingStatus === "bound"),
-          ...boundItems,
-        ]));
-      if (!synchronized) {
-        showSynchronizationError();
-      } else {
-        const onlyManagedKnowledgeTools = boundItems.every((item) => {
-          if (item.resource.candidate.resource_type !== "tool") return false;
-          const toolId = parseResourceId(candidateRef(item), "tool");
-          const canonicalTool = findCanonicalTool(availableTools, toolId);
-          return canonicalTool ? isManagedKnowledgeTool(canonicalTool) : false;
-        });
-        const visibleBoundItems = boundItems.filter((item) => {
-          if (item.resource.candidate.resource_type === "skill") return true;
-          const toolId = parseResourceId(candidateRef(item), "tool");
-          return (
-            findCanonicalTool(availableTools, toolId)?.is_user_selectable !==
-            false
-          );
-        });
-        if (onlyManagedKnowledgeTools) {
-          requestConfigFocus(payload.agent_id, {
-            section: "knowledge_base",
-          });
-        } else if (visibleBoundItems.length) {
-          requestConfigFocus(payload.agent_id, {
-            section: "tools_skills",
-            capabilityTab: visibleBoundItems.some(
-              (item) => item.resource.candidate.resource_type === "tool"
-            )
-              ? "tools"
-              : "skills",
-          });
-        }
-      }
+    if (!boundItems.length) return;
+
+    const persistedBindings = toPersistedBindings(
+      boundItems,
+      queryClient.getQueryData<Tool[]>(["tools"]) ?? [],
+      queryClient.getQueryData<Skill[]>(["skills"]) ?? []
+    );
+    const applied = applyPersistedResourceBindings(
+      payload.agent_id,
+      persistedBindings
+    );
+    const synchronized =
+      applied &&
+      (await reloadAgentSnapshot([
+        ...items.filter((item) => item.bindingStatus === "bound"),
+        ...boundItems,
+      ]));
+    if (!synchronized) {
+      showSynchronizationError();
+      return;
     }
+
+    const focusTarget = resolveBindingFocusTarget(boundItems, availableTools);
+    if (focusTarget) requestConfigFocus(payload.agent_id, focusTarget);
   };
 
   const continueFlow = async () => {
