@@ -756,5 +756,10 @@ STREAMABLE_CONTENT_TYPES = frozenset([
     "execution_logs",
 ])
 
+# LLM Model Configuration
+LLM_INCLUDE_LOGPROBS = os.getenv("LLM_INCLUDE_LOGPROBS", "false").lower() == "true"
+"""When True, adds logprobs=true to every chat.completions.create request body,
+enabling the provider to return log probability information in the response."""
+
 # SSE streaming event type for status messages
 STREAM_STATUS_EVENT = "event: stream_status\n"

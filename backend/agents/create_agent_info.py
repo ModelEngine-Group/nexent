@@ -74,6 +74,7 @@ from consts.const import (
     AIDP_TENANT_ID,
     DATA_PROCESS_SERVICE,
     LANGUAGE,
+    LLM_INCLUDE_LOGPROBS,
     LOCAL_MCP_SERVER,
     MINIO_DEFAULT_BUCKET,
     MODEL_CONFIG_MAPPING,
@@ -856,6 +857,7 @@ def _get_skill_script_tools(
 async def create_model_config_list(tenant_id):
     records = get_model_records({"model_type": "llm"}, tenant_id)
     model_list = []
+    extra_body = {"logprobs": True} if LLM_INCLUDE_LOGPROBS else None
     for record in records:
         model_list.append(
             ModelConfig(cite_name=record["display_name"],
@@ -880,7 +882,8 @@ async def create_model_config_list(tenant_id):
                         default_output_reserve_tokens=record.get("default_output_reserve_tokens"),
                         tokenizer_family=record.get("tokenizer_family"),
                         capacity_source=record.get("capacity_source"),
-                        capability_profile_version=record.get("capability_profile_version")))
+                        capability_profile_version=record.get("capability_profile_version"),
+                        extra_body=extra_body))
     # fit for old version, main_model and sub_model use default model
     main_model_config = tenant_config_manager.get_model_config(
         key=MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id)
@@ -896,7 +899,8 @@ async def create_model_config_list(tenant_id):
                     model_factory=main_model_config.get("model_factory"),
                     timeout_seconds=main_model_config.get("timeout_seconds"),
                     concurrency_limit=main_model_config.get("concurrency_limit"),
-                    prompt_cache=main_prompt_cache))
+                    prompt_cache=main_prompt_cache,
+                    extra_body=extra_body))
     model_list.append(
         ModelConfig(cite_name="sub_model",
                     api_key=main_model_config.get("api_key", ""),
@@ -907,7 +911,8 @@ async def create_model_config_list(tenant_id):
                     model_factory=main_model_config.get("model_factory"),
                     timeout_seconds=main_model_config.get("timeout_seconds"),
                     concurrency_limit=main_model_config.get("concurrency_limit"),
-                    prompt_cache=main_prompt_cache))
+                    prompt_cache=main_prompt_cache,
+                    extra_body=extra_body))
 
     return model_list
 
