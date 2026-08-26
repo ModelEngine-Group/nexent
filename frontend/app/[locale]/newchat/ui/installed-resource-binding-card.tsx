@@ -23,6 +23,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useNl2AgentFlow } from "@/contexts/nl2AgentFlow";
 import { useToolList } from "@/hooks/agent/useToolList";
+import { isManagedKnowledgeTool } from "@/lib/managedKnowledgeTools";
 import {
   searchAgentInfo,
   searchToolConfig,
@@ -527,6 +528,12 @@ export const InstalledResourceBindingCard: FC<{
       if (!synchronized) {
         showSynchronizationError();
       } else {
+        const onlyManagedKnowledgeTools = boundItems.every((item) => {
+          if (item.resource.candidate.resource_type !== "tool") return false;
+          const toolId = parseResourceId(candidateRef(item), "tool");
+          const canonicalTool = findCanonicalTool(availableTools, toolId);
+          return canonicalTool ? isManagedKnowledgeTool(canonicalTool) : false;
+        });
         const visibleBoundItems = boundItems.filter((item) => {
           if (item.resource.candidate.resource_type === "skill") return true;
           const toolId = parseResourceId(candidateRef(item), "tool");
@@ -535,7 +542,11 @@ export const InstalledResourceBindingCard: FC<{
             false
           );
         });
-        if (visibleBoundItems.length) {
+        if (onlyManagedKnowledgeTools) {
+          requestConfigFocus(payload.agent_id, {
+            section: "knowledge_base",
+          });
+        } else if (visibleBoundItems.length) {
           requestConfigFocus(payload.agent_id, {
             section: "tools_skills",
             capabilityTab: visibleBoundItems.some(
