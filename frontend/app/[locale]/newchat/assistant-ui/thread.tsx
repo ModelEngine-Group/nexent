@@ -1214,8 +1214,20 @@ const AssistantMessage: FC<{
             ).metadata;
             const subagentId = meta?.subagentId;
             const runId = meta?.runId;
-            const chainPath: `group-${string}`[] =
-              part.type === "reasoning"
+            const isImagePart =
+              (part.type === "image" &&
+                Boolean((part as { image?: string }).image)) ||
+              (part.type === "text" &&
+                Boolean(
+                  (part as {
+                    isSearchImage?: boolean;
+                    imageSource?: SourcePartLike;
+                  }).isSearchImage &&
+                    (part as { imageSource?: SourcePartLike }).imageSource
+                ));
+            const chainPath: `group-${string}`[] = isImagePart
+              ? ["group-image"]
+              : part.type === "reasoning"
                 ? ["group-chainOfThought", "group-reasoning"]
                 : part.type === "tool-call"
                   ? ["group-chainOfThought", "group-tool"]
@@ -1269,6 +1281,12 @@ const AssistantMessage: FC<{
             }
 
             switch (part.type) {
+              case "group-image":
+                return (
+                  <div className="grid grid-cols-1 gap-3 py-2 sm:grid-cols-3">
+                    {children}
+                  </div>
+                );
               case "group-chainOfThought":
                 return <div data-slot="aui_chain-of-thought">{children}</div>;
               case "group-tool":
@@ -1616,7 +1634,7 @@ const GlobalSearchImage: FC<{ source: SourcePartLike }> = ({ source }) => {
     source.title && source.title !== imageUrl ? source.title : undefined;
   return (
     <figure
-      className="aui-global-search-image w-full max-w-xl overflow-hidden rounded-md border bg-muted/30"
+      className="aui-global-search-image min-w-0 overflow-hidden rounded-md border bg-muted/30"
       title={imageUrl}
     >
       <AuthenticatedImage
@@ -1625,7 +1643,7 @@ const GlobalSearchImage: FC<{ source: SourcePartLike }> = ({ source }) => {
         loading="lazy"
         preview
         proxy
-        className="max-h-[28rem] w-full bg-muted/50 object-contain"
+        className="aspect-[4/3] max-h-56 w-full bg-muted/50 object-cover"
       />
       {displayTitle || source.text ? (
         <figcaption className="border-t bg-card px-3 py-2">
