@@ -3074,7 +3074,8 @@ def test_process_returns_cancelled_when_deleted_after_local_extraction(monkeypat
 
 def test_process_returns_cancelled_when_deleted_after_minio_extraction(monkeypatch):
     tasks, _ = import_tasks_with_fake_ray(monkeypatch)
-    checks = iter([False, False, True])
+    # The MinIO path performs the initial and post-extraction checks only.
+    checks = iter([False, True])
     monkeypatch.setattr(tasks, "_is_document_delete_requested", lambda *args, **kwargs: next(checks))
     monkeypatch.setattr(tasks, "_update_file_lifecycle", lambda **kwargs: None)
     monkeypatch.setattr(tasks, "_fetch_minio_source", lambda source: b"content")

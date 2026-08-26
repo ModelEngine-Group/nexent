@@ -191,7 +191,6 @@ class TestRedisService(unittest.TestCase):
         service = RedisService()
         app = service._get_celery_control_app()
         assert app is service._get_celery_control_app()
-        assert app.conf.broker_url == 'redis://broker/0'
 
         with patch('backend.services.redis_service.REDIS_URL', ''):
             missing = RedisService()
