@@ -623,6 +623,15 @@ class OpenAIModel(OpenAIServerModel):
                     caller_value=caller_max_tokens,
                 )
             completion_kwargs["max_tokens"] = trusted_max_tokens
+        logger.info(
+            "event=chat_completion_create model_id=%s kwargs=%s",
+            self.model_id,
+            json.dumps(
+                {k: v for k, v in completion_kwargs.items() if k != "messages"},
+                ensure_ascii=False,
+                default=str,
+            ),
+        )
         return self.client.chat.completions.create(**completion_kwargs)
 
     @staticmethod
