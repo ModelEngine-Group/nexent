@@ -2629,6 +2629,43 @@ class TestDataProcessService(unittest.TestCase):
 
         asyncio.run(_run())
 
+    @patch('backend.services.data_process_service.get_redis_service')
+    @patch('backend.services.data_process_service.celery_app')
+    @patch('backend.services.data_process_service.get_all_task_ids_from_redis', return_value=['deleted-task'])
+    @patch('backend.services.data_process_service.get_task_info')
+    def test_get_all_tasks_hides_tasks_for_deleted_documents(
+        self, mock_get_task_info, _mock_ids, mock_celery_app, mock_get_redis_service
+    ):
+        mock_inspector = MagicMock()
+        mock_inspector.active.return_value = {}
+        mock_inspector.reserved.return_value = {}
+        mock_celery_app.control.inspect.return_value = mock_inspector
+        mock_celery_app.conf.broker_url = "redis://mock:6379/0"
+        mock_celery_app.conf.result_backend = "redis://mock:6379/0"
+
+        async def _task_info(task_id):
+            return {
+                "id": task_id,
+                "task_name": "forward",
+                "index_name": "idx",
+                "path_or_url": "knowledge_base/deleted.txt",
+                "file_id": "file-deleted",
+            }
+
+        mock_get_task_info.side_effect = _task_info
+        fence_service = MagicMock()
+        fence_service.is_document_delete_requested.return_value = True
+        mock_get_redis_service.return_value = fence_service
+
+        rows = asyncio.run(self.service.get_all_tasks(filter=False))
+
+        self.assertEqual(rows, [])
+        fence_service.is_document_delete_requested.assert_called_once_with(
+            index_name="idx",
+            path_or_url="knowledge_base/deleted.txt",
+            file_id="file-deleted",
+        )
+
 
     # ---- Additional coverage tests ----
 

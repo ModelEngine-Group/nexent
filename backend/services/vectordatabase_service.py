@@ -2209,6 +2209,19 @@ class ElasticSearchService:
 
         tenant_id = lifecycle_record.get("tenant_id")
         index_name = lifecycle_record.get("index_name")
+        if index_name:
+            try:
+                get_redis_service().prepare_document_deletion(
+                    index_name=index_name,
+                    path_or_url=None,
+                    file_id=file_id,
+                )
+            except Exception as deletion_exc:
+                logger.warning(
+                    "Failed to prepare deletion for lifecycle file %s: %s",
+                    file_id,
+                    deletion_exc,
+                )
         current_status = str(lifecycle_record.get("status") or "").upper()
         deleteable_statuses = (
             "UPLOADING",
@@ -2294,7 +2307,22 @@ class ElasticSearchService:
             await ElasticSearchService._assert_source_only_deletable(
                 index_name, path_or_url
             )
-            ElasticSearchService._mark_file_delete_requested(index_name, path_or_url)
+            lifecycle_record = ElasticSearchService._mark_file_delete_requested(
+                index_name, path_or_url
+            )
+            try:
+                get_redis_service().prepare_document_deletion(
+                    index_name=index_name,
+                    path_or_url=path_or_url,
+                    file_id=(lifecycle_record or {}).get("file_id"),
+                )
+            except Exception as deletion_exc:
+                logger.warning(
+                    "Failed to prepare source-only deletion for index=%s path=%s: %s",
+                    index_name,
+                    path_or_url,
+                    deletion_exc,
+                )
             try:
                 knowledge = get_knowledge_record({"index_name": index_name}) or {}
             except Exception:
@@ -2322,7 +2350,22 @@ class ElasticSearchService:
                 ),
             }
 
-        ElasticSearchService._mark_file_delete_requested(index_name, path_or_url)
+        lifecycle_record = ElasticSearchService._mark_file_delete_requested(
+            index_name, path_or_url
+        )
+        try:
+            get_redis_service().prepare_document_deletion(
+                index_name=index_name,
+                path_or_url=path_or_url,
+                file_id=(lifecycle_record or {}).get("file_id"),
+            )
+        except Exception as deletion_exc:
+            logger.warning(
+                "Failed to prepare full deletion for index=%s path=%s: %s",
+                index_name,
+                path_or_url,
+                deletion_exc,
+            )
         result = ElasticSearchService.delete_documents(
             index_name, path_or_url, vdb_core
         )

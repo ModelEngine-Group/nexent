@@ -143,6 +143,62 @@ class TestRedisService(unittest.TestCase):
         mock_client.setex.assert_called_once()
         mock_client.get.assert_called_once()
 
+    @patch('backend.services.redis_service.REDIS_URL', 'redis://localhost:6379/0')
+    def test_document_delete_fence_can_be_set_checked_and_cleared(self):
+        mock_client = MagicMock()
+        mock_client.get.side_effect = [b'{"deleted": true}', None]
+        mock_client.delete.return_value = 1
+        service = RedisService()
+        service._client = mock_client
+
+        self.assertTrue(service.mark_document_delete_requested(
+            "idx", "knowledge_base/a.txt", file_id="file-1", ttl_seconds=60
+        ))
+        self.assertTrue(service.is_document_delete_requested(
+            "idx", "knowledge_base/a.txt", file_id="file-1"
+        ))
+        self.assertEqual(service.clear_document_delete_marker(
+            "idx", "knowledge_base/a.txt", file_id="file-1"
+        ), 1)
+        self.assertEqual(mock_client.setex.call_count, 2)
+        mock_client.delete.assert_called_once()
+
+    def test_prepare_document_deletion_marks_and_revokes_runtime_tasks(self):
+        service = RedisService()
+        service.mark_document_delete_requested = MagicMock(return_value=True)
+        service._collect_runtime_task_ids = MagicMock(return_value={"task-1", "task-2"})
+        service.mark_task_cancelled = MagicMock(return_value=True)
+        service._revoke_task = MagicMock(return_value=True)
+
+        result = service.prepare_document_deletion(
+            "idx", "knowledge_base/a.txt", file_id="file-1"
+        )
+
+        self.assertTrue(result["delete_fence_set"])
+        self.assertEqual(result["runtime_tasks_found"], 2)
+        self.assertEqual(result["tasks_cancelled"], 2)
+        self.assertEqual(result["tasks_revoked"], 2)
+        self.assertEqual(service.mark_task_cancelled.call_count, 2)
+        self.assertEqual(service._revoke_task.call_count, 2)
+
+    def test_runtime_task_matches_document_by_file_id_or_path(self):
+        task = {
+            "kwargs": json.dumps({
+                "index_name": "idx",
+                "source": "knowledge_base/a.txt",
+                "file_id": "file-1",
+            })
+        }
+        self.assertTrue(RedisService._runtime_task_matches_document(
+            task, "idx", "different-path", "file-1"
+        ))
+        self.assertTrue(RedisService._runtime_task_matches_document(
+            task, "idx", "knowledge_base/a.txt", None
+        ))
+        self.assertFalse(RedisService._runtime_task_matches_document(
+            task, "idx", "knowledge_base/a.txt", "file-2"
+        ))
+
     def test_delete_knowledgebase_records(self):
         """Test delete_knowledgebase_records method"""
         # Setup

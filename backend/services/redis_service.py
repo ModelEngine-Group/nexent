@@ -1,6 +1,8 @@
+import hashlib
 import json
 import logging
 import re
+import time
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 import redis
@@ -19,9 +21,12 @@ logger = logging.getLogger(__name__)
 class RedisService:
     """Redis service for managing cache and task data"""
 
+    DOCUMENT_DELETE_MARKER_TTL_SECONDS = 24 * 60 * 60
+
     def __init__(self):
         self._client = None
         self._backend_client = None
+        self._celery_control_app = None
 
     @property
     def client(self) -> redis.Redis:
@@ -50,6 +55,231 @@ class RedisService:
     # ------------------------------------------------------------------
     # Cancellation helpers
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _document_delete_marker_keys(
+        index_name: Optional[str] = None,
+        path_or_url: Optional[str] = None,
+        file_id: Optional[str] = None,
+    ) -> List[str]:
+        """Return stable Redis keys for a file deletion fence."""
+        keys = []
+        if file_id:
+            keys.append(f"kb-delete:file:{file_id}")
+        if index_name and path_or_url:
+            identity = f"{index_name}\0{path_or_url}".encode("utf-8")
+            digest = hashlib.sha256(identity).hexdigest()
+            keys.append(f"kb-delete:path:{digest}")
+        return keys
+
+    def mark_document_delete_requested(
+        self,
+        index_name: str,
+        path_or_url: Optional[str] = None,
+        file_id: Optional[str] = None,
+        ttl_seconds: Optional[int] = None,
+    ) -> bool:
+        """Write a short-lived file-level deletion fence.
+
+        The fence is deliberately separate from per-task cancellation keys. It
+        survives result/cache cleanup so queued broker messages cannot recreate
+        a document after its lifecycle row has been hard deleted.
+        """
+        keys = self._document_delete_marker_keys(index_name, path_or_url, file_id)
+        if not keys:
+            return False
+        ttl = int(ttl_seconds or self.DOCUMENT_DELETE_MARKER_TTL_SECONDS)
+        if ttl <= 0:
+            return False
+        payload = json.dumps({
+            "index_name": index_name,
+            "path_or_url": path_or_url,
+            "file_id": file_id,
+            "requested_at": time.time(),
+        }, ensure_ascii=False)
+        try:
+            for key in keys:
+                self.client.setex(key, ttl, payload)
+            logger.info(
+                "Marked document deletion fence: index=%s path=%s file_id=%s ttl=%ss",
+                index_name,
+                path_or_url,
+                file_id,
+                ttl,
+            )
+            return True
+        except Exception as exc:
+            logger.warning(
+                "Failed to mark document deletion fence for index=%s path=%s file_id=%s: %s",
+                index_name,
+                path_or_url,
+                file_id,
+                exc,
+            )
+            return False
+
+    def clear_document_delete_marker(
+        self,
+        index_name: str,
+        path_or_url: Optional[str] = None,
+        file_id: Optional[str] = None,
+    ) -> int:
+        """Clear a path/file deletion fence before a new upload reuses it."""
+        keys = self._document_delete_marker_keys(index_name, path_or_url, file_id)
+        if not keys:
+            return 0
+        try:
+            return int(self.client.delete(*keys))
+        except Exception as exc:
+            logger.warning(
+                "Failed to clear document deletion fence for index=%s path=%s file_id=%s: %s",
+                index_name,
+                path_or_url,
+                file_id,
+                exc,
+            )
+            return 0
+
+    def is_document_delete_requested(
+        self,
+        index_name: Optional[str],
+        path_or_url: Optional[str] = None,
+        file_id: Optional[str] = None,
+    ) -> bool:
+        """Return whether a file is fenced from further processing."""
+        keys = self._document_delete_marker_keys(index_name, path_or_url, file_id)
+        if not keys:
+            return False
+        try:
+            return any(bool(self.client.get(key)) for key in keys)
+        except Exception as exc:
+            # A Redis outage must preserve the legacy best-effort behavior.
+            logger.debug(
+                "Unable to check document deletion fence for index=%s path=%s file_id=%s: %s",
+                index_name,
+                path_or_url,
+                file_id,
+                exc,
+            )
+            return False
+
+    def _get_celery_control_app(self):
+        """Create a lightweight Celery control app without importing task modules."""
+        if self._celery_control_app is None:
+            from celery import Celery
+
+            broker_url = REDIS_URL
+            backend_url = REDIS_BACKEND_URL or REDIS_URL
+            if not broker_url:
+                raise ValueError("REDIS_URL is not configured")
+            self._celery_control_app = Celery(
+                "nexent-delete-control",
+                broker=broker_url,
+                backend=backend_url,
+            )
+        return self._celery_control_app
+
+    @staticmethod
+    def _task_kwargs(task: Dict[str, Any]) -> Dict[str, Any]:
+        kwargs = task.get("kwargs") or {}
+        if isinstance(kwargs, str):
+            try:
+                kwargs = json.loads(kwargs)
+            except (TypeError, json.JSONDecodeError):
+                kwargs = {}
+        return kwargs if isinstance(kwargs, dict) else {}
+
+    @classmethod
+    def _runtime_task_matches_document(
+        cls,
+        task: Dict[str, Any],
+        index_name: str,
+        path_or_url: Optional[str],
+        file_id: Optional[str],
+    ) -> bool:
+        kwargs = cls._task_kwargs(task)
+        task_index = kwargs.get("index_name")
+        task_source = kwargs.get("source") or kwargs.get("path_or_url")
+        task_file_id = kwargs.get("file_id")
+        if file_id and task_file_id and task_file_id != file_id:
+            return False
+        if task_index != index_name:
+            return False
+        if file_id and task_file_id == file_id:
+            return True
+        return bool(path_or_url and task_source == path_or_url)
+
+    def _collect_runtime_task_ids(
+        self,
+        index_name: str,
+        path_or_url: Optional[str],
+        file_id: Optional[str] = None,
+    ) -> Set[str]:
+        """Collect matching active/reserved task IDs for targeted revocation."""
+        task_ids: Set[str] = set()
+        try:
+            inspector = self._get_celery_control_app().control.inspect(timeout=0.5)
+            for state_name in ("active", "reserved"):
+                snapshot = getattr(inspector, state_name)() or {}
+                for tasks in snapshot.values():
+                    for task in tasks or []:
+                        if not isinstance(task, dict):
+                            continue
+                        task_id = task.get("id")
+                        if task_id and self._runtime_task_matches_document(
+                            task, index_name, path_or_url, file_id
+                        ):
+                            task_ids.add(str(task_id))
+        except Exception as exc:
+            logger.warning(
+                "Failed to inspect runtime tasks for index=%s path=%s file_id=%s: %s",
+                index_name,
+                path_or_url,
+                file_id,
+                exc,
+            )
+        return task_ids
+
+    def _revoke_task(self, task_id: str) -> bool:
+        if not task_id:
+            return False
+        try:
+            self._get_celery_control_app().control.revoke(
+                task_id,
+                terminate=False,
+            )
+            logger.info("Revoked Celery task %s", task_id)
+            return True
+        except Exception as exc:
+            logger.warning("Failed to revoke Celery task %s: %s", task_id, exc)
+            return False
+
+    def prepare_document_deletion(
+        self,
+        index_name: str,
+        path_or_url: Optional[str] = None,
+        file_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Fence a file and revoke discoverable runtime tasks before storage deletion."""
+        result = {
+            "delete_fence_set": self.mark_document_delete_requested(
+                index_name=index_name,
+                path_or_url=path_or_url,
+                file_id=file_id,
+            ),
+            "runtime_tasks_found": 0,
+            "tasks_cancelled": 0,
+            "tasks_revoked": 0,
+            "warnings": [],
+        }
+        task_ids = self._collect_runtime_task_ids(index_name, path_or_url, file_id)
+        result["runtime_tasks_found"] = len(task_ids)
+        for task_id in task_ids:
+            if self.mark_task_cancelled(task_id):
+                result["tasks_cancelled"] += 1
+            if self._revoke_task(task_id):
+                result["tasks_revoked"] += 1
+        return result
 
     def mark_task_cancelled(self, task_id: str, ttl_hours: int = 24) -> bool:
         """
