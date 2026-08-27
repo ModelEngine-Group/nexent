@@ -33,12 +33,14 @@ export interface Nl2AgentChatPanelProps {
   agentId?: number | null;
   disabled?: boolean;
   onStateEvent?: (event: Nl2AgentStateEvent) => void;
+  onStopped?: (agentId: number) => void;
 }
 
 export const Nl2AgentChatPanel: FC<Nl2AgentChatPanelProps> = ({
   agentId = null,
   disabled = false,
   onStateEvent,
+  onStopped,
 }) => {
   const { t } = useTranslation("common");
   const { modelConfig } = useConfig();
@@ -60,12 +62,13 @@ export const Nl2AgentChatPanel: FC<Nl2AgentChatPanelProps> = ({
               runtimeMode: "nl2agent",
               agentId,
               onNl2AgentState: onStateEvent,
+              onNl2AgentStopped: onStopped,
             },
           },
         });
       },
     }),
-    [agentId, onStateEvent]
+    [agentId, onStateEvent, onStopped]
   );
   const runtime = useLocalRuntime(chatModelAdapter, { adapters });
 

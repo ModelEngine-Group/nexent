@@ -62,6 +62,7 @@ type Nl2AgentFlowAction =
   | { type: "submit_card"; cardKey: string }
   | { type: "resources_bound"; agentId: number }
   | { type: "prompt_generation_failed"; agentId: number; fields: string[] }
+  | { type: "generation_stopped"; agentId: number }
   | {
       type: "request_config_focus";
       agentId: number;
@@ -141,6 +142,18 @@ function reducer(
         completionSyncFailed: false,
         isFormLocked: true,
       };
+    case "generation_stopped":
+      if (state.agentId !== action.agentId) return state;
+      return {
+        ...state,
+        phase: "idle",
+        activeCard: null,
+        failedPromptFields: [],
+        configFocusRequest: null,
+        completionSyncFailed: false,
+        isFormLocked: false,
+        isComposerDisabled: false,
+      };
     case "request_config_focus":
       if (state.agentId !== null && state.agentId !== action.agentId) {
         return state;
@@ -190,6 +203,7 @@ interface Nl2AgentFlowContextValue extends Nl2AgentFlowState {
   submitCard: (key: string) => void;
   markResourcesBound: (agentId: number) => void;
   markPromptGenerationFailed: (agentId: number, fields: string[]) => void;
+  markGenerationStopped: (agentId: number) => void;
   requestConfigFocus: (
     agentId: number,
     target: Nl2AgentConfigFocusTarget
@@ -228,6 +242,10 @@ export const Nl2AgentFlowProvider: FC<PropsWithChildren> = ({ children }) => {
       dispatch({ type: "prompt_generation_failed", agentId, fields }),
     []
   );
+  const markGenerationStopped = useCallback(
+    (agentId: number) => dispatch({ type: "generation_stopped", agentId }),
+    []
+  );
   const requestConfigFocus = useCallback(
     (agentId: number, target: Nl2AgentConfigFocusTarget) =>
       dispatch({ type: "request_config_focus", agentId, target }),
@@ -258,6 +276,7 @@ export const Nl2AgentFlowProvider: FC<PropsWithChildren> = ({ children }) => {
       submitCard,
       markResourcesBound,
       markPromptGenerationFailed,
+      markGenerationStopped,
       requestConfigFocus,
       markGenerationCompleted,
       markCompletionSynced,
@@ -269,6 +288,7 @@ export const Nl2AgentFlowProvider: FC<PropsWithChildren> = ({ children }) => {
       markGenerationCompleted,
       markCompletionSynced,
       markCompletionSyncFailed,
+      markGenerationStopped,
       markPromptGenerationFailed,
       markResourcesBound,
       registerCard,

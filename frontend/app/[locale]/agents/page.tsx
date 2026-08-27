@@ -137,6 +137,7 @@ function AgentSetupContent() {
     markCompletionSynced,
     markCompletionSyncFailed,
     markGenerationCompleted,
+    markGenerationStopped,
     markPromptGenerationFailed,
     requestConfigFocus,
     resetFlow,
@@ -226,6 +227,11 @@ function AgentSetupContent() {
       markPromptGenerationFailed,
       synchronizeCompletion,
     ]
+  );
+
+  const handleGenerationStopped = useCallback(
+    (agentId: number) => markGenerationStopped(agentId),
+    [markGenerationStopped]
   );
 
   const retryCompletionSync = useCallback(() => {
@@ -335,6 +341,7 @@ function AgentSetupContent() {
                   isNl2AgentUnavailable
                 }
                 onStateEvent={handleStateEvent}
+                onStopped={handleGenerationStopped}
               />
             </div>
           </PanelCard>

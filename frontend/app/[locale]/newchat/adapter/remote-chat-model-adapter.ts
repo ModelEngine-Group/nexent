@@ -259,6 +259,7 @@ interface NexentRunConfig {
   language?: "zh" | "en";
   onNl2SkillEvent?: (event: Nl2SkillStreamEvent) => void;
   onNl2AgentState?: (event: Nl2AgentStateEvent) => void;
+  onNl2AgentStopped?: (agentId: number) => void;
   modelId?: number;
   runtimeMetadata?: Record<string, unknown>;
   runtimeMetadataVersion?: number;
@@ -1486,6 +1487,8 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       ? numericServerThreadId
       : null;
     let backendStopPromise: Promise<void> | null = null;
+    let abortHandled = false;
+    let userAborted = false;
     const stopBackendConversation = async (conversationId: number) => {
       if (isEphemeralRuntime || backendStopPromise) return;
       backendStopPromise = conversationService
@@ -1500,20 +1503,27 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       await backendStopPromise;
     };
     const handleAbort = () => {
+      if (abortHandled) return;
+      abortHandled = true;
       const abortReason = abortSignal?.reason as
-        | { detach?: boolean }
-        | undefined;
+        { detach?: boolean } | undefined;
       if (abortReason?.detach) {
         log.log(
           `[ChatModelAdapter] Local stream detached from conversation ${backendConversationId ?? "unknown"}`
         );
         return;
       }
+      userAborted = true;
+      const nl2AgentId = Number(custom?.agentId);
+      if (isNl2Agent && Number.isInteger(nl2AgentId) && nl2AgentId > 0) {
+        custom?.onNl2AgentStopped?.(nl2AgentId);
+      }
       if (backendConversationId !== null) {
         void stopBackendConversation(backendConversationId);
       }
     };
     abortSignal?.addEventListener("abort", handleAbort, { once: true });
+    if (abortSignal?.aborted) handleAbort();
     const cleanupAbortHandler = () => {
       abortSignal?.removeEventListener("abort", handleAbort);
     };
@@ -1583,6 +1593,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         error instanceof Error &&
         (error.name === "AbortError" || error.message === "请求已被取消")
       ) {
+        if (abortSignal?.aborted) handleAbort();
         await backendStopPromise;
         log.log("[ChatModelAdapter] Request aborted by user");
         return;
@@ -1862,7 +1873,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     };
     const deliveredNl2AgentStates = new Set<string>();
     const deliverNl2AgentState = (chunk: SseChunk) => {
-      if (!isNl2Agent) return;
+      if (!isNl2Agent || userAborted) return;
       const event = parseNl2AgentState(chunk.content);
       if (!event) {
         log.warn("[ChatModelAdapter] Ignored invalid nl2a_state payload");
