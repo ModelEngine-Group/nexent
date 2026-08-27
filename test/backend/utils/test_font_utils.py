@@ -80,6 +80,38 @@ class TestFindCjkFontPath:
             "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
         )
 
+    def test_fontconfig_failure_falls_back_to_candidates(self, monkeypatch):
+        monkeypatch.setattr(font_utils.shutil, "which", lambda _name: "/usr/bin/fc-match")
+
+        def _raise(*_args, **_kwargs):
+            raise OSError("fc-match unavailable")
+
+        monkeypatch.setattr(font_utils.subprocess, "run", _raise)
+        monkeypatch.setattr(font_utils.os.path, "exists", lambda _path: False)
+
+        assert font_utils._find_cjk_font_path() is None
+
+    def test_ignores_invalid_or_non_cjk_fontconfig_results(self, monkeypatch):
+        monkeypatch.setattr(font_utils.shutil, "which", lambda _name: "/usr/bin/fc-match")
+        monkeypatch.setattr(
+            font_utils.subprocess,
+            "run",
+            lambda *_args, **_kwargs: SimpleNamespace(
+                stdout="malformed\nNoto Sans CJK SC\t\nDejaVu Sans\ten\t/foo.ttf\n"
+            ),
+        )
+        monkeypatch.setattr(font_utils.os.path, "exists", lambda _path: False)
+
+        assert font_utils._find_cjk_font_path() is None
+
+    def test_uses_explicit_linux_path_when_fontconfig_has_no_result(self, monkeypatch):
+        monkeypatch.setattr(font_utils, "_find_cjk_font_with_fontconfig", lambda: None)
+        expected = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
+        monkeypatch.setattr(font_utils.os.path, "exists", lambda path: path == expected)
+        monkeypatch.setattr(font_utils.os.path, "getsize", lambda _path: 2001)
+
+        assert font_utils._find_cjk_font_path() == expected
+
     def test_returns_real_font_when_present(self):
         fp = font_utils._find_cjk_font_path()
         assert fp is None or (Path(fp).exists() and Path(fp).stat().st_size > 1000)
@@ -156,3 +188,10 @@ class TestSetupReportlabCjk:
         _pdfmetrics, _ttfonts, cidfonts = _install_reportlab_stub()
         assert font_utils.setup_reportlab_cjk() == "STSong-Light"
         cidfonts.UnicodeCIDFont.assert_called_once_with("STSong-Light")
+
+    @patch("font_utils.get_cjk_font_path", return_value=None)
+    def test_cid_fallback_error_returns_helvetica(self, _fp):
+        _pdfmetrics, _ttfonts, cidfonts = _install_reportlab_stub()
+        cidfonts.UnicodeCIDFont.side_effect = RuntimeError("no CID font")
+
+        assert font_utils.setup_reportlab_cjk() == "Helvetica"
