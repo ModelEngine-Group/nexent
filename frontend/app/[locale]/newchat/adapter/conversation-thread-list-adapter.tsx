@@ -22,10 +22,7 @@ import {
   CONVERSATION_PAGE_SIZE,
   conversationService,
 } from "@/services/conversationService";
-import {
-  getConversationDateBoundaries,
-  newChatConversationViewport,
-} from "@/lib/conversationViewport";
+import { getConversationDateBoundaries } from "@/lib/conversationViewport";
 import { toMessageCreatedAt } from "@/lib/messageDate";
 
 import { storageService } from "@/services/storageService";
@@ -1106,6 +1103,8 @@ const toRemoteThreadMetadata = (
   };
 };
 
+const INITIAL_CONVERSATION_PAGE_SIZE = 30;
+
 const parseConversationListOffset = (after: string | undefined): number => {
   if (after === undefined) return 0;
 
@@ -1323,24 +1322,16 @@ export const conversationThreadListAdapter: RemoteThreadListAdapter = {
   unstable_Provider: createHistoryProvider(),
 
   async list({ after } = {}): Promise<RemoteThreadListResponse> {
-    if (after === undefined) {
-      newChatConversationViewport.reset();
-      return { threads: [], nextCursor: "0" };
-    }
-
     const { todayStartMs, weekStartMs } = getConversationDateBoundaries();
     const offset = parseConversationListOffset(after);
     const limit =
-      offset === 0
-        ? newChatConversationViewport.takePageLimit()
-        : CONVERSATION_PAGE_SIZE;
+      offset === 0 ? INITIAL_CONVERSATION_PAGE_SIZE : CONVERSATION_PAGE_SIZE;
     const data = await conversationService.getList({
       offset,
       limit,
       todayStartMs,
       weekStartMs,
     });
-    newChatConversationViewport.setMetadata(data.metadata);
     const nextOffset = offset + data.items.length;
 
     return {
