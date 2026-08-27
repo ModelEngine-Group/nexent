@@ -111,7 +111,7 @@ export function ThreadListSidebar({
             <SidebarHeader>
               <div className="flex items-center gap-2 px-1">
                 <ThreadListPrimitive.New
-                  className="flex h-9 flex-1 items-center gap-2 rounded-lg border px-3 text-sm hover:bg-muted truncate"
+                  className="flex h-9 flex-1 items-center gap-2 rounded-lg border px-3 text-sm hover:bg-muted truncate bg-white"
                   onClick={onPrepareNewConversation}
                 >
                   <PlusIcon className="size-4 shrink-0" />
