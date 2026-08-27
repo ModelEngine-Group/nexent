@@ -102,3 +102,37 @@ def test_forward_http_error(serply_search_tool):
         serply_search_tool.forward("test query")
 
     assert "Serply API request failed" in str(excinfo.value)
+
+
+def test_forward_http_status_error(serply_search_tool):
+    """Test forward method when the Serply API returns a non-2xx status"""
+    request = httpx.Request("GET", "https://api.serply.io/v1/search/")
+    response = httpx.Response(401, request=request)
+    with patch("sdk.nexent.core.tools.serply_search_tool.httpx.get", return_value=response), \
+            pytest.raises(Exception) as excinfo:
+        serply_search_tool.forward("test query")
+
+    assert "Serply API HTTP error" in str(excinfo.value)
+    assert "401" in str(excinfo.value)
+
+
+def test_forward_invalid_json(serply_search_tool):
+    """Test forward method when the Serply API returns a non-JSON body"""
+    request = httpx.Request("GET", "https://api.serply.io/v1/search/")
+    response = httpx.Response(200, content=b"not json", request=request)
+    with patch("sdk.nexent.core.tools.serply_search_tool.httpx.get", return_value=response), \
+            pytest.raises(Exception) as excinfo:
+        serply_search_tool.forward("test query")
+
+    assert "Failed to parse Serply API response" in str(excinfo.value)
+
+
+def test_forward_results_not_a_list(serply_search_tool):
+    """Test forward method when the Serply API returns a malformed results field"""
+    mock_response = MagicMock()
+    mock_response.json.return_value = {"results": {"unexpected": "shape"}}
+    with patch("sdk.nexent.core.tools.serply_search_tool.httpx.get", return_value=mock_response), \
+            pytest.raises(Exception) as excinfo:
+        serply_search_tool.forward("test query")
+
+    assert "No results found" in str(excinfo.value)
