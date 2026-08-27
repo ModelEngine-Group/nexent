@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from consts.exceptions import AppException, QuotaExceededError, TokenExpiredError
+from services.health_service import install_health_contract
 
 
 logger = logging.getLogger(__name__)
@@ -55,6 +56,9 @@ def create_app(
 
     # Register exception handlers
     register_exception_handlers(app)
+
+    # Process health endpoints never poll external dependencies.
+    install_health_contract(app)
 
     # Initialize monitoring if enabled
     if enable_monitoring:

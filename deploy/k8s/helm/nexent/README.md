@@ -96,7 +96,7 @@ K8s deployments read runtime configuration from `deploy/env/.env`, the same file
 
 When `--persistence-mode local` is used, Nexent renders static PVs with `hostPath` and `DirectoryOrCreate`; node affinity is not required. Shared workspace data uses `/var/lib/nexent`, shared skills use `/var/lib/nexent-data/skills`, and service data uses `/var/lib/nexent-data/nexent-*` by default.
 
-Config, Runtime, and Northbound use `/health/live` startup probes before their liveness and readiness probes become active. The default startup budget is five minutes (`periodSeconds: 5`, `failureThreshold: 60`) so cold starts, Python imports, and serialized database migrations do not trigger a premature liveness restart. Operators can override the budget independently, for example with `--set nexent-config.probes.startup.failureThreshold=90`.
+Config, Runtime, and Northbound use `/health/live` startup probes, while Web probes `/`, before their liveness and readiness probes become active. Each service waits 30 seconds before its first startup check; the following probe budget is five minutes (`periodSeconds: 5`, `failureThreshold: 60`) so cold starts and Python imports do not trigger a premature liveness restart. Operators can override each delay independently, for example with `--set nexent-runtime.probes.startup.initialDelaySeconds=60`.
 
 ## Deploy Options
 

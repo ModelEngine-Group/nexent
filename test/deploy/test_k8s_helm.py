@@ -393,6 +393,42 @@ def test_deploy_and_uninstall_scripts_have_valid_shell_syntax() -> None:
         assert result.returncode == 0, result.stdout + result.stderr
 
 
+@pytest.mark.parametrize(
+    ("component", "port"),
+    (("nexent-config", 5010), ("nexent-runtime", 5014), ("nexent-northbound", 5013)),
+)
+def test_backend_charts_declare_delayed_process_health_probes(component: str, port: int) -> None:
+    chart = APPLICATION_CHART_SOURCE / "charts" / component
+    deployment = (chart / "templates" / "deployment.yaml").read_text(encoding="utf-8")
+    values = yaml.safe_load((chart / "values.yaml").read_text(encoding="utf-8"))
+
+    assert deployment.count("path: /health/live") == 2
+    assert "path: /health/ready" in deployment
+    assert f"port: {port}" in deployment
+    assert "initialDelaySeconds: {{ .Values.probes.startup.initialDelaySeconds }}" in deployment
+    assert values["probes"]["startup"] == {
+        "initialDelaySeconds": 30,
+        "periodSeconds": 5,
+        "timeoutSeconds": 2,
+        "failureThreshold": 60,
+    }
+
+
+def test_web_chart_declares_delayed_startup_probe() -> None:
+    chart = APPLICATION_CHART_SOURCE / "charts" / "nexent-web"
+    deployment = (chart / "templates" / "deployment.yaml").read_text(encoding="utf-8")
+    values = yaml.safe_load((chart / "values.yaml").read_text(encoding="utf-8"))
+
+    assert deployment.count("path: /") == 3
+    assert "initialDelaySeconds: {{ .Values.probes.startup.initialDelaySeconds }}" in deployment
+    assert values["probes"]["startup"] == {
+        "initialDelaySeconds": 30,
+        "periodSeconds": 5,
+        "timeoutSeconds": 2,
+        "failureThreshold": 60,
+    }
+
+
 def test_default_deploy_orders_releases_without_second_application_upgrade(
     isolated_k8s_project: tuple[Path, dict[str, str], Path],
 ) -> None:

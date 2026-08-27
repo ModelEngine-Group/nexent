@@ -25,5 +25,12 @@ config:
   skipProxy: "true"
   umask: "0022"
 
+probes:
+  startup:
+    initialDelaySeconds: 30
+    periodSeconds: 5
+    timeoutSeconds: 2
+    failureThreshold: 60
+
 serviceAccount:
   name: nexent-config
