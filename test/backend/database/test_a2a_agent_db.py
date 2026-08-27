@@ -484,6 +484,13 @@ def artifact():
 # Tests: Helper Functions
 # ===========================================================================
 
+class TestExtractBaseUrl:
+    def test_preserves_ipv6_brackets(self):
+        url = "https://[2001:db8::7]:8443/.well-known/agent-card.json"
+
+        assert a2a_db._extract_base_url(url) == "https://[2001:db8::7]:8443"
+
+
 class TestGenerateTaskId:
     def test_prefix(self):
         assert a2a_db._generate_task_id().startswith('task_')

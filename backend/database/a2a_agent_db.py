@@ -41,9 +41,12 @@ def _extract_base_url(url: str) -> str:
     """
     from urllib.parse import urlparse
     parsed = urlparse(url)
+    hostname = parsed.hostname or ""
+    if ":" in hostname:
+        hostname = f"[{hostname}]"
     if parsed.port:
-        return f"{parsed.scheme}://{parsed.hostname}:{parsed.port}"
-    return f"{parsed.scheme}://{parsed.hostname}"
+        return f"{parsed.scheme}://{hostname}:{parsed.port}"
+    return f"{parsed.scheme}://{hostname}"
 
 # Standard human-readable protocol label
 PROTOCOL_HTTP_JSON = "HTTP+JSON"
