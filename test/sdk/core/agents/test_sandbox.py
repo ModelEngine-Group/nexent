@@ -16,6 +16,7 @@ reachable so the suite remains runnable on developer machines without docker.
 import importlib
 import importlib.util
 import json
+import logging
 import os
 import sys
 import time
@@ -54,6 +55,7 @@ SandboxPoolManager = sandbox_module.SandboxPoolManager
 build_python_executor = sandbox_module.build_python_executor
 release_python_executor = sandbox_module.release_python_executor
 ShellPolicy = sandbox_module.ShellPolicy
+SandboxSkillScriptRunner = sandbox_module.SandboxSkillScriptRunner
 
 
 def _docker_available() -> bool:
@@ -100,6 +102,130 @@ def reset_singleton():
 # ---------------------------------------------------------------------------
 # Pure-Python unit tests
 # ---------------------------------------------------------------------------
+class TestSandboxSkillScriptRunner:
+    def test_copies_validated_skill_and_executes_inside_container(self, tmp_path):
+        skill_dir = tmp_path / "skills" / "report"
+        script = skill_dir / "scripts" / "generate.py"
+        script.parent.mkdir(parents=True)
+        script.write_text("print('sandbox')", encoding="utf-8")
+
+        container = MagicMock()
+        container.put_archive.return_value = True
+        container.exec_run.side_effect = [
+            SimpleNamespace(exit_code=0, output=b""),
+            SimpleNamespace(exit_code=0, output=b"sandbox\n"),
+        ]
+        executor = SimpleNamespace(container=container, _nexent_backend="docker")
+        manager = MagicMock()
+        manager.resolve_skill_script.return_value = (
+            str(skill_dir),
+            str(script),
+            "scripts/generate.py",
+        )
+        runner = SandboxSkillScriptRunner(executor, timeout_seconds=17)
+
+        result = runner(
+            manager=manager,
+            skill_name="report",
+            script_path="scripts/generate.py",
+            params='--title "Quarterly report"',
+            tenant_id="tenant-1",
+            working_directory="/mnt/nexent/workdir/user/run",
+        )
+
+        assert result == "sandbox\n"
+        manager.resolve_skill_script.assert_called_once_with(
+            "report", "scripts/generate.py", tenant_id="tenant-1"
+        )
+        assert container.put_archive.call_count == 1
+        command = container.exec_run.call_args_list[1].args[0]
+        assert command[:5] == ["timeout", "--signal=KILL", "17", "python", ANY]
+        assert command[-2:] == ["--title", "Quarterly report"]
+        assert container.exec_run.call_args_list[1].kwargs == {
+            "user": "sandbox",
+            "workdir": "/mnt/nexent/workdir/user/run",
+            "environment": {
+                "NEXENT_WORKSPACE": "/mnt/nexent/workdir/user/run",
+                "NEXENT_OUTPUT_DIR": "/mnt/nexent/workdir/user/run/outputs",
+            },
+        }
+
+    def test_refuses_to_fall_back_to_host_when_docker_is_unavailable(self):
+        runner = SandboxSkillScriptRunner(
+            SimpleNamespace(container=None, _nexent_backend="local")
+        )
+
+        with pytest.raises(RuntimeError, match="require a Docker sandbox"):
+            runner(
+                manager=MagicMock(),
+                skill_name="report",
+                script_path="scripts/generate.py",
+                params=None,
+                tenant_id="tenant-1",
+                working_directory=None,
+            )
+
+    def test_maps_timeout_exit_to_timeout_error(self, tmp_path):
+        skill_dir = tmp_path / "skill"
+        script = skill_dir / "scripts" / "slow.sh"
+        script.parent.mkdir(parents=True)
+        script.write_text("sleep 30", encoding="utf-8")
+        container = MagicMock()
+        container.put_archive.return_value = True
+        container.exec_run.side_effect = [
+            SimpleNamespace(exit_code=0, output=b""),
+            SimpleNamespace(exit_code=124, output=b""),
+        ]
+        runner = SandboxSkillScriptRunner(
+            SimpleNamespace(container=container, _nexent_backend="docker"),
+            timeout_seconds=1,
+        )
+        manager = MagicMock()
+        manager.resolve_skill_script.return_value = (
+            str(skill_dir), str(script), "scripts/slow.sh"
+        )
+
+        with pytest.raises(TimeoutError, match="slow.sh"):
+            runner(
+                manager=manager,
+                skill_name="slow",
+                script_path="scripts/slow.sh",
+                params=None,
+                tenant_id="tenant-1",
+                working_directory=None,
+            )
+
+    def test_cleanup_uses_root_for_docker_archive_owned_files(self):
+        container = MagicMock()
+        container.exec_run.return_value = SimpleNamespace(exit_code=0, output=b"")
+        runner = SandboxSkillScriptRunner(
+            SimpleNamespace(container=container, _nexent_backend="docker")
+        )
+
+        runner.cleanup()
+
+        container.exec_run.assert_called_once_with(
+            ["rm", "-rf", "--", runner._root],
+            user="0",
+        )
+
+    def test_cleanup_logs_nonzero_exit(self, caplog):
+        container = MagicMock()
+        container.exec_run.return_value = SimpleNamespace(
+            exit_code=1,
+            output=b"permission denied",
+        )
+        runner = SandboxSkillScriptRunner(
+            SimpleNamespace(container=container, _nexent_backend="docker")
+        )
+
+        with caplog.at_level(logging.WARNING, logger="sandbox_under_test"):
+            runner.cleanup()
+
+        assert "permission denied" in caplog.text
+        assert runner._root in caplog.text
+
+
 class TestSandboxConfig:
     """Configuration parsing for the two scope dimensions."""
 

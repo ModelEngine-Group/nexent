@@ -25,6 +25,8 @@ import logging
 import mimetypes
 import re
 import secrets
+import shlex
+import tarfile
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -41,6 +43,144 @@ logger = logging.getLogger(__name__)
 
 
 _TOOL_BRIDGE_VALUE_MARKER = "__nexent_tool_bridge_value__"
+
+
+class SandboxSkillScriptRunner:
+    """Copy a validated skill into Docker and execute its script there.
+
+    The runtime remains the control plane: it resolves tenant-scoped skills
+    and validates that the requested path cannot escape the skill root.  The
+    script process itself, its interpreter and dependencies live exclusively
+    in the sandbox container.
+    """
+
+    def __init__(self, executor: Any, timeout_seconds: int = 300) -> None:
+        self._executor = executor
+        self._container = getattr(executor, "container", None)
+        self._timeout_seconds = max(1, int(timeout_seconds))
+        self._root = f"/tmp/nexent-skills/{secrets.token_hex(16)}"
+
+    @property
+    def available(self) -> bool:
+        """Return whether this runner has a real Docker execution target."""
+        return self._container is not None and getattr(self._executor, "_nexent_backend", None) == "docker"
+
+    @staticmethod
+    def _output_text(output: Any) -> str:
+        if isinstance(output, bytes):
+            return output.decode("utf-8", errors="replace")
+        return str(output or "")
+
+    def _run_container_command(self, command: list[str], **kwargs: Any) -> Any:
+        result = self._container.exec_run(command, **kwargs)
+        exit_code = getattr(result, "exit_code", None)
+        if exit_code != 0:
+            output = self._output_text(getattr(result, "output", b""))
+            raise RuntimeError(
+                f"Sandbox preparation command failed (exit={exit_code}): {output.strip()}"
+            )
+        return result
+
+    def __call__(
+        self,
+        *,
+        manager: Any,
+        skill_name: str,
+        script_path: str,
+        params: Optional[str],
+        tenant_id: Optional[str],
+        working_directory: Optional[str],
+    ) -> str:
+        if not self.available:
+            raise RuntimeError(
+                "Skill scripts require a Docker sandbox, but the configured sandbox executor is unavailable"
+            )
+
+        local_skill_dir, local_script, normalized_script = manager.resolve_skill_script(
+            skill_name,
+            script_path,
+            tenant_id=tenant_id,
+        )
+        relative_script = Path(local_script).resolve().relative_to(Path(local_skill_dir).resolve())
+        skill_digest = hashlib.sha256(
+            str(Path(local_skill_dir).resolve()).encode("utf-8")
+        ).hexdigest()[:16]
+        # Each invocation gets a private copy so parallel calls cannot delete
+        # or overwrite a script while another process is still using it.
+        skill_key = f"{skill_digest}-{secrets.token_hex(8)}"
+        sandbox_skill_dir = f"{self._root}/{skill_key}"
+
+        self._run_container_command(["mkdir", "-p", self._root], user="sandbox")
+        archive = io.BytesIO()
+        with tarfile.open(fileobj=archive, mode="w") as tar:
+            tar.add(local_skill_dir, arcname=skill_key, recursive=True)
+        if not self._container.put_archive(self._root, archive.getvalue()):
+            raise RuntimeError("Failed to copy the skill directory into the sandbox")
+
+        sandbox_script = f"{sandbox_skill_dir}/{relative_script.as_posix()}"
+        interpreter = "python" if normalized_script.endswith(".py") else "bash"
+        command = [
+            "timeout",
+            "--signal=KILL",
+            str(self._timeout_seconds),
+            interpreter,
+            sandbox_script,
+            *shlex.split(params or ""),
+        ]
+        workdir = working_directory or "/home/sandbox/workdir/output"
+        output_dir = (
+            f"{working_directory.rstrip('/')}/outputs"
+            if working_directory
+            else workdir
+        )
+        result = self._container.exec_run(
+            command,
+            user="sandbox",
+            workdir=workdir,
+            environment={
+                "NEXENT_WORKSPACE": workdir,
+                "NEXENT_OUTPUT_DIR": output_dir,
+            },
+        )
+        exit_code = getattr(result, "exit_code", None)
+        output = self._output_text(getattr(result, "output", b""))
+        if exit_code == 124 or exit_code == 137:
+            raise TimeoutError(f"Script execution timed out: {normalized_script}")
+        if exit_code != 0:
+            logger.error(
+                "Sandbox skill script failed skill=%s script=%s exit=%s output=%s",
+                skill_name,
+                normalized_script,
+                exit_code,
+                output,
+            )
+            return json.dumps({"error": output, "output": ""})
+        return output
+
+    def cleanup(self) -> None:
+        """Remove this run's private skill copy from a shared container."""
+        if not self.available:
+            return
+        try:
+            # Docker archive extraction may preserve root ownership on nested
+            # skill directories. Cleanup is a control-plane operation against
+            # an exact runner-generated path, so use root and verify the result
+            # instead of silently leaving data in a system-scoped container.
+            result = self._container.exec_run(
+                ["rm", "-rf", "--", self._root],
+                user="0",
+            )
+            exit_code = getattr(result, "exit_code", None)
+            if exit_code != 0:
+                output = self._output_text(getattr(result, "output", b""))
+                logger.warning(
+                    "Failed to remove sandbox skill directory %s (exit=%s): %s",
+                    self._root,
+                    exit_code,
+                    output.strip(),
+                )
+        except Exception as exc:
+            logger.warning("Failed to remove sandbox skill directory %s: %s", self._root, exc)
 
 
 def _serialize_tool_bridge_value(value: Any) -> Any:

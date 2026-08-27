@@ -933,6 +933,33 @@ class SkillManager:
             SkillNotFoundError: When the skill directory does not exist in local storage
             SkillScriptNotFoundError: When the specified script path does not exist within the skill
         """
+        _local_skill_dir, full_path, normalised_script_path = self.resolve_skill_script(
+            skill_name,
+            script_path,
+            tenant_id=tenant_id,
+        )
+
+        if normalised_script_path.endswith(".py"):
+            return self._run_python_script(full_path, params, working_directory)
+        elif normalised_script_path.endswith(".sh"):
+            return self._run_shell_script(full_path, params, working_directory)
+        else:
+            raise ValueError(f"Unsupported script type: {normalised_script_path}")
+
+    def resolve_skill_script(
+        self,
+        skill_name: str,
+        script_path: str,
+        *,
+        tenant_id: Optional[str],
+    ) -> tuple[str, str, str]:
+        """Resolve and validate a skill script without executing it.
+
+        This is the common trust boundary used by both local execution and
+        sandbox execution.  Returning the skill root as well as the resolved
+        script lets a sandbox copy the already-validated directory before it
+        starts a process in the isolated environment.
+        """
         local_skill_dir = self.resolve_skill_dir(skill_name, tenant_id=tenant_id)
         if not os.path.isdir(local_skill_dir):
             raise SkillNotFoundError(f"Skill '{skill_name}' not found.")
@@ -1017,12 +1044,10 @@ class SkillManager:
             else:
                 raise _fail("script file does not exist")
 
-        if normalised_script_path.endswith(".py"):
-            return self._run_python_script(full_path, params, working_directory)
-        elif normalised_script_path.endswith(".sh"):
-            return self._run_shell_script(full_path, params, working_directory)
-        else:
+        if not normalised_script_path.endswith((".py", ".sh")):
             raise ValueError(f"Unsupported script type: {normalised_script_path}")
+
+        return local_skill_dir, full_path, normalised_script_path
 
     def _list_available_scripts(self, local_skill_dir: str) -> List[str]:
         """Return script paths (relative to the skill root) that exist on disk.
