@@ -3,6 +3,9 @@
 import { Button, Input } from "antd";
 import { Copy, Eye, Search } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import RepositoryTagFilter, {
+  type RepositoryTagStat,
+} from "@/components/tag/RepositoryTagFilter";
 
 import { SkillRepositoryCard } from "./SkillRepositoryCard";
 import { AsyncContent, PaginationBar } from "./SkillRepositoryControls";
@@ -11,6 +14,9 @@ import type { SkillRepositoryListingItem } from "@/types/skillRepository";
 export function RepositoryView({
   searchQuery,
   onSearchChange,
+  tag,
+  tagStats,
+  onTagChange,
   listings,
   isLoading,
   isError,
@@ -29,6 +35,9 @@ export function RepositoryView({
 }: {
   searchQuery: string;
   onSearchChange: (value: string) => void;
+  tag?: string;
+  tagStats: RepositoryTagStat[];
+  onTagChange: (value?: string) => void;
   listings: SkillRepositoryListingItem[];
   isLoading: boolean;
   isError: boolean;
@@ -48,15 +57,18 @@ export function RepositoryView({
   const { t } = useTranslation("common");
   return (
     <div className="space-y-5">
-      <div className="relative">
-        <Input
-          allowClear
-          value={searchQuery}
-          onChange={(event) => onSearchChange(event.target.value)}
-          placeholder={t("skillRepository.searchPlaceholder")}
-          prefix={<Search className="size-4 text-slate-400" aria-hidden />}
-          className="h-11 rounded-xl"
-        />
+      <div className="flex items-center gap-3">
+        <div className="relative min-w-0 flex-1">
+          <Input
+            allowClear
+            value={searchQuery}
+            onChange={(event) => onSearchChange(event.target.value)}
+            placeholder={t("skillRepository.searchPlaceholder")}
+            prefix={<Search className="size-4 text-slate-400" aria-hidden />}
+            className="h-11 rounded-xl"
+          />
+        </div>
+        <RepositoryTagFilter value={tag} tags={tagStats} onChange={onTagChange} />
       </div>
 
       <p className="text-sm text-slate-500 dark:text-slate-400">

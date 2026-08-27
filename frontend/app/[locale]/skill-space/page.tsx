@@ -13,6 +13,8 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { USER_ROLES } from "@/const/auth";
 import { useSetupFlow } from "@/hooks/useSetupFlow";
+import { useTagDefinitions, useTagLibraries } from "@/hooks/useTagManagement";
+import type { TagResourcePredicate } from "@/types/tagManagement";
 import {
   invalidateSkillRepositoryCaches,
   SKILLS_LIST_QUERY_KEY,
@@ -22,6 +24,7 @@ import {
   useMyEditableSkills,
   useSkillRepositoryListingDetail,
   useSkillRepositoryListings,
+  useSkillRepositoryTagStats,
   useUpdateSkillRepositoryStatus,
 } from "@/hooks/skillRepository/useSkillRepositoryListings";
 import { parseSkillReviewDeepLinkParams } from "@/lib/notificationNavigation";
@@ -98,12 +101,16 @@ export default function SkillRepositoryPage() {
   );
   const [repositoryPage, setRepositoryPage] = useState(1);
   const [repositorySearch, setRepositorySearch] = useState("");
+  const [repositoryTag, setRepositoryTag] = useState<string>();
   const [debouncedRepositorySearch, setDebouncedRepositorySearch] =
     useState("");
   const [minePage, setMinePage] = useState(1);
   const [mineOwnership, setMineOwnership] =
     useState<MineOwnershipFilter>("all");
   const [mineSearch, setMineSearch] = useState("");
+  const [mineTagPredicates, setMineTagPredicates] = useState<
+    TagResourcePredicate[]
+  >([]);
   const [debouncedMineSearch, setDebouncedMineSearch] = useState("");
   const [reviewPage, setReviewPage] = useState(1);
   const [detailRepositoryId, setDetailRepositoryId] = useState<number | null>(
@@ -145,6 +152,13 @@ export default function SkillRepositoryPage() {
   const isRepositoryTab = tab === SkillRepositoryTab.REPOSITORY;
   const isMineTab = tab === SkillRepositoryTab.MINE;
   const isReviewTab = tab === SkillRepositoryTab.REVIEW;
+  const { data: tagLibraries } = useTagLibraries();
+  const defaultTagLibrary =
+    tagLibraries?.find((library) => library.bucket_key === "default_resource") ??
+    null;
+  const { data: mineTagDefinitions } = useTagDefinitions(
+    defaultTagLibrary?.bucket_id ?? null
+  );
 
   useEffect(() => {
     const timer = window.setTimeout(
@@ -179,8 +193,9 @@ export default function SkillRepositoryPage() {
       ...(debouncedRepositorySearch.trim()
         ? { search: debouncedRepositorySearch.trim() }
         : {}),
+      ...(repositoryTag ? { tag: repositoryTag } : {}),
     }),
-    [debouncedRepositorySearch, repositoryPage]
+    [debouncedRepositorySearch, repositoryPage, repositoryTag]
   );
 
   const mineParams = useMemo(
@@ -191,11 +206,15 @@ export default function SkillRepositoryPage() {
       ...(debouncedMineSearch.trim()
         ? { search: debouncedMineSearch.trim() }
         : {}),
+      ...(mineTagPredicates.length > 0
+        ? { tag_predicates: mineTagPredicates }
+        : {}),
       ...(mineOwnership === "all" && !debouncedMineSearch.trim()
+        && mineTagPredicates.length === 0
         ? { new_skill_padding: true }
         : {}),
     }),
-    [debouncedMineSearch, mineOwnership, minePage]
+    [debouncedMineSearch, mineOwnership, minePage, mineTagPredicates]
   );
 
   const reviewParams = useMemo(
@@ -215,6 +234,9 @@ export default function SkillRepositoryPage() {
     isFetching: isRepositoryFetching,
     refetch: refetchRepository,
   } = useSkillRepositoryListings(repositoryParams, isRepositoryTab);
+  const { data: repositoryTagStats = [] } = useSkillRepositoryTagStats(
+    isRepositoryTab
+  );
 
   const { data: repositoryCountData } = useSkillRepositoryListings(
     { status: "shared", page: 1, page_size: 1 },
@@ -569,6 +591,12 @@ export default function SkillRepositoryPage() {
                     setRepositorySearch(value);
                     setRepositoryPage(1);
                   }}
+                  tag={repositoryTag}
+                  tagStats={repositoryTagStats}
+                  onTagChange={(value) => {
+                    setRepositoryTag(value);
+                    setRepositoryPage(1);
+                  }}
                   listings={repositoryItems}
                   isLoading={isRepositoryLoading}
                   isError={isRepositoryError}
@@ -597,6 +625,12 @@ export default function SkillRepositoryPage() {
                   searchQuery={mineSearch}
                   onSearchChange={(value) => {
                     setMineSearch(value);
+                    setMinePage(1);
+                  }}
+                  tagDefinitions={mineTagDefinitions ?? []}
+                  tagPredicates={mineTagPredicates}
+                  onTagPredicatesChange={(value) => {
+                    setMineTagPredicates(value);
                     setMinePage(1);
                   }}
                   isLoading={isMineLoading}

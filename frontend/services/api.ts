@@ -550,6 +550,7 @@ export const API_ENDPOINTS = {
       if (params?.search?.trim()) {
         queryParams.append("search", params.search.trim());
       }
+      if (params?.tag?.trim()) queryParams.append("tag", params.tag.trim());
       const queryString = queryParams.toString();
       return `${API_BASE_URL}/repository/agent${queryString ? `?${queryString}` : ""}`;
     },
@@ -573,11 +574,15 @@ export const API_ENDPOINTS = {
       if (params?.agent_id != null) {
         queryParams.append("agent_id", String(params.agent_id));
       }
+      if (params?.tag_predicates?.length) {
+        queryParams.append("tag_predicates", JSON.stringify(params.tag_predicates));
+      }
       const queryString = queryParams.toString();
       return `${API_BASE_URL}/repository/agent/mine${queryString ? `?${queryString}` : ""}`;
     },
     detail: (agentRepositoryId: number) =>
       `${API_BASE_URL}/repository/agent/${agentRepositoryId}`,
+    tagStats: `${API_BASE_URL}/repository/agent/tags`,
     importPrecheck: (agentRepositoryId: number) =>
       `${API_BASE_URL}/repository/agent/${agentRepositoryId}/import_precheck`,
     import: (agentRepositoryId: number) =>
@@ -606,6 +611,7 @@ export const API_ENDPOINTS = {
       if (params?.search?.trim()) {
         queryParams.append("search", params.search.trim());
       }
+      if (params?.tag?.trim()) queryParams.append("tag", params.tag.trim());
       if (params?.sort_by_update_time) {
         queryParams.append("sort_by_update_time", "true");
       }
@@ -629,12 +635,16 @@ export const API_ENDPOINTS = {
       if (params?.new_skill_padding) {
         queryParams.append("new_skill_padding", "true");
       }
+      if (params?.tag_predicates?.length) {
+        queryParams.append("tag_predicates", JSON.stringify(params.tag_predicates));
+      }
       const queryString = queryParams.toString();
       return `${API_BASE_URL}/repository/skill/mine${queryString ? `?${queryString}` : ""}`;
     },
     mineSkillCounts: `${API_BASE_URL}/repository/skill/mine/counts`,
     detail: (skillRepositoryId: number) =>
       `${API_BASE_URL}/repository/skill/${skillRepositoryId}`,
+    tagStats: `${API_BASE_URL}/repository/skill/tags`,
     install: (skillRepositoryId: number) =>
       `${API_BASE_URL}/repository/skill/${skillRepositoryId}/install`,
     updateStatus: (skillRepositoryId: number) =>

@@ -142,6 +142,7 @@ def list_agent_repository_listings_impl(
     page: int = 1,
     page_size: int = 10,
     search: Optional[str] = None,
+    tag: Optional[str] = None,
 ) -> Dict[str, Any]:
     """List repository listings for the caller tenant with optional status filter."""
     if status is not None and status not in VALID_REPOSITORY_STATUSES:
@@ -159,6 +160,12 @@ def list_agent_repository_listings_impl(
             record
             for record in records
             if _matches_repository_listing_search_filter(record, search)
+        ]
+    if tag and tag.strip():
+        records = [
+            record
+            for record in records
+            if tag.strip() in (record.get("tags") or [])
         ]
     total = len(records)
     start = (page - 1) * page_size
@@ -186,6 +193,23 @@ def list_agent_repository_listings_impl(
             "total_pages": (total + page_size - 1) // page_size if total else 0,
         },
     }
+
+
+def list_agent_repository_tag_stats_impl(tenant_id: str) -> List[Dict[str, Any]]:
+    """Return shared repository tags and their listing counts for one tenant."""
+    counts: Dict[str, int] = {}
+    for record in list_agent_repository_summaries(
+        publisher_tenant_id=tenant_id,
+        status=STATUS_SHARED,
+    ):
+        for raw_tag in record.get("tags") or []:
+            tag = str(raw_tag).strip()
+            if tag:
+                counts[tag] = counts.get(tag, 0) + 1
+    return [
+        {"tag": tag, "count": count}
+        for tag, count in sorted(counts.items(), key=lambda item: item[0].lower())
+    ]
 
 
 def _normalize_listing_tags(tags: Any) -> List[str]:
@@ -399,6 +423,7 @@ async def list_my_editable_agents_impl(
     search: Optional[str] = None,
     new_agent_padding: bool = False,
     agent_id: Optional[int] = None,
+    tag_predicates: Optional[list] = None,
 ) -> Dict[str, Any]:
     """List visible draft agents for the current user with repository listing info."""
     normalized_ownership = (ownership or OWNERSHIP_ALL).strip().lower()
@@ -409,6 +434,27 @@ async def list_my_editable_agents_impl(
         )
 
     all_agents = await list_all_agent_info_impl(tenant_id=tenant_id, user_id=user_id)
+    if tag_predicates:
+        from database.tag_management_db import TagManagementDB
+
+        agent_ids_for_filter = [
+            str(agent["agent_id"])
+            for agent in all_agents
+            if agent.get("agent_id") is not None
+        ]
+        matched_ids = set(
+            TagManagementDB.filter_authorized_resource_ids(
+                tenant_id,
+                "agent",
+                agent_ids_for_filter,
+                tag_predicates,
+            )
+        )
+        all_agents = [
+            agent
+            for agent in all_agents
+            if str(agent.get("agent_id")) in matched_ids
+        ]
     agent_ids = [
         int(agent["agent_id"])
         for agent in all_agents
@@ -467,6 +513,7 @@ async def list_my_editable_agents_impl(
         new_agent_padding
         and normalized_ownership == OWNERSHIP_ALL
         and not (search and search.strip())
+        and not tag_predicates
         and agent_id is None
     )
     paged_entries, total = _paginate_mine_agents_with_optional_padding(

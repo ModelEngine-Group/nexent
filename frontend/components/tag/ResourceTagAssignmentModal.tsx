@@ -21,6 +21,7 @@ import { useTranslation } from "react-i18next";
 import { useTagAssignments } from "@/hooks/useTagManagement";
 import { tagManagementApi } from "@/services/tagManagementService";
 import type {
+  TagAssignment,
   TagAssignmentBulkOutcome,
   TagDefinition,
   TagSelectionMode,
@@ -36,6 +37,8 @@ interface ResourceTagAssignmentModalProps {
   provider?: string | null;
   knowledgeBaseId?: string | null;
   bulkResourceIds?: string[];
+  initialSelection?: Record<number, number[]>;
+  onSaved?: (assignment: TagAssignment) => void;
   onManageDefinitions?: () => void;
 }
 
@@ -57,6 +60,8 @@ export default function ResourceTagAssignmentModal({
   provider,
   knowledgeBaseId,
   bulkResourceIds,
+  initialSelection,
+  onSaved,
   onManageDefinitions,
 }: ResourceTagAssignmentModalProps) {
   const { t } = useTranslation("common");
@@ -91,6 +96,11 @@ export default function ResourceTagAssignmentModal({
       group.push(assignment.value_id);
       next[assignment.definition_id] = group;
     }
+    if (Object.keys(next).length === 0 && initialSelection) {
+      for (const [definitionId, valueIds] of Object.entries(initialSelection)) {
+        next[Number(definitionId)] = valueIds;
+      }
+    }
     setSelected(next);
     if (bulkResourceIds && bulkResourceIds.length > 0) {
       setBulkTargets(
@@ -104,7 +114,7 @@ export default function ResourceTagAssignmentModal({
       setBulkTargets([{ resourceId, provider, knowledgeBaseId }]);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, assignmentState.data, bulkResourceIds]);
+  }, [open, assignmentState.data, bulkResourceIds, initialSelection]);
 
   const activeDefinitions = useMemo(
     () => definitions.filter((definition) => definition.status === "active"),
@@ -149,6 +159,7 @@ export default function ResourceTagAssignmentModal({
     setSaving(true);
     try {
       const result = await assignmentState.replace({ value_ids: valueIds });
+      onSaved?.(result);
       message.success(t("tagManagement.message.assignmentsSaved"));
       const projection = result.projection_status;
       if (projection && projection.status !== "synced") {
@@ -164,7 +175,7 @@ export default function ResourceTagAssignmentModal({
     } finally {
       setSaving(false);
     }
-  }, [assignmentState, message, onClose, selected, t]);
+  }, [assignmentState, message, onClose, onSaved, selected, t]);
 
   const saveBulk = useCallback(async () => {
     const targets = bulkTargets.filter((target) => target.resourceId.trim());
@@ -284,7 +295,11 @@ export default function ResourceTagAssignmentModal({
     <Modal
       title={
         <Flex align="center" gap={8}>
-          <span>{t("tagManagement.title.assignTags")}</span>
+          <span>
+            {bulkTargets.length > 1
+              ? t("tagManagement.title.bulkAssignTags")
+              : t("tagManagement.action.editTags")}
+          </span>
           {onManageDefinitions ? (
             <Button type="link" size="small" onClick={onManageDefinitions}>
               {t("tagManagement.action.manageDefinitions")}
@@ -296,6 +311,7 @@ export default function ResourceTagAssignmentModal({
       onCancel={onClose}
       onOk={() => (bulkTargets.length > 1 ? saveBulk() : saveSingle())}
       okText={t("tagManagement.action.save")}
+      cancelText={t("common.cancel")}
       confirmLoading={saving}
       width={880}
       zIndex={1100}

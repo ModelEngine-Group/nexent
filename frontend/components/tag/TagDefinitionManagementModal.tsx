@@ -317,6 +317,7 @@ export default function TagDefinitionManagementModal({
             </Button>
             <Popconfirm
               title={t("tagManagement.confirm.deleteValue")}
+              cancelText={t("common.cancel")}
               onConfirm={() => deleteValue(definition, tagValue)}
             >
               <Button size="small" danger disabled={!canManage}>
@@ -417,6 +418,7 @@ export default function TagDefinitionManagementModal({
           </Button>
           <Popconfirm
             title={t("tagManagement.confirm.deleteDefinition")}
+            cancelText={t("common.cancel")}
             onConfirm={() => deleteDefinition(definition)}
           >
             <Button size="small" danger disabled={!canManage}>
@@ -435,8 +437,8 @@ export default function TagDefinitionManagementModal({
       footer={null}
       width={1100}
       zIndex={1200}
-    centered
-    destroyOnHidden
+      centered
+      destroyOnHidden
     >
       <div className="mb-3 flex items-center justify-between">
         <Typography.Text type="secondary">
@@ -506,6 +508,7 @@ export default function TagDefinitionManagementModal({
             ? handleUpdateDefinition()
             : handleCreateDefinition()
         }
+        cancelText={t("common.cancel")}
         destroyOnHidden
         zIndex={1300}
       >
@@ -582,6 +585,7 @@ export default function TagDefinitionManagementModal({
           setValueModal({ open: false, definition: null, editingValue: null })
         }
         onOk={handleSaveValue}
+        cancelText={t("common.cancel")}
         destroyOnHidden
         zIndex={1300}
       >

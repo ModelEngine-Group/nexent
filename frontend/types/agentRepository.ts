@@ -2,6 +2,8 @@
  * Types for tenant agent repository (marketplace listings)
  */
 
+import type { TagResourcePredicate } from "@/types/tagManagement";
+
 export type AgentRepositoryListingStatus =
   | "not_shared"
   | "pending_review"
@@ -43,6 +45,7 @@ export interface AgentRepositoryListingListParams {
   page?: number;
   page_size?: number;
   search?: string;
+  tag?: string;
 }
 
 export interface AgentRepositoryListingDetail {
@@ -117,6 +120,7 @@ export interface MyEditableAgentListParams {
   search?: string;
   new_agent_padding?: boolean;
   agent_id?: number;
+  tag_predicates?: TagResourcePredicate[];
 }
 
 export interface MyEditableAgentPagination {

@@ -93,6 +93,7 @@ def _apply_skill_repository_filters(
     skill_id: Optional[int],
     category_id: Optional[int],
     search: Optional[str],
+    tag: Optional[str],
 ):
     query = query.filter(
         SkillRepository.delete_flag != "Y",
@@ -104,6 +105,8 @@ def _apply_skill_repository_filters(
         query = query.filter(SkillRepository.skill_id == skill_id)
     if category_id is not None:
         query = query.filter(SkillRepository.category_id == category_id)
+    if tag and tag.strip():
+        query = query.filter(SkillRepository.tags.any(tag.strip()))
 
     keyword = (search or "").strip()
     if keyword:
@@ -127,6 +130,7 @@ def list_skill_repository_summaries(
     page: int = 1,
     page_size: int = 10,
     search: Optional[str] = None,
+    tag: Optional[str] = None,
     sort_by_update_time: bool = False,
 ) -> Dict[str, Any]:
     """List active repository summaries for a publisher tenant without heavy payloads."""
@@ -157,6 +161,7 @@ def list_skill_repository_summaries(
             skill_id=skill_id,
             category_id=category_id,
             search=search,
+            tag=tag,
         )
 
         total = query.count()
@@ -201,6 +206,30 @@ def list_skill_repository_summaries(
             "total_pages": math.ceil(total / safe_page_size) if total else 0,
         },
     }
+
+
+def list_skill_repository_tag_stats(publisher_tenant_id: str) -> List[Dict[str, Any]]:
+    """Return shared repository tags and their listing counts for one tenant."""
+    with get_db_session() as session:
+        rows = (
+            session.query(
+                func.unnest(SkillRepository.tags).label("tag"),
+                func.count(SkillRepository.skill_repository_id).label("count"),
+            )
+            .filter(
+                SkillRepository.delete_flag != "Y",
+                SkillRepository.publisher_tenant_id == publisher_tenant_id,
+                SkillRepository.status == "shared",
+            )
+            .group_by("tag")
+            .order_by("tag")
+            .all()
+        )
+    return [
+        {"tag": str(row.tag), "count": int(row.count)}
+        for row in rows
+        if row.tag
+    ]
 
 
 def update_skill_repository_by_id(

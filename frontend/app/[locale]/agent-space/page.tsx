@@ -18,9 +18,12 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { USER_ROLES } from "@/const/auth";
 import { useSetupFlow } from "@/hooks/useSetupFlow";
+import { useTagDefinitions, useTagLibraries } from "@/hooks/useTagManagement";
+import type { TagResourcePredicate } from "@/types/tagManagement";
 import {
   useAgentRepositoryListingDetail,
   useAgentRepositoryListings,
+  useAgentRepositoryTagStats,
   useMyEditableAgents,
   useUpdateAgentRepositoryStatus,
 } from "@/hooks/agentRepository/useAgentRepositoryListings";
@@ -35,6 +38,9 @@ import { isNewAgentPaddingItem } from "@/types/agentRepository";
 import { parseReviewDeepLinkParams } from "@/lib/notificationNavigation";
 import { cn } from "@/lib/utils";
 import { AgentRepositoryCard } from "./components/AgentRepositoryCard";
+import RepositoryTagFilter, {
+  type RepositoryTagStat,
+} from "@/components/tag/RepositoryTagFilter";
 import { AgentRepositoryCopyDialog } from "./components/AgentRepositoryCopyDialog";
 import { AgentRepositoryDetailModal } from "./components/AgentRepositoryDetailModal";
 import { MineAgentsView } from "./components/MineAgentsView";
@@ -80,10 +86,14 @@ export default function AgentRepositoryPage() {
     return AgentRepositoryTab.REPOSITORY;
   });
   const [searchQuery, setSearchQuery] = useState("");
+  const [repositoryTag, setRepositoryTag] = useState<string>();
   const [repositoryPage, setRepositoryPage] = useState(1);
   const [mineOwnership, setMineOwnership] = useState<MineOwnershipFilter>("all");
   const [minePage, setMinePage] = useState(1);
   const [mineSearch, setMineSearch] = useState("");
+  const [mineTagPredicates, setMineTagPredicates] = useState<
+    TagResourcePredicate[]
+  >([]);
   const [reviewPage, setReviewPage] = useState(1);
   const [detailSource, setDetailSource] = useState<AgentDetailSource | null>(
     null
@@ -109,6 +119,13 @@ export default function AgentRepositoryPage() {
   const isRepositoryTab = tab === AgentRepositoryTab.REPOSITORY;
   const isReviewTab = tab === AgentRepositoryTab.REVIEW;
   const isMineTab = tab === AgentRepositoryTab.MINE;
+  const { data: tagLibraries } = useTagLibraries();
+  const defaultTagLibrary =
+    tagLibraries?.find((library) => library.bucket_key === "default_resource") ??
+    null;
+  const { data: mineTagDefinitions } = useTagDefinitions(
+    defaultTagLibrary?.bucket_id ?? null
+  );
 
   const reviewDeepLink = useMemo(
     () => parseReviewDeepLinkParams(searchParams),
@@ -125,12 +142,16 @@ export default function AgentRepositoryPage() {
       page: repositoryPage,
       page_size: REPOSITORY_PAGE_SIZE,
       ...(searchQuery.trim() ? { search: searchQuery.trim() } : {}),
+      ...(repositoryTag ? { tag: repositoryTag } : {}),
     }),
-    [repositoryPage, searchQuery]
+    [repositoryPage, repositoryTag, searchQuery]
   );
 
   const { data, isLoading, isError, refetch, isFetching } =
     useAgentRepositoryListings(listingParams, isRepositoryTab);
+  const { data: repositoryTagStats = [] } = useAgentRepositoryTagStats(
+    isRepositoryTab
+  );
 
   const { data: repositoryCountData } = useAgentRepositoryListings(
     { status: "shared", page: 1, page_size: 1 },
@@ -143,11 +164,15 @@ export default function AgentRepositoryPage() {
       page: minePage,
       page_size: MINE_PAGE_SIZE,
       ...(mineSearch.trim() ? { search: mineSearch.trim() } : {}),
+      ...(mineTagPredicates.length > 0
+        ? { tag_predicates: mineTagPredicates }
+        : {}),
       ...(mineOwnership === "all" && !mineSearch.trim()
+        && mineTagPredicates.length === 0
         ? { new_agent_padding: true }
         : {}),
     }),
-    [mineOwnership, minePage, mineSearch]
+    [mineOwnership, minePage, mineSearch, mineTagPredicates]
   );
 
   const {
@@ -416,6 +441,12 @@ export default function AgentRepositoryPage() {
                 <RepositoryView
                   searchQuery={searchQuery}
                   onSearchChange={handleRepositorySearchChange}
+                  tag={repositoryTag}
+                  tagStats={repositoryTagStats}
+                  onTagChange={(value) => {
+                    setRepositoryTag(value);
+                    setRepositoryPage(1);
+                  }}
                   isLoading={isLoading}
                   isError={isError}
                   isFetching={isFetching}
@@ -474,6 +505,12 @@ export default function AgentRepositoryPage() {
                     setMineSearch(value);
                     setMinePage(1);
                   }}
+                  tagDefinitions={mineTagDefinitions ?? []}
+                  tagPredicates={mineTagPredicates}
+                  onTagPredicatesChange={(value) => {
+                    setMineTagPredicates(value);
+                    setMinePage(1);
+                  }}
                   page={minePage}
                   pageSize={MINE_PAGE_SIZE}
                   total={mineTotal}
@@ -520,6 +557,9 @@ export default function AgentRepositoryPage() {
 function RepositoryView({
   searchQuery,
   onSearchChange,
+  tag,
+  tagStats,
+  onTagChange,
   isLoading,
   isError,
   isFetching,
@@ -537,6 +577,9 @@ function RepositoryView({
 }: {
   searchQuery: string;
   onSearchChange: (value: string) => void;
+  tag?: string;
+  tagStats: RepositoryTagStat[];
+  onTagChange: (value?: string) => void;
   isLoading: boolean;
   isError: boolean;
   isFetching: boolean;
@@ -588,15 +631,18 @@ function RepositoryView({
 
   return (
     <div className="space-y-5">
-      <div className="relative">
-        <Input
-          value={searchQuery}
-          onChange={(e) => onSearchChange(e.target.value)}
-          placeholder={t("agentRepository.page.searchPlaceholder")}
-          prefix={<Search className="size-4 text-slate-400" aria-hidden />}
-          className="h-11 rounded-xl"
-          allowClear
-        />
+      <div className="flex items-center gap-3">
+        <div className="relative min-w-0 flex-1">
+          <Input
+            value={searchQuery}
+            onChange={(e) => onSearchChange(e.target.value)}
+            placeholder={t("agentRepository.page.searchPlaceholder")}
+            prefix={<Search className="size-4 text-slate-400" aria-hidden />}
+            className="h-11 rounded-xl"
+            allowClear
+          />
+        </div>
+        <RepositoryTagFilter value={tag} tags={tagStats} onChange={onTagChange} />
       </div>
 
       <p className="text-sm text-slate-500 dark:text-slate-400">

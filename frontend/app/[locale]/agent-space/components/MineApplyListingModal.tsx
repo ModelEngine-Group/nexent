@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { App, Button, Dropdown, Input, Modal, Select, Spin } from "antd";
+import { App, Button, Dropdown, Input, Modal, Spin } from "antd";
 import { ChevronDown, Share2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { AGENT_REPOSITORY_ICONS } from "@/const/agentRepository";
@@ -16,6 +16,7 @@ import {
   useTagDefinitions,
   useTagLibraries,
 } from "@/hooks/useTagManagement";
+import ResourceTagAssignmentModal from "@/components/tag/ResourceTagAssignmentModal";
 import {
   buildApplyListingFormPrefill,
   pickApplyListingPrefillSource,
@@ -24,6 +25,7 @@ import type {
   AgentRepositoryListingCreatePayload,
   MyEditableAgentItem,
 } from "@/types/agentRepository";
+import type { TagAssignmentValue } from "@/types/tagManagement";
 
 const MAX_TAGS = 5;
 const MAX_TAG_LENGTH = 20;
@@ -72,10 +74,12 @@ export function MineApplyListingModal({
   const [iconInput, setIconInput] = useState("");
   const [iconError, setIconError] = useState<string | null>(null);
   const [presetDropdownOpen, setPresetDropdownOpen] = useState(false);
-  const [selectedTagValueIds, setSelectedTagValueIds] = useState<number[]>([]);
   const [listingContent, setListingContent] = useState("");
-  const [isSavingTags, setIsSavingTags] = useState(false);
   const [formInitialized, setFormInitialized] = useState(false);
+  const [tagEditorOpen, setTagEditorOpen] = useState(false);
+  const [savedAssignments, setSavedAssignments] = useState<
+    TagAssignmentValue[] | null
+  >(null);
 
   const agentId = agent?.agent_id;
   const agentTagAssignments = useTagAssignments(
@@ -93,14 +97,59 @@ export function MineApplyListingModal({
     open && agentId != null
   );
 
-  const tagOptions = useMemo(
+  const assignmentValues =
+    savedAssignments ?? agentTagAssignments.data?.assignments ?? [];
+
+  const categoryAssignmentValueIds = useMemo(
     () =>
-      categoryValues.map((value) => ({
-        label: getAgentRepositoryTagLabel(value.normalized_value, t),
-        value: value.value_id,
-      })),
-    [categoryValues, t]
+      new Set(
+        assignmentValues
+          .filter(
+            (assignment) =>
+              assignment.definition_id === agentCategory?.definition_id
+          )
+          .map((assignment) => assignment.value_id)
+      ),
+    [agentCategory?.definition_id, assignmentValues]
   );
+
+  const selectedCategoryValues = useMemo(
+    () =>
+      categoryValues.filter((value) =>
+        categoryAssignmentValueIds.has(value.value_id)
+      ),
+    [categoryAssignmentValueIds, categoryValues]
+  );
+
+  const legacyCategorySelection = useMemo(() => {
+    if (!agentCategory || categoryAssignmentValueIds.size > 0) return {};
+    const source = pickApplyListingPrefillSource(
+      listingsData?.items ?? [],
+      agent?.version_label
+    );
+    const prefill = buildApplyListingFormPrefill(source, { maxTags: MAX_TAGS });
+    if (!prefill) return {};
+    const legacyTags = new Set(
+      prefill.tags.map((tag) => tag.trim().toLocaleLowerCase())
+    );
+    const valueIds = categoryValues
+      .filter((value) =>
+        [
+          value.normalized_value,
+          value.display_value,
+          getAgentRepositoryTagLabel(value.normalized_value, t),
+        ].some((candidate) => legacyTags.has(candidate.trim().toLocaleLowerCase()))
+      )
+      .map((value) => value.value_id);
+    return valueIds.length > 0 ? { [agentCategory.definition_id]: valueIds } : {};
+  }, [
+    agent?.version_label,
+    agentCategory,
+    categoryAssignmentValueIds.size,
+    categoryValues,
+    listingsData?.items,
+    t,
+  ]);
 
   const invalidIconMessage = t(
     "agentRepository.mine.applyModal.validation.iconInvalid"
@@ -138,25 +187,12 @@ export function MineApplyListingModal({
   useEffect(() => {
     if (!open) {
       setFormInitialized(false);
+      setTagEditorOpen(false);
+      setSavedAssignments(null);
       return;
     }
 
-    if (
-      !agent ||
-      !isListingsSuccess ||
-      tagDefinitions === null ||
-      (agentTagAssignments.data === null &&
-        agentTagAssignments.error === null) ||
-      formInitialized
-    ) {
-      return;
-    }
-
-    if (!agentCategory) {
-      clearIconState();
-      setSelectedTagValueIds([]);
-      setListingContent("");
-      setFormInitialized(true);
+    if (!agent || !isListingsSuccess || formInitialized) {
       return;
     }
 
@@ -170,19 +206,6 @@ export function MineApplyListingModal({
 
     if (!prefill) {
       clearIconState();
-      const assignedIds = new Set(
-        (agentTagAssignments.data?.assignments ?? [])
-          .filter(
-            (assignment) =>
-              assignment.definition_id === agentCategory.definition_id
-          )
-          .map((assignment) => assignment.value_id)
-      );
-      setSelectedTagValueIds(
-        categoryValues
-          .filter((value) => assignedIds.has(value.value_id))
-          .map((value) => value.value_id)
-      );
       setListingContent("");
       setFormInitialized(true);
       return;
@@ -195,34 +218,6 @@ export function MineApplyListingModal({
       clearIconState();
     }
 
-    const assignedIds = new Set(
-      (agentTagAssignments.data?.assignments ?? [])
-        .filter(
-          (assignment) =>
-            assignment.definition_id === agentCategory.definition_id
-        )
-        .map((assignment) => assignment.value_id)
-    );
-    const hasAssignedCategory = assignedIds.size > 0;
-    const legacyTags = new Set(
-      prefill.tags.map((tag) => tag.trim().toLocaleLowerCase())
-    );
-    setSelectedTagValueIds(
-      categoryValues
-        .filter(
-          (value) =>
-            assignedIds.has(value.value_id) ||
-            (!hasAssignedCategory &&
-              [
-                value.normalized_value,
-                value.display_value,
-                getAgentRepositoryTagLabel(value.normalized_value, t),
-              ].some((candidate) =>
-                legacyTags.has(candidate.trim().toLocaleLowerCase())
-              ))
-        )
-        .map((value) => value.value_id)
-    );
     setListingContent("");
     setFormInitialized(true);
   }, [
@@ -232,13 +227,7 @@ export function MineApplyListingModal({
     listingsData,
     clearIconState,
     applyIconInputFromValue,
-    tagDefinitions,
-    agentTagAssignments.data,
-    agentTagAssignments.error,
     formInitialized,
-    agentCategory,
-    categoryValues,
-    t,
   ]);
 
   const title = agent?.name?.trim() || t("agentRepository.card.untitled");
@@ -278,14 +267,11 @@ export function MineApplyListingModal({
       return;
     }
 
-    const selectedTagValues = categoryValues.filter((value) =>
-      selectedTagValueIds.includes(value.value_id)
-    );
-    if (selectedTagValues.length === 0 || !agentCategory) {
+    if (selectedCategoryValues.length === 0 || !agentCategory) {
       message.warning(t("agentRepository.mine.applyModal.validation.tags"));
       return;
     }
-    if (selectedTagValues.length > MAX_TAGS) {
+    if (selectedCategoryValues.length > MAX_TAGS) {
       message.warning(
         t("agentRepository.mine.applyModal.validation.tagsMax", {
           count: MAX_TAGS,
@@ -293,7 +279,7 @@ export function MineApplyListingModal({
       );
       return;
     }
-    const tags = selectedTagValues.map((value) =>
+    const tags = selectedCategoryValues.map((value) =>
       resolveAgentRepositoryTagForSubmit(value.normalized_value, t)
     );
     if (tags.some((tag) => tag.length > MAX_TAG_LENGTH)) {
@@ -305,22 +291,7 @@ export function MineApplyListingModal({
       return;
     }
 
-    const preservedValueIds = (agentTagAssignments.data?.assignments ?? [])
-      .filter(
-        (assignment) => assignment.definition_id !== agentCategory.definition_id
-      )
-      .map((assignment) => assignment.value_id);
-
-    setIsSavingTags(true);
     try {
-      await agentTagAssignments.replace({
-        value_ids: Array.from(
-          new Set([
-            ...preservedValueIds,
-            ...selectedTagValues.map((value) => value.value_id),
-          ])
-        ),
-      });
       await onSubmit({
         icon: selectedIcon,
         tags,
@@ -328,13 +299,12 @@ export function MineApplyListingModal({
       });
     } catch (error) {
       message.error(error instanceof Error ? error.message : String(error));
-    } finally {
-      setIsSavingTags(false);
     }
   };
 
   return (
-    <Modal
+    <>
+      <Modal
       open={open && agent != null}
       onCancel={onClose}
       centered
@@ -347,12 +317,12 @@ export function MineApplyListingModal({
       }
       footer={
         <div className="flex flex-wrap justify-end gap-2">
-          <Button onClick={onClose} disabled={isSubmitting || isSavingTags}>
+          <Button onClick={onClose} disabled={isSubmitting}>
             {t("common.cancel")}
           </Button>
           <Button
             type="primary"
-            loading={isSubmitting || isSavingTags}
+            loading={isSubmitting}
             onClick={() => void handleSubmit()}
           >
             {t("agentRepository.mine.applyModal.submit")}
@@ -423,19 +393,22 @@ export function MineApplyListingModal({
             <p className="text-sm font-medium text-slate-700 dark:text-slate-200">
               {t("agentRepository.mine.applyModal.tags")}
             </p>
-            <Select
-              mode="multiple"
-              className="w-full"
-              value={selectedTagValueIds}
-              onChange={setSelectedTagValueIds}
-              options={tagOptions}
-              maxCount={MAX_TAGS}
-              placeholder={t("agentRepository.mine.applyModal.tagsPlaceholder")}
-            />
+            <div className="flex flex-wrap items-center gap-2">
+              <Button onClick={() => setTagEditorOpen(true)}>
+                {t("tagManagement.action.editTags")}
+              </Button>
+              {selectedCategoryValues.length > 0 ? (
+                <span className="text-sm text-slate-600 dark:text-slate-300">
+                  {selectedCategoryValues
+                    .map((value) =>
+                      getAgentRepositoryTagLabel(value.normalized_value, t)
+                    )
+                    .join(" · ")}
+                </span>
+              ) : null}
+            </div>
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              {t("agentRepository.mine.applyModal.tagsHint", {
-                count: MAX_TAGS,
-              })}
+              {t("agentRepository.mine.applyModal.tagsHint")}
             </p>
           </section>
 
@@ -452,6 +425,17 @@ export function MineApplyListingModal({
           </section>
         </div>
       </Spin>
-    </Modal>
+      </Modal>
+      <ResourceTagAssignmentModal
+        open={tagEditorOpen && agentId != null}
+        onClose={() => setTagEditorOpen(false)}
+        resourceType="agent"
+        resourceId={String(agentId ?? "")}
+        definitions={tagDefinitions ?? []}
+        canEdit={agent?.permission !== "READ_ONLY"}
+        initialSelection={legacyCategorySelection}
+        onSaved={(assignment) => setSavedAssignments(assignment.assignments)}
+      />
+    </>
   );
 }
