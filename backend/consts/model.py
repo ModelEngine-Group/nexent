@@ -510,6 +510,10 @@ class RenameRequest(BaseModel):
     conversation_id: int
     name: str
 
+
+class BatchDeleteConversationRequest(BaseModel):
+    conversation_ids: List[int]
+
 # Pydantic models for API
 class TaskRequest(BaseModel):
     source: str
