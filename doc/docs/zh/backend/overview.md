@@ -23,7 +23,7 @@ backend/
 │   ├── conversation_management_app.py  # 对话管理 API
 │   ├── conversation_share_app.py       # 会话分享 API
 │   ├── vectordatabase_app.py    # 知识库检索 API
-│   ├── model_managment_app.py   # 模型管理 API（含容量建议/并发治理）
+│   ├── model_management_app.py   # 模型管理 API（含容量建议/并发治理）
 │   ├── voice_app.py             # 语音 API（STT/TTS WebSocket）
 │   ├── file_management_app.py   # 文件管理 API（上传/预览/签名URL）
 │   ├── remote_mcp_app.py        # MCP 服务与 API→MCP 转换 API（/mcp）
