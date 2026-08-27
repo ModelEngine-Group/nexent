@@ -97,9 +97,10 @@ export const ThreadList: FC<ThreadListProps> = ({ generatedTitles }) => {
         />
       </AuiIf>
       <ThreadListPrimitive.LoadMore
+        disabled={!hasMore || isLoading || isLoadingMore}
         className="mt-1 flex h-8 w-full items-center justify-center gap-2 rounded-lg px-3 text-xs text-muted-foreground hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
       >
-        <ArrowDownIcon className="size-3.5" />
+        {hasMore ? <ArrowDownIcon className="size-3.5" /> : null}
         <span>
           {isLoading || isLoadingMore
             ? t("chat.threadList.loadingMore")
