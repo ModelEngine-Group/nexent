@@ -1,4 +1,4 @@
-import type { Tool } from "@/types/agentConfig";
+import type { Tool, ToolParam } from "@/types/agentConfig";
 
 // Shared tool helpers used by Agent configuration and NL2Agent resource cards.
 
@@ -18,6 +18,19 @@ export function mergeCanonicalTool(tool: Tool, tools: Tool[]): Tool {
     ...canonical,
     initParams: tool.initParams,
   };
+}
+
+export function mergeToolParamValues(
+  params: ToolParam[],
+  values: Record<string, unknown> | null | undefined
+): ToolParam[] {
+  if (!values) return params.map((param) => ({ ...param }));
+
+  return params.map((param) =>
+    Object.prototype.hasOwnProperty.call(values, param.name)
+      ? { ...param, value: values[param.name] }
+      : { ...param }
+  );
 }
 
 export const TOOLS_REQUIRING_KB_SELECTION = [

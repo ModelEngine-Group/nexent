@@ -212,12 +212,14 @@ export type Nl2aRecommendedResource =
   | {
       candidate: Nl2aResourceCandidate & { resource_type: "tool" };
       recommendation: "recommended" | "optional";
+      is_bound: boolean;
       form_kind: "TOOL_CONFIG";
       config: ToolParam[];
     }
   | {
       candidate: Nl2aResourceCandidate & { resource_type: "skill" };
       recommendation: "recommended" | "optional";
+      is_bound: boolean;
       form_kind: "SKILL_CONFIG";
       config: SkillParam[];
     };
@@ -803,6 +805,7 @@ function parseNl2aMessage(chunk: SseChunk): Nl2aMessage | null {
             !resource?.candidate?.candidate_ref ||
             !["tool", "skill"].includes(resource.candidate.resource_type) ||
             !["recommended", "optional"].includes(resource.recommendation) ||
+            typeof resource.is_bound !== "boolean" ||
             !Array.isArray(resource.config)
         )
       ) {

@@ -443,7 +443,6 @@ async def _load_installed_resource_catalog(
         if (
             source not in {ToolSourceEnum.LOCAL.value, ToolSourceEnum.MCP.value}
             or tool.get("is_available") is not True
-            or tool.get("is_user_selectable") is False
             or name in internal_names
         ):
             continue
@@ -989,6 +988,7 @@ def _recommended_resource(
     actual: dict[str, Any],
     supplied: ResourceCandidate,
     recommended_refs: set[str],
+    is_bound: bool = False,
 ) -> RecommendedResource:
     return RecommendedResource(
         candidate=_verified_resource_candidate(actual, supplied),
@@ -997,6 +997,7 @@ def _recommended_resource(
             if supplied.candidate_ref in recommended_refs
             else "optional"
         ),
+        is_bound=is_bound,
         form_kind=actual.get("form_kind") or (
             "TOOL_CONFIG"
             if actual["resource_type"] == "tool"
@@ -1038,6 +1039,7 @@ async def recommend_uninstalled_resources_impl(
 
 async def recommend_installed_resources_impl(
     *,
+    agent_id: int,
     candidates: list[ResourceCandidate],
     recommended_refs: list[str],
     tenant_id: str,
@@ -1050,6 +1052,15 @@ async def recommend_installed_resources_impl(
         user_id=user_id,
     )
     by_ref = {item["candidate_ref"]: item for item in catalog}
+    bound_tool_refs = {
+        f"tool:{instance['tool_id']}"
+        for instance in query_all_enabled_tool_instances(
+            agent_id=agent_id,
+            tenant_id=tenant_id,
+            version_no=0,
+        )
+        if isinstance(instance.get("tool_id"), int)
+    }
     recommended = set(recommended_refs)
     resources: list[RecommendedResource] = []
     for supplied in candidates:
@@ -1060,12 +1071,14 @@ async def recommend_installed_resources_impl(
             actual=actual,
             supplied=supplied,
             recommended_refs=recommended,
+            is_bound=supplied.candidate_ref in bound_tool_refs,
         ))
     return RecommendResourcesOutput(resources=resources)
 
 
 async def recommend_resources_impl(
     *,
+    agent_id: int,
     candidates: list[ResourceCandidate],
     recommended_refs: list[str],
     tenant_id: str,
@@ -1076,6 +1089,7 @@ async def recommend_resources_impl(
     sources = {candidate.source for candidate in candidates}
     if sources and sources.issubset(INSTALLED_RESOURCE_SOURCES):
         return await recommend_installed_resources_impl(
+            agent_id=agent_id,
             candidates=candidates,
             recommended_refs=recommended_refs,
             tenant_id=tenant_id,

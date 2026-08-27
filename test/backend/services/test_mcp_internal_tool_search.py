@@ -936,6 +936,7 @@ async def test_resource_tools_return_tenant_scoped_results_and_stable_errors(
         "tenant_mcp_repository:8"
     ]
     assert recommend_impl.await_args.kwargs["user_id"] == "user-a"
+    assert recommend_impl.await_args.kwargs["agent_id"] == 42
 
     search_impl.side_effect = PermissionError("private auth details")
     assert (
@@ -1005,12 +1006,22 @@ async def test_installed_binding_wrapper_rechecks_agent_and_candidates(mocker):
                     "score": 0.9,
                 },
                 "recommendation": "recommended",
+                "is_bound": True,
                 "form_kind": "TOOL_CONFIG",
                 "config": [],
             }
         ],
     }
-    verified = RecommendResourcesOutput.model_validate(resource_result)
+    verified_result = {
+        **resource_result,
+        "resources": [
+            {
+                **resource_result["resources"][0],
+                "is_bound": False,
+            }
+        ],
+    }
+    verified = RecommendResourcesOutput.model_validate(verified_result)
     recommend_impl = mocker.patch.object(
         nl2agent_service,
         "recommend_resources_impl",
@@ -1023,12 +1034,15 @@ async def test_installed_binding_wrapper_rechecks_agent_and_candidates(mocker):
         resource_result=resource_result,
     )
 
-    assert _unwrap_nl2a(wrapped)["resources"][0]["candidate"]["name"] == "search"
+    wrapped_resource = _unwrap_nl2a(wrapped)["resources"][0]
+    assert wrapped_resource["candidate"]["name"] == "search"
+    assert wrapped_resource["is_bound"] is False
     require_edit.assert_called_once_with(
         agent_id=42,
         tenant_id="tenant-a",
         user_id="user-a",
     )
+    assert recommend_impl.await_args.kwargs["agent_id"] == 42
     assert recommend_impl.await_args.kwargs["recommended_refs"] == ["tool:7"]
 
 
@@ -1086,6 +1100,8 @@ async def test_installation_wrapper_rechecks_agent_and_candidates(mocker):
     payload = _unwrap_nl2a(wrapped)
     assert payload["subtype"] == "suggested_resource_installation"
     assert payload["resources"][0]["default_option_id"] == "official"
+    assert payload["resources"][0]["is_bound"] is False
+    assert recommend_impl.await_args.kwargs["agent_id"] == 42
     assert recommend_impl.await_args.kwargs["recommended_refs"] == [
         "nexent_official_skill:daily-report"
     ]
