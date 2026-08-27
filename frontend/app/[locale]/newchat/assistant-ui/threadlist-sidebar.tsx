@@ -1,4 +1,3 @@
-import * as React from "react";
 import { useRouter } from "next/navigation";
 import { PanelLeftIcon, PlusIcon, Repeat2Icon } from "lucide-react";
 import {
@@ -40,8 +39,6 @@ export function ThreadListSidebar({
   const router = useRouter();
   const isMobile = useIsMobile();
   const isCollapsed = state === "collapsed" || isMobile;
-  const listContainerRef = React.useRef<HTMLDivElement>(null);
-
   if (isCollapsed) {
     return (
       <div className="h-full" style={{ backgroundColor: "#F2F8FF" }}>
@@ -109,7 +106,7 @@ export function ThreadListSidebar({
           <SidebarHeader>
             <div className="flex items-center gap-2 px-1">
               <ThreadListPrimitive.New
-                className="flex h-9 flex-1 items-center gap-2 rounded-lg border px-3 text-sm hover:bg-muted truncate"
+                className="flex h-9 flex-1 items-center gap-2 rounded-lg border px-3 text-sm hover:bg-muted truncate bg-white"
                 onClick={onPrepareNewConversation}
               >
                 <PlusIcon className="size-4 shrink-0" />
@@ -118,20 +115,13 @@ export function ThreadListSidebar({
               <SidebarTrigger className="size-8 shrink-0" />
             </div>
           </SidebarHeader>
-          <SidebarContent
-            ref={listContainerRef}
-            tabIndex={0}
-            className="focus:outline-none"
-          >
-            <ThreadList
-              generatedTitles={generatedTitles}
-              scrollContainerRef={listContainerRef}
-            />
+          <SidebarContent className="focus:outline-none">
+            <ThreadList generatedTitles={generatedTitles} />
           </SidebarContent>
           <SidebarFooter>
             <button
               type="button"
-              className="flex h-9 w-full items-center justify-center gap-2 rounded-lg border px-3 text-sm hover:bg-muted"
+              className="flex h-9 w-full items-center justify-center gap-2 rounded-lg border px-3 text-sm hover:bg-muted bg-white"
               onClick={() => router.push("/chat")}
             >
               <Repeat2Icon className="size-4 shrink-0" />
