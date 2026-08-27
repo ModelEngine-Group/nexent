@@ -43,6 +43,7 @@ from backend.apps.conversation_management_app import (
     list_conversations_endpoint,
     rename_conversation_endpoint,
     delete_conversation_endpoint,
+    delete_conversations_batch_endpoint,
     get_conversation_history_endpoint,
     get_sources_endpoint,
     generate_conversation_title_endpoint,
@@ -65,6 +66,7 @@ def conversation_mocks():
             patch('backend.apps.conversation_management_app.rename_conversation_service') as mock_rename_conv, \
             patch('backend.apps.conversation_management_app.logging') as mock_logging, \
             patch('backend.apps.conversation_management_app.delete_conversation_service') as mock_delete_conv, \
+            patch('backend.apps.conversation_management_app.delete_conversations_batch_service') as mock_delete_batch, \
             patch('backend.apps.conversation_management_app.get_conversation_history_service') as mock_history_service, \
             patch('backend.apps.conversation_management_app.get_sources_service') as mock_sources_service, \
             patch('backend.apps.conversation_management_app.generate_conversation_title_service') as mock_generate_title_service, \
@@ -79,6 +81,7 @@ def conversation_mocks():
             'rename_conversation': mock_rename_conv,
             'logging': mock_logging,
             'delete_conversation': mock_delete_conv,
+            'delete_conversations_batch': mock_delete_batch,
             'history_service': mock_history_service,
             'sources_service': mock_sources_service,
             'generate_title_service': mock_generate_title_service,
@@ -370,6 +373,52 @@ async def test_delete_conversation_failure(conversation_mocks):
 
     with pytest.raises(HTTPException) as exc_info:
         await delete_conversation_endpoint(conversation_id, authorization=mock_auth_header)
+
+    assert exc_info.value.status_code == 500
+    conversation_mocks['logging'].error.assert_called_once()
+
+
+# delete_conversations_batch_endpoint
+
+
+@pytest.mark.asyncio
+async def test_delete_conversations_batch_success(conversation_mocks):
+    mock_auth_header = "Bearer test-token"
+
+    conversation_mocks['get_current_user_id'].return_value = (
+        "user_id", "tenant_id")
+    conversation_mocks['delete_conversations_batch'].return_value = {
+        "deleted_count": 2,
+        "failed_ids": [],
+    }
+
+    request_obj = MagicMock()
+    request_obj.conversation_ids = [1, 2, 3]
+
+    result = await delete_conversations_batch_endpoint(
+        request_obj, authorization=mock_auth_header)
+
+    assert result.code == 0
+    assert result.data["deleted_count"] == 2
+    conversation_mocks['delete_conversations_batch'].assert_called_once_with(
+        [1, 2, 3], "user_id")
+
+
+@pytest.mark.asyncio
+async def test_delete_conversations_batch_failure(conversation_mocks):
+    mock_auth_header = "Bearer test-token"
+
+    conversation_mocks['get_current_user_id'].return_value = (
+        "user_id", "tenant_id")
+    conversation_mocks['delete_conversations_batch'].side_effect = Exception(
+        "batch delete error")
+
+    request_obj = MagicMock()
+    request_obj.conversation_ids = [1, 2]
+
+    with pytest.raises(HTTPException) as exc_info:
+        await delete_conversations_batch_endpoint(
+            request_obj, authorization=mock_auth_header)
 
     assert exc_info.value.status_code == 500
     conversation_mocks['logging'].error.assert_called_once()

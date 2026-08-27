@@ -1449,6 +1449,43 @@ class TestDeleteConversationService(unittest.TestCase):
         self.assertIn("DB error", str(ctx.exception))
 
 
+class TestDeleteConversationsBatchService(unittest.TestCase):
+    """Test delete_conversations_batch_service function."""
+
+    @patch('backend.services.conversation_management_service.delete_conversations_batch')
+    def test_batch_delete_success(self, mock_delete_batch):
+        """Returns deleted_count and failed_ids when some ids are not owned."""
+        mock_delete_batch.return_value = [101, 102]
+        from backend.services.conversation_management_service import delete_conversations_batch_service
+
+        result = delete_conversations_batch_service([101, 102, 999], "user-1")
+
+        self.assertEqual(result["deleted_count"], 2)
+        self.assertEqual(result["failed_ids"], [999])
+        mock_delete_batch.assert_called_once_with([101, 102, 999], "user-1")
+
+    @patch('backend.services.conversation_management_service.delete_conversations_batch')
+    def test_batch_delete_none_owned(self, mock_delete_batch):
+        """Returns 0 deleted and all ids as failed when none owned."""
+        mock_delete_batch.return_value = []
+        from backend.services.conversation_management_service import delete_conversations_batch_service
+
+        result = delete_conversations_batch_service([999], "user-1")
+
+        self.assertEqual(result["deleted_count"], 0)
+        self.assertEqual(result["failed_ids"], [999])
+
+    @patch('backend.services.conversation_management_service.delete_conversations_batch')
+    def test_batch_delete_db_exception_propagates(self, mock_delete_batch):
+        """Should re-raise exception from database layer."""
+        mock_delete_batch.side_effect = Exception("DB error")
+        from backend.services.conversation_management_service import delete_conversations_batch_service
+
+        with self.assertRaises(Exception) as ctx:
+            delete_conversations_batch_service([101], "user-1")
+        self.assertIn("DB error", str(ctx.exception))
+
+
 class TestBuildStreamingMessage(unittest.TestCase):
     """Test _build_streaming_message function."""
 
