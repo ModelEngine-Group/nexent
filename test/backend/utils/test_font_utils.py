@@ -50,14 +50,17 @@ def _install_reportlab_stub(register_side_effect=None):
     pdfmetrics = MagicMock()
     pdfmetrics.registerFont.side_effect = register_side_effect
     ttfonts = MagicMock()
+    cidfonts = MagicMock()
     rl = MagicMock()
     rl.pdfbase.pdfmetrics = pdfmetrics
     rl.pdfbase.ttfonts = ttfonts
+    rl.pdfbase.cidfonts = cidfonts
     sys.modules["reportlab"] = rl
     sys.modules["reportlab.pdfbase"] = rl.pdfbase
     sys.modules["reportlab.pdfbase.pdfmetrics"] = pdfmetrics
     sys.modules["reportlab.pdfbase.ttfonts"] = ttfonts
-    return pdfmetrics, ttfonts
+    sys.modules["reportlab.pdfbase.cidfonts"] = cidfonts
+    return pdfmetrics, ttfonts, cidfonts
 
 
 class TestFindCjkFontPath:
@@ -120,15 +123,20 @@ class TestSetupMatplotlibCjk:
 class TestSetupReportlabCjk:
     @patch("font_utils.get_cjk_font_path", return_value="C:/x.ttf")
     def test_registers_and_returns_cjk(self, _fp):
-        pdfmetrics, ttfonts = _install_reportlab_stub()
+        pdfmetrics, ttfonts, _cidfonts = _install_reportlab_stub()
         assert font_utils.setup_reportlab_cjk() == "CJK"
         pdfmetrics.registerFont.assert_called_once_with(ttfonts.TTFont("CJK", "C:/x.ttf"))
 
     @patch("font_utils.get_cjk_font_path", return_value="C:/x.ttf")
-    def test_register_error_returns_helvetica(self, _fp):
-        _install_reportlab_stub(register_side_effect=RuntimeError("no"))
-        assert font_utils.setup_reportlab_cjk() == "Helvetica"
+    def test_register_error_uses_cid_fallback(self, _fp):
+        pdfmetrics, _ttfonts, cidfonts = _install_reportlab_stub(
+            register_side_effect=[RuntimeError("no"), None]
+        )
+        assert font_utils.setup_reportlab_cjk() == "STSong-Light"
+        assert pdfmetrics.registerFont.call_args_list[1].args == (cidfonts.UnicodeCIDFont("STSong-Light"),)
 
     @patch("font_utils.get_cjk_font_path", return_value=None)
-    def test_no_font_returns_helvetica(self, _fp):
-        assert font_utils.setup_reportlab_cjk() == "Helvetica"
+    def test_no_font_uses_cid_fallback(self, _fp):
+        _pdfmetrics, _ttfonts, cidfonts = _install_reportlab_stub()
+        assert font_utils.setup_reportlab_cjk() == "STSong-Light"
+        cidfonts.UnicodeCIDFont.assert_called_once_with("STSong-Light")

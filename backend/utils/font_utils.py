@@ -28,6 +28,7 @@ def _find_cjk_font_path() -> Optional[str]:
         "C:/Windows/Fonts/simsun.ttc",
         # Linux / macOS
         os.path.expanduser("~/.fonts/NotoSansSC.ttf"),
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
         "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
     ]
     for fp in candidates:
@@ -86,11 +87,15 @@ def setup_matplotlib_cjk() -> str:
 def setup_reportlab_cjk() -> str:
     """Register a CJK font with reportlab and return the PDF font name.
 
-    Returns ``"CJK"`` on success, ``"Helvetica"`` on failure.
+    Returns ``"CJK"`` when a TrueType font can be embedded.  Debian's
+    ``fonts-noto-cjk`` package provides CFF-based TTC files, which ReportLab's
+    ``TTFont`` cannot embed, so fall back to ReportLab's built-in Chinese CID
+    font before using Helvetica as a last resort.
     """
+    from reportlab.pdfbase import pdfmetrics
+
     fp = get_cjk_font_path()
     if fp:
-        from reportlab.pdfbase import pdfmetrics
         from reportlab.pdfbase.ttfonts import TTFont
         try:
             pdfmetrics.registerFont(TTFont("CJK", fp))
@@ -98,4 +103,13 @@ def setup_reportlab_cjk() -> str:
             return "CJK"
         except Exception as exc:
             logger.warning("Failed to register reportlab CJK font: %s", exc)
+
+    try:
+        from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+
+        pdfmetrics.registerFont(UnicodeCIDFont("STSong-Light"))
+        logger.warning("Using ReportLab built-in STSong-Light CID font for CJK PDF text")
+        return "STSong-Light"
+    except Exception as exc:
+        logger.warning("Failed to register ReportLab CJK CID fallback: %s", exc)
     return "Helvetica"
