@@ -4702,6 +4702,7 @@
   "agentEvaluation.genSetNameHint": "2-64 characters",
   "agentEvaluation.genSetNameAutoHint": "Auto-use existing set name",
   "agentEvaluation.genSceneDescHint": "Describe the scenarios and test focus you want to cover. AI will generate test cases based on this.",
+  "agentEvaluation.genSceneDescRequired": "Please enter a scene description",
   "agentEvaluation.genSceneDescPlaceholder": "e.g., Cover return, replacement, complaint, and logistics tracking for customer service scenarios",
   "agentEvaluation.genSelectExistingSet": "Select existing set to append cases",
   "agentEvaluation.genExistingSetHint": "Select an existing evaluation set to append cases, or leave empty and enter a name below to create a new set",

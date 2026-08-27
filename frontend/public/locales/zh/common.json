@@ -4716,6 +4716,7 @@
   "agentEvaluation.genSetNameHint": "2-64个字符",
   "agentEvaluation.genSetNameAutoHint": "自动使用已有评测集名称",
   "agentEvaluation.genSceneDescHint": "描述想要覆盖的场景和测试重点，AI 将据此生成测试用例。",
+  "agentEvaluation.genSceneDescRequired": "请输入场景描述",
   "agentEvaluation.genSceneDescPlaceholder": "例如：覆盖客服场景的退货、换货、投诉、物流查询",
   "agentEvaluation.genSelectExistingSet": "选择已有评测集追加用例",
   "agentEvaluation.genExistingSetHint": "选择已有评测集追加用例，留空则下方输入名称创建新评测集",
