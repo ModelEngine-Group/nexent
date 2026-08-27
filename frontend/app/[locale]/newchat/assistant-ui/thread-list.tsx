@@ -5,7 +5,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { Button, message } from "antd";
+import { Checkbox, message } from "antd";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 import {
   AuiIf,
@@ -22,19 +22,24 @@ import {
   Clock,
   CheckIcon,
   XIcon,
+  Repeat2Icon,
 } from "lucide-react";
 import {
   Fragment,
+  createContext,
   useCallback,
+  useContext,
   useEffect,
   useMemo,
   useRef,
   useState,
   useSyncExternalStore,
+  type ReactNode,
   type RefObject,
 } from "react";
 import { useTranslation } from "react-i18next";
 import log from "@/lib/logger";
+import { conversationService } from "@/services/conversationService";
 import type { FC } from "react";
 import {
   isConversationListNearBottom,
@@ -74,6 +79,229 @@ const ConversationStatusIndicator: FC<{
   }
 
   return null;
+};
+
+interface BatchSelectionValue {
+  batchMode: boolean;
+  selectedIds: Set<string>;
+  toggle: (id: string) => void;
+  selectAllVisible: () => void;
+  clear: () => void;
+  enter: () => void;
+  exit: () => void;
+  deleteSelected: () => void;
+}
+
+const BatchSelectionContext = createContext<BatchSelectionValue | null>(null);
+
+// Safe hook: returns null outside a provider so list items render normally
+// (no batch UI) when the sidebar is not wrapped in BatchSelectionProvider.
+const useBatchSelection = (): BatchSelectionValue | null =>
+  useContext(BatchSelectionContext);
+
+export const BatchSelectionProvider: FC<{
+  children: ReactNode;
+  onNewConversation?: () => void | Promise<void>;
+}> = ({ children, onNewConversation }) => {
+  const { t } = useTranslation();
+  const aui = useAui();
+  const { confirm } = useConfirmModal();
+  const threadIds = useAuiState((s) => s.threads.threadIds);
+  const threadItems = useAuiState((s) => s.threads.threadItems);
+  const mainThreadId = useAuiState((s) => s.threads.mainThreadId);
+  const [batchMode, setBatchMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+
+  const toggle = useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const selectAllVisible = useCallback(() => {
+    setSelectedIds(() => new Set(threadIds));
+  }, [threadIds]);
+
+  const clear = useCallback(() => setSelectedIds(new Set()), []);
+
+  const enter = useCallback(() => {
+    setSelectedIds(new Set());
+    setBatchMode(true);
+  }, []);
+
+  const exit = useCallback(() => {
+    setBatchMode(false);
+    setSelectedIds(new Set());
+  }, []);
+
+  const deleteSelected = useCallback(() => {
+    const itemsById = new Map(
+      (threadItems as ReadonlyArray<{ id: string; remoteId?: string }>).map(
+        (it) => [it.id, it]
+      )
+    );
+    const conversationIds: number[] = [];
+    for (const id of selectedIds) {
+      const remoteId = itemsById.get(id)?.remoteId;
+      const num = Number(remoteId);
+      if (remoteId && Number.isInteger(num) && num > 0) {
+        conversationIds.push(num);
+      }
+    }
+    if (conversationIds.length === 0) return;
+
+    // Detect whether the currently active conversation is in the delete set.
+    // If so, the main panel must switch to a fresh thread after reload,
+    // otherwise it would keep pointing at a now-deleted conversation.
+    const activeRemoteId = mainThreadId
+      ? itemsById.get(mainThreadId)?.remoteId
+      : undefined;
+    const activeConversationId = Number(activeRemoteId);
+    const activeDeleted =
+      !!activeRemoteId &&
+      Number.isInteger(activeConversationId) &&
+      activeConversationId > 0 &&
+      conversationIds.includes(activeConversationId);
+
+    confirm({
+      title: t("chat.threadList.delete"),
+      content: t("chat.threadList.batchConfirmDeletionDescription"),
+      onOk: async () => {
+        try {
+          const result = await conversationService.deleteBatch(conversationIds);
+          await aui.threads.reload();
+          if (result?.failed_ids?.length) {
+            message.warning(
+              t("chat.threadList.batchDeletePartial", {
+                failed: result.failed_ids.length,
+                total: conversationIds.length,
+              })
+            );
+          }
+          if (activeDeleted) {
+            await onNewConversation?.();
+          }
+          setBatchMode(false);
+          setSelectedIds(new Set());
+        } catch (error) {
+          log.error("[ThreadList] Failed to batch delete:", error);
+          message.error(t("chatInterface.deleteFailed"));
+          throw error;
+        }
+      },
+    });
+  }, [
+    selectedIds,
+    threadItems,
+    mainThreadId,
+    confirm,
+    t,
+    aui,
+    onNewConversation,
+  ]);
+
+  const value = useMemo<BatchSelectionValue>(
+    () => ({
+      batchMode,
+      selectedIds,
+      toggle,
+      selectAllVisible,
+      clear,
+      enter,
+      exit,
+      deleteSelected,
+    }),
+    [
+      batchMode,
+      selectedIds,
+      toggle,
+      selectAllVisible,
+      clear,
+      enter,
+      exit,
+      deleteSelected,
+    ]
+  );
+
+  return (
+    <BatchSelectionContext.Provider value={value}>
+      {children}
+    </BatchSelectionContext.Provider>
+  );
+};
+
+export const BatchSidebarFooter: FC<{ onSwitchToLegacy: () => void }> = ({
+  onSwitchToLegacy,
+}) => {
+  const { t } = useTranslation();
+  const {
+    batchMode,
+    selectedIds,
+    enter,
+    exit,
+    selectAllVisible,
+    deleteSelected,
+  } = useBatchSelection()!;
+
+  if (batchMode) {
+    return (
+      <div className="flex flex-col gap-2">
+        <div className="flex items-center justify-between px-1 text-xs text-muted-foreground">
+          <span>
+            {t("chat.threadList.selectedCount", { count: selectedIds.size })}
+          </span>
+          <button
+            type="button"
+            className="text-xs text-muted-foreground hover:text-foreground"
+            onClick={exit}
+          >
+            {t("chat.threadList.cancel")}
+          </button>
+        </div>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            className="flex h-9 flex-1 items-center justify-center rounded-lg border px-3 text-sm hover:bg-muted"
+            onClick={selectAllVisible}
+          >
+            {t("chat.threadList.selectAll")}
+          </button>
+          <button
+            type="button"
+            className="flex h-9 flex-1 items-center justify-center rounded-lg border border-destructive/30 px-3 text-sm text-destructive hover:bg-destructive/10 disabled:opacity-50"
+            disabled={selectedIds.size === 0}
+            onClick={deleteSelected}
+          >
+            {t("chat.threadList.delete")}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <button
+        type="button"
+        className="flex h-9 w-full items-center justify-center gap-2 rounded-lg border px-3 text-sm hover:bg-muted"
+        onClick={enter}
+      >
+        <CheckIcon className="size-4 shrink-0" />
+        <span>{t("chat.threadList.batchManage")}</span>
+      </button>
+      <button
+        type="button"
+        className="flex h-9 w-full items-center justify-center gap-2 rounded-lg border px-3 text-sm hover:bg-muted"
+        onClick={onSwitchToLegacy}
+      >
+        <Repeat2Icon className="size-4 shrink-0" />
+        <span>{t("chat.sidebar.switchToLegacy")}</span>
+      </button>
+    </div>
+  );
 };
 
 interface ThreadListProps {
@@ -214,8 +442,7 @@ export const ThreadList: FC<ThreadListProps> = ({
       requestNextPage(event.isTrusted && event.deltaY > 0);
     const handleScroll = (event: Event) => {
       requestNextPage(
-        event.isTrusted &&
-          container.scrollTop > previousScrollTopRef.current
+        event.isTrusted && container.scrollTop > previousScrollTopRef.current
       );
       previousScrollTopRef.current = container.scrollTop;
     };
@@ -239,7 +466,9 @@ export const ThreadList: FC<ThreadListProps> = ({
       );
     container.addEventListener("wheel", handleWheel, { passive: true });
     container.addEventListener("scroll", handleScroll, { passive: true });
-    container.addEventListener("touchstart", handleTouchStart, { passive: true });
+    container.addEventListener("touchstart", handleTouchStart, {
+      passive: true,
+    });
     container.addEventListener("touchmove", handleTouchMove, { passive: true });
     container.addEventListener("keydown", handleKeyDown);
     return () => {
@@ -345,7 +574,7 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
         generatedTitles={generatedTitles}
       />
     ),
-    [completedConversations, generatedTitles],
+    [completedConversations, generatedTitles]
   );
 
   if (!groups) {
@@ -512,6 +741,10 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
   const { t } = useTranslation();
   const { confirm } = useConfirmModal();
   const [isEditing, setIsEditing] = useState(false);
+  const batch = useBatchSelection();
+  const batchMode = batch?.batchMode ?? false;
+  const selectedIds = batch?.selectedIds;
+  const toggle = batch?.toggle;
   const threadListItem = aui.threadListItem;
   const thread = threadListItem.getState();
   const title =
@@ -570,6 +803,16 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
           onRename={handleRename}
           onCancel={handleCancelRename}
         />
+      ) : batchMode ? (
+        <div
+          className={`flex min-w-0 flex-1 cursor-pointer items-center gap-2 px-3 text-left text-sm transition-colors hover:bg-muted ${
+            selectedIds?.has(thread.id) ? "bg-accent" : ""
+          }`}
+          onClick={() => toggle?.(thread.id)}
+        >
+          <Checkbox checked={selectedIds?.has(thread.id) ?? false} />
+          <span className="min-w-0 flex-1 truncate text-left">{title}</span>
+        </div>
       ) : (
         <>
           <ThreadListItemPrimitive.Trigger className="flex min-w-0 flex-1 justify-start px-3 text-left text-sm">
@@ -591,7 +834,7 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
           </ThreadListItemPrimitive.Trigger>
         </>
       )}
-      {!isEditing && (
+      {!isEditing && !batchMode && (
         <ThreadListItemMorePrimitive.Root>
           <ThreadListItemMorePrimitive.Trigger className="mr-2 size-7 rounded-md opacity-0 group-hover/item:opacity-100">
             <MoreHorizontalIcon className="size-4" />
