@@ -20,6 +20,7 @@ import {
   PencilIcon,
   TrashIcon,
   Clock,
+  ArrowDownIcon,
   CheckIcon,
   XIcon,
   Repeat2Icon,
@@ -29,29 +30,15 @@ import {
   createContext,
   useCallback,
   useContext,
-  useEffect,
   useMemo,
-  useRef,
   useState,
-  useSyncExternalStore,
   type ReactNode,
-  type RefObject,
 } from "react";
 import { useTranslation } from "react-i18next";
 import log from "@/lib/logger";
 import { conversationService } from "@/services/conversationService";
 import type { FC } from "react";
-import {
-  isConversationListNearBottom,
-  shouldContinueConversationPageLoading,
-  shouldLoadNextConversationPage,
-} from "@/lib/conversationLoadPolicy";
 import { setPendingThreadOperationId } from "../adapter/conversation-thread-list-adapter";
-import {
-  calculateConversationViewport,
-  getConversationViewportGroupCounts,
-  newChatConversationViewport,
-} from "@/lib/conversationViewport";
 
 // Conversation status indicator component
 const ConversationStatusIndicator: FC<{
@@ -306,235 +293,53 @@ export const BatchSidebarFooter: FC<{ onSwitchToLegacy: () => void }> = ({
 
 interface ThreadListProps {
   generatedTitles?: ReadonlyMap<string, string>;
-  scrollContainerRef: RefObject<HTMLDivElement>;
 }
 
 export const ThreadList: FC<ThreadListProps> = ({
   generatedTitles,
-  scrollContainerRef,
 }) => {
   const { t } = useTranslation();
-  const aui = useAui();
-  const hasMore = useAuiState((s) => s.threads.hasMore);
-  const threadCount = useAuiState((s) => s.threads.threadIds.length);
-  const conversationMetadata = useSyncExternalStore(
-    newChatConversationViewport.subscribe,
-    newChatConversationViewport.getSnapshot,
-    newChatConversationViewport.getSnapshot
-  );
-  const isLoadingRef = useRef(false);
-  const contentRef = useRef<HTMLDivElement>(null);
-  const measurementRowRef = useRef<HTMLDivElement>(null);
-  const measurementHeaderRef = useRef<HTMLDivElement>(null);
-  const touchStartYRef = useRef<number | null>(null);
-  const previousScrollTopRef = useRef(0);
-  const continueLoadingRef = useRef(false);
-  const paginationStateRef = useRef({ hasMore, threadCount });
-  const [totalVirtualHeight, setTotalVirtualHeight] = useState(0);
-  const [rowHeight, setRowHeight] = useState(36);
-  const [headerHeight, setHeaderHeight] = useState(32);
-  const [renderedHeaderCount, setRenderedHeaderCount] = useState(0);
-  paginationStateRef.current = { hasMore, threadCount };
-
-  // Placeholder for completed set - currently not used since status only has completed/running
   const completedConversations = useMemo(() => new Set<string>(), []);
+  const isLoading = useAuiState((s) => s.threads.isLoading);
+  const isLoadingMore = useAuiState((s) => s.threads.isLoadingMore);
+  const hasMore = useAuiState((s) => s.threads.hasMore);
 
-  useEffect(() => {
-    if (conversationMetadata?.total === 0) {
-      setTotalVirtualHeight(0);
-      return;
-    }
-    let cancelled = false;
-    void document.fonts.ready.then(() => {
-      requestAnimationFrame(() => {
-        if (cancelled) return;
-        const container = scrollContainerRef.current;
-        const measuredRow = measurementRowRef.current;
-        const measuredHeader = measurementHeaderRef.current;
-        if (!container || !measuredRow || !measuredHeader) return;
-        const nextRowHeight = measuredRow.getBoundingClientRect().height;
-        const nextHeaderHeight = measuredHeader.getBoundingClientRect().height;
-        const viewport = calculateConversationViewport({
-          containerHeight: container.clientHeight,
-          rowHeight: nextRowHeight,
-          groupHeaderHeight: nextHeaderHeight,
-          contentPadding: 16,
-          groupCounts: getConversationViewportGroupCounts(conversationMetadata),
-        });
-        setRowHeight(nextRowHeight);
-        setHeaderHeight(nextHeaderHeight);
-        setTotalVirtualHeight(viewport.totalHeight);
-        if (threadCount > 0 || isLoadingRef.current || !hasMore) return;
-        newChatConversationViewport.resolveInitialLimit(viewport.initialLimit);
-        isLoadingRef.current = true;
-        void aui.threads
-          .loadMore()
-          .catch((error) =>
-            log.error("Failed to load initial conversations", error)
-          )
-          .finally(() => {
-            isLoadingRef.current = false;
-          });
-      });
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [aui, conversationMetadata, hasMore, scrollContainerRef, threadCount]);
-
-  useEffect(() => {
-    setRenderedHeaderCount(
-      contentRef.current?.querySelectorAll(
-        '[data-slot="aui_thread-list-group-label"]'
-      ).length ?? 0
-    );
-  }, [threadCount]);
-
-  useEffect(() => {
-    const container = scrollContainerRef.current;
-    if (!container) return;
-    let cancelled = false;
-
-    const requestNextPage = (hasDownwardUserIntent: boolean) => {
-      if (hasDownwardUserIntent) continueLoadingRef.current = true;
-      const paginationState = paginationStateRef.current;
-      const isNearLoadedBoundary = isConversationListNearBottom(
-        contentRef.current?.scrollHeight ?? container.scrollHeight,
-        container.scrollTop,
-        container.clientHeight
-      );
-      if (
-        !shouldLoadNextConversationPage({
-          hasMore: paginationState.hasMore,
-          isLoading: isLoadingRef.current,
-          isNearBottom: isNearLoadedBoundary,
-          hasDownwardUserIntent: continueLoadingRef.current,
-        })
-      ) {
-        if (!paginationState.hasMore || !isNearLoadedBoundary) {
-          continueLoadingRef.current = false;
-        }
-        return;
-      }
-      const loadedBefore = paginationState.threadCount;
-      isLoadingRef.current = true;
-      void aui.threads.loadMore().finally(() => {
-        isLoadingRef.current = false;
-        requestAnimationFrame(() => {
-          if (cancelled) return;
-          const latestState = paginationStateRef.current;
-          const shouldContinue = shouldContinueConversationPageLoading({
-            hasMore: latestState.hasMore,
-            loadedBefore,
-            loadedAfter: latestState.threadCount,
-            isNearLoadedBoundary: isConversationListNearBottom(
-              contentRef.current?.scrollHeight ?? container.scrollHeight,
-              container.scrollTop,
-              container.clientHeight
-            ),
-          });
-          continueLoadingRef.current = shouldContinue;
-          if (shouldContinue) requestNextPage(true);
-        });
-      });
-    };
-    const handleWheel = (event: WheelEvent) =>
-      requestNextPage(event.isTrusted && event.deltaY > 0);
-    const handleScroll = (event: Event) => {
-      requestNextPage(
-        event.isTrusted && container.scrollTop > previousScrollTopRef.current
-      );
-      previousScrollTopRef.current = container.scrollTop;
-    };
-    const handleTouchStart = (event: TouchEvent) => {
-      touchStartYRef.current = event.touches[0]?.clientY ?? null;
-    };
-    const handleTouchMove = (event: TouchEvent) => {
-      const currentY = event.touches[0]?.clientY;
-      const startY = touchStartYRef.current;
-      requestNextPage(
-        event.isTrusted &&
-          currentY !== undefined &&
-          startY !== null &&
-          currentY < startY
-      );
-      touchStartYRef.current = currentY ?? null;
-    };
-    const handleKeyDown = (event: KeyboardEvent) =>
-      requestNextPage(
-        event.isTrusted && ["ArrowDown", "PageDown", "End"].includes(event.key)
-      );
-    container.addEventListener("wheel", handleWheel, { passive: true });
-    container.addEventListener("scroll", handleScroll, { passive: true });
-    container.addEventListener("touchstart", handleTouchStart, {
-      passive: true,
-    });
-    container.addEventListener("touchmove", handleTouchMove, { passive: true });
-    container.addEventListener("keydown", handleKeyDown);
-    return () => {
-      cancelled = true;
-      container.removeEventListener("wheel", handleWheel);
-      container.removeEventListener("scroll", handleScroll);
-      container.removeEventListener("touchstart", handleTouchStart);
-      container.removeEventListener("touchmove", handleTouchMove);
-      container.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [aui, scrollContainerRef]);
 
   return (
     <div className="flex flex-col p-2">
-      <div
-        aria-hidden="true"
-        className="fixed invisible pointer-events-none -z-10"
+      <AuiIf condition={(s) => s.threads.isLoading}>
+        <ThreadListSkeleton />
+      </AuiIf>
+      <AuiIf
+        condition={(s) =>
+          !s.threads.isLoading && s.threads.threadIds.length === 0
+        }
       >
-        <div
-          ref={measurementRowRef}
-          className="flex h-9 items-center rounded-lg px-3 text-sm"
-        >
-          Conversation
-        </div>
-        <div
-          ref={measurementHeaderRef}
-          className="px-3 pt-3 pb-1 text-xs font-medium"
-        >
-          {t("chat.threadList.today")}
-        </div>
-      </div>
-      <div ref={contentRef} className="flex flex-col">
-        <AuiIf condition={(s) => s.threads.isLoading}>
-          <ThreadListSkeleton />
-        </AuiIf>
-        <AuiIf
-          condition={(s) =>
-            !s.threads.isLoading && s.threads.threadIds.length === 0
-          }
-        >
-          <ThreadListEmpty />
-        </AuiIf>
-        <AuiIf
-          condition={(s) =>
-            !s.threads.isLoading && s.threads.threadIds.length > 0
-          }
-        >
-          <ThreadListItems
-            completedConversations={completedConversations}
-            generatedTitles={generatedTitles}
-          />
-        </AuiIf>
-      </div>
-      <div
-        aria-hidden="true"
-        className="shrink-0 w-full"
-        style={{
-          height: Math.max(
-            0,
-            totalVirtualHeight -
-              threadCount * rowHeight -
-              renderedHeaderCount * headerHeight -
-              16
-          ),
-        }}
-      />
+        <ThreadListEmpty />
+      </AuiIf>
+      <AuiIf
+        condition={(s) =>
+          !s.threads.isLoading && s.threads.threadIds.length > 0
+        }
+      >
+        <ThreadListItems
+          completedConversations={completedConversations}
+          generatedTitles={generatedTitles}
+        />
+      </AuiIf>
+      <ThreadListPrimitive.LoadMore
+        disabled={!hasMore || isLoading || isLoadingMore}
+        className="mt-1 flex h-8 w-full items-center justify-center gap-2 rounded-lg px-3 text-xs text-muted-foreground hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {hasMore ? <ArrowDownIcon className="size-3.5" /> : null}
+        <span>
+          {isLoading || isLoadingMore
+            ? t("chat.threadList.loadingMore")
+            : hasMore
+              ? t("chat.threadList.loadMore")
+              : t("chat.threadList.allLoaded")}
+        </span>
+      </ThreadListPrimitive.LoadMore>
     </div>
   );
 };

@@ -1,4 +1,3 @@
-import * as React from "react";
 import { useRouter } from "next/navigation";
 import { PanelLeftIcon, PlusIcon, Repeat2Icon } from "lucide-react";
 import {
@@ -43,7 +42,6 @@ export function ThreadListSidebar({
   const router = useRouter();
   const isMobile = useIsMobile();
   const isCollapsed = state === "collapsed" || isMobile;
-  const listContainerRef = React.useRef<HTMLDivElement>(null);
 
   if (isCollapsed) {
     return (
@@ -122,15 +120,8 @@ export function ThreadListSidebar({
                 <SidebarTrigger className="size-8 shrink-0" />
               </div>
             </SidebarHeader>
-            <SidebarContent
-              ref={listContainerRef}
-              tabIndex={0}
-              className="focus:outline-none"
-            >
-              <ThreadList
-                generatedTitles={generatedTitles}
-                scrollContainerRef={listContainerRef}
-              />
+            <SidebarContent className="focus:outline-none">
+              <ThreadList generatedTitles={generatedTitles} />
             </SidebarContent>
             <SidebarFooter>
               <BatchSidebarFooter
