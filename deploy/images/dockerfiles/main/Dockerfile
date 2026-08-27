@@ -29,9 +29,7 @@ RUN --mount=type=cache,id=nexent-main-apt-cache-${TARGETARCH},target=/var/cache/
         postgresql-client \
         fontconfig \
         fonts-noto-cjk && \
-    fc-cache -fv && \
-    command -v fc-match >/dev/null 2>&1 && \
-    fc-match --version >/dev/null 2>&1
+    fc-cache -f
 
 FROM base AS builder
 ARG MIRROR
