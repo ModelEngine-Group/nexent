@@ -32,7 +32,7 @@ Nexent 的软件架构遵循分层设计原则，从上到下分为以下几个�
 - **核心模块**：
   - `agent_app.py` - 智能体 CRUD、版本管理、流式执行
   - `conversation_management_app.py` - 多轮对话、历史追踪
-  - `model_managment_app.py` - 模型配置、健康检查
+  - `model_management_app.py` - 模型配置、健康检查
   - `skill_app.py` - 技能创建与管理
   - `knowledge_summary_app.py` - 知识库操作
   - `remote_mcp_app.py` - 远程 MCP 工具管理

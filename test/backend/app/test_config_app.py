@@ -126,7 +126,7 @@ class TestConfigAppRouterConfiguration:
             "apps.image_app": {"router": APIRouter()},
             "apps.knowledge_summary_app": {"router": APIRouter()},
             "apps.mock_user_management_app": {"router": APIRouter()},
-            "apps.model_managment_app": {"router": APIRouter()},
+            "apps.model_management_app": {"router": APIRouter()},
             "apps.oauth_app": {"router": APIRouter()},
             "apps.prompt_app": {"router": APIRouter()},
             "apps.prompt_template_app": {"router": APIRouter()},
