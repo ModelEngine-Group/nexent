@@ -3762,7 +3762,7 @@ async def run_agent_stream(
 
             # Emit conversation_created event for new conversations
             if is_new_conversation:
-                yield f'data: {{"type": "conversation_created", "content": {{"conversation_id": {agent_request.conversation_id}}}}}\n\n'
+                yield "data: " + json.dumps({"type": "conversation_created", "content": {"conversation_id": agent_request.conversation_id}}, ensure_ascii=False) + "\n\n"
 
             scope_event = getattr(agent_request, "_resolved_knowledge_scope_event", None)
             if scope_event is not None:
