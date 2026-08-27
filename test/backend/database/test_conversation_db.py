@@ -1554,7 +1554,7 @@ def test_get_conversation_list_applies_offset_without_limit(monkeypatch, mock_se
     session.execute.assert_called_once_with(stmt)
 
 
-def test_get_conversation_list_page_returns_rows_and_metadata_from_one_query(
+def test_get_conversation_list_page_returns_rows_and_metadata(
     monkeypatch, mock_session_ctx
 ):
     session, ctx = mock_session_ctx
@@ -1576,7 +1576,14 @@ def test_get_conversation_list_page_returns_rows_and_metadata_from_one_query(
         "return_value",
         ComparableTimestamp(),
     )
-    session.execute.return_value = [
+    metadata_result = MagicMock()
+    metadata_result.one.return_value = types.SimpleNamespace(
+        total=30,
+        today=3,
+        last_7_days=7,
+        older=20,
+    )
+    page_records = [
         types.SimpleNamespace(
             conversation_id=2,
             conversation_title="Second",
@@ -1584,12 +1591,9 @@ def test_get_conversation_list_page_returns_rows_and_metadata_from_one_query(
             chat_mode="execution",
             create_time=2000,
             update_time=2100,
-            total=30,
-            today=3,
-            last_7_days=7,
-            older=20,
         )
     ]
+    session.execute.side_effect = [metadata_result, page_records]
     monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
 
     result = get_conversation_list_page(
@@ -1613,7 +1617,7 @@ def test_get_conversation_list_page_returns_rows_and_metadata_from_one_query(
         ],
         "metadata": {"total": 30, "today": 3, "last_7_days": 7, "older": 20},
     }
-    session.execute.assert_called_once()
+    assert session.execute.call_count == 2
 
 
 def test_get_conversation_list_page_supports_unpaginated_empty_result(
@@ -1638,7 +1642,14 @@ def test_get_conversation_list_page_supports_unpaginated_empty_result(
         "return_value",
         ComparableTimestamp(),
     )
-    session.execute.return_value = []
+    metadata_result = MagicMock()
+    metadata_result.one.return_value = types.SimpleNamespace(
+        total=0,
+        today=0,
+        last_7_days=0,
+        older=0,
+    )
+    session.execute.side_effect = [metadata_result, []]
     monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
 
     result = get_conversation_list_page(
@@ -1651,7 +1662,55 @@ def test_get_conversation_list_page_supports_unpaginated_empty_result(
         "items": [],
         "metadata": {"total": 0, "today": 0, "last_7_days": 0, "older": 0},
     }
-    session.execute.assert_called_once()
+    assert session.execute.call_count == 2
+
+
+def test_get_conversation_list_page_preserves_metadata_when_page_is_empty(
+    monkeypatch, mock_session_ctx
+):
+    """An offset past the last row must not make a non-empty dataset look empty."""
+    session, ctx = mock_session_ctx
+
+    class ComparableTimestamp:
+        def label(self, _name):
+            return self
+
+        def __ge__(self, _value):
+            return MagicMock()
+
+        def __lt__(self, _value):
+            return MagicMock()
+
+    from backend.database import conversation_db
+
+    monkeypatch.setattr(
+        conversation_db.func.extract.return_value.__mul__,
+        "return_value",
+        ComparableTimestamp(),
+    )
+    metadata_result = MagicMock()
+    metadata_result.one.return_value = types.SimpleNamespace(
+        total=3,
+        today=1,
+        last_7_days=1,
+        older=1,
+    )
+    session.execute.side_effect = [metadata_result, []]
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    result = get_conversation_list_page(
+        "user-1",
+        today_start_ms=2000,
+        week_start_ms=1000,
+        limit=20,
+        offset=20,
+    )
+
+    assert result == {
+        "items": [],
+        "metadata": {"total": 3, "today": 1, "last_7_days": 1, "older": 1},
+    }
+    assert session.execute.call_count == 2
 
 
 def test_update_conversation_agent_id_success(monkeypatch, mock_session_ctx):

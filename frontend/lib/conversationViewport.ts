@@ -64,7 +64,7 @@ export const calculateConversationViewport = (
     for (let index = 0; index < count; index += 1) {
       usedHeight += rowHeight;
       rows += 1;
-      if (usedHeight >= containerHeight) {
+      if (usedHeight > containerHeight) {
         return { initialLimit: Math.min(100, rows), totalHeight };
       }
     }
@@ -86,30 +86,96 @@ export const getConversationDateBoundaries = (): {
   return { todayStartMs, weekStartMs: todayStartMs - 7 * 86_400_000 };
 };
 
+interface ConversationVirtualSpacerInput {
+  totalCount: number;
+  pendingDeletionCount: number;
+  loadedContentHeight: number;
+  rowHeight: number;
+  groupHeaderHeight: number;
+  groupCount: number;
+  contentPadding: number;
+}
+
+export const calculateConversationVirtualSpacerHeight = (
+  input: ConversationVirtualSpacerInput
+): number => {
+  const remainingTotal = Math.max(
+    0,
+    Math.floor(input.totalCount) - Math.floor(input.pendingDeletionCount)
+  );
+  const estimatedTotalHeight =
+    remainingTotal * Math.max(0, input.rowHeight) +
+    Math.max(0, Math.floor(input.groupCount)) *
+      Math.max(0, input.groupHeaderHeight) +
+    Math.max(0, input.contentPadding);
+
+  return Math.max(
+    0,
+    estimatedTotalHeight -
+      Math.max(0, input.contentPadding) -
+      Math.max(0, input.loadedContentHeight)
+  );
+};
+
+interface ConversationLoadedBoundaryInput {
+  scrollTop: number;
+  clientHeight: number;
+  loadedBoundary: number;
+  threshold?: number;
+}
+
+export const isConversationLoadedBoundaryReached = (
+  input: ConversationLoadedBoundaryInput
+): boolean =>
+  input.scrollTop + input.clientHeight >=
+  input.loadedBoundary - Math.max(0, input.threshold ?? 0);
+
 export class ConversationViewportCoordinator {
+  private nextPageSize: number | null = null;
+  private pendingOffsetAdjustment = 0;
   private metadata: ConversationListMetadata | null = null;
-  private initialLimit: number | null = null;
   private listeners = new Set<() => void>();
 
-  private notify(): void {
-    this.listeners.forEach((listener) => listener());
+  requestNextPageSize(pageSize: number): void {
+    this.nextPageSize = this.normalizePageSize(pageSize);
   }
 
-  setMetadata(metadata: ConversationListMetadata): void {
+  takeNextPageSize = (fallback: number): number => {
+    const pageSize = this.nextPageSize ?? this.normalizePageSize(fallback);
+    this.nextPageSize = null;
+    return pageSize;
+  };
+
+  clearNextPageSize(): void {
+    this.nextPageSize = null;
+  }
+
+  recordDeletedLoadedItem(): void {
+    this.pendingOffsetAdjustment += 1;
+  }
+
+  getOffsetAdjustment = (): number => this.pendingOffsetAdjustment;
+
+  commitOffsetAdjustment = (count: number): void => {
+    this.pendingOffsetAdjustment = Math.max(
+      0,
+      this.pendingOffsetAdjustment - Math.max(0, Math.floor(count))
+    );
+  };
+
+  resetPagination = (): void => {
+    this.nextPageSize = null;
+    this.pendingOffsetAdjustment = 0;
+    if (this.metadata !== null) {
+      this.metadata = null;
+      this.notify();
+    }
+  };
+
+  setMetadata = (metadata: ConversationListMetadata): void => {
     this.metadata = metadata;
-    this.initialLimit = null;
     this.notify();
-  }
-
-  reset(): void {
-    this.metadata = null;
-    this.initialLimit = null;
-    this.notify();
-  }
-
-  getMetadata(): ConversationListMetadata | null {
-    return this.metadata;
-  }
+  };
 
   getSnapshot = (): ConversationListMetadata | null => this.metadata;
 
@@ -118,14 +184,12 @@ export class ConversationViewportCoordinator {
     return () => this.listeners.delete(listener);
   };
 
-  resolveInitialLimit(limit: number): void {
-    this.initialLimit = Math.max(1, Math.ceil(limit));
+  private notify(): void {
+    this.listeners.forEach((listener) => listener());
   }
 
-  takePageLimit(): number {
-    const limit = this.initialLimit ?? DEFAULT_CONVERSATION_PAGE_SIZE;
-    this.initialLimit = null;
-    return limit;
+  private normalizePageSize(pageSize: number): number {
+    return Math.min(100, Math.max(1, Math.ceil(pageSize)));
   }
 }
 

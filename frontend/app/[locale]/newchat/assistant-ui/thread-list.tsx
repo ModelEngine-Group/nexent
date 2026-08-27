@@ -5,7 +5,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { Button, message } from "antd";
+import { message } from "antd";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 import {
   AuiIf,
@@ -27,6 +27,7 @@ import {
   Fragment,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -35,18 +36,18 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import log from "@/lib/logger";
+import { CONVERSATION_PAGE_SIZE } from "@/services/conversationService";
 import type { FC } from "react";
+import { getConversationPageRequest } from "@/lib/conversationLoadPolicy";
+import { runConversationDeletionLifecycle } from "@/lib/conversationThreadPagination";
 import {
-  isConversationListNearBottom,
-  shouldContinueConversationPageLoading,
-  shouldLoadNextConversationPage,
-} from "@/lib/conversationLoadPolicy";
-import { setPendingThreadOperationId } from "../adapter/conversation-thread-list-adapter";
-import {
+  calculateConversationVirtualSpacerHeight,
   calculateConversationViewport,
   getConversationViewportGroupCounts,
+  isConversationLoadedBoundaryReached,
   newChatConversationViewport,
 } from "@/lib/conversationViewport";
+import { setPendingThreadOperationId } from "../adapter/conversation-thread-list-adapter";
 
 // Conversation status indicator component
 const ConversationStatusIndicator: FC<{
@@ -81,6 +82,17 @@ interface ThreadListProps {
   scrollContainerRef: RefObject<HTMLDivElement>;
 }
 
+type DeleteConversation = () => void | Promise<void>;
+type DeleteWithPagination = (
+  deleteConversation: DeleteConversation
+) => Promise<void>;
+type RequestConversationPage = (
+  isScrollRequest: boolean,
+  continueTowardScrollPosition?: boolean
+) => void;
+
+const CONVERSATION_LOAD_THRESHOLD = 80;
+
 export const ThreadList: FC<ThreadListProps> = ({
   generatedTitles,
   scrollContainerRef,
@@ -88,169 +100,253 @@ export const ThreadList: FC<ThreadListProps> = ({
   const { t } = useTranslation();
   const aui = useAui();
   const hasMore = useAuiState((s) => s.threads.hasMore);
+  const isThreadListLoading = useAuiState((s) => s.threads.isLoading);
+  const isLoadingMore = useAuiState((s) => s.threads.isLoadingMore);
   const threadCount = useAuiState((s) => s.threads.threadIds.length);
   const conversationMetadata = useSyncExternalStore(
     newChatConversationViewport.subscribe,
     newChatConversationViewport.getSnapshot,
     newChatConversationViewport.getSnapshot
   );
-  const isLoadingRef = useRef(false);
-  const contentRef = useRef<HTMLDivElement>(null);
+  const loadedItemsRef = useRef<HTMLDivElement>(null);
+  const loadMoreSentinelRef = useRef<HTMLDivElement>(null);
   const measurementRowRef = useRef<HTMLDivElement>(null);
   const measurementHeaderRef = useRef<HTMLDivElement>(null);
-  const touchStartYRef = useRef<number | null>(null);
+  const pageLoadPromiseRef = useRef<Promise<void> | null>(null);
+  const deletionInFlightRef = useRef(false);
+  const requestPageRef = useRef<RequestConversationPage>(() => {});
+  const userScrollIntentRef = useRef(false);
   const previousScrollTopRef = useRef(0);
-  const continueLoadingRef = useRef(false);
-  const paginationStateRef = useRef({ hasMore, threadCount });
-  const [totalVirtualHeight, setTotalVirtualHeight] = useState(0);
-  const [rowHeight, setRowHeight] = useState(36);
-  const [headerHeight, setHeaderHeight] = useState(32);
-  const [renderedHeaderCount, setRenderedHeaderCount] = useState(0);
-  paginationStateRef.current = { hasMore, threadCount };
+  const [virtualSpacerHeight, setVirtualSpacerHeight] = useState(0);
+  const [deletionRevision, setDeletionRevision] = useState(0);
 
-  // Placeholder for completed set - currently not used since status only has completed/running
-  const completedConversations = useMemo(() => new Set<string>(), []);
+  const getLoadedBoundary = useCallback((): number | null => {
+    const container = scrollContainerRef.current;
+    const sentinel = loadMoreSentinelRef.current;
+    if (!container || !sentinel) return null;
 
-  useEffect(() => {
-    if (conversationMetadata?.total === 0) {
-      setTotalVirtualHeight(0);
-      return;
-    }
-    let cancelled = false;
-    void document.fonts.ready.then(() => {
-      requestAnimationFrame(() => {
-        if (cancelled) return;
-        const container = scrollContainerRef.current;
-        const measuredRow = measurementRowRef.current;
-        const measuredHeader = measurementHeaderRef.current;
-        if (!container || !measuredRow || !measuredHeader) return;
-        const nextRowHeight = measuredRow.getBoundingClientRect().height;
-        const nextHeaderHeight = measuredHeader.getBoundingClientRect().height;
-        const viewport = calculateConversationViewport({
-          containerHeight: container.clientHeight,
-          rowHeight: nextRowHeight,
-          groupHeaderHeight: nextHeaderHeight,
-          contentPadding: 16,
-          groupCounts: getConversationViewportGroupCounts(conversationMetadata),
-        });
-        setRowHeight(nextRowHeight);
-        setHeaderHeight(nextHeaderHeight);
-        setTotalVirtualHeight(viewport.totalHeight);
-        if (threadCount > 0 || isLoadingRef.current || !hasMore) return;
-        newChatConversationViewport.resolveInitialLimit(viewport.initialLimit);
-        isLoadingRef.current = true;
-        void aui.threads
-          .loadMore()
-          .catch((error) =>
-            log.error("Failed to load initial conversations", error)
-          )
-          .finally(() => {
-            isLoadingRef.current = false;
-          });
-      });
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [aui, conversationMetadata, hasMore, scrollContainerRef, threadCount]);
-
-  useEffect(() => {
-    setRenderedHeaderCount(
-      contentRef.current?.querySelectorAll(
-        '[data-slot="aui_thread-list-group-label"]'
-      ).length ?? 0
+    return (
+      sentinel.getBoundingClientRect().top -
+      container.getBoundingClientRect().top +
+      container.scrollTop +
+      sentinel.getBoundingClientRect().height
     );
-  }, [threadCount]);
+  }, [scrollContainerRef]);
+
+  const requestPage = useCallback(
+    (isScrollRequest: boolean, continueTowardScrollPosition = false) => {
+      if (deletionInFlightRef.current || pageLoadPromiseRef.current) return;
+
+      const container = scrollContainerRef.current;
+      const measuredRow = measurementRowRef.current;
+      const measuredHeader = measurementHeaderRef.current;
+      if (!container || !measuredRow || !measuredHeader) return;
+
+      const loadedBoundary = getLoadedBoundary();
+      if (
+        isScrollRequest &&
+        (loadedBoundary === null ||
+          !isConversationLoadedBoundaryReached({
+            scrollTop: container.scrollTop,
+            clientHeight: container.clientHeight,
+            loadedBoundary,
+            threshold: CONVERSATION_LOAD_THRESHOLD,
+          }))
+      ) {
+        return;
+      }
+
+      const rowHeight = measuredRow.getBoundingClientRect().height;
+      const viewport = calculateConversationViewport({
+        containerHeight: container.clientHeight,
+        rowHeight,
+        groupHeaderHeight: measuredHeader.getBoundingClientRect().height,
+        contentPadding: 16,
+        groupCounts: getConversationViewportGroupCounts(conversationMetadata),
+      });
+      const isLoading = isThreadListLoading || isLoadingMore;
+      const request =
+        threadCount === 0 && hasMore && !isLoading
+          ? {
+              limit: viewport.initialLimit,
+              reason: "viewport-fill" as const,
+            }
+          : getConversationPageRequest({
+              hasMore,
+              isLoading,
+              clientHeight: container.clientHeight,
+              scrollHeight: loadedBoundary ?? container.scrollHeight,
+              rowHeight,
+              isLoadRequested: isScrollRequest,
+              regularPageSize: CONVERSATION_PAGE_SIZE,
+            });
+      if (!request) return;
+
+      newChatConversationViewport.requestNextPageSize(request.limit);
+      const trackedTask = aui.threads
+        .loadMore()
+        .then(() => {
+          if (continueTowardScrollPosition) {
+            requestAnimationFrame(() => requestPageRef.current(true, true));
+          }
+        })
+        .catch((error) =>
+          log.error(`Failed to load conversations (${request.reason})`, error)
+        )
+        .finally(() => {
+          newChatConversationViewport.clearNextPageSize();
+          if (pageLoadPromiseRef.current === trackedTask) {
+            pageLoadPromiseRef.current = null;
+          }
+        });
+      pageLoadPromiseRef.current = trackedTask;
+    },
+    [
+      aui,
+      conversationMetadata,
+      getLoadedBoundary,
+      hasMore,
+      isLoadingMore,
+      isThreadListLoading,
+      scrollContainerRef,
+      threadCount,
+    ]
+  );
+  requestPageRef.current = requestPage;
+
+  const deleteWithPagination = useCallback<DeleteWithPagination>(
+    async (deleteConversation) => {
+      deletionInFlightRef.current = true;
+
+      try {
+        await runConversationDeletionLifecycle({
+          pendingPageLoad: pageLoadPromiseRef.current,
+          deleteConversation,
+          recordDeletedLoadedItem: () => {
+            newChatConversationViewport.recordDeletedLoadedItem();
+            setDeletionRevision((revision) => revision + 1);
+          },
+        });
+      } finally {
+        newChatConversationViewport.clearNextPageSize();
+        deletionInFlightRef.current = false;
+        requestAnimationFrame(() => requestPageRef.current(false));
+      }
+    },
+    []
+  );
+
+  useLayoutEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    let frame: number | null = null;
+
+    const measureAndFill = () => {
+      frame = null;
+      const measuredRow = measurementRowRef.current;
+      const measuredHeader = measurementHeaderRef.current;
+      const loadedItems = loadedItemsRef.current;
+      if (
+        measuredRow &&
+        measuredHeader &&
+        loadedItems &&
+        conversationMetadata
+      ) {
+        const groupCount = getConversationViewportGroupCounts(
+          conversationMetadata
+        ).filter((count) => count > 0).length;
+        const nextSpacerHeight = calculateConversationVirtualSpacerHeight({
+          totalCount: conversationMetadata.total,
+          pendingDeletionCount:
+            newChatConversationViewport.getOffsetAdjustment(),
+          loadedContentHeight: loadedItems.getBoundingClientRect().height,
+          rowHeight: measuredRow.getBoundingClientRect().height,
+          groupHeaderHeight: measuredHeader.getBoundingClientRect().height,
+          groupCount,
+          contentPadding: 16,
+        });
+        setVirtualSpacerHeight((currentHeight) =>
+          currentHeight === nextSpacerHeight ? currentHeight : nextSpacerHeight
+        );
+      } else {
+        setVirtualSpacerHeight(0);
+      }
+      requestPage(false);
+    };
+    const scheduleMeasurement = () => {
+      if (frame !== null) cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(measureAndFill);
+    };
+
+    // Read layout synchronously after commit. A single animation-frame retry
+    // covers transient zero-sized containers without delaying the page shell.
+    measureAndFill();
+    if (container.clientHeight <= 0) scheduleMeasurement();
+
+    const resizeObserver = new ResizeObserver(scheduleMeasurement);
+    resizeObserver.observe(container);
+    if (loadedItemsRef.current) resizeObserver.observe(loadedItemsRef.current);
+    return () => {
+      resizeObserver.disconnect();
+      if (frame !== null) cancelAnimationFrame(frame);
+    };
+  }, [
+    conversationMetadata,
+    deletionRevision,
+    requestPage,
+    scrollContainerRef,
+    threadCount,
+  ]);
 
   useEffect(() => {
     const container = scrollContainerRef.current;
-    if (!container) return;
-    let cancelled = false;
+    const sentinel = loadMoreSentinelRef.current;
+    if (!container || !sentinel) return;
 
-    const requestNextPage = (hasDownwardUserIntent: boolean) => {
-      if (hasDownwardUserIntent) continueLoadingRef.current = true;
-      const paginationState = paginationStateRef.current;
-      const isNearLoadedBoundary = isConversationListNearBottom(
-        contentRef.current?.scrollHeight ?? container.scrollHeight,
-        container.scrollTop,
-        container.clientHeight
-      );
-      if (
-        !shouldLoadNextConversationPage({
-          hasMore: paginationState.hasMore,
-          isLoading: isLoadingRef.current,
-          isNearBottom: isNearLoadedBoundary,
-          hasDownwardUserIntent: continueLoadingRef.current,
-        })
-      ) {
-        if (!paginationState.hasMore || !isNearLoadedBoundary) {
-          continueLoadingRef.current = false;
-        }
-        return;
+    previousScrollTopRef.current = container.scrollTop;
+    const handleScrollIntent = () => {
+      userScrollIntentRef.current = true;
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (["ArrowDown", "PageDown", "End"].includes(event.key)) {
+        handleScrollIntent();
       }
-      const loadedBefore = paginationState.threadCount;
-      isLoadingRef.current = true;
-      void aui.threads.loadMore().finally(() => {
-        isLoadingRef.current = false;
-        requestAnimationFrame(() => {
-          if (cancelled) return;
-          const latestState = paginationStateRef.current;
-          const shouldContinue = shouldContinueConversationPageLoading({
-            hasMore: latestState.hasMore,
-            loadedBefore,
-            loadedAfter: latestState.threadCount,
-            isNearLoadedBoundary: isConversationListNearBottom(
-              contentRef.current?.scrollHeight ?? container.scrollHeight,
-              container.scrollTop,
-              container.clientHeight
-            ),
-          });
-          continueLoadingRef.current = shouldContinue;
-          if (shouldContinue) requestNextPage(true);
-        });
-      });
     };
-    const handleWheel = (event: WheelEvent) =>
-      requestNextPage(event.isTrusted && event.deltaY > 0);
+    const handleWheel = (event: WheelEvent) => {
+      if (event.deltaY > 0) handleScrollIntent();
+    };
     const handleScroll = (event: Event) => {
-      requestNextPage(
-        event.isTrusted &&
-          container.scrollTop > previousScrollTopRef.current
-      );
+      const isScrollingDown =
+        container.scrollTop > previousScrollTopRef.current;
       previousScrollTopRef.current = container.scrollTop;
+      const hasUserIntent = userScrollIntentRef.current;
+      userScrollIntentRef.current = false;
+      if (event.isTrusted && hasUserIntent && isScrollingDown) {
+        requestPage(true, true);
+      }
     };
-    const handleTouchStart = (event: TouchEvent) => {
-      touchStartYRef.current = event.touches[0]?.clientY ?? null;
-    };
-    const handleTouchMove = (event: TouchEvent) => {
-      const currentY = event.touches[0]?.clientY;
-      const startY = touchStartYRef.current;
-      requestNextPage(
-        event.isTrusted &&
-          currentY !== undefined &&
-          startY !== null &&
-          currentY < startY
-      );
-      touchStartYRef.current = currentY ?? null;
-    };
-    const handleKeyDown = (event: KeyboardEvent) =>
-      requestNextPage(
-        event.isTrusted && ["ArrowDown", "PageDown", "End"].includes(event.key)
-      );
+    container.addEventListener("pointerdown", handleScrollIntent);
     container.addEventListener("wheel", handleWheel, { passive: true });
-    container.addEventListener("scroll", handleScroll, { passive: true });
-    container.addEventListener("touchstart", handleTouchStart, { passive: true });
-    container.addEventListener("touchmove", handleTouchMove, { passive: true });
     container.addEventListener("keydown", handleKeyDown);
+    container.addEventListener("scroll", handleScroll, { passive: true });
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          requestPage(true, false);
+        }
+      },
+      { root: container, threshold: 0 }
+    );
+    observer.observe(sentinel);
     return () => {
-      cancelled = true;
+      observer.disconnect();
+      container.removeEventListener("pointerdown", handleScrollIntent);
       container.removeEventListener("wheel", handleWheel);
-      container.removeEventListener("scroll", handleScroll);
-      container.removeEventListener("touchstart", handleTouchStart);
-      container.removeEventListener("touchmove", handleTouchMove);
       container.removeEventListener("keydown", handleKeyDown);
+      container.removeEventListener("scroll", handleScroll);
     };
-  }, [aui, scrollContainerRef]);
+  }, [requestPage, scrollContainerRef]);
 
   return (
     <div className="flex flex-col p-2">
@@ -271,13 +367,20 @@ export const ThreadList: FC<ThreadListProps> = ({
           {t("chat.threadList.today")}
         </div>
       </div>
-      <div ref={contentRef} className="flex flex-col">
-        <AuiIf condition={(s) => s.threads.isLoading}>
+      <div ref={loadedItemsRef} className="flex flex-col">
+        <AuiIf
+          condition={(s) =>
+            s.threads.isLoading ||
+            (s.threads.threadIds.length === 0 && s.threads.hasMore)
+          }
+        >
           <ThreadListSkeleton />
         </AuiIf>
         <AuiIf
           condition={(s) =>
-            !s.threads.isLoading && s.threads.threadIds.length === 0
+            !s.threads.isLoading &&
+            !s.threads.hasMore &&
+            s.threads.threadIds.length === 0
           }
         >
           <ThreadListEmpty />
@@ -288,23 +391,20 @@ export const ThreadList: FC<ThreadListProps> = ({
           }
         >
           <ThreadListItems
-            completedConversations={completedConversations}
             generatedTitles={generatedTitles}
+            deleteWithPagination={deleteWithPagination}
           />
         </AuiIf>
       </div>
       <div
+        ref={loadMoreSentinelRef}
         aria-hidden="true"
-        className="shrink-0 w-full"
-        style={{
-          height: Math.max(
-            0,
-            totalVirtualHeight -
-              threadCount * rowHeight -
-              renderedHeaderCount * headerHeight -
-              16
-          ),
-        }}
+        className="h-px w-full shrink-0"
+      />
+      <div
+        aria-hidden="true"
+        className="w-full shrink-0"
+        style={{ height: virtualSpacerHeight }}
       />
     </div>
   );
@@ -326,26 +426,28 @@ const ThreadListEmpty: FC = () => {
 };
 
 interface ThreadListItemsProps {
-  completedConversations: Set<string>;
   generatedTitles?: ReadonlyMap<string, string>;
+  deleteWithPagination: DeleteWithPagination;
 }
 
 const ThreadListItems: FC<ThreadListItemsProps> = ({
-  completedConversations,
   generatedTitles,
+  deleteWithPagination,
 }) => {
   const { t } = useTranslation();
 
   const groups = useThreadListGroups();
 
-  const GroupedThreadListItem = useMemo<FC>(
-    () => () => (
-      <ThreadListItem
-        completedConversations={completedConversations}
-        generatedTitles={generatedTitles}
-      />
-    ),
-    [completedConversations, generatedTitles],
+  const GroupedThreadListItem = useCallback(
+    function GroupedThreadListItem() {
+      return (
+        <ThreadListItem
+          generatedTitles={generatedTitles}
+          deleteWithPagination={deleteWithPagination}
+        />
+      );
+    },
+    [deleteWithPagination, generatedTitles]
   );
 
   if (!groups) {
@@ -353,8 +455,8 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
       <ThreadListPrimitive.Items>
         {() => (
           <ThreadListItem
-            completedConversations={completedConversations}
             generatedTitles={generatedTitles}
+            deleteWithPagination={deleteWithPagination}
           />
         )}
       </ThreadListPrimitive.Items>
@@ -436,14 +538,8 @@ const useThreadListGroups = (): ThreadListGroup[] | null => {
       now.getDate()
     ).getTime();
 
-    const time = (index: number) =>
-      dates[index]?.getTime() ?? Number.MAX_SAFE_INTEGER;
-    const indices = threadIds
-      .map((_, index) => index)
-      .sort((a, b) => time(b) - time(a));
-
     const result: ThreadListGroup[] = [];
-    for (const index of indices) {
+    for (const [index] of threadIds.entries()) {
       const label = dateGroupLabel(dates[index], startOfToday);
       const entry: ThreadListGroupEntry = { id: threadIds[index], index };
       const lastGroup = result[result.length - 1];
@@ -481,32 +577,32 @@ const ThreadListSkeleton: FC = () => {
 };
 
 interface ThreadListItemProps {
-  completedConversations: Set<string>;
   generatedTitles?: ReadonlyMap<string, string>;
+  deleteWithPagination: DeleteWithPagination;
 }
 
 const ThreadListItem: FC<ThreadListItemProps> = ({
-  completedConversations,
   generatedTitles,
+  deleteWithPagination,
 }) => {
   return (
     <ThreadListItemPrimitive.Root className="group/item flex h-9 items-center rounded-lg hover:bg-muted data-[active=true]:bg-muted">
       <ThreadListItemContent
-        completedConversations={completedConversations}
         generatedTitles={generatedTitles}
+        deleteWithPagination={deleteWithPagination}
       />
     </ThreadListItemPrimitive.Root>
   );
 };
 
 interface ThreadListItemContentProps {
-  completedConversations: Set<string>;
   generatedTitles?: ReadonlyMap<string, string>;
+  deleteWithPagination: DeleteWithPagination;
 }
 
 const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
-  completedConversations,
   generatedTitles,
+  deleteWithPagination,
 }) => {
   const aui = useAui();
   const { t } = useTranslation();
@@ -549,8 +645,7 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
       onOk: async () => {
         setPendingThreadOperationId(thread.id);
         try {
-          await threadListItem.delete();
-          await aui.threads.reload();
+          await deleteWithPagination(() => threadListItem.delete());
         } catch (error) {
           log.error("[ThreadList] Failed to delete thread:", error);
           message.error(t("chatInterface.deleteFailed"));
@@ -560,7 +655,7 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
         }
       },
     });
-  }, [aui, confirm, t, threadListItem]);
+  }, [confirm, deleteWithPagination, t, thread.id, threadListItem]);
 
   return (
     <>
@@ -574,9 +669,7 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
         <>
           <ThreadListItemPrimitive.Trigger className="flex min-w-0 flex-1 justify-start px-3 text-left text-sm">
             <div className="flex min-w-0 flex-1 items-center text-left">
-              <ConversationStatusIndicatorWrapper
-                completedConversations={completedConversations}
-              />
+              <ConversationStatusIndicatorWrapper />
               <Tooltip>
                 <TooltipTrigger asChild>
                   <span className="min-w-0 flex-1 truncate text-left">
@@ -623,9 +716,7 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
 };
 
 // Wrapper to get thread status from adapter and pass to status indicator
-const ConversationStatusIndicatorWrapper: FC<{
-  completedConversations: Set<string>;
-}> = ({ completedConversations }) => {
+const ConversationStatusIndicatorWrapper: FC = () => {
   const aui = useAui();
   const status = aui.threadListItem.getState().status as string;
   const isRunning = status === "running" || status === "streaming";
@@ -667,7 +758,7 @@ const InlineRenameEditor: FC<{
   return (
     <form
       onSubmit={handleSubmit}
-      className="flex min-w-0 flex-1 items-center gap-1 px-3 overflow-hidden"
+      className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden px-3"
     >
       <input
         type="text"
@@ -682,7 +773,7 @@ const InlineRenameEditor: FC<{
           }
         }}
         autoFocus
-        className="shrink min-w-0 flex-1 rounded border border-input px-2 py-1 text-sm outline-none focus:border-ring"
+        className="min-w-0 shrink flex-1 rounded border border-input px-2 py-1 text-sm outline-none focus:border-ring"
       />
       <div className="flex shrink-0 gap-1">
         <button type="submit" className="p-1 hover:bg-accent rounded">

@@ -197,15 +197,16 @@ export function ChatSidebar({
     const container = conversationListRef.current;
     if (
       !container ||
+      !hasDownwardUserIntent ||
       !shouldLoadNextConversationPage({
         hasMore: conversationManagement.hasNextPage,
         isLoading: isLoadingNextPageRef.current,
         isNearBottom: isConversationListNearBottom(
-          conversationContentRef.current?.scrollHeight ?? container.scrollHeight,
+          conversationContentRef.current?.scrollHeight ??
+            container.scrollHeight,
           container.scrollTop,
           container.clientHeight
         ),
-        hasDownwardUserIntent,
       })
     ) {
       return;
@@ -249,8 +250,7 @@ export function ChatSidebar({
 
   const handleKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) =>
     requestNextPage(
-      event.isTrusted &&
-        ["ArrowDown", "PageDown", "End"].includes(event.key)
+      event.isTrusted && ["ArrowDown", "PageDown", "End"].includes(event.key)
     );
 
   const handleRenameClick = (conversationId: number, currentTitle: string) => {
@@ -545,10 +545,7 @@ export function ChatSidebar({
         <div className="flex-1" />
 
         <div className="pb-3 flex justify-center">
-          <Tooltip
-            title={t("chat.sidebar.switchToNew")}
-            placement="right"
-          >
+          <Tooltip title={t("chat.sidebar.switchToNew")} placement="right">
             <Button
               type="text"
               size="middle"
@@ -638,17 +635,24 @@ export function ChatSidebar({
                     ref={measurementRowRef}
                     className="flex items-center min-h-10 px-3 py-1"
                   >
-                    <span className="text-base font-normal font-sans">Conversation</span>
+                    <span className="text-base font-normal font-sans">
+                      Conversation
+                    </span>
                   </div>
                   <div
                     ref={measurementSecondRowRef}
                     className="flex items-center min-h-10 px-3 py-1"
                   >
-                    <span className="text-base font-normal font-sans">Conversation</span>
+                    <span className="text-base font-normal font-sans">
+                      Conversation
+                    </span>
                   </div>
                 </div>
               </div>
-              <div ref={conversationContentRef} className="flex flex-col gap-4 pb-4">
+              <div
+                ref={conversationContentRef}
+                className="flex flex-col gap-4 pb-4"
+              >
                 {conversationManagement.conversationList.length > 0 ? (
                   <>
                     {renderConversationList(today, t("chatLeftSidebar.today"))}
@@ -681,12 +685,17 @@ export function ChatSidebar({
                   height: Math.max(
                     0,
                     totalVirtualHeight -
-                      conversationManagement.conversationList.length * rowHeight -
-                      [today, week, older].filter((group) => group.length > 0).length * headerHeight -
+                      conversationManagement.conversationList.length *
+                        rowHeight -
+                      [today, week, older].filter((group) => group.length > 0)
+                        .length *
+                        headerHeight -
                       Math.max(
                         0,
-                        [today, week, older].filter((group) => group.length > 0).length - 1
-                      ) * 16 -
+                        [today, week, older].filter((group) => group.length > 0)
+                          .length - 1
+                      ) *
+                        16 -
                       16
                   ),
                 }}
@@ -712,7 +721,7 @@ export function ChatSidebar({
       <style jsx global>{`
         .ant-layout-sider.chat-left-sidebar,
         .ant-layout-sider.chat-left-sidebar .ant-layout-sider-children {
-          background-color: #F2F8FF !important;
+          background-color: #f2f8ff !important;
         }
 
         .chat-sidebar-title-fade {

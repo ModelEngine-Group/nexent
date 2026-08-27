@@ -207,6 +207,7 @@ from backend.services.conversation_management_service import (
         update_conversation_title,
         create_new_conversation,
         get_conversation_service,
+        list_conversations_service,
         rename_conversation_service,
         delete_conversation_service,
         get_conversation_history_service,
@@ -216,6 +217,34 @@ from backend.services.conversation_management_service import (
         update_conversation_chat_mode_service,
         update_message_opinion_service,
         get_message_id_by_index_impl
+    )
+
+
+@patch('backend.services.conversation_management_service.get_conversation_list_page')
+def test_list_conversations_service_forwards_explicit_page_parameters(
+    mock_get_conversation_list_page,
+):
+    page = {
+        "items": [{"conversation_id": 123}],
+        "metadata": {"total": 1, "today": 1, "last_7_days": 0, "older": 0},
+    }
+    mock_get_conversation_list_page.return_value = page
+
+    result = list_conversations_service(
+        user_id="test_user_id",
+        today_start_ms=2000,
+        week_start_ms=1000,
+        limit=20,
+        offset=0,
+    )
+
+    assert result == page
+    mock_get_conversation_list_page.assert_called_once_with(
+        user_id="test_user_id",
+        today_start_ms=2000,
+        week_start_ms=1000,
+        limit=20,
+        offset=0,
     )
 
 

@@ -13,17 +13,18 @@ from consts.model import (
     OpinionRequest,
     RenameRequest,
 )
-from consts.exceptions import ConversationNotFoundError, ValidationError, TokenExpiredError
-from database.conversation_db import get_conversation_list_page
+from consts.exceptions import ConversationNotFoundError, TokenExpiredError, ValidationError
 from services.conversation_management_service import (
     create_new_conversation,
     delete_conversation_service,
     generate_conversation_title_service,
     get_conversation_history_service,
+    get_message_id_by_index_impl,
     get_sources_service,
+    list_conversations_service,
     rename_conversation_service,
     update_conversation_knowledge_scope_service,
-    update_message_opinion_service, get_message_id_by_index_impl,
+    update_message_opinion_service,
 )
 from utils.auth_utils import get_current_user_id, get_current_user_info
 
@@ -80,7 +81,7 @@ async def list_conversations_endpoint(
         user_id, tenant_id = get_current_user_id(authorization)
         if not user_id:
             raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Unauthorized access, Please login first")
-        conversations = get_conversation_list_page(
+        conversations = list_conversations_service(
             user_id=user_id,
             today_start_ms=today_start_ms,
             week_start_ms=week_start_ms,

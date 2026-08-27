@@ -61,7 +61,7 @@ def conversation_mocks():
     """Provide fresh mocks for each conversation management test"""
     with patch('backend.apps.conversation_management_app.get_current_user_id') as mock_get_current_user_id, \
             patch('backend.apps.conversation_management_app.create_new_conversation') as mock_create_new_conv, \
-            patch('backend.apps.conversation_management_app.get_conversation_list_page') as mock_get_conv_list, \
+            patch('backend.apps.conversation_management_app.list_conversations_service') as mock_get_conv_list, \
             patch('backend.apps.conversation_management_app.rename_conversation_service') as mock_rename_conv, \
             patch('backend.apps.conversation_management_app.logging') as mock_logging, \
             patch('backend.apps.conversation_management_app.delete_conversation_service') as mock_delete_conv, \

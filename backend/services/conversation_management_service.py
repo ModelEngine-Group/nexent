@@ -19,6 +19,7 @@ from database.conversation_db import (
     delete_conversation,
     get_conversation,
     get_conversation_history,
+    get_conversation_list_page,
     get_historical_context,
     get_latest_assistant_message,  # noqa: F401 - service boundary re-export
     get_latest_assistant_message_id,
@@ -423,6 +424,23 @@ def get_conversation_service(
         conversation_id=conversation_id,
         user_id=user_id,
         tenant_id=tenant_id,
+    )
+
+
+def list_conversations_service(
+    user_id: str,
+    today_start_ms: int,
+    week_start_ms: int,
+    limit: Optional[int] = None,
+    offset: int = 0,
+) -> Dict[str, Any]:
+    """Return one ordered conversation page and its list metadata."""
+    return get_conversation_list_page(
+        user_id=user_id,
+        today_start_ms=today_start_ms,
+        week_start_ms=week_start_ms,
+        limit=limit,
+        offset=offset,
     )
 
 

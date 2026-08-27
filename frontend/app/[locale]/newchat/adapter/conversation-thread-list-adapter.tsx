@@ -17,7 +17,6 @@ import type {
   RemoteThreadListAdapter,
   ThreadHistoryAdapter,
 } from "@assistant-ui/react";
-
 import {
   CONVERSATION_PAGE_SIZE,
   conversationService,
@@ -27,7 +26,7 @@ import {
   newChatConversationViewport,
 } from "@/lib/conversationViewport";
 import { toMessageCreatedAt } from "@/lib/messageDate";
-
+import { createConversationThreadPageLoader } from "@/lib/conversationThreadPagination";
 import { storageService } from "@/services/storageService";
 import { parseAutomationProposal } from "@/features/agentAutomation/parseProposal";
 import type { ConversationListItem } from "@/types/conversation";
@@ -149,7 +148,8 @@ const toToolSearchItem = (value: unknown) => {
   const item = value as Record<string, unknown>;
   const url = typeof item.url === "string" ? item.url : "";
   const filename = typeof item.filename === "string" ? item.filename : "";
-  const sourceFile = typeof item.source_file === "string" ? item.source_file : "";
+  const sourceFile =
+    typeof item.source_file === "string" ? item.source_file : "";
   const imageMetadata = parseImageMetadata(item.text);
   const resolvedUrl = imageMetadata?.image_url || url;
   const title =
@@ -164,17 +164,24 @@ const toToolSearchItem = (value: unknown) => {
       : typeof item.citeIndex === "number"
         ? item.citeIndex
         : undefined;
-  const toolSign = typeof item.tool_sign === "string" ? item.tool_sign : undefined;
+  const toolSign =
+    typeof item.tool_sign === "string" ? item.tool_sign : undefined;
 
   return resolvedUrl || sourceFile
     ? {
         url: resolvedUrl,
         title,
-        text: imageMetadata ? undefined : typeof item.text === "string" ? item.text : undefined,
-        sourceType: typeof item.source_type === "string" ? item.source_type : undefined,
+        text: imageMetadata
+          ? undefined
+          : typeof item.text === "string"
+            ? item.text
+            : undefined,
+        sourceType:
+          typeof item.source_type === "string" ? item.source_type : undefined,
         filename: filename || undefined,
         sourceFile: sourceFile || imageMetadata?.source_file || undefined,
-        objectName: typeof item.object_name === "string" ? item.object_name : undefined,
+        objectName:
+          typeof item.object_name === "string" ? item.object_name : undefined,
         citeIndex,
         toolSign,
         isImage: Boolean(imageMetadata),
@@ -630,7 +637,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
                     isImage: true,
                     imageKey: imagePart.imageKey,
                   },
-                  part.tool_call_id,
+                  part.tool_call_id
                 );
               }
             }
@@ -1084,11 +1091,9 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
 const toRemoteThreadMetadata = (
   item: ConversationListItem
 ): RemoteThreadMetadata => {
-  // Prefer the most recent activity timestamp; fall back to the creation time
-  // so the thread list can always group by recency. The timestamp is passed
-  // through the `custom` slot because the installed @assistant-ui/react
-  // (0.14.15) does not yet thread `lastMessageAt` through the runtime state.
-  const timestamp = item.update_time || item.create_time;
+  // The database owns the stable newest-first order. Use the same creation
+  // timestamp for grouping so the frontend never reorders paginated rows.
+  const timestamp = item.create_time;
   return {
     remoteId: String(item.conversation_id),
     status: "regular",
@@ -1104,17 +1109,6 @@ const toRemoteThreadMetadata = (
         }
       : {}),
   };
-};
-
-const parseConversationListOffset = (after: string | undefined): number => {
-  if (after === undefined) return 0;
-
-  const offset = Number(after);
-  return Number.isSafeInteger(offset) &&
-    offset >= 0 &&
-    offset <= Number.MAX_SAFE_INTEGER - CONVERSATION_PAGE_SIZE
-    ? offset
-    : 0;
 };
 
 const createHistoryProvider = (): FC<PropsWithChildren> => {
@@ -1322,33 +1316,24 @@ const waitForServerConversationId = async (
 export const conversationThreadListAdapter: RemoteThreadListAdapter = {
   unstable_Provider: createHistoryProvider(),
 
-  async list({ after } = {}): Promise<RemoteThreadListResponse> {
-    if (after === undefined) {
-      newChatConversationViewport.reset();
-      return { threads: [], nextCursor: "0" };
-    }
-
-    const { todayStartMs, weekStartMs } = getConversationDateBoundaries();
-    const offset = parseConversationListOffset(after);
-    const limit =
-      offset === 0
-        ? newChatConversationViewport.takePageLimit()
-        : CONVERSATION_PAGE_SIZE;
-    const data = await conversationService.getList({
-      offset,
-      limit,
-      todayStartMs,
-      weekStartMs,
-    });
-    newChatConversationViewport.setMetadata(data.metadata);
-    const nextOffset = offset + data.items.length;
-
-    return {
-      threads: data.items.map(toRemoteThreadMetadata),
-      nextCursor:
-        nextOffset < data.metadata.total ? String(nextOffset) : undefined,
-    };
-  },
+  list: createConversationThreadPageLoader({
+    pageSize: CONVERSATION_PAGE_SIZE,
+    takeNextPageSize: newChatConversationViewport.takeNextPageSize,
+    getOffsetAdjustment: newChatConversationViewport.getOffsetAdjustment,
+    commitOffsetAdjustment: newChatConversationViewport.commitOffsetAdjustment,
+    resetPagination: newChatConversationViewport.resetPagination,
+    fetchPage: async ({ offset, limit }) => {
+      const { todayStartMs, weekStartMs } = getConversationDateBoundaries();
+      return conversationService.getList({
+        offset,
+        limit,
+        todayStartMs,
+        weekStartMs,
+      });
+    },
+    mapItem: toRemoteThreadMetadata,
+    onMetadata: newChatConversationViewport.setMetadata,
+  }),
 
   async initialize(_threadId: string): Promise<RemoteThreadInitializeResponse> {
     // Conversation creation is now handled lazily by `POST /api/agent/run`:

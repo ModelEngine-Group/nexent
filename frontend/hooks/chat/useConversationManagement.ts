@@ -48,14 +48,21 @@ export interface ConversationManagement {
     agentId: number | null
   ) => void;
   handleNewConversation: () => void;
-  handleConversationSelect: (conversation: ConversationListItem) => Promise<void>;
-  updateConversationTitle: (conversationId: number, title: string) => Promise<void>;
+  handleConversationSelect: (
+    conversation: ConversationListItem
+  ) => Promise<void>;
+  updateConversationTitle: (
+    conversationId: number,
+    title: string
+  ) => Promise<void>;
   clearConversationLoadError: (conversationId: number) => void;
   setConversationLoadErrorForId: (
     conversationId: number,
     error: string
   ) => void;
-  setSelectedConversationId: React.Dispatch<React.SetStateAction<number | null>>;
+  setSelectedConversationId: React.Dispatch<
+    React.SetStateAction<number | null>
+  >;
   setConversationTitle: React.Dispatch<React.SetStateAction<string>>;
   setIsNewConversation: React.Dispatch<React.SetStateAction<boolean>>;
 }
@@ -104,9 +111,9 @@ export const useConversationManagement = (): ConversationManagement => {
 
   const conversationList = Array.from(
     new Map(
-      (conversationListQuery.data?.pages.flatMap((page) => page.items) ?? [])
-        .sort((a, b) => b.create_time - a.create_time)
-        .map((conversation) => [conversation.conversation_id, conversation])
+      (
+        conversationListQuery.data?.pages.flatMap((page) => page.items) ?? []
+      ).map((conversation) => [conversation.conversation_id, conversation])
     ).values()
   );
 
@@ -118,15 +125,17 @@ export const useConversationManagement = (): ConversationManagement => {
     }
     return Array.from(
       new Map(
-        (result.data?.pages.flatMap((page) => page.items) ?? [])
-          .sort((a, b) => b.create_time - a.create_time)
-          .map((conversation) => [conversation.conversation_id, conversation])
+        (result.data?.pages.flatMap((page) => page.items) ?? []).map(
+          (conversation) => [conversation.conversation_id, conversation]
+        )
       ).values()
     );
   };
 
   const invalidateConversationList = () => {
-    void queryClient.invalidateQueries({ queryKey: CONVERSATION_LIST_QUERY_KEY });
+    void queryClient.invalidateQueries({
+      queryKey: CONVERSATION_LIST_QUERY_KEY,
+    });
   };
 
   const fetchNextPage = async (): Promise<void> => {
