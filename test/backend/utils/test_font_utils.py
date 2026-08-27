@@ -64,6 +64,22 @@ def _install_reportlab_stub(register_side_effect=None):
 
 
 class TestFindCjkFontPath:
+    def test_prefers_linux_fontconfig_result(self, monkeypatch):
+        monkeypatch.setattr(font_utils.shutil, "which", lambda _name: "/usr/bin/fc-match")
+        monkeypatch.setattr(
+            font_utils.subprocess,
+            "run",
+            lambda *_args, **_kwargs: SimpleNamespace(
+                stdout="Noto Sans CJK SC\tzh-cn|zh-tw\t/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc\n"
+            ),
+        )
+        monkeypatch.setattr(font_utils.os.path, "exists", lambda _path: True)
+        monkeypatch.setattr(font_utils.os.path, "getsize", lambda _path: 2001)
+
+        assert font_utils._find_cjk_font_path() == (
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
+        )
+
     def test_returns_real_font_when_present(self):
         fp = font_utils._find_cjk_font_path()
         assert fp is None or (Path(fp).exists() and Path(fp).stat().st_size > 1000)
