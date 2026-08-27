@@ -146,6 +146,7 @@ export default function AgentConfig({
   const displayInfoSectionRef = useRef<HTMLDivElement>(null);
   const roleModelSectionRef = useRef<HTMLDivElement>(null);
   const toolsSkillsSectionRef = useRef<HTMLDivElement>(null);
+  const knowledgeBaseSectionRef = useRef<HTMLDivElement>(null);
   const conversationGuideSectionRef = useRef<HTMLDivElement>(null);
   const lastScrolledRequestRef = useRef<string | null>(null);
   const { configFocusRequest } = useNl2AgentFlow();
@@ -181,7 +182,10 @@ export default function AgentConfig({
 
     const { requestId, target } = configFocusRequest;
     setActiveConfigTab(
-      target.section === "conversation_guide" ? "advanced" : "basic"
+      target.section === "conversation_guide" ||
+        target.section === "knowledge_base"
+        ? "advanced"
+        : "basic"
     );
     setOpenSections((current) =>
       current[target.section] ? current : { ...current, [target.section]: true }
@@ -198,7 +202,9 @@ export default function AgentConfig({
             ? roleModelSectionRef.current
             : target.section === "tools_skills"
               ? toolsSkillsSectionRef.current
-              : conversationGuideSectionRef.current;
+              : target.section === "knowledge_base"
+                ? knowledgeBaseSectionRef.current
+                : conversationGuideSectionRef.current;
       if (!sectionElement) return;
 
       const prefersReducedMotion = window.matchMedia(
@@ -410,6 +416,7 @@ export default function AgentConfig({
             onOpenChange={(open) =>
               handleSectionOpenChange("knowledge_base", open)
             }
+            containerRef={knowledgeBaseSectionRef}
             headerActions={<KnowledgeBaseConfigActions />}
           >
             <KnowledgeBaseConfig />
