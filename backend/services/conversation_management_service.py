@@ -20,7 +20,6 @@ from database.conversation_db import (
     get_conversation,
     get_conversation_history,
     get_historical_context,
-    get_conversation_list,
     get_latest_assistant_message,  # noqa: F401 - service boundary re-export
     get_latest_assistant_message_id,
     get_latest_user_message_id,
@@ -414,21 +413,6 @@ def create_new_conversation(
         raise Exception(str(e))
 
 
-def get_conversation_list_service(user_id: str) -> List[Dict[str, Any]]:
-    """
-    Get all conversation list
-
-    Returns:
-        List of conversation data
-    """
-    try:
-        conversations = get_conversation_list(user_id)
-        return conversations
-    except Exception as e:
-        logging.error(f"Failed to get conversation list: {str(e)}")
-        raise Exception(str(e))
-
-
 def get_conversation_service(
     conversation_id: int,
     user_id: str,
@@ -746,6 +730,7 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
                     'role': role,
                     'message': message_content,
                     'message_id': message_id,
+                    'create_time': msg.get('create_time'),
                     'opinion_flag': None
                 }
 
@@ -828,6 +813,7 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
                     'role': role,
                     'message': processed_units,
                     'message_id': message_id,
+                    'create_time': msg.get('create_time'),
                     'opinion_flag': msg['opinion_flag']
                 }
 
@@ -866,6 +852,7 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
         formatted_history = {
             # Convert to string
             'conversation_id': str(history_data['conversation_id']),
+            'conversation_title': history_data.get('conversation_title'),
             'agent_id': history_data.get('agent_id'),
             'chat_mode': history_data.get('chat_mode') or 'execution',
             'knowledge_scope': history_data.get('knowledge_scope'),

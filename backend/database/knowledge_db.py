@@ -378,13 +378,23 @@ def get_knowledge_ids_by_index_names(index_names: List[str]) -> List[str]:
         raise e
 
 
-def get_knowledge_info_by_tenant_id(tenant_id: str) -> List[Dict[str, Any]]:
+def get_knowledge_info_by_tenant_id(
+    tenant_id: str,
+    ordered: bool = False,
+) -> List[Dict[str, Any]]:
     try:
         with get_db_session() as session:
-            result = session.query(KnowledgeRecord).filter(
+            query = session.query(KnowledgeRecord).filter(
                 KnowledgeRecord.tenant_id == tenant_id,
                 KnowledgeRecord.delete_flag != 'Y'
-            ).all()
+            )
+            if ordered:
+                query = query.order_by(
+                    KnowledgeRecord.update_time.desc(),
+                    KnowledgeRecord.knowledge_id.desc(),
+                    KnowledgeRecord.index_name.desc(),
+                )
+            result = query.all()
             return [as_dict(item) for item in result]
     except SQLAlchemyError as e:
         raise e

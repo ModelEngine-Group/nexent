@@ -8,7 +8,7 @@ import sys
 import pytest
 import types
 import importlib.machinery
-from unittest.mock import patch, MagicMock, ANY, AsyncMock
+from unittest.mock import patch, MagicMock, ANY, AsyncMock, call
 from fastapi.testclient import TestClient
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
@@ -671,6 +671,98 @@ async def test_get_list_indices_with_tenant_id_filter(vdb_core_mock, auth_data):
         assert len(response_data["indices_info"]) == 2
         assert response_data["indices_info"][0]["tenant_id"] == target_tenant_id
         assert response_data["indices_info"][1]["tenant_id"] == target_tenant_id
+
+
+@pytest.mark.asyncio
+async def test_get_list_indices_passes_pagination_and_filters(vdb_core_mock, auth_data):
+    with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+            patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.ElasticSearchService.list_indices") as mock_list:
+        mock_list.return_value = {
+            "indices": [], "count": 0, "total": 0,
+            "next_offset": None, "facets": {"sources": [], "models": []},
+            "estimated_row_height": 112, "estimated_item_heights": None,
+        }
+
+        response = client.get(
+            "/indices",
+            params=[
+                ("tenant_id", auth_data["tenant_id"]), ("offset", "10"), ("limit", "10"),
+                ("keyword", "medical"), ("sources", "elasticsearch"), ("models", "model-a"),
+            ],
+            headers=auth_data["auth_header"],
+        )
+
+        assert response.status_code == 200
+        assert mock_list.call_args.kwargs == {
+            "pagination_enabled": True,
+            "offset": 10,
+            "limit": 10,
+            "keyword": "medical",
+            "sources": ["elasticsearch"],
+            "models": ["model-a"],
+        }
+
+
+@pytest.mark.asyncio
+async def test_get_list_indices_merges_tenant_and_asset_pages(vdb_core_mock, auth_data):
+    primary = {"indices": ["tenant-kb"], "count": 1, "total": 1}
+    asset = {"indices": ["asset-kb"], "count": 1, "total": 1}
+    merged = {
+        "indices": ["tenant-kb", "asset-kb"],
+        "count": 2,
+        "total": 2,
+        "next_offset": None,
+    }
+
+    with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+            patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.ASSET_OWNER_TENANT_ID", "asset-tenant"), \
+            patch("backend.apps.vectordatabase_app.ElasticSearchService.list_indices", side_effect=[primary, asset]) as mock_list, \
+            patch("backend.apps.vectordatabase_app.ElasticSearchService.merge_paginated_list_indices_results", return_value=merged) as mock_merge:
+        response = client.get(
+            "/indices",
+            params={"offset": 3, "limit": 10, "keyword": "medical"},
+            headers=auth_data["auth_header"],
+        )
+
+    assert response.status_code == 200
+    assert response.json() == merged
+    assert mock_list.call_args_list == [
+        call(
+            "*", False, auth_data["tenant_id"], auth_data["user_id"], ANY,
+            pagination_enabled=True, offset=0, limit=13,
+            keyword="medical", sources=None, models=None,
+        ),
+        call(
+            "*", False, "asset-tenant", auth_data["user_id"], ANY,
+            pagination_enabled=True, offset=0, limit=13,
+            keyword="medical", sources=None, models=None,
+        ),
+    ]
+    mock_merge.assert_called_once_with(primary, asset, 3, 10)
+
+
+@pytest.mark.asyncio
+async def test_get_list_indices_merges_tenant_and_asset_without_pagination(vdb_core_mock, auth_data):
+    primary = {"indices": ["tenant-kb"], "count": 1}
+    asset = {"indices": ["asset-kb"], "count": 1}
+    merged = {"indices": ["tenant-kb", "asset-kb"], "count": 2}
+
+    with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+            patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.ASSET_OWNER_TENANT_ID", "asset-tenant"), \
+            patch("backend.apps.vectordatabase_app.ElasticSearchService.list_indices", side_effect=[primary, asset]) as mock_list, \
+            patch("backend.apps.vectordatabase_app.ElasticSearchService.merge_list_indices_results", return_value=merged) as mock_merge:
+        response = client.get("/indices", headers=auth_data["auth_header"])
+
+    assert response.status_code == 200
+    assert response.json() == merged
+    assert mock_list.call_args_list == [
+        call("*", False, auth_data["tenant_id"], auth_data["user_id"], ANY),
+        call("*", False, "asset-tenant", auth_data["user_id"], ANY),
+    ]
+    mock_merge.assert_called_once_with(primary, asset)
 
 
 @pytest.mark.asyncio
@@ -1951,6 +2043,252 @@ async def test_delete_documents_success(vdb_core_mock, redis_service_mock, auth_
 
 
 @pytest.mark.asyncio
+async def test_delete_documents_resolves_lifecycle_file_id(vdb_core_mock, redis_service_mock, auth_data):
+    """New clients can delete a file by durable lifecycle ID."""
+    lifecycle_record = {"file_id": "fid-1", "object_name": "knowledge_base/a.txt"}
+    with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+            patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("database.knowledge_file_lifecycle_db.get_file_record", return_value=lifecycle_record) as mock_get_record, \
+            patch(
+                "backend.apps.vectordatabase_app.ElasticSearchService.delete_document_by_scope",
+                new_callable=AsyncMock,
+            ) as mock_delete_by_scope:
+        mock_delete_by_scope.return_value = {"status": "success", "scope": "source_only"}
+
+        response = client.delete(
+            f"/indices/{auth_data['index_name']}/documents",
+            params={"file_id": "fid-1", "scope": "source_only"},
+            headers=auth_data["auth_header"],
+        )
+
+        assert response.status_code == 200
+        mock_get_record.assert_called_once_with(
+            file_id="fid-1",
+            index_name=auth_data["index_name"],
+            tenant_id=auth_data["tenant_id"],
+            include_hidden=True,
+        )
+        mock_delete_by_scope.assert_awaited_once_with(
+            auth_data["index_name"], "knowledge_base/a.txt", "source_only", ANY
+        )
+
+
+@pytest.mark.asyncio
+async def test_delete_documents_uses_legacy_path_when_lifecycle_lookup_fails(
+    vdb_core_mock, auth_data
+):
+    """A temporary lifecycle-table outage must retain the legacy delete contract."""
+    with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+            patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("database.knowledge_file_lifecycle_db.get_file_record", side_effect=RuntimeError("table unavailable")), \
+            patch(
+                "backend.apps.vectordatabase_app.ElasticSearchService.delete_document_by_scope",
+                new_callable=AsyncMock,
+                return_value={"status": "success", "scope": "full"},
+            ) as mock_delete:
+        response = client.delete(
+            f"/indices/{auth_data['index_name']}/documents",
+            params={
+                "file_id": "fid-legacy",
+                "path_or_url": "knowledge_base/legacy.txt",
+                "scope": "full",
+            },
+            headers=auth_data["auth_header"],
+        )
+
+    assert response.status_code == 200
+    mock_delete.assert_awaited_once_with(
+        auth_data["index_name"], "knowledge_base/legacy.txt", "full", ANY
+    )
+
+
+@pytest.mark.asyncio
+async def test_delete_documents_requires_file_identity(vdb_core_mock, auth_data):
+    with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+            patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])):
+        response = client.delete(
+            f"/indices/{auth_data['index_name']}/documents",
+            params={"scope": "full"},
+            headers=auth_data["auth_header"],
+        )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Either path_or_url or file_id is required"
+
+
+@pytest.mark.asyncio
+async def test_delete_documents_removes_lifecycle_record_without_object(vdb_core_mock, auth_data):
+    """A failed upload without a storage object can be deleted by file ID."""
+    lifecycle_record = {
+        "file_id": "fid-no-object",
+        "tenant_id": auth_data["tenant_id"],
+        "index_name": auth_data["index_name"],
+        "object_name": None,
+        "status": "FAILED",
+    }
+    delete_result = {
+        "status": "success",
+        "scope": "full",
+        "lifecycle_deleted": True,
+    }
+    with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+            patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("database.knowledge_file_lifecycle_db.get_file_record", return_value=lifecycle_record), \
+            patch(
+                "backend.apps.vectordatabase_app.ElasticSearchService.delete_lifecycle_record_without_object",
+                return_value=delete_result,
+            ) as mock_delete_lifecycle:
+        response = client.delete(
+            f"/indices/{auth_data['index_name']}/documents",
+            # The frontend uses file_id as the legacy path fallback when object_name is empty.
+            params={
+                "path_or_url": "fid-no-object",
+                "file_id": "fid-no-object",
+                "scope": "full",
+            },
+            headers=auth_data["auth_header"],
+        )
+
+    assert response.status_code == 200
+    assert response.json() == delete_result
+    mock_delete_lifecycle.assert_called_once_with(lifecycle_record, requested_by=auth_data["user_id"])
+
+
+@pytest.mark.asyncio
+async def test_delete_documents_rejects_source_only_without_object(vdb_core_mock, auth_data):
+    """Source-only deletion is invalid when upload never created a storage object."""
+    lifecycle_record = {
+        "file_id": "fid-no-object",
+        "tenant_id": auth_data["tenant_id"],
+        "index_name": auth_data["index_name"],
+        "object_name": None,
+        "status": "FAILED",
+    }
+    with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+            patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("database.knowledge_file_lifecycle_db.get_file_record", return_value=lifecycle_record), \
+            patch(
+                "backend.apps.vectordatabase_app.ElasticSearchService.delete_lifecycle_record_without_object",
+            ) as mock_delete_lifecycle:
+        response = client.delete(
+            f"/indices/{auth_data['index_name']}/documents",
+            params={"file_id": "fid-no-object", "scope": "source_only"},
+            headers=auth_data["auth_header"],
+        )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "A file without a storage object can only use full deletion"
+    mock_delete_lifecycle.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_get_document_error_info_returns_lifecycle_error(auth_data):
+    """Durable lifecycle errors take precedence over Redis task metadata."""
+    lifecycle_record = {
+        "file_id": "fid-failed",
+        "error_code": "PARSE_FAILED",
+        "error_message": "unsupported format",
+        "error_stage": "PROCESS",
+        "failed_at": "2026-08-22T00:00:00",
+    }
+    with patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("database.knowledge_file_lifecycle_db.get_file_record", return_value=lifecycle_record) as mock_get_record, \
+            patch("backend.apps.vectordatabase_app.get_all_files_status", new_callable=AsyncMock) as mock_legacy:
+        response = client.get(
+            f"/indices/{auth_data['index_name']}/documents/knowledge_base/a.txt/error-info",
+            params={"file_id": "fid-failed"},
+            headers=auth_data["auth_header"],
+        )
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "status": "success",
+            "error_code": "PARSE_FAILED",
+            "error_message": "unsupported format",
+            "error_stage": "PROCESS",
+            "failed_at": "2026-08-22T00:00:00",
+        }
+        mock_get_record.assert_called_once_with(
+            file_id="fid-failed",
+            index_name=auth_data["index_name"],
+            tenant_id=auth_data["tenant_id"],
+            object_name=None,
+            include_hidden=True,
+        )
+        mock_legacy.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_get_document_error_info_falls_back_when_lifecycle_has_no_error(auth_data):
+    """A lifecycle row without error metadata must not hide legacy Redis errors."""
+    lifecycle_record = {
+        "file_id": "fid-processing",
+        "tenant_id": auth_data["tenant_id"],
+        "index_name": auth_data["index_name"],
+        "status": "PROCESSING",
+        "error_code": None,
+        "error_message": None,
+        "error_stage": None,
+        "failed_at": None,
+    }
+    redis_service = MagicMock()
+    redis_service.get_error_info.return_value = '{"error_code":"LEGACY_PARSE_FAILED"}'
+    with patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("database.knowledge_file_lifecycle_db.get_file_record", return_value=lifecycle_record), \
+            patch(
+                "backend.apps.vectordatabase_app.get_all_files_status",
+                new=AsyncMock(return_value={"knowledge_base/a.txt": {"latest_task_id": "task-legacy"}}),
+            ), \
+            patch("backend.apps.vectordatabase_app.get_redis_service", return_value=redis_service):
+        response = client.get(
+            f"/indices/{auth_data['index_name']}/documents/knowledge_base/a.txt/error-info",
+            params={"file_id": "fid-processing"},
+            headers=auth_data["auth_header"],
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "success",
+        "error_code": "LEGACY_PARSE_FAILED",
+        "error_message": '{"error_code":"LEGACY_PARSE_FAILED"}',
+        "error_stage": None,
+        "failed_at": None,
+    }
+    redis_service.get_error_info.assert_called_once_with("task-legacy")
+
+
+@pytest.mark.asyncio
+async def test_get_document_error_info_returns_lifecycle_stage_without_legacy_status(auth_data):
+    """A durable row with no task ID still returns a stable success payload."""
+    lifecycle_record = {
+        "file_id": "fid-uploaded",
+        "status": "UPLOADED",
+        "stage": "UPLOAD",
+        "error_code": None,
+        "error_message": None,
+        "error_stage": None,
+        "failed_at": None,
+    }
+    with patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("database.knowledge_file_lifecycle_db.get_file_record", return_value=lifecycle_record), \
+            patch("backend.apps.vectordatabase_app.get_all_files_status", new_callable=AsyncMock, return_value={}):
+        response = client.get(
+            f"/indices/{auth_data['index_name']}/documents/knowledge_base/a.txt/error-info",
+            params={"file_id": "fid-uploaded"},
+            headers=auth_data["auth_header"],
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "success",
+        "error_code": None,
+        "error_message": None,
+        "error_stage": "UPLOAD",
+        "failed_at": None,
+    }
+
+
+@pytest.mark.asyncio
 async def test_delete_documents_forbidden_for_read_only(vdb_core_mock, auth_data):
     """Read-only users must not be able to delete files from a knowledge base."""
     with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
@@ -2266,7 +2604,13 @@ async def test_get_document_error_info_no_task_id(auth_data):
         )
 
     assert response.status_code == 200
-    assert response.json() == {"status": "success", "error_code": None}
+    assert response.json() == {
+        "status": "success",
+        "error_code": None,
+        "error_message": None,
+        "error_stage": None,
+        "failed_at": None,
+    }
     mock_redis.assert_not_called()
 
 
@@ -2297,7 +2641,13 @@ async def test_get_document_error_info_json_error_code(auth_data):
         )
 
     assert response.status_code == 200
-    assert response.json() == {"status": "success", "error_code": "INVALID_FORMAT"}
+    assert response.json() == {
+        "status": "success",
+        "error_code": "INVALID_FORMAT",
+        "error_message": '{"error_code": "INVALID_FORMAT"}',
+        "error_stage": None,
+        "failed_at": None,
+    }
     redis_mock.get_error_info.assert_called_once_with("task-123")
 
 
@@ -2328,7 +2678,13 @@ async def test_get_document_error_info_regex_error_code(auth_data):
         )
 
     assert response.status_code == 200
-    assert response.json() == {"status": "success", "error_code": "TIMEOUT_ERROR"}
+    assert response.json() == {
+        "status": "success",
+        "error_code": "TIMEOUT_ERROR",
+        "error_message": "oops {'error_code': 'TIMEOUT_ERROR'}",
+        "error_stage": None,
+        "failed_at": None,
+    }
     redis_mock.get_error_info.assert_called_once_with("task-999")
 
 
@@ -3259,3 +3615,46 @@ async def test_delete_documents_maps_storage_permission_error(vdb_core_mock, aut
     assert response.status_code == 403
     assert response.json()["detail"] == "read-only KB"
     mock_delete.assert_not_called()
+
+# TokenExpiredError -> 401 mapping for every VDB endpoint guarded by auth.
+
+
+TOKEN_EXPIRED_ENDPOINTS = [
+    ("post", "/indices/check_exist", {"json": {"knowledge_name": "kb1"}}, "get_current_user_id"),
+    ("post", "/indices/kb1", {"json": {"embedding_model_id": 101}}, "get_current_user_context"),
+    ("delete", "/indices/kb1", {}, "get_current_user_id"),
+    ("patch", "/indices/kb1", {"json": {"knowledge_name": "kb2"}}, "get_current_user_context"),
+    ("patch", "/indices/kb1/summary_frequency", {"json": {"summary_frequency": "daily"}}, "get_current_user_id"),
+    ("get", "/indices/kb1/embedding-model-status", {}, "get_current_user_id"),
+    ("put", "/indices/kb1/embedding-model", {"json": {"model_id": 123}}, "get_current_user_id"),
+    ("get", "/indices", {}, "get_current_user_id"),
+    ("post", "/indices/kb1/documents", {"json": [{"content": "doc"}]}, "get_current_user_id"),
+    ("get", "/indices/kb1/files", {}, "get_current_user_id"),
+    ("delete", "/indices/kb1/documents", {"params": {"path_or_url": "a.pdf"}}, "get_current_user_id"),
+    ("get", "/indices/kb1/documents/a.pdf/error-info", {}, "get_current_user_id"),
+    ("post", "/indices/kb1/chunks", {}, "get_current_user_id"),
+    ("post", "/indices/kb1/chunk", {"json": {"content": "chunk"}}, "get_current_user_id"),
+    ("put", "/indices/kb1/chunk/ch1", {"json": {"content": "updated"}}, "get_current_user_id"),
+    ("delete", "/indices/kb1/chunk/ch1", {}, "get_current_user_id"),
+    ("post", "/indices/search/hybrid", {"json": {"index_names": ["kb1"], "query": "q"}}, "get_current_user_id"),
+]
+
+
+@pytest.mark.parametrize(
+    "method,url,kwargs,auth_fn", TOKEN_EXPIRED_ENDPOINTS
+)
+def test_vdb_endpoints_return_401_on_token_expired(method, url, kwargs, auth_fn):
+    """Expired token maps to 401 on every authenticated VDB endpoint."""
+    from consts.exceptions import TokenExpiredError
+    from http import HTTPStatus
+
+    with patch(
+        f"backend.apps.vectordatabase_app.{auth_fn}",
+        side_effect=TokenExpiredError("expired"),
+    ):
+        response = getattr(client, method)(
+            url, headers={"Authorization": "Bearer expired"}, **kwargs
+        )
+
+    assert response.status_code == HTTPStatus.UNAUTHORIZED
+    assert "expired" in response.json()["detail"]

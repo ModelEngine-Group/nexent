@@ -12799,8 +12799,8 @@ def test_generate_unique_value_with_suffix_exhaust_attempts():
 # ============================================================================
 
 
-def test_transform_skill_files_to_standard_format_with_preview_url():
-    """_transform_skill_files_to_standard_format should use preview_url when url is missing."""
+def test_transform_skill_files_to_standard_format_ignores_preview_url():
+    """An unapproved preview URL must not enter persisted attachment metadata."""
     from backend.services.agent_service import _transform_skill_files_to_standard_format
 
     upload_results = [
@@ -12812,7 +12812,8 @@ def test_transform_skill_files_to_standard_format_with_preview_url():
     ]
     frontend_files = _transform_skill_files_to_standard_format(upload_results)
     assert len(frontend_files) == 1
-    assert frontend_files[0]["presigned_url"] == "https://example.com/preview"
+    assert frontend_files[0]["url"] == ""
+    assert "presigned_url" not in frontend_files[0]
 
 
 def test_transform_skill_files_to_standard_format_empty_list():
@@ -14140,7 +14141,6 @@ async def test_stream_agent_chunks_parses_string_workspace_artifacts_and_handles
             "type": "file",
             "size": 0,
             "url": "",
-            "presigned_url": "",
             "description": "",
         }
     ]
@@ -16829,8 +16829,8 @@ class TestTransformSkillFilesToStandardFormat:
         assert result[0]["presigned_url"] == "https://example.com/presigned"
         assert result[0]["description"] == ""
 
-    def test_transform_skill_files_uses_preview_url(self):
-        """Test _transform_skill_files_to_standard_format uses preview_url as fallback for presigned_url."""
+    def test_transform_skill_files_ignores_preview_url(self):
+        """Temporary preview URLs are not part of the permanent file contract."""
         from backend.services.agent_service import _transform_skill_files_to_standard_format
 
         upload_results = [
@@ -16842,7 +16842,8 @@ class TestTransformSkillFilesToStandardFormat:
             }
         ]
         result = _transform_skill_files_to_standard_format(upload_results)
-        assert result[0]["presigned_url"] == "https://example.com/preview"
+        assert result[0]["url"] == "https://example.com/test.txt"
+        assert "presigned_url" not in result[0]
 
     def test_transform_skill_files_uses_size_fallback(self):
         """Test _transform_skill_files_to_standard_format uses 'size' as fallback for 'file_size'."""

@@ -217,7 +217,7 @@ export default function AgentConfigActions() {
   return (
     <>
       <div className="flex items-center gap-1">
-        {(agentInfo as { is_a2a_server?: boolean } | null)?.is_a2a_server && (
+        {(agentInfo as { is_a2a?: boolean } | null)?.is_a2a && (
           <Tooltip title={t("a2a.agent.viewA2ASettings")}>
             <Button
               type="text"

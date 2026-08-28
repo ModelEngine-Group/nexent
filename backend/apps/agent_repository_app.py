@@ -6,7 +6,7 @@ from fastapi import APIRouter, Body, Header, HTTPException, Query
 from starlette.responses import JSONResponse
 
 from consts.exceptions import SkillDuplicateError, UnauthorizedError
-from consts.model import AgentRepositoryListingCreateRequest
+from consts.model import AgentRepositoryListingCreateRequest, SkillResolution
 from services.agent_repository_service import (
     check_repository_import_precheck_impl,
     create_agent_repository_listing_impl,
@@ -246,6 +246,7 @@ async def check_repository_import_precheck_api(
 @agent_repository_router.post("/{agent_repository_id}/import")
 async def import_agent_from_repository_api(
     agent_repository_id: int,
+    skill_resolutions: Optional[list[SkillResolution]] = Body(default=None),
     authorization: Optional[str] = Header(None),
 ):
     """Import an agent tree from a marketplace repository listing into the current tenant."""
@@ -255,6 +256,7 @@ async def import_agent_from_repository_api(
             agent_repository_id=agent_repository_id,
             tenant_id=tenant_id,
             authorization=authorization,
+            skill_resolutions=skill_resolutions,
         )
         return JSONResponse(status_code=HTTPStatus.OK, content={})
     except UnauthorizedError as e:

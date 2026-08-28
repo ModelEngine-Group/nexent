@@ -1424,6 +1424,7 @@ class TestGetToolFromRemoteMcpServer:
         assert result[0].name == "test_tool_1"
         assert result[0].description == "Test tool 1 description"
         assert result[0].source == ToolSourceEnum.MCP.value
+        assert result[0].output_type == "object"
         assert result[0].usage == "test_server"
         assert result[1].name == "test_tool_2"
         assert result[1].description == "Test tool 2 description"
@@ -5725,3 +5726,192 @@ def test_validate_local_tool_aidp_search_rejects_unavailable_kds(mocker):
             tenant_id="tenant-1",
             user_id="user-1",
         )
+
+
+class TestExtractFieldConstraints:
+    """Tests for _extract_field_constraints (Pydantic Field constraint extraction)."""
+
+    def test_extract_numeric_constraints(self):
+        from pydantic import Field
+
+        field_info = Field(ge=1, le=100)
+        result = _tool_cfg_service._extract_field_constraints(field_info)
+        assert result == {"ge": 1, "le": 100}
+
+    def test_extract_length_constraints(self):
+        from pydantic import Field
+
+        field_info = Field(min_length=1, max_length=5)
+        result = _tool_cfg_service._extract_field_constraints(field_info)
+        assert result == {"min_length": 1, "max_length": 5}
+
+    def test_extract_no_constraints(self):
+        from pydantic import Field
+
+        field_info = Field(default=3)
+        assert _tool_cfg_service._extract_field_constraints(field_info) == {}
+
+    def test_extract_without_metadata(self):
+        assert _tool_cfg_service._extract_field_constraints(object()) == {}
+
+
+class TestGetToolRecord:
+    """Tests for _get_tool_record."""
+
+    def test_returns_first_record(self):
+        with patch(
+            "backend.services.tool_configuration_service.query_tools_by_ids",
+            return_value=[{"id": 1, "name": "tool_a"}],
+        ):
+            assert _tool_cfg_service._get_tool_record(1) == {"id": 1, "name": "tool_a"}
+
+    def test_returns_none_when_empty(self):
+        with patch(
+            "backend.services.tool_configuration_service.query_tools_by_ids",
+            return_value=[],
+        ):
+            assert _tool_cfg_service._get_tool_record(1) is None
+
+    def test_returns_none_on_exception(self):
+        with patch(
+            "backend.services.tool_configuration_service.query_tools_by_ids",
+            side_effect=RuntimeError("db down"),
+        ):
+            assert _tool_cfg_service._get_tool_record(1) is None
+
+
+class TestCoerceParamValue:
+    """Tests for _coerce_param_value."""
+
+    def test_length_constraint_returns_string_length(self):
+        result = _tool_cfg_service._coerce_param_value(
+            "t", "p", "string", "hello", "min_length"
+        )
+        assert result == 5
+
+    def test_string_type_returns_str(self):
+        assert _tool_cfg_service._coerce_param_value("t", "p", "string", 123, "ge") == "123"
+
+    def test_integer_returns_float(self):
+        assert _tool_cfg_service._coerce_param_value("t", "p", "integer", "5", "ge") == 5.0
+
+    def test_number_returns_float(self):
+        assert _tool_cfg_service._coerce_param_value("t", "p", "number", 2.5, "le") == 2.5
+
+    def test_invalid_numeric_raises_valid_type(self):
+        from consts.exceptions import ValidationError
+
+        with pytest.raises(ValidationError, match="p must be a valid integer"):
+            _tool_cfg_service._coerce_param_value("t", "p", "integer", "abc", "ge")
+
+    def test_non_integer_for_integer_type_raises(self):
+        from consts.exceptions import ValidationError
+
+        with pytest.raises(ValidationError, match="p must be an integer"):
+            _tool_cfg_service._coerce_param_value("t", "p", "integer", 1.5, "ge")
+
+
+class TestFormatConstraintMessage:
+    """Tests for _format_constraint_message."""
+
+    def test_formats_ge_message(self):
+        msg = _tool_cfg_service._format_constraint_message("ge", "tool_a", "top_k", 1)
+        assert msg == "tool_a top_k must be >= 1"
+
+
+class TestApplyParamConstraints:
+    """Tests for _apply_param_constraints."""
+
+    def test_no_constraint_keys_returns(self):
+        # Should not raise even with a value that would violate nothing.
+        _tool_cfg_service._apply_param_constraints("t", "p", "integer", 0, {})
+
+    def test_ge_violation_raises(self):
+        from consts.exceptions import ValidationError
+
+        with pytest.raises(ValidationError, match="top_k must be >= 1"):
+            _tool_cfg_service._apply_param_constraints(
+                "t", "top_k", "integer", 0, {"ge": 1}
+            )
+
+    def test_ge_satisfied(self):
+        _tool_cfg_service._apply_param_constraints(
+            "t", "top_k", "integer", "5", {"ge": 1}
+        )
+
+    def test_le_violation_raises(self):
+        from consts.exceptions import ValidationError
+
+        with pytest.raises(ValidationError, match="top_k must be <= 100"):
+            _tool_cfg_service._apply_param_constraints(
+                "t", "top_k", "integer", 101, {"le": 100}
+            )
+
+    def test_min_length_violation_raises(self):
+        from consts.exceptions import ValidationError
+
+        with pytest.raises(ValidationError, match="name length must be >= 3"):
+            _tool_cfg_service._apply_param_constraints(
+                "t", "name", "string", "ab", {"min_length": 3}
+            )
+
+    def test_max_length_satisfied(self):
+        _tool_cfg_service._apply_param_constraints(
+            "t", "name", "string", "abc", {"max_length": 5}
+        )
+
+
+class TestValidateToolParamRanges:
+    """Tests for _validate_tool_param_ranges."""
+
+    def _tool(self, params):
+        return {"name": "tool_a", "params": params}
+
+    def test_skips_when_no_record(self):
+        with patch(
+            "backend.services.tool_configuration_service._get_tool_record",
+            return_value=None,
+        ):
+            _tool_cfg_service._validate_tool_param_ranges(1, {"top_k": 0})
+
+    def test_skips_when_configured_value_is_none(self):
+        tool = self._tool([{"name": "top_k", "type": "integer", "constraints": {"ge": 1}}])
+        with patch(
+            "backend.services.tool_configuration_service._get_tool_record",
+            return_value=tool,
+        ):
+            _tool_cfg_service._validate_tool_param_ranges(1, {"top_k": None})
+
+    def test_skips_param_without_constraints(self):
+        tool = self._tool([{"name": "top_k", "type": "integer"}])
+        with patch(
+            "backend.services.tool_configuration_service._get_tool_record",
+            return_value=tool,
+        ):
+            _tool_cfg_service._validate_tool_param_ranges(1, {"top_k": 0})
+
+    def test_violation_raises(self):
+        from consts.exceptions import ValidationError
+
+        tool = self._tool([{"name": "top_k", "type": "integer", "constraints": {"ge": 1}}])
+        with patch(
+            "backend.services.tool_configuration_service._get_tool_record",
+            return_value=tool,
+        ):
+            with pytest.raises(ValidationError, match="top_k must be >= 1"):
+                _tool_cfg_service._validate_tool_param_ranges(1, {"top_k": 0})
+
+    def test_satisfied_does_not_raise(self):
+        tool = self._tool(
+            [
+                {"name": "top_k", "type": "integer", "constraints": {"ge": 1, "le": 100}},
+                {"name": "threshold", "type": "number", "constraints": {"ge": 0.0, "le": 1.0}},
+            ]
+        )
+        with patch(
+            "backend.services.tool_configuration_service._get_tool_record",
+            return_value=tool,
+        ):
+            _tool_cfg_service._validate_tool_param_ranges(
+                1, {"top_k": 50, "threshold": 0.5}
+            )

@@ -71,15 +71,40 @@ class _BatchTaskRequest:
 _model_mod.BatchTaskRequest = _BatchTaskRequest
 sys.modules.setdefault('consts.model', _model_mod)
 
-# Stub consts.exceptions with a *real* exception class so assertRaises works correctly
+# Stub consts.exceptions with real exception classes so assertRaises works correctly
 _exceptions_mod = types.ModuleType('consts.exceptions')
+
+
+class AppException(Exception):
+    """Stub AppException carrying the production error-code contract."""
+
+    def __init__(self, error_code=None, message=None):
+        self.error_code = error_code
+        self.message = message
+        super().__init__(message or error_code or "application error")
 
 
 class OfficeConversionException(Exception):
     """Stub OfficeConversionException used in tests."""
 
 
+class FileTooLargeException(Exception):
+    """Stub file-size validation exception."""
+
+
+class UnsupportedFileTypeException(Exception):
+    """Stub file-type validation exception."""
+
+
+class QuotaExceededError(Exception):
+    """Stub quota exception."""
+
+
+_exceptions_mod.AppException = AppException
 _exceptions_mod.OfficeConversionException = OfficeConversionException
+_exceptions_mod.FileTooLargeException = FileTooLargeException
+_exceptions_mod.UnsupportedFileTypeException = UnsupportedFileTypeException
+_exceptions_mod.QuotaExceededError = QuotaExceededError
 sys.modules['consts.exceptions'] = _exceptions_mod
 
 # Stub utils.file_management_utils (new import in data_process_service)
@@ -652,7 +677,7 @@ class TestDataProcessService(unittest.TestCase):
         # Setup mocks — get_all_tasks creates short-timeout inspectors via celery_app
         mock_inspector = MagicMock()
         mock_inspector.active.return_value = {
-            'worker1': [{'id': 'task1'}, {'id': 'task2'}]
+            'worker1': [{'id': 'task1', 'kwargs': {'file_id': 'fid-runtime'}}, {'id': 'task2'}]
         }
         mock_inspector.reserved.return_value = {
             'worker1': [{'id': 'task3'}]
@@ -669,7 +694,13 @@ class TestDataProcessService(unittest.TestCase):
                 'task1': {'id': 'task1', 'status': 'ACTIVE', 'index_name': 'index1', 'task_name': 'task_name1'},
                 'task2': {'id': 'task2', 'status': 'ACTIVE', 'index_name': 'index2', 'task_name': 'task_name2'},
                 'task3': {'id': 'task3', 'status': 'RESERVED', 'index_name': 'index3', 'task_name': 'task_name3'},
-                'task4': {'id': 'task4', 'status': 'SUCCESS', 'index_name': 'index4', 'task_name': 'task_name4'},
+                'task4': {
+                    'id': 'task4',
+                    'status': 'SUCCESS',
+                    'index_name': 'index4',
+                    'task_name': 'task_name4',
+                    'file_id': 'fid-result',
+                },
                 'task5': {'id': 'task5', 'status': 'FAILURE', 'index_name': None, 'task_name': None},
             }
             return task_data.get(task_id, {})
@@ -681,6 +712,8 @@ class TestDataProcessService(unittest.TestCase):
 
         # task1-task4 have index_name + task_name; task5 is filtered out
         self.assertEqual(len(result), 4)
+        self.assertEqual(next(task for task in result if task['id'] == 'task1')['file_id'], 'fid-runtime')
+        self.assertEqual(next(task for task in result if task['id'] == 'task4')['file_id'], 'fid-result')
 
         # Get all tasks without filtering
         result = await self.service.get_all_tasks(filter=False)
@@ -1678,7 +1711,8 @@ class TestDataProcessService(unittest.TestCase):
                     'source_type': 'url',
                     'chunking_strategy': 'semantic',
                     'index_name': 'test_index_1',
-                    'original_filename': 'doc1.pdf'
+                    'original_filename': 'doc1.pdf',
+                    'file_id': 'fid-batch-1',
                 },
                 {
                     'source': 'http://example.com/doc2.pdf',
@@ -1692,9 +1726,9 @@ class TestDataProcessService(unittest.TestCase):
 
         result = await self.service.create_batch_tasks_impl("Bearer test_token", request)
 
-        self.assertEqual(len(result), 2)
-        self.assertEqual(result[0], "task_id_1")
-        self.assertEqual(result[1], "task_id_2")
+        self.assertEqual(result["task_ids"], ["task_id_1", "task_id_2"])
+        self.assertEqual(result["status"], "success")
+        self.assertEqual([item["status"] for item in result["results"]], ["SUBMITTED", "SUBMITTED"])
         self.assertEqual(mock_submit_chain.call_count, 2)
 
         expected_calls = [
@@ -1708,6 +1742,7 @@ class TestDataProcessService(unittest.TestCase):
                 'embedding_model_id': None,
                 'tenant_id': None,
                 'telemetry_context': {},
+                'file_id': 'fid-batch-1',
             },
             {
                 'source': 'http://example.com/doc2.pdf',
@@ -1761,8 +1796,9 @@ class TestDataProcessService(unittest.TestCase):
 
         result = await self.service.create_batch_tasks_impl("Bearer test_token", request)
 
-        self.assertEqual(len(result), 1)
-        self.assertEqual(result[0], "task_id_1")
+        self.assertEqual(result["task_ids"], ["task_id_1"])
+        self.assertEqual(result["status"], "partial_success")
+        self.assertEqual(result["results"][0]["error_code"], "000103")
         mock_submit_chain.assert_called_once()
         self.assertEqual(
             mock_submit_chain.call_args[1]['source'], 'http://example.com/doc2.pdf')
@@ -1806,8 +1842,9 @@ class TestDataProcessService(unittest.TestCase):
 
         result = await self.service.create_batch_tasks_impl("Bearer test_token", request)
 
-        self.assertEqual(len(result), 1)
-        self.assertEqual(result[0], "task_id_1")
+        self.assertEqual(result["task_ids"], ["task_id_1"])
+        self.assertEqual(result["status"], "partial_success")
+        self.assertEqual(result["results"][0]["error_code"], "000103")
         mock_submit_chain.assert_called_once()
         self.assertEqual(
             mock_submit_chain.call_args[1]['source'], 'http://example.com/doc2.pdf')
@@ -1847,7 +1884,9 @@ class TestDataProcessService(unittest.TestCase):
 
         result = await self.service.create_batch_tasks_impl("Bearer test_token", request)
 
-        self.assertEqual(len(result), 0)
+        self.assertEqual(result["task_ids"], [])
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["failed_count"], 2)
         mock_submit_chain.assert_not_called()
 
     @patch('backend.services.data_process_service.submit_process_forward_chain')
@@ -1867,7 +1906,9 @@ class TestDataProcessService(unittest.TestCase):
 
         result = await self.service.create_batch_tasks_impl("Bearer test_token", request)
 
-        self.assertEqual(len(result), 0)
+        self.assertEqual(result["task_ids"], [])
+        self.assertEqual(result["results"], [])
+        self.assertEqual(result["status"], "success")
         mock_submit_chain.assert_not_called()
 
     @patch('backend.services.data_process_service.submit_process_forward_chain')
@@ -1897,8 +1938,7 @@ class TestDataProcessService(unittest.TestCase):
 
         result = await self.service.create_batch_tasks_impl("Bearer test_token", request)
 
-        self.assertEqual(len(result), 1)
-        self.assertEqual(result[0], "task_id_1")
+        self.assertEqual(result["task_ids"], ["task_id_1"])
         mock_submit_chain.assert_called_once()
         kwargs = mock_submit_chain.call_args[1]
         self.assertEqual(kwargs['source'], 'http://example.com/doc1.pdf')
@@ -1937,8 +1977,7 @@ class TestDataProcessService(unittest.TestCase):
 
         result = await self.service.create_batch_tasks_impl(None, request)
 
-        self.assertEqual(len(result), 1)
-        self.assertEqual(result[0], "task_id_1")
+        self.assertEqual(result["task_ids"], ["task_id_1"])
         mock_submit_chain.assert_called_once()
         kwargs = mock_submit_chain.call_args[1]
         self.assertEqual(kwargs['source'], 'http://example.com/doc1.pdf')
@@ -1966,6 +2005,52 @@ class TestDataProcessService(unittest.TestCase):
         asyncio.run(self.async_test_create_batch_tasks_impl_empty_sources())
         asyncio.run(self.async_test_create_batch_tasks_impl_optional_fields())
         asyncio.run(self.async_test_create_batch_tasks_impl_no_authorization())
+
+    @patch('backend.services.data_process_service.submit_process_forward_chain')
+    @pytest.mark.asyncio
+    async def async_test_create_batch_tasks_impl_continues_after_submission_exception(self, mock_submit_chain):
+        """A single Celery submission exception must not discard later files."""
+        mock_submit_chain.side_effect = [RuntimeError("broker unavailable"), "task_id_2"]
+
+        from consts.model import BatchTaskRequest
+        request = BatchTaskRequest(sources=[
+            {"source": "/tmp/a.txt", "source_type": "local", "index_name": "idx", "file_id": "fid-a"},
+            {"source": "/tmp/b.txt", "source_type": "local", "index_name": "idx", "file_id": "fid-b"},
+        ])
+
+        result = await self.service.create_batch_tasks_impl("Bearer token", request)
+
+        self.assertEqual(result["task_ids"], ["task_id_2"])
+        self.assertEqual(result["status"], "partial_success")
+        self.assertEqual(result["results"][0]["file_id"], "fid-a")
+        self.assertEqual(result["results"][0]["error_code"], "060108")
+        self.assertEqual(result["results"][1]["task_id"], "task_id_2")
+
+    def test_create_batch_tasks_impl_submission_exception(self):
+        asyncio.run(self.async_test_create_batch_tasks_impl_continues_after_submission_exception())
+
+    @patch('backend.services.data_process_service.submit_process_forward_chain', return_value="")
+    @pytest.mark.asyncio
+    async def async_test_create_batch_tasks_impl_empty_task_id(self, mock_submit_chain):
+        """An empty task id is reported as a durable per-file submission failure."""
+        from consts.model import BatchTaskRequest
+        request = BatchTaskRequest(sources=[{
+            "source": "/tmp/a.txt",
+            "source_type": "local",
+            "index_name": "idx",
+            "original_filename": "a.txt",
+            "file_id": "fid-a",
+        }])
+
+        result = await self.service.create_batch_tasks_impl("Bearer token", request)
+
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["failed_count"], 1)
+        self.assertEqual(result["results"][0]["file_id"], "fid-a")
+        mock_submit_chain.assert_called_once()
+
+    def test_create_batch_tasks_impl_empty_task_id(self):
+        asyncio.run(self.async_test_create_batch_tasks_impl_empty_task_id())
 
     @patch('backend.services.data_process_service.DataProcessCore')
     @pytest.mark.asyncio

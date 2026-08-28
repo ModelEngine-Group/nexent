@@ -2,7 +2,15 @@
 
 import { useState, useMemo, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { Modal, Tabs, Input, Checkbox, Button, Select, Tooltip } from "antd";
+import {
+  Modal,
+  Tabs,
+  Input,
+  Checkbox,
+  Button,
+  Select,
+  Tooltip,
+} from "antd";
 import type { TabsProps } from "antd";
 import { Search, Settings, Wrench, Tag } from "lucide-react";
 import i18n from "i18next";
@@ -17,6 +25,7 @@ import { useConfirmModal } from "@/hooks/useConfirmModal";
 import { TOOL_SOURCE_TYPES } from "@/const/agentConfig";
 import type { Tool, ToolParam } from "@/types/agentConfig";
 import ToolConfigModal from "./ToolConfigModal";
+import { useMergedToolParams } from "./useMergedToolParams";
 import {
   TOOLS_REQUIRING_KB_SELECTION,
   TOOLS_REQUIRING_EMBEDDING,
@@ -26,7 +35,6 @@ import {
   getToolKbType,
   getToolLabels,
 } from "./utils";
-import log from "@/lib/logger";
 
 function isToolDisabled(
   name: string,
@@ -106,7 +114,7 @@ export default function SelectToolsDialog({
   const { t } = useTranslation("common");
   const { confirm } = useConfirmModal();
 
-  const { availableTools } = useToolList({ enabled: open });
+  const { selectableTools } = useToolList({ enabled: open });
   const { user } = useAuthorizationContext();
   const tenantId = user?.tenantId || null;
   const { serverList: rawServers } = useMcpServerList({
@@ -152,12 +160,12 @@ export default function SelectToolsDialog({
   // Collect all unique labels from available tools for filter dropdown
   const allLabels = useMemo(() => {
     const labelSet = new Set<string>();
-    availableTools.forEach((tool: any) => {
+    selectableTools.forEach((tool: any) => {
       const labels = getToolLabels(tool);
       labels.forEach((l: string) => labelSet.add(l));
     });
     return Array.from(labelSet).sort((a, b) => a.localeCompare(b));
-  }, [availableTools]);
+  }, [selectableTools]);
 
   const [activeLabels, setActiveLabels] = useState<string[]>([]);
 
@@ -171,8 +179,8 @@ export default function SelectToolsDialog({
   const sourceGroups = useMemo(() => {
     const result: Record<string, { category: string; tools: any[] }[]> = {};
     for (const tab of SOURCE_TABS) {
-      const sourceTools = availableTools.filter(
-        (t: any) => t.source === tab.sourceValue && t.is_user_selectable !== false
+      const sourceTools = selectableTools.filter(
+        (tool: any) => tool.source === tab.sourceValue
       );
       // For MCP tools: show API-added (not in server list) or from visible servers
       const filteredTools =
@@ -204,7 +212,7 @@ export default function SelectToolsDialog({
         });
     }
     return result;
-  }, [availableTools, visibleMcpNames, allMcpServerNames]);
+  }, [selectableTools, visibleMcpNames, allMcpServerNames]);
 
   // --- Filtered current tab data by search + labels (AND) ---
   const currentGroups = useMemo(() => {
@@ -263,44 +271,7 @@ export default function SelectToolsDialog({
     [activeCategory, currentGroups]
   );
 
-  // --- Merge instance params for a tool ---
-  const mergeInstanceParams = useCallback(
-    async (tool: any, forceFetch?: boolean): Promise<ToolParam[]> => {
-      const params = tool.initParams || [];
-      // If tool already has stored params with non-empty values, the user's
-      // unsaved modifications are already reflected in those params — skip the
-      // API call to avoid overwriting them with stale server data.
-      const hasStoredParams = params.some(
-        (p: ToolParam) =>
-          p.value !== undefined && p.value !== null && p.value !== ""
-      );
-      if (!forceFetch && hasStoredParams) {
-        return params;
-      }
-      if (!currentAgentId) return params;
-      try {
-        const { searchToolConfig } =
-          await import("@/services/agentConfigService");
-        const instance = await searchToolConfig(
-          parseInt(tool.id),
-          currentAgentId
-        );
-        if (instance.success && instance.data) {
-          return params.map((p: ToolParam) => ({
-            ...p,
-            value:
-              instance.data?.params?.[p.name] !== undefined
-                ? instance.data.params[p.name]
-                : p.value,
-          }));
-        }
-      } catch (err) {
-        log.error("Failed to fetch tool instance params:", err);
-      }
-      return params;
-    },
-    [currentAgentId]
-  );
+  const mergeInstanceParams = useMergedToolParams(currentAgentId);
 
   // --- Check if tool has missing required params ---
   const hasMissingRequired = useCallback(
@@ -370,6 +341,7 @@ export default function SelectToolsDialog({
         : tool;
 
       const mergedParams = await mergeInstanceParams(toolToUse);
+      if (!mergedParams) return;
       setConfigTool(toolToUse);
       setConfigParams(mergedParams);
       setConfigModalOpen(true);
@@ -400,6 +372,7 @@ export default function SelectToolsDialog({
       const dup = currentSelected.find((s) => s.name === tool.name);
       const doAdd = async () => {
         const mergedParams = await mergeInstanceParams(tool);
+        if (!mergedParams) return;
         const toolToUse = { ...tool, initParams: mergedParams };
         if (hasMissingRequired(mergedParams)) {
           setConfigTool(toolToUse);
@@ -451,17 +424,18 @@ export default function SelectToolsDialog({
     setIsSelectingAll(true);
     try {
       const toolsWithParams = await Promise.all(
-        toolsToAdd.map(async (tool: any) => ({
-          ...tool,
-          initParams: await mergeInstanceParams(tool),
-        }))
+        toolsToAdd.map(async (tool: any) => {
+          const initParams = await mergeInstanceParams(tool);
+          return initParams ? { ...tool, initParams } : null;
+        })
       );
       const latestSelected = useAgentStore.getState().editedAgent?.tools ?? [];
       const latestIds = new Set(
         latestSelected.map((tool) => parseInt(tool.id))
       );
       const names = new Set(latestSelected.map((tool) => tool.name));
-      const additions = toolsWithParams.filter((tool) => {
+      const additions = toolsWithParams.filter((tool): tool is Tool => {
+        if (!tool) return false;
         if (
           latestIds.has(parseInt(tool.id)) ||
           names.has(tool.name) ||

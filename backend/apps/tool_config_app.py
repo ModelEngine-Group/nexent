@@ -5,7 +5,7 @@ from typing import Optional, Dict, Any, List
 from fastapi import APIRouter, Header, HTTPException, Body, Query
 from fastapi.responses import JSONResponse
 
-from consts.exceptions import AppException, MCPConnectionError, NotFoundException, ValidationError
+from consts.exceptions import AppException, MCPConnectionError, NotFoundException, ValidationError, TokenExpiredError
 from consts.model import ToolInstanceInfoRequest, ToolInstanceSearchRequest, ToolValidateRequest
 from services.tool_configuration_service import (
     search_tool_info_impl,
@@ -42,6 +42,9 @@ async def list_tools_api(
         _, tenant_id = get_current_user_id(authorization)
         label_list = [lbl.strip() for lbl in labels.split(",") if lbl.strip()] if labels else None
         return await list_all_tools(tenant_id=tenant_id, labels=label_list)
+    except TokenExpiredError as e:
+        logging.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logging.error(f"Failed to get tool info, error in: {str(e)}")
         raise HTTPException(
@@ -55,6 +58,9 @@ async def search_tool_info_api(request: ToolInstanceSearchRequest, authorization
         return search_tool_info_impl(request.agent_id, request.tool_id, tenant_id, user_id)
     except (HTTPException, AppException):
         raise
+    except TokenExpiredError as e:
+        logging.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logging.error(f"Failed to search tool, error in: {str(e)}")
         raise HTTPException(
@@ -88,6 +94,9 @@ async def update_tool_info_api(request: ToolInstanceInfoRequest, authorization: 
         ) from exc
     except (HTTPException, AppException):
         raise
+    except TokenExpiredError as e:
+        logging.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logging.exception("Failed to update tool")
         raise HTTPException(
@@ -131,6 +140,9 @@ async def load_last_tool_config(tool_id: int, authorization: Optional[str] = Hea
         logger.error(f"Tool configuration not found for tool ID: {tool_id}")
         raise HTTPException(
             status_code=HTTPStatus.NOT_FOUND, detail="Tool configuration not found")
+    except TokenExpiredError as e:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logger.error(f"Failed to load tool config: {e}")
         raise HTTPException(
@@ -267,6 +279,9 @@ async def list_openapi_services_api(
                 "data": services
             }
         )
+    except TokenExpiredError as e:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logger.error(f"Failed to list OpenAPI services: {e}")
         raise HTTPException(
@@ -341,6 +356,9 @@ async def update_tool_labels_api(
         )
     except HTTPException:
         raise
+    except TokenExpiredError as e:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logger.exception(f"Failed to update tool labels: {e}")
         raise HTTPException(

@@ -5,7 +5,7 @@ from typing import Optional
 from fastapi import APIRouter, Header, HTTPException
 from starlette.responses import JSONResponse
 
-from consts.exceptions import DuplicateError, NotFoundException, ValidationError
+from consts.exceptions import DuplicateError, NotFoundException, ValidationError, TokenExpiredError
 from consts.model import PromptTemplateRequest
 from services.prompt_template_service import (
     create_prompt_template_impl,
@@ -29,6 +29,9 @@ async def list_prompt_templates_api(
         user_id, tenant_id = get_current_user_id(authorization)
         result = list_prompt_templates_impl(tenant_id=tenant_id, user_id=user_id)
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
+    except TokenExpiredError as exc:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
     except Exception as exc:
         logger.error(f"Prompt template list error: {str(exc)}")
         raise HTTPException(
@@ -53,6 +56,9 @@ async def get_prompt_template_api(
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
     except NotFoundException as exc:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(exc))
+    except TokenExpiredError as exc:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
     except Exception as exc:
         logger.error(f"Prompt template detail error: {str(exc)}")
         raise HTTPException(
@@ -79,6 +85,9 @@ async def create_prompt_template_api(
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc))
     except ValidationError as exc:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc))
+    except TokenExpiredError as exc:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
     except Exception as exc:
         logger.error(f"Prompt template create error: {str(exc)}")
         raise HTTPException(
@@ -109,6 +118,9 @@ async def update_prompt_template_api(
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc))
     except ValidationError as exc:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc))
+    except TokenExpiredError as exc:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
     except Exception as exc:
         logger.error(f"Prompt template update error: {str(exc)}")
         raise HTTPException(
@@ -135,6 +147,9 @@ async def delete_prompt_template_api(
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(exc))
     except ValidationError as exc:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc))
+    except TokenExpiredError as exc:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
     except Exception as exc:
         logger.error(f"Prompt template delete error: {str(exc)}")
         raise HTTPException(

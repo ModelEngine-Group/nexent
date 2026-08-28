@@ -15,7 +15,6 @@ import {
   App,
   Upload,
   Tabs,
-  Popconfirm,
   Tag,
 } from "antd";
 import {
@@ -603,23 +602,10 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
                 disabled={actionsLocked}
               />
             </Tooltip>
-            <Popconfirm
-              title={t("mcpConfig.delete.confirmTitle")}
-              description={t("mcpConfig.delete.confirmContent", { name: record.service_name })}
-              onConfirm={() => onDeleteServer(record)}
-              okText={t("common.confirm")}
-              cancelText={t("common.cancel")}
-            >
-              <Tooltip title={t("mcpConfig.serverList.button.delete")}>
-                <Button
-                  type="text"
-                  danger
-                  icon={<Trash2 className="h-4 w-4" />}
-                  size="small"
-                  disabled={actionsLocked}
-                />
-              </Tooltip>
-            </Popconfirm>
+            <Tooltip title={t("mcpConfig.serverList.button.delete")}>
+              <Button type="text" danger icon={<Trash2 className="h-4 w-4" />} size="small" disabled={actionsLocked}
+                onClick={() => confirm({ title: t("mcpConfig.delete.confirmTitle"), content: t("mcpConfig.delete.confirmContent", { name: record.service_name }), onOk: () => onDeleteServer(record) })} />
+            </Tooltip>
           </div>
         );
       },
@@ -697,23 +683,10 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
               disabled={updatingTools}
             />
           </Tooltip>
-          <Popconfirm
-            title={t("mcpConfig.deleteContainer.confirmTitle")}
-            description={t("mcpConfig.deleteContainer.confirmContent", { name: record.name || record.container_id })}
-            onConfirm={() => onDeleteContainer(record)}
-            okText={t("common.confirm")}
-            cancelText={t("common.cancel")}
-          >
-            <Tooltip title={t("mcpConfig.containerList.button.delete")}>
-              <Button
-                type="text"
-                danger
-                icon={<Trash2 className="h-4 w-4" />}
-                size="small"
-                disabled={actionsLocked}
-              />
-            </Tooltip>
-          </Popconfirm>
+          <Tooltip title={t("mcpConfig.containerList.button.delete")}>
+            <Button type="text" danger icon={<Trash2 className="h-4 w-4" />} size="small" disabled={actionsLocked}
+              onClick={() => confirm({ title: t("mcpConfig.deleteContainer.confirmTitle"), content: t("mcpConfig.deleteContainer.confirmContent", { name: record.name || record.container_id }), onOk: () => onDeleteContainer(record) })} />
+          </Tooltip>
         </div>
       ),
     },
@@ -742,23 +715,10 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
       width: "20%",
       render: (_: any, record: any) => (
         <div className="flex items-center space-x-2">
-          <Popconfirm
-            title={t("mcpConfig.delete.confirmTitle")}
-            description={t("mcpConfig.delete.confirmContent", { name: record.mcp_service_name })}
-            onConfirm={() => onDeleteOpenapiService(record)}
-            okText={t("common.confirm")}
-            cancelText={t("common.cancel")}
-          >
-            <Tooltip title={t("mcpConfig.serverList.button.delete")}>
-              <Button
-                type="text"
-                danger
-                icon={<Trash2 className="h-4 w-4" />}
-                size="small"
-                disabled={actionsLocked}
-              />
-            </Tooltip>
-          </Popconfirm>
+          <Tooltip title={t("mcpConfig.serverList.button.delete")}>
+            <Button type="text" danger icon={<Trash2 className="h-4 w-4" />} size="small" disabled={actionsLocked}
+              onClick={() => confirm({ title: t("mcpConfig.delete.confirmTitle"), content: t("mcpConfig.delete.confirmContent", { name: record.mcp_service_name }), onOk: () => onDeleteOpenapiService(record) })} />
+          </Tooltip>
         </div>
       ),
     },

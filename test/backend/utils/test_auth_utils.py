@@ -18,6 +18,7 @@ from backend.consts.exceptions import (
     TimeoutException,
     SignatureValidationError,
     UnauthorizedError,
+    TokenExpiredError,
     ValidationError,
     NotFoundException,
     MEConnectionException,
@@ -177,6 +178,7 @@ for _exc_name in (
     "TimeoutException",
     "SignatureValidationError",
     "UnauthorizedError",
+    "TokenExpiredError",
     "ValidationError",
     "NotFoundException",
     "MEConnectionException",
@@ -1097,3 +1099,34 @@ def test_get_current_user_info_combines_authentication_and_language(monkeypatch)
     monkeypatch.setattr(au, "get_user_language", lambda request: "en")
 
     assert au.get_current_user_info("Bearer token", object()) == ("user-1", "tenant-1", "en")
+
+
+def test_get_aksk_config_raises_token_expired():
+    """The get_aksk_config stub raises TokenExpiredError when not configured."""
+    with pytest.raises(TokenExpiredError, match="not configured"):
+        au.get_aksk_config("tenant-1")
+
+
+def test_validate_aksk_authentication_invalid_timestamp(monkeypatch):
+    """Expired AK/SK timestamps raise TokenExpiredError."""
+    old = int(time.time()) - (au.TIMESTAMP_VALIDITY_WINDOW + 10)
+    with pytest.raises(TokenExpiredError, match="Invalid or expired timestamp"):
+        au.validate_aksk_authentication({
+            "X-Access-Key": "ak",
+            "X-Timestamp": str(old),
+            "X-Signature": "sig",
+        }, "body")
+
+
+def test_validate_aksk_authentication_unexpected_error(monkeypatch):
+    """Unexpected AK/SK auth errors surface as TokenExpiredError."""
+    def boom(*args, **kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(au, "validate_timestamp", boom)
+    with pytest.raises(TokenExpiredError, match="Authentication failed"):
+        au.validate_aksk_authentication({
+            "X-Access-Key": "ak",
+            "X-Timestamp": str(int(time.time())),
+            "X-Signature": "sig",
+        }, "body")

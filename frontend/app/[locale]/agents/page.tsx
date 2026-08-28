@@ -6,14 +6,16 @@ import {
   useRef,
   useState,
   type ReactNode,
+  type Ref,
 } from "react";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
-import { Button, Switch, Tag } from "antd";
+import { Button, Switch, Tag, Tour } from "antd";
 import {
   History,
   Maximize2,
   Minimize2,
+  Pencil,
   RefreshCw,
   Sparkles,
   X,
@@ -65,6 +67,8 @@ function resolveDraftFocusTarget(
   return null;
 }
 
+const AGENT_TOUR_SEEN_STORAGE_KEY = "nexent.agent-tour.seen";
+
 interface PanelCardProps {
   title: string;
   children: ReactNode;
@@ -72,6 +76,7 @@ interface PanelCardProps {
   leftAction?: ReactNode;
   rightAction?: ReactNode;
   icon?: ReactNode;
+  panelRef?: Ref<HTMLElement>;
 }
 
 function PanelCard({
@@ -81,18 +86,20 @@ function PanelCard({
   leftAction,
   rightAction,
   icon,
+  panelRef,
 }: PanelCardProps) {
   return (
     <section
+      ref={panelRef}
       className={`flex min-h-0 flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm ${className}`}
     >
-        <div className="flex min-h-12 shrink-0 items-center justify-between border-b border-gray-200 px-4">
-          <div className="flex items-center gap-2">
-            {icon}
-            <h3 className="text-base font-medium text-gray-900">{title}</h3>
-            {leftAction}
-          </div>
-          {rightAction}
+      <div className="flex min-h-12 shrink-0 items-center justify-between border-b border-gray-200 px-4">
+        <div className="flex items-center gap-2">
+          {icon}
+          <h3 className="text-base font-medium text-gray-900">{title}</h3>
+          {leftAction}
+        </div>
+        {rightAction}
       </div>
       {children}
     </section>
@@ -101,10 +108,16 @@ function PanelCard({
 
 function AgentSetupContent() {
   const { t } = useTranslation("common");
-  const queryClient = useQueryClient();
   const searchParams = useSearchParams();
+  const queryClient = useQueryClient();
   const snapshotRefreshQueue = useRef<Promise<boolean>>(Promise.resolve(true));
+  const generationPanelRef = useRef<HTMLElement>(null);
+  const configPanelRef = useRef<HTMLElement>(null);
+  const actionAreaRef = useRef<HTMLDivElement>(null);
   const [isGenerationVisible, setIsGenerationVisible] = useState(true);
+  const [isAgentTourOpen, setIsAgentTourOpen] = useState(false);
+  const [agentTourCurrent, setAgentTourCurrent] = useState(0);
+  const [isAgentTourPending, setIsAgentTourPending] = useState(false);
   const [isDebugVisible, setIsDebugVisible] = useState(false);
   const [isCompareMode, setIsCompareMode] = useState(false);
   const [isDebugFullscreen, setIsDebugFullscreen] = useState(false);
@@ -124,6 +137,7 @@ function AgentSetupContent() {
     markCompletionSynced,
     markCompletionSyncFailed,
     markGenerationCompleted,
+    markGenerationStopped,
     markPromptGenerationFailed,
     requestConfigFocus,
     resetFlow,
@@ -163,7 +177,6 @@ function AgentSetupContent() {
             throw new Error("Agent context changed during synchronization");
           }
 
-          queryClient.setQueryData(["agentInfo", agentId], result.data);
           await queryClient.invalidateQueries({ queryKey: ["agents"] });
           if (focusTarget) requestConfigFocus(agentId, focusTarget);
           return true;
@@ -177,7 +190,7 @@ function AgentSetupContent() {
         });
       return snapshotRefreshQueue.current;
     },
-    [queryClient, requestConfigFocus]
+    [requestConfigFocus]
   );
 
   const synchronizeCompletion = useCallback(
@@ -216,9 +229,45 @@ function AgentSetupContent() {
     ]
   );
 
+  const handleGenerationStopped = useCallback(
+    (agentId: number) => markGenerationStopped(agentId),
+    [markGenerationStopped]
+  );
+
   const retryCompletionSync = useCallback(() => {
     if (currentAgentId !== null) synchronizeCompletion(currentAgentId);
   }, [currentAgentId, synchronizeCompletion]);
+
+  const handleAgentCreated = useCallback(() => {
+    setIsGenerationVisible(true);
+    if (
+      typeof window !== "undefined" &&
+      window.localStorage.getItem(AGENT_TOUR_SEEN_STORAGE_KEY) === "true"
+    ) {
+      return;
+    }
+    setAgentTourCurrent(0);
+    setIsAgentTourPending(true);
+  }, []);
+
+  useEffect(() => {
+    if (
+      !isAgentTourPending ||
+      !generationPanelRef.current ||
+      !configPanelRef.current ||
+      !actionAreaRef.current
+    ) {
+      return;
+    }
+
+    const animationFrame = requestAnimationFrame(() => {
+      setIsAgentTourOpen(true);
+      setIsAgentTourPending(false);
+      window.localStorage.setItem(AGENT_TOUR_SEEN_STORAGE_KEY, "true");
+    });
+
+    return () => cancelAnimationFrame(animationFrame);
+  }, [isAgentTourPending, isGenerationVisible]);
 
   return (
     <div className="flex h-full w-full min-h-0 flex-col bg-gray-50">
@@ -228,172 +277,190 @@ function AgentSetupContent() {
             setIsShowVersionManagePanel((visible) => !visible)
           }
           isVersionManageVisible={isShowVersionManagePanel}
+          onAgentCreated={handleAgentCreated}
         />
       </div>
 
       <main className="flex min-h-0 flex-1 flex-row gap-4 overflow-hidden p-6">
         <div className="flex min-w-0 min-h-0 flex-1 flex-row gap-4">
-          {isGenerationVisible && (
-            <PanelCard
-              title={t("agent.page.panel.nl2agent")}
-              className={isDebugVisible ? "flex-1" : "flex-[1]"}
-              rightAction={
-                <button
-                  type="button"
-                  aria-label={t("agent.page.panel.nl2agent.closeAria")}
-                  onClick={() => setIsGenerationVisible(false)}
-                  className="rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+          <PanelCard
+            panelRef={generationPanelRef}
+            title={t("agent.page.panel.nl2agent")}
+            className={
+              isGenerationVisible ? (isDebugVisible ? "flex-1" : "flex-[1]") : "hidden"
+            }
+            rightAction={
+              <button
+                type="button"
+                aria-label={t("agent.page.panel.nl2agent.closeAria")}
+                onClick={() => setIsGenerationVisible(false)}
+                className="rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+              >
+                <X size={18} />
+              </button>
+            }
+          >
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+              {isNl2AgentUnavailable ? (
+                <div
+                  className="shrink-0 border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900"
+                  role="status"
                 >
-                  <X size={18} />
-                </button>
-              }
-            >
-              <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-                {isNl2AgentUnavailable ? (
-                  <div
-                    className="shrink-0 border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900"
-                    role="status"
-                  >
+                  {t(
+                    "nl2agent.unavailable",
+                    "Create or select an editable Agent first."
+                  )}
+                </div>
+              ) : null}
+              {completionSyncFailed ? (
+                <div
+                  className="flex shrink-0 items-center justify-between gap-3 border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900"
+                  role="alert"
+                >
+                  <span>
                     {t(
-                      "nl2agent.unavailable",
-                      "Create or select an editable Agent first."
+                      "nl2agent.completion.syncFailed",
+                      "The Agent was generated, but the form could not be refreshed."
                     )}
-                  </div>
-                ) : null}
-                {completionSyncFailed ? (
-                  <div
-                    className="flex shrink-0 items-center justify-between gap-3 border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900"
-                    role="alert"
+                  </span>
+                  <Button
+                    icon={<RefreshCw size={14} />}
+                    onClick={retryCompletionSync}
+                    size="small"
                   >
-                    <span>
-                      {t(
-                        "nl2agent.completion.syncFailed",
-                        "The Agent was generated, but the form could not be refreshed."
-                      )}
-                    </span>
-                    <Button
-                      icon={<RefreshCw size={14} />}
-                      onClick={retryCompletionSync}
-                      size="small"
-                    >
-                      {t("nl2agent.completion.retry", "Retry")}
-                    </Button>
-                  </div>
-                ) : null}
-                <Nl2AgentChatPanel
-                  key={sessionGeneration}
-                  agentId={currentAgentId}
-                  disabled={
-                    isComposerDisabled ||
-                    isRequestedAgentLoading ||
-                    isNl2AgentUnavailable
-                  }
-                  onStateEvent={handleStateEvent}
-                />
-              </div>
-            </PanelCard>
-          )}
+                    {t("nl2agent.completion.retry", "Retry")}
+                  </Button>
+                </div>
+              ) : null}
+              <Nl2AgentChatPanel
+                key={sessionGeneration}
+                agentId={currentAgentId}
+                disabled={
+                  isComposerDisabled ||
+                  isRequestedAgentLoading ||
+                  isNl2AgentUnavailable
+                }
+                onStateEvent={handleStateEvent}
+                onStopped={handleGenerationStopped}
+              />
+            </div>
+          </PanelCard>
 
           <PanelCard
+            panelRef={configPanelRef}
             title={t("agent.page.panel.config")}
             className={isDebugFullscreen ? "flex-1" : "flex-[2]"}
             leftAction={
-              currentAgentId !== null &&
-              agentInfo?.current_version_no !== 0 &&
-              total > 0 ? (
-                <div className="flex shrink-0 items-center gap-1 rounded-lg px-3 py-1.5 text-gray-700">
-                  <History size={16} />
-                  <Tag
-                    color="cyan"
-                    variant="outlined"
-                    className="cursor-pointer rounded-md font-mono text-sm"
-                    onClick={() => setIsShowVersionManagePanel(true)}
-                  >
-                    {agentVersionDetail?.version.version_name}
+              currentAgentId !== null ? (
+                <div className="flex shrink-0 items-center gap-2 px-3 py-1.5 text-gray-700">
+                  <Tag color="orange" className="rounded-md text-sm">
+                    <span className="inline-flex items-center gap-1 whitespace-nowrap">
+                      <Pencil size={12} aria-hidden="true" />
+                      {t("agent.version.draftStatus")}
+                    </span>
                   </Tag>
-                  <span className="text-xs text-gray-500">
-                    / {t("agent.version.totalVersions", { count: total })}
-                  </span>
+                 
                 </div>
               ) : null
             }
             rightAction={
-              <Button
-                icon={<Sparkles size={16} />}
-                onClick={() => setIsGenerationVisible((visible) => !visible)}
-                type={isGenerationVisible ? "primary" : "default"}
-              >
-                {t("agent.page.panel.nl2agent")}
-              </Button>
+              <div className="flex items-center gap-2">
+                {agentInfo?.current_version_no && total > 0 ? (
+                  <div className="flex items-center gap-1">
+                    <History size={16} />
+                    {t("agent.version.current")}:
+                    <Tag
+                      color="cyan"
+                      variant="outlined"
+                      className="cursor-pointer rounded-md font-mono text-sm"
+                      onClick={() => setIsShowVersionManagePanel(true)}
+                    >
+                      {agentVersionDetail?.version.version_name ||
+                        `V${agentInfo.current_version_no}`}
+                    </Tag>
+                    <span className="text-xs text-gray-500">
+                      / {t("agent.version.totalVersions", { count: total })}
+                    </span>
+                  </div>
+                ) : null}
+                <Button
+                  icon={<Sparkles size={16} />}
+                  onClick={() => setIsGenerationVisible((visible) => !visible)}
+                  type={isGenerationVisible ? "primary" : "default"}
+                >
+                  {t("agent.page.panel.nl2agent")}
+                </Button>
+              </div>
             }
           >
             <div className="min-h-0 flex-1 overflow-auto px-4 py-2">
               <AgentConfig
+                actionAreaRef={actionAreaRef}
                 onToggleDebug={() => setIsDebugVisible((visible) => !visible)}
               />
             </div>
           </PanelCard>
 
-          {isDebugVisible && (
-            <PanelCard
-              title={t("agent.page.panel.debug")}
-              className={isDebugFullscreen ? "flex-[2]" : "flex-1"}
-              leftAction={
-                <div className="flex items-center gap-2 text-sm text-gray-600">
-                  <span>{t("agent.debug.compareMode")}</span>
-                  <Switch
-                    checked={isCompareMode}
-                    onChange={setIsCompareMode}
-                    size="small"
-                  />
-                </div>
-              }
-              rightAction={
-                <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    aria-label={
-                      isDebugFullscreen
-                        ? "Restore debug panel size"
-                        : "Maximize debug panel"
-                    }
-                    onClick={() => {
-                      if (isDebugFullscreen) {
-                        setIsDebugFullscreen(false);
-                        return;
-                      }
-
-                      setIsGenerationVisible(false);
-                      setIsShowVersionManagePanel(false);
-                      setIsDebugFullscreen(true);
-                    }}
-                    className="rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
-                  >
-                    {isDebugFullscreen ? (
-                      <Minimize2 size={18} />
-                    ) : (
-                      <Maximize2 size={18} />
-                    )}
-                  </button>
-                  <button
-                    type="button"
-                    aria-label={t("agent.page.panel.debug.closeAria")}
-                    onClick={() => {
-                      setIsDebugVisible(false);
-                      setIsDebugFullscreen(false);
-                    }}
-                    className="rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
-                  >
-                    <X size={18} />
-                  </button>
-                </div>
-              }
-            >
-              <div className="min-h-0 flex-1 overflow-hidden">
-                <AgentDebugPanel isCompareMode={isCompareMode} />
+          <PanelCard
+            title={t("agent.page.panel.debug")}
+            className={
+              isDebugVisible ? (isDebugFullscreen ? "flex-[2]" : "flex-1") : "hidden"
+            }
+            leftAction={
+              <div className="flex items-center gap-2 text-sm text-gray-600">
+                <span>{t("agent.debug.compareMode")}</span>
+                <Switch
+                  checked={isCompareMode}
+                  onChange={setIsCompareMode}
+                  size="small"
+                />
               </div>
-            </PanelCard>
-          )}
+            }
+            rightAction={
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  aria-label={
+                    isDebugFullscreen
+                      ? "Restore debug panel size"
+                      : "Maximize debug panel"
+                  }
+                  onClick={() => {
+                    if (isDebugFullscreen) {
+                      setIsDebugFullscreen(false);
+                      return;
+                    }
+
+                    setIsGenerationVisible(false);
+                    setIsShowVersionManagePanel(false);
+                    setIsDebugFullscreen(true);
+                  }}
+                  className="rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+                >
+                  {isDebugFullscreen ? (
+                    <Minimize2 size={18} />
+                  ) : (
+                    <Maximize2 size={18} />
+                  )}
+                </button>
+                <button
+                  type="button"
+                  aria-label={t("agent.page.panel.debug.closeAria")}
+                  onClick={() => {
+                    setIsDebugVisible(false);
+                    setIsDebugFullscreen(false);
+                  }}
+                  className="rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+            }
+          >
+            <div className="min-h-0 flex-1 overflow-hidden">
+              <AgentDebugPanel isCompareMode={isCompareMode} />
+            </div>
+          </PanelCard>
 
           {isShowVersionManagePanel && (
             <PanelCard
@@ -417,6 +484,44 @@ function AgentSetupContent() {
           )}
         </div>
       </main>
+      <Tour
+        open={isAgentTourOpen}
+        current={agentTourCurrent}
+        onChange={setAgentTourCurrent}
+        onClose={() => setIsAgentTourOpen(false)}
+        steps={[
+          {
+            title: t("agent.tour.generation.title"),
+            description: t("agent.tour.generation.description"),
+            target: generationPanelRef.current,
+            nextButtonProps: {
+              children: t("agent.tour.next"),
+            },
+          },
+          {
+            title: t("agent.tour.configuration.title"),
+            description: t("agent.tour.configuration.description"),
+            target: configPanelRef.current,
+            prevButtonProps: {
+              children: t("agent.tour.previous"),
+            },
+            nextButtonProps: {
+              children: t("agent.tour.next"),
+            },
+          },
+          {
+            title: t("agent.tour.actions.title"),
+            description: t("agent.tour.actions.description"),
+            target: actionAreaRef.current,
+            prevButtonProps: {
+              children: t("agent.tour.previous"),
+            },
+            nextButtonProps: {
+              children: t("agent.tour.finish"),
+            },
+          },
+        ]}
+      />
     </div>
   );
 }

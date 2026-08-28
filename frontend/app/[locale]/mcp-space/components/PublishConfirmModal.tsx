@@ -303,6 +303,7 @@ export default function PublishConfirmModal({
           >
             <Select
               mode="multiple"
+              showSearch={{ optionFilterProp: "label" }}
               placeholder={
                 isGroupSelectDisabled
                   ? t("knowledgeBase.create.permission.groupPlaceholder")

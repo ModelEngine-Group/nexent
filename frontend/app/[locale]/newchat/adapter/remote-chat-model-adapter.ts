@@ -159,11 +159,10 @@ export interface Nl2aAgentDraftPayload {
   example_questions: string[];
 }
 
-// PR1 freezes the future card identity boundary only. Resource and summary
-// fields are added with their implementations in PR2 through PR4.
 export interface Nl2aSuggestedResourceInstallationPayload {
   subtype: "suggested_resource_installation";
   agent_id: number;
+  resources: Nl2aInstallableResource[];
 }
 
 export interface Nl2aInstalledResourceBindingPayload {
@@ -174,24 +173,53 @@ export interface Nl2aInstalledResourceBindingPayload {
 
 export interface Nl2aResourceCandidate {
   candidate_ref: string;
-  resource_type: "tool" | "skill";
-  source: "LOCAL_TOOL" | "MCP_TOOL" | "INSTALLED_SKILL";
+  resource_type: "tool" | "skill" | "mcp_server";
+  source:
+    | "LOCAL_TOOL"
+    | "MCP_TOOL"
+    | "INSTALLED_SKILL"
+    | "NEXENT_OFFICIAL_SKILL"
+    | "TENANT_SKILL_REPOSITORY"
+    | "TENANT_MCP_REPOSITORY";
   name: string;
   description: string;
   requirement_ids: string[];
   score: number;
 }
 
+export type Nl2aInstallationFormKind =
+  "SKILL_CONFIG" | "MCP_REMOTE" | "MCP_CONTAINER";
+
+export interface Nl2aResourceInstallationOption {
+  option_id: string;
+  label: string;
+  form_kind: Nl2aInstallationFormKind;
+  config: Record<string, unknown> | SkillParam[];
+}
+
+export interface Nl2aInstallableResource {
+  candidate: Nl2aResourceCandidate & {
+    resource_type: "skill" | "mcp_server";
+  };
+  recommendation: "recommended" | "optional";
+  form_kind: Nl2aInstallationFormKind;
+  config: Record<string, unknown> | SkillParam[];
+  installation_options: Nl2aResourceInstallationOption[];
+  default_option_id: string;
+}
+
 export type Nl2aRecommendedResource =
   | {
       candidate: Nl2aResourceCandidate & { resource_type: "tool" };
       recommendation: "recommended" | "optional";
+      is_bound: boolean;
       form_kind: "TOOL_CONFIG";
       config: ToolParam[];
     }
   | {
       candidate: Nl2aResourceCandidate & { resource_type: "skill" };
       recommendation: "recommended" | "optional";
+      is_bound: boolean;
       form_kind: "SKILL_CONFIG";
       config: SkillParam[];
     };
@@ -233,6 +261,7 @@ interface NexentRunConfig {
   language?: "zh" | "en";
   onNl2SkillEvent?: (event: Nl2SkillStreamEvent) => void;
   onNl2AgentState?: (event: Nl2AgentStateEvent) => void;
+  onNl2AgentStopped?: (agentId: number) => void;
   modelId?: number;
   runtimeMetadata?: Record<string, unknown>;
   runtimeMetadataVersion?: number;
@@ -603,23 +632,6 @@ function parseSseChunk(line: string): SseChunk | null {
 }
 
 /**
- * Extracts the agent run start time from an agent_new_run content string.
- * The backend prepends `[Current time: YYYY-MM-DD HH:MM:SS±HHMM]` to the task text.
- * Returns undefined when the prefix is absent or unparseable.
- */
-const AGENT_RUN_TIME_PREFIX = "[Current time:";
-function extractAgentRunTime(content: string): string | undefined {
-  if (!content || !content.startsWith(AGENT_RUN_TIME_PREFIX)) return undefined;
-  const closeIdx = content.indexOf("]", AGENT_RUN_TIME_PREFIX.length);
-  if (closeIdx < 0) return undefined;
-  const raw = content.slice(AGENT_RUN_TIME_PREFIX.length, closeIdx).trim();
-  // Format check: "YYYY-MM-DD HH:MM:SS" with optional timezone offset "±HHMM"
-  if (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}([+-]\d{4})?$/.test(raw))
-    return undefined;
-  return raw;
-}
-
-/**
  * Maps a backend chunk type to an assistant-ui part type.
  * Returns null for types that should be handled internally (not rendered).
  *
@@ -793,10 +805,38 @@ function parseNl2aMessage(chunk: SseChunk): Nl2aMessage | null {
             !resource?.candidate?.candidate_ref ||
             !["tool", "skill"].includes(resource.candidate.resource_type) ||
             !["recommended", "optional"].includes(resource.recommendation) ||
+            typeof resource.is_bound !== "boolean" ||
             !Array.isArray(resource.config)
         )
       ) {
         log.warn("[ChatModelAdapter] Ignored invalid binding-card payload");
+        return null;
+      }
+    }
+    if (content.subtype === "suggested_resource_installation") {
+      if (
+        !Number.isInteger(content.agent_id) ||
+        content.agent_id <= 0 ||
+        !Array.isArray(content.resources) ||
+        content.resources.length === 0 ||
+        content.resources.length > 12 ||
+        content.resources.some(
+          (resource) =>
+            !resource?.candidate?.candidate_ref ||
+            !["skill", "mcp_server"].includes(
+              resource.candidate.resource_type
+            ) ||
+            !Array.isArray(resource.installation_options) ||
+            resource.installation_options.length === 0 ||
+            !resource.default_option_id ||
+            !resource.installation_options.some(
+              (option) => option.option_id === resource.default_option_id
+            )
+        )
+      ) {
+        log.warn(
+          "[ChatModelAdapter] Ignored invalid installation-card payload"
+        );
         return null;
       }
     }
@@ -1232,12 +1272,6 @@ export function pushStepTokenCount(step: StepTokenCount): void {
   stepTokenCounts.push(step);
 }
 
-let agentRunTime: string | undefined;
-
-export function getAgentRunTime(): string | undefined {
-  return agentRunTime;
-}
-
 /**
  * Clears the global step token counts registry and resets the shared plan
  * state. Called from `remoteChatModelAdapter.run()` so a fresh assistant
@@ -1246,7 +1280,6 @@ export function getAgentRunTime(): string | undefined {
 export function clearStepTokenCounts(): void {
   stepTokenCounts.length = 0;
   accumulatedDuration = 0;
-  agentRunTime = undefined;
   planRegistry.set(null);
 }
 
@@ -1457,6 +1490,8 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       ? numericServerThreadId
       : null;
     let backendStopPromise: Promise<void> | null = null;
+    let abortHandled = false;
+    let userAborted = false;
     const stopBackendConversation = async (conversationId: number) => {
       if (isEphemeralRuntime || backendStopPromise) return;
       backendStopPromise = conversationService
@@ -1471,18 +1506,33 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       await backendStopPromise;
     };
     const handleAbort = () => {
+      if (abortHandled) return;
+      abortHandled = true;
+      const abortReason = abortSignal?.reason as
+        { detach?: boolean } | undefined;
+      if (abortReason?.detach) {
+        log.log(
+          `[ChatModelAdapter] Local stream detached from conversation ${backendConversationId ?? "unknown"}`
+        );
+        return;
+      }
+      userAborted = true;
+      const nl2AgentId = Number(custom?.agentId);
+      if (isNl2Agent && Number.isInteger(nl2AgentId) && nl2AgentId > 0) {
+        custom?.onNl2AgentStopped?.(nl2AgentId);
+      }
       if (backendConversationId !== null) {
         void stopBackendConversation(backendConversationId);
       }
     };
     abortSignal?.addEventListener("abort", handleAbort, { once: true });
+    if (abortSignal?.aborted) handleAbort();
     const cleanupAbortHandler = () => {
       abortSignal?.removeEventListener("abort", handleAbort);
     };
 
     let agentResponse:
-      | ReadableStreamDefaultReader<Uint8Array>
-      | { type: "json"; data: unknown };
+      ReadableStreamDefaultReader<Uint8Array> | { type: "json"; data: unknown };
     let returnedRuntimeMetadataVersion: number | undefined;
     try {
       agentResponse = await conversationService.runAgent(
@@ -1546,6 +1596,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         error instanceof Error &&
         (error.name === "AbortError" || error.message === "请求已被取消")
       ) {
+        if (abortSignal?.aborted) handleAbort();
         await backendStopPromise;
         log.log("[ChatModelAdapter] Request aborted by user");
         return;
@@ -1825,7 +1876,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     };
     const deliveredNl2AgentStates = new Set<string>();
     const deliverNl2AgentState = (chunk: SseChunk) => {
-      if (!isNl2Agent) return;
+      if (!isNl2Agent || userAborted) return;
       const event = parseNl2AgentState(chunk.content);
       if (!event) {
         log.warn("[ChatModelAdapter] Ignored invalid nl2a_state payload");
@@ -1963,12 +2014,6 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             const update = parsePlanStepUpdate(chunk.content);
             if (update) planRegistry.updateStep(update.stepId, update.status);
             continue;
-          }
-
-          // Handle agent_new_run - capture the agent start time before stripping the prefix
-          if (chunk.type === "agent_new_run") {
-            const captured = extractAgentRunTime(chunk.content);
-            if (captured) agentRunTime = captured;
           }
 
           // Track timing for first content token

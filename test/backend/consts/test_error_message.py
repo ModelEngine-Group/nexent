@@ -205,7 +205,10 @@ class TestErrorMessageGetAllMessages:
     def test_get_all_messages_all_values_are_strings(self):
         """Test that all message values in get_all_messages are non-empty strings."""
         messages = ErrorMessage.get_all_messages()
+        constraint_code = ErrorCode.MCP_PARAM_CONSTRAINT_ERROR_MESSAGES.value
         for code, msg in messages.items():
+            if code == constraint_code:
+                continue  # Nested template dict, not a single message string
             assert isinstance(msg, str), f"Message for {code} is not a string"
             assert len(msg) > 0, f"Message for {code} is empty"
 
@@ -249,8 +252,11 @@ class TestErrorMessageCoverage:
         """Test that all defined ErrorCodes have messages."""
         # Get all error codes from ErrorCode enum
         all_codes = list(ErrorCode)
+        constraint_code = ErrorCode.MCP_PARAM_CONSTRAINT_ERROR_MESSAGES
 
         for code in all_codes:
+            if code == constraint_code:
+                continue  # Value is a nested template dict, not a string message
             msg = ErrorMessage.get_message(code)
             assert msg != "", f"Error code {code} has no message"
             assert isinstance(msg, str), f"Message for {code} is not a string"

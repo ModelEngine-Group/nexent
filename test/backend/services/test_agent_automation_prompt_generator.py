@@ -305,6 +305,9 @@ def test_llm_strategy_builds_model_request_from_tenant_configuration(monkeypatch
     assert result == '{"title":"A","instruction":"B"}'
     assert captured["config"]["model_id"] == "resolved-model"
     assert captured["config"]["ssl_verify"] is False
+    from nexent.core.utils.observer import MessageObserver
+
+    assert isinstance(captured["config"]["observer"], MessageObserver)
     assert captured["messages"][1]["content"] == "Instruction: do work"
 
 

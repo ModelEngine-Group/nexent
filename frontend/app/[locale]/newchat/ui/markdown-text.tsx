@@ -24,7 +24,10 @@ import { cn } from "@/lib/utils";
 import { remarkCite } from "./remark-cite";
 import { CiteMarker } from "./cite-marker";
 import { AuthenticatedImage } from "./authenticated-image";
-import { isLocalStorageObjectUrl } from "@/services/storageService";
+import {
+  getLocalFileDownloadUrl,
+  isLocalStorageObjectUrl,
+} from "@/services/storageService";
 import { useSourcesPanel } from "./sources-panel-context";
 import type { PanelSourceItem } from "./sources-panel";
 import {
@@ -53,8 +56,10 @@ interface MessageSourcePart {
   imageKey?: string;
 }
 
-const markdownUrlTransform: UrlTransform = (url, key, node) => {
-  if (key === "src" && node.tagName === "img" && url.startsWith("s3://")) {
+const markdownUrlTransform: UrlTransform = (url) => {
+  // React Markdown rejects non-web protocols by default. s3:// is Nexent's
+  // permanent file-reference protocol and is converted by custom renderers.
+  if (url.startsWith("s3://")) {
     return url;
   }
   return defaultUrlTransform(url);
@@ -381,6 +386,24 @@ const VerifiedMarkdownImage: FC<React.ComponentProps<"img">> = ({
   return <AuthenticatedImage src={src} alt={alt} {...props} />;
 };
 
+const PermanentFileLink: FC<React.ComponentProps<"a">> = ({
+  href,
+  className,
+  ...props
+}) => {
+  const resolvedHref = getLocalFileDownloadUrl(href) || href;
+  return (
+    <a
+      href={resolvedHref}
+      className={cn(
+        "aui-md-a text-primary hover:text-primary/80 underline underline-offset-2",
+        className
+      )}
+      {...props}
+    />
+  );
+};
+
 const defaultComponents = memoizeMarkdownComponents({
   SyntaxHighlighter: MarkdownSyntaxHighlighter,
   img: VerifiedMarkdownImage,
@@ -447,15 +470,7 @@ const defaultComponents = memoizeMarkdownComponents({
       {...props}
     />
   ),
-  a: ({ className, ...props }) => (
-    <a
-      className={cn(
-        "aui-md-a text-primary hover:text-primary/80 underline underline-offset-2",
-        className
-      )}
-      {...props}
-    />
-  ),
+  a: PermanentFileLink,
   blockquote: ({ className, ...props }) => (
     <blockquote
       className={cn(

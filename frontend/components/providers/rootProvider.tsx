@@ -55,6 +55,8 @@ function AppReadyWrapper({ children }: { children?: ReactNode }) {
  * RootProvider Component
  * Integrates all necessary providers for the application
  */
+const queryClient = new QueryClient();
+
 export function RootProvider({ children }: { children: ReactNode }) {
   return (
     <ConfigProvider
@@ -79,5 +81,3 @@ export function RootProvider({ children }: { children: ReactNode }) {
   );
 }
 
-// Create a single QueryClient instance for the application
-const queryClient = new QueryClient();

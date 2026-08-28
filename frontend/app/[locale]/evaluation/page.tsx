@@ -2013,6 +2013,7 @@ function SetsTab() {
     return true;
   };
   const [genDesc, setGenDesc] = useState("");
+  const [genDescError, setGenDescError] = useState<string | null>(null);
   const [genCount, setGenCount] = useState(10);
   const [genSetModel, setGenSetModel] = useState<number | undefined>(undefined);
   const [busy, setBusy] = useState(false);
@@ -2780,6 +2781,7 @@ function SetsTab() {
         open={genD}
         onClose={() => {
           setGenD(false);
+          setGenDescError(null);
           setGenTargetSetId(undefined);
           setGenSetName("");
           setGenSetDesc("");
@@ -2865,7 +2867,10 @@ function SetsTab() {
               title={
                 <Flex gap={6} align="center">
                   <Zap className="size-4" />
-                  <Text>{t("agentEvaluation.genSceneDescTitle")}</Text>
+                  <Text>
+                    {t("agentEvaluation.genSceneDescTitle")}{" "}
+                    <Text type="danger">*</Text>
+                  </Text>
                 </Flex>
               }
             >
@@ -2877,9 +2882,20 @@ function SetsTab() {
                   rows={3}
                   maxLength={1000}
                   value={genDesc}
-                  onChange={(e) => setGenDesc(e.target.value)}
+                  status={genDescError ? "error" : undefined}
+                  onChange={(e) => {
+                    setGenDesc(e.target.value);
+                    if (genDescError && e.target.value.trim()) {
+                      setGenDescError(null);
+                    }
+                  }}
                   placeholder={t("agentEvaluation.genSceneDescPlaceholder")}
                 />
+                {genDescError && (
+                  <Text type="danger" className="text-xs">
+                    {genDescError}
+                  </Text>
+                )}
               </Flex>
             </Card>
             <Card
@@ -3029,7 +3045,10 @@ function SetsTab() {
                 loading={busy}
                 style={{ marginTop: 18 }}
                 onClick={async () => {
-                  if (!genDesc.trim()) return;
+                  if (!genDesc.trim()) {
+                    setGenDescError(t("agentEvaluation.genSceneDescRequired"));
+                    return;
+                  }
                   if (!genSetModel) {
                     message.warning(t("agentEvaluation.selectGenModel"));
                     return;
@@ -3084,6 +3103,7 @@ function SetsTab() {
                     if (d?.data?.evaluation_set_id) {
                       setGenD(false);
                       setGenDesc("");
+                      setGenDescError(null);
                       setGenAgentId(undefined);
                       setGenFiles([]);
                       setGenSetName("");

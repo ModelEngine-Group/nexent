@@ -1,4 +1,10 @@
-import React, { useState, useMemo } from "react";
+import React, {
+  useCallback,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
 
 import log from "@/lib/logger";
@@ -30,12 +36,27 @@ import { KB_LAYOUT, KB_TAG_VARIANTS } from "@/const/knowledgeBaseLayout";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
 import { formatDateOrFallback } from "@/lib/date";
 import { USER_ROLES } from "@/const/auth";
+import { calculateKnowledgeBaseInitialLimit } from "@/lib/knowledgeBaseViewport";
 
 interface KnowledgeBaseListProps {
   knowledgeBases: KnowledgeBase[];
   activeKnowledgeBase: KnowledgeBase | null;
   isLoading?: boolean;
+  isLoadingMore?: boolean;
   syncLoading?: boolean;
+  totalCount?: number;
+  hasMore?: boolean;
+  estimatedRowHeight?: number;
+  estimatedItemHeights?: Record<string, number> | null;
+  availableSources?: string[];
+  availableModels?: string[];
+  onLoadMore?: () => void;
+  serverFiltered?: boolean;
+  initialLoadPending?: boolean;
+  onViewportCapacityChange?: (
+    capacity: number,
+    hasMeasuredRows: boolean
+  ) => void;
   onClick: (kb: KnowledgeBase) => void;
   onDelete: (id: string) => void;
   onSync: () => void;
@@ -59,7 +80,18 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
   knowledgeBases,
   activeKnowledgeBase,
   isLoading = false,
+  isLoadingMore = false,
   syncLoading = false,
+  totalCount = knowledgeBases.length,
+  hasMore = false,
+  estimatedRowHeight = 112,
+  estimatedItemHeights,
+  availableSources: availableSourceOptions,
+  availableModels: availableModelOptions,
+  onLoadMore,
+  serverFiltered = false,
+  initialLoadPending = false,
+  onViewportCapacityChange,
   onClick,
   onDelete,
   onSync,
@@ -83,6 +115,11 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
   const { user } = useAuthorizationContext();
   const tenantId = user?.tenantId || null;
   const showPersonalCapacity = user?.role === USER_ROLES.USER;
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const previousScrollTopRef = useRef(0);
+  const [measuredRowHeight, setMeasuredRowHeight] =
+    useState(estimatedRowHeight);
+  const [hasMeasuredRows, setHasMeasuredRows] = useState(false);
 
   // Fetch groups for group name mapping
   const { data: groupData } = useGroupList(tenantId);
@@ -208,18 +245,20 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
 
   // Calculate available filter options
   const availableSources = useMemo(() => {
+    if (availableSourceOptions?.length) return availableSourceOptions;
     const sources = new Set(knowledgeBases.map((kb) => kb.source));
     return Array.from(sources)
       .filter((source) => source)
       .sort();
-  }, [knowledgeBases]);
+  }, [availableSourceOptions, knowledgeBases]);
 
   const availableModels = useMemo(() => {
+    if (availableModelOptions?.length) return availableModelOptions;
     const models = new Set(knowledgeBases.map((kb) => kb.embeddingModel));
     return Array.from(models)
       .filter((model) => model && model !== "unknown")
       .sort();
-  }, [knowledgeBases]);
+  }, [availableModelOptions, knowledgeBases]);
 
   // Filter knowledge bases based on search and filters
   const filteredKnowledgeBases = useMemo(() => {
@@ -230,44 +269,46 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
       modelFilter: effectiveSelectedModels,
     });
 
-    const result = sortedKnowledgeBases.filter((kb) => {
-      // Keyword search: match name, description, or nickname
-      const keyword = effectiveSearchKeyword || "";
-      const kbName = kb.name || "";
-      const kbDescription = kb.description || "";
-      const kbNickname = kb.nickname || "";
+    const result = serverFiltered
+      ? sortedKnowledgeBases
+      : sortedKnowledgeBases.filter((kb) => {
+          // Keyword search: match name, description, or nickname
+          const keyword = effectiveSearchKeyword || "";
+          const kbName = kb.name || "";
+          const kbDescription = kb.description || "";
+          const kbNickname = kb.nickname || "";
 
-      const matchesSearch =
-        !keyword ||
-        kbName.toLowerCase().includes(keyword.toLowerCase()) ||
-        kbDescription.toLowerCase().includes(keyword.toLowerCase()) ||
-        kbNickname.toLowerCase().includes(keyword.toLowerCase());
+          const matchesSearch =
+            !keyword ||
+            kbName.toLowerCase().includes(keyword.toLowerCase()) ||
+            kbDescription.toLowerCase().includes(keyword.toLowerCase()) ||
+            kbNickname.toLowerCase().includes(keyword.toLowerCase());
 
-      // Source filter
-      const matchesSource =
-        effectiveSelectedSources.length === 0 ||
-        effectiveSelectedSources.includes(kb.source);
+          // Source filter
+          const matchesSource =
+            effectiveSelectedSources.length === 0 ||
+            effectiveSelectedSources.includes(kb.source);
 
-      // Model filter
-      const matchesModel =
-        effectiveSelectedModels.length === 0 ||
-        effectiveSelectedModels.includes(kb.embeddingModel);
+          // Model filter
+          const matchesModel =
+            effectiveSelectedModels.length === 0 ||
+            effectiveSelectedModels.includes(kb.embeddingModel);
 
-      const matches = matchesSearch && matchesSource && matchesModel;
+          const matches = matchesSearch && matchesSource && matchesModel;
 
-      if (!matches) {
-        log.log("KB filtered out:", {
-          name: kb.name,
-          source: kb.source,
-          embeddingModel: kb.embeddingModel,
-          matchesSearch,
-          matchesSource,
-          matchesModel,
+          if (!matches) {
+            log.log("KB filtered out:", {
+              name: kb.name,
+              source: kb.source,
+              embeddingModel: kb.embeddingModel,
+              matchesSearch,
+              matchesSource,
+              matchesModel,
+            });
+          }
+
+          return matches;
         });
-      }
-
-      return matches;
-    });
 
     log.log("Filtered result:", result.length, "items");
     return result;
@@ -276,7 +317,92 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
     effectiveSearchKeyword,
     effectiveSelectedSources,
     effectiveSelectedModels,
+    serverFiltered,
   ]);
+
+  useLayoutEffect(() => {
+    const rows = scrollContainerRef.current?.querySelectorAll<HTMLElement>(
+      "[data-knowledge-base-row]"
+    );
+    if (!rows?.length) {
+      if (hasMeasuredRows) setHasMeasuredRows(false);
+      return;
+    }
+    const average =
+      Array.from(rows).reduce(
+        (sum, row) => sum + row.getBoundingClientRect().height,
+        0
+      ) / rows.length;
+    if (average > 0 && Math.abs(average - measuredRowHeight) > 1) {
+      setMeasuredRowHeight(average);
+    }
+    if (!hasMeasuredRows) setHasMeasuredRows(true);
+  }, [filteredKnowledgeBases.length, hasMeasuredRows, measuredRowHeight]);
+
+  useLayoutEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container || !onViewportCapacityChange) return;
+
+    const reportCapacity = () => {
+      if (container.clientHeight <= 0 || measuredRowHeight <= 0) return;
+      onViewportCapacityChange(
+        calculateKnowledgeBaseInitialLimit(
+          container.clientHeight,
+          measuredRowHeight
+        ),
+        hasMeasuredRows
+      );
+    };
+    reportCapacity();
+    const observer = new ResizeObserver(reportCapacity);
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [hasMeasuredRows, measuredRowHeight, onViewportCapacityChange]);
+
+  const placeholderHeight = useMemo(() => {
+    const unloadedCount = Math.max(
+      0,
+      totalCount - filteredKnowledgeBases.length
+    );
+    if (!unloadedCount) return 0;
+    if (estimatedItemHeights) {
+      const loadedIds = new Set(filteredKnowledgeBases.map((kb) => kb.id));
+      const reservedHeight = Object.entries(estimatedItemHeights).reduce(
+        (sum, [id, height]) => sum + (loadedIds.has(id) ? 0 : height),
+        0
+      );
+      if (reservedHeight > 0) return reservedHeight;
+    }
+    return unloadedCount * measuredRowHeight;
+  }, [
+    estimatedItemHeights,
+    filteredKnowledgeBases.length,
+    measuredRowHeight,
+    totalCount,
+  ]);
+
+  const handleScroll = useCallback(
+    (event: React.UIEvent<HTMLDivElement>) => {
+      const container = event.currentTarget;
+      const hasDownwardIntent =
+        container.scrollTop > previousScrollTopRef.current;
+      previousScrollTopRef.current = container.scrollTop;
+      if (!hasDownwardIntent || !hasMore || isLoadingMore || !onLoadMore)
+        return;
+
+      const loadedHeight = filteredKnowledgeBases.length * measuredRowHeight;
+      if (container.scrollTop + container.clientHeight >= loadedHeight - 80) {
+        onLoadMore();
+      }
+    },
+    [
+      filteredKnowledgeBases.length,
+      hasMore,
+      isLoadingMore,
+      measuredRowHeight,
+      onLoadMore,
+    ]
+  );
 
   return (
     <div className="w-full h-full bg-white border border-gray-200 rounded-md flex flex-col overflow-hidden">
@@ -420,7 +546,11 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto overflow-x-hidden">
+      <div
+        ref={scrollContainerRef}
+        className="flex-1 overflow-y-auto overflow-x-hidden"
+        onScroll={handleScroll}
+      >
         {filteredKnowledgeBases.length > 0 ? (
           <div className="divide-y-0">
             {filteredKnowledgeBases.map((kb, index) => {
@@ -429,6 +559,7 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
               return (
                 <div
                   key={kb.id}
+                  data-knowledge-base-row
                   className={`${
                     KB_LAYOUT.ROW_PADDING
                   } px-2 hover:bg-gray-50 cursor-pointer transition-colors ${
@@ -618,6 +749,18 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                 </div>
               );
             })}
+            {placeholderHeight > 0 && (
+              <div aria-hidden="true" style={{ height: placeholderHeight }} />
+            )}
+            {isLoadingMore && (
+              <div className="py-2 text-center text-xs text-gray-400">
+                Loading...
+              </div>
+            )}
+          </div>
+        ) : isLoading || initialLoadPending ? (
+          <div className="py-6 text-center text-sm text-gray-400">
+            Loading...
           </div>
         ) : (
           <div

@@ -108,6 +108,9 @@ class ErrorCode(Enum):
     KNOWLEDGE_SYNC_FAILED = "060103"  # Sync failed
     KNOWLEDGE_INDEX_NOT_FOUND = "060104"  # Index not found
     KNOWLEDGE_SEARCH_FAILED = "060105"  # Search failed
+    KNOWLEDGE_INDEX_WRITE_BLOCKED = "060106"  # Index write blocked by storage protection
+    KNOWLEDGE_STORAGE_COMMIT_FAILED = "060107"  # Source object ledger commit failed
+    KNOWLEDGE_TASK_SUBMIT_FAILED = "060108"  # Data-process task submission failed
 
     # ==================== 07 MCPTools / MCP 工具 ====================
     # 01 - Tool
@@ -121,6 +124,7 @@ class ErrorCode(Enum):
 
     # 03 - Configuration
     MCP_NAME_ILLEGAL = "070301"  # Illegal MCP name
+    MCP_PARAM_CONSTRAINT_ERROR_MESSAGES = "070302"  # MCP parameter constraint error messages
 
     # ==================== 08 MonitorOps / 监控与运维 ====================
     # 01 - Monitoring

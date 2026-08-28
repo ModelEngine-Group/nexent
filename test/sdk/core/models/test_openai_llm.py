@@ -1873,5 +1873,373 @@ def test_provider_adapter_preserves_context_manager_tool_order(openai_model_inst
     assert openai_model_instance.last_provider_cache_advice.supported is True
 
 
+# ---------------------------------------------------------------------------
+# Tests for retry-with-exponential-backoff in OpenAIModel.__call__
+# ---------------------------------------------------------------------------
+
+
+class _StatusErr(Exception):
+    """Minimal stand-in for an OpenAI-style error exposing status_code."""
+
+    def __init__(self, status_code: int, message: str = ""):
+        super().__init__(message or f"HTTP {status_code}")
+        self.status_code = status_code
+
+
+def _make_content_chunk(content: str = "hi"):
+    chunk = MagicMock()
+    chunk.choices = [MagicMock()]
+    chunk.choices[0].delta.content = content
+    chunk.choices[0].delta.role = "assistant"
+    chunk.choices[0].delta.reasoning_content = None
+    chunk.usage = MagicMock()
+    chunk.usage.prompt_tokens = 1
+    chunk.usage.completion_tokens = 1
+    return chunk
+
+
+def _retry_model_config(max_attempts: int = 3, backoff_base: float = 0.0):
+    """Build a ModelRetryConfig with no real sleep so tests run fast."""
+    from nexent.core.models.retry import ModelRetryConfig
+
+    return ModelRetryConfig(
+        max_attempts=max_attempts,
+        backoff_base_seconds=backoff_base,
+        max_backoff_seconds=backoff_base,
+        jitter=False,
+    )
+
+
+def test_retry_succeeds_after_transient_failure(openai_model_instance):
+    """A 503 on the first attempt must be retried and succeed on the next."""
+    calls = {"n": 0}
+
+    def fake_create(stream=True, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise _StatusErr(503, "Service Unavailable")
+        return [_make_content_chunk("ok")]
+
+    openai_model_instance.retry_config = _retry_model_config()
+    openai_model_instance.client.chat.completions.create.side_effect = fake_create
+
+    result = openai_model_instance.__call__([{"role": "user", "content": "hello"}])
+
+    assert calls["n"] == 2
+    assert openai_model_instance.last_retry_count == 1
+    assert result is not None
+
+
+def test_retry_exhausts_after_max_attempts(openai_model_instance):
+    """Repeated 503 must exhaust retries and re-raise the last error."""
+    calls = {"n": 0}
+    max_attempts = 3
+
+    def fake_create(stream=True, **kwargs):
+        calls["n"] += 1
+        raise _StatusErr(503, "Service Unavailable")
+
+    openai_model_instance.retry_config = _retry_model_config(max_attempts=max_attempts)
+    openai_model_instance.client.chat.completions.create.side_effect = fake_create
+
+    with pytest.raises(_StatusErr) as exc_info:
+        openai_model_instance.__call__([{"role": "user", "content": "hello"}])
+
+    assert exc_info.value.status_code == 503
+    assert calls["n"] == max_attempts
+    assert openai_model_instance.last_retry_count == max_attempts - 1
+
+
+def test_non_retryable_fails_immediately(openai_model_instance):
+    """A 401 must NOT be retried; the call fails on the first attempt."""
+    calls = {"n": 0}
+
+    def fake_create(stream=True, **kwargs):
+        calls["n"] += 1
+        raise _StatusErr(401, "Unauthorized")
+
+    openai_model_instance.retry_config = _retry_model_config()
+    openai_model_instance.client.chat.completions.create.side_effect = fake_create
+
+    with pytest.raises(_StatusErr) as exc_info:
+        openai_model_instance.__call__([{"role": "user", "content": "hello"}])
+
+    assert exc_info.value.status_code == 401
+    assert calls["n"] == 1
+
+
+def test_empty_response_not_retried(openai_model_instance):
+    """EmptyModelResponseError must propagate without retrying."""
+    calls = {"n": 0}
+
+    def fake_create(stream=True, **kwargs):
+        calls["n"] += 1
+        chunk = _make_content_chunk(None)
+        chunk.choices[0].delta.content = None
+        chunk.usage = MagicMock(prompt_tokens=1, completion_tokens=1)
+        return [chunk]
+
+    openai_model_instance.retry_config = _retry_model_config()
+    openai_model_instance.client.chat.completions.create.side_effect = fake_create
+
+    with pytest.raises(openai_llm_module.EmptyModelResponseError):
+        openai_model_instance.__call__([{"role": "user", "content": "hello"}])
+
+    assert calls["n"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Coverage gap tests – target Codecov patch coverage from 89% → 90%+
+#
+# Missing lines targeted:
+#   L119-124  legacy max_tokens→max_output_tokens conversion
+#   L136      timeout_seconds set into client_config (with ssl_verify=False)
+#   L270      extra_body passed to completion_kwargs
+#   L288      max_output_tokens set when budget=None and not in kwargs
+#   L314      context_evidence monitoring span attributes
+#   L425-428  stop_event inside streaming loop with token_tracker present
+#   L460      string content path in input_text extraction
+#   L590      stop_event check during retry backoff wait
+#   L652      all-None capacity_snapshot early return in _check_capacity_consistency
+#   L679      _resolve_budget_snapshot SafeInputBudgetSnapshot passthrough
+#   L683      _resolve_budget_snapshot TypeError for invalid type
+# ---------------------------------------------------------------------------
+
+def test_init_legacy_max_tokens_converted_to_max_output_tokens():
+    """When max_output_tokens is None and max_tokens is set, legacy alias kicks in (L119-124)."""
+    observer = MagicMock()
+    model = ImportedOpenAIModel(
+        observer=observer, max_output_tokens=None, max_tokens=512)
+    # Legacy max_tokens should be promoted to max_output_tokens
+    assert model.max_output_tokens == 512
+    assert model.max_tokens == 512
+
+
+def test_init_with_ssl_verify_false_and_timeout():
+    """Both ssl_verify=False and timeout_seconds set → timeout in client_config (L136)."""
+    observer = MagicMock()
+    with patch("openai.DefaultHttpxClient") as mock_httpx:
+        mock_httpx.return_value = MagicMock()
+        model = ImportedOpenAIModel(
+            observer=observer, ssl_verify=False, timeout_seconds=45)
+        mock_httpx.assert_called_once()
+        call_kwargs = mock_httpx.call_args[1]
+        assert call_kwargs["verify"] is False
+        assert call_kwargs["timeout"] == 45
+
+
+def test_dispatch_extra_body_forwarded(openai_model_instance):
+    """When extra_body is set on the model, it is forwarded to completion_kwargs (L270)."""
+    openai_model_instance.extra_body = {"some_flag": True}
+    openai_model_instance.max_output_tokens = None
+
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs",
+                      return_value={}) as mock_prep:
+        with patch.object(openai_model_instance, "_dispatch_chat_completion",
+                          return_value=[_make_content_chunk("ok")]) as mock_dispatch:
+            openai_model_instance.__call__([{"role": "user", "content": "hi"}])
+            # Verify _dispatch_chat_completion was called; inspect kwargs via call_args
+            dispatch_kw = mock_dispatch.call_args[1]
+            assert dispatch_kw.get("extra_body") == {"some_flag": True}
+
+
+def test_dispatch_max_output_tokens_autofill_when_budget_none(openai_model_instance):
+    """max_output_tokens is set into completion_kwargs when not already there and budget is None (L288)."""
+    openai_model_instance.max_output_tokens = 256
+    openai_model_instance.safe_input_budget_snapshot = None
+
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs",
+                      return_value={}) as mock_prep:
+        with patch.object(openai_model_instance, "_dispatch_chat_completion",
+                          return_value=[_make_content_chunk("x")]) as mock_dispatch:
+            openai_model_instance.__call__([{"role": "user", "content": "hi"}])
+            dispatch_kw = mock_dispatch.call_args[1]
+            assert dispatch_kw.get("max_tokens") == 256
+
+
+def test_context_evidence_sets_span_attributes(openai_model_instance):
+    """When last_context_evidence exists, monitoring attributes are set (L314)."""
+    fake_evidence = types.SimpleNamespace(stable_prefix_fingerprint="fp123")
+    openai_model_instance.last_context_evidence = fake_evidence
+
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs",
+                      return_value={}):
+        with patch.object(openai_model_instance, "_dispatch_chat_completion",
+                          return_value=[_make_content_chunk("ok")]):
+            openai_model_instance.__call__([{"role": "user", "content": "hi"}])
+
+    # Verify set_span_attributes was called and included the context evidence field
+    call_args_list = openai_model_instance._monitoring.set_span_attributes.call_args_list
+    assert any(
+        "llm.prompt_cache.stable_prefix_fingerprint" in str(ca)
+        for ca in call_args_list
+    )
+
+
+def test_stop_event_during_streaming_with_token_tracker(openai_model_instance):
+    """stop_event set mid-stream inside retry loop with token_tracker (L425-428)."""
+    import threading
+
+    calls = {"n": 0}
+    original_event = openai_model_instance.stop_event
+    openai_model_instance.stop_event = threading.Event()
+
+    def fake_create(stream=True, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            chunk = _make_content_chunk("partial")
+            # After first chunk, set stop event for next iteration's pre-check
+            openai_model_instance.stop_event.set()
+            return [chunk]
+        return [_make_content_chunk("done")]
+
+    mock_tracker = MagicMock()
+
+    openai_model_instance.retry_config = _retry_model_config(max_attempts=3)
+    openai_model_instance.client.chat.completions.create.side_effect = fake_create
+
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}):
+        with pytest.raises(RuntimeError, match="Model is interrupted by stop event"):
+            openai_model_instance.__call__(
+                [{"role": "user", "content": "hello"}], _token_tracker=mock_tracker)
+
+    openai_model_instance.stop_event = original_event
+
+
+def test_retry_backoff_interrupted_by_stop_event(openai_model_instance):
+    """stop_event is checked during backoff wait between retries (L590)."""
+    import threading
+
+    calls = {"n": 0}
+    original_event = openai_model_instance.stop_event
+    openai_model_instance.stop_event = threading.Event()
+
+    def fake_create(stream=True, **kwargs):
+        calls["n"] += 1
+        # After first failure, set stop_event so L589 catches it before wait()
+        if calls["n"] >= 1:
+            openai_model_instance.stop_event.set()
+        raise _StatusErr(503, "unavailable")
+
+    openai_model_instance.retry_config = _retry_model_config(max_attempts=3)
+    openai_model_instance.client.chat.completions.create.side_effect = fake_create
+
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}):
+        with pytest.raises(RuntimeError, match="Model is interrupted by stop event"):
+            openai_model_instance.__call__([{"role": "user", "content": "hi"}])
+
+    openai_model_instance.stop_event = original_event
+
+
+def test_verify_w1_w2_consistency_all_none_returns_early():
+    """All-None capacity_snapshot fields causes _verify_w1_w2_consistency to return immediately (L652).
+
+    Note: empty dict {} would be caught by L646 (`if not capacity_snapshot`).
+    To reach L652 we need a truthy snapshot where all three fields are None/absent.
+    """
+    from nexent.core.models.openai_llm import OpenAIModel, SafeInputBudgetSnapshot
+    # Truthy dict with irrelevant key → passes L646, hits L652 where all W1 fields are None
+    partial_snap = {"irrelevant": "data"}
+    budget = SafeInputBudgetSnapshot.model_validate({
+        "w1_fingerprint": "fp", "provider": "p", "model_name": "m",
+        "requested_output_tokens": 128, "output_reserve_source": "model_default",
+        "provider_input_limit_tokens": 1000, "uncertainty_reserve_tokens": 0,
+        "uncertainty_reserve_basis": "none", "approved_profile_reserve_tokens": None,
+        "soft_limit_ratio": 0.8, "soft_limit_ratio_source": "code_default",
+        "soft_input_budget_tokens": 800, "hard_input_budget_tokens": 1000,
+        "field_sources": {}, "warnings": [], "resolver_version": "1.0.0",
+        "fingerprint": "w2-fp-test",
+    })
+    OpenAIModel._verify_w1_w2_consistency(budget_snapshot=budget, capacity_snapshot=partial_snap)
+
+
+def test_coerce_budget_snapshot_passes_safeinput_instance():
+    """_coerce_safe_input_budget_snapshot returns SafeInputBudgetSnapshot unchanged (L679)."""
+    from nexent.core.models.openai_llm import (
+        OpenAIModel, SafeInputBudgetSnapshot, compute_w2_fingerprint,
+    )
+    fp = compute_w2_fingerprint(
+        w2_resolver_version="1.0.0", w1_fingerprint="fp", provider="p",
+        model_name="m", requested_output_tokens=128,
+        output_reserve_source="model_default", uncertainty_reserve_tokens=0,
+        uncertainty_reserve_basis="none", approved_profile_reserve_tokens=None,
+        soft_limit_ratio=0.8, soft_limit_ratio_source="code_default",
+        soft_input_budget_tokens=800, hard_input_budget_tokens=1000,
+        field_sources={}, warnings=[],
+    )
+    snapshot = SafeInputBudgetSnapshot.model_validate({
+        "w1_fingerprint": "fp", "provider": "p", "model_name": "m",
+        "requested_output_tokens": 128, "output_reserve_source": "model_default",
+        "provider_input_limit_tokens": 1000, "uncertainty_reserve_tokens": 0,
+        "uncertainty_reserve_basis": "none", "approved_profile_reserve_tokens": None,
+        "soft_limit_ratio": 0.8, "soft_limit_ratio_source": "code_default",
+        "soft_input_budget_tokens": 800, "hard_input_budget_tokens": 1000,
+        "field_sources": {}, "warnings": [], "resolver_version": "1.0.0",
+        "fingerprint": fp,
+    })
+    result = OpenAIModel._coerce_safe_input_budget_snapshot(snapshot)
+    assert result is snapshot
+
+
+def test_coerce_budget_snapshot_raises_type_error():
+    """_coerce_safe_input_budget_snapshot raises TypeError for invalid type (L683)."""
+    from nexent.core.models.openai_llm import OpenAIModel
+    with pytest.raises(TypeError, match="safe_input_budget_snapshot must be"):
+        OpenAIModel._coerce_safe_input_budget_snapshot("not_a_dict_or_snapshot")
+
+
+def test_coerce_budget_snapshot_from_dict():
+    """_coerce_safe_input_budget_snapshot validates dict into SafeInputBudgetSnapshot (L681)."""
+    from nexent.core.models.openai_llm import (
+        OpenAIModel, compute_w2_fingerprint,
+    )
+    fp = compute_w2_fingerprint(
+        w2_resolver_version="1.0.0", w1_fingerprint="fp1", provider="openai",
+        model_name="gpt4", requested_output_tokens=128,
+        output_reserve_source="model_default", uncertainty_reserve_tokens=0,
+        uncertainty_reserve_basis="none", approved_profile_reserve_tokens=None,
+        soft_limit_ratio=0.8, soft_limit_ratio_source="code_default",
+        soft_input_budget_tokens=800, hard_input_budget_tokens=1000,
+        field_sources={}, warnings=[],
+    )
+    snap_dict = {
+        "w1_fingerprint": "fp1", "provider": "openai", "model_name": "gpt4",
+        "requested_output_tokens": 128, "output_reserve_source": "model_default",
+        "provider_input_limit_tokens": 1000, "uncertainty_reserve_tokens": 0,
+        "uncertainty_reserve_basis": "none", "approved_profile_reserve_tokens": None,
+        "soft_limit_ratio": 0.8, "soft_limit_ratio_source": "code_default",
+        "soft_input_budget_tokens": 800, "hard_input_budget_tokens": 1000,
+        "field_sources": {}, "warnings": [], "resolver_version": "1.0.0",
+        "fingerprint": fp,
+    }
+    result = OpenAIModel._coerce_safe_input_budget_snapshot(snap_dict)
+    assert result is not None
+    assert result.w1_fingerprint == "fp1"
+
+
+def test_streaming_without_usage_falls_back_to_input_text(openai_model_instance):
+    """When chunk has no usage info, input_text is extracted from messages (L454-L465).
+
+    This covers:
+      L460: string content concatenation into input_text
+      The else branch at L454 (chunk_list[-1].usage is None)
+    """
+    # Create chunk with usage explicitly set to None to trigger fallback path
+    clean_chunk = types.SimpleNamespace()
+    clean_choice = types.SimpleNamespace()
+    clean_delta = types.SimpleNamespace()
+    clean_delta.content = "ok"
+    clean_delta.role = "assistant"
+    clean_delta.reasoning_content = None
+    clean_choice.delta = clean_delta
+    clean_chunk.choices = [clean_choice]
+    clean_chunk.usage = None  # Explicitly None → else branch at L454 → L460 string concat
+
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}):
+        openai_model_instance.client.chat.completions.create.return_value = [clean_chunk]
+        result = openai_model_instance.__call__([{"role": "user", "content": "hello"}])
+        assert result is not None
+
+
 if __name__ == "__main__":
     pytest.main([__file__])

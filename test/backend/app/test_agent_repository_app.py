@@ -28,8 +28,38 @@ class _AgentRepositoryListingCreateRequest(BaseModel):
     tool_count: Optional[int] = Field(None, ge=0)
 
 
+class _SkillResolution(BaseModel):
+    skill_name: str
+    action: str
+    new_name: Optional[str] = None
+
+
 consts_model.AgentRepositoryListingCreateRequest = _AgentRepositoryListingCreateRequest
+consts_model.SkillResolution = _SkillResolution
 sys.modules["consts.model"] = consts_model
+
+consts_exceptions_mock = types.ModuleType("consts.exceptions")
+consts_exceptions_mock.SkillDuplicateError = type('SkillDuplicateError', (Exception,), {})
+consts_exceptions_mock.UnauthorizedError = type('UnauthorizedError', (Exception,), {})
+consts_exceptions_mock.NotFoundException = type('NotFoundException', (Exception,), {})
+consts_exceptions_mock.ValidationError = type('ValidationError', (Exception,), {})
+consts_exceptions_mock.AppException = type('AppException', (Exception,), {})
+consts_exceptions_mock.ForbiddenError = type('ForbiddenError', (Exception,), {})
+sys.modules["consts.exceptions"] = consts_exceptions_mock
+
+consts_pkg = sys.modules.get("consts")
+if consts_pkg is None:
+    consts_pkg = types.ModuleType("consts")
+    sys.modules["consts"] = consts_pkg
+consts_pkg.exceptions = consts_exceptions_mock
+consts_pkg.model = consts_model
+
+_UnauthorizedError = consts_exceptions_mock.UnauthorizedError
+_NotFoundException = consts_exceptions_mock.NotFoundException
+_ValidationError = consts_exceptions_mock.ValidationError
+_ForbiddenError = consts_exceptions_mock.ForbiddenError
+_AppException = consts_exceptions_mock.AppException
+_SkillDuplicateError = consts_exceptions_mock.SkillDuplicateError
 
 from apps.agent_repository_app import agent_repository_router
 
@@ -344,8 +374,6 @@ def test_update_agent_repository_status_api_success(mocker, mock_auth_header):
 
 def test_update_agent_repository_status_api_unauthorized(mocker, mock_auth_header):
     """Test update_agent_repository_status_api maps UnauthorizedError to 401."""
-    from consts.exceptions import UnauthorizedError
-
     mock_get_user_id = mocker.patch(
         "apps.agent_repository_app.get_current_user_id"
     )
@@ -354,7 +382,7 @@ def test_update_agent_repository_status_api_unauthorized(mocker, mock_auth_heade
     )
 
     mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
-    mock_update_status.side_effect = UnauthorizedError("Not authorized")
+    mock_update_status.side_effect = _UnauthorizedError("Not authorized")
 
     response = client.patch(
         "/repository/agent/42/status",
@@ -722,7 +750,44 @@ def test_import_agent_from_repository_api_passes_tenant_id(
         agent_repository_id=42,
         tenant_id="test_tenant_id",
         authorization=mock_auth_header["Authorization"],
+        skill_resolutions=None,
     )
+
+
+def test_import_agent_from_repository_api_with_skill_resolutions(
+    mocker,
+    mock_auth_header,
+):
+    """Test import API passes skill_resolutions to service when provided."""
+    mock_get_user_id = mocker.patch(
+        "apps.agent_repository_app.get_current_user_id"
+    )
+    mock_import = mocker.patch(
+        "apps.agent_repository_app.import_agent_from_repository_impl",
+        new_callable=AsyncMock,
+    )
+
+    mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
+    mock_import.return_value = {}
+
+    skill_resolutions = [
+        {"skill_name": "test_skill", "action": "rename", "new_name": "test_skill 副本"}
+    ]
+
+    response = client.post(
+        "/repository/agent/42/import",
+        json=skill_resolutions,
+        headers=mock_auth_header,
+    )
+
+    assert response.status_code == 200
+    call_args = mock_import.call_args
+    assert call_args[1]["agent_repository_id"] == 42
+    assert call_args[1]["tenant_id"] == "test_tenant_id"
+    assert call_args[1]["skill_resolutions"] is not None
+    assert len(call_args[1]["skill_resolutions"]) == 1
+    assert call_args[1]["skill_resolutions"][0].skill_name == "test_skill"
+    assert call_args[1]["skill_resolutions"][0].action == "rename"
 
 
 def test_check_repository_import_precheck_api_passes_tenant_id(

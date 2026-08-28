@@ -77,6 +77,30 @@ def setup_mocks_for_worker(mocker, initialized=False):
     const_mod.RAY_GLOBAL_ACTOR_POOL_NAME = "global_actor_pool"
     const_mod.RAY_GLOBAL_ACTOR_POOL_NAMESPACE = "nexent"
     mocker.patch.dict(sys.modules, {"consts.const": const_mod})
+
+    # New ingestion classification is imported while the data_process package
+    # initializes. Keep the worker unit-test sandbox independent from the full
+    # consts package and its production error-code registry.
+    error_code_mod = types.ModuleType("consts.error_code")
+    error_code_mod.ErrorCode = types.SimpleNamespace(
+        KNOWLEDGE_INDEX_WRITE_BLOCKED=types.SimpleNamespace(value="060106")
+    )
+    mocker.patch.dict(sys.modules, {"consts.error_code": error_code_mod})
+
+    ingestion_errors_mod = types.ModuleType("utils.knowledge_ingestion_errors")
+
+    class _ClassifiedIngestionException:
+        error_code = None
+        error_message = None
+        retryable = False
+
+    ingestion_errors_mod.ClassifiedIngestionException = _ClassifiedIngestionException
+    ingestion_errors_mod.classify_ingestion_exception = (
+        lambda *args, **kwargs: _ClassifiedIngestionException()
+    )
+    mocker.patch.dict(
+        sys.modules, {"utils.knowledge_ingestion_errors": ingestion_errors_mod}
+    )
     
     # Stub celery module and submodules (required by tasks.py imported via __init__.py)
     if "celery.backends.base" not in sys.modules:

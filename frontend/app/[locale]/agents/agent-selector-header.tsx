@@ -1,16 +1,7 @@
 "use client";
 
 import { useTranslation } from "react-i18next";
-import {
-  App,
-  Flex,
-  Button,
-  Dropdown,
-  Tooltip,
-  Col,
-  Row,
-  Input,
-} from "antd";
+import { App, Flex, Button, Dropdown, Tooltip, Col, Row, Input } from "antd";
 import {
   Plus,
   FileInput,
@@ -49,11 +40,13 @@ import AgentConfigActions from "./components/agent-config-actions";
 interface AgentSelectorHeaderProps {
   onToggleVersionManage: () => void;
   isVersionManageVisible: boolean;
+  onAgentCreated: () => void;
 }
 
 export default function AgentSelectorHeader({
   onToggleVersionManage,
   isVersionManageVisible,
+  onAgentCreated,
 }: AgentSelectorHeaderProps) {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
@@ -104,61 +97,64 @@ export default function AgentSelectorHeader({
   };
 
   // Handle select agent from dropdown
-  const handleSelectAgent = useCallback(async (agentId: number | null) => {
-    if (agentId === null) return;
+  const handleSelectAgent = useCallback(
+    async (agentId: number | null) => {
+      if (agentId === null) return;
 
-    const agent = agents.find((a: Agent) => String(a.id) === String(agentId));
-    if (!agent || currentAgentId === Number(agent.id)) return;
+      const agent = agents.find((a: Agent) => String(a.id) === String(agentId));
+      if (!agent || currentAgentId === Number(agent.id)) return;
 
-    const nextSearchParams = new URLSearchParams(searchParams.toString());
-    nextSearchParams.set("agent_id", String(agent.id));
-    router.replace(`${pathname}?${nextSearchParams.toString()}`);
+      const nextSearchParams = new URLSearchParams(searchParams.toString());
+      nextSearchParams.set("agent_id", String(agent.id));
+      router.replace(`${pathname}?${nextSearchParams.toString()}`);
 
-    // Clear NEW mark when agent is selected for editing
-    if (agent.is_new === true) {
-      try {
-        const res = await clearAgentNewMark(agent.id);
-        if (!res?.success) {
-          log.warn("Failed to clear NEW mark on select:", res);
-          queryClient.invalidateQueries({ queryKey: ["agents"] });
+      // Clear NEW mark when agent is selected for editing
+      if (agent.is_new === true) {
+        try {
+          const res = await clearAgentNewMark(agent.id);
+          if (!res?.success) {
+            log.warn("Failed to clear NEW mark on select:", res);
+            queryClient.invalidateQueries({ queryKey: ["agents"] });
+          }
+        } catch (err) {
+          log.error("Failed to clear NEW mark on select:", err);
         }
-      } catch (err) {
-        log.error("Failed to clear NEW mark on select:", err);
       }
-    }
 
-    if (currentAgentId !== null) {
-      await waitForAutosave();
-    }
-
-    // Load and set agent
-    try {
-      const result = await searchAgentInfo(Number(agent.id));
-      if (result.success && result.data) {
-        initialize(result.data);
-      } else {
-        message.error(
-          result.message || t("agentConfig.agents.detailsLoadFailed")
-        );
+      if (currentAgentId !== null) {
+        await waitForAutosave();
       }
-    } catch (error) {
-      log.error("Failed to load agent detail:", error);
-      message.error(t("agentConfig.agents.detailsLoadFailed"));
-    }
-  }, [
-    agents,
-    clearAgentNewMark,
-    currentAgentId,
-    initialize,
-    log,
-    message,
-    pathname,
-    queryClient,
-    router,
-    searchParams,
-    t,
-    waitForAutosave,
-  ]);
+
+      // Load and set agent
+      try {
+        const result = await searchAgentInfo(Number(agent.id));
+        if (result.success && result.data) {
+          initialize(result.data);
+        } else {
+          message.error(
+            result.message || t("agentConfig.agents.detailsLoadFailed")
+          );
+        }
+      } catch (error) {
+        log.error("Failed to load agent detail:", error);
+        message.error(t("agentConfig.agents.detailsLoadFailed"));
+      }
+    },
+    [
+      agents,
+      clearAgentNewMark,
+      currentAgentId,
+      initialize,
+      log,
+      message,
+      pathname,
+      queryClient,
+      router,
+      searchParams,
+      t,
+      waitForAutosave,
+    ]
+  );
 
   useEffect(() => {
     const rawAgentId = searchParams.get("agent_id");
@@ -248,8 +244,7 @@ export default function AgentSelectorHeader({
                       <span className="truncate text-sm">{displayName}</span>
                     )}
                   </Flex>
-                  <div>
-                  </div>
+                  <div></div>
                 </div>
               </div>
               {/* Row 2: Description */}
@@ -284,6 +279,23 @@ export default function AgentSelectorHeader({
     setCreateAgentModalVisible(true);
   };
 
+  const handleImportComplete = async (agentId: number) => {
+    setImportWizardVisible(false);
+    setImportWizardData(null);
+    await queryClient.invalidateQueries({ queryKey: ["agents"] });
+
+    const result = await searchAgentInfo(agentId);
+    if (!result.success || !result.data) {
+      message.error(result.message || t("agent.error.fetchAgentList"));
+      return;
+    }
+
+    initialize({ ...result.data, permission: "EDIT" });
+    const nextSearchParams = new URLSearchParams(searchParams.toString());
+    nextSearchParams.set("agent_id", String(agentId));
+    router.replace(`${pathname}?${nextSearchParams.toString()}`);
+  };
+
   const handleAgentCreated = async ({ agentId }: { agentId: number }) => {
     setCreateAgentModalVisible(false);
     queryClient.invalidateQueries({ queryKey: ["agents"] });
@@ -295,6 +307,7 @@ export default function AgentSelectorHeader({
     initialize({ ...result.data, permission: "EDIT" });
     router.replace(`${pathname}?agent_id=${agentId}`);
     message.success(t("subAgentPool.button.create"));
+    onAgentCreated();
   };
 
   return (
@@ -455,13 +468,8 @@ export default function AgentSelectorHeader({
           setImportWizardData(null);
         }}
         initialData={importWizardData}
-        onImportComplete={() => {
-          setImportWizardVisible(false);
-          setImportWizardData(null);
-          queryClient.invalidateQueries({ queryKey: ["agents"] });
-        }}
+        onImportComplete={handleImportComplete}
       />
-
     </>
   );
 }

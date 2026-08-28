@@ -879,6 +879,7 @@ export default function McpServiceDetailModal({
                 >
                   <Select
                     mode="multiple"
+                    showSearch={{ optionFilterProp: "label" }}
                     placeholder={t("tenantResources.knowledgeBase.groupNames")}
                     disabled={isReadOnly || isApi}
                     value={

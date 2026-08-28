@@ -1170,6 +1170,50 @@ class TestElasticSearchService(unittest.TestCase):
     @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
     @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
     @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
+    def test_list_indices_paginates_before_loading_stats(
+            self, mock_get_knowledge, mock_get_user_tenant, mock_get_group_ids):
+        self.mock_vdb_core.get_user_indices.return_value = ["kb-1", "kb-2", "kb-3"]
+        self.mock_vdb_core.get_indices_detail.return_value = {
+            "kb-2": {"base_info": {"doc_count": 2}}
+        }
+        mock_get_knowledge.return_value = [
+            {
+                "knowledge_id": 1, "index_name": "kb-1", "knowledge_name": "Alpha",
+                "embedding_model_name": "model-a", "group_ids": "", "knowledge_sources": "elasticsearch",
+                "ingroup_permission": "EDIT", "tenant_id": "test_tenant", "update_time": "2026-08-24T10:00:00",
+            },
+            {
+                "knowledge_id": 2, "index_name": "kb-2", "knowledge_name": "Beta",
+                "embedding_model_name": "model-b", "group_ids": "", "knowledge_sources": "elasticsearch",
+                "ingroup_permission": "EDIT", "tenant_id": "test_tenant", "update_time": "2026-08-24T09:00:00",
+            },
+            {
+                "knowledge_id": 3, "index_name": "kb-3", "knowledge_name": "Gamma",
+                "embedding_model_name": "model-a", "group_ids": "", "knowledge_sources": "elasticsearch",
+                "ingroup_permission": "EDIT", "tenant_id": "test_tenant", "update_time": "2026-08-24T08:00:00",
+            },
+        ]
+        mock_get_user_tenant.return_value = {"user_role": "SU", "tenant_id": "test_tenant"}
+        mock_get_group_ids.return_value = []
+
+        result = ElasticSearchService.list_indices(
+            pattern="*", include_stats=True, target_tenant_id="test_tenant", user_id="test_user",
+            vdb_core=self.mock_vdb_core, pagination_enabled=True, offset=1, limit=1,
+        )
+
+        self.assertEqual(result["indices"], ["kb-2"])
+        self.assertEqual(result["count"], 1)
+        self.assertEqual(result["total"], 3)
+        self.assertNotIn("has_more", result)
+        self.assertEqual(result["next_offset"], 2)
+        self.assertEqual(result["estimated_item_heights"], None)
+        self.assertEqual(result["facets"]["sources"], ["elasticsearch"])
+        self.assertEqual(result["facets"]["models"], ["model-a", "model-b"])
+        self.mock_vdb_core.get_indices_detail.assert_called_once_with(["kb-2"])
+
+    @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
+    @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
+    @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
     def test_list_indices_skips_missing_indices(self, mock_get_info, mock_get_user_tenant, mock_get_group_ids):
         """
         Test that list_indices skips indices that exist in database but not in Elasticsearch.
@@ -2255,6 +2299,313 @@ class TestElasticSearchService(unittest.TestCase):
         self.mock_vdb_core.get_documents_detail.assert_called_once_with(
             "test_index")
 
+    @patch('backend.services.vectordatabase_service.get_redis_service')
+    @patch('backend.services.vectordatabase_service.get_file_size', return_value=12)
+    @patch('backend.services.vectordatabase_service.list_file_records')
+    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    @patch('backend.services.vectordatabase_service.get_all_files_status', new_callable=AsyncMock)
+    def test_list_files_merges_lifecycle_rows_and_hides_tombstones(
+        self, mock_get_files_status, mock_get_knowledge, mock_list_lifecycle, mock_get_size, mock_redis
+    ):
+        """PG lifecycle rows should override legacy status and hide deleted paths."""
+        self.mock_vdb_core.get_documents_detail.return_value = []
+        mock_get_files_status.return_value = {
+            "legacy-ms": {
+                "state": "PROCESS_FAILED",
+                "latest_task_id": "task-legacy",
+                "created_at": 1700000000000,
+                "original_filename": "legacy.txt",
+            }
+        }
+        mock_get_knowledge.return_value = {"tenant_id": "tenant-1"}
+        mock_list_lifecycle.return_value = [
+            {"file_id": "deleted", "object_name": "deleted.txt", "status": "DELETED"},
+            {
+                "file_id": "failed",
+                "object_name": "failed.txt",
+                "original_filename": "failed.txt",
+                "file_size": 4,
+                "uploaded_at": "2024-01-01T00:00:00",
+                "status": "FAILED",
+                "stage": "FORWARD",
+                "error_code": "FORWARD_FAILED",
+                "error_message": "forward unavailable",
+                "process_task_id": "task-failed",
+                "failed_at": "2024-01-01T00:00:01",
+            },
+            {
+                "file_id": "uploading",
+                "object_name": "uploading.txt",
+                "original_filename": "uploading.txt",
+                "file_size": 2,
+                "uploaded_at": "not-a-timestamp",
+                "status": "UPLOADED",
+            },
+        ]
+        mock_redis.return_value.get_error_info.return_value = "legacy parse error"
+
+        result = asyncio.run(
+            ElasticSearchService.list_files("test_index", include_chunks=False, vdb_core=self.mock_vdb_core)
+        )
+
+        by_path = {item["path_or_url"]: item for item in result["files"]}
+        assert "deleted.txt" not in by_path
+        assert by_path["failed.txt"]["status"] == "FORWARD_FAILED"
+        assert by_path["failed.txt"]["error_reason"] == "forward unavailable"
+        assert by_path["failed.txt"]["file_id"] == "failed"
+        assert by_path["uploading.txt"]["status"] == "WAIT_FOR_PROCESSING"
+        assert by_path["legacy-ms"]["create_time"] == 1700000000000
+
+    @patch('backend.services.vectordatabase_service.get_redis_service')
+    @patch('backend.services.vectordatabase_service.list_file_records')
+    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    @patch('backend.services.vectordatabase_service.get_all_files_status', new_callable=AsyncMock)
+    def test_list_files_keeps_legacy_effective_filename_over_lifecycle_name(
+        self, mock_get_files_status, mock_get_knowledge, mock_list_lifecycle, mock_redis
+    ):
+        """Existing ES/Redis effective names keep the old UI display contract."""
+        self.mock_vdb_core.get_documents_detail.return_value = [{
+            "path_or_url": "folder/data.txt",
+            "filename": "data_1.txt",
+            "file_size": 5,
+            "create_time": "2024-01-01T00:00:00",
+        }]
+        mock_get_files_status.return_value = {
+            "folder/data.txt": {
+                "state": "PROCESS_FAILED",
+                "latest_task_id": "task-1",
+                "original_filename": "data_1.txt",
+            }
+        }
+        mock_get_knowledge.return_value = {"tenant_id": "tenant-1"}
+        mock_list_lifecycle.return_value = [{
+            "file_id": "fid-1",
+            "object_name": "folder/data.txt",
+            "original_filename": "data.txt",
+            "status": "FAILED",
+            "stage": "PROCESS",
+            "error_code": "PARSE_FAILED",
+        }]
+        mock_redis.return_value.get_error_info.return_value = None
+
+        result = asyncio.run(
+            ElasticSearchService.list_files("test_index", include_chunks=False, vdb_core=self.mock_vdb_core)
+        )
+
+        assert result["files"][0]["file"] == "data_1.txt"
+
+    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    @patch('backend.services.vectordatabase_service.get_file_record')
+    @patch('backend.services.vectordatabase_service.transition_file_record')
+    def test_mark_file_delete_requested_updates_existing_record(
+        self, mock_transition, mock_get_record, mock_get_knowledge
+    ):
+        mock_get_knowledge.return_value = {"tenant_id": "tenant-1", "knowledge_id": 7}
+        mock_get_record.return_value = {"file_id": "fid-delete"}
+        mock_transition.return_value = {"file_id": "fid-delete", "status": "DELETE_REQUESTED"}
+
+        result = ElasticSearchService._mark_file_delete_requested(
+            "test_index", "knowledge_base/a.txt", requested_by="user-1"
+        )
+
+        assert result["status"] == "DELETE_REQUESTED"
+        assert mock_transition.call_args.args == ("fid-delete",)
+        assert mock_transition.call_args.kwargs["status"] == "DELETE_REQUESTED"
+
+    @patch('backend.services.vectordatabase_service.create_delete_tombstone')
+    @patch('backend.services.vectordatabase_service.get_file_record', return_value=None)
+    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    def test_mark_file_delete_requested_creates_legacy_tombstone(
+        self, mock_get_knowledge, _mock_get_record, mock_create_tombstone
+    ):
+        mock_get_knowledge.return_value = {"tenant_id": "tenant-1", "knowledge_id": 7}
+        mock_create_tombstone.return_value = {"file_id": "fid-new", "status": "DELETE_REQUESTED"}
+
+        result = ElasticSearchService._mark_file_delete_requested(
+            "test_index", "knowledge_base/legacy.txt"
+        )
+
+        assert result["file_id"] == "fid-new"
+        assert result["status"] == "DELETE_REQUESTED"
+        mock_create_tombstone.assert_called_once()
+
+    @patch('backend.services.vectordatabase_service.get_knowledge_record', return_value={})
+    def test_mark_file_delete_requested_skips_missing_knowledge_identity(self, _mock_get_knowledge):
+        assert ElasticSearchService._mark_file_delete_requested("test_index", "missing.txt") is None
+
+    @patch('backend.services.vectordatabase_service.get_file_record')
+    @patch('backend.services.vectordatabase_service.get_knowledge_record', return_value={"tenant_id": "tenant-1"})
+    @patch('backend.services.vectordatabase_service.delete_file_record')
+    def test_mark_file_deleted_finalizes_existing_record(
+        self, mock_delete, _mock_get_knowledge, mock_get_record
+    ):
+        mock_get_record.return_value = {"file_id": "fid-delete"}
+        ElasticSearchService._mark_file_deleted("test_index", "knowledge_base/a.txt", updated_by="user-1")
+        mock_delete.assert_called_once_with(
+            "fid-delete",
+            expected_statuses=("DELETE_REQUESTED", "DELETED"),
+        )
+
+    @patch('backend.services.vectordatabase_service.get_file_record', return_value=None)
+    @patch('backend.services.vectordatabase_service.get_knowledge_record', return_value={"tenant_id": "tenant-1"})
+    @patch('backend.services.vectordatabase_service.delete_file_record')
+    def test_mark_file_deleted_ignores_missing_record(
+        self, mock_delete, _mock_get_knowledge, _mock_get_record
+    ):
+        """Finalization is best effort when a legacy row does not exist."""
+        ElasticSearchService._mark_file_deleted("test_index", "knowledge_base/missing.txt")
+        mock_delete.assert_not_called()
+
+    @patch('backend.services.vectordatabase_service.delete_file_record', return_value=True)
+    @patch('backend.services.vectordatabase_service.transition_file_record')
+    def test_delete_lifecycle_record_without_object_hard_deletes(self, mock_transition, mock_delete):
+        mock_transition.return_value = {"file_id": "fid-no-object", "status": "DELETE_REQUESTED"}
+
+        result = ElasticSearchService.delete_lifecycle_record_without_object(
+            {
+                "file_id": "fid-no-object",
+                "tenant_id": "tenant-1",
+                "index_name": "test_index",
+                "object_name": None,
+                "status": "FAILED",
+            },
+            requested_by="user-1",
+        )
+
+        assert result["status"] == "success"
+        assert result["lifecycle_deleted"] is True
+        assert result["source_available"] is False
+        assert mock_transition.call_count == 1
+        assert mock_transition.call_args_list[0].kwargs["status"] == "DELETE_REQUESTED"
+        mock_delete.assert_called_once_with(
+            "fid-no-object",
+            expected_statuses=("DELETE_REQUESTED", "DELETED"),
+        )
+
+    def test_delete_lifecycle_record_without_object_rejects_invalid_identity(self):
+        with pytest.raises(ValueError, match="file ID without an object path"):
+            ElasticSearchService.delete_lifecycle_record_without_object(
+                {"file_id": "fid-with-object", "object_name": "knowledge_base/a.txt"}
+            )
+
+    @patch('backend.services.vectordatabase_service.delete_file_record', return_value=True)
+    @patch('backend.services.vectordatabase_service.transition_file_record')
+    def test_delete_lifecycle_record_without_object_hard_deletes_existing_deleted(self, mock_transition, mock_delete):
+        result = ElasticSearchService.delete_lifecycle_record_without_object(
+            {"file_id": "fid-deleted", "object_name": None, "status": "DELETED"}
+        )
+
+        assert result["lifecycle_deleted"] is True
+        assert "already deleted" in result["message"]
+        mock_transition.assert_not_called()
+        mock_delete.assert_called_once_with(
+            "fid-deleted",
+            expected_statuses=("DELETE_REQUESTED", "DELETED"),
+        )
+
+    @patch('backend.services.vectordatabase_service.get_file_record')
+    @patch('backend.services.vectordatabase_service.delete_file_record', return_value=True)
+    @patch('backend.services.vectordatabase_service.transition_file_record')
+    def test_delete_lifecycle_record_without_object_reconciles_stale_delete_request(
+        self, mock_transition, _mock_delete, mock_get_record
+    ):
+        """A concurrent transition to DELETE_REQUESTED can still be finalized."""
+        mock_transition.return_value = None
+        mock_get_record.return_value = {
+            "file_id": "fid-race",
+            "tenant_id": "tenant-1",
+            "index_name": "kb-1",
+            "status": "DELETE_REQUESTED",
+        }
+
+        result = ElasticSearchService.delete_lifecycle_record_without_object(
+            {
+                "file_id": "fid-race",
+                "tenant_id": "tenant-1",
+                "index_name": "kb-1",
+                "object_name": None,
+                "status": "FAILED",
+            }
+        )
+
+        assert result["lifecycle_deleted"] is True
+        assert mock_get_record.call_count == 1
+        assert mock_transition.call_count == 1
+
+    @patch(
+        'backend.services.vectordatabase_service.get_file_record',
+        side_effect=[{"status": "DELETED"}, None],
+    )
+    @patch('backend.services.vectordatabase_service.delete_file_record', return_value=False)
+    @patch('backend.services.vectordatabase_service.transition_file_record', return_value=None)
+    def test_delete_lifecycle_record_without_object_reconciles_deleted_race(
+        self, _mock_transition, _mock_delete, _mock_get_record
+    ):
+        """A concurrent delete that already finalized is treated as success."""
+        result = ElasticSearchService.delete_lifecycle_record_without_object(
+            {
+                "file_id": "fid-race-deleted",
+                "tenant_id": "tenant-1",
+                "index_name": "kb-1",
+                "object_name": None,
+                "status": "FAILED",
+            }
+        )
+
+        assert result["lifecycle_deleted"] is True
+
+    @patch('backend.services.vectordatabase_service.get_file_record', return_value=None)
+    @patch('backend.services.vectordatabase_service.delete_file_record', return_value=False)
+    @patch('backend.services.vectordatabase_service.transition_file_record', return_value=None)
+    def test_delete_lifecycle_record_without_object_raises_when_request_is_stale(
+        self, _mock_transition, _mock_delete, _mock_get_record
+    ):
+        with pytest.raises(ValueError, match="could not be deleted"):
+            ElasticSearchService.delete_lifecycle_record_without_object(
+                {
+                    "file_id": "fid-stale",
+                    "tenant_id": "tenant-1",
+                    "index_name": "kb-1",
+                    "object_name": None,
+                    "status": "FAILED",
+                }
+            )
+
+    @patch('backend.services.vectordatabase_service.get_file_record', return_value={"status": "DELETED"})
+    @patch('backend.services.vectordatabase_service.delete_file_record', return_value=True)
+    @patch('backend.services.vectordatabase_service.transition_file_record', return_value=None)
+    def test_delete_lifecycle_record_without_object_accepts_concurrent_finalization(
+        self, _mock_transition, _mock_delete, _mock_get_record
+    ):
+        result = ElasticSearchService.delete_lifecycle_record_without_object(
+            {
+                "file_id": "fid-race-final",
+                "tenant_id": "tenant-1",
+                "index_name": "kb-1",
+                "object_name": None,
+                "status": "DELETE_REQUESTED",
+            }
+        )
+
+        assert result["lifecycle_deleted"] is True
+
+    @patch('backend.services.vectordatabase_service.get_file_record', return_value={"status": "FAILED"})
+    @patch('backend.services.vectordatabase_service.delete_file_record', return_value=False)
+    @patch('backend.services.vectordatabase_service.transition_file_record', return_value=None)
+    def test_delete_lifecycle_record_without_object_raises_when_finalization_is_stale(
+        self, _mock_transition, _mock_delete, _mock_get_record
+    ):
+        with pytest.raises(ValueError, match="could not be finalized"):
+            ElasticSearchService.delete_lifecycle_record_without_object(
+                {
+                    "file_id": "fid-stale-final",
+                    "tenant_id": "tenant-1",
+                    "index_name": "kb-1",
+                    "object_name": None,
+                    "status": "DELETE_REQUESTED",
+                }
+            )
+
     @patch('backend.services.vectordatabase_service.get_all_files_status')
     def test_list_files_with_chunks(self, mock_get_files_status):
         """
@@ -2479,6 +2830,38 @@ class TestElasticSearchService(unittest.TestCase):
         mock_delete_documents.assert_called_once_with(
             "test_index", "knowledge_base/doc.pdf", self.mock_vdb_core
         )
+
+    @patch.object(ElasticSearchService, "_mark_file_deleted")
+    @patch.object(
+        ElasticSearchService,
+        "delete_documents",
+        return_value={"status": "success", "deleted_minio": True},
+    )
+    @patch.object(ElasticSearchService, "_mark_file_delete_requested")
+    def test_legacy_delete_request_tombstone_uses_full_delete_flow(
+        self, mock_mark_requested, mock_delete_documents, mock_mark_deleted
+    ):
+        """A newly-created legacy tombstone must not short-circuit deletion."""
+        mock_mark_requested.return_value = {
+            "file_id": "fid-legacy",
+            "status": "DELETE_REQUESTED",
+        }
+
+        result = asyncio.run(
+            ElasticSearchService.delete_document_by_scope(
+                "test_index",
+                "knowledge_base/legacy.txt",
+                "full",
+                self.mock_vdb_core,
+            )
+        )
+
+        self.assertEqual(result["status"], "success")
+        mock_mark_requested.assert_called_once_with("test_index", "knowledge_base/legacy.txt")
+        mock_delete_documents.assert_called_once_with(
+            "test_index", "knowledge_base/legacy.txt", self.mock_vdb_core
+        )
+        mock_mark_deleted.assert_called_once_with("test_index", "knowledge_base/legacy.txt")
 
     @patch.object(
         ElasticSearchService,
@@ -8726,3 +9109,139 @@ def test_get_embedding_model_returns_none_when_lookup_raises(monkeypatch):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+def test_merge_paginated_indices_uses_ordered_service_merge():
+    primary = {
+        "indices": ["tenant-new", "tenant-old"],
+        "indices_info": [
+            {"name": "tenant-new", "update_time": "2026-08-24T10:00:00", "knowledge_id": 3},
+            {"name": "tenant-old", "update_time": "2026-08-24T08:00:00", "knowledge_id": 1},
+        ],
+        "total": 2,
+        "facets": {"sources": ["elasticsearch"], "models": ["model-a"]},
+    }
+    asset_owner = {
+        "indices": ["asset-middle"],
+        "indices_info": [
+            {
+                "name": "asset-middle",
+                "update_time": "2026-08-24T09:00:00",
+                "knowledge_id": 2,
+                "permission": "EDIT",
+            }
+        ],
+        "total": 1,
+        "facets": {"sources": ["elasticsearch"], "models": ["model-b"]},
+    }
+
+    result = ElasticSearchService.merge_paginated_list_indices_results(
+        primary,
+        asset_owner,
+        offset=0,
+        limit=2,
+    )
+
+    assert result["indices"] == ["tenant-new", "asset-middle"]
+    assert result["indices_info"][1]["permission"] == "READ_ONLY"
+    assert result["total"] == 3
+    assert result["next_offset"] == 2
+    assert "has_more" not in result
+
+
+def test_prepare_indices_page_requires_limit_when_pagination_is_enabled():
+    with pytest.raises(ValueError, match="limit is required"):
+        ElasticSearchService._prepare_indices_page(
+            visible_knowledgebases=[],
+            pagination_enabled=True,
+            offset=0,
+            limit=None,
+            keyword=None,
+            sources=None,
+            models=None,
+        )
+
+
+def test_apply_read_only_returns_unchanged_result_without_indices_info():
+    result = {"indices": ["asset-kb"], "count": 1}
+
+    assert ElasticSearchService._apply_read_only_to_asset_indices_info(result) is result
+
+
+def test_merge_non_paginated_indices_applies_asset_read_only_permission():
+    primary = {
+        "indices": ["tenant-kb"],
+        "count": 1,
+        "indices_info": [{"name": "tenant-kb", "permission": "EDIT"}],
+    }
+    asset = {
+        "indices": ["asset-kb"],
+        "count": 1,
+        "indices_info": [{"name": "asset-kb", "permission": "EDIT"}],
+    }
+
+    result = ElasticSearchService.merge_list_indices_results(primary, asset)
+
+    assert result["indices"] == ["tenant-kb", "asset-kb"]
+    assert result["count"] == 2
+    assert result["indices_info"] == [
+        {"name": "tenant-kb", "permission": "EDIT"},
+        {"name": "asset-kb", "permission": "READ_ONLY"},
+    ]
+
+
+def test_merge_non_paginated_indices_without_info_returns_names_only():
+    result = ElasticSearchService.merge_list_indices_results(
+        {"indices": ["tenant-kb"], "count": 1},
+        {"indices": ["asset-kb"], "count": 1},
+    )
+
+    assert result == {
+        "indices": ["tenant-kb", "asset-kb"],
+        "count": 2,
+    }
+
+
+def test_merge_paginated_indices_supports_asset_first_and_last_page():
+    primary = {
+        "indices": ["tenant-old"],
+        "indices_info": [
+            {"name": "tenant-old", "update_time": "2026-08-24T08:00:00", "knowledge_id": 1}
+        ],
+        "total": 1,
+        "facets": {"sources": ["elasticsearch"], "models": ["model-a"]},
+    }
+    asset = {
+        "indices": ["asset-new"],
+        "indices_info": [
+            {"name": "asset-new", "update_time": "2026-08-24T10:00:00", "knowledge_id": 2}
+        ],
+        "total": 1,
+        "facets": {"sources": ["asset"], "models": ["model-b"]},
+    }
+
+    result = ElasticSearchService.merge_paginated_list_indices_results(
+        primary, asset, offset=0, limit=2
+    )
+
+    assert result["indices"] == ["asset-new", "tenant-old"]
+    assert result["next_offset"] is None
+    assert result["facets"] == {
+        "sources": ["asset", "elasticsearch"],
+        "models": ["model-a", "model-b"],
+    }
+
+
+def test_merge_paginated_indices_falls_back_to_index_names_without_info():
+    result = ElasticSearchService.merge_paginated_list_indices_results(
+        {"indices": ["tenant-kb"], "count": 1},
+        {"indices": ["asset-kb"], "count": 1},
+        offset=1,
+        limit=1,
+    )
+
+    assert result["indices"] == ["asset-kb"]
+    assert result["count"] == 1
+    assert result["total"] == 2
+    assert result["next_offset"] is None
+    assert "indices_info" not in result

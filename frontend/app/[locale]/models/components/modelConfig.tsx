@@ -6,6 +6,7 @@ import {
   useRef,
   ReactNode,
 } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 
 import { Alert, Button, Card, Col, Row, Space, App } from "antd";
@@ -112,6 +113,7 @@ export const ModelConfigSection = forwardRef<
 >((props, ref): ReactNode => {
   const { t } = useTranslation();
   const { message } = App.useApp();
+  const queryClient = useQueryClient();
 
   const { skipVerification = false } = props;
   const { modelConfig, updateModelConfig, appConfig, saveConfig } = useConfig();
@@ -263,11 +265,14 @@ export const ModelConfigSection = forwardRef<
   }));
 
   // Load model lists
-  const loadModelLists = async (skipVerify: boolean = false) => {
+  const loadModelLists = async (
+    skipVerify: boolean = false,
+    refreshAgentQueries: boolean = false
+  ) => {
     if (!modelConfig) return;
 
     try {
-      invalidate()
+      await invalidate();
       const [allModels, coverage] = await Promise.all([
         modelService.getAllModels(),
         modelService.getCapacityCoverage(),
@@ -276,6 +281,10 @@ export const ModelConfigSection = forwardRef<
       // Update state with all models
       setModels(allModels);
       setCapacityCoverage(coverage);
+
+      if (refreshAgentQueries) {
+        await queryClient.invalidateQueries({ queryKey: ["agents"] });
+      }
 
       // Load selected models from configuration and check if models still exist
       const llmMain = modelConfig.llm.displayName;
@@ -1133,7 +1142,7 @@ export const ModelConfigSection = forwardRef<
           isOpen={isAddModalOpen}
           onClose={() => setIsAddModalOpen(false)}
           onSuccess={async (newModel) => {
-            await loadModelLists(true);
+            await loadModelLists(true, true);
             message.success(t("modelConfig.message.addSuccess"));
 
             if (newModel && newModel.name && newModel.type) {
@@ -1150,7 +1159,7 @@ export const ModelConfigSection = forwardRef<
           isOpen={isDeleteModalOpen}
           onClose={() => setIsDeleteModalOpen(false)}
           onSuccess={async () => {
-            await loadModelLists(true);
+            await loadModelLists(true, true);
             return;
           }}
           models={models}

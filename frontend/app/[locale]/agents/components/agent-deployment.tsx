@@ -38,6 +38,7 @@ export default function AgentDeployment() {
           >
             <Select
               mode="multiple"
+              showSearch={{ optionFilterProp: "label" }}
               placeholder={t("agent.deployment.groupIdsPlaceholder")}
               options={groupOptions}
               value={editedAgent.group_ids ?? []}

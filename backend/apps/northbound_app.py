@@ -22,7 +22,12 @@ from consts.exceptions import (
     UnauthorizedError,
     ValidationError,
 )
-from consts.model import ApiKeyTargetRequest, ApiUserBatchCreateRequest, ToolParamsRequest
+from consts.model import (
+    ApiKeyTargetRequest,
+    ApiUserBatchCreateRequest,
+    GenerateTitleRequest,
+    ToolParamsRequest,
+)
 from database.token_db import log_token_usage
 from database.user_tenant_db import get_user_role_by_tenant
 from services.api_key_service import (
@@ -39,11 +44,17 @@ from services.northbound_service import (
     get_agent_info_list,
     get_agent_info_by_name_for_northbound,
     get_agent_knowledge_bases_for_northbound,
+    generate_conversation_title,
+    list_configured_models,
     update_conversation_title,
     upload_files_for_northbound,
 )
 
-from utils.auth_utils import validate_bearer_token, get_user_and_tenant_by_access_key
+from utils.auth_utils import (
+    get_user_and_tenant_by_access_key,
+    get_user_language,
+    validate_bearer_token,
+)
 
 from .file_management_app import build_content_disposition_header
 
@@ -572,6 +583,45 @@ async def list_convs(request: Request):
         logging.error(f"Failed to list conversations: {str(e)}", exc_info=e)
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Internal Server Error")
+
+
+@router.get("/models")
+async def list_models(request: Request):
+    """List the models configured for the authenticated tenant."""
+    try:
+        ctx: NorthboundContext = await _get_northbound_context(request)
+        return await list_configured_models(ctx=ctx)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logging.error("Failed to list configured models: %s", exc, exc_info=exc)
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Internal Server Error",
+        ) from exc
+
+
+@router.post("/generate_title")
+async def generate_title(payload: GenerateTitleRequest, request: Request):
+    """Generate and persist a conversation title from the supplied question."""
+    try:
+        ctx: NorthboundContext = await _get_northbound_context(request)
+        return await generate_conversation_title(
+            ctx=ctx,
+            conversation_id=payload.conversation_id,
+            question=payload.question,
+            language=get_user_language(request),
+        )
+    except ConversationNotFoundError as exc:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(exc)) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logging.error("Failed to generate conversation title: %s", exc, exc_info=exc)
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Internal Server Error",
+        ) from exc
 
 
 @router.put("/conversations/{conversation_id}/title")

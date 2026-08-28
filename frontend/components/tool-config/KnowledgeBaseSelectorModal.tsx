@@ -18,6 +18,9 @@ import {
   ExclamationCircleOutlined,
 } from "@ant-design/icons";
 
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import { Can } from "@/components/permission/Can";
+import { useGroupList } from "@/hooks/group/useGroupList";
 import { KnowledgeBase } from "@/types/knowledgeBase";
 import { ToolKbType, getKnowledgeBaseSourcesForTool } from "./index";
 import { KB_LAYOUT, KB_TAG_VARIANTS } from "@/const/knowledgeBaseLayout";
@@ -103,7 +106,23 @@ export default function KnowledgeBaseSelectorModal({
   difyConfig,
 }: KnowledgeBaseSelectorModalProps) {
   const { t } = useTranslation("common");
-  const { data: allModels = [] } = useModelList();
+  const isAidpSearch = toolType === "aidp_search";
+  const { data: allModels = [] } = useModelList({ enabled: !isAidpSearch });
+  const showSourceMetadata = !isAidpSearch;
+  const { user } = useAuthorizationContext();
+  const { data: groupListData } = useGroupList(
+    isAidpSearch ? (user?.tenantId ?? null) : null
+  );
+  const groupNameById = useMemo(
+    () =>
+      new Map(
+        (groupListData?.groups ?? []).map((group) => [
+          group.group_id,
+          group.group_name,
+        ])
+      ),
+    [groupListData]
+  );
 
   // Memoized lookup function for model display names using the fetched model list
   const resolveModelDisplayName = useMemo(() => {
@@ -127,9 +146,14 @@ export default function KnowledgeBaseSelectorModal({
   const [selectedSources, setSelectedSources] = useState<string[]>([]);
   const [selectedModels, setSelectedModels] = useState<string[]>([]);
   // Track the embedding model from selected knowledge bases for auto-filtering
-  const [selectedEmbeddingModel, setSelectedEmbeddingModel] = useState<string | null>(null);
+  const [selectedEmbeddingModel, setSelectedEmbeddingModel] = useState<
+    string | null
+  >(null);
   // Model mismatch confirmation modal state
-  const [pendingSelection, setPendingSelection] = useState<{ id: string; kb: KnowledgeBase } | null>(null);
+  const [pendingSelection, setPendingSelection] = useState<{
+    id: string;
+    kb: KnowledgeBase;
+  } | null>(null);
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
   const [modelMismatchInfo, setModelMismatchInfo] = useState<{
     existingModel: string;
@@ -139,18 +163,26 @@ export default function KnowledgeBaseSelectorModal({
   } | null>(null);
 
   // Embedding model config dialog state
-  const [embeddingModelDialogOpen, setEmbeddingModelDialogOpen] = useState(false);
+  const [embeddingModelDialogOpen, setEmbeddingModelDialogOpen] =
+    useState(false);
   const [embeddingModelDialogData, setEmbeddingModelDialogData] = useState<{
     indexName: string;
     knowledgeName: string;
   } | null>(null);
-  const [embeddingModelDialogMismatch, setEmbeddingModelDialogMismatch] = useState(false);
-  const [configuringKbIds, setConfiguringKbIds] = useState<Set<string>>(new Set());
+  const [embeddingModelDialogMismatch, setEmbeddingModelDialogMismatch] =
+    useState(false);
+  const [configuringKbIds, setConfiguringKbIds] = useState<Set<string>>(
+    new Set()
+  );
 
   // Track configured models for display - use model display name instead of ID
-  const [configuredModels, setConfiguredModels] = useState<Map<string, string>>(new Map());
+  const [configuredModels, setConfiguredModels] = useState<Map<string, string>>(
+    new Map()
+  );
   // Track index names of KBs that have been configured (so they won't be checked again)
-  const [configuredKbIndexNames, setConfiguredKbIndexNames] = useState<Set<string>>(new Set());
+  const [configuredKbIndexNames, setConfiguredKbIndexNames] = useState<
+    Set<string>
+  >(new Set());
 
   // Initialize selection state when modal opens
   useEffect(() => {
@@ -238,11 +270,13 @@ export default function KnowledgeBaseSelectorModal({
       }
 
       // Default selection logic:
-      // Only empty knowledge bases (0 documents AND 0 chunks) cannot be selected
-      const isEmpty =
-        (kb.documentCount || 0) === 0 && (kb.chunkCount || 0) === 0;
-      if (isEmpty) {
-        return false;
+      // AIDP availability is determined by the permission-filtered backend catalog.
+      if (!isAidpSearch) {
+        const isEmpty =
+          (kb.documentCount || 0) === 0 && (kb.chunkCount || 0) === 0;
+        if (isEmpty) {
+          return false;
+        }
       }
 
       // For nexent source, check model matching against current tenant config and tool multimodal constraint.
@@ -257,6 +291,7 @@ export default function KnowledgeBaseSelectorModal({
     },
     [
       isSelectable,
+      isAidpSearch,
       isEmbeddingModelCompatible,
       isMultimodalConstraintMismatch,
     ]
@@ -312,12 +347,17 @@ export default function KnowledgeBaseSelectorModal({
       }
 
       // Source filter
-      if (selectedSources.length > 0 && !selectedSources.includes(kb.source)) {
+      if (
+        showSourceMetadata &&
+        selectedSources.length > 0 &&
+        !selectedSources.includes(kb.source)
+      ) {
         return false;
       }
 
       // Model filter
       if (
+        showSourceMetadata &&
         selectedModels.length > 0 &&
         !selectedModels.includes(kb.embeddingModel)
       ) {
@@ -339,6 +379,7 @@ export default function KnowledgeBaseSelectorModal({
     knowledgeBases,
     allowedSources,
     searchKeyword,
+    showSourceMetadata,
     selectedSources,
     selectedModels,
   ]);
@@ -355,7 +396,7 @@ export default function KnowledgeBaseSelectorModal({
         return;
       }
 
-        setTempSelectedIds((prev) => {
+      setTempSelectedIds((prev) => {
         if (prev.includes(id)) {
           // When deselecting, check if we need to clear the model filter
           const newSelected = prev.filter((itemId) => itemId !== id);
@@ -428,7 +469,11 @@ export default function KnowledgeBaseSelectorModal({
 
         // Auto-filter by the selected knowledge base's embedding model
         // Only for nexent source with valid embedding model
-        if (kb.source === "nexent" && kb.embeddingModel && kb.embeddingModel !== "unknown") {
+        if (
+          kb.source === "nexent" &&
+          kb.embeddingModel &&
+          kb.embeddingModel !== "unknown"
+        ) {
           setSelectedEmbeddingModel(kb.embeddingModel);
           setSelectedModels([kb.embeddingModel]);
         }
@@ -453,8 +498,10 @@ export default function KnowledgeBaseSelectorModal({
       const indexNameList = indexNames.split(",").filter(Boolean);
 
       // Find KBs matching the index names
-      const matchingKBs = knowledgeBases.filter((k) =>
-        indexNameList.includes(k.index_name || k.name) || tempSelectedIds.includes(k.id)
+      const matchingKBs = knowledgeBases.filter(
+        (k) =>
+          indexNameList.includes(k.index_name || k.name) ||
+          tempSelectedIds.includes(k.id)
       );
 
       // Deduplicate - keep unique KBs
@@ -519,7 +566,9 @@ export default function KnowledgeBaseSelectorModal({
       setEmbeddingModelDialogMismatch(true);
       setEmbeddingModelDialogOpen(true);
       // Track all selected nexent KB index names for batch update
-      setConfiguringKbIds(new Set(nexentKBs.map((k) => k.index_name || k.name)));
+      setConfiguringKbIds(
+        new Set(nexentKBs.map((k) => k.index_name || k.name))
+      );
       return; // Wait for user to configure before confirming
     }
 
@@ -536,12 +585,16 @@ export default function KnowledgeBaseSelectorModal({
       const kbIndexName = kb.index_name || kb.name;
 
       // Skip if already configured (either in current session or previously)
-      if (configuringKbIds.has(kb.id) || configuredKbIndexNames.has(kbIndexName)) {
+      if (
+        configuringKbIds.has(kb.id) ||
+        configuredKbIndexNames.has(kbIndexName)
+      ) {
         continue;
       }
 
       try {
-        const status = await knowledgeBaseService.getEmbeddingModelStatus(kbIndexName);
+        const status =
+          await knowledgeBaseService.getEmbeddingModelStatus(kbIndexName);
 
         if (status.needs_config) {
           kbIdsNeedingConfig.push(kbIndexName);
@@ -561,9 +614,10 @@ export default function KnowledgeBaseSelectorModal({
     // If any KBs need configuration, show the dialog with all of them
     if (kbIdsNeedingConfig.length > 0) {
       const firstIndexName = kbIdsNeedingConfig[0];
-      const knowledgeBaseName = kbIdsNeedingConfig.length === 1
-        ? kbNamesNeedingConfig[0]
-        : `${kbIdsNeedingConfig.length} knowledge bases`;
+      const knowledgeBaseName =
+        kbIdsNeedingConfig.length === 1
+          ? kbNamesNeedingConfig[0]
+          : `${kbIdsNeedingConfig.length} knowledge bases`;
 
       setEmbeddingModelDialogData({
         indexName: firstIndexName,
@@ -579,7 +633,14 @@ export default function KnowledgeBaseSelectorModal({
     // All checks passed, proceed with confirm
     onConfirm(selectedKBs);
     onClose();
-  }, [knowledgeBases, tempSelectedIds, configuringKbIds, configuredKbIndexNames, onConfirm, onClose]);
+  }, [
+    knowledgeBases,
+    tempSelectedIds,
+    configuringKbIds,
+    configuredKbIndexNames,
+    onConfirm,
+    onClose,
+  ]);
 
   // Handle cancel
   const handleCancel = useCallback(() => {
@@ -599,7 +660,10 @@ export default function KnowledgeBaseSelectorModal({
       dify_search: t("toolConfig.knowledgeBaseSelector.title.dify"),
       datamate_search: t("toolConfig.knowledgeBaseSelector.title.datamate"),
       ragflow_search: t("toolConfig.knowledgeBaseSelector.title.ragflow"),
-      idata_search: t("toolConfig.knowledgeBaseSelector.title.idata", "选择 iData 知识库"),
+      idata_search: t(
+        "toolConfig.knowledgeBaseSelector.title.idata",
+        "选择 iData 知识库"
+      ),
     };
     return (
       titles[toolType] || t("toolConfig.knowledgeBaseSelector.title.default")
@@ -698,7 +762,7 @@ export default function KnowledgeBaseSelectorModal({
             allowClear
           />
 
-          {availableSources.length > 0 && (
+          {showSourceMetadata && availableSources.length > 0 && (
             <Select
               mode="multiple"
               placeholder={t("knowledgeBase.filter.source.placeholder")}
@@ -718,7 +782,7 @@ export default function KnowledgeBaseSelectorModal({
             </Select>
           )}
 
-          {availableModels.length > 0 && (
+          {showSourceMetadata && availableModels.length > 0 && (
             <Select
               mode="multiple"
               placeholder={t("knowledgeBase.filter.model.placeholder")}
@@ -860,6 +924,9 @@ export default function KnowledgeBaseSelectorModal({
               );
               const canSelect = checkCanSelect(kb);
               const hasModelMismatch = getModelMismatch(kb);
+              const groupNames = (kb.group_ids ?? [])
+                .map((groupId) => groupNameById.get(groupId))
+                .filter((groupName): groupName is string => Boolean(groupName));
 
               return (
                 <div
@@ -923,86 +990,148 @@ export default function KnowledgeBaseSelectorModal({
                         </p>
                       </div>
 
-                      {/* First row: Basic info tags */}
-                      <div
-                        className={`flex flex-wrap items-center ${KB_LAYOUT.TAG_MARGIN} ${KB_LAYOUT.TAG_SPACING}`}
-                      >
-                        {/* Document count tag */}
-                        <span
-                          className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.default} mr-1`}
-                        >
-                          {t("knowledgeBase.tag.documents", {
-                            count: kb.documentCount || 0,
-                          })}
-                        </span>
-
-                        {/* Chunk count tag */}
-                        <span
-                          className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.default} mr-1`}
-                        >
-                          {t("knowledgeBase.tag.chunks", {
-                            count: kb.chunkCount || 0,
-                          })}
-                        </span>
-
-                        {/* Source tag */}
-                        <span
-                          className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.default} mr-1`}
-                        >
-                          {t("knowledgeBase.tag.source", {
-                            source: t(`knowledgeBase.source.${kb.source}`, {
-                              defaultValue: kb.source,
-                            }),
-                          })}
-                        </span>
-
-                        {/* Creation date - only show when there are documents or chunks */}
-                        {((kb.documentCount || 0) > 0 ||
-                          (kb.chunkCount || 0) > 0) && (
-                          <span
-                            className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.default} mr-1`}
+                      {isAidpSearch ? (
+                        <>
+                          <div
+                            className="mt-1 line-clamp-2 text-xs text-gray-500"
+                            title={
+                              kb.description || t("aidpKnowledge.noDescription")
+                            }
                           >
-                            {t("knowledgeBase.tag.createdAt", {
-                              date: formatDateOrFallback(kb.createdAt),
-                            })}
-                          </span>
-                        )}
-                      </div>
-
-                      {/* Second row: Model tags */}
-                      <div
-                        className={`flex flex-wrap items-center ${KB_LAYOUT.SECOND_ROW_TAG_MARGIN} ${KB_LAYOUT.TAG_SPACING}`}
-                      >
-                        {/* Model tag - only show when model is not "unknown" and there are documents or chunks */}
-                        {((kb.documentCount || 0) > 0 ||
-                          (kb.chunkCount || 0) > 0) &&
-                          kb.embeddingModel &&
-                          kb.embeddingModel !== "unknown" && (
+                            {kb.description || t("aidpKnowledge.noDescription")}
+                          </div>
+                          <div
+                            className={`flex flex-wrap items-center ${KB_LAYOUT.TAG_MARGIN} ${KB_LAYOUT.TAG_SPACING}`}
+                          >
+                            {kb.ingroup_permission === "PRIVATE" ? (
+                              <span
+                                className={`${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.default}`}
+                              >
+                                {t("knowledgeBase.ingroup.permission.PRIVATE")}
+                              </span>
+                            ) : (
+                              <Can permission="group:read">
+                                {groupNames.map((groupName) => (
+                                  <span
+                                    key={groupName}
+                                    className={`${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} border border-blue-200 bg-blue-100 text-blue-800`}
+                                  >
+                                    {groupName}
+                                  </span>
+                                ))}
+                              </Can>
+                            )}
                             <span
-                              className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.model} mr-1`}
+                              className={`${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.default}`}
                             >
-                              {/* Use configuredModels state for updated display name, fallback to effectiveGetModelDisplayName */}
-                              {configuredModels.get(kb.id) || effectiveGetModelDisplayName(kb.embeddingModel)}
-                              {t("knowledgeBase.tag.model", {
-                                model: "",
+                              {t("knowledgeBase.tag.createdAt", {
+                                date: formatDateOrFallback(kb.createdAt),
                               })}
                             </span>
-                          )}
-                        {kb.is_multimodal && (
-                          <span
-                            className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.red} mr-1`}
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          {/* First row: Basic info tags */}
+                          <div
+                            className={`flex flex-wrap items-center ${KB_LAYOUT.TAG_MARGIN} ${KB_LAYOUT.TAG_SPACING}`}
                           >
-                            multimodal
-                          </span>
-                        )}
-                        {hasModelMismatch && (
-                          <span
-                            className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.warning} mr-1`}
+                            {kb.ingroup_permission === "PRIVATE" && (
+                              <span
+                                className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.default} mr-1`}
+                              >
+                                {t("knowledgeBase.ingroup.permission.PRIVATE")}
+                              </span>
+                            )}
+
+                            {/* Document count tag */}
+                            <span
+                              className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.default} mr-1`}
+                            >
+                              {t("knowledgeBase.tag.documents", {
+                                count: kb.documentCount || 0,
+                              })}
+                            </span>
+
+                            {showSourceMetadata && (
+                              <>
+                                {/* Chunk count tag */}
+                                <span
+                                  className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.default} mr-1`}
+                                >
+                                  {t("knowledgeBase.tag.chunks", {
+                                    count: kb.chunkCount || 0,
+                                  })}
+                                </span>
+
+                                {/* Source tag */}
+                                <span
+                                  className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.default} mr-1`}
+                                >
+                                  {t("knowledgeBase.tag.source", {
+                                    source: t(
+                                      `knowledgeBase.source.${kb.source}`,
+                                      {
+                                        defaultValue: kb.source,
+                                      }
+                                    ),
+                                  })}
+                                </span>
+                              </>
+                            )}
+
+                            {/* Creation date - only show when there are documents or chunks */}
+                            {((kb.documentCount || 0) > 0 ||
+                              (kb.chunkCount || 0) > 0) && (
+                              <span
+                                className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.default} mr-1`}
+                              >
+                                {t("knowledgeBase.tag.createdAt", {
+                                  date: formatDateOrFallback(kb.createdAt),
+                                })}
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Second row: Model tags */}
+                          <div
+                            className={`flex flex-wrap items-center ${KB_LAYOUT.SECOND_ROW_TAG_MARGIN} ${KB_LAYOUT.TAG_SPACING}`}
                           >
-                            {t("knowledgeBase.tag.modelMismatch")}
-                          </span>
-                        )}
-                      </div>
+                            {/* Model tag - only show when model is not "unknown" and there are documents or chunks */}
+                            {((kb.documentCount || 0) > 0 ||
+                              (kb.chunkCount || 0) > 0) &&
+                              kb.embeddingModel &&
+                              kb.embeddingModel !== "unknown" && (
+                                <span
+                                  className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.model} mr-1`}
+                                >
+                                  {/* Use configuredModels state for updated display name, fallback to effectiveGetModelDisplayName */}
+                                  {configuredModels.get(kb.id) ||
+                                    effectiveGetModelDisplayName(
+                                      kb.embeddingModel
+                                    )}
+                                  {t("knowledgeBase.tag.model", {
+                                    model: "",
+                                  })}
+                                </span>
+                              )}
+                            {kb.is_multimodal && (
+                              <span
+                                className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.red} mr-1`}
+                              >
+                                multimodal
+                              </span>
+                            )}
+                            {hasModelMismatch && (
+                              <span
+                                className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.warning} mr-1`}
+                              >
+                                {t("knowledgeBase.tag.modelMismatch")}
+                              </span>
+                            )}
+                          </div>
+                        </>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -1024,8 +1153,15 @@ export default function KnowledgeBaseSelectorModal({
       <Modal
         title={
           <div className="flex items-center gap-2">
-            <ExclamationCircleOutlined style={{ color: "#faad14", fontSize: 20 }} />
-            <span>{t("toolConfig.knowledgeBaseSelector.modelMismatch.title", "模型不匹配")}</span>
+            <ExclamationCircleOutlined
+              style={{ color: "#faad14", fontSize: 20 }}
+            />
+            <span>
+              {t(
+                "toolConfig.knowledgeBaseSelector.modelMismatch.title",
+                "模型不匹配"
+              )}
+            </span>
           </div>
         }
         open={confirmModalOpen}
@@ -1053,15 +1189,28 @@ export default function KnowledgeBaseSelectorModal({
               if (pendingSelection) {
                 setTempSelectedIds((prev) => {
                   // Remove all KBs with the old model
-                  const existingKBs = knowledgeBases.filter((k) => prev.includes(k.id));
-                  const existingModels = [...new Set(existingKBs.map((k) => k.embeddingModel).filter((m) => m && m !== "unknown"))];
+                  const existingKBs = knowledgeBases.filter((k) =>
+                    prev.includes(k.id)
+                  );
+                  const existingModels = [
+                    ...new Set(
+                      existingKBs
+                        .map((k) => k.embeddingModel)
+                        .filter((m) => m && m !== "unknown")
+                    ),
+                  ];
                   const idsToRemove = existingKBs
                     .filter((k) => existingModels.includes(k.embeddingModel))
                     .map((k) => k.id);
 
                   // Update model filter
-                  if (pendingSelection.kb.embeddingModel && pendingSelection.kb.embeddingModel !== "unknown") {
-                    setSelectedEmbeddingModel(pendingSelection.kb.embeddingModel);
+                  if (
+                    pendingSelection.kb.embeddingModel &&
+                    pendingSelection.kb.embeddingModel !== "unknown"
+                  ) {
+                    setSelectedEmbeddingModel(
+                      pendingSelection.kb.embeddingModel
+                    );
                     setSelectedModels([pendingSelection.kb.embeddingModel]);
                   }
 
@@ -1074,7 +1223,10 @@ export default function KnowledgeBaseSelectorModal({
               setModelMismatchInfo(null);
             }}
           >
-            {t("toolConfig.knowledgeBaseSelector.modelMismatch.switchModel", "切换模型")}
+            {t(
+              "toolConfig.knowledgeBaseSelector.modelMismatch.switchModel",
+              "切换模型"
+            )}
           </Button>,
         ]}
       >
@@ -1089,23 +1241,43 @@ export default function KnowledgeBaseSelectorModal({
             <div className="bg-gray-50 p-4 rounded-lg space-y-3">
               <div className="flex items-start">
                 <span className="text-gray-500 w-20 flex-shrink-0">
-                  {t("toolConfig.knowledgeBaseSelector.modelMismatch.existing", "已选知识库")}:
+                  {t(
+                    "toolConfig.knowledgeBaseSelector.modelMismatch.existing",
+                    "已选知识库"
+                  )}
+                  :
                 </span>
                 <div className="flex-1">
-                  <div className="text-gray-800 font-medium">{modelMismatchInfo.existingKBName}</div>
+                  <div className="text-gray-800 font-medium">
+                    {modelMismatchInfo.existingKBName}
+                  </div>
                   <div className="text-gray-500 text-sm">
-                    {t("toolConfig.knowledgeBaseSelector.modelMismatch.model", "模型")}: {modelMismatchInfo.existingModel}
+                    {t(
+                      "toolConfig.knowledgeBaseSelector.modelMismatch.model",
+                      "模型"
+                    )}
+                    : {modelMismatchInfo.existingModel}
                   </div>
                 </div>
               </div>
               <div className="flex items-start">
                 <span className="text-gray-500 w-20 flex-shrink-0">
-                  {t("toolConfig.knowledgeBaseSelector.modelMismatch.new", "新选择")}:
+                  {t(
+                    "toolConfig.knowledgeBaseSelector.modelMismatch.new",
+                    "新选择"
+                  )}
+                  :
                 </span>
                 <div className="flex-1">
-                  <div className="text-gray-800 font-medium">{modelMismatchInfo.newKBName}</div>
+                  <div className="text-gray-800 font-medium">
+                    {modelMismatchInfo.newKBName}
+                  </div>
                   <div className="text-gray-500 text-sm">
-                    {t("toolConfig.knowledgeBaseSelector.modelMismatch.model", "模型")}: {modelMismatchInfo.newModel}
+                    {t(
+                      "toolConfig.knowledgeBaseSelector.modelMismatch.model",
+                      "模型"
+                    )}
+                    : {modelMismatchInfo.newModel}
                   </div>
                 </div>
               </div>

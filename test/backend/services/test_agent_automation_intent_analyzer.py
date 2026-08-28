@@ -220,6 +220,8 @@ def test_llm_analyzer_generate_sync_invokes_model_as_callable(monkeypatch):
         "schedule_error": None,
     }, ensure_ascii=False)
 
+    captured = {}
+
     class FakeModel:
         def __init__(self):
             self.calls = None
@@ -229,7 +231,12 @@ def test_llm_analyzer_generate_sync_invokes_model_as_callable(monkeypatch):
             return SimpleNamespace(content=fake_payload)
 
     fake_model = FakeModel()
-    monkeypatch.setattr("nexent.core.models.OpenAIModel", lambda **kwargs: fake_model)
+
+    def build_fake_model(**kwargs):
+        captured["config"] = kwargs
+        return fake_model
+
+    monkeypatch.setattr("nexent.core.models.OpenAIModel", build_fake_model)
     monkeypatch.setattr(
         "services.agent_automation.intent_analyzer.get_prompt_template",
         lambda *a, **k: {
@@ -251,6 +258,9 @@ def test_llm_analyzer_generate_sync_invokes_model_as_callable(monkeypatch):
     assert result["analysis_source"] == "llm"
     assert result["is_automation_intent"] is True
     assert result["schedule_trigger"].cron_expr == "0 8 * * *"
+    from nexent.core.utils.observer import MessageObserver
+
+    assert isinstance(captured["config"]["observer"], MessageObserver)
     assert fake_model.calls[0] == {"role": "system", "content": "sys"}
     assert fake_model.calls[1]["content"].startswith("msg: ")
 

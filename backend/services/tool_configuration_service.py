@@ -20,9 +20,14 @@ from consts.const import (
     LOCAL_MCP_SERVER,
     MCP_MANAGEMENT_API,
 )
+from consts.error_message import ErrorMessage
 from consts.exceptions import MCPConnectionError, NotFoundException, ToolExecutionException, ValidationError
 from consts.model import ToolInstanceInfoRequest, ToolInfo, ToolSourceEnum, ToolValidateRequest
 from consts.tool_labels import SYSTEM_MANAGED_TOOL_NAMES
+from consts.tool_param_constraints import (
+    TOOL_PARAM_CONSTRAINT_KEYS,
+    TOOL_PARAM_CONSTRAINT_RULES,
+)
 from database.outer_api_tool_db import (
     upsert_openapi_service,
     query_openapi_services_by_tenant,
@@ -63,6 +68,8 @@ from utils.langchain_utils import discover_langchain_modules
 from utils.tool_utils import get_local_tools_classes, get_local_tools_description_zh
 
 logger = logging.getLogger("tool_configuration_service")
+
+TOOL_PARAM_CONSTRAINT_ERROR_MESSAGES = ErrorMessage.get_param_constraint_messages()
 
 
 def _parse_kds_list(value: Any) -> list[str]:
@@ -162,6 +169,26 @@ def python_type_to_json_schema(annotation: Any) -> str:
     return type_mapping.get(type_name, type_name)
 
 
+def _extract_field_constraints(field_info: Any) -> Dict[str, Any]:
+    """Extract Pydantic ``Field`` validation constraints (ge, le, gt, lt, ...).
+
+    In Pydantic v2, constraints declared via ``Field(ge=..., le=...)`` are stored
+    in ``FieldInfo.metadata`` as ``annotated_types`` instances (e.g. ``Ge``, ``Le``,
+    ``Interval``, ``MinLen``). This helper reads the relevant attributes so the
+    constraints can be persisted to the DB ``params`` column.
+
+    Args:
+        field_info: Pydantic FieldInfo to extract constraints from
+    """
+    constraints: Dict[str, Any] = {}
+    for item in getattr(field_info, "metadata", None) or []:
+        for attr in TOOL_PARAM_CONSTRAINT_KEYS:
+            value = getattr(item, attr, None)
+            if value is not None:
+                constraints[attr] = value
+    return constraints
+
+
 def get_local_tools() -> List[ToolInfo]:
     """
     Get metadata for all locally available tools
@@ -214,6 +241,12 @@ def get_local_tools() -> List[ToolInfo]:
                 else:
                     param_info["default"] = param.default.default
                     param_info["optional"] = True
+
+                # Persist Pydantic Field validation constraints (ge, le, gt, lt, ...)
+                # so they are stored in the DB params column on scan/refresh and first init.
+                constraints = _extract_field_constraints(param.default)
+                if constraints:
+                    param_info["constraints"] = constraints
             else:
                 # Simple default value (not a FieldInfo)
                 if param.default == inspect.Parameter.empty:
@@ -401,6 +434,119 @@ def search_tool_info_impl(
         }
 
 
+def _get_tool_record(tool_id: int) -> Optional[Dict[str, Any]]:
+    """
+    Resolve a tool's DB record so constraints can be read from its ``params`` column.
+
+    Args:
+        tool_id: Tool ID
+
+    Returns:
+        Tool info dict
+    """
+    try:
+        tools = query_tools_by_ids([tool_id])
+    except Exception:
+        logger.warning("Failed to load tool %s for constraint validation; skipping", tool_id)
+        return None
+    return tools[0] if tools else None
+
+
+def _coerce_param_value(tool_name: str, param_name: str, value_type: str, raw_value: Any, constraint_key: str):
+    """
+    Coerce the initial value and validate its data type.
+
+    When the constraint key contains "length", the string length is returned.
+    Otherwise the value is converted to the type expected by the parameter.
+
+    Args:
+        tool_name: Tool name
+        param_name: Parameter name
+        value_type: Expected parameter type
+        raw_value: Raw value to coerce
+        constraint_key: Constraint key being validated
+
+    Returns:
+        The coerced value (string length, string, or numeric value)
+
+    Raises:
+        ValidationError: If the value cannot be coerced to the expected type
+    """
+    if "length" in constraint_key:
+        return len(str(raw_value))
+    elif value_type == "string":
+        return str(raw_value)
+    
+    try:
+        numeric_value = float(raw_value)
+    except (TypeError, ValueError):
+        raise ValidationError(
+            TOOL_PARAM_CONSTRAINT_ERROR_MESSAGES["valid_type"].format(
+                tool_name=tool_name, param_name=param_name, value_type=value_type
+            )
+        )
+    if value_type == "integer" and not numeric_value.is_integer():
+        raise ValidationError(
+            TOOL_PARAM_CONSTRAINT_ERROR_MESSAGES["integer"].format(
+                tool_name=tool_name, param_name=param_name
+            )
+        )
+    return numeric_value
+
+def _format_constraint_message(key: str, tool_name: str, param_name: str, value: Any) -> str:
+    """Format a tool parameter constraint message from its centralized template."""
+    return TOOL_PARAM_CONSTRAINT_ERROR_MESSAGES[key].format(
+        tool_name=tool_name, param_name=param_name, value=value
+    )
+
+
+def _apply_param_constraints(
+    tool_name: str, param_name: str, value_type: str, raw_value: Any, constraints: Dict[str, Any]
+):
+    """
+    Apply a parameter's DB-stored constraints to a single configured value.
+
+    Args:
+        tool_name: Tool name
+        param_name: Parameter name
+        value_type: Expected parameter type
+        raw_value: Raw value to validate
+        constraints: Constraint definitions to apply
+    """
+    if any(key in constraints for key in TOOL_PARAM_CONSTRAINT_KEYS):
+        for key, check_fn in TOOL_PARAM_CONSTRAINT_RULES:
+            if key not in constraints:
+                continue
+            value = _coerce_param_value(tool_name, param_name, value_type, raw_value, key)
+            if check_fn(value, constraints[key]):
+                raise ValidationError(_format_constraint_message(key, tool_name, param_name, constraints[key]))
+
+def _validate_tool_param_ranges(tool_id: int, params: Dict[str, Any]):
+    """
+    Validate configured parameter values against constraints stored in the DB ``params`` column.
+
+    Args:
+        tool_id: Tool ID
+        params: Configured parameter values
+    """
+    tool = _get_tool_record(tool_id)
+    if not tool:
+        return
+    tool_name = tool.get("name") or ""
+    for spec in tool.get("params") or []:
+        param_name = spec.get("name")
+        constraints = spec.get("constraints")
+        if not param_name or not constraints:
+            continue
+        raw_value = params.get(param_name)
+        # None means "not configured"; the DB layer drops it and the SDK falls back to its default.
+        if raw_value is None:
+            continue
+        _apply_param_constraints(
+            tool_name, param_name, spec.get("type") or "", raw_value, constraints
+        )
+
+
 def update_tool_info_impl(tool_info: ToolInstanceInfoRequest, tenant_id: str, user_id: str):
     """
     Update tool configuration information
@@ -485,6 +631,11 @@ def update_tool_info_impl(tool_info: ToolInstanceInfoRequest, tenant_id: str, us
                 params["kds_list"] = list(dict.fromkeys(hidden_existing + visible_submitted))
         tool_info.params = params
 
+    _validate_tool_param_ranges(
+        tool_info.tool_id,
+        dict(getattr(tool_info, "params", None) or {}),
+    )
+
     tool_instance = create_or_update_tool_by_tool_info(
         tool_info, tenant_id, user_id, version_no=version_no)
     return {
@@ -557,7 +708,9 @@ async def get_tool_from_remote_mcp_server(
                                      params=[],
                                      source=ToolSourceEnum.MCP.value,
                                      inputs=str(input_schema["properties"]),
-                                     output_type="string",
+                                     # MCP results may contain text, structured data, images, audio, or files.
+                                     # "object" matches the runtime adapter and avoids advertising every result as text.
+                                     output_type="object",
                                      class_name=sanitized_tool_name,
                                      usage=mcp_server_name,
                                      origin_name=tool.name,
@@ -637,6 +790,10 @@ async def update_tool_list(tenant_id: str, user_id: str):
 async def list_all_tools(tenant_id: str, labels: Optional[List[str]] = None):
     """
     List all tools for a given tenant, optionally filtered by labels (OR match).
+
+    Args:
+        tenant_id: Tenant ID
+        labels: Optional labels to filter tools by (OR match)
     """
     if labels:
         tools_info = query_tools_by_labels(tenant_id, labels)

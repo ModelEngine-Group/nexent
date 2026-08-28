@@ -20,7 +20,7 @@ export default function AgentVersionManage({ onClose }: AgentVersionManageProps)
   const currentAgentId = useAgentStore((state) => state.currentAgentId);
 
   const { agentVersionList, total, isLoading, invalidate: invalidateAgentVersionList } = useAgentVersionList(currentAgentId);
-  const { agentInfo, invalidate: invalidateAgentInfo } = useAgentInfo(currentAgentId);
+  const { agentInfo } = useAgentInfo(currentAgentId);
   
   const [compareModalOpen, setCompareModalOpen] = useState(false);
   const [compareLoading, setCompareLoading] = useState(false);
@@ -123,7 +123,7 @@ export default function AgentVersionManage({ onClose }: AgentVersionManageProps)
                 <Empty />
               </Flex>
             ) : (
-              <div className="flex flex-col gap-2">
+              <div className="flex flex-col gap-2 px-3">
                 {agentVersionList.map((version) => (
                   <VersionCardItem
                     key={version.version_no}

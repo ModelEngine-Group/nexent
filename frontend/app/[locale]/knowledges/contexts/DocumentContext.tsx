@@ -141,7 +141,11 @@ export const DocumentContext = createContext<{
     kbId: string,
     files: File[]
   ) => Promise<{ quota_status?: QuotaStatusResponse } | undefined>;
-  deleteDocument: (kbId: string, docId: string) => Promise<void>;
+  deleteDocument: (
+    kbId: string,
+    docId: string,
+    fileId?: string
+  ) => Promise<void>;
 }>({
   state: {
     documentsMap: {},
@@ -299,6 +303,17 @@ export const DocumentProvider: React.FC<DocumentProviderProps> = ({
         dispatch({ type: DOCUMENT_ACTION_TYPES.SET_UPLOAD_FILES, payload: [] });
         return uploadResult;
       } catch (error) {
+        // A rejected upload can still have a durable FAILED lifecycle row;
+        // refresh so the user can see its timestamp and reason immediately.
+        try {
+          const latestDocuments = await knowledgeBaseService.getAllFiles(kbId);
+          dispatch({
+            type: DOCUMENT_ACTION_TYPES.FETCH_SUCCESS,
+            payload: { kbId, documents: latestDocuments },
+          });
+        } catch (refreshError) {
+          log.error("Failed to refresh documents after upload error", refreshError);
+        }
         dispatch({
           type: DOCUMENT_ACTION_TYPES.ERROR,
           payload: `${t("document.error.upload")}. ${t("document.error.retry")}`,
@@ -317,9 +332,9 @@ export const DocumentProvider: React.FC<DocumentProviderProps> = ({
 
   // Delete a document
   const deleteDocument = useCallback(
-    async (kbId: string, docId: string) => {
+    async (kbId: string, docId: string, fileId?: string) => {
       try {
-        await knowledgeBaseService.deleteDocument(docId, kbId);
+        await knowledgeBaseService.deleteDocument(docId, kbId, fileId);
         dispatch({
           type: DOCUMENT_ACTION_TYPES.DELETE_DOCUMENT,
           payload: { kbId, docId },

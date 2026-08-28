@@ -34,6 +34,16 @@ logger = logging.getLogger("agent_automation.tool_adapter")
 DEFAULT_AUTOMATION_TIMEZONE = "Asia/Shanghai"
 
 
+def _strip_runtime_time_prefix(message: str) -> str:
+    """Remove the runtime-only current-time header from the user request."""
+    normalized = str(message or "")
+    if normalized.startswith("[Current time:"):
+        close_index = normalized.find("]", len("[Current time:"))
+        if close_index >= 0:
+            return normalized[close_index + 1:].lstrip("\n").strip()
+    return normalized
+
+
 def _run_coroutine(coro):
     try:
         asyncio.get_running_loop()
@@ -130,7 +140,8 @@ class AgentLoopAutomationToolAdapter:
         # The model argument is intentionally not forwarded to extraction. The
         # persisted current user message is the authoritative business input.
         del request_text
-        language = detect_instruction_language(context.user_message)
+        user_message = _strip_runtime_time_prefix(context.user_message)
+        language = detect_instruction_language(user_message)
         if context.source_message_id is None:
             message = (
                 "本轮消息尚未完成持久化，无法安全创建定时任务提案。请稍后重试。"
@@ -160,7 +171,7 @@ class AgentLoopAutomationToolAdapter:
         request = AutomationProposalCreateRequest(
             conversation_id=context.conversation_id,
             agent_id=context.agent_id,
-            message=context.user_message,
+            message=user_message,
             timezone=context.timezone or DEFAULT_AUTOMATION_TIMEZONE,
             agent_version_no=context.agent_version_no,
             model_id=context.model_id,

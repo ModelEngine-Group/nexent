@@ -5,7 +5,8 @@ import importlib.machinery
 from unittest.mock import patch, MagicMock
 
 import pytest
-from fastapi import HTTPException
+from fastapi import FastAPI, HTTPException
+from fastapi.testclient import TestClient
 
 # Dynamically determine the backend path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -47,9 +48,8 @@ from backend.apps.conversation_management_app import (
     generate_conversation_title_endpoint,
     update_opinion_endpoint,
     get_message_id_endpoint,
-    update_conversation_knowledge_scope_endpoint,
+    router,
 )
-from consts.exceptions import ValidationError
 
 
 # -----------------------------
@@ -61,7 +61,7 @@ def conversation_mocks():
     """Provide fresh mocks for each conversation management test"""
     with patch('backend.apps.conversation_management_app.get_current_user_id') as mock_get_current_user_id, \
             patch('backend.apps.conversation_management_app.create_new_conversation') as mock_create_new_conv, \
-            patch('backend.apps.conversation_management_app.get_conversation_list_service') as mock_get_conv_list, \
+            patch('backend.apps.conversation_management_app.get_conversation_list_page') as mock_get_conv_list, \
             patch('backend.apps.conversation_management_app.rename_conversation_service') as mock_rename_conv, \
             patch('backend.apps.conversation_management_app.logging') as mock_logging, \
             patch('backend.apps.conversation_management_app.delete_conversation_service') as mock_delete_conv, \
@@ -70,7 +70,6 @@ def conversation_mocks():
             patch('backend.apps.conversation_management_app.generate_conversation_title_service') as mock_generate_title_service, \
             patch('backend.apps.conversation_management_app.update_message_opinion_service') as mock_update_opinion_service, \
             patch('backend.apps.conversation_management_app.get_message_id_by_index_impl') as mock_get_msg_id_impl, \
-            patch('backend.apps.conversation_management_app.update_conversation_knowledge_scope_service') as mock_update_scope_service, \
             patch('backend.apps.conversation_management_app.get_current_user_info') as mock_get_user_info:
 
         yield {
@@ -85,7 +84,6 @@ def conversation_mocks():
             'generate_title_service': mock_generate_title_service,
             'update_opinion_service': mock_update_opinion_service,
             'get_message_id_impl': mock_get_msg_id_impl,
-            'update_scope_service': mock_update_scope_service,
             'get_user_info': mock_get_user_info,
         }
 
@@ -163,18 +161,97 @@ async def test_list_conversations_success(conversation_mocks):
 
     conversation_mocks['get_current_user_id'].return_value = (
         "user_id", "tenant_id")
-    conversation_mocks['get_conversation_list'].return_value = dummy_list
+    dummy_page = {
+        "items": dummy_list,
+        "metadata": {"total": 2, "today": 2, "last_7_days": 0, "older": 0},
+    }
+    conversation_mocks['get_conversation_list'].return_value = dummy_page
 
     # Act
-    result = await list_conversations_endpoint(authorization=mock_auth_header)
+    result = await list_conversations_endpoint(
+        today_start_ms=2000,
+        week_start_ms=1000,
+        authorization=mock_auth_header,
+    )
 
     # Assert
     assert result.code == 0
-    assert result.data == dummy_list
+    assert result.data == dummy_page
     conversation_mocks['get_current_user_id'].assert_called_once_with(
         mock_auth_header)
     conversation_mocks['get_conversation_list'].assert_called_once_with(
-        "user_id")
+        user_id="user_id",
+        today_start_ms=2000,
+        week_start_ms=1000,
+        limit=None,
+        offset=0,
+    )
+
+
+@pytest.mark.asyncio
+async def test_list_conversations_forwards_pagination(conversation_mocks):
+    """Verify explicit pagination is forwarded to the service."""
+    conversation_mocks['get_current_user_id'].return_value = (
+        "user_id", "tenant_id")
+    conversation_mocks['get_conversation_list'].return_value = []
+
+    result = await list_conversations_endpoint(
+        authorization="Bearer test-token",
+        today_start_ms=2000,
+        week_start_ms=1000,
+        limit=10,
+        offset=20,
+    )
+
+    assert result.code == 0
+    assert result.data == []
+    conversation_mocks['get_conversation_list'].assert_called_once_with(
+        user_id="user_id",
+        today_start_ms=2000,
+        week_start_ms=1000,
+        limit=10,
+        offset=20,
+    )
+
+
+@pytest.mark.asyncio
+async def test_list_conversations_forwards_offset_without_limit(conversation_mocks):
+    """Verify offset remains effective for compatibility requests without a limit."""
+    conversation_mocks['get_current_user_id'].return_value = (
+        "user_id", "tenant_id")
+    conversation_mocks['get_conversation_list'].return_value = []
+
+    result = await list_conversations_endpoint(
+        authorization="Bearer test-token",
+        today_start_ms=2000,
+        week_start_ms=1000,
+        offset=20,
+        limit=None,
+    )
+
+    assert result.code == 0
+    assert result.data == []
+    conversation_mocks['get_conversation_list'].assert_called_once_with(
+        user_id="user_id",
+        today_start_ms=2000,
+        week_start_ms=1000,
+        limit=None,
+        offset=20,
+    )
+
+
+@pytest.mark.parametrize("query", ["offset=-1", "limit=0", "limit=101"])
+def test_list_conversations_rejects_invalid_pagination(query, conversation_mocks):
+    """Verify FastAPI rejects pagination values outside the public contract."""
+    app = FastAPI()
+    app.include_router(router)
+
+    response = TestClient(app).get(
+        f"/conversation/list?today_start_ms=2000&week_start_ms=1000&{query}"
+    )
+
+    assert response.status_code == 422
+    conversation_mocks['get_conversation_list'].assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -186,9 +263,13 @@ async def test_list_conversations_unauthorized(conversation_mocks):
 
     # Act / Assert
     with pytest.raises(HTTPException) as exc_info:
-        await list_conversations_endpoint(authorization=mock_auth_header)
+        await list_conversations_endpoint(
+            today_start_ms=2000,
+            week_start_ms=1000,
+            authorization=mock_auth_header,
+        )
 
-    assert exc_info.value.status_code == 500
+    assert exc_info.value.status_code == 401
     assert "Unauthorized access" in str(exc_info.value.detail)
 
 
@@ -331,53 +412,6 @@ async def test_get_history_failure(conversation_mocks):
 
     assert exc_info.value.status_code == 500
     conversation_mocks['logging'].error.assert_called_once()
-
-
-# get_sources_endpoint
-
-
-@pytest.mark.asyncio
-async def test_update_knowledge_scope_returns_preview(conversation_mocks):
-    conversation_mocks['get_current_user_id'].return_value = (
-        "user_id", "tenant_id"
-    )
-    payload = {
-        "desired_scope": {"schema_version": 1},
-        "effective_preview": {"local": {}, "aidp": {}},
-        "warnings": [],
-    }
-    conversation_mocks['update_scope_service'].return_value = payload
-    request_obj = MagicMock()
-    request_obj.scope.model_dump.return_value = {"schema_version": 1}
-
-    result = await update_conversation_knowledge_scope_endpoint(
-        1, request_obj, authorization="Bearer test-token"
-    )
-
-    assert result.code == 0
-    assert result.data == payload
-
-
-@pytest.mark.asyncio
-async def test_update_knowledge_scope_maps_validation_error_to_422(
-    conversation_mocks,
-):
-    conversation_mocks['get_current_user_id'].return_value = (
-        "user_id", "tenant_id"
-    )
-    conversation_mocks['update_scope_service'].side_effect = ValidationError(
-        "scope invalid"
-    )
-    request_obj = MagicMock()
-    request_obj.scope.model_dump.return_value = {"schema_version": 1}
-
-    with pytest.raises(HTTPException) as exc_info:
-        await update_conversation_knowledge_scope_endpoint(
-            1, request_obj, authorization="Bearer test-token"
-        )
-
-    assert exc_info.value.status_code == 422
-    assert exc_info.value.detail == "scope invalid"
 
 
 # get_sources_endpoint
@@ -527,44 +561,71 @@ async def test_get_message_id_failure(conversation_mocks):
     conversation_mocks['logging'].error.assert_called_once()
 
 
-@pytest.mark.asyncio
-async def test_update_knowledge_scope_maps_not_found_to_404(
-    conversation_mocks,
-):
-    from consts.exceptions import ConversationNotFoundError
-
-    conversation_mocks['get_current_user_id'].return_value = (
-        "user_id", "tenant_id"
-    )
-    conversation_mocks['update_scope_service'].side_effect = ConversationNotFoundError(
-        "conversation missing"
-    )
-    request_obj = MagicMock()
-    request_obj.scope.model_dump.return_value = {"schema_version": 1}
-
-    with pytest.raises(HTTPException) as exc_info:
-        await update_conversation_knowledge_scope_endpoint(
-            404, request_obj, authorization="Bearer test-token"
-        )
-
-    assert exc_info.value.status_code == 404
-    assert exc_info.value.detail == "conversation missing"
+# TokenExpiredError -> 401 mapping
 
 
 @pytest.mark.asyncio
-async def test_update_knowledge_scope_maps_internal_error_to_500(
-    conversation_mocks,
-):
-    conversation_mocks['get_current_user_id'].return_value = (
-        "user_id", "tenant_id"
-    )
-    conversation_mocks['update_scope_service'].side_effect = RuntimeError("db down")
+async def test_conversation_endpoints_token_expired(conversation_mocks):
+    """Every conversation management endpoint maps an expired token to 401."""
+    from consts.exceptions import TokenExpiredError
+
     request_obj = MagicMock()
-    request_obj.scope.model_dump.return_value = {"schema_version": 1}
+    request_obj.title = "t"
+    request_obj.name = "n"
+    request_obj.conversation_id = 1
+    request_obj.question = "q"
+
+    error = TokenExpiredError("expired")
+    cases = [
+        (create_new_conversation_endpoint, (request_obj,), {"authorization": "Bearer x"}),
+        (list_conversations_endpoint, (), {"today_start_ms": 0, "week_start_ms": 0, "authorization": "Bearer x"}),
+        (rename_conversation_endpoint, (request_obj,), {"authorization": "Bearer x"}),
+        (delete_conversation_endpoint, (1,), {"authorization": "Bearer x"}),
+        (get_conversation_history_endpoint, (1,), {"authorization": "Bearer x"}),
+        (get_sources_endpoint, ({"conversation_id": 1, "message_id": 2},), {"authorization": "Bearer x"}),
+    ]
+
+    for endpoint, args, kwargs in cases:
+        conversation_mocks['get_current_user_id'].side_effect = error
+        with pytest.raises(HTTPException) as exc_info:
+            await endpoint(*args, **kwargs)
+        assert exc_info.value.status_code == 401
+        conversation_mocks['get_current_user_id'].reset_mock()
+
+
+@pytest.mark.asyncio
+async def test_generate_conversation_title_token_expired(conversation_mocks):
+    """Expired token on title generation maps to 401."""
+    from consts.exceptions import TokenExpiredError
+
+    request_obj = MagicMock()
+    request_obj.conversation_id = 1
+    request_obj.question = "q"
+
+    conversation_mocks['get_user_info'].side_effect = TokenExpiredError(
+        "expired")
+
+    with pytest.raises(HTTPException) as exc_info:
+        await generate_conversation_title_endpoint(
+            request_obj, MagicMock(), authorization="Bearer x")
+
+    assert exc_info.value.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_update_conversation_knowledge_scope_token_expired(conversation_mocks):
+    """Expired token on knowledge-scope update maps to 401."""
+    from backend.apps.conversation_management_app import update_conversation_knowledge_scope_endpoint
+    from consts.exceptions import TokenExpiredError
+
+    request_obj = MagicMock()
+    request_obj.scope = None
+
+    conversation_mocks['get_current_user_id'].side_effect = TokenExpiredError(
+        "expired")
 
     with pytest.raises(HTTPException) as exc_info:
         await update_conversation_knowledge_scope_endpoint(
-            1, request_obj, authorization="Bearer test-token"
-        )
+            1, request_obj, authorization="Bearer x")
 
-    assert exc_info.value.status_code == 500
+    assert exc_info.value.status_code == 401

@@ -117,6 +117,12 @@ class UnauthorizedError(Exception):
     pass
 
 
+class TokenExpiredError(UnauthorizedError):
+    """Raised when the caller's session/JWT/access token is missing, invalid, or expired."""
+
+    pass
+
+
 class ForbiddenError(Exception):
     """Raised when an authenticated user lacks permission."""
 

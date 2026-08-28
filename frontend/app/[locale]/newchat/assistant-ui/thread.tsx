@@ -80,13 +80,13 @@ import { ToolRecommendations } from "../ui/tool-recommendations";
 import { AgentDraftCard } from "../ui/agent-draft-card";
 import { RequirementClarificationCard } from "../ui/requirement-clarification-card";
 import { InstalledResourceBindingCard } from "../ui/installed-resource-binding-card";
+import { SuggestedResourceInstallationCard } from "../ui/suggested-resource-installation-card";
 import {
   ToolGroupContent,
   ToolGroupRoot,
   ToolGroupTrigger,
 } from "../ui/tool-group";
 import {
-  getAgentRunTime,
   searchSourcesRegistry,
   conversationSourcesRegistry,
   skillFileUploadsRegistry,
@@ -94,6 +94,11 @@ import {
   type Nl2SkillFileCardData,
   type VerificationContent,
 } from "../adapter/remote-chat-model-adapter";
+import {
+  formatMessageDate,
+  formatMessageTime,
+  shouldShowDateSeparator,
+} from "@/lib/messageDate";
 import { VerificationPanel } from "../ui/verification-panel";
 import { cn } from "@/lib/utils";
 import { AuthenticatedImage } from "../ui/authenticated-image";
@@ -111,6 +116,7 @@ import type { SkillFileContent } from "@/types/skill";
 export interface ThreadProps {
   agent: Agent | PublishedAgent;
   generatedTitle?: string;
+  welcomeTitle?: string;
   conversationId?: number;
   onBack?: () => void;
   selectedModelId?: string;
@@ -179,6 +185,7 @@ const useAgentModels = (
 export const Thread: FC<ThreadProps> = ({
   agent,
   generatedTitle,
+  welcomeTitle,
   conversationId,
   onBack,
   selectedModelId,
@@ -398,6 +405,7 @@ export const Thread: FC<ThreadProps> = ({
     <SourcesPanelProvider value={panelContextValue}>
       <ThreadView
         agent={agent}
+        welcomeTitle={welcomeTitle}
         onBack={onBack}
         models={models}
         selectedModelId={selectedModelId}
@@ -493,6 +501,7 @@ export const Thread: FC<ThreadProps> = ({
 
 interface ThreadViewProps {
   agent: Agent | PublishedAgent;
+  welcomeTitle?: string;
   onBack?: () => void;
   models: readonly ModelOption[];
   selectedModelId?: string;
@@ -536,6 +545,7 @@ interface ThreadViewProps {
 
 const ThreadView: FC<ThreadViewProps> = ({
   agent,
+  welcomeTitle,
   onBack,
   models,
   selectedModelId,
@@ -696,7 +706,7 @@ const ThreadView: FC<ThreadViewProps> = ({
               onToggleShareMessage={onToggleShareMessage}
             />
           ) : (
-            <ThreadWelcomeContent agent={agent} />
+            <ThreadWelcomeContent agent={agent} title={welcomeTitle} />
           )}
         </ThreadPrimitive.Viewport>
 
@@ -797,9 +807,13 @@ export const ReadOnlyConversation: FC<{
 
 interface ThreadWelcomeContentProps {
   agent: Agent | PublishedAgent;
+  title?: string;
 }
 
-const ThreadWelcomeContent: FC<ThreadWelcomeContentProps> = ({ agent }) => {
+const ThreadWelcomeContent: FC<ThreadWelcomeContentProps> = ({
+  agent,
+  title,
+}) => {
   const aui = useAui();
   const { t } = useTranslation();
   const Icon = getAgentIcon(agent);
@@ -823,7 +837,7 @@ const ThreadWelcomeContent: FC<ThreadWelcomeContentProps> = ({ agent }) => {
 
           <div className="text-center">
             <h1 className="text-balance text-2xl font-bold text-foreground md:text-3xl">
-              {t("chat.thread.helloAgent", { agent: displayName })}
+              {title ?? t("chat.thread.helloAgent", { agent: displayName })}
             </h1>
             <p className="mx-auto mt-3 max-w-xl text-pretty text-sm leading-relaxed text-muted-foreground">
               {agent.greeting_message || agent.description}
@@ -1061,6 +1075,67 @@ const AssistantCompletionIndicator: FC = () => {
   );
 };
 
+type DatabaseTimeMetadata = {
+  databaseCreateTime?: number;
+};
+
+const getDatabaseCreateTime = (metadata: unknown): number | undefined => {
+  if (!metadata || typeof metadata !== "object") return undefined;
+  const custom = (metadata as { custom?: DatabaseTimeMetadata }).custom;
+  return custom?.databaseCreateTime;
+};
+
+const MessageTimestamp: FC<{ className?: string }> = ({ className }) => {
+  const createTime = useAuiState((s) =>
+    getDatabaseCreateTime(s.message.metadata)
+  );
+  const displayTime = formatMessageTime(createTime);
+
+  if (!displayTime) return null;
+
+  return (
+    <time
+      dateTime={new Date(createTime!).toISOString()}
+      className={cn("text-xs text-muted-foreground", className)}
+    >
+      {displayTime}
+    </time>
+  );
+};
+
+const MessageDateSeparator: FC = () => {
+  const { i18n } = useTranslation();
+  const createTime = useAuiState((s) =>
+    getDatabaseCreateTime(s.message.metadata)
+  );
+  const previousCreateTime = useAuiState((s) => {
+    if (s.message.index <= 0) return undefined;
+    return getDatabaseCreateTime(
+      s.thread.messages.at(s.message.index - 1)?.metadata
+    );
+  });
+
+  if (!shouldShowDateSeparator(createTime, previousCreateTime)) return null;
+
+  const label = formatMessageDate(
+    createTime,
+    i18n.resolvedLanguage ?? i18n.language
+  );
+  if (!label) return null;
+
+  return (
+    <div
+      role="separator"
+      aria-label={label}
+      className="col-span-full !col-start-1 mx-auto my-4 flex w-full max-w-(--thread-max-width) items-center gap-3 px-2 text-xs text-muted-foreground"
+    >
+      <span className="h-px flex-1 bg-border" aria-hidden />
+      <time dateTime={new Date(createTime!).toISOString()}>{label}</time>
+      <span className="h-px flex-1 bg-border" aria-hidden />
+    </div>
+  );
+};
+
 const AssistantMessage: FC<{
   agent: Agent | PublishedAgent;
   readOnly?: boolean;
@@ -1076,7 +1151,6 @@ const AssistantMessage: FC<{
   const AgentIcon = getAgentIcon(agent);
   const agentName = agent.display_name || agent.name;
 
-  const agentRunTime = getAgentRunTime();
   const nl2a = useAuiState(
     (s) =>
       (s.message.metadata?.custom as { nl2a?: Nl2aMessage } | undefined)?.nl2a
@@ -1105,6 +1179,7 @@ const AssistantMessage: FC<{
       data-role="assistant"
       className="fade-in slide-in-from-bottom-1 animate-in relative mx-auto min-w-0 w-full max-w-(--thread-max-width) duration-150"
     >
+      <MessageDateSeparator />
       <div
         data-slot="aui_assistant-message-content"
         className="text-foreground min-w-0 px-2 pt-3 pb-1 leading-relaxed wrap-break-word"
@@ -1123,16 +1198,7 @@ const AssistantMessage: FC<{
             </span>
             <AssistantCompletionIndicator />
           </div>
-          {agentRunTime && (
-            <span
-              data-slot="aui_assistant-message-run-time"
-              className="text-xs text-muted-foreground"
-              aria-label={t("chat.thread.runStartedAt", { time: agentRunTime })}
-              title={t("chat.thread.runStartedAt", { time: agentRunTime })}
-            >
-              {agentRunTime}
-            </span>
-          )}
+          <MessageTimestamp />
         </header>
         <MessagePrimitive.GroupedParts
           groupBy={(part) => {
@@ -1148,8 +1214,20 @@ const AssistantMessage: FC<{
             ).metadata;
             const subagentId = meta?.subagentId;
             const runId = meta?.runId;
-            const chainPath: `group-${string}`[] =
-              part.type === "reasoning"
+            const isImagePart =
+              (part.type === "image" &&
+                Boolean((part as { image?: string }).image)) ||
+              (part.type === "text" &&
+                Boolean(
+                  (part as {
+                    isSearchImage?: boolean;
+                    imageSource?: SourcePartLike;
+                  }).isSearchImage &&
+                    (part as { imageSource?: SourcePartLike }).imageSource
+                ));
+            const chainPath: `group-${string}`[] = isImagePart
+              ? ["group-image"]
+              : part.type === "reasoning"
                 ? ["group-chainOfThought", "group-reasoning"]
                 : part.type === "tool-call"
                   ? ["group-chainOfThought", "group-tool"]
@@ -1203,6 +1281,12 @@ const AssistantMessage: FC<{
             }
 
             switch (part.type) {
+              case "group-image":
+                return (
+                  <div className="grid grid-cols-1 gap-3 py-2 sm:grid-cols-3">
+                    {children}
+                  </div>
+                );
               case "group-chainOfThought":
                 return <div data-slot="aui_chain-of-thought">{children}</div>;
               case "group-tool":
@@ -1340,6 +1424,11 @@ const AssistantMessage: FC<{
           <ToolRecommendations payload={nl2a.content} disabled={readOnly} />
         ) : nl2a?.content.subtype === "agent_draft" ? (
           <AgentDraftCard draft={nl2a.content} disabled={readOnly} />
+        ) : nl2a?.content.subtype === "suggested_resource_installation" ? (
+          <SuggestedResourceInstallationCard
+            payload={nl2a.content}
+            disabled={readOnly}
+          />
         ) : nl2a?.content.subtype === "installed_resource_binding" ? (
           <InstalledResourceBindingCard
             payload={nl2a.content}
@@ -1444,6 +1533,7 @@ const UserMessage: FC<{
       data-role="user"
       className="relative fade-in slide-in-from-bottom-1 animate-in mx-auto grid w-full max-w-(--thread-max-width) auto-rows-auto grid-cols-[minmax(72px,1fr)_auto] content-start gap-y-2 px-2 duration-150 [&:where(>*)]:col-start-2"
     >
+      <MessageDateSeparator />
       {shareMode && backendMessageId !== undefined && (
         <label className="absolute left-2 top-1/2 z-10 flex -translate-y-1/2 cursor-pointer items-center justify-center">
           <input
@@ -1479,6 +1569,7 @@ const UserMessage: FC<{
             </div>
           )}
         </div>
+        <MessageTimestamp className="self-end" />
       </div>
 
       {!readOnly && (
@@ -1543,7 +1634,7 @@ const GlobalSearchImage: FC<{ source: SourcePartLike }> = ({ source }) => {
     source.title && source.title !== imageUrl ? source.title : undefined;
   return (
     <figure
-      className="aui-global-search-image w-full max-w-xl overflow-hidden rounded-md border bg-muted/30"
+      className="aui-global-search-image min-w-0 overflow-hidden rounded-md border bg-muted/30"
       title={imageUrl}
     >
       <AuthenticatedImage
@@ -1552,7 +1643,7 @@ const GlobalSearchImage: FC<{ source: SourcePartLike }> = ({ source }) => {
         loading="lazy"
         preview
         proxy
-        className="max-h-[28rem] w-full bg-muted/50 object-contain"
+        className="aspect-[4/3] max-h-56 w-full bg-muted/50 object-cover"
       />
       {displayTitle || source.text ? (
         <figcaption className="border-t bg-card px-3 py-2">

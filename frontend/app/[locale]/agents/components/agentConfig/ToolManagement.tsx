@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect, useMemo } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Tooltip } from "antd";
 import { useToolList } from "@/hooks/agent/useToolList";
@@ -10,17 +10,18 @@ import { useConfig } from "@/hooks/useConfig";
 import { ChevronRight, Settings, X, AlertTriangle } from "lucide-react";
 import type { Tool, ToolParam } from "@/types/agentConfig";
 import { TOOL_SOURCE_TYPES } from "@/const/agentConfig";
+import { isManagedKnowledgeTool } from "@/lib/managedKnowledgeTools";
 import ToolConfigModal from "./tool/ToolConfigModal";
+import { useMergedToolParams } from "./tool/useMergedToolParams";
 import {
-  TOOLS_REQUIRING_KB_SELECTION,
   TOOLS_REQUIRING_EMBEDDING,
   TOOLS_REQUIRING_IMAGE_UNDERSTANDING,
   TOOLS_REQUIRING_AUDIO_UNDERSTANDING,
   TOOLS_REQUIRING_VIDEO_UNDERSTANDING,
   getToolKbType,
   getToolLabels,
+  mergeCanonicalTool,
 } from "./tool/utils";
-import log from "@/lib/logger";
 
 // --- Local tool helpers (not in utils) ---
 
@@ -98,30 +99,19 @@ export default function ToolManagement({
   // Canonical tool list (with `inputs`) — used to backfill any missing
   // fields on the stored tool object so the tool test panel always
   // operates in parsed mode and shows the manual-input toggle.
-  const { availableTools, isSuccess: toolsLoaded } = useToolList({
+  const { availableTools } = useToolList({
     enabled: true,
   });
 
-  // Reconcile the selected-tools draft against the canonical tool list.
-  // When an MCP is deleted, its tools are marked unavailable and dropped from
-  // /tool/list; without this reconciliation those stale selections would stay
-  // visible in the panel (and be re-persisted on save) until a page refresh.
-  // Gated on the tool list having loaded so we never blank out the panel while
-  // `availableTools` is still empty on the initial fetch.
-  useEffect(() => {
-    if (!toolsLoaded) return;
-    const availableIds = new Set(availableTools.map((t: any) => String(t.id)));
-    const current = useAgentStore.getState().editedAgent?.tools ?? [];
-    const next = current.filter((t) => availableIds.has(String(t.id)));
-    if (next.length !== current.length) {
-      updateTools(next);
-    }
-  }, [availableTools, toolsLoaded, selectedTools, updateTools]);
+  // Tool availability is refreshed independently from the agent draft. Do not
+  // persist a cleanup during initialization because it is indistinguishable
+  // from a user tool edit and can race with agent switching.
 
   // Keep system-managed tools in the draft for persistence, but omit them from
   // the user-facing selected-tools list.
   const visibleSelectedTools = useMemo(() => {
     return selectedTools.filter((tool) => {
+      if (isManagedKnowledgeTool(tool)) return false;
       const canonicalTool = availableTools.find(
         (availableTool: Tool) => String(availableTool.id) === String(tool.id)
       );
@@ -132,42 +122,7 @@ export default function ToolManagement({
   // --- Group by source → category ---
   const grouped = groupToolsBySource(visibleSelectedTools);
 
-  const mergeParams = useCallback(
-    async (tool: Tool, forceFetch?: boolean): Promise<ToolParam[]> => {
-      const params = tool.initParams || [];
-      // If tool already has stored params in the agent config store, the user's
-      // unsaved modifications are already reflected in those params — skip the
-      // API call to avoid overwriting them with stale server data.
-      const hasStoredParams = params.some(
-        (p) => p.value !== undefined && p.value !== null && p.value !== ""
-      );
-      if (!forceFetch && hasStoredParams) {
-        return params;
-      }
-      if (!currentAgentId) return params;
-      try {
-        const { searchToolConfig } =
-          await import("@/services/agentConfigService");
-        const instance = await searchToolConfig(
-          parseInt(tool.id),
-          currentAgentId
-        );
-        if (instance.success && instance.data) {
-          return params.map((p) => ({
-            ...p,
-            value:
-              instance.data?.params?.[p.name] !== undefined
-                ? instance.data.params[p.name]
-                : p.value,
-          }));
-        }
-      } catch (err) {
-        log.error("mergeParams:", err);
-      }
-      return params;
-    },
-    [currentAgentId]
-  );
+  const mergeParams = useMergedToolParams(currentAgentId);
 
   const openConfig = useCallback(
     async (tool: Tool) => {
@@ -180,21 +135,9 @@ export default function ToolManagement({
       const configuredTool = configured
         ? { ...tool, ...configured, initParams: configured.initParams }
         : tool;
-      // Backfill fields that may be missing from the stored tool (e.g.
-      // `inputs`, which is required for the tool test panel to enter
-      // parsed mode). The canonical source for these fields is the
-      // tool list returned by /tool/list.
-      const canonical = availableTools.find(
-        (t: any) => parseInt(String(t.id)) === parseInt(tool.id)
-      );
-      const toolToUse = canonical
-        ? {
-            ...configuredTool,
-            ...canonical,
-            initParams: configuredTool.initParams,
-          }
-        : configuredTool;
+      const toolToUse = mergeCanonicalTool(configuredTool, availableTools);
       const merged = await mergeParams(toolToUse);
+      if (!merged) return;
       setConfigTool(toolToUse);
       setConfigParams(merged);
       setModalOpen(true);
@@ -407,14 +350,14 @@ function groupToolsBySource(tools: Tool[]): SourceGroup[] {
     SourceKey,
     (typeof SOURCE_META)[SourceKey],
   ][]) {
-    const srcTools = tools.filter((t: any) => t.source === meta.sourceValue);
+    const srcTools = tools.filter((tool) => tool.source === meta.sourceValue);
     if (srcTools.length === 0) continue;
     const catMap = new Map<string, Tool[]>();
     for (const tool of srcTools) {
       const cat =
         key === "mcp"
-          ? (tool as any).usage?.trim() || "toolPool.category.other"
-          : (tool as any).category?.trim() || "toolPool.category.other";
+          ? tool.usage?.trim() || "toolPool.category.other"
+          : tool.category?.trim() || "toolPool.category.other";
       if (!catMap.has(cat)) catMap.set(cat, []);
       catMap.get(cat)!.push(tool);
     }

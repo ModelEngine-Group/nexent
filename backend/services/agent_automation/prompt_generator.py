@@ -227,12 +227,14 @@ class LLMAutomationPromptStrategy(AutomationPromptStrategy):
         user_key: str,
     ) -> str:
         from nexent.core.models import OpenAIModel
+        from nexent.core.utils.observer import MessageObserver
         from utils.config_utils import get_model_name_from_config
 
         prompt_template = get_prompt_template("agent_automation", context.language)
         values = {"instruction": context.instruction.strip()}
         user_prompt = Template(prompt_template[user_key], undefined=StrictUndefined).render(**values).strip()
         llm = OpenAIModel(
+            observer=MessageObserver(),
             model_id=get_model_name_from_config(self._model_config) if self._model_config.get("model_name") else "",
             api_base=self._model_config.get("base_url", ""),
             api_key=self._model_config.get("api_key", ""),

@@ -6,6 +6,7 @@ import asyncio
 from typing import Any, AsyncIterator
 
 from nexent.core.models import OpenAILongContextModel, OpenAIModel
+from nexent.core.models.retry import DEFAULT_MODEL_RETRY
 
 from ...model_context import LLMContext
 from ...multimodal_adapter import ModelInfo
@@ -56,6 +57,7 @@ class OpenAILLMAdapter(LLMAdapter, HttpTransportMixin):
             kwargs["top_p"] = ctx.top_p
         if ctx.stream is not None:
             kwargs["stream"] = ctx.stream
+        kwargs["retry_config"] = DEFAULT_MODEL_RETRY
         self._model = OpenAIModel(**kwargs)
 
     async def invoke(self, request: LLMRequest) -> Any:
@@ -135,6 +137,7 @@ class OpenAILongContextLLMAdapter(OpenAILLMAdapter):
             timeout_seconds=ctx.timeout_seconds,
             extra_body=ctx.extra_body,
             max_output_tokens=ctx.max_output_tokens,
+            retry_config=DEFAULT_MODEL_RETRY,
         )
 
     def analyze_long_text(

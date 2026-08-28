@@ -69,6 +69,7 @@ def _coerce_choice(raw: str, valid: set, default: str, label: str) -> str:
 
 class AidpSearchTool(Tool):
     name = "aidp_search"
+    is_user_selectable: bool = False
     description = (
         "Performs a multimodal search on AIDP knowledge bases using FusionSearch. "
         "Returns text, table, and image chunks with title and text content. "
@@ -172,8 +173,8 @@ class AidpSearchTool(Tool):
         reranking_mode: str = Field(default="performance", description="Reranking mode"),
         rewrite_enable: bool = Field(default=False, description="Enable query rewrite"),
         related_search_enable: bool = Field(default=False, description="Enable related search"),
-        score_threshold: float = Field(default=0.0, description="Score threshold 0-1"),
-        top_k: int = Field(default=10, description="Top K results"),
+        score_threshold: float = Field(default=0.0, description="Score threshold 0-1", ge=0.0, le=1.0),
+        top_k: int = Field(default=10, description="Top K results", ge=1, le=100),
         multi_modal: bool = Field(default=True, description="Return multimodal chunks"),
         observer: MessageObserver = Field(default=None, exclude=True),
     ):

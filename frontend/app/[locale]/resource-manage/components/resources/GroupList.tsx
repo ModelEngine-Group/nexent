@@ -9,15 +9,15 @@ import {
   Modal,
   Form,
   Input,
-  Popconfirm,
   message,
   Select,
-  Tooltip
+  Tooltip,
 } from "antd";
 import { Edit, Trash2 } from "lucide-react";
 import { ColumnsType } from "antd/es/table";
 import { useGroupList } from "@/hooks/group/useGroupList";
 import { useUserList } from "@/hooks/user/useUserList";
+import { useConfirmModal } from "@/hooks/useConfirmModal";
 import {
   createGroup,
   updateGroup,
@@ -33,14 +33,21 @@ import {
 import { type User } from "@/services/userService";
 
 export default function GroupList({ tenantId }: { tenantId: string | null }) {
+  const { confirm } = useConfirmModal();
   const { t } = useTranslation("common");
   const queryClient = useQueryClient();
 
   // Pagination state
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
+  const [keyword, setKeyword] = useState("");
 
-  const { data, isLoading, refetch } = useGroupList(tenantId, page, pageSize);
+  const { data, isLoading, refetch } = useGroupList(
+    tenantId,
+    page,
+    pageSize,
+    keyword
+  );
   const { data: userData, refetch: refetchUsers } = useUserList(
     tenantId
     // Omit page and pageSize to get all users for member management
@@ -49,6 +56,7 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
   // Reset page to 1 when tenantId changes
   useEffect(() => {
     setPage(1);
+    setKeyword("");
   }, [tenantId]);
 
   const groups = data?.groups || [];
@@ -143,7 +151,8 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
   const handleSubmit = async () => {
     try {
       const values = await form.validateFields();
-      if (!tenantId) throw new Error(t("tenantResources.groups.noTenantSelected"));
+      if (!tenantId)
+        throw new Error(t("tenantResources.groups.noTenantSelected"));
 
       if (editingGroup) {
         const updateData: UpdateGroupRequest = {
@@ -165,8 +174,9 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
       queryClient.invalidateQueries({ queryKey: ["groups"] });
     } catch (err: any) {
       const errorMessage = err?.response?.data?.message || err?.message || "";
-      const nameConflictMatch = errorMessage.match(/Group with name '(.*)' already exists/i) ||
-                                errorMessage.match(/Group name '(.*)' already exists/i);
+      const nameConflictMatch =
+        errorMessage.match(/Group with name '(.*)' already exists/i) ||
+        errorMessage.match(/Group name '(.*)' already exists/i);
 
       if (nameConflictMatch && nameConflictMatch[1]) {
         message.error(t("tenantResources.groups.duplicateName"));
@@ -201,8 +211,9 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
       await refetchUsers();
     } catch (err: any) {
       const errorMessage = err?.response?.data?.message || err?.message || "";
-      const nameConflictMatch = errorMessage.match(/Group with name '(.*)' already exists/i) ||
-                                errorMessage.match(/Group name '(.*)' already exists/i);
+      const nameConflictMatch =
+        errorMessage.match(/Group with name '(.*)' already exists/i) ||
+        errorMessage.match(/Group name '(.*)' already exists/i);
 
       if (nameConflictMatch && nameConflictMatch[1]) {
         message.error(t("tenantResources.groups.duplicateName"));
@@ -216,13 +227,23 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
 
   const columns: ColumnsType<Group> = useMemo(
     () => [
-      { title: t("tenantResources.groups.name"), dataIndex: "group_name", key: "group_name" },
+      {
+        title: t("tenantResources.groups.name"),
+        dataIndex: "group_name",
+        key: "group_name",
+      },
       {
         title: t("common.description"),
         dataIndex: "group_description",
         key: "group_description",
         render: (description: string) =>
-          description ? description : <span className="text-gray-400">{t("tenantResources.groups.noDescription")}</span>,
+          description ? (
+            description
+          ) : (
+            <span className="text-gray-400">
+              {t("tenantResources.groups.noDescription")}
+            </span>
+          ),
       },
       {
         title: t("tenantResources.groups.members"),
@@ -252,23 +273,21 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
                 size="small"
               />
             </Tooltip>
-            <Popconfirm
-              title={t("tenantResources.groups.confirmDelete", {
-                name: record.group_name,
-              })}
-              onConfirm={() => handleDelete(record.group_id)}
-              okText={t("common.confirm")}
-              cancelText={t("common.cancel")}
-            >
-              <Tooltip title={t("tenantResources.groups.deleteGroup")}>
-                <Button
-                  type="text"
-                  danger
-                  icon={<Trash2 className="h-4 w-4" />}
-                  size="small"
-                />
-              </Tooltip>
-            </Popconfirm>
+            <Tooltip title={t("tenantResources.groups.deleteGroup")}>
+              <Button
+                type="text"
+                danger
+                icon={<Trash2 className="h-4 w-4" />}
+                size="small"
+                onClick={() => confirm({
+                  title: t("tenantResources.groups.confirmDelete", { name: record.group_name }),
+                  content: "",
+                  okText: t("common.confirm"),
+                  cancelText: t("common.cancel"),
+                  onOk: () => handleDelete(record.group_id),
+                })}
+              />
+            </Tooltip>
           </div>
         ),
       },
@@ -276,15 +295,28 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
     [t]
   );
 
-  const handlePageChange = (newPage: number, _pageSize: number) => {
+  const handlePageChange = (newPage: number, newPageSize: number) => {
     setPage(newPage);
+    if (newPageSize !== pageSize) {
+      setPageSize(newPageSize);
+      setPage(1);
+    }
   };
 
   return (
     <div className="h-full w-full flex flex-col overflow-auto">
-      <div className="flex items-center justify-between mb-4 flex-shrink-0">
-        <div />
-        <div>
+      <div className="flex items-center justify-between mb-4 flex-shrink-0 gap-6">
+        <Input.Search
+          allowClear
+          value={keyword}
+          onChange={(event) => {
+            setPage(1);
+            setKeyword(event.target.value);
+          }}
+          placeholder={t("tenantResources.groups.searchPlaceholder")}
+          className="w-48"
+        />
+        <div className="ml-4">
           <Button type="primary" onClick={openCreate}>
             + {t("tenantResources.groups.createGroup")}
           </Button>
@@ -299,7 +331,7 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
         pagination={{
           current: page,
           pageSize: pageSize,
-          total: total,
+          total,
           onChange: handlePageChange,
         }}
         scroll={{ x: true }}
@@ -340,9 +372,13 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
             <Form.Item name="description" label={t("common.description")}>
               <Input.TextArea placeholder={t("common.description")} rows={3} />
             </Form.Item>
-            <Form.Item name="members" label={t("tenantResources.groups.members")}>
+            <Form.Item
+              name="members"
+              label={t("tenantResources.groups.members")}
+            >
               <Select
                 mode="multiple"
+                showSearch={{ optionFilterProp: "label" }}
                 placeholder={t("tenantResources.groups.selectUsers")}
                 options={allUsers.map((user) => ({
                   label: user.username,
@@ -373,10 +409,7 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
               <Input placeholder={t("tenantResources.groups.enterName")} />
             </Form.Item>
             <Form.Item name="description" label={t("common.description")}>
-              <Input.TextArea
-                placeholder={t("common.description")}
-                rows={3}
-              />
+              <Input.TextArea placeholder={t("common.description")} rows={3} />
             </Form.Item>
           </Form>
         </div>

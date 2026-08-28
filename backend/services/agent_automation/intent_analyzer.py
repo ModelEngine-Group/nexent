@@ -273,6 +273,7 @@ class LLMAutomationIntentStrategy(AutomationIntentAnalysisStrategy):
 
     def _generate_sync(self, context: AutomationIntentContext) -> str:
         from nexent.core.models import OpenAIModel
+        from nexent.core.utils.observer import MessageObserver
         from utils.config_utils import get_model_name_from_config
 
         language = detect_instruction_language(context.message)
@@ -289,6 +290,7 @@ class LLMAutomationIntentStrategy(AutomationIntentAnalysisStrategy):
             undefined=StrictUndefined,
         ).render(**values).strip()
         llm = OpenAIModel(
+            observer=MessageObserver(),
             model_id=get_model_name_from_config(self._model_config),
             api_base=self._model_config.get("base_url", ""),
             api_key=self._model_config.get("api_key", ""),

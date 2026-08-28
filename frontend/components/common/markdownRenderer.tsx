@@ -2,7 +2,7 @@
 
 import React from "react";
 import { useTranslation } from "react-i18next";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import remarkParse from "remark-parse";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -15,7 +15,10 @@ import { oneLight } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { unified } from "unified";
 import { visit } from "unist-util-visit";
 import { SearchResult } from "@/types/chat";
-import { resolveS3UrlToDataUrl } from "@/services/storageService";
+import {
+  getLocalFileDownloadUrl,
+  resolveS3UrlToDataUrl,
+} from "@/services/storageService";
 import {
   Tooltip,
   TooltipContent,
@@ -80,6 +83,9 @@ const mediaObjectUrlPromiseCache = new Map<string, Promise<string | null>>();
 const S3_MEDIA_SESSION_PREFIX = "s3-media-cache:";
 
 const isBrowserEnvironment = typeof window !== "undefined";
+
+const markdownUrlTransform = (url: string): string =>
+  url.startsWith("s3://") ? url : defaultUrlTransform(url);
 
 const flattenTextContent = (value: React.ReactNode): string => {
   if (typeof value === "string" || typeof value === "number") {
@@ -258,7 +264,9 @@ const buildCitationDisplayIndexMap = (
 ): Map<string, number> => {
   const validCitationKeys = new Set(
     searchResults
-      .filter((result) => result.tool_sign && typeof result.cite_index === "number")
+      .filter(
+        (result) => result.tool_sign && typeof result.cite_index === "number"
+      )
       .map((result) => `${result.tool_sign}${result.cite_index}`)
   );
   const displayIndexMap = new Map<string, number>();
@@ -1437,6 +1445,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
       >
         <MarkdownErrorBoundary rawContent={processedContent}>
           <ReactMarkdown
+            urlTransform={markdownUrlTransform}
             remarkPlugins={
               [
                 remarkGfm,
@@ -1525,8 +1534,9 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
               ),
               // Link
               a: ({ href, children, ...props }: any) => {
+                const resolvedHref = getLocalFileDownloadUrl(href) || href;
                 return (
-                  <a href={href} className="markdown-link" {...props}>
+                  <a href={resolvedHref} className="markdown-link" {...props}>
                     <TextWrapper>{children}</TextWrapper>
                   </a>
                 );

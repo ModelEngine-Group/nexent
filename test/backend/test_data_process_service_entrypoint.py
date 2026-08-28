@@ -93,6 +93,50 @@ def test_start_ray_cluster_returns_when_disabled(service_module):
     service_module.RayConfig.init_ray_for_service.assert_not_called()
 
 
+def test_worker_configs_isolate_forward_parent_parts_and_aggregate(service_module):
+    configs = service_module.ServiceManager._build_worker_configs(4)
+
+    assert [config["queue"] for config in configs] == [
+        "process_q",
+        "process_part_q",
+        "forward_q",
+        "forward_part_q",
+        "forward_aggregate_q",
+    ]
+    assert configs[0]["concurrency"] == configs[1]["concurrency"] == 2
+    assert configs[2]["concurrency"] == configs[3]["concurrency"] == 8
+    assert configs[4]["concurrency"] == 2
+
+
+def test_start_workers_launches_each_isolated_queue(service_module, monkeypatch):
+    launched = []
+
+    class _Process:
+        def __init__(self, command, **kwargs):
+            self.pid = len(launched) + 100
+            self.stdout = types.SimpleNamespace(readline=lambda: "")
+            launched.append((command, kwargs))
+
+    monkeypatch.setattr(service_module, "RAY_NUM_CPUS", "4")
+    monkeypatch.setattr(service_module, "RAY_ACTOR_NUM_CPUS", 2)
+    monkeypatch.setattr(service_module.subprocess, "Popen", _Process)
+    monkeypatch.setattr(service_module.threading, "Thread", lambda **kwargs: types.SimpleNamespace(start=lambda: None))
+
+    service_module.service_processes["workers"] = []
+    manager = service_module.ServiceManager({"start_workers": True})
+
+    assert manager.start_workers() is True
+    assert [row["queue"] for row in service_module.service_processes["workers"]] == [
+        "process_q",
+        "process_part_q",
+        "forward_q",
+        "forward_part_q",
+        "forward_aggregate_q",
+    ]
+    assert len(launched) == 5
+    service_module.service_processes["workers"] = []
+
+
 def test_start_all_services_starts_enabled_services_in_order(service_module, monkeypatch):
     scheduler = types.SimpleNamespace(start=MagicMock())
     scheduler_module = types.ModuleType("services.auto_summary_scheduler")

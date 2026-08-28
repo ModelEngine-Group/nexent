@@ -88,6 +88,7 @@ async def get_task_info(task_id: str) -> Dict[str, Any]:
             'task_name': '',
             'path_or_url': '',
             'original_filename': '',
+            'file_id': None,
             'status': result.status if result.status else 'PENDING',
             'created_at': current_time,
             'updated_at': current_time,
@@ -142,6 +143,9 @@ async def get_task_info(task_id: str) -> Dict[str, Any]:
 
                         if 'original_filename' in metadata:
                             status_info['original_filename'] = metadata['original_filename']
+
+                        if 'file_id' in metadata:
+                            status_info['file_id'] = metadata['file_id']
                         
                         # Get progress info from metadata
                         if 'total_chunks' in metadata:
@@ -185,10 +189,17 @@ async def get_task_info(task_id: str) -> Dict[str, Any]:
                             if error_json.get('original_filename') is not None:
                                 status_info['original_filename'] = error_json.get(
                                     'original_filename')
+                            if error_json.get('file_id') is not None:
+                                status_info['file_id'] = error_json.get('file_id')
                         elif not status_info['error']:
                             # fallback: compatible with previous format
                             status_info['error'] = str(
                                 result.result) if result.result else "Unknown error"
+                        if (
+                            isinstance(result.result, dict)
+                            and result.result.get('file_id') is not None
+                        ):
+                            status_info['file_id'] = result.result.get('file_id')
                     except Exception as e:
                         logger.warning(
                             f"Could not parse error info for task {task_id}, falling back. Error: {e}")
@@ -201,7 +212,13 @@ async def get_task_info(task_id: str) -> Dict[str, Any]:
                 if result.successful() and result.result:
                     if isinstance(result.result, dict):
                         # Include specific result fields that are useful for API
-                        for key in ['chunks_count', 'processing_time', 'storage_time', 'es_result']:
+                        for key in [
+                            'chunks_count',
+                            'processing_time',
+                            'storage_time',
+                            'es_result',
+                            'file_id',
+                        ]:
                             if key in result.result:
                                 status_info[key] = result.result[key]
             except Exception as e:
@@ -227,6 +244,7 @@ async def get_task_info(task_id: str) -> Dict[str, Any]:
                 'task_name': '',
                 'path_or_url': '',
                 'original_filename': '',
+                'file_id': None,
             }
         else:
             logger.error(f"Error getting status for task {task_id}: {str(e)}")
@@ -240,6 +258,7 @@ async def get_task_info(task_id: str) -> Dict[str, Any]:
                 'task_name': '',
                 'path_or_url': '',
                 'original_filename': '',
+                'file_id': None,
             }
     except Exception as e:
         logger.warning(f"Error getting status for task {task_id}: {str(e)}")
@@ -254,6 +273,7 @@ async def get_task_info(task_id: str) -> Dict[str, Any]:
             'task_name': '',
             'path_or_url': '',
             'original_filename': '',
+            'file_id': None,
         }
 
 

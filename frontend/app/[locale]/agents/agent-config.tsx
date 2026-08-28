@@ -128,9 +128,13 @@ function ConfigSection({
 
 interface AgentConfigProps {
   onToggleDebug: () => void;
+  actionAreaRef?: React.Ref<HTMLDivElement>;
 }
 
-export default function AgentConfig({ onToggleDebug }: AgentConfigProps) {
+export default function AgentConfig({
+  onToggleDebug,
+  actionAreaRef,
+}: AgentConfigProps) {
   const { t } = useTranslation("common");
   const [form] = Form.useForm();
   const [isPublishModalOpen, setIsPublishModalOpen] = useState(false);
@@ -142,6 +146,7 @@ export default function AgentConfig({ onToggleDebug }: AgentConfigProps) {
   const displayInfoSectionRef = useRef<HTMLDivElement>(null);
   const roleModelSectionRef = useRef<HTMLDivElement>(null);
   const toolsSkillsSectionRef = useRef<HTMLDivElement>(null);
+  const knowledgeBaseSectionRef = useRef<HTMLDivElement>(null);
   const conversationGuideSectionRef = useRef<HTMLDivElement>(null);
   const lastScrolledRequestRef = useRef<string | null>(null);
   const { configFocusRequest } = useNl2AgentFlow();
@@ -177,7 +182,10 @@ export default function AgentConfig({ onToggleDebug }: AgentConfigProps) {
 
     const { requestId, target } = configFocusRequest;
     setActiveConfigTab(
-      target.section === "conversation_guide" ? "advanced" : "basic"
+      target.section === "conversation_guide" ||
+        target.section === "knowledge_base"
+        ? "advanced"
+        : "basic"
     );
     setOpenSections((current) =>
       current[target.section] ? current : { ...current, [target.section]: true }
@@ -194,7 +202,9 @@ export default function AgentConfig({ onToggleDebug }: AgentConfigProps) {
             ? roleModelSectionRef.current
             : target.section === "tools_skills"
               ? toolsSkillsSectionRef.current
-              : conversationGuideSectionRef.current;
+              : target.section === "knowledge_base"
+                ? knowledgeBaseSectionRef.current
+                : conversationGuideSectionRef.current;
       if (!sectionElement) return;
 
       const prefersReducedMotion = window.matchMedia(
@@ -406,6 +416,7 @@ export default function AgentConfig({ onToggleDebug }: AgentConfigProps) {
             onOpenChange={(open) =>
               handleSectionOpenChange("knowledge_base", open)
             }
+            containerRef={knowledgeBaseSectionRef}
             headerActions={<KnowledgeBaseConfigActions />}
           >
             <KnowledgeBaseConfig />
@@ -438,7 +449,10 @@ export default function AgentConfig({ onToggleDebug }: AgentConfigProps) {
           </ConfigSection>
         </TabsContent>
       </Tabs>
-      <div className="flex shrink-0 justify-end gap-2 border-t border-gray-200 bg-white pt-3 pb-1">
+      <div
+        ref={actionAreaRef}
+        className="flex shrink-0 justify-end gap-2 border-t border-gray-200 bg-white pt-3 pb-1"
+      >
         <div className="flex items-center gap-2">
           <Button
             icon={<Bug size={16} />}

@@ -519,3 +519,36 @@ class TestGetSummary:
 
         assert response.status_code == 500
         assert "Failed to get knowledge base summary" in response.json()["detail"]
+
+class TestTokenExpired:
+    """Expired tokens must map to 401 on summary endpoints."""
+
+    @patch('apps.knowledge_summary_app.get_current_user_info')
+    def test_auto_summary_token_expired(self, mock_user_info, test_data):
+        from consts.exceptions import TokenExpiredError
+
+        mock_user_info.side_effect = TokenExpiredError("expired")
+
+        response = client.post(
+            f"/summary/{test_data['index_name']}/auto_summary",
+            headers=test_data["auth_header"]
+        )
+
+        assert response.status_code == 401
+        assert "expired" in response.json()["detail"]
+
+    @patch('apps.knowledge_summary_app.get_current_user_id')
+    def test_change_summary_token_expired(self, mock_user_id, test_data):
+        from consts.exceptions import TokenExpiredError
+
+        mock_user_id.side_effect = TokenExpiredError("expired")
+
+        response = client.post(
+            f"/summary/{test_data['index_name']}/summary",
+            json={"summary_result": "test summary"},
+            headers=test_data["auth_header"]
+        )
+
+        assert response.status_code == 401
+        assert "expired" in response.json()["detail"]
+
