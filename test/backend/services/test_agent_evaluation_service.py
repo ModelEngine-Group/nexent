@@ -855,6 +855,7 @@ def test_run_agent_to_final_answer_releases_registered_run_on_error(service_modu
 
     service_module.agent_run = _failing_agent_run
     unregister = MagicMock()
+    service_module.agent_run_manager = MagicMock()
     service_module.agent_run_manager.unregister_agent_run = unregister
 
     async def invoke_failing_run():

@@ -22,7 +22,6 @@ except ModuleNotFoundError:
 from nexent.core.agents.run_agent import agent_run
 from nexent.core.agents.sandbox import _scan_shell_calls
 
-from agents.agent_run_manager import agent_run_manager
 from consts.error_code import ErrorCode
 from consts.evaluation_limits import (
     DEFAULT_PASS_THRESHOLD,
@@ -72,6 +71,11 @@ from utils.thread_utils import pool
 _QUERY_FORMAT_ERR_MSG = "AI returned invalid format for test queries"
 
 logger = logging.getLogger(__name__)
+
+# Loaded lazily when an evaluation case starts.  Several pure-logic tests
+# intentionally stub the SDK dependency graph and do not provide the runtime
+# agent manager package.
+agent_run_manager = None
 
 
 def _dispatch_agent_evaluation_run(
@@ -432,6 +436,10 @@ async def _run_agent_to_final_answer(
     agent_run_info = None
     terminal_status = "failed"
     try:
+        run_manager = agent_run_manager
+        if run_manager is None:
+            from agents.agent_run_manager import agent_run_manager as run_manager
+
         agent_run_info, _memory_context = await prepare_agent_run(
             agent_request=agent_request,
             user_id=user_id,
@@ -465,7 +473,7 @@ async def _run_agent_to_final_answer(
         return "".join(final_answer_parts).strip(), runtime_events
     finally:
         if agent_run_info is not None:
-            agent_run_manager.unregister_agent_run(
+            run_manager.unregister_agent_run(
                 run_conversation_id,
                 user_id,
                 status=terminal_status,
