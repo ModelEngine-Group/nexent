@@ -9128,13 +9128,20 @@ async def test_import_agent_by_agent_id_resolves_name_and_display_name_conflicts
     mock_create_agent,
     mock_create_tool,
 ):
-    mock_query_agents.return_value = [{
-        "agent_id": 1,
-        "name": "duplicate_name",
-        "display_name": "Duplicate Display",
-    }]
+    mock_query_agents.side_effect = [
+        [{
+            "agent_id": 1,
+            "name": "duplicate_name",
+            "display_name": "Duplicate Display",
+        }],
+        [{
+            "agent_id": 2,
+            "name": "existing_agent",
+            "display_name": "Existing Agent",
+        }],
+    ]
     mock_query_all_tools.return_value = []
-    mock_resolve_model.side_effect = [[1], [2]]
+    mock_resolve_model.side_effect = [[1], [2], [1], [2]]
     mock_create_agent.return_value = {"agent_id": 456}
 
     agent_info = ExportAndImportAgentInfo(
@@ -9167,6 +9174,17 @@ async def test_import_agent_by_agent_id_resolves_name_and_display_name_conflicts
     created_agent = mock_create_agent.call_args.kwargs["agent_info"]
     assert created_agent["name"] == "duplicate_name_1"
     assert created_agent["display_name"] == "Duplicate Display_1"
+
+    await import_agent_by_agent_id(
+        import_agent_info=agent_info,
+        tenant_id="test_tenant",
+        user_id="test_user",
+        resolve_name_conflicts=True,
+    )
+
+    created_agent = mock_create_agent.call_args.kwargs["agent_info"]
+    assert created_agent["name"] == "duplicate_name"
+    assert created_agent["display_name"] == "Duplicate Display"
 
 
 @pytest.mark.asyncio
