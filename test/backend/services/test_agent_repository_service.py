@@ -290,6 +290,29 @@ def test_list_repository_listings_filters_by_search_before_pagination():
     }
 
 
+def test_list_repository_listings_searches_structured_tags():
+    records = [
+        _repository_record(agent_repository_id=1, agent_id=10, status="shared"),
+        _repository_record(agent_repository_id=2, agent_id=11, status="shared"),
+    ]
+
+    with patch.object(
+        ars, "list_agent_repository_summaries", return_value=records
+    ), patch.object(
+        ars,
+        "_find_agent_ids_matching_any_tag_predicate",
+        return_value={"11"},
+    ):
+        result = ars.list_agent_repository_listings_impl(
+            "tenant_a",
+            status="shared",
+            search="智能体类别",
+            search_tag_predicates=[object()],
+        )
+
+    assert [item["agent_repository_id"] for item in result["items"]] == [2]
+
+
 def test_list_repository_listings_paginates_filtered_records():
     records = [
         {
@@ -872,6 +895,62 @@ async def test_list_my_editable_agents_impl_searches_structured_and_listing_tags
 
     assert [item["agent_id"] for item in structured_result["items"]] == [1]
     assert [item["agent_id"] for item in listing_result["items"]] == [2]
+
+
+@pytest.mark.asyncio
+async def test_list_my_editable_agents_impl_searches_localized_structured_tags():
+    agents = [
+        _list_all_agent_record(agent_id=1, display_name="Alpha Agent"),
+        _list_all_agent_record(agent_id=2, display_name="Beta Agent"),
+    ]
+    meta_by_id = {
+        1: _mine_metadata_record(agent_id=1, created_by="user_a"),
+        2: _mine_metadata_record(agent_id=2, created_by="user_a"),
+    }
+
+    with patch.object(
+        ars, "list_all_agent_info_impl", new_callable=AsyncMock, return_value=agents
+    ), patch.object(
+        ars, "fetch_draft_agent_mine_metadata", return_value=meta_by_id
+    ), patch.object(
+        ars, "list_agent_repository_by_agent_ids", return_value=[]
+    ), patch.object(
+        ars, "_merge_agent_tag_values", return_value={1: [], 2: []}
+    ), patch.object(
+        ars,
+        "_find_agent_ids_matching_any_tag_predicate",
+        return_value={"2"},
+    ):
+        result = await ars.list_my_editable_agents_impl(
+            tenant_id="tenant_a",
+            user_id="user_a",
+            search="智能体类别",
+            search_tag_predicates=[object()],
+        )
+
+    assert [item["agent_id"] for item in result["items"]] == [2]
+
+
+@pytest.mark.asyncio
+async def test_list_my_editable_agents_impl_includes_tags_without_search():
+    agents = [_list_all_agent_record(agent_id=1, display_name="Alpha Agent")]
+    meta_by_id = {1: _mine_metadata_record(agent_id=1, created_by="user_a")}
+
+    with patch.object(
+        ars, "list_all_agent_info_impl", new_callable=AsyncMock, return_value=agents
+    ), patch.object(
+        ars, "fetch_draft_agent_mine_metadata", return_value=meta_by_id
+    ), patch.object(
+        ars, "list_agent_repository_by_agent_ids", return_value=[]
+    ), patch.object(
+        ars, "_merge_agent_tag_values", return_value={1: ["Analyst"]}
+    ):
+        result = await ars.list_my_editable_agents_impl(
+            tenant_id="tenant_a",
+            user_id="user_a",
+        )
+
+    assert result["items"][0]["tags"] == ["Analyst"]
 
 
 @pytest.mark.asyncio

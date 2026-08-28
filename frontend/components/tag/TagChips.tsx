@@ -1,7 +1,12 @@
 "use client";
 
 import { Tag, Tooltip } from "antd";
+import { useTranslation } from "react-i18next";
 
+import {
+  getTagDefinitionDisplayName,
+  getTagValueDisplayName,
+} from "@/lib/systemTagLabels";
 import type { TagAssignmentValue } from "@/types/tagManagement";
 
 interface TagChipsProps {
@@ -19,6 +24,7 @@ export default function TagChips({
   max = 6,
   singleLine = false,
 }: TagChipsProps) {
+  const { t } = useTranslation("common");
   const visible = assignments.slice(0, max);
   const overflow = assignments.length - visible.length;
 
@@ -29,13 +35,23 @@ export default function TagChips({
       }`}
     >
       {visible.map((assignment) => {
-        const label = `${assignment.definition_name}: ${assignment.display_value}`;
+        const definitionName = getTagDefinitionDisplayName(
+          assignment.definition_key,
+          assignment.definition_name,
+          t
+        );
+        const valueName = getTagValueDisplayName(
+          assignment.definition_key,
+          assignment.display_value,
+          t
+        );
+        const label = `${definitionName}: ${valueName}`;
         return (
           <Tooltip
             key={`${assignment.definition_id}:${assignment.value_id}`}
             title={label}
           >
-            <Tag aria-label={label}>{assignment.display_value}</Tag>
+            <Tag aria-label={label}>{valueName}</Tag>
           </Tooltip>
         );
       })}

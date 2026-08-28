@@ -5,6 +5,10 @@ import { useMemo } from "react";
 import { Empty, Select, Space, Typography } from "antd";
 import { useTranslation } from "react-i18next";
 
+import {
+  getTagDefinitionDisplayName,
+  getTagValueDisplayName,
+} from "@/lib/systemTagLabels";
 import type {
   TagDefinition,
   TagDocumentPredicate,
@@ -65,16 +69,25 @@ export default function TagFilterControls({
   return (
     <Space direction="vertical" className="w-full">
       {activeDefinitions.map((definition) => {
+        const definitionName = getTagDefinitionDisplayName(
+          definition.definition_key,
+          definition.definition_name,
+          t
+        );
         const options = (definition.values ?? [])
           .filter((tagValue) => tagValue.status === "active")
           .map((tagValue) => ({
-            label: tagValue.display_value,
+            label: getTagValueDisplayName(
+              definition.definition_key,
+              tagValue.display_value,
+              t
+            ),
             value: tagValue.value_id,
           }));
         return (
           <div key={definition.definition_id} className="flex flex-col gap-1">
             <Typography.Text type="secondary" className="text-xs">
-              {definition.definition_name}
+              {definitionName}
             </Typography.Text>
             <Select
               mode="multiple"
@@ -88,7 +101,7 @@ export default function TagFilterControls({
               disabled={disabled}
               style={{ width: "100%" }}
               aria-label={t("tagManagement.filter.ariaLabel", {
-                definition: definition.definition_name,
+                definition: definitionName,
               })}
             />
           </div>

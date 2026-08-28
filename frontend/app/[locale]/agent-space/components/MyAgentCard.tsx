@@ -14,6 +14,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { getAgentRepositoryTagLabel } from "@/lib/agentRepositoryLabels";
 import {
   formatMineDate,
   getMineCardMenuActions,
@@ -64,6 +65,7 @@ export function MyAgentCard({
   const title = agent.name?.trim() || t("agentRepository.card.untitled");
   const description =
     agent.description?.trim() || t("agentRepository.card.noDescription");
+  const tags = agent.tags?.filter((tag) => tag.trim()) ?? [];
   const published = (agent.current_version_no ?? 0) > 0;
   const repositoryInfo = agent.repository_info ?? [];
   const hasRepositoryInfo = repositoryInfo.length > 0;
@@ -181,6 +183,19 @@ export function MyAgentCard({
       <p className="mt-3 line-clamp-2 min-h-[2.75rem] text-sm leading-relaxed text-slate-600 dark:text-slate-300">
         {description}
       </p>
+
+      {tags.length > 0 ? (
+        <div className="mt-3 flex flex-wrap items-center gap-1.5">
+          {tags.map((tag) => (
+            <span
+              key={tag}
+              className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-200"
+            >
+              {getAgentRepositoryTagLabel(tag, t)}
+            </span>
+          ))}
+        </div>
+      ) : null}
 
       <div className="mt-auto flex flex-col gap-3">
         <div className="flex min-h-[1.75rem] items-center justify-between border-t border-slate-100 pt-3 text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">

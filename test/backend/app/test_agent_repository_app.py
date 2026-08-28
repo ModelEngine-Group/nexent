@@ -239,6 +239,37 @@ def test_list_agent_repository_listings_api_passes_tag_filter(
     )
 
 
+def test_list_agent_repository_listings_api_passes_search_tag_predicates(
+    mocker,
+    mock_auth_header,
+):
+    """Test listing API forwards structured tag matches for text search."""
+    mocker.patch(
+        "apps.agent_repository_app.get_current_user_id",
+        return_value=("test_user_id", "test_tenant_id"),
+    )
+    mock_list = mocker.patch(
+        "apps.agent_repository_app.list_agent_repository_listings_impl",
+        return_value={"items": []},
+    )
+
+    response = client.get(
+        "/repository/agent",
+        headers=mock_auth_header,
+        params={
+            "search": "智能体类别",
+            "search_tag_predicates": json.dumps(
+                [{"definition_id": 1, "value_ids": [2]}]
+            ),
+        },
+    )
+
+    assert response.status_code == 200
+    assert mock_list.call_args.kwargs["search_tag_predicates"] == [
+        _TagAssignmentFilter(definition_id=1, value_ids=[2])
+    ]
+
+
 def test_list_agent_repository_tag_stats_api(mocker, mock_auth_header):
     """Test tag-stat endpoint returns the service result for the caller tenant."""
     mocker.patch(
@@ -631,6 +662,38 @@ def test_list_my_editable_agents_api_passes_tag_predicates(
     assert response.status_code == 200
     tag_predicates = mock_list_mine.call_args.kwargs["tag_predicates"]
     assert tag_predicates == [_TagAssignmentFilter(definition_id=1, value_ids=[2])]
+
+
+def test_list_my_editable_agents_api_passes_search_tag_predicates(
+    mocker,
+    mock_auth_header,
+):
+    """Test mine API forwards structured tag matches for text search."""
+    mocker.patch(
+        "apps.agent_repository_app.get_current_user_id",
+        return_value=("test_user_id", "test_tenant_id"),
+    )
+    mock_list_mine = mocker.patch(
+        "apps.agent_repository_app.list_my_editable_agents_impl",
+        new_callable=AsyncMock,
+        return_value={"items": [], "counts": {}, "pagination": {"total": 0}},
+    )
+
+    response = client.get(
+        "/repository/agent/mine",
+        headers=mock_auth_header,
+        params={
+            "search": "智能体类别",
+            "search_tag_predicates": json.dumps(
+                [{"definition_id": 1, "value_ids": [2]}]
+            ),
+        },
+    )
+
+    assert response.status_code == 200
+    assert mock_list_mine.call_args.kwargs["search_tag_predicates"] == [
+        _TagAssignmentFilter(definition_id=1, value_ids=[2])
+    ]
 
 
 def test_list_my_editable_agents_api_passes_pagination_and_search(

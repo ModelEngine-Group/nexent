@@ -3,6 +3,7 @@
 from collections.abc import Awaitable, Callable
 from typing import Annotated
 
+from consts.const import CAN_EDIT_ALL_USER_ROLES
 from consts.exceptions import (
     TagManagementConflictError,
     TagManagementNotFoundError,
@@ -87,6 +88,7 @@ def _assignment_caller(authorization: str | None) -> AuthenticatedCaller:
         user_id=user_id,
         authenticated_tenant_id=tenant_id,
         role=role,
+        can_edit_all=role in CAN_EDIT_ALL_USER_ROLES,
     )
 
 

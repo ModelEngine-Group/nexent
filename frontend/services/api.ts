@@ -550,6 +550,12 @@ export const API_ENDPOINTS = {
       if (params?.search?.trim()) {
         queryParams.append("search", params.search.trim());
       }
+      if (params?.search_tag_predicates?.length) {
+        queryParams.append(
+          "search_tag_predicates",
+          JSON.stringify(params.search_tag_predicates)
+        );
+      }
       if (params?.tag?.trim()) queryParams.append("tag", params.tag.trim());
       const queryString = queryParams.toString();
       return `${API_BASE_URL}/repository/agent${queryString ? `?${queryString}` : ""}`;
@@ -576,6 +582,12 @@ export const API_ENDPOINTS = {
       }
       if (params?.tag_predicates?.length) {
         queryParams.append("tag_predicates", JSON.stringify(params.tag_predicates));
+      }
+      if (params?.search_tag_predicates?.length) {
+        queryParams.append(
+          "search_tag_predicates",
+          JSON.stringify(params.search_tag_predicates)
+        );
       }
       const queryString = queryParams.toString();
       return `${API_BASE_URL}/repository/agent/mine${queryString ? `?${queryString}` : ""}`;

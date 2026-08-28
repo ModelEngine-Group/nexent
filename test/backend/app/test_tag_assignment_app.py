@@ -53,8 +53,22 @@ async def test_assignment_route_uses_authenticated_context_not_library_manage_pe
     assert response["assignment_count"] == 1
     assert captured["caller"].authenticated_tenant_id == "tenant-a"
     assert captured["caller"].role == "DEV"
+    assert captured["caller"].can_edit_all is False
     assert captured["value_ids"] == [7]
     assert captured["document_context"] == {"provider": None, "knowledge_base_id": None}
+
+
+def test_assignment_caller_preserves_admin_edit_capability(monkeypatch):
+    monkeypatch.setattr(
+        tag_management_app,
+        "get_current_user_context",
+        lambda authorization: ("admin-a", "tenant-a", "ADMIN"),
+    )
+
+    caller = tag_management_app._assignment_caller("Bearer token")
+
+    assert caller.role == "ADMIN"
+    assert caller.can_edit_all is True
 
 
 @pytest.mark.asyncio

@@ -19,6 +19,10 @@ import type { ColumnsType } from "antd/es/table";
 import { useTranslation } from "react-i18next";
 
 import { useTagAssignments } from "@/hooks/useTagManagement";
+import {
+  getTagDefinitionDisplayName,
+  getTagValueDisplayName,
+} from "@/lib/systemTagLabels";
 import { tagManagementApi } from "@/services/tagManagementService";
 import type {
   TagAssignment,
@@ -241,11 +245,20 @@ export default function ResourceTagAssignmentModal({
   ];
 
   const renderDefinitionControl = (definition: TagDefinition) => {
+    const definitionName = getTagDefinitionDisplayName(
+      definition.definition_key,
+      definition.definition_name,
+      t
+    );
     const valueIds = selected[definition.definition_id] ?? [];
     const options = (definition.values ?? [])
       .filter((tagValue) => tagValue.status === "active")
       .map((tagValue) => ({
-        label: tagValue.display_value,
+        label: getTagValueDisplayName(
+          definition.definition_key,
+          tagValue.display_value,
+          t
+        ),
         value: tagValue.value_id,
       }));
     const single =
@@ -253,7 +266,7 @@ export default function ResourceTagAssignmentModal({
     return (
       <div className="flex flex-col gap-2">
         <div>
-          <Typography.Text strong>{definition.definition_name}</Typography.Text>
+          <Typography.Text strong>{definitionName}</Typography.Text>
           <Typography.Paragraph type="secondary" className="!mb-0 !text-xs">
             {single
               ? t("tagManagement.form.singleSelectHint")
@@ -346,7 +359,11 @@ export default function ResourceTagAssignmentModal({
                       }
                     >
                       <span className="truncate">
-                        {definition.definition_name}
+                        {getTagDefinitionDisplayName(
+                          definition.definition_key,
+                          definition.definition_name,
+                          t
+                        )}
                       </span>
                       {selectedCount > 0 ? (
                         <Badge

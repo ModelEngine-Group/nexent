@@ -20,6 +20,10 @@ import type { ColumnsType } from "antd/es/table";
 import { useTranslation } from "react-i18next";
 
 import { useTagDefinitions } from "@/hooks/useTagManagement";
+import {
+  getTagDefinitionDisplayName,
+  getTagValueDisplayName,
+} from "@/lib/systemTagLabels";
 import { tagManagementApi } from "@/services/tagManagementService";
 import type {
   TagDefinition,
@@ -274,6 +278,12 @@ export default function TagDefinitionManagementModal({
         title: t("tagManagement.column.displayValue"),
         dataIndex: "display_value",
         key: "display_value",
+        render: (_, tagValue) =>
+          getTagValueDisplayName(
+            definition.definition_key,
+            tagValue.display_value,
+            t
+          ),
       },
       {
         title: t("tagManagement.column.status"),
@@ -336,6 +346,12 @@ export default function TagDefinitionManagementModal({
       title: t("tagManagement.column.name"),
       dataIndex: "definition_name",
       key: "definition_name",
+      render: (_, definition) =>
+        getTagDefinitionDisplayName(
+          definition.definition_key,
+          definition.definition_name,
+          t
+        ),
     },
     {
       title: t("tagManagement.column.key"),

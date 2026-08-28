@@ -19,6 +19,7 @@ import { useAuthorizationContext } from "@/components/providers/AuthorizationPro
 import { USER_ROLES } from "@/const/auth";
 import { useSetupFlow } from "@/hooks/useSetupFlow";
 import { useTagDefinitions, useTagLibraries } from "@/hooks/useTagManagement";
+import { getTagSearchPredicates } from "@/lib/systemTagLabels";
 import type { TagResourcePredicate } from "@/types/tagManagement";
 import {
   useAgentRepositoryListingDetail,
@@ -126,6 +127,14 @@ export default function AgentRepositoryPage() {
   const { data: mineTagDefinitions } = useTagDefinitions(
     defaultTagLibrary?.bucket_id ?? null
   );
+  const repositorySearchTagPredicates = useMemo(
+    () => getTagSearchPredicates(mineTagDefinitions, searchQuery, t),
+    [mineTagDefinitions, searchQuery, t]
+  );
+  const mineSearchTagPredicates = useMemo(
+    () => getTagSearchPredicates(mineTagDefinitions, mineSearch, t),
+    [mineSearch, mineTagDefinitions, t]
+  );
 
   const reviewDeepLink = useMemo(
     () => parseReviewDeepLinkParams(searchParams),
@@ -142,9 +151,12 @@ export default function AgentRepositoryPage() {
       page: repositoryPage,
       page_size: REPOSITORY_PAGE_SIZE,
       ...(searchQuery.trim() ? { search: searchQuery.trim() } : {}),
+      ...(repositorySearchTagPredicates.length > 0
+        ? { search_tag_predicates: repositorySearchTagPredicates }
+        : {}),
       ...(repositoryTag ? { tag: repositoryTag } : {}),
     }),
-    [repositoryPage, repositoryTag, searchQuery]
+    [repositoryPage, repositorySearchTagPredicates, repositoryTag, searchQuery]
   );
 
   const { data, isLoading, isError, refetch, isFetching } =
@@ -167,12 +179,15 @@ export default function AgentRepositoryPage() {
       ...(mineTagPredicates.length > 0
         ? { tag_predicates: mineTagPredicates }
         : {}),
+      ...(mineSearchTagPredicates.length > 0
+        ? { search_tag_predicates: mineSearchTagPredicates }
+        : {}),
       ...(mineOwnership === "all" && !mineSearch.trim()
         && mineTagPredicates.length === 0
         ? { new_agent_padding: true }
         : {}),
     }),
-    [mineOwnership, minePage, mineSearch, mineTagPredicates]
+    [mineOwnership, minePage, mineSearch, mineSearchTagPredicates, mineTagPredicates]
   );
 
   const {

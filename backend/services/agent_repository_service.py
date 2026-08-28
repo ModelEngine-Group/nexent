@@ -134,6 +134,31 @@ def _matches_repository_listing_search_filter(record: dict, search: str) -> bool
     )
 
 
+def _find_agent_ids_matching_any_tag_predicate(
+    tenant_id: str,
+    agent_ids: Collection[int],
+    predicates: Collection[Any],
+) -> set[str]:
+    """Return visible agents matching any structured tag predicate."""
+    if not agent_ids or not predicates:
+        return set()
+
+    from database.tag_management_db import TagManagementDB
+
+    resource_ids = [str(agent_id) for agent_id in agent_ids]
+    matched_ids: set[str] = set()
+    for predicate in predicates:
+        matched_ids.update(
+            TagManagementDB.filter_authorized_resource_ids(
+                tenant_id,
+                "agent",
+                resource_ids,
+                [predicate],
+            )
+        )
+    return matched_ids
+
+
 def list_agent_repository_listings_impl(
     tenant_id: str,
     *,
@@ -142,6 +167,7 @@ def list_agent_repository_listings_impl(
     page: int = 1,
     page_size: int = 10,
     search: Optional[str] = None,
+    search_tag_predicates: Optional[list] = None,
     tag: Optional[str] = None,
 ) -> Dict[str, Any]:
     """List repository listings for the caller tenant with optional status filter."""
@@ -155,11 +181,21 @@ def list_agent_repository_listings_impl(
         status=status,
         agent_id=agent_id,
     )
+    search_matched_agent_ids = _find_agent_ids_matching_any_tag_predicate(
+        tenant_id,
+        [
+            int(record["agent_id"])
+            for record in records
+            if record.get("agent_id") is not None
+        ],
+        search_tag_predicates or [],
+    )
     if search and search.strip():
         records = [
             record
             for record in records
             if _matches_repository_listing_search_filter(record, search)
+            or str(record.get("agent_id")) in search_matched_agent_ids
         ]
     if tag and tag.strip():
         records = [
@@ -424,6 +460,7 @@ async def list_my_editable_agents_impl(
     new_agent_padding: bool = False,
     agent_id: Optional[int] = None,
     tag_predicates: Optional[list] = None,
+    search_tag_predicates: Optional[list] = None,
 ) -> Dict[str, Any]:
     """List visible draft agents for the current user with repository listing info."""
     normalized_ownership = (ownership or OWNERSHIP_ALL).strip().lower()
@@ -460,6 +497,11 @@ async def list_my_editable_agents_impl(
         for agent in all_agents
         if agent.get("agent_id") is not None
     ]
+    search_matched_agent_ids = _find_agent_ids_matching_any_tag_predicate(
+        tenant_id,
+        agent_ids,
+        search_tag_predicates or [],
+    )
     meta_by_id = fetch_draft_agent_mine_metadata(tenant_id, agent_ids)
     counts = _compute_mine_ownership_counts(all_agents, meta_by_id, user_id)
 
@@ -500,6 +542,7 @@ async def list_my_editable_agents_impl(
                 search,
                 tags_by_agent_id.get(int(agent["agent_id"]), []),
             )
+            or str(agent["agent_id"]) in search_matched_agent_ids
         ]
 
     if agent_id is not None:
@@ -550,6 +593,12 @@ async def list_my_editable_agents_impl(
                 continue
             repository_by_agent_id.setdefault(int(record_agent_id), []).append(
                 _to_repository_info_item(record)
+            )
+        if not tags_by_agent_id:
+            tags_by_agent_id = _merge_agent_tag_values(
+                paged_agent_ids,
+                tenant_id,
+                repository_records,
             )
 
     download_totals = _get_agent_download_totals(paged_agent_ids)

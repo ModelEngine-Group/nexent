@@ -45,6 +45,7 @@ export interface AgentRepositoryListingListParams {
   page?: number;
   page_size?: number;
   search?: string;
+  search_tag_predicates?: TagResourcePredicate[];
   tag?: string;
 }
 
@@ -88,6 +89,7 @@ export interface MyEditableAgentItem {
   permission?: "EDIT" | "READ_ONLY";
   /** Total downloads summed across all repository listings for this agent_id. */
   downloads?: number;
+  tags?: string[];
   repository_info: MyAgentRepositoryInfoItem[];
 }
 
@@ -121,6 +123,7 @@ export interface MyEditableAgentListParams {
   new_agent_padding?: boolean;
   agent_id?: number;
   tag_predicates?: TagResourcePredicate[];
+  search_tag_predicates?: TagResourcePredicate[];
 }
 
 export interface MyEditableAgentPagination {
