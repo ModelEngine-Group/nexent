@@ -159,6 +159,27 @@ def _find_agent_ids_matching_any_tag_predicate(
     return matched_ids
 
 
+def _filter_agent_ids_by_tag_predicates(
+    tenant_id: str,
+    agent_ids: Collection[str],
+    predicates: Collection[Any],
+) -> set[str]:
+    """Return visible agents matching all selected structured tag predicates."""
+    if not agent_ids or not predicates:
+        return set()
+
+    from database.tag_management_db import TagManagementDB
+
+    return set(
+        TagManagementDB.filter_authorized_resource_ids(
+            tenant_id,
+            "agent",
+            list(agent_ids),
+            list(predicates),
+        )
+    )
+
+
 def list_agent_repository_listings_impl(
     tenant_id: str,
     *,
@@ -168,6 +189,7 @@ def list_agent_repository_listings_impl(
     page_size: int = 10,
     search: Optional[str] = None,
     search_tag_predicates: Optional[list] = None,
+    tag_predicates: Optional[list] = None,
     tag: Optional[str] = None,
 ) -> Dict[str, Any]:
     """List repository listings for the caller tenant with optional status filter."""
@@ -181,6 +203,22 @@ def list_agent_repository_listings_impl(
         status=status,
         agent_id=agent_id,
     )
+    if tag_predicates:
+        record_agent_ids = [
+            str(record["agent_id"])
+            for record in records
+            if record.get("agent_id") is not None
+        ]
+        matched_agent_ids = _filter_agent_ids_by_tag_predicates(
+            tenant_id,
+            record_agent_ids,
+            tag_predicates,
+        )
+        records = [
+            record
+            for record in records
+            if str(record.get("agent_id")) in matched_agent_ids
+        ]
     search_matched_agent_ids = _find_agent_ids_matching_any_tag_predicate(
         tenant_id,
         [

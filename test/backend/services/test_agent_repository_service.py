@@ -313,6 +313,30 @@ def test_list_repository_listings_searches_structured_tags():
     assert [item["agent_repository_id"] for item in result["items"]] == [2]
 
 
+def test_list_repository_listings_filters_all_matching_structured_tags():
+    records = [
+        _repository_record(agent_repository_id=1, agent_id=10, status="shared"),
+        _repository_record(agent_repository_id=2, agent_id=11, status="shared"),
+    ]
+    predicate = object()
+
+    with patch.object(
+        ars, "list_agent_repository_summaries", return_value=records
+    ), patch.object(
+        ars,
+        "_filter_agent_ids_by_tag_predicates",
+        return_value=["10", "11"],
+    ) as mock_filter:
+        result = ars.list_agent_repository_listings_impl(
+            "tenant_a",
+            status="shared",
+            tag_predicates=[predicate],
+        )
+
+    mock_filter.assert_called_once_with("tenant_a", ["10", "11"], [predicate])
+    assert [item["agent_repository_id"] for item in result["items"]] == [1, 2]
+
+
 def test_list_repository_listings_paginates_filtered_records():
     records = [
         {

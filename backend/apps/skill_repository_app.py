@@ -59,6 +59,10 @@ async def list_skill_repository_listings_api(
     search: Optional[str] = Query(
         None, description="Filter by name, description, source, submitter, or tags"
     ),
+    tag_predicates: Optional[str] = Query(
+        None,
+        description="Structured tag predicates encoded as JSON",
+    ),
     tag: Optional[str] = Query(None, description="Filter by an exact tag"),
     sort_by_update_time: bool = Query(
         False, description="Sort by repository update time descending"
@@ -79,6 +83,9 @@ async def list_skill_repository_listings_api(
             "search": search,
             "sort_by_update_time": sort_by_update_time,
         }
+        predicates = _parse_tag_predicates(tag_predicates)
+        if predicates:
+            filters["tag_predicates"] = predicates
         if tag:
             filters["tag"] = tag
         result = list_skill_repository_listings_impl(tenant_id, **filters)

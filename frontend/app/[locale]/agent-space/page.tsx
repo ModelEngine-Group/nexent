@@ -20,11 +20,10 @@ import { USER_ROLES } from "@/const/auth";
 import { useSetupFlow } from "@/hooks/useSetupFlow";
 import { useTagDefinitions, useTagLibraries } from "@/hooks/useTagManagement";
 import { getTagSearchPredicates } from "@/lib/systemTagLabels";
-import type { TagResourcePredicate } from "@/types/tagManagement";
+import type { TagDefinition, TagResourcePredicate } from "@/types/tagManagement";
 import {
   useAgentRepositoryListingDetail,
   useAgentRepositoryListings,
-  useAgentRepositoryTagStats,
   useMyEditableAgents,
   useUpdateAgentRepositoryStatus,
 } from "@/hooks/agentRepository/useAgentRepositoryListings";
@@ -39,9 +38,7 @@ import { isNewAgentPaddingItem } from "@/types/agentRepository";
 import { parseReviewDeepLinkParams } from "@/lib/notificationNavigation";
 import { cn } from "@/lib/utils";
 import { AgentRepositoryCard } from "./components/AgentRepositoryCard";
-import RepositoryTagFilter, {
-  type RepositoryTagStat,
-} from "@/components/tag/RepositoryTagFilter";
+import TagFilterPopover from "@/components/tag/TagFilterPopover";
 import { AgentRepositoryCopyDialog } from "./components/AgentRepositoryCopyDialog";
 import { AgentRepositoryDetailModal } from "./components/AgentRepositoryDetailModal";
 import { MineAgentsView } from "./components/MineAgentsView";
@@ -87,7 +84,9 @@ export default function AgentRepositoryPage() {
     return AgentRepositoryTab.REPOSITORY;
   });
   const [searchQuery, setSearchQuery] = useState("");
-  const [repositoryTag, setRepositoryTag] = useState<string>();
+  const [repositoryTagPredicates, setRepositoryTagPredicates] = useState<
+    TagResourcePredicate[]
+  >([]);
   const [repositoryPage, setRepositoryPage] = useState(1);
   const [mineOwnership, setMineOwnership] = useState<MineOwnershipFilter>("all");
   const [minePage, setMinePage] = useState(1);
@@ -154,16 +153,20 @@ export default function AgentRepositoryPage() {
       ...(repositorySearchTagPredicates.length > 0
         ? { search_tag_predicates: repositorySearchTagPredicates }
         : {}),
-      ...(repositoryTag ? { tag: repositoryTag } : {}),
+      ...(repositoryTagPredicates.length > 0
+        ? { tag_predicates: repositoryTagPredicates }
+        : {}),
     }),
-    [repositoryPage, repositorySearchTagPredicates, repositoryTag, searchQuery]
+    [
+      repositoryPage,
+      repositorySearchTagPredicates,
+      repositoryTagPredicates,
+      searchQuery,
+    ]
   );
 
   const { data, isLoading, isError, refetch, isFetching } =
     useAgentRepositoryListings(listingParams, isRepositoryTab);
-  const { data: repositoryTagStats = [] } = useAgentRepositoryTagStats(
-    isRepositoryTab
-  );
 
   const { data: repositoryCountData } = useAgentRepositoryListings(
     { status: "shared", page: 1, page_size: 1 },
@@ -456,10 +459,10 @@ export default function AgentRepositoryPage() {
                 <RepositoryView
                   searchQuery={searchQuery}
                   onSearchChange={handleRepositorySearchChange}
-                  tag={repositoryTag}
-                  tagStats={repositoryTagStats}
-                  onTagChange={(value) => {
-                    setRepositoryTag(value);
+                  tagDefinitions={mineTagDefinitions ?? []}
+                  tagPredicates={repositoryTagPredicates}
+                  onTagPredicatesChange={(value) => {
+                    setRepositoryTagPredicates(value);
                     setRepositoryPage(1);
                   }}
                   isLoading={isLoading}
@@ -572,9 +575,9 @@ export default function AgentRepositoryPage() {
 function RepositoryView({
   searchQuery,
   onSearchChange,
-  tag,
-  tagStats,
-  onTagChange,
+  tagDefinitions,
+  tagPredicates,
+  onTagPredicatesChange,
   isLoading,
   isError,
   isFetching,
@@ -592,9 +595,9 @@ function RepositoryView({
 }: {
   searchQuery: string;
   onSearchChange: (value: string) => void;
-  tag?: string;
-  tagStats: RepositoryTagStat[];
-  onTagChange: (value?: string) => void;
+  tagDefinitions: TagDefinition[];
+  tagPredicates: TagResourcePredicate[];
+  onTagPredicatesChange: (value: TagResourcePredicate[]) => void;
   isLoading: boolean;
   isError: boolean;
   isFetching: boolean;
@@ -657,7 +660,11 @@ function RepositoryView({
             allowClear
           />
         </div>
-        <RepositoryTagFilter value={tag} tags={tagStats} onChange={onTagChange} />
+        <TagFilterPopover
+          definitions={tagDefinitions}
+          value={tagPredicates}
+          onChange={onTagPredicatesChange}
+        />
       </div>
 
       <p className="text-sm text-slate-500 dark:text-slate-400">

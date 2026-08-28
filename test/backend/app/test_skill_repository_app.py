@@ -140,6 +140,35 @@ def test_list_skill_repository_listings_api_passes_tag_filter(mocker, mock_auth_
     )
 
 
+def test_list_skill_repository_listings_api_passes_tag_predicates(
+    mocker, mock_auth_header
+):
+    """Test repository API forwards structured tag filters."""
+    mocker.patch(
+        "apps.skill_repository_app.get_current_user_id",
+        return_value=("user-1", "tenant-1"),
+    )
+    mock_list = mocker.patch(
+        "apps.skill_repository_app.list_skill_repository_listings_impl",
+        return_value={"items": [], "pagination": {"total": 0}},
+    )
+
+    response = client.get(
+        "/repository/skill",
+        headers=mock_auth_header,
+        params={
+            "tag_predicates": json.dumps(
+                [{"definition_id": 1, "value_ids": [2]}]
+            )
+        },
+    )
+
+    assert response.status_code == 200
+    assert mock_list.call_args.kwargs["tag_predicates"] == [
+        _TagAssignmentFilter(definition_id=1, value_ids=[2])
+    ]
+
+
 def test_list_skill_repository_tag_stats_api(mocker, mock_auth_header):
     mocker.patch(
         "apps.skill_repository_app.get_current_user_id",

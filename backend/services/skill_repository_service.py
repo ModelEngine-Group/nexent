@@ -1074,6 +1074,7 @@ def list_skill_repository_listings_impl(
     page: int = 1,
     page_size: int = 10,
     search: Optional[str] = None,
+    tag_predicates: Optional[list] = None,
     tag: Optional[str] = None,
     sort_by_update_time: bool = False,
 ) -> Dict[str, Any]:
@@ -1084,10 +1085,31 @@ def list_skill_repository_listings_impl(
             f"{', '.join(sorted(VALID_REPOSITORY_STATUSES))}"
         )
 
+    skill_ids = None
+    if tag_predicates:
+        from database.tag_management_db import TagManagementDB
+
+        visible_skill_ids = [
+            str(skill["skill_id"])
+            for skill in SkillService(tenant_id=tenant_id).list_visible_skills(
+                tenant_id=tenant_id,
+                user_id=user_id,
+            )
+            if skill.get("skill_id") is not None
+        ]
+        matched_ids = TagManagementDB.filter_authorized_resource_ids(
+            tenant_id,
+            "skill",
+            visible_skill_ids,
+            tag_predicates,
+        )
+        skill_ids = [int(skill_id) for skill_id in matched_ids]
+
     result = list_skill_repository_summaries(
         publisher_tenant_id=tenant_id,
         status=status,
         skill_id=skill_id,
+        skill_ids=skill_ids,
         category_id=category_id,
         page=page,
         page_size=page_size,

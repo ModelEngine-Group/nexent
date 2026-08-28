@@ -92,6 +92,7 @@ def _apply_skill_repository_filters(
     status: Optional[str],
     skill_id: Optional[int],
     category_id: Optional[int],
+    skill_ids: Optional[List[int]],
     search: Optional[str],
     tag: Optional[str],
 ):
@@ -103,6 +104,8 @@ def _apply_skill_repository_filters(
         query = query.filter(SkillRepository.status == status)
     if skill_id is not None:
         query = query.filter(SkillRepository.skill_id == skill_id)
+    if skill_ids is not None:
+        query = query.filter(SkillRepository.skill_id.in_(skill_ids))
     if category_id is not None:
         query = query.filter(SkillRepository.category_id == category_id)
     if tag and tag.strip():
@@ -126,6 +129,7 @@ def list_skill_repository_summaries(
     *,
     status: Optional[str] = None,
     skill_id: Optional[int] = None,
+    skill_ids: Optional[List[int]] = None,
     category_id: Optional[int] = None,
     page: int = 1,
     page_size: int = 10,
@@ -159,6 +163,7 @@ def list_skill_repository_summaries(
             publisher_tenant_id=publisher_tenant_id,
             status=status,
             skill_id=skill_id,
+            skill_ids=skill_ids,
             category_id=category_id,
             search=search,
             tag=tag,

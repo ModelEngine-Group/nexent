@@ -45,6 +45,7 @@ export interface SkillRepositoryListingListParams {
   page?: number;
   page_size?: number;
   search?: string;
+  tag_predicates?: TagResourcePredicate[];
   tag?: string;
   sort_by_update_time?: boolean;
 }

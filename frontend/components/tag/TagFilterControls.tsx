@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 
-import { Empty, Select, Space, Typography } from "antd";
+import { Empty, Select, Space, Tag, Typography } from "antd";
 import { useTranslation } from "react-i18next";
 
 import {
@@ -47,6 +47,50 @@ export default function TagFilterControls({
     return map;
   }, [value]);
 
+  const [activeDefinitionId, setActiveDefinitionId] = useState<number | null>(
+    null
+  );
+
+  const activeDefinition = useMemo(() => {
+    const selectedDefinition = activeDefinitions.find(
+      (definition) => definition.definition_id === activeDefinitionId
+    );
+    return selectedDefinition ?? activeDefinitions[0] ?? null;
+  }, [activeDefinitionId, activeDefinitions]);
+
+  const selectedTags = useMemo(
+    () =>
+      activeDefinitions.flatMap((definition) => {
+        const selectedValueIds = selectedByDefinition.get(
+          definition.definition_id
+        );
+        if (!selectedValueIds?.length) return [];
+
+        const definitionName = getTagDefinitionDisplayName(
+          definition.definition_key,
+          definition.definition_name,
+          t
+        );
+        return (definition.values ?? [])
+          .filter(
+            (tagValue) =>
+              selectedValueIds.includes(tagValue.value_id) &&
+              tagValue.status === "active"
+          )
+          .map((tagValue) => ({
+            definitionId: definition.definition_id,
+            definitionName,
+            valueId: tagValue.value_id,
+            valueName: getTagValueDisplayName(
+              definition.definition_key,
+              tagValue.display_value,
+              t
+            ),
+          }));
+      }),
+    [activeDefinitions, selectedByDefinition, t]
+  );
+
   const handleChange = (definitionId: number, valueIds: number[]) => {
     const next = value.filter(
       (predicate) => predicate.definition_id !== definitionId
@@ -66,47 +110,108 @@ export default function TagFilterControls({
     );
   }
 
+  if (!activeDefinition) return null;
+
+  const definitionName = getTagDefinitionDisplayName(
+    activeDefinition.definition_key,
+    activeDefinition.definition_name,
+    t
+  );
+  const selectedValueIds =
+    selectedByDefinition.get(activeDefinition.definition_id) ?? [];
+  const valueOptions = (activeDefinition.values ?? [])
+    .filter((tagValue) => tagValue.status === "active")
+    .map((tagValue) => ({
+      label: getTagValueDisplayName(
+        activeDefinition.definition_key,
+        tagValue.display_value,
+        t
+      ),
+      value: tagValue.value_id,
+    }));
+  const isMultiSelect = activeDefinition.selection_mode === "multi_select";
+
   return (
     <Space direction="vertical" className="w-full">
-      {activeDefinitions.map((definition) => {
-        const definitionName = getTagDefinitionDisplayName(
-          definition.definition_key,
-          definition.definition_name,
-          t
-        );
-        const options = (definition.values ?? [])
-          .filter((tagValue) => tagValue.status === "active")
-          .map((tagValue) => ({
-            label: getTagValueDisplayName(
+      {selectedTags.length > 0 ? (
+        <div className="flex flex-col gap-1">
+          <Typography.Text type="secondary" className="text-xs">
+            {t("tagManagement.filter.selectedLabel")}
+          </Typography.Text>
+          <Space wrap size={[4, 4]}>
+            {selectedTags.map((tag) => (
+              <Tag
+                key={`${tag.definitionId}-${tag.valueId}`}
+                closable={!disabled}
+                onClose={(event) => {
+                  event.preventDefault();
+                  handleChange(
+                    tag.definitionId,
+                    (selectedByDefinition.get(tag.definitionId) ?? []).filter(
+                      (valueId) => valueId !== tag.valueId
+                    )
+                  );
+                }}
+              >
+                {tag.definitionName}: {tag.valueName}
+              </Tag>
+            ))}
+          </Space>
+        </div>
+      ) : null}
+      <div className="flex flex-col gap-1">
+        <Typography.Text type="secondary" className="text-xs">
+          {t("tagManagement.filter.definitionLabel")}
+        </Typography.Text>
+        <Select
+          showSearch
+          optionFilterProp="label"
+          value={activeDefinition.definition_id}
+          options={activeDefinitions.map((definition) => {
+            const selectedCount =
+              selectedByDefinition.get(definition.definition_id)?.length ?? 0;
+            const name = getTagDefinitionDisplayName(
               definition.definition_key,
-              tagValue.display_value,
+              definition.definition_name,
               t
-            ),
-            value: tagValue.value_id,
-          }));
-        return (
-          <div key={definition.definition_id} className="flex flex-col gap-1">
-            <Typography.Text type="secondary" className="text-xs">
-              {definitionName}
-            </Typography.Text>
-            <Select
-              mode="multiple"
-              allowClear
-              placeholder={t("tagManagement.form.assignPlaceholder")}
-              options={options}
-              value={selectedByDefinition.get(definition.definition_id) ?? []}
-              onChange={(valueIds: number[]) =>
-                handleChange(definition.definition_id, valueIds)
-              }
-              disabled={disabled}
-              style={{ width: "100%" }}
-              aria-label={t("tagManagement.filter.ariaLabel", {
-                definition: definitionName,
-              })}
-            />
-          </div>
-        );
-      })}
+            );
+            return {
+              value: definition.definition_id,
+              label: selectedCount > 0 ? `${name} (${selectedCount})` : name,
+            };
+          })}
+          onChange={setActiveDefinitionId}
+          disabled={disabled}
+          style={{ width: "100%" }}
+        />
+      </div>
+      <div className="flex flex-col gap-1">
+        <Typography.Text type="secondary" className="text-xs">
+          {definitionName}
+        </Typography.Text>
+        <Select
+          mode={isMultiSelect ? "multiple" : undefined}
+          allowClear
+          showSearch
+          optionFilterProp="label"
+          placeholder={t("tagManagement.form.assignPlaceholder")}
+          options={valueOptions}
+          value={isMultiSelect ? selectedValueIds : selectedValueIds[0]}
+          onChange={(nextValue: number | number[] | undefined) => {
+            const valueIds = Array.isArray(nextValue)
+              ? nextValue
+              : nextValue == null
+                ? []
+                : [nextValue];
+            handleChange(activeDefinition.definition_id, valueIds);
+          }}
+          disabled={disabled}
+          style={{ width: "100%" }}
+          aria-label={t("tagManagement.filter.ariaLabel", {
+            definition: definitionName,
+          })}
+        />
+      </div>
     </Space>
   );
 }

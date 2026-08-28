@@ -24,7 +24,6 @@ import {
   useMyEditableSkills,
   useSkillRepositoryListingDetail,
   useSkillRepositoryListings,
-  useSkillRepositoryTagStats,
   useUpdateSkillRepositoryStatus,
 } from "@/hooks/skillRepository/useSkillRepositoryListings";
 import { parseSkillReviewDeepLinkParams } from "@/lib/notificationNavigation";
@@ -101,7 +100,9 @@ export default function SkillRepositoryPage() {
   );
   const [repositoryPage, setRepositoryPage] = useState(1);
   const [repositorySearch, setRepositorySearch] = useState("");
-  const [repositoryTag, setRepositoryTag] = useState<string>();
+  const [repositoryTagPredicates, setRepositoryTagPredicates] = useState<
+    TagResourcePredicate[]
+  >([]);
   const [debouncedRepositorySearch, setDebouncedRepositorySearch] =
     useState("");
   const [minePage, setMinePage] = useState(1);
@@ -193,9 +194,11 @@ export default function SkillRepositoryPage() {
       ...(debouncedRepositorySearch.trim()
         ? { search: debouncedRepositorySearch.trim() }
         : {}),
-      ...(repositoryTag ? { tag: repositoryTag } : {}),
+      ...(repositoryTagPredicates.length > 0
+        ? { tag_predicates: repositoryTagPredicates }
+        : {}),
     }),
-    [debouncedRepositorySearch, repositoryPage, repositoryTag]
+    [debouncedRepositorySearch, repositoryPage, repositoryTagPredicates]
   );
 
   const mineParams = useMemo(
@@ -234,9 +237,6 @@ export default function SkillRepositoryPage() {
     isFetching: isRepositoryFetching,
     refetch: refetchRepository,
   } = useSkillRepositoryListings(repositoryParams, isRepositoryTab);
-  const { data: repositoryTagStats = [] } = useSkillRepositoryTagStats(
-    isRepositoryTab
-  );
 
   const { data: repositoryCountData } = useSkillRepositoryListings(
     { status: "shared", page: 1, page_size: 1 },
@@ -591,10 +591,10 @@ export default function SkillRepositoryPage() {
                     setRepositorySearch(value);
                     setRepositoryPage(1);
                   }}
-                  tag={repositoryTag}
-                  tagStats={repositoryTagStats}
-                  onTagChange={(value) => {
-                    setRepositoryTag(value);
+                  tagDefinitions={mineTagDefinitions ?? []}
+                  tagPredicates={repositoryTagPredicates}
+                  onTagPredicatesChange={(value) => {
+                    setRepositoryTagPredicates(value);
                     setRepositoryPage(1);
                   }}
                   listings={repositoryItems}

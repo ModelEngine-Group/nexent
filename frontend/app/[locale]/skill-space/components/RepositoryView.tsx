@@ -3,20 +3,19 @@
 import { Button, Input } from "antd";
 import { Copy, Eye, Search } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import RepositoryTagFilter, {
-  type RepositoryTagStat,
-} from "@/components/tag/RepositoryTagFilter";
+import TagFilterPopover from "@/components/tag/TagFilterPopover";
 
 import { SkillRepositoryCard } from "./SkillRepositoryCard";
 import { AsyncContent, PaginationBar } from "./SkillRepositoryControls";
 import type { SkillRepositoryListingItem } from "@/types/skillRepository";
+import type { TagDefinition, TagResourcePredicate } from "@/types/tagManagement";
 
 export function RepositoryView({
   searchQuery,
   onSearchChange,
-  tag,
-  tagStats,
-  onTagChange,
+  tagDefinitions,
+  tagPredicates,
+  onTagPredicatesChange,
   listings,
   isLoading,
   isError,
@@ -35,9 +34,9 @@ export function RepositoryView({
 }: {
   searchQuery: string;
   onSearchChange: (value: string) => void;
-  tag?: string;
-  tagStats: RepositoryTagStat[];
-  onTagChange: (value?: string) => void;
+  tagDefinitions: TagDefinition[];
+  tagPredicates: TagResourcePredicate[];
+  onTagPredicatesChange: (value: TagResourcePredicate[]) => void;
   listings: SkillRepositoryListingItem[];
   isLoading: boolean;
   isError: boolean;
@@ -68,7 +67,11 @@ export function RepositoryView({
             className="h-11 rounded-xl"
           />
         </div>
-        <RepositoryTagFilter value={tag} tags={tagStats} onChange={onTagChange} />
+        <TagFilterPopover
+          definitions={tagDefinitions}
+          value={tagPredicates}
+          onChange={onTagPredicatesChange}
+        />
       </div>
 
       <p className="text-sm text-slate-500 dark:text-slate-400">

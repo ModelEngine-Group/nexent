@@ -46,6 +46,7 @@ export interface AgentRepositoryListingListParams {
   page_size?: number;
   search?: string;
   search_tag_predicates?: TagResourcePredicate[];
+  tag_predicates?: TagResourcePredicate[];
   tag?: string;
 }
 

@@ -55,6 +55,10 @@ async def list_agent_repository_listings_api(
         None,
         description="Structured tag predicates that expand text search matches",
     ),
+    tag_predicates: Optional[str] = Query(
+        None,
+        description="Structured tag predicates encoded as JSON",
+    ),
     tag: Optional[str] = Query(None, description="Filter by an exact tag"),
     authorization: str = Header(None),
 ):
@@ -71,6 +75,9 @@ async def list_agent_repository_listings_api(
         search_predicates = _parse_tag_predicates(search_tag_predicates)
         if search_predicates:
             filters["search_tag_predicates"] = search_predicates
+        predicates = _parse_tag_predicates(tag_predicates)
+        if predicates:
+            filters["tag_predicates"] = predicates
         if tag:
             filters["tag"] = tag
         result = list_agent_repository_listings_impl(tenant_id, **filters)

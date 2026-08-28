@@ -270,6 +270,36 @@ def test_list_agent_repository_listings_api_passes_search_tag_predicates(
     ]
 
 
+def test_list_agent_repository_listings_api_passes_tag_predicates(
+    mocker,
+    mock_auth_header,
+):
+    """Test listing API forwards structured tag filters."""
+    mocker.patch(
+        "apps.agent_repository_app.get_current_user_id",
+        return_value=("test_user_id", "test_tenant_id"),
+    )
+    mock_list = mocker.patch(
+        "apps.agent_repository_app.list_agent_repository_listings_impl",
+        return_value={"items": []},
+    )
+
+    response = client.get(
+        "/repository/agent",
+        headers=mock_auth_header,
+        params={
+            "tag_predicates": json.dumps(
+                [{"definition_id": 1, "value_ids": [2]}]
+            )
+        },
+    )
+
+    assert response.status_code == 200
+    assert mock_list.call_args.kwargs["tag_predicates"] == [
+        _TagAssignmentFilter(definition_id=1, value_ids=[2])
+    ]
+
+
 def test_list_agent_repository_tag_stats_api(mocker, mock_auth_header):
     """Test tag-stat endpoint returns the service result for the caller tenant."""
     mocker.patch(
