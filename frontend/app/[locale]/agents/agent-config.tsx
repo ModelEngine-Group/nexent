@@ -129,11 +129,13 @@ function ConfigSection({
 interface AgentConfigProps {
   onToggleDebug: () => void;
   actionAreaRef?: React.Ref<HTMLDivElement>;
+  onPublished?: () => void;
 }
 
 export default function AgentConfig({
   onToggleDebug,
   actionAreaRef,
+  onPublished,
 }: AgentConfigProps) {
   const { t } = useTranslation("common");
   const [form] = Form.useForm();
@@ -478,6 +480,7 @@ export default function AgentConfig({
         open={isPublishModalOpen}
         onClose={() => setIsPublishModalOpen(false)}
         agentId={agentId}
+        onPublished={onPublished}
       />
     </Form>
   );
