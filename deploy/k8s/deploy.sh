@@ -213,13 +213,7 @@ apply_deployment_common_config() {
             ;;
     esac
 
-    deployment_apply_image_source
-    deployment_prepare_monitoring_env k8s || return 1
-    deployment_render_helm_values "$GENERATED_VALUES"
-    deployment_render_helm_values "$INFRASTRUCTURE_GENERATED_VALUES"
-    render_k8s_runtime_config_values "$GENERATED_RUNTIME_VALUES"
-    render_infrastructure_runtime_values "$INFRASTRUCTURE_GENERATED_RUNTIME_VALUES"
-    render_persistence_values
+    validate_persistence_mode || return 1
     deployment_print_summary k8s
     echo "Helm release scope: $RELEASE_SCOPE"
     case "$RELEASE_SCOPE" in
@@ -303,15 +297,19 @@ render_shared_storage_persistence_values() {
   } >> "$output_file"
 }
 
-render_persistence_values() {
+validate_persistence_mode() {
   case "$PERSISTENCE_MODE" in
     local|dynamic|existing) ;;
     *)
       echo "Unsupported persistence mode: $PERSISTENCE_MODE"
       echo "Use local, dynamic, or existing."
-      exit 1
+      return 1
       ;;
   esac
+}
+
+render_persistence_values() {
+  validate_persistence_mode || exit 1
 
   echo "# Generated application persistence overrides" > "$GENERATED_PERSISTENCE_VALUES"
   render_shared_storage_persistence_values "$GENERATED_PERSISTENCE_VALUES"
@@ -1223,10 +1221,10 @@ apply() {
 
     # Step 1: Select deployment components, port policy and image source.
     apply_deployment_common_config
-    persist_deploy_options
 
     # Step 2: Render release-specific values with image tags and persistence settings.
     update_values_yaml
+    persist_deploy_options
 
     reject_legacy_single_release || exit 1
 

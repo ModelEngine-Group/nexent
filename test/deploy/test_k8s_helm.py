@@ -196,6 +196,17 @@ def _write_executable(path: Path, content: str) -> None:
     path.chmod(0o755)
 
 
+def _instrument_shell_function(path: Path, function_name: str) -> None:
+    content = path.read_text(encoding="utf-8")
+    signature = f"{function_name}() {{"
+    assert content.count(signature) == 1
+    instrumented_signature = (
+        f"{signature}\n"
+        f"  printf 'instrument {function_name} %s\\n' \"${{1:-}}\" >> \"$MOCK_LOG\""
+    )
+    path.write_text(content.replace(signature, instrumented_signature, 1), encoding="utf-8")
+
+
 def _application_dynamic_args() -> list[str]:
     return [
         "--set",
@@ -492,6 +503,91 @@ def test_web_chart_declares_delayed_startup_probe() -> None:
         "timeoutSeconds": 2,
         "failureThreshold": 60,
     }
+
+
+def test_deploy_renders_generated_values_once_after_summary(
+    isolated_k8s_project: tuple[Path, dict[str, str], Path],
+) -> None:
+    project, env, mock_log = isolated_k8s_project
+    common_script = project / "deploy" / "common" / "common.sh"
+    deploy_script = project / "deploy" / "k8s" / "deploy.sh"
+    for function_name in (
+        "deployment_apply_image_source",
+        "deployment_prepare_monitoring_env",
+        "deployment_render_helm_values",
+    ):
+        _instrument_shell_function(common_script, function_name)
+    for function_name in (
+        "render_k8s_runtime_config_values",
+        "render_infrastructure_runtime_values",
+        "render_persistence_values",
+    ):
+        _instrument_shell_function(deploy_script, function_name)
+    env["DEPLOYMENT_LANG"] = "en"
+
+    result = _run(_deploy_command(project), check=False, env=env)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.index("Helm charts:") < result.stdout.index("Rendering generated image values")
+    commands = mock_log.read_text(encoding="utf-8").splitlines()
+    assert sum(line.startswith("instrument deployment_apply_image_source ") for line in commands) == 1
+    assert sum(line.startswith("instrument deployment_prepare_monitoring_env ") for line in commands) == 1
+    helm_value_renders = [
+        line for line in commands if line.startswith("instrument deployment_render_helm_values ")
+    ]
+    assert len(helm_value_renders) == 2
+    assert any(line.endswith("/helm/nexent/generated-values.yaml") for line in helm_value_renders)
+    assert any(line.endswith("/helm/nexent-infrastructure/generated-values.yaml") for line in helm_value_renders)
+    assert sum(line.startswith("instrument render_k8s_runtime_config_values ") for line in commands) == 1
+    assert sum(line.startswith("instrument render_infrastructure_runtime_values ") for line in commands) == 1
+    assert sum(line.startswith("instrument render_persistence_values ") for line in commands) == 1
+
+    application_chart = project / "deploy" / "k8s" / "helm" / "nexent"
+    infrastructure_chart = project / "deploy" / "k8s" / "helm" / "nexent-infrastructure"
+    generated_values = (application_chart / "generated-values.yaml").read_text(encoding="utf-8")
+    runtime_values = (application_chart / "generated-runtime-values.yaml").read_text(encoding="utf-8")
+    persistence_values = (application_chart / "generated-persistence-values.yaml").read_text(encoding="utf-8")
+    for output_name in (
+        "generated-values.yaml",
+        "generated-runtime-values.yaml",
+        "generated-persistence-values.yaml",
+    ):
+        assert (infrastructure_chart / output_name).stat().st_size > 0
+    assert 'imageSource: "local-latest"' in generated_values
+    assert "sqlFileNames:" in runtime_values
+    assert 'mode: "dynamic"' in persistence_values
+    assert 'storageClassName: "rwx-storage"' in persistence_values
+
+
+def test_invalid_persistence_mode_fails_before_render_or_config_persistence(
+    isolated_k8s_project: tuple[Path, dict[str, str], Path],
+) -> None:
+    project, env, mock_log = isolated_k8s_project
+    command = _deploy_command(project)
+    command[command.index("--persistence-mode") + 1] = "unsupported"
+
+    result = _run(command, check=False, env=env)
+
+    assert result.returncode != 0
+    assert "Unsupported persistence mode: unsupported" in result.stdout
+    assert "Rendering generated image values" not in result.stdout
+    assert not (project / "deploy" / "k8s" / "deploy.options").exists()
+    assert not mock_log.exists() or "helm " not in mock_log.read_text(encoding="utf-8")
+
+
+def test_render_failure_does_not_persist_deploy_options_or_call_helm(
+    isolated_k8s_project: tuple[Path, dict[str, str], Path],
+) -> None:
+    project, env, mock_log = isolated_k8s_project
+    (project / "deploy" / "sql" / "init.sql").unlink()
+
+    result = _run(_deploy_command(project), check=False, env=env)
+
+    assert result.returncode != 0
+    assert "SQL init file not found" in result.stdout
+    assert "Rendering generated image values" in result.stdout
+    assert not (project / "deploy" / "k8s" / "deploy.options").exists()
+    assert not mock_log.exists() or "helm " not in mock_log.read_text(encoding="utf-8")
 
 
 def test_default_deploy_orders_releases_without_second_application_upgrade(
