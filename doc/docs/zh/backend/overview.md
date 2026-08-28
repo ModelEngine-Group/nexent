@@ -22,7 +22,7 @@ backend/
 │   ├── conversation_management_app.py # 对话管理API
 │   ├── file_management_app.py   # 文件管理API
 │   ├── knowledge_app.py         # 知识库API
-│   ├── model_managment_app.py   # 模型管理API
+│   ├── model_management_app.py   # 模型管理API
 │   ├── config_sync_app.py       # 配置同步API
 │   └── voice_app.py             # 语音相关API
 ├── services/                     # 业务服务层

@@ -16,7 +16,7 @@ from apps.file_management_app import (
 from apps.image_app import router as proxy_router
 from apps.knowledge_summary_app import router as summary_router
 from apps.mock_user_management_app import router as mock_user_management_router
-from apps.model_managment_app import router as model_manager_router
+from apps.model_management_app import router as model_manager_router
 from apps.oauth_app import router as oauth_router
 from apps.prompt_app import router as prompt_router
 from apps.prompt_template_app import router as prompt_template_router
