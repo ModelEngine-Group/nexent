@@ -26,7 +26,10 @@ import AgentSelectorHeader from "./agent-selector-header";
 import AgentConfig from "./agent-config";
 import AgentVersion from "./agent-version";
 import AgentDebugPanel from "./agent-debug";
-import { Nl2AgentChatPanel } from "../newchat/assistant-ui/nl2agent-chat-panel";
+import {
+  Nl2AgentChatPanel,
+  type Nl2AgentChatPanelHandle,
+} from "../newchat/assistant-ui/nl2agent-chat-panel";
 import {
   Nl2AgentFlowProvider,
   useNl2AgentFlow,
@@ -111,6 +114,7 @@ function AgentSetupContent() {
   const searchParams = useSearchParams();
   const queryClient = useQueryClient();
   const snapshotRefreshQueue = useRef<Promise<boolean>>(Promise.resolve(true));
+  const nl2AgentChatPanelRef = useRef<Nl2AgentChatPanelHandle>(null);
   const generationPanelRef = useRef<HTMLElement>(null);
   const configPanelRef = useRef<HTMLElement>(null);
   const actionAreaRef = useRef<HTMLDivElement>(null);
@@ -132,8 +136,10 @@ function AgentSetupContent() {
   );
   const permissionReadOnly = useAgentStore((state) => state.isReadOnly);
   const {
-    isComposerDisabled,
+    agentId: flowAgentId,
     completionSyncFailed,
+    isComposerDisabled,
+    isFormLocked,
     markCompletionSynced,
     markCompletionSyncFailed,
     markGenerationCompleted,
@@ -149,6 +155,11 @@ function AgentSetupContent() {
     requestedAgentId > 0 &&
     requestedAgentId !== currentAgentId;
   const isNl2AgentUnavailable = currentAgentId === null || permissionReadOnly;
+  const canManualUnlock =
+    !isNl2AgentUnavailable &&
+    flowAgentId === currentAgentId &&
+    !isRequestedAgentLoading &&
+    (isFormLocked || isComposerDisabled);
 
   useEffect(() => {
     resetFlow(currentAgentId);
@@ -233,6 +244,12 @@ function AgentSetupContent() {
     (agentId: number) => markGenerationStopped(agentId),
     [markGenerationStopped]
   );
+
+  const handleManualUnlock = useCallback(() => {
+    if (!canManualUnlock || currentAgentId === null) return;
+    nl2AgentChatPanelRef.current?.cancelRun();
+    markGenerationStopped(currentAgentId);
+  }, [canManualUnlock, currentAgentId, markGenerationStopped]);
 
   const retryCompletionSync = useCallback(() => {
     if (currentAgentId !== null) synchronizeCompletion(currentAgentId);
@@ -333,6 +350,7 @@ function AgentSetupContent() {
                 </div>
               ) : null}
               <Nl2AgentChatPanel
+                ref={nl2AgentChatPanelRef}
                 key={sessionGeneration}
                 agentId={currentAgentId}
                 disabled={
@@ -396,6 +414,8 @@ function AgentSetupContent() {
             <div className="min-h-0 flex-1 overflow-auto px-4 py-2">
               <AgentConfig
                 actionAreaRef={actionAreaRef}
+                canManualUnlock={canManualUnlock}
+                onManualUnlock={handleManualUnlock}
                 onToggleDebug={() => setIsDebugVisible((visible) => !visible)}
               />
             </div>
