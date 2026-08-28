@@ -658,7 +658,7 @@ def delete_conversations_batch_service(conversation_ids: List[int], user_id: str
         return {"deleted_count": len(deleted_ids), "failed_ids": failed_ids}
     except Exception as e:
         logging.exception("Failed to batch delete conversations")
-        raise Exception(str(e))
+        raise RuntimeError(str(e))
 
 
 def _build_streaming_message(message_records: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:

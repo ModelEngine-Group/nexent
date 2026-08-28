@@ -599,16 +599,20 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
     });
   }, [aui, confirm, t, threadListItem]);
 
-  return (
-    <>
-      {isEditing ? (
+  const renderMainContent = () => {
+    if (isEditing) {
+      return (
         <InlineRenameEditor
           currentTitle={title}
           onRename={handleRename}
           onCancel={handleCancelRename}
         />
-      ) : batchMode ? (
-        <div
+      );
+    }
+    if (batchMode) {
+      return (
+        <button
+          type="button"
           className={`flex min-w-0 flex-1 cursor-pointer items-center gap-2 px-3 text-left text-sm transition-colors hover:bg-muted ${
             selectedIds?.has(thread.id) ? "bg-accent" : ""
           }`}
@@ -616,28 +620,33 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
         >
           <Checkbox checked={selectedIds?.has(thread.id) ?? false} />
           <span className="min-w-0 flex-1 truncate text-left">{title}</span>
+        </button>
+      );
+    }
+    return (
+      <ThreadListItemPrimitive.Trigger className="flex min-w-0 flex-1 justify-start px-3 text-left text-sm">
+        <div className="flex min-w-0 flex-1 items-center text-left">
+          <ConversationStatusIndicatorWrapper
+            completedConversations={completedConversations}
+          />
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="min-w-0 flex-1 truncate text-left">
+                {title}
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="max-w-80 break-words">
+              {title}
+            </TooltipContent>
+          </Tooltip>
         </div>
-      ) : (
-        <>
-          <ThreadListItemPrimitive.Trigger className="flex min-w-0 flex-1 justify-start px-3 text-left text-sm">
-            <div className="flex min-w-0 flex-1 items-center text-left">
-              <ConversationStatusIndicatorWrapper
-                completedConversations={completedConversations}
-              />
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span className="min-w-0 flex-1 truncate text-left">
-                    {title}
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent side="top" className="max-w-80 break-words">
-                  {title}
-                </TooltipContent>
-              </Tooltip>
-            </div>
-          </ThreadListItemPrimitive.Trigger>
-        </>
-      )}
+      </ThreadListItemPrimitive.Trigger>
+    );
+  };
+
+  return (
+    <>
+      {renderMainContent()}
       {!isEditing && !batchMode && (
         <ThreadListItemMorePrimitive.Root>
           <ThreadListItemMorePrimitive.Trigger className="mr-2 size-7 rounded-md opacity-0 group-hover/item:opacity-100">

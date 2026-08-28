@@ -1481,7 +1481,7 @@ class TestDeleteConversationsBatchService(unittest.TestCase):
         mock_delete_batch.side_effect = Exception("DB error")
         from backend.services.conversation_management_service import delete_conversations_batch_service
 
-        with self.assertRaises(Exception) as ctx:
+        with self.assertRaises(RuntimeError) as ctx:
             delete_conversations_batch_service([101], "user-1")
         self.assertIn("DB error", str(ctx.exception))
 
