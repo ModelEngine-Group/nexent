@@ -8,6 +8,7 @@ import {
   Card,
   Flex,
   InputNumber,
+  Modal,
   Select,
   Switch,
   TimePicker,
@@ -84,6 +85,7 @@ export function DreamingConfigCards() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [running, setRunning] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [latestRun, setLatestRun] = useState<DreamingAudit | null>(null);
   const [schedule, setSchedule] = useState<DreamingSchedule | null>(null);
 
@@ -310,22 +312,22 @@ export function DreamingConfigCards() {
   const lastRunAt = latestRun?.finished_at ?? latestRun?.started_at;
 
   if (loading) {
-    return (
-      <Flex gap={24} className="mt-6">
-        <Card className="memory-config-card" style={{ flex: 2 }} loading />
-        <Card className="memory-config-card" style={{ flex: 1 }} loading />
-      </Flex>
-    );
+    return <Card className="memory-config-card mt-6" loading />;
   }
 
   return (
     <Flex gap={24} className="mt-6" align="stretch">
-      <Card
-        className="memory-config-card"
-        style={{ flex: 2 }}
-        title={t("dreaming.thresholds.title")}
+      <Modal
+        title={t("dreaming.advanced.title")}
+        open={advancedOpen}
+        onCancel={() => setAdvancedOpen(false)}
+        footer={null}
+        width={640}
       >
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-4">
+        <Text type="secondary" className="block mb-5">
+          {t("dreaming.advanced.description")}
+        </Text>
+        <div className="grid grid-cols-1 gap-y-5">
           <div>
             <Text strong>{t("dreaming.thresholds.minScore")}</Text>
             <InputNumber
@@ -339,6 +341,9 @@ export function DreamingConfigCards() {
             />
             <Text type="secondary" className="block mt-1 text-xs">
               {t("dreaming.thresholds.minScoreHint", INPUT_RANGES.minScore)}
+            </Text>
+            <Text type="secondary" className="block mt-1 text-xs">
+              {t("dreaming.thresholds.minScoreGuide")}
             </Text>
           </div>
 
@@ -359,6 +364,9 @@ export function DreamingConfigCards() {
                 INPUT_RANGES.minRecallCount
               )}
             </Text>
+            <Text type="secondary" className="block mt-1 text-xs">
+              {t("dreaming.thresholds.minRecallCountGuide")}
+            </Text>
           </div>
 
           <div>
@@ -377,6 +385,9 @@ export function DreamingConfigCards() {
                 "dreaming.thresholds.minUniqueQueriesHint",
                 INPUT_RANGES.minUniqueQueries
               )}
+            </Text>
+            <Text type="secondary" className="block mt-1 text-xs">
+              {t("dreaming.thresholds.minUniqueQueriesGuide")}
             </Text>
           </div>
 
@@ -397,6 +408,9 @@ export function DreamingConfigCards() {
                 INPUT_RANGES.sourceLimit
               )}
             </Text>
+            <Text type="secondary" className="block mt-1 text-xs">
+              {t("dreaming.thresholds.sourceLimitGuide")}
+            </Text>
           </div>
 
           <div>
@@ -415,6 +429,9 @@ export function DreamingConfigCards() {
                 "dreaming.thresholds.longTermMaxCharsHint",
                 INPUT_RANGES.longTermMaxChars
               )}
+            </Text>
+            <Text type="secondary" className="block mt-1 text-xs">
+              {t("dreaming.thresholds.longTermMaxCharsGuide")}
             </Text>
           </div>
 
@@ -440,6 +457,9 @@ export function DreamingConfigCards() {
                 INPUT_RANGES.summarizationMaxAttempts
               )}
             </Text>
+            <Text type="secondary" className="block mt-1 text-xs">
+              {t("dreaming.thresholds.summarizationMaxAttemptsGuide")}
+            </Text>
           </div>
         </div>
 
@@ -452,23 +472,44 @@ export function DreamingConfigCards() {
             {t("dreaming.thresholds.save")}
           </Button>
         </div>
-      </Card>
+      </Modal>
 
       <Card
         className="memory-config-card"
-        style={{ flex: 1 }}
+        style={{ flex: 1, width: "100%" }}
+        styles={{ body: { paddingTop: 16, paddingBottom: 16 } }}
         title={t("dreaming.execution.title")}
       >
-        <Flex vertical gap={16}>
-          <Flex align="center" justify="space-between">
+        <Flex vertical gap={12}>
+          <Flex align="center" justify="space-between" gap={12} wrap="wrap">
+            <Text type="secondary" style={{ flex: "1 1 480px" }}>
+              {t("dreaming.alwaysOn.description")}
+            </Text>
+            <Flex gap={8} wrap="wrap">
+              <Button onClick={() => setAdvancedOpen(true)}>
+                {t("dreaming.advanced.open")}
+              </Button>
+              <Button type="primary" loading={running} onClick={handleRunNow}>
+                {t("dreaming.run.executeNow")}
+              </Button>
+            </Flex>
+          </Flex>
+
+          <Flex
+            align="center"
+            justify="space-between"
+            gap={12}
+            className="rounded-md bg-gray-50 px-3 py-2"
+          >
             <Text strong>{t("dreaming.schedule.enabled")}</Text>
             <Switch
+              size="small"
               checked={enabled}
               onChange={(checked) => setEnabled(checked)}
             />
           </Flex>
 
-          {enabled ? (
+          {enabled || schedule?.enabled ? (
             <>
               <div className="grid grid-cols-1 items-end gap-3 sm:grid-cols-[1fr_1fr_auto]">
                 <div>
@@ -521,16 +562,12 @@ export function DreamingConfigCards() {
                     </Flex>
                   )}
                 </div>
-                <Button
-                  type="primary"
-                  loading={saving}
-                  onClick={handleSaveSchedule}
-                >
+                <Button loading={saving} onClick={handleSaveSchedule}>
                   {t("dreaming.schedule.save")}
                 </Button>
               </div>
 
-              <Text type="secondary" className="text-xs text-center">
+              <Text type="secondary" className="text-xs">
                 {t("dreaming.schedule.nextFire", {
                   time: schedule?.next_fire_at
                     ? dayjs(schedule.next_fire_at).format("YYYY-MM-DD HH:mm")
@@ -539,14 +576,12 @@ export function DreamingConfigCards() {
               </Text>
             </>
           ) : (
-            <Text type="secondary">{t("dreaming.schedule.disabledHint")}</Text>
+            <Text type="secondary" className="text-xs">
+              {t("dreaming.schedule.disabledHint")}
+            </Text>
           )}
 
-          <Button type="primary" loading={running} onClick={handleRunNow} block>
-            {t("dreaming.run.executeNow")}
-          </Button>
-
-          <Flex vertical align="center" gap={4} className="text-center">
+          <Flex align="center" justify="space-between" gap={8} wrap="wrap">
             <Badge status={runStatus.status} text={runStatus.text} />
             <Text type="secondary" className="text-xs">
               {t("dreaming.schedule.lastFire", {
@@ -556,7 +591,7 @@ export function DreamingConfigCards() {
               })}
             </Text>
             {latestRun?.status === "failed" && latestRun.error && (
-              <Text type="danger" className="text-xs">
+              <Text type="danger" className="w-full text-xs">
                 {latestRun.error}
               </Text>
             )}
