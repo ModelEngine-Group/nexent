@@ -165,3 +165,16 @@ def test_wrapping_is_idempotent():
     second.forward(query="hi")
     # Injection happens exactly once even when wrapping is attempted twice.
     assert captured == {"query": "hi", "user_id": "u-1"}
+
+
+def test_non_dict_inputs_untouched():
+    """Tools without a dict-shaped inputs schema are returned unchanged."""
+
+    def forward(**kwargs):
+        return "ok"
+
+    tool = _FakeTool({"query": {"type": "string"}}, forward)
+    tool.inputs = "not-a-dict"
+    result = apply_user_context_to_mcp_tool(tool, SAMPLE_CONTEXT)
+    assert result is tool
+    assert not getattr(tool, "_nexent_user_context_wrapped", False)

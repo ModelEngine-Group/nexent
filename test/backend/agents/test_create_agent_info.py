@@ -7667,3 +7667,26 @@ class TestAgentTreeNeedsUserContext:
         sub = self._cfg(tools=[types.SimpleNamespace(source="mcp")])
         config = self._cfg(tools=[types.SimpleNamespace(source="local")], managed=[sub])
         assert _agent_tree_needs_user_context(config) is True
+
+
+class TestResolveToolUserContext:
+    """Tests for _resolve_tool_user_context defensive resolver."""
+
+    def test_unneeded_tree_returns_none(self):
+        from backend.agents.create_agent_info import _resolve_tool_user_context
+        config = types.SimpleNamespace(
+            tools=[types.SimpleNamespace(source="local")],
+            external_a2a_agents=[],
+            managed_agents=[],
+        )
+        assert _resolve_tool_user_context(config, "u-1", "t-1") is None
+
+    def test_build_failure_degrades_to_none(self):
+        """A tree needing context but failing lookups degrades to None, never raises."""
+        from backend.agents.create_agent_info import _resolve_tool_user_context
+        config = types.SimpleNamespace(
+            tools=[types.SimpleNamespace(source="mcp")],
+            external_a2a_agents=[],
+            managed_agents=[],
+        )
+        assert _resolve_tool_user_context(config, "u-1", "t-1") is None
