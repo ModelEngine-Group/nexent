@@ -1,4 +1,5 @@
 import os
+import shlex
 import shutil
 import subprocess
 from pathlib import Path
@@ -63,6 +64,26 @@ def _run(
         check=check,
         capture_output=True,
         text=True,
+        timeout=60,
+        env=env,
+    )
+
+
+def _run_in_pseudo_tty(
+    command: list[str],
+    *,
+    env: dict[str, str],
+    input_text: str,
+) -> subprocess.CompletedProcess[str]:
+    script = shutil.which("script")
+    if script is None:
+        pytest.skip("script is required for pseudo-TTY uninstall tests")
+    return subprocess.run(
+        [script, "-q", "-e", "-c", shlex.join(command), "/dev/null"],
+        check=False,
+        capture_output=True,
+        text=True,
+        input=input_text,
         timeout=60,
         env=env,
     )
@@ -639,3 +660,226 @@ def test_uninstall_infrastructure_scope_has_dependency_guard(
     assert result.returncode != 0
     assert "cannot uninstall 'nexent-infrastructure'" in result.stdout
     assert "helm uninstall" not in mock_log.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("persistence_mode", ["dynamic", "existing"])
+def test_uninstall_non_local_mode_skips_local_data_prompt_in_tty(
+    isolated_k8s_project: tuple[Path, dict[str, str], Path],
+    persistence_mode: str,
+) -> None:
+    project, env, _ = isolated_k8s_project
+    (project / "deploy" / "k8s" / "deploy.options").write_text(
+        f'k8s:\n  persistenceMode: "{persistence_mode}"\n',
+        encoding="utf-8",
+    )
+    env["DEPLOYMENT_LANG"] = "en"
+
+    result = _run_in_pseudo_tty(
+        [
+            "bash",
+            str(project / "deploy" / "k8s" / "uninstall.sh"),
+            "--keep-namespace",
+        ],
+        env=env,
+        input_text="n\n",
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert f"Persistence mode is '{persistence_mode}'; skipping local PV directory cleanup." in result.stdout
+    assert "Delete local PV data under" not in result.stdout
+    assert "Deleting local PV data" not in result.stdout
+
+
+@pytest.mark.parametrize("persistence_mode", ["dynamic", "existing"])
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ["--delete-local-data", "true", "--keep-namespace"],
+        ["delete-all", "--keep-namespace"],
+    ],
+    ids=["explicit-delete", "delete-all"],
+)
+def test_uninstall_non_local_mode_ignores_local_data_deletion(
+    isolated_k8s_project: tuple[Path, dict[str, str], Path],
+    persistence_mode: str,
+    arguments: list[str],
+) -> None:
+    project, env, _ = isolated_k8s_project
+    (project / "deploy" / "k8s" / "deploy.options").write_text(
+        f"k8s:\n  persistenceMode: {persistence_mode}\n",
+        encoding="utf-8",
+    )
+    env["DEPLOYMENT_LANG"] = "en"
+
+    result = _run(
+        ["bash", str(project / "deploy" / "k8s" / "uninstall.sh"), *arguments],
+        check=False,
+        env=env,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert f"Persistence mode is '{persistence_mode}'; skipping local PV directory cleanup." in result.stdout
+    assert "Deleting local PV data" not in result.stdout
+
+
+def test_uninstall_reads_legacy_persistence_mode(
+    isolated_k8s_project: tuple[Path, dict[str, str], Path],
+) -> None:
+    project, env, _ = isolated_k8s_project
+    (project / "deploy" / "k8s" / "deploy.options").write_text(
+        "PERSISTENCE_MODE='dynamic'\n",
+        encoding="utf-8",
+    )
+    env["DEPLOYMENT_LANG"] = "en"
+
+    result = _run(
+        [
+            "bash",
+            str(project / "deploy" / "k8s" / "uninstall.sh"),
+            "--delete-local-data",
+            "true",
+            "--keep-namespace",
+        ],
+        check=False,
+        env=env,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Persistence mode is 'dynamic'; skipping local PV directory cleanup." in result.stdout
+    assert "Deleting local PV data" not in result.stdout
+
+
+def test_uninstall_non_local_mode_still_validates_local_data_option(
+    isolated_k8s_project: tuple[Path, dict[str, str], Path],
+) -> None:
+    project, env, _ = isolated_k8s_project
+    (project / "deploy" / "k8s" / "deploy.options").write_text(
+        "k8s:\n  persistenceMode: dynamic\n",
+        encoding="utf-8",
+    )
+    env["DEPLOYMENT_LANG"] = "en"
+
+    result = _run(
+        [
+            "bash",
+            str(project / "deploy" / "k8s" / "uninstall.sh"),
+            "--delete-local-data",
+            "invalid",
+            "--keep-namespace",
+        ],
+        check=False,
+        env=env,
+    )
+
+    assert result.returncode != 0
+    assert "Invalid boolean value: invalid." in result.stdout
+
+
+def test_uninstall_local_mode_keeps_prompt_and_explicit_options(
+    isolated_k8s_project: tuple[Path, dict[str, str], Path],
+) -> None:
+    project, env, _ = isolated_k8s_project
+    (project / "deploy" / "k8s" / "deploy.options").write_text(
+        "k8s:\n  persistenceMode: local\n",
+        encoding="utf-8",
+    )
+    env["DEPLOYMENT_LANG"] = "en"
+
+    prompted = _run_in_pseudo_tty(
+        [
+            "bash",
+            str(project / "deploy" / "k8s" / "uninstall.sh"),
+            "--keep-namespace",
+        ],
+        env=env,
+        input_text="n\n",
+    )
+    kept = _run(
+        [
+            "bash",
+            str(project / "deploy" / "k8s" / "uninstall.sh"),
+            "--keep-local-data",
+            "--keep-namespace",
+        ],
+        check=False,
+        env=env,
+    )
+
+    safe_bin = project / "safe-bin"
+    safe_bin.mkdir()
+    _write_executable(safe_bin / "rm", "#!/bin/bash\nexit 0\n")
+    delete_env = env.copy()
+    delete_env["PATH"] = f"{safe_bin}:{delete_env['PATH']}"
+    deleted = _run(
+        [
+            "bash",
+            str(project / "deploy" / "k8s" / "uninstall.sh"),
+            "--delete-local-data",
+            "true",
+            "--keep-namespace",
+        ],
+        check=False,
+        env=delete_env,
+    )
+
+    assert prompted.returncode == 0, prompted.stdout + prompted.stderr
+    assert "Delete local PV data under" in prompted.stdout
+    assert "Local PV data preserved." in prompted.stdout
+    assert kept.returncode == 0, kept.stdout + kept.stderr
+    assert "Local PV data preserved." in kept.stdout
+    assert deleted.returncode == 0, deleted.stdout + deleted.stderr
+    assert "Deleting local PV data..." in deleted.stdout
+
+
+@pytest.mark.parametrize(
+    "deploy_options",
+    [
+        None,
+        "not: [valid\n",
+        "k8s:\n  persistenceMode: unsupported\n",
+    ],
+    ids=["missing", "damaged", "unknown"],
+)
+def test_uninstall_unknown_persistence_mode_keeps_compatible_prompt(
+    isolated_k8s_project: tuple[Path, dict[str, str], Path],
+    deploy_options: str | None,
+) -> None:
+    project, env, _ = isolated_k8s_project
+    if deploy_options is not None:
+        (project / "deploy" / "k8s" / "deploy.options").write_text(deploy_options, encoding="utf-8")
+    env["DEPLOYMENT_LANG"] = "en"
+
+    result = _run_in_pseudo_tty(
+        [
+            "bash",
+            str(project / "deploy" / "k8s" / "uninstall.sh"),
+            "--keep-namespace",
+        ],
+        env=env,
+        input_text="n\n",
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Delete local PV data under" in result.stdout
+    assert "Local PV data preserved." in result.stdout
+
+
+def test_uninstall_missing_persistence_mode_non_interactive_preserves_local_data(
+    isolated_k8s_project: tuple[Path, dict[str, str], Path],
+) -> None:
+    project, env, _ = isolated_k8s_project
+    env["DEPLOYMENT_LANG"] = "en"
+
+    result = _run(
+        [
+            "bash",
+            str(project / "deploy" / "k8s" / "uninstall.sh"),
+            "--keep-namespace",
+        ],
+        check=False,
+        env=env,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Delete local PV data under" not in result.stdout
+    assert "Local PV data preserved." in result.stdout

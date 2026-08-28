@@ -11,6 +11,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 DEPLOYMENT_COMMON="$PROJECT_ROOT/deploy/common/common.sh"
+DEPLOY_OPTIONS_FILE="$SCRIPT_DIR/deploy.options"
 cd "$SCRIPT_DIR"
 
 if [ -f "$DEPLOYMENT_COMMON" ]; then
@@ -26,6 +27,7 @@ DELETE_DATA=""
 DELETE_NAMESPACE=""
 DELETE_LOCAL_DATA=""
 LOCAL_DATA_DELETED="false"
+PERSISTENCE_MODE=""
 COMMAND="uninstall"
 
 print_usage() {
@@ -36,7 +38,7 @@ print_usage() {
     echo ""
     echo "命令："
     echo "  delete       卸载 Helm release 并删除 namespace"
-    echo "  delete-all   卸载 Helm release、删除 namespace，并删除本地数据"
+    echo "  delete-all   卸载 Helm release、删除 namespace，并在 local 模式下删除本地数据"
     echo "  clean        仅清理 Helm release 状态"
     echo ""
     echo "选项："
@@ -44,9 +46,9 @@ print_usage() {
     echo "  --delete-volumes true|false     等同于 --delete-data"
     echo "  --remove-volumes                等同于 --delete-data true"
     echo "  --keep-volumes                  等同于 --delete-data false"
-    echo "  --delete-local-data true|false  控制是否删除本地 PV 数据"
-    echo "  --remove-local-data             等同于 --delete-local-data true"
-    echo "  --keep-local-data               等同于 --delete-local-data false"
+    echo "  --delete-local-data true|false  控制是否删除本地 PV 数据（仅 local 模式）"
+    echo "  --remove-local-data             等同于 --delete-local-data true（仅 local 模式）"
+    echo "  --keep-local-data               等同于 --delete-local-data false（仅 local 模式）"
     echo "  --delete-namespace true|false   控制是否删除 namespace"
     echo "  --remove-namespace              等同于 --delete-namespace true"
     echo "  --keep-namespace                等同于 --delete-namespace false"
@@ -76,7 +78,7 @@ print_usage() {
   echo ""
   echo "Commands:"
   echo "  delete       Uninstall Helm release and delete namespace"
-  echo "  delete-all   Uninstall Helm release, delete namespace, and delete local data"
+  echo "  delete-all   Uninstall Helm release, delete namespace, and delete local data in local mode"
   echo "  clean        Clean Helm release state only"
   echo ""
   echo "Options:"
@@ -84,9 +86,9 @@ print_usage() {
   echo "  --delete-volumes true|false  Alias for --delete-data"
   echo "  --remove-volumes             Alias for --delete-data true"
   echo "  --keep-volumes               Alias for --delete-data false"
-  echo "  --delete-local-data true|false  Control whether local PV data is deleted"
-  echo "  --remove-local-data             Alias for --delete-local-data true"
-  echo "  --keep-local-data               Alias for --delete-local-data false"
+  echo "  --delete-local-data true|false  Control whether local PV data is deleted (local mode only)"
+  echo "  --remove-local-data             Alias for --delete-local-data true (local mode only)"
+  echo "  --keep-local-data               Alias for --delete-local-data false (local mode only)"
   echo "  --delete-namespace true|false  Control whether the namespace is deleted"
   echo "  --remove-namespace             Alias for --delete-namespace true"
   echo "  --keep-namespace               Alias for --delete-namespace false"
@@ -112,6 +114,58 @@ print_usage() {
 sanitize_input() {
   local input="$1"
   printf "%s" "$input" | tr -d '\r'
+}
+
+trim_deploy_option() {
+  local value="$1"
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  printf '%s' "$value"
+}
+
+unquote_deploy_option() {
+  local value
+  value="$(trim_deploy_option "$1")"
+  value="${value%$'\r'}"
+  value="${value%%#*}"
+  value="$(trim_deploy_option "$value")"
+  value="${value%\"}"
+  value="${value#\"}"
+  value="${value%\'}"
+  value="${value#\'}"
+  printf '%s' "$value"
+}
+
+load_persistence_mode() {
+  local line trimmed value in_k8s_section
+  [ -f "$DEPLOY_OPTIONS_FILE" ] || return 0
+
+  in_k8s_section="false"
+  while IFS= read -r line || [ -n "$line" ]; do
+    trimmed="$(trim_deploy_option "${line%%#*}")"
+    [ -z "$trimmed" ] && continue
+
+    if [[ "$trimmed" =~ ^PERSISTENCE_MODE=(.*)$ ]]; then
+      PERSISTENCE_MODE="$(unquote_deploy_option "${BASH_REMATCH[1]}")"
+      continue
+    fi
+
+    if [[ "$trimmed" =~ ^k8s:[[:space:]]*$ ]]; then
+      in_k8s_section="true"
+      continue
+    fi
+
+    if [[ "$line" =~ ^[A-Za-z][A-Za-z0-9_]*:[[:space:]]* ]]; then
+      in_k8s_section="false"
+      continue
+    fi
+
+    if [ "$in_k8s_section" = "true" ] \
+      && [[ "$line" =~ ^[[:space:]]+persistenceMode:[[:space:]]*(.*)$ ]]; then
+      value="$(unquote_deploy_option "${BASH_REMATCH[1]}")"
+      PERSISTENCE_MODE="$value"
+    fi
+  done < "$DEPLOY_OPTIONS_FILE"
 }
 
 parse_bool_option() {
@@ -213,6 +267,8 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+load_persistence_mode
 
 case "$RELEASE_SCOPE" in
   all|infrastructure|nexent) ;;
@@ -438,6 +494,20 @@ delete_local_volume_data() {
 }
 
 maybe_delete_local_volume_data() {
+  case "$PERSISTENCE_MODE" in
+    dynamic|existing)
+      if [ -n "$DELETE_LOCAL_DATA" ]; then
+        parse_bool_option "$DELETE_LOCAL_DATA" || true
+      fi
+      if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+        echo "持久化模式为 '$PERSISTENCE_MODE'，跳过本地 PV 目录清理。"
+      else
+        echo "Persistence mode is '$PERSISTENCE_MODE'; skipping local PV directory cleanup."
+      fi
+      return 0
+      ;;
+  esac
+
   if resolve_delete_local_data; then
     delete_local_volume_data
   else
