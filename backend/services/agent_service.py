@@ -169,6 +169,7 @@ AGENT_ICON_CONTENT_TYPES = {
 _channel_cleanup_tasks: set[asyncio.Task[None]] = set()
 _fa_extraction_tasks: set[asyncio.Task] = set()
 _agent_stream_producer_tasks: set[asyncio.Task[None]] = set()
+_external_memory_ingest_tasks: set[asyncio.Task[None]] = set()
 
 
 def _finalize_buffered_unit_fragments(message_units: list[dict[str, Any]]) -> int:
@@ -1601,7 +1602,9 @@ async def _stream_agent_chunks(
                 except Exception as e:
                     logger.warning("Per-turn supplement failed: %s", e)
 
-            asyncio.create_task(_per_turn_supplement())
+            supplement_task = asyncio.create_task(_per_turn_supplement())
+            _external_memory_ingest_tasks.add(supplement_task)
+            supplement_task.add_done_callback(_external_memory_ingest_tasks.discard)
 
 
 def get_enable_tool_id_by_agent_id(agent_id: int, tenant_id: str):
