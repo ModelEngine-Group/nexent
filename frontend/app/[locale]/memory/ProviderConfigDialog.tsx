@@ -210,6 +210,24 @@ export function ProviderConfigDialog({
   };
 
   const renderDynamicField = (field: ConfigSchemaField) => {
+    const fieldLabel = field.required ? (
+      <>
+        {field.label} <span style={{ color: "#ff4d4f" }}>*</span>
+      </>
+    ) : (
+      field.label
+    );
+    const requiredRules = field.required
+      ? [
+          {
+            required: true,
+            message: t("memory.external.form.fieldRequired", {
+              label: field.label,
+            }),
+          },
+        ]
+      : [];
+
     const isSecretEditing =
       field.type === "secret" && isEditing && !changedSecrets.has(field.key);
 
@@ -318,27 +336,8 @@ export function ProviderConfigDialog({
           <Form.Item
             key={field.key}
             name={["params", field.key]}
-            label={
-              field.required ? (
-                <>
-                  {field.label} <span style={{ color: "#ff4d4f" }}>*</span>
-                </>
-              ) : (
-                field.label
-              )
-            }
-            rules={
-              field.required
-                ? [
-                    {
-                      required: true,
-                      message: t("memory.external.form.fieldRequired", {
-                        label: field.label,
-                      }),
-                    },
-                  ]
-                : []
-            }
+            label={fieldLabel}
+            rules={requiredRules}
           >
             <Select
               placeholder={t("memory.external.form.fieldSelect", {
@@ -354,27 +353,8 @@ export function ProviderConfigDialog({
           <Form.Item
             key={field.key}
             name={["params", field.key]}
-            label={
-              field.required ? (
-                <>
-                  {field.label} <span style={{ color: "#ff4d4f" }}>*</span>
-                </>
-              ) : (
-                field.label
-              )
-            }
-            rules={
-              field.required
-                ? [
-                    {
-                      required: true,
-                      message: t("memory.external.form.fieldRequired", {
-                        label: field.label,
-                      }),
-                    },
-                  ]
-                : []
-            }
+            label={fieldLabel}
+            rules={requiredRules}
           >
             <Input
               placeholder={t("memory.external.form.fieldPlaceholder", {

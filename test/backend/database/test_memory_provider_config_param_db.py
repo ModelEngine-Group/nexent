@@ -59,6 +59,14 @@ def mock_session_ctx():
     return session, ctx
 
 
+def _configure_update_result(session, row_count):
+    mock_query = MagicMock()
+    mock_filter = MagicMock()
+    mock_filter.update.return_value = row_count
+    mock_query.filter.return_value = mock_filter
+    session.query.return_value = mock_query
+
+
 def test_get_params_empty(monkeypatch, mock_session_ctx):
     session, ctx = mock_session_ctx
     mock_query = MagicMock()
@@ -90,11 +98,7 @@ def test_get_params_with_results(monkeypatch, mock_session_ctx):
 
 def test_upsert_params_insert_new(monkeypatch, mock_session_ctx):
     session, ctx = mock_session_ctx
-    mock_query = MagicMock()
-    mock_filter = MagicMock()
-    mock_filter.update.return_value = 0
-    mock_query.filter.return_value = mock_filter
-    session.query.return_value = mock_query
+    _configure_update_result(session, 0)
     monkeypatch.setattr("backend.database.memory_provider_config_param_db.get_db_session", lambda: ctx)
 
     assert upsert_params(1, {"plugin.name": "mem0"}) is True
@@ -104,11 +108,7 @@ def test_upsert_params_insert_new(monkeypatch, mock_session_ctx):
 
 def test_upsert_params_replace_existing(monkeypatch, mock_session_ctx):
     session, ctx = mock_session_ctx
-    mock_query = MagicMock()
-    mock_filter = MagicMock()
-    mock_filter.update.return_value = 2
-    mock_query.filter.return_value = mock_filter
-    session.query.return_value = mock_query
+    _configure_update_result(session, 2)
     monkeypatch.setattr("backend.database.memory_provider_config_param_db.get_db_session", lambda: ctx)
 
     assert upsert_params(1, {"plugin.name": "new", "plugin.api_key": "new-key"}) is True
@@ -127,11 +127,7 @@ def test_upsert_params_failure(monkeypatch, mock_session_ctx):
 
 def test_delete_params_success(monkeypatch, mock_session_ctx):
     session, ctx = mock_session_ctx
-    mock_query = MagicMock()
-    mock_filter = MagicMock()
-    mock_filter.update.return_value = 3
-    mock_query.filter.return_value = mock_filter
-    session.query.return_value = mock_query
+    _configure_update_result(session, 3)
     monkeypatch.setattr("backend.database.memory_provider_config_param_db.get_db_session", lambda: ctx)
 
     assert delete_params(1) is True
@@ -140,11 +136,7 @@ def test_delete_params_success(monkeypatch, mock_session_ctx):
 
 def test_delete_params_no_params_to_delete(monkeypatch, mock_session_ctx):
     session, ctx = mock_session_ctx
-    mock_query = MagicMock()
-    mock_filter = MagicMock()
-    mock_filter.update.return_value = 0
-    mock_query.filter.return_value = mock_filter
-    session.query.return_value = mock_query
+    _configure_update_result(session, 0)
     monkeypatch.setattr("backend.database.memory_provider_config_param_db.get_db_session", lambda: ctx)
 
     assert delete_params(1) is True

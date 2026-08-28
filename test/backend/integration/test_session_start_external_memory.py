@@ -113,6 +113,50 @@ def mock_memory_context():
     return context
 
 
+async def _search_external_memories(provider_service, memory_context):
+    """Run the session-start provider lookup and map results to context items."""
+    top_k = memory_context.user_config.external_provider_top_k
+    request = _MemorySearchRequest(
+        query="test query",
+        tenant_id=memory_context.tenant_id,
+        user_id=memory_context.user_id,
+        agent_id=memory_context.agent_id,
+        conversation_id=None,
+        top_k=top_k,
+    )
+    results = await provider_service.search_all_enabled(
+        tenant_id=memory_context.tenant_id,
+        request=request,
+        limit=top_k,
+    )
+    if not results:
+        return None
+    return [
+        _ExternalMemoryItem(
+            id=str(result.memory_id or ""),
+            content=result.content,
+            score=result.score,
+            provider=result.source or "external",
+            metadata=result.metadata or {},
+            created_at=None,
+        )
+        for result in results
+    ]
+
+
+async def _build_memory_context(context_service, memory_context, external_results):
+    """Build the same memory context used during session initialization."""
+    return await context_service.build_context(
+        tenant_id=memory_context.tenant_id,
+        user_id=memory_context.user_id,
+        agent_id=memory_context.agent_id,
+        conversation_id=None,
+        query=None,
+        layers=["tenant", "user"],
+        external_results=external_results,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Integration tests
 # ---------------------------------------------------------------------------
@@ -186,47 +230,13 @@ class TestSessionStartExternalRetrieval:
         mock_context_service.build_context.return_value = mock_context
 
         # Execute: Simulate the flow in create_agent_info.py
-        external_results = None
-        if mock_provider_service is not None:
-            top_k = mock_memory_context.user_config.external_provider_top_k
-
-            search_request = _MemorySearchRequest(
-                query="test query",
-                tenant_id=mock_memory_context.tenant_id,
-                user_id=mock_memory_context.user_id,
-                agent_id=mock_memory_context.agent_id,
-                conversation_id=None,
-                top_k=top_k,
-            )
-
-            ext_search_results = await mock_provider_service.search_all_enabled(
-                tenant_id=mock_memory_context.tenant_id,
-                request=search_request,
-                limit=top_k,
-            )
-
-            if ext_search_results:
-                external_results = [
-                    _ExternalMemoryItem(
-                        id=str(r.memory_id or ""),
-                        content=r.content,
-                        score=r.score,
-                        provider=r.source or "external",
-                        metadata=r.metadata or {},
-                        created_at=None,
-                    )
-                    for r in ext_search_results
-                ]
+        external_results = await _search_external_memories(
+            mock_provider_service, mock_memory_context
+        )
 
         # Build context with external results
-        result = await mock_context_service.build_context(
-            tenant_id=mock_memory_context.tenant_id,
-            user_id=mock_memory_context.user_id,
-            agent_id=mock_memory_context.agent_id,
-            conversation_id=None,
-            query=None,
-            layers=["tenant", "user"],
-            external_results=external_results,
+        result = await _build_memory_context(
+            mock_context_service, mock_memory_context, external_results
         )
 
         # Verify: All 3 external results are present
@@ -260,35 +270,9 @@ class TestSessionStartExternalRetrieval:
         # Execute with error handling
         external_results = None
         try:
-            top_k = mock_memory_context.user_config.external_provider_top_k
-
-            search_request = _MemorySearchRequest(
-                query="test query",
-                tenant_id=mock_memory_context.tenant_id,
-                user_id=mock_memory_context.user_id,
-                agent_id=mock_memory_context.agent_id,
-                conversation_id=None,
-                top_k=top_k,
+            external_results = await _search_external_memories(
+                mock_provider_service, mock_memory_context
             )
-
-            ext_search_results = await mock_provider_service.search_all_enabled(
-                tenant_id=mock_memory_context.tenant_id,
-                request=search_request,
-                limit=top_k,
-            )
-
-            if ext_search_results:
-                external_results = [
-                    _ExternalMemoryItem(
-                        id=str(r.memory_id or ""),
-                        content=r.content,
-                        score=r.score,
-                        provider=r.source or "external",
-                        metadata=r.metadata or {},
-                        created_at=None,
-                    )
-                    for r in ext_search_results
-                ]
         except Exception:
             # Graceful failure: external_results remains None or partial
             pass
@@ -309,35 +293,9 @@ class TestSessionStartExternalRetrieval:
         # Execute with error handling
         external_results = None
         try:
-            top_k = mock_memory_context.user_config.external_provider_top_k
-
-            search_request = _MemorySearchRequest(
-                query="test query",
-                tenant_id=mock_memory_context.tenant_id,
-                user_id=mock_memory_context.user_id,
-                agent_id=mock_memory_context.agent_id,
-                conversation_id=None,
-                top_k=top_k,
+            external_results = await _search_external_memories(
+                mock_provider_service, mock_memory_context
             )
-
-            ext_search_results = await mock_provider_service.search_all_enabled(
-                tenant_id=mock_memory_context.tenant_id,
-                request=search_request,
-                limit=top_k,
-            )
-
-            if ext_search_results:
-                external_results = [
-                    _ExternalMemoryItem(
-                        id=str(r.memory_id or ""),
-                        content=r.content,
-                        score=r.score,
-                        provider=r.source or "external",
-                        metadata=r.metadata or {},
-                        created_at=None,
-                    )
-                    for r in ext_search_results
-                ]
         except Exception:
             # Graceful failure: external_results remains None
             pass
@@ -351,14 +309,8 @@ class TestSessionStartExternalRetrieval:
         mock_context.external = []
         mock_context_service.build_context.return_value = mock_context
 
-        result = await mock_context_service.build_context(
-            tenant_id=mock_memory_context.tenant_id,
-            user_id=mock_memory_context.user_id,
-            agent_id=mock_memory_context.agent_id,
-            conversation_id=None,
-            query=None,
-            layers=["tenant", "user"],
-            external_results=external_results,
+        result = await _build_memory_context(
+            mock_context_service, mock_memory_context, external_results
         )
 
         assert result.external == []
@@ -413,45 +365,12 @@ class TestSessionStartExternalRetrieval:
         mock_context_service.build_context.return_value = mock_context
 
         # Execute
-        external_results = None
-        top_k = mock_memory_context.user_config.external_provider_top_k
-
-        search_request = _MemorySearchRequest(
-            query="test query",
-            tenant_id=mock_memory_context.tenant_id,
-            user_id=mock_memory_context.user_id,
-            agent_id=mock_memory_context.agent_id,
-            conversation_id=None,
-            top_k=top_k,
+        external_results = await _search_external_memories(
+            mock_provider_service, mock_memory_context
         )
 
-        ext_search_results = await mock_provider_service.search_all_enabled(
-            tenant_id=mock_memory_context.tenant_id,
-            request=search_request,
-            limit=top_k,
-        )
-
-        if ext_search_results:
-            external_results = [
-                _ExternalMemoryItem(
-                    id=str(r.memory_id or ""),
-                    content=r.content,
-                    score=r.score,
-                    provider=r.source or "external",
-                    metadata=r.metadata or {},
-                    created_at=None,
-                )
-                for r in ext_search_results
-            ]
-
-        result = await mock_context_service.build_context(
-            tenant_id=mock_memory_context.tenant_id,
-            user_id=mock_memory_context.user_id,
-            agent_id=mock_memory_context.agent_id,
-            conversation_id=None,
-            query=None,
-            layers=["tenant", "user"],
-            external_results=external_results,
+        result = await _build_memory_context(
+            mock_context_service, mock_memory_context, external_results
         )
 
         # Verify: MMR dedup should remove duplicate (simulated by mock)
@@ -495,45 +414,12 @@ class TestSessionStartExternalRetrieval:
         mock_context_service.build_context.return_value = mock_context
 
         # Execute
-        external_results = None
-        top_k = mock_memory_context.user_config.external_provider_top_k
-
-        search_request = _MemorySearchRequest(
-            query="test query",
-            tenant_id=mock_memory_context.tenant_id,
-            user_id=mock_memory_context.user_id,
-            agent_id=mock_memory_context.agent_id,
-            conversation_id=None,
-            top_k=top_k,
+        external_results = await _search_external_memories(
+            mock_provider_service, mock_memory_context
         )
 
-        ext_search_results = await mock_provider_service.search_all_enabled(
-            tenant_id=mock_memory_context.tenant_id,
-            request=search_request,
-            limit=top_k,
-        )
-
-        if ext_search_results:
-            external_results = [
-                _ExternalMemoryItem(
-                    id=str(r.memory_id or ""),
-                    content=r.content,
-                    score=r.score,
-                    provider=r.source or "external",
-                    metadata=r.metadata or {},
-                    created_at=None,
-                )
-                for r in ext_search_results
-            ]
-
-        result = await mock_context_service.build_context(
-            tenant_id=mock_memory_context.tenant_id,
-            user_id=mock_memory_context.user_id,
-            agent_id=mock_memory_context.agent_id,
-            conversation_id=None,
-            query=None,
-            layers=["tenant", "user"],
-            external_results=external_results,
+        result = await _build_memory_context(
+            mock_context_service, mock_memory_context, external_results
         )
 
         # Verify: Token budget enforcement truncated to 4 results

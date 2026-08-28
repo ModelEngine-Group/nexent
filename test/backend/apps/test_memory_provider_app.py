@@ -1,5 +1,6 @@
 import sys
 import types
+from contextlib import contextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -152,6 +153,19 @@ def _mock_plugin_loader():
     loader.list_plugins.return_value = []
     loader.load_all.return_value = None
     return loader
+
+
+@contextmanager
+def _provider_runtime(provider_service):
+    """Patch the dependencies shared by provider search and ingest endpoints."""
+    with patch.object(memory_provider_app, "memory_provider_config_db") as config_db, \
+         patch.object(memory_provider_app, "memory_provider_config_param_db") as param_db, \
+         patch.object(memory_provider_app, "_get_provider_service", return_value=provider_service), \
+         patch.object(memory_provider_app, "_get_plugin_loader", return_value=_mock_plugin_loader()):
+        config_db.get_provider_config.return_value = {"provider_config_id": 1}
+        param_db.get_params.return_value = {"plugin.name": "mem0"}
+        config_db.update_provider_config.return_value = True
+        yield config_db
 
 
 def test_create_provider_success(client):
@@ -309,14 +323,7 @@ def test_test_search_success(client):
     mock_provider_service = MagicMock()
     mock_provider_service.build_provider.return_value = mock_provider
 
-    with patch.object(memory_provider_app, "memory_provider_config_db") as m_db, \
-         patch.object(memory_provider_app, "memory_provider_config_param_db") as m_param_db, \
-         patch.object(memory_provider_app, "_get_provider_service", return_value=mock_provider_service), \
-         patch.object(memory_provider_app, "_get_plugin_loader", return_value=_mock_plugin_loader()):
-        m_db.get_provider_config.return_value = {"provider_config_id": 1}
-        m_param_db.get_params.return_value = {"plugin.name": "mem0"}
-        m_db.update_provider_config.return_value = True
-
+    with _provider_runtime(mock_provider_service):
         response = client.post(
             "/memory/providers/1/test-search",
             json={"query": "hello", "top_k": 5},
@@ -336,14 +343,7 @@ def test_test_search_failure_updates_error_code(client):
     mock_provider_service = MagicMock()
     mock_provider_service.build_provider.return_value = mock_provider
 
-    with patch.object(memory_provider_app, "memory_provider_config_db") as m_db, \
-         patch.object(memory_provider_app, "memory_provider_config_param_db") as m_param_db, \
-         patch.object(memory_provider_app, "_get_provider_service", return_value=mock_provider_service), \
-         patch.object(memory_provider_app, "_get_plugin_loader", return_value=_mock_plugin_loader()):
-        m_db.get_provider_config.return_value = {"provider_config_id": 1}
-        m_param_db.get_params.return_value = {"plugin.name": "mem0"}
-        m_db.update_provider_config.return_value = True
-
+    with _provider_runtime(mock_provider_service) as m_db:
         response = client.post(
             "/memory/providers/1/test-search",
             json={"query": "hello"},
@@ -361,14 +361,7 @@ def test_test_ingest_success(client):
     mock_provider_service = MagicMock()
     mock_provider_service.build_provider.return_value = mock_provider
 
-    with patch.object(memory_provider_app, "memory_provider_config_db") as m_db, \
-         patch.object(memory_provider_app, "memory_provider_config_param_db") as m_param_db, \
-         patch.object(memory_provider_app, "_get_provider_service", return_value=mock_provider_service), \
-         patch.object(memory_provider_app, "_get_plugin_loader", return_value=_mock_plugin_loader()):
-        m_db.get_provider_config.return_value = {"provider_config_id": 1}
-        m_param_db.get_params.return_value = {"plugin.name": "mem0"}
-        m_db.update_provider_config.return_value = True
-
+    with _provider_runtime(mock_provider_service):
         response = client.post(
             "/memory/providers/1/test-ingest",
             json={"units": [{"event_id": "e1", "event_type": "test", "unit_type": "agent", "unit_content": "x"}]},
@@ -386,14 +379,7 @@ def test_test_ingest_failure_updates_error_code(client):
     mock_provider_service = MagicMock()
     mock_provider_service.build_provider.return_value = mock_provider
 
-    with patch.object(memory_provider_app, "memory_provider_config_db") as m_db, \
-         patch.object(memory_provider_app, "memory_provider_config_param_db") as m_param_db, \
-         patch.object(memory_provider_app, "_get_provider_service", return_value=mock_provider_service), \
-         patch.object(memory_provider_app, "_get_plugin_loader", return_value=_mock_plugin_loader()):
-        m_db.get_provider_config.return_value = {"provider_config_id": 1}
-        m_param_db.get_params.return_value = {"plugin.name": "mem0"}
-        m_db.update_provider_config.return_value = True
-
+    with _provider_runtime(mock_provider_service) as m_db:
         response = client.post(
             "/memory/providers/1/test-ingest",
             json={"units": [{"event_id": "e1", "event_type": "test", "unit_type": "agent", "unit_content": "x"}]},
