@@ -485,9 +485,14 @@ export function DreamingConfigCards() {
             <Text type="secondary" style={{ flex: "1 1 480px" }}>
               {t("dreaming.alwaysOn.description")}
             </Text>
-            <Button size="small" onClick={() => setAdvancedOpen(true)}>
-              {t("dreaming.advanced.open")}
-            </Button>
+            <Flex gap={8} wrap="wrap">
+              <Button onClick={() => setAdvancedOpen(true)}>
+                {t("dreaming.advanced.open")}
+              </Button>
+              <Button type="primary" loading={running} onClick={handleRunNow}>
+                {t("dreaming.run.executeNow")}
+              </Button>
+            </Flex>
           </Flex>
 
           <Flex
@@ -504,9 +509,9 @@ export function DreamingConfigCards() {
             />
           </Flex>
 
-          {enabled ? (
+          {enabled || schedule?.enabled ? (
             <>
-              <div className="grid grid-cols-1 items-end gap-3 sm:grid-cols-2">
+              <div className="grid grid-cols-1 items-end gap-3 sm:grid-cols-[1fr_1fr_auto]">
                 <div>
                   <Text strong className="block mb-1">
                     {t("dreaming.schedule.frequency")}
@@ -557,6 +562,9 @@ export function DreamingConfigCards() {
                     </Flex>
                   )}
                 </div>
+                <Button loading={saving} onClick={handleSaveSchedule}>
+                  {t("dreaming.schedule.save")}
+                </Button>
               </div>
 
               <Text type="secondary" className="text-xs">
@@ -572,20 +580,6 @@ export function DreamingConfigCards() {
               {t("dreaming.schedule.disabledHint")}
             </Text>
           )}
-
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-            <Button block loading={saving} onClick={handleSaveSchedule}>
-              {t("dreaming.schedule.save")}
-            </Button>
-            <Button
-              type="primary"
-              loading={running}
-              onClick={handleRunNow}
-              block
-            >
-              {t("dreaming.run.executeNow")}
-            </Button>
-          </div>
 
           <Flex align="center" justify="space-between" gap={8} wrap="wrap">
             <Badge status={runStatus.status} text={runStatus.text} />
