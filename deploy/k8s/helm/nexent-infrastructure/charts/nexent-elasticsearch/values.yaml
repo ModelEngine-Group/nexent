@@ -29,3 +29,7 @@ config:
   diskWatermarkLow: "85%"
   diskWatermarkHigh: "90%"
   diskWatermarkFloodStage: "95%"
+
+service:
+  type: ClusterIP
+  nodePorts: {}

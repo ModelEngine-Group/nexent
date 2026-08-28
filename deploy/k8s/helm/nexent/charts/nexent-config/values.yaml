@@ -34,3 +34,6 @@ probes:
 
 serviceAccount:
   name: nexent-config
+
+service:
+  type: ClusterIP

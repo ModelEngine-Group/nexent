@@ -31,3 +31,6 @@ probes:
     periodSeconds: 5
     timeoutSeconds: 2
     failureThreshold: 60
+
+service:
+  type: ClusterIP

@@ -29,3 +29,7 @@ config:
   user: "root"
   db: "nexent"
   port: "5432"
+
+service:
+  type: ClusterIP
+  nodePort: null

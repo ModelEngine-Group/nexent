@@ -176,13 +176,29 @@ def _write_executable(path: Path, content: str) -> None:
 
 
 def _application_dynamic_args() -> list[str]:
-    return ["--set", "global.sharedStorage.storageClassName=rwx-storage"]
+    return [
+        "--set",
+        "global.sharedStorage.mode=dynamic",
+        "--set",
+        "global.sharedStorage.storageClassName=rwx-storage",
+        "--set",
+        "nexent-supabase-db.persistence.mode=dynamic",
+        "--set",
+        "nexent-supabase-db.persistence.storageClassName=rwx-storage",
+    ]
 
 
 def _infrastructure_dynamic_args() -> list[str]:
     args: list[str] = []
     for component in sorted(INFRASTRUCTURE_DEPLOYMENTS):
-        args.extend(["--set", f"{component}.persistence.storageClassName=rwx-storage"])
+        args.extend(
+            [
+                "--set",
+                f"{component}.persistence.mode=dynamic",
+                "--set",
+                f"{component}.persistence.storageClassName=rwx-storage",
+            ]
+        )
     return args
 
 
@@ -356,6 +372,34 @@ def test_dynamic_storage_class_applies_to_release_owned_pvcs(
             claim["spec"]["storageClassName"] == "rwx-storage"
             for claim in claims.values()
         )
+
+
+def test_nodeport_service_defaults_render_without_explicit_ports(chart_dirs: dict[str, Path]) -> None:
+    application_args = [*_application_dynamic_args()]
+    for component in (
+        "nexent-config",
+        "nexent-data-process",
+        "nexent-mcp",
+        "nexent-runtime",
+        "nexent-supabase-auth",
+        "nexent-supabase-db",
+        "nexent-supabase-kong",
+    ):
+        application_args.extend(["--set", f"{component}.service.type=NodePort"])
+
+    infrastructure_args = [*_infrastructure_dynamic_args()]
+    for component in INFRASTRUCTURE_DEPLOYMENTS:
+        infrastructure_args.extend(["--set", f"{component}.service.type=NodePort"])
+
+    application = _template(chart_dirs["application"], "nexent", application_args)
+    infrastructure = _template(
+        chart_dirs["infrastructure"],
+        "nexent-infrastructure",
+        infrastructure_args,
+    )
+
+    assert application.returncode == 0, application.stderr
+    assert infrastructure.returncode == 0, infrastructure.stderr
 
 
 @pytest.mark.parametrize("component", sorted(INFRASTRUCTURE_DEPLOYMENTS))
