@@ -6581,6 +6581,76 @@ class TestCreateSingleAgentSandboxAndPlanning:
         # Warm-up call should have happened: executor("[0, None]")
         mock_executor.assert_called_once_with("[0, None]")
 
+    def test_docker_sandbox_binds_skill_script_execution_backend(
+        self, nexent_agent_instance, mock_model_config, mock_core_agent
+    ):
+        nexent_agent_instance.model_config_list = [mock_model_config]
+        nexent_agent_instance.sandbox_config = self._make_sandbox_config("docker")
+        nexent_agent_instance.workspace_path = "/mnt/nexent/workdir/user/run"
+
+        tool = MagicMock()
+        tool.name = "run_skill_script"
+        tool.bind_execution_backend = MagicMock()
+        tool_config = ToolConfig(
+            class_name="RunSkillScriptTool",
+            name="run_skill_script",
+            description="Run a skill script",
+            inputs="{}",
+            output_type="string",
+            params={},
+            source="builtin",
+        )
+        agent_config = AgentConfig(
+            name="docker_agent",
+            description="Agent with sandbox skill execution",
+            prompt_templates={"system": "test"},
+            tools=[tool_config],
+            max_steps=5,
+            model_name="test_model",
+            provide_run_summary=False,
+            managed_agents=[],
+            enable_planning=False,
+        )
+        executor = MagicMock()
+        executor._nexent_backend = "docker"
+        runner = MagicMock()
+        runner_class = MagicMock(return_value=runner)
+        sandbox_module = MagicMock()
+        sandbox_module.SandboxLevel = self._make_sandbox_level()
+        sandbox_module.build_python_executor = MagicMock(return_value=executor)
+        sandbox_module.SandboxSkillScriptRunner = runner_class
+
+        with patch.dict(
+            "sys.modules",
+            {"sdk.nexent.core.agents.sandbox": sandbox_module},
+        ), patch.object(
+            nexent_agent_instance, "create_tool", return_value=tool
+        ), patch.object(
+            nexent_agent, "_wrap_tool_with_monitoring", side_effect=lambda value, _name: value
+        ), patch.object(
+            nexent_agent_instance, "_pull_file_workspace_from_sandbox"
+        ) as pull_workspace:
+            self._run_create_single_agent(
+                nexent_agent_instance,
+                mock_model_config,
+                mock_core_agent,
+                agent_config,
+            )
+            on_complete = tool.bind_execution_backend.call_args.kwargs["on_complete"]
+            on_complete("done")
+
+        runner_class.assert_called_once_with(
+            executor,
+            timeout_seconds=300,
+            workspace_path=nexent_agent_instance.workspace_path,
+        )
+        tool.bind_execution_backend.assert_called_once_with(
+            runner,
+            on_complete=tool.bind_execution_backend.call_args.kwargs["on_complete"],
+        )
+        pull_workspace.assert_called_once_with()
+        assert nexent_agent_instance._sandbox_skill_runners == [runner]
+
     def test_sandbox_build_docker_warmup_fallback_local(self, nexent_agent_instance, mock_model_config, mock_core_agent):
         """Warm-up detects fallback to local backend (lines 633-640)."""
         nexent_agent_instance.model_config_list = [mock_model_config]

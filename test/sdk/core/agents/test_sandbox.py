@@ -107,6 +107,125 @@ def reset_singleton():
 # Pure-Python unit tests
 # ---------------------------------------------------------------------------
 class TestSandboxSkillScriptRunner:
+    def test_output_text_handles_non_bytes_values(self):
+        assert SandboxSkillScriptRunner._output_text("plain output") == "plain output"
+        assert SandboxSkillScriptRunner._output_text(None) == ""
+
+    def test_preparation_command_failure_includes_container_output(self):
+        container = MagicMock()
+        container.exec_run.return_value = SimpleNamespace(
+            exit_code=23,
+            output="permission denied",
+        )
+        runner = SandboxSkillScriptRunner(
+            SimpleNamespace(container=container, _nexent_backend="docker")
+        )
+
+        with pytest.raises(RuntimeError, match=r"exit=23.*permission denied"):
+            runner._run_container_command(["mkdir", "-p", "/workspace/skills"])
+
+    def test_resolve_skills_root_requires_workspace_and_rejects_drift(self):
+        runner = SandboxSkillScriptRunner(
+            SimpleNamespace(container=MagicMock(), _nexent_backend="docker")
+        )
+
+        with pytest.raises(RuntimeError, match="run-scoped workspace"):
+            runner._resolve_skills_root(None)
+
+        assert runner._resolve_skills_root("/workspace/run-1") == "/workspace/run-1/skills"
+        with pytest.raises(RuntimeError, match="does not match"):
+            runner._resolve_skills_root("/workspace/run-2")
+
+    def test_stage_skill_raises_when_archive_copy_fails(self, tmp_path):
+        skill_dir = tmp_path / "skills" / "report"
+        script = skill_dir / "scripts" / "generate.py"
+        script.parent.mkdir(parents=True)
+        script.write_text("print('sandbox')", encoding="utf-8")
+        container = MagicMock()
+        container.exec_run.return_value = SimpleNamespace(exit_code=0, output=b"")
+        container.put_archive.return_value = False
+        runner = SandboxSkillScriptRunner(
+            SimpleNamespace(container=container, _nexent_backend="docker")
+        )
+        manager = MagicMock()
+        manager.resolve_skill_script.return_value = (
+            str(skill_dir),
+            str(script),
+            "scripts/generate.py",
+        )
+
+        with pytest.raises(RuntimeError, match="Failed to copy"):
+            runner._stage_skill(
+                manager,
+                "report",
+                "scripts/generate.py",
+                "tenant-1",
+                "/workspace/skills",
+            )
+
+    def test_nonzero_script_with_combined_output_returns_error_json(self, tmp_path):
+        skill_dir = tmp_path / "skills" / "report"
+        script = skill_dir / "scripts" / "generate.py"
+        script.parent.mkdir(parents=True)
+        script.write_text("raise SystemExit(2)", encoding="utf-8")
+        container = MagicMock()
+        container.put_archive.return_value = True
+        container.exec_run.side_effect = [
+            SimpleNamespace(exit_code=0, output=b""),
+            SimpleNamespace(exit_code=0, output=b""),
+            SimpleNamespace(exit_code=0, output=b""),
+            SimpleNamespace(exit_code=2, output="combined failure"),
+        ]
+        workspace = "/mnt/nexent/workdir/user/run"
+        runner = SandboxSkillScriptRunner(
+            SimpleNamespace(container=container, _nexent_backend="docker"),
+            workspace_path=workspace,
+        )
+        manager = MagicMock()
+        manager.resolve_skill_script.return_value = (
+            str(skill_dir),
+            str(script),
+            "scripts/generate.py",
+        )
+
+        result = runner(
+            manager=manager,
+            skill_name="report",
+            script_path="scripts/generate.py",
+            params=None,
+            tenant_id="tenant-1",
+            working_directory=workspace,
+        )
+
+        assert json.loads(result) == {"error": "combined failure", "output": ""}
+
+    def test_cleanup_noops_without_backend_or_workspace_and_logs_exception(self, caplog):
+        unavailable_container = MagicMock()
+        unavailable = SandboxSkillScriptRunner(
+            SimpleNamespace(container=unavailable_container, _nexent_backend="local"),
+            workspace_path="/workspace/run",
+        )
+        unavailable.cleanup()
+        unavailable_container.exec_run.assert_not_called()
+
+        no_workspace_container = MagicMock()
+        no_workspace = SandboxSkillScriptRunner(
+            SimpleNamespace(container=no_workspace_container, _nexent_backend="docker")
+        )
+        no_workspace.cleanup()
+        no_workspace_container.exec_run.assert_not_called()
+
+        failing_container = MagicMock()
+        failing_container.exec_run.side_effect = RuntimeError("container unavailable")
+        failing = SandboxSkillScriptRunner(
+            SimpleNamespace(container=failing_container, _nexent_backend="docker"),
+            workspace_path="/workspace/run",
+        )
+        with caplog.at_level(logging.WARNING, logger="sandbox_under_test"):
+            failing.cleanup()
+
+        assert "container unavailable" in caplog.text
+
     def test_copies_validated_skill_and_executes_inside_container(self, tmp_path):
         skill_dir = tmp_path / "skills" / "report"
         script = skill_dir / "scripts" / "generate.py"

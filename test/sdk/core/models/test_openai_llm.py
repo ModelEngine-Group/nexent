@@ -2015,6 +2015,23 @@ def test_reasoning_only_stop_response_recovers_on_retry(openai_model_instance):
     assert openai_model_instance.last_retry_count == 1
 
 
+def test_reasoning_only_retry_is_interrupted_by_stop_event(openai_model_instance):
+    def fake_create(stream=True, **kwargs):
+        chunk = _make_content_chunk(None)
+        chunk.choices[0].finish_reason = "stop"
+        return [chunk]
+
+    openai_model_instance.stop_event = MagicMock()
+    openai_model_instance.stop_event.is_set.side_effect = [False, False, True]
+    openai_model_instance.retry_config = _retry_model_config()
+    openai_model_instance.client.chat.completions.create.side_effect = fake_create
+
+    with pytest.raises(RuntimeError, match="Model is interrupted by stop event"):
+        openai_model_instance.__call__([{"role": "user", "content": "hello"}])
+
+    assert openai_model_instance.last_retry_count == 1
+
+
 # ---------------------------------------------------------------------------
 # Coverage gap tests – target Codecov patch coverage from 89% → 90%+
 #
