@@ -87,8 +87,8 @@ export const API_ENDPOINTS = {
     publishedList: `${API_BASE_URL}/agent/published_list`,
     delete: `${API_BASE_URL}/agent`,
     getCreatingSubAgentId: `${API_BASE_URL}/agent/get_creating_sub_agent_id`,
-    stop: (conversationId: number) =>
-      `${API_BASE_URL}/agent/stop/${conversationId}`,
+    stop: (runId: string | number) =>
+      `${API_BASE_URL}/agent/stop/${encodeURIComponent(String(runId))}`,
     export: `${API_BASE_URL}/agent/export`,
     import: `${API_BASE_URL}/agent/import`,
     checkSkills: `${API_BASE_URL}/agent/check_skills`,
