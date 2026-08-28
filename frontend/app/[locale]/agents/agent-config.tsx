@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { App, Button, Form } from "antd";
+import { App, Button, Form, Tooltip } from "antd";
 import {
   Collapsible,
   CollapsibleContent,
@@ -43,6 +43,7 @@ import {
   MessageSquare,
   ShieldCheck,
   Bug,
+  LockOpen,
   Rocket,
 } from "lucide-react";
 
@@ -127,12 +128,16 @@ function ConfigSection({
 }
 
 interface AgentConfigProps {
+  canManualUnlock: boolean;
+  onManualUnlock: () => void;
   onToggleDebug: () => void;
   actionAreaRef?: React.Ref<HTMLDivElement>;
   onPublished?: () => void;
 }
 
 export default function AgentConfig({
+  canManualUnlock,
+  onManualUnlock,
   onToggleDebug,
   actionAreaRef,
   onPublished,
@@ -453,8 +458,20 @@ export default function AgentConfig({
       </Tabs>
       <div
         ref={actionAreaRef}
-        className="flex shrink-0 justify-end gap-2 border-t border-gray-200 bg-white pt-3 pb-1"
+        className="flex shrink-0 items-center justify-between gap-2 border-t border-gray-200 bg-white pt-3 pb-1"
       >
+        <Tooltip title={t("agent.page.panel.nl2agent.manualUnlockAction")}>
+          <Button
+            aria-label={t("agent.page.panel.nl2agent.manualUnlockAction")}
+            icon={<LockOpen size={16} />}
+            disabled={!canManualUnlock}
+            onClick={onManualUnlock}
+            variant="solid"
+            type="primary"
+          >
+            {t("agent.config.button.unlock")}
+          </Button>
+        </Tooltip>
         <div className="flex items-center gap-2">
           <Button
             icon={<Bug size={16} />}
