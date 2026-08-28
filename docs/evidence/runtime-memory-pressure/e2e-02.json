@@ -1,0 +1,9 @@
+{
+  "scenario": "E2E-02 disconnect continuation and cleanup",
+  "result": "PASS",
+  "first_event": "event-0",
+  "produced_after_disconnect": 50,
+  "active_channels": 0,
+  "active_producers": 0,
+  "active_runs": 0
+}

@@ -167,7 +167,7 @@ class TestStreamingChannel:
     async def test_ac_001_history_buffer_obeys_byte_limit(self, monkeypatch):
         """AC-001: local replay evicts whole events to honor the byte policy."""
         monkeypatch.setattr(
-            "backend.services.streaming_channel.RUNTIME_LOCAL_STREAM_MAX_BYTES", 8
+            "backend.services.streaming_channel.RUNTIME_STREAM_LOCAL_REPLAY_MAX_BYTES", 8
         )
         channel = StreamingChannel("test-conv", "test-user", history_size=10)
 
@@ -196,7 +196,7 @@ class TestStreamingChannel:
     async def test_ac_001_single_oversized_event_does_not_accumulate(self, monkeypatch):
         """AC-001: one live event may exceed the cap, but oversized events do not stack."""
         monkeypatch.setattr(
-            "backend.services.streaming_channel.RUNTIME_LOCAL_STREAM_MAX_BYTES", 4
+            "backend.services.streaming_channel.RUNTIME_STREAM_LOCAL_REPLAY_MAX_BYTES", 4
         )
         channel = StreamingChannel("test-conv", "test-user", history_size=10)
 

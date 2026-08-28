@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>E2E-04 三轮内存压力稳定性</title>
+<style>
+body{font-family:system-ui,-apple-system,sans-serif;background:#f3f5f8;color:#172033;margin:0;padding:36px}
+.card{max-width:1040px;margin:auto;background:white;border-radius:16px;padding:32px;box-shadow:0 8px 28px #1d2a3a18}
+.meta{color:#687386;font-size:14px} h1{margin:8px 0 20px;font-size:30px}
+.badge{display:inline-block;padding:8px 18px;border-radius:999px;font-weight:800} .pass{background:#d9f8e5;color:#087333} .fail{background:#ffe0e0;color:#ad1515}
+table{border-collapse:collapse;width:100%;margin:24px 0} th,td{border-bottom:1px solid #e3e7ee;padding:12px;text-align:left} th{width:34%;color:#526074}
+details{margin-top:20px} pre{background:#101827;color:#d9e2f2;padding:20px;border-radius:10px;white-space:pre-wrap;overflow-wrap:anywhere}
+</style></head><body><main class="card"><div class="meta">Nexent Runtime Memory Pressure · E2E-04 · 2026-08-28T07:06:11.890440+00:00</div>
+<h1>三轮内存压力稳定性</h1><span class="badge pass">PASS</span>
+<table><tr><th>baseline_rss</th><td>494727168</td></tr><tr><th>process_peak_rss</th><td>630157312</td></tr><tr><th>stable</th><td>True</td></tr><tr><th>under_1_2_gib</th><td>True</td></tr><tr><th>wave_1</th><td>wave=1, retained_bytes=167772160, peak_rss=630390784, quiescent_rss=483708928</td></tr><tr><th>wave_2</th><td>wave=2, retained_bytes=167772160, peak_rss=630390784, quiescent_rss=483708928</td></tr><tr><th>wave_3</th><td>wave=3, retained_bytes=167772160, peak_rss=630390784, quiescent_rss=483708928</td></tr></table><details><summary>原始结果 JSON</summary><pre>{
+  &quot;scenario&quot;: &quot;E2E-04 repeated memory waves&quot;,
+  &quot;result&quot;: &quot;PASS&quot;,
+  &quot;baseline_rss&quot;: 494727168,
+  &quot;process_peak_rss&quot;: 630157312,
+  &quot;stable&quot;: true,
+  &quot;under_1_2_gib&quot;: true,
+  &quot;waves&quot;: [
+    {
+      &quot;wave&quot;: 1,
+      &quot;retained_bytes&quot;: 167772160,
+      &quot;peak_rss&quot;: 630390784,
+      &quot;quiescent_rss&quot;: 483708928
+    },
+    {
+      &quot;wave&quot;: 2,
+      &quot;retained_bytes&quot;: 167772160,
+      &quot;peak_rss&quot;: 630390784,
+      &quot;quiescent_rss&quot;: 483708928
+    },
+    {
+      &quot;wave&quot;: 3,
+      &quot;retained_bytes&quot;: 167772160,
+      &quot;peak_rss&quot;: 630390784,
+      &quot;quiescent_rss&quot;: 483708928
+    }
+  ]
+}</pre></details>
+</main></body></html>

@@ -1,0 +1,28 @@
+{
+  "scenario": "E2E-04 repeated memory waves",
+  "result": "PASS",
+  "baseline_rss": 494727168,
+  "process_peak_rss": 630157312,
+  "stable": true,
+  "under_1_2_gib": true,
+  "waves": [
+    {
+      "wave": 1,
+      "retained_bytes": 167772160,
+      "peak_rss": 630390784,
+      "quiescent_rss": 483708928
+    },
+    {
+      "wave": 2,
+      "retained_bytes": 167772160,
+      "peak_rss": 630390784,
+      "quiescent_rss": 483708928
+    },
+    {
+      "wave": 3,
+      "retained_bytes": 167772160,
+      "peak_rss": 630390784,
+      "quiescent_rss": 483708928
+    }
+  ]
+}

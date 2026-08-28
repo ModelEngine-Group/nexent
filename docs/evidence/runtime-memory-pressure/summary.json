@@ -1,0 +1,30 @@
+{
+  "timestamp": "2026-08-28T07:06:11.890440+00:00",
+  "tests": [
+    {
+      "test_id": "E2E-01",
+      "title": "有界本地重放与游标顺序",
+      "result": "PASS"
+    },
+    {
+      "test_id": "E2E-02",
+      "title": "客户端断连后继续执行与资源清理",
+      "result": "PASS"
+    },
+    {
+      "test_id": "E2E-03",
+      "title": "持久化片段一次性合并",
+      "result": "PASS"
+    },
+    {
+      "test_id": "E2E-04",
+      "title": "三轮内存压力稳定性",
+      "result": "PASS"
+    },
+    {
+      "test_id": "E2E-05",
+      "title": "真实模型 1/5 用户验证",
+      "result": "PASS"
+    }
+  ]
+}

@@ -11,7 +11,7 @@ from collections import deque
 import logging
 from typing import AsyncIterator, Deque, Dict, List, Optional, Tuple
 
-from consts.const import RUNTIME_LOCAL_STREAM_MAX_BYTES
+from consts.const import RUNTIME_STREAM_LOCAL_REPLAY_MAX_BYTES
 from services.runtime_state_service import runtime_state_service
 
 logger = logging.getLogger(__name__)
@@ -38,7 +38,7 @@ class StreamingChannel:
         self.conversation_id = conversation_id
         self.user_id = user_id
         self._history_size = max(1, history_size)
-        self._history_max_bytes = max(1, RUNTIME_LOCAL_STREAM_MAX_BYTES)
+        self._history_max_bytes = max(1, RUNTIME_STREAM_LOCAL_REPLAY_MAX_BYTES)
         self._history_buffer: Deque[Tuple[int, str, int]] = deque()
         self._history_bytes = 0
         self._next_event_index = 0

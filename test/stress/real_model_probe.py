@@ -3,17 +3,17 @@
 
 import json
 import os
-from pathlib import Path
 import sys
 import time
+from pathlib import Path
 
 import yaml
 
 sys.path.insert(0, "/opt/sdk")
 sys.path.insert(0, "/opt/backend")
 
-from nexent.core.models.openai_llm import OpenAIModel  # noqa: E402
-from nexent.core.utils.observer import MessageObserver  # noqa: E402
+from nexent.core.models.openai_llm import OpenAIModel
+from nexent.core.utils.observer import MessageObserver
 
 
 def load_env(path: Path) -> dict[str, str]:
@@ -26,7 +26,7 @@ def load_env(path: Path) -> dict[str, str]:
     return values
 
 
-def main() -> None:
+def run_probe() -> dict:
     credential_dir = Path(os.environ.get("NEXENT_RUNTIME_CREDENTIAL_DIR", "/runtime-credentials"))
     config = yaml.safe_load((credential_dir / "models.yaml").read_text(encoding="utf-8"))
     secrets = load_env(credential_dir / "secrets.env")
@@ -61,13 +61,13 @@ def main() -> None:
                 {"role": "user", "content": "Return exactly: RUNTIME_MEMORY_REAL_MODEL_OK"},
             ])
             break
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - try the next configured model
             last_error = exc
     else:
         raise RuntimeError(f"All {len(candidates)} configured LLM candidates failed") from last_error
     elapsed = time.perf_counter() - started
     content = str(getattr(response, "content", response) or "")
-    print(json.dumps({
+    return {
         "marker_present": "RUNTIME_MEMORY_REAL_MODEL_OK" in content,
         "response_chars": len(content),
         "elapsed_seconds": elapsed,
@@ -75,7 +75,11 @@ def main() -> None:
         "diagnostics_present": getattr(model, "last_response_diagnostics", None) is not None,
         "model_alias": str(llm.get("id", "llm")),
         "candidate_index": candidate_index,
-    }, sort_keys=True))
+    }
+
+
+def main() -> None:
+    print(json.dumps(run_probe(), sort_keys=True))
 
 
 if __name__ == "__main__":
