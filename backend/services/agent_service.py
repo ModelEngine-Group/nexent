@@ -169,6 +169,19 @@ _channel_cleanup_tasks: set[asyncio.Task[None]] = set()
 _agent_stream_producer_tasks: set[asyncio.Task[None]] = set()
 
 
+def _finalize_buffered_unit_fragments(message_units: list[dict[str, Any]]) -> int:
+    """Join mergeable unit fragments once and return finalized UTF-8 bytes."""
+    finalized_bytes = 0
+    for unit in message_units:
+        fragments = unit.pop("_content_fragments", None)
+        if fragments is not None:
+            content = "".join(fragments)
+            unit["content"] = content
+            unit["unit_content"] = content
+        finalized_bytes += len(str(unit.get("unit_content", "")).encode("utf-8"))
+    return finalized_bytes
+
+
 def _agent_icon_object_name(agent_id: int, tenant_id: str) -> str:
     return f"agent-icons/{tenant_id}/{agent_id}/icon"
 
@@ -324,6 +337,16 @@ async def _consume_agent_stream_producer(
             )
             _channel_cleanup_tasks.add(cleanup_task)
             cleanup_task.add_done_callback(_channel_cleanup_tasks.discard)
+        logger.info(
+            "Agent stream cleanup conversation=%s status=%s active_runs=%s "
+            "active_channels=%s active_producers=%s replay_bytes=%s",
+            conversation_id,
+            "failed" if not channel.is_completed else channel.completion_status,
+            agent_run_manager.get_active_run_count(),
+            streaming_channel_manager.get_active_channel_count(),
+            len(_agent_stream_producer_tasks),
+            streaming_channel_manager.get_retained_history_bytes(),
+        )
 
 
 async def _poll_runtime_cancel_signal(conversation_id: int, user_id: str, stop_event) -> None:
@@ -1185,8 +1208,7 @@ async def _stream_agent_chunks(
                 )
 
                 if is_continuation:
-                    current_unit["content"] += chunk_content
-                    current_unit["unit_content"] = current_unit["content"]
+                    current_unit["_content_fragments"].append(chunk_content)
                 else:
                     if chunk_type == "final_answer":
                         final_answer_content = chunk_content
@@ -1279,6 +1301,10 @@ async def _stream_agent_chunks(
                             "invocation_id": data.get("invocation_id"),
                             "mergeable": mergeable,
                         }
+                        if mergeable:
+                            current_unit["_content_fragments"] = [persisted_content]
+                            current_unit["content"] = ""
+                            current_unit["unit_content"] = ""
                         buffered_units.append(current_unit)
                         if chunk_type == "automation_proposal":
                             try:
@@ -1378,6 +1404,13 @@ async def _stream_agent_chunks(
         persistence_failed = False
         if streaming_message_id is not None:
             try:
+                persistence_bytes = _finalize_buffered_unit_fragments(buffered_units)
+                logger.info(
+                    "Finalizing assistant persistence conversation=%s units=%s bytes=%s",
+                    agent_request.conversation_id,
+                    len(buffered_units),
+                    persistence_bytes,
+                )
                 await asyncio.to_thread(
                     persist_assistant_run_batch,
                     message_id=streaming_message_id,
