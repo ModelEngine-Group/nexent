@@ -272,6 +272,23 @@ export const conversationService = {
     throw new ApiError(data.code, data.message);
   },
 
+  // Batch delete conversations
+  async deleteBatch(conversationIds: number[]) {
+    const response = await fetch(API_ENDPOINTS.conversation.batchDelete, {
+      method: "POST",
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ conversation_ids: conversationIds }),
+    });
+
+    const data = await response.json();
+
+    if (data.code === 0) {
+      return data.data as { deleted_count: number; failed_ids: number[] };
+    }
+
+    throw new ApiError(data.code, data.message);
+  },
+
   // Stop conversation agent
   async stop(conversationId: number) {
     const response = await fetch(API_ENDPOINTS.agent.stop(conversationId), {

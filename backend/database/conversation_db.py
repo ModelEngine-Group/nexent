@@ -1046,6 +1046,89 @@ def delete_conversation(conversation_id: int, user_id: Optional[str] = None) -> 
         return conversation_result.rowcount > 0
 
 
+def delete_conversations_batch(conversation_ids: List[int], user_id: Optional[str] = None) -> List[int]:
+    """
+    Soft-delete multiple conversations owned by the user (cascading).
+
+    Only conversations whose created_by matches user_id are affected. Child
+    rows cascade by conversation_id for the validated set only, so a caller
+    passing ids it does not own cannot touch another user's data.
+
+    Args:
+        conversation_ids: Conversation IDs to delete
+        user_id: Owner filter (created_by) and audit value for updated_by
+
+    Returns:
+        List of conversation IDs that were actually deleted
+    """
+    with get_db_session() as session:
+        ids = [int(i) for i in conversation_ids]
+        if not ids:
+            return []
+
+        # Ownership boundary: resolve requested ids that belong to the user.
+        # Only this set is cascaded below, enforcing tenant isolation.
+        owned_rows = session.execute(
+            select(ConversationRecord.conversation_id).where(
+                ConversationRecord.conversation_id.in_(ids),
+                ConversationRecord.created_by == user_id,
+                ConversationRecord.delete_flag == 'N'
+            )
+        ).all()
+        owned_ids = [row[0] for row in owned_rows]
+        if not owned_ids:
+            return []
+
+        update_data = {
+            "delete_flag": 'Y',
+            "update_time": func.current_timestamp()
+        }
+        if user_id:
+            update_data = add_update_tracking(update_data, user_id)
+
+        # 1. Mark the owned conversations as deleted
+        session.execute(
+            update(ConversationRecord).where(
+                ConversationRecord.conversation_id.in_(owned_ids),
+                ConversationRecord.delete_flag == 'N'
+            ).values(update_data)
+        )
+
+        # 2. Mark related messages as deleted
+        session.execute(
+            update(ConversationMessage).where(
+                ConversationMessage.conversation_id.in_(owned_ids),
+                ConversationMessage.delete_flag == 'N'
+            ).values(update_data)
+        )
+
+        # 3. Mark message units as deleted
+        session.execute(
+            update(ConversationMessageUnit).where(
+                ConversationMessageUnit.conversation_id.in_(owned_ids),
+                ConversationMessageUnit.delete_flag == 'N'
+            ).values(update_data)
+        )
+
+        # 4. Mark search sources as deleted
+        session.execute(
+            update(ConversationSourceSearch).where(
+                ConversationSourceSearch.conversation_id.in_(owned_ids),
+                ConversationSourceSearch.delete_flag == 'N'
+            ).values(update_data)
+        )
+
+        # 5. Mark image sources as deleted
+        session.execute(
+            update(ConversationSourceImage).where(
+                ConversationSourceImage.conversation_id.in_(owned_ids),
+                ConversationSourceImage.delete_flag == 'N'
+            ).values(update_data)
+        )
+
+        return owned_ids
+
+
 def soft_delete_all_conversations_by_user(user_id: str) -> int:
     """
     Soft-delete all conversations and related records created by a user.

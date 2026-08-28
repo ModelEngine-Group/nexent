@@ -208,6 +208,7 @@ from backend.database.conversation_db import (
     create_source_image,
     create_source_search,
     delete_conversation,
+    delete_conversations_batch,
     delete_source_image,
     delete_source_search,
     get_conversation,
@@ -343,6 +344,70 @@ def test_delete_conversation_noop(monkeypatch, mock_session_ctx):
 
     assert ok is False
     assert session.execute.call_count == 5
+
+
+# =============================================================================
+# Tests for delete_conversations_batch
+# =============================================================================
+
+
+def test_delete_conversations_batch_success(monkeypatch, mock_session_ctx):
+    """delete_conversations_batch returns owned ids and cascades 5 updates."""
+    session, ctx = mock_session_ctx
+    select_result = MagicMock()
+    select_result.all.return_value = [(101,), (102,)]
+    session.execute.side_effect = [select_result] + [MagicMock() for _ in range(5)]
+
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    deleted = delete_conversations_batch([101, 102, 999], user_id="user-1")
+
+    assert deleted == [101, 102]
+    # 1 ownership SELECT + 5 cascade UPDATEs
+    assert session.execute.call_count == 6
+
+
+def test_delete_conversations_batch_none_owned(monkeypatch, mock_session_ctx):
+    """delete_conversations_batch returns [] when no requested id belongs to the user."""
+    session, ctx = mock_session_ctx
+    select_result = MagicMock()
+    select_result.all.return_value = []
+    session.execute.return_value = select_result
+
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    deleted = delete_conversations_batch([999], user_id="user-1")
+
+    assert deleted == []
+    # Only the ownership SELECT, no cascade UPDATEs
+    assert session.execute.call_count == 1
+
+
+def test_delete_conversations_batch_empty_input(monkeypatch, mock_session_ctx):
+    """delete_conversations_batch returns [] without hitting the DB when input is empty."""
+    session, ctx = mock_session_ctx
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    deleted = delete_conversations_batch([], user_id="user-1")
+
+    assert deleted == []
+    session.execute.assert_not_called()
+
+
+def test_delete_conversations_batch_without_user_id(monkeypatch, mock_session_ctx):
+    """delete_conversations_batch skips updated_by tracking when user_id is absent."""
+    session, ctx = mock_session_ctx
+    select_result = MagicMock()
+    select_result.all.return_value = [(101,), (102,)]
+    session.execute.side_effect = [select_result] + [MagicMock() for _ in range(5)]
+
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    deleted = delete_conversations_batch([101, 102])
+
+    assert deleted == [101, 102]
+    # 1 ownership SELECT + 5 cascade UPDATEs
+    assert session.execute.call_count == 6
 
 
 # =============================================================================
