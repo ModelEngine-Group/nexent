@@ -771,7 +771,7 @@ def _get_skill_script_tools(
                 class_name="RunSkillScriptTool",
                 name="run_skill_script",
                 description="Execute a skill script with given parameters. Use this to run Python or shell scripts that are part of a skill.",
-                inputs='{"skill_name": "str", "script_path": "str", "params": "dict"}',
+                inputs='{"skill_name": "str", "script_path": "str", "params": "str"}',
                 output_type="string",
                 params={
                     "local_skills_dir": CONTAINER_SKILLS_PATH,

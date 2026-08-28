@@ -10,7 +10,6 @@ import {
   Flex,
   Form,
   Input,
-  InputNumber,
   Modal,
   Select,
   Space,
@@ -25,7 +24,6 @@ import {
 import type { Dayjs } from "dayjs";
 import {
   Bot,
-  Brain,
   Building2,
   Clock3,
   Edit3,
@@ -44,10 +42,8 @@ import { LongTermMemoryPanel } from "./LongTermMemoryPanel";
 import { ProviderConfigCard } from "./ProviderConfigCard";
 import {
   loadMemoryConfig,
-  setDreamingConfig,
-  setMemorySwitch,
   setExternalProviderTopK,
-  setExternalProviderTimeout,
+  setMemorySwitch,
   type MemoryConfig,
 } from "@/services/memoryService";
 import {
@@ -105,7 +101,6 @@ const statusMap: Record<MemoryStatus, { label: string; color: string }> = {
 
 const defaultConfig: MemoryConfig = {
   memoryEnabled: true,
-  dreamingEnabled: true,
   shareOption: "always",
   disableAgentIds: [],
   disableUserAgentIds: [],
@@ -279,41 +274,6 @@ export function MemoryManager() {
       setConfig((current) => ({ ...current, memoryEnabled: previous }));
       message.error(t("useMemory.setMemorySwitchError"));
     }
-  };
-
-  const persistDreamingEnabled = async (
-    enabled: boolean,
-    deleteHistory = false
-  ) => {
-    setSavingConfig(true);
-    try {
-      const saved = await setDreamingConfig(enabled, deleteHistory);
-      if (!saved) throw new Error("save failed");
-      setConfig((current) => ({ ...current, dreamingEnabled: enabled }));
-      message.success(
-        enabled ? t("dreaming.config.enabled") : t("dreaming.config.disabled")
-      );
-    } catch {
-      message.error(t("dreaming.config.updateFailed"));
-    } finally {
-      setSavingConfig(false);
-    }
-  };
-
-  const updateDreamingEnabled = (enabled: boolean) => {
-    if (enabled) {
-      void persistDreamingEnabled(true);
-      return;
-    }
-    Modal.confirm({
-      title: t("dreaming.config.disableTitle"),
-      content: t("dreaming.config.disableConfirm"),
-      okText: t("dreaming.config.disableWithHistory"),
-      okButtonProps: { danger: true },
-      cancelText: t("dreaming.config.disableKeepHistory"),
-      onOk: () => persistDreamingEnabled(false, true),
-      onCancel: () => persistDreamingEnabled(false, false),
-    });
   };
 
   const openCreate = () => {
@@ -533,25 +493,7 @@ export function MemoryManager() {
           />
         </Flex>
       </Card>
-      <Card className="memory-config-card" loading={configLoading}>
-        <Flex align="center" justify="space-between" gap={24}>
-          <Flex align="center" gap={12}>
-            <Brain size={20} />
-            <div>
-              <Text strong>{t("dreaming.config.enableTitle")}</Text>
-              <Text type="secondary" className="memory-setting-description">
-                {t("dreaming.config.enableDescription")}
-              </Text>
-            </div>
-          </Flex>
-          <Switch
-            checked={config.dreamingEnabled}
-            loading={savingConfig}
-            onChange={updateDreamingEnabled}
-          />
-        </Flex>
-        {config.dreamingEnabled && <DreamingConfigCards />}
-      </Card>
+      <DreamingConfigCards />
       <ProviderConfigCard
         memoryEnabled={config.memoryEnabled}
         topK={config.externalProviderTopK}

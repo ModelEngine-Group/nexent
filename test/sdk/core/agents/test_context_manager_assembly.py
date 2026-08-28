@@ -168,7 +168,7 @@ def test_context_manager_owns_final_answer_assembly():
         "system",
         "system",
         "user",
-        "assistant",
+        "user",
         "user",
     ]
     assert [_message_text(message) for message in final.messages[:3]] == [
@@ -176,6 +176,11 @@ def test_context_manager_owns_final_answer_assembly():
         "final instruction",
         "memory fact",
     ]
+    action_history = _message_text(final.messages[3])
+    assert '<completed_action_history read_only="true">' in action_history
+    assert "recorded_result:\nwork trace" in action_history
+    assert "Calling tools:" not in action_history
+    assert "Observation:" not in action_history
     assert final.evidence.purpose == "final_answer"
     assert final.evidence.final_answer_prompt_fingerprint
     assert _message_text(final.messages[-1]) == "answer task: original task"

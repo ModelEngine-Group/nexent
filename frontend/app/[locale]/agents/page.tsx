@@ -128,7 +128,9 @@ function AgentSetupContent() {
   const [isShowVersionManagePanel, setIsShowVersionManagePanel] =
     useState(false);
   const currentAgentId = useAgentStore((state) => state.currentAgentId);
-  const { agentInfo } = useAgentInfo(currentAgentId);
+  const { agentInfo, refetch: refetchAgentInfo } = useAgentInfo(
+    currentAgentId
+  );
   const { total } = useAgentVersionList(currentAgentId);
   const { agentVersionDetail } = useAgentVersionDetail(
     currentAgentId,
@@ -266,6 +268,22 @@ function AgentSetupContent() {
     setAgentTourCurrent(0);
     setIsAgentTourPending(true);
   }, []);
+
+  const handleAgentPublished = useCallback(() => {
+    if (currentAgentId === null) return;
+
+    void Promise.all([
+      refetchAgentInfo(),
+      queryClient.invalidateQueries({
+        queryKey: ["agentVersions", currentAgentId],
+      }),
+    ]).catch((error) => {
+      log.warn("[AgentVersion] Failed to refresh version information", {
+        agentId: currentAgentId,
+        error,
+      });
+    });
+  }, [currentAgentId, queryClient, refetchAgentInfo]);
 
   useEffect(() => {
     if (
@@ -417,6 +435,7 @@ function AgentSetupContent() {
                 canManualUnlock={canManualUnlock}
                 onManualUnlock={handleManualUnlock}
                 onToggleDebug={() => setIsDebugVisible((visible) => !visible)}
+                onPublished={handleAgentPublished}
               />
             </div>
           </PanelCard>

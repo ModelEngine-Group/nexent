@@ -6,6 +6,7 @@ import io
 import json
 import logging
 import os
+import uuid
 import zipfile
 from collections import deque
 from typing import Any, Callable, Optional, Dict, List
@@ -1459,7 +1460,7 @@ async def _stream_agent_chunks(
                 pass
 
         agent_run_manager.unregister_agent_run(
-            agent_request.conversation_id,
+            _agent_run_identifier(agent_request),
             user_id,
             status=terminal_status,
             agent_run_info=agent_run_info,
@@ -3058,6 +3059,15 @@ def insert_related_agent_impl(parent_agent_id, child_agent_id, tenant_id):
         )
 
 
+# Debug runs have no persisted conversation. Use their server-generated ID to
+# register and stop them without affecting conversation-backed runs.
+def _agent_run_identifier(agent_request: AgentRequest) -> int | str | None:
+    debug_run_id = getattr(agent_request, "_debug_run_id", None)
+    if isinstance(debug_run_id, str) and debug_run_id:
+        return debug_run_id
+    return agent_request.conversation_id
+
+
 # Helper function for run_agent_stream, used to prepare context for an agent run
 async def prepare_agent_run(
     agent_request: AgentRequest,
@@ -3142,7 +3152,7 @@ async def prepare_agent_run(
     if reservation_token is not None:
         register_kwargs["reservation_token"] = reservation_token
     agent_run_manager.register_agent_run(
-        agent_request.conversation_id,
+        _agent_run_identifier(agent_request),
         agent_run_info,
         user_id,
         **register_kwargs,
@@ -3305,7 +3315,7 @@ async def generate_stream(
             cancel_poll_task.cancel()
         if reservation_token is not None:
             agent_run_manager.release_agent_run_reservation(
-                agent_request.conversation_id,
+                _agent_run_identifier(agent_request),
                 user_id,
                 reservation_token,
             )
@@ -3407,6 +3417,10 @@ async def run_agent_stream(
         user_id=user_id,
         tenant_id=tenant_id,
     )
+    if agent_request.is_debug and not resume:
+        # Debug executions deliberately do not create conversations, so they
+        # need a transient identifier for lifecycle operations such as stop.
+        agent_request.__dict__["_debug_run_id"] = f"debug-{uuid.uuid4().hex}"
 
     # Inject current time in the user's timezone so the LLM can answer
     # time-related questions correctly. The SDK strips this prefix before
@@ -3796,7 +3810,7 @@ async def run_agent_stream(
     # Normal mode: start new stream
     try:
         reservation_token = agent_run_manager.reserve_agent_run(
-            agent_request.conversation_id,
+            _agent_run_identifier(agent_request),
             resolved_user_id,
         )
     except AgentRunAlreadyActiveError:
@@ -3882,7 +3896,7 @@ async def run_agent_stream(
             )
     except Exception:
         agent_run_manager.release_agent_run_reservation(
-            agent_request.conversation_id,
+            _agent_run_identifier(agent_request),
             resolved_user_id,
             reservation_token,
         )
@@ -3919,7 +3933,7 @@ async def run_agent_stream(
 
             # Emit conversation_created event for new conversations
             if is_new_conversation:
-                yield f'data: {{"type": "conversation_created", "content": {{"conversation_id": {agent_request.conversation_id}}}}}\n\n'
+                yield "data: " + json.dumps({"type": "conversation_created", "content": {"conversation_id": agent_request.conversation_id}}, ensure_ascii=False) + "\n\n"
 
             scope_event = getattr(agent_request, "_resolved_knowledge_scope_event", None)
             if scope_event is not None:
@@ -3950,12 +3964,15 @@ async def run_agent_stream(
             yield _safe_agent_stream_error_chunk()
         finally:
             agent_run_manager.release_agent_run_reservation(
-                agent_request.conversation_id,
+                _agent_run_identifier(agent_request),
                 resolved_user_id,
                 reservation_token,
             )
 
     headers = {"Cache-Control": "no-cache", "Connection": "keep-alive"}
+    debug_run_id = getattr(agent_request, "_debug_run_id", None)
+    if debug_run_id is not None:
+        headers["run_id"] = debug_run_id
     if agent_request.conversation_id is not None:
         headers["conversation_id"] = str(agent_request.conversation_id)
     runtime_metadata_version = getattr(
@@ -4053,17 +4070,20 @@ async def run_agent_background(
     }
 
 
-def stop_agent_tasks(conversation_id: int, user_id: str):
+def stop_agent_tasks(conversation_id: int | str, user_id: str):
     """
-    Stop agent run and preprocess tasks for the specified conversation_id.
+    Stop an agent run by its conversation ID or ephemeral debug run ID.
     Matches the behavior of agent_app.agent_stop_api.
     """
     # Stop agent run
     agent_stopped = agent_run_manager.stop_agent_run(conversation_id, user_id)
 
-    # Stop preprocess tasks
-    preprocess_stopped = preprocess_manager.stop_preprocess_tasks(
-        conversation_id)
+    # Preprocess tasks are associated only with persisted conversations.
+    preprocess_stopped = (
+        preprocess_manager.stop_preprocess_tasks(conversation_id)
+        if isinstance(conversation_id, int)
+        else False
+    )
 
     if agent_stopped or preprocess_stopped:
         message_parts = []
@@ -4072,11 +4092,11 @@ def stop_agent_tasks(conversation_id: int, user_id: str):
         if preprocess_stopped:
             message_parts.append("preprocess tasks")
 
-        message = f"successfully stopped {' and '.join(message_parts)} for user_id {user_id}, conversation_id {conversation_id}"
+        message = f"successfully stopped {' and '.join(message_parts)} for user_id {user_id}, run_id {conversation_id}"
         logging.info(message)
         return {"status": "success", "message": message}
     else:
-        message = f"no running agent or preprocess tasks found for user_id {user_id}, conversation_id {conversation_id}"
+        message = f"no running agent or preprocess tasks found for user_id {user_id}, run_id {conversation_id}"
         logging.info(message)
         return {"status": "success", "message": message, "already_stopped": True}
 

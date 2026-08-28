@@ -60,11 +60,12 @@ export default function AgentSelectorHeader({
   const waitForAutosave = useAgentStore((state) => state.waitForIdle);
 
   // Resolve tenant from auth (matches AgentManageComp / published_list; keeps ASSET_OWNER merge)
-  const { agents } = useAgentList("");
+  const { agents, isSuccess: hasLoadedAgents } = useAgentList("");
 
   // Store state
   const currentAgentId = useAgentStore((state) => state.currentAgentId);
   const initialize = useAgentStore((state) => state.initialize);
+  const reset = useAgentStore((state) => state.reset);
 
   // Dropdown open state
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -160,20 +161,66 @@ export default function AgentSelectorHeader({
     const rawAgentId = searchParams.get("agent_id");
     const parsedAgentId = rawAgentId ? Number(rawAgentId) : null;
 
+    // Keep the selected Agent in sync with the URL and the current user's list.
+    // This also prevents an Agent loaded under a previous account from remaining
+    // in the store after the account switch clears or invalidates agent_id.
+    if (parsedAgentId === null) {
+      initialUrlAgentIdRef.current = null;
+      if (currentAgentId !== null) reset();
+      return;
+    }
+
+    if (!Number.isInteger(parsedAgentId) || parsedAgentId <= 0) {
+      initialUrlAgentIdRef.current = null;
+      if (currentAgentId !== null) reset();
+
+      const nextSearchParams = new URLSearchParams(searchParams.toString());
+      nextSearchParams.delete("agent_id");
+      router.replace(
+        nextSearchParams.size > 0
+          ? `${pathname}?${nextSearchParams.toString()}`
+          : pathname
+      );
+      return;
+    }
+
+    // An empty list is also the query's loading state, so wait for a successful
+    // response before treating an Agent as unavailable to the current user.
+    if (!hasLoadedAgents) return;
+
+    if (!agents.some((agent: Agent) => Number(agent.id) === parsedAgentId)) {
+      initialUrlAgentIdRef.current = null;
+      if (currentAgentId !== null) reset();
+
+      const nextSearchParams = new URLSearchParams(searchParams.toString());
+      nextSearchParams.delete("agent_id");
+      router.replace(
+        nextSearchParams.size > 0
+          ? `${pathname}?${nextSearchParams.toString()}`
+          : pathname
+      );
+      return;
+    }
+
     if (
       initialUrlAgentIdRef.current !== null ||
-      parsedAgentId === null ||
-      !Number.isInteger(parsedAgentId) ||
-      parsedAgentId <= 0 ||
-      currentAgentId !== null ||
-      !agents.some((agent: Agent) => Number(agent.id) === parsedAgentId)
+      currentAgentId !== null
     ) {
       return;
     }
 
     initialUrlAgentIdRef.current = parsedAgentId;
     void handleSelectAgent(parsedAgentId);
-  }, [agents, currentAgentId, handleSelectAgent, searchParams]);
+  }, [
+    agents,
+    currentAgentId,
+    handleSelectAgent,
+    hasLoadedAgents,
+    pathname,
+    reset,
+    router,
+    searchParams,
+  ]);
 
   const filteredAgents = useMemo(() => {
     const query = agentSearch.trim().toLowerCase();
