@@ -2905,7 +2905,10 @@ def insert_related_agent_impl(parent_agent_id, child_agent_id, tenant_id):
 # Debug runs have no persisted conversation. Use their server-generated ID to
 # register and stop them without affecting conversation-backed runs.
 def _agent_run_identifier(agent_request: AgentRequest) -> int | str | None:
-    return getattr(agent_request, "_debug_run_id", None) or agent_request.conversation_id
+    debug_run_id = getattr(agent_request, "_debug_run_id", None)
+    if isinstance(debug_run_id, str) and debug_run_id:
+        return debug_run_id
+    return agent_request.conversation_id
 
 
 # Helper function for run_agent_stream, used to prepare context for an agent run
