@@ -304,7 +304,6 @@ export const ThreadList: FC<ThreadListProps> = ({
   const isLoadingMore = useAuiState((s) => s.threads.isLoadingMore);
   const hasMore = useAuiState((s) => s.threads.hasMore);
 
-
   return (
     <div className="flex flex-col p-2">
       <AuiIf condition={(s) => s.threads.isLoading}>
