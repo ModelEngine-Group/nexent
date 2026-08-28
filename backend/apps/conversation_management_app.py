@@ -170,7 +170,7 @@ async def delete_conversations_batch_endpoint(request: BatchDeleteConversationRe
         logging.warning("Session expired")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
-        logging.error(f"Failed to batch delete conversations: {str(e)}")
+        logging.exception("Failed to batch delete conversations")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
 

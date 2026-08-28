@@ -421,7 +421,25 @@ async def test_delete_conversations_batch_failure(conversation_mocks):
             request_obj, authorization=mock_auth_header)
 
     assert exc_info.value.status_code == 500
-    conversation_mocks['logging'].error.assert_called_once()
+    conversation_mocks['logging'].exception.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_delete_conversations_batch_token_expired(conversation_mocks):
+    """Expired token on batch delete maps to 401."""
+    from consts.exceptions import TokenExpiredError
+
+    conversation_mocks['get_current_user_id'].side_effect = TokenExpiredError(
+        "expired")
+
+    request_obj = MagicMock()
+    request_obj.conversation_ids = [1, 2]
+
+    with pytest.raises(HTTPException) as exc_info:
+        await delete_conversations_batch_endpoint(
+            request_obj, authorization="Bearer x")
+
+    assert exc_info.value.status_code == 401
 
 
 # get_conversation_history_endpoint
