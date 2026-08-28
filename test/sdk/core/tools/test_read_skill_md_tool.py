@@ -273,6 +273,33 @@ class TestReadSkillFile:
         assert found is True
         assert "Skill Content" in content
 
+    @pytest.mark.parametrize("encoding", ["utf-8", "gbk", "gb18030"])
+    def test_read_markdown_with_supported_encoding(self, temp_skills_dir, encoding):
+        """Test reading UTF-8 and common Chinese legacy encodings."""
+        skill_dir = os.path.join(temp_skills_dir, f"{encoding}-skill")
+        os.makedirs(skill_dir)
+        expected_content = "# 技能说明\n这是编码读取测试，扩展字符：𠀀。"
+        if encoding == "gbk":
+            expected_content = "# 技能说明\n这是 GBK 编码读取测试。"
+
+        with open(os.path.join(skill_dir, "SKILL.md"), "wb") as file:
+            file.write(expected_content.encode(encoding))
+
+        content, found = ReadSkillMdTool()._read_skill_file(skill_dir, "SKILL.md")
+
+        assert found is True
+        assert content == expected_content
+
+    def test_read_file_reports_unsupported_encoding(self, temp_skills_dir):
+        """Test that genuine decoding failures are not treated as missing files."""
+        skill_dir = os.path.join(temp_skills_dir, "invalid-encoding-skill")
+        os.makedirs(skill_dir)
+        with open(os.path.join(skill_dir, "SKILL.md"), "wb") as file:
+            file.write(b"\xff\xff\xff")
+
+        with pytest.raises(UnicodeError, match="utf-8-sig, gb18030"):
+            ReadSkillMdTool()._read_skill_file(skill_dir, "SKILL.md")
+
     def test_read_file_with_extension(self, sample_skill):
         """Test reading a file with .md extension when not provided."""
         tool = ReadSkillMdTool()
@@ -361,6 +388,35 @@ class TestExecute:
         result = tool.execute(skill_name)
         assert "test-skill" in result.lower() or "Skill Content" in result
 
+    def test_execute_reads_gbk_skill_md(self, temp_skills_dir):
+        """Test execute reads a GBK-encoded default SKILL.md."""
+        skill_name = "gbk-skill"
+        skill_dir = os.path.join(temp_skills_dir, skill_name)
+        os.makedirs(skill_dir)
+        expected_content = "# 技能说明\n这是 GBK 编码的技能文件。"
+        with open(os.path.join(skill_dir, "SKILL.md"), "wb") as file:
+            file.write(expected_content.encode("gbk"))
+
+        tool = ReadSkillMdTool(local_skills_dir=temp_skills_dir)
+        tool.skill_manager = MockSkillManager(temp_skills_dir)
+
+        assert tool.execute(skill_name) == expected_content
+
+    def test_execute_reports_decode_error(self, temp_skills_dir):
+        """Test execute distinguishes decoding errors from missing files."""
+        skill_name = "invalid-encoding-skill"
+        skill_dir = os.path.join(temp_skills_dir, skill_name)
+        os.makedirs(skill_dir)
+        with open(os.path.join(skill_dir, "SKILL.md"), "wb") as file:
+            file.write(b"\xff\xff\xff")
+
+        tool = ReadSkillMdTool(local_skills_dir=temp_skills_dir)
+        tool.skill_manager = MockSkillManager(temp_skills_dir)
+        result = tool.execute(skill_name)
+
+        assert "Unable to decode" in result
+        assert "not found" not in result.lower()
+
     def test_execute_reads_additional_files(self, sample_skill_with_files, temp_skills_dir):
         """Test execute reads specified additional files."""
         skill_dir, skill_name = sample_skill_with_files
@@ -445,6 +501,16 @@ description: Root skill
 
         result = tool._read_direct_file(("test-file.txt",))
         assert "test content" in result
+
+    def test_read_direct_gbk_file(self, temp_skills_dir):
+        """Test direct reads use the same GBK-compatible fallback."""
+        tool = ReadSkillMdTool(local_skills_dir=temp_skills_dir)
+        tool.skill_manager = MockSkillManager(temp_skills_dir)
+        expected_content = "根目录下的 GBK 文件"
+        with open(os.path.join(temp_skills_dir, "legacy.txt"), "wb") as file:
+            file.write(expected_content.encode("gbk"))
+
+        assert tool._read_direct_file(("legacy.txt",)) == expected_content
 
     def test_read_direct_file_not_found(self, temp_skills_dir):
         """Test _read_direct_file returns error for missing file."""

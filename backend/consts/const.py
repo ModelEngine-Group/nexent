@@ -263,6 +263,9 @@ REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
 RUNTIME_STATE_REDIS_URL = os.getenv("RUNTIME_STATE_REDIS_URL") or REDIS_URL
 RUNTIME_STREAM_TTL_SECONDS = int(os.getenv("RUNTIME_STREAM_TTL_SECONDS", "86400"))
 RUNTIME_STREAM_MAX_LEN = int(os.getenv("RUNTIME_STREAM_MAX_LEN", "10000"))
+RUNTIME_STREAM_LOCAL_REPLAY_MAX_BYTES = int(
+    os.getenv("RUNTIME_STREAM_LOCAL_REPLAY_MAX_BYTES", str(8 * 1024 * 1024))
+)
 RUNTIME_RUN_TTL_SECONDS = int(os.getenv("RUNTIME_RUN_TTL_SECONDS", "86400"))
 RUNTIME_CANCEL_TTL_SECONDS = int(os.getenv("RUNTIME_CANCEL_TTL_SECONDS", "86400"))
 RUNTIME_COMPLETED_TTL_SECONDS = int(os.getenv("RUNTIME_COMPLETED_TTL_SECONDS", "300"))
@@ -317,10 +320,17 @@ ELASTICSEARCH_REQUEST_TIMEOUT = int(
 
 # Worker Configuration
 RAY_ADDRESS = os.getenv("RAY_ADDRESS", "auto")
-QUEUES = os.getenv("QUEUES", "process_q,process_part_q,forward_q")
+QUEUES = os.getenv(
+    "QUEUES",
+    "process_q,process_part_q,forward_q,forward_part_q,forward_aggregate_q",
+)
 # Will be dynamically set based on PID if not provided
 WORKER_NAME = os.getenv("WORKER_NAME")
-WORKER_CONCURRENCY = DP_PART_PROCESSOR_COUNT + 1
+# The data-process service sets a queue-specific value for each child worker.
+# Keep the historical default when the variable is not provided.
+WORKER_CONCURRENCY = int(
+    os.getenv("WORKER_CONCURRENCY", str(DP_PART_PROCESSOR_COUNT + 1))
+)
 RAY_WARM_ACTOR_POOL_SIZE_PART = int(
     os.getenv("RAY_WARM_ACTOR_POOL_SIZE_PART", "2"))
 RAY_WARM_ACTOR_POOL_SIZE_PROCESS = int(

@@ -12,6 +12,26 @@ from backend.services.streaming_channel import (
 )
 
 
+@pytest.fixture(autouse=True)
+def disable_external_runtime_stream_writes(monkeypatch):
+    """Streaming-channel unit tests must not depend on a configured Redis."""
+
+    async def _append(**_kwargs):
+        return None
+
+    async def _complete(**_kwargs):
+        return None
+
+    monkeypatch.setattr(
+        "backend.services.streaming_channel.runtime_state_service.append_stream_event_async",
+        _append,
+    )
+    monkeypatch.setattr(
+        "backend.services.streaming_channel.runtime_state_service.mark_stream_completed_async",
+        _complete,
+    )
+
+
 class TestStreamingChannel:
     """Tests for StreamingChannel class."""
 
@@ -127,25 +147,65 @@ class TestStreamingChannel:
         assert results == ["a", "b", "c"]
 
     @pytest.mark.asyncio
-    async def test_history_buffer_is_unbounded(self):
-        """Test that history buffer is unbounded (stores all chunks).
-
-        The buffer is intentionally unbounded to support stream resume
-        after long-running streams. Memory is bounded by conversation lifecycle.
-        """
+    async def test_ac_001_history_buffer_obeys_event_limit(self):
+        """AC-001: local replay retains only the configured event tail."""
         channel = StreamingChannel(
             conversation_id="test-conv",
             user_id="test-user",
-            history_size=3  # This parameter is kept for API compatibility
+            history_size=3
         )
 
         for i in range(5):
             await channel.publish(f"chunk{i}")
 
-        # All chunks should be kept (unbounded buffer)
         history = channel.get_history()
-        assert len(history) == 5
-        assert history == ["chunk0", "chunk1", "chunk2", "chunk3", "chunk4"]
+        assert len(history) == 3
+        assert history == ["chunk2", "chunk3", "chunk4"]
+        assert channel.history_start_index == 2
+
+    @pytest.mark.asyncio
+    async def test_ac_001_history_buffer_obeys_byte_limit(self, monkeypatch):
+        """AC-001: local replay evicts whole events to honor the byte policy."""
+        monkeypatch.setattr(
+            "backend.services.streaming_channel.RUNTIME_STREAM_LOCAL_REPLAY_MAX_BYTES", 8
+        )
+        channel = StreamingChannel("test-conv", "test-user", history_size=10)
+
+        await channel.publish("1234")
+        await channel.publish("5678")
+        await channel.publish("90")
+
+        assert channel.get_history() == ["5678", "90"]
+        assert channel.history_bytes == 6
+        assert channel.history_start_index == 1
+
+    @pytest.mark.asyncio
+    async def test_ac_002_resume_cursor_remains_absolute_after_eviction(self):
+        """AC-002: eviction never renumbers retained events or duplicates them."""
+        channel = StreamingChannel("test-conv", "test-user", history_size=2)
+        for value in ("zero", "one", "two"):
+            await channel.publish(value)
+        channel.complete()
+
+        resumed = [chunk async for chunk in channel.subscribe_with_history(1)]
+
+        assert resumed == ["one", "two"]
+        assert channel.history_start_index == 1
+
+    @pytest.mark.asyncio
+    async def test_ac_001_single_oversized_event_does_not_accumulate(self, monkeypatch):
+        """AC-001: one live event may exceed the cap, but oversized events do not stack."""
+        monkeypatch.setattr(
+            "backend.services.streaming_channel.RUNTIME_STREAM_LOCAL_REPLAY_MAX_BYTES", 4
+        )
+        channel = StreamingChannel("test-conv", "test-user", history_size=10)
+
+        await channel.publish("oversized-one")
+        assert channel.get_history() == ["oversized-one"]
+        await channel.publish("oversized-two")
+
+        assert channel.get_history() == ["oversized-two"]
+        assert channel.history_size == 1
 
     @pytest.mark.asyncio
     async def test_complete_wakes_up_subscribers(self, channel):
@@ -325,6 +385,7 @@ class TestStreamingChannelManager:
         await channel.publish("test-chunk")
 
         assert channel.get_history() == ["test-chunk"]
+        assert manager.get_retained_history_bytes() == len("test-chunk".encode("utf-8"))
 
     @pytest.mark.asyncio
     async def test_complete_channel_helper(self, manager):

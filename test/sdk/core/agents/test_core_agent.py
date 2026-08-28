@@ -3217,6 +3217,35 @@ def test_wrap_tool_for_observer_emits_unique_ids_for_same_name_calls(monkeypatch
     ]
 
 
+def test_wrap_tool_for_observer_maps_positional_values_to_input_names(monkeypatch):
+    observer = MagicMock()
+    observer.tool_call_context.return_value.__enter__.return_value = None
+    tool = type(
+        "RunSkillTool",
+        (),
+        {
+            "name": "run_skill_script",
+            "inputs": {"skill_name": {}, "script_path": {}, "params": {}},
+        },
+    )()
+    tool.forward = lambda skill_name, script_path, params=None: "ok"
+    monkeypatch.setattr(core_agent_module.uuid, "uuid4", lambda: "call-1")
+
+    core_agent_module._wrap_tool_for_observer(tool, observer, "agent")
+    result = tool.forward(
+        "sandbox-execution-probe",
+        "scripts/check_execution_env.py",
+        {"compact": True},
+    )
+
+    assert result == "ok"
+    assert observer.add_message.call_args.kwargs["tool_arguments"] == {
+        "skill_name": "sandbox-execution-probe",
+        "script_path": "scripts/check_execution_env.py",
+        "params": {"compact": True},
+    }
+
+
 def test_known_tool_names_combines_mapping_containers_and_ignores_invalid_ones():
     """Collect stringified keys from tools and managed agents only."""
     module = TestRunStreamRealExecution()._load_core_agent_in_isolation()
