@@ -33,19 +33,12 @@ export default function AgentInfo() {
   const editedAgent = useAgentStore((state) => state.editedAgent!);
   const updateDraft = useAgentStore((state) => state.updateDraft);
 
-  const updateValidatedDraft = (
+  const updateDraftValue = (
     field: "display_name" | "name" | "description",
     value: string
   ) => {
     form.setFieldValue(field, value);
-    void form
-      .validateFields([field])
-      .then(() => {
-        if (form.getFieldValue(field) === value) {
-          updateDraft({ [field]: value } as AgentDraftPatch);
-        }
-      })
-      .catch(() => undefined);
+    updateDraft({ [field]: value } as AgentDraftPatch);
   };
 
   const agentId = useAgentStore((state) => state.agentId);
@@ -106,6 +99,7 @@ export default function AgentInfo() {
                 label={t("agent.displayName")}
                 className="mb-3"
                 name="display_name"
+                validateTrigger={["onChange", "onBlur"]}
                 rules={[
                   {
                     required: true,
@@ -117,11 +111,14 @@ export default function AgentInfo() {
                       max: AGENT_NAME_MAX_LENGTH,
                     }),
                   },
-                  createAgentNameConflictValidator(
-                    t,
-                    "display_name",
-                    agentId ?? undefined
-                  ),
+                  {
+                    ...createAgentNameConflictValidator(
+                      t,
+                      "display_name",
+                      agentId ?? undefined
+                    ),
+                    validateTrigger: "onBlur",
+                  },
                 ]}
               >
                 <Input
@@ -129,7 +126,7 @@ export default function AgentInfo() {
                   maxLength={AGENT_NAME_MAX_LENGTH}
                   showCount
                   onChange={(event) =>
-                    updateValidatedDraft("display_name", event.target.value)
+                    updateDraftValue("display_name", event.target.value)
                   }
                 />
               </Form.Item>
@@ -139,7 +136,7 @@ export default function AgentInfo() {
                 label={t("agent.name")}
                 className="mb-3"
                 name="name"
-                
+                validateTrigger={["onChange", "onBlur"]}
                 rules={[
                   {
                     required: true,
@@ -157,11 +154,14 @@ export default function AgentInfo() {
                         ? Promise.resolve()
                         : Promise.reject(new Error(t("agent.validation.namePattern"))),
                   },
-                  createAgentNameConflictValidator(
-                    t,
-                    "name",
-                    agentId ?? undefined
-                  ),
+                  {
+                    ...createAgentNameConflictValidator(
+                      t,
+                      "name",
+                      agentId ?? undefined
+                    ),
+                    validateTrigger: "onBlur",
+                  },
                 ]}
               >
                 <Input
@@ -169,7 +169,7 @@ export default function AgentInfo() {
                   maxLength={AGENT_NAME_MAX_LENGTH}
                   showCount
                   onChange={(event) =>
-                    updateValidatedDraft("name", event.target.value)
+                    updateDraftValue("name", event.target.value)
                   }
                 />
               </Form.Item>
@@ -221,7 +221,7 @@ export default function AgentInfo() {
               placeholder={t("agent.descriptionPlaceholder")}
               rows={3}
               onChange={(event) =>
-                updateValidatedDraft("description", event.target.value)
+                updateDraftValue("description", event.target.value)
               }
               showCount
               maxLength={AGENT_DESCRIPTION_MAX_LENGTH}
