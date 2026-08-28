@@ -290,8 +290,8 @@ export const conversationService = {
   },
 
   // Stop conversation agent
-  async stop(conversationId: number) {
-    const response = await fetch(API_ENDPOINTS.agent.stop(conversationId), {
+  async stop(runId: string | number) {
+    const response = await fetch(API_ENDPOINTS.agent.stop(runId), {
       method: "GET",
       headers: getAuthHeaders(),
     });
@@ -1028,7 +1028,8 @@ export const conversationService = {
     },
     signal?: AbortSignal,
     onConversationId?: (id: string) => void,
-    onRuntimeMetadataVersion?: (version: number) => void
+    onRuntimeMetadataVersion?: (version: number) => void,
+    onRunId?: (id: string) => void
   ): Promise<
     ReadableStreamDefaultReader<Uint8Array> | { type: "json"; data: unknown }
   > {
@@ -1102,6 +1103,10 @@ export const conversationService = {
       const conversationId = response.headers.get("conversation_id");
       if (conversationId && onConversationId) {
         onConversationId(conversationId);
+      }
+      const runId = response.headers.get("run_id");
+      if (runId && onRunId) {
+        onRunId(runId);
       }
       const runtimeMetadataVersion = response.headers.get(
         "X-Runtime-Metadata-Version"
