@@ -2,6 +2,7 @@
 
 import logging
 from http import HTTPStatus
+from typing import Annotated
 
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel, Field
@@ -36,7 +37,7 @@ def _load_evaluation_executor():
 @router.post("/run", include_in_schema=False, status_code=HTTPStatus.ACCEPTED)
 async def dispatch_evaluation_run_api(
     payload: EvaluationRunRequest,
-    authorization: str | None = Header(None),
+    authorization: Annotated[str | None, Header()] = None,
 ):
     """Start evaluation execution in the runtime process.
 

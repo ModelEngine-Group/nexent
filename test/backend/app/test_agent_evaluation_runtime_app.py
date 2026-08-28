@@ -81,10 +81,9 @@ async def test_dispatch_rejects_missing_internal_token(monkeypatch):
         MagicMock(side_effect=ValueError("invalid token")),
     )
 
+    payload = EvaluationRunRequest(agent_evaluation_id=7)
     with pytest.raises(HTTPException) as exc_info:
-        await dispatch_evaluation_run_api(
-            EvaluationRunRequest(agent_evaluation_id=7), None
-        )
+        await dispatch_evaluation_run_api(payload, None)
 
     assert exc_info.value.status_code == 401
 
@@ -94,9 +93,8 @@ async def test_dispatch_returns_not_found_for_missing_run(monkeypatch):
     monkeypatch.setattr(runtime_app, "verify_internal_runtime_jwt", lambda _: ("u1", "t1"))
     monkeypatch.setattr(runtime_app, "get_agent_evaluation", lambda **_: None)
 
+    payload = EvaluationRunRequest(agent_evaluation_id=7)
     with pytest.raises(HTTPException) as exc_info:
-        await dispatch_evaluation_run_api(
-            EvaluationRunRequest(agent_evaluation_id=7), "internal-token"
-        )
+        await dispatch_evaluation_run_api(payload, "internal-token")
 
     assert exc_info.value.status_code == 404

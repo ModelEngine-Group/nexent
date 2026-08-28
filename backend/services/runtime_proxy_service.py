@@ -29,6 +29,7 @@ _HOP_BY_HOP_HEADERS = {
 _STREAM_TIMEOUT = httpx.Timeout(connect=10.0, read=None, write=30.0, pool=10.0)
 _REQUEST_TIMEOUT = httpx.Timeout(connect=10.0, read=30.0, write=30.0, pool=10.0)
 _EVALUATION_DISPATCH_TIMEOUT = httpx.Timeout(connect=10.0, read=30.0, write=30.0, pool=10.0)
+_RUNTIME_SERVICE_UNAVAILABLE_MESSAGE = "Runtime service is unavailable"
 
 
 def _runtime_url(path: str) -> str:
@@ -71,7 +72,6 @@ def dispatch_agent_evaluation_run(
             timeout=_EVALUATION_DISPATCH_TIMEOUT,
             follow_redirects=True,
             trust_env=False,
-            verify=False,
         ) as client:
             response = client.post(
                 _runtime_url("/agent-evaluations/internal/run"),
@@ -80,7 +80,7 @@ def dispatch_agent_evaluation_run(
     except httpx.TimeoutException as exc:
         raise RuntimeServiceTimeoutError("Runtime evaluation dispatch timed out") from exc
     except httpx.RequestError as exc:
-        raise RuntimeServiceUnavailableError("Runtime service is unavailable") from exc
+        raise RuntimeServiceUnavailableError(_RUNTIME_SERVICE_UNAVAILABLE_MESSAGE) from exc
 
     if response.status_code >= 400:
         raise RuntimeUpstreamError(
@@ -123,7 +123,7 @@ async def forward_agent_run(
         raise RuntimeServiceTimeoutError("Runtime agent run request timed out") from exc
     except httpx.RequestError as exc:
         await client.aclose()
-        raise RuntimeServiceUnavailableError("Runtime service is unavailable") from exc
+        raise RuntimeServiceUnavailableError(_RUNTIME_SERVICE_UNAVAILABLE_MESSAGE) from exc
     except Exception:
         await client.aclose()
         raise
@@ -160,7 +160,7 @@ async def forward_agent_stop(
     except httpx.TimeoutException as exc:
         raise RuntimeServiceTimeoutError("Runtime stop request timed out") from exc
     except httpx.RequestError as exc:
-        raise RuntimeServiceUnavailableError("Runtime service is unavailable") from exc
+        raise RuntimeServiceUnavailableError(_RUNTIME_SERVICE_UNAVAILABLE_MESSAGE) from exc
 
     if response.status_code >= 400:
         raise RuntimeUpstreamError(

@@ -857,17 +857,18 @@ def test_run_agent_to_final_answer_releases_registered_run_on_error(service_modu
     unregister = MagicMock()
     service_module.agent_run_manager.unregister_agent_run = unregister
 
-    with pytest.raises(RuntimeError, match="agent failed"):
-        asyncio.run(
-            service_module._run_agent_to_final_answer(
-                agent_id=1,
-                tenant_id="t1",
-                user_id="u1",
-                query="q",
-                version_no=1,
-                conversation_id=-123,
-            )
+    async def invoke_failing_run():
+        return await service_module._run_agent_to_final_answer(
+            agent_id=1,
+            tenant_id="t1",
+            user_id="u1",
+            query="q",
+            version_no=1,
+            conversation_id=-123,
         )
+
+    with pytest.raises(RuntimeError, match="agent failed"):
+        asyncio.run(invoke_failing_run())
 
     unregister.assert_called_once_with(
         -123,
