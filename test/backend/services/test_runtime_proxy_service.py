@@ -68,6 +68,66 @@ def test_dispatch_agent_evaluation_run_maps_upstream_error(monkeypatch):
     assert exc_info.value.content == b'{"detail":"already running"}'
 
 
+class FailingSyncClient:
+    def __init__(self, error):
+        self.error = error
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+    def post(self, *_args, **_kwargs):
+        raise self.error
+
+
+def test_dispatch_agent_evaluation_run_maps_timeout(monkeypatch):
+    monkeypatch.setattr(proxy, "generate_internal_runtime_jwt", lambda *_: "jwt")
+    monkeypatch.setattr(
+        proxy.httpx,
+        "Client",
+        lambda **_: FailingSyncClient(httpx.ReadTimeout("timed out")),
+    )
+
+    with pytest.raises(RuntimeServiceTimeoutError):
+        proxy.dispatch_agent_evaluation_run(17, "user-a", "tenant-a")
+
+
+def test_dispatch_agent_evaluation_run_maps_unavailable(monkeypatch):
+    monkeypatch.setattr(proxy, "generate_internal_runtime_jwt", lambda *_: "jwt")
+    monkeypatch.setattr(
+        proxy.httpx,
+        "Client",
+        lambda **_: FailingSyncClient(httpx.ConnectError("down")),
+    )
+
+    with pytest.raises(RuntimeServiceUnavailableError, match="unavailable"):
+        proxy.dispatch_agent_evaluation_run(17, "user-a", "tenant-a")
+
+
+def test_dispatch_agent_evaluation_run_rejects_invalid_json(monkeypatch):
+    client = httpx.Client(
+        transport=httpx.MockTransport(lambda _: httpx.Response(200, content=b"not json"))
+    )
+    monkeypatch.setattr(proxy, "generate_internal_runtime_jwt", lambda *_: "jwt")
+    monkeypatch.setattr(proxy.httpx, "Client", lambda **_: client)
+
+    with pytest.raises(RuntimeServiceUnavailableError, match="not valid JSON"):
+        proxy.dispatch_agent_evaluation_run(17, "user-a", "tenant-a")
+
+
+def test_dispatch_agent_evaluation_run_rejects_non_object_json(monkeypatch):
+    client = httpx.Client(
+        transport=httpx.MockTransport(lambda _: httpx.Response(200, json=["accepted"]))
+    )
+    monkeypatch.setattr(proxy, "generate_internal_runtime_jwt", lambda *_: "jwt")
+    monkeypatch.setattr(proxy.httpx, "Client", lambda **_: client)
+
+    with pytest.raises(RuntimeServiceUnavailableError, match="not a JSON object"):
+        proxy.dispatch_agent_evaluation_run(17, "user-a", "tenant-a")
+
+
 def test_authorization_headers_maps_missing_jwt_configuration(monkeypatch):
     monkeypatch.setattr(
         proxy,

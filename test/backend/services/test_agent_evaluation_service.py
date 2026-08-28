@@ -840,6 +840,22 @@ def test_evaluation_conversation_ids_are_isolated_and_stable(service_module):
     assert first != second
 
 
+def test_dispatch_agent_evaluation_run_uses_runtime_proxy(service_module, monkeypatch):
+    runtime_proxy = types.ModuleType("services.runtime_proxy_service")
+    dispatch = MagicMock(return_value={"accepted": True})
+    runtime_proxy.dispatch_agent_evaluation_run = dispatch
+    monkeypatch.setitem(sys.modules, "services.runtime_proxy_service", runtime_proxy)
+
+    result = service_module._dispatch_agent_evaluation_run(7, "u1", "t1")
+
+    assert result == {"accepted": True}
+    dispatch.assert_called_once_with(
+        agent_evaluation_id=7,
+        user_id="u1",
+        tenant_id="t1",
+    )
+
+
 def test_run_agent_to_final_answer_releases_registered_run_on_error(service_module):
     import asyncio
 
