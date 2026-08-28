@@ -394,6 +394,22 @@ def test_delete_conversations_batch_empty_input(monkeypatch, mock_session_ctx):
     session.execute.assert_not_called()
 
 
+def test_delete_conversations_batch_without_user_id(monkeypatch, mock_session_ctx):
+    """delete_conversations_batch skips updated_by tracking when user_id is absent."""
+    session, ctx = mock_session_ctx
+    select_result = MagicMock()
+    select_result.all.return_value = [(101,), (102,)]
+    session.execute.side_effect = [select_result] + [MagicMock() for _ in range(5)]
+
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    deleted = delete_conversations_batch([101, 102])
+
+    assert deleted == [101, 102]
+    # 1 ownership SELECT + 5 cascade UPDATEs
+    assert session.execute.call_count == 6
+
+
 # =============================================================================
 # Tests for rename_conversation
 # =============================================================================
