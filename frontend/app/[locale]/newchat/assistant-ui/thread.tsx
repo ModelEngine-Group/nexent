@@ -866,7 +866,7 @@ const ThreadWelcomeContent: FC<ThreadWelcomeContentProps> = ({
           </div>
 
           {displayedSuggestions.length > 0 ? (
-            <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-2">
+            <div className="grid w-full auto-rows-fr grid-cols-1 gap-2 sm:grid-cols-2">
               {displayedSuggestions.map((suggestion) => {
                 const SuggestionIcon = suggestion.icon;
                 return (
@@ -876,10 +876,10 @@ const ThreadWelcomeContent: FC<ThreadWelcomeContentProps> = ({
                     onClick={() =>
                       handleSampleQuestionClick(suggestion.prompt)
                     }
-                    className="flex min-h-20 items-start gap-3 rounded-lg border border-border bg-card px-4 py-3 text-left transition-colors hover:border-primary/40 hover:bg-accent/50"
+                    className="flex h-full min-h-20 items-center gap-3 rounded-lg border border-border bg-card px-4 py-3 text-left transition-colors hover:border-primary/40 hover:bg-accent/50"
                   >
-                    <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
-                      <SuggestionIcon className="size-4" />
+                    <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
+                      <SuggestionIcon className="size-5" />
                     </span>
                     <span className="min-w-0">
                       <span className="block text-sm font-medium leading-5 text-foreground">
