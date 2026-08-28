@@ -98,7 +98,7 @@ def test_build_nl2agent_system_prompt_configures_existing_draft(
         assert "### Atomic Action Contract" in prompt
         assert "at most one short reasoning sentence" in prompt
         assert 'equal to `["duty_prompt"]`' in prompt
-        assert "exactly one concise Think-Code-Observation example" in prompt
+        assert "exactly one concise Think-Code example" in prompt
         assert "Weather Assistant" not in prompt
         assert "Describe the tasks this Agent must perform" not in prompt
         assert '"question_id": "expected_output"' in prompt
@@ -115,7 +115,7 @@ def test_build_nl2agent_system_prompt_configures_existing_draft(
         assert "### 原子动作输出契约" in prompt
         assert "`<code>` 前最多只写一句简短思考" in prompt
         assert '`updated_fields` 是 `["duty_prompt"]`' in prompt
-        assert "只编写一个紧凑的“思考-代码-Observation”示例" in prompt
+        assert "只编写一个紧凑的“思考-代码”示例" in prompt
         assert "天气助手" not in prompt
         assert "请详细说明这个智能体需要完成的任务" not in prompt
         assert '"question_id": "expected_output"' in prompt
@@ -136,7 +136,7 @@ def test_build_nl2agent_system_prompt_configures_existing_draft(
     )
     assert r"\x3ccode>" in few_shots_save
     assert r"\x3c/code>" in few_shots_save
-    assert r"Observation\x3a" in few_shots_save
+    assert r"Observation\x3a" not in few_shots_save
     assert "<code>" not in few_shots_save
     assert "</code>" not in few_shots_save
     assert "Observation:" not in few_shots_save
@@ -146,7 +146,11 @@ def test_build_nl2agent_system_prompt_configures_existing_draft(
     stored_few_shots = ast.literal_eval(few_shots_assignment.value)
     assert "<code>" in stored_few_shots
     assert "</code>" in stored_few_shots
-    assert "Observation:" in stored_few_shots
+    assert "Observation:" not in stored_few_shots
+    if language == "en":
+        assert "The system supplies the tool result in subsequent context" in stored_few_shots
+    else:
+        assert "系统在后续上下文中提供工具结果" in stored_few_shots
 
 
 def test_build_nl2agent_system_prompt_falls_back_to_chinese():

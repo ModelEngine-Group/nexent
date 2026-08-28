@@ -6926,25 +6926,39 @@ class TestSkillServiceReportedCoverageGaps:
         assert skills[1]["config_schemas"] == [{"name": "query", "type": "string"}]
 
     def test_install_skills_from_zip_covers_validation_existing_and_new(self, mocker, tmp_path):
-        (tmp_path / "existing.zip").write_bytes(b"existing")
+        (tmp_path / "official.zip").write_bytes(b"official")
+        (tmp_path / "custom.zip").write_bytes(b"custom")
         (tmp_path / "new.zip").write_bytes(b"new")
         mocker.patch.object(skill_service, "OFFICIAL_SKILLS_ZIP_PATH", str(tmp_path))
         mocker.patch.object(
             skill_service.skill_db,
             "get_skill_by_name",
-            side_effect=lambda name, tenant: {"skill_id": 1} if name == "existing" else None,
+            side_effect=lambda name, tenant: (
+                {"skill_id": 1, "source": "official"}
+                if name == "official"
+                else {"skill_id": 2, "source": "custom"}
+                if name == "custom"
+                else None
+            ),
         )
         service = MagicMock()
         service.create_skill_from_file.return_value = {"name": "new"}
         mocker.patch.object(skill_service, "SkillService", return_value=service)
 
         result = skill_service.install_skills_from_zip_for_tenant(
-            ["", "../unsafe", "missing", "existing", "new"],
+            ["", "../unsafe", "missing", "official", "custom", "new"],
             "tenant-1",
             "user-1",
         )
 
-        assert result == ["existing", "new"]
+        assert result == ["official", "custom", "new"]
+        service.update_skill_from_file.assert_called_once_with(
+            skill_name="official",
+            file_content=b"official",
+            file_type="zip",
+            tenant_id="tenant-1",
+            user_id=None,
+        )
         service.create_skill_from_file.assert_called_once()
 
     def test_install_skills_from_zip_handles_missing_directory_and_scan_error(self, mocker, tmp_path):
