@@ -84,7 +84,6 @@ services:
       NEXENT_SQL_FILES_CHECKSUM: ${NEXENT_SQL_FILES_CHECKSUM:-}
       skip_proxy: "true"
       UMASK: 0022
-      RUNTIME_SERVICE_URL: http://nexent-runtime:5014
     env_file:
       - ../../env/.env
       - ../../env/monitoring.env
@@ -118,7 +117,6 @@ services:
       NEXENT_SQL_FILES_CHECKSUM: ${NEXENT_SQL_FILES_CHECKSUM:-}
       skip_proxy: "true"
       UMASK: 0022
-      RUNTIME_SERVICE_URL: http://nexent-runtime:5014
     env_file:
       - ../../env/.env
       - ../../env/monitoring.env
