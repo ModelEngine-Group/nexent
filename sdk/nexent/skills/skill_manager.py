@@ -1114,8 +1114,12 @@ class SkillManager:
                 cwd=working_directory,
             )
             if result.returncode != 0:
-                logger.error(f"Script error: {result.stderr}")
-                return json.dumps({"error": result.stderr, "output": result.stdout})
+                failure_message = result.stderr or result.stdout
+                logger.error(f"Script error: {failure_message}")
+                return json.dumps({
+                    "error": failure_message,
+                    "output": result.stdout if result.stderr else "",
+                })
             return result.stdout
         except subprocess.TimeoutExpired:
             raise TimeoutError(f"Script execution timed out: {script_path}")
@@ -1154,8 +1158,12 @@ class SkillManager:
                 cwd=working_directory,
             )
             if result.returncode != 0:
-                logger.error(f"Script error: {result.stderr}")
-                return json.dumps({"error": result.stderr, "output": result.stdout})
+                failure_message = result.stderr or result.stdout
+                logger.error(f"Script error: {failure_message}")
+                return json.dumps({
+                    "error": failure_message,
+                    "output": result.stdout if result.stderr else "",
+                })
             return result.stdout
         except subprocess.TimeoutExpired:
             raise TimeoutError(f"Script execution timed out: {script_path}")

@@ -822,6 +822,7 @@ class NexentAgent:
                     script_runner = SandboxSkillScriptRunner(
                         python_executor,
                         timeout_seconds=skill_timeout,
+                        workspace_path=self.workspace_path,
                     )
                     for tool in tool_list:
                         bind_backend = getattr(tool, "bind_execution_backend", None)
@@ -1411,7 +1412,7 @@ class NexentAgent:
             if not path.is_file():
                 continue
             relative = path.relative_to(workspace)
-            if relative.parts and relative.parts[0] == "inputs":
+            if relative.parts and relative.parts[0] in {"inputs", "skills"}:
                 continue
             normalized = os.path.normcase(os.path.abspath(str(path)))
             if normalized in uploaded_paths:

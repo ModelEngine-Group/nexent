@@ -187,13 +187,13 @@ class TestRunSkillScriptToolInit:
             agent_id=42,
             tenant_id="tenant-123",
             version_no=5,
-            workspace_path="/mnt/nexent/workdir/t/u/run",
+            workspace_path="/mnt/nexent/workdir/user/run",
         )
         assert tool.local_skills_dir == "/path/to/skills"
         assert tool.agent_id == 42
         assert tool.tenant_id == "tenant-123"
         assert tool.version_no == 5
-        assert tool.workspace_path == "/mnt/nexent/workdir/t/u/run"
+        assert tool.workspace_path == "/mnt/nexent/workdir/user/run"
         assert tool.skill_manager is None
 
     def test_init_with_minimal_params(self):
@@ -266,7 +266,7 @@ class TestExecute:
         tool = RunSkillScriptTool(
             local_skills_dir=temp_skills_dir,
             tenant_id="test-tenant",
-            workspace_path="/mnt/nexent/workdir/t/u/run",
+            workspace_path="/mnt/nexent/workdir/user/run",
         )
         mock_manager = MagicMock()
         mock_manager.run_skill_script.return_value = "Result"
@@ -280,7 +280,7 @@ class TestExecute:
             "script.py",
             None,
             tenant_id="test-tenant",
-            working_directory="/mnt/nexent/workdir/t/u/run",
+            working_directory="/mnt/nexent/workdir/user/run",
         )
 
     def test_execute_uses_bound_sandbox_backend(self, temp_skills_dir):
@@ -289,7 +289,7 @@ class TestExecute:
         tool = RunSkillScriptTool(
             local_skills_dir=temp_skills_dir,
             tenant_id="test-tenant",
-            workspace_path="/mnt/nexent/workdir/t/u/run",
+            workspace_path="/mnt/nexent/workdir/user/run",
             execution_backend=backend,
         )
         manager = MagicMock()
@@ -306,7 +306,7 @@ class TestExecute:
             script_path="scripts/test.py",
             params="--count 2",
             tenant_id="test-tenant",
-            working_directory="/mnt/nexent/workdir/t/u/run",
+            working_directory="/mnt/nexent/workdir/user/run",
         )
 
     def test_bind_execution_backend_replaces_completion_callback(self, temp_skills_dir):

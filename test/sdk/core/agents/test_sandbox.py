@@ -89,7 +89,11 @@ def reset_singleton():
             "smolagents.remote_executors",
         ):
             sys.modules.pop(mod_name, None)
-        importlib.import_module("smolagents")
+        try:
+            importlib.import_module("smolagents")
+        except ModuleNotFoundError:
+            # Runner-only tests do not require the optional executor package.
+            pass
     yield
     pool = SandboxPoolManager.get_instance()
     try:
@@ -113,7 +117,9 @@ class TestSandboxSkillScriptRunner:
         container.put_archive.return_value = True
         container.exec_run.side_effect = [
             SimpleNamespace(exit_code=0, output=b""),
-            SimpleNamespace(exit_code=0, output=b"sandbox\n"),
+            SimpleNamespace(exit_code=0, output=b""),
+            SimpleNamespace(exit_code=0, output=b""),
+            SimpleNamespace(exit_code=0, output=(b"sandbox\n", b"warning\n")),
         ]
         executor = SimpleNamespace(container=container, _nexent_backend="docker")
         manager = MagicMock()
@@ -122,15 +128,19 @@ class TestSandboxSkillScriptRunner:
             str(script),
             "scripts/generate.py",
         )
-        runner = SandboxSkillScriptRunner(executor, timeout_seconds=17)
-
+        workspace = "/mnt/nexent/workdir/user/run"
+        runner = SandboxSkillScriptRunner(
+            executor,
+            timeout_seconds=17,
+            workspace_path=workspace,
+        )
         result = runner(
             manager=manager,
             skill_name="report",
             script_path="scripts/generate.py",
             params='--title "Quarterly report"',
             tenant_id="tenant-1",
-            working_directory="/mnt/nexent/workdir/user/run",
+            working_directory=workspace,
         )
 
         assert result == "sandbox\n"
@@ -138,16 +148,20 @@ class TestSandboxSkillScriptRunner:
             "report", "scripts/generate.py", tenant_id="tenant-1"
         )
         assert container.put_archive.call_count == 1
-        command = container.exec_run.call_args_list[1].args[0]
+        assert container.exec_run.call_args_list[0] == call(
+            ["mkdir", "-p", f"{workspace}/skills"], user="0"
+        )
+        command = container.exec_run.call_args_list[-1].args[0]
         assert command[:5] == ["timeout", "--signal=KILL", "17", "python", ANY]
         assert command[-2:] == ["--title", "Quarterly report"]
-        assert container.exec_run.call_args_list[1].kwargs == {
+        assert container.exec_run.call_args_list[-1].kwargs == {
             "user": "sandbox",
-            "workdir": "/mnt/nexent/workdir/user/run",
+            "workdir": workspace,
             "environment": {
-                "NEXENT_WORKSPACE": "/mnt/nexent/workdir/user/run",
-                "NEXENT_OUTPUT_DIR": "/mnt/nexent/workdir/user/run/outputs",
+                "NEXENT_WORKSPACE": workspace,
+                "NEXENT_OUTPUT_DIR": f"{workspace}/outputs",
             },
+            "demux": True,
         }
 
     def test_refuses_to_fall_back_to_host_when_docker_is_unavailable(self):
@@ -174,11 +188,15 @@ class TestSandboxSkillScriptRunner:
         container.put_archive.return_value = True
         container.exec_run.side_effect = [
             SimpleNamespace(exit_code=0, output=b""),
-            SimpleNamespace(exit_code=124, output=b""),
+            SimpleNamespace(exit_code=0, output=b""),
+            SimpleNamespace(exit_code=0, output=b""),
+            SimpleNamespace(exit_code=124, output=(b"", b"")),
         ]
+        workspace = "/mnt/nexent/workdir/user/run"
         runner = SandboxSkillScriptRunner(
             SimpleNamespace(container=container, _nexent_backend="docker"),
             timeout_seconds=1,
+            workspace_path=workspace,
         )
         manager = MagicMock()
         manager.resolve_skill_script.return_value = (
@@ -192,14 +210,15 @@ class TestSandboxSkillScriptRunner:
                 script_path="scripts/slow.sh",
                 params=None,
                 tenant_id="tenant-1",
-                working_directory=None,
+                working_directory=workspace,
             )
 
     def test_cleanup_uses_root_for_docker_archive_owned_files(self):
         container = MagicMock()
         container.exec_run.return_value = SimpleNamespace(exit_code=0, output=b"")
         runner = SandboxSkillScriptRunner(
-            SimpleNamespace(container=container, _nexent_backend="docker")
+            SimpleNamespace(container=container, _nexent_backend="docker"),
+            workspace_path="/mnt/nexent/workdir/user/run",
         )
 
         runner.cleanup()
@@ -216,7 +235,8 @@ class TestSandboxSkillScriptRunner:
             output=b"permission denied",
         )
         runner = SandboxSkillScriptRunner(
-            SimpleNamespace(container=container, _nexent_backend="docker")
+            SimpleNamespace(container=container, _nexent_backend="docker"),
+            workspace_path="/mnt/nexent/workdir/user/run",
         )
 
         with caplog.at_level(logging.WARNING, logger="sandbox_under_test"):
@@ -861,6 +881,65 @@ class TestDockerIntegration:
     """End-to-end exercise of session + system scope with real Docker containers."""
 
     IMAGE = "nexent/nexent-sandbox:latest"
+
+    def test_skill_runner_passes_cli_arguments_and_demuxes_stdout(self, tmp_path):
+        """A real sandbox receives argv and returns stdout, not Docker stream IDs."""
+        import docker
+
+        skill_dir = tmp_path / "argv-probe"
+        script_dir = skill_dir / "scripts"
+        script_dir.mkdir(parents=True)
+        script_path = script_dir / "probe.py"
+        script_path.write_text(
+            "import argparse\n"
+            "import json\n"
+            "import sys\n"
+            "parser = argparse.ArgumentParser()\n"
+            "parser.add_argument('--message', required=True)\n"
+            "parser.add_argument('--count', type=int, required=True)\n"
+            "params = vars(parser.parse_args())\n"
+            "print('probe warning', file=sys.stderr)\n"
+            "print(json.dumps({'received': params, 'format': 'argv'}, ensure_ascii=False))\n",
+            encoding="utf-8",
+        )
+
+        client = docker.from_env()
+        container = client.containers.run(
+            self.IMAGE,
+            command=["sleep", "60"],
+            detach=True,
+            network_disabled=True,
+        )
+        workspace = "/tmp/nexent-skill-runner-integration/user/run"
+        runner = SandboxSkillScriptRunner(
+            SimpleNamespace(container=container, _nexent_backend="docker"),
+            workspace_path=workspace,
+        )
+        manager = SimpleNamespace(
+            resolve_skill_script=lambda *args, **kwargs: (
+                str(skill_dir),
+                str(script_path),
+                "scripts/probe.py",
+            )
+        )
+
+        try:
+            result = runner(
+                manager=manager,
+                skill_name="argv-probe",
+                script_path="scripts/probe.py",
+                params='--message "沙箱参数" --count 2',
+                tenant_id=None,
+                working_directory=workspace,
+            )
+
+            assert json.loads(result) == {
+                "received": {"message": "沙箱参数", "count": 2},
+                "format": "argv",
+            }
+        finally:
+            runner.cleanup()
+            container.remove(force=True)
 
     def test_unrelated_session_scopes_do_not_share_container(self):
         """Unrelated SESSION builds each receive a fresh container."""

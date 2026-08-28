@@ -4974,14 +4974,15 @@ class TestCreateBuiltinToolAndFileWorkspaceLifecycle:
 
         error.assert_called_once()
 
-    def test_finalize_workspace_skips_inputs_and_uploaded_files_and_reports_failure(
+    def test_finalize_workspace_skips_inputs_skills_and_uploaded_files_and_reports_failure(
         self, nexent_agent_instance, tmp_path
     ):
         workspace = tmp_path / "user" / "run"
         input_file = workspace / "inputs" / "input.txt"
+        skill_file = workspace / "skills" / "probe" / "scripts" / "probe.py"
         uploaded_file = workspace / "outputs" / "uploaded.txt"
         failed_file = workspace / "outputs" / "failed.txt"
-        for path in (input_file, uploaded_file, failed_file):
+        for path in (input_file, skill_file, uploaded_file, failed_file):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text("data", encoding="utf-8")
         upload_tool = MagicMock()
