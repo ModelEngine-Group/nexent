@@ -1,47 +1,24 @@
 """Unit tests for ``backend.database.memory_provider_config_param_db``."""
 
-import sys
-import types
 from unittest.mock import MagicMock
 
 import pytest
 
-sys.path.insert(0, __import__("os").path.join(__import__("os").path.dirname(__file__), "../../.."))
-
-client_mod = types.ModuleType("database.client")
-client_mod.get_db_session = MagicMock(name="get_db_session")
-client_mod.filter_property = MagicMock(name="filter_property", side_effect=lambda d, _m: d)
-sys.modules["database.client"] = client_mod
-sys.modules["backend.database.client"] = client_mod
-
-db_models_mod = types.ModuleType("database.db_models")
-
-
-class _FakeColumn:
-    def __init__(self, name):
-        self.name = name
-
-    def __eq__(self, other):
-        return ("eq", self.name, other)
-
-    def __hash__(self):
-        return hash(self.name)
+from test.backend.database.db_test_support import FakeColumn, install_database_stubs
 
 
 class MemoryProviderConfigParam:
-    provider_config_id = _FakeColumn("provider_config_id")
-    param_name = _FakeColumn("param_name")
-    param_value = _FakeColumn("param_value")
-    delete_flag = _FakeColumn("delete_flag")
+    provider_config_id = FakeColumn("provider_config_id")
+    param_name = FakeColumn("param_name")
+    param_value = FakeColumn("param_value")
+    delete_flag = FakeColumn("delete_flag")
 
     def __init__(self, **kwargs):
         for k, v in kwargs.items():
             setattr(self, k, v)
 
 
-db_models_mod.MemoryProviderConfigParam = MemoryProviderConfigParam
-sys.modules["database.db_models"] = db_models_mod
-sys.modules["backend.database.db_models"] = db_models_mod
+install_database_stubs("MemoryProviderConfigParam", MemoryProviderConfigParam)
 
 from backend.database.memory_provider_config_param_db import (
     delete_params,

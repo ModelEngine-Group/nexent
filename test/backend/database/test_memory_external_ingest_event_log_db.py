@@ -1,60 +1,34 @@
 """Unit tests for ``backend.database.memory_external_ingest_event_log_db``."""
 
-import sys
-import types
 from unittest.mock import MagicMock
 
 import pytest
 
-sys.path.insert(0, __import__("os").path.join(__import__("os").path.dirname(__file__), "../../.."))
-
-client_mod = types.ModuleType("database.client")
-client_mod.get_db_session = MagicMock(name="get_db_session")
-client_mod.filter_property = MagicMock(name="filter_property", side_effect=lambda d, _m: d)
-sys.modules["database.client"] = client_mod
-sys.modules["backend.database.client"] = client_mod
-
-db_models_mod = types.ModuleType("database.db_models")
-
-
-class _FakeColumn:
-    def __init__(self, name):
-        self.name = name
-
-    def __eq__(self, other):
-        return ("eq", self.name, other)
-
-    def __hash__(self):
-        return hash(self.name)
-
-    def desc(self):
-        return ("desc", self.name)
+from test.backend.database.db_test_support import FakeColumn, install_database_stubs
 
 
 class MemoryExternalIngestEventLog:
-    log_id = _FakeColumn("log_id")
-    provider = _FakeColumn("provider")
-    tenant_id = _FakeColumn("tenant_id")
-    user_id = _FakeColumn("user_id")
-    agent_id = _FakeColumn("agent_id")
-    conversation_id = _FakeColumn("conversation_id")
-    event_id = _FakeColumn("event_id")
-    idempotency_key = _FakeColumn("idempotency_key")
-    unit_ids = _FakeColumn("unit_ids")
-    response_status = _FakeColumn("response_status")
-    response_summary = _FakeColumn("response_summary")
-    sent_at = _FakeColumn("sent_at")
-    create_time = _FakeColumn("create_time")
-    delete_flag = _FakeColumn("delete_flag")
+    log_id = FakeColumn("log_id")
+    provider = FakeColumn("provider")
+    tenant_id = FakeColumn("tenant_id")
+    user_id = FakeColumn("user_id")
+    agent_id = FakeColumn("agent_id")
+    conversation_id = FakeColumn("conversation_id")
+    event_id = FakeColumn("event_id")
+    idempotency_key = FakeColumn("idempotency_key")
+    unit_ids = FakeColumn("unit_ids")
+    response_status = FakeColumn("response_status")
+    response_summary = FakeColumn("response_summary")
+    sent_at = FakeColumn("sent_at")
+    create_time = FakeColumn("create_time")
+    delete_flag = FakeColumn("delete_flag")
 
     def __init__(self, **kwargs):
         for k, v in kwargs.items():
             setattr(self, k, v)
 
 
-db_models_mod.MemoryExternalIngestEventLog = MemoryExternalIngestEventLog
-sys.modules["database.db_models"] = db_models_mod
-sys.modules["backend.database.db_models"] = db_models_mod
+install_database_stubs("MemoryExternalIngestEventLog", MemoryExternalIngestEventLog)
 
 from backend.database.memory_external_ingest_event_log_db import (
     get_event_log_by_idempotency,

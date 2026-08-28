@@ -1,59 +1,32 @@
 """Unit tests for ``backend.database.memory_provider_config_db``."""
 
-import sys
-import types
 from unittest.mock import MagicMock
 
 import pytest
 
-# Path setup
-sys.path.insert(0, __import__("os").path.join(__import__("os").path.dirname(__file__), "../../.."))
-
-# Stub database.client
-client_mod = types.ModuleType("database.client")
-client_mod.get_db_session = MagicMock(name="get_db_session")
-client_mod.filter_property = MagicMock(name="filter_property", side_effect=lambda d, _m: d)
-sys.modules["database.client"] = client_mod
-sys.modules["backend.database.client"] = client_mod
-
-# Stub db_models
-db_models_mod = types.ModuleType("database.db_models")
-
-
-class _FakeColumn:
-    """Minimal column proxy for filter expressions."""
-    def __init__(self, name):
-        self.name = name
-
-    def __eq__(self, other):
-        return ("eq", self.name, other)
-
-    def __hash__(self):
-        return hash(self.name)
+from test.backend.database.db_test_support import FakeColumn, install_database_stubs
 
 
 class MemoryProviderConfig:
-    provider_config_id = _FakeColumn("provider_config_id")
-    tenant_id = _FakeColumn("tenant_id")
-    provider_name = _FakeColumn("provider_name")
-    connection_type = _FakeColumn("connection_type")
-    enabled = _FakeColumn("enabled")
-    timeout_seconds = _FakeColumn("timeout_seconds")
-    last_error_code = _FakeColumn("last_error_code")
-    create_time = _FakeColumn("create_time")
-    update_time = _FakeColumn("update_time")
-    created_by = _FakeColumn("created_by")
-    updated_by = _FakeColumn("updated_by")
-    delete_flag = _FakeColumn("delete_flag")
+    provider_config_id = FakeColumn("provider_config_id")
+    tenant_id = FakeColumn("tenant_id")
+    provider_name = FakeColumn("provider_name")
+    connection_type = FakeColumn("connection_type")
+    enabled = FakeColumn("enabled")
+    timeout_seconds = FakeColumn("timeout_seconds")
+    last_error_code = FakeColumn("last_error_code")
+    create_time = FakeColumn("create_time")
+    update_time = FakeColumn("update_time")
+    created_by = FakeColumn("created_by")
+    updated_by = FakeColumn("updated_by")
+    delete_flag = FakeColumn("delete_flag")
 
     def __init__(self, **kwargs):
         for k, v in kwargs.items():
             setattr(self, k, v)
 
 
-db_models_mod.MemoryProviderConfig = MemoryProviderConfig
-sys.modules["database.db_models"] = db_models_mod
-sys.modules["backend.database.db_models"] = db_models_mod
+install_database_stubs("MemoryProviderConfig", MemoryProviderConfig)
 
 from backend.database.memory_provider_config_db import (
     disable_provider_config,
