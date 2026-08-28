@@ -54,6 +54,7 @@ import {
   RefreshCwIcon,
   ArrowLeft,
   SparklesIcon,
+  type LucideIcon,
   PencilIcon,
   Share2Icon,
   XCircleIcon,
@@ -113,10 +114,19 @@ import type {
 import { SkillFileCard } from "../ui/skill-file-card";
 import type { SkillFileContent } from "@/types/skill";
 
+export interface WelcomeSuggestion {
+  id: string;
+  title: string;
+  description: string;
+  prompt: string;
+  icon: LucideIcon;
+}
+
 export interface ThreadProps {
   agent: Agent | PublishedAgent;
   generatedTitle?: string;
   welcomeTitle?: string;
+  welcomeSuggestions?: readonly WelcomeSuggestion[];
   conversationId?: number;
   onBack?: () => void;
   selectedModelId?: string;
@@ -186,6 +196,7 @@ export const Thread: FC<ThreadProps> = ({
   agent,
   generatedTitle,
   welcomeTitle,
+  welcomeSuggestions,
   conversationId,
   onBack,
   selectedModelId,
@@ -406,6 +417,7 @@ export const Thread: FC<ThreadProps> = ({
       <ThreadView
         agent={agent}
         welcomeTitle={welcomeTitle}
+        welcomeSuggestions={welcomeSuggestions}
         onBack={onBack}
         models={models}
         selectedModelId={selectedModelId}
@@ -502,6 +514,7 @@ export const Thread: FC<ThreadProps> = ({
 interface ThreadViewProps {
   agent: Agent | PublishedAgent;
   welcomeTitle?: string;
+  welcomeSuggestions?: readonly WelcomeSuggestion[];
   onBack?: () => void;
   models: readonly ModelOption[];
   selectedModelId?: string;
@@ -546,6 +559,7 @@ interface ThreadViewProps {
 const ThreadView: FC<ThreadViewProps> = ({
   agent,
   welcomeTitle,
+  welcomeSuggestions,
   onBack,
   models,
   selectedModelId,
@@ -706,7 +720,11 @@ const ThreadView: FC<ThreadViewProps> = ({
               onToggleShareMessage={onToggleShareMessage}
             />
           ) : (
-            <ThreadWelcomeContent agent={agent} title={welcomeTitle} />
+            <ThreadWelcomeContent
+              agent={agent}
+              title={welcomeTitle}
+              suggestions={welcomeSuggestions}
+            />
           )}
         </ThreadPrimitive.Viewport>
 
@@ -808,17 +826,20 @@ export const ReadOnlyConversation: FC<{
 interface ThreadWelcomeContentProps {
   agent: Agent | PublishedAgent;
   title?: string;
+  suggestions?: readonly WelcomeSuggestion[];
 }
 
 const ThreadWelcomeContent: FC<ThreadWelcomeContentProps> = ({
   agent,
   title,
+  suggestions = [],
 }) => {
   const aui = useAui();
   const { t } = useTranslation();
   const Icon = getAgentIcon(agent);
   const displayName = agent.display_name || agent.name;
   const sampleQuestions = (agent.example_questions || []).slice(0, 4);
+  const displayedSuggestions = suggestions.slice(0, 4);
 
   const handleSampleQuestionClick = useCallback(
     (question: string) => {
@@ -844,7 +865,35 @@ const ThreadWelcomeContent: FC<ThreadWelcomeContentProps> = ({
             </p>
           </div>
 
-          {sampleQuestions.length > 0 && (
+          {displayedSuggestions.length > 0 ? (
+            <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-2">
+              {displayedSuggestions.map((suggestion) => {
+                const SuggestionIcon = suggestion.icon;
+                return (
+                  <button
+                    key={suggestion.id}
+                    type="button"
+                    onClick={() =>
+                      handleSampleQuestionClick(suggestion.prompt)
+                    }
+                    className="flex min-h-20 items-start gap-3 rounded-lg border border-border bg-card px-4 py-3 text-left transition-colors hover:border-primary/40 hover:bg-accent/50"
+                  >
+                    <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
+                      <SuggestionIcon className="size-4" />
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block text-sm font-medium leading-5 text-foreground">
+                        {suggestion.title}
+                      </span>
+                      <span className="mt-1 block text-xs leading-5 text-muted-foreground">
+                        {suggestion.description}
+                      </span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          ) : sampleQuestions.length > 0 ? (
             <div className="w-full">
               <p className="mb-4 flex items-center justify-center gap-1.5 text-xs font-medium text-muted-foreground">
                 <SparklesIcon className="size-3.5 text-primary" />
@@ -863,7 +912,7 @@ const ThreadWelcomeContent: FC<ThreadWelcomeContentProps> = ({
                 ))}
               </div>
             </div>
-          )}
+          ) : null}
         </div>
       </div>
     </div>
