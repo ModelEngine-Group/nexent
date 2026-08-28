@@ -1,8 +1,0 @@
-{
-  "scenario": "E2E-03 persistence finalization",
-  "result": "PASS",
-  "bytes": 33554432,
-  "sha256_match": true,
-  "private_fragments_removed": true,
-  "finalization_seconds": 0.029600225998365204
-}
