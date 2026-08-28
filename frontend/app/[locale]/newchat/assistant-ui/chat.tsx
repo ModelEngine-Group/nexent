@@ -7,10 +7,16 @@ import { Thread } from "./thread";
 import type { ChatMode } from "./composer";
 import { AgentLandingPage } from "./agent-landing";
 import type { Agent } from "@/types/agentConfig";
+import type {
+  ConversationKnowledgeScope,
+  KnowledgeCapabilities,
+  KnowledgeScopeEffectivePreview,
+} from "@/types/knowledgeScope";
 import type { SkillFileContent } from "@/types/skill";
 
 export interface ChatProps {
   generatedTitle?: string;
+  welcomeTitle?: string;
   conversationId?: number;
   isLoadingAgents?: boolean;
   selectedAgent: Agent | null;
@@ -19,10 +25,21 @@ export interface ChatProps {
   chatMode?: ChatMode;
   onChatModeChange?: (mode: ChatMode) => void;
   showModelSelector?: boolean;
+  showConversationTitle?: boolean;
   isDictationConfigured?: boolean;
+  knowledgeScope?: ConversationKnowledgeScope | null;
+  knowledgePreview?: KnowledgeScopeEffectivePreview | null;
+  knowledgeCapabilities?: KnowledgeCapabilities | null;
+  onKnowledgeScopeChange?: (
+    scope: ConversationKnowledgeScope | null,
+    preview?: KnowledgeScopeEffectivePreview | null
+  ) => Promise<void> | void;
   variant?: "default" | "embedded";
   skillFiles?: readonly SkillFileContent[];
   onSkillFileSelect?: (path: string) => void;
+  runtimeMetadata?: Record<string, unknown>;
+  onRuntimeMetadataChange?: (value: Record<string, unknown>) => void;
+  readOnly?: boolean;
 }
 
 const AgentsLoadingState: FC = () => {
@@ -42,6 +59,7 @@ const AgentsLoadingState: FC = () => {
 
 export const Chat: FC<ChatProps> = ({
   generatedTitle,
+  welcomeTitle,
   conversationId,
   isLoadingAgents = false,
   selectedAgent,
@@ -50,10 +68,18 @@ export const Chat: FC<ChatProps> = ({
   chatMode = "execution",
   onChatModeChange = () => undefined,
   showModelSelector = true,
+  showConversationTitle = true,
   isDictationConfigured = false,
+  knowledgeScope = null,
+  knowledgePreview = null,
+  knowledgeCapabilities = null,
+  onKnowledgeScopeChange,
   variant = "default",
   skillFiles,
   onSkillFileSelect,
+  runtimeMetadata = {},
+  onRuntimeMetadataChange,
+  readOnly = false,
 }) => {
   const handleSelectAgent = useCallback(
     (agent: Agent) => {
@@ -77,15 +103,24 @@ export const Chat: FC<ChatProps> = ({
     <Thread
       agent={selectedAgent}
       generatedTitle={generatedTitle}
+      welcomeTitle={welcomeTitle}
       conversationId={conversationId}
       onBack={onBack}
       chatMode={chatMode}
       onChatModeChange={onChatModeChange}
       showModelSelector={showModelSelector}
+      showConversationTitle={showConversationTitle}
       isDictationConfigured={isDictationConfigured}
+      knowledgeScope={knowledgeScope}
+      knowledgePreview={knowledgePreview}
+      knowledgeCapabilities={knowledgeCapabilities}
+      onKnowledgeScopeChange={onKnowledgeScopeChange}
       variant={variant}
       skillFiles={skillFiles}
       onSkillFileSelect={onSkillFileSelect}
+      runtimeMetadata={runtimeMetadata}
+      onRuntimeMetadataChange={onRuntimeMetadataChange}
+      readOnly={readOnly}
     />
   );
 };

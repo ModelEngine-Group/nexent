@@ -7,6 +7,9 @@ import { App, Button, Empty, Input, Spin } from "antd";
 import { ChevronLeft, ChevronRight, Plus, Search, Upload } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import AgentImportWizard from "@/components/agent/AgentImportWizard";
+import CreateAgentModal, {
+  type CreatedAgentResult,
+} from "@/components/agent/CreateAgentModal";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 import { deleteAgent } from "@/services/agentConfigService";
 import {
@@ -105,6 +108,7 @@ export function MineAgentsView({
   const [importWizardVisible, setImportWizardVisible] = useState(false);
   const [importWizardData, setImportWizardData] =
     useState<ImportAgentData | null>(null);
+  const [createAgentModalVisible, setCreateAgentModalVisible] = useState(false);
   const [reviewModalOpen, setReviewModalOpen] = useState(false);
   const [reviewModalAgent, setReviewModalAgent] =
     useState<MyEditableAgentItem | null>(null);
@@ -128,7 +132,16 @@ export function MineAgentsView({
   const normalizedQuery = searchQuery.trim().toLowerCase();
 
   const handleCreateAgent = () => {
-    router.push(`/${locale}/agents?create=true&from=agent-space&tab=mine`);
+    setCreateAgentModalVisible(true);
+  };
+
+  const handleAgentCreated = async ({ agentId }: CreatedAgentResult) => {
+    setCreateAgentModalVisible(false);
+    await Promise.all([
+      invalidateAgentRepositoryCaches(queryClient),
+      queryClient.invalidateQueries({ queryKey: [AGENTS_LIST_QUERY_KEY] }),
+    ]);
+    router.push(`/${locale}/agents?agent_id=${agentId}`);
   };
 
   const handleImportAgent = async () => {
@@ -143,7 +156,10 @@ export function MineAgentsView({
     });
   };
 
-  const handleEdit = (agentId: number, permission?: MyEditableAgentItem["permission"]) => {
+  const handleEdit = (
+    agentId: number,
+    permission?: MyEditableAgentItem["permission"]
+  ) => {
     if (permission === "READ_ONLY") {
       return;
     }
@@ -168,7 +184,9 @@ export function MineAgentsView({
           );
           await Promise.all([
             invalidateAgentRepositoryCaches(queryClient),
-            queryClient.invalidateQueries({ queryKey: [AGENTS_LIST_QUERY_KEY] }),
+            queryClient.invalidateQueries({
+              queryKey: [AGENTS_LIST_QUERY_KEY],
+            }),
           ]);
         } catch (error) {
           log.error("Failed to delete agent:", error);
@@ -184,7 +202,7 @@ export function MineAgentsView({
     if (versionNo <= 0) {
       return;
     }
-    router.push(`/${locale}/space/evaluation?agent_id=${agent.agent_id}`);
+    router.push(`/${locale}/evaluation?agent_id=${agent.agent_id}`);
   };
 
   const closeReviewModal = () => {
@@ -226,9 +244,7 @@ export function MineAgentsView({
         versionNo,
         payload,
       });
-      message.success(
-        t("repository.mine.applySuccess")
-      );
+      message.success(t("repository.mine.applySuccess"));
       closeApplyModal();
     } catch {
       message.error(t("repository.mine.applyError"));
@@ -542,6 +558,12 @@ export function MineAgentsView({
         isUpdatingStatus={updateStatusMutation.isPending}
         onClose={closeReviewModal}
         onSetNotShared={handleSetNotShared}
+      />
+
+      <CreateAgentModal
+        open={createAgentModalVisible}
+        onCancel={() => setCreateAgentModalVisible(false)}
+        onCreated={handleAgentCreated}
       />
 
       <AgentImportWizard

@@ -1,11 +1,14 @@
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy import func
+from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from database.client import get_db_session
-from database.db_models import TenantConfig
+from database.db_models import TenantConfig, TenantGroupInfo
+from consts.const import DEFAULT_GROUP_ID, MAX_TENANT_COUNT, TENANT_ID, TENANT_NAME
+from consts.exceptions import TenantResourceLimitError
 
 
 logger = logging.getLogger("tenant_config_db")
@@ -27,6 +30,26 @@ def get_all_configs_by_tenant_id(tenant_id: str):
             })
 
         return record_info
+
+
+def get_configs_by_tenant_id_and_keys(
+    tenant_id: str,
+    config_keys: List[str],
+) -> Dict[str, str]:
+    """Return active tenant configuration values for a set of keys."""
+    if not config_keys:
+        return {}
+
+    with get_db_session() as session:
+        result = session.query(TenantConfig).filter(
+            TenantConfig.tenant_id == tenant_id,
+            TenantConfig.config_key.in_(config_keys),
+            TenantConfig.delete_flag == "N",
+        ).all()
+        return {
+            item.config_key: item.config_value
+            for item in result
+        }
 
 
 def get_tenant_config_info(tenant_id: str, user_id: str, select_key: str):
@@ -68,6 +91,19 @@ def get_single_config_info(tenant_id: str, select_key: str):
 def insert_config(insert_data: Dict[str, Any]):
     with get_db_session() as session:
         try:
+            if insert_data.get("config_key") == TENANT_ID:
+                session.execute(
+                    text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
+                    {"lock_key": "tenant-count-limit"},
+                )
+                tenant_count = session.query(TenantConfig.tenant_id).filter(
+                    TenantConfig.config_key == TENANT_ID,
+                    TenantConfig.delete_flag == "N",
+                ).distinct().count()
+                if tenant_count >= MAX_TENANT_COUNT:
+                    raise TenantResourceLimitError(
+                        f"Tenant limit reached: maximum {MAX_TENANT_COUNT} tenants"
+                    )
             session.add(TenantConfig(**insert_data))
             session.commit()
             return True
@@ -75,6 +111,61 @@ def insert_config(insert_data: Dict[str, Any]):
             session.rollback()
             logger.error(f"insert config failed, error: {e}")
             return False
+
+
+def create_tenant_with_default_group(
+    tenant_id: str,
+    tenant_name: str,
+    created_by: Optional[str] = None,
+) -> int:
+    """Create the tenant configuration and its default group atomically."""
+    with get_db_session() as session:
+        session.execute(
+            text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
+            {"lock_key": "tenant-count-limit"},
+        )
+        tenant_count = session.query(TenantConfig.tenant_id).filter(
+            TenantConfig.config_key == TENANT_ID,
+            TenantConfig.delete_flag == "N",
+        ).distinct().count()
+        if tenant_count >= MAX_TENANT_COUNT:
+            raise TenantResourceLimitError(
+                f"Tenant limit reached: maximum {MAX_TENANT_COUNT} tenants"
+            )
+
+        session.add(TenantConfig(
+            tenant_id=tenant_id,
+            config_key=TENANT_ID,
+            config_value=tenant_id,
+            created_by=created_by,
+            updated_by=created_by,
+        ))
+        default_group = TenantGroupInfo(
+            tenant_id=tenant_id,
+            group_name="Default Group",
+            group_description="Default group created automatically for new tenant",
+            created_by=created_by,
+            updated_by=created_by,
+        )
+        session.add(default_group)
+        session.flush()
+        session.add_all([
+            TenantConfig(
+                tenant_id=tenant_id,
+                config_key=TENANT_NAME,
+                config_value=tenant_name,
+                created_by=created_by,
+                updated_by=created_by,
+            ),
+            TenantConfig(
+                tenant_id=tenant_id,
+                config_key=DEFAULT_GROUP_ID,
+                config_value=str(default_group.group_id),
+                created_by=created_by,
+                updated_by=created_by,
+            ),
+        ])
+        return default_group.group_id
 
 
 def delete_config_by_tenant_config_id(tenant_config_id: int):

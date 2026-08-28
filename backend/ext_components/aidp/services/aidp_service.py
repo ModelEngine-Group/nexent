@@ -17,6 +17,90 @@ from nexent.utils.http_client_manager import http_client_manager
 
 logger = logging.getLogger("aidp_service")
 
+_MAX_UPSTREAM_ERROR_REASON_LENGTH = 1000
+_UPSTREAM_ERROR_KEYS = (
+    "reason_zh",
+    "reason_en",
+    "details",
+    "message",
+    "detail",
+    "error",
+)
+
+
+def _normalize_upstream_error(value: Any) -> str | None:
+    """Extract a concise human-readable reason from an upstream error value."""
+    if isinstance(value, str):
+        normalized = " ".join(value.split())
+        return normalized or None
+    if isinstance(value, dict):
+        for key in _UPSTREAM_ERROR_KEYS:
+            reason = _normalize_upstream_error(value.get(key))
+            if reason:
+                return reason
+    if isinstance(value, list):
+        reasons = [
+            reason
+            for item in value
+            if (reason := _normalize_upstream_error(item))
+        ]
+        if reasons:
+            return "; ".join(reasons)
+    return None
+
+
+def _extract_upstream_error(response: httpx.Response) -> str | None:
+    """Read a bounded error reason from an AIDP HTTP response."""
+    try:
+        reason = _normalize_upstream_error(response.json())
+    except (TypeError, ValueError):
+        reason = None
+
+    if not reason:
+        content_type = response.headers.get("content-type", "").lower()
+        if "text/plain" in content_type:
+            reason = _normalize_upstream_error(response.text)
+
+    if not reason:
+        return None
+    return reason[:_MAX_UPSTREAM_ERROR_REASON_LENGTH]
+
+
+def _extract_upload_failures(response: httpx.Response) -> List[Dict[str, str]]:
+    """Extract per-file upload failures from AIDP's structured error body."""
+    try:
+        payload = response.json()
+    except (TypeError, ValueError):
+        return []
+
+    if not isinstance(payload, dict):
+        return []
+    error = payload.get("error")
+    if not isinstance(error, dict):
+        return []
+    raw_details = error.get("details")
+    if not isinstance(raw_details, list):
+        return []
+
+    fallback_reason = _normalize_upstream_error(error.get("message")) or "Upload failed"
+    failures: List[Dict[str, str]] = []
+    for item in raw_details:
+        if not isinstance(item, dict):
+            continue
+        file_name = _normalize_upstream_error(item.get("file_name") or item.get("filename"))
+        reason_zh = _normalize_upstream_error(item.get("reason_zh"))
+        reason_en = _normalize_upstream_error(item.get("reason_en"))
+        if not file_name or not (reason_zh or reason_en):
+            continue
+        failures.append(
+            {
+                "file_name": file_name,
+                "reason_zh": reason_zh or reason_en or fallback_reason,
+                "reason_en": reason_en or reason_zh or fallback_reason,
+            }
+        )
+    return failures
+
 def _resolve_tenant_id(tenant_id: Any = None) -> str:
     """Resolve a valid AIDP tenant identifier from explicit or configured input."""
     configured_tenant = AIDP_TENANT_ID if isinstance(AIDP_TENANT_ID, str) else "aidp"
@@ -94,10 +178,11 @@ def _validate_params(server_url: str, api_key: str) -> str:
 
 
 # ==================== Retry helpers ====================
-# Retry on ANY non-200 response. Simple and predictable.
 _AIDP_RETRY_MAX_ATTEMPTS = 3
 # Exponential backoff: 0.5s, 1s, 2s
 _AIDP_RETRY_BACKOFF_FACTOR = 0.5
+_AIDP_RETRYABLE_STATUS_CODES = {408, 429, 500, 502, 503, 504}
+_AIDP_READ_TIMEOUT_SECONDS = 30.0
 
 
 def _request_with_retry(
@@ -105,10 +190,10 @@ def _request_with_retry(
     context: str,
     max_attempts: int = _AIDP_RETRY_MAX_ATTEMPTS,
 ) -> httpx.Response:
-    """Execute a sync httpx request with retry on any non-200 response.
+    """Execute a sync httpx request with retries for transient failures.
 
     Retries on:
-        * Any HTTP status code != 200
+        * HTTP 408, 429, 500, 502, 503, and 504
         * httpx.RequestError (connection refused, timeouts, DNS, etc.)
 
     Exponential backoff: 0.5s, 1s, 2s. Respects Retry-After header on 429.
@@ -122,9 +207,10 @@ def _request_with_retry(
     for attempt in range(max_attempts):
         try:
             response = request_fn()
-            if response.status_code == 200:
+            if 200 <= response.status_code < 300:
                 return response
-            # Non-200 — decide whether to retry
+            if response.status_code not in _AIDP_RETRYABLE_STATUS_CODES:
+                return response
             if attempt < max_attempts - 1:
                 wait_time = _compute_retry_wait(response, attempt)
                 logger.warning(
@@ -190,7 +276,7 @@ def fetch_aidp_knowledge_bases_impl(
     try:
         client = http_client_manager.get_sync_client(
             base_url=normalized_url,
-            timeout=60.0,
+            timeout=_AIDP_READ_TIMEOUT_SECONDS,
             verify_ssl=False,
         )
         response = _request_with_retry(
@@ -257,25 +343,40 @@ def _normalize_response(raw: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _extract_tenant_from_url(url: str) -> str | None:
-    """Extract tenant ID from a URL like /KnowledgeBase/Tenants/{tenant}/KnowledgeBases."""
-    import re
-    match = re.search(r"/Tenants/([^/]+)/", url)
-    return match.group(1) if match else None
-
-
 def fetch_all_aidp_knowledge_bases_impl(
     server_url: str,
     api_key: str,
 ) -> Dict[str, Any]:
-    """Fetch all knowledge bases from AIDP by following next_link until exhausted.
+    """Fetch every AIDP knowledge-base page using the dedicated Count API.
 
-    AIDP does not return a true total count, so we follow next_link pages
-    until there is no next_link left. We also detect the real tenant ID
-    from the first response's next_link (AIDP embeds it there) and use it
-    for any manual page construction needed.
+    The list response does not expose a reliable global count and its
+    ``next_link`` may contain a sentinel tenant. The Count endpoint determines
+    the number of pages, and every list request uses the configured tenant.
+    Duplicate resources are removed by ``kds_id`` while preserving their
+    first-seen order.
     """
     normalized_url = _validate_params(server_url, api_key)
+    page_size = 100
+    started_at = time.perf_counter()
+    count_started_at = time.perf_counter()
+    total_count = count_aidp_kbs_impl(normalized_url, api_key)
+    count_ms = (time.perf_counter() - count_started_at) * 1000
+    if total_count <= 0:
+        logger.info(
+            "AIDP KB catalog timing: total_ms=%.1f count_ms=%.1f list_ms=0.0 "
+            "reported_total=0 pages=0 accumulated=0",
+            (time.perf_counter() - started_at) * 1000,
+            count_ms,
+        )
+        return {"value": [], "total_count": 0, "next_link": None}
+
+    total_pages = (total_count + page_size - 1) // page_size
+    max_pages = 1000
+    if total_pages > max_pages:
+        raise AppException(
+            ErrorCode.AIDP_RESPONSE_ERROR,
+            f"AIDP knowledge base pagination exceeded {max_pages} pages",
+        )
 
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -285,24 +386,22 @@ def fetch_all_aidp_knowledge_bases_impl(
     try:
         client = http_client_manager.get_sync_client(
             base_url=normalized_url,
-            timeout=120.0,
+            timeout=_AIDP_READ_TIMEOUT_SECONDS,
             verify_ssl=False,
         )
 
         all_items: List[Any] = []
-        current_page = 1
-        max_pages = 1000
-        page_size = 100
-        detected_tenant: str | None = None
+        seen_kds_ids: set[str] = set()
+        list_started_at = time.perf_counter()
 
-        # Build the first request URL using the known path pattern
-        first_path = f"{_get_list_path()}?page=1&page_size={page_size}"
-        current_url: str | None = urljoin(f"{normalized_url}/", first_path)
+        for current_page in range(1, total_pages + 1):
+            page_path = f"{_get_list_path()}?page={current_page}&page_size={page_size}"
+            current_url = urljoin(f"{normalized_url}/", page_path)
 
-        while current_page <= max_pages and current_url:
             logger.info(
-                "Fetching AIDP KBs — page %d from %s",
+                "Fetching AIDP KBs — page %d/%d from %s",
                 current_page,
+                total_pages,
                 current_url,
             )
 
@@ -332,30 +431,36 @@ def fetch_all_aidp_knowledge_bases_impl(
             if not isinstance(page_items, list):
                 page_items = []
 
-            all_items.extend(page_items)
+            for item in page_items:
+                if not isinstance(item, dict):
+                    all_items.append(item)
+                    continue
+                raw_kds_id = item.get("kds_id") or item.get("id")
+                if raw_kds_id is None:
+                    all_items.append(item)
+                    continue
+                kds_id = str(raw_kds_id)
+                if kds_id in seen_kds_ids:
+                    continue
+                seen_kds_ids.add(kds_id)
+                all_items.append(item)
 
-            # Detect real tenant from next_link on the first page
-            if current_page == 1 and detected_tenant is None:
-                raw_next = result.get("next_link") or result.get("next") or ""
-                detected_tenant = _extract_tenant_from_url(str(raw_next))
-                if detected_tenant:
-                    logger.info("Detected AIDP tenant: %s", detected_tenant)
-
-            # Follow next_link if present, otherwise construct next page manually
-            raw_next = result.get("next_link") or result.get("next") or ""
-            next_url_str = str(raw_next).strip()
-            if next_url_str:
-                current_url = urljoin(normalized_url + "/", next_url_str)
-                current_page += 1
-            else:
-                current_url = None
-
-        total_count = len(all_items)
-        logger.info("AIDP KBs: accumulated %d total items (tenant=%s)", total_count, detected_tenant)
+        accumulated_count = len(all_items)
+        list_ms = (time.perf_counter() - list_started_at) * 1000
+        logger.info(
+            "AIDP KB catalog timing: total_ms=%.1f count_ms=%.1f list_ms=%.1f "
+            "reported_total=%d pages=%d accumulated=%d",
+            (time.perf_counter() - started_at) * 1000,
+            count_ms,
+            list_ms,
+            total_count,
+            total_pages,
+            accumulated_count,
+        )
 
         return {
             "value": all_items,
-            "total_count": total_count,
+            "total_count": accumulated_count,
             "next_link": None,
         }
     except httpx.RequestError as e:
@@ -410,7 +515,7 @@ def count_aidp_kbs_impl(server_url: str, api_key: str) -> int:
     try:
         client = http_client_manager.get_sync_client(
             base_url=normalized_url,
-            timeout=60.0,
+            timeout=_AIDP_READ_TIMEOUT_SECONDS,
             verify_ssl=False,
         )
         response = _request_with_retry(
@@ -628,7 +733,7 @@ def get_aidp_kb_impl(
     try:
         client = http_client_manager.get_sync_client(
             base_url=normalized_url,
-            timeout=60.0,
+            timeout=_AIDP_READ_TIMEOUT_SECONDS,
             verify_ssl=False,
         )
         response = _request_with_retry(
@@ -854,24 +959,50 @@ def upload_aidp_docs_impl(
             f"AIDP API request failed: {str(e)}",
         )
     except httpx.HTTPStatusError as e:
+        upload_failures = _extract_upload_failures(e.response)
+        if upload_failures:
+            logger.warning(
+                "AIDP rejected %d uploaded file(s) with structured reasons, status_code=%s",
+                len(upload_failures),
+                e.response.status_code,
+            )
+            return {
+                "summary": {
+                    "total": len(files),
+                    "success": 0,
+                    "failed": len(upload_failures),
+                },
+                "success_list": [],
+                "failed_list": upload_failures,
+            }
+
+        upstream_reason = _extract_upstream_error(e.response)
         logger.exception(
-            "AIDP API HTTP error: %s, status_code: %s",
+            "AIDP API HTTP error: %s, status_code: %s, upstream_reason=%s",
             e,
             e.response.status_code,
+            upstream_reason or "unavailable",
         )
+        details = {
+            "upstream_status": e.response.status_code,
+            "upstream_reason": upstream_reason,
+        }
         if e.response.status_code in (401, 403):
             raise AppException(
                 ErrorCode.AIDP_AUTH_ERROR,
-                f"AIDP authentication failed: {str(e)}",
+                upstream_reason or f"AIDP authentication failed: {str(e)}",
+                details=details,
             )
         if e.response.status_code == 429:
             raise AppException(
                 ErrorCode.AIDP_RATE_LIMIT,
-                f"AIDP rate limit exceeded: {str(e)}",
+                upstream_reason or f"AIDP rate limit exceeded: {str(e)}",
+                details=details,
             )
         raise AppException(
             ErrorCode.AIDP_SERVICE_ERROR,
-            f"AIDP API HTTP error {e.response.status_code}: {str(e)}",
+            upstream_reason or f"AIDP API HTTP error {e.response.status_code}: {str(e)}",
+            details=details,
         )
     except ValueError as e:
         logger.exception("Failed to parse AIDP API response: %s", e)
@@ -907,7 +1038,7 @@ def count_aidp_docs_impl(server_url: str, api_key: str, kds_id: str) -> int:
     try:
         client = http_client_manager.get_sync_client(
             base_url=normalized_url,
-            timeout=60.0,
+            timeout=_AIDP_READ_TIMEOUT_SECONDS,
             verify_ssl=False,
         )
         # Body is empty per AIDP contract; use content=b"" to send an explicit
@@ -984,7 +1115,7 @@ def list_aidp_docs_impl(
     try:
         client = http_client_manager.get_sync_client(
             base_url=normalized_url,
-            timeout=60.0,
+            timeout=_AIDP_READ_TIMEOUT_SECONDS,
             verify_ssl=False,
         )
         response = _request_with_retry(

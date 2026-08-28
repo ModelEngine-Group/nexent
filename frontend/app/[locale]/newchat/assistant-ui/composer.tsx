@@ -1,6 +1,12 @@
 "use client";
 
-import { useSyncExternalStore, type FC, type ReactNode } from "react";
+import {
+  useMemo,
+  useState,
+  useSyncExternalStore,
+  type FC,
+  type ReactNode,
+} from "react";
 import { useTranslation } from "react-i18next";
 import {
   ArrowUp,
@@ -13,10 +19,11 @@ import {
   Circle,
   ListChecks,
   ChevronDown,
+  Database,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { AuiIf, ComposerPrimitive } from "@assistant-ui/react";
+import { AuiIf, ComposerPrimitive, useAuiState } from "@assistant-ui/react";
 import {
   LexicalComposerInput,
   type DirectiveChipProps as LexicalDirectiveChipProps,
@@ -37,6 +44,12 @@ import {
   planRegistry,
   type PlanData,
 } from "../adapter/remote-chat-model-adapter";
+import type {
+  ConversationKnowledgeScope,
+  KnowledgeCapabilities,
+  KnowledgeScopeEffectivePreview,
+} from "@/types/knowledgeScope";
+import { ConversationKnowledgeScopeModal } from "./conversation-knowledge-scope-modal";
 import type { SkillFileContent } from "@/types/skill";
 import { SkillFileMentionPopover } from "../ui/skill-file-mention";
 import { DirectiveChip } from "../ui/directive-text";
@@ -44,6 +57,7 @@ import {
   combinedSkillDirectiveFormatter,
   skillDirectiveIconMap,
 } from "../ui/skill-directives";
+import { RuntimeMetadataEditor } from "@/components/chat/RuntimeMetadataEditor";
 
 export type ChatMode = "planning" | "execution";
 
@@ -55,8 +69,19 @@ export interface ComposerProps {
   onChatModeChange: (mode: ChatMode) => void;
   showModelSelector?: boolean;
   isDictationConfigured?: boolean;
+  knowledgeScope?: ConversationKnowledgeScope | null;
+  knowledgePreview?: KnowledgeScopeEffectivePreview | null;
+  knowledgeCapabilities?: KnowledgeCapabilities | null;
+  onKnowledgeScopeChange?: (
+    scope: ConversationKnowledgeScope | null,
+    preview?: KnowledgeScopeEffectivePreview | null
+  ) => Promise<void> | void;
   compact?: boolean;
   skillFiles?: readonly SkillFileContent[];
+  runtimeMetadata?: Record<string, unknown>;
+  onRuntimeMetadataChange?: (value: Record<string, unknown>) => void;
+  allowRuntimeMetadata?: boolean;
+  disabled?: boolean;
 }
 
 // Simple tooltip wrapper
@@ -176,18 +201,123 @@ export const Composer: FC<ComposerProps> = ({
   onChatModeChange,
   showModelSelector = true,
   isDictationConfigured = false,
+  knowledgeScope = null,
+  knowledgePreview = null,
+  knowledgeCapabilities = null,
+  onKnowledgeScopeChange,
   compact = false,
   skillFiles,
+  runtimeMetadata = {},
+  onRuntimeMetadataChange,
+  allowRuntimeMetadata = false,
+  disabled = false,
 }) => {
   const { t } = useTranslation();
+  const [knowledgeModalOpen, setKnowledgeModalOpen] = useState(false);
+  const isRunning = useAuiState((state) => state.thread.isRunning);
+
+  const hasIncompatibleScope = Boolean(
+    knowledgeScope &&
+    ((knowledgeScope.local.mode === "override" &&
+      !knowledgeCapabilities?.sources.local.enabled) ||
+      (knowledgeScope.aidp.mode === "override" &&
+        !knowledgeCapabilities?.sources.aidp.enabled))
+  );
+
+  const knowledgeSummary = useMemo(() => {
+    if (!knowledgeScope) return t("chat.knowledgeScope.summaryDefault");
+    const selectedCount =
+      (knowledgeScope.local.mode === "override"
+        ? knowledgeScope.local.knowledge_ids.length
+        : 0) +
+      (knowledgeScope.aidp.mode === "override"
+        ? knowledgeScope.aidp.kds_ids.length
+        : 0);
+    const selectedNames = [
+      ...(knowledgeScope.local.mode === "override"
+        ? (knowledgePreview?.local.display_names ?? [])
+        : []),
+      ...(knowledgeScope.aidp.mode === "override"
+        ? (knowledgePreview?.aidp.display_names ?? [])
+        : []),
+    ];
+    const buildSummary = (value: string) => {
+      const summary = t("chat.knowledgeScope.summary", { value });
+      return hasIncompatibleScope
+        ? `${summary} · ${t("chat.knowledgeScope.incompatibleShort")}`
+        : summary;
+    };
+    if (
+      knowledgeScope.local.mode === "disabled" &&
+      knowledgeScope.aidp.mode === "disabled"
+    ) {
+      return buildSummary(t("chat.knowledgeScope.summaryDisabled"));
+    }
+    if (
+      knowledgeScope.local.mode === "inherit" &&
+      knowledgeScope.aidp.mode === "inherit"
+    ) {
+      return t("chat.knowledgeScope.summaryDefault");
+    }
+    if (selectedCount === 1 && selectedNames.length === 1) {
+      return buildSummary(selectedNames[0]);
+    }
+    if (selectedCount > 1 && selectedNames.length > 0) {
+      return buildSummary(
+        t("chat.knowledgeScope.summaryMultiple", {
+          name: selectedNames[0],
+          count: selectedCount,
+        })
+      );
+    }
+    const parts: string[] = [];
+    if (knowledgeCapabilities?.sources.local.enabled) {
+      parts.push(
+        knowledgeScope.local.mode === "disabled"
+          ? t("chat.knowledgeScope.summaryLocalDisabled")
+          : knowledgeScope.local.mode === "override"
+            ? t("chat.knowledgeScope.summaryLocalOverride", {
+                count: knowledgeScope.local.knowledge_ids.length,
+              })
+            : t("chat.knowledgeScope.summaryLocalDefault")
+      );
+    }
+    if (knowledgeCapabilities?.sources.aidp.enabled) {
+      parts.push(
+        knowledgeScope.aidp.mode === "disabled"
+          ? t("chat.knowledgeScope.summaryAidpDisabled")
+          : knowledgeScope.aidp.mode === "override"
+            ? t("chat.knowledgeScope.summaryAidpOverride", {
+                count: knowledgeScope.aidp.kds_ids.length,
+              })
+            : t("chat.knowledgeScope.summaryAidpDefault")
+      );
+    }
+    return buildSummary(
+      parts.join(" · ") || t("chat.knowledgeScope.unavailable")
+    );
+  }, [
+    knowledgeScope,
+    knowledgePreview,
+    knowledgeCapabilities,
+    hasIncompatibleScope,
+    t,
+  ]);
 
   return (
-    <div className="relative flex w-full flex-col overflow-visible rounded-2xl border border-border bg-card shadow-sm">
+    <fieldset
+      disabled={disabled}
+      aria-disabled={disabled}
+      className={cn(
+        "relative m-0 flex min-w-0 w-full flex-col overflow-visible rounded-2xl border border-border bg-card p-0 shadow-sm",
+        disabled && "cursor-not-allowed opacity-60"
+      )}
+    >
       {!compact && <PlanView />}
 
       {/* Mode switcher above input */}
       {!compact && (
-        <div className="flex items-center justify-between border-b border-border px-3 py-2">
+        <div className="flex items-center border-b border-border px-3 py-2">
           {/* Mode switcher */}
           <div className="flex items-center rounded-lg border border-border bg-muted/50 p-0.5">
             <Button
@@ -222,9 +352,6 @@ export const Composer: FC<ComposerProps> = ({
               {t("chat.composer.execution")}
             </Button>
           </div>
-
-          {/* Placeholder for alignment */}
-          <div className="w-16" />
         </div>
       )}
 
@@ -252,16 +379,46 @@ export const Composer: FC<ComposerProps> = ({
             />
           )}
           <div className="relative mx-2 mb-2 flex items-center justify-between gap-2">
-            {showModelSelector && (
-              <ModelSelector
-                models={models}
-                value={selectedModelId}
-                onValueChange={onModelChange}
-                variant="ghost"
-                size="sm"
-                className="text-xs"
-              />
-            )}
+            <div className="flex min-w-0 items-center gap-1">
+              {showModelSelector && (
+                <ModelSelector
+                  models={models}
+                  value={selectedModelId}
+                  onValueChange={onModelChange}
+                  variant="ghost"
+                  size="sm"
+                  className="shrink-0 text-xs"
+                />
+              )}
+              {!compact &&
+                (knowledgeCapabilities?.sources.local.enabled ||
+                  knowledgeCapabilities?.sources.aidp.enabled ||
+                  knowledgeScope) && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 min-w-0 max-w-64 gap-1.5 px-2 text-xs text-muted-foreground"
+                    onClick={() => setKnowledgeModalOpen(true)}
+                    disabled={isRunning}
+                    title={
+                      isRunning
+                        ? t("chat.knowledgeScope.runningDisabled")
+                        : knowledgeSummary
+                    }
+                  >
+                    <Database className="size-3.5 shrink-0" />
+                    <span className="truncate">{knowledgeSummary}</span>
+                  </Button>
+                )}
+              {!compact && allowRuntimeMetadata && onRuntimeMetadataChange && (
+                <RuntimeMetadataEditor
+                  value={runtimeMetadata}
+                  onChange={onRuntimeMetadataChange}
+                  disabled={isRunning}
+                />
+              )}
+            </div>
             <div className="ml-auto flex items-center gap-1">
               {!compact && <ComposerAddAttachment />}
               {!compact && (
@@ -315,8 +472,20 @@ export const Composer: FC<ComposerProps> = ({
             </div>
           </div>
         </ComposerPrimitive.Root>
+        {!compact && (
+          <ConversationKnowledgeScopeModal
+            open={knowledgeModalOpen}
+            value={knowledgeScope}
+            capabilities={knowledgeCapabilities}
+            onCancel={() => setKnowledgeModalOpen(false)}
+            onConfirm={async (scope, preview) => {
+              await onKnowledgeScopeChange?.(scope, preview);
+              setKnowledgeModalOpen(false);
+            }}
+          />
+        )}
       </ComposerPrimitive.Unstable_TriggerPopoverRoot>
-    </div>
+    </fieldset>
   );
 };
 
@@ -327,6 +496,7 @@ export const Composer: FC<ComposerProps> = ({
 // two branches declaratively based on `thread.isRunning`.
 const ComposerSendOrCancel: FC = () => {
   const { t } = useTranslation();
+  const hasText = useAuiState((state) => state.composer.text.trim().length > 0);
 
   return (
     <>
@@ -346,7 +516,12 @@ const ComposerSendOrCancel: FC = () => {
       <AuiIf condition={(s) => !s.thread.isRunning}>
         <TooltipWrapper tooltip={t("chat.composer.send")} side="top">
           <ComposerPrimitive.Send asChild>
-            <Button size="icon" className="size-8 rounded-full ml-2">
+            <Button
+              size="icon"
+              className="size-8 rounded-full ml-2"
+              disabled={!hasText}
+              aria-label={t("chat.composer.send")}
+            >
               <ArrowUp className="size-5" />
             </Button>
           </ComposerPrimitive.Send>

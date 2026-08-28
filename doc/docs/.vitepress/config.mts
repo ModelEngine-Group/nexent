@@ -372,6 +372,10 @@ export default defineConfig({
                           },
                         ],
                       },
+                      {   
+                        text: "自定义文件生成技能",
+                        link: "/zh/user-guide/resource-repository/custom-file-generation-skill",
+                      }
                     ],
                   },
                 ],

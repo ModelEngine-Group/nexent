@@ -1,7 +1,7 @@
 from enum import Enum
 from typing import Optional, Any, List, Dict, Literal
 
-from pydantic import BaseModel, Field, EmailStr, ConfigDict, field_validator
+from pydantic import BaseModel, Field, EmailStr, ConfigDict, field_validator, model_validator
 from nexent.core.agents.agent_model import AgentVerificationConfig, ToolConfig
 
 from consts.prompt_template import PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP
@@ -84,6 +84,27 @@ class UserUpdateRequest(BaseModel):
 class UserDeleteRequest(BaseModel):
     """User delete request model"""
     new_owner_id: Optional[str] = None
+
+
+class ApiUserBatchCreateRequest(BaseModel):
+    """Request model for creating API-only users in one transaction."""
+
+    role: Literal["DEV", "USER"] = "USER"
+    group_id: Optional[int] = Field(None, ge=1)
+    count: int = Field(1, ge=1, le=100)
+
+
+class ApiKeyTargetRequest(BaseModel):
+    """Identify a tenant user by exactly one supported field."""
+
+    user_id: Optional[str] = Field(None, min_length=1, max_length=100)
+    email: Optional[EmailStr] = None
+
+    @model_validator(mode="after")
+    def validate_single_target(self):
+        if bool(self.user_id) == bool(self.email):
+            raise ValueError("Exactly one of user_id or email must be provided")
+        return self
 
 
 class OAuthProviderDefinition(BaseModel):
@@ -204,7 +225,7 @@ class CapacityCoverageBareModel(BaseModel):
     model_id: int
     model_name: str
     model_factory: Optional[str] = None
-    model_type: Literal["llm", "vlm", "vlm2", "vlm3"]
+    model_type: Literal["llm", "vlm", "vlm2", "vlm3", "vlm4"]
     max_tokens: Optional[int] = None
     suggestion_available: bool = False
 
@@ -278,6 +299,7 @@ class ModelConfig(BaseModel):
     vlm: SingleModelConfig
     vlm2: SingleModelConfig = Field(default_factory=_empty_model_config)
     vlm3: SingleModelConfig = Field(default_factory=_empty_model_config)
+    vlm4: SingleModelConfig = Field(default_factory=_empty_model_config)
     stt: STTModelConfig
     tts: TTSModelConfig
 
@@ -323,6 +345,77 @@ class ToolParamsRequest(BaseModel):
     )
 
 
+KnowledgeScopeMode = Literal["inherit", "override", "disabled"]
+
+
+class LocalKnowledgeScopeRequest(BaseModel):
+    """Conversation-scoped selection for local knowledge bases."""
+
+    mode: KnowledgeScopeMode = "inherit"
+    knowledge_ids: List[str] = Field(default_factory=list, max_length=50)
+
+    @field_validator("knowledge_ids")
+    @classmethod
+    def normalize_knowledge_ids(cls, values: List[str]) -> List[str]:
+        normalized = []
+        for value in values:
+            item = str(value).strip()
+            if not item or len(item) > 32:
+                raise ValueError("knowledge_ids must contain non-empty identifiers of at most 32 characters")
+            if item not in normalized:
+                normalized.append(item)
+        return normalized
+
+    @model_validator(mode="after")
+    def validate_mode_and_ids(self):
+        if self.mode == "override" and not self.knowledge_ids:
+            raise ValueError("local override mode requires at least one knowledge_id")
+        if self.mode != "override" and self.knowledge_ids:
+            raise ValueError(f"local {self.mode} mode does not accept knowledge_ids")
+        return self
+
+
+class AidpKnowledgeScopeRequest(BaseModel):
+    """Conversation-scoped selection for AIDP knowledge bases."""
+
+    mode: KnowledgeScopeMode = "inherit"
+    kds_ids: List[str] = Field(default_factory=list, max_length=10)
+
+    @field_validator("kds_ids")
+    @classmethod
+    def normalize_kds_ids(cls, values: List[str]) -> List[str]:
+        normalized = []
+        for value in values:
+            item = str(value).strip()
+            if not item or len(item) > 256:
+                raise ValueError("kds_ids must contain non-empty identifiers of at most 256 characters")
+            if item not in normalized:
+                normalized.append(item)
+        return normalized
+
+    @model_validator(mode="after")
+    def validate_mode_and_ids(self):
+        if self.mode == "override" and not self.kds_ids:
+            raise ValueError("AIDP override mode requires at least one kds_id")
+        if self.mode != "override" and self.kds_ids:
+            raise ValueError(f"AIDP {self.mode} mode does not accept kds_ids")
+        return self
+
+
+class ConversationKnowledgeScopeRequest(BaseModel):
+    """Persisted business policy for conversation-scoped knowledge retrieval."""
+
+    schema_version: Literal[1] = 1
+    local: LocalKnowledgeScopeRequest = Field(default_factory=LocalKnowledgeScopeRequest)
+    aidp: AidpKnowledgeScopeRequest = Field(default_factory=AidpKnowledgeScopeRequest)
+
+
+class ConversationKnowledgeScopeUpdateRequest(BaseModel):
+    """Replace a conversation scope, or clear it with null to restore defaults."""
+
+    scope: Optional[ConversationKnowledgeScopeRequest] = None
+
+
 class AgentRequest(BaseModel):
     query: str
     conversation_id: Optional[int] = None
@@ -335,15 +428,26 @@ class AgentRequest(BaseModel):
     version_no: Optional[int] = None
     is_debug: Optional[bool] = False
     tool_params: Optional[ToolParamsRequest] = None
+    knowledge_scope: Optional[ConversationKnowledgeScopeRequest] = None
     context_policy: Optional[Dict[str, Any]] = Field(
         default=None,
         description="Optional request-scoped context policy override",
+    )
+    metadata: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Conversation runtime metadata available to the agent",
+    )
+    expected_metadata_version: Optional[int] = Field(
+        default=None,
+        ge=0,
+        description="Optional optimistic-lock version for runtime metadata updates",
     )
 
     @field_validator("context_policy")
     @classmethod
     def validate_context_policy(cls, value):
         return _validated_context_policy(value)
+
     enable_plan: Optional[bool] = Field(
         default=False,
         description="Whether to enable the planning phase before execution"
@@ -360,6 +464,7 @@ class NL2AgentRunRequest(BaseModel):
     query: str = Field(min_length=1)
     history: Optional[List[HistoryItem]] = None
     minio_files: Optional[List[Dict[str, Any]]] = None
+    agent_id: int = Field(gt=0)
 
 
 class NL2SkillRunRequest(BaseModel):
@@ -405,6 +510,10 @@ class RenameRequest(BaseModel):
     conversation_id: int
     name: str
 
+
+class BatchDeleteConversationRequest(BaseModel):
+    conversation_ids: List[int]
+
 # Pydantic models for API
 class TaskRequest(BaseModel):
     source: str
@@ -414,6 +523,8 @@ class TaskRequest(BaseModel):
     original_filename: Optional[str] = None
     embedding_model_id: Optional[int] = None
     tenant_id: Optional[str] = None
+    file_id: Optional[str] = None
+    telemetry_context: Dict[str, str] = Field(default_factory=dict)
     additional_params: Dict[str, Any] = Field(default_factory=dict)
 
 
@@ -462,8 +573,12 @@ class HybridSearchRequest(BaseModel):
                                    description="List of index names to search")
     top_k: int = Field(10, ge=1, le=100,
                        description="Number of results to return")
-    weight_accurate: float = Field(0.5, ge=0.0, le=1.0,
-                                   description="Weight applied to accurate search scores")
+    weight_accurate: Optional[float] = Field(
+        None,
+        ge=0.0,
+        le=1.0,
+        description="Optional caller-specified weight applied to accurate search scores",
+    )
 
 
 # Request models
@@ -472,7 +587,6 @@ class ProcessParams(BaseModel):
     source_type: str
     index_name: str
     authorization: Optional[str] = None
-    model_id: Optional[int] = None
 
 
 class OpinionRequest(BaseModel):
@@ -640,11 +754,14 @@ class AgentInfoRequest(BaseModel):
     group_ids: Optional[List[int]] = None
     ingroup_permission: Optional[str] = None
     enable_context_manager: Optional[bool] = None
+    is_a2a: Optional[bool] = None
     verification_config: Optional[Dict[str, Any]] = None
     context_policy: Optional[Dict[str, Any]] = None
+    allow_chat_metadata: Optional[bool] = None
 
     greeting_message: Optional[str] = None
     example_questions: Optional[List[str]] = None
+    icon_url: Optional[str] = None
     version_no: int = 0
 
     @field_validator("verification_config", mode="before")
@@ -710,6 +827,7 @@ class ToolInfo(BaseModel):
     origin_name: Optional[str] = None
     category: Optional[str] = None
     labels: Optional[List[str]] = None
+    is_user_selectable: bool = True
 
 
 # used in Knowledge Summary request
@@ -728,12 +846,12 @@ class ExportAndImportAgentInfo(BaseModel):
     name: str
     display_name: Optional[str] = None
     description: str
-    business_description: str
     author: Optional[str] = None
     max_steps: int
     requested_output_tokens: Optional[int] = Field(default=None, gt=0)
     is_main_agent: bool = True
     provide_run_summary: bool
+    allow_chat_metadata: bool = False
     verification_config: Optional[Dict[str, Any]] = None
     context_policy: Optional[Dict[str, Any]] = None
     duty_prompt: Optional[str] = None
@@ -749,6 +867,8 @@ class ExportAndImportAgentInfo(BaseModel):
     skill_names: Optional[List[str]] = None
     prompt_template_id: Optional[int] = None
     prompt_template_name: Optional[str] = None
+    greeting_message: Optional[str] = None
+    example_questions: Optional[List[str]] = None
 
     @field_validator("context_policy")
     @classmethod
@@ -788,6 +908,7 @@ class RepositoryImportRequirementItem(BaseModel):
     description: Optional[str] = None
     available: bool
     reason_code: Optional[str] = None
+    suggested_new_name: Optional[str] = None
 
 
 class RepositoryImportPrecheckResponse(BaseModel):
@@ -878,10 +999,23 @@ class SkillZipEntry(BaseModel):
     skill_zip_base64: str
 
 
+class SkillResolution(BaseModel):
+    """User-selected resolution for a duplicate skill during agent import."""
+    skill_name: str
+    action: Literal["rename", "use_existing"]
+    new_name: Optional[str] = None
+
+
+class SkillConflictCheckRequest(BaseModel):
+    """Skill names to check before showing the agent import steps."""
+    skill_names: List[str]
+
+
 class AgentImportRequest(BaseModel):
     agent_info: ExportAndImportDataFormat
     force_import: bool = False
     skills: Optional[List[SkillZipEntry]] = None
+    skill_resolutions: Optional[List[SkillResolution]] = None
 
 
 class AgentNameBatchRegenerateItem(BaseModel):
@@ -896,7 +1030,7 @@ class AgentNameBatchRegenerateRequest(BaseModel):
 
 
 class AgentNameBatchCheckItem(BaseModel):
-    name: str
+    name: str = ""
     display_name: Optional[str] = None
     agent_id: Optional[int] = None
 
@@ -1018,9 +1152,7 @@ class TenantCreateRequest(BaseModel):
     )
     locale: Optional[str] = Field(
         default=None,
-        description="Frontend locale when creating the tenant (e.g. 'zh' or 'en'). "
-                    "Determines the source label for auto-installed skills: "
-                    "'zh' → '官方', other locales → 'official'."
+        description="Frontend locale when creating the tenant (e.g. 'zh' or 'en')."
     )
 
 
@@ -1067,6 +1199,8 @@ class GroupListRequest(BaseModel):
         "created_at", description="Field to sort by")
     sort_order: Optional[str] = Field(
         "desc", description="Sort order (asc or desc)")
+    search: Optional[str] = Field(
+        None, max_length=200, description="Search group name")
 
 
 class UserListRequest(BaseModel):
@@ -1080,6 +1214,12 @@ class UserListRequest(BaseModel):
         "created_at", description="Field to sort by")
     sort_order: Optional[str] = Field(
         "desc", description="Sort order (asc or desc)")
+    search: Optional[str] = Field(
+        None, max_length=200, description="Search user email")
+    roles: Optional[List[str]] = Field(
+        None, description="Filter by user roles")
+    group_ids: Optional[List[int]] = Field(
+        None, description="Filter by user group IDs")
 
 
 class GroupUserRequest(BaseModel):
@@ -1308,7 +1448,6 @@ class VersionPublishRequest(BaseModel):
     """Request model for publishing a new version"""
     version_name: Optional[str] = Field(None, description="User-defined version name for display")
     release_note: Optional[str] = Field(None, description="Release notes / publish remarks")
-    publish_as_a2a: bool = Field(False, description="Whether to publish this agent as an A2A Server agent")
 
 
 class VersionListItemResponse(BaseModel):
@@ -1320,7 +1459,6 @@ class VersionListItemResponse(BaseModel):
     source_version_no: Optional[int] = Field(None, description="Source version number if rollback")
     source_type: Optional[str] = Field(None, description="Source type: NORMAL / ROLLBACK")
     status: str = Field(..., description="Version status: RELEASED / DISABLED / ARCHIVED")
-    is_a2a: bool = Field(False, description="Whether this version is published as an A2A Server agent")
     created_by: str = Field(..., description="User who published this version")
     create_time: Optional[str] = Field(None, description="Publish timestamp")
 
@@ -1340,7 +1478,6 @@ class VersionDetailResponse(BaseModel):
     source_version_no: Optional[int] = Field(None, description="Source version number")
     source_type: Optional[str] = Field(None, description="Source type")
     status: str = Field(..., description="Version status")
-    is_a2a: bool = Field(False, description="Whether this version is published as an A2A Server agent")
     created_by: str = Field(..., description="User who published this version")
     create_time: Optional[str] = Field(None, description="Publish timestamp")
     agent_info: Optional[dict] = Field(None, description="Agent info snapshot")
@@ -1410,6 +1547,8 @@ class SkillFileData(BaseModel):
     """A single file within a skill."""
     path: str = Field(description="Relative file path within the skill (e.g. 'SKILL.md', 'scripts/run.py')")
     content: str = Field(description="Full file content")
+    encoding: Optional[str] = Field(default=None, description="Source character encoding to preserve when writing")
+    encoding: Optional[str] = Field(default=None, description="Source character encoding to preserve when writing")
 
 
 class SkillUpdateRequest(BaseModel):
@@ -1582,30 +1721,13 @@ class ListMcpServicesQuery(BaseModel):
         return value
 
 
-class RegistryListQuery(BaseModel):
-    """Query parameters for listing MCP registry services"""
-    search: Optional[str] = Field(None, description="Search keyword")
-    include_deleted: bool = Field(default=False, description="Include deleted records")
-    updated_since: Optional[str] = Field(None, description="Filter by update time")
-    version: Optional[str] = Field(None, description="Filter by version")
-    cursor: Optional[str] = Field(None, description="Pagination cursor")
-    limit: int = Field(default=30, ge=1, le=100, description="Items per page")
-
-    @field_validator("search", "updated_since", "version", "cursor", mode="before")
-    @classmethod
-    def _strip_text(cls, value: Any):
-        if isinstance(value, str):
-            stripped = value.strip()
-            return stripped or None
-        return value
-
-
 class CommunityListRequest(BaseModel):
     """Request model for listing community MCP services"""
     search: Optional[str] = Field(None, description="Search keyword")
     tag: Optional[str] = Field(None, description="Filter by tag")
     transport_type: Optional[str] = Field(None,description="Filter by transport: url or container")
     cursor: Optional[str] = Field(None, description="Pagination cursor")
+    page: Optional[int] = Field(None, ge=1, description="Offset pagination page")
     limit: int = Field(default=30, ge=1, le=100, description="Items per page")
 
     @field_validator("search", "tag", "cursor", "transport_type", mode="before")

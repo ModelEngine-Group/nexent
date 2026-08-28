@@ -179,8 +179,15 @@ export async function fetchRepositoryImportPrecheck(
   }
 }
 
+export interface SkillResolutionInput {
+  skill_name: string;
+  action: "rename" | "use_existing";
+  new_name?: string;
+}
+
 export async function importAgentFromRepository(
-  agentRepositoryId: number
+  agentRepositoryId: number,
+  skillResolutions?: SkillResolutionInput[]
 ): Promise<void> {
   try {
     const response = await fetch(
@@ -188,6 +195,7 @@ export async function importAgentFromRepository(
       {
         method: "POST",
         headers: getAuthHeaders(),
+        body: skillResolutions ? JSON.stringify(skillResolutions) : undefined,
       }
     );
 

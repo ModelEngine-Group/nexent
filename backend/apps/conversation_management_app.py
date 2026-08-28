@@ -1,10 +1,12 @@
 import logging
 from http import HTTPStatus
-from typing import Any, Dict, Optional
+from typing import Annotated, Any, Dict, Optional
 
-from fastapi import APIRouter, Header, HTTPException, Request
+from fastapi import APIRouter, Header, HTTPException, Query, Request
 
 from consts.model import (
+    BatchDeleteConversationRequest,
+    ConversationKnowledgeScopeUpdateRequest,
     ConversationRequest,
     ConversationResponse,
     GenerateTitleRequest,
@@ -12,14 +14,17 @@ from consts.model import (
     OpinionRequest,
     RenameRequest,
 )
+from consts.exceptions import ConversationNotFoundError, ValidationError, TokenExpiredError
+from database.conversation_db import get_conversation_list_page
 from services.conversation_management_service import (
     create_new_conversation,
     delete_conversation_service,
+    delete_conversations_batch_service,
     generate_conversation_title_service,
     get_conversation_history_service,
-    get_conversation_list_service,
     get_sources_service,
     rename_conversation_service,
+    update_conversation_knowledge_scope_service,
     update_message_opinion_service, get_message_id_by_index_impl,
 )
 from utils.auth_utils import get_current_user_id, get_current_user_info
@@ -48,13 +53,22 @@ async def create_new_conversation_endpoint(request: ConversationRequest, authori
         user_id, tenant_id = get_current_user_id(authorization)
         conversation_data = create_new_conversation(request.title, user_id)
         return ConversationResponse(code=0, message="success", data=conversation_data)
+    except TokenExpiredError as e:
+        logging.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logging.error(f"Failed to create conversation: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
 
 @router.get("/list", response_model=ConversationResponse)
-async def list_conversations_endpoint(authorization: Optional[str] = Header(None)):
+async def list_conversations_endpoint(
+    today_start_ms: Annotated[int, Query(ge=0)],
+    week_start_ms: Annotated[int, Query(ge=0)],
+    authorization: Optional[str] = Header(None),
+    offset: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[Optional[int], Query(ge=1, le=100)] = None,
+):
     """
     Get all conversation list
 
@@ -68,12 +82,22 @@ async def list_conversations_endpoint(authorization: Optional[str] = Header(None
         user_id, tenant_id = get_current_user_id(authorization)
         if not user_id:
             raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Unauthorized access, Please login first")
-        conversations = get_conversation_list_service(user_id)
+        conversations = get_conversation_list_page(
+            user_id=user_id,
+            today_start_ms=today_start_ms,
+            week_start_ms=week_start_ms,
+            limit=limit,
+            offset=offset,
+        )
         return ConversationResponse(code=0, message="success", data=conversations)
+    except TokenExpiredError as e:
+        logging.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
+    except HTTPException:
+        raise
     except Exception as e:
         logging.error(f"Failed to get conversation list: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
-
 
 @router.post("/rename", response_model=ConversationResponse)
 async def rename_conversation_endpoint(request: RenameRequest, authorization: Optional[str] = Header(None)):
@@ -94,6 +118,9 @@ async def rename_conversation_endpoint(request: RenameRequest, authorization: Op
         rename_conversation_service(
             request.conversation_id, request.name, user_id)
         return ConversationResponse(code=0, message="success", data=True)
+    except TokenExpiredError as e:
+        logging.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logging.error(f"Failed to rename conversation: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
@@ -115,8 +142,35 @@ async def delete_conversation_endpoint(conversation_id: int, authorization: Opti
         user_id, tenant_id = get_current_user_id(authorization)
         delete_conversation_service(conversation_id, user_id)
         return ConversationResponse(code=0, message="success", data=True)
+    except TokenExpiredError as e:
+        logging.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logging.error(f"Failed to delete conversation: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.post("/batch-delete", response_model=ConversationResponse)
+async def delete_conversations_batch_endpoint(request: BatchDeleteConversationRequest, authorization: Annotated[Optional[str], Header()] = None):
+    """
+    Batch-delete conversations owned by the current user
+
+    Args:
+        request: BatchDeleteConversationRequest containing conversation_ids
+        authorization: Authorization header
+
+    Returns:
+        ConversationResponse with deleted_count and failed_ids
+    """
+    try:
+        user_id, _ = get_current_user_id(authorization)
+        result = delete_conversations_batch_service(request.conversation_ids, user_id)
+        return ConversationResponse(code=0, message="success", data=result)
+    except TokenExpiredError as e:
+        logging.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
+    except Exception as e:
+        logging.exception("Failed to batch delete conversations")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
 
@@ -137,9 +191,50 @@ async def get_conversation_history_endpoint(conversation_id: int, authorization:
         history_data = get_conversation_history_service(
             conversation_id, user_id)
         return ConversationResponse(code=0, message="success", data=history_data)
+    except TokenExpiredError as e:
+        logging.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logging.error(f"Failed to get conversation history: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.put("/{conversation_id}/knowledge-scope", response_model=ConversationResponse)
+async def update_conversation_knowledge_scope_endpoint(
+    conversation_id: int,
+    request: ConversationKnowledgeScopeUpdateRequest,
+    authorization: Optional[str] = Header(None),
+):
+    """Replace the desired knowledge scope for an existing conversation."""
+    try:
+        user_id, tenant_id = get_current_user_id(authorization)
+        scope = request.scope.model_dump(mode="json") if request.scope is not None else None
+        result = update_conversation_knowledge_scope_service(
+            conversation_id=conversation_id,
+            knowledge_scope=scope,
+            user_id=user_id,
+            tenant_id=tenant_id,
+        )
+        return ConversationResponse(
+            code=0,
+            message="success",
+            data=result,
+        )
+    except ConversationNotFoundError as exc:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(exc)) from exc
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+    except HTTPException:
+        raise
+    except TokenExpiredError as exc:
+        logging.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
+    except Exception as exc:
+        logging.error("Failed to update conversation knowledge scope: %s", exc)
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
 
 
 @router.post("/sources", response_model=Dict[str, Any])
@@ -163,6 +258,9 @@ async def get_sources_endpoint(request: Dict[str, Any], authorization: Optional[
         message_id = request.get("message_id")
         source_type = request.get("type", "all")
         return get_sources_service(conversation_id, message_id, source_type, user_id)
+    except TokenExpiredError as e:
+        logging.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logging.error(f"Failed to get message sources: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
@@ -196,6 +294,9 @@ async def generate_conversation_title_endpoint(
         title = await generate_conversation_title_service(
             request.conversation_id, request.question, user_id, tenant_id=tenant_id, language=language)
         return ConversationResponse(code=0, message="success", data=title)
+    except TokenExpiredError as e:
+        logging.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logging.error(f"Failed to generate conversation title: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))

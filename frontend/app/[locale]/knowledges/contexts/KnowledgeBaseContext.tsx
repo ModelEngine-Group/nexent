@@ -8,6 +8,8 @@ import {
   ReactNode,
   useCallback,
   useMemo,
+  useRef,
+  useState,
 } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -18,11 +20,24 @@ import {
   KnowledgeBaseState,
   KnowledgeBaseAction,
   DataMateSyncError,
+  KnowledgeBaseListFacets,
+  KnowledgeBaseListQuery,
 } from "@/types/knowledgeBase";
 import { KNOWLEDGE_BASE_ACTION_TYPES } from "@/const/knowledgeBase";
 
 import { useConfig } from "@/hooks/useConfig";
 import log from "@/lib/logger";
+
+const KNOWLEDGE_BASE_PAGE_SIZE = 10;
+
+interface KnowledgeBaseListPagination {
+  total: number;
+  hasMore: boolean;
+  nextOffset: number | null;
+  facets: KnowledgeBaseListFacets;
+  estimatedRowHeight: number;
+  estimatedItemHeights: Record<string, number> | null;
+}
 
 // Reducer function
 const knowledgeBaseReducer = (
@@ -109,8 +124,13 @@ export const KnowledgeBaseContext = createContext<{
   dispatch: React.Dispatch<KnowledgeBaseAction>;
   fetchKnowledgeBases: (
     skipHealthCheck?: boolean,
-    shouldLoadSelected?: boolean
+    shouldLoadSelected?: boolean,
+    includeDataMateSync?: boolean,
+    query?: KnowledgeBaseListQuery
   ) => Promise<void>;
+  loadMoreKnowledgeBases: () => Promise<void>;
+  listPagination: KnowledgeBaseListPagination;
+  isLoadingMore: boolean;
   createKnowledgeBase: (
     name: string,
     description: string,
@@ -119,8 +139,8 @@ export const KnowledgeBaseContext = createContext<{
     group_ids?: number[],
     embeddingModelId?: number,
     preserve_source_file?: boolean,
-    quota_limit_bytes?: number | null,
-  ) => Promise<KnowledgeBase | null>;
+    quota_limit_bytes?: number | null
+  ) => Promise<KnowledgeBase>;
   deleteKnowledgeBase: (id: string) => Promise<boolean>;
   selectKnowledgeBase: (id: string) => void;
   setActiveKnowledgeBase: (kb: KnowledgeBase | null) => void;
@@ -142,7 +162,19 @@ export const KnowledgeBaseContext = createContext<{
   },
   dispatch: () => {},
   fetchKnowledgeBases: async () => {},
-  createKnowledgeBase: async () => null,
+  loadMoreKnowledgeBases: async () => {},
+  listPagination: {
+    total: 0,
+    hasMore: false,
+    nextOffset: null,
+    facets: { sources: [], models: [] },
+    estimatedRowHeight: 112,
+    estimatedItemHeights: null,
+  },
+  isLoadingMore: false,
+  createKnowledgeBase: async () => {
+    throw new Error("KnowledgeBaseProvider is required");
+  },
   deleteKnowledgeBase: async () => false,
   selectKnowledgeBase: () => {},
   setActiveKnowledgeBase: () => {},
@@ -165,6 +197,18 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
   children,
 }) => {
   const { t } = useTranslation();
+  const queryRef = useRef<KnowledgeBaseListQuery>({});
+  const listRequestIdRef = useRef(0);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [listPagination, setListPagination] =
+    useState<KnowledgeBaseListPagination>({
+      total: 0,
+      hasMore: false,
+      nextOffset: null,
+      facets: { sources: [], models: [] },
+      estimatedRowHeight: 112,
+      estimatedItemHeights: null,
+    });
   const { appConfig, modelConfig } = useConfig();
   const [state, dispatch] = useReducer(knowledgeBaseReducer, {
     knowledgeBases: [],
@@ -254,12 +298,11 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
     async (
       skipHealthCheck = true,
       shouldLoadSelected = true,
-      includeDataMateSync = true
+      includeDataMateSync = true,
+      query?: KnowledgeBaseListQuery
     ) => {
-      // If already loading, return directly
-      if (state.isLoading) {
-        return;
-      }
+      if (query) queryRef.current = query;
+      const requestId = ++listRequestIdRef.current;
 
       dispatch({ type: KNOWLEDGE_BASE_ACTION_TYPES.LOADING, payload: true });
       // Clear previous DataMate sync error
@@ -276,12 +319,34 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
           skipHealthCheck,
           includeDataMateSync,
           null,
-          appConfig?.datamateUrl ?? null
+          appConfig?.datamateUrl ?? null,
+          {
+            ...queryRef.current,
+            offset: 0,
+            limit:
+              query?.limit ??
+              queryRef.current.limit ??
+              KNOWLEDGE_BASE_PAGE_SIZE,
+          }
         );
+        if (requestId !== listRequestIdRef.current) return;
 
         dispatch({
           type: KNOWLEDGE_BASE_ACTION_TYPES.FETCH_SUCCESS,
           payload: result.knowledgeBases,
+        });
+        const externalCount = Math.max(
+          0,
+          result.knowledgeBases.length -
+            (result.pageCount ?? result.knowledgeBases.length)
+        );
+        setListPagination({
+          total: (result.total ?? result.knowledgeBases.length) + externalCount,
+          hasMore: result.hasMore ?? false,
+          nextOffset: result.nextOffset ?? null,
+          facets: result.facets ?? { sources: [], models: [] },
+          estimatedRowHeight: result.estimatedRowHeight ?? 112,
+          estimatedItemHeights: result.estimatedItemHeights ?? null,
         });
 
         // Set DataMate sync error if present and throw to trigger error handling
@@ -294,6 +359,7 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
           throw new DataMateSyncError(result.dataMateSyncError);
         }
       } catch (error) {
+        if (requestId !== listRequestIdRef.current) return;
         // Check if it's a DataMate sync error
         if (error instanceof DataMateSyncError) {
           // Re-throw DataMateSyncError to be handled by the caller
@@ -305,11 +371,61 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
           payload: t("knowledgeBase.error.fetchListRetry"),
         });
       } finally {
-        dispatch({ type: KNOWLEDGE_BASE_ACTION_TYPES.LOADING, payload: false });
+        if (requestId === listRequestIdRef.current) {
+          dispatch({
+            type: KNOWLEDGE_BASE_ACTION_TYPES.LOADING,
+            payload: false,
+          });
+        }
       }
     },
-    [state.isLoading, t]
+    [appConfig?.datamateUrl, t]
   );
+
+  const loadMoreKnowledgeBases = useCallback(async () => {
+    if (isLoadingMore || !listPagination.hasMore) return;
+    const requestId = listRequestIdRef.current;
+    setIsLoadingMore(true);
+    try {
+      const result = await knowledgeBaseService.getKnowledgeBasesInfo(
+        true,
+        false,
+        null,
+        appConfig?.datamateUrl ?? null,
+        {
+          ...queryRef.current,
+          offset: listPagination.nextOffset ?? state.knowledgeBases.length,
+          limit: KNOWLEDGE_BASE_PAGE_SIZE,
+        }
+      );
+      if (requestId !== listRequestIdRef.current) return;
+      const merged = [...state.knowledgeBases, ...result.knowledgeBases].filter(
+        (kb, index, items) =>
+          items.findIndex((item) => item.id === kb.id) === index
+      );
+      dispatch({
+        type: KNOWLEDGE_BASE_ACTION_TYPES.FETCH_SUCCESS,
+        payload: merged,
+      });
+      setListPagination((current) => ({
+        ...current,
+        total: Math.max(current.total, result.total ?? current.total),
+        hasMore: result.hasMore ?? false,
+        nextOffset: result.nextOffset ?? null,
+        facets: result.facets ?? current.facets,
+      }));
+    } catch (error) {
+      log.error("Failed to load the next knowledge base page:", error);
+    } finally {
+      setIsLoadingMore(false);
+    }
+  }, [
+    appConfig?.datamateUrl,
+    isLoadingMore,
+    listPagination.hasMore,
+    listPagination.nextOffset,
+    state.knowledgeBases,
+  ]);
 
   // Select knowledge base - memoized with useCallback
   const selectKnowledgeBase = useCallback(
@@ -349,7 +465,10 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
 
   // Update knowledge base in list - memoized with useCallback
   const updateKnowledgeBase = useCallback((kb: KnowledgeBase) => {
-    dispatch({ type: KNOWLEDGE_BASE_ACTION_TYPES.UPDATE_KNOWLEDGE_BASE, payload: kb });
+    dispatch({
+      type: KNOWLEDGE_BASE_ACTION_TYPES.UPDATE_KNOWLEDGE_BASE,
+      payload: kb,
+    });
   }, []);
 
   // Create knowledge base - memoized with useCallback
@@ -362,7 +481,7 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
       group_ids?: number[],
       embeddingModelId?: number,
       preserve_source_file?: boolean,
-      quota_limit_bytes?: number | null,
+      quota_limit_bytes?: number | null
     ) => {
       try {
         if (embeddingModelId === undefined) {
@@ -385,7 +504,7 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
           type: KNOWLEDGE_BASE_ACTION_TYPES.ERROR,
           payload: t("knowledgeBase.error.createRetry"),
         });
-        return null;
+        throw error;
       }
     },
     [t]
@@ -443,13 +562,25 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
           false,
           true,
           null,
-          appConfig?.datamateUrl ?? null
+          appConfig?.datamateUrl ?? null,
+          {
+            ...queryRef.current,
+            offset: 0,
+            limit: queryRef.current.limit ?? KNOWLEDGE_BASE_PAGE_SIZE,
+          }
         );
 
         dispatch({
           type: KNOWLEDGE_BASE_ACTION_TYPES.FETCH_SUCCESS,
           payload: result.knowledgeBases,
         });
+        setListPagination((current) => ({
+          ...current,
+          total: result.total ?? result.knowledgeBases.length,
+          hasMore: result.hasMore ?? false,
+          nextOffset: result.nextOffset ?? null,
+          facets: result.facets ?? current.facets,
+        }));
 
         if (result.dataMateSyncError) {
           dispatch({
@@ -497,13 +628,25 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
         false,
         true,
         null,
-        appConfig?.datamateUrl ?? null
+        appConfig?.datamateUrl ?? null,
+        {
+          ...queryRef.current,
+          offset: 0,
+          limit: queryRef.current.limit ?? KNOWLEDGE_BASE_PAGE_SIZE,
+        }
       );
 
       dispatch({
         type: KNOWLEDGE_BASE_ACTION_TYPES.FETCH_SUCCESS,
         payload: result.knowledgeBases,
       });
+      setListPagination((current) => ({
+        ...current,
+        total: result.total ?? result.knowledgeBases.length,
+        hasMore: result.hasMore ?? false,
+        nextOffset: result.nextOffset ?? null,
+        facets: result.facets ?? current.facets,
+      }));
 
       // Handle DataMate sync error
       if (result.dataMateSyncError) {
@@ -647,6 +790,9 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
       state,
       dispatch,
       fetchKnowledgeBases,
+      loadMoreKnowledgeBases,
+      listPagination,
+      isLoadingMore,
       createKnowledgeBase,
       deleteKnowledgeBase,
       selectKnowledgeBase,
@@ -661,6 +807,9 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
       state,
       dispatch,
       fetchKnowledgeBases,
+      loadMoreKnowledgeBases,
+      listPagination,
+      isLoadingMore,
       createKnowledgeBase,
       deleteKnowledgeBase,
       selectKnowledgeBase,

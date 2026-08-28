@@ -7,8 +7,9 @@ from smolagents.tools import Tool
 from urllib.parse import urlparse
 
 from ...vector_database import DataMateCore
-from ..models.rerank_model import BaseRerank
+from ..gateway.modality import RerankAdapter
 from ..utils.observer import MessageObserver, ProcessType
+from ..utils.pydantic_utils import unwrap_field_info
 from ..utils.constants import RERANK_OVERSEARCH_MULTIPLIER
 from ..utils.tools_common_message import SearchResultTextMessage, ToolCategory, ToolSign
 
@@ -83,9 +84,9 @@ class DataMateSearchTool(Tool):
         observer: MessageObserver = Field(
             description="Message observer", default=None, exclude=True),
         top_k: int = Field(
-            description="Default maximum number of search results to return", default=3),
+            description="Default maximum number of search results to return", default=3, ge=1, le=100),
         threshold: float = Field(
-            description="Default similarity threshold for search results", default=0.2),
+            description="Default similarity threshold for search results", default=0.2, ge=0.0, le=1.0),
         rerank: bool = Field(
             description="Whether to enable reranking for search results",
             default=False,
@@ -94,7 +95,7 @@ class DataMateSearchTool(Tool):
             description="The name of the rerank model to use",
             default="",
         ),
-        rerank_model: BaseRerank = Field(
+        rerank_model: RerankAdapter = Field(
             description="The rerank model to use", default=None, exclude=True),
         kb_page: int = Field(
             description="Page index when listing knowledge bases from DataMate", default=1),
@@ -115,6 +116,11 @@ class DataMateSearchTool(Tool):
         """
         super().__init__()
 
+        top_k = unwrap_field_info(top_k)
+        threshold = unwrap_field_info(threshold)
+        kb_page = unwrap_field_info(kb_page)
+        kb_page_size = unwrap_field_info(kb_page_size)
+
         if not server_url:
             raise ValueError("server_url is required for DataMateSearchTool")
 
@@ -127,8 +133,8 @@ class DataMateSearchTool(Tool):
         self.use_https = parsed_url["use_https"]
         self.server_base_url = parsed_url["base_url"]
         self.index_names = [] if index_names is None else index_names
-        self.top_k = top_k
-        self.threshold = threshold
+        self.top_k = max(1, min(int(top_k or 3), 100))
+        self.threshold = max(0.0, min(float(threshold if threshold is not None else 0.2), 1.0))
         self.rerank = rerank
         self.rerank_model_name = rerank_model_name
         self.rerank_model = rerank_model
@@ -146,8 +152,8 @@ class DataMateSearchTool(Tool):
             verify_ssl=self.verify_ssl if self.use_https else True
         )
 
-        self.kb_page = kb_page
-        self.kb_page_size = kb_page_size
+        self.kb_page = max(1, int(kb_page or 1))
+        self.kb_page_size = max(1, min(int(kb_page_size or 20), 100))
         self.observer = observer
 
         self.record_ops = 1  # To record serial number

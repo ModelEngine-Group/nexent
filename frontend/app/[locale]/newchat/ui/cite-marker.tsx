@@ -12,7 +12,10 @@ import { cn } from "@/lib/utils";
 export interface CiteMarkerProps {
   /** The raw citekey from the markdown, e.g. "b1", "a1", "1" */
   citekey: string;
-  citeIndex: number;
+  /** The index displayed to the user, ordered by first appearance. */
+  displayIndex: number;
+  /** The original index used to resolve the source data. */
+  sourceIndex: number;
   url?: string;
   title: string;
   text?: string;
@@ -97,7 +100,8 @@ function CitationPreview({ text }: { text: string }) {
 
 const CiteMarkerImpl = ({
   citekey,
-  citeIndex,
+  displayIndex,
+  sourceIndex,
   url,
   title,
   text,
@@ -111,12 +115,15 @@ const CiteMarkerImpl = ({
         <TooltipTrigger asChild>
           <button
             type="button"
+            data-citation-key={citekey}
+            data-citation-source-index={sourceIndex}
+            data-citation-display-index={displayIndex}
             onClick={onClick}
             disabled={!onClick}
             aria-label={
               loading
-                ? `Source ${citeIndex} is loading`
-                : `Open source ${citeIndex}: ${title}`
+                ? `Source ${displayIndex} is loading`
+                : `Open source ${displayIndex}: ${title}`
             }
             className={cn(
               "mx-0.5 inline-flex items-center justify-center rounded bg-primary/10 px-1 align-baseline font-normal leading-normal text-primary transition-colors",
@@ -126,7 +133,7 @@ const CiteMarkerImpl = ({
               className,
             )}
           >
-            [{citeIndex}]
+            [{displayIndex}]
           </button>
         </TooltipTrigger>
         <TooltipContent side="top" className="max-w-sm px-3 py-2">

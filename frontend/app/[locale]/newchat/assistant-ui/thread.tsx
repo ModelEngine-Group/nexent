@@ -78,13 +78,15 @@ import { SingleTurnTokenUsage } from "../ui/token-usage";
 import { ToolFallback } from "../ui/tool-fallback";
 import { ToolRecommendations } from "../ui/tool-recommendations";
 import { AgentDraftCard } from "../ui/agent-draft-card";
+import { RequirementClarificationCard } from "../ui/requirement-clarification-card";
+import { InstalledResourceBindingCard } from "../ui/installed-resource-binding-card";
+import { SuggestedResourceInstallationCard } from "../ui/suggested-resource-installation-card";
 import {
   ToolGroupContent,
   ToolGroupRoot,
   ToolGroupTrigger,
 } from "../ui/tool-group";
 import {
-  getAgentRunTime,
   searchSourcesRegistry,
   conversationSourcesRegistry,
   skillFileUploadsRegistry,
@@ -92,18 +94,29 @@ import {
   type Nl2SkillFileCardData,
   type VerificationContent,
 } from "../adapter/remote-chat-model-adapter";
+import {
+  formatMessageDate,
+  formatMessageTime,
+  shouldShowDateSeparator,
+} from "@/lib/messageDate";
 import { VerificationPanel } from "../ui/verification-panel";
 import { cn } from "@/lib/utils";
 import { AuthenticatedImage } from "../ui/authenticated-image";
 import { copyToClipboard } from "@/lib/clipboard";
 import { configService } from "@/services/configService";
 import { conversationService } from "@/services/conversationService";
+import type {
+  ConversationKnowledgeScope,
+  KnowledgeCapabilities,
+  KnowledgeScopeEffectivePreview,
+} from "@/types/knowledgeScope";
 import { SkillFileCard } from "../ui/skill-file-card";
 import type { SkillFileContent } from "@/types/skill";
 
 export interface ThreadProps {
   agent: Agent | PublishedAgent;
   generatedTitle?: string;
+  welcomeTitle?: string;
   conversationId?: number;
   onBack?: () => void;
   selectedModelId?: string;
@@ -111,10 +124,22 @@ export interface ThreadProps {
   chatMode: ChatMode;
   onChatModeChange: (mode: ChatMode) => void;
   showModelSelector?: boolean;
+  showConversationTitle?: boolean;
   isDictationConfigured?: boolean;
+  knowledgeScope?: ConversationKnowledgeScope | null;
+  knowledgePreview?: KnowledgeScopeEffectivePreview | null;
+  knowledgeCapabilities?: KnowledgeCapabilities | null;
+  onKnowledgeScopeChange?: (
+    scope: ConversationKnowledgeScope | null,
+    preview?: KnowledgeScopeEffectivePreview | null
+  ) => Promise<void> | void;
   variant?: "default" | "embedded";
   skillFiles?: readonly SkillFileContent[];
   onSkillFileSelect?: (path: string) => void;
+  runtimeMetadata?: Record<string, unknown>;
+  onRuntimeMetadataChange?: (value: Record<string, unknown>) => void;
+  readOnly?: boolean;
+  showComposer?: boolean;
 }
 
 /**
@@ -147,6 +172,12 @@ const useAgentModels = (
       return [{ id: modelName, name: modelName }];
     }
 
+    // Fallback to the single model field (used by AgentDraft / debug panel)
+    const singleModel = (typedAgent as unknown as { model?: string }).model;
+    if (singleModel) {
+      return [{ id: singleModel, name: singleModel }];
+    }
+
     return [];
   }, [agent]);
 };
@@ -154,6 +185,7 @@ const useAgentModels = (
 export const Thread: FC<ThreadProps> = ({
   agent,
   generatedTitle,
+  welcomeTitle,
   conversationId,
   onBack,
   selectedModelId,
@@ -161,10 +193,19 @@ export const Thread: FC<ThreadProps> = ({
   chatMode,
   onChatModeChange,
   showModelSelector = true,
+  showConversationTitle = true,
   isDictationConfigured = false,
+  knowledgeScope = null,
+  knowledgePreview = null,
+  knowledgeCapabilities = null,
+  onKnowledgeScopeChange,
   variant = "default",
   skillFiles,
   onSkillFileSelect,
+  runtimeMetadata = {},
+  onRuntimeMetadataChange,
+  readOnly = false,
+  showComposer = true,
 }) => {
   const { t } = useTranslation();
   const models = useAgentModels(agent);
@@ -364,6 +405,7 @@ export const Thread: FC<ThreadProps> = ({
     <SourcesPanelProvider value={panelContextValue}>
       <ThreadView
         agent={agent}
+        welcomeTitle={welcomeTitle}
         onBack={onBack}
         models={models}
         selectedModelId={selectedModelId}
@@ -371,10 +413,19 @@ export const Thread: FC<ThreadProps> = ({
         chatMode={chatMode}
         onChatModeChange={onChatModeChange}
         showModelSelector={showModelSelector}
+        showConversationTitle={showConversationTitle}
         isDictationConfigured={isDictationConfigured}
+        knowledgeScope={knowledgeScope}
+        knowledgePreview={knowledgePreview}
+        knowledgeCapabilities={knowledgeCapabilities}
+        onKnowledgeScopeChange={onKnowledgeScopeChange}
         variant={variant}
         skillFiles={skillFiles}
         onSkillFileSelect={onSkillFileSelect}
+        runtimeMetadata={runtimeMetadata}
+        onRuntimeMetadataChange={onRuntimeMetadataChange}
+        readOnly={readOnly}
+        showComposer={showComposer}
         hasMessages={hasMessages}
         displayName={displayName}
         conversationTitle={conversationTitle}
@@ -450,6 +501,7 @@ export const Thread: FC<ThreadProps> = ({
 
 interface ThreadViewProps {
   agent: Agent | PublishedAgent;
+  welcomeTitle?: string;
   onBack?: () => void;
   models: readonly ModelOption[];
   selectedModelId?: string;
@@ -457,7 +509,15 @@ interface ThreadViewProps {
   chatMode: ChatMode;
   onChatModeChange: (mode: ChatMode) => void;
   showModelSelector: boolean;
+  showConversationTitle: boolean;
   isDictationConfigured: boolean;
+  knowledgeScope: ConversationKnowledgeScope | null;
+  knowledgePreview: KnowledgeScopeEffectivePreview | null;
+  knowledgeCapabilities: KnowledgeCapabilities | null;
+  onKnowledgeScopeChange?: (
+    scope: ConversationKnowledgeScope | null,
+    preview?: KnowledgeScopeEffectivePreview | null
+  ) => Promise<void> | void;
   hasMessages: boolean;
   displayName: string;
   conversationTitle: string;
@@ -477,10 +537,15 @@ interface ThreadViewProps {
   variant: "default" | "embedded";
   skillFiles?: readonly SkillFileContent[];
   onSkillFileSelect?: (path: string) => void;
+  runtimeMetadata: Record<string, unknown>;
+  onRuntimeMetadataChange?: (value: Record<string, unknown>) => void;
+  readOnly: boolean;
+  showComposer: boolean;
 }
 
 const ThreadView: FC<ThreadViewProps> = ({
   agent,
+  welcomeTitle,
   onBack,
   models,
   selectedModelId,
@@ -488,7 +553,12 @@ const ThreadView: FC<ThreadViewProps> = ({
   chatMode,
   onChatModeChange,
   showModelSelector,
+  showConversationTitle,
   isDictationConfigured,
+  knowledgeScope,
+  knowledgePreview,
+  knowledgeCapabilities,
+  onKnowledgeScopeChange,
   hasMessages,
   displayName,
   conversationTitle,
@@ -508,6 +578,10 @@ const ThreadView: FC<ThreadViewProps> = ({
   variant,
   skillFiles,
   onSkillFileSelect,
+  runtimeMetadata,
+  onRuntimeMetadataChange,
+  readOnly,
+  showComposer,
 }) => {
   const { t } = useTranslation();
 
@@ -520,52 +594,57 @@ const ThreadView: FC<ThreadViewProps> = ({
       )}
     >
       <div className="flex h-full min-w-0 flex-1 flex-col">
-        <header className="flex items-center gap-2 border-b px-3 py-2">
-          {isShareMode ? (
-            <>
-              <div className="flex min-w-0 flex-1 justify-center text-sm font-medium text-foreground">
-                {conversationTitle}
-              </div>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={onLeaveShareMode}
-                aria-label={t("common.close", "关闭")}
-              >
-                <XIcon className="size-4" />
-              </Button>
-            </>
-          ) : (
-            <>
-              {onBack && (
-                <Button variant="ghost" size="icon" onClick={onBack}>
-                  <ArrowLeft className="size-4" />
-                </Button>
-              )}
-              <div className="flex min-w-0 flex-1 flex-col">
-                <span className="text-sm font-medium text-foreground">
-                  {hasMessages ? conversationTitle : displayName}
-                </span>
-                {hasMessages && variant !== "embedded" && (
-                  <span className="text-xs text-muted-foreground">
-                    {t("chat.thread.conversation")}
-                  </span>
-                )}
-              </div>
-              {hasMessages && conversationId && (
+        {showConversationTitle && (
+          <header className="flex items-center gap-2 border-b px-3 py-2">
+            {isShareMode ? (
+              <>
+                <div className="flex min-w-0 flex-1 justify-center text-sm font-medium text-foreground">
+                  {conversationTitle}
+                </div>
                 <Button
                   variant="ghost"
                   size="icon"
-                  aria-label={t("chatInterface.shareConversation", "分享对话")}
-                  disabled={isRunning}
-                  onClick={onEnterShareMode}
+                  onClick={onLeaveShareMode}
+                  aria-label={t("common.close", "关闭")}
                 >
-                  <Share2Icon className="size-4" />
+                  <XIcon className="size-4" />
                 </Button>
-              )}
-            </>
-          )}
-        </header>
+              </>
+            ) : (
+              <>
+                {onBack && (
+                  <Button variant="ghost" size="icon" onClick={onBack}>
+                    <ArrowLeft className="size-4" />
+                  </Button>
+                )}
+                <div className="flex min-w-0 flex-1 flex-col">
+                  <span className="text-sm font-medium text-foreground">
+                    {hasMessages ? conversationTitle : displayName}
+                  </span>
+                  {hasMessages && variant !== "embedded" && (
+                    <span className="text-xs text-muted-foreground">
+                      {t("chat.thread.conversation")}
+                    </span>
+                  )}
+                </div>
+                {hasMessages && conversationId && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    aria-label={t(
+                      "chatInterface.shareConversation",
+                      "分享对话"
+                    )}
+                    disabled={isRunning}
+                    onClick={onEnterShareMode}
+                  >
+                    <Share2Icon className="size-4" />
+                  </Button>
+                )}
+              </>
+            )}
+          </header>
+        )}
 
         {isShareMode && (
           <div className="flex items-center justify-between border-b bg-muted/30 px-4 py-2">
@@ -618,6 +697,7 @@ const ThreadView: FC<ThreadViewProps> = ({
           {hasMessages ? (
             <ThreadMessages
               agent={agent}
+              readOnly={readOnly}
               enableSkillDirectives={Boolean(skillFiles)}
               onSkillFileSelect={onSkillFileSelect}
               shareMode={isShareMode}
@@ -626,29 +706,39 @@ const ThreadView: FC<ThreadViewProps> = ({
               onToggleShareMessage={onToggleShareMessage}
             />
           ) : (
-            <ThreadWelcomeContent agent={agent} />
+            <ThreadWelcomeContent agent={agent} title={welcomeTitle} />
           )}
         </ThreadPrimitive.Viewport>
 
-        <ThreadPrimitive.ViewportFooter
-          className={cn(
-            "sticky bottom-0 mx-auto flex w-full max-w-4xl flex-col",
-            variant === "embedded" ? "gap-2 px-4 pb-4" : "gap-4 px-8 pb-8"
-          )}
-        >
-          <ThreadScrollToBottom />
-          <Composer
-            models={models}
-            selectedModelId={selectedModelId}
-            onModelChange={onModelChange}
-            chatMode={chatMode}
-            onChatModeChange={onChatModeChange}
-            showModelSelector={showModelSelector}
-            isDictationConfigured={isDictationConfigured}
-            compact={variant === "embedded"}
-            skillFiles={skillFiles}
-          />
-        </ThreadPrimitive.ViewportFooter>
+        {showComposer && (
+          <ThreadPrimitive.ViewportFooter
+            className={cn(
+              "sticky bottom-0 mx-auto flex w-full max-w-4xl flex-col",
+              variant === "embedded" ? "gap-2 px-4 pb-4" : "gap-4 px-8 pb-8"
+            )}
+          >
+            <ThreadScrollToBottom />
+            <Composer
+              models={models}
+              selectedModelId={selectedModelId}
+              onModelChange={onModelChange}
+              chatMode={chatMode}
+              onChatModeChange={onChatModeChange}
+              showModelSelector={showModelSelector}
+              isDictationConfigured={isDictationConfigured}
+              knowledgeScope={knowledgeScope}
+              knowledgePreview={knowledgePreview}
+              knowledgeCapabilities={knowledgeCapabilities}
+              onKnowledgeScopeChange={onKnowledgeScopeChange}
+              compact={variant === "embedded"}
+              skillFiles={skillFiles}
+              runtimeMetadata={runtimeMetadata}
+              onRuntimeMetadataChange={onRuntimeMetadataChange}
+              allowRuntimeMetadata={agent.allow_chat_metadata === true}
+              disabled={readOnly}
+            />
+          </ThreadPrimitive.ViewportFooter>
+        )}
       </div>
 
       <SourcesPanel
@@ -717,9 +807,13 @@ export const ReadOnlyConversation: FC<{
 
 interface ThreadWelcomeContentProps {
   agent: Agent | PublishedAgent;
+  title?: string;
 }
 
-const ThreadWelcomeContent: FC<ThreadWelcomeContentProps> = ({ agent }) => {
+const ThreadWelcomeContent: FC<ThreadWelcomeContentProps> = ({
+  agent,
+  title,
+}) => {
   const aui = useAui();
   const { t } = useTranslation();
   const Icon = getAgentIcon(agent);
@@ -743,7 +837,7 @@ const ThreadWelcomeContent: FC<ThreadWelcomeContentProps> = ({ agent }) => {
 
           <div className="text-center">
             <h1 className="text-balance text-2xl font-bold text-foreground md:text-3xl">
-              {t("chat.thread.helloAgent", { agent: displayName })}
+              {title ?? t("chat.thread.helloAgent", { agent: displayName })}
             </h1>
             <p className="mx-auto mt-3 max-w-xl text-pretty text-sm leading-relaxed text-muted-foreground">
               {agent.greeting_message || agent.description}
@@ -981,6 +1075,67 @@ const AssistantCompletionIndicator: FC = () => {
   );
 };
 
+type DatabaseTimeMetadata = {
+  databaseCreateTime?: number;
+};
+
+const getDatabaseCreateTime = (metadata: unknown): number | undefined => {
+  if (!metadata || typeof metadata !== "object") return undefined;
+  const custom = (metadata as { custom?: DatabaseTimeMetadata }).custom;
+  return custom?.databaseCreateTime;
+};
+
+const MessageTimestamp: FC<{ className?: string }> = ({ className }) => {
+  const createTime = useAuiState((s) =>
+    getDatabaseCreateTime(s.message.metadata)
+  );
+  const displayTime = formatMessageTime(createTime);
+
+  if (!displayTime) return null;
+
+  return (
+    <time
+      dateTime={new Date(createTime!).toISOString()}
+      className={cn("text-xs text-muted-foreground", className)}
+    >
+      {displayTime}
+    </time>
+  );
+};
+
+const MessageDateSeparator: FC = () => {
+  const { i18n } = useTranslation();
+  const createTime = useAuiState((s) =>
+    getDatabaseCreateTime(s.message.metadata)
+  );
+  const previousCreateTime = useAuiState((s) => {
+    if (s.message.index <= 0) return undefined;
+    return getDatabaseCreateTime(
+      s.thread.messages.at(s.message.index - 1)?.metadata
+    );
+  });
+
+  if (!shouldShowDateSeparator(createTime, previousCreateTime)) return null;
+
+  const label = formatMessageDate(
+    createTime,
+    i18n.resolvedLanguage ?? i18n.language
+  );
+  if (!label) return null;
+
+  return (
+    <div
+      role="separator"
+      aria-label={label}
+      className="col-span-full !col-start-1 mx-auto my-4 flex w-full max-w-(--thread-max-width) items-center gap-3 px-2 text-xs text-muted-foreground"
+    >
+      <span className="h-px flex-1 bg-border" aria-hidden />
+      <time dateTime={new Date(createTime!).toISOString()}>{label}</time>
+      <span className="h-px flex-1 bg-border" aria-hidden />
+    </div>
+  );
+};
+
 const AssistantMessage: FC<{
   agent: Agent | PublishedAgent;
   readOnly?: boolean;
@@ -996,7 +1151,6 @@ const AssistantMessage: FC<{
   const AgentIcon = getAgentIcon(agent);
   const agentName = agent.display_name || agent.name;
 
-  const agentRunTime = getAgentRunTime();
   const nl2a = useAuiState(
     (s) =>
       (s.message.metadata?.custom as { nl2a?: Nl2aMessage } | undefined)?.nl2a
@@ -1025,6 +1179,7 @@ const AssistantMessage: FC<{
       data-role="assistant"
       className="fade-in slide-in-from-bottom-1 animate-in relative mx-auto min-w-0 w-full max-w-(--thread-max-width) duration-150"
     >
+      <MessageDateSeparator />
       <div
         data-slot="aui_assistant-message-content"
         className="text-foreground min-w-0 px-2 pt-3 pb-1 leading-relaxed wrap-break-word"
@@ -1043,16 +1198,7 @@ const AssistantMessage: FC<{
             </span>
             <AssistantCompletionIndicator />
           </div>
-          {agentRunTime && (
-            <span
-              data-slot="aui_assistant-message-run-time"
-              className="text-xs text-muted-foreground"
-              aria-label={t("chat.thread.runStartedAt", { time: agentRunTime })}
-              title={t("chat.thread.runStartedAt", { time: agentRunTime })}
-            >
-              {agentRunTime}
-            </span>
-          )}
+          <MessageTimestamp />
         </header>
         <MessagePrimitive.GroupedParts
           groupBy={(part) => {
@@ -1068,8 +1214,20 @@ const AssistantMessage: FC<{
             ).metadata;
             const subagentId = meta?.subagentId;
             const runId = meta?.runId;
-            const chainPath: `group-${string}`[] =
-              part.type === "reasoning"
+            const isImagePart =
+              (part.type === "image" &&
+                Boolean((part as { image?: string }).image)) ||
+              (part.type === "text" &&
+                Boolean(
+                  (part as {
+                    isSearchImage?: boolean;
+                    imageSource?: SourcePartLike;
+                  }).isSearchImage &&
+                    (part as { imageSource?: SourcePartLike }).imageSource
+                ));
+            const chainPath: `group-${string}`[] = isImagePart
+              ? ["group-image"]
+              : part.type === "reasoning"
                 ? ["group-chainOfThought", "group-reasoning"]
                 : part.type === "tool-call"
                   ? ["group-chainOfThought", "group-tool"]
@@ -1123,6 +1281,12 @@ const AssistantMessage: FC<{
             }
 
             switch (part.type) {
+              case "group-image":
+                return (
+                  <div className="grid grid-cols-1 gap-3 py-2 sm:grid-cols-3">
+                    {children}
+                  </div>
+                );
               case "group-chainOfThought":
                 return <div data-slot="aui_chain-of-thought">{children}</div>;
               case "group-tool":
@@ -1185,6 +1349,20 @@ const AssistantMessage: FC<{
                 }
                 return <MarkdownText />;
               }
+              case "image": {
+                const imageUrl = (part as typeof part & { image?: string })
+                  .image;
+                return imageUrl ? (
+                  <GlobalSearchImage
+                    source={{
+                      type: "source",
+                      sourceType: "url",
+                      url: imageUrl,
+                      title: imageUrl,
+                    }}
+                  />
+                ) : null;
+              }
               case "reasoning":
                 return <Reasoning {...part} />;
               case "tool-call":
@@ -1237,10 +1415,25 @@ const AssistantMessage: FC<{
             }
           }}
         </MessagePrimitive.GroupedParts>
-        {nl2a?.content.subtype === "local_mcp_recommendation" ? (
-          <ToolRecommendations payload={nl2a.content} />
+        {nl2a?.content.subtype === "requirement_clarification" ? (
+          <RequirementClarificationCard
+            payload={nl2a.content}
+            disabled={readOnly}
+          />
+        ) : nl2a?.content.subtype === "local_mcp_recommendation" ? (
+          <ToolRecommendations payload={nl2a.content} disabled={readOnly} />
         ) : nl2a?.content.subtype === "agent_draft" ? (
-          <AgentDraftCard draft={nl2a.content} />
+          <AgentDraftCard draft={nl2a.content} disabled={readOnly} />
+        ) : nl2a?.content.subtype === "suggested_resource_installation" ? (
+          <SuggestedResourceInstallationCard
+            payload={nl2a.content}
+            disabled={readOnly}
+          />
+        ) : nl2a?.content.subtype === "installed_resource_binding" ? (
+          <InstalledResourceBindingCard
+            payload={nl2a.content}
+            disabled={readOnly}
+          />
         ) : null}
         {skillFileAttachments?.length ? (
           <AssistantMessageAttachments attachments={skillFileAttachments} />
@@ -1340,6 +1533,7 @@ const UserMessage: FC<{
       data-role="user"
       className="relative fade-in slide-in-from-bottom-1 animate-in mx-auto grid w-full max-w-(--thread-max-width) auto-rows-auto grid-cols-[minmax(72px,1fr)_auto] content-start gap-y-2 px-2 duration-150 [&:where(>*)]:col-start-2"
     >
+      <MessageDateSeparator />
       {shareMode && backendMessageId !== undefined && (
         <label className="absolute left-2 top-1/2 z-10 flex -translate-y-1/2 cursor-pointer items-center justify-center">
           <input
@@ -1375,6 +1569,7 @@ const UserMessage: FC<{
             </div>
           )}
         </div>
+        <MessageTimestamp className="self-end" />
       </div>
 
       {!readOnly && (
@@ -1435,23 +1630,26 @@ interface SourcePartLike {
 const GlobalSearchImage: FC<{ source: SourcePartLike }> = ({ source }) => {
   const imageUrl = source.url || "";
   if (!imageUrl) return null;
+  const displayTitle =
+    source.title && source.title !== imageUrl ? source.title : undefined;
   return (
     <figure
-      className="aui-global-search-image w-full max-w-xl overflow-hidden rounded-md border bg-muted/30"
+      className="aui-global-search-image min-w-0 overflow-hidden rounded-md border bg-muted/30"
       title={imageUrl}
     >
       <AuthenticatedImage
         src={imageUrl}
-        alt={source.title || imageUrl}
+        alt={displayTitle || imageUrl}
         loading="lazy"
         preview
-        className="max-h-[28rem] w-full bg-muted/50 object-contain"
+        proxy
+        className="aspect-[4/3] max-h-56 w-full bg-muted/50 object-cover"
       />
-      {source.title || source.text ? (
+      {displayTitle || source.text ? (
         <figcaption className="border-t bg-card px-3 py-2">
-          {source.title ? (
+          {displayTitle ? (
             <div className="text-sm font-medium text-foreground">
-              {source.title}
+              {displayTitle}
             </div>
           ) : null}
           {source.text ? (

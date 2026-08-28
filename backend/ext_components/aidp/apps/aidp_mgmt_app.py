@@ -8,13 +8,14 @@ FastAPI endpoints for AIDP knowledge base CRUD with permission enforcement.
   the v7.1 permission matrix and raise 403/404 when violated.
 * Creation is idempotent: the AIDP call uses ``kds_id`` returned from AIDP
   as the dedup key; collisions surface as 409 without compensating deletes.
-* KB metadata is fetched lazily for the visible page only; failures mark
-  ``resource_status = UNAVAILABLE`` so the frontend can render the row
-  gracefully instead of treating it as a hard error.
+* The current AIDP catalog is intersected with Nexent permissions before
+  pagination. KB metadata is fetched lazily for the visible page only.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 from http import HTTPStatus
 from typing import Annotated, List, Optional
 
@@ -26,6 +27,7 @@ from sqlalchemy.exc import IntegrityError
 from consts.const import AIDP_API_KEY, AIDP_SERVER_URL
 from consts.error_code import ErrorCode
 from consts.exceptions import AppException, UnauthorizedError
+from database.user_tenant_db import get_user_role_by_tenant
 from ext_components.aidp.consts.aidp_exceptions import (
     AidpKbConflictError,
     AidpKbNotFoundError,
@@ -35,7 +37,16 @@ from ext_components.aidp.consts.aidp_exceptions import (
 )
 from ext_components.aidp.database import aidp_permission_db
 from ext_components.aidp.services import aidp_permission_service as perms
+from ext_components.aidp.services.aidp_access_service import (
+    get_cached_aidp_doc_count,
+    get_cached_aidp_kb_detail,
+    invalidate_aidp_catalog_cache,
+    invalidate_aidp_doc_count_cache,
+    invalidate_aidp_kb_detail_cache,
+    resolve_current_aidp_access,
+)
 from ext_components.aidp.services.aidp_service import (
+    _timestamp_to_iso,
     count_aidp_docs_impl,
     create_aidp_kb_impl,
     delete_aidp_kb_impl,
@@ -47,6 +58,7 @@ from ext_components.aidp.services.aidp_service import (
 )
 from ext_components.aidp.services.aidp_permission_service import (
     EDIT,
+    PRIVATE,
     READ_ONLY,
     _validate_group_ids_strict,
 )
@@ -54,6 +66,58 @@ from utils import auth_utils as auth_utils_module
 
 aidp_mgmt_router = APIRouter(prefix="/aidp-mgmt")
 logger = logging.getLogger("aidp_mgmt_app")
+
+AIDP_MAX_UPLOAD_FILE_COUNT = 50
+AIDP_SMALL_FILE_MAX_SIZE_BYTES = 20 * 1024 * 1024
+AIDP_OTHER_FILE_MAX_SIZE_BYTES = 1024 * 1024 * 1024
+AIDP_SMALL_FILE_EXTENSIONS = {"txt", "xls", "xlsx", "csv"}
+
+
+def _upload_failure(file_name: str, reason_zh: str, reason_en: str) -> dict:
+    return {
+        "file_name": file_name,
+        "reason_zh": reason_zh,
+        "reason_en": reason_en,
+    }
+
+
+def _validate_upload_files(files: List[UploadFile]) -> tuple[List[UploadFile], list[dict]]:
+    """Validate AIDP upload count and per-file size without loading files into memory."""
+    if len(files) > AIDP_MAX_UPLOAD_FILE_COUNT:
+        reason_zh = f"单次最多上传 {AIDP_MAX_UPLOAD_FILE_COUNT} 个文件"
+        reason_en = f"You can upload up to {AIDP_MAX_UPLOAD_FILE_COUNT} files at a time"
+        return [], [
+            _upload_failure(file.filename or "unknown", reason_zh, reason_en)
+            for file in files
+        ]
+
+    valid_files: List[UploadFile] = []
+    failed_files: list[dict] = []
+    for file in files:
+        file_name = file.filename or "unknown"
+        extension = file_name.rsplit(".", 1)[-1].lower() if "." in file_name else ""
+        max_size_bytes = (
+            AIDP_SMALL_FILE_MAX_SIZE_BYTES
+            if extension in AIDP_SMALL_FILE_EXTENSIONS
+            else AIDP_OTHER_FILE_MAX_SIZE_BYTES
+        )
+        max_size_mb = max_size_bytes // (1024 * 1024)
+
+        original_position = file.file.tell()
+        file.file.seek(0, 2)
+        file_size = file.file.tell()
+        file.file.seek(original_position)
+
+        if file_size > max_size_bytes:
+            failed_files.append(_upload_failure(
+                file_name,
+                f"文件大小不能超过 {max_size_mb} MB",
+                f"File size must not exceed {max_size_mb} MB",
+            ))
+        else:
+            valid_files.append(file)
+
+    return valid_files, failed_files
 
 
 # ---------------------------------------------------------------------------
@@ -174,6 +238,30 @@ def _credentials() -> tuple[str, str]:
     return AIDP_SERVER_URL, AIDP_API_KEY
 
 
+def _is_user_role(user_id: str, tenant_id: str) -> bool:
+    """Return whether the caller is a regular USER in the current tenant.
+
+    Missing tenant-role data is treated as USER so an authenticated caller
+    cannot bypass the personal-KB boundary while its tenant context is being
+    provisioned.
+    """
+    role = get_user_role_by_tenant(user_id, tenant_id)
+    return (role or "USER").upper() == "USER"
+
+
+def _current_accessible_rows(user_id: str, tenant_id: str) -> list[dict]:
+    """Return the current AIDP catalog intersected with local user access."""
+    server_url, api_key = _credentials()
+    snapshot = resolve_current_aidp_access(
+        server_url=server_url,
+        api_key=api_key,
+        user_id=user_id,
+        tenant_id=tenant_id,
+        aidp_tenant_id="aidp",
+    )
+    return snapshot.accessible_rows
+
+
 # ---------------------------------------------------------------------------
 # Permission-aware helpers
 # ---------------------------------------------------------------------------
@@ -185,6 +273,33 @@ def _serialize_permission(decision) -> dict:
         "matched_group_ids": list(decision.matched_group_ids),
         "is_management_role": decision.is_management_role,
     }
+
+
+def _has_kb_card_metadata(row: dict) -> bool:
+    """Return whether the catalog row already contains every card field."""
+    has_name = bool(row.get("kds_name") or row.get("name"))
+    has_description = "description" in row
+    has_created_at = "created_at" in row or "create_time" in row
+    has_multimodal = "is_multimodal" in row or "caption_enable" in row
+    return has_name and has_description and has_created_at and has_multimodal
+
+
+def _load_cached_kb_detail(server_url: str, api_key: str, kb_id: str) -> dict:
+    return get_cached_aidp_kb_detail(
+        server_url=server_url,
+        api_key=api_key,
+        kds_id=kb_id,
+        loader=lambda: get_aidp_kb_impl(server_url, api_key, kb_id) or {},
+    )
+
+
+def _load_cached_doc_count(server_url: str, api_key: str, kb_id: str) -> int:
+    return get_cached_aidp_doc_count(
+        server_url=server_url,
+        api_key=api_key,
+        kds_id=kb_id,
+        loader=lambda: count_aidp_docs_impl(server_url, api_key, kb_id),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -201,65 +316,97 @@ async def list_knowledge_bases(
     """List KBs the caller can access.
 
     Resolution order:
-    1. Read active rows from the local DB for the tenant (tenant + active
-       filter ensures we never leak across tenants).
-    2. For each row, compute the effective permission using the role +
-       ownership + group intersection matrix.
-    3. Fetch AIDP-side metadata lazily for the visible page only; failures
-       mark ``resource_status = UNAVAILABLE`` rather than failing the list.
+    1. Fetch every KB visible to the currently configured AIDP credentials.
+    2. Intersect that catalog with the caller's effective Nexent permissions.
+    3. Paginate the intersection, then fetch details for the visible page.
     """
     user_id, tenant_id = await _auth(request)
 
-    total_count = perms.count_accessible_kbs(user_id=user_id, tenant_id=tenant_id)
+    server_url, api_key = _credentials()
+    started_at = time.perf_counter()
+    rows = await asyncio.to_thread(_current_accessible_rows, user_id, tenant_id)
+    access_resolve_ms = (time.perf_counter() - started_at) * 1000
+    total_count = len(rows)
     if total_count == 0:
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={"value": [], "total_count": 0, "has_more": False, "total_reliable": True},
         )
 
-    rows = perms.get_accessible_kbs(
-        user_id=user_id, tenant_id=tenant_id, page=page, page_size=page_size
-    )
+    start = (page - 1) * page_size
+    page_rows = rows[start:start + page_size]
 
-    server_url, api_key = _credentials()
-    items: list[dict] = []
-    for row in rows:
+    detail_semaphore = asyncio.Semaphore(5)
+
+    async def resolve_detail(row: dict) -> tuple[dict, str]:
+        if _has_kb_card_metadata(row):
+            return {}, "ACTIVE"
         kb_id = row["kb_id"]
-        try:
-            detail = get_aidp_kb_impl(server_url, api_key, kb_id) or {}
-            resource_status = "ACTIVE"
-        except AppException as exc:
-            logger.warning("AIDP detail fetch failed for %s: %s", kb_id, exc)
-            perms.update_resource_status(
-                kb_id=kb_id, tenant_id=tenant_id, status="UNAVAILABLE",
-                updated_by=user_id,
-            )
-            detail = {}
-            resource_status = "UNAVAILABLE"
+        async with detail_semaphore:
+            try:
+                detail = await asyncio.to_thread(
+                    _load_cached_kb_detail,
+                    server_url,
+                    api_key,
+                    kb_id,
+                )
+                return detail, "ACTIVE"
+            except AppException as exc:
+                logger.warning("AIDP detail fetch failed for %s: %s", kb_id, exc)
+                return {}, "UNAVAILABLE"
 
+    detail_started_at = time.perf_counter()
+    detail_results = await asyncio.gather(*(resolve_detail(row) for row in page_rows))
+    detail_fetch_ms = (time.perf_counter() - detail_started_at) * 1000
+
+    items: list[dict] = []
+    for row, (detail, resource_status) in zip(page_rows, detail_results):
+        kb_id = row["kb_id"]
         items.append({
             "kds_id": kb_id,
-            "kds_name": detail.get("kds_name") or detail.get("name") or "",
-            "description": detail.get("description", ""),
-            "document_count": detail.get("document_count", 0),
-            "chunk_count": detail.get("chunk_count", 0),
-            "embedding_model": detail.get("embedding_model", ""),
+            "kds_name": (
+                detail.get("kds_name")
+                or detail.get("name")
+                or row.get("kds_name")
+                or row.get("name")
+                or ""
+            ),
+            "description": detail.get("description") or row.get("description") or "",
+            "document_count": detail.get("document_count", row.get("document_count", 0)),
+            "chunk_count": detail.get("chunk_count", row.get("chunk_count", 0)),
+            "embedding_model": detail.get("embedding_model") or row.get("embedding_model") or "",
             # ``is_multimodal`` is a Nexent-side concept (frontend sends it
             # when creating a KB; the SDK mapper converts it to
             # ``caption_enable`` + ``vlm_model``). AIDP does NOT return this
             # field, so we reverse-derive it from ``caption_enable == 1``
             # and a non-empty ``vlm_model``. Matches the forward mapping
             # in ``sdk/nexent/core/knowledge_base/mapper.py``.
-            "is_multimodal": _infer_is_multimodal(detail),
-            "vlm_model": detail.get("vlm_model") or "",
-            "caption_enable": detail.get("caption_enable", 0),
-            "created_at": detail.get("created_at"),
+            "is_multimodal": _infer_is_multimodal(detail or row),
+            "vlm_model": detail.get("vlm_model") or row.get("vlm_model") or "",
+            "caption_enable": detail.get("caption_enable", row.get("caption_enable", 0)),
+            "created_at": (
+                detail.get("created_at")
+                or row.get("created_at")
+                or _timestamp_to_iso(row.get("create_time"))
+            ),
             "permission": row.get("permission"),
             "ingroup_permission": row.get("ingroup_permission"),
             "group_ids": row.get("group_ids"),
             "created_by": row.get("owner_user_id"),
             "resource_status": resource_status,
         })
+
+    total_ms = (time.perf_counter() - started_at) * 1000
+    logger.info(
+        "AIDP KB list timing: total_ms=%.1f access_resolve_ms=%.1f detail_ms=%.1f "
+        "accessible_count=%d page_item_count=%d detail_candidates=%d",
+        total_ms,
+        access_resolve_ms,
+        detail_fetch_ms,
+        total_count,
+        len(page_rows),
+        sum(1 for row in page_rows if not _has_kb_card_metadata(row)),
+    )
 
     has_more = page * page_size < total_count
     return JSONResponse(
@@ -277,7 +424,8 @@ async def list_knowledge_bases(
 async def count_knowledge_bases(request: Request) -> JSONResponse:
     """Return the accessible KB count for the calling user/tenant."""
     user_id, tenant_id = await _auth(request)
-    total = perms.count_accessible_kbs(user_id=user_id, tenant_id=tenant_id)
+    rows = await asyncio.to_thread(_current_accessible_rows, user_id, tenant_id)
+    total = len(rows)
     return JSONResponse(status_code=HTTPStatus.OK, content={"total_count": total})
 
 
@@ -290,13 +438,20 @@ async def create_knowledge_base(
     user_id, tenant_id = await _auth(request)
 
     ingroup = body.ingroup_permission or READ_ONLY
-    if ingroup not in {EDIT, READ_ONLY, "PRIVATE"}:
+    is_user = _is_user_role(user_id, tenant_id)
+    if is_user:
+        # Personal KB is the only KB type a USER may create. Normalize rather
+        # than trusting the client, so direct API callers cannot create a
+        # shared AIDP KB by sending EDIT/READ_ONLY and group_ids.
+        ingroup = PRIVATE
+        valid_group_ids: list[int] = []
+    elif ingroup not in {EDIT, READ_ONLY, PRIVATE}:
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST,
             detail=f"Unsupported ingroup_permission: {ingroup!r}",
         )
 
-    if ingroup != "PRIVATE":
+    elif ingroup != PRIVATE:
         if not body.group_ids:
             raise HTTPException(
                 status_code=HTTPStatus.BAD_REQUEST,
@@ -383,6 +538,7 @@ async def create_knowledge_base(
     perms.update_resource_status(
         kb_id=kds_id, tenant_id=tenant_id, status="ACTIVE", updated_by=user_id,
     )
+    invalidate_aidp_catalog_cache(server_url, api_key)
 
     aidp_result = dict(aidp_result or {})
     aidp_result["permission"] = EDIT
@@ -399,7 +555,12 @@ async def get_knowledge_base(
 
     server_url, api_key = _credentials()
     try:
-        detail = get_aidp_kb_impl(server_url, api_key, kds_id) or {}
+        detail = await asyncio.to_thread(
+            _load_cached_kb_detail,
+            server_url,
+            api_key,
+            kds_id,
+        )
         resource_status = "ACTIVE"
     except AppException as exc:
         logger.warning("AIDP detail fetch failed for %s: %s", kds_id, exc)
@@ -448,6 +609,9 @@ async def update_knowledge_base(
             updated_by=user_id,
         )
 
+    invalidate_aidp_catalog_cache(server_url, api_key)
+    invalidate_aidp_kb_detail_cache(server_url, api_key, kds_id)
+
     return JSONResponse(status_code=HTTPStatus.OK, content=result)
 
 
@@ -465,6 +629,9 @@ async def delete_knowledge_base(
         perms.soft_delete_permission(
             kb_id=kds_id, tenant_id=tenant_id, updated_by=user_id,
         )
+        invalidate_aidp_catalog_cache(server_url, api_key)
+        invalidate_aidp_kb_detail_cache(server_url, api_key, kds_id)
+        invalidate_aidp_doc_count_cache(server_url, api_key, kds_id)
     return JSONResponse(status_code=HTTPStatus.OK, content={"success": success})
 
 
@@ -477,8 +644,37 @@ async def upload_documents(
     user_id, tenant_id = await _auth(request)
     perms.require_permission(kds_id, user_id, tenant_id, required="EDIT")
 
+    valid_files, validation_failures = _validate_upload_files(files)
     server_url, api_key = _credentials()
-    result = upload_aidp_docs_impl(server_url, api_key, kds_id, files)
+    if valid_files:
+        result = await asyncio.to_thread(
+            upload_aidp_docs_impl,
+            server_url,
+            api_key,
+            kds_id,
+            valid_files,
+        )
+        invalidate_aidp_kb_detail_cache(server_url, api_key, kds_id)
+        invalidate_aidp_doc_count_cache(server_url, api_key, kds_id)
+    else:
+        result = {
+            "summary": {"total": 0, "success": 0, "failed": 0},
+            "success_list": [],
+            "failed_list": [],
+        }
+
+    success_list = result.get("success_list", []) if isinstance(result, dict) else []
+    aidp_failed_list = result.get("failed_list", []) if isinstance(result, dict) else []
+    failed_list = [*aidp_failed_list, *validation_failures]
+    result = {
+        "summary": {
+            "total": len(files),
+            "success": len(success_list),
+            "failed": len(failed_list),
+        },
+        "success_list": success_list,
+        "failed_list": failed_list,
+    }
     return JSONResponse(status_code=HTTPStatus.OK, content=result)
 
 
@@ -493,16 +689,38 @@ async def list_documents(
     perms.require_permission(kds_id, user_id, tenant_id, required="READ")
 
     server_url, api_key = _credentials()
-    result = list_aidp_docs_impl(server_url, api_key, kds_id, page=page, page_size=page_size)
+    started_at = time.perf_counter()
+    list_result, count_result = await asyncio.gather(
+        asyncio.to_thread(
+            list_aidp_docs_impl,
+            server_url,
+            api_key,
+            kds_id,
+            page,
+            page_size,
+        ),
+        asyncio.to_thread(
+            _load_cached_doc_count,
+            server_url,
+            api_key,
+            kds_id,
+        ),
+        return_exceptions=True,
+    )
+
+    if isinstance(list_result, BaseException):
+        raise list_result
+
+    result = list_result
     page_items = result.get("value", []) if isinstance(result, dict) else []
     page_count = len(page_items) if isinstance(page_items, list) else 0
 
-    try:
-        total_count = count_aidp_docs_impl(server_url, api_key, kds_id)
+    if not isinstance(count_result, BaseException):
+        total_count = count_result
         count_reliable = True
-    except Exception as count_err:
+    else:
         logger.warning(
-            "AIDP doc Count API failed for KB %s: %s", kds_id, count_err,
+            "AIDP doc Count API failed for KB %s: %s", kds_id, count_result,
         )
         total_count = page_count
         count_reliable = False
@@ -517,6 +735,17 @@ async def list_documents(
     result["has_more"] = has_more
     if not count_reliable:
         result["total_reliable"] = False
+    logger.info(
+        "AIDP document list timing: total_ms=%.1f kb_id=%s page=%d page_size=%d "
+        "page_count=%d total_count=%d total_reliable=%s",
+        (time.perf_counter() - started_at) * 1000,
+        kds_id,
+        page,
+        page_size,
+        page_count,
+        int(total_count),
+        count_reliable,
+    )
     return JSONResponse(status_code=HTTPStatus.OK, content=result)
 
 
@@ -530,13 +759,19 @@ async def set_permission(
     user_id, tenant_id = await _auth(request)
     perms.require_permission(kds_id, user_id, tenant_id, required="EDIT")
 
-    if body.ingroup_permission not in {EDIT, READ_ONLY, "PRIVATE"}:
+    if _is_user_role(user_id, tenant_id) and body.ingroup_permission != PRIVATE:
+        raise HTTPException(
+            status_code=HTTPStatus.FORBIDDEN,
+            detail="USER role can only manage PRIVATE personal knowledge bases",
+        )
+
+    if body.ingroup_permission not in {EDIT, READ_ONLY, PRIVATE}:
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST,
             detail=f"Unsupported ingroup_permission: {body.ingroup_permission!r}",
         )
 
-    if body.ingroup_permission == "PRIVATE":
+    if body.ingroup_permission == PRIVATE:
         final_group_ids: list[int] = []
     else:
         if not body.group_ids:

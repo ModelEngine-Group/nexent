@@ -1,9 +1,8 @@
+
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 from unittest.mock import MagicMock
-
 import pytest
-
 from services.memory_dreaming_service import (
     DreamingConflictError,
     DreamingRunError,
@@ -37,6 +36,7 @@ def test_ac007_lock_busy_skips(monkeypatch):
 
 
 def test_ac001_ac006_full_run_and_idempotency_key(monkeypatch):
+    now = datetime.utcnow()
     record = {
         "memory_id": 7,
         "tenant_id": "t",
@@ -44,18 +44,19 @@ def test_ac001_ac006_full_run_and_idempotency_key(monkeypatch):
         "agent_id": "a",
         "conversation_id": "conversation-7",
         "content": "Always prefer stable transaction rollback behavior",
-        "create_time": "2026-07-20T09:00:00",
-        "update_time": "2026-07-23T10:30:00",
+        "create_time": (now - timedelta(days=1)).isoformat(),
+        "update_time": now.isoformat(),
+
         "recall_count": 3,
         "daily_count": 2,
         "grounded_count": 1,
-        "last_recalled_at": datetime.utcnow().isoformat(),
+        "last_recalled_at": now.isoformat(),
         "query_hashes": ["q1", "q2"],
         "recall_days": ["2026-07-22", "2026-07-23"],
         "light_hits": 2,
         "rem_hits": 2,
-        "last_light_at": datetime.utcnow().isoformat(),
-        "last_rem_at": datetime.utcnow().isoformat(),
+        "last_light_at": now.isoformat(),
+        "last_rem_at": now.isoformat(),
         "concept_tags": [],
     }
     monkeypatch.setattr(

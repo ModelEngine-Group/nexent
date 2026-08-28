@@ -1,7 +1,7 @@
 import json
 import sys
 import types
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, call
 
 import pytest
 
@@ -104,6 +104,9 @@ class ConversationRecord:
     conversation_title = MagicMock(name="ConversationRecord.conversation_title")
     agent_id = MagicMock(name="ConversationRecord.agent_id")
     chat_mode = MagicMock(name="ConversationRecord.chat_mode")
+    knowledge_scope = MagicMock(name="ConversationRecord.knowledge_scope")
+    runtime_metadata = MagicMock(name="ConversationRecord.runtime_metadata")
+    runtime_metadata_version = MagicMock(name="ConversationRecord.runtime_metadata_version")
     create_time = MagicMock(name="ConversationRecord.create_time")
     update_time = MagicMock(name="ConversationRecord.update_time")
     created_by = MagicMock(name="ConversationRecord.created_by")
@@ -121,6 +124,8 @@ class ConversationMessage:
     status = MagicMock(name="ConversationMessage.status")
     minio_files = MagicMock(name="ConversationMessage.minio_files")
     opinion_flag = MagicMock(name="ConversationMessage.opinion_flag")
+    create_time = MagicMock(name="ConversationMessage.create_time")
+    created_by = MagicMock(name="ConversationMessage.created_by")
 
 
 class ConversationMessageUnit:
@@ -151,11 +156,19 @@ class ConversationSourceImage:
     delete_flag = MagicMock(name="ConversationSourceImage.delete_flag")
 
 
+class AgentAutomationProposal:
+    proposal_id = MagicMock(name="AgentAutomationProposal.proposal_id")
+    tenant_id = MagicMock(name="AgentAutomationProposal.tenant_id")
+    user_id = MagicMock(name="AgentAutomationProposal.user_id")
+    delete_flag = MagicMock(name="AgentAutomationProposal.delete_flag")
+
+
 db_models_mod.ConversationRecord = ConversationRecord
 db_models_mod.ConversationMessage = ConversationMessage
 db_models_mod.ConversationMessageUnit = ConversationMessageUnit
 db_models_mod.ConversationSourceSearch = ConversationSourceSearch
 db_models_mod.ConversationSourceImage = ConversationSourceImage
+db_models_mod.AgentAutomationProposal = AgentAutomationProposal
 
 sys.modules["database.db_models"] = db_models_mod
 sys.modules["backend.database.db_models"] = db_models_mod
@@ -195,12 +208,14 @@ from backend.database.conversation_db import (
     create_source_image,
     create_source_search,
     delete_conversation,
+    delete_conversations_batch,
     delete_source_image,
     delete_source_search,
     get_conversation,
     get_conversation_history,
     get_historical_context,
     get_conversation_list,
+    get_conversation_list_page,
     get_conversation_messages,
     get_last_unit_for_message,
     get_latest_assistant_message,
@@ -212,17 +227,24 @@ from backend.database.conversation_db import (
     get_source_images_by_message,
     get_source_searches_by_conversation,
     get_source_searches_by_message,
+    persist_assistant_run_batch,
     rename_conversation,
+    resolve_conversation_runtime_metadata,
     save_history_summary,
     soft_delete_all_conversations_by_user,
     update_conversation_agent_id,
     update_conversation_chat_mode,
+    update_conversation_knowledge_scope,
     update_conversation_message_content,
     update_conversation_message_status,
     update_message_minio_files,
     update_message_opinion,
     update_message_unit_content,
     update_message_unit_status,
+)
+from consts.exceptions import (
+    ConversationNotFoundError,
+    RuntimeMetadataVersionConflict,
 )
 
 
@@ -322,6 +344,70 @@ def test_delete_conversation_noop(monkeypatch, mock_session_ctx):
 
     assert ok is False
     assert session.execute.call_count == 5
+
+
+# =============================================================================
+# Tests for delete_conversations_batch
+# =============================================================================
+
+
+def test_delete_conversations_batch_success(monkeypatch, mock_session_ctx):
+    """delete_conversations_batch returns owned ids and cascades 5 updates."""
+    session, ctx = mock_session_ctx
+    select_result = MagicMock()
+    select_result.all.return_value = [(101,), (102,)]
+    session.execute.side_effect = [select_result] + [MagicMock() for _ in range(5)]
+
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    deleted = delete_conversations_batch([101, 102, 999], user_id="user-1")
+
+    assert deleted == [101, 102]
+    # 1 ownership SELECT + 5 cascade UPDATEs
+    assert session.execute.call_count == 6
+
+
+def test_delete_conversations_batch_none_owned(monkeypatch, mock_session_ctx):
+    """delete_conversations_batch returns [] when no requested id belongs to the user."""
+    session, ctx = mock_session_ctx
+    select_result = MagicMock()
+    select_result.all.return_value = []
+    session.execute.return_value = select_result
+
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    deleted = delete_conversations_batch([999], user_id="user-1")
+
+    assert deleted == []
+    # Only the ownership SELECT, no cascade UPDATEs
+    assert session.execute.call_count == 1
+
+
+def test_delete_conversations_batch_empty_input(monkeypatch, mock_session_ctx):
+    """delete_conversations_batch returns [] without hitting the DB when input is empty."""
+    session, ctx = mock_session_ctx
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    deleted = delete_conversations_batch([], user_id="user-1")
+
+    assert deleted == []
+    session.execute.assert_not_called()
+
+
+def test_delete_conversations_batch_without_user_id(monkeypatch, mock_session_ctx):
+    """delete_conversations_batch skips updated_by tracking when user_id is absent."""
+    session, ctx = mock_session_ctx
+    select_result = MagicMock()
+    select_result.all.return_value = [(101,), (102,)]
+    session.execute.side_effect = [select_result] + [MagicMock() for _ in range(5)]
+
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    deleted = delete_conversations_batch([101, 102])
+
+    assert deleted == [101, 102]
+    # 1 ownership SELECT + 5 cascade UPDATEs
+    assert session.execute.call_count == 6
 
 
 # =============================================================================
@@ -491,6 +577,10 @@ def test_create_conversation_success(monkeypatch, mock_session_ctx):
     mock_record.conversation_id = 42
     mock_record.conversation_title = "Test Title"
     mock_record.agent_id = 7
+    mock_record.chat_mode = "execution"
+    mock_record.knowledge_scope = None
+    mock_record.runtime_metadata = {}
+    mock_record.runtime_metadata_version = 0
     mock_record.create_time = 1234567890.123
     mock_record.update_time = 1234567890.456
     session.execute.return_value.fetchone.return_value = mock_record
@@ -515,6 +605,10 @@ def test_create_conversation_without_user_id(monkeypatch, mock_session_ctx):
     mock_record.conversation_id = 1
     mock_record.conversation_title = "No User Title"
     mock_record.agent_id = None
+    mock_record.chat_mode = "execution"
+    mock_record.knowledge_scope = None
+    mock_record.runtime_metadata = {}
+    mock_record.runtime_metadata_version = 0
     mock_record.create_time = 1000.0
     mock_record.update_time = 1000.0
     session.execute.return_value.fetchone.return_value = mock_record
@@ -525,6 +619,99 @@ def test_create_conversation_without_user_id(monkeypatch, mock_session_ctx):
 
     assert result["conversation_id"] == 1
     session.execute.assert_called_once()
+
+
+def test_resolve_runtime_metadata_replaces_and_increments(monkeypatch, mock_session_ctx):
+    session, ctx = mock_session_ctx
+    record = MagicMock()
+    record.runtime_metadata = {"old": True}
+    record.runtime_metadata_version = 3
+    session.scalars.return_value.first.return_value = record
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    request_metadata = {"nested": {"value": 1}}
+    result = resolve_conversation_runtime_metadata(
+        conversation_id=9,
+        user_id="user-1",
+        request_metadata=request_metadata,
+        update_requested=True,
+        expected_version=3,
+    )
+
+    assert result == {
+        "runtime_metadata": {"nested": {"value": 1}},
+        "runtime_metadata_version": 4,
+    }
+    assert record.runtime_metadata == request_metadata
+    assert record.runtime_metadata is not request_metadata
+    session.flush.assert_called_once()
+
+
+def test_create_conversation_with_runtime_metadata_starts_at_version_one(
+    monkeypatch, mock_session_ctx
+):
+    session, ctx = mock_session_ctx
+    record = MagicMock()
+    record.conversation_id = 44
+    record.conversation_title = "Metadata Title"
+    record.agent_id = 2
+    record.chat_mode = "execution"
+    record.knowledge_scope = None
+    record.runtime_metadata = {"region": "cn"}
+    record.runtime_metadata_version = 1
+    record.create_time = 1000.0
+    record.update_time = 1000.0
+    session.execute.return_value.fetchone.return_value = record
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    result = create_conversation(
+        "Metadata Title",
+        user_id="user-1",
+        agent_id=2,
+        runtime_metadata={"region": "cn"},
+    )
+
+    assert _captured_insert_values["runtime_metadata"] == {"region": "cn"}
+    assert _captured_insert_values["runtime_metadata_version"] == 1
+    assert result["runtime_metadata_version"] == 1
+
+
+def test_resolve_runtime_metadata_rejects_stale_version(monkeypatch, mock_session_ctx):
+    session, ctx = mock_session_ctx
+    record = MagicMock()
+    record.runtime_metadata = {"current": True}
+    record.runtime_metadata_version = 4
+    session.scalars.return_value.first.return_value = record
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    with pytest.raises(RuntimeMetadataVersionConflict) as exc_info:
+        resolve_conversation_runtime_metadata(
+            conversation_id=9,
+            user_id="user-1",
+            request_metadata={},
+            update_requested=True,
+            expected_version=3,
+        )
+
+    assert exc_info.value.current_version == 4
+    assert record.runtime_metadata == {"current": True}
+    session.flush.assert_not_called()
+
+
+def test_resolve_runtime_metadata_raises_conversation_not_found(monkeypatch, mock_session_ctx):
+    session, ctx = mock_session_ctx
+    session.scalars.return_value.first.return_value = None
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    with pytest.raises(ConversationNotFoundError):
+        resolve_conversation_runtime_metadata(
+            conversation_id=9,
+            user_id="user-1",
+            request_metadata={},
+            update_requested=True,
+            expected_version=0,
+        )
+
 
 
 # =============================================================================
@@ -730,6 +917,351 @@ def test_create_message_units_empty_list(monkeypatch):
     result = create_message_units([], message_id=1, conversation_id=2)
 
     assert result == []
+
+
+def test_persist_assistant_run_batch_uses_one_transaction(monkeypatch):
+    """Assistant units and sources are finalized through one session scope."""
+    parent = MagicMock(status="streaming", minio_files=None)
+    parent_result = MagicMock()
+    parent_result.scalar_one_or_none.return_value = parent
+    unit_result = MagicMock()
+    unit_result.all.return_value = [
+        MagicMock(unit_id=101, unit_index=0),
+        MagicMock(unit_id=102, unit_index=1),
+    ]
+    proposal = MagicMock(proposed_task={"name": "daily report"})
+    proposal_result = MagicMock()
+    proposal_result.scalar_one_or_none.return_value = proposal
+
+    session = MagicMock()
+    session.execute.side_effect = [
+        parent_result,
+        unit_result,
+        MagicMock(),
+        MagicMock(),
+        proposal_result,
+    ]
+    ctx = MagicMock()
+    ctx.__enter__.return_value = session
+    ctx.__exit__.return_value = None
+    session_factory = MagicMock(return_value=ctx)
+    monkeypatch.setattr(
+        "backend.database.conversation_db.get_db_session",
+        session_factory,
+    )
+
+    result = persist_assistant_run_batch(
+        message_id=10,
+        conversation_id=20,
+        message_content="done",
+        terminal_status="completed",
+        message_units=[
+            {
+                "unit_index": 0,
+                "unit_type": "search_content_placeholder",
+                "unit_content": '{"placeholder": true}',
+            },
+            {
+                "unit_index": 1,
+                "unit_type": "final_answer",
+                "unit_content": "done",
+            },
+        ],
+        search_records=[{
+            "unit_index": 0,
+            "source_type": "url",
+            "source_title": "Result",
+            "source_location": "https://example.com",
+            "source_content": "content",
+            "cite_index": 1,
+            "search_type": "web_search",
+            "tool_sign": "web",
+        }],
+        image_urls=["https://example.com/image.png", "https://example.com/image.png"],
+        skill_files=[{"object_name": "generated/report.docx"}],
+        automation_proposals=[{"unit_index": 1, "proposal_id": 77}],
+        user_id="user-1",
+        tenant_id="tenant-1",
+    )
+
+    assert result == {0: 101, 1: 102}
+    session_factory.assert_called_once_with()
+    ctx.__enter__.assert_called_once()
+    ctx.__exit__.assert_called_once()
+    assert session.execute.call_count == 5
+    assert parent.message_content == "done"
+    assert parent.status == "completed"
+    assert json.loads(parent.minio_files) == [
+        {"object_name": "generated/report.docx"}
+    ]
+    assert proposal.proposed_task["_conversation_message_id"] == 10
+    assert proposal.proposed_task["_conversation_unit_id"] == 102
+
+
+def test_persist_assistant_run_batch_rejects_finalized_parent(monkeypatch):
+    """A second finalization cannot duplicate message units."""
+    parent_result = MagicMock()
+    parent_result.scalar_one_or_none.return_value = MagicMock(
+        status="completed",
+        minio_files=None,
+    )
+    session = MagicMock()
+    session.execute.return_value = parent_result
+    ctx = MagicMock()
+    ctx.__enter__.return_value = session
+    ctx.__exit__.return_value = None
+    monkeypatch.setattr(
+        "backend.database.conversation_db.get_db_session",
+        lambda: ctx,
+    )
+
+    with pytest.raises(ValueError, match="already finalized"):
+        persist_assistant_run_batch(
+            message_id=10,
+            conversation_id=20,
+            message_content="done",
+            terminal_status="completed",
+            message_units=[],
+            search_records=[],
+            image_urls=[],
+            skill_files=[],
+            automation_proposals=[],
+            user_id="user-1",
+            tenant_id="tenant-1",
+        )
+
+
+def _persist_empty_assistant_batch(**overrides):
+    params = {
+        "message_id": 10,
+        "conversation_id": 20,
+        "message_content": "",
+        "terminal_status": "completed",
+        "message_units": [],
+        "search_records": [],
+        "image_urls": [],
+        "skill_files": [],
+        "automation_proposals": [],
+        "user_id": "user-1",
+        "tenant_id": "tenant-1",
+    }
+    params.update(overrides)
+    return persist_assistant_run_batch(**params)
+
+
+def test_persist_assistant_run_batch_rejects_invalid_terminal_status(monkeypatch):
+    """Only terminal assistant states may be persisted."""
+    session_factory = MagicMock()
+    monkeypatch.setattr(
+        "backend.database.conversation_db.get_db_session",
+        session_factory,
+    )
+
+    with pytest.raises(ValueError, match="Unsupported assistant terminal status"):
+        _persist_empty_assistant_batch(terminal_status="streaming")
+
+    session_factory.assert_not_called()
+
+
+def test_persist_assistant_run_batch_rejects_missing_parent(monkeypatch):
+    """Finalization requires the caller's streaming assistant row."""
+    parent_result = MagicMock()
+    parent_result.scalar_one_or_none.return_value = None
+    session = MagicMock()
+    session.execute.return_value = parent_result
+    ctx = MagicMock()
+    ctx.__enter__.return_value = session
+    ctx.__exit__.return_value = None
+    monkeypatch.setattr(
+        "backend.database.conversation_db.get_db_session",
+        lambda: ctx,
+    )
+
+    with pytest.raises(ValueError, match="does not exist or is not accessible"):
+        _persist_empty_assistant_batch()
+
+
+def test_persist_assistant_run_batch_accepts_empty_output(monkeypatch):
+    """A stopped run may atomically finalize without units or sources."""
+    parent = MagicMock(status="streaming", minio_files=None)
+    parent_result = MagicMock()
+    parent_result.scalar_one_or_none.return_value = parent
+    session = MagicMock()
+    session.execute.return_value = parent_result
+    ctx = MagicMock()
+    ctx.__enter__.return_value = session
+    ctx.__exit__.return_value = None
+    monkeypatch.setattr(
+        "backend.database.conversation_db.get_db_session",
+        lambda: ctx,
+    )
+
+    result = _persist_empty_assistant_batch(
+        terminal_status="stopped",
+        image_urls=["", None],
+    )
+
+    assert result == {}
+    assert session.execute.call_count == 1
+    assert parent.message_content == ""
+    assert parent.status == "stopped"
+
+
+def test_persist_assistant_run_batch_rejects_missing_search_unit(monkeypatch):
+    """Search sources must reference a unit inserted by the same transaction."""
+    parent_result = MagicMock()
+    parent_result.scalar_one_or_none.return_value = MagicMock(
+        status="streaming",
+        minio_files=None,
+    )
+    session = MagicMock()
+    session.execute.return_value = parent_result
+    ctx = MagicMock()
+    ctx.__enter__.return_value = session
+    ctx.__exit__.return_value = None
+    monkeypatch.setattr(
+        "backend.database.conversation_db.get_db_session",
+        lambda: ctx,
+    )
+
+    with pytest.raises(ValueError, match="Search source references missing unit_index 99"):
+        _persist_empty_assistant_batch(search_records=[{"unit_index": 99}])
+
+
+def test_persist_assistant_run_batch_rejects_missing_automation_unit(monkeypatch):
+    """Automation cards must reference a unit inserted by the same transaction."""
+    parent_result = MagicMock()
+    parent_result.scalar_one_or_none.return_value = MagicMock(
+        status="streaming",
+        minio_files=None,
+    )
+    session = MagicMock()
+    session.execute.return_value = parent_result
+    ctx = MagicMock()
+    ctx.__enter__.return_value = session
+    ctx.__exit__.return_value = None
+    monkeypatch.setattr(
+        "backend.database.conversation_db.get_db_session",
+        lambda: ctx,
+    )
+
+    with pytest.raises(ValueError, match="Automation proposal references missing unit_index 99"):
+        _persist_empty_assistant_batch(
+            automation_proposals=[{"unit_index": 99, "proposal_id": 77}],
+        )
+
+
+def test_persist_assistant_run_batch_rejects_missing_automation_proposal(monkeypatch):
+    """An inaccessible automation proposal rolls back the final batch."""
+    parent_result = MagicMock()
+    parent_result.scalar_one_or_none.return_value = MagicMock(
+        status="streaming",
+        minio_files=None,
+    )
+    unit_result = MagicMock()
+    unit_result.all.return_value = [MagicMock(unit_id=101, unit_index=0)]
+    proposal_result = MagicMock()
+    proposal_result.scalar_one_or_none.return_value = None
+    session = MagicMock()
+    session.execute.side_effect = [parent_result, unit_result, proposal_result]
+    ctx = MagicMock()
+    ctx.__enter__.return_value = session
+    ctx.__exit__.return_value = None
+    monkeypatch.setattr(
+        "backend.database.conversation_db.get_db_session",
+        lambda: ctx,
+    )
+
+    with pytest.raises(ValueError, match="Automation proposal does not exist"):
+        _persist_empty_assistant_batch(
+            message_units=[{
+                "unit_index": 0,
+                "unit_type": "automation_proposal",
+                "unit_content": '{"proposal_id": 77}',
+            }],
+            automation_proposals=[{"unit_index": 0, "proposal_id": 77}],
+        )
+
+
+@pytest.mark.parametrize(
+    ("existing_files", "expected_files"),
+    [
+        (
+            json.dumps([{"object_name": "generated/old.txt"}]),
+            [
+                {"object_name": "generated/old.txt"},
+                {"object_name": "generated/new.txt"},
+            ],
+        ),
+        ("{invalid-json", [{"object_name": "generated/new.txt"}]),
+        (
+            json.dumps({"object_name": "generated/old.txt"}),
+            [{"object_name": "generated/new.txt"}],
+        ),
+    ],
+)
+def test_persist_assistant_run_batch_normalizes_existing_skill_files(
+    monkeypatch,
+    existing_files,
+    expected_files,
+):
+    """Existing attachment metadata is merged only when it is a JSON list."""
+    parent = MagicMock(status="streaming", minio_files=existing_files)
+    parent_result = MagicMock()
+    parent_result.scalar_one_or_none.return_value = parent
+    session = MagicMock()
+    session.execute.return_value = parent_result
+    ctx = MagicMock()
+    ctx.__enter__.return_value = session
+    ctx.__exit__.return_value = None
+    monkeypatch.setattr(
+        "backend.database.conversation_db.get_db_session",
+        lambda: ctx,
+    )
+
+    _persist_empty_assistant_batch(
+        skill_files=[{"object_name": "generated/new.txt"}],
+    )
+
+    assert json.loads(parent.minio_files) == expected_files
+
+
+def test_persist_assistant_run_batch_initializes_empty_proposal_task(monkeypatch):
+    """Automation linkage initializes proposal metadata when it is absent."""
+    parent_result = MagicMock()
+    parent_result.scalar_one_or_none.return_value = MagicMock(
+        status="streaming",
+        minio_files=None,
+    )
+    unit_result = MagicMock()
+    unit_result.all.return_value = [MagicMock(unit_id=101, unit_index=0)]
+    proposal = MagicMock(proposed_task=None)
+    proposal_result = MagicMock()
+    proposal_result.scalar_one_or_none.return_value = proposal
+    session = MagicMock()
+    session.execute.side_effect = [parent_result, unit_result, proposal_result]
+    ctx = MagicMock()
+    ctx.__enter__.return_value = session
+    ctx.__exit__.return_value = None
+    monkeypatch.setattr(
+        "backend.database.conversation_db.get_db_session",
+        lambda: ctx,
+    )
+
+    result = _persist_empty_assistant_batch(
+        message_units=[{
+            "unit_index": 0,
+            "unit_type": "automation_proposal",
+            "unit_content": '{"proposal_id": 77}',
+        }],
+        automation_proposals=[{"unit_index": 0, "proposal_id": 77}],
+    )
+
+    assert result == {0: 101}
+    assert proposal.proposed_task == {
+        "_conversation_message_id": 10,
+        "_conversation_unit_id": 101,
+    }
 
 
 # =============================================================================
@@ -1035,6 +1567,156 @@ def test_get_conversation_list_filtered_by_user(monkeypatch, mock_session_ctx):
 
     assert len(result) == 1
     assert result[0]["agent_id"] == 15
+
+
+def test_get_conversation_list_applies_pagination_with_stable_order(monkeypatch, mock_session_ctx):
+    """get_conversation_list applies limit/offset after deterministic newest-first ordering."""
+    session, ctx = mock_session_ctx
+    session.execute.return_value = []
+
+    select_mock = MagicMock(name="select")
+    desc_mock = MagicMock(name="desc")
+    stmt = MagicMock(name="conversation_list_statement")
+    select_mock.return_value.where.return_value.order_by.return_value = stmt
+    stmt.where.return_value = stmt
+    stmt.limit.return_value = stmt
+    stmt.offset.return_value = stmt
+
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("backend.database.conversation_db.select", select_mock)
+    monkeypatch.setattr("backend.database.conversation_db.desc", desc_mock)
+
+    result = get_conversation_list(user_id="user-1", limit=10, offset=20)
+
+    assert result == []
+    desc_mock.assert_has_calls([
+        call(ConversationRecord.create_time),
+        call(ConversationRecord.conversation_id),
+    ])
+    stmt.limit.assert_called_once_with(10)
+    stmt.offset.assert_called_once_with(20)
+    session.execute.assert_called_once_with(stmt)
+
+
+def test_get_conversation_list_applies_offset_without_limit(monkeypatch, mock_session_ctx):
+    """get_conversation_list supports skipping records without truncating the remainder."""
+    session, ctx = mock_session_ctx
+    session.execute.return_value = []
+
+    select_mock = MagicMock(name="select")
+    stmt = MagicMock(name="conversation_list_statement")
+    select_mock.return_value.where.return_value.order_by.return_value = stmt
+    stmt.offset.return_value = stmt
+
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("backend.database.conversation_db.select", select_mock)
+
+    result = get_conversation_list(offset=20)
+
+    assert result == []
+    stmt.limit.assert_not_called()
+    stmt.offset.assert_called_once_with(20)
+    session.execute.assert_called_once_with(stmt)
+
+
+def test_get_conversation_list_page_returns_rows_and_metadata_from_one_query(
+    monkeypatch, mock_session_ctx
+):
+    session, ctx = mock_session_ctx
+
+    class ComparableTimestamp:
+        def label(self, _name):
+            return self
+
+        def __ge__(self, _value):
+            return MagicMock()
+
+        def __lt__(self, _value):
+            return MagicMock()
+
+    from backend.database import conversation_db
+
+    monkeypatch.setattr(
+        conversation_db.func.extract.return_value.__mul__,
+        "return_value",
+        ComparableTimestamp(),
+    )
+    session.execute.return_value = [
+        types.SimpleNamespace(
+            conversation_id=2,
+            conversation_title="Second",
+            agent_id=22,
+            chat_mode="execution",
+            create_time=2000,
+            update_time=2100,
+            total=30,
+            today=3,
+            last_7_days=7,
+            older=20,
+        )
+    ]
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    result = get_conversation_list_page(
+        "user-1",
+        today_start_ms=2000,
+        week_start_ms=1000,
+        limit=10,
+        offset=5,
+    )
+
+    assert result == {
+        "items": [
+            {
+                "conversation_id": 2,
+                "conversation_title": "Second",
+                "agent_id": 22,
+                "chat_mode": "execution",
+                "create_time": 2000,
+                "update_time": 2100,
+            }
+        ],
+        "metadata": {"total": 30, "today": 3, "last_7_days": 7, "older": 20},
+    }
+    session.execute.assert_called_once()
+
+
+def test_get_conversation_list_page_supports_unpaginated_empty_result(
+    monkeypatch, mock_session_ctx
+):
+    session, ctx = mock_session_ctx
+
+    class ComparableTimestamp:
+        def label(self, _name):
+            return self
+
+        def __ge__(self, _value):
+            return MagicMock()
+
+        def __lt__(self, _value):
+            return MagicMock()
+
+    from backend.database import conversation_db
+
+    monkeypatch.setattr(
+        conversation_db.func.extract.return_value.__mul__,
+        "return_value",
+        ComparableTimestamp(),
+    )
+    session.execute.return_value = []
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    result = get_conversation_list_page(
+        "user-1",
+        today_start_ms=2000,
+        week_start_ms=1000,
+    )
+
+    assert result == {
+        "items": [],
+        "metadata": {"total": 0, "today": 0, "last_7_days": 0, "older": 0},
+    }
+    session.execute.assert_called_once()
 
 
 def test_update_conversation_agent_id_success(monkeypatch, mock_session_ctx):
@@ -2064,7 +2746,12 @@ def test_get_conversation_history_with_messages(monkeypatch, mock_session_ctx):
     session, ctx = mock_session_ctx
 
     # Use SimpleNamespace for accurate attribute checks
-    mock_conv = SimpleNamespace(conversation_id=1, agent_id=9, create_time=1000.0)
+    mock_conv = SimpleNamespace(
+        conversation_id=1,
+        conversation_title="Test Chat",
+        agent_id=9,
+        create_time=1000.0,
+    )
     mock_message = SimpleNamespace(
         message_id=1,
         message_index=0,
@@ -2073,6 +2760,7 @@ def test_get_conversation_history_with_messages(monkeypatch, mock_session_ctx):
         status="completed",
         minio_files=None,
         opinion_flag=None,
+        create_time=1700000000123.0,
         units=None,
     )
 
@@ -2103,11 +2791,13 @@ def test_get_conversation_history_with_messages(monkeypatch, mock_session_ctx):
                 "status": record.status,
                 "minio_files": record.minio_files,
                 "opinion_flag": record.opinion_flag,
+                "create_time": record.create_time,
                 "units": getattr(record, 'units', None),
             }
         elif hasattr(record, 'conversation_id'):
             return {
                 "conversation_id": record.conversation_id,
+                "conversation_title": record.conversation_title,
                 "agent_id": record.agent_id,
                 "create_time": record.create_time,
             }
@@ -2116,11 +2806,16 @@ def test_get_conversation_history_with_messages(monkeypatch, mock_session_ctx):
     monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
     monkeypatch.setattr("backend.database.conversation_db.as_dict", as_dict_side_effect)
 
+    sa_mod.func.extract.reset_mock()
+
     result = get_conversation_history(1)
 
     assert result is not None
     assert result['conversation_id'] == 1
+    assert result['conversation_title'] == "Test Chat"
     assert result['agent_id'] == 9
+    assert result['message_records'][0]['create_time'] == 1700000000123
+    assert call('epoch', ConversationMessage.create_time) in sa_mod.func.extract.call_args_list
 
 
 def test_create_message_units_creates_all_units_with_user_id(monkeypatch):
@@ -2635,3 +3330,78 @@ def test_get_historical_context_returns_latest_summary_and_only_new_turns(
         "user_message_id": 31,
         "assistant_message_id": 32,
     }]
+
+
+# =============================================================================
+# Tests for create_conversation knowledge_scope + update_conversation_knowledge_scope
+# =============================================================================
+
+
+def test_create_conversation_with_knowledge_scope(monkeypatch, mock_session_ctx, fresh_insert_mock):
+    """create_conversation persists the desired knowledge scope."""
+    session, ctx = mock_session_ctx
+    mock_record = MagicMock()
+    mock_record.conversation_id = 43
+    mock_record.conversation_title = "Scoped Title"
+    mock_record.agent_id = None
+
+    mock_record.knowledge_scope = {
+        "local": {"mode": "override", "index_names": ["idx-a"]},
+        "aidp": {"mode": "disabled"},
+    }
+    mock_record.chat_mode = "chat"
+    mock_record.runtime_metadata = {}
+    mock_record.runtime_metadata_version = 0
+
+    mock_record.create_time = 1000.0
+    mock_record.update_time = 1000.0
+    session.execute.return_value.fetchone.return_value = mock_record
+
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    scope = {
+        "local": {"mode": "override", "index_names": ["idx-a"]},
+        "aidp": {"mode": "disabled"},
+    }
+    result = create_conversation(
+        "Scoped Title", user_id="user-1", chat_mode="chat", knowledge_scope=scope
+    )
+
+    assert result["conversation_id"] == 43
+    assert result["knowledge_scope"] == scope
+    assert _captured_insert_values["knowledge_scope"] == scope
+    assert _captured_insert_values["chat_mode"] == "chat"
+
+
+def test_update_conversation_knowledge_scope_success(monkeypatch, mock_session_ctx, fresh_update_mock):
+    """update_conversation_knowledge_scope returns True when a row was updated."""
+    session, ctx = mock_session_ctx
+    result_mock = MagicMock()
+    result_mock.rowcount = 1
+    session.execute.return_value = result_mock
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    scope = {"local": {"mode": "inherit"}}
+    ok = update_conversation_knowledge_scope(999, scope, user_id="user-1")
+
+    assert ok is True
+    session.execute.assert_called_once()
+    assert _captured_update_values["knowledge_scope"] == scope
+
+
+def test_update_conversation_knowledge_scope_missing_row(monkeypatch, mock_session_ctx):
+    """update_conversation_knowledge_scope returns False when no row matches."""
+    session, ctx = mock_session_ctx
+    result_mock = MagicMock()
+    result_mock.rowcount = 0
+    session.execute.return_value = result_mock
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    ok = update_conversation_knowledge_scope(
+        404,
+        {"local": {"mode": "disabled"}},
+        user_id="nobody",
+    )
+
+    assert ok is False
+    session.execute.assert_called_once()

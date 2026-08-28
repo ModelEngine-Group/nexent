@@ -1,0 +1,501 @@
+"use client";
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { App, Button, Form, Tooltip } from "antd";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { cn } from "@/lib/utils";
+import { useAgentStore } from "@/stores/agentStore";
+import { useSaveGuard } from "@/hooks/agent/useSaveGuard";
+import { useAgentReadOnly } from "@/hooks/agent/useAgentReadOnly";
+import { useNl2AgentFlow } from "@/contexts/nl2AgentFlow";
+
+import AgentInfo from "./components/agent-info";
+import AgentPrmopt from "./components/agent-prompt";
+import AgentCapability from "./components/agent-capability";
+import AgentRunPolicy from "./components/agent-run-policy";
+import AgentGuide from "./components/agent-guide";
+import AgentDeployment from "./components/agent-deployment";
+import CollaborativeAgent, {
+  CollaborativeAgentActions,
+} from "./components/collaborative-agent";
+import GuardrailConfigContent, {
+  GuardrailConfigActions,
+} from "./components/advanced/GuardrailConfigContent";
+import KnowledgeBaseConfig, {
+  KnowledgeBaseConfigActions,
+} from "./components/knowledge-base-search";
+import AgentVersionPubulishModal from "./versions/AgentVersionPubulishModal";
+
+import {
+  ChevronDown,
+  Info,
+  Cpu,
+  Wrench,
+  Play,
+  Globe,
+  Database,
+  MessageSquare,
+  ShieldCheck,
+  Bug,
+  LockOpen,
+  Rocket,
+} from "lucide-react";
+
+type AgentConfigTab = "basic" | "advanced";
+type ConfigSectionKey =
+  | "display_info"
+  | "role_model"
+  | "tools_skills"
+  | "run_strategy"
+  | "publish_attributes"
+  | "collaborative_agents"
+  | "knowledge_base"
+  | "conversation_guide"
+  | "guardrail";
+
+const DEFAULT_OPEN_SECTIONS: Record<ConfigSectionKey, boolean> = {
+  display_info: true,
+  role_model: true,
+  tools_skills: false,
+  run_strategy: false,
+  publish_attributes: false,
+  collaborative_agents: false,
+  knowledge_base: false,
+  conversation_guide: false,
+  guardrail: false,
+};
+
+interface ConfigSectionProps {
+  title: string;
+  description: string;
+  icon: React.ReactNode;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  containerRef?: React.Ref<HTMLDivElement>;
+  headerActions?: React.ReactNode;
+  children: React.ReactNode;
+}
+
+function ConfigSection({
+  title,
+  description,
+  icon,
+  open,
+  onOpenChange,
+  containerRef,
+  headerActions,
+  children,
+}: ConfigSectionProps) {
+  return (
+    <div ref={containerRef}>
+      <Collapsible
+        open={open}
+        onOpenChange={onOpenChange}
+        className="overflow-hidden rounded-lg border border-gray-200 bg-white"
+      >
+        <div className="flex items-center gap-4  transition-colors hover:bg-gray-50 px-2">
+          <CollapsibleTrigger className="flex min-w-0 flex-1 items-center px-2 py-4 gap-4 text-left">
+            <div className="flex min-w-0 items-center gap-2">
+              <ChevronDown className="h-4 w-4 text-gray-400 transition-transform group-data-[state=open]:rotate-180" />
+
+              <div className="flex shrink-0 items-center gap-2 text-sm font-medium text-gray-900">
+                {icon}
+                <span>{title}</span>
+              </div>
+              <p className="min-w-0 truncate text-xs text-gray-500">
+                {description}
+              </p>
+            </div>
+          </CollapsibleTrigger>
+          {headerActions && (
+            <div className="flex shrink-0 items-center gap-2">
+              {headerActions}
+            </div>
+          )}
+        </div>
+        <CollapsibleContent className="border-t border-gray-200 bg-gray-50/70 px-4 py-4">
+          {children}
+        </CollapsibleContent>
+      </Collapsible>
+    </div>
+  );
+}
+
+interface AgentConfigProps {
+  canManualUnlock: boolean;
+  onManualUnlock: () => void;
+  onToggleDebug: () => void;
+  actionAreaRef?: React.Ref<HTMLDivElement>;
+}
+
+export default function AgentConfig({
+  canManualUnlock,
+  onManualUnlock,
+  onToggleDebug,
+  actionAreaRef,
+}: AgentConfigProps) {
+  const { t } = useTranslation("common");
+  const [form] = Form.useForm();
+  const [isPublishModalOpen, setIsPublishModalOpen] = useState(false);
+  const [activeConfigTab, setActiveConfigTab] =
+    useState<AgentConfigTab>("basic");
+  const [openSections, setOpenSections] = useState<
+    Record<ConfigSectionKey, boolean>
+  >(() => ({ ...DEFAULT_OPEN_SECTIONS }));
+  const displayInfoSectionRef = useRef<HTMLDivElement>(null);
+  const roleModelSectionRef = useRef<HTMLDivElement>(null);
+  const toolsSkillsSectionRef = useRef<HTMLDivElement>(null);
+  const knowledgeBaseSectionRef = useRef<HTMLDivElement>(null);
+  const conversationGuideSectionRef = useRef<HTMLDivElement>(null);
+  const lastScrolledRequestRef = useRef<string | null>(null);
+  const { configFocusRequest } = useNl2AgentFlow();
+
+  const isReadOnly = useAgentReadOnly();
+  const agentId = useAgentStore((state) => state.agentId);
+  const editedAgent = useAgentStore((state) => state.editedAgent);
+  const serverSnapshotRevision = useAgentStore(
+    (state) => state.serverSnapshotRevision
+  );
+  const flushDraft = useAgentStore((state) => state.flushDraft);
+  const { save } = useSaveGuard();
+  const { message } = App.useApp();
+  const saveError = useAgentStore((state) => state.saveError);
+  const clearSaveError = useAgentStore((state) => state.clearSaveError);
+
+  useEffect(() => {
+    setActiveConfigTab("basic");
+    setOpenSections({ ...DEFAULT_OPEN_SECTIONS });
+    lastScrolledRequestRef.current = null;
+  }, [agentId]);
+
+  useEffect(() => {
+    form.resetFields();
+    const serverSnapshot = useAgentStore.getState().editedAgent;
+    if (serverSnapshot) {
+      form.setFieldsValue(serverSnapshot);
+    }
+  }, [agentId, form, serverSnapshotRevision]);
+
+  useEffect(() => {
+    if (!configFocusRequest || configFocusRequest.agentId !== agentId) return;
+
+    const { requestId, target } = configFocusRequest;
+    setActiveConfigTab(
+      target.section === "conversation_guide" ||
+        target.section === "knowledge_base"
+        ? "advanced"
+        : "basic"
+    );
+    setOpenSections((current) =>
+      current[target.section] ? current : { ...current, [target.section]: true }
+    );
+
+    const frameId = window.requestAnimationFrame(() => {
+      const requestKey = `${configFocusRequest.agentId}:${requestId}`;
+      if (lastScrolledRequestRef.current === requestKey) return;
+
+      const sectionElement =
+        target.section === "display_info"
+          ? displayInfoSectionRef.current
+          : target.section === "role_model"
+            ? roleModelSectionRef.current
+            : target.section === "tools_skills"
+              ? toolsSkillsSectionRef.current
+              : target.section === "knowledge_base"
+                ? knowledgeBaseSectionRef.current
+                : conversationGuideSectionRef.current;
+      if (!sectionElement) return;
+
+      const prefersReducedMotion = window.matchMedia(
+        "(prefers-reduced-motion: reduce)"
+      ).matches;
+      sectionElement.scrollIntoView({
+        behavior: prefersReducedMotion ? "auto" : "smooth",
+        block: "nearest",
+      });
+      lastScrolledRequestRef.current = requestKey;
+    });
+
+    return () => window.cancelAnimationFrame(frameId);
+  }, [agentId, configFocusRequest]);
+
+  const handleTabChange = useCallback(
+    (value: string) => {
+      flushDraft();
+      if (value === "basic" || value === "advanced") {
+        setActiveConfigTab(value);
+      }
+    },
+    [flushDraft]
+  );
+
+  const handleSectionOpenChange = useCallback(
+    (section: ConfigSectionKey, open: boolean) => {
+      setOpenSections((current) =>
+        current[section] === open ? current : { ...current, [section]: open }
+      );
+    },
+    []
+  );
+
+  const handleDebug = async () => {
+    try {
+      await form.validateFields();
+      if (!(await save())) return;
+      onToggleDebug();
+    } catch {
+      // Field validation errors are rendered by Ant Design.
+    }
+  };
+
+  const handlePublish = async () => {
+    try {
+      await form.validateFields();
+      if (!(await save())) return;
+      setIsPublishModalOpen(true);
+    } catch {
+      // Field validation errors are rendered by Ant Design.
+    }
+  };
+
+  useEffect(() => {
+    if (!saveError) {
+      return;
+    }
+
+    message.error(saveError);
+    clearSaveError();
+  }, [clearSaveError, message, saveError]);
+
+  if (!editedAgent) {
+    return (
+      <div className="relative flex h-full min-h-0 items-center justify-center">
+        <div className="space-y-3 text-center animate-in fade-in-50 duration-400">
+          <div className="flex items-center justify-center gap-3 animate-in slide-in-from-bottom-2 duration-300 delay-150">
+            <Info
+              className="text-gray-400 transition-all duration-300 animate-in zoom-in-75 delay-100"
+              size={48}
+            />
+            <h3 className="text-lg font-medium text-gray-700 transition-all duration-300">
+              {t("systemPrompt.nonEditing.title")}
+            </h3>
+          </div>
+          <p className="text-sm text-gray-500 transition-all duration-300">
+            {t("systemPrompt.nonEditing.subtitle")}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <Form
+      form={form}
+      layout="vertical"
+      disabled={isReadOnly}
+      className="flex h-full min-h-0 flex-col"
+    >
+      <Tabs
+        value={activeConfigTab}
+        onValueChange={handleTabChange}
+        className="flex min-h-0 flex-1 flex-col"
+      >
+        <TabsList className="flex h-10 w-full shrink-0 items-end justify-start gap-4 rounded-none border-b border-gray-200 bg-transparent p-0">
+          <TabsTrigger
+            value="basic"
+            className="h-10 rounded-none border-b-2 border-transparent px-0 pb-2 pt-1 text-gray-500 shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none"
+          >
+            {t("agent.config.tab.basic")}
+          </TabsTrigger>
+          <TabsTrigger
+            value="advanced"
+            className="h-10 rounded-none border-b-2 border-transparent px-0 pb-2 pt-1 text-gray-500 shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none"
+          >
+            {t("agent.config.tab.advanced")}
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent
+          value="basic"
+          className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1 mt-3"
+        >
+          {/* 1. 展示信息 */}
+          <ConfigSection
+            title={t("agent.config.section.displayInfo.title")}
+            description={t("agent.config.section.displayInfo.description")}
+            icon={<Info className="h-4 w-4 shrink-0 text-blue-500" />}
+            open={openSections.display_info}
+            onOpenChange={(open) =>
+              handleSectionOpenChange("display_info", open)
+            }
+            containerRef={displayInfoSectionRef}
+          >
+            <AgentInfo />
+          </ConfigSection>
+
+          {/* 2. 角色与模型 */}
+          <ConfigSection
+            title={t("agent.config.section.roleModel.title")}
+            description={t("agent.config.section.roleModel.description")}
+            icon={<Cpu className="h-4 w-4 shrink-0 text-blue-500" />}
+            open={openSections.role_model}
+            onOpenChange={(open) => handleSectionOpenChange("role_model", open)}
+            containerRef={roleModelSectionRef}
+          >
+            <AgentPrmopt />
+          </ConfigSection>
+
+          {/* 3. 工具与技能 */}
+          <ConfigSection
+            title={t("agent.config.section.toolsSkills.title")}
+            description={t("agent.config.section.toolsSkills.description")}
+            icon={<Wrench className="h-4 w-4 shrink-0 text-blue-500" />}
+            open={openSections.tools_skills}
+            onOpenChange={(open) =>
+              handleSectionOpenChange("tools_skills", open)
+            }
+            containerRef={toolsSkillsSectionRef}
+          >
+            <AgentCapability />
+          </ConfigSection>
+
+          {/* 4. 运行策略 */}
+          <ConfigSection
+            title={t("agent.config.section.runStrategy.title")}
+            description={t("agent.config.section.runStrategy.description")}
+            icon={<Play className="h-4 w-4 shrink-0 text-blue-500" />}
+            open={openSections.run_strategy}
+            onOpenChange={(open) =>
+              handleSectionOpenChange("run_strategy", open)
+            }
+          >
+            <AgentRunPolicy />
+          </ConfigSection>
+
+          {/* 5. 发布属性 */}
+          <ConfigSection
+            title={t("agent.config.section.publishAttributes.title")}
+            description={t(
+              "agent.config.section.publishAttributes.description"
+            )}
+            icon={<Globe className="h-4 w-4 shrink-0 text-blue-500" />}
+            open={openSections.publish_attributes}
+            onOpenChange={(open) =>
+              handleSectionOpenChange("publish_attributes", open)
+            }
+          >
+            <AgentDeployment />
+          </ConfigSection>
+        </TabsContent>
+
+        <TabsContent
+          value="advanced"
+          className={cn("min-h-0 flex-1 space-y-3 overflow-y-auto pr-1 mt-3")}
+        >
+          <ConfigSection
+            title={t("agent.config.section.collaborativeAgents.title")}
+            description={t(
+              "agent.config.section.collaborativeAgents.description"
+            )}
+            icon={<Cpu className="h-4 w-4 shrink-0 text-blue-500" />}
+            open={openSections.collaborative_agents}
+            onOpenChange={(open) =>
+              handleSectionOpenChange("collaborative_agents", open)
+            }
+            headerActions={<CollaborativeAgentActions />}
+          >
+            <CollaborativeAgent />
+          </ConfigSection>
+
+          <ConfigSection
+            title={t("agent.config.section.knowledgeBase.title")}
+            description={t("agent.config.section.knowledgeBase.description")}
+            icon={<Database className="h-4 w-4 shrink-0 text-blue-500" />}
+            open={openSections.knowledge_base}
+            onOpenChange={(open) =>
+              handleSectionOpenChange("knowledge_base", open)
+            }
+            containerRef={knowledgeBaseSectionRef}
+            headerActions={<KnowledgeBaseConfigActions />}
+          >
+            <KnowledgeBaseConfig />
+          </ConfigSection>
+
+          <ConfigSection
+            title={t("agent.config.section.conversationGuide.title")}
+            description={t(
+              "agent.config.section.conversationGuide.description"
+            )}
+            icon={<MessageSquare className="h-4 w-4 shrink-0 text-blue-500" />}
+            open={openSections.conversation_guide}
+            onOpenChange={(open) =>
+              handleSectionOpenChange("conversation_guide", open)
+            }
+            containerRef={conversationGuideSectionRef}
+          >
+            <AgentGuide />
+          </ConfigSection>
+
+          <ConfigSection
+            title={t("agent.config.section.guardrail.title")}
+            description={t("agent.config.section.guardrail.description")}
+            icon={<ShieldCheck className="h-4 w-4 shrink-0 text-blue-500" />}
+            open={openSections.guardrail}
+            onOpenChange={(open) => handleSectionOpenChange("guardrail", open)}
+            headerActions={<GuardrailConfigActions />}
+          >
+            <GuardrailConfigContent />
+          </ConfigSection>
+        </TabsContent>
+      </Tabs>
+      <div
+        ref={actionAreaRef}
+        className="flex shrink-0 items-center justify-between gap-2 border-t border-gray-200 bg-white pt-3 pb-1"
+      >
+        <Tooltip title={t("agent.page.panel.nl2agent.manualUnlockAction")}>
+          <Button
+            aria-label={t("agent.page.panel.nl2agent.manualUnlockAction")}
+            icon={<LockOpen size={16} />}
+            disabled={!canManualUnlock}
+            onClick={onManualUnlock}
+            variant="solid"
+            type="primary"
+          >
+            {t("agent.config.button.unlock")}
+          </Button>
+        </Tooltip>
+        <div className="flex items-center gap-2">
+          <Button
+            icon={<Bug size={16} />}
+            disabled={agentId === null}
+            onClick={handleDebug}
+            variant="solid"
+            type="primary"
+          >
+            {t("agent.config.button.debug")}
+          </Button>
+          <Button
+            icon={<Rocket size={16} />}
+            disabled={agentId === null || isReadOnly}
+            onClick={handlePublish}
+            color="green"
+            variant="solid"
+          >
+            {t("agent.config.button.publish")}
+          </Button>
+        </div>
+      </div>
+      <AgentVersionPubulishModal
+        open={isPublishModalOpen}
+        onClose={() => setIsPublishModalOpen(false)}
+        agentId={agentId}
+      />
+    </Form>
+  );
+}

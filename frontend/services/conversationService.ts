@@ -3,15 +3,23 @@ import { API_ENDPOINTS, ApiError } from "./api";
 import { chatConfig } from "@/const/chatConfig";
 import type {
   ConversationListResponse,
-  ConversationListItem,
+  ConversationListPage,
+  ConversationListParams,
   ApiConversationDetail,
   ApiConversationResponse,
 } from "@/types/conversation";
 import { getAuthHeaders, fetchWithAuth } from "@/lib/auth";
 import log from "@/lib/logger";
+import type {
+  ConversationKnowledgeScope,
+  KnowledgeCapabilities,
+  KnowledgeScopeUpdateResult,
+} from "@/types/knowledgeScope";
 
 // @ts-ignore
 const fetch = fetchWithAuth;
+
+export const CONVERSATION_PAGE_SIZE = 20;
 
 // This helper function now ALWAYS connects through the current host and port.
 // This relies on our custom `server.js` to handle the proxying in all environments.
@@ -24,13 +32,26 @@ const getWebSocketUrl = (endpoint: string): string => {
 
 export const conversationService = {
   // Get conversation list
-  async getList(): Promise<ConversationListItem[]> {
-    const response = await fetch(API_ENDPOINTS.conversation.list);
+  async getList(
+    params: ConversationListParams & {
+      todayStartMs: number;
+      weekStartMs: number;
+    }
+  ): Promise<ConversationListPage> {
+    const query = new URLSearchParams({
+      offset: String(params.offset),
+      limit: String(params.limit),
+      today_start_ms: String(params.todayStartMs),
+      week_start_ms: String(params.weekStartMs),
+    });
+    const response = await fetch(
+      `${API_ENDPOINTS.conversation.list}?${query.toString()}`
+    );
 
     const data = (await response.json()) as ConversationListResponse;
 
     if (data.code === 0) {
-      return data.data || [];
+      return data.data;
     }
 
     throw new ApiError(data.code, data.message);
@@ -54,6 +75,58 @@ export const conversationService = {
     }
 
     throw new Error(`Conversation ${conversationId} not found`);
+  },
+  async updateKnowledgeScope(
+    conversationId: number,
+    scope: ConversationKnowledgeScope | null
+  ): Promise<KnowledgeScopeUpdateResult> {
+    const response = await fetch(
+      API_ENDPOINTS.conversation.knowledgeScope(conversationId),
+      {
+        method: "PUT",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ scope }),
+      }
+    );
+
+    const data = await response.json();
+
+    if (!response.ok || data.code !== 0) {
+      throw new ApiError(
+        data.code || response.status,
+        data.message || data.detail
+      );
+    }
+
+    return data.data;
+  },
+
+  async getKnowledgeCapabilities(
+    agentId: number,
+    versionNo?: number
+  ): Promise<KnowledgeCapabilities> {
+    const url = new URL(
+      API_ENDPOINTS.agent.knowledgeCapabilities(agentId),
+      globalThis.location.origin
+    );
+
+    if (versionNo !== undefined) {
+      url.searchParams.set("version_no", String(versionNo));
+    }
+
+    const response = await fetch(url.toString(), {
+      headers: getAuthHeaders(),
+    });
+    const data = await response.json();
+
+    if (!response.ok || data.code !== 0) {
+      throw new ApiError(
+        data.code || response.status,
+        data.message || data.detail
+      );
+    }
+
+    return data.data;
   },
 
   // Create new conversation
@@ -194,6 +267,23 @@ export const conversationService = {
 
     if (data.code === 0) {
       return true;
+    }
+
+    throw new ApiError(data.code, data.message);
+  },
+
+  // Batch delete conversations
+  async deleteBatch(conversationIds: number[]) {
+    const response = await fetch(API_ENDPOINTS.conversation.batchDelete, {
+      method: "POST",
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ conversation_ids: conversationIds }),
+    });
+
+    const data = await response.json();
+
+    if (data.code === 0) {
+      return data.data as { deleted_count: number; failed_ids: number[] };
     }
 
     throw new ApiError(data.code, data.message);
@@ -928,13 +1018,17 @@ export const conversationService = {
       is_debug?: boolean; // Add debug mode parameter
       is_resume?: boolean; // Add resume mode parameter for streaming recovery
       enable_plan?: boolean;
+      knowledge_scope?: ConversationKnowledgeScope;
+      metadata?: Record<string, unknown> | null;
+      expected_metadata_version?: number;
       runtime_mode?: "nl2agent" | "nl2skill";
       draft_snapshot?: Record<string, unknown>;
       complexity?: "simple" | "complicated";
       language?: "zh" | "en";
     },
     signal?: AbortSignal,
-    onConversationId?: (id: string) => void
+    onConversationId?: (id: string) => void,
+    onRuntimeMetadataVersion?: (version: number) => void
   ): Promise<
     ReadableStreamDefaultReader<Uint8Array> | { type: "json"; data: unknown }
   > {
@@ -972,6 +1066,16 @@ export const conversationService = {
       if (params.version_no !== undefined && params.version_no !== null) {
         requestParams.version_no = params.version_no;
       }
+      if (params.knowledge_scope !== undefined) {
+        requestParams.knowledge_scope = params.knowledge_scope;
+      }
+      if (params.metadata !== undefined) {
+        requestParams.metadata = params.metadata;
+      }
+      if (params.expected_metadata_version !== undefined) {
+        requestParams.expected_metadata_version =
+          params.expected_metadata_version;
+      }
 
       // Build URL with query parameters for resume mode
       let url = API_ENDPOINTS.agent.run;
@@ -998,6 +1102,15 @@ export const conversationService = {
       const conversationId = response.headers.get("conversation_id");
       if (conversationId && onConversationId) {
         onConversationId(conversationId);
+      }
+      const runtimeMetadataVersion = response.headers.get(
+        "X-Runtime-Metadata-Version"
+      );
+      if (runtimeMetadataVersion !== null && onRuntimeMetadataVersion) {
+        const parsedVersion = Number(runtimeMetadataVersion);
+        if (Number.isInteger(parsedVersion) && parsedVersion >= 0) {
+          onRuntimeMetadataVersion(parsedVersion);
+        }
       }
 
       if (!response.ok) {

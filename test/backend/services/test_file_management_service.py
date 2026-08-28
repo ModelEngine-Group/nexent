@@ -19,7 +19,8 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 backend_dir = os.path.abspath(os.path.join(current_dir, "../../../backend"))
 sys.path.append(backend_dir)
 
-from consts.exceptions import QuotaExceededError
+from consts.error_code import ErrorCode
+from consts.exceptions import AppException, QuotaExceededError
 
 # Patch environment variables before any imports that might use them
 # Environment variables are now configured in conftest.py
@@ -52,6 +53,10 @@ class _StubElasticSearchService:
     async def list_files(index_name, include_chunks=False, vdb_core=None):
         return {"files": []}
 
+    @staticmethod
+    def resolve_knowledge_base_permission(index_name, user_id, tenant_id):
+        return "EDIT"
+
 
 def _stub_get_vector_db_core():
     return None
@@ -64,10 +69,32 @@ setattr(services_stub, 'vectordatabase_service', vdb_stub)
 
 knowledge_storage_stub = types.ModuleType('services.knowledge_storage_service')
 knowledge_storage_stub.resolve_storage_context = MagicMock(return_value=None)
+knowledge_storage_stub.resolve_storage_object_access = MagicMock(return_value=False)
 knowledge_storage_stub.commit_uploaded_object = MagicMock(return_value={"storage_object_id": 1})
 knowledge_storage_stub.compensate_uploaded_objects = MagicMock()
 sys.modules['services.knowledge_storage_service'] = knowledge_storage_stub
 setattr(services_stub, 'knowledge_storage_service', knowledge_storage_stub)
+
+
+def _stub_create_file_records(specs):
+    """Return deterministic lifecycle rows for service tests outside the repository layer."""
+    return [
+        {
+            **spec,
+            "file_id": f"test-file-{index}",
+            "status": spec.get("status", "UPLOADING"),
+        }
+        for index, spec in enumerate(specs)
+    ]
+
+
+def _stub_transition_file_record(file_id, **fields):
+    """Return an updated lifecycle row without requiring PostgreSQL in service tests."""
+    return {
+        "file_id": file_id,
+        "status": fields.get("status", "UPLOADING"),
+        **fields,
+    }
 
 # Import the service module after mocking external dependencies
 file_management_service = importlib.import_module(
@@ -92,6 +119,10 @@ def setup_patches():
         patch('backend.database.attachment_db.get_file_stream', MagicMock()),
         patch('backend.database.attachment_db.delete_file', MagicMock()),
         patch('backend.database.attachment_db.list_files', MagicMock()),
+        patch('backend.services.file_management_service.create_file_records',
+              side_effect=_stub_create_file_records),
+        patch('backend.services.file_management_service.transition_file_record',
+              side_effect=_stub_transition_file_record),
         patch('backend.services.file_management_service.get_file_size_from_minio', MagicMock(return_value=0)),
         patch('backend.services.file_management_service.save_upload_file', AsyncMock()),
         patch('backend.services.file_management_service.upload_semaphore', MagicMock()),
@@ -128,6 +159,11 @@ def reset_knowledge_storage_stub():
         return_value=True,
         side_effect=True,
     )
+    knowledge_storage_stub.resolve_storage_object_access.reset_mock(
+        return_value=True,
+        side_effect=True,
+    )
+    knowledge_storage_stub.resolve_storage_object_access.return_value = False
 
 
 class TestUploadFilesImpl:
@@ -376,6 +412,82 @@ class TestUploadFilesImpl:
             assert uploaded_names == ["DOC_1.PDF", "doc_2.pdf"]
 
     @pytest.mark.asyncio
+    async def test_upload_files_impl_syncs_effective_name_to_successful_lifecycle_record(self):
+        """Conflict renaming updates only successful lifecycle rows in a partial batch."""
+        files = [
+            MagicMock(filename="a.txt", size=3),
+            MagicMock(filename="b.txt", size=4),
+        ]
+        context = SimpleNamespace(
+            tenant_id="tenant-1",
+            knowledge_id=7,
+            index_name="kb-1",
+            bucket_name="bucket-1",
+            ingroup_permission="SHARED",
+        )
+        records = [
+            {"file_id": "fid-a", "object_name": "folder/a.txt", "original_filename": "a.txt", "status": "UPLOADING"},
+            {"file_id": "fid-b", "object_name": "folder/b.txt", "original_filename": "b.txt", "status": "UPLOADING"},
+        ]
+        transitions = []
+
+        def transition(file_id, **kwargs):
+            transitions.append((file_id, kwargs))
+            current = next(item for item in records if item["file_id"] == file_id)
+            current.update(kwargs)
+            current["status"] = kwargs.get("status", current.get("status"))
+            return dict(current)
+
+        quota_service = MagicMock()
+        quota_service.check_hard_limit.return_value = {"quota_status": "ok"}
+        quota_service.check_hard_limit_post_write.return_value = {"quota_status": "ok"}
+        quota_module = types.ModuleType("services.quota_service")
+        quota_module.QuotaService = MagicMock(return_value=quota_service)
+
+        with patch.object(knowledge_storage_stub, "resolve_storage_context", return_value=context), \
+                patch("backend.services.file_management_service.create_file_records", return_value=records), \
+                patch("backend.services.file_management_service.transition_file_record", side_effect=transition), \
+                patch("backend.services.file_management_service.upload_to_minio", AsyncMock(return_value=[
+                    {
+                        "success": True,
+                        "file_id": "fid-a",
+                        "file_name": "a.txt",
+                        "object_name": "folder/a.txt",
+                        "file_size": 3,
+                    },
+                    {
+                        "success": False,
+                        "file_id": "fid-b",
+                        "file_name": "b.txt",
+                        "error": "read failed",
+                    },
+                ])), \
+                patch("backend.services.file_management_service.get_vector_db_core", MagicMock()), \
+                patch("backend.services.file_management_service.ElasticSearchService.list_files", AsyncMock(
+                    return_value={"files": [{"file": "a.txt"}]}
+                )), \
+                patch.dict(sys.modules, {"services.quota_service": quota_module}):
+            result = await upload_files_impl(
+                destination="minio",
+                file=files,
+                folder="folder",
+                index_name="kb-1",
+                user_id="user-1",
+            )
+
+        assert result[2] == ["a_1.txt"]
+        assert records[0]["original_filename"] == "a_1.txt"
+        assert records[1]["original_filename"] == "b.txt"
+        assert any(
+            file_id == "fid-a" and kwargs.get("original_filename") == "a_1.txt"
+            for file_id, kwargs in transitions
+        )
+        assert not any(
+            file_id == "fid-b" and "original_filename" in kwargs
+            for file_id, kwargs in transitions
+        )
+
+    @pytest.mark.asyncio
     async def test_upload_files_impl_minio_conflict_resolution_es_exception(self):
         """If ES lookup fails, service should warn and leave names unchanged."""
         mock_file = MagicMock()
@@ -419,6 +531,307 @@ class TestUploadFilesImpl:
             assert uploaded_paths == ["folder/"]
             assert uploaded_names == [""]
 
+    @pytest.mark.asyncio
+    async def test_upload_files_impl_persists_lifecycle_and_storage_commit(self):
+        """A successful KB upload should persist upload and storage-ledger transitions."""
+        mock_file = MagicMock(filename="a.txt", size=3)
+        context = SimpleNamespace(
+            tenant_id="tenant-1",
+            knowledge_id=7,
+            index_name="kb-1",
+            bucket_name="bucket-1",
+            ingroup_permission="SHARED",
+        )
+        record = {"file_id": "fid-1", "object_name": "folder/a.txt", "status": "UPLOADING"}
+        transitions = []
+
+        def transition(file_id, **kwargs):
+            transitions.append((file_id, kwargs))
+            updated = dict(record)
+            updated.update(kwargs)
+            updated["file_id"] = file_id
+            updated["status"] = kwargs.get("status", updated.get("status"))
+            return updated
+
+        class FakeQuota:
+            def __init__(self, *_args):
+                pass
+
+            def check_hard_limit(self, *_args, **_kwargs):
+                return {"quota_status": "ok"}
+
+            def invalidate_usage_cache(self, *_args):
+                return None
+
+            def check_hard_limit_post_write(self, *_args, **_kwargs):
+                return {"quota_status": "ok"}
+
+        quota_module = types.ModuleType("services.quota_service")
+        quota_module.QuotaService = FakeQuota
+        with patch.object(knowledge_storage_stub, "resolve_storage_context", return_value=context), \
+                patch("backend.services.file_management_service.create_file_records", return_value=[record]) as create_records, \
+                patch("backend.services.file_management_service.transition_file_record", side_effect=transition) as transition_record, \
+                patch("backend.services.file_management_service.upload_to_minio", AsyncMock(return_value=[
+                    {"success": True, "file_id": "fid-1", "file_name": "a.txt", "object_name": "folder/a.txt", "file_size": 3}
+                ])) as upload_mock, \
+                patch.dict(sys.modules, {"services.quota_service": quota_module}):
+            result = await upload_files_impl(
+                destination="minio", file=[mock_file], folder="folder", index_name="kb-1", user_id="user-1"
+            )
+
+        assert result.file_records[0]["file_id"] == "fid-1"
+        assert result[1] == ["folder/a.txt"]
+        create_records.assert_called_once()
+        upload_mock.assert_awaited_once()
+        transition_record.assert_called()
+        assert {item[1].get("status") for item in transitions} >= {"UPLOADED"}
+
+    @pytest.mark.asyncio
+    async def test_upload_files_impl_does_not_upload_when_lifecycle_batch_creation_fails(self):
+        """Lifecycle persistence is a required precondition for KB object upload."""
+        mock_file = MagicMock(filename="a.txt", size=3)
+        context = SimpleNamespace(
+            tenant_id="tenant-1",
+            knowledge_id=7,
+            index_name="kb-1",
+            bucket_name="bucket-1",
+            ingroup_permission="SHARED",
+        )
+        with patch.object(knowledge_storage_stub, "resolve_storage_context", return_value=context), \
+                patch("backend.services.file_management_service.create_file_records",
+                      side_effect=RuntimeError("lifecycle table unavailable")), \
+                patch("backend.services.file_management_service.upload_to_minio", AsyncMock()) as upload_mock:
+            with pytest.raises(RuntimeError, match="lifecycle table unavailable"):
+                await upload_files_impl(
+                    destination="minio",
+                    file=[mock_file],
+                    folder="folder",
+                    index_name="kb-1",
+                    user_id="user-1",
+                )
+
+        upload_mock.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_upload_files_impl_skips_empty_entry_when_creating_lifecycle_batch(self, monkeypatch):
+        """A sparse multipart list must not create a lifecycle row for an empty slot."""
+        uploads = [MagicMock(filename="a.txt", size=3), None]
+        context = SimpleNamespace(
+            tenant_id="tenant-1",
+            knowledge_id=7,
+            index_name="kb-1",
+            bucket_name="bucket-1",
+            ingroup_permission="SHARED",
+        )
+        quota_service = MagicMock()
+        quota_service.check_hard_limit.return_value = {"quota_status": "ok"}
+        quota_module = types.ModuleType("services.quota_service")
+        quota_module.QuotaService = MagicMock(return_value=quota_service)
+        record = {"file_id": "fid-a", "object_name": "folder/a.txt", "status": "UPLOADING"}
+
+        monkeypatch.setitem(sys.modules, "services.quota_service", quota_module)
+        with patch.object(knowledge_storage_stub, "resolve_storage_context", return_value=context), \
+                patch("backend.services.file_management_service.create_file_records", return_value=[record]) as create_records, \
+                patch("backend.services.file_management_service.transition_file_record", return_value={"file_id": "fid-a", "status": "UPLOADED"}), \
+                patch("backend.services.file_management_service.upload_to_minio", AsyncMock(return_value=[
+                    {"success": True, "file_id": "fid-a", "file_name": "a.txt", "object_name": "folder/a.txt"}
+                ])):
+            result = await upload_files_impl(destination="minio", file=uploads, folder="folder")
+
+        assert result[1] == ["folder/a.txt"]
+        specs = create_records.call_args.args[0]
+        assert len(specs) == 1
+        assert specs[0]["original_filename"] == "a.txt"
+
+    @pytest.mark.asyncio
+    async def test_upload_files_impl_rejects_incomplete_lifecycle_batch(self):
+        """MinIO must not be called when the repository returns fewer rows than files."""
+        upload = MagicMock(filename="a.txt", size=3)
+        context = SimpleNamespace(
+            tenant_id="tenant-1", knowledge_id=7, index_name="kb-1", bucket_name="bucket-1"
+        )
+        with patch.object(knowledge_storage_stub, "resolve_storage_context", return_value=context), \
+                patch("backend.services.file_management_service.create_file_records", return_value=[]), \
+                patch("backend.services.file_management_service.upload_to_minio", AsyncMock()) as upload_mock:
+            with pytest.raises(RuntimeError, match="incomplete result"):
+                await upload_files_impl(destination="minio", file=[upload], folder="folder")
+
+        upload_mock.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_upload_files_impl_keeps_partial_minio_success_after_lifecycle_batch_creation(self):
+        """Per-file MinIO success/failure behavior remains after atomic pre-creation."""
+        files = [
+            MagicMock(filename="a.txt", size=3),
+            MagicMock(filename="b.txt", size=4),
+        ]
+        context = SimpleNamespace(
+            tenant_id="tenant-1",
+            knowledge_id=7,
+            index_name="kb-1",
+            bucket_name="bucket-1",
+            ingroup_permission="SHARED",
+        )
+        records = [
+            {"file_id": "fid-a", "object_name": "folder/a.txt", "status": "UPLOADING"},
+            {"file_id": "fid-b", "object_name": "folder/b.txt", "status": "UPLOADING"},
+        ]
+        transitions = []
+
+        def transition(file_id, **kwargs):
+            transitions.append((file_id, kwargs))
+            return {
+                "file_id": file_id,
+                "object_name": f"folder/{'a' if file_id == 'fid-a' else 'b'}.txt",
+                "status": kwargs.get("status", "UPLOADING"),
+            }
+
+        class FakeQuota:
+            def __init__(self, *_args):
+                pass
+
+            def check_hard_limit(self, *_args, **_kwargs):
+                return {"quota_status": "ok"}
+
+            def invalidate_usage_cache(self, *_args):
+                return None
+
+            def check_hard_limit_post_write(self, *_args, **_kwargs):
+                return {"quota_status": "ok"}
+
+        quota_module = types.ModuleType("services.quota_service")
+        quota_module.QuotaService = FakeQuota
+        with patch.object(knowledge_storage_stub, "resolve_storage_context", return_value=context), \
+                patch("backend.services.file_management_service.create_file_records", return_value=records), \
+                patch("backend.services.file_management_service.transition_file_record", side_effect=transition), \
+                patch("backend.services.file_management_service.upload_to_minio", AsyncMock(return_value=[
+                    {
+                        "success": True,
+                        "file_id": "fid-a",
+                        "file_name": "a.txt",
+                        "object_name": "folder/a.txt",
+                        "file_size": 3,
+                    },
+                    {
+                        "success": False,
+                        "file_id": "fid-b",
+                        "file_name": "b.txt",
+                        "error": "read failed",
+                    },
+                ])), \
+                patch.object(knowledge_storage_stub, "commit_uploaded_object",
+                             return_value={"storage_object_id": 11}), \
+                patch.dict(sys.modules, {"services.quota_service": quota_module}):
+            result = await upload_files_impl(
+                destination="minio",
+                file=files,
+                folder="folder",
+                index_name="kb-1",
+                user_id="user-1",
+            )
+
+        assert result[1] == ["folder/a.txt"]
+        assert result[0] == ["Failed to upload b.txt: read failed"]
+        assert {kwargs.get("status") for _, kwargs in transitions} >= {"UPLOADED", "FAILED"}
+
+    @pytest.mark.asyncio
+    async def test_upload_files_impl_lifecycle_quota_failure_persists_reason(self):
+        """Quota rejection should mark pre-created lifecycle rows as failed."""
+        mock_file = MagicMock(filename="quota.txt", size=10)
+        context = SimpleNamespace(
+            tenant_id="tenant-1", knowledge_id=7, index_name="kb-1", bucket_name="bucket-1", ingroup_permission="SHARED"
+        )
+        record = {"file_id": "fid-quota", "object_name": "folder/quota.txt", "status": "UPLOADING"}
+        transition = MagicMock(return_value={"file_id": "fid-quota", "status": "FAILED"})
+
+        class FakeQuota:
+            def __init__(self, *_args):
+                pass
+
+            def check_hard_limit(self, *_args, **_kwargs):
+                raise QuotaExceededError("quota exceeded")
+
+        quota_module = types.ModuleType("services.quota_service")
+        quota_module.QuotaService = FakeQuota
+        with patch.object(knowledge_storage_stub, "resolve_storage_context", return_value=context), \
+                patch("backend.services.file_management_service.create_file_records", return_value=[record]), \
+                patch("backend.services.file_management_service.transition_file_record", transition), \
+                patch("backend.services.file_management_service.upload_to_minio", AsyncMock()) as upload_mock, \
+                patch.dict(sys.modules, {"services.quota_service": quota_module}):
+            with pytest.raises(QuotaExceededError, match="quota exceeded"):
+                await upload_files_impl(destination="minio", file=[mock_file], folder="folder", index_name="kb-1")
+
+        transition.assert_called_once()
+        assert transition.call_args.kwargs["status"] == "FAILED"
+        assert transition.call_args.kwargs["stage"] == "QUOTA"
+        assert transition.call_args.kwargs["error_code"] == "120104"
+        assert transition.call_args.kwargs["error_message"] is None
+        upload_mock.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_upload_files_impl_lifecycle_upload_and_commit_failures(self):
+        """Upload and storage-commit failures should update lifecycle records and compensate storage."""
+        mock_file = MagicMock(filename="broken.txt", size=3)
+        context = SimpleNamespace(
+            tenant_id="tenant-1", knowledge_id=7, index_name="kb-1", bucket_name="bucket-1", ingroup_permission="SHARED"
+        )
+        record = {"file_id": "fid-upload", "object_name": "folder/broken.txt", "status": "UPLOADING"}
+        transition = MagicMock(side_effect=[
+            {"file_id": "fid-upload", "status": "FAILED"},
+            {"file_id": "fid-commit", "status": "UPLOADED"},
+            {"file_id": "fid-commit", "status": "FAILED"},
+        ])
+
+        class FakeQuota:
+            def __init__(self, *_args):
+                pass
+
+            def check_hard_limit(self, *_args, **_kwargs):
+                return {"quota_status": "ok"}
+
+            def invalidate_usage_cache(self, *_args):
+                return None
+
+            def check_hard_limit_post_write(self, *_args, **_kwargs):
+                return {"quota_status": "ok"}
+
+        quota_module = types.ModuleType("services.quota_service")
+        quota_module.QuotaService = FakeQuota
+        with patch.object(knowledge_storage_stub, "resolve_storage_context", return_value=context), \
+                patch("backend.services.file_management_service.create_file_records", return_value=[record]), \
+                patch("backend.services.file_management_service.transition_file_record", transition), \
+                patch("backend.services.file_management_service.upload_to_minio", AsyncMock(side_effect=[
+                    [{"success": False, "file_id": "fid-upload", "file_name": "broken.txt", "error": "read failed"}],
+                    [{"success": True, "file_id": "fid-commit", "file_name": "commit.txt", "object_name": "folder/commit.txt", "file_size": 3}],
+                ])), \
+                patch.object(knowledge_storage_stub, "commit_uploaded_object", side_effect=RuntimeError("commit failed")), \
+                patch.object(knowledge_storage_stub, "compensate_uploaded_objects") as compensate, \
+                patch.dict(sys.modules, {"services.quota_service": quota_module}):
+            result = await upload_files_impl(destination="minio", file=[mock_file], folder="folder", index_name="kb-1")
+            assert transition.call_args_list[0].kwargs["error_code"] == "000402"
+            assert transition.call_args_list[0].kwargs["error_message"] is None
+            assert result[0] == ["Failed to upload broken.txt: read failed"]
+
+        with patch.object(knowledge_storage_stub, "resolve_storage_context", return_value=context), \
+                patch("backend.services.file_management_service.create_file_records", return_value=[{"file_id": "fid-commit", "object_name": "folder/commit.txt", "status": "UPLOADING"}]), \
+                patch("backend.services.file_management_service.transition_file_record", side_effect=[
+                    {"file_id": "fid-commit", "status": "UPLOADED"},
+                    {"file_id": "fid-commit", "status": "FAILED"},
+                ]) as commit_transition, \
+                patch("backend.services.file_management_service.upload_to_minio", AsyncMock(return_value=[
+                    {"success": True, "file_id": "fid-commit", "file_name": "commit.txt", "object_name": "folder/commit.txt", "file_size": 3}
+                ])), \
+                patch.object(knowledge_storage_stub, "commit_uploaded_object", side_effect=RuntimeError("commit failed")), \
+                patch.object(knowledge_storage_stub, "compensate_uploaded_objects") as compensate, \
+                patch.dict(sys.modules, {"services.quota_service": quota_module}):
+            with pytest.raises(RuntimeError, match="commit failed"):
+                await upload_files_impl(destination="minio", file=[mock_file], folder="folder", index_name="kb-1")
+
+        assert commit_transition.call_args_list[-1].kwargs["stage"] == "STORAGE_COMMIT"
+        assert commit_transition.call_args_list[-1].kwargs["error_code"] == "060107"
+        assert commit_transition.call_args_list[-1].kwargs["error_message"] is None
+        compensate.assert_called_once()
+
 
 class TestUploadToMinio:
     """Test cases for upload_to_minio function"""
@@ -448,6 +861,26 @@ class TestUploadToMinio:
             mock_upload.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_upload_to_minio_uses_lifecycle_object_and_id(self):
+        """Lifecycle identity must be passed through to the storage upload."""
+        mock_file = MagicMock()
+        mock_file.filename = "test.txt"
+        mock_file.read = AsyncMock(return_value=b"test content")
+        mock_file.seek = AsyncMock()
+
+        with patch("backend.services.file_management_service.upload_fileobj", MagicMock(return_value={
+            "success": True, "file_name": "test.txt", "object_name": "folder/planned.txt"
+        })) as mock_upload:
+            results = await upload_to_minio(
+                files=[mock_file],
+                folder="folder",
+                file_records={0: {"file_id": "fid-1", "object_name": "folder/planned.txt"}},
+            )
+
+        assert results[0]["file_id"] == "fid-1"
+        assert mock_upload.call_args.kwargs["object_name"] == "folder/planned.txt"
+
+    @pytest.mark.asyncio
     async def test_upload_to_minio_file_read_exception(self):
         """Test MinIO upload with file read exception"""
         # Create mock UploadFile that raises exception on read
@@ -463,7 +896,7 @@ class TestUploadToMinio:
             assert len(results) == 1
             assert results[0]["success"] is False
             assert results[0]["file_name"] == "test.txt"
-            assert results[0]["error"] == "An error occurred while processing the file."
+            assert results[0]["error"] == "Read error"
             mock_logger.error.assert_called_once()
 
     @pytest.mark.asyncio
@@ -484,7 +917,7 @@ class TestUploadToMinio:
             assert len(results) == 1
             assert results[0]["success"] is False
             assert results[0]["file_name"] == "test.txt"
-            assert results[0]["error"] == "An error occurred while processing the file."
+            assert results[0]["error"] == "Upload error"
             mock_file.read.assert_called_once()
             # seek is not called when upload_fileobj throws exception
             mock_file.seek.assert_not_called()
@@ -544,7 +977,7 @@ class TestUploadToMinio:
             # Second file failure
             assert results[1]["success"] is False
             assert results[1]["file_name"] == "test2.txt"
-            assert results[1]["error"] == "An error occurred while processing the file."
+            assert results[1]["error"] == "Read error"
 
             mock_upload.assert_called_once()  # Only called for successful file
             mock_logger.error.assert_called_once()  # Called for failed file
@@ -569,7 +1002,7 @@ class TestUploadToMinio:
             assert len(results) == 1
             assert results[0]["success"] is False
             assert results[0]["file_name"] == "test.txt"
-            assert results[0]["error"] == "An error occurred while processing the file."
+            assert results[0]["error"] == "Seek error"
             mock_file.read.assert_called_once()
             mock_file.seek.assert_called_once_with(0)
             mock_logger.error.assert_called_once()
@@ -856,6 +1289,101 @@ class TestCheckFileAccess:
         assert check_file_access("knowledge_base/subfolder/doc.pdf", "user456") is True
         assert check_file_access("knowledge_base/", "any_user") is True
 
+    def test_check_file_access_knowledge_base_write_uses_storage_resolver(self):
+        from backend.services.file_management_service import check_file_access
+
+        assert check_file_access(
+            "knowledge_base/file.txt",
+            "user123",
+            "tenant-a",
+            required_permission="DELETE",
+        ) is False
+        knowledge_storage_stub.resolve_storage_object_access.assert_called_once_with(
+            object_name="knowledge_base/file.txt",
+            user_id="user123",
+            tenant_id="tenant-a",
+            required_permission="DELETE",
+        )
+
+    @pytest.mark.parametrize("permission", ["READ", "READ_ONLY", None])
+    def test_check_file_access_knowledge_base_reads_keep_compatibility(self, permission):
+        from backend.services.file_management_service import check_file_access
+
+        assert check_file_access(
+            "knowledge_base/file.txt",
+            "user123",
+            "tenant-a",
+            required_permission=permission,
+        ) is True
+        knowledge_storage_stub.resolve_storage_object_access.assert_not_called()
+
+    def test_check_file_access_asset_owner_write_uses_storage_resolver(self):
+        from backend.services.file_management_service import check_file_access
+        from consts.const import ASSET_OWNER_TENANT_ID
+
+        knowledge_storage_stub.resolve_storage_object_access.return_value = True
+
+        assert check_file_access(
+            "attachments/asset_owner/user1/doc.pdf",
+            "user1",
+            ASSET_OWNER_TENANT_ID,
+            required_permission="EDIT",
+        ) is True
+        knowledge_storage_stub.resolve_storage_object_access.assert_called_once_with(
+            object_name="attachments/asset_owner/user1/doc.pdf",
+            user_id="user1",
+            tenant_id=ASSET_OWNER_TENANT_ID,
+            required_permission="EDIT",
+        )
+
+    def test_check_file_access_denies_asset_owner_write_for_wrong_tenant(self):
+        from backend.services.file_management_service import check_file_access
+        from consts.const import ASSET_OWNER_TENANT_ID
+
+        assert check_file_access(
+            "attachments/asset_owner/user1/doc.pdf",
+            "user1",
+            "regular-tenant",
+            required_permission="DELETE",
+        ) is False
+        knowledge_storage_stub.resolve_storage_object_access.assert_called_once_with(
+            object_name="attachments/asset_owner/user1/doc.pdf",
+            user_id="user1",
+            tenant_id="regular-tenant",
+            required_permission="DELETE",
+        )
+
+    def test_check_file_access_image_and_skill_file_rules(self):
+        from backend.services.file_management_service import check_file_access
+
+        assert check_file_access("images_in_attachments/page.png", "user123") is True
+        assert check_file_access(
+            "images_in_attachments/page.png", "user123", required_permission="DELETE"
+        ) is False
+        assert check_file_access("skill-files/user123/result.docx", "user123") is True
+        assert check_file_access("skill-files/user123/result.docx", "user456") is False
+
+    def test_check_file_access_batch_forwards_required_permission(self, mocker):
+        from backend.services.file_management_service import check_file_access_batch
+
+        check = mocker.patch(
+            "backend.services.file_management_service.check_file_access",
+            side_effect=[True, False],
+        )
+
+        result = check_file_access_batch(
+            ["knowledge_base/a.txt", "knowledge_base/b.txt"],
+            "user123",
+            "tenant-a",
+            required_permission="DELETE",
+        )
+
+        assert result == {
+            "knowledge_base/a.txt": True,
+            "knowledge_base/b.txt": False,
+        }
+        assert check.call_args_list[0].kwargs["required_permission"] == "DELETE"
+
     def test_check_file_access_user_attachment_allows_owner(self):
         """Users can access files in their own attachments folder"""
         from backend.services.file_management_service import check_file_access
@@ -893,6 +1421,19 @@ class TestCheckFileAccess:
         assert check_file_access("private/file.txt", "user123") is False
         assert check_file_access("system/config.json", "user123") is False
         assert check_file_access("preview/file.pdf", "user123") is False
+
+    def test_check_file_access_workspace_requires_matching_user(self):
+        from backend.services.file_management_service import check_file_access
+
+        path = "workspace/user-a/run-1/outputs/report.pdf"
+        assert check_file_access(path, "user-a", "tenant-a") is True
+        assert check_file_access(path, "user-a", None) is True
+        assert check_file_access(path, "user-b", "tenant-a") is False
+        assert check_file_access(
+            "workspace/tenant-a/user-a/run-1/outputs/report.pdf",
+            "user-a",
+            "tenant-a",
+        ) is False
 
     def test_check_file_access_asset_owner_prefix_requires_asset_owner_tenant(self):
         """Asset-owner attachment paths are restricted to the asset-owner tenant."""
@@ -944,7 +1485,9 @@ class TestUploadQuotaEnforcement:
     @pytest.mark.asyncio
     async def test_upload_runs_pre_and_post_write_checks(self, monkeypatch):
         upload = MagicMock(filename="quota.txt", size=128)
-        context = SimpleNamespace(tenant_id="tenant-id", index_name="kb-index")
+        context = SimpleNamespace(
+            tenant_id="tenant-id", knowledge_id=1, index_name="kb-index", bucket_name="bucket"
+        )
         knowledge_storage_stub.resolve_storage_context.return_value = context
         quota_service = MagicMock()
         quota_service.check_hard_limit.return_value = {"stage": "pre"}
@@ -989,6 +1532,49 @@ class TestUploadQuotaEnforcement:
         assert result.quota_status == {"stage": "post"}
 
     @pytest.mark.asyncio
+    async def test_private_kb_upload_checks_user_quota_before_minio_write(
+        self, monkeypatch
+    ):
+        upload = MagicMock(filename="quota.txt", size=128)
+        context = SimpleNamespace(
+            tenant_id="tenant-id",
+            knowledge_id=1,
+            index_name="kb-index",
+            bucket_name="bucket",
+            ingroup_permission="PRIVATE",
+        )
+        knowledge_storage_stub.resolve_storage_context.return_value = context
+        quota_service = MagicMock()
+        quota_error = AppException(
+            ErrorCode.TENANT_PERSONAL_KB_QUOTA_EXCEEDED,
+            "personal quota exceeded",
+        )
+        quota_service.check_personal_user_quota.side_effect = quota_error
+
+        monkeypatch.setitem(
+            sys.modules, "services.quota_service", self._quota_module(quota_service)
+        )
+        with patch(
+            "backend.services.file_management_service.upload_to_minio",
+            new_callable=AsyncMock,
+        ) as upload_to_minio_mock:
+            with pytest.raises(AppException) as raised:
+                await upload_files_impl(
+                    destination="minio",
+                    file=[upload],
+                    folder="knowledge_base",
+                    index_name="kb-index",
+                    user_id="user-id",
+                    uploader_tenant_id="tenant-id",
+                )
+
+        assert raised.value is quota_error
+        quota_service.check_personal_user_quota.assert_called_once_with(
+            "user-id", 128
+        )
+        upload_to_minio_mock.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_missing_sizes_read_complete_batch_and_restore_streams(self, monkeypatch):
         first = MagicMock(filename="first.txt", size=None)
         first.read = AsyncMock(return_value=b"a" * 300)
@@ -996,7 +1582,9 @@ class TestUploadQuotaEnforcement:
         second = MagicMock(filename="second.txt", size=None)
         second.read = AsyncMock(return_value=b"b" * 200)
         second.seek = AsyncMock()
-        context = SimpleNamespace(tenant_id="tenant-id", index_name="kb-index")
+        context = SimpleNamespace(
+            tenant_id="tenant-id", knowledge_id=1, index_name="kb-index", bucket_name="bucket"
+        )
         knowledge_storage_stub.resolve_storage_context.return_value = context
         quota_service = MagicMock()
 
@@ -1029,7 +1617,9 @@ class TestUploadQuotaEnforcement:
         spooled_file.seek(3)
         upload = MagicMock(filename="spooled.txt", size=None, file=spooled_file)
         upload.read = AsyncMock()
-        context = SimpleNamespace(tenant_id="tenant-id", index_name="kb-index")
+        context = SimpleNamespace(
+            tenant_id="tenant-id", knowledge_id=1, index_name="kb-index", bucket_name="bucket"
+        )
         knowledge_storage_stub.resolve_storage_context.return_value = context
         quota_service = MagicMock()
 
@@ -1059,7 +1649,9 @@ class TestUploadQuotaEnforcement:
         upload = MagicMock(filename="zero.txt", size=0)
         upload.read = AsyncMock(return_value=b"actual-content")
         upload.seek = AsyncMock()
-        context = SimpleNamespace(tenant_id="tenant-id", index_name="kb-index")
+        context = SimpleNamespace(
+            tenant_id="tenant-id", knowledge_id=1, index_name="kb-index", bucket_name="bucket"
+        )
         knowledge_storage_stub.resolve_storage_context.return_value = context
         quota_service = MagicMock()
 
@@ -1090,7 +1682,9 @@ class TestUploadQuotaEnforcement:
             MagicMock(filename="a.txt", size=300),
             MagicMock(filename="b.txt", size=200),
         ]
-        context = SimpleNamespace(tenant_id="tenant-id", index_name="kb-index")
+        context = SimpleNamespace(
+            tenant_id="tenant-id", knowledge_id=1, index_name="kb-index", bucket_name="bucket"
+        )
         knowledge_storage_stub.resolve_storage_context.return_value = context
         quota_service = MagicMock()
         quota_error = QuotaExceededError("quota exceeded")
@@ -1149,7 +1743,9 @@ class TestUploadQuotaEnforcement:
     @pytest.mark.parametrize("failure_stage", ["ledger", "post-check"])
     async def test_failure_compensates_only_new_batch(self, failure_stage, monkeypatch):
         upload = MagicMock(filename="quota.txt", size=128)
-        context = SimpleNamespace(tenant_id="tenant-id", index_name="kb-index")
+        context = SimpleNamespace(
+            tenant_id="tenant-id", knowledge_id=1, index_name="kb-index", bucket_name="bucket"
+        )
         knowledge_storage_stub.resolve_storage_context.return_value = context
         quota_service = MagicMock()
         failure = RuntimeError(f"{failure_stage} failed")
@@ -1204,7 +1800,9 @@ class TestUploadQuotaEnforcement:
             MagicMock(filename="same.txt", size=4),
             MagicMock(filename="same.txt", size=4),
         ]
-        context = SimpleNamespace(tenant_id="tenant-id", index_name="kb-index")
+        context = SimpleNamespace(
+            tenant_id="tenant-id", knowledge_id=1, index_name="kb-index", bucket_name="bucket"
+        )
         knowledge_storage_stub.resolve_storage_context.return_value = context
         quota_service = MagicMock()
 
@@ -1918,6 +2516,7 @@ class TestResolvePreviewFile:
         ("test/readme.txt", "text/plain"),
         ("test/data.csv", "text/csv"),
         ("test/readme.md", "text/markdown"),
+        ("test/data.json", "application/json"),
     ])
     async def test_direct_types_returned_as_is(self, object_name, content_type):
         """PDF, images, and text files resolve to themselves without conversion."""

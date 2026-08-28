@@ -20,9 +20,14 @@ from consts.const import (
     LOCAL_MCP_SERVER,
     MCP_MANAGEMENT_API,
 )
-from consts.exceptions import MCPConnectionError, NotFoundException, ToolExecutionException
+from consts.error_message import ErrorMessage
+from consts.exceptions import MCPConnectionError, NotFoundException, ToolExecutionException, ValidationError
 from consts.model import ToolInstanceInfoRequest, ToolInfo, ToolSourceEnum, ToolValidateRequest
 from consts.tool_labels import SYSTEM_MANAGED_TOOL_NAMES
+from consts.tool_param_constraints import (
+    TOOL_PARAM_CONSTRAINT_KEYS,
+    TOOL_PARAM_CONSTRAINT_RULES,
+)
 from database.outer_api_tool_db import (
     upsert_openapi_service,
     query_openapi_services_by_tenant,
@@ -39,6 +44,7 @@ from database.tool_db import (
     create_or_update_tool_by_tool_info,
     query_all_tools,
     query_tools_by_labels,
+    query_tools_by_ids,
     query_tool_instances_by_id,
     search_last_tool_instance_by_tool_id,
     update_tool_table_from_scan_tool_list,
@@ -46,17 +52,57 @@ from database.tool_db import (
 from database.knowledge_db import get_knowledge_name_map_by_index_names
 from database.user_tenant_db import get_user_email_map
 from mcpadapt.smolagents_adapter import _sanitize_function_name
-from services.file_management_service import get_llm_model, validate_urls_access
+from services.file_management_service import validate_urls_access
+from .agent_draft_permission_service import (
+    AgentDraftEditError,
+    ResourceBindingError,
+    require_agent_draft_edit,
+)
 from services.vectordatabase_service import get_embedding_model_by_index_name, get_rerank_model
 from utils.http_client_utils import create_httpx_client
 from database.client import minio_client
-from services.image_service import get_video_understanding_model, get_vlm_model
+from services.model_gateway_service import get_llm_adapter, get_vlm_adapter
 from nexent.monitor import set_monitoring_context, set_monitoring_operation
 from services.vectordatabase_service import get_vector_db_core
 from utils.langchain_utils import discover_langchain_modules
 from utils.tool_utils import get_local_tools_classes, get_local_tools_description_zh
 
 logger = logging.getLogger("tool_configuration_service")
+
+TOOL_PARAM_CONSTRAINT_ERROR_MESSAGES = ErrorMessage.get_param_constraint_messages()
+
+
+def _parse_kds_list(value: Any) -> list[str]:
+    """Normalize legacy JSON strings and list values into ordered string IDs."""
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError:
+            return []
+    if not isinstance(value, list):
+        return []
+    return list(dict.fromkeys(str(item).strip() for item in value if str(item).strip()))
+
+
+def _is_aidp_search_tool(tool_id: int, tool_name: Any = None) -> bool:
+    if isinstance(tool_name, str):
+        return tool_name == "aidp_search"
+    tools = query_tools_by_ids([tool_id])
+    return bool(tools and tools[0].get("name") == "aidp_search")
+
+
+def _resolve_aidp_snapshot(user_id: str, tenant_id: str):
+    from ext_components.aidp.services.aidp_access_service import (
+        resolve_current_aidp_access,
+    )
+
+    return resolve_current_aidp_access(
+        server_url=AIDP_SERVER_URL,
+        api_key=AIDP_API_KEY,
+        user_id=user_id,
+        tenant_id=tenant_id,
+        aidp_tenant_id=AIDP_TENANT_ID,
+    )
 
 
 def _create_mcp_transport(url: str, authorization_token: Optional[str] = None, custom_headers: Optional[Dict[str, Any]] = None):
@@ -123,6 +169,26 @@ def python_type_to_json_schema(annotation: Any) -> str:
     return type_mapping.get(type_name, type_name)
 
 
+def _extract_field_constraints(field_info: Any) -> Dict[str, Any]:
+    """Extract Pydantic ``Field`` validation constraints (ge, le, gt, lt, ...).
+
+    In Pydantic v2, constraints declared via ``Field(ge=..., le=...)`` are stored
+    in ``FieldInfo.metadata`` as ``annotated_types`` instances (e.g. ``Ge``, ``Le``,
+    ``Interval``, ``MinLen``). This helper reads the relevant attributes so the
+    constraints can be persisted to the DB ``params`` column.
+
+    Args:
+        field_info: Pydantic FieldInfo to extract constraints from
+    """
+    constraints: Dict[str, Any] = {}
+    for item in getattr(field_info, "metadata", None) or []:
+        for attr in TOOL_PARAM_CONSTRAINT_KEYS:
+            value = getattr(item, attr, None)
+            if value is not None:
+                constraints[attr] = value
+    return constraints
+
+
 def get_local_tools() -> List[ToolInfo]:
     """
     Get metadata for all locally available tools
@@ -175,6 +241,12 @@ def get_local_tools() -> List[ToolInfo]:
                 else:
                     param_info["default"] = param.default.default
                     param_info["optional"] = True
+
+                # Persist Pydantic Field validation constraints (ge, le, gt, lt, ...)
+                # so they are stored in the DB params column on scan/refresh and first init.
+                constraints = _extract_field_constraints(param.default)
+                if constraints:
+                    param_info["constraints"] = constraints
             else:
                 # Simple default value (not a FieldInfo)
                 if param.default == inspect.Parameter.empty:
@@ -211,6 +283,7 @@ def get_local_tools() -> List[ToolInfo]:
             output_type=getattr(tool_class, 'output_type'),
             category=getattr(tool_class, 'category'),
             labels=getattr(tool_class, 'labels', None),
+            is_user_selectable=getattr(tool_class, 'is_user_selectable', True),
             class_name=tool_class.__name__,
             usage=None,
             origin_name=getattr(tool_class, 'name')
@@ -257,7 +330,8 @@ def _build_tool_info_from_langchain(obj) -> ToolInfo:
         usage=None,
         origin_name=tool_name,
         category=None,
-        labels=None
+        labels=None,
+        is_user_selectable=True,
     )
     return tool_info
 
@@ -317,7 +391,12 @@ async def get_all_mcp_tools(tenant_id: str) -> List[ToolInfo]:
     return tools_info
 
 
-def search_tool_info_impl(agent_id: int, tool_id: int, tenant_id: str):
+def search_tool_info_impl(
+    agent_id: int,
+    tool_id: int,
+    tenant_id: str,
+    user_id: Optional[str] = None,
+):
     """
     Search for tool configuration information by agent ID and tool ID
 
@@ -336,8 +415,16 @@ def search_tool_info_impl(agent_id: int, tool_id: int, tenant_id: str):
         agent_id, tool_id, tenant_id)
 
     if tool_instance:
+        params = dict(tool_instance["params"] or {})
+        if user_id and _is_aidp_search_tool(tool_id):
+            snapshot = _resolve_aidp_snapshot(user_id, tenant_id)
+            existing_ids = _parse_kds_list(params.get("kds_list"))
+            params["kds_list"] = [
+                kds_id for kds_id in existing_ids
+                if kds_id in snapshot.accessible_id_set
+            ]
         return {
-            "params": tool_instance["params"],
+            "params": params,
             "enabled": tool_instance["enabled"]
         }
     else:
@@ -345,6 +432,119 @@ def search_tool_info_impl(agent_id: int, tool_id: int, tenant_id: str):
             "params": None,
             "enabled": False
         }
+
+
+def _get_tool_record(tool_id: int) -> Optional[Dict[str, Any]]:
+    """
+    Resolve a tool's DB record so constraints can be read from its ``params`` column.
+
+    Args:
+        tool_id: Tool ID
+
+    Returns:
+        Tool info dict
+    """
+    try:
+        tools = query_tools_by_ids([tool_id])
+    except Exception:
+        logger.warning("Failed to load tool %s for constraint validation; skipping", tool_id)
+        return None
+    return tools[0] if tools else None
+
+
+def _coerce_param_value(tool_name: str, param_name: str, value_type: str, raw_value: Any, constraint_key: str):
+    """
+    Coerce the initial value and validate its data type.
+
+    When the constraint key contains "length", the string length is returned.
+    Otherwise the value is converted to the type expected by the parameter.
+
+    Args:
+        tool_name: Tool name
+        param_name: Parameter name
+        value_type: Expected parameter type
+        raw_value: Raw value to coerce
+        constraint_key: Constraint key being validated
+
+    Returns:
+        The coerced value (string length, string, or numeric value)
+
+    Raises:
+        ValidationError: If the value cannot be coerced to the expected type
+    """
+    if "length" in constraint_key:
+        return len(str(raw_value))
+    elif value_type == "string":
+        return str(raw_value)
+    
+    try:
+        numeric_value = float(raw_value)
+    except (TypeError, ValueError):
+        raise ValidationError(
+            TOOL_PARAM_CONSTRAINT_ERROR_MESSAGES["valid_type"].format(
+                tool_name=tool_name, param_name=param_name, value_type=value_type
+            )
+        )
+    if value_type == "integer" and not numeric_value.is_integer():
+        raise ValidationError(
+            TOOL_PARAM_CONSTRAINT_ERROR_MESSAGES["integer"].format(
+                tool_name=tool_name, param_name=param_name
+            )
+        )
+    return numeric_value
+
+def _format_constraint_message(key: str, tool_name: str, param_name: str, value: Any) -> str:
+    """Format a tool parameter constraint message from its centralized template."""
+    return TOOL_PARAM_CONSTRAINT_ERROR_MESSAGES[key].format(
+        tool_name=tool_name, param_name=param_name, value=value
+    )
+
+
+def _apply_param_constraints(
+    tool_name: str, param_name: str, value_type: str, raw_value: Any, constraints: Dict[str, Any]
+):
+    """
+    Apply a parameter's DB-stored constraints to a single configured value.
+
+    Args:
+        tool_name: Tool name
+        param_name: Parameter name
+        value_type: Expected parameter type
+        raw_value: Raw value to validate
+        constraints: Constraint definitions to apply
+    """
+    if any(key in constraints for key in TOOL_PARAM_CONSTRAINT_KEYS):
+        for key, check_fn in TOOL_PARAM_CONSTRAINT_RULES:
+            if key not in constraints:
+                continue
+            value = _coerce_param_value(tool_name, param_name, value_type, raw_value, key)
+            if check_fn(value, constraints[key]):
+                raise ValidationError(_format_constraint_message(key, tool_name, param_name, constraints[key]))
+
+def _validate_tool_param_ranges(tool_id: int, params: Dict[str, Any]):
+    """
+    Validate configured parameter values against constraints stored in the DB ``params`` column.
+
+    Args:
+        tool_id: Tool ID
+        params: Configured parameter values
+    """
+    tool = _get_tool_record(tool_id)
+    if not tool:
+        return
+    tool_name = tool.get("name") or ""
+    for spec in tool.get("params") or []:
+        param_name = spec.get("name")
+        constraints = spec.get("constraints")
+        if not param_name or not constraints:
+            continue
+        raw_value = params.get(param_name)
+        # None means "not configured"; the DB layer drops it and the SDK falls back to its default.
+        if raw_value is None:
+            continue
+        _apply_param_constraints(
+            tool_name, param_name, spec.get("type") or "", raw_value, constraints
+        )
 
 
 def update_tool_info_impl(tool_info: ToolInstanceInfoRequest, tenant_id: str, user_id: str):
@@ -362,38 +562,80 @@ def update_tool_info_impl(tool_info: ToolInstanceInfoRequest, tenant_id: str, us
     Raises:
         ValueError: If database update fails
     """
-    # v7.1: validate per-KB READ access for aidp_search so a tenant user
-    # cannot stash a forbidden kds_id in their tool config for later abuse.
-    if getattr(tool_info, "name", None) == "aidp_search":
-        params = tool_info.params or {}
-        kds_list = params.get("kds_list") or []
-        # ``kds_list`` may arrive as a JSON-encoded string (the
-        # legacy storage shape); decode it so we can validate each entry.
-        if isinstance(kds_list, str):
-            import json
-            try:
-                kds_list = json.loads(kds_list)
-            except json.JSONDecodeError:
-                kds_list = []
-        if kds_list:
-            try:
-                from ext_components.aidp.services import (
-                    aidp_permission_service as _aidp_perms,
-                )
-                for _kds_id in kds_list:
-                    _aidp_perms.require_permission(
-                        kb_id=_kds_id, user_id=user_id,
-                        tenant_id=tenant_id, required="READ",
-                    )
-            except Exception:
-                # Surface as ValidationError so the app layer returns 400.
-                from consts.exceptions import ValidationError
-                raise ValidationError(
-                    f"aidp_search kds_list contains a KB the user cannot read"
-                ) from None
+    version_no = getattr(tool_info, "version_no", 0)
+    if version_no != 0:
+        raise AgentDraftEditError("agent_not_draft")
+    require_agent_draft_edit(
+        agent_id=tool_info.agent_id,
+        tenant_id=tenant_id,
+        user_id=user_id,
+    )
+    tool = next(
+        (
+            item
+            for item in query_all_tools(tenant_id)
+            if item.get("tool_id") == tool_info.tool_id
+        ),
+        None,
+    )
+    if (
+        tool is None
+        or tool.get("is_available") is not True
+        or tool.get("name") in SYSTEM_MANAGED_TOOL_NAMES
+    ):
+        raise ResourceBindingError("resource_not_visible")
 
-    # Use version_no from request if provided, otherwise default to 0
-    version_no = getattr(tool_info, 'version_no', 0)
+    if _is_aidp_search_tool(tool_info.tool_id, tool.get("name")):
+        existing = query_tool_instances_by_id(
+            tool_info.agent_id,
+            tool_info.tool_id,
+            tenant_id,
+            version_no,
+        )
+        existing_params = dict((existing or {}).get("params") or {})
+        existing_ids = _parse_kds_list(existing_params.get("kds_list"))
+        params = dict(tool_info.params or {})
+
+        # A missing key means the caller did not edit the knowledge scope.
+        if "kds_list" not in params:
+            params["kds_list"] = existing_ids
+        else:
+            submitted_ids = _parse_kds_list(params.get("kds_list"))
+            try:
+                snapshot = _resolve_aidp_snapshot(user_id, tenant_id)
+            except Exception as exc:
+                new_ids = [kds_id for kds_id in submitted_ids if kds_id not in set(existing_ids)]
+                if new_ids:
+                    raise ValidationError(
+                        "AIDP is unavailable; the knowledge base configuration was not changed"
+                    ) from exc
+                params["kds_list"] = existing_ids
+            else:
+                existing_set = set(existing_ids)
+                invalid_ids = [
+                    kds_id for kds_id in submitted_ids
+                    if kds_id not in snapshot.accessible_id_set and kds_id not in existing_set
+                ]
+                if invalid_ids:
+                    raise ValidationError(
+                        "aidp_search kds_list contains a knowledge base the user cannot configure"
+                    )
+                hidden_existing = [
+                    kds_id for kds_id in existing_ids
+                    if kds_id not in snapshot.accessible_id_set
+                ]
+                visible_submitted = [
+                    kds_id for kds_id in submitted_ids
+                    if kds_id in snapshot.accessible_id_set
+                ]
+                params["kds_list"] = list(dict.fromkeys(hidden_existing + visible_submitted))
+        tool_info.params = params
+
+    _validate_tool_param_ranges(
+        tool_info.tool_id,
+        dict(getattr(tool_info, "params", None) or {}),
+    )
+
     tool_instance = create_or_update_tool_by_tool_info(
         tool_info, tenant_id, user_id, version_no=version_no)
     return {
@@ -466,11 +708,14 @@ async def get_tool_from_remote_mcp_server(
                                      params=[],
                                      source=ToolSourceEnum.MCP.value,
                                      inputs=str(input_schema["properties"]),
-                                     output_type="string",
+                                     # MCP results may contain text, structured data, images, audio, or files.
+                                     # "object" matches the runtime adapter and avoids advertising every result as text.
+                                     output_type="object",
                                      class_name=sanitized_tool_name,
                                      usage=mcp_server_name,
                                      origin_name=tool.name,
-                                     category=None)
+                                     category=None,
+                                     is_user_selectable=True)
                 tools_info.append(tool_info)
             return tools_info
     except BaseException as e:
@@ -545,6 +790,10 @@ async def update_tool_list(tenant_id: str, user_id: str):
 async def list_all_tools(tenant_id: str, labels: Optional[List[str]] = None):
     """
     List all tools for a given tenant, optionally filtered by labels (OR match).
+
+    Args:
+        tenant_id: Tenant ID
+        labels: Optional labels to filter tools by (OR match)
     """
     if labels:
         tools_info = query_tools_by_labels(tenant_id, labels)
@@ -623,6 +872,7 @@ async def list_all_tools(tenant_id: str, labels: Optional[List[str]] = None):
             "inputs": inputs_str,
             "category": tool.get("category"),
             "labels": tool.get("labels", []),
+            "is_user_selectable": tool.get("is_user_selectable", True),
             "updated_by": tool.get("updated_by", ""),
             "updated_by_name": updated_by_email_map.get(tool.get("updated_by"), ""),
         }
@@ -887,7 +1137,7 @@ def _validate_local_tool(
             filtered_params = {k: v for k, v in instantiation_params.items()
                                if k not in ["rerank_model", "rerank", "rerank_model_name"]}
             tool_instance = tool_class(**filtered_params)
-        elif tool_name in ("haotian_search", "aidp_search"):
+        elif tool_name in ("haotian_search", "aidp_search", "ind_aidp_search"):
             # Haotian and AIDP share the same instantiation shape: drop the
             # backend-only rerank keys and explicitly set observer=None
             # (otherwise Python falls back to the FieldInfo default, which
@@ -896,6 +1146,14 @@ def _validate_local_tool(
             filtered_params = {k: v for k, v in instantiation_params.items()
                               if k not in ["observer", "rerank_model", "rerank"]}
             filtered_params["observer"] = None
+            if tool_name == "ind_aidp_search":
+                # Older UI builds incorrectly sent the independent AIDP KDS
+                # selection under the local-search name ``index_names``.
+                # Normalize that alias without ever replacing the independent
+                # connector's own URL or API key.
+                legacy_index_names = filtered_params.pop("index_names", None)
+                if not filtered_params.get("kds_list") and legacy_index_names:
+                    filtered_params["kds_list"] = legacy_index_names
             if tool_name == "aidp_search":
                 # AIDP credentials are sourced from ``consts.const`` (i.e. the
                 # process environment). Inject them here exactly as
@@ -912,6 +1170,21 @@ def _validate_local_tool(
                         "AIDP is not configured for this deployment: "
                         "set AIDP_API_KEY before testing aidp_search"
                     )
+                if not tenant_id or not user_id:
+                    raise ToolExecutionException(
+                        "Tenant ID and User ID are required for aidp_search validation"
+                    )
+                snapshot = _resolve_aidp_snapshot(user_id, tenant_id)
+                requested_kds = _parse_kds_list(filtered_params.get("kds_list"))
+                invalid_kds = [
+                    kds_id for kds_id in requested_kds
+                    if kds_id not in snapshot.accessible_id_set
+                ]
+                if invalid_kds:
+                    raise ToolExecutionException(
+                        "aidp_search test selection contains an unavailable knowledge base"
+                    )
+                filtered_params["kds_list"] = requested_kds
                 filtered_params["server_url"] = AIDP_SERVER_URL
                 filtered_params["api_key"] = AIDP_API_KEY
                 filtered_params["tenant_id"] = AIDP_TENANT_ID
@@ -920,9 +1193,8 @@ def _validate_local_tool(
             if not tenant_id or not user_id:
                 raise ToolExecutionException(
                     f"Tenant ID and User ID are required for {tool_name} validation")
-            # get_vlm_model reads the first multimodal slot, now shown as image understanding.
             selected_model_id = instantiation_params.get("selected_model_id")
-            image_to_text_model = get_vlm_model(tenant_id=tenant_id, model_id=selected_model_id)
+            image_to_text_model = get_vlm_adapter(tenant_id, selected_model_id, slot="vlm")
             vlm_display_name = getattr(
                 image_to_text_model, 'display_name', None)
             set_monitoring_context(tenant_id=tenant_id)
@@ -940,15 +1212,16 @@ def _validate_local_tool(
                 raise ToolExecutionException(
                     f"Tenant ID and User ID are required for {tool_name} validation")
             selected_model_id = instantiation_params.get("selected_model_id")
-            video_understanding_model = get_video_understanding_model(tenant_id=tenant_id, model_id=selected_model_id)
+            slot = "vlm4" if tool_name == "analyze_audio" else "vlm3"
+            understanding_model = get_vlm_adapter(tenant_id, selected_model_id, slot=slot)
             model_display_name = getattr(
-                video_understanding_model, 'display_name', None)
+                understanding_model, 'display_name', None)
             set_monitoring_context(tenant_id=tenant_id)
             set_monitoring_operation(
                 "tool_validation", display_name=model_display_name)
             params = {
                 **instantiation_params,
-                'vlm_model': video_understanding_model,
+                'vlm_model': understanding_model,
                 'storage_client': minio_client,
                 'validate_url_access': lambda urls: validate_urls_access(urls, user_id)
             }
@@ -958,7 +1231,7 @@ def _validate_local_tool(
                 raise ToolExecutionException(
                     f"Tenant ID and User ID are required for {tool_name} validation")
             selected_model_id = instantiation_params.get("selected_model_id")
-            long_text_to_text_model = get_llm_model(tenant_id=tenant_id, model_id=selected_model_id)
+            long_text_to_text_model = get_llm_adapter(tenant_id, selected_model_id, modality="llm_long_context")
             llm_display_name = getattr(
                 long_text_to_text_model, 'display_name', None)
             set_monitoring_context(tenant_id=tenant_id)

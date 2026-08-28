@@ -194,6 +194,7 @@ class KubernetesContainerClient(ContainerClient):
         env_vars: Optional[Dict[str, str]] = None,
         host_port: Optional[int] = None,
         image: Optional[str] = None,
+        wait_for_ready: bool = True,
     ) -> Dict[str, Any]:
         """
         Start container (Pod) and return access URL
@@ -309,8 +310,9 @@ class KubernetesContainerClient(ContainerClient):
             logger.info(f"Creating pod {pod_name} with image {image_name}")
             self.core_v1.create_namespaced_pod(namespace=namespace, body=pod)
 
-            # Wait for pod to be ready (returns pod with UID)
-            pod = await self._wait_for_pod_ready(pod_name, namespace)
+            if wait_for_ready:
+                # Wait for pod to be ready (returns pod with UID)
+                pod = await self._wait_for_pod_ready(pod_name, namespace)
 
             # Create service for the pod with matching labels
             service = self._create_pod_service(pod_name, namespace, host_port or self.config.service_port, labels)
@@ -318,13 +320,17 @@ class KubernetesContainerClient(ContainerClient):
 
             service_url = self._get_service_url(pod_name, host_port)
 
-            # Wait for service to be ready
-            try:
-                await self._wait_for_service_ready(service_url, authorization_token=authorization_token)
-            except ContainerConnectionError:
-                logger.warning(
-                    f"Service health check failed for {service_url}, but pod is running"
-                )
+            if wait_for_ready:
+                # Wait for service to be ready
+                try:
+                    await self._wait_for_service_ready(
+                        service_url,
+                        authorization_token=authorization_token,
+                    )
+                except ContainerConnectionError:
+                    logger.warning(
+                        f"Service health check failed for {service_url}, but pod is running"
+                    )
 
             logger.info(f"Pod {pod_name} started successfully on port {host_port}")
             logger.info(f"Pod uid is: {pod.metadata.uid}")
