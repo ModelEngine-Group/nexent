@@ -9,6 +9,19 @@ from nexent.core.agents.context.evidence import ContextEvidenceCollector
 from nexent.core.context_runtime.contracts import ContextEvidence
 
 
+def _rendered_text(messages):
+    texts = []
+    for message in messages:
+        content = message.get("content") if isinstance(message, dict) else message.content
+        if isinstance(content, str):
+            texts.append(content)
+        else:
+            texts.extend(
+                part.get("text", "") for part in content or () if isinstance(part, dict)
+            )
+    return "\n".join(texts)
+
+
 class _SystemPrompt:
     def __init__(self, system_prompt):
         self.system_prompt = system_prompt
@@ -238,17 +251,17 @@ def test_projects_tool_calls_as_json_serializable_payloads(monkeypatch):
     result = manager.assemble_final_context(
         model=None, memory=memory, current_run_start_idx=0, run_context=run,
     )
-    rendered = str(result.messages)
+    rendered = _rendered_text(result.messages)
     assert "tool: python_interpreter" in rendered
     assert "print('ok')" in rendered
-    assert "outcome:\\nok" in rendered
-    assert "recorded_result:\\ndone" in rendered
+    assert "outcome:\nok" in rendered
+    assert "recorded_result:\ndone" in rendered
     assert "Calling tools:" not in rendered
     assert "Observation:" not in rendered
 
-    summary_rendered = str(manager.render_memory_messages(memory))
+    summary_rendered = _rendered_text(manager.render_memory_messages(memory))
     assert "tool: python_interpreter" in summary_rendered
-    assert "outcome:\\nok" in summary_rendered
+    assert "outcome:\nok" in summary_rendered
     assert "Calling tools:" not in summary_rendered
     assert "Observation:" not in summary_rendered
 
