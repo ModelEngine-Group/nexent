@@ -3,14 +3,18 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   App,
+  Button,
   Checkbox,
+  Divider,
+  Drawer,
   Form,
   Input,
   InputNumber,
-  Modal,
   Select,
   Switch,
+  Typography,
 } from "antd";
+import { useTranslation } from "react-i18next";
 
 import {
   createProvider,
@@ -25,7 +29,7 @@ interface ProviderConfigDialogProps {
   open: boolean;
   editing: ProviderConfig | null;
   onClose: () => void;
-  onSaved: () => void;
+  onSaved: (provider: ProviderConfig, shouldTest: boolean) => void;
 }
 
 const SECRET_MASK = "••••••••";
@@ -45,6 +49,7 @@ export function ProviderConfigDialog({
   onSaved,
 }: ProviderConfigDialogProps) {
   const { message } = App.useApp();
+  const { t } = useTranslation("common");
   const [form] = Form.useForm<FormValues>();
   const [saving, setSaving] = useState(false);
   const [plugins, setPlugins] = useState<PluginInfo[]>([]);
@@ -60,9 +65,9 @@ export function ProviderConfigDialog({
     setPluginsLoading(true);
     listPlugins()
       .then((data) => setPlugins(data))
-      .catch(() => message.error("Failed to load plugins"))
+      .catch(() => message.error(t("memory.external.form.pluginsLoadFailed")))
       .finally(() => setPluginsLoading(false));
-  }, [open, message]);
+  }, [open, message, t]);
 
   useEffect(() => {
     if (!open) {
@@ -145,7 +150,7 @@ export function ProviderConfigDialog({
     [selectedPlugin]
   );
 
-  const handleSave = async () => {
+  const handleSave = async (shouldTest = false) => {
     try {
       const values = await form.validateFields();
       setSaving(true);
@@ -171,29 +176,34 @@ export function ProviderConfigDialog({
       }
 
       if (isEditing) {
-        await updateProvider(editing.provider_config_id, {
+        const provider = await updateProvider(editing.provider_config_id, {
           provider_name: values.provider_name,
           enabled: values.enabled,
           timeout_seconds: values.timeout_seconds,
           params,
         });
-        message.success("Provider updated");
+        message.success(t("memory.external.form.updated"));
+        onSaved(provider, shouldTest);
       } else {
-        await createProvider({
+        const provider = await createProvider({
           provider_name: values.provider_name,
           connection_type: "plugin",
           enabled: values.enabled,
           timeout_seconds: values.timeout_seconds,
           params,
         });
-        message.success("Provider created");
+        message.success(t("memory.external.form.created"));
+        onSaved(provider, shouldTest);
       }
-      onSaved();
     } catch (err: unknown) {
       if (err && typeof err === "object" && "errorFields" in err) {
         return;
       }
-      message.error(isEditing ? "Failed to update provider" : "Failed to create provider");
+      message.error(
+        isEditing
+          ? t("memory.external.form.updateFailed")
+          : t("memory.external.form.createFailed")
+      );
     } finally {
       setSaving(false);
     }
@@ -220,12 +230,25 @@ export function ProviderConfigDialog({
             }
             rules={
               field.required && !isSecretEditing
-                ? [{ required: true, message: `${field.label} is required` }]
+                ? [
+                    {
+                      required: true,
+                      message: t("memory.external.form.fieldRequired", {
+                        label: field.label,
+                      }),
+                    },
+                  ]
                 : []
             }
           >
             <Input.Password
-              placeholder={isSecretEditing ? SECRET_MASK : `Enter ${field.label}`}
+              placeholder={
+                isSecretEditing
+                  ? SECRET_MASK
+                  : t("memory.external.form.fieldPlaceholder", {
+                      label: field.label,
+                    })
+              }
               onChange={() => handleSecretChange(field.key)}
             />
           </Form.Item>
@@ -247,11 +270,20 @@ export function ProviderConfigDialog({
             }
             rules={[
               ...(field.required
-                ? [{ required: true, message: `${field.label} is required` }]
+                ? [
+                    {
+                      required: true,
+                      message: t("memory.external.form.fieldRequired", {
+                        label: field.label,
+                      }),
+                    },
+                  ]
                 : []),
               {
                 type: "number",
-                message: `${field.label} must be a valid number`,
+                message: t("memory.external.form.fieldNumber", {
+                  label: field.label,
+                }),
                 transform: (value: string) =>
                   value === "" || value === undefined
                     ? undefined
@@ -297,12 +329,21 @@ export function ProviderConfigDialog({
             }
             rules={
               field.required
-                ? [{ required: true, message: `${field.label} is required` }]
+                ? [
+                    {
+                      required: true,
+                      message: t("memory.external.form.fieldRequired", {
+                        label: field.label,
+                      }),
+                    },
+                  ]
                 : []
             }
           >
             <Select
-              placeholder={`Select ${field.label}`}
+              placeholder={t("memory.external.form.fieldSelect", {
+                label: field.label,
+              })}
               options={field.options ?? []}
             />
           </Form.Item>
@@ -324,28 +365,58 @@ export function ProviderConfigDialog({
             }
             rules={
               field.required
-                ? [{ required: true, message: `${field.label} is required` }]
+                ? [
+                    {
+                      required: true,
+                      message: t("memory.external.form.fieldRequired", {
+                        label: field.label,
+                      }),
+                    },
+                  ]
                 : []
             }
           >
-            <Input placeholder={`Enter ${field.label}`} />
+            <Input
+              placeholder={t("memory.external.form.fieldPlaceholder", {
+                label: field.label,
+              })}
+            />
           </Form.Item>
         );
     }
   };
 
   return (
-    <Modal
+    <Drawer
       open={open}
-      centered
-      title={isEditing ? "Edit Provider" : "Add Provider"}
-      okText={isEditing ? "Save Changes" : "Create"}
-      cancelText="Cancel"
-      confirmLoading={saving}
-      onOk={handleSave}
-      onCancel={onClose}
+      title={
+        isEditing
+          ? t("memory.external.form.editTitle")
+          : t("memory.external.form.addTitle")
+      }
+      onClose={onClose}
       destroyOnHidden
-      width={560}
+      width={680}
+      extra={
+        <Button onClick={onClose}>{t("memory.external.actions.cancel")}</Button>
+      }
+      footer={
+        <div className="external-provider-drawer-footer">
+          <Button onClick={onClose}>
+            {t("memory.external.actions.cancel")}
+          </Button>
+          <Button loading={saving} onClick={() => void handleSave(true)}>
+            {t("memory.external.form.saveAndTest")}
+          </Button>
+          <Button
+            type="primary"
+            loading={saving}
+            onClick={() => void handleSave(false)}
+          >
+            {t("memory.external.actions.save")}
+          </Button>
+        </div>
+      }
     >
       <Form
         form={form}
@@ -354,24 +425,40 @@ export function ProviderConfigDialog({
         style={{ paddingTop: 12 }}
         initialValues={{ enabled: false, timeout_seconds: 30, params: {} }}
       >
+        <Divider titlePlacement="start">
+          {t("memory.external.form.providerSection")}
+        </Divider>
         <Form.Item
           name="provider_name"
-          label="Provider Name"
+          label={t("memory.external.form.providerName")}
           rules={[
-            { required: true, message: "Provider name is required" },
-            { whitespace: true, message: "Provider name cannot be empty" },
+            {
+              required: true,
+              message: t("memory.external.form.providerNameRequired"),
+            },
+            {
+              whitespace: true,
+              message: t("memory.external.form.providerNameRequired"),
+            },
           ]}
         >
-          <Input placeholder="Enter provider name" />
+          <Input
+            placeholder={t("memory.external.form.providerNamePlaceholder")}
+          />
         </Form.Item>
 
         <Form.Item
           name="plugin_name"
-          label="Plugin"
-          rules={[{ required: true, message: "Plugin is required" }]}
+          label={t("memory.external.form.plugin")}
+          rules={[
+            {
+              required: true,
+              message: t("memory.external.form.pluginRequired"),
+            },
+          ]}
         >
           <Select
-            placeholder="Select a plugin"
+            placeholder={t("memory.external.form.pluginPlaceholder")}
             loading={pluginsLoading}
             disabled={isEditing}
             onChange={handlePluginChange}
@@ -382,32 +469,43 @@ export function ProviderConfigDialog({
           />
         </Form.Item>
 
-        <Form.Item name="enabled" label="Enabled" valuePropName="checked">
-          <Switch />
-        </Form.Item>
-
+        <Divider titlePlacement="start">
+          {t("memory.external.form.connectionSection")}
+        </Divider>
         <Form.Item
           name="timeout_seconds"
-          label="Timeout (seconds)"
+          label={t("memory.external.form.timeout")}
           rules={[
-            { required: true, message: "Timeout is required" },
+            {
+              required: true,
+              message: t("memory.external.form.timeoutRequired"),
+            },
             {
               type: "number",
               min: 1,
               max: 300,
-              message: "Timeout must be between 1 and 300 seconds",
+              message: t("memory.external.form.timeoutRange"),
             },
           ]}
         >
           <InputNumber style={{ width: "100%" }} min={1} max={300} />
         </Form.Item>
 
-        {schemaFields.length > 0 && (
-          <div style={{ borderTop: "1px solid #f0f0f0", paddingTop: 16, marginTop: 8 }}>
-            {schemaFields.map(renderDynamicField)}
-          </div>
-        )}
+        {schemaFields.map(renderDynamicField)}
+        <Divider titlePlacement="start">
+          {t("memory.external.form.activationSection")}
+        </Divider>
+        <Form.Item
+          name="enabled"
+          label={t("memory.external.form.enabled")}
+          valuePropName="checked"
+        >
+          <Switch />
+        </Form.Item>
+        <Typography.Text type="secondary">
+          {t("memory.external.form.masterSwitchHint")}
+        </Typography.Text>
       </Form>
-    </Modal>
+    </Drawer>
   );
 }

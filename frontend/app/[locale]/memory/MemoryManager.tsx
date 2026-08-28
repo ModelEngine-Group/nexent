@@ -552,45 +552,22 @@ export function MemoryManager() {
         </Flex>
         {config.dreamingEnabled && <DreamingConfigCards />}
       </Card>
-      <Card className="memory-config-card" loading={configLoading}>
-        <Flex vertical gap={16}>
-          <Flex align="center" gap={12}>
-            <Settings size={20} />
-            <div>
-              <Text strong>{t("memoryManageModal.externalProviderTitle")}</Text>
-              <Text type="secondary" className="memory-setting-description">
-                {t("memoryManageModal.externalProviderDescription")}
-              </Text>
-            </div>
-          </Flex>
-          <Flex gap={24}>
-            <Flex vertical gap={8} style={{ flex: 1 }}>
-              <Text>{t("memoryManageModal.externalProviderTopK")}</Text>
-              <InputNumber
-                min={1}
-                max={100}
-                value={config.externalProviderTopK}
-                onChange={(value) => {
-                  if (value !== null && value >= 1 && value <= 100) {
-                    setConfig({ ...config, externalProviderTopK: value });
-                  }
-                }}
-                onBlur={async () => {
-                  setSavingConfig(true);
-                  await setExternalProviderTopK(config.externalProviderTopK);
-                  setSavingConfig(false);
-                }}
-                disabled={savingConfig}
-                style={{ width: "100%" }}
-              />
-              <Text type="secondary" style={{ fontSize: 12 }}>
-                {t("memoryManageModal.externalProviderTopKRange")}
-              </Text>
-            </Flex>
-          </Flex>
-        </Flex>
-      </Card>
-      <ProviderConfigCard />
+      <ProviderConfigCard
+        memoryEnabled={config.memoryEnabled}
+        topK={config.externalProviderTopK}
+        savingTopK={savingConfig}
+        onTopKChange={(value) =>
+          setConfig((current) => ({ ...current, externalProviderTopK: value }))
+        }
+        onTopKSave={async () => {
+          setSavingConfig(true);
+          try {
+            await setExternalProviderTopK(config.externalProviderTopK);
+          } finally {
+            setSavingConfig(false);
+          }
+        }}
+      />
     </div>
   );
 

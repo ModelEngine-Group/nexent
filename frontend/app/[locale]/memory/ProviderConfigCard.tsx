@@ -1,111 +1,159 @@
 "use client";
 
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  Alert,
   App,
-  Badge,
   Button,
   Card,
+  Dropdown,
   Empty,
   Flex,
-  Spin,
+  InputNumber,
+  Popover,
+  Segmented,
+  Skeleton,
   Switch,
+  Tag,
   Typography,
+  type MenuProps,
 } from "antd";
-import { Edit3, Plus, Search, Trash2, Upload, Plug } from "lucide-react";
+import {
+  Edit3,
+  MoreHorizontal,
+  Plus,
+  Plug,
+  RefreshCw,
+  Search,
+  Settings2,
+  Trash2,
+} from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 import { Can } from "@/components/permission/Can";
+import { usePermission } from "@/hooks/permission/usePermission";
 import {
   deleteProvider,
+  listPlugins,
   listProviders,
-  testSearch,
-  testIngest,
   updateProvider,
+  type PluginInfo,
   type ProviderConfig,
 } from "@/services/providerService";
 import { ProviderConfigDialog } from "./ProviderConfigDialog";
+import { ProviderTestPanel } from "./ProviderTestPanel";
 
 const { Text } = Typography;
+type ProviderFilter = "all" | "enabled" | "attention";
+type StatusKey =
+  "normal" | "unauthorized" | "forbidden" | "timeout" | "error" | "disabled";
 
-type ProviderStatus = {
-  status: "success" | "error" | "warning" | "default";
-  text: string;
-};
-
-function resolveProviderStatus(provider: ProviderConfig): ProviderStatus {
-  if (!provider.enabled) {
-    return { status: "default", text: "disabled" };
-  }
-  if (provider.last_error_code === null) {
-    return { status: "success", text: "normal" };
-  }
-  if (
-    provider.last_error_code === "unauthorized" ||
-    provider.last_error_code === "forbidden"
-  ) {
-    return { status: "error", text: provider.last_error_code };
-  }
-  return { status: "warning", text: provider.last_error_code };
+interface ProviderConfigCardProps {
+  memoryEnabled: boolean;
+  topK: number;
+  savingTopK: boolean;
+  onTopKChange: (value: number) => void;
+  onTopKSave: () => Promise<void>;
 }
 
-export function ProviderConfigCard() {
-  const { message, modal } = App.useApp();
+function resolveProviderStatus(provider: ProviderConfig): {
+  color: string;
+  key: StatusKey;
+} {
+  if (provider.last_error_code === "unauthorized")
+    return { color: "error", key: "unauthorized" };
+  if (provider.last_error_code === "forbidden")
+    return { color: "error", key: "forbidden" };
+  if (provider.last_error_code === "timeout")
+    return { color: "warning", key: "timeout" };
+  if (provider.last_error_code) return { color: "warning", key: "error" };
+  if (!provider.enabled) return { color: "default", key: "disabled" };
+  return { color: "success", key: "normal" };
+}
 
+export function ProviderConfigCard({
+  memoryEnabled,
+  topK,
+  savingTopK,
+  onTopKChange,
+  onTopKSave,
+}: ProviderConfigCardProps) {
+  const { message, modal } = App.useApp();
+  const { t } = useTranslation("common");
+  const { can } = usePermission();
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [providers, setProviders] = useState<ProviderConfig[]>([]);
+  const [plugins, setPlugins] = useState<PluginInfo[]>([]);
+  const [filter, setFilter] = useState<ProviderFilter>("all");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<ProviderConfig | null>(null);
+  const [testProvider, setTestProvider] = useState<ProviderConfig | null>(null);
+  const [testOpen, setTestOpen] = useState(false);
   const [togglingIds, setTogglingIds] = useState<Set<number>>(new Set());
-  const [testingIds, setTestingIds] = useState<Set<number>>(new Set());
 
   const refresh = useCallback(async () => {
     setLoading(true);
+    setLoadError(false);
     try {
-      const data = await listProviders();
-      setProviders(data);
+      const [providerData, pluginData] = await Promise.all([
+        listProviders(),
+        listPlugins(),
+      ]);
+      setProviders(providerData);
+      setPlugins(pluginData);
     } catch {
-      message.error("Failed to load providers");
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
-  }, [message]);
+  }, []);
 
   useEffect(() => {
-    let active = true;
-    listProviders()
-      .then((data) => {
-        if (active) setProviders(data);
-      })
-      .catch(() => {
-        if (active) message.error("Failed to load providers");
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
-    return () => {
-      active = false;
-    };
-  }, [message]);
+    void refresh();
+  }, [refresh]);
+
+  const filteredProviders = useMemo(
+    () =>
+      providers.filter((provider) => {
+        if (filter === "enabled") return provider.enabled;
+        if (filter === "attention") {
+          const status = resolveProviderStatus(provider).key;
+          return status !== "normal" && status !== "disabled";
+        }
+        return true;
+      }),
+    [filter, providers]
+  );
+
+  const pluginByName = useMemo(
+    () => new Map(plugins.map((plugin) => [plugin.name, plugin])),
+    [plugins]
+  );
 
   const handleToggleEnabled = async (
     provider: ProviderConfig,
     enabled: boolean
   ) => {
-    setTogglingIds((prev) => new Set(prev).add(provider.provider_config_id));
+    setTogglingIds((current) =>
+      new Set(current).add(provider.provider_config_id)
+    );
     try {
       const updated = await updateProvider(provider.provider_config_id, {
         enabled,
       });
-      setProviders((prev) =>
-        prev.map((p) =>
-          p.provider_config_id === provider.provider_config_id ? updated : p
+      setProviders((current) =>
+        current.map((item) =>
+          item.provider_config_id === provider.provider_config_id
+            ? updated
+            : item
         )
       );
     } catch {
-      message.error("Failed to update provider");
+      message.error(t("memory.external.providers.updateFailed"));
     } finally {
-      setTogglingIds((prev) => {
-        const next = new Set(prev);
+      setTogglingIds((current) => {
+        const next = new Set(current);
         next.delete(provider.provider_config_id);
         return next;
       });
@@ -115,215 +163,316 @@ export function ProviderConfigCard() {
   const handleDelete = (provider: ProviderConfig) => {
     modal.confirm({
       centered: true,
-      title: "Delete this provider?",
-      content: `Provider "${provider.provider_name}" will be permanently removed.`,
-      okText: "Delete",
-      cancelText: "Cancel",
+      title: t("memory.external.providers.deleteTitle"),
+      content: t("memory.external.providers.deleteDescription", {
+        name: provider.provider_name,
+      }),
+      okText: t("memory.external.actions.delete"),
+      cancelText: t("memory.external.actions.cancel"),
       okButtonProps: { danger: true },
       onOk: async () => {
         try {
           await deleteProvider(provider.provider_config_id);
-          setProviders((prev) =>
-            prev.filter(
-              (p) => p.provider_config_id !== provider.provider_config_id
+          setProviders((current) =>
+            current.filter(
+              (item) => item.provider_config_id !== provider.provider_config_id
             )
           );
-          message.success("Provider deleted");
+          message.success(t("memory.external.providers.deleted"));
         } catch {
-          message.error("Failed to delete provider");
+          message.error(t("memory.external.providers.deleteFailed"));
         }
       },
     });
   };
 
-  const handleTestSearch = async (provider: ProviderConfig) => {
-    setTestingIds((prev) => new Set(prev).add(provider.provider_config_id));
-    try {
-      await testSearch(provider.provider_config_id, "test query", 3);
-      message.success("Test search succeeded");
-    } catch {
-      message.error("Test search failed");
-    } finally {
-      setTestingIds((prev) => {
-        const next = new Set(prev);
-        next.delete(provider.provider_config_id);
-        return next;
-      });
-    }
+  const openTest = (provider: ProviderConfig) => {
+    setTestProvider(provider);
+    setTestOpen(true);
   };
-
-  const handleTestIngest = async (provider: ProviderConfig) => {
-    setTestingIds((prev) => new Set(prev).add(provider.provider_config_id));
-    try {
-      await testIngest(provider.provider_config_id, [
+  const menuFor = (provider: ProviderConfig): MenuProps["items"] => {
+    const items: MenuProps["items"] = [];
+    if (can("mem.provider:update")) {
+      items.push(
         {
-          event_id: "__test__",
-          event_type: "test",
-          unit_type: "test",
-          unit_content: "test ingest payload",
-          unit_index: 0,
-          metadata: {},
+          key: "test",
+          icon: <Search size={15} />,
+          label: t("memory.external.actions.test"),
+          onClick: () => openTest(provider),
         },
-      ]);
-      message.success("Test ingest succeeded");
-    } catch {
-      message.error("Test ingest failed");
-    } finally {
-      setTestingIds((prev) => {
-        const next = new Set(prev);
-        next.delete(provider.provider_config_id);
-        return next;
-      });
+        {
+          key: "edit",
+          icon: <Edit3 size={15} />,
+          label: t("memory.external.actions.edit"),
+          onClick: () => {
+            setEditing(provider);
+            setDialogOpen(true);
+          },
+        }
+      );
     }
+    if (can("mem.provider:delete")) {
+      items.push(
+        { type: "divider" },
+        {
+          key: "delete",
+          danger: true,
+          icon: <Trash2 size={15} />,
+          label: t("memory.external.actions.delete"),
+          onClick: () => handleDelete(provider),
+        }
+      );
+    }
+    return items;
   };
-
-  const openCreate = () => {
-    setEditing(null);
-    setDialogOpen(true);
-  };
-
-  const openEdit = (provider: ProviderConfig) => {
-    setEditing(provider);
-    setDialogOpen(true);
-  };
-
-  const handleDialogSaved = () => {
-    setDialogOpen(false);
-    void refresh();
-  };
-
-  const pluginNameFromParams = (provider: ProviderConfig): string =>
-    provider.params?.["plugin.name"] ?? "—";
-
-  if (loading) {
-    return (
-      <Card className="memory-config-card">
-        <Flex justify="center" style={{ padding: 48 }}>
-          <Spin />
-        </Flex>
-      </Card>
-    );
-  }
 
   return (
     <>
-      <Card className="memory-config-card">
-        <Flex
-          align="center"
-          justify="space-between"
-          style={{ marginBottom: 16 }}
-        >
-          <Flex align="center" gap={12}>
-            <Plug size={20} />
-            <div>
-              <Text strong>External Memory Providers</Text>
-              <Text type="secondary" className="memory-setting-description">
-                Configure plugin-based external memory providers
-              </Text>
-            </div>
-          </Flex>
-          <Can permission="mem.provider:create">
-            <Button type="primary" icon={<Plus size={17} />} onClick={openCreate}>
-              Add Provider
-            </Button>
-          </Can>
-        </Flex>
-
-        {providers.length === 0 ? (
-          <Empty
-            description="No providers configured"
-            image={Empty.PRESENTED_IMAGE_SIMPLE}
-          />
-        ) : (
-          <Flex vertical gap={12}>
-            {providers.map((provider) => {
-              const badge = resolveProviderStatus(provider);
-              const isToggling = togglingIds.has(provider.provider_config_id);
-              const isTesting = testingIds.has(provider.provider_config_id);
-
-              return (
-                <div
-                  key={provider.provider_config_id}
-                  className="provider-row"
+      <Card className="memory-config-card external-memory-card">
+        <Flex vertical gap={20}>
+          <Flex align="flex-start" justify="space-between" gap={16} wrap="wrap">
+            <Flex align="center" gap={12}>
+              <Plug size={20} aria-hidden="true" />
+              <div>
+                <Text strong>{t("memory.external.title")}</Text>
+                <Text type="secondary" className="memory-setting-description">
+                  {t("memory.external.description")}
+                </Text>
+              </div>
+            </Flex>
+            <Flex gap={8} wrap="wrap">
+              <Popover
+                placement="bottomRight"
+                trigger="click"
+                title={t("memory.external.advanced.title")}
+                content={
+                  <div className="external-memory-advanced-popover">
+                    <Text type="secondary">
+                      {t("memory.external.topK.description")}
+                    </Text>
+                    <div className="external-memory-advanced-field">
+                      <Text strong>{t("memory.external.topK.label")}</Text>
+                      <InputNumber
+                        min={1}
+                        max={100}
+                        value={topK}
+                        disabled={savingTopK}
+                        aria-label={t("memory.external.topK.label")}
+                        onChange={(value) =>
+                          value !== null && onTopKChange(value)
+                        }
+                        onBlur={() => void onTopKSave()}
+                      />
+                    </div>
+                  </div>
+                }
+              >
+                <Button icon={<Settings2 size={17} />}>
+                  {t("memory.external.advanced.title")}
+                </Button>
+              </Popover>
+              <Can permission="mem.provider:create">
+                <Button
+                  type="primary"
+                  icon={<Plus size={17} />}
+                  disabled={!loading && plugins.length === 0}
+                  onClick={() => {
+                    setEditing(null);
+                    setDialogOpen(true);
+                  }}
                 >
-                  <Flex
-                    align="center"
-                    justify="space-between"
-                    gap={12}
-                    wrap="wrap"
-                  >
-                    <Flex align="center" gap={12} style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ minWidth: 0 }}>
-                        <Text strong ellipsis>
-                          {provider.provider_name}
-                        </Text>
-                        <br />
-                        <Text type="secondary" style={{ fontSize: 12 }}>
-                          {pluginNameFromParams(provider)}
-                        </Text>
-                      </div>
-                      <Badge
-                        status={badge.status}
-                        text={
-                          <span style={{ fontSize: 12 }}>{badge.text}</span>
-                        }
-                      />
-                    </Flex>
-
-                    <Flex align="center" gap={8}>
-                      <Switch
-                        size="small"
-                        checked={provider.enabled}
-                        loading={isToggling}
-                        onChange={(checked) =>
-                          handleToggleEnabled(provider, checked)
-                        }
-                      />
-                      <Button
-                        size="small"
-                        icon={<Search size={14} />}
-                        loading={isTesting}
-                        onClick={() => handleTestSearch(provider)}
-                      >
-                        Search
-                      </Button>
-                      <Button
-                        size="small"
-                        icon={<Upload size={14} />}
-                        loading={isTesting}
-                        onClick={() => handleTestIngest(provider)}
-                      >
-                        Ingest
-                      </Button>
-                      <Can permission="mem.provider:update">
-                        <Button
-                          size="small"
-                          icon={<Edit3 size={14} />}
-                          onClick={() => openEdit(provider)}
-                        />
-                      </Can>
-                      <Can permission="mem.provider:delete">
-                        <Button
-                          size="small"
-                          danger
-                          icon={<Trash2 size={14} />}
-                          onClick={() => handleDelete(provider)}
-                        />
-                      </Can>
-                    </Flex>
-                  </Flex>
-                </div>
-              );
-            })}
+                  {t("memory.external.actions.add")}
+                </Button>
+              </Can>
+            </Flex>
           </Flex>
-        )}
+
+          {!memoryEnabled && (
+            <Alert
+              type="info"
+              showIcon
+              message={t("memory.external.masterSwitchOff")}
+            />
+          )}
+
+          <Flex align="center" justify="space-between" gap={12} wrap="wrap">
+            <Text strong>
+              {t("memory.external.providers.title", {
+                count: providers.length,
+              })}
+            </Text>
+            <Segmented<ProviderFilter>
+              size="small"
+              value={filter}
+              onChange={setFilter}
+              options={[
+                { value: "all", label: t("memory.external.filters.all") },
+                {
+                  value: "enabled",
+                  label: t("memory.external.filters.enabled"),
+                },
+                {
+                  value: "attention",
+                  label: t("memory.external.filters.attention"),
+                },
+              ]}
+            />
+          </Flex>
+
+          {loading ? (
+            <Skeleton active paragraph={{ rows: 3 }} />
+          ) : loadError ? (
+            <Alert
+              type="error"
+              showIcon
+              message={t("memory.external.loadFailed")}
+              action={
+                <Button
+                  size="small"
+                  icon={<RefreshCw size={14} />}
+                  onClick={() => void refresh()}
+                >
+                  {t("memory.external.actions.retry")}
+                </Button>
+              }
+            />
+          ) : plugins.length === 0 ? (
+            <Empty
+              image={Empty.PRESENTED_IMAGE_SIMPLE}
+              description={t("memory.external.noPlugins")}
+            />
+          ) : providers.length === 0 ? (
+            <Empty
+              image={Empty.PRESENTED_IMAGE_SIMPLE}
+              description={t("memory.external.empty")}
+            >
+              <Can permission="mem.provider:create">
+                <Button
+                  type="primary"
+                  icon={<Plus size={16} />}
+                  onClick={() => {
+                    setEditing(null);
+                    setDialogOpen(true);
+                  }}
+                >
+                  {t("memory.external.actions.add")}
+                </Button>
+              </Can>
+            </Empty>
+          ) : filteredProviders.length === 0 ? (
+            <Empty
+              image={Empty.PRESENTED_IMAGE_SIMPLE}
+              description={t("memory.external.noFilterResults")}
+            />
+          ) : (
+            <div className="external-provider-list">
+              {filteredProviders.map((provider) => {
+                const status = resolveProviderStatus(provider);
+                const pluginName = provider.params?.["plugin.name"] ?? "";
+                const plugin = pluginByName.get(pluginName);
+                const actions = menuFor(provider);
+                return (
+                  <div
+                    className="external-provider-row"
+                    key={provider.provider_config_id}
+                  >
+                    <div className="external-provider-main">
+                      <Flex align="center" gap={8} wrap="wrap">
+                        <Text strong>{provider.provider_name}</Text>
+                        <Tag color={status.color}>
+                          {t(`memory.external.status.${status.key}`)}
+                        </Tag>
+                      </Flex>
+                      <Flex
+                        gap={8}
+                        wrap="wrap"
+                        className="external-provider-meta"
+                      >
+                        <Text type="secondary">
+                          {pluginName || "—"}
+                          {plugin ? ` · v${plugin.version}` : ""}
+                        </Text>
+                        {plugin?.implements.map((capability) => (
+                          <Tag key={capability}>
+                            {t(`memory.external.capability.${capability}`, {
+                              defaultValue: capability,
+                            })}
+                          </Tag>
+                        ))}
+                        <Text type="secondary">
+                          {t("memory.external.timeout", {
+                            seconds: provider.timeout_seconds,
+                          })}
+                        </Text>
+                      </Flex>
+                      {status.key !== "normal" && status.key !== "disabled" && (
+                        <Text
+                          type="danger"
+                          className="external-provider-guidance"
+                        >
+                          {t(`memory.external.statusHelp.${status.key}`)}
+                        </Text>
+                      )}
+                    </div>
+                    <Flex
+                      align="center"
+                      gap={8}
+                      className="external-provider-actions"
+                    >
+                      <Can
+                        permission="mem.provider:update"
+                        fallback={
+                          <Switch
+                            size="small"
+                            checked={provider.enabled}
+                            disabled
+                            aria-label={t("memory.external.actions.enable")}
+                          />
+                        }
+                      >
+                        <Switch
+                          size="small"
+                          checked={provider.enabled}
+                          loading={togglingIds.has(provider.provider_config_id)}
+                          aria-label={t("memory.external.actions.enable")}
+                          onChange={(checked) =>
+                            void handleToggleEnabled(provider, checked)
+                          }
+                        />
+                      </Can>
+                      {actions && actions.length > 0 && (
+                        <Dropdown menu={{ items: actions }} trigger={["click"]}>
+                          <Button
+                            type="text"
+                            aria-label={t("memory.external.actions.more")}
+                            icon={<MoreHorizontal size={18} />}
+                          />
+                        </Dropdown>
+                      )}
+                    </Flex>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </Flex>
       </Card>
 
       <ProviderConfigDialog
         open={dialogOpen}
         editing={editing}
         onClose={() => setDialogOpen(false)}
-        onSaved={handleDialogSaved}
+        onSaved={(provider, shouldTest) => {
+          setDialogOpen(false);
+          void refresh();
+          if (shouldTest) openTest(provider);
+        }}
+      />
+      <ProviderTestPanel
+        open={testOpen}
+        provider={testProvider}
+        onClose={() => setTestOpen(false)}
+        onTested={() => void refresh()}
       />
     </>
   );
