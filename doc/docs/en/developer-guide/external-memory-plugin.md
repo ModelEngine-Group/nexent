@@ -9,7 +9,7 @@ A plugin can implement either or both capabilities:
 - `searchable`: retrieve external memories during Agent initialization and `search_memory` execution, then merge them with built-in memory context.
 - `ingestible`: send extracted memory units to the provider after a conversation turn.
 
-The deployment kill switches `EXTERNAL_MEMORY_SEARCH_ENABLED` and `EXTERNAL_MEMORY_INGEST_ENABLED` default to `false`. The provider configuration's `enabled` field is tenant- and instance-scoped. Normal Agent traffic calls a plugin only when both levels are enabled. The UI test actions bypass the instance `enabled` state for connectivity checks.
+The deployment search kill switch `EXTERNAL_MEMORY_SEARCH_ENABLED` defaults to `false`. External ingest has no deployment-wide switch: the provider configuration's `enabled` field is the tenant- and instance-scoped control. Normal Agent ingest traffic calls every enabled provider instance. The UI test actions bypass the instance `enabled` state for connectivity checks.
 
 ## Plugin layout
 

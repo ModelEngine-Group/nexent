@@ -7,9 +7,21 @@ import json
 import httpx
 import pytest
 
+from nexent.memory.models import (
+    ExternalMemoryItem,
+    MemoryIngestRequest,
+    MemoryIngestUnit,
+    MemoryLayer,
+    MemorySearchRequest,
+    MemorySearchResult,
+)
+from nexent.memory.providers.retry import (
+    NonRetryableProviderError,
+    RetryableProviderError,
+)
+from nexent.memory.retrieval.normalizer import Normalizer
+
 from backend.memory_provider_plugins.mem0.provider import Mem0Provider
-from nexent.memory.models import MemoryIngestRequest, MemoryIngestUnit, MemorySearchRequest
-from nexent.memory.providers.retry import NonRetryableProviderError, RetryableProviderError
 
 
 def _install_transport(monkeypatch, handler):
@@ -114,6 +126,71 @@ async def test_ac_p3_24_ingest_success_uses_mock_http(monkeypatch):
     assert result.accepted_count == 1
     assert payloads[0]["user_id"] == "user-1"
     assert payloads[0]["agent_id"] == "agent-5"
+
+
+@pytest.mark.asyncio
+async def test_ac_p3_37_38_mem0_dual_write_search_and_cross_source_dedup(monkeypatch):
+    """Exercise the real Mem0 plugin HTTP contract and retrieval normalizer."""
+    stored_memories = []
+
+    def handler(request):
+        payload = json.loads(request.content)
+        if request.url.path == "/v1/memories/":
+            stored_memories.append(payload["messages"][0]["content"])
+            return httpx.Response(200, json={"results": [{"id": "mem0-1", "event": "ADD"}]})
+        if request.url.path == "/v1/memories/search/":
+            return httpx.Response(200, json={"results": [
+                {"id": "mem0-1", "memory": content, "score": 0.88}
+                for content in stored_memories
+            ]})
+        return httpx.Response(404)
+
+    _install_transport(monkeypatch, handler)
+    provider = Mem0Provider({"api_key": "test-key"})
+    content = "The user prefers concise weekly status summaries."
+
+    internal_result = MemorySearchResult(
+        memory_id=101,
+        content=content,
+        score=0.93,
+        layer=MemoryLayer.AGENT,
+        source="internal",
+        metadata={"memory_type": "short_term"},
+    )
+    ingest_result = await provider.ingest(MemoryIngestRequest(
+        tenant_id="tenant-1",
+        user_id="user-1",
+        agent_id="agent-5",
+        conversation_id="conversation-1",
+        units=[MemoryIngestUnit(
+            event_id="memory-101",
+            event_type="memory_stored",
+            unit_type="agent",
+            unit_content=content,
+        )],
+        idempotency_key="nexent:tenant-1:agent-5:user-1:conversation-1:memory_stored:101",
+    ))
+    external_results = await provider.search(
+        _search_request(query="weekly status summaries", agent_id="agent-5")
+    )
+
+    assert ingest_result.status == "ok"
+    assert stored_memories == [content]
+    assert [result.content for result in external_results] == [content]
+
+    normalized = Normalizer().normalize(
+        [internal_result],
+        external_results=[ExternalMemoryItem(
+            id=result.external_id or "",
+            content=result.content,
+            score=result.score,
+            provider=result.source,
+            metadata=result.metadata,
+        ) for result in external_results],
+    )
+    assert len(normalized) == 1
+    assert normalized[0].content == content
+    assert normalized[0].is_external is False
 
 
 @pytest.mark.asyncio

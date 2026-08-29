@@ -1175,6 +1175,13 @@ async def create_agent_config(
                         provider_service = _get_external_provider_service_for_search()
                         if provider_service is not None:
                             top_k = memory_context.user_config.external_provider_top_k
+                            logger.info(
+                                "event=external_provider_search_started tenant_id=%s "
+                                "agent_id=%s top_k=%d",
+                                tenant_id,
+                                agent_id,
+                                top_k,
+                            )
 
                             search_request = MemorySearchRequest(
                                 query=last_user_query or "",
@@ -1205,14 +1212,13 @@ async def create_agent_config(
                                     )
                                     for r in ext_search_results
                                 ]
-                                logger.info(
-                                    "event=external_provider_search tenant_id=%s user_id=%s "
-                                    "agent_id=%s results_count=%d",
-                                    tenant_id,
-                                    user_id,
-                                    agent_id,
-                                    len(external_results),
-                                )
+                            logger.info(
+                                "event=external_provider_search_completed tenant_id=%s "
+                                "agent_id=%s results_count=%d",
+                                tenant_id,
+                                agent_id,
+                                len(external_results or []),
+                            )
                     except Exception as exc:
                         logger.warning(
                             "event=external_provider_search_failed tenant_id=%s user_id=%s "

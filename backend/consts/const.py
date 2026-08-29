@@ -419,13 +419,10 @@ PROVIDER_REQUEST_TIMEOUT_SECONDS = int(
 EXTERNAL_MEMORY_SEARCH_ENABLED = os.getenv(
     "EXTERNAL_MEMORY_SEARCH_ENABLED", "false"
 ).lower() in ("true", "1", "yes")
-EXTERNAL_MEMORY_INGEST_ENABLED = os.getenv(
-    "EXTERNAL_MEMORY_INGEST_ENABLED", "false"
-).lower() in ("true", "1", "yes")
-
 # External provider toggles (configured per provider elsewhere; these constants
 # describe protocol-level defaults)
 EXTERNAL_MEMORY_DEFAULT_ALLOWED_UNIT_TYPES = (
+    "agent",
     "model_output",
     "model_output_thinking",
     "model_output_deep_thinking",

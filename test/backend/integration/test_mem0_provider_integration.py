@@ -23,7 +23,6 @@ sys.path.insert(0, __import__("os").path.join(__import__("os").path.dirname(__fi
 _consts_const = types.ModuleType("consts.const")
 _consts_const.MEMORY_PROVIDER_PLUGINS_DIR = "/tmp/test-plugins"
 _consts_const.EXTERNAL_MEMORY_SEARCH_ENABLED = True
-_consts_const.EXTERNAL_MEMORY_INGEST_ENABLED = True
 _consts_const.EXTERNAL_MEMORY_DEFAULT_ALLOWED_UNIT_TYPES = {"agent", "user", "tool", "summary"}
 sys.modules["consts.const"] = _consts_const
 sys.modules["consts"] = types.ModuleType("consts")

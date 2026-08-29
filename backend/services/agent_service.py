@@ -23,8 +23,7 @@ from services.agent_version_service import publish_version_impl
 from utils.prompt_template_utils import normalize_prompt_generate_template_content
 from consts.const import TOOL_TYPE_MAPPING, \
     LANGUAGE, MESSAGE_ROLE, MODEL_CONFIG_MAPPING, CAN_EDIT_ALL_USER_ROLES, PERMISSION_PRIVATE, STREAM_STATUS_EVENT, \
-    DEFAULT_EN_TITLE, DEFAULT_ZH_TITLE, RUNTIME_CANCEL_POLL_INTERVAL_SECONDS, \
-    EXTERNAL_MEMORY_INGEST_ENABLED
+    DEFAULT_EN_TITLE, DEFAULT_ZH_TITLE, RUNTIME_CANCEL_POLL_INTERVAL_SECONDS
 from consts.agent import SAFE_AGENT_STREAM_ERROR_MESSAGE
 from consts.exceptions import (
     AppException,
@@ -1562,8 +1561,7 @@ async def _stream_agent_chunks(
                 logger.exception("fa_memory_extraction: failed to schedule extraction task")
 
         if (
-            EXTERNAL_MEMORY_INGEST_ENABLED
-            and terminal_status == "completed"
+            terminal_status == "completed"
             and streaming_message_id is not None
             and memory_ctx is not None
             and getattr(getattr(memory_ctx, "user_config", None), "memory_switch", False)

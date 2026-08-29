@@ -200,6 +200,13 @@ class MemoryContextService:
             embedding_model_info=resolved_model_info,
             write_hits=bool(query),
         )
+        logger.info(
+            "event=memory_context_internal_search_completed tenant_id=%s "
+            "result_count=%d external_prefetched=%s",
+            tenant_id,
+            len(results),
+            external_results is not None,
+        )
 
         if (
             external_results is None
@@ -213,6 +220,12 @@ class MemoryContextService:
                     user_id=user_id,
                     agent_id=agent_id,
                     conversation_id=conversation_id,
+                )
+                logger.info(
+                    "event=memory_context_external_search_completed tenant_id=%s "
+                    "result_count=%d",
+                    tenant_id,
+                    len(external_results or []),
                 )
             except Exception:
                 logger.warning(
@@ -229,6 +242,14 @@ class MemoryContextService:
                 created_at_for_id=created_at_for_id,
             )
             context = pipeline_result.into_memory_search_context()
+            logger.info(
+                "event=memory_context_pipeline_completed tenant_id=%s internal_count=%d "
+                "external_count=%d final_count=%d",
+                tenant_id,
+                len(results),
+                len(external_results or []),
+                len(getattr(pipeline_result, "final_memory_records", [])),
+            )
         else:
             context = MemorySearchContext()
             for result in results:

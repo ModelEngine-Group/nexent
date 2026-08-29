@@ -33,8 +33,6 @@ from nexent.memory.models import (
 )
 from nexent.memory.service import MemoryService
 
-from consts.const import EXTERNAL_MEMORY_INGEST_ENABLED
-
 from .memory_record_service import (
     MemoryRecordError,
     _resolve_tenant_embedding_model_info,
@@ -88,11 +86,17 @@ async def _backend_store_hook(
         actor="agent",
     )
 
-    if EXTERNAL_MEMORY_INGEST_ENABLED:
-        try:
-            await _fanout_external_ingest(payload, result)
-        except Exception:
-            logger.warning("External ingest failed", exc_info=True)
+    try:
+        await _fanout_external_ingest(payload, result)
+    except Exception as exc:
+        logger.warning(
+            "event=external_memory_ingest_failed tenant_id=%s event_type=memory_stored "
+            "event_id=%s error_type=%s",
+            tenant_id,
+            result.get("memory_id", ""),
+            type(exc).__name__,
+            exc_info=True,
+        )
 
     return result
 
@@ -123,7 +127,23 @@ async def _fanout_external_ingest(
     provider_service = get_memory_external_provider_service()
     enabled = provider_service._config_service.get_enabled_providers(tenant_id)
     if not enabled:
+        logger.info(
+            "event=external_memory_ingest_skipped tenant_id=%s event_type=memory_stored "
+            "event_id=%s reason=no_enabled_providers",
+            tenant_id,
+            result.get("memory_id", ""),
+        )
         return
+
+    provider_names = [str(config.get("provider_name", "unknown")) for config in enabled]
+    logger.info(
+        "event=external_memory_ingest_started tenant_id=%s event_type=memory_stored "
+        "event_id=%s provider_count=%d providers=%s unit_count=1",
+        tenant_id,
+        result.get("memory_id", ""),
+        len(enabled),
+        ",".join(provider_names),
+    )
 
     layer = payload.get("layer", MemoryLayer.AGENT.value)
     if hasattr(layer, "value"):
@@ -137,7 +157,7 @@ async def _fanout_external_ingest(
     )
 
     ingestion_service = _build_ingestion_event_service()
-    await ingestion_service.send_ingest_all_enabled(
+    ingest_results = await ingestion_service.send_ingest_all_enabled(
         tenant_id=tenant_id,
         user_id=payload["user_id"],
         agent_id=str(payload.get("agent_id", "")),
@@ -145,6 +165,16 @@ async def _fanout_external_ingest(
         event_type="memory_stored",
         event_id=str(result.get("memory_id", "")),
         units=[ingest_unit],
+    )
+    successful = sum(item.status in {"ok", "degraded"} for item in ingest_results)
+    logger.info(
+        "event=external_memory_ingest_completed tenant_id=%s event_type=memory_stored "
+        "event_id=%s provider_count=%d success_count=%d failure_count=%d",
+        tenant_id,
+        result.get("memory_id", ""),
+        len(enabled),
+        successful,
+        len(ingest_results) - successful,
     )
 
 

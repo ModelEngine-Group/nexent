@@ -71,7 +71,6 @@ config:
   skillsPath: "/mnt/nexent-data/skills"
   memoryProviderPluginsDir: "/mnt/nexent-data/memory-provider-plugins"
   externalMemorySearchEnabled: "false"
-  externalMemoryIngestEnabled: "false"
   marketBackend: "http://60.204.251.153:8010"
   modelEngine:
     enabled: "false"

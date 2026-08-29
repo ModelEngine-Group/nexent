@@ -8,7 +8,6 @@ sys.path.insert(0, __import__("os").path.join(__import__("os").path.dirname(__fi
 
 consts_const = types.ModuleType("consts.const")
 consts_const.EXTERNAL_MEMORY_SEARCH_ENABLED = True
-consts_const.EXTERNAL_MEMORY_INGEST_ENABLED = True
 consts_const.AGENT_SHORT_TERM_HALF_LIFE_DAYS = 7.0
 consts_const.MMR_CANDIDATE_TOP_K = 10
 consts_const.MMR_DUPLICATE_THRESHOLD = 0.92
@@ -305,7 +304,6 @@ async def test_build_context_search_disabled(mock_retrieval):
 async def test_backend_store_hook_external_ingest_called():
     sys.modules["nexent.memory.models"].MemoryLayer = MemoryLayer
     sys.modules["nexent.memory.models"].MemoryIngestUnit = MemoryIngestUnit
-    sys.modules["consts.const"].EXTERNAL_MEMORY_INGEST_ENABLED = True
     from backend.services import memory_backend_adapter
 
     mock_record_service = MagicMock()
@@ -313,7 +311,6 @@ async def test_backend_store_hook_external_ingest_called():
 
     with patch.object(memory_backend_adapter, "get_memory_record_service", return_value=mock_record_service), \
          patch.object(memory_backend_adapter, "_resolve_tenant_embedding_model_info", return_value=MagicMock()), \
-         patch.object(memory_backend_adapter, "EXTERNAL_MEMORY_INGEST_ENABLED", True), \
          patch.object(memory_backend_adapter, "_fanout_external_ingest", new_callable=AsyncMock) as m_fanout:
         await memory_backend_adapter._backend_store_hook({
             "tenant_id": "t1", "user_id": "u1", "content": "test",
@@ -323,10 +320,9 @@ async def test_backend_store_hook_external_ingest_called():
 
 
 @pytest.mark.asyncio
-async def test_backend_store_hook_external_ingest_not_called_when_disabled():
+async def test_backend_store_hook_external_ingest_has_no_deployment_switch():
     sys.modules["nexent.memory.models"].MemoryLayer = MemoryLayer
     sys.modules["nexent.memory.models"].MemoryIngestUnit = MemoryIngestUnit
-    sys.modules["consts.const"].EXTERNAL_MEMORY_INGEST_ENABLED = True
     from backend.services import memory_backend_adapter
 
     mock_record_service = MagicMock()
@@ -334,20 +330,18 @@ async def test_backend_store_hook_external_ingest_not_called_when_disabled():
 
     with patch.object(memory_backend_adapter, "get_memory_record_service", return_value=mock_record_service), \
          patch.object(memory_backend_adapter, "_resolve_tenant_embedding_model_info", return_value=MagicMock()), \
-         patch.object(memory_backend_adapter, "EXTERNAL_MEMORY_INGEST_ENABLED", False), \
          patch.object(memory_backend_adapter, "_fanout_external_ingest", new_callable=AsyncMock) as m_fanout:
         await memory_backend_adapter._backend_store_hook({
             "tenant_id": "t1", "user_id": "u1", "content": "test",
             "layer": "agent", "memory_type": "short_term",
         })
-        m_fanout.assert_not_awaited()
+        m_fanout.assert_awaited_once()
 
 
 @pytest.mark.asyncio
 async def test_backend_store_hook_ingest_failure_doesnt_break():
     sys.modules["nexent.memory.models"].MemoryLayer = MemoryLayer
     sys.modules["nexent.memory.models"].MemoryIngestUnit = MemoryIngestUnit
-    sys.modules["consts.const"].EXTERNAL_MEMORY_INGEST_ENABLED = True
     from backend.services import memory_backend_adapter
 
     mock_record_service = MagicMock()
@@ -355,7 +349,6 @@ async def test_backend_store_hook_ingest_failure_doesnt_break():
 
     with patch.object(memory_backend_adapter, "get_memory_record_service", return_value=mock_record_service), \
          patch.object(memory_backend_adapter, "_resolve_tenant_embedding_model_info", return_value=MagicMock()), \
-         patch.object(memory_backend_adapter, "EXTERNAL_MEMORY_INGEST_ENABLED", True), \
          patch.object(memory_backend_adapter, "_fanout_external_ingest", new_callable=AsyncMock, side_effect=RuntimeError("fail")):
         result = await memory_backend_adapter._backend_store_hook({
             "tenant_id": "t1", "user_id": "u1", "content": "test",

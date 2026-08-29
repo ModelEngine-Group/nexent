@@ -9,7 +9,7 @@ Nexent 外部记忆插件用于把第三方记忆服务接入 Agent 的记忆检
 - `searchable`：会话开始和 `search_memory` 工具执行时检索第三方记忆，并与内置记忆一起注入 Agent 上下文。
 - `ingestible`：会话结束后把提取出的记忆单元写入第三方服务。
 
-部署级总开关 `EXTERNAL_MEMORY_SEARCH_ENABLED` 和 `EXTERNAL_MEMORY_INGEST_ENABLED` 默认均为 `false`。Provider 配置中的 `enabled` 是租户级、实例级开关；只有总开关和实例开关同时启用，正常会话链路才会调用插件。管理页面的“测试检索/测试写入”用于连通性检查，会绕过实例的 `enabled` 状态。
+部署级检索开关 `EXTERNAL_MEMORY_SEARCH_ENABLED` 默认为 `false`。外部 ingest 不再设置部署级总开关，Provider 配置中的 `enabled` 是租户级、实例级控制；正常 Agent 写入会调用每个已启用的 Provider 实例。管理页面的“测试检索/测试写入”用于连通性检查，会绕过实例的 `enabled` 状态。
 
 ## 插件目录结构
 

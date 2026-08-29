@@ -66,6 +66,16 @@ class MemoryIngestionEventService:
             units, list(EXTERNAL_MEMORY_DEFAULT_ALLOWED_UNIT_TYPES)
         )
         if not filtered:
+            logger.warning(
+                "event=external_memory_ingest_filtered_empty tenant_id=%s provider=%s "
+                "event_type=%s event_id=%s input_unit_count=%d allowed_unit_types=%s",
+                tenant_id,
+                provider_name,
+                event_type,
+                event_id,
+                len(units),
+                ",".join(sorted(EXTERNAL_MEMORY_DEFAULT_ALLOWED_UNIT_TYPES)),
+            )
             return MemoryIngestResult(
                 provider=provider_name,
                 status="ok",
@@ -108,7 +118,24 @@ class MemoryIngestionEventService:
         """
         configs = self._config_service.get_enabled_providers(tenant_id)
         if not configs:
+            logger.info(
+                "event=external_memory_ingest_fanout_skipped tenant_id=%s "
+                "event_type=%s event_id=%s reason=no_enabled_providers",
+                tenant_id,
+                event_type,
+                event_id,
+            )
             return []
+
+        logger.info(
+            "event=external_memory_ingest_fanout_started tenant_id=%s event_type=%s "
+            "event_id=%s provider_count=%d unit_count=%d",
+            tenant_id,
+            event_type,
+            event_id,
+            len(configs),
+            len(units),
+        )
 
         tasks = [
             self.send_ingest(
@@ -133,6 +160,16 @@ class MemoryIngestionEventService:
                     status="error",
                     message=str(r),
                 ))
+        logger.info(
+            "event=external_memory_ingest_fanout_completed tenant_id=%s event_type=%s "
+            "event_id=%s provider_count=%d result_count=%d error_count=%d",
+            tenant_id,
+            event_type,
+            event_id,
+            len(configs),
+            len(final),
+            sum(result.status == "error" for result in final),
+        )
         return final
 
     # ------------------------------------------------------------------
