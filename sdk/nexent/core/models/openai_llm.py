@@ -32,22 +32,22 @@ from .prompt_cache import (
     extract_prompt_cache_usage,
     resolve_prompt_cache_profile,
 )
-from .message_utils import prepare_messages_for_smolagents_text_flattening
+from .message_utils import content_has_multimodal_blocks, prepare_messages_for_smolagents_text_flattening
+from .retry import DEFAULT_MODEL_RETRY, ModelRetryConfig, classify_model_error
 
 logger = logging.getLogger("openai_llm")
 
+# Raised (with this message) when a model invocation is aborted because the
+# caller's stop event was set. Reused at every stop_event check site so the
+# message stays consistent and is easy to assert against in tests.
+STOP_EVENT_INTERRUPTED_MESSAGE = "Model is interrupted by stop event"
+
+
+class EmptyModelResponseError(RuntimeError):
+    """Raised when a completed provider stream contains no user-visible content."""
+
 
 class OpenAIModel(OpenAIServerModel):
-    def _prepare_completion_kwargs(self, *args, **kwargs) -> Dict[str, Any]:
-        """
-        Override to force flatten_messages_as_text=False for VLM.
-        VLM content is always a list of typed blocks (e.g. image_url + text).
-        It must never be flattened into a plain string, regardless of the
-        model_factory setting (e.g. "modelengine").
-        """
-        kwargs.setdefault("flatten_messages_as_text", False)
-        return super()._prepare_completion_kwargs(*args, **kwargs)
-
     # Public SDK constructor: keep common kwargs explicit and read extension
     # kwargs below to preserve backward-compatible keyword call sites.
     def __init__(self, observer: MessageObserver = MessageObserver, temperature=0.2, top_p=0.95,
@@ -56,8 +56,10 @@ class OpenAIModel(OpenAIServerModel):
                  extra_body: Optional[Dict[str, Any]] = None,
                  max_output_tokens: Optional[int] = None,
                  max_tokens: Optional[int] = None,
+                 flatten_messages_as_text: Optional[bool] = None,
                  safe_input_budget_snapshot: Optional[SafeInputBudgetSnapshot | Dict[str, Any]] = None,
                  timeout_seconds: Optional[float] = None,
+                 retry_config: Optional["ModelRetryConfig"] = None,
                  *args, **kwargs):
         """
         Initialize OpenAI Model with observer and SSL verification option.
@@ -82,6 +84,10 @@ class OpenAIModel(OpenAIServerModel):
             max_tokens: DEPRECATED alias for max_output_tokens retained during
                        the W1 migration. If max_output_tokens is supplied it
                        wins; otherwise max_tokens is copied into it.
+            flatten_messages_as_text: Override message flattening for this
+                       model instance. Defaults to ModelEngine text-model
+                       behavior; multimodal adapters must pass False to retain
+                       typed media blocks.
             capacity_snapshot: Optional model capacity snapshot accepted via
                        kwargs for backward-compatible keyword call sites.
             prompt_cache: Selected prompt-cache capability profile accepted via
@@ -99,12 +105,14 @@ class OpenAIModel(OpenAIServerModel):
         self.stop_event = threading.Event()
         self._monitoring = get_monitoring_manager()
         self.model_factory = (model_factory or "").lower()
+        self.flatten_messages_as_text = flatten_messages_as_text
         self.display_name = display_name
         self.extra_body = extra_body or None
         self.prompt_cache = prompt_cache or None
         self.last_provider_cache_advice = None
         self.last_prompt_cache_usage = None
         self.last_cached_input_token_count = 0
+        self.last_response_diagnostics = None
         self.safe_input_budget_snapshot = safe_input_budget_snapshot
         self.capacity_snapshot = capacity_snapshot
         if max_output_tokens is None and max_tokens is not None:
@@ -117,6 +125,8 @@ class OpenAIModel(OpenAIServerModel):
         self.max_output_tokens = max_output_tokens
         # Legacy alias kept readable for any caller still reading .max_tokens.
         self.max_tokens = max_output_tokens
+        self.retry_config = retry_config or DEFAULT_MODEL_RETRY
+        self.last_retry_count = 0
 
         # Create http_client based on ssl_verify parameter and timeout
         if not ssl_verify or timeout_seconds is not None:
@@ -195,6 +205,7 @@ class OpenAIModel(OpenAIServerModel):
 
         token_tracker = _token_tracker or self._monitoring.create_token_tracker(
             self.model_id)
+        self.last_response_diagnostics = None
 
         # Normalize incoming messages so we can accept plain dict payloads like
         # {"role": "user", "content": "..."} alongside ChatMessage instances.
@@ -227,7 +238,15 @@ class OpenAIModel(OpenAIServerModel):
                 **{f"llm.param.{k}": v for k, v in kwargs.items() if isinstance(v, (str, int, float, bool))}
             )
 
-        flatten_messages_as_text = self.model_factory == "modelengine"
+        has_media = any(
+            content_has_multimodal_blocks(getattr(m, "content", None))
+            for m in normalized_messages
+        )
+        flatten_messages_as_text = (
+            self.model_factory == "modelengine" and not has_media
+            if self.flatten_messages_as_text is None
+            else self.flatten_messages_as_text
+        )
         messages_for_completion = (
             prepare_messages_for_smolagents_text_flattening(normalized_messages)
             if flatten_messages_as_text
@@ -279,6 +298,10 @@ class OpenAIModel(OpenAIServerModel):
         dispatch_kwargs = apply_cache_directives(
             completion_kwargs, cache_advice
         )
+        # The __call__ boundary owns streaming: dispatch below always streams
+        # and assembles the result. Drop a stale construction-time ``stream``
+        # so it cannot collide with the explicit ``stream=True`` at dispatch.
+        dispatch_kwargs.pop("stream", None)
         self._monitoring.set_span_attributes(
             **{
                 "llm.prompt_cache.mode": cache_advice.mode,
@@ -306,186 +329,289 @@ class OpenAIModel(OpenAIServerModel):
                 }
             )
 
-        current_request = self._dispatch_chat_completion(
-            safe_input_budget_snapshot=trusted_budget_snapshot,
-            capacity_snapshot=self.capacity_snapshot,
-            stream=True,
-            **dispatch_kwargs,
-        )
+        for attempt in range(1, self.retry_config.max_attempts + 1):
+            if self.stop_event.is_set():
+                if token_tracker:
+                    self._monitoring.add_span_event("model_stopped", {
+                        "reason": "stop_event_set"})
+                raise RuntimeError(STOP_EVENT_INTERRUPTED_MESSAGE)
+            try:
+                current_request = self._dispatch_chat_completion(
+                    safe_input_budget_snapshot=trusted_budget_snapshot,
+                    capacity_snapshot=self.capacity_snapshot,
+                    stream=True,
+                    **dispatch_kwargs,
+                )
 
-        # Validate response type: ensure we got a proper iterator, not error strings or dicts
-        # Some APIs return error strings like "error: rate limit" or JSON dicts on failure
-        if isinstance(current_request, str):
-            raise ValueError(f"LLM API returned error string: {current_request}")
-        if isinstance(current_request, dict):
-            error_msg = current_request.get("error") or current_request.get("message") or str(current_request)
-            raise ValueError(f"LLM API returned error: {error_msg}")
+                # Validate response type: ensure we got a proper iterator, not error strings or dicts
+                # Some APIs return error strings like "error: rate limit" or JSON dicts on failure
+                if isinstance(current_request, str):
+                    raise ValueError(f"LLM API returned error string: {current_request}")
+                if isinstance(current_request, dict):
+                    error_msg = current_request.get("error") or current_request.get("message") or str(current_request)
+                    raise ValueError(f"LLM API returned error: {error_msg}")
 
-        chunk_list = []
-        token_join = []
-        role = None
-        finish_reason = None
-        self.last_finish_reason = None
+                chunk_list = []
+                token_join = []
+                role = None
+                finish_reason = None
+                self.last_finish_reason = None
+                content_chunk_count = 0
+                reasoning_chunk_count = 0
+                reasoning_char_count = 0
+                empty_choices_chunk_count = 0
+                nonstandard_chunk_count = 0
 
-        # Reset output mode
-        self.observer.current_mode = ProcessType.MODEL_OUTPUT_THINKING
+                # Reset output mode
+                self.observer.current_mode = ProcessType.MODEL_OUTPUT_THINKING
 
-        # Track streaming metrics
-        stream_start_time = time.time()
-        first_token_received = False
+                # Track streaming metrics
+                stream_start_time = time.time()
+                first_token_received = False
 
-        try:
-            for chunk in current_request:
-                # Safety check: skip non-standard chunks that lack expected attributes
-                # This handles edge cases where API returns error responses as chunks
-                if not hasattr(chunk, 'choices'):
-                    # Log warning and continue processing
-                    if hasattr(chunk, '__str__'):
-                        chunk_str = str(chunk)
-                        logger.warning(f"Received non-standard chunk (no 'choices'): {chunk_str[:200]}")
-                    chunk_list.append(chunk)
-                    continue
+                try:
+                    for chunk in current_request:
+                        # Safety check: skip non-standard chunks that lack expected attributes
+                        # This handles edge cases where API returns error responses as chunks
+                        if not hasattr(chunk, 'choices'):
+                            # Log warning and continue processing
+                            if hasattr(chunk, '__str__'):
+                                chunk_str = str(chunk)
+                                logger.warning(f"Received non-standard chunk (no 'choices'): {chunk_str[:200]}")
+                            chunk_list.append(chunk)
+                            nonstandard_chunk_count += 1
+                            continue
 
-                if not chunk.choices:
-                    chunk_list.append(chunk)
-                    continue
+                        if not chunk.choices:
+                            chunk_list.append(chunk)
+                            empty_choices_chunk_count += 1
+                            continue
 
-                chunk_finish_reason = getattr(chunk.choices[0], "finish_reason", None)
-                if chunk_finish_reason is not None:
-                    finish_reason = str(chunk_finish_reason)
+                        chunk_finish_reason = getattr(chunk.choices[0], "finish_reason", None)
+                        if chunk_finish_reason is not None:
+                            finish_reason = str(chunk_finish_reason)
 
-                new_token = chunk.choices[0].delta.content
-                reasoning_content = getattr(
-                    chunk.choices[0].delta, 'reasoning_content', None)
+                        new_token = chunk.choices[0].delta.content
+                        reasoning_content = getattr(
+                            chunk.choices[0].delta, 'reasoning_content', None)
 
-                # Handle reasoning_content if it exists and is not null
-                if reasoning_content is not None:
-                    self.observer.add_model_reasoning_content(
-                        reasoning_content)
-                    if token_tracker and not first_token_received:
-                        token_tracker.record_first_token()
-                        first_token_received = True
+                        # Handle reasoning_content if it exists and is not null
+                        if reasoning_content is not None:
+                            reasoning_chunk_count += 1
+                            reasoning_char_count += len(str(reasoning_content))
+                            self.observer.add_model_reasoning_content(
+                                reasoning_content)
+                            if token_tracker and not first_token_received:
+                                token_tracker.record_first_token()
+                                first_token_received = True
 
-                if new_token is not None:
-                    # Record first token timing
-                    if token_tracker and not first_token_received:
-                        token_tracker.record_first_token()
-                        first_token_received = True
+                        if new_token is not None:
+                            content_chunk_count += 1
+                            # Record first token timing
+                            if token_tracker and not first_token_received:
+                                token_tracker.record_first_token()
+                                first_token_received = True
 
-                    # Track each token
+                            # Track each token
+                            if token_tracker:
+                                token_tracker.record_token(new_token)
+
+                            self.observer.add_model_new_token(new_token)
+                            token_join.append(new_token)
+                            role = chunk.choices[0].delta.role
+
+                        chunk_list.append(chunk)
+                        if self.stop_event.is_set():
+                            if token_tracker:
+                                self._monitoring.add_span_event("model_stopped", {
+                                    "reason": "stop_event_set"})
+                            raise RuntimeError(STOP_EVENT_INTERRUPTED_MESSAGE)
+
+                    # Send end marker
+                    self.observer.flush_remaining_tokens()
+                    model_output = "".join(token_join)
+                    self.last_finish_reason = finish_reason
+                    if finish_reason == "length":
+                        logger.warning(
+                            "Model output reached the configured completion token limit; "
+                            "the answer is incomplete"
+                        )
+                        self._monitoring.add_span_event("completion_truncated", {
+                            "finish_reason": finish_reason,
+                        })
+
+                    # Extract token usage
+                    input_tokens = 0
+                    output_tokens = 0
+                    usage = None
+                    if chunk_list and chunk_list[-1].usage is not None:
+                        usage = chunk_list[-1].usage
+                        input_tokens = usage.prompt_tokens
+                        output_tokens = usage.completion_tokens if hasattr(
+                            usage, 'completion_tokens') else usage.total_tokens
+                        self.last_input_token_count = input_tokens
+                        self.last_output_token_count = output_tokens
+                    else:
+                        input_text = ""
+                        for msg in normalized_messages:
+                            if hasattr(msg, 'content'):
+                                content = msg.content
+                                if isinstance(content, str):
+                                    input_text += content
+                                elif isinstance(content, list):
+                                    for part in content:
+                                        if isinstance(part, dict) and part.get("type") == "text":
+                                            input_text += part.get("text", "")
+                        input_tokens = estimate_tokens_text(input_text)
+                        output_tokens = estimate_tokens_text(model_output)
+                        self.last_input_token_count = input_tokens
+                        self.last_output_token_count = output_tokens
+                        logger.debug(
+                            f"Token usage not returned by API, using estimation: "
+                            f"input_tokens={input_tokens}, output_tokens={output_tokens}"
+                        )
+
+                    cache_usage = extract_prompt_cache_usage(
+                        usage, input_tokens, capability_profile=selected_cache_profile
+                    )
+                    self.last_prompt_cache_usage = cache_usage
+                    self.last_cached_input_token_count = cache_usage.cached_input_tokens
+                    self._monitoring.set_span_attributes(
+                        **{
+                            "llm.prompt_cache.cached_input_tokens": cache_usage.cached_input_tokens,
+                            "llm.prompt_cache.uncached_input_tokens": cache_usage.uncached_input_tokens,
+                            "llm.prompt_cache.provider_cache_hit": cache_usage.provider_cache_hit,
+                            "llm.prompt_cache.hit_ratio": cache_usage.hit_ratio,
+                            "llm.prompt_cache.metrics_source": cache_usage.metrics_source,
+                            "llm.prompt_cache.estimated_saved_input_tokens": cache_usage.estimated_saved_input_tokens,
+                            "llm.prompt_cache.estimated_input_savings_ratio": cache_usage.estimated_input_savings_ratio,
+                        }
+                    )
+
+                    # Record completion metrics
                     if token_tracker:
-                        token_tracker.record_token(new_token)
+                        token_tracker.record_completion(
+                            input_tokens, output_tokens)
 
-                    self.observer.add_model_new_token(new_token)
-                    token_join.append(new_token)
-                    role = chunk.choices[0].delta.role
+                    response_diagnostics = {
+                        "finish_reason": finish_reason,
+                        "chunk_count": len(chunk_list),
+                        "content_chunk_count": content_chunk_count,
+                        "content_char_count": len(model_output),
+                        "reasoning_chunk_count": reasoning_chunk_count,
+                        "reasoning_char_count": reasoning_char_count,
+                        "empty_choices_chunk_count": empty_choices_chunk_count,
+                        "nonstandard_chunk_count": nonstandard_chunk_count,
+                        "input_tokens": input_tokens,
+                        "output_tokens": output_tokens,
+                    }
+                    self.last_response_diagnostics = response_diagnostics
+                    self._monitoring.set_span_attributes(
+                        **{f"llm.response.{key}": value for key, value in response_diagnostics.items()}
+                    )
 
-                chunk_list.append(chunk)
-                if self.stop_event.is_set():
                     if token_tracker:
-                        self._monitoring.add_span_event("model_stopped", {
-                            "reason": "stop_event_set"})
-                    raise RuntimeError(
-                        "Model is interrupted by stop event")
+                        total_duration = time.time() - stream_start_time
+                        self._monitoring.set_openinference_output(model_output)
+                        self._monitoring.add_span_event("completion_finished", {
+                            "total_duration": total_duration,
+                            "output_length": len(model_output),
+                            "chunk_count": len(chunk_list)
+                        })
 
-            # Send end marker
-            self.observer.flush_remaining_tokens()
-            model_output = "".join(token_join)
-            self.last_finish_reason = finish_reason
-            if finish_reason == "length":
+                    if not model_output.strip():
+                        logger.warning(
+                            "event=empty_model_response model_id=%s provider=%s "
+                            "finish_reason=%s chunk_count=%d content_chunk_count=%d "
+                            "reasoning_chunk_count=%d reasoning_char_count=%d "
+                            "empty_choices_chunk_count=%d nonstandard_chunk_count=%d "
+                            "input_tokens=%d output_tokens=%d",
+                            self.model_id,
+                            self.model_factory or "unknown",
+                            finish_reason,
+                            len(chunk_list),
+                            content_chunk_count,
+                            reasoning_chunk_count,
+                            reasoning_char_count,
+                            empty_choices_chunk_count,
+                            nonstandard_chunk_count,
+                            input_tokens,
+                            output_tokens,
+                        )
+                        self._monitoring.add_span_event("empty_model_response", response_diagnostics)
+                        raise EmptyModelResponseError(
+                            "Model stream completed without user-visible content "
+                            f"(finish_reason={finish_reason}, reasoning_chunks={reasoning_chunk_count}, "
+                            f"output_tokens={output_tokens})"
+                        )
+
+                    message = ChatMessage.from_dict(
+                        ChatCompletionMessage(role=role if role else "assistant",  # If there is no explicit role, default to "assistant"
+                                              content=model_output).model_dump(include={"role", "content", "tool_calls"}))
+
+                    from smolagents.monitoring import TokenUsage
+
+                    if input_tokens > 0 or output_tokens > 0:
+                        message.token_usage = TokenUsage(
+                            input_tokens=input_tokens,
+                            output_tokens=output_tokens
+                        )
+                    message.raw = current_request
+                    message.role = MessageRole.ASSISTANT
+                    return message
+
+                except Exception as e:
+                    if token_tracker:
+                        self._monitoring.add_span_event("error_occurred", {"error_type": type(
+                            e).__name__, "error_message": str(e)})
+
+                    if "context_length_exceeded" in str(e):
+                        raise ValueError(f"Token limit exceeded: {str(e)}")
+                    raise e
+            except EmptyModelResponseError:
+                # Some reasoning-capable OpenAI-compatible providers
+                # occasionally finish with ``stop`` after emitting only
+                # reasoning chunks. Retry once inside the model adapter so an
+                # otherwise transient malformed stream does not consume a
+                # visible agent step. A ``length`` finish is deterministic
+                # truncation and must still surface immediately.
+                empty_retry_limit = min(self.retry_config.max_attempts, 2)
+                if self.last_finish_reason not in (None, "stop") or attempt >= empty_retry_limit:
+                    raise
+                backoff = self.retry_config.calculate_backoff(attempt)
                 logger.warning(
-                    "Model output reached the configured completion token limit; "
-                    "the answer is incomplete"
+                    "event=retry_empty_model_response attempt=%d/%d finish_reason=%s "
+                    "retrying_after_seconds=%.2f",
+                    attempt,
+                    empty_retry_limit,
+                    self.last_finish_reason,
+                    backoff,
                 )
-                self._monitoring.add_span_event("completion_truncated", {
-                    "finish_reason": finish_reason,
-                })
-
-            # Extract token usage
-            input_tokens = 0
-            output_tokens = 0
-            usage = None
-            if chunk_list and chunk_list[-1].usage is not None:
-                usage = chunk_list[-1].usage
-                input_tokens = usage.prompt_tokens
-                output_tokens = usage.completion_tokens if hasattr(
-                    usage, 'completion_tokens') else usage.total_tokens
-                self.last_input_token_count = input_tokens
-                self.last_output_token_count = output_tokens
-            else:
-                input_text = ""
-                for msg in normalized_messages:
-                    if hasattr(msg, 'content'):
-                        content = msg.content
-                        if isinstance(content, str):
-                            input_text += content
-                        elif isinstance(content, list):
-                            for part in content:
-                                if isinstance(part, dict) and part.get("type") == "text":
-                                    input_text += part.get("text", "")
-                input_tokens = estimate_tokens_text(input_text)
-                output_tokens = estimate_tokens_text(model_output)
-                self.last_input_token_count = input_tokens
-                self.last_output_token_count = output_tokens
-                logger.debug(
-                    f"Token usage not returned by API, using estimation: "
-                    f"input_tokens={input_tokens}, output_tokens={output_tokens}"
+                self.last_retry_count = attempt
+                if self.stop_event.is_set():
+                    raise RuntimeError(STOP_EVENT_INTERRUPTED_MESSAGE)
+                self.stop_event.wait(backoff)
+                continue
+            except Exception as e:
+                if classify_model_error(e) != "retryable":
+                    raise
+                if attempt >= self.retry_config.max_attempts:
+                    logging.exception(
+                        "Model call failed after %d attempts: %s",
+                        attempt, str(e),
+                    )
+                    raise
+                backoff = self.retry_config.calculate_backoff(attempt)
+                logger.warning(
+                    "Model call attempt %d/%d failed with retryable error (%s); "
+                    "retrying after %.2fs",
+                    attempt, self.retry_config.max_attempts, str(e), backoff,
                 )
-
-            cache_usage = extract_prompt_cache_usage(
-                usage, input_tokens, capability_profile=selected_cache_profile
-            )
-            self.last_prompt_cache_usage = cache_usage
-            self.last_cached_input_token_count = cache_usage.cached_input_tokens
-            self._monitoring.set_span_attributes(
-                **{
-                    "llm.prompt_cache.cached_input_tokens": cache_usage.cached_input_tokens,
-                    "llm.prompt_cache.uncached_input_tokens": cache_usage.uncached_input_tokens,
-                    "llm.prompt_cache.provider_cache_hit": cache_usage.provider_cache_hit,
-                    "llm.prompt_cache.hit_ratio": cache_usage.hit_ratio,
-                    "llm.prompt_cache.metrics_source": cache_usage.metrics_source,
-                    "llm.prompt_cache.estimated_saved_input_tokens": cache_usage.estimated_saved_input_tokens,
-                    "llm.prompt_cache.estimated_input_savings_ratio": cache_usage.estimated_input_savings_ratio,
-                }
-            )
-
-            # Record completion metrics
-            if token_tracker:
-                token_tracker.record_completion(
-                    input_tokens, output_tokens)
-
-            if token_tracker:
-                total_duration = time.time() - stream_start_time
-                self._monitoring.set_openinference_output(model_output)
-                self._monitoring.add_span_event("completion_finished", {
-                    "total_duration": total_duration,
-                    "output_length": len(model_output),
-                    "chunk_count": len(chunk_list)
-                })
-
-            message = ChatMessage.from_dict(
-                ChatCompletionMessage(role=role if role else "assistant",  # If there is no explicit role, default to "assistant"
-                                      content=model_output).model_dump(include={"role", "content", "tool_calls"}))
-
-            from smolagents.monitoring import TokenUsage
-
-            if input_tokens > 0 or output_tokens > 0:
-                message.token_usage = TokenUsage(
-                    input_tokens=input_tokens,
-                    output_tokens=output_tokens
-                )
-            message.raw = current_request
-            message.role = MessageRole.ASSISTANT
-            return message
-
-        except Exception as e:
-            if token_tracker:
-                self._monitoring.add_span_event("error_occurred", {"error_type": type(
-                    e).__name__, "error_message": str(e)})
-
-            if "context_length_exceeded" in str(e):
-                raise ValueError(f"Token limit exceeded: {str(e)}")
-            raise e
+                self.last_retry_count = attempt
+                if self.stop_event.is_set():
+                    raise RuntimeError(STOP_EVENT_INTERRUPTED_MESSAGE)
+                self.stop_event.wait(backoff)
+                continue
 
     def _dispatch_chat_completion(
         self,
@@ -519,6 +645,15 @@ class OpenAIModel(OpenAIServerModel):
                     caller_value=caller_max_tokens,
                 )
             completion_kwargs["max_tokens"] = trusted_max_tokens
+        logger.info(
+            "event=chat_completion_create model_id=%s kwargs=%s",
+            self.model_id,
+            json.dumps(
+                {k: v for k, v in completion_kwargs.items() if k != "messages"},
+                ensure_ascii=False,
+                default=str,
+            ),
+        )
         return self.client.chat.completions.create(**completion_kwargs)
 
     @staticmethod

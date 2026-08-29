@@ -125,6 +125,46 @@ class TestRaiseError:
             assert e.details == details
 
 
+class TestPersonalKbQuotaErrorCodes:
+    """Test personal KB quota errors use the unified AppException contract."""
+
+    def test_quota_exceeded_uses_forbidden_error_code(self):
+        exc = AppException(
+            ErrorCode.TENANT_PERSONAL_KB_QUOTA_EXCEEDED,
+            "quota exceeded",
+        )
+
+        assert isinstance(exc, AppException)
+        assert exc.error_code == ErrorCode.TENANT_PERSONAL_KB_QUOTA_EXCEEDED
+        assert exc.http_status == 403
+        assert exc.message == "quota exceeded"
+
+    def test_quota_unavailable_uses_service_unavailable_error_code(self):
+        exc = AppException(
+            ErrorCode.TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE,
+            "es down",
+        )
+
+        assert isinstance(exc, AppException)
+        assert exc.error_code == ErrorCode.TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE
+        assert exc.http_status == 503
+
+    def test_quota_below_usage_contains_structured_details(self):
+        exc = AppException(
+            ErrorCode.TENANT_PERSONAL_KB_QUOTA_BELOW_USAGE,
+            "Personal KB quota 1 KB is below current usage 2 KB",
+            details={"quota_limit_bytes": 1024, "usage_bytes": 2048},
+        )
+
+        assert isinstance(exc, AppException)
+        assert exc.error_code == ErrorCode.TENANT_PERSONAL_KB_QUOTA_BELOW_USAGE
+        assert exc.http_status == 400
+        assert exc.details == {
+            "quota_limit_bytes": 1024,
+            "usage_bytes": 2048,
+        }
+
+
 class TestLegacyExceptions:
     """Test class for legacy exception classes."""
 

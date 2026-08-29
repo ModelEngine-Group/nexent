@@ -4,6 +4,7 @@ Unit tests for backend.apps.skill_app module.
 import sys
 import os
 import io
+import json
 import types
 import zipfile
 
@@ -109,7 +110,10 @@ consts_mock = types.ModuleType('consts')
 consts_exceptions_mock = types.ModuleType('consts.exceptions')
 consts_model_mock = types.ModuleType('consts.model')
 consts_const_mock = types.ModuleType('consts.const')
+consts_agent_mock = types.ModuleType('consts.agent')
+consts_agent_mock.SAFE_AGENT_STREAM_ERROR_MESSAGE = "Agent execution failed. Please try again later."
 sys.modules['consts'] = consts_mock
+sys.modules['consts.agent'] = consts_agent_mock
 sys.modules['consts.exceptions'] = consts_exceptions_mock
 sys.modules['consts.model'] = consts_model_mock
 sys.modules['consts.const'] = consts_const_mock
@@ -169,46 +173,73 @@ class MockSkillResponse(BaseModel):
     description: Optional[str] = None
     content: Optional[str] = None
 
-class MockSkillCreateInteractiveRequest(BaseModel):
-    user_request: str
-    language: Optional[str] = "zh"
-    complexity: Optional[str] = "simple"
-    existing_skill: Optional[str] = None
+class MockNL2SkillRunRequest(BaseModel):
+    query: str
+    history: Optional[List[Dict[str, str]]] = None
+    draft_snapshot: Optional[Dict[str, Any]] = None
+    complexity: str = "complicated"
+    language: Optional[str] = None
 
 consts_model_mock.SkillCreateRequest = MockSkillCreateRequest
 consts_model_mock.SkillUpdateRequest = MockSkillUpdateRequest
 consts_model_mock.SkillResponse = MockSkillResponse
-consts_model_mock.SkillCreateInteractiveRequest = MockSkillCreateInteractiveRequest
+consts_model_mock.NL2SkillRunRequest = MockNL2SkillRunRequest
 
 # Mock services
 services_mock = types.ModuleType('services')
-services_mock.__path__ = []  # Make it a package so submodules can be imported
+services_mock.__path__ = [
+    os.path.join(os.path.dirname(__file__), "../../../backend/services")
+]  # Keep real service submodules importable
 services_skill_service_mock = types.ModuleType('services.skill_service')
+services_nl2skill_service_mock = types.ModuleType('services.nl2skill_service')
 services_asset_owner_visibility_mock = types.ModuleType('services.asset_owner_visibility')
+services_agent_draft_permission_mock = types.ModuleType('services.agent_draft_permission_service')
 sys.modules['services'] = services_mock
 sys.modules['services.skill_service'] = services_skill_service_mock
+sys.modules['services.nl2skill_service'] = services_nl2skill_service_mock
 sys.modules['services.asset_owner_visibility'] = services_asset_owner_visibility_mock
+sys.modules['services.agent_draft_permission_service'] = services_agent_draft_permission_mock
 setattr(services_mock, 'skill_service', services_skill_service_mock)
+setattr(services_mock, 'nl2skill_service', services_nl2skill_service_mock)
 setattr(services_mock, 'asset_owner_visibility', services_asset_owner_visibility_mock)
+
+
+class AgentDraftEditError(Exception):
+    def __init__(self, code):
+        self.code = code
+
+
+class ResourceBindingError(Exception):
+    def __init__(self, code):
+        self.code = code
+
+
+services_agent_draft_permission_mock.AgentDraftEditError = AgentDraftEditError
+services_agent_draft_permission_mock.ResourceBindingError = ResourceBindingError
+services_agent_draft_permission_mock.require_agent_draft_edit = MagicMock()
 
 class MockSkillService:
     def __init__(self):
         self.repository = MagicMock()
         self.skill_manager = MagicMock()
 services_skill_service_mock.SkillService = MockSkillService
+services_skill_service_mock.UnsupportedSkillFilePreview = type(
+    "UnsupportedSkillFilePreview", (SkillException,), {}
+)
 services_skill_service_mock.get_skill_manager = MagicMock()
-services_skill_service_mock.skill_creation_task_manager = MagicMock()
-services_skill_service_mock.stream_skill_creation = MagicMock(return_value=("task123", MagicMock()))
 services_skill_service_mock.update_skill_list = MagicMock()
 services_skill_service_mock.get_official_skills_with_status = MagicMock(return_value=[])
 services_skill_service_mock.install_skills_from_zip_for_tenant = MagicMock(return_value=[])
+services_nl2skill_service_mock.create_nl2skill_stream = AsyncMock()
 
 
 def setup_function():
     """Restore module-level service stubs after tests that isolate imports."""
     sys.modules['services'] = services_mock
     sys.modules['services.skill_service'] = services_skill_service_mock
+    sys.modules['services.nl2skill_service'] = services_nl2skill_service_mock
     sys.modules['services.asset_owner_visibility'] = services_asset_owner_visibility_mock
+    sys.modules['services.agent_draft_permission_service'] = services_agent_draft_permission_mock
 services_asset_owner_visibility_mock.can_view_skill = MagicMock(return_value=True)
 
 # Mock utils
@@ -947,64 +978,59 @@ description: Updated description
 class TestUpdateSkillInstanceEndpoint:
     """Test POST /skills/instance/update endpoint."""
 
-    def test_update_instance_success(self, mocker):
+    @pytest.mark.asyncio
+    @patch('backend.apps.skill_app.require_agent_draft_edit')
+    async def test_update_instance_success(self, mock_require_edit, mocker):
         """Test successful skill instance update."""
         with patch('backend.apps.skill_app.SkillService') as mock_service_class:
             with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
                 mock_auth.return_value = ("user123", "tenant123")
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
-                mock_service.get_skill_by_id.return_value = {
-                    "skill_id": 1,
-                    "name": "test_skill"
-                }
+                mock_service.list_visible_skills.return_value = [
+                    {"skill_id": 1, "name": "test_skill"}
+                ]
                 mock_service.create_or_update_skill_instance.return_value = {
                     "skill_id": 1,
                     "agent_id": 1
                 }
 
-                app = FastAPI()
-                app.include_router(skill_app.router)
-                client = TestClient(app)
-
-                response = client.post(
-                    "/skills/instance/update",
-                    json={
-                        "skill_id": 1,
-                        "agent_id": 1,
-                        "enabled": True
-                    },
-                    headers={"Authorization": "Bearer token123"}
+                response = await skill_app.update_skill_instance(
+                    SkillInstanceInfoRequest(
+                        skill_id=1,
+                        agent_id=1,
+                        enabled=True,
+                    ),
+                    authorization="Bearer token123",
                 )
 
                 assert response.status_code == 200
-                data = response.json()
+                data = json.loads(response.body)
                 assert "instance" in data
 
-    def test_update_instance_skill_not_found(self, mocker):
+    @pytest.mark.asyncio
+    @patch('backend.apps.skill_app.require_agent_draft_edit')
+    async def test_update_instance_skill_not_found(self, mock_require_edit, mocker):
         """Test update instance for non-existent skill."""
         with patch('backend.apps.skill_app.SkillService') as mock_service_class:
             with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
                 mock_auth.return_value = ("user123", "tenant123")
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
-                mock_service.get_skill_by_id.return_value = None
+                mock_service.list_visible_skills.return_value = []
 
-                app = FastAPI()
-                app.include_router(skill_app.router)
-                client = TestClient(app)
+                with pytest.raises(skill_app.HTTPException) as exc_info:
+                    await skill_app.update_skill_instance(
+                        SkillInstanceInfoRequest(
+                            skill_id=999,
+                            agent_id=1,
+                            enabled=True,
+                        ),
+                        authorization="Bearer token123",
+                    )
 
-                response = client.post(
-                    "/skills/instance/update",
-                    json={
-                        "skill_id": 999,
-                        "agent_id": 1,
-                        "enabled": True
-                    },
-                    headers={"Authorization": "Bearer token123"}
-                )
-
-                assert response.status_code == 404
+                assert exc_info.value.status_code == 404
+                assert exc_info.value.detail["code"] == "resource_not_visible"
 
 
 # ===== List Skill Instances Endpoint Tests =====
@@ -1204,7 +1230,9 @@ class TestErrorHandling:
 class TestUpdateSkillInstanceEndpointExtended:
     """Additional tests for POST /skills/instance/update endpoint."""
 
-    def test_update_instance_validation_error(self, mocker):
+    @pytest.mark.asyncio
+    @patch('backend.apps.skill_app.require_agent_draft_edit')
+    async def test_update_instance_validation_error(self, mock_require_edit, mocker):
         """Test update instance with validation error."""
         from backend.apps.skill_app import SkillException
         with patch('backend.apps.skill_app.SkillService') as mock_service_class:
@@ -1212,27 +1240,22 @@ class TestUpdateSkillInstanceEndpointExtended:
                 mock_auth.return_value = ("user123", "tenant123")
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
-                mock_service.get_skill_by_id.return_value = {
-                    "skill_id": 1,
-                    "name": "test_skill"
-                }
+                mock_service.list_visible_skills.return_value = [
+                    {"skill_id": 1, "name": "test_skill"}
+                ]
                 mock_service.create_or_update_skill_instance.side_effect = SkillException("Validation failed")
 
-                app = FastAPI()
-                app.include_router(skill_app.router)
-                client = TestClient(app)
+                with pytest.raises(skill_app.HTTPException) as exc_info:
+                    await skill_app.update_skill_instance(
+                        SkillInstanceInfoRequest(
+                            skill_id=1,
+                            agent_id=1,
+                            enabled=True,
+                        ),
+                        authorization="Bearer token123",
+                    )
 
-                response = client.post(
-                    "/skills/instance/update",
-                    json={
-                        "skill_id": 1,
-                        "agent_id": 1,
-                        "enabled": True
-                    },
-                    headers={"Authorization": "Bearer token123"}
-                )
-
-                assert response.status_code == 400
+                assert exc_info.value.status_code == 400
 
     def test_update_instance_unauthorized(self, mocker):
         """Test update instance without authorization."""
@@ -2040,56 +2063,55 @@ class TestCreateSkillEndpointExtended:
 class TestUpdateSkillInstanceEndpointErrorHandling:
     """Error handling tests for POST /skills/instance/update endpoint."""
 
-    def test_update_instance_http_exception_propagation(self, mocker):
-        """Test HTTPException is propagated from get_skill_by_id."""
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
-            with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
-                mock_auth.return_value = ("user123", "tenant123")
-                mock_service = MagicMock()
-                mock_service_class.return_value = mock_service
-                # When get_skill_by_id returns None, HTTPException 404 is raised
-                mock_service.get_skill_by_id.return_value = None
+    @pytest.mark.asyncio
+    async def test_update_instance_http_exception_propagation(self):
+        """Test HTTPException is propagated unchanged."""
+        expected_exception = skill_app.HTTPException(
+            status_code=409,
+            detail="Conflict",
+        )
 
-                app = FastAPI()
-                app.include_router(skill_app.router)
-                client = TestClient(app)
-
-                response = client.post(
-                    "/skills/instance/update",
-                    json={
-                        "skill_id": 999,
-                        "agent_id": 1,
-                        "enabled": True
-                    },
-                    headers={"Authorization": "Bearer token123"}
+        with patch(
+            'backend.apps.skill_app.get_current_user_id',
+            side_effect=expected_exception,
+        ):
+            with pytest.raises(skill_app.HTTPException) as exc_info:
+                await skill_app.update_skill_instance(
+                    SkillInstanceInfoRequest(
+                        skill_id=1,
+                        agent_id=1,
+                        enabled=True,
+                    ),
+                    authorization="Bearer token123",
                 )
 
-                assert response.status_code == 404
+        assert exc_info.value is expected_exception
 
-    def test_update_instance_unexpected_error(self, mocker):
+    @pytest.mark.asyncio
+    @patch('backend.apps.skill_app.require_agent_draft_edit')
+    async def test_update_instance_unexpected_error(self, mock_require_edit, mocker):
         """Test update instance with unexpected error."""
         with patch('backend.apps.skill_app.SkillService') as mock_service_class:
             with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
                 mock_auth.return_value = ("user123", "tenant123")
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
-                mock_service.get_skill_by_id.side_effect = Exception("Unexpected error")
-
-                app = FastAPI()
-                app.include_router(skill_app.router)
-                client = TestClient(app)
-
-                response = client.post(
-                    "/skills/instance/update",
-                    json={
-                        "skill_id": 1,
-                        "agent_id": 1,
-                        "enabled": True
-                    },
-                    headers={"Authorization": "Bearer token123"}
+                mock_service.list_visible_skills.side_effect = Exception(
+                    "Unexpected error"
                 )
 
-                assert response.status_code == 500
+                with pytest.raises(skill_app.HTTPException) as exc_info:
+                    await skill_app.update_skill_instance(
+                        SkillInstanceInfoRequest(
+                            skill_id=1,
+                            agent_id=1,
+                            enabled=True,
+                        ),
+                        authorization="Bearer token123",
+                    )
+
+                assert exc_info.value.status_code == 500
+                assert exc_info.value.detail == "Internal server error"
 
 
 # ===== List Skill Instances Endpoint Error Handling Tests =====
@@ -2497,30 +2519,73 @@ class TestScanSkillEndpoint:
 
 # ===== Create Skill Interactive Endpoint Tests =====
 class TestCreateSkillInteractiveEndpoint:
-    """Test POST /skills/create endpoint (nl2skill)."""
+    """Test POST /skills/nl2skill/run endpoint."""
 
     def test_create_skill_interactive_success(self, mocker):
         """Test successful interactive skill creation."""
         with patch('backend.apps.skill_app.get_current_user_info') as mock_auth:
             mock_auth.return_value = ("user123", "tenant123", "zh")
-            with patch('backend.apps.skill_app._build_model_config_from_tenant') as mock_model:
-                mock_config = MagicMock()
-                mock_model.return_value = mock_config
-                with patch('backend.apps.skill_app.stream_skill_creation') as mock_stream:
-                    mock_stream.return_value = ("task123", MagicMock())
+            async def stream():
+                yield 'data: {"type":"done","content":""}\n\n'
 
-                    app = FastAPI()
-                    app.include_router(skill_app.skill_creator_router)
-                    client = TestClient(app)
+            with patch(
+                'backend.apps.skill_app.create_nl2skill_stream',
+                new_callable=AsyncMock,
+                return_value=stream(),
+            ) as mock_stream:
+                app = FastAPI()
+                app.include_router(skill_app.skill_creator_router)
+                client = TestClient(app)
 
-                    response = client.post(
-                        "/skills/create",
-                        json={"user_request": "Create a skill", "language": "zh", "complexity": "simple"},
-                        headers={"Authorization": "Bearer token123"}
-                    )
+                response = client.post(
+                    "/skills/nl2skill/run",
+                    json={"query": "Create a skill", "language": "zh", "complexity": "simple"},
+                    headers={"Authorization": "Bearer token123"}
+                )
 
-                    assert response.status_code == 200
-                    assert response.headers.get("x-task-id") == "task123"
+                assert response.status_code == 200
+                assert '"type":"done"' in response.text
+                mock_stream.assert_awaited_once()
+
+    def test_create_skill_interactive_uses_user_language_when_request_omits_it(self):
+        with patch('backend.apps.skill_app.get_current_user_info', return_value=("user123", "tenant123", "en")):
+            async def stream():
+                yield 'data: {"type":"done","content":""}\n\n'
+
+            with patch(
+                'backend.apps.skill_app.create_nl2skill_stream',
+                new_callable=AsyncMock,
+                return_value=stream(),
+            ) as mock_stream:
+                app = FastAPI()
+                app.include_router(skill_app.skill_creator_router)
+                response = TestClient(app).post(
+                    "/skills/nl2skill/run",
+                    json={"query": "Create a skill"},
+                    headers={"Authorization": "Bearer token123"},
+                )
+
+        assert response.status_code == 200
+        assert mock_stream.await_args.kwargs["tenant_id"] == "tenant123"
+        assert mock_stream.await_args.kwargs["language"] == "en"
+
+    def test_create_skill_interactive_maps_runtime_error_to_server_error(self):
+        with patch('backend.apps.skill_app.get_current_user_info', return_value=("user123", "tenant123", "zh")):
+            with patch(
+                'backend.apps.skill_app.create_nl2skill_stream',
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("failed"),
+            ):
+                app = FastAPI()
+                app.include_router(skill_app.skill_creator_router)
+                response = TestClient(app).post(
+                    "/skills/nl2skill/run",
+                    json={"query": "Create a skill"},
+                    headers={"Authorization": "Bearer token123"},
+                )
+
+        assert response.status_code == 500
+        assert response.json()["detail"] == "NL2Skill run error."
 
     def test_create_skill_interactive_unauthorized(self, mocker):
         """Test interactive skill creation without auth."""
@@ -2532,8 +2597,8 @@ class TestCreateSkillInteractiveEndpoint:
             client = TestClient(app)
 
             response = client.post(
-                "/skills/create",
-                json={"user_request": "Create a skill"}
+                "/skills/nl2skill/run",
+                json={"query": "Create a skill"}
             )
 
             assert response.status_code == 401
@@ -2541,74 +2606,47 @@ class TestCreateSkillInteractiveEndpoint:
 
 # ===== Stop Skill Creation Endpoint Tests =====
 class TestStopSkillCreationEndpoint:
-    """Test GET /skills/stop/{task_id} endpoint."""
+    """The legacy stop endpoint is intentionally removed."""
 
     def test_stop_skill_creation_success(self, mocker):
         """Test successful stop skill creation."""
-        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
-            mock_auth.return_value = ("user123", "tenant123")
-            with patch('backend.apps.skill_app.skill_creation_task_manager') as mock_manager:
-                mock_manager.stop_task.return_value = True
-
-                app = FastAPI()
-                app.include_router(skill_app.skill_creator_router)
-                client = TestClient(app)
-
-                response = client.get(
-                    "/skills/stop/task123",
-                    headers={"Authorization": "Bearer token123"}
-                )
-
-                assert response.status_code == 200
-                data = response.json()
-                assert data["status"] == "success"
+        app = FastAPI()
+        app.include_router(skill_app.skill_creator_router)
+        client = TestClient(app)
+        response = client.get("/skills/stop/task123")
+        assert response.status_code == 404
 
     def test_stop_skill_creation_not_found(self, mocker):
         """Test stop skill creation when task not found."""
-        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
-            mock_auth.return_value = ("user123", "tenant123")
-            with patch('backend.apps.skill_app.skill_creation_task_manager') as mock_manager:
-                mock_manager.stop_task.return_value = False
-
-                app = FastAPI()
-                app.include_router(skill_app.skill_creator_router)
-                client = TestClient(app)
-
-                response = client.get(
-                    "/skills/stop/nonexistent",
-                    headers={"Authorization": "Bearer token123"}
-                )
-
-                assert response.status_code == 404
-                data = response.json()
-                assert data["status"] == "not_found"
+        app = FastAPI()
+        app.include_router(skill_app.skill_creator_router)
+        client = TestClient(app)
+        response = client.get("/skills/stop/nonexistent")
+        assert response.status_code == 404
 
     def test_stop_skill_creation_unauthorized(self, mocker):
-        """Test stop skill creation without auth."""
-        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
-            mock_auth.side_effect = Exception("Unauthorized")
-
-            app = FastAPI()
-            app.include_router(skill_app.skill_creator_router)
-            client = TestClient(app)
-
-            response = client.get("/skills/stop/task123")
-
-            assert response.status_code == 401
+        """Removed routes return not found before authentication."""
+        app = FastAPI()
+        app.include_router(skill_app.skill_creator_router)
+        client = TestClient(app)
+        response = client.get("/skills/stop/task123")
+        assert response.status_code == 404
 
 
 # ===== Update Skill Instance with config_values merge tests =====
 class TestUpdateSkillInstanceWithConfigMerge:
     """Test config_values merge in update skill instance."""
 
-    def test_update_instance_with_config_values_merge(self, mocker):
+    @pytest.mark.asyncio
+    @patch('backend.apps.skill_app.require_agent_draft_edit')
+    async def test_update_instance_with_config_values_merge(self, mock_require_edit, mocker):
         """Test instance update with config_values merges with template defaults (lines 368-371)."""
         with patch('backend.apps.skill_app.SkillService') as mock_service_class:
             with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
                 mock_auth.return_value = ("user123", "tenant123")
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
-                mock_service.get_skill_by_id.return_value = {
+                skill = {
                     "skill_id": 1,
                     "name": "test_skill",
                     "description": "Test",
@@ -2616,6 +2654,7 @@ class TestUpdateSkillInstanceWithConfigMerge:
                     "config_schemas": [{"name": "key1", "type": "string"}],
                     "config_values": {"template_key": "template_value"}
                 }
+                mock_service.list_visible_skills.return_value = [skill]
                 mock_service.create_or_update_skill_instance.return_value = {
                     "skill_id": 1,
                     "agent_id": 1,
@@ -2623,22 +2662,17 @@ class TestUpdateSkillInstanceWithConfigMerge:
                     "config_values": {"instance_key": "instance_value"}
                 }
 
-                app = FastAPI()
-                app.include_router(skill_app.router)
-                client = TestClient(app)
-
-                response = client.post(
-                    "/skills/instance/update",
-                    json={
-                        "skill_id": 1,
-                        "agent_id": 1,
-                        "enabled": True
-                    },
-                    headers={"Authorization": "Bearer token123"}
+                response = await skill_app.update_skill_instance(
+                    SkillInstanceInfoRequest(
+                        skill_id=1,
+                        agent_id=1,
+                        enabled=True,
+                    ),
+                    authorization="Bearer token123",
                 )
 
                 assert response.status_code == 200
-                data = response.json()
+                data = json.loads(response.body)
                 assert "instance" in data
                 assert data["instance"]["config_values"] == {
                     "template_key": "template_value",
@@ -2710,75 +2744,6 @@ class TestUpdateSkillWithFiles:
 
 
 # ===== Build Model Config From Tenant Tests =====
-class TestBuildModelConfigFromTenant:
-    """Test _build_model_config_from_tenant helper function (lines 532-553)."""
-
-    def test_build_model_config_success(self, mocker):
-        """Test successful model config building."""
-        with patch('utils.config_utils.tenant_config_manager') as mock_config_mgr:
-            with patch('utils.config_utils.get_model_name_from_config') as mock_get_model:
-                sys.modules["consts.const"].MODEL_CONFIG_MAPPING = {"llm": "llm_model"}
-                mock_config_mgr.get_model_config.return_value = {
-                    "display_name": "GPT-4",
-                    "api_key": "test-key",
-                    "base_url": "https://api.openai.com",
-                    "model_factory": "openai",
-                    "ssl_verify": True
-                }
-                mock_get_model.return_value = "gpt-4"
-
-                from backend.apps.skill_app import _build_model_config_from_tenant
-                config = _build_model_config_from_tenant("tenant123")
-
-                assert config.cite_name == "GPT-4"
-                assert config.api_key == "test-key"
-                assert config.model_name == "gpt-4"
-                assert config.url == "https://api.openai.com"
-                assert config.temperature == 0.1
-                assert config.top_p == 0.95
-                assert config.ssl_verify is True
-                assert config.model_factory == "openai"
-                assert config.prompt_cache["mode"] == "openai_automatic"
-
-    def test_build_model_config_ssl_verify_default_false(self, mocker):
-        """Test that ssl_verify defaults to False when not present in config."""
-        with patch('utils.config_utils.tenant_config_manager') as mock_config_mgr:
-            with patch('utils.config_utils.get_model_name_from_config') as mock_get_model:
-                sys.modules["consts.const"].MODEL_CONFIG_MAPPING = {"llm": "llm_model"}
-                mock_config_mgr.get_model_config.return_value = {
-                    "display_name": "GPT-4",
-                    "api_key": "test-key",
-                    "base_url": "https://api.openai.com",
-                    "model_factory": "openai"
-                }
-                mock_get_model.return_value = "gpt-4"
-
-                from backend.apps.skill_app import _build_model_config_from_tenant
-                config = _build_model_config_from_tenant("tenant123")
-
-                assert config.ssl_verify is False
-
-    def test_build_model_config_missing_quick_config(self, mocker):
-        """Test error when tenant has no LLM model configured."""
-        with patch('utils.config_utils.tenant_config_manager') as mock_config_mgr:
-            sys.modules["consts.const"].MODEL_CONFIG_MAPPING = {"llm": "llm_model"}
-            mock_config_mgr.get_model_config.return_value = None
-
-            from backend.apps.skill_app import _build_model_config_from_tenant
-            with pytest.raises(ValueError, match="No LLM model configured for tenant"):
-                _build_model_config_from_tenant("tenant123")
-
-    def test_build_model_config_empty_quick_config(self, mocker):
-        """Test error when tenant has empty LLM model config."""
-        with patch('utils.config_utils.tenant_config_manager') as mock_config_mgr:
-            sys.modules["consts.const"].MODEL_CONFIG_MAPPING = {"llm": "llm_model"}
-            mock_config_mgr.get_model_config.return_value = {}
-
-            from backend.apps.skill_app import _build_model_config_from_tenant
-            with pytest.raises(ValueError, match="No LLM model configured for tenant"):
-                _build_model_config_from_tenant("tenant123")
-
-
 class TestGetSkillByIdEndpoint:
     def test_get_skill_by_id_success(self, mocker):
         with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
@@ -3241,6 +3206,114 @@ class TestSkillAppCoverageGaps:
             "config_schemas": {"key": {"type": "string"}},
             "config_values": {"key": "value"},
         }
+
+
+class TestSkillAppRequestDataCoverage:
+    def test_build_skill_update_data_omits_none_fields_and_keeps_empty_files(self):
+        request = skill_app.SkillUpdateRequest(files=[])
+
+        assert skill_app._build_skill_update_data(request) == {"files": []}
+
+
+class TestSkillAppRemainingExceptionMappings:
+    """Cover endpoint-specific status mappings and early not-found returns."""
+
+    @pytest.mark.asyncio
+    async def test_create_skill_from_file_maps_forbidden_to_403(self, mocker):
+        mocker.patch.object(
+            skill_app, "get_current_user_id", side_effect=skill_app.ForbiddenError("denied")
+        )
+        upload = MagicMock()
+
+        with pytest.raises(skill_app.HTTPException) as exc_info:
+            await skill_app.create_skill_from_file(file=upload, authorization="token")
+
+        assert exc_info.value.status_code == 403
+        assert exc_info.value.detail == "denied"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("endpoint", "service_method"),
+        [
+            (skill_app.get_skill_file_tree, "get_skill_file_tree"),
+            (skill_app.get_skill_file_content, "get_skill_file_content"),
+        ],
+    )
+    async def test_file_endpoints_return_404_when_skill_is_missing(
+        self, mocker, endpoint, service_method
+    ):
+        mocker.patch.object(skill_app, "get_current_user_id", return_value=("user", "tenant"))
+        service = MagicMock()
+        service.get_skill.return_value = None
+        mocker.patch.object(skill_app, "SkillService", return_value=service)
+
+        kwargs = {"skill_name": "missing", "authorization": "token"}
+        if endpoint is skill_app.get_skill_file_content:
+            kwargs["file_path"] = "README.md"
+        with pytest.raises(skill_app.HTTPException) as exc_info:
+            await endpoint(**kwargs)
+
+        assert exc_info.value.status_code == 404
+        getattr(service, service_method).assert_not_called()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("endpoint", "error", "expected_status"),
+        [
+            (skill_app.get_skill_file_tree, skill_app.UnauthorizedError("unauthorized"), 401),
+            (skill_app.get_skill_file_tree, skill_app.ForbiddenError("forbidden"), 403),
+            (skill_app.get_skill_file_content, skill_app.UnauthorizedError("unauthorized"), 401),
+            (
+                skill_app.get_skill_file_content,
+                skill_app.UnsupportedSkillFilePreview("unsupported"),
+                415,
+            ),
+        ],
+    )
+    async def test_file_endpoints_map_expected_errors(
+        self, mocker, endpoint, error, expected_status
+    ):
+        mocker.patch.object(skill_app, "get_current_user_id", side_effect=error)
+
+        kwargs = {"skill_name": "demo", "authorization": "token"}
+        if endpoint is skill_app.get_skill_file_content:
+            kwargs["file_path"] = "README.md"
+        with pytest.raises(skill_app.HTTPException) as exc_info:
+            await endpoint(**kwargs)
+
+        assert exc_info.value.status_code == expected_status
+        assert exc_info.value.detail == str(error)
+
+    @pytest.mark.asyncio
+    async def test_update_skill_maps_forbidden_to_403(self, mocker):
+        mocker.patch.object(
+            skill_app, "get_current_user_id", side_effect=skill_app.ForbiddenError("denied")
+        )
+
+        with pytest.raises(skill_app.HTTPException) as exc_info:
+            await skill_app.update_skill(
+                skill_name="demo",
+                request=skill_app.SkillUpdateRequest(description="updated"),
+                authorization="token",
+            )
+
+        assert exc_info.value.status_code == 403
+
+    @pytest.mark.asyncio
+    async def test_nl2skill_preserves_http_exception(self, mocker):
+        mocker.patch.object(
+            skill_app,
+            "get_current_user_info",
+            return_value=("user", "tenant", "en"),
+        )
+        expected = skill_app.HTTPException(status_code=409, detail="conflict")
+        mocker.patch.object(skill_app, "create_nl2skill_stream", side_effect=expected)
+        request = MagicMock(language=None)
+
+        with pytest.raises(skill_app.HTTPException) as exc_info:
+            await skill_app.nl2skill_run_api(request=request, authorization="token")
+
+        assert exc_info.value is expected
 
 
 if __name__ == "__main__":

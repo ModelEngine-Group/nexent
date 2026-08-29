@@ -15,6 +15,7 @@ from __future__ import annotations
 import io
 import os
 import sys
+import threading
 import types
 from http import HTTPStatus
 from typing import Any
@@ -91,6 +92,11 @@ TENANT_ID = "tenant-test"
 def configure_aidp_constants(monkeypatch):
     """Pin AIDP credentials and auth helper behaviour for every test."""
     from ext_components.aidp.apps import aidp_mgmt_app
+    from ext_components.aidp.services import aidp_access_service
+
+    aidp_access_service.invalidate_aidp_catalog_cache()
+    aidp_access_service.invalidate_aidp_kb_detail_cache()
+    aidp_access_service.invalidate_aidp_doc_count_cache()
 
     monkeypatch.setattr(aidp_mgmt_app, "AIDP_SERVER_URL", SERVER_URL)
     monkeypatch.setattr(aidp_mgmt_app, "AIDP_API_KEY", API_KEY)
@@ -100,7 +106,15 @@ def configure_aidp_constants(monkeypatch):
         aidp_mgmt_app.auth_utils_module, "get_current_user_id",
         lambda *_a, **_kw: (USER_ID, TENANT_ID),
     )
+    # Existing management tests exercise the shared-KB path. Individual
+    # USER-policy tests override this role explicitly below.
+    monkeypatch.setattr(
+        aidp_mgmt_app, "get_user_role_by_tenant", lambda *_a, **_kw: "DEV"
+    )
     yield
+    aidp_access_service.invalidate_aidp_catalog_cache()
+    aidp_access_service.invalidate_aidp_kb_detail_cache()
+    aidp_access_service.invalidate_aidp_doc_count_cache()
 
 
 def _build_app() -> FastAPI:
@@ -419,9 +433,9 @@ class TestCreateKnowledgeBase:
 class TestListKnowledgeBases:
     def test_list_returns_empty_when_no_rows(self):
         client = _client()
-        from ext_components.aidp.services import aidp_permission_service
+        from ext_components.aidp.apps import aidp_mgmt_app
 
-        with patch.object(aidp_permission_service, "count_accessible_kbs", return_value=0):
+        with patch.object(aidp_mgmt_app, "_current_accessible_rows", return_value=[]):
             response = client.get("/aidp-mgmt/knowledge-bases", headers=_bearer())
         assert response.status_code == HTTPStatus.OK
         body = response.json()
@@ -433,8 +447,7 @@ class TestListKnowledgeBases:
         from ext_components.aidp.apps import aidp_mgmt_app
         from ext_components.aidp.services import aidp_permission_service
 
-        with patch.object(aidp_permission_service, "count_accessible_kbs", return_value=1), \
-             patch.object(aidp_permission_service, "get_accessible_kbs", return_value=[
+        with patch.object(aidp_mgmt_app, "_current_accessible_rows", return_value=[
                  {
                      "kb_id": "kb-1", "owner_user_id": USER_ID, "tenant_id": TENANT_ID,
                      "ingroup_permission": "EDIT", "group_ids": [],
@@ -449,7 +462,79 @@ class TestListKnowledgeBases:
         assert response.status_code == HTTPStatus.OK
         body = response.json()
         assert body["value"][0]["resource_status"] == "UNAVAILABLE"
-        mock_status.assert_called_once()
+        mock_status.assert_not_called()
+
+    def test_list_intersects_before_pagination_and_fetches_only_visible_detail(self):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from types import SimpleNamespace
+
+        remote_items = [
+            {"kds_id": "kb-1"},
+            {"kds_id": "kb-2"},
+            {"kds_id": "kb-3"},
+            {"kds_id": "remote-only"},
+        ]
+        intersected_rows = [
+            {"kb_id": "kb-1", "permission": "EDIT"},
+            {"kb_id": "kb-2", "permission": "READ_ONLY"},
+            {"kb_id": "kb-3", "permission": "EDIT"},
+        ]
+        with patch.object(
+            aidp_mgmt_app,
+            "resolve_current_aidp_access",
+            return_value=SimpleNamespace(accessible_rows=intersected_rows),
+        ) as mock_snapshot, patch.object(
+            aidp_mgmt_app,
+            "get_aidp_kb_impl",
+            return_value={"kds_name": "Second KB"},
+        ) as mock_detail:
+            response = client.get(
+                "/aidp-mgmt/knowledge-bases?page=2&page_size=1",
+                headers=_bearer(),
+            )
+
+        assert response.status_code == HTTPStatus.OK
+        body = response.json()
+        assert body["total_count"] == 3
+        assert body["has_more"] is True
+        assert [item["kds_id"] for item in body["value"]] == ["kb-2"]
+        mock_snapshot.assert_called_once_with(
+            server_url=aidp_mgmt_app.AIDP_SERVER_URL,
+            api_key=aidp_mgmt_app.AIDP_API_KEY,
+            user_id=USER_ID,
+            tenant_id=TENANT_ID,
+            aidp_tenant_id="aidp",
+        )
+        mock_detail.assert_called_once_with(
+            aidp_mgmt_app.AIDP_SERVER_URL,
+            aidp_mgmt_app.AIDP_API_KEY,
+            "kb-2",
+        )
+
+    def test_list_skips_detail_when_catalog_row_has_card_metadata(self):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+
+        complete_row = {
+            "kb_id": "kb-1",
+            "kds_id": "kb-1",
+            "kds_name": "Catalog KB",
+            "description": "From catalog",
+            "created_at": "2026-01-01T00:00:00Z",
+            "caption_enable": 0,
+            "permission": "EDIT",
+        }
+        with patch.object(
+            aidp_mgmt_app,
+            "_current_accessible_rows",
+            return_value=[complete_row],
+        ), patch.object(aidp_mgmt_app, "get_aidp_kb_impl") as mock_detail:
+            response = client.get("/aidp-mgmt/knowledge-bases", headers=_bearer())
+
+        assert response.status_code == HTTPStatus.OK
+        assert response.json()["value"][0]["description"] == "From catalog"
+        mock_detail.assert_not_called()
 
 
 # Use a lazy import for AppException at module load to avoid breaking the
@@ -482,6 +567,8 @@ class TestUpdateKnowledgeBase:
 
         with patch.object(aidp_permission_service, "require_permission",
                           return_value=MagicMock(permission="EDIT")), \
+             patch.object(aidp_permission_service, "update_permission",
+                          return_value=True) as mock_update_permission, \
              patch.object(aidp_mgmt_app, "update_aidp_kb_impl", return_value={"ok": True}) as mock_update:
             response = client.put(
                 "/aidp-mgmt/knowledge-bases/kb-1",
@@ -495,6 +582,12 @@ class TestUpdateKnowledgeBase:
         positional = call_args.args
         assert positional[2] == "kb-1"
         assert positional[3] == {"name": "new"}
+        mock_update_permission.assert_called_once_with(
+            kb_id="kb-1",
+            tenant_id="tenant-test",
+            kds_name="new",
+            updated_by="user-test",
+        )
 
 
 # --- Upload documents ----------------------------------------------------
@@ -511,14 +604,78 @@ class TestUploadDocuments:
         ]
         with patch.object(aidp_permission_service, "require_permission",
                           return_value=MagicMock(permission="EDIT")), \
-             patch.object(aidp_mgmt_app, "upload_aidp_docs_impl", return_value={"uploaded": 1}) as mock_upload:
+             patch.object(aidp_mgmt_app, "upload_aidp_docs_impl", return_value={
+                 "summary": {"total": 1, "success": 0, "failed": 1},
+                 "success_list": [],
+                 "failed_list": [{
+                     "file_name": "doc.txt",
+                     "reason_zh": "文件内容为空",
+                     "reason_en": "File content is empty",
+                 }],
+             }) as mock_upload:
             response = client.post(
                 "/aidp-mgmt/knowledge-bases/kb-1/documents",
                 headers=_bearer(),
                 files=files,
             )
         assert response.status_code == HTTPStatus.OK
+        assert response.json()["failed_list"][0]["reason_en"] == "File content is empty"
         mock_upload.assert_called_once()
+
+    def test_upload_rejects_more_than_fifty_files_without_calling_aidp(self):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        files = [
+            ("files", (f"doc-{index}.txt", io.BytesIO(b"hello"), "text/plain"))
+            for index in range(51)
+        ]
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=MagicMock(permission="EDIT")), \
+             patch.object(aidp_mgmt_app, "upload_aidp_docs_impl") as mock_upload:
+            response = client.post(
+                "/aidp-mgmt/knowledge-bases/kb-1/documents",
+                headers=_bearer(),
+                files=files,
+            )
+
+        assert response.status_code == HTTPStatus.OK
+        body = response.json()
+        assert body["summary"] == {"total": 51, "success": 0, "failed": 51}
+        assert body["failed_list"][0]["reason_zh"] == "单次最多上传 50 个文件"
+        mock_upload.assert_not_called()
+
+    def test_upload_merges_oversized_file_with_aidp_result(self):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        files = [
+            ("files", ("valid.pdf", io.BytesIO(b"ok"), "application/pdf")),
+            ("files", ("large.txt", io.BytesIO(b"x"), "text/plain")),
+        ]
+        aidp_result = {
+            "summary": {"total": 1, "success": 1, "failed": 0},
+            "success_list": [{"file_name": "valid.pdf"}],
+            "failed_list": [],
+        }
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=MagicMock(permission="EDIT")), \
+             patch.object(aidp_mgmt_app, "AIDP_SMALL_FILE_MAX_SIZE_BYTES", 0), \
+             patch.object(aidp_mgmt_app, "upload_aidp_docs_impl",
+                          return_value=aidp_result) as mock_upload:
+            response = client.post(
+                "/aidp-mgmt/knowledge-bases/kb-1/documents",
+                headers=_bearer(),
+                files=files,
+            )
+
+        assert response.status_code == HTTPStatus.OK
+        body = response.json()
+        assert body["summary"] == {"total": 2, "success": 1, "failed": 1}
+        assert body["failed_list"][0]["file_name"] == "large.txt"
+        assert mock_upload.call_args.args[3][0].filename == "valid.pdf"
 
 
 # --- List documents ------------------------------------------------------
@@ -543,6 +700,42 @@ class TestListDocuments:
         body = response.json()
         assert body["total_count"] == 42
         assert body["has_more"] is True
+
+    def test_list_and_count_requests_run_concurrently(self):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        rendezvous = threading.Barrier(2, timeout=2)
+
+        def list_docs(*_args, **_kwargs):
+            rendezvous.wait()
+            return {"value": [{"file_name": "doc.txt"}]}
+
+        def count_docs(*_args, **_kwargs):
+            rendezvous.wait()
+            return 1
+
+        with patch.object(
+            aidp_permission_service,
+            "require_permission",
+            return_value=MagicMock(permission="READ_ONLY"),
+        ), patch.object(
+            aidp_mgmt_app,
+            "list_aidp_docs_impl",
+            side_effect=list_docs,
+        ), patch.object(
+            aidp_mgmt_app,
+            "count_aidp_docs_impl",
+            side_effect=count_docs,
+        ):
+            response = client.get(
+                "/aidp-mgmt/knowledge-bases/kb-1/documents",
+                headers=_bearer(),
+            )
+
+        assert response.status_code == HTTPStatus.OK
+        assert response.json()["total_count"] == 1
 
 
 # --- Models list (auth only, no per-KB permission) ------------------------
@@ -651,9 +844,9 @@ class TestHelperFunctions:
 class TestCountEndpoint:
     def test_count_knowledge_bases_returns_total(self):
         client = _client()
-        from ext_components.aidp.services import aidp_permission_service
+        from ext_components.aidp.apps import aidp_mgmt_app
 
-        with patch.object(aidp_permission_service, "count_accessible_kbs", return_value=5):
+        with patch.object(aidp_mgmt_app, "_current_accessible_rows", return_value=[{}] * 5):
             response = client.get("/aidp-mgmt/knowledge-bases/count", headers=_bearer())
         assert response.status_code == HTTPStatus.OK
         assert response.json()["total_count"] == 5
@@ -670,8 +863,7 @@ class TestListKbsActiveStatus:
         from ext_components.aidp.apps import aidp_mgmt_app
         from ext_components.aidp.services import aidp_permission_service
 
-        with patch.object(aidp_permission_service, "count_accessible_kbs", return_value=1), \
-             patch.object(aidp_permission_service, "get_accessible_kbs", return_value=[
+        with patch.object(aidp_mgmt_app, "_current_accessible_rows", return_value=[
                  {
                      "kb_id": "kb-1", "owner_user_id": USER_ID, "tenant_id": TENANT_ID,
                      "ingroup_permission": "EDIT", "group_ids": [],
@@ -694,6 +886,28 @@ class TestListKbsActiveStatus:
 
 
 class TestCreateKnowledgeBaseEdgeCases:
+    def test_user_create_normalizes_shared_permission_to_private(self):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        with patch.object(aidp_mgmt_app, "get_user_role_by_tenant", return_value="USER"), \
+             patch.object(aidp_mgmt_app, "create_aidp_kb_impl", return_value={"kds_id": "kb-user"}), \
+             patch.object(aidp_permission_service.aidp_permission_db,
+                          "get_permission_by_kb_id", return_value=None), \
+             patch.object(aidp_permission_service, "create_permission", return_value=1) as mock_perm, \
+             patch.object(aidp_permission_service, "update_resource_status", return_value=True):
+            response = client.post(
+                "/aidp-mgmt/knowledge-bases",
+                headers=_bearer(),
+                json={"name": "User KB", "ingroup_permission": "EDIT", "group_ids": [1]},
+            )
+
+        assert response.status_code == HTTPStatus.OK
+        perm_kwargs = mock_perm.call_args.kwargs
+        assert perm_kwargs["ingroup_permission"] == "PRIVATE"
+        assert perm_kwargs["group_ids"] == []
+
     def test_create_rejects_invalid_ingroup_permission(self):
         client = _client()
         response = client.post(
@@ -922,6 +1136,24 @@ class TestListDocumentsCountFailure:
 
 
 class TestSetPermissionEdgeCases:
+    def test_user_cannot_change_private_kb_to_shared_permission(self):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        with patch.object(aidp_mgmt_app, "get_user_role_by_tenant", return_value="USER"), \
+             patch.object(aidp_permission_service, "require_permission",
+                          return_value=MagicMock(permission="EDIT")), \
+             patch.object(aidp_permission_service, "update_permission") as mock_update:
+            response = client.patch(
+                "/aidp-mgmt/aidp-permissions/kb-user",
+                headers=_bearer(),
+                json={"ingroup_permission": "READ_ONLY", "group_ids": [1]},
+            )
+
+        assert response.status_code == HTTPStatus.FORBIDDEN
+        mock_update.assert_not_called()
+
     def test_set_permission_rejects_unsupported_value(self):
         client = _client()
         from ext_components.aidp.services import aidp_permission_service

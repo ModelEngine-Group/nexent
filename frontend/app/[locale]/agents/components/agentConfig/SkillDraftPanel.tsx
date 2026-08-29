@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type {
   ChangeEvent,
   Dispatch,
@@ -10,11 +10,23 @@ import type {
 } from "react";
 import type { FormInstance } from "antd";
 import { Button, Col, Form, Input, Modal, Row, Select, Tooltip } from "antd";
-import { FileText, Folder, Maximize2, Pencil, Plus, X } from "lucide-react";
+import {
+  Eye,
+  FileQuestion as FileQuestionMark,
+  FileText,
+  Folder,
+  Maximize2,
+  Pencil,
+  Plus,
+  X,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { Can } from "@/components/permission/Can";
+import { MarkdownRenderer } from "@/components/common/markdownRenderer";
 import type { SkillFileContent, SkillFormData } from "@/types/skill";
+import { SkillCodePreview } from "./SkillCodePreview";
+import { isCodeFile, resolveLanguageFromPath } from "./skillFileLanguage";
 
 const { TextArea } = Input;
 const MAX_SKILL_TAGS = 5;
@@ -60,6 +72,7 @@ export default function SkillDraftPanel({
   const [editingTabName, setEditingTabName] = useState("");
   const [expandedEditorPath, setExpandedEditorPath] = useState("");
   const [expandedEditorContent, setExpandedEditorContent] = useState("");
+  const [sourceEditorPath, setSourceEditorPath] = useState("");
 
   const dedupeSkillTabs = (tabs: SkillFileContent[]) =>
     tabs.filter(
@@ -71,7 +84,36 @@ export default function SkillDraftPanel({
   const activeFile =
     visibleSkillTabs.find((tab) => tab.path === activeSkillTab) ||
     visibleSkillTabs[0];
+  const activeFileIsMarkdown =
+    activeFile?.path.toLowerCase().endsWith(".md") ?? false;
+  const activeFileUnavailable =
+    activeFile?.status === "unsupported" || activeFile?.status === "read_error";
+  const isEditingActiveFile = sourceEditorPath === activeFile?.path;
+  const activeFileIsPreviewable =
+    !!activeFile && !activeFileIsMarkdown && !activeFileUnavailable;
+  const activeFileLanguage = activeFile
+    ? resolveLanguageFromPath(activeFile.path)
+    : null;
+  const showMarkdownPreview =
+    activeFileIsMarkdown &&
+    !activeFileUnavailable &&
+    (readOnly || isStreaming || !isEditingActiveFile);
+  const showCodePreview =
+    !showMarkdownPreview &&
+    activeFileIsPreviewable &&
+    (readOnly || isStreaming || !isEditingActiveFile);
   const canEditFiles = !readOnly && !isStreaming;
+  const expandedEditorIsPreview =
+    readOnly || sourceEditorPath !== expandedEditorPath;
+
+  const handleSkillDirectiveClick = (path: string) => {
+    const targetFile = visibleSkillTabs.find((tab) => tab.path === path);
+    if (!targetFile) return;
+    setActiveSkillTab(targetFile.path);
+    setSourceEditorPath("");
+    setExpandedEditorPath("");
+    setExpandedEditorContent("");
+  };
 
   const renameTab = (fromPath: string | null, toPath: string) => {
     if (!fromPath || !toPath.trim()) return;
@@ -87,7 +129,13 @@ export default function SkillDraftPanel({
   };
 
   const renderFileActions = (tab: SkillFileContent) => {
-    if (!canEditFiles || tab.path === "SKILL.md") return null;
+    if (
+      !canEditFiles ||
+      tab.path === "SKILL.md" ||
+      tab.status === "unsupported" ||
+      tab.status === "read_error"
+    )
+      return null;
     return (
       <div className="hidden items-center gap-1 group-hover/file:flex">
         <button
@@ -134,7 +182,15 @@ export default function SkillDraftPanel({
 
   const renderFileName = (tab: SkillFileContent, displayName: string) => {
     if (editingTabKey !== tab.path) {
-      return <span className="min-w-0 flex-1 truncate">{displayName}</span>;
+      return (
+        <span
+          className={`min-w-0 flex-1 truncate ${
+            tab.status === "read_error" ? "text-red-500" : ""
+          }`}
+        >
+          {displayName}
+        </span>
+      );
     }
 
     return (
@@ -260,7 +316,9 @@ export default function SkillDraftPanel({
                     style={{ marginBottom: 10 }}
                   >
                     <Select
-                      placeholder={t("tenantResources.knowledgeBase.permission")}
+                      placeholder={t(
+                        "tenantResources.knowledgeBase.permission"
+                      )}
                       disabled={!canEditGroupSettings}
                       options={[
                         {
@@ -391,10 +449,25 @@ export default function SkillDraftPanel({
                         ? "bg-blue-50 text-blue-700"
                         : "text-slate-600 hover:bg-slate-100"
                     }`}
-                    onClick={() => setActiveSkillTab(tab.path)}
+                    onClick={() => {
+                      setActiveSkillTab(tab.path);
+                      setSourceEditorPath("");
+                    }}
                     onKeyDown={(event) => handleFileRowKeyDown(event, tab.path)}
                   >
-                    <FileText size={15} className="shrink-0" />
+                    {tab.status === "unsupported" ||
+                    tab.status === "read_error" ? (
+                      <FileQuestionMark
+                        size={15}
+                        className={`shrink-0 ${
+                          tab.status === "read_error"
+                            ? "text-red-500"
+                            : "text-slate-400"
+                        }`}
+                      />
+                    ) : (
+                      <FileText size={15} className="shrink-0" />
+                    )}
                     {renderFileName(tab, tab.path)}
                     {renderFileActions(tab)}
                   </div>
@@ -425,12 +498,27 @@ export default function SkillDraftPanel({
                             ? "bg-blue-50 text-blue-700"
                             : "text-slate-600 hover:bg-slate-100"
                         }`}
-                        onClick={() => setActiveSkillTab(tab.path)}
+                        onClick={() => {
+                          setActiveSkillTab(tab.path);
+                          setSourceEditorPath("");
+                        }}
                         onKeyDown={(event) =>
                           handleFileRowKeyDown(event, tab.path)
                         }
                       >
-                        <FileText size={15} className="shrink-0" />
+                        {tab.status === "unsupported" ||
+                        tab.status === "read_error" ? (
+                          <FileQuestionMark
+                            size={15}
+                            className={`shrink-0 ${
+                              tab.status === "read_error"
+                                ? "text-red-500"
+                                : "text-slate-400"
+                            }`}
+                          />
+                        ) : (
+                          <FileText size={15} className="shrink-0" />
+                        )}
                         {renderFileName(
                           tab,
                           tab.path.slice(folderName.length + 1)
@@ -448,48 +536,105 @@ export default function SkillDraftPanel({
                 <span className="min-w-0 flex-1 truncate">
                   {activeFile.path}
                 </span>
-                <Tooltip title={t("skillManagement.detail.expand")}>
-                  <Button
-                    type="text"
-                    size="small"
-                    icon={<Maximize2 size={15} />}
-                    onClick={() => {
-                      setExpandedEditorPath(activeFile.path);
-                      setExpandedEditorContent(activeFile.content);
-                    }}
-                  />
-                </Tooltip>
+                {!activeFileUnavailable &&
+                (activeFileIsMarkdown || activeFileIsPreviewable) &&
+                !readOnly &&
+                !isStreaming ? (
+                  <Tooltip
+                    title={t(
+                      isEditingActiveFile ? "common.preview" : "common.edit"
+                    )}
+                  >
+                    <Button
+                      type="text"
+                      size="small"
+                      icon={
+                        isEditingActiveFile ? (
+                          <Eye size={15} />
+                        ) : (
+                          <Pencil size={15} />
+                        )
+                      }
+                      onClick={() =>
+                        setSourceEditorPath(
+                          isEditingActiveFile ? "" : activeFile.path
+                        )
+                      }
+                    />
+                  </Tooltip>
+                ) : null}
+                {!activeFileUnavailable ? (
+                  <Tooltip title={t("skillManagement.detail.expand")}>
+                    <Button
+                      type="text"
+                      size="small"
+                      icon={<Maximize2 size={15} />}
+                      onClick={() => {
+                        setExpandedEditorPath(activeFile.path);
+                        setExpandedEditorContent(activeFile.content);
+                      }}
+                    />
+                  </Tooltip>
+                ) : null}
               </div>
-              <TextArea
-                className="min-h-0 flex-1 rounded-none border-0 font-mono text-xs shadow-none focus:border-0 focus:shadow-none"
-                placeholder={isStreaming ? "" : `${activeFile.path} content...`}
-                value={activeFile.content}
-                disabled={isStreaming}
-                readOnly={readOnly}
-                style={{ resize: "none" }}
-                ref={(el) => {
-                  if (!textareaRefs) return;
-                  textareaRefs.current[activeFile.path] = el;
-                  if (
-                    el &&
-                    shouldAutoScrollRef &&
-                    shouldAutoScrollRef.current[activeFile.path] === undefined
-                  ) {
-                    shouldAutoScrollRef.current[activeFile.path] = true;
+              {activeFileUnavailable ? (
+                <div className="flex min-h-0 flex-1 items-center justify-center px-6 text-center text-sm text-slate-500">
+                  {t(
+                    activeFile.status === "read_error"
+                      ? "skillManagement.detail.fileReadFailed"
+                      : "skillManagement.detail.filePreviewUnsupported"
+                  )}
+                </div>
+              ) : showMarkdownPreview ? (
+                <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto px-5 py-4">
+                  <MarkdownRenderer
+                    content={activeFile.content}
+                    enableSkillDirectives
+                    onSkillDirectiveClick={handleSkillDirectiveClick}
+                  />
+                </div>
+              ) : showCodePreview ? (
+                <div className="custom-scrollbar min-h-0 flex-1 overflow-auto p-3">
+                  <SkillCodePreview
+                    code={activeFile.content}
+                    language={resolveLanguageFromPath(activeFile.path)}
+                    isStreaming={isStreaming}
+                  />
+                </div>
+              ) : (
+                <TextArea
+                  className="min-h-0 flex-1 rounded-none border-0 font-mono text-xs shadow-none focus:border-0 focus:shadow-none"
+                  placeholder={
+                    isStreaming ? "" : `${activeFile.path} content...`
                   }
-                }}
-                onScroll={() => onTextareaScroll?.(activeFile.path)}
-                onChange={(e) => {
-                  if (isStreaming || readOnly) return;
-                  setSkillTabs((prev) =>
-                    prev.map((tab) =>
-                      tab.path === activeFile.path
-                        ? { ...tab, content: e.target.value }
-                        : tab
-                    )
-                  );
-                }}
-              />
+                  value={activeFile.content}
+                  disabled={isStreaming}
+                  readOnly={readOnly}
+                  style={{ resize: "none" }}
+                  ref={(el) => {
+                    if (!textareaRefs) return;
+                    textareaRefs.current[activeFile.path] = el;
+                    if (
+                      el &&
+                      shouldAutoScrollRef &&
+                      shouldAutoScrollRef.current[activeFile.path] === undefined
+                    ) {
+                      shouldAutoScrollRef.current[activeFile.path] = true;
+                    }
+                  }}
+                  onScroll={() => onTextareaScroll?.(activeFile.path)}
+                  onChange={(e) => {
+                    if (isStreaming || readOnly) return;
+                    setSkillTabs((prev) =>
+                      prev.map((tab) =>
+                        tab.path === activeFile.path
+                          ? { ...tab, content: e.target.value }
+                          : tab
+                      )
+                    );
+                  }}
+                />
+              )}
             </div>
           ) : null}
         </div>
@@ -507,7 +652,7 @@ export default function SkillDraftPanel({
         className="expanded-file-editor"
         styles={{ body: { padding: 0 } }}
         footer={
-          readOnly
+          expandedEditorIsPreview
             ? null
             : [
                 <Button
@@ -540,18 +685,37 @@ export default function SkillDraftPanel({
               ]
         }
       >
-        <TextArea
-          value={expandedEditorContent}
-          disabled={isStreaming}
-          readOnly={readOnly}
-          onChange={(e) => {
-            if (readOnly) return;
-            setExpandedEditorContent(e.target.value);
-          }}
-          autoSize={{ minRows: 16, maxRows: 32 }}
-          className="rounded-none border-0 font-mono text-sm shadow-none focus:border-0 focus:shadow-none"
-          style={{ resize: "none" }}
-        />
+        {expandedEditorIsPreview &&
+        expandedEditorPath.toLowerCase().endsWith(".md") ? (
+          <div className="max-h-[70vh] overflow-y-auto p-6">
+            <MarkdownRenderer
+              content={expandedEditorContent}
+              enableSkillDirectives
+              onSkillDirectiveClick={handleSkillDirectiveClick}
+            />
+          </div>
+        ) : expandedEditorIsPreview && isCodeFile(expandedEditorPath) ? (
+          <div className="max-h-[70vh] overflow-auto p-4">
+            <SkillCodePreview
+              code={expandedEditorContent}
+              language={resolveLanguageFromPath(expandedEditorPath)}
+              isStreaming={isStreaming}
+            />
+          </div>
+        ) : (
+          <TextArea
+            value={expandedEditorContent}
+            disabled={isStreaming}
+            readOnly={readOnly}
+            autoSize={{ minRows: 16, maxRows: 32 }}
+            className="rounded-none border-0 font-mono text-sm shadow-none focus:border-0 focus:shadow-none"
+            style={{ resize: "none" }}
+            onChange={(e) => {
+              if (readOnly) return;
+              setExpandedEditorContent(e.target.value);
+            }}
+          />
+        )}
       </Modal>
     </div>
   );

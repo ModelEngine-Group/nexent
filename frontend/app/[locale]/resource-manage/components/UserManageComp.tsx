@@ -53,6 +53,7 @@ import { authService } from "@/services/authService";
 import { fetchOfficialSkillsWithStatus } from "@/services/skillService";
 import { InstallableSkill } from "@/types/agentConfig";
 import UserList from "./resources/UserList";
+import ApiKeyList from "./resources/ApiKeyList";
 import GroupList from "./resources/GroupList";
 import ModelList from "./resources/ModelList";
 import KnowledgeList from "./resources/KnowledgeList";
@@ -448,8 +449,9 @@ function TenantList({
         // Handle empty name error
         message.error(t("tenantResources.tenants.nameRequired"));
       } else {
-        // Show generic error for other cases
-        message.error(t("tenantResources.tenantOperationFailed"));
+        message.error(
+          errorMessage || t("tenantResources.tenantOperationFailed")
+        );
       }
     }
   };
@@ -1313,6 +1315,17 @@ export default function UserManageComp() {
                             />
                           ),
                         },
+                        ...(user?.role === USER_ROLES.ADMIN
+                          ? [
+                              {
+                                key: "apiKeys",
+                                label:
+                                  t("tenantResources.tabs.apiKeys") ||
+                                  "API Key",
+                                children: <ApiKeyList tenantId={tenantId} />,
+                              },
+                            ]
+                          : []),
                         {
                           key: "groups",
                           label: t("tenantResources.tabs.groups") || "Groups",

@@ -1102,10 +1102,10 @@ class TestListTokensEndpoint:
     """Tests for GET /tokens endpoint."""
 
     @patch('apps.user_management_app.list_tokens_by_user')
-    @patch('apps.user_management_app.get_current_user_id')
-    def test_list_tokens_success(self, mock_get_user_id, mock_list_tokens):
+    @patch('apps.user_management_app.get_current_user_context')
+    def test_list_tokens_success(self, mock_get_user_context, mock_list_tokens):
         """Test successful token listing."""
-        mock_get_user_id.return_value = ("user-123", "tenant-456")
+        mock_get_user_context.return_value = ("user-123", "tenant-456", "USER")
         mock_list_tokens.return_value = [
             {"token_id": 1, "access_key": "nexent-key1", "user_id": "user-123"},
             {"token_id": 2, "access_key": "nexent-key2", "user_id": "user-123"}
@@ -1120,6 +1120,7 @@ class TestListTokensEndpoint:
         data = response.json()
         assert data["message"] == "success"
         assert len(data["data"]) == 2
+        mock_list_tokens.assert_called_once_with("user-123", "USER")
 
     @patch('apps.user_management_app.get_current_user_id')
     def test_list_tokens_no_authorization(self, mock_get_user_id):
@@ -1130,10 +1131,10 @@ class TestListTokensEndpoint:
         data = response.json()
         assert "No authorization header" in data["detail"]
 
-    @patch('apps.user_management_app.get_current_user_id')
-    def test_list_tokens_forbidden_other_user(self, mock_get_user_id):
+    @patch('apps.user_management_app.get_current_user_context')
+    def test_list_tokens_forbidden_other_user(self, mock_get_user_context):
         """Test listing tokens for a different user is forbidden."""
-        mock_get_user_id.return_value = ("user-123", "tenant-456")
+        mock_get_user_context.return_value = ("user-123", "tenant-456", "USER")
 
         response = client.get(
             "/user/tokens?user_id=user-other",
@@ -1145,10 +1146,10 @@ class TestListTokensEndpoint:
         assert "cannot list tokens for other users" in data["detail"]
 
     @patch('apps.user_management_app.list_tokens_by_user')
-    @patch('apps.user_management_app.get_current_user_id')
-    def test_list_tokens_empty(self, mock_get_user_id, mock_list_tokens):
+    @patch('apps.user_management_app.get_current_user_context')
+    def test_list_tokens_empty(self, mock_get_user_context, mock_list_tokens):
         """Test listing tokens when user has none."""
-        mock_get_user_id.return_value = ("user-123", "tenant-456")
+        mock_get_user_context.return_value = ("user-123", "tenant-456", "DEV")
         mock_list_tokens.return_value = []
 
         response = client.get(
@@ -1161,10 +1162,10 @@ class TestListTokensEndpoint:
         assert data["data"] == []
 
     @patch('apps.user_management_app.list_tokens_by_user')
-    @patch('apps.user_management_app.get_current_user_id')
-    def test_list_tokens_exception(self, mock_get_user_id, mock_list_tokens):
+    @patch('apps.user_management_app.get_current_user_context')
+    def test_list_tokens_exception(self, mock_get_user_context, mock_list_tokens):
         """Test token listing with exception."""
-        mock_get_user_id.return_value = ("user-123", "tenant-456")
+        mock_get_user_context.return_value = ("user-123", "tenant-456", "USER")
         mock_list_tokens.side_effect = Exception("Database error")
 
         response = client.get(

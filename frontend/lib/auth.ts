@@ -84,6 +84,8 @@ export const getAuthHeaders = () => {
   return {
     "Content-Type": "application/json",
     "User-Agent": "AgentFrontEnd/1.0",
+    "X-User-Timezone":
+      Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
   };
 };
 

@@ -80,7 +80,7 @@ After a successful deployment, non-sensitive choices are saved to `deploy/docker
 
 1️⃣ **When deploying v1.8.0 or later for the first time**, Nexent creates the `suadmin@nexent.com` super administrator account with the default password `Nexent@123`, without prompting, and displays it in the terminal after successful creation. Override it before the first deployment with `NEXENT_SUPER_ADMIN_PASSWORD` in `deploy/env/.env`; non-interactive creation displays the effective password. As an exception, an offline package launched with `--config` prompts for and confirms the password, and that input takes precedence without being displayed.
 
-> This account is used for permission management only and cannot develop agents or create knowledge bases. Log in with this account and complete: Access tenant resources → Create tenant → Create tenant administrator, then log in with the tenant administrator account to use all features. For role permissions, see [User Management](../user-guide/user-management).
+> This account is used for permission management only and cannot develop agents or create knowledge bases. Log in with this account and complete: Access tenant resources → Create tenant → Create tenant administrator, then log in with the tenant administrator account to use all features. For role permissions, see [User Management](../user-guide/resource-management).
 
 2️⃣ To recreate the `suadmin` account, follow these steps:
 
@@ -378,10 +378,15 @@ CAS_LOGIN_MODE=force
 CAS_USER_ATTRIBUTE=
 CAS_EMAIL_ATTRIBUTE=email
 CAS_ROLE_ATTRIBUTE=role
+CAS_DEFAULT_ROLE=USER
 CAS_TENANT_ATTRIBUTE=tenant_id
+CAS_DEFAULT_TENANT_ID=tenant_id
 CAS_ROLE_MAP_JSON={"cas-admin":"ADMIN","cas-user":"USER"}
 CAS_SESSION_MAX_AGE_SECONDS=3600
 LOCAL_SESSION_MAX_AGE_SECONDS=3600
+CAS_HEARTBEAT_URL=
+CAS_HEARTBEAT_INTERVAL_SECONDS=300
+CAS_HEARTBEAT_COOKIE_NAME=
 CAS_RENEW_BEFORE_SECONDS=300
 CAS_RENEW_TIMEOUT_SECONDS=10
 CAS_SYNTHETIC_EMAIL_DOMAIN=cas.local
@@ -392,6 +397,12 @@ CAS_LOGOUT_URL=/logout
 CAS_SSL_VERIFY=true
 CAS_CA_BUNDLE=
 ```
+
+When CAS omits the role attribute selected by `CAS_ROLE_ATTRIBUTE`, returns it empty, or returns an unsupported role after mapping, Nexent uses `CAS_DEFAULT_ROLE`. Supported default roles are `SU`, `ADMIN`, `DEV`, and `USER`; invalid values fall back to `USER`.
+
+When CAS omits the tenant attribute selected by `CAS_TENANT_ATTRIBUTE` or returns it empty, Nexent uses `CAS_DEFAULT_TENANT_ID`.
+
+`CAS_HEARTBEAT_URL` enables a separate activity-driven heartbeat for CAS users. The first visible-page activity sends a GET immediately; later clicks, keyboard input, mouse movement, touch input, focus, or visibility changes send at most one request per `CAS_HEARTBEAT_INTERVAL_SECONDS` across browser tabs. If the configured Cookie is readable, Nexent sends `X-Auth-Token: <cookie-name>=<cookie-value>`; otherwise it sends the heartbeat without that header. The heartbeat endpoint must allow the Nexent origin, GET, OPTIONS, and `X-Auth-Token` through CORS. This heartbeat only keeps the authentication source active; the existing silent renewal continues to refresh the local Nexent session.
 
 Common CAS URLs:
 
@@ -432,10 +443,15 @@ CAS_LOGIN_MODE=force
 CAS_USER_ATTRIBUTE=userName
 CAS_EMAIL_ATTRIBUTE=email
 CAS_ROLE_ATTRIBUTE=userType
+CAS_DEFAULT_ROLE=USER
 CAS_TENANT_ATTRIBUTE=tenant_id
+CAS_DEFAULT_TENANT_ID=tenant_id
 CAS_ROLE_MAP_JSON={"1":"ADMIN","3":"DEV"}
 CAS_SESSION_MAX_AGE_SECONDS=3600
 LOCAL_SESSION_MAX_AGE_SECONDS=3600
+CAS_HEARTBEAT_URL=https://<ModelEngine IP>:5443/<heartbeat-path>
+CAS_HEARTBEAT_INTERVAL_SECONDS=300
+CAS_HEARTBEAT_COOKIE_NAME=<cookie-name>
 CAS_RENEW_BEFORE_SECONDS=300
 CAS_RENEW_TIMEOUT_SECONDS=10
 CAS_SYNTHETIC_EMAIL_DOMAIN=cas.local

@@ -1715,6 +1715,36 @@ class TestRedisService(unittest.TestCase):
         self.assertEqual(result, 1)
         mock_delete.assert_called_once_with('1')
 
+    def test_cleanup_document_celery_tasks_celery_exc_message_args(self):
+        """Celery's list-shaped exception args are matched and deleted."""
+        self.redis_service._backend_client = self.mock_backend_client
+        self.redis_service._client = self.mock_redis_client
+
+        task_payload = json.dumps({
+            'result': {
+                'exc_type': 'Exception',
+                'exc_message': [json.dumps({
+                    'index_name': 'idx',
+                    'source': '/legacy-failed.txt',
+                    'original_filename': 'legacy-failed.txt',
+                })],
+            },
+        }).encode()
+        self.mock_backend_client.keys.return_value = [b'celery-task-meta-1']
+        self.mock_backend_client.get.return_value = task_payload
+
+        with patch.object(
+            self.redis_service,
+            '_recursively_delete_task_and_parents',
+            return_value=(1, {'1'}),
+        ) as mock_delete:
+            result = self.redis_service._cleanup_document_celery_tasks(
+                'idx', '/legacy-failed.txt'
+            )
+
+        self.assertEqual(result, 1)
+        mock_delete.assert_called_once_with('1')
+
     def test_cleanup_document_celery_tasks_exc_message_path_or_url(self):
         """exc_message may use `path_or_url` instead of `source`."""
         self.redis_service._backend_client = self.mock_backend_client
@@ -2005,6 +2035,18 @@ class TestRedisService(unittest.TestCase):
         result = self.redis_service._extract_error_metadata_from_exc_message(msg)
         self.assertEqual(result, {"index_name": "idx", "source": "/a.txt"})
 
+    def test_extract_error_metadata_from_exc_message_celery_args_list(self):
+        """Celery's JSON-encoded exception args are unwrapped before parsing."""
+        msg = [json.dumps({"index_name": "idx", "source": "/a.txt"})]
+        result = self.redis_service._extract_error_metadata_from_exc_message(msg)
+        self.assertEqual(result, {"index_name": "idx", "source": "/a.txt"})
+
+    def test_extract_error_metadata_from_exc_message_dict(self):
+        """Already-decoded exception metadata is returned unchanged."""
+        msg = {"index_name": "idx", "source": "/a.txt"}
+        result = self.redis_service._extract_error_metadata_from_exc_message(msg)
+        self.assertEqual(result, msg)
+
     def test_extract_error_metadata_from_exc_message_second_candidate(self):
         """Escaped-quote variant is tried when the first candidate fails."""
         # Invalid JSON without escapes, but valid with the quote-un-escape
@@ -2039,6 +2081,17 @@ class TestRedisService(unittest.TestCase):
                 raise RuntimeError("can't stringify")
 
         result = self.redis_service._extract_error_metadata_from_exc_message(_Boom())
+        self.assertIsNone(result)
+
+    def test_extract_error_metadata_from_exc_message_bytes(self):
+        """Bytes returned by a result backend are decoded before JSON parsing."""
+        msg = json.dumps({"index_name": "idx", "source": "/a.txt"}).encode("utf-8")
+        result = self.redis_service._extract_error_metadata_from_exc_message(msg)
+        self.assertEqual(result, {"index_name": "idx", "source": "/a.txt"})
+
+    def test_extract_error_metadata_from_exc_message_empty_sequence(self):
+        """An empty Celery args sequence has no metadata."""
+        result = self.redis_service._extract_error_metadata_from_exc_message([])
         self.assertIsNone(result)
 
     def test_cleanup_celery_tasks_parent_id_lookup_exception(self):

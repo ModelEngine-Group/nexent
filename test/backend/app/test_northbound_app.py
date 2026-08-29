@@ -5,17 +5,25 @@ import os
 # The conftest.py sets up all mocks
 
 from unittest.mock import AsyncMock, MagicMock, patch
+import httpx
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from io import BytesIO
 
 # Import from conftest (which sets up mocks automatically)
 from apps.northbound_app import router
 from consts.exceptions import (
+    ConversationNotFoundError,
+    ForbiddenError,
     LimitExceededError,
+    RuntimeServiceTimeoutError,
+    RuntimeServiceUnavailableError,
+    RuntimeUpstreamError,
+    NotFoundException,
     UnauthorizedError,
     SignatureValidationError,
+    ValidationError,
 )
 
 
@@ -50,6 +58,216 @@ def test_health_check():
     data = resp.json()
     assert data["status"] == "healthy"
     assert data["service"] == "northbound-api"
+
+
+def test_role_for_context_normalizes_database_role():
+    with patch("apps.northbound_app.get_user_role_by_tenant", return_value="admin") as mock_role:
+        from apps.northbound_app import _role_for_context
+
+        assert _role_for_context("user-1", "tenant-1") == "ADMIN"
+
+    mock_role.assert_called_once_with("user-1", "tenant-1")
+
+
+@pytest.mark.parametrize(
+    ("exception", "expected_status"),
+    [
+        (ForbiddenError("not allowed"), 403),
+        (NotFoundException("missing"), 404),
+        (ValidationError("invalid request"), 400),
+        (ValueError("invalid value"), 400),
+    ],
+)
+def test_raise_api_key_http_exception_maps_expected_errors(exception, expected_status):
+    from apps.northbound_app import _raise_api_key_http_exception
+
+    with pytest.raises(Exception) as raised:
+        _raise_api_key_http_exception(exception)
+
+    assert raised.value.status_code == expected_status
+
+
+def test_raise_api_key_http_exception_reraises_unexpected_error():
+    from apps.northbound_app import _raise_api_key_http_exception
+
+    with pytest.raises(RuntimeError, match="database unavailable"):
+        _raise_api_key_http_exception(RuntimeError("database unavailable"))
+
+
+def test_get_northbound_context_logs_non_service_request_usage():
+    from starlette.requests import Request
+    from apps.northbound_app import _get_northbound_context
+
+    request = Request({
+        "type": "http",
+        "method": "GET",
+        "scheme": "http",
+        "path": "/nb/v1/api-keys",
+        "raw_path": b"/nb/v1/api-keys",
+        "query_string": b"",
+        "headers": [(b"authorization", b"Bearer api-key"), (b"x-request-id", b"req-1")],
+        "server": ("testserver", 80),
+        "client": ("testclient", 50000),
+    })
+    with patch("apps.northbound_app.validate_bearer_token", return_value=(True, {"sub": "user-1"})), \
+            patch("apps.northbound_app.get_user_and_tenant_by_access_key", return_value={
+                "user_id": "user-1", "tenant_id": "tenant-1", "token_id": 9,
+            }), \
+            patch("apps.northbound_app.log_token_usage") as mock_log:
+        context = __import__("asyncio").run(_get_northbound_context(request))
+
+    assert context.request_id == "req-1"
+    assert context.authorization == "Bearer api-key"
+    mock_log.assert_called_once_with(
+        token_id=9,
+        call_function_name="/nb/v1/api-keys",
+        related_id=None,
+        created_by="user-1",
+        metadata={"method": "GET", "request_id": "req-1"},
+    )
+
+
+def test_get_northbound_context_skips_usage_log_for_service_logged_paths():
+    from starlette.requests import Request
+    from apps.northbound_app import _get_northbound_context
+
+    request = Request({
+        "type": "http",
+        "method": "POST",
+        "scheme": "http",
+        "path": "/nb/v1/chat/run",
+        "raw_path": b"/nb/v1/chat/run",
+        "query_string": b"",
+        "headers": [(b"authorization", b"Bearer api-key")],
+        "server": ("testserver", 80),
+        "client": ("testclient", 50000),
+    })
+    with patch("apps.northbound_app.validate_bearer_token", return_value=(True, {"sub": "user-1"})), \
+            patch("apps.northbound_app.get_user_and_tenant_by_access_key", return_value={
+                "user_id": "user-1", "tenant_id": "tenant-1", "token_id": 9,
+            }), \
+            patch("apps.northbound_app.log_token_usage") as mock_log:
+        __import__("asyncio").run(_get_northbound_context(request))
+
+    mock_log.assert_not_called()
+
+
+def test_create_api_users_batch_endpoint_is_exposed_by_northbound_router():
+    ctx = MagicMock(user_id="admin-1", tenant_id="tenant-1", request_id="req-123")
+    created = [{
+        "user_id": "api-user-1",
+        "role": "USER",
+        "group_id": 1,
+        "group_name": "Default",
+        "api_key": "nexent-complete-key",
+    }]
+    with patch('apps.northbound_app._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('apps.northbound_app._role_for_context', return_value="ADMIN"), \
+            patch('apps.northbound_app.create_api_users_batch', return_value=created) as mock_create:
+        mock_ctx.return_value = ctx
+
+        response = client.post(
+            "/nb/v1/api-users/batch",
+            headers=_build_headers(),
+            json={"role": "USER", "count": 1},
+        )
+
+    assert response.status_code == 201
+    assert response.json()["data"] == created
+    mock_create.assert_called_once_with(
+        actor_user_id="admin-1",
+        actor_tenant_id="tenant-1",
+        actor_role="ADMIN",
+        role="USER",
+        group_id=None,
+        count=1,
+    )
+
+
+def test_create_api_users_batch_endpoint_maps_validation_error():
+    ctx = MagicMock(user_id="admin-1", tenant_id="tenant-1", request_id="req-123")
+    with patch("apps.northbound_app._get_northbound_context", new_callable=AsyncMock) as mock_ctx, \
+            patch("apps.northbound_app._role_for_context", return_value="ADMIN"), \
+            patch("apps.northbound_app.create_api_users_batch", side_effect=ValidationError("invalid group")):
+        mock_ctx.return_value = ctx
+        response = client.post(
+            "/nb/v1/api-users/batch",
+            headers=_build_headers(),
+            json={"role": "USER", "count": 1},
+        )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "invalid group"
+
+
+def test_refresh_api_key_endpoint_is_exposed_by_northbound_router():
+    ctx = MagicMock(user_id="admin-1", tenant_id="tenant-1", request_id="req-123")
+    refreshed = {
+        "user_id": "api-user-1",
+        "email": None,
+        "api_key": "nexent-new-key",
+        "revoked_count": 1,
+    }
+    with patch('apps.northbound_app._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('apps.northbound_app._role_for_context', return_value="SU"), \
+            patch('apps.northbound_app.refresh_user_api_key', return_value=refreshed):
+        mock_ctx.return_value = ctx
+
+        response = client.post(
+            "/nb/v1/api-keys/refresh",
+            headers=_build_headers(),
+            json={"user_id": "api-user-1"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["data"] == refreshed
+
+
+def test_refresh_api_key_endpoint_returns_mapped_forbidden_error():
+    ctx = MagicMock(user_id="admin-1", tenant_id="tenant-1", request_id="req-123")
+    with patch("apps.northbound_app._get_northbound_context", new_callable=AsyncMock) as mock_ctx, \
+            patch("apps.northbound_app._role_for_context", return_value="ADMIN"), \
+            patch("apps.northbound_app.refresh_user_api_key", side_effect=ForbiddenError("not allowed")):
+        mock_ctx.return_value = ctx
+        response = client.post(
+            "/nb/v1/api-keys/refresh",
+            headers=_build_headers(),
+            json={"email": "api.user@example.com"},
+        )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "not allowed"
+
+
+def test_revoke_api_key_endpoint_forwards_email_target():
+    ctx = MagicMock(user_id="admin-1", tenant_id="tenant-1", request_id="req-123")
+    with patch("apps.northbound_app._get_northbound_context", new_callable=AsyncMock) as mock_ctx, \
+            patch("apps.northbound_app._role_for_context", return_value="ADMIN"), \
+            patch("apps.northbound_app.revoke_user_api_keys", return_value={"revoked_count": 1}) as mock_revoke:
+        mock_ctx.return_value = ctx
+        response = client.delete(
+            "/nb/v1/api-keys?email=api.user@example.com",
+            headers=_build_headers(),
+        )
+
+    assert response.status_code == 200
+    assert response.json()["requestId"] == "req-123"
+    mock_revoke.assert_called_once_with(
+        actor_user_id="admin-1",
+        actor_tenant_id="tenant-1",
+        actor_role="ADMIN",
+        user_id=None,
+        email="api.user@example.com",
+    )
+
+
+def test_revoke_api_key_endpoint_rejects_missing_target():
+    ctx = MagicMock(user_id="admin-1", tenant_id="tenant-1", request_id="req-123")
+    with patch('apps.northbound_app._get_northbound_context', new_callable=AsyncMock) as mock_ctx:
+        mock_ctx.return_value = ctx
+        response = client.delete("/nb/v1/api-keys", headers=_build_headers())
+
+    assert response.status_code == 400
 
 
 # =============================================================================
@@ -189,6 +407,33 @@ def test_run_chat_unauthorized():
         assert resp.status_code == 500
 
 
+@pytest.mark.parametrize(
+    ("error", "expected_status"),
+    [
+        (RuntimeServiceUnavailableError("unavailable"), 502),
+        (RuntimeServiceTimeoutError("timed out"), 504),
+    ],
+)
+def test_run_chat_maps_runtime_transport_errors(error, expected_status):
+    with patch(
+        "apps.northbound_app._get_northbound_context",
+        new_callable=AsyncMock,
+    ) as mock_ctx, patch(
+        "apps.northbound_app.start_streaming_chat",
+        new_callable=AsyncMock,
+        side_effect=error,
+    ):
+        mock_ctx.return_value = MagicMock()
+
+        response = client.post(
+            "/nb/v1/chat/run",
+            json={"agent_name": "general-assistant", "query": "Hello"},
+            headers=_build_headers(),
+        )
+
+    assert response.status_code == expected_status
+
+
 # =============================================================================
 # Stop Chat Tests
 # =============================================================================
@@ -207,6 +452,57 @@ def test_stop_chat_success():
         )
 
         assert resp.status_code == 200
+
+
+def test_stop_chat_preserves_runtime_error_response():
+    upstream_error = RuntimeUpstreamError(
+        status_code=403,
+        content=b'{"message":"forbidden"}',
+        headers={"content-type": "application/json"},
+    )
+    with patch(
+        "apps.northbound_app._get_northbound_context",
+        new_callable=AsyncMock,
+    ) as mock_ctx, patch(
+        "apps.northbound_app.stop_chat",
+        new_callable=AsyncMock,
+        side_effect=upstream_error,
+    ):
+        mock_ctx.return_value = MagicMock()
+
+        response = client.get(
+            "/nb/v1/chat/stop/123",
+            headers=_build_headers(),
+        )
+
+    assert response.status_code == 403
+    assert response.json() == {"message": "forbidden"}
+
+
+@pytest.mark.parametrize(
+    ("error", "expected_status"),
+    [
+        (RuntimeServiceUnavailableError("unavailable"), 502),
+        (RuntimeServiceTimeoutError("timed out"), 504),
+    ],
+)
+def test_stop_chat_maps_runtime_transport_errors(error, expected_status):
+    with patch(
+        "apps.northbound_app._get_northbound_context",
+        new_callable=AsyncMock,
+    ) as mock_ctx, patch(
+        "apps.northbound_app.stop_chat",
+        new_callable=AsyncMock,
+        side_effect=error,
+    ):
+        mock_ctx.return_value = MagicMock()
+
+        response = client.get(
+            "/nb/v1/chat/stop/123",
+            headers=_build_headers(),
+        )
+
+    assert response.status_code == expected_status
 
 
 # =============================================================================
@@ -336,6 +632,49 @@ def test_get_agent_by_name_internal_error():
         assert resp.status_code == 500
 
 
+def test_get_agent_knowledge_bases_success():
+    """Test user-visible knowledge bases are returned for a published agent."""
+    with patch('apps.northbound_app._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('apps.northbound_app.get_agent_knowledge_bases_for_northbound', new_callable=AsyncMock) as mock_get:
+        mock_ctx.return_value = MagicMock()
+        mock_get.return_value = {
+            "message": "success",
+            "data": {
+                "source": "aidp",
+                "tool_name": "AidpSearchTool",
+                "range_parameter": "kds_list",
+                "knowledge_bases": [{"id": "kds-1", "name": "Policies"}],
+            },
+            "requestId": "req-123",
+        }
+
+        resp = client.get(
+            "/nb/v1/agents/agent1/knowledge-bases",
+            headers=_build_headers(),
+        )
+
+        assert resp.status_code == 200
+        assert resp.json()["data"]["range_parameter"] == "kds_list"
+        mock_get.assert_awaited_once()
+
+
+def test_get_agent_knowledge_bases_source_conflict():
+    """Test agents with both knowledge sources return a configuration conflict."""
+    with patch('apps.northbound_app._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('apps.northbound_app.get_agent_knowledge_bases_for_northbound', new_callable=AsyncMock) as mock_get:
+        mock_ctx.return_value = MagicMock()
+        mock_get.side_effect = ValueError(
+            "The agent enables both local and AIDP knowledge retrieval."
+        )
+
+        resp = client.get(
+            "/nb/v1/agents/agent1/knowledge-bases",
+            headers=_build_headers(),
+        )
+
+        assert resp.status_code == 409
+
+
 # =============================================================================
 # List Conversations Tests
 # =============================================================================
@@ -382,6 +721,57 @@ def test_update_conversation_title_success():
         )
 
         assert resp.status_code == 200
+
+
+# =============================================================================
+# Model List and Generated Title Tests
+# =============================================================================
+
+def test_list_configured_models_success():
+    ctx = MagicMock(tenant_id="tenant-1", request_id="req-123")
+    models = [{"model_id": 7, "display_name": "Main model"}]
+    with patch('apps.northbound_app._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('apps.northbound_app.list_configured_models', new_callable=AsyncMock) as mock_list:
+        mock_ctx.return_value = ctx
+        mock_list.return_value = {
+            "message": "success",
+            "data": models,
+            "requestId": "req-123",
+        }
+
+        resp = client.get("/nb/v1/models", headers=_build_headers())
+
+    assert resp.status_code == 200
+    assert resp.json()["data"] == models
+    mock_list.assert_awaited_once_with(ctx=ctx)
+
+
+def test_generate_title_success():
+    ctx = MagicMock(user_id="user-1", tenant_id="tenant-1", request_id="req-123")
+    with patch('apps.northbound_app._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('apps.northbound_app.get_user_language', return_value="en"), \
+            patch('apps.northbound_app.generate_conversation_title', new_callable=AsyncMock) as mock_generate:
+        mock_ctx.return_value = ctx
+        mock_generate.return_value = {
+            "message": "success",
+            "data": "Generated title",
+            "requestId": "req-123",
+        }
+
+        resp = client.post(
+            "/nb/v1/generate_title",
+            headers=_build_headers(),
+            json={"conversation_id": 42, "question": "Summarize this conversation"},
+        )
+
+    assert resp.status_code == 200
+    assert resp.json()["data"] == "Generated title"
+    mock_generate.assert_awaited_once_with(
+        ctx=ctx,
+        conversation_id=42,
+        question="Summarize this conversation",
+        language="en",
+    )
 
 
 # =============================================================================
@@ -977,6 +1367,234 @@ def test_upload_chat_attachments_permission_error():
         assert resp.status_code == 403
 
 
+# =============================================================================
+# Additional Branch Coverage Tests
+# =============================================================================
+
+
+def _request(path="/nb/v1/agents", method="GET", headers=None):
+    from starlette.requests import Request
+
+    request_headers = [(b"authorization", b"Bearer api-key")]
+    for key, value in (headers or {}).items():
+        request_headers.append((key.lower().encode(), value.encode()))
+    return Request({
+        "type": "http",
+        "method": method,
+        "scheme": "http",
+        "path": path,
+        "raw_path": path.encode(),
+        "query_string": b"",
+        "headers": request_headers,
+        "server": ("testserver", 80),
+        "client": ("testclient", 50000),
+    })
+
+
+@pytest.mark.parametrize(
+    ("token_result", "lookup_result", "expected_status", "detail"),
+    [
+        ((False, None), None, 401, "Invalid or missing bearer token"),
+        ((True, {"sub": "user"}), {"tenant_id": "tenant"}, 400, "Missing user information"),
+        ((True, {"sub": "user"}), {"user_id": "user"}, 400, "Missing tenant information"),
+    ],
+)
+def test_get_northbound_context_rejects_invalid_identity(
+    token_result, lookup_result, expected_status, detail
+):
+    from apps.northbound_app import _get_northbound_context
+
+    with patch("apps.northbound_app.validate_bearer_token", return_value=token_result), \
+            patch("apps.northbound_app.get_user_and_tenant_by_access_key", return_value=lookup_result):
+        with pytest.raises(Exception) as raised:
+            __import__("asyncio").run(_get_northbound_context(_request()))
+
+    assert raised.value.status_code == expected_status
+    assert detail in raised.value.detail
+
+
+@pytest.mark.parametrize(
+    "error",
+    [LimitExceededError("limited"), UnauthorizedError("unauthorized"), RuntimeError("broken")],
+)
+def test_get_northbound_context_maps_authentication_errors(error):
+    from apps.northbound_app import _get_northbound_context
+
+    with patch("apps.northbound_app.validate_bearer_token", side_effect=error):
+        with pytest.raises(Exception) as raised:
+            __import__("asyncio").run(_get_northbound_context(_request()))
+
+    assert raised.value.status_code in (401, 429)
+
+
+def test_get_northbound_context_generates_request_id_and_survives_usage_log_failure():
+    from apps.northbound_app import _get_northbound_context
+
+    with patch("apps.northbound_app.validate_bearer_token", return_value=(True, {"sub": "user"})), \
+            patch("apps.northbound_app.get_user_and_tenant_by_access_key", return_value={
+                "user_id": "user", "tenant_id": "tenant", "token_id": 2,
+            }), patch("apps.northbound_app.log_token_usage", side_effect=RuntimeError("db")):
+        context = __import__("asyncio").run(_get_northbound_context(_request()))
+
+    assert context.request_id
+    assert context.authorization == "Bearer api-key"
+
+
+def test_get_northbound_context_does_not_log_non_positive_token_id():
+    from apps.northbound_app import _get_northbound_context
+
+    with patch("apps.northbound_app.validate_bearer_token", return_value=(True, {"sub": "user"})), \
+            patch("apps.northbound_app.get_user_and_tenant_by_access_key", return_value={
+                "user_id": "user", "tenant_id": "tenant", "token_id": 0,
+            }), patch("apps.northbound_app.log_token_usage") as mock_log:
+        __import__("asyncio").run(_get_northbound_context(_request()))
+
+    mock_log.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("endpoint", "service_name", "error", "expected_status"),
+    [
+        ("/nb/v1/models", "list_configured_models", RuntimeError("failed"), 500),
+        ("/nb/v1/generate_title", "generate_conversation_title", NotFoundException("missing"), 404),
+        ("/nb/v1/generate_title", "generate_conversation_title", RuntimeError("failed"), 500),
+    ],
+)
+def test_simple_northbound_endpoints_map_errors(endpoint, service_name, error, expected_status):
+    payload = {"conversation_id": 1, "question": "question"} if "generate_title" in endpoint else None
+    request_method = client.post if payload else client.get
+    with patch("apps.northbound_app._get_northbound_context", new_callable=AsyncMock) as mock_ctx, \
+            patch(f"apps.northbound_app.{service_name}", new_callable=AsyncMock, side_effect=error), \
+            patch("apps.northbound_app.get_user_language", return_value="en"):
+        mock_ctx.return_value = MagicMock()
+        response = request_method(endpoint, headers=_build_headers(), json=payload) if payload else request_method(
+            endpoint, headers=_build_headers()
+        )
+
+    assert response.status_code == expected_status
+
+
+@pytest.mark.parametrize(
+    ("service_name", "error", "expected_status"),
+    [
+        ("get_conversation_history", LimitExceededError("limited"), 429),
+        ("get_conversation_history", RuntimeError("failed"), 500),
+        ("get_agent_info_list", LimitExceededError("limited"), 429),
+        ("get_agent_info_list", RuntimeError("failed"), 500),
+        ("get_agent_info_by_name_for_northbound", ValueError("invalid"), 400),
+        ("get_agent_info_by_name_for_northbound", HTTPException(status_code=418, detail="teapot"), 418),
+        ("list_conversations", LimitExceededError("limited"), 429),
+        ("list_conversations", RuntimeError("failed"), 500),
+    ],
+)
+def test_northbound_endpoint_error_mappings(service_name, error, expected_status):
+    from fastapi import HTTPException
+
+    path_by_service = {
+        "get_conversation_history": "/nb/v1/conversations/1",
+        "get_agent_info_list": "/nb/v1/agents",
+        "get_agent_info_by_name_for_northbound": "/nb/v1/agents/agent",
+        "list_conversations": "/nb/v1/conversations",
+    }
+    with patch("apps.northbound_app._get_northbound_context", new_callable=AsyncMock) as mock_ctx, \
+            patch(f"apps.northbound_app.{service_name}", new_callable=AsyncMock, side_effect=error):
+        mock_ctx.return_value = MagicMock()
+        response = client.get(path_by_service[service_name], headers=_build_headers())
+
+    assert response.status_code == expected_status
+
+
+def test_update_conversation_title_ignores_invalid_metadata_and_sets_headers():
+    with patch("apps.northbound_app._get_northbound_context", new_callable=AsyncMock) as mock_ctx, \
+            patch("apps.northbound_app.update_conversation_title", new_callable=AsyncMock) as mock_update:
+        mock_ctx.return_value = MagicMock(request_id="req-1")
+        mock_update.return_value = {"idempotency_key": "generated", "title": "New"}
+        response = client.put(
+            "/nb/v1/conversations/1/title?title=New&meta_data=invalid",
+            headers={**_build_headers(), "Idempotency-Key": "input"},
+        )
+
+    assert response.status_code == 200
+    assert response.headers["Idempotency-Key"] == "generated"
+    assert response.headers["X-Request-Id"] == "req-1"
+    assert mock_update.await_args.kwargs["meta_data"] is None
+
+
+@pytest.mark.parametrize(
+    ("service_name", "error", "expected_status"),
+    [
+        ("list_configured_models", HTTPException(status_code=401, detail="unauthorized"), 401),
+        ("generate_conversation_title", ConversationNotFoundError("missing"), 404),
+    ],
+)
+def test_models_and_title_preserve_expected_http_errors(service_name, error, expected_status):
+    from fastapi import HTTPException
+
+    path = "/nb/v1/models" if service_name == "list_configured_models" else "/nb/v1/generate_title"
+    with patch("apps.northbound_app._get_northbound_context", new_callable=AsyncMock) as mock_ctx, \
+            patch(f"apps.northbound_app.{service_name}", new_callable=AsyncMock, side_effect=error), \
+            patch("apps.northbound_app.get_user_language", return_value="en"):
+        mock_ctx.return_value = MagicMock()
+        response = client.get(path, headers=_build_headers()) if path.endswith("models") else client.post(
+            path, headers=_build_headers(), json={"conversation_id": 1, "question": "q"}
+        )
+
+    assert response.status_code == expected_status
+
+
+@pytest.mark.parametrize(
+    ("url", "expected_status"),
+    [("ftp://example.com/file.txt", 400), ("not a url", 400), ("", 400)],
+)
+def test_file_fetch_rejects_invalid_urls(url, expected_status):
+    response = client.get("/nb/v1/file/fetch", params={"presigned_url": url})
+    assert response.status_code == expected_status
+
+
+def test_file_fetch_returns_bad_gateway_for_storage_status():
+    response = MagicMock(status_code=404)
+    response.headers = {}
+    with patch("apps.northbound_app.httpx.AsyncClient") as client_cls:
+        client_cls.return_value.__aenter__ = AsyncMock(return_value=client_cls.return_value)
+        client_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+        client_cls.return_value.get = AsyncMock(return_value=response)
+        result = client.get("/nb/v1/file/fetch", params={"presigned_url": "https://storage/file"})
+
+    assert result.status_code == 502
+
+
+@pytest.mark.parametrize("error", [httpx.TimeoutException("timeout"), httpx.RequestError("request failed")])
+def test_file_fetch_maps_http_client_errors(error):
+    with patch("apps.northbound_app.httpx.AsyncClient") as client_cls:
+        client_cls.return_value.__aenter__ = AsyncMock(return_value=client_cls.return_value)
+        client_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+        client_cls.return_value.get = AsyncMock(side_effect=error)
+        result = client.get("/nb/v1/file/fetch", params={"presigned_url": "https://storage/file"})
+
+    assert result.status_code == (504 if isinstance(error, httpx.TimeoutException) else 502)
+
+
+def test_file_fetch_streams_content_and_uses_content_disposition_filename():
+    async def chunks():
+        yield b"file content"
+
+    response = MagicMock(status_code=200)
+    response.headers = {
+        "Content-Type": "text/plain",
+        "Content-Disposition": 'attachment; filename="report.txt"',
+    }
+    response.aiter_bytes = chunks
+    with patch("apps.northbound_app.httpx.AsyncClient") as client_cls:
+        client_cls.return_value.__aenter__ = AsyncMock(return_value=client_cls.return_value)
+        client_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+        client_cls.return_value.get = AsyncMock(return_value=response)
+        result = client.get("/nb/v1/file/fetch", params={"presigned_url": "https://storage/file"})
+
+    assert result.status_code == 200
+    assert result.content == b"file content"
+    assert "report.txt" in result.headers["content-disposition"]
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
 
@@ -1038,3 +1656,65 @@ def test_resolve_proxy_download_filename_empty_content_disposition():
         None
     )
     assert result == "file.pdf"
+
+def test_get_agent_knowledge_bases_not_found():
+    """Test 404 when the target agent cannot be found."""
+    with patch('apps.northbound_app._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('apps.northbound_app.get_agent_knowledge_bases_for_northbound', new_callable=AsyncMock) as mock_get:
+        mock_ctx.return_value = MagicMock()
+        mock_get.side_effect = LookupError("agent not found")
+
+        resp = client.get(
+            "/nb/v1/agents/missing/knowledge-bases",
+            headers=_build_headers(),
+        )
+
+        assert resp.status_code == 404
+        assert resp.json()["detail"] == "agent not found"
+
+
+def test_get_agent_knowledge_bases_limit_exceeded():
+    """Test 429 when the northbound quota is exceeded."""
+    with patch('apps.northbound_app._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('apps.northbound_app.get_agent_knowledge_bases_for_northbound', new_callable=AsyncMock) as mock_get:
+        mock_ctx.return_value = MagicMock()
+        mock_get.side_effect = LimitExceededError("Rate limit exceeded")
+
+        resp = client.get(
+            "/nb/v1/agents/agent1/knowledge-bases",
+            headers=_build_headers(),
+        )
+
+        assert resp.status_code == 429
+
+
+def test_get_agent_knowledge_bases_internal_error():
+    """Test 500 when an unexpected error occurs."""
+    with patch('apps.northbound_app._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('apps.northbound_app.get_agent_knowledge_bases_for_northbound', new_callable=AsyncMock) as mock_get:
+        mock_ctx.return_value = MagicMock()
+        mock_get.side_effect = RuntimeError("boom")
+
+        resp = client.get(
+            "/nb/v1/agents/agent1/knowledge-bases",
+            headers=_build_headers(),
+        )
+
+        assert resp.status_code == 500
+
+
+def test_get_agent_knowledge_bases_http_exception_passthrough():
+    """HTTPException raised earlier in the call chain is re-raised unchanged."""
+    from fastapi import HTTPException
+
+    with patch('apps.northbound_app._get_northbound_context', new_callable=AsyncMock) as mock_ctx,             patch('apps.northbound_app.get_agent_knowledge_bases_for_northbound', new_callable=AsyncMock) as mock_get:
+        mock_ctx.return_value = MagicMock()
+        mock_get.side_effect = HTTPException(status_code=403, detail="forbidden")
+
+        resp = client.get(
+            "/nb/v1/agents/agent1/knowledge-bases",
+            headers=_build_headers(),
+        )
+
+        assert resp.status_code == 403
+        assert resp.json()["detail"] == "forbidden"

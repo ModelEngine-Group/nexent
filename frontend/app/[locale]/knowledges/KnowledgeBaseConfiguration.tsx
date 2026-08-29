@@ -21,12 +21,13 @@ import {
   DOCUMENT_ACTION_TYPES,
   KNOWLEDGE_BASE_ACTION_TYPES,
 } from "@/const/knowledgeBase";
+import { ErrorCode } from "@/const/errorCode";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 import log from "@/lib/logger";
+import { createKnowledgeBaseFilterKey } from "@/lib/knowledgeBaseViewport";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
 import knowledgeBasePollingService from "@/services/knowledgeBasePollingService";
 import { isKnowledgeBaseFileSizeValid } from "@/services/uploadService";
-import { ApiError } from "@/services/api";
 import { KnowledgeBase } from "@/types/knowledgeBase";
 import { useConfig } from "@/hooks/useConfig";
 import { useModelList } from "@/hooks/model/useModelList";
@@ -47,11 +48,16 @@ import {
   DocumentProvider,
 } from "./contexts/DocumentContext";
 import { useUIContext, UIProvider } from "./contexts/UIStateContext";
-import quotaService from "@/services/quotaService";
 
 const EMBEDDING_MODEL_OPTION_DELIMITER = "::";
 const normalizeEmbeddingModelType = (type: string) =>
   (type || "").trim().toLowerCase();
+
+const isApiErrorCode = (error: unknown, code: string | number): boolean =>
+  typeof error === "object" &&
+  error !== null &&
+  "code" in error &&
+  String((error as { code?: unknown }).code) === String(code);
 
 const toEmbeddingModelOptionValue = (displayName: string, type: string) =>
   `${displayName}${EMBEDDING_MODEL_OPTION_DELIMITER}${type}`;
@@ -202,6 +208,9 @@ function DataConfig({ isActive }: DataConfigProps) {
   const {
     state: kbState,
     fetchKnowledgeBases,
+    loadMoreKnowledgeBases,
+    listPagination,
+    isLoadingMore,
     createKnowledgeBase,
     deleteKnowledgeBase,
     setActiveKnowledgeBase,
@@ -245,7 +254,78 @@ function DataConfig({ isActive }: DataConfigProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [sourceFilter, setSourceFilter] = useState<string[]>([]);
   const [modelFilter, setModelFilter] = useState<string[]>([]);
+  const lastRequestedFilterKeyRef = useRef(
+    createKnowledgeBaseFilterKey(searchQuery, sourceFilter, modelFilter)
+  );
+  const initialLoadStartedRef = useRef(false);
+  const initialCapacityRequestRef = useRef(false);
+  const initialPageSizeRef = useRef(1);
+  const [initialListPending, setInitialListPending] = useState(true);
   const contentRef = useRef<HTMLDivElement | null>(null);
+
+  const handleViewportCapacityChange = useCallback(
+    (capacity: number, hasMeasuredRows: boolean) => {
+      const pageSize = Math.max(1, Math.ceil(capacity));
+      initialPageSizeRef.current = pageSize;
+      const loadedCount = kbState.knowledgeBases.length;
+      if (initialLoadStartedRef.current && !listPagination.hasMore) {
+        setInitialListPending(false);
+        return;
+      }
+      if (
+        kbState.isLoading ||
+        isLoadingMore ||
+        initialCapacityRequestRef.current ||
+        (initialLoadStartedRef.current &&
+          (!hasMeasuredRows || loadedCount >= pageSize))
+      ) {
+        return;
+      }
+
+      initialLoadStartedRef.current = true;
+      initialCapacityRequestRef.current = true;
+      setInitialListPending(true);
+      void fetchKnowledgeBases(false, true, true, {
+        keyword: searchQuery,
+        sources: sourceFilter,
+        models: modelFilter,
+        limit: pageSize,
+      }).finally(() => {
+        initialCapacityRequestRef.current = false;
+        setInitialListPending(false);
+      });
+    },
+    [
+      fetchKnowledgeBases,
+      kbState.isLoading,
+      kbState.knowledgeBases.length,
+      isLoadingMore,
+      listPagination.hasMore,
+      modelFilter,
+      searchQuery,
+      sourceFilter,
+    ]
+  );
+
+  useEffect(() => {
+    const filterKey = createKnowledgeBaseFilterKey(
+      searchQuery,
+      sourceFilter,
+      modelFilter
+    );
+    if (filterKey === lastRequestedFilterKeyRef.current) return;
+
+    const timer = window.setTimeout(() => {
+      lastRequestedFilterKeyRef.current = filterKey;
+      fetchKnowledgeBases(true, false, false, {
+        keyword: searchQuery,
+        sources: sourceFilter,
+        models: modelFilter,
+        limit: initialPageSizeRef.current,
+      });
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [fetchKnowledgeBases, modelFilter, searchQuery, sourceFilter]);
 
   const availableEmbeddingModels = useMemo(() => {
     const embeddingRelatedModels = models.filter(
@@ -420,23 +500,22 @@ function DataConfig({ isActive }: DataConfigProps) {
     kbDispatch,
   ]);
 
-  // Generate unique knowledge base name
-  const generateUniqueKbName = (existingKbs: KnowledgeBase[]): string => {
+  // Generate the default name from knowledge bases visible to the current user.
+  const generateVisibleKbName = (existingKbs: KnowledgeBase[]): string => {
     const baseNamePrefix = t("knowledgeBase.name.new");
     const existingNames = new Set(existingKbs.map((kb) => kb.name));
 
-    // If base name is not used, return directly
-    if (!existingNames.has(baseNamePrefix)) {
-      return baseNamePrefix;
-    }
-
-    // Otherwise try adding numeric suffix until finding unused name
     let counter = 1;
-    while (existingNames.has(`${baseNamePrefix}${counter}`)) {
+    while (true) {
+      const candidate =
+        counter === 1 ? baseNamePrefix : `${baseNamePrefix}${counter - 1}`;
+
+      if (!existingNames.has(candidate)) {
+        return candidate;
+      }
+
       counter++;
     }
-
-    return `${baseNamePrefix}${counter}`;
   };
 
   // Handle knowledge base click logic, set current active knowledge base
@@ -742,8 +821,8 @@ function DataConfig({ isActive }: DataConfigProps) {
     // This prevents issues with chunk loading from previously selected KB
     setActiveKnowledgeBase(null);
 
-    // Generate default knowledge base name
-    const defaultName = generateUniqueKbName(kbState.knowledgeBases);
+    // Generate the default name without probing hidden tenant knowledge bases.
+    const defaultName = generateVisibleKbName(kbState.knowledgeBases);
     setNewKbName(defaultName);
     setNewKbIngroupPermission("READ_ONLY");
     setNewKbGroupIds([]);
@@ -784,7 +863,7 @@ function DataConfig({ isActive }: DataConfigProps) {
   };
 
   // Handle document deletion
-  const handleDeleteDocument = (docId: string) => {
+  const handleDeleteDocument = (docId: string, fileId?: string) => {
     const kbId = kbState.activeKnowledgeBase?.id;
     if (!kbId) return;
     if (kbState.activeKnowledgeBase?.permission === "READ_ONLY") {
@@ -800,7 +879,7 @@ function DataConfig({ isActive }: DataConfigProps) {
       danger: true,
       onOk: async () => {
         try {
-          await deleteDocument(kbId, docId);
+          await deleteDocument(kbId, docId, fileId);
           message.success(t("document.message.deleteSuccess"));
         } catch (error) {
           message.error(t("document.message.deleteError"));
@@ -811,7 +890,10 @@ function DataConfig({ isActive }: DataConfigProps) {
 
   // Handle file upload - in creation mode create knowledge base first then upload, in normal mode upload directly
   const handleFileUpload = async (selectedFiles: File[] = uploadFiles) => {
-    if (!isCreatingMode && kbState.activeKnowledgeBase?.permission === "READ_ONLY") {
+    if (
+      !isCreatingMode &&
+      kbState.activeKnowledgeBase?.permission === "READ_ONLY"
+    ) {
       message.error(t("errorCode.000202", "Access forbidden."));
       return;
     }
@@ -861,14 +943,8 @@ function DataConfig({ isActive }: DataConfigProps) {
           newKbGroupIds,
           selectedModelId,
           newKbPreserveSourceFile,
-          newKbQuotaBytes,
+          newKbQuotaBytes
         );
-
-        if (!newKB) {
-          message.error(t("knowledgeBase.message.createError"));
-          setHasClickedUpload(false);
-          return;
-        }
 
         setIsCreatingMode(false);
         setActiveKnowledgeBase(newKB);
@@ -898,13 +974,29 @@ function DataConfig({ isActive }: DataConfigProps) {
             setNewlyCreatedKbId(null);
           });
       } catch (error) {
-        log.error(t("knowledgeBase.error.createUpload"), error);
         message.error(
-          error instanceof ApiError && error.code === 413
-            ? t("quota.uploadBlocked")
-            : t("knowledgeBase.message.createUploadError")
+          isApiErrorCode(error, 409)
+            ? t("knowledgeBase.message.nameExists", {
+                name: newKbName.trim(),
+              })
+            : isApiErrorCode(
+                  error,
+                  ErrorCode.TENANT_PERSONAL_KB_QUOTA_EXCEEDED
+                )
+              ? t("quota.personalKbUploadBlocked")
+              : isApiErrorCode(
+                    error,
+                    ErrorCode.TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE
+                  )
+                ? t(`errorCode.${ErrorCode.TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE}`)
+              : isApiErrorCode(error, 413)
+                ? t("quota.uploadBlocked")
+                : t("knowledgeBase.message.createUploadError")
         );
         setHasClickedUpload(false);
+        // Clear the waiting flag so a failed upload cannot leave the page
+        // stuck on "waiting for task creation".
+        setNewlyCreatedKbId(null);
         throw error;
       }
       return;
@@ -941,11 +1033,17 @@ function DataConfig({ isActive }: DataConfigProps) {
         }
       );
     } catch (error) {
-      log.error(t("document.error.upload"), error);
       message.error(
-        error instanceof ApiError && error.code === 413
-          ? t("quota.uploadBlocked")
-          : t("document.message.uploadError")
+        isApiErrorCode(error, ErrorCode.TENANT_PERSONAL_KB_QUOTA_EXCEEDED)
+          ? t("quota.personalKbUploadBlocked")
+          : isApiErrorCode(
+                error,
+                ErrorCode.TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE
+              )
+            ? t(`errorCode.${ErrorCode.TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE}`)
+          : isApiErrorCode(error, 413)
+            ? t("quota.uploadBlocked")
+            : t("document.message.uploadError")
       );
       throw error;
     }
@@ -1068,184 +1166,202 @@ function DataConfig({ isActive }: DataConfigProps) {
       >
         <div className="w-full h-full">
           <Row className="h-full w-full" gutter={TWO_COLUMN_LAYOUT.GUTTER}>
-          <Col
-            className="h-full"
-            xs={TWO_COLUMN_LAYOUT.LEFT_COLUMN.xs}
-            md={TWO_COLUMN_LAYOUT.LEFT_COLUMN.md}
-            lg={TWO_COLUMN_LAYOUT.LEFT_COLUMN.lg}
-            xl={TWO_COLUMN_LAYOUT.LEFT_COLUMN.xl}
-            xxl={TWO_COLUMN_LAYOUT.LEFT_COLUMN.xxl}
-          >
-            <KnowledgeBaseList
-              knowledgeBases={kbState.knowledgeBases}
-              activeKnowledgeBase={kbState.activeKnowledgeBase}
-              isLoading={kbState.isLoading}
-              syncLoading={kbState.syncLoading}
-              onClick={handleKnowledgeBaseClick}
-              onDelete={handleDelete}
-              onSync={handleSync}
-              onCreateNew={handleCreateNew}
-              onDataMateConfig={handleDataMateConfig}
-              showDataMateConfig={modelEngineEnabled}
-              getModelDisplayName={(modelId) => modelId}
-              containerHeight={SETUP_PAGE_CONTAINER.MAIN_CONTENT_HEIGHT}
-              onKnowledgeBaseChange={() => {}} // No need to trigger repeatedly here as it's already handled in handleKnowledgeBaseClick
-              onKnowledgeBaseUpdate={(updatedKnowledgeBase) => {
-                // Update knowledge base in list and active knowledge base
-                updateKnowledgeBase(updatedKnowledgeBase);
-                if (
-                  kbState.activeKnowledgeBase &&
-                  kbState.activeKnowledgeBase.id === updatedKnowledgeBase.id
-                ) {
-                  setActiveKnowledgeBase(updatedKnowledgeBase);
-                }
-              }}
-              // Search and filter props
-              searchQuery={searchQuery}
-              onSearchChange={setSearchQuery}
-              sourceFilter={sourceFilter}
-              onSourceFilterChange={(values) =>
-                setSourceFilter(
-                  Array.isArray(values) ? values : values ? [values] : []
-                )
-              }
-              modelFilter={modelFilter}
-              onModelFilterChange={(values) =>
-                setModelFilter(
-                  Array.isArray(values) ? values : values ? [values] : []
-                )
-              }
-            />
-          </Col>
-
-          <Col
-            className="h-full"
-            xs={TWO_COLUMN_LAYOUT.RIGHT_COLUMN.xs}
-            md={TWO_COLUMN_LAYOUT.RIGHT_COLUMN.md}
-            lg={TWO_COLUMN_LAYOUT.RIGHT_COLUMN.lg}
-            xl={TWO_COLUMN_LAYOUT.RIGHT_COLUMN.xl}
-            xxl={TWO_COLUMN_LAYOUT.RIGHT_COLUMN.xxl}
-          >
-            {isCreatingMode ? (
-              <DocumentList
-                key="create-mode"
-                documents={[]}
-                onDelete={() => {}}
-                knowledgeBaseSource={""}
-                isCreatingMode={true}
-                knowledgeBaseId={""}
-                knowledgeBaseName={newKbName}
-                onNameChange={handleNameChange}
+            <Col
+              className="h-full"
+              xs={TWO_COLUMN_LAYOUT.LEFT_COLUMN.xs}
+              md={TWO_COLUMN_LAYOUT.LEFT_COLUMN.md}
+              lg={TWO_COLUMN_LAYOUT.LEFT_COLUMN.lg}
+              xl={TWO_COLUMN_LAYOUT.LEFT_COLUMN.xl}
+              xxl={TWO_COLUMN_LAYOUT.LEFT_COLUMN.xxl}
+            >
+              <KnowledgeBaseList
+                knowledgeBases={kbState.knowledgeBases}
+                activeKnowledgeBase={kbState.activeKnowledgeBase}
+                isLoading={kbState.isLoading}
+                isLoadingMore={isLoadingMore}
+                syncLoading={kbState.syncLoading}
+                totalCount={listPagination.total}
+                hasMore={listPagination.hasMore}
+                estimatedRowHeight={listPagination.estimatedRowHeight}
+                estimatedItemHeights={listPagination.estimatedItemHeights}
+                availableSources={listPagination.facets.sources}
+                availableModels={listPagination.facets.models}
+                onLoadMore={loadMoreKnowledgeBases}
+                serverFiltered
+                initialLoadPending={initialListPending}
+                onViewportCapacityChange={handleViewportCapacityChange}
+                onClick={handleKnowledgeBaseClick}
+                onDelete={handleDelete}
+                onSync={handleSync}
+                onCreateNew={handleCreateNew}
+                onDataMateConfig={handleDataMateConfig}
+                showDataMateConfig={modelEngineEnabled}
+                getModelDisplayName={(modelId) => modelId}
                 containerHeight={SETUP_PAGE_CONTAINER.MAIN_CONTENT_HEIGHT}
-                hasDocuments={hasClickedUpload || docState.isUploading}
-                // Group permission and user groups for create mode
-                ingroupPermission={newKbIngroupPermission}
-                onIngroupPermissionChange={setNewKbIngroupPermission}
-                selectedGroupIds={newKbGroupIds}
-                onSelectedGroupIdsChange={setNewKbGroupIds}
-                preserveSourceFile={newKbPreserveSourceFile}
-                onPreserveSourceFileChange={setNewKbPreserveSourceFile}
-                quotaLimitBytes={newKbQuotaBytes}
-                onQuotaLimitBytesChange={setNewKbQuotaBytes}
-                // Embedding model for create mode
-                availableEmbeddingModels={availableEmbeddingModels}
-                selectedEmbeddingModel={newKbEmbeddingModel}
-                onEmbeddingModelChange={setNewKbEmbeddingModel}
-                // Upload related props
-                isDragging={uiState.isDragging}
-                onDragOver={handleDragOver}
-                onDragLeave={handleDragLeave}
-                onDrop={handleDrop}
-                onFileSelect={handleFileSelect}
-                onUpload={handleFileUpload}
-                isUploading={docState.isUploading}
-              />
-            ) : kbState.activeKnowledgeBase ? (
-              <DocumentList
-                key={`kb-${kbState.activeKnowledgeBase.id}`}
-                documents={viewingDocuments}
-                onDelete={handleDeleteDocument}
-                knowledgeBaseSource={kbState.activeKnowledgeBase?.source}
-                knowledgeBaseId={kbState.activeKnowledgeBase.id}
-                knowledgeBaseName={viewingKbName}
-                modelMismatch={hasKnowledgeBaseDetailModelMismatch(
-                  kbState.activeKnowledgeBase
-                )}
-                currentModel={
-                  kbState.activeKnowledgeBase?.is_multimodal
-                    ? modelConfig?.multiEmbedding?.displayName?.trim() || ""
-                    : modelConfig?.embedding?.displayName?.trim() || ""
-                }
-                knowledgeBaseModel={kbState.activeKnowledgeBase.embeddingModel}
-                embeddingModelInfo={
-                  hasKnowledgeBaseDetailModelMismatch(
-                    kbState.activeKnowledgeBase
+                onKnowledgeBaseChange={() => {}} // No need to trigger repeatedly here as it's already handled in handleKnowledgeBaseClick
+                onKnowledgeBaseUpdate={(updatedKnowledgeBase) => {
+                  // Update knowledge base in list and active knowledge base
+                  updateKnowledgeBase(updatedKnowledgeBase);
+                  if (
+                    kbState.activeKnowledgeBase &&
+                    kbState.activeKnowledgeBase.id === updatedKnowledgeBase.id
+                  ) {
+                    setActiveKnowledgeBase(updatedKnowledgeBase);
+                  }
+                }}
+                // Search and filter props
+                searchQuery={searchQuery}
+                onSearchChange={setSearchQuery}
+                sourceFilter={sourceFilter}
+                onSourceFilterChange={(values) =>
+                  setSourceFilter(
+                    Array.isArray(values) ? values : values ? [values] : []
                   )
-                    ? `\u5f53\u524d\u6a21\u578b${kbState.activeKnowledgeBase.embeddingModel || "unknown"}\u672a\u914d\u7f6e`
-                    : undefined
                 }
-                containerHeight={SETUP_PAGE_CONTAINER.MAIN_CONTENT_HEIGHT}
-                hasDocuments={viewingDocuments.length > 0}
-                isNewlyCreatedAndWaiting={isNewlyCreatedAndWaiting}
-                onChunkCountChange={() => {
-                  // Trigger knowledge base list update to refresh chunk count
-                  knowledgeBasePollingService.triggerKnowledgeBaseListUpdate(
-                    true
-                  );
-                }}
-                permission={kbState.activeKnowledgeBase?.permission}
-                summaryFrequency={kbState.activeKnowledgeBase?.summaryFrequency}
-                onSummaryFrequencyChange={(frequency) => {
-                  if (kbState.activeKnowledgeBase) {
-                    knowledgeBaseService
-                      .updateSummaryFrequency(
-                        kbState.activeKnowledgeBase.id,
-                        frequency
-                      )
-                      .then(() => {
-                        const updatedKB: KnowledgeBase = {
-                          ...kbState.activeKnowledgeBase!,
-                          summaryFrequency: frequency,
-                        };
-                        updateKnowledgeBase(updatedKB);
-                        setActiveKnowledgeBase(updatedKB);
-                      })
-                      .catch((error) => {
-                        log.error("Failed to update summary frequency:", error);
-                      });
-                  }
-                }}
-                // Upload related props
-                isDragging={uiState.isDragging}
-                onDragOver={handleDragOver}
-                onDragLeave={handleDragLeave}
-                onDrop={handleDrop}
-                onFileSelect={handleFileSelect}
-                onUpload={handleFileUpload}
-                isUploading={docState.isUploading}
+                modelFilter={modelFilter}
+                onModelFilterChange={(values) =>
+                  setModelFilter(
+                    Array.isArray(values) ? values : values ? [values] : []
+                  )
+                }
               />
-            ) : (
-              <div
-                className={`${STANDARD_CARD.BASE_CLASSES} flex flex-col h-full w-full`}
-                style={{
-                  padding: STANDARD_CARD.PADDING,
-                }}
-              >
-                <EmptyState
-                  title={t("knowledgeBase.empty.title")}
-                  description={t("knowledgeBase.empty.description")}
-                  icon={
-                    <InfoCircleFilled
-                      style={{ fontSize: 36, color: "#1677ff" }}
-                    />
-                  }
-                  containerHeight="100%"
+            </Col>
+
+            <Col
+              className="h-full"
+              xs={TWO_COLUMN_LAYOUT.RIGHT_COLUMN.xs}
+              md={TWO_COLUMN_LAYOUT.RIGHT_COLUMN.md}
+              lg={TWO_COLUMN_LAYOUT.RIGHT_COLUMN.lg}
+              xl={TWO_COLUMN_LAYOUT.RIGHT_COLUMN.xl}
+              xxl={TWO_COLUMN_LAYOUT.RIGHT_COLUMN.xxl}
+            >
+              {isCreatingMode ? (
+                <DocumentList
+                  key="create-mode"
+                  documents={[]}
+                  onDelete={() => {}}
+                  knowledgeBaseSource={""}
+                  isCreatingMode={true}
+                  knowledgeBaseId={""}
+                  knowledgeBaseName={newKbName}
+                  onNameChange={handleNameChange}
+                  containerHeight={SETUP_PAGE_CONTAINER.MAIN_CONTENT_HEIGHT}
+                  hasDocuments={hasClickedUpload || docState.isUploading}
+                  // Group permission and user groups for create mode
+                  ingroupPermission={newKbIngroupPermission}
+                  onIngroupPermissionChange={setNewKbIngroupPermission}
+                  selectedGroupIds={newKbGroupIds}
+                  onSelectedGroupIdsChange={setNewKbGroupIds}
+                  preserveSourceFile={newKbPreserveSourceFile}
+                  onPreserveSourceFileChange={setNewKbPreserveSourceFile}
+                  quotaLimitBytes={newKbQuotaBytes}
+                  onQuotaLimitBytesChange={setNewKbQuotaBytes}
+                  // Embedding model for create mode
+                  availableEmbeddingModels={availableEmbeddingModels}
+                  selectedEmbeddingModel={newKbEmbeddingModel}
+                  onEmbeddingModelChange={setNewKbEmbeddingModel}
+                  // Upload related props
+                  isDragging={uiState.isDragging}
+                  onDragOver={handleDragOver}
+                  onDragLeave={handleDragLeave}
+                  onDrop={handleDrop}
+                  onFileSelect={handleFileSelect}
+                  onUpload={handleFileUpload}
+                  isUploading={docState.isUploading}
                 />
-              </div>
-            )}
-          </Col>
-        </Row>
-          </div>
+              ) : kbState.activeKnowledgeBase ? (
+                <DocumentList
+                  key={`kb-${kbState.activeKnowledgeBase.id}`}
+                  documents={viewingDocuments}
+                  onDelete={handleDeleteDocument}
+                  knowledgeBaseSource={kbState.activeKnowledgeBase?.source}
+                  knowledgeBaseId={kbState.activeKnowledgeBase.id}
+                  knowledgeBaseName={viewingKbName}
+                  modelMismatch={hasKnowledgeBaseDetailModelMismatch(
+                    kbState.activeKnowledgeBase
+                  )}
+                  currentModel={
+                    kbState.activeKnowledgeBase?.is_multimodal
+                      ? modelConfig?.multiEmbedding?.displayName?.trim() || ""
+                      : modelConfig?.embedding?.displayName?.trim() || ""
+                  }
+                  knowledgeBaseModel={
+                    kbState.activeKnowledgeBase.embeddingModel
+                  }
+                  embeddingModelInfo={
+                    hasKnowledgeBaseDetailModelMismatch(
+                      kbState.activeKnowledgeBase
+                    )
+                      ? `\u5f53\u524d\u6a21\u578b${kbState.activeKnowledgeBase.embeddingModel || "unknown"}\u672a\u914d\u7f6e`
+                      : undefined
+                  }
+                  containerHeight={SETUP_PAGE_CONTAINER.MAIN_CONTENT_HEIGHT}
+                  hasDocuments={viewingDocuments.length > 0}
+                  isNewlyCreatedAndWaiting={isNewlyCreatedAndWaiting}
+                  onChunkCountChange={() => {
+                    // Trigger knowledge base list update to refresh chunk count
+                    knowledgeBasePollingService.triggerKnowledgeBaseListUpdate(
+                      true
+                    );
+                  }}
+                  permission={kbState.activeKnowledgeBase?.permission}
+                  summaryFrequency={
+                    kbState.activeKnowledgeBase?.summaryFrequency
+                  }
+                  onSummaryFrequencyChange={(frequency) => {
+                    if (kbState.activeKnowledgeBase) {
+                      knowledgeBaseService
+                        .updateSummaryFrequency(
+                          kbState.activeKnowledgeBase.id,
+                          frequency
+                        )
+                        .then(() => {
+                          const updatedKB: KnowledgeBase = {
+                            ...kbState.activeKnowledgeBase!,
+                            summaryFrequency: frequency,
+                          };
+                          updateKnowledgeBase(updatedKB);
+                          setActiveKnowledgeBase(updatedKB);
+                        })
+                        .catch((error) => {
+                          log.error(
+                            "Failed to update summary frequency:",
+                            error
+                          );
+                        });
+                    }
+                  }}
+                  // Upload related props
+                  isDragging={uiState.isDragging}
+                  onDragOver={handleDragOver}
+                  onDragLeave={handleDragLeave}
+                  onDrop={handleDrop}
+                  onFileSelect={handleFileSelect}
+                  onUpload={handleFileUpload}
+                  isUploading={docState.isUploading}
+                />
+              ) : (
+                <div
+                  className={`${STANDARD_CARD.BASE_CLASSES} flex flex-col h-full w-full`}
+                  style={{
+                    padding: STANDARD_CARD.PADDING,
+                  }}
+                >
+                  <EmptyState
+                    title={t("knowledgeBase.empty.title")}
+                    description={t("knowledgeBase.empty.description")}
+                    icon={
+                      <InfoCircleFilled
+                        style={{ fontSize: 36, color: "#1677ff" }}
+                      />
+                    }
+                    containerHeight="100%"
+                  />
+                </div>
+              )}
+            </Col>
+          </Row>
+        </div>
       </div>
 
       <Modal

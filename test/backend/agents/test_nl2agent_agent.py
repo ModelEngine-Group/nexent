@@ -1,10 +1,15 @@
 import ast
 import json
 import re
+from unittest.mock import MagicMock
 
 import pytest
 from jinja2 import UndefinedError
+from nexent.core.agents.context import ContextItemInput, ContextManager, ContextManagerConfig
+from nexent.core.tools.parallel_executor import ParallelExecutorTool
 from pydantic import ValidationError
+from smolagents import CodeAgent
+from smolagents.memory import TaskStep
 
 from agents.nl2agent_agent import (
     build_nl2agent_system_prompt,
@@ -12,153 +17,300 @@ from agents.nl2agent_agent import (
 )
 from tool_collection.mcp.local_mcp_service import local_mcp_service
 from tool_collection.mcp.nl2agent_mcp_tools import (
-    GeneratedAgentDraft,
-    InstalledMcpToolRecommendation,
+    AgentDraftFields,
     NL2A_WRAPPER_NAME,
-    Nl2aAgentDraftInput,
-    Nl2aFewShotToolCall,
-    SEARCH_INSTALLED_MCP_TOOLS_NAME,
+    RECOMMEND_RESOURCES_NAME,
+    RecommendResourcesInput,
+    RequirementClarificationPayload,
+    ResourceCandidate,
+    ResourceRequirement,
+    SAVE_AGENT_DRAFT_FIELDS_NAME,
+    SEARCH_INSTALLED_RESOURCES_NAME,
+    SEARCH_UNINSTALLED_RESOURCES_NAME,
+    SearchInstalledResourcesInput,
     build_nl2a_wrapper,
 )
 
 
-def _few_shot_examples(tool_name="weather_forecast"):
-    return [
-        {
-            "user_input": question,
-            "steps": [
-                {
-                    "reasoning": f"Look up the forecast for {city}.",
-                    "tool_calls": [
-                        {
-                            "name": tool_name,
-                            "arguments": {"city": city},
-                        }
-                    ],
-                    "observation": f"{city} will be dry and mild.",
-                }
-            ],
-            "final_reasoning": "The forecast is sufficient to answer.",
-            "final_answer": f"{city} will be dry and mild.",
-        }
-        for question, city in [
-            ("Will it rain in Paris?", "Paris"),
-            ("What is the weather in Rome?", "Rome"),
-        ]
-    ]
+@pytest.mark.parametrize(
+    ("language", "heading", "immutable_rule", "description_rule"),
+    [
+        (
+            "en",
+            "### Role",
+            "`name` and `display_name` are immutable",
+            "generate only `description`",
+        ),
+        (
+            "zh",
+            "### 核心职责",
+            "`name` 和 `display_name` 不可修改",
+            "只生成 `description`",
+        ),
+    ],
+)
+def test_build_nl2agent_system_prompt_configures_existing_draft(
+    language,
+    heading,
+    immutable_rule,
+    description_rule,
+):
+    prompt = build_nl2agent_system_prompt(
+        language,
+        tool_name="runtime_search",
+        recommend_tool_name="runtime_recommend",
+        wrapper_name="runtime_wrapper",
+        save_tool_name="runtime_save",
+        max_results=3,
+    )
+
+    assert heading in prompt
+    assert immutable_rule in prompt
+    assert description_rule in prompt
+    assert "runtime_search" in prompt
+    assert "runtime_recommend" in prompt
+    assert "runtime_wrapper" in prompt
+    assert "runtime_save" in prompt
+    assert "json.loads" in prompt
+    assert "bound_resources" in prompt
+    assert "business_description" not in prompt
+    assert 'subtype="requirement_clarification"' in prompt
+    assert 'subtype="installed_resource_binding"' in prompt
+    assert 'subtype="final_confirmation"' not in prompt
+    assert "agent_generation_completed" in prompt
+    assert "agent_id=None" not in prompt
+    assert "nl2agent_tool_selection" not in prompt
+    assert 'subtype="agent_draft"' not in prompt
+    assert 'subtype="local_mcp_recommendation"' not in prompt
+    assert "<nl2a>" not in prompt
+    assert "```" not in prompt
+
+    if language == "en":
+        assert "never discard it merely because it appears in `bound_resources`" in prompt
+        assert "Already-bound Tools remain normal candidates" in prompt
+        assert "### State And Completion Rules" in prompt
+        assert "They never prove that its configuration is complete" in prompt
+        assert "an empty-description draft must produce" in prompt
+        assert "Configuration is complete only after the description is saved" in prompt
+        assert "Before receiving `agent_generation_completed`" in prompt
+        assert "### Completion Summary" in prompt
+        assert "New Agent summary:" in prompt
+        assert "### Atomic Action Contract" in prompt
+        assert "at most one short reasoning sentence" in prompt
+        assert 'equal to `["duty_prompt"]`' in prompt
+        assert "exactly one concise Think-Code example" in prompt
+        assert "Weather Assistant" not in prompt
+        assert "Describe the tasks this Agent must perform" not in prompt
+        assert '"question_id": "expected_output"' in prompt
+    else:
+        assert "不得仅因它出现在 `bound_resources` 中就丢弃" in prompt
+        assert "已绑定 Tool 仍是普通候选" in prompt
+        assert "### 状态判定与完成标准" in prompt
+        assert "不证明该 Agent 已完成配置" in prompt
+        assert "空描述草稿必须先输出一次" in prompt
+        assert "只有描述已保存、资源需求已安装并绑定或明确放弃" in prompt
+        assert "收到 `agent_generation_completed` 前，禁止输出普通最终答案" in prompt
+        assert "### 完成总结" in prompt
+        assert "新智能体已完成生成" in prompt
+        assert "### 原子动作输出契约" in prompt
+        assert "`<code>` 前最多只写一句简短思考" in prompt
+        assert '`updated_fields` 是 `["duty_prompt"]`' in prompt
+        assert "只编写一个紧凑的“思考-代码”示例" in prompt
+        assert "天气助手" not in prompt
+        assert "请详细说明这个智能体需要完成的任务" not in prompt
+        assert '"question_id": "expected_output"' in prompt
+
+    description_save = prompt.index('"description":')
+    resource_search = prompt.index("raw_results = parallel_executor")
+    assert description_save < resource_search
+
+    code_blocks = re.findall(r"<code>\n(.*?)\n</code>", prompt, re.DOTALL)
+    assert len(code_blocks) == 7
+    for code_block in code_blocks:
+        ast.parse(code_block)
+
+    few_shots_save = next(
+        code_block
+        for code_block in code_blocks
+        if 'fields={"few_shots_prompt": few_shots}' in code_block
+    )
+    assert r"\x3ccode>" in few_shots_save
+    assert r"\x3c/code>" in few_shots_save
+    assert r"Observation\x3a" not in few_shots_save
+    assert "<code>" not in few_shots_save
+    assert "</code>" not in few_shots_save
+    assert "Observation:" not in few_shots_save
+
+    few_shots_assignment = ast.parse(few_shots_save).body[0]
+    assert isinstance(few_shots_assignment, ast.Assign)
+    stored_few_shots = ast.literal_eval(few_shots_assignment.value)
+    assert "<code>" in stored_few_shots
+    assert "</code>" in stored_few_shots
+    assert "Observation:" not in stored_few_shots
+    if language == "en":
+        assert "The system supplies the tool result in subsequent context" in stored_few_shots
+    else:
+        assert "系统在后续上下文中提供工具结果" in stored_few_shots
 
 
-def _agent_draft_input(**overrides):
-    payload = {
-        "subtype": "agent_draft",
-        "language": "en",
-        "name": "weather_assistant",
-        "display_name": "WeatherAssistant",
-        "description": "You can get weather guidance.",
-        "duty_prompt": "Answer weather questions.",
-        "constraint_prompt": "1. Use the selected weather tool.",
-        "greeting_message": "Hello, I can help with weather.",
-        "example_questions": [
-            "Will it rain in Paris?",
-            "What is the weather in Rome?",
-            "Is it suitable for hiking?",
-        ],
-        "selected_tool_names": ["weather_forecast"],
-        "few_shot_examples": _few_shot_examples(),
-    }
-    payload.update(overrides)
-    return payload
+def test_build_nl2agent_system_prompt_falls_back_to_chinese():
+    assert build_nl2agent_system_prompt("fr") == build_nl2agent_system_prompt("zh")
 
 
 @pytest.mark.parametrize(
     (
         "language",
-        "expected",
-        "json_rule",
-        "retry_rule",
-        "selection_rule",
-        "few_shot_rule",
-        "thought_label",
+        "boundary_heading",
+        "deferred_rule",
+        "resource_rule",
+        "empty_resource_rule",
+        "single_invocation_rule",
+        "summary_rule",
     ),
     [
         (
-            "zh",
-            "### 核心职责",
-            "MCP 工具返回 JSON 文本",
-            "中文关键词搜索成功但没有候选结果时",
-            "只有处理当前",
-            "选择工具时生成恰好 2",
-            "思考：",
+            "en",
+            "### Scheduled-task Boundary",
+            "this workflow does not create the scheduled task",
+            "Never search for a scheduled-task resource",
+            'resource_result={"status": "success", "resources": []}',
+            "Every Prompt field describes one invocation",
+            "open [Scheduled tasks](/agent-tasks)",
         ),
         (
-            "en",
-            "### Core Responsibilities",
-            "MCP tool returns JSON text",
-            "successful Chinese-keyword search returns no candidates",
-            "only while processing the current",
-            "selected tool set produces exactly 2",
-            "Think:",
+            "zh",
+            "### 定时任务边界",
+            "本流程不创建定时任务",
+            "不得搜索定时任务资源",
+            'resource_result={"status": "success", "resources": []}',
+            "所有 Prompt 字段只描述 Agent 单次被调用时的行为",
+            "前往[定时任务](/agent-tasks)",
         ),
     ],
 )
-def test_build_nl2agent_system_prompt_is_runtime_specific(
+def test_build_nl2agent_system_prompt_defers_scheduled_tasks_until_agent_chat(
     language,
-    expected,
-    json_rule,
-    retry_rule,
-    selection_rule,
-    few_shot_rule,
-    thought_label,
+    boundary_heading,
+    deferred_rule,
+    resource_rule,
+    empty_resource_rule,
+    single_invocation_rule,
+    summary_rule,
 ):
-    prompt = build_nl2agent_system_prompt(
-        language,
-        tool_name="runtime_search",
-        wrapper_name="runtime_wrapper",
-        max_results=3,
+    prompt = build_nl2agent_system_prompt(language)
+
+    assert boundary_heading in prompt
+    assert deferred_rule in prompt
+    assert resource_rule in prompt
+    assert empty_resource_rule in prompt
+    assert single_invocation_rule in prompt
+    assert summary_rule in prompt
+    assert prompt.count("(/agent-tasks)") == 1
+
+
+@pytest.mark.parametrize(
+    (
+        "language",
+        "priority_heading",
+        "state_rule",
+        "linear_priority_rule",
+        "partial_patch_rule",
+        "preserve_rule",
+        "clarification_rule",
+        "resource_scope_rule",
+        "reconfigure_rule",
+        "resource_continue_rule",
+        "revision_summary_rule",
+        "removal_rule",
+        "immutable_boundary",
+    ),
+    [
+        (
+            "en",
+            "### Revision Mode Priority",
+            "Determine completion from the current `nl2agent_verified_state`",
+            "always take priority over the linear generation state machine",
+            "One request may update multiple explicitly requested fields in one save call",
+            "Omit every unspecified field so its persisted value remains unchanged",
+            "listing only the potentially affected fields",
+            "search only for the newly requested capability",
+            "reconfigure a specifically requested bound resource",
+            "Never start at `duty_prompt` or enter the full Prompt generation chain",
+            'Start with "Updated:"',
+            "Conversational removal is unsupported",
+            "model settings, publication status, version state",
+        ),
+        (
+            "zh",
+            "### 修订模式优先级",
+            "只能根据当前 `nl2agent_verified_state` 判断是否完成",
+            "始终优先于线性生成状态机",
+            "一次请求可在一次保存调用中更新多个明确指定字段",
+            "所有未指定字段都必须省略并保持数据库原值",
+            "只列出可能受影响的字段",
+            "只搜索用户新请求的能力",
+            "重新配置用户明确指定的已绑定资源",
+            "不得因卡片已确认就从 `duty_prompt` 开始",
+            "以“已更新：”开头",
+            "不支持通过对话移除资源",
+            "模型设置、发布状态、版本状态",
+        ),
+    ],
+)
+def test_build_nl2agent_system_prompt_prioritizes_completed_draft_revisions(
+    language,
+    priority_heading,
+    state_rule,
+    linear_priority_rule,
+    partial_patch_rule,
+    preserve_rule,
+    clarification_rule,
+    resource_scope_rule,
+    reconfigure_rule,
+    resource_continue_rule,
+    revision_summary_rule,
+    removal_rule,
+    immutable_boundary,
+):
+    prompt = build_nl2agent_system_prompt(language)
+
+    assert priority_heading in prompt
+    assert state_rule in prompt
+    assert linear_priority_rule in prompt
+    assert partial_patch_rule in prompt
+    assert preserve_rule in prompt
+    assert clarification_rule in prompt
+    assert "Never cascade automatically" in prompt or "禁止自动级联" in prompt
+    assert resource_scope_rule in prompt
+    assert (
+        "does not confirm any Prompt update" in prompt
+        or "不代表用户确认更新任何 Prompt" in prompt
+    )
+    assert reconfigure_rule in prompt
+    assert resource_continue_rule in prompt
+    assert revision_summary_rule in prompt
+    assert removal_rule in prompt
+    assert immutable_boundary in prompt
+    assert "revision save emits `agent_generation_completed`" in prompt or (
+        "修订保存触发 `agent_generation_completed`" in prompt
+    )
+    assert (
+        "must still follow every bound-resource" in prompt
+        or "仍须遵守“Prompt 生成”中的真实绑定资源" in prompt
     )
 
-    assert expected in prompt
-    assert "runtime_search" in prompt
-    assert "runtime_wrapper" in prompt
-    assert "3" in prompt
-    assert "keywords" in prompt
-    assert "nl2agent_tool_selection" in prompt
-    assert "few_shot_examples" in prompt
-    assert "greeting_message" in prompt
-    assert "example_questions" in prompt
-    assert thought_label in prompt
-    assert json_rule in prompt
-    assert retry_rule in prompt
-    assert selection_rule in prompt
-    assert few_shot_rule in prompt
-    assert "_assistant" in prompt
-    assert "30" in prompt
-    assert "exactly 2" in prompt or "恰好 2" in prompt
-    assert "second person" in prompt or "第二人称" in prompt
-    assert "Observation" in prompt
-    assert "final_answer" in prompt
-    assert "<code>" in prompt
-    assert "</code>" in prompt
-    assert "<nl2a>" not in prompt
-    assert "</nl2a>" not in prompt
-    assert "final_answer(" not in prompt
-    assert 'subtype="local_mcp_recommendation"' in prompt
-    assert 'subtype="agent_draft"' in prompt
-    assert 'result = json.loads(runtime_search(keywords=[' in prompt
-    assert "wrapped = runtime_wrapper(" in prompt
-    assert "search_result=result" in prompt
-    assert "import json" in prompt
-    assert "few_shots_prompt" not in prompt
-    code_blocks = re.findall(r"<code>\n(.*?)\n</code>", prompt, re.DOTALL)
-    assert len(code_blocks) == 3
-    for code_block in code_blocks:
-        ast.parse(code_block)
-    assert code_blocks[-1].count('{"user_input":') == 2
-    assert "```" not in prompt
 
+@pytest.mark.parametrize("language", ["zh", "en"])
+def test_build_nl2agent_system_prompt_uses_mounted_tool_names(language):
+    prompt = build_nl2agent_system_prompt(language)
 
-def test_build_nl2agent_system_prompt_falls_back_to_chinese():
-    assert build_nl2agent_system_prompt("fr") == build_nl2agent_system_prompt("zh")
+    assert f"({SEARCH_INSTALLED_RESOURCES_NAME}," in prompt
+    assert f"({SEARCH_UNINSTALLED_RESOURCES_NAME}," in prompt
+    assert f"raw_resource_result = {RECOMMEND_RESOURCES_NAME}(" in prompt
+    assert f"saved = {SAVE_AGENT_DRAFT_FIELDS_NAME}(" in prompt
+    assert f"wrapped = {NL2A_WRAPPER_NAME}(" in prompt
+    assert "external_registry" not in prompt
+    assert "MCP_OFFICIAL_REGISTRY" not in prompt
 
 
 def test_build_nl2agent_system_prompt_rejects_unknown_template_variables(mocker):
@@ -173,213 +325,233 @@ def test_build_nl2agent_system_prompt_rejects_unknown_template_variables(mocker)
     prompt_loader.assert_called_once_with("nl2agent", "en")
 
 
-def test_nl2agent_models_preserve_tool_inputs_and_define_agent_draft():
-    recommendation = InstalledMcpToolRecommendation(
-        tool_id=10,
-        name="weather_forecast",
-        origin_name="weather",
-        description="Get weather forecasts",
-        usage="weather-server",
-        labels=["weather"],
-        inputs={"city": "string"},
+def test_current_wrapper_models_require_existing_agent_id():
+    requirement = ResourceRequirement(
+        requirement_id="source",
+        query="Find reliable source material",
+    )
+    assert SearchInstalledResourcesInput(requirements=[requirement]).requirements
+    candidate = ResourceCandidate(
+        candidate_ref="tool:7",
+        resource_type="tool",
+        source="LOCAL_TOOL",
+        name="search",
+        requirement_ids=["source"],
         score=0.9,
     )
-    draft = GeneratedAgentDraft(
-        name="weather_assistant",
-        display_name="Weather Assistant",
-        description="Weather help",
-        duty_prompt="Answer weather questions.",
-        constraint_prompt="Use only selected tools.",
-        greeting_message="Hello! I can help with weather questions.",
-        example_questions=[
-            "Will it rain tomorrow?",
-            "What should I wear today?",
-            "Is it a good day for hiking?",
+    assert RecommendResourcesInput(candidates=[candidate]).recommended_refs == []
+
+    wrapped = build_nl2a_wrapper(
+        subtype="requirement_clarification",
+        agent_id=42,
+        questions=[
+            {
+                "question_id": "output",
+                "question_type": "single_choice",
+                "title": "What should the Agent produce?",
+                "required": True,
+                "options": [{"option_id": "report", "label": "A report"}],
+                "allow_other": True,
+                "other_input_expanded": True,
+            }
         ],
     )
+    payload = json.loads(wrapped.split("<nl2a>", 1)[1].split("</nl2a>", 1)[0])
+    clarification = RequirementClarificationPayload.model_validate(payload)
+    assert clarification.agent_id == 42
 
-    assert recommendation.inputs == {"city": "string"}
-    assert draft.model_dump() == {
-        "subtype": "agent_draft",
-        "name": "weather_assistant",
-        "display_name": "Weather Assistant",
-        "description": "Weather help",
-        "duty_prompt": "Answer weather questions.",
-        "constraint_prompt": "Use only selected tools.",
-        "few_shots_prompt": None,
-        "greeting_message": "Hello! I can help with weather questions.",
-        "example_questions": [
-            "Will it rain tomorrow?",
-            "What should I wear today?",
-            "Is it a good day for hiking?",
-        ],
+    with pytest.raises(ValidationError):
+        RequirementClarificationPayload(
+            questions=[
+                {
+                    "question_id": "output",
+                    "question_type": "text",
+                    "title": "What should the Agent produce?",
+                }
+            ]
+        )
+
+
+def test_installed_resource_binding_wrapper_preserves_verified_contract():
+    candidate = ResourceCandidate(
+        candidate_ref="skill:12",
+        resource_type="skill",
+        source="INSTALLED_SKILL",
+        name="daily_report",
+        description="Create a daily report",
+        requirement_ids=["report"],
+        score=0.88,
+    )
+    wrapped = build_nl2a_wrapper(
+        subtype="installed_resource_binding",
+        agent_id=42,
+        resource_result={
+            "status": "success",
+            "resources": [
+                {
+                    "candidate": candidate.model_dump(mode="json"),
+                    "recommendation": "recommended",
+                    "form_kind": "SKILL_CONFIG",
+                    "config": [],
+                }
+            ],
+        },
+    )
+    payload = json.loads(wrapped.split("<nl2a>", 1)[1].split("</nl2a>", 1)[0])
+
+    assert payload["agent_id"] == 42
+    assert payload["resources"][0]["candidate"]["candidate_ref"] == "skill:12"
+
+    empty_wrapped = build_nl2a_wrapper(
+        subtype="installed_resource_binding",
+        agent_id=42,
+        resource_result={"status": "success", "resources": []},
+    )
+    empty_payload = json.loads(
+        empty_wrapped.split("<nl2a>", 1)[1].split("</nl2a>", 1)[0]
+    )
+    assert empty_payload == {
+        "subtype": "installed_resource_binding",
+        "agent_id": 42,
+        "resources": [],
     }
+
+
+def test_requirement_clarification_accepts_at_most_five_questions():
+    questions = [
+        {
+            "question_id": f"question-{index}",
+            "question_type": "text",
+            "title": f"Question {index}",
+        }
+        for index in range(5)
+    ]
+
+    assert len(RequirementClarificationPayload(agent_id=42, questions=questions).questions) == 5
+    with pytest.raises(ValidationError, match="at most 5 items"):
+        RequirementClarificationPayload(
+            agent_id=42,
+            questions=[
+                *questions,
+                {
+                    "question_id": "question-5",
+                    "question_type": "text",
+                    "title": "Question 5",
+                },
+            ],
+        )
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("language", ["zh", "en"])
-async def test_create_nl2agent_agent_config_has_only_runtime_tools(language):
+async def test_create_nl2agent_agent_config_has_only_current_runtime_tools(language):
     config = create_nl2agent_agent_config(language)
     registered_tools = await local_mcp_service.get_tools()
 
-    assert config.name == "__nl2agent_runtime__"
-    assert config.model_name == "main_model"
-    assert config.max_steps == 5
-    assert config.enable_planning is False
     assert [tool.name for tool in config.tools] == [
-        SEARCH_INSTALLED_MCP_TOOLS_NAME,
+        SEARCH_INSTALLED_RESOURCES_NAME,
+        SEARCH_UNINSTALLED_RESOURCES_NAME,
+        RECOMMEND_RESOURCES_NAME,
+        SAVE_AGENT_DRAFT_FIELDS_NAME,
         NL2A_WRAPPER_NAME,
+        ParallelExecutorTool.name,
     ]
     assert [tool.description for tool in config.tools] == [
-        registered_tools[SEARCH_INSTALLED_MCP_TOOLS_NAME].description,
+        registered_tools[SEARCH_INSTALLED_RESOURCES_NAME].description,
+        registered_tools[SEARCH_UNINSTALLED_RESOURCES_NAME].description,
+        registered_tools[RECOMMEND_RESOURCES_NAME].description,
+        registered_tools[SAVE_AGENT_DRAFT_FIELDS_NAME].description,
         registered_tools[NL2A_WRAPPER_NAME].description,
+        ParallelExecutorTool.description,
     ]
-    assert all(tool.source == "mcp" for tool in config.tools)
-    assert all(tool.usage == "outer-apis" for tool in config.tools)
-    assert config.tools[0].inputs == '{"keywords": "list[str]"}'
-    wrapper_inputs = json.loads(config.tools[1].inputs)
-    assert wrapper_inputs["subtype"] == "str"
-    assert wrapper_inputs["search_result"] == "dict | None"
-    assert wrapper_inputs["language"] == "str | None"
-    assert (
-        wrapper_inputs["few_shot_examples"]
-        == "list[dict] with exactly 2 items | None"
+    assert json.loads(config.tools[0].inputs)["agent_id"] == "int"
+    assert json.loads(config.tools[1].inputs)["agent_id"] == "int"
+    assert json.loads(config.tools[2].inputs)["agent_id"] == "int"
+    save_inputs = json.loads(config.tools[3].inputs)
+    assert save_inputs["agent_id"] == "int"
+    assert set(save_inputs["fields"]) == {
+        "description",
+        "duty_prompt",
+        "constraint_prompt",
+        "few_shots_prompt",
+        "greeting_message",
+        "example_questions",
+    }
+    assert set(json.loads(config.tools[4].inputs)) == {
+        "subtype",
+        "agent_id",
+        "resource_result",
+        "questions",
+    }
+    assert config.instructions is None
+    assert len(config.context_items) == 1
+    prompt_context = config.context_items[0]
+    assert prompt_context.id == "system:nl2agent_prompt"
+    assert prompt_context.type.value == "system"
+    assert prompt_context.source == ("prompt:nl2agent",)
+    assert prompt_context.priority == 100
+    assert prompt_context.metadata == {
+        "authority": "platform",
+        "layout_order": -1,
+    }
+    assert prompt_context.content["text"] == build_nl2agent_system_prompt(language)
+
+
+def test_nl2agent_explicit_system_context_reaches_final_model_messages():
+    config = create_nl2agent_agent_config("zh")
+    runtime_agent = CodeAgent(
+        tools=[],
+        model=MagicMock(),
+        instructions=config.instructions,
     )
-    assert all(tool.metadata is None for tool in config.tools)
-    expected_persistence_rule = (
-        "Agent persistence is handled by the product flow"
-        if language == "en"
-        else "持久化由产品流程完成"
+    verified_state = ContextItemInput(
+        id="system:nl2agent_bound_resources",
+        type="system",
+        content={"text": "Verified database binding facts: agent_id=42"},
+        metadata={"authority": "tenant"},
     )
-    assert expected_persistence_rule in config.instructions
+    manager = ContextManager(ContextManagerConfig(token_threshold=100000))
 
-
-@pytest.mark.parametrize(
-    ("name", "arguments", "message"),
-    [
-        ("weather-tool", {"city": "Paris"}, "tool call name"),
-        ("weather_forecast", {"city-name": "Paris"}, "tool argument names"),
-        ("weather_forecast", {"class": "Paris"}, "tool argument names"),
-    ],
-)
-def test_few_shot_tool_calls_require_executable_python_names(
-    name,
-    arguments,
-    message,
-):
-    with pytest.raises(ValidationError, match=message):
-        Nl2aFewShotToolCall(name=name, arguments=arguments)
-
-
-@pytest.mark.parametrize(
-    ("overrides", "message"),
-    [
-        (
-            {"language": "zh", "display_name": "WeatherAssistant"},
-            "Chinese display_name must end with",
-        ),
-        (
-            {"selected_tool_names": ["weather_forecast", "weather_forecast"]},
-            "selected_tool_names must be unique",
-        ),
-        (
-            {"selected_tool_names": ["weather-tool"]},
-            "selected tool names must be valid Python identifiers",
-        ),
-        (
-            {"few_shot_examples": None},
-            "few_shot_examples are required",
-        ),
-        (
-            {"constraint_prompt": ""},
-            "constraint_prompt is required",
-        ),
-        (
-            {"selected_tool_names": [], "constraint_prompt": ""},
-            "few_shot_examples require selected tools",
-        ),
-        (
-            {
-                "selected_tool_names": [],
-                "constraint_prompt": "Must use a tool.",
-                "few_shot_examples": None,
-            },
-            "constraint_prompt must be empty",
-        ),
-    ],
-)
-def test_agent_draft_rejects_invalid_tool_binding_contract(overrides, message):
-    with pytest.raises(ValidationError, match=message):
-        Nl2aAgentDraftInput(**_agent_draft_input(**overrides))
-
-
-@pytest.mark.parametrize(
-    ("arguments", "message"),
-    [
-        (
-            {"subtype": "local_mcp_recommendation"},
-            "requires search_result and selected_tool_ids",
-        ),
-        (
-            {
-                "subtype": "local_mcp_recommendation",
-                "search_result": {
-                    "subtype": "local_mcp_recommendation",
-                    "status": "error",
-                    "code": "tool_search_failed",
-                    "retryable": True,
-                },
-                "selected_tool_ids": [7],
-            },
-            "must be empty for a search error",
-        ),
-        (
-            {
-                "subtype": "local_mcp_recommendation",
-                "search_result": {"status": "pending"},
-                "selected_tool_ids": [],
-            },
-            "unsupported status",
-        ),
-        (
-            {"subtype": "agent_draft"},
-            "agent_draft requires parameters",
-        ),
-        (
-            {"subtype": "unsupported"},
-            "unsupported nl2a subtype",
-        ),
-    ],
-)
-def test_wrapper_rejects_invalid_workflow_contracts(arguments, message):
-    with pytest.raises(ValueError, match=message):
-        build_nl2a_wrapper(**arguments)
-
-
-def test_wrapper_renders_english_multi_tool_steps_as_executable_few_shots():
-    examples = _few_shot_examples()
-    examples[0]["steps"][0]["tool_calls"].append(
-        {
-            "name": "weather_alerts",
-            "arguments": {"city": "Paris", "severe_only": True},
-        }
+    run_context = manager.prepare_run_context(
+        memory=runtime_agent.memory,
+        fallback_system_prompt=runtime_agent.system_prompt,
+        items=[*config.context_items, verified_state],
     )
-    wrapped = build_nl2a_wrapper(
-        **_agent_draft_input(
-            selected_tool_names=["weather_forecast", "weather_alerts"],
-            few_shot_examples=examples,
+    runtime_agent.memory.steps.append(TaskStep(task="配置这个草稿"))
+    final_context = manager.assemble_final_context(
+        model=None,
+        memory=runtime_agent.memory,
+        current_run_start_idx=0,
+        run_context=run_context,
+    )
+    message_texts = [
+        "".join(
+            part.get("text", "")
+            for part in message["content"]
+            if isinstance(part, dict)
         )
-    )
+        for message in final_context.messages
+    ]
 
-    serialized = wrapped.split("<nl2a>\n", 1)[1].split("\n</nl2a>", 1)[0]
-    payload = json.loads(serialized)
-    few_shots = payload["few_shots_prompt"]
+    assert [item.id for item in run_context.items] == [
+        "system:nl2agent_prompt",
+        "system:nl2agent_bound_resources",
+    ]
+    assert all(item.id != "system:fallback" for item in run_context.items)
+    assert [message["role"] for message in final_context.messages] == [
+        "system",
+        "system",
+        "user",
+    ]
+    assert "### 核心职责" in message_texts[0]
+    assert "空描述草稿必须先输出一次 `requirement_clarification` 卡" in message_texts[0]
+    assert message_texts[1] == "Verified database binding facts: agent_id=42"
+    assert message_texts[2] == "配置这个草稿"
 
-    assert 'Task 1: "Will it rain in Paris?"' in few_shots
-    assert "result_1_1 = weather_forecast(city='Paris')" in few_shots
-    assert (
-        "result_1_2 = weather_alerts(city='Paris', severe_only=True)"
-        in few_shots
-    )
-    assert "# System returns Observation: Paris will be dry and mild." in few_shots
-    assert few_shots.count("<code>") == 2
+
+def test_agent_draft_fields_rejects_removed_business_description():
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        AgentDraftFields(
+            description="Research help",
+            business_description="Verify and summarize sources",
+        )

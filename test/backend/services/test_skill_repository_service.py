@@ -170,6 +170,25 @@ class _SkillServiceMock:
 
 _skill_service_module_mock = MagicMock()
 _skill_service_module_mock.SkillService = _SkillServiceMock
+
+
+def _generate_available_copy_skill_name_mock(base_name, unavailable_names=None):
+    normalized_base = (base_name or "Skill").strip() or "Skill"
+    unavailable = unavailable_names or set()
+    if normalized_base not in unavailable:
+        return normalized_base
+    index = 1
+    while True:
+        suffix = " \u526f\u672c" if index == 1 else f" \u526f\u672c {index}"
+        max_base_length = max(100 - len(suffix), 1)
+        truncated_base = normalized_base[:max_base_length].rstrip() or normalized_base[:max_base_length]
+        candidate = f"{truncated_base}{suffix}"
+        if candidate not in unavailable:
+            return candidate
+        index += 1
+
+
+_skill_service_module_mock.generate_available_copy_skill_name = _generate_available_copy_skill_name_mock
 sys.modules["services.skill_service"] = _skill_service_module_mock
 
 _notification_service_mock = MagicMock()
@@ -647,6 +666,48 @@ def test_list_my_editable_skills_filters_to_current_user_and_search():
     assert [item["name"] for item in result["items"]] == ["Excel Report"]
 
 
+def test_list_my_editable_skills_normalizes_string_tags_for_response_and_search():
+    class ListSkillService(_SkillServiceMock):
+        def list_skills(self, tenant_id=None):
+            return [{
+                "skill_id": 1,
+                "name": "Clinic Report",
+                "description": "build clinic reports",
+                "source": "custom",
+                "tags": '["table analysis", "visit volume", "medical statistics"]',
+                "created_by": "user-1",
+            }]
+
+    with patch.object(srs, "SkillService", ListSkillService):
+        result = srs.list_my_editable_skills_impl(
+            tenant_id="tenant-1",
+            user_id="user-1",
+            search="visit volume",
+        )
+
+    assert result["items"][0]["tags"] == [
+        "table analysis",
+        "visit volume",
+        "medical statistics",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("tags", "expected"),
+    [
+        ([" tag ", "", 1, "second"], ["tag", "second"]),
+        ('["json", "array"]', ["json", "array"]),
+        ("[table analysis, visit volume]", []),
+        ("plain text", []),
+        ("[invalid", []),
+        (None, []),
+        ({"tag": "value"}, []),
+    ],
+)
+def test_normalize_mine_skill_tags(tags, expected):
+    assert srs._normalize_mine_skill_tags(tags) == expected
+
+
 def test_mine_ownership_uses_creator_not_edit_permission():
     class ListSkillService(_SkillServiceMock):
         def list_skills(self, tenant_id=None):
@@ -1110,7 +1171,6 @@ def test_status_transition_edges_and_update_failures():
 
 def test_copy_name_and_install_error_edges():
     assert srs._extract_duplicate_skill_name("plain failure") is None
-    assert srs._truncate_copy_base_name("A" * 120, " suffix") == "A" * 93
 
     _skill_db_mock.get_skill_by_name.side_effect = None
     _skill_db_mock.get_skill_by_name.return_value = None

@@ -29,17 +29,20 @@ export default function ProjectConfigTab({
     {
       key: 'productName',
       label: t('project.config.title'),
-      max: 10,
+      max: 20,
+      maxEn: 50,
     },
     {
       key: 'pageSubtitle',
       label: t('project.config.page.subtitle'),
       max: 50,
+      maxEn: 100,
     },
     {
       key: 'pageDescription',
       label: t('project.config.page.description'),
       max: 150,
+      maxEn: 200,
     }
   ];
 
@@ -71,7 +74,7 @@ export default function ProjectConfigTab({
   }, [])
   
   const beforeUpload = (fileUpdate: UploadFile, logo2 = false) => {
-    const isPng = fileUpdate.type === "image/png"
+    const isPng = fileUpdate.type === "image/png" || fileUpdate.type === "image/jpeg"
     if (!isPng) {
       message.error(t('project.config.logo.format'));
       return false;
@@ -169,7 +172,7 @@ export default function ProjectConfigTab({
                       label={ `${item.label}-English` }
                       rules={[
                         { required: true, message: t("businessLogic.config.template.contentRequired") },
-                        { max: item.max, message: t("chatLeftSidebar.renameErrorTooLong", { max: item.max }) }
+                        { max: item.maxEn, message: t("chatLeftSidebar.renameErrorTooLong", { max: item.maxEn }) }
                       ]}
                     >
                       <Input placeholder={t("project.config.language.en")}></Input>
@@ -202,7 +205,7 @@ export default function ProjectConfigTab({
             <Upload
                 beforeUpload={(fileRaw) => beforeUpload(fileRaw, true)}
                 showUploadList={false}
-                accept="image/png"
+                accept="image/png,image/jpeg"
               >
                 <Button size="small">{ t('project.config.logo.upload.new') }</Button>
               </Upload>

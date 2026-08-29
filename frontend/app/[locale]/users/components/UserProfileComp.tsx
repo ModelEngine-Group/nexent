@@ -99,6 +99,7 @@ export default function UserProfileComp() {
 
   // AK/SK state
   const [akInfo, setAkInfo] = useState<string | null>(null);
+  const [canCopyAk, setCanCopyAk] = useState(false);
   const [existingTokenIds, setExistingTokenIds] = useState<number[]>([]);
   const [isLoadingAkSk, setIsLoadingAkSk] = useState(false);
   const [isGeneratingAkSk, setIsGeneratingAkSk] = useState(false);
@@ -161,7 +162,12 @@ export default function UserProfileComp() {
         const tokens = await getUserTokens(user.id);
         if (tokens.length > 0) {
           setAkInfo(tokens[0].access_key);
+          setCanCopyAk(tokens[0].can_copy);
           setExistingTokenIds(tokens.map((t) => t.token_id));
+        } else {
+          setAkInfo(null);
+          setCanCopyAk(false);
+          setExistingTokenIds([]);
         }
       } catch (error) {
         log.error("Failed to fetch AK/SK info:", error);
@@ -183,6 +189,7 @@ export default function UserProfileComp() {
 
       const newToken = await createUserToken();
       setAkInfo(newToken.access_key);
+      setCanCopyAk(true);
       setExistingTokenIds([newToken.token_id]);
       antdMessage.success(
         t("profile.generateAkSkSuccess") || "Access key generated successfully"
@@ -415,16 +422,18 @@ export default function UserProfileComp() {
                           <span className="text-xs font-mono text-purple-600 dark:text-purple-400">
                             {akInfo}
                           </span>
-                          <Button
-                            type="text"
-                            size="small"
-                            icon={<Copy className="h-3 w-3" />}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleCopyAk();
-                            }}
-                            className="text-gray-400 hover:text-purple-500 p-0 h-auto"
-                          />
+                          {canCopyAk && (
+                            <Button
+                              type="text"
+                              size="small"
+                              icon={<Copy className="h-3 w-3" />}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleCopyAk();
+                              }}
+                              className="text-gray-400 hover:text-purple-500 p-0 h-auto"
+                            />
+                          )}
                           <Button
                             type="text"
                             size="small"
@@ -447,6 +456,7 @@ export default function UserProfileComp() {
                                       await deleteUserToken(tokenId);
                                     }
                                     setAkInfo(null);
+                                    setCanCopyAk(false);
                                     setExistingTokenIds([]);
                                     antdMessage.success(
                                       t("profile.deleteAkSkSuccess") ||

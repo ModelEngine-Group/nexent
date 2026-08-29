@@ -9,15 +9,13 @@ given AIDP knowledge base:
    ``tenant_group_info_t`` so we never leak cross-tenant group IDs).
 
 Decision order:
-    1. Management roles (SU/ADMIN/SPEED) -> EDIT (within tenant boundary).
-    2. ASSET_OWNER -> EDIT only inside its asset context; we conservatively
-       grant EDIT here so the rest of the system can rely on a single rule.
-       Callers that need finer ASSET_OWNER scoping can override at the
-       resource layer.
-    3. Creator (matches ``owner_user_id``) -> EDIT.
-    4. ``PRIVATE`` -> no access (except creator).
-    5. Empty ``group_ids`` -> no access (except creator/management).
-    6. Group intersection exists -> ``ingroup_permission``; otherwise no access.
+    1. Creator (matches ``owner_user_id``) -> EDIT.
+    2. ``PRIVATE`` -> no access for every non-creator, including management
+       roles.
+    3. USER -> no access to any non-owned KB.
+    4. Management roles (SU/ADMIN/SPEED/ASSET_OWNER) -> EDIT for shared KBs.
+    5. DEV with a group intersection -> ``ingroup_permission``.
+    6. Empty ``group_ids`` or no intersection -> no access.
 
 Errors raised here map to HTTP status codes in ``aidp_mgmt_app``:
 * ``AidpKbNotFoundError`` -> 404
@@ -138,12 +136,13 @@ def _resolve_permission(
     user_id: str,
     tenant_id: str,
     user_groups: Sequence[int] | None = None,
+    user_role: str | None = None,
 ) -> AidpPermissionDecision:
     """Compute effective permission using the matrix described in the module docstring.
 
     ``record`` is a row from ``aidp_kb_permission_t`` keyed by ``kb_id`` +
-    ``tenant_id``. ``user_groups`` may be supplied to avoid an extra DB round
-    trip when callers already have them in scope.
+    ``tenant_id``. ``user_groups`` and ``user_role`` may be supplied to avoid
+    extra DB round trips when callers already have them in scope.
     """
     if not record:
         # Treat as 404 so callers can map this consistently.
@@ -154,17 +153,7 @@ def _resolve_permission(
     ingroup_permission = record.get("ingroup_permission") or READ_ONLY
     record_groups = set(_parse_group_ids(record.get("group_ids")))
 
-    role = _get_user_role(user_id, tenant_id)
-    is_management = role in CAN_EDIT_ALL_USER_ROLES
-    if is_management:
-        return AidpPermissionDecision(
-            kb_id=kb_id,
-            tenant_id=tenant_id,
-            user_id=user_id,
-            permission=EDIT,
-            is_management_role=True,
-            matched_group_ids=tuple(),
-        )
+    role = _get_user_role(user_id, tenant_id) if user_role is None else user_role
 
     if owner_user_id and owner_user_id == user_id:
         return AidpPermissionDecision(
@@ -186,7 +175,27 @@ def _resolve_permission(
             matched_group_ids=tuple(),
         )
 
-    if not record_groups:
+    if role == "USER":
+        return AidpPermissionDecision(
+            kb_id=kb_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            permission=None,
+            is_management_role=False,
+            matched_group_ids=tuple(),
+        )
+
+    if role in CAN_EDIT_ALL_USER_ROLES:
+        return AidpPermissionDecision(
+            kb_id=kb_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            permission=EDIT,
+            is_management_role=True,
+            matched_group_ids=tuple(),
+        )
+
+    if role != "DEV" or not record_groups:
         return AidpPermissionDecision(
             kb_id=kb_id,
             tenant_id=tenant_id,
@@ -271,16 +280,9 @@ def _compute_accessible_rows(user_id: str, tenant_id: str) -> list[dict]:
     rows = aidp_permission_db.list_all_permissions_by_tenant(tenant_id=tenant_id)
     user_groups = _get_user_groups(user_id, tenant_id)
     role = _get_user_role(user_id, tenant_id)
-    is_management = role in CAN_EDIT_ALL_USER_ROLES
-
     accessible: list[dict] = []
     for row in rows:
-        if is_management or row.get("owner_user_id") == user_id:
-            new_row = dict(row)
-            new_row["permission"] = EDIT
-            accessible.append(new_row)
-            continue
-        decision = _resolve_permission(row, user_id, tenant_id, user_groups)
+        decision = _resolve_permission(row, user_id, tenant_id, user_groups, role)
         # Drop rows the user cannot see: PRIVATE, not-in-group, or empty
         # group_ids all produce ``permission is None`` here.
         if decision.permission is None:
@@ -327,6 +329,55 @@ def count_accessible_kbs(user_id: str, tenant_id: str) -> int:
     return len(accessible)
 
 
+def intersect_accessible_kbs(
+    remote_items: Sequence[dict],
+    user_id: str,
+    tenant_id: str,
+) -> list[dict]:
+    """Intersect the current AIDP catalog with the user's local permissions.
+
+    The AIDP result is authoritative for whether a resource exists under the
+    currently configured credentials. The local permission table remains
+    authoritative for whether the Nexent user may see that resource. Result
+    order follows the AIDP catalog so pagination remains stable with the
+    upstream listing.
+    """
+    local_rows = _compute_accessible_rows(user_id, tenant_id)
+    local_by_id = {str(row["kb_id"]): row for row in local_rows}
+    protected_local_fields = (
+        "tenant_id",
+        "owner_user_id",
+        "ingroup_permission",
+        "group_ids",
+        "permission",
+    )
+
+    intersection: list[dict] = []
+    seen_ids: set[str] = set()
+    for remote_item in remote_items:
+        if not isinstance(remote_item, dict):
+            continue
+        raw_kds_id = remote_item.get("kds_id") or remote_item.get("id")
+        if raw_kds_id is None:
+            continue
+        kds_id = str(raw_kds_id)
+        if kds_id in seen_ids:
+            continue
+        local_row = local_by_id.get(kds_id)
+        if local_row is None:
+            continue
+
+        merged = {**local_row, **remote_item}
+        for field in protected_local_fields:
+            if field in local_row:
+                merged[field] = local_row[field]
+        merged["kb_id"] = kds_id
+        merged["kds_id"] = kds_id
+        intersection.append(merged)
+        seen_ids.add(kds_id)
+    return intersection
+
+
 def filter_accessible_kds(
     kds_ids: Sequence[str],
     user_id: str,
@@ -337,17 +388,13 @@ def filter_accessible_kds(
         return []
     user_groups = _get_user_groups(user_id, tenant_id)
     role = _get_user_role(user_id, tenant_id)
-    is_management = role in CAN_EDIT_ALL_USER_ROLES
 
     allowed: list[str] = []
     for kds_id in kds_ids:
         record = _get_permission_record(kb_id=kds_id, tenant_id=tenant_id)
         if record is None:
             continue
-        if is_management or record.get("owner_user_id") == user_id:
-            allowed.append(kds_id)
-            continue
-        decision = _resolve_permission(record, user_id, tenant_id, user_groups)
+        decision = _resolve_permission(record, user_id, tenant_id, user_groups, role)
         if _decision_meets(decision, REQUIRE_READ):
             allowed.append(kds_id)
     return allowed
@@ -365,14 +412,10 @@ def get_allowed_kds_list(user_id: str, tenant_id: str) -> list[str]:
     )
     user_groups = _get_user_groups(user_id, tenant_id)
     role = _get_user_role(user_id, tenant_id)
-    is_management = role in CAN_EDIT_ALL_USER_ROLES
 
     allowed: list[str] = []
     for row in rows:
-        if is_management or row.get("owner_user_id") == user_id:
-            allowed.append(row["kb_id"])
-            continue
-        decision = _resolve_permission(row, user_id, tenant_id, user_groups)
+        decision = _resolve_permission(row, user_id, tenant_id, user_groups, role)
         if _decision_meets(decision, REQUIRE_READ):
             allowed.append(row["kb_id"])
     return allowed
@@ -392,7 +435,6 @@ def get_kds_name_to_id_map(user_id: str, tenant_id: str) -> dict[str, str]:
     )
     user_groups = _get_user_groups(user_id, tenant_id)
     role = _get_user_role(user_id, tenant_id)
-    is_management = role in CAN_EDIT_ALL_USER_ROLES
 
     kds_map: dict[str, str] = {}
     for row in rows:
@@ -400,10 +442,7 @@ def get_kds_name_to_id_map(user_id: str, tenant_id: str) -> dict[str, str]:
         kds_name = row.get("kds_name")
         if not kds_name:
             continue
-        if is_management or row.get("owner_user_id") == user_id:
-            kds_map[kds_name] = kb_id
-            continue
-        decision = _resolve_permission(row, user_id, tenant_id, user_groups)
+        decision = _resolve_permission(row, user_id, tenant_id, user_groups, role)
         if _decision_meets(decision, REQUIRE_READ):
             kds_map[kds_name] = kb_id
     return kds_map
@@ -460,6 +499,7 @@ __all__ = [
     "filter_accessible_kds",
     "get_accessible_kbs",
     "count_accessible_kbs",
+    "intersect_accessible_kbs",
     "get_allowed_kds_list",
     "get_kds_name_to_id_map",
     "require_permission",

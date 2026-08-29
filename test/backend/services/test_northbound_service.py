@@ -10,6 +10,7 @@ This module tests the northbound-facing service layer functions including:
 import sys
 import os
 import types
+from enum import Enum
 from unittest.mock import MagicMock, AsyncMock, patch
 
 import pytest
@@ -21,6 +22,30 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 # Mock all required modules BEFORE importing northbound_service
 # =============================================================================
 
+class ErrorCode:
+    CHAT_METADATA_INVALID = "010106"
+    CHAT_METADATA_TOO_LARGE = "010107"
+
+
+class RuntimeMetadataValidationCode(str, Enum):
+    INVALID_METADATA_TYPE = "INVALID_METADATA_TYPE"
+    METADATA_TOO_LARGE = "METADATA_TOO_LARGE"
+
+
+class AppException(Exception):
+    def __init__(self, error_code, message=None, details=None):
+        self.error_code = error_code
+        self.message = message
+        self.details = details or {}
+        super().__init__(message)
+
+
+class RuntimeMetadataValidationError(ValueError):
+    def __init__(self, code, message):
+        self.code = code
+        super().__init__(message)
+
+
 # Mock consts.exceptions
 class LimitExceededError(Exception):
     pass
@@ -31,15 +56,38 @@ class UnauthorizedError(Exception):
 class ConversationNotFoundError(Exception):
     pass
 
+class RuntimeServiceTimeoutError(Exception):
+    pass
+
+class RuntimeServiceUnavailableError(Exception):
+    pass
+
+class RuntimeUpstreamError(Exception):
+    pass
+
+
 consts_exceptions_mod = types.ModuleType("consts.exceptions")
 consts_exceptions_mod.LimitExceededError = LimitExceededError
 consts_exceptions_mod.UnauthorizedError = UnauthorizedError
 consts_exceptions_mod.ConversationNotFoundError = ConversationNotFoundError
+consts_exceptions_mod.RuntimeServiceTimeoutError = RuntimeServiceTimeoutError
+consts_exceptions_mod.RuntimeServiceUnavailableError = RuntimeServiceUnavailableError
+consts_exceptions_mod.RuntimeUpstreamError = RuntimeUpstreamError
+consts_exceptions_mod.AppException = AppException
+consts_exceptions_mod.RuntimeMetadataValidationError = RuntimeMetadataValidationError
 sys.modules["consts.exceptions"] = consts_exceptions_mod
 sys.modules["backend.consts.exceptions"] = consts_exceptions_mod
 
+consts_error_code_mod = types.ModuleType("consts.error_code")
+consts_error_code_mod.ErrorCode = ErrorCode
+consts_error_code_mod.RuntimeMetadataValidationCode = RuntimeMetadataValidationCode
+sys.modules["consts.error_code"] = consts_error_code_mod
+sys.modules["backend.consts.error_code"] = consts_error_code_mod
+
 # Mock consts.const
 consts_const_mod = types.ModuleType("consts.const")
+consts_const_mod.AIDP_API_KEY = "test-aidp-api-key"
+consts_const_mod.AIDP_SERVER_URL = "https://aidp.example"
 consts_const_mod.ASSET_OWNER_TENANT_ID = "asset-owner-tenant"
 consts_const_mod.RUNTIME_STATE_REDIS_URL = ""
 consts_const_mod.RUNTIME_STREAM_TTL_SECONDS = 86400
@@ -56,6 +104,7 @@ sys.modules["consts.const"] = consts_const_mod
 consts_package = types.ModuleType("consts")
 consts_package.exceptions = consts_exceptions_mod
 consts_package.const = consts_const_mod
+consts_package.error_code = consts_error_code_mod
 sys.modules["consts"] = consts_package
 
 # Mock database modules
@@ -77,11 +126,18 @@ sys.modules["database.token_db"] = token_db_mod
 
 # Mock conversation_db
 conversation_db_mod = types.ModuleType("database.conversation_db")
+conversation_db_mod.get_conversation_list = MagicMock(return_value=[
+    {"conversation_id": "1", "title": "Test"}
+])
 conversation_db_mod.get_conversation_messages = MagicMock(return_value=[
     {"message_role": "user", "message_content": "Hello"}
 ])
 conversation_db_mod.get_source_searches_by_message = MagicMock(return_value=[])
 sys.modules["database.conversation_db"] = conversation_db_mod
+
+knowledge_db_mod = types.ModuleType("database.knowledge_db")
+knowledge_db_mod.get_knowledge_info_by_tenant_id = MagicMock(return_value=[])
+sys.modules["database.knowledge_db"] = knowledge_db_mod
 
 # Mock attachment_db
 attachment_db_mod = types.ModuleType("database.attachment_db")
@@ -112,20 +168,27 @@ sys.modules["services.runtime_state_service"] = runtime_state_service_mod
 
 # Mock agent_service
 agent_service_mod = types.ModuleType("services.agent_service")
-agent_service_mod.run_agent_stream = AsyncMock()
-agent_service_mod.stop_agent_tasks = MagicMock(return_value={"message": "stopped"})
 agent_service_mod.get_agent_by_name_impl = MagicMock(return_value={"agent_id": 1, "latest_version_no": 1})
 sys.modules["services.agent_service"] = agent_service_mod
+
+# Mock runtime forwarding service
+runtime_proxy_mod = types.ModuleType("services.runtime_proxy_service")
+runtime_proxy_mod.forward_agent_run = AsyncMock()
+runtime_proxy_mod.forward_agent_stop = AsyncMock(return_value={"message": "stopped"})
+sys.modules["services.runtime_proxy_service"] = runtime_proxy_mod
 
 # Mock conversation_management_service
 conv_mgmt_mod = types.ModuleType("services.conversation_management_service")
 conv_mgmt_mod.save_conversation_user = MagicMock()
-conv_mgmt_mod.get_conversation_list_service = MagicMock(return_value=[
-    {"conversation_id": "1", "title": "Test"}
-])
 conv_mgmt_mod.create_new_conversation = MagicMock(return_value={"conversation_id": 123})
+conv_mgmt_mod.generate_conversation_title_service = AsyncMock(return_value="Generated title")
 conv_mgmt_mod.update_conversation_title = MagicMock()
 sys.modules["services.conversation_management_service"] = conv_mgmt_mod
+
+# Mock model_management_service
+model_mgmt_mod = types.ModuleType("services.model_management_service")
+model_mgmt_mod.list_models_for_tenant = AsyncMock(return_value=[])
+sys.modules["services.model_management_service"] = model_mgmt_mod
 
 # Mock agent_version_service
 agent_version_mod = types.ModuleType("services.agent_version_service")
@@ -133,6 +196,20 @@ agent_version_mod.list_published_agents_impl = AsyncMock(return_value=[
     {"agent_id": 1, "name": "test_agent", "description": "Test agent"}
 ])
 sys.modules["services.agent_version_service"] = agent_version_mod
+
+knowledge_scope_service_mod = types.ModuleType("services.knowledge_scope_service")
+knowledge_scope_service_mod.LOCAL_TOOL_CLASS = "KnowledgeBaseSearchTool"
+knowledge_scope_service_mod.AIDP_TOOL_CLASS = "AidpSearchTool"
+knowledge_scope_service_mod.get_agent_knowledge_capabilities = MagicMock()
+sys.modules["services.knowledge_scope_service"] = knowledge_scope_service_mod
+
+vectordatabase_service_mod = types.ModuleType("services.vectordatabase_service")
+vectordatabase_service_mod.ElasticSearchService = MagicMock()
+vectordatabase_service_mod.ElasticSearchService.filter_accessible_indices = MagicMock(
+    return_value=[]
+)
+vectordatabase_service_mod._is_multimodal_by_model_id = MagicMock(return_value=False)
+sys.modules["services.vectordatabase_service"] = vectordatabase_service_mod
 
 # Mock file_management_service
 file_mgmt_mod = types.ModuleType("services.file_management_service")
@@ -143,10 +220,14 @@ sys.modules["services.file_management_service"] = file_mgmt_mod
 
 # Add to services package
 services_package.agent_service = agent_service_mod
+services_package.runtime_proxy_service = runtime_proxy_mod
 services_package.agent_version_service = agent_version_mod
 services_package.conversation_management_service = conv_mgmt_mod
+services_package.model_management_service = model_mgmt_mod
 services_package.file_management_service = file_mgmt_mod
 services_package.runtime_state_service = runtime_state_service_mod
+services_package.knowledge_scope_service = knowledge_scope_service_mod
+services_package.vectordatabase_service = vectordatabase_service_mod
 sys.modules["services"] = services_package
 
 # Mock consts.model - create stub classes
@@ -189,6 +270,9 @@ def reset_test_isolation():
     agent_version_mod.list_published_agents_impl.return_value = [
         {"agent_id": 1, "name": "test_agent", "description": "Test agent"}
     ]
+    runtime_proxy_mod.forward_agent_run.reset_mock(side_effect=True)
+    runtime_proxy_mod.forward_agent_stop.reset_mock(side_effect=True)
+    runtime_proxy_mod.forward_agent_stop.return_value = {"message": "stopped"}
     yield
     ns._IDEMPOTENCY_RUNNING.clear()
     ns._RATE_STATE.clear()
@@ -474,13 +558,58 @@ class TestRateLimiting:
 class TestStartStreamingChat:
     """Tests for start_streaming_chat function."""
 
+    async def test_start_streaming_chat_rejects_invalid_metadata(self):
+        """Non-object runtime metadata must be rejected with HTTP 422."""
+        ctx = MockNorthboundContext(token_id=0)
+
+        with pytest.raises(AppException) as exc_info:
+            await ns.start_streaming_chat(
+                ctx=ctx,
+                conversation_id=None,
+                agent_name="test_agent",
+                query="test query",
+                metadata=["not", "an", "object"],
+            )
+
+        assert exc_info.value.error_code == ErrorCode.CHAT_METADATA_INVALID
+        assert exc_info.value.details == {"reason": "INVALID_METADATA_TYPE"}
+
+    async def test_start_streaming_chat_oversized_metadata_returns_413(self):
+        """METADATA_TOO_LARGE validation failures map to HTTP 413."""
+        ctx = MockNorthboundContext(token_id=0)
+
+        with patch.object(
+            ns,
+            "validate_runtime_metadata",
+            side_effect=RuntimeMetadataValidationError(
+                RuntimeMetadataValidationCode.METADATA_TOO_LARGE,
+                "too large",
+            ),
+        ):
+            with pytest.raises(AppException) as exc_info:
+                await ns.start_streaming_chat(
+                    ctx=ctx,
+                    conversation_id=None,
+                    agent_name="test_agent",
+                    query="test query",
+                    metadata={"payload": "x"},
+                )
+
+        assert exc_info.value.error_code == ErrorCode.CHAT_METADATA_TOO_LARGE
+        assert exc_info.value.details == {"reason": "METADATA_TOO_LARGE"}
+
     async def test_start_streaming_chat_creates_conversation(self):
         """Test that new conversation is created when conversation_id is None."""
         ctx = MockNorthboundContext(token_id=0)
 
         mock_response = MagicMock()
         mock_response.headers = {}
-        agent_service_mod.run_agent_stream.return_value = mock_response
+
+        async def response_chunks():
+            yield b"data: {\"type\": \"final_answer\", \"content\": \"ok\"}\n\n"
+
+        mock_response.body_iterator = response_chunks()
+        runtime_proxy_mod.forward_agent_run.return_value = mock_response
 
         with patch.object(ns, 'check_and_consume_rate_limit', new_callable=AsyncMock), \
                 patch.object(ns, 'idempotency_start', new_callable=AsyncMock), \
@@ -494,7 +623,51 @@ class TestStartStreamingChat:
                 query="test query"
             )
 
-            conv_mgmt_mod.create_new_conversation.assert_called()
+            conv_mgmt_mod.create_new_conversation.assert_called_once_with(
+                title="New Conversation",
+                user_id=ctx.user_id,
+                agent_id=1,
+            )
+
+            chunks = [chunk async for chunk in mock_response.body_iterator]
+            assert b'"type": "conversation_created"' in chunks[0]
+            assert b'"conversation_id": 123' in chunks[0]
+            assert chunks[1].startswith(b"data: {\"type\": \"final_answer\"")
+
+    async def test_start_streaming_chat_allows_unpublished_agent(self):
+        """Use the resolved agent ID even when it has no published version."""
+        ctx = MockNorthboundContext(token_id=0)
+        conv_mgmt_mod.create_new_conversation.reset_mock()
+        mock_response = MagicMock()
+        mock_response.headers = {}
+        runtime_proxy_mod.forward_agent_run.return_value = mock_response
+
+        with patch.object(ns, "check_and_consume_rate_limit", new_callable=AsyncMock), \
+                patch.object(ns, "idempotency_start", new_callable=AsyncMock), \
+                patch.object(ns, "get_conversation_history_internal", new_callable=AsyncMock) as mock_history, \
+                patch.object(
+                    ns,
+                    "get_agent_by_name_impl",
+                    return_value={"agent_id": 99, "latest_version_no": None},
+                ):
+            mock_history.return_value = {"data": {"history": []}}
+
+            await ns.start_streaming_chat(
+                ctx=ctx,
+                conversation_id=None,
+                agent_name="draft_agent",
+                query="test query",
+            )
+
+        conv_mgmt_mod.create_new_conversation.assert_called_once_with(
+            title="New Conversation",
+            user_id=ctx.user_id,
+            agent_id=99,
+        )
+        forwarded_request = runtime_proxy_mod.forward_agent_run.call_args.kwargs[
+            "agent_request"
+        ]
+        assert forwarded_request.version_no is None
 
     async def test_start_streaming_chat_logs_token_usage(self):
         """Test that token usage is logged when token_id > 0."""
@@ -502,7 +675,7 @@ class TestStartStreamingChat:
 
         mock_response = MagicMock()
         mock_response.headers = {}
-        agent_service_mod.run_agent_stream.return_value = mock_response
+        runtime_proxy_mod.forward_agent_run.return_value = mock_response
 
         with patch.object(ns, 'check_and_consume_rate_limit', new_callable=AsyncMock), \
                 patch.object(ns, 'idempotency_start', new_callable=AsyncMock), \
@@ -541,7 +714,7 @@ class TestStartStreamingChat:
 
         mock_response = MagicMock()
         mock_response.headers = {}
-        agent_service_mod.run_agent_stream.return_value = mock_response
+        runtime_proxy_mod.forward_agent_run.return_value = mock_response
 
         async def mock_get_history(*args, **kwargs):
             return {"data": {"history": []}}
@@ -566,7 +739,7 @@ class TestStartStreamingChat:
 
         mock_response = MagicMock()
         mock_response.headers = {}
-        agent_service_mod.run_agent_stream.return_value = mock_response
+        runtime_proxy_mod.forward_agent_run.return_value = mock_response
 
         async def mock_get_history(*args, **kwargs):
             return {"data": {"history": []}}
@@ -591,7 +764,7 @@ class TestStartStreamingChat:
 
         mock_response = MagicMock()
         mock_response.headers = {}
-        agent_service_mod.run_agent_stream.return_value = mock_response
+        runtime_proxy_mod.forward_agent_run.return_value = mock_response
 
         with patch.object(ns, 'check_and_consume_rate_limit', new_callable=AsyncMock), \
                 patch.object(ns, 'idempotency_start', new_callable=AsyncMock), \
@@ -609,6 +782,10 @@ class TestStartStreamingChat:
             )
 
             mock_norm.assert_called_once()
+            forwarded_request = runtime_proxy_mod.forward_agent_run.call_args.kwargs[
+                "agent_request"
+            ]
+            assert forwarded_request.minio_files == [{"name": "file.txt"}]
 
     async def test_start_streaming_chat_with_model_id_override(self):
         """Test that model_id is passed through to AgentRequest to override the agent's default model."""
@@ -617,7 +794,7 @@ class TestStartStreamingChat:
 
         mock_response = MagicMock()
         mock_response.headers = {}
-        agent_service_mod.run_agent_stream.return_value = mock_response
+        runtime_proxy_mod.forward_agent_run.return_value = mock_response
 
         async def mock_get_history(*args, **kwargs):
             return {"data": {"history": []}}
@@ -635,10 +812,12 @@ class TestStartStreamingChat:
             )
 
             # Verify run_agent_stream was called with an AgentRequest that has the override model_id
-            call_kwargs = agent_service_mod.run_agent_stream.call_args.kwargs
+            call_kwargs = runtime_proxy_mod.forward_agent_run.call_args.kwargs
             agent_request = call_kwargs.get("agent_request")
             assert agent_request is not None
             assert getattr(agent_request, "model_id", None) == override_model_id
+            assert call_kwargs["user_id"] == ctx.user_id
+            assert call_kwargs["tenant_id"] == ctx.tenant_id
 
     async def test_start_streaming_chat_model_id_null_uses_agent_default(self):
         """Test that omitting model_id results in None, preserving agent's default model."""
@@ -646,7 +825,7 @@ class TestStartStreamingChat:
 
         mock_response = MagicMock()
         mock_response.headers = {}
-        agent_service_mod.run_agent_stream.return_value = mock_response
+        runtime_proxy_mod.forward_agent_run.return_value = mock_response
 
         async def mock_get_history(*args, **kwargs):
             return {"data": {"history": []}}
@@ -663,7 +842,7 @@ class TestStartStreamingChat:
                 # model_id not provided -> defaults to None
             )
 
-            call_kwargs = agent_service_mod.run_agent_stream.call_args.kwargs
+            call_kwargs = runtime_proxy_mod.forward_agent_run.call_args.kwargs
             agent_request = call_kwargs.get("agent_request")
             assert agent_request is not None
             assert getattr(agent_request, "model_id", None) is None
@@ -675,7 +854,7 @@ class TestStartStreamingChat:
 
         mock_response = MagicMock()
         mock_response.headers = {}
-        agent_service_mod.run_agent_stream.return_value = mock_response
+        runtime_proxy_mod.forward_agent_run.return_value = mock_response
 
         with patch.object(ns, 'check_and_consume_rate_limit', new_callable=AsyncMock), \
                 patch.object(ns, 'idempotency_start', new_callable=AsyncMock), \
@@ -694,7 +873,7 @@ class TestStartStreamingChat:
             )
 
             mock_norm.assert_called_once()
-            call_kwargs = agent_service_mod.run_agent_stream.call_args.kwargs
+            call_kwargs = runtime_proxy_mod.forward_agent_run.call_args.kwargs
             agent_request = call_kwargs.get("agent_request")
             assert agent_request is not None
             assert getattr(agent_request, "model_id", None) == 99
@@ -710,7 +889,7 @@ class TestStartStreamingChat:
         mock_response.headers = {"x-existing": "1"}
         mock_response.media_type = "text/event-stream"
         mock_response.body_iterator = _body_iterator()
-        agent_service_mod.run_agent_stream.return_value = mock_response
+        runtime_proxy_mod.forward_agent_run.return_value = mock_response
 
         with patch.object(ns, "check_and_consume_rate_limit", new_callable=AsyncMock), \
                 patch.object(ns, "idempotency_start", new_callable=AsyncMock), \
@@ -732,8 +911,8 @@ class TestStartStreamingChat:
         assert chunks == [b"data: hello\n\n"]
         assert response.headers["conversation_id"] == "123"
         assert response.headers["X-Request-Id"] == ctx.request_id
-        assert response.headers["x-existing"] == "1"
         assert response.headers["X-Accel-Buffering"] == "no"
+        assert response.headers["x-existing"] == "1"
 
 
 @pytest.mark.asyncio
@@ -743,7 +922,7 @@ class TestStopChat:
     async def test_stop_chat_success(self):
         """Test successful stop chat."""
         ctx = MockNorthboundContext(token_id=1)
-        agent_service_mod.stop_agent_tasks.return_value = {"message": "stopped"}
+        runtime_proxy_mod.forward_agent_stop.return_value = {"message": "stopped"}
 
         result = await ns.stop_chat(ctx=ctx, conversation_id=123)
 
@@ -757,7 +936,13 @@ class TestStopChat:
 
         await ns.stop_chat(ctx=ctx, conversation_id=123, meta_data={"test": "data"})
 
-        token_db_mod.log_token_usage.assert_called()
+        token_db_mod.log_token_usage.assert_called_once_with(
+            token_id=1,
+            call_function_name="stop_chat_stream",
+            related_id=123,
+            created_by=ctx.user_id,
+            metadata={"test": "data"},
+        )
 
     async def test_stop_chat_no_token_id_no_logging(self):
         """Test that token usage is not logged when token_id is 0."""
@@ -767,6 +952,23 @@ class TestStopChat:
         await ns.stop_chat(ctx=ctx, conversation_id=123)
 
         token_db_mod.log_token_usage.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "runtime_error",
+        [
+            RuntimeServiceTimeoutError("timed out"),
+            RuntimeServiceUnavailableError("unavailable"),
+            RuntimeUpstreamError("upstream error"),
+        ],
+    )
+    async def test_stop_chat_preserves_runtime_errors(self, runtime_error):
+        ctx = MockNorthboundContext(token_id=0)
+        runtime_proxy_mod.forward_agent_stop.side_effect = runtime_error
+
+        with pytest.raises(type(runtime_error)) as exc_info:
+            await ns.stop_chat(ctx=ctx, conversation_id=123)
+
+        assert exc_info.value is runtime_error
 
 
 @pytest.mark.asyncio
@@ -791,6 +993,49 @@ class TestListConversations:
 
         token_db_mod.get_latest_usage_metadata.assert_not_called()
         assert result["message"] == "success"
+
+
+@pytest.mark.asyncio
+class TestNorthboundModelAndGeneratedTitleServices:
+    async def test_list_configured_models_uses_context_tenant(self):
+        ctx = MockNorthboundContext(tenant_id="tenant-models")
+        models = [{"model_id": 7, "display_name": "Main model"}]
+        model_mgmt_mod.list_models_for_tenant.reset_mock(side_effect=True)
+        model_mgmt_mod.list_models_for_tenant.return_value = models
+
+        result = await ns.list_configured_models(ctx)
+
+        assert result == {
+            "message": "success",
+            "data": models,
+            "requestId": "req-123",
+        }
+        model_mgmt_mod.list_models_for_tenant.assert_awaited_once_with("tenant-models")
+
+    async def test_generate_conversation_title_uses_context_identity(self):
+        ctx = MockNorthboundContext(user_id="user-title", tenant_id="tenant-title")
+        conv_mgmt_mod.generate_conversation_title_service.reset_mock(side_effect=True)
+        conv_mgmt_mod.generate_conversation_title_service.return_value = "Generated title"
+
+        result = await ns.generate_conversation_title(
+            ctx=ctx,
+            conversation_id=42,
+            question="Summarize this conversation",
+            language="en",
+        )
+
+        assert result == {
+            "message": "success",
+            "data": "Generated title",
+            "requestId": "req-123",
+        }
+        conv_mgmt_mod.generate_conversation_title_service.assert_awaited_once_with(
+            conversation_id=42,
+            question="Summarize this conversation",
+            user_id="user-title",
+            tenant_id="tenant-title",
+            language="en",
+        )
 
 
 @pytest.mark.asyncio
@@ -988,6 +1233,187 @@ class TestGetAgentInfoList:
         with pytest.raises(Exception, match="Failed to get agent info for agent_name"):
             await ns.get_agent_info_by_name_for_northbound(ctx, "any_agent")
 
+    async def test_get_agent_knowledge_bases_returns_accessible_local_indices(self):
+        ctx = MockNorthboundContext(tenant_id="tenant-1", user_id="user-1")
+        agent_version_mod.list_published_agents_impl.return_value = [
+            {
+                "agent_id": 42,
+                "tenant_id": "tenant-1",
+                "name": "local_agent",
+                "current_version_no": 3,
+            }
+        ]
+        knowledge_scope_service_mod.get_agent_knowledge_capabilities.return_value = {
+            "sources": {
+                "local": {
+                    "enabled": True,
+                    "max_select": 50,
+                    "default_range_values": ["allowed-index"],
+                },
+                "aidp": {
+                    "enabled": False,
+                    "max_select": 10,
+                    "default_range_values": [],
+                },
+            }
+        }
+        knowledge_db_mod.get_knowledge_info_by_tenant_id.return_value = [
+            {
+                "knowledge_id": 7,
+                "index_name": "allowed-index",
+                "knowledge_name": "Allowed KB",
+                "knowledge_sources": "elasticsearch",
+                "embedding_model_name": "bge-m3",
+                "embedding_model_id": 9,
+            },
+            {
+                "knowledge_id": 8,
+                "index_name": "denied-index",
+                "knowledge_name": "Denied KB",
+                "knowledge_sources": "elasticsearch",
+            },
+        ]
+        ns.ElasticSearchService.filter_accessible_indices.return_value = [
+            "allowed-index"
+        ]
+
+        result = await ns.get_agent_knowledge_bases_for_northbound(
+            ctx, "local_agent"
+        )
+
+        assert result["data"]["source"] == "local"
+        assert result["data"]["tool_name"] == "KnowledgeBaseSearchTool"
+        assert result["data"]["range_parameter"] == "index_names"
+        assert result["data"]["default_selected_ids"] == ["allowed-index"]
+        assert result["data"]["knowledge_bases"] == [{
+            "id": "allowed-index",
+            "knowledge_id": "7",
+            "name": "Allowed KB",
+            "embedding_model": "bge-m3",
+            "embedding_model_id": 9,
+            "is_multimodal": False,
+        }]
+
+    async def test_get_agent_knowledge_bases_rejects_source_conflict(self):
+        ctx = MockNorthboundContext(tenant_id="tenant-1", user_id="user-1")
+        agent_version_mod.list_published_agents_impl.return_value = [
+            {
+                "agent_id": 42,
+                "tenant_id": "tenant-1",
+                "name": "conflicting_agent",
+                "current_version_no": 3,
+            }
+        ]
+        knowledge_scope_service_mod.get_agent_knowledge_capabilities.return_value = {
+            "sources": {
+                "local": {"enabled": True},
+                "aidp": {"enabled": True},
+            }
+        }
+
+        with pytest.raises(ValueError, match="both local and AIDP"):
+            await ns.get_agent_knowledge_bases_for_northbound(
+                ctx, "conflicting_agent"
+            )
+
+    async def test_get_agent_knowledge_bases_returns_accessible_aidp_items(self):
+        ctx = MockNorthboundContext(tenant_id="tenant-1", user_id="user-1")
+        agent_version_mod.list_published_agents_impl.return_value = [{
+            "agent_id": 42,
+            "name": "aidp_agent",
+            "current_version_no": 3,
+        }]
+        knowledge_scope_service_mod.get_agent_knowledge_capabilities.return_value = {
+            "sources": {
+                "local": {
+                    "enabled": False,
+                    "max_select": 50,
+                    "default_range_values": [],
+                },
+                "aidp": {
+                    "enabled": True,
+                    "max_select": 10,
+                    "default_range_values": ["kds-1"],
+                },
+            }
+        }
+        permission_service = types.ModuleType(
+            "ext_components.aidp.services.aidp_permission_service"
+        )
+        permission_service.intersect_accessible_kbs = MagicMock(return_value=[{
+            "kb_id": "kds-1",
+            "kds_name": "Fallback name",
+            "resource_status": "ACTIVE",
+        }])
+        aidp_service = types.ModuleType(
+            "ext_components.aidp.services.aidp_service"
+        )
+        aidp_service.get_aidp_kb_impl = MagicMock(return_value={
+            "kds_name": "Policies",
+            "document_count": 2,
+            "chunk_count": 12,
+            "caption_enable": 1,
+        })
+        aidp_service.fetch_all_aidp_knowledge_bases_impl = MagicMock(return_value={
+            "value": [{"kds_id": "kds-1"}],
+            "total_count": 1,
+            "next_link": None,
+        })
+        aidp_access_service = types.ModuleType(
+            "ext_components.aidp.services.aidp_access_service"
+        )
+        aidp_access_service.resolve_current_aidp_access = MagicMock(
+            return_value=types.SimpleNamespace(
+                accessible_rows=[{
+                    "kb_id": "kds-1",
+                    "kds_name": "Fallback name",
+                    "resource_status": "ACTIVE",
+                }]
+            )
+        )
+        services_module = types.ModuleType("ext_components.aidp.services")
+        services_module.aidp_permission_service = permission_service
+        aidp_module = types.ModuleType("ext_components.aidp")
+        aidp_module.services = services_module
+        ext_components_module = types.ModuleType("ext_components")
+        ext_components_module.aidp = aidp_module
+
+        with patch.dict(sys.modules, {
+            "ext_components": ext_components_module,
+            "ext_components.aidp": aidp_module,
+            "ext_components.aidp.services": services_module,
+            "ext_components.aidp.services.aidp_permission_service": permission_service,
+            "ext_components.aidp.services.aidp_service": aidp_service,
+            "ext_components.aidp.services.aidp_access_service": aidp_access_service,
+        }):
+            result = await ns.get_agent_knowledge_bases_for_northbound(
+                ctx, "aidp_agent"
+            )
+
+        assert result["data"]["source"] == "aidp"
+        assert result["data"]["range_parameter"] == "kds_list"
+        assert result["data"]["default_selected_ids"] == ["kds-1"]
+        assert result["data"]["knowledge_bases"] == [{
+            "id": "kds-1",
+            "name": "Policies",
+            "document_count": 2,
+            "chunk_count": 12,
+            "is_multimodal": True,
+            "resource_status": "ACTIVE",
+        }]
+        aidp_service.get_aidp_kb_impl.assert_called_once_with(
+            "https://aidp.example",
+            "test-aidp-api-key",
+            "kds-1",
+        )
+        aidp_access_service.resolve_current_aidp_access.assert_called_once_with(
+            server_url="https://aidp.example",
+            api_key="test-aidp-api-key",
+            user_id="user-1",
+            tenant_id="tenant-1",
+            aidp_tenant_id="aidp",
+        )
+
 
 @pytest.mark.asyncio
 class TestUpdateConversationTitle:
@@ -1019,7 +1445,13 @@ class TestUpdateConversationTitle:
             meta_data={"source": "api"}
         )
 
-        token_db_mod.log_token_usage.assert_called()
+        token_db_mod.log_token_usage.assert_called_once_with(
+            token_id=1,
+            call_function_name="update_conversation_title",
+            related_id=123,
+            created_by=ctx.user_id,
+            metadata={"source": "api"},
+        )
 
     async def test_update_conversation_title_custom_idempotency_key(self):
         """Test that custom idempotency key is used when provided."""
@@ -1119,7 +1551,7 @@ class TestStartStreamingChatErrorHandling:
 
         mock_response = MagicMock()
         mock_response.headers = {}
-        agent_service_mod.run_agent_stream.return_value = mock_response
+        runtime_proxy_mod.forward_agent_run.return_value = mock_response
 
         async def mock_get_history(*args, **kwargs):
             return {"data": {"history": []}}
@@ -1144,7 +1576,7 @@ class TestStartStreamingChatErrorHandling:
 
         mock_response = MagicMock()
         mock_response.headers = {}
-        agent_service_mod.run_agent_stream.return_value = mock_response
+        runtime_proxy_mod.forward_agent_run.return_value = mock_response
         token_db_mod.log_token_usage.side_effect = Exception("Logging failed")
 
         async def mock_get_history(*args, **kwargs):
@@ -1188,7 +1620,7 @@ class TestStartStreamingChatErrorHandling:
                     "latest_version_no": 5
                 }), \
                 patch.object(ns, 'save_conversation_user', side_effect=lambda *args: None), \
-                patch.object(ns, 'run_agent_stream', new_callable=AsyncMock, return_value=mock_response) as mock_stream:
+                patch.object(ns, 'forward_agent_run', new_callable=AsyncMock, return_value=mock_response) as mock_stream:
             conv_mgmt_mod.save_conversation_user.reset_mock()
 
             await ns.start_streaming_chat(
@@ -1215,7 +1647,7 @@ class TestStartStreamingChatErrorHandling:
 
         mock_response = MagicMock()
         mock_response.headers = {}
-        agent_service_mod.run_agent_stream.return_value = mock_response
+        runtime_proxy_mod.forward_agent_run.return_value = mock_response
 
         async def mock_get_history(*args, **kwargs):
             return {"data": {"history": []}}
@@ -1271,7 +1703,7 @@ class TestStopChatErrorHandling:
     async def test_stop_chat_error(self):
         """Test that errors in stop_chat are wrapped properly."""
         ctx = MockNorthboundContext(token_id=0)
-        agent_service_mod.stop_agent_tasks.side_effect = Exception("Stop failed")
+        runtime_proxy_mod.forward_agent_stop.side_effect = Exception("Stop failed")
 
         with pytest.raises(Exception) as exc_info:
             await ns.stop_chat(ctx=ctx, conversation_id=123)
@@ -1282,7 +1714,11 @@ class TestStopChatErrorHandling:
         ctx = MockNorthboundContext(token_id=1)
         token_db_mod.log_token_usage.side_effect = Exception("Logging failed")
 
-        with patch("backend.services.northbound_service.stop_agent_tasks", return_value={"message": "stopped"}):
+        with patch(
+            "backend.services.northbound_service.forward_agent_stop",
+            new_callable=AsyncMock,
+            return_value={"message": "stopped"},
+        ):
             # Should not raise even if token logging fails
             result = await ns.stop_chat(ctx=ctx, conversation_id=123, meta_data={"key": "value"})
             assert result is not None
@@ -1297,7 +1733,7 @@ class TestListConversationsErrorHandling:
         conversations = [
             {"conversation_id": "1", "title": "Test", "meta_data": {}}
         ]
-        conv_mgmt_mod.get_conversation_list_service.return_value = conversations
+        conversation_db_mod.get_conversation_list.return_value = conversations
         token_db_mod.get_latest_usage_metadata.reset_mock(side_effect=True)
 
         result = await ns.list_conversations(ctx=ctx)
@@ -1312,7 +1748,7 @@ class TestListConversationsErrorHandling:
         conversations = [
             {"conversation_id": "1", "title": "Test", "meta_data": {"query": "stored query"}}
         ]
-        conv_mgmt_mod.get_conversation_list_service.return_value = conversations
+        conversation_db_mod.get_conversation_list.return_value = conversations
         token_db_mod.get_latest_usage_metadata.reset_mock(side_effect=True)
 
         result = await ns.list_conversations(ctx=ctx)
@@ -1324,7 +1760,7 @@ class TestListConversationsErrorHandling:
         """Test that usage metadata is not injected into conversation items."""
         ctx = MockNorthboundContext(token_id=1)
         conversations = [{"conversation_id": "1", "title": "Test"}]
-        conv_mgmt_mod.get_conversation_list_service.return_value = conversations
+        conversation_db_mod.get_conversation_list.return_value = conversations
         token_db_mod.get_latest_usage_metadata.reset_mock(side_effect=True)
         token_db_mod.get_latest_usage_metadata.return_value = {"query": "test query"}
 

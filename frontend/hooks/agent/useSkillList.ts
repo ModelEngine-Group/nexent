@@ -4,11 +4,8 @@ import { useMemo } from "react";
 import { Skill, SkillGroup } from "@/types/agentConfig";
 import { useTranslation } from "react-i18next";
 
-const OFFICIAL_SKILL_SOURCES = new Set(["official", "官方"]);
-
 function isOfficialSkill(skill: Skill) {
-  const source = (skill.source || "").trim();
-  return OFFICIAL_SKILL_SOURCES.has(source);
+  return (skill.source || "").trim() === "official";
 }
 
 export function useSkillList(options?: {

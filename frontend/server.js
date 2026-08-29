@@ -57,7 +57,10 @@ const LOCALES_CONFIG_DIR = path.resolve(__dirname, "./public/locales");
 const PORT = 3000;
 
 function withoutBasePath(pathname) {
-  if (!BASE_PATH || (pathname !== BASE_PATH && !pathname.startsWith(`${BASE_PATH}/`))) {
+  if (
+    !BASE_PATH ||
+    (pathname !== BASE_PATH && !pathname.startsWith(`${BASE_PATH}/`))
+  ) {
     return pathname;
   }
 
@@ -73,7 +76,10 @@ function parseTimeout(value, fallback) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
-const PROXY_TIMEOUT_MS = parseTimeout(process.env.PROXY_TIMEOUT_MS, 10 * 60 * 1000);
+const PROXY_TIMEOUT_MS = parseTimeout(
+  process.env.PROXY_TIMEOUT_MS,
+  10 * 60 * 1000
+);
 const PROXY_WS_TIMEOUT_MS = parseTimeout(
   process.env.PROXY_WS_TIMEOUT_MS,
   PROXY_TIMEOUT_MS
@@ -201,33 +207,42 @@ function parseCookies(req) {
   return cookie.parse(req.headers.cookie || "");
 }
 
-function decodeJwtPayload(token) {
-  try {
-    const parts = token.split('.');
-    if (parts.length !==3 ) {
-      return null;
-    }
-      const payload = parts[1];
-      const padded = payload + '='.repeat((4 - (payload.length % 4)) % 4);
-      const decoded = Buffer.from(padded, "base64").toString("utf-8");
-      return JSON.parse(decoded)
-  } catch (error) {
-    console.error("decodeJwtPayload error:", error.message);
-    return null;
-  }
-}
+// Matches backend consts/const.py: IS_SPEED_MODE = DEPLOYMENT_VERSION == "speed"
+const IS_SPEED_MODE = (process.env.DEPLOYMENT_VERSION || "speed") === "speed";
 
-function isSuperAdminRequest(req) {
+// Matches backend consts/notification.py SU_ROLES and services/mcp_management_service.py SUPER_ADMIN_ROLES
+const SUPER_ADMIN_ROLES = new Set(["SU", "SUPER_ADMIN"]);
+
+async function isSuperAdminRequest(req) {
+  // Speed mode: SPEED role has SU-level privileges (see backend is_speed_admin logic in user_service.py)
+  if (IS_SPEED_MODE) {
+    return true;
+  }
+
   const cookies = parseCookies(req);
   const token = cookies[COOKIE_NAMES.ACCESS_TOKEN];
   if (!token) {
     return false;
   }
-  const payload = decodeJwtPayload(token);
-  if (!payload) {
+
+  try {
+    const response = await fetch(`${HTTP_BACKEND}/user/current_user_info`, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(5000),
+    });
+
+    if (!response.ok) {
+      return false;
+    }
+
+    const data = await response.json();
+    const userRole = data?.data?.user?.user_role;
+    return SUPER_ADMIN_ROLES.has(userRole);
+  } catch (error) {
+    console.error("[isSuperAdminRequest] Error checking super admin:", error.message);
     return false;
   }
-  return payload.role === 'authenticated' && payload.email === 'suadmin@nexent.com';
 }
 
 function renameFile(oldPath, newFileName) {
@@ -240,7 +255,7 @@ function updateLocalConfig(oldData, newData) {
     return oldData;
   }
   return Object.keys(oldData).reduce((acc, key) => {
-    acc[key] = newData[key] ? newData[key] : oldData[key]
+    acc[key] = newData[key] ? newData[key] : oldData[key];
     return acc;
   }, {});
 }
@@ -537,7 +552,8 @@ app.prepare().then(() => {
 
     const isProxyRequest =
       internalPathname.startsWith("/api/") ||
-      (internalPathname.includes("/attachments/") && !internalPathname.startsWith("/api/"));
+      (internalPathname.includes("/attachments/") &&
+        !internalPathname.startsWith("/api/"));
     if (isProxyRequest && BASE_PATH) {
       req.url = req.url.slice(BASE_PATH.length) || "/";
     }
@@ -551,7 +567,7 @@ app.prepare().then(() => {
     // Fallback: let Next.js render pages and framework resources with basePath intact.
     handle(req, res, parsedUrl);
   });
-    // Proxy WebSocket upgrade requests
+  // Proxy WebSocket upgrade requests
   server.on("upgrade", (req, socket, head) => {
     const { pathname } = parse(req.url);
     const internalPathname = withoutBasePath(pathname);
@@ -612,7 +628,7 @@ async function handleProjectConfigApi(pathname, req, res) {
   if (pathname !== "/api/config/project-config") return false;
 
   // 权限校验
-  if (!isSuperAdminRequest(req)) {
+  if (!(await isSuperAdminRequest(req))) {
     sendJsonResponse(res, 403, { message: "Super admin access required" });
     return true;
   }
@@ -668,6 +684,7 @@ function handleAllApiProxy(pathname, req, res) {
   const runtimePathPrefixes = [
     "/api/agent/run",
     "/api/agent/nl2agent/run",
+    "/api/skills/nl2skill/run",
     "/api/agent/stop",
     "/api/agent/automations",
     "/api/conversation/",
@@ -678,20 +695,15 @@ function handleAllApiProxy(pathname, req, res) {
   const isRuntime = runtimePathPrefixes.some(prefix => pathname.startsWith(prefix));
 
   // 4. skills 特殊接口
-  const skillsPathsStartWith = ["/api/skills/stop/"];
-  const skillsPathsEquals = ["/api/skills/create"];
-  const isSkillApi = skillsPathsStartWith.some(path => pathname.startsWith(path)) || skillsPathsEquals.some(path => pathname === path);
-
   // 分发代理目标
   if (isRuntime) {
     const runtimeProxyTimeout =
       pathname.startsWith("/api/agent/run") ||
-      pathname.startsWith("/api/agent/nl2agent/run")
+      pathname.startsWith("/api/agent/nl2agent/run") ||
+      pathname.startsWith("/api/skills/nl2skill/run")
         ? SSE_PROXY_TIMEOUT_MS
         : PROXY_TIMEOUT_MS;
     proxy.web(req, res, getRuntimeProxyConfig(runtimeProxyTimeout));
-  } else if (isSkillApi) {
-    proxy.web(req, res, getRuntimeProxyConfig(PROXY_TIMEOUT_MS));
   } else {
     proxy.web(req, res, {
       target: HTTP_BACKEND,

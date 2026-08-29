@@ -1343,6 +1343,56 @@ class MonitoringManager:
             )
         self.add_span_event("agent.step.metrics", attrs)
 
+    def record_final_context_evidence(self, evidence: Any, step_number: int) -> None:
+        """Record a content-free description of the exact model payload."""
+        if not self.is_enabled or not OPENTELEMETRY_AVAILABLE:
+            return
+        compression_records = [{
+            "call_type": getattr(record, "call_type", "unknown"),
+            "input_tokens": getattr(record, "input_tokens", 0),
+            "output_tokens": getattr(record, "output_tokens", 0),
+            "input_chars": getattr(record, "input_chars", 0),
+            "output_chars": getattr(record, "output_chars", 0),
+            "cache_hit": bool(getattr(record, "cache_hit", False)),
+        } for record in (getattr(evidence, "compression_records", ()) or ())]
+        attrs = {
+            "agent.step.number": step_number,
+            "context.purpose": getattr(evidence, "purpose", "step"),
+            "context.messages.fingerprint": getattr(evidence, "messages_fingerprint", "") or "",
+            "context.tools.fingerprint": getattr(evidence, "tools_fingerprint", "") or "",
+            "context.messages.system_fingerprint": getattr(evidence, "system_messages_fingerprint", "") or "",
+            "context.messages.history_fingerprint": getattr(evidence, "history_messages_fingerprint", "") or "",
+            "context.final_answer_prompt.fingerprint": getattr(evidence, "final_answer_prompt_fingerprint", "") or "",
+            "context.message.roles": json.dumps(
+                list(getattr(evidence, "message_roles", ()) or ()),
+                ensure_ascii=False,
+            ),
+            "context.history_message.roles": json.dumps(
+                list(getattr(evidence, "history_message_roles", ()) or ()),
+                ensure_ascii=False,
+            ),
+            "context.items.selected": json.dumps(
+                list(getattr(evidence, "selected_item_types", ()) or ()),
+                ensure_ascii=False,
+            ),
+            "context.messages.stable_count": getattr(evidence, "stable_message_count", 0),
+            "context.messages.dynamic_count": getattr(evidence, "dynamic_message_count", 0),
+            "context.stable_prefix.fingerprint": getattr(evidence, "stable_prefix_fingerprint", "") or "",
+            "context.stable_prefix.change_reasons": json.dumps(
+                list(getattr(evidence, "prefix_change_reasons", ()) or ()),
+                ensure_ascii=False,
+            ),
+            "context.budget.soft": getattr(evidence, "soft_budget", 0),
+            "context.budget.hard": getattr(evidence, "hard_budget", 0),
+            "context.tokens.pre_compression": getattr(evidence, "raw_token_estimate", 0),
+            "context.tokens.post_compression": getattr(evidence, "final_token_estimate", 0),
+            "context.budget.hard_exceeded": bool(getattr(evidence, "over_hard_budget", False)),
+            "context.compression.attempted": bool(getattr(evidence, "compression_attempted", False)),
+            "context.compression.fallback_compaction": bool(getattr(evidence, "fallback_compaction_used", False)),
+            "context.compression.records": json.dumps(compression_records, ensure_ascii=False, sort_keys=True),
+        }
+        self.add_span_event("agent.final_context", attrs)
+
     def set_agent_context_metrics(self, metrics: List[Dict[str, Any]]) -> None:
         """Attach aggregate context/compression metrics to the current Agent span."""
         if not metrics:

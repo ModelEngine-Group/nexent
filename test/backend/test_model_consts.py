@@ -28,6 +28,34 @@ def test_model_request_and_validation():
     assert req.filename == "f"
 
 
+def test_conversation_knowledge_scope_validates_three_state_contract():
+    scope = model_consts.ConversationKnowledgeScopeRequest.model_validate({
+        "local": {"mode": "override", "knowledge_ids": [" 12 ", "12", "13"]},
+        "aidp": {"mode": "disabled", "kds_ids": []},
+    })
+
+    assert scope.local.knowledge_ids == ["12", "13"]
+    assert scope.aidp.mode == "disabled"
+
+    with pytest.raises(ValidationError):
+        model_consts.ConversationKnowledgeScopeRequest.model_validate({
+            "local": {"mode": "override", "knowledge_ids": []},
+        })
+
+    with pytest.raises(ValidationError):
+        model_consts.ConversationKnowledgeScopeRequest.model_validate({
+            "aidp": {"mode": "inherit", "kds_ids": ["unexpected"]},
+        })
+
+    with pytest.raises(ValidationError):
+        model_consts.ConversationKnowledgeScopeRequest.model_validate({
+            "aidp": {
+                "mode": "override",
+                "kds_ids": [f"kds-{index}" for index in range(11)],
+            },
+        })
+
+
 def test_skill_repository_install_request_limits_target_name_to_100_characters():
     request = model_consts.SkillRepositoryInstallRequest(target_name="x" * 100)
     assert len(request.target_name) == 100
@@ -694,19 +722,6 @@ def test_community_list_request():
     assert req.limit == 50
 
 
-def test_registry_list_query():
-    """Test RegistryListQuery with strip validators"""
-    req = model_consts.RegistryListQuery(
-        search="  test  ",
-        version="  v1  ",
-        limit=25
-    )
-    assert req.search == "test"
-    assert req.version == "v1"
-    assert req.limit == 25
-    assert req.include_deleted is False
-
-
 def test_capacity_bare_model():
     """Test CapacityCoverageBareModel"""
     model = model_consts.CapacityCoverageBareModel(
@@ -819,10 +834,9 @@ def test_version_management_requests():
     publish_req = model_consts.VersionPublishRequest(
         version_name="v1.0.0",
         release_note="Initial release",
-        publish_as_a2a=True
     )
     assert publish_req.version_name == "v1.0.0"
-    assert publish_req.publish_as_a2a is True
+    assert publish_req.release_note == "Initial release"
 
     rollback_req = model_consts.VersionRollbackRequest(
         version_name="Rollback v1",
@@ -960,6 +974,29 @@ def test_provider_model_requests():
     assert create_req.base_url == "https://api.openai.com"
 
 
+def test_nl2_agent_skill_requests():
+    """Test NL2AgentRunRequest and NL2SkillRunRequest"""
+    nl2_agent = model_consts.NL2AgentRunRequest(
+        query="Create a chatbot",
+        history=[],
+        minio_files=[],
+        agent_id=42,
+    )
+    assert nl2_agent.query == "Create a chatbot"
+    assert nl2_agent.agent_id == 42
+
+    with pytest.raises(ValidationError):
+        model_consts.NL2AgentRunRequest(query="Create a chatbot")
+
+    nl2_skill = model_consts.NL2SkillRunRequest(
+        query="Build an automation",
+        complexity="simple",
+        language="en"
+    )
+    assert nl2_skill.complexity == "simple"
+    assert nl2_skill.language == "en"
+
+
 def test_export_import_requests():
     """Test export and import request models"""
     agent_info = model_consts.ExportAndImportAgentInfo(
@@ -968,7 +1005,6 @@ def test_export_import_requests():
         name="exported-agent",
         display_name="Exported Agent",
         description="An exported agent",
-        business_description="Business desc",
         max_steps=10,
         is_main_agent=True,
         provide_run_summary=True,
@@ -1045,6 +1081,21 @@ def test_agent_name_batch_requests():
         ]
     )
     assert len(batch_check.items) == 1
+
+
+def test_nl2_skill_run_with_complexity():
+    """Test NL2SkillRunRequest with different complexity modes"""
+    req_simple = model_consts.NL2SkillRunRequest(
+        query="Simple task",
+        complexity="simple"
+    )
+    assert req_simple.complexity == "simple"
+
+    req_complicated = model_consts.NL2SkillRunRequest(
+        query="Complex task",
+        complexity="complicated"
+    )
+    assert req_complicated.complexity == "complicated"
 
 
 def test_model_api_config():
@@ -1281,4 +1332,3 @@ def test_delete_mcp_service_request():
         mcp_id=42
     )
     assert req.mcp_id == 42
-

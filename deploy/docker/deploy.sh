@@ -1015,7 +1015,7 @@ prepare_directory_and_data() {
   echo "🔧 Creating directory with permission..."
   create_dir_with_permission "$ROOT_DIR/elasticsearch" 775
   create_dir_with_permission "$ROOT_DIR/postgresql" 775
-  create_dir_with_permission "$ROOT_DIR/minio" 775
+  create_dir_with_permission "$ROOT_DIR/minio/data" 775
   create_dir_with_permission "$ROOT_DIR/redis" 775
 
   cp -rn "$DOCKER_ASSETS_DIR/volumes" "$ROOT_DIR"
@@ -1039,11 +1039,12 @@ prepare_directory_and_data() {
   create_dir_with_permission "$NEXENT_USER_DIR" 775
   echo "   🖥️  Nexent user workspace: $NEXENT_USER_DIR"
 
-  # Copy official-skills-zip folder to /mnt/nexent
+  # Refresh bundled official skills while preserving additional target files.
   if [ -d "$DOCKER_ASSETS_DIR/official-skills-zip" ]; then
-    cp -rn "$DOCKER_ASSETS_DIR/official-skills-zip" "$NEXENT_USER_DIR/"
+    mkdir -p "$NEXENT_USER_DIR/official-skills-zip"
+    cp -rf "$DOCKER_ASSETS_DIR/official-skills-zip/." "$NEXENT_USER_DIR/official-skills-zip/"
     chmod -R 775 "$NEXENT_USER_DIR/official-skills-zip"
-    echo "   📦 Official skills copied to $NEXENT_USER_DIR/official-skills-zip"
+    echo "   📦 Official skills refreshed at $NEXENT_USER_DIR/official-skills-zip"
   else
     echo "   ⚠️ official-skills-zip directory not found, skipping skills copy"
   fi

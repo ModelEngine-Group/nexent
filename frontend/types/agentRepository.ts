@@ -152,6 +152,7 @@ export interface RepositoryImportRequirementItem {
   description?: string | null;
   available: boolean;
   reason_code?: string | null;
+  suggested_new_name?: string | null;
 }
 
 export interface RepositoryImportPrecheckResponse {

@@ -49,8 +49,11 @@ def _format_memory_context(
                 lines.append(f"**{level_title} 层级记忆：**")
                 for item in memory_by_level[level]:
                     content = item.get("memory", "") or item.get("content", "")
-                    score = item.get("score", 0.0)
-                    lines.append(f"- {content} `({score:.2f})`")
+                    if item.get("version_id") is not None or item.get("memory_type") == "long_term":
+                        lines.append(content)
+                    else:
+                        score = item.get("score", 0.0)
+                        lines.append(f"- {content} `({score:.2f})`")
                 lines.append("")
 
         lines.append("**记忆使用准则：**")
@@ -78,8 +81,11 @@ def _format_memory_context(
                 lines.append(f"**{level.title()} Level Memory:**")
                 for item in memory_by_level[level]:
                     content = item.get("memory", "") or item.get("content", "")
-                    score = item.get("score", 0.0)
-                    lines.append(f"- {content} `({score:.2f})`")
+                    if item.get("version_id") is not None or item.get("memory_type") == "long_term":
+                        lines.append(content)
+                    else:
+                        score = item.get("score", 0.0)
+                        lines.append(f"- {content} `({score:.2f})`")
                 lines.append("")
 
         lines.append("**Memory Usage Guidelines:**")

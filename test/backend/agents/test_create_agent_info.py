@@ -239,6 +239,7 @@ sys.modules['services.vectordatabase_service'].ElasticSearchService.filter_acces
 sys.modules['services.tenant_config_service'] = MagicMock()
 sys.modules['utils.prompt_template_utils'] = MagicMock()
 sys.modules['utils.config_utils'] = MagicMock()
+sys.modules['utils.http_client_utils'] = MagicMock()
 sys.modules['utils.langchain_utils'] = MagicMock()
 sys.modules['utils.model_name_utils'] = MagicMock()
 sys.modules['langchain_core.tools'] = MagicMock()
@@ -249,6 +250,15 @@ sys.modules['services.image_service'] = _create_stub_module(
     "services.image_service",
     get_vlm_model=MagicMock(return_value="stub_vlm"),
     get_video_understanding_model=MagicMock(return_value="stub_video_vlm"),
+)
+sys.modules['services.ind_aidp_service'] = _create_stub_module(
+    "services.ind_aidp_service",
+    create_ind_aidp_image_url_builder=MagicMock(),
+)
+sys.modules['services.model_gateway_service'] = _create_stub_module(
+    "services.model_gateway_service",
+    get_llm_adapter=MagicMock(return_value="stub_llm_adapter"),
+    get_vlm_adapter=MagicMock(return_value="stub_vlm_adapter"),
 )
 sys.modules['services.memory_config_service'] = MagicMock()
 # Extend services hierarchy with additional stubs
@@ -296,6 +306,14 @@ sandbox_module = _create_stub_module(
     SandboxConfig=MockSandboxConfig,
 )
 nexent_agents_module.sandbox = sandbox_module
+
+nexent_agent_module = _create_stub_module(
+    "nexent.core.agents.nexent_agent",
+    get_local_python_authorized_imports=MagicMock(
+        return_value=["sdk_default_import"]
+    ),
+)
+nexent_agents_module.nexent_agent = nexent_agent_module
 
 
 class MockProviderCapabilityUnknown(Exception):
@@ -494,6 +512,9 @@ from backend.agents.create_agent_info import (
     _get_skill_script_tools,
     _extract_url_from_card,
     _build_external_agent_config,
+    _build_security_headers,
+    _resolve_scheme_field,
+    _build_auth_header_for_scheme,
     _get_external_a2a_agents,
     _build_internal_s3_url,
     _format_minio_files_for_content,
@@ -505,6 +526,26 @@ from backend.agents.create_agent_info import (
     _resolve_input_budget,
     _resolve_safe_input_budget,
 )
+
+
+@pytest.fixture(autouse=True)
+def run_create_agent_thread_work_inline(monkeypatch):
+    async def run_inline(func, *args, **kwargs):
+        return func(*args, **kwargs)
+
+    monkeypatch.setattr(create_agent_info_module.asyncio, "to_thread", run_inline)
+
+
+def test_build_run_workspace_uses_user_and_run_only(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        create_agent_info_module,
+        "AGENT_WORKSPACE_ROOT",
+        str(tmp_path),
+    )
+
+    workspace = create_agent_info_module._build_run_workspace("user-1", "run-1")
+
+    assert Path(workspace) == tmp_path.resolve() / "user-1" / "run-1"
 
 # Import HistoryItem for testing (from mocked consts.model)
 HistoryItem = sys.modules["consts.model"].HistoryItem
@@ -670,8 +711,8 @@ class TestGetSkillScriptTools:
                 version_no=0
             )
 
-            assert len(result) == 4
-            assert mock_tool_config.call_count == 4
+            assert len(result) == 6
+            assert mock_tool_config.call_count == 6
 
             # Verify the calls made to ToolConfig
             calls = mock_tool_config.call_args_list
@@ -694,6 +735,11 @@ class TestGetSkillScriptTools:
             assert calls[3][1]['class_name'] == "WriteSkillFileTool"
             assert calls[3][1]['name'] == "write_skill_file"
 
+            assert calls[4][1]['class_name'] == "DownloadFromS3Tool"
+            assert calls[4][1]['name'] == "download_from_s3"
+            assert calls[5][1]['class_name'] == "UploadToS3Tool"
+            assert calls[5][1]['name'] == "upload_to_s3"
+
     def test_get_skill_script_tools_metadata_context(self):
         """Test that skill context metadata is correctly set for all tools"""
         mock_tool_config.reset_mock()
@@ -704,15 +750,17 @@ class TestGetSkillScriptTools:
                 version_no=7
             )
 
-            assert len(result) == 4
-            # Verify all tools have the correct metadata
+            assert len(result) == 6
+            # Skill tools retain skill context; file tools use run-scoped metadata.
             calls = mock_tool_config.call_args_list
-            for call in calls:
+            for call in calls[:4]:
                 assert call[1]['metadata'] == {
                     "agent_id": 123,
                     "tenant_id": "test_tenant",
                     "version_no": 7
                 }
+            for call in calls[4:]:
+                assert call[1]['metadata'] == {}
 
     def test_get_skill_script_tools_input_schemas(self):
         """Test that input schemas are correctly defined for all tools"""
@@ -729,7 +777,7 @@ class TestGetSkillScriptTools:
             # RunSkillScriptTool
             assert '"skill_name": "str"' in calls[0][1]['inputs']
             assert '"script_path": "str"' in calls[0][1]['inputs']
-            assert '"params": "dict"' in calls[0][1]['inputs']
+            assert '"params": "str"' in calls[0][1]['inputs']
 
             # ReadSkillMdTool
             assert '"skill_name": "str"' in calls[1][1]['inputs']
@@ -787,7 +835,25 @@ class TestGetSkillScriptTools:
             for call in calls:
                 desc = call[1]['description']
                 assert len(desc) > 0
-                assert "skill" in desc.lower()
+                assert isinstance(desc, str)
+
+    def test_get_skill_script_tools_injects_runtime_file_context(self):
+        mock_tool_config.reset_mock()
+        file_context = {
+            "workspace_path": "/mnt/nexent/workdir/t/u/run",
+            "user_id": "u",
+            "tenant_id": "t",
+            "run_id": "run",
+            "minio_client": object(),
+        }
+
+        _get_skill_script_tools(1, "t", runtime_file_context=file_context)
+
+        calls = mock_tool_config.call_args_list
+        assert calls[0][1]["params"]["workspace_path"] == file_context["workspace_path"]
+        for call in calls[4:]:
+            assert call[1]["metadata"] == file_context
+            assert call[1]["params"]["workspace_path"] == file_context["workspace_path"]
 
 
 class TestDiscoverLangchainTools:
@@ -1113,7 +1179,7 @@ class TestCreateToolConfigList:
 
         with patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
                 patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
-                patch('backend.agents.create_agent_info.get_vlm_model') as mock_get_vlm_model, \
+                patch('backend.agents.create_agent_info.get_vlm_adapter') as mock_get_vlm_model, \
                 patch('backend.agents.create_agent_info.minio_client', new_callable=MagicMock) as mock_minio_client:
 
             mock_search_tools.return_value = [
@@ -1134,7 +1200,7 @@ class TestCreateToolConfigList:
 
             assert len(result) == 1
             assert result[0] is mock_tool_instance
-            mock_get_vlm_model.assert_called_once_with(tenant_id="tenant_1", model_id=None)
+            mock_get_vlm_model.assert_called_once_with("tenant_1", None, slot="vlm")
             # Verify metadata includes validate_url_access lambda
             assert "vlm_model" in mock_tool_instance.metadata
             assert "storage_client" in mock_tool_instance.metadata
@@ -1157,7 +1223,7 @@ class TestCreateToolConfigList:
 
         with patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
                 patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
-                patch('backend.agents.create_agent_info.get_video_understanding_model') as mock_get_video_model, \
+                patch('backend.agents.create_agent_info.get_vlm_adapter') as mock_get_video_model, \
                 patch('backend.agents.create_agent_info.minio_client', new_callable=MagicMock):
 
             mock_search_tools.return_value = [
@@ -1178,7 +1244,8 @@ class TestCreateToolConfigList:
 
             assert len(result) == 1
             assert result[0] is mock_tool_instance
-            mock_get_video_model.assert_called_once_with(tenant_id="tenant_1", model_id=None)
+            expected_slot = "vlm4" if tool_name == "analyze_audio" else "vlm3"
+            mock_get_video_model.assert_called_once_with("tenant_1", None, slot=expected_slot)
             assert mock_tool_instance.metadata["vlm_model"] == "mock_video_model"
             assert "storage_client" in mock_tool_instance.metadata
             assert callable(mock_tool_instance.metadata["validate_url_access"])
@@ -1192,7 +1259,7 @@ class TestCreateToolConfigList:
 
         with patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
                 patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
-                patch('backend.agents.create_agent_info.get_llm_model') as mock_get_llm_model, \
+                patch('backend.agents.create_agent_info.get_llm_adapter') as mock_get_llm_model, \
                 patch('backend.agents.create_agent_info.minio_client', new_callable=MagicMock) as mock_minio_client:
 
             mock_search_tools.return_value = [
@@ -1213,7 +1280,7 @@ class TestCreateToolConfigList:
 
             assert len(result) == 1
             assert result[0] is mock_tool_instance
-            mock_get_llm_model.assert_called_once_with(tenant_id="tenant_1", model_id=None)
+            mock_get_llm_model.assert_called_once_with("tenant_1", None, modality="llm_long_context")
             # Verify metadata includes validate_url_access lambda
             assert "llm_model" in mock_tool_instance.metadata
             assert "storage_client" in mock_tool_instance.metadata
@@ -1585,7 +1652,7 @@ class TestCreateToolConfigList:
                 patch('backend.agents.create_agent_info.get_embedding_model_by_index_name') as mock_embedding, \
                 patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank, \
                 patch('backend.agents.create_agent_info.get_knowledge_name_map_by_index_names', return_value={"idx_override": "Override KB"}), \
-                patch('backend.agents.create_agent_info.get_llm_model', return_value='llm-model'):
+                patch('backend.agents.create_agent_info.get_llm_adapter', return_value='llm-model'):
             mock_tool_config.side_effect = [kb_tool, analyze_tool]
             mock_get_vector_db_core.return_value = 'vdb-core'
             mock_embedding.return_value = ('embedding-model', 1, {'status': 'ok'})
@@ -1664,7 +1731,7 @@ class TestCreateToolConfigList:
         with patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config, \
                 patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
                 patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
-                patch('backend.agents.create_agent_info.get_llm_model', return_value='llm-model'):
+                patch('backend.agents.create_agent_info.get_llm_adapter', return_value='llm-model'):
             mock_tool_config.return_value = mock_tool_instance
 
             mock_search_tools.return_value = [
@@ -1843,7 +1910,7 @@ class TestCreateToolConfigList:
         with patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config, \
                 patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
                 patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
-                patch('backend.agents.create_agent_info.get_vlm_model') as mock_get_vlm_model, \
+                patch('backend.agents.create_agent_info.get_vlm_adapter') as mock_get_vlm_model, \
                 patch('backend.agents.create_agent_info.minio_client', new_callable=MagicMock), \
                 patch('backend.agents.create_agent_info.validate_urls_access') as mock_validate:
 
@@ -1887,7 +1954,7 @@ class TestCreateToolConfigList:
         with patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config, \
                 patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
                 patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
-                patch('backend.agents.create_agent_info.get_llm_model') as mock_get_llm_model, \
+                patch('backend.agents.create_agent_info.get_llm_adapter') as mock_get_llm_model, \
                 patch('backend.agents.create_agent_info.minio_client', new_callable=MagicMock), \
                 patch('backend.agents.create_agent_info.validate_urls_access') as mock_validate:
 
@@ -2046,6 +2113,39 @@ class TestCreateAgentConfig:
         assert "instructions" not in mocks["agent_config"].call_args.kwargs
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("sandbox_default_level", ["local", "docker"])
+    async def test_create_agent_config_injects_import_policy_only_for_local_executor(
+        self,
+        sandbox_default_level,
+    ):
+        sdk_authorized_imports = ["sdk_default_import", "sdk_extra_import"]
+        with patch(
+            "backend.agents.create_agent_info.os.getenv",
+            return_value=sandbox_default_level,
+        ), patch(
+            "backend.agents.create_agent_info.get_local_python_authorized_imports",
+            return_value=sdk_authorized_imports,
+        ) as get_authorized_imports:
+            mocks = await self._run_context_manager_case(
+                enable_context_manager=True,
+                prepared_prompt="",
+            )
+
+        expected_authorized_imports = (
+            sdk_authorized_imports if sandbox_default_level == "local" else None
+        )
+        assert (
+            mocks["build_components"].call_args.kwargs[
+                "restricted_python_authorized_imports"
+            ]
+            == expected_authorized_imports
+        )
+        if sandbox_default_level == "local":
+            get_authorized_imports.assert_called_once_with()
+        else:
+            get_authorized_imports.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_create_agent_config_runs_fixed_search_once_without_exposing_tool(self):
         result_text = "Found 1 relevant memories:\n[1] Existing preference"
         mocks = await self._run_context_manager_case(
@@ -2163,7 +2263,7 @@ class TestCreateAgentConfig:
     @pytest.mark.asyncio
     async def test_create_agent_config_basic(self):
         """Test case for basic agent configuration creation"""
-        # Reset module-level mock — parallel_executor appends an extra
+        # Reset module-level mock - parallel_executor appends an extra
         # ToolConfig call after create_tool_config_list returns.  Both
         # call history and side_effect must be cleared because prior
         # tests may have left an exhausted iterator on the shared mock.
@@ -2219,6 +2319,7 @@ class TestCreateAgentConfig:
                 requested_output_tokens=None,
                 model_name="test_model",
                 provide_run_summary=True,
+                allow_chat_metadata=False,
                 managed_agents=[],
                 external_a2a_agents=[],
                 context_manager_config=ANY,
@@ -2303,6 +2404,7 @@ class TestCreateAgentConfig:
                     requested_output_tokens=None,
                     model_name="test_model",
                     provide_run_summary=True,
+                    allow_chat_metadata=False,
                     managed_agents=[mock_sub_agent_config],
                     external_a2a_agents=[],
                     context_manager_config=ANY,
@@ -2443,7 +2545,13 @@ class TestCreateAgentConfig:
                 "system_prompt": "populated_system_prompt"}
             mock_get_model_by_id.return_value = {"display_name": "test_model"}
 
-            await create_agent_config("agent_1", "tenant_1", "user_1", "zh", "test query")
+            await create_agent_config(
+                "agent_1",
+                "tenant_1",
+                "user_1",
+                "zh",
+                "test query",
+            )
 
             # Verify that fixed search memory tool's forward was called
             search_instance = mock_search_tool.return_value
@@ -2582,6 +2690,7 @@ class TestCreateAgentConfig:
                 requested_output_tokens=None,
                 model_name="main_model",
                 provide_run_summary=True,
+                allow_chat_metadata=False,
                 managed_agents=[],
                 external_a2a_agents=[],
                 context_manager_config=ANY,
@@ -3149,7 +3258,17 @@ class TestCreateAgentConfig:
             ]
             mock_es_service.return_value = mock_es_instance
 
-            await create_agent_config("agent_1", "tenant_1", "user_1", "zh", "test query")
+            await create_agent_config(
+                "agent_1",
+                "tenant_1",
+                "user_1",
+                "zh",
+                "test query",
+                runtime_knowledge_context={
+                    "policy": "scope policy",
+                    "resources": "selected resources",
+                },
+            )
 
             assert mock_es_instance.get_summary.call_args_list == [
                 ((), {"index_name": "idx_a"}),
@@ -3162,9 +3281,72 @@ class TestCreateAgentConfig:
             assert create_agent_info_module.build_context_inputs.call_args.kwargs[
                 "knowledge_base_summary"
             ] == "**idx_a**: AAA\n\n"
+            assert create_agent_info_module.build_context_inputs.call_args.kwargs[
+                "knowledge_scope_policy"
+            ] == "scope policy"
+            assert create_agent_info_module.build_context_inputs.call_args.kwargs[
+                "knowledge_scope_resources"
+            ] == "selected resources"
 
             # Ensure only the first KnowledgeBaseSearchTool is processed.
             assert "idx_c" not in str(mock_es_instance.get_summary.call_args_list)
+
+    def test_scoped_summary_uses_only_effective_tool_indices(self):
+        """Scoped runs build routing summaries from the final tool whitelist."""
+        kb_tool = Mock(
+            class_name="KnowledgeBaseSearchTool",
+            params={"index_names": ["selected-index"]},
+            metadata={
+                "index_name_to_display_map": {
+                    "selected-index": "Selected Knowledge Base"
+                }
+            },
+        )
+
+        with patch(
+            "backend.agents.create_agent_info.ElasticSearchService"
+        ) as mock_es_service:
+            mock_es_service.return_value.get_summary.return_value = {
+                "summary": "Selected summary"
+            }
+            summary, kb_ids = (
+                create_agent_info_module._build_effective_knowledge_base_summary(
+                    [kb_tool],
+                    "en",
+                    include_empty_message=False,
+                )
+            )
+
+        assert summary == (
+            "**Selected Knowledge Base**: Selected summary\n\n"
+        )
+        assert kb_ids == ["selected-index"]
+        mock_es_service.return_value.get_summary.assert_called_once_with(
+            index_name="selected-index"
+        )
+
+    def test_scoped_empty_summary_does_not_restore_agent_defaults(self):
+        """An empty effective scope stays empty instead of adding legacy text."""
+        kb_tool = Mock(
+            class_name="KnowledgeBaseSearchTool",
+            params={"index_names": []},
+            metadata={},
+        )
+
+        with patch(
+            "backend.agents.create_agent_info.ElasticSearchService"
+        ) as mock_es_service:
+            summary, kb_ids = (
+                create_agent_info_module._build_effective_knowledge_base_summary(
+                    [kb_tool],
+                    "en",
+                    include_empty_message=False,
+                )
+            )
+
+        assert summary == ""
+        assert kb_ids == []
+        mock_es_service.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_create_agent_config_uses_metadata_index_name_to_display_map(self):
@@ -3864,6 +4046,10 @@ class TestCreateAgentRunInfo:
                 redis_client=ANY,
                 sandbox_config=None,
                 minio_client=None,
+                workspace_path=ANY,
+                workspace_run_id=ANY,
+                tenant_id="tenant_1",
+                minio_files=[],
             )
 
             # Verify that other functions were called correctly
@@ -3881,6 +4067,7 @@ class TestCreateAgentRunInfo:
                 tool_params=None,
                 conversation_id=None,
                 enable_planning=ANY,
+                runtime_file_context=ANY,
             )
             mock_get_mcp.assert_called_once_with(tenant_id="tenant_1", is_need_auth=True)
             mock_filter.assert_called_once_with("agent_config", {
@@ -4220,17 +4407,10 @@ class TestCreateAgentRunInfo:
 
             mock_join_query.return_value = "processed_query"
             mock_create_models.return_value = ["model_config"]
-            mock_get_mcp.return_value = [
-                {
-                    "remote_mcp_server_name": "sse_server",
-                    "remote_mcp_server": "http://sse.server/sse",
-                    "status": True,
-                    "authorization_token": None
-                }
-            ]
+            mock_get_mcp.return_value = []
             mock_create_agent.return_value = "agent_config"
             mock_urljoin.return_value = "http://nexent.mcp/sse"
-            mock_filter.return_value = ["http://sse.server/sse"]
+            mock_filter.return_value = ["http://nexent.mcp/sse"]
             mock_threading.Event.return_value = "stop_event"
             mock_version_no.return_value = 1
 
@@ -4250,8 +4430,9 @@ class TestCreateAgentRunInfo:
             mcp_host = call_args[1]["mcp_host"]
             assert len(mcp_host) == 1
             assert mcp_host[0] == {
-                "url": "http://sse.server/sse",
-                "transport": "sse"
+                "url": "http://nexent.mcp/sse",
+                "transport": "sse",
+                "httpx_client_factory": create_agent_info_module.create_httpx_client,
             }
 
     @pytest.mark.asyncio
@@ -4470,6 +4651,7 @@ class TestCreateAgentRunInfo:
                 version_no=1,
                 conversation_id=None,
                 enable_planning=False,
+                runtime_file_context=ANY,
                 tool_params=None,
             )
 
@@ -4519,6 +4701,7 @@ class TestCreateAgentRunInfo:
                 version_no=0,  # Debug mode uses draft version 0
                 conversation_id=None,
                 enable_planning=False,
+                runtime_file_context=ANY,
                 tool_params=None,
             )
 
@@ -4574,6 +4757,7 @@ class TestCreateAgentRunInfo:
                 version_no=0,  # Fallback to draft version 0
                 conversation_id=None,
                 enable_planning=False,
+                runtime_file_context=ANY,
                 tool_params=None,
             )
             # Verify that get_remote_mcp_server_list was called with is_need_auth=True
@@ -4918,18 +5102,15 @@ class TestPreparePromptTemplates:
 
 
 class TestAdditionalAgentInfoCoverage:
-    def test_format_long_term_memory_prompt_supports_dict_and_object_entries(self):
+    def test_build_long_term_memory_items_preserves_scope_metadata(self):
         context = types.SimpleNamespace(
-            tenant_long_term=[{"content": " tenant preference "}, {"content": ""}],
-            user_long_term=[types.SimpleNamespace(content="user preference")],
+            tenant_long_term=[{"content": "tenant preference", "metadata": {"version_id": 7}, "source": "manual"}],
+            user_long_term=[types.SimpleNamespace(content="## Preferences\n\n- concise", metadata={"version_id": 8}, source="dreaming")],
         )
-
-        result = create_agent_info_module._format_long_term_memory_prompt(context, "en")
-
-        assert result == (
-            "### Tenant Long-term Memory\n- tenant preference\n\n"
-            "### User Long-term Memory\n- user preference"
-        )
+        result = create_agent_info_module._build_long_term_memory_items(context)
+        assert [item["scope"] for item in result] == ["tenant", "user"]
+        assert [item["version_id"] for item in result] == [7, 8]
+        assert result[1]["source"] == "dreaming"
 
     def test_normalize_tool_params_rejects_non_object_payload(self):
         with pytest.raises(ValidationError, match="must be an object"):
@@ -5158,6 +5339,7 @@ class TestBuildExternalAgentConfig:
                 protocol_type="JSONRPC",
                 timeout=300.0,
                 raw_card=None,
+                custom_headers=None,
             )
             assert result == MockConfig.return_value
 
@@ -5182,6 +5364,7 @@ class TestBuildExternalAgentConfig:
                 protocol_type="JSONRPC",
                 timeout=300.0,
                 raw_card=None,
+                custom_headers=None,
             )
             assert result == MockConfig.return_value
 
@@ -6730,85 +6913,6 @@ class TestKBPermissionFilteringInCreateToolConfigList:
             assert mock_tc_instance.params["index_names"] == ["kb_b", "kb_d"]
 
 
-class TestFormatLongTermMemoryPrompt:
-    """Coverage for lines 100-109: _format_long_term_memory_prompt with mixed item types."""
-
-    def test_dict_items_with_content(self):
-        """Dict items with content keys are rendered as bullet points."""
-        ctx = types.SimpleNamespace(
-            tenant_long_term=[
-                {"content": "Tenant policy X"},
-                {"content": "Tenant rule Y"},
-            ],
-            user_long_term=[],
-        )
-        result = create_agent_info_module._format_long_term_memory_prompt(ctx, "en")
-        assert "- Tenant policy X" in result
-        assert "- Tenant rule Y" in result
-        assert "Tenant Long-term Memory" in result
-
-    def test_object_items_with_content_attr(self):
-        """Object items with a .content attribute are rendered correctly."""
-        item1 = types.SimpleNamespace(content="User preference A")
-        item2 = types.SimpleNamespace(content="User fact B")
-        ctx = types.SimpleNamespace(tenant_long_term=[], user_long_term=[item1, item2])
-        result = create_agent_info_module._format_long_term_memory_prompt(ctx, "en")
-        assert "- User preference A" in result
-        assert "- User fact B" in result
-        assert "User Long-term Memory" in result
-
-    def test_mixed_dict_and_object_items(self):
-        """Mixed dict and object items (in the same section) are both handled."""
-        ctx = types.SimpleNamespace(
-            tenant_long_term=[
-                {"content": "dict-content"},
-                types.SimpleNamespace(content="obj-content"),
-            ],
-            user_long_term=[],
-        )
-        result = create_agent_info_module._format_long_term_memory_prompt(ctx, "en")
-        assert "- dict-content" in result
-        assert "- obj-content" in result
-
-    def test_empty_and_whitespace_content_filtered(self):
-        """Items with empty or whitespace-only content are skipped."""
-        ctx = types.SimpleNamespace(
-            tenant_long_term=[
-                {"content": ""},
-                {"content": "   "},
-                {"content": "real"},
-            ],
-            user_long_term=[
-                types.SimpleNamespace(content=None),
-                types.SimpleNamespace(content=""),
-            ],
-        )
-        result = create_agent_info_module._format_long_term_memory_prompt(ctx, "en")
-        assert "- real" in result
-        assert "- " not in result.replace("- real", "").strip()
-
-    def test_both_sections_empty_returns_empty_string(self):
-        """When both sections have no items, returns an empty string."""
-        ctx = types.SimpleNamespace(tenant_long_term=[], user_long_term=[])
-        result = create_agent_info_module._format_long_term_memory_prompt(ctx, "en")
-        assert result == ""
-
-    def test_none_attributes_treated_as_empty(self):
-        """When the attribute is None on the context, it is treated as empty."""
-        ctx = types.SimpleNamespace(tenant_long_term=None, user_long_term=None)
-        result = create_agent_info_module._format_long_term_memory_prompt(ctx, "en")
-        assert result == ""
-
-    def test_zh_language_headings(self):
-        """Chinese language parameter produces Chinese headings."""
-        ctx = types.SimpleNamespace(
-            tenant_long_term=[{"content": "tenant fact"}],
-            user_long_term=[{"content": "user fact"}],
-        )
-        result = create_agent_info_module._format_long_term_memory_prompt(ctx, "zh")
-        assert "租户长期记忆" in result
-        assert "用户长期记忆" in result
-
 
 class TestCreateAgentConfigMemoryBuildFailure:
     """MemoryService initialization failures leave no unusable store tool."""
@@ -6870,7 +6974,7 @@ class TestCreateAgentConfigMemoryBuildFailure:
             )
             mock_search_tool.return_value.forward = MagicMock(return_value="")
 
-            # Should NOT raise — the exception is caught and warning logged
+            # Should NOT raise - the exception is caught and warning logged
             result = await create_agent_config("a1", "t1", "u1", "en", "query")
             assert result is not None
             tool_names = [
@@ -6934,7 +7038,7 @@ class TestCreateAgentConfigMemoryContextServiceFailure:
             )
             mock_search_tool.return_value.forward = MagicMock(return_value="")
 
-            # Should NOT raise — the error is caught
+            # Should NOT raise - the error is caught
             result = await create_agent_config("a1", "t1", "u1", "en", "query")
             assert result is not None
             mock_search_tool.assert_not_called()
@@ -7138,7 +7242,8 @@ class TestCreateToolConfigListAidpSearch:
             )
 
             assert len(result) == 1
-            # Verify env creds are in the params (overriding stale DB values)
+            # Platform credentials replace stale database values and are passed
+            # explicitly to the SDK; the SDK must not read process environment.
             assert mock_tc_instance.params["server_url"] == "https://aidp.test"
             assert mock_tc_instance.params["api_key"] == "key-123"
             assert mock_tc_instance.params["tenant_id"] == "aidp-tenant"
@@ -7146,6 +7251,15 @@ class TestCreateToolConfigListAidpSearch:
     @pytest.mark.asyncio
     async def test_aidp_search_permission_whitelist_success(self):
         """When get_allowed_kds_list succeeds, allowed_kds_set is set in metadata."""
+        access_module = MagicMock()
+        access_module.resolve_current_aidp_access.return_value = types.SimpleNamespace(
+            accessible_id_set={"kb_allowed_1", "kb_allowed_2", "kb_not_selected"},
+            name_to_id={
+                "Allowed 1": "kb_allowed_1",
+                "Allowed 2": "kb_allowed_2",
+                "Not selected": "kb_not_selected",
+            },
+        )
         with patch("backend.agents.create_agent_info.discover_langchain_tools",
                    new_callable=AsyncMock, return_value=[]), \
              patch("backend.agents.create_agent_info.search_tools_for_sub_agent") as mock_tools, \
@@ -7156,13 +7270,7 @@ class TestCreateToolConfigListAidpSearch:
              patch("backend.agents.create_agent_info.AIDP_API_KEY", "key"), \
              patch("backend.agents.create_agent_info.AIDP_TENANT_ID", "tenant"), \
              patch.dict(sys.modules, {
-                 "ext_components.aidp.services": MagicMock(
-                     aidp_permission_service=MagicMock(
-                         get_allowed_kds_list=MagicMock(
-                             return_value=["kb_allowed_1", "kb_allowed_2"],
-                         ),
-                     ),
-                 ),
+                 "ext_components.aidp.services.aidp_access_service": access_module,
              }):
 
             mock_tools.return_value = [{
@@ -7171,7 +7279,10 @@ class TestCreateToolConfigListAidpSearch:
                 "description": "AIDP search",
                 "inputs": "{}",
                 "output_type": "string",
-                "params": [{"name": "kds_list", "default": ["kb_allowed_1", "kb_allowed_2"]}],
+                "params": [{
+                    "name": "kds_list",
+                    "default": ["kb_allowed_2", "kb_not_accessible"],
+                }],
                 "source": "langchain",
                 "usage": None,
             }]
@@ -7194,11 +7305,17 @@ class TestCreateToolConfigListAidpSearch:
             assert len(result) == 1
             assert mock_tc_instance.metadata is not None
             assert "allowed_kds_set" in mock_tc_instance.metadata
-            assert mock_tc_instance.metadata["allowed_kds_set"] == {"kb_allowed_1", "kb_allowed_2"}
+            assert mock_tc_instance.params["kds_list"] == ["kb_allowed_2"]
+            assert mock_tc_instance.metadata["allowed_kds_set"] == ["kb_allowed_2"]
+            assert mock_tc_instance.metadata["kds_name_to_id_map"] == {
+                "Allowed 2": "kb_allowed_2",
+            }
 
     @pytest.mark.asyncio
     async def test_aidp_search_permission_whitelist_failure_fallback(self):
         """When get_allowed_kds_list raises, a warning is logged and allowed_kds_set stays empty."""
+        access_module = MagicMock()
+        access_module.resolve_current_aidp_access.side_effect = Exception("AIDP down")
         with patch("backend.agents.create_agent_info.discover_langchain_tools",
                    new_callable=AsyncMock, return_value=[]), \
              patch("backend.agents.create_agent_info.search_tools_for_sub_agent") as mock_tools, \
@@ -7209,13 +7326,7 @@ class TestCreateToolConfigListAidpSearch:
              patch("backend.agents.create_agent_info.AIDP_API_KEY", "key"), \
              patch("backend.agents.create_agent_info.AIDP_TENANT_ID", "tenant"), \
              patch.dict(sys.modules, {
-                 "ext_components.aidp.services": MagicMock(
-                     aidp_permission_service=MagicMock(
-                         get_allowed_kds_list=MagicMock(
-                             side_effect=Exception("DB down"),
-                         ),
-                     ),
-                 ),
+                 "ext_components.aidp.services.aidp_access_service": access_module,
              }):
 
             mock_tools.return_value = [{
@@ -7224,7 +7335,7 @@ class TestCreateToolConfigListAidpSearch:
                 "description": "AIDP search",
                 "inputs": "{}",
                 "output_type": "string",
-                "params": [{"name": "kds_list", "default": []}],
+                "params": [{"name": "kds_list", "default": ["kb_requested"]}],
                 "source": "langchain",
                 "usage": None,
             }]
@@ -7245,9 +7356,10 @@ class TestCreateToolConfigListAidpSearch:
             )
 
             assert len(result) == 1
-            # allowed_kds_set should be empty set on failure
+            # Snapshot failure is fail-closed even when the tool requested a KB.
+            assert mock_tc_instance.params["kds_list"] == []
             assert mock_tc_instance.metadata is not None
-            assert mock_tc_instance.metadata["allowed_kds_set"] == set()
+            assert mock_tc_instance.metadata["allowed_kds_set"] == []
 
     @pytest.mark.asyncio
     async def test_aidp_search_metadata_merges_langchain_tool(self):
@@ -7302,3 +7414,141 @@ class TestCreateToolConfigListAidpSearch:
             assert "langchain_tool" in mock_tc_instance.metadata
             assert mock_tc_instance.metadata["langchain_tool"] is matching_langchain_tool
             assert "allowed_kds_set" in mock_tc_instance.metadata
+
+
+class TestBuildSecurityHeaders:
+    """Tests for _build_security_headers and related functions."""
+
+    def test_build_security_headers_apikey(self):
+        """Two apiKey-header schemes."""
+        agent = {
+            "security_schemes": {
+                "scheme_a": {"apiKeySecurityScheme": {"name": "X-Custom-Id", "location": "header"}},
+                "scheme_b": {"apiKeySecurityScheme": {"name": "X-Custom-Key", "location": "header"}},
+            },
+            "security_requirements": [{"schemes": {"scheme_a": {}, "scheme_b": {}}}],
+            "security_credentials": {"scheme_a": "id_value", "scheme_b": "key_value"},
+        }
+        assert _build_security_headers(agent) == {"X-Custom-Id": "id_value", "X-Custom-Key": "key_value"}
+
+    def test_build_security_headers_http_bearer(self):
+        """HTTP Bearer JWT."""
+        agent = {
+            "security_schemes": {"jwt": {"httpAuthSecurityScheme": {"scheme": "bearer", "bearerFormat": "JWT"}}},
+            "security_requirements": [{"schemes": {"jwt": {}}}],
+            "security_credentials": {"jwt": "token123"},
+        }
+        assert _build_security_headers(agent) == {"Authorization": "Bearer token123"}
+
+    def test_build_security_headers_no_credentials(self):
+        """No credentials -> empty."""
+        agent = {
+            "security_schemes": {"k": {"apiKeySecurityScheme": {"name": "X-Key", "location": "header"}}},
+            "security_requirements": [{"schemes": {"k": {}}}],
+            "security_credentials": {},
+        }
+        assert _build_security_headers(agent) == {}
+
+    def test_build_security_headers_mixed(self):
+        """Mixed apiKey + httpAuth."""
+        agent = {
+            "security_schemes": {
+                "k": {"apiKeySecurityScheme": {"name": "X-Custom", "location": "header"}},
+                "j": {"httpAuthSecurityScheme": {"scheme": "bearer"}},
+            },
+            "security_requirements": [{"schemes": {"k": {}, "j": {}}}],
+            "security_credentials": {"k": "key-val", "j": "jwt-val"},
+        }
+        assert _build_security_headers(agent) == {"X-Custom": "key-val", "Authorization": "bearer jwt-val"}
+
+    def test_resolve_scheme_field_wrapper(self):
+        scheme = {"apiKeySecurityScheme": {"name": "X-Key", "location": "header"}}
+        assert _resolve_scheme_field(scheme, "apiKeySecurityScheme") == {"name": "X-Key", "location": "header"}
+
+    def test_resolve_scheme_field_flat_apikey(self):
+        scheme = {"name": "X-Key", "location": "header"}
+        assert _resolve_scheme_field(scheme, "apiKeySecurityScheme") == scheme
+
+    def test_resolve_scheme_field_flat_http(self):
+        scheme = {"scheme": "bearer", "bearerFormat": "JWT"}
+        assert _resolve_scheme_field(scheme, "httpAuthSecurityScheme") == scheme
+
+    def test_resolve_scheme_field_none(self):
+        assert _resolve_scheme_field({}, "apiKeySecurityScheme") is None
+        assert _resolve_scheme_field({"foo": "bar"}, "httpAuthSecurityScheme") is None
+
+    def test_build_auth_header_apikey(self):
+        scheme = {"apiKeySecurityScheme": {"name": "X-Custom", "location": "header"}}
+        assert _build_auth_header_for_scheme(scheme, "secret") == ("X-Custom", "secret")
+
+    def test_build_auth_header_http_bearer(self):
+        scheme = {"httpAuthSecurityScheme": {"scheme": "bearer"}}
+        assert _build_auth_header_for_scheme(scheme, "tok") == ("Authorization", "bearer tok")
+
+    def test_build_auth_header_http_jwt(self):
+        scheme = {"httpAuthSecurityScheme": {"scheme": "bearer", "bearerFormat": "JWT"}}
+        assert _build_auth_header_for_scheme(scheme, "tok") == ("Authorization", "Bearer tok")
+
+    def test_build_auth_header_apikey_query(self):
+        scheme = {"apiKeySecurityScheme": {"name": "key", "location": "query"}}
+        assert _build_auth_header_for_scheme(scheme, "val") is None
+
+    def test_build_auth_header_no_match(self):
+        assert _build_auth_header_for_scheme({"foo": "bar"}, "val") is None
+
+    def test_build_external_agent_config_with_security(self):
+        """_build_external_agent_config passes custom_headers from security."""
+        agent = {
+            "external_agent_id": "ext_sec",
+            "name": "Secured Agent",
+            "security_schemes": {"k": {"apiKeySecurityScheme": {"name": "X-Token", "location": "header"}}},
+            "security_requirements": [{"schemes": {"k": {}}}],
+            "security_credentials": {"k": "secret-token"},
+        }
+        with patch('backend.agents.create_agent_info.ExternalA2AAgentConfig') as MockConfig:
+            _build_external_agent_config(agent, "http://test/a2a")
+            call_kwargs = MockConfig.call_args[1]
+            assert call_kwargs["custom_headers"] == {"X-Token": "secret-token"}
+
+    def test_resolve_scheme_field_empty_scheme_string(self):
+        """scheme['scheme'] is empty string -> None."""
+        from backend.agents.create_agent_info import _resolve_scheme_field
+        scheme = {"scheme": ""}
+        assert _resolve_scheme_field(scheme, "httpAuthSecurityScheme") is None
+
+    def test_build_auth_header_empty_auth_scheme(self):
+        """httpAuth with empty scheme -> None."""
+        from backend.agents.create_agent_info import _build_auth_header_for_scheme
+        scheme = {"httpAuthSecurityScheme": {"scheme": ""}}
+        assert _build_auth_header_for_scheme(scheme, "cred") is None
+
+    def test_collect_auth_headers_non_dict_req(self):
+        """Requirement is not a dict -> skipped."""
+        from backend.agents.create_agent_info import _build_security_headers
+        agent = {
+            "security_schemes": {"k": {"apiKeySecurityScheme": {"name": "X", "location": "header"}}},
+            "security_requirements": ["not_a_dict"],
+            "security_credentials": {"k": "v"},
+        }
+        assert _build_security_headers(agent) == {}
+
+    def test_build_security_headers_missing_credential(self):
+        """scheme_id in requirements but not in credentials -> skipped."""
+        from backend.agents.create_agent_info import _build_security_headers
+        agent = {
+            "security_schemes": {"k": {"apiKeySecurityScheme": {"name": "X", "location": "header"}}},
+            "security_requirements": [{"schemes": {"k": {}, "missing": {}}}],
+            "security_credentials": {"k": "v"},
+        }
+        headers = _build_security_headers(agent)
+        assert headers == {"X": "v"}
+
+    def test_build_security_headers_scheme_builds_none(self):
+        """Credential present but header build returns None (e.g. query location) -> skipped."""
+        from backend.agents.create_agent_info import _build_security_headers
+        agent = {
+            "security_schemes": {"k": {"apiKeySecurityScheme": {"name": "key", "location": "query"}}},
+            "security_requirements": [{"schemes": {"k": {}}}],
+            "security_credentials": {"k": "v"},
+        }
+        assert _build_security_headers(agent) == {}

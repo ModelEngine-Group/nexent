@@ -161,6 +161,11 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
                         </p>
                       )}
                       <div className="flex items-center gap-2 mt-2 flex-wrap">
+                        {kb.ingroup_permission === "PRIVATE" && (
+                          <Tag>
+                            {t("knowledgeBase.ingroup.permission.PRIVATE")}
+                          </Tag>
+                        )}
                         {/* Authorized user-group tags. Aligned with the local
                             knowledge base list: only render group names when
                             ``ingroup_permission !== "PRIVATE"``, each group

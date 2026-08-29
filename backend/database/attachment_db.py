@@ -157,7 +157,8 @@ def upload_fileobj(
         prefix: str = "attachments",
         generate_presigned_url: bool = True,
         presigned_url_expires: int = 86400,
-        file_size: Optional[int] = None
+        file_size: Optional[int] = None,
+        object_name: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Upload file object to MinIO
@@ -174,8 +175,8 @@ def upload_fileobj(
     Returns:
         Dict[str, Any]: Upload result, containing success flag, URL and error message (if any)
     """
-    # Generate object name
-    object_name = generate_object_name(file_name, prefix=prefix)
+    # Generate object name when the caller did not pre-allocate one.
+    object_name = object_name or generate_object_name(file_name, prefix=prefix)
 
     # Calculate file size if not provided
     if file_size is None:
@@ -279,6 +280,15 @@ def get_file_size_from_minio(object_name: str, bucket: Optional[str] = None) -> 
     minio_client._ensure_initialized()
     bucket = bucket or minio_client.storage_config.default_bucket
     return minio_client.get_file_size(object_name, bucket)
+
+
+def get_file_size_from_minio_strict(
+    object_name: str,
+    bucket: Optional[str] = None,
+) -> Optional[int]:
+    """Return authoritative size, ``None`` only when MinIO confirms the object is missing."""
+    object_name, bucket = _normalize_object_and_bucket(object_name, bucket)
+    return minio_client.get_file_size_strict(object_name, bucket)
 
 
 def file_exists(object_name: str, bucket: Optional[str] = None) -> bool:

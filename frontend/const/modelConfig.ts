@@ -11,6 +11,7 @@ export const MODEL_TYPES = {
   VLM: "vlm",
   VLM2: "vlm2",
   VLM3: "vlm3",
+  VLM4: "vlm4",
 } as const;
 
 // Model source constants
@@ -41,6 +42,7 @@ export const ICON_TYPES = {
 
 // Provider detection and icon mapping
 export const MODEL_PROVIDER_KEYS = [
+  "modelengine",
   "qwen",
   "openai",
   "siliconflow",
@@ -49,13 +51,14 @@ export const MODEL_PROVIDER_KEYS = [
   "aliyuncs",
   "tokenpony",
   "dashscope",
-  "volcengine"
+  "volcengine",
 ] as const;
 
 export type ModelProviderKey = (typeof MODEL_PROVIDER_KEYS)[number];
 
 // Direct provider hint string mapping (no arrays)
 export const PROVIDER_HINTS: Record<ModelProviderKey, string> = {
+  modelengine: "open/router",
   qwen: "qwen",
   openai: "openai",
   siliconflow: "siliconflow",
@@ -64,11 +67,12 @@ export const PROVIDER_HINTS: Record<ModelProviderKey, string> = {
   aliyuncs: "aliyuncs",
   tokenpony: "tokenpony",
   dashscope: "dashscope",
-  volcengine:"bytedance"
+  volcengine: "bytedance",
 };
 
 // Icon filenames for providers
 export const PROVIDER_ICON_MAP: Record<ModelProviderKey, string> = {
+  modelengine: publicAsset("/modelengine-logo.png"),
   qwen: publicAsset("/qwen.png"),
   openai: publicAsset("/openai.png"),
   siliconflow: publicAsset("/siliconflow.png"),
@@ -77,7 +81,7 @@ export const PROVIDER_ICON_MAP: Record<ModelProviderKey, string> = {
   aliyuncs: publicAsset("/aliyuncs.png"),
   dashscope: publicAsset("/aliyuncs.png"),
   tokenpony: publicAsset("/tokenpony.png"),
-  volcengine: publicAsset("/volcengine.png")
+  volcengine: publicAsset("/volcengine.png"),
 };
 
 export const OFFICIAL_PROVIDER_ICON = publicAsset("/modelengine-logo.png");
@@ -95,7 +99,7 @@ export const PROVIDER_LINKS: Record<string, string> = {
   baai: "https://www.baai.ac.cn/",
   dashscope: "https://dashscope.aliyun.com/",
   tokenpony: "https://www.tokenpony.cn/",
-  volcengine:"https://www.volcengine.com/"
+  volcengine: "https://www.volcengine.com/",
 };
 
 // User role constants
@@ -160,4 +164,3 @@ export const CARD_THEMES = {
     backgroundColor: "#ffffff",
   },
 };
-

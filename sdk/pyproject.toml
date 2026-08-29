@@ -58,6 +58,7 @@ dependencies = [
     "langchain-text-splitters==1.1.2",
     "ebooklib==0.20",
     "pypandoc==1.17",
+    "charset-normalizer>=3.4.0",
 ]
 
 [tool.uv]
@@ -96,6 +97,9 @@ dev = [
 [tool.setuptools.packages.find]
 include = ["nexent*"]
 exclude = ["tests*", "examples*"]
+# Modality subpackages (llm/vlm/stt/tts/embedding/rerank) intentionally have no
+# __init__.py (namespace packages): modality/__init__.py is the single aggregator.
+namespaces = true
 
 [tool.setuptools.package-data]
 "nexent.core.prompts" = ["*.yaml"]

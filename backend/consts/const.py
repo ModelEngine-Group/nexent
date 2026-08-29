@@ -4,7 +4,10 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 # Load environment variables
-load_dotenv(override=True)
+# Explicitly sourced deployment variables take precedence over a nearby
+# developer .env file. This is required for tmux/K8s-local verification and
+# avoids silently replacing operator-provided service addresses.
+load_dotenv(override=False)
 
 # TODO: Analyze every variable if this is used
 # Test voice file path (WAV format for volcengine STT)
@@ -30,6 +33,7 @@ ELASTICSEARCH_SERVICE = os.getenv("ELASTICSEARCH_SERVICE")
 
 # Data Processing Service Configuration
 DATA_PROCESS_SERVICE = os.getenv("DATA_PROCESS_SERVICE")
+RUNTIME_SERVICE_URL = os.getenv("RUNTIME_SERVICE_URL", "http://localhost:5014").rstrip("/")
 CLIP_MODEL_PATH = os.getenv("CLIP_MODEL_PATH")
 TABLE_TRANSFORMER_MODEL_PATH = os.getenv("TABLE_TRANSFORMER_MODEL_PATH")
 UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH = os.getenv(
@@ -41,6 +45,7 @@ UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH = os.getenv(
 MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB
 MAX_CONCURRENT_UPLOADS = 5
 UPLOAD_FOLDER = os.getenv('UPLOAD_FOLDER', 'uploads')
+AGENT_WORKSPACE_ROOT = os.getenv('AGENT_WORKSPACE_ROOT', '/mnt/nexent/workdir')
 ROOT_DIR = os.getenv("ROOT_DIR")
 
 PER_WAVE_TIMEOUT = int(os.getenv("DP_SPLIT_WAIT_TIMEOUT_PER_WAVE_S", "30"))
@@ -105,6 +110,10 @@ SERVICE_ROLE_KEY = os.getenv('SERVICE_ROLE_KEY', SUPABASE_KEY)
 # GoTrue uses GOTRUE_JWT_SECRET (= JWT_SECRET in docker setup) to sign tokens.
 SUPABASE_JWT_SECRET = os.getenv(
     'SUPABASE_JWT_SECRET') or os.getenv('JWT_SECRET', '')
+# Dedicated signing key for opaque independent-AIDP image references. The JWT
+# fallback keeps existing deployments functional while allowing key separation.
+IND_AIDP_IMAGE_SIGNING_KEY = os.getenv(
+    'IND_AIDP_IMAGE_SIGNING_KEY') or SUPABASE_JWT_SECRET
 
 
 # OAuth Configuration
@@ -131,10 +140,15 @@ CAS_LOGIN_MODE = os.getenv("CAS_LOGIN_MODE", "disabled").lower()
 CAS_USER_ATTRIBUTE = os.getenv("CAS_USER_ATTRIBUTE", "")
 CAS_EMAIL_ATTRIBUTE = os.getenv("CAS_EMAIL_ATTRIBUTE", "email")
 CAS_ROLE_ATTRIBUTE = os.getenv("CAS_ROLE_ATTRIBUTE", "role")
+CAS_DEFAULT_ROLE = os.getenv("CAS_DEFAULT_ROLE", "USER").strip().upper()
 CAS_TENANT_ATTRIBUTE = os.getenv("CAS_TENANT_ATTRIBUTE", "tenant_id")
+CAS_DEFAULT_TENANT_ID = os.getenv("CAS_DEFAULT_TENANT_ID", "tenant_id")
 CAS_ROLE_MAP_JSON = os.getenv("CAS_ROLE_MAP_JSON", "")
 CAS_SESSION_MAX_AGE_SECONDS = int(os.getenv("CAS_SESSION_MAX_AGE_SECONDS", "3600") or 3600)
 LOCAL_SESSION_MAX_AGE_SECONDS = int(os.getenv("LOCAL_SESSION_MAX_AGE_SECONDS", "3600") or 3600)
+CAS_HEARTBEAT_URL = os.getenv("CAS_HEARTBEAT_URL", "").strip()
+CAS_HEARTBEAT_INTERVAL_SECONDS = int(os.getenv("CAS_HEARTBEAT_INTERVAL_SECONDS", "300") or 300)
+CAS_HEARTBEAT_COOKIE_NAME = os.getenv("CAS_HEARTBEAT_COOKIE_NAME", "").strip()
 CAS_RENEW_BEFORE_SECONDS = int(os.getenv("CAS_RENEW_BEFORE_SECONDS", "300") or 300)
 CAS_RENEW_TIMEOUT_SECONDS = int(os.getenv("CAS_RENEW_TIMEOUT_SECONDS", "10") or 10)
 CAS_SYNTHETIC_EMAIL_DOMAIN = os.getenv("CAS_SYNTHETIC_EMAIL_DOMAIN", "")
@@ -164,6 +178,13 @@ IMAGE_FILTER = os.getenv("IMAGE_FILTER", "false").lower() == "true"
 # Default User and Tenant IDs
 DEFAULT_USER_ID = "user_id"
 DEFAULT_TENANT_ID = "tenant_id"
+
+# Tenant resource hard limits. These values are intentionally not configurable.
+MAX_TENANT_COUNT = 100
+MAX_USERS_PER_TENANT = 10_000
+MAX_GROUPS_PER_TENANT = 1_000
+MAX_SUPER_ADMIN_COUNT = 1
+MAX_ADMINS_PER_TENANT = 1_000
 
 # Invitation code type for asset administrator registration
 ASSET_OWNER_INVITE_CODE_TYPE = "ASSET_OWNER_INVITE"
@@ -242,6 +263,9 @@ REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
 RUNTIME_STATE_REDIS_URL = os.getenv("RUNTIME_STATE_REDIS_URL") or REDIS_URL
 RUNTIME_STREAM_TTL_SECONDS = int(os.getenv("RUNTIME_STREAM_TTL_SECONDS", "86400"))
 RUNTIME_STREAM_MAX_LEN = int(os.getenv("RUNTIME_STREAM_MAX_LEN", "10000"))
+RUNTIME_STREAM_LOCAL_REPLAY_MAX_BYTES = int(
+    os.getenv("RUNTIME_STREAM_LOCAL_REPLAY_MAX_BYTES", str(8 * 1024 * 1024))
+)
 RUNTIME_RUN_TTL_SECONDS = int(os.getenv("RUNTIME_RUN_TTL_SECONDS", "86400"))
 RUNTIME_CANCEL_TTL_SECONDS = int(os.getenv("RUNTIME_CANCEL_TTL_SECONDS", "86400"))
 RUNTIME_COMPLETED_TTL_SECONDS = int(os.getenv("RUNTIME_COMPLETED_TTL_SECONDS", "300"))
@@ -296,10 +320,17 @@ ELASTICSEARCH_REQUEST_TIMEOUT = int(
 
 # Worker Configuration
 RAY_ADDRESS = os.getenv("RAY_ADDRESS", "auto")
-QUEUES = os.getenv("QUEUES", "process_q,process_part_q,forward_q")
+QUEUES = os.getenv(
+    "QUEUES",
+    "process_q,process_part_q,forward_q,forward_part_q,forward_aggregate_q",
+)
 # Will be dynamically set based on PID if not provided
 WORKER_NAME = os.getenv("WORKER_NAME")
-WORKER_CONCURRENCY = DP_PART_PROCESSOR_COUNT + 1
+# The data-process service sets a queue-specific value for each child worker.
+# Keep the historical default when the variable is not provided.
+WORKER_CONCURRENCY = int(
+    os.getenv("WORKER_CONCURRENCY", str(DP_PART_PROCESSOR_COUNT + 1))
+)
 RAY_WARM_ACTOR_POOL_SIZE_PART = int(
     os.getenv("RAY_WARM_ACTOR_POOL_SIZE_PART", "2"))
 RAY_WARM_ACTOR_POOL_SIZE_PROCESS = int(
@@ -321,10 +352,12 @@ SPEED_RATIO = float(os.getenv("SPEED_RATIO", "1.3"))
 
 # Memory Feature
 MEMORY_SWITCH_KEY = "MEMORY_SWITCH"
+DREAMING_SWITCH_KEY = "DREAMING_SWITCH"
 MEMORY_AGENT_SHARE_KEY = "MEMORY_AGENT_SHARE"
 DISABLE_AGENT_ID_KEY = "DISABLE_AGENT_ID"
 DISABLE_USERAGENT_ID_KEY = "DISABLE_USERAGENT_ID"
 DEFAULT_MEMORY_SWITCH_KEY = "Y"
+DEFAULT_DREAMING_SWITCH_KEY = "Y"
 DEFAULT_MEMORY_AGENT_SHARE_KEY = "always"
 # Boolean value representations for configuration parsing
 BOOLEAN_TRUE_VALUES = {"true", "1", "y", "yes", "on"}
@@ -352,13 +385,22 @@ MEMORY_TOKEN_BUDGET = int(os.getenv("MEMORY_TOKEN_BUDGET", "2000"))
 # Dreaming promotion thresholds
 LIGHT_SLEEP_WINDOW_DAYS = int(os.getenv("LIGHT_SLEEP_WINDOW_DAYS", "7"))
 RECENCY_HALF_LIFE_DAYS = int(os.getenv("RECENCY_HALF_LIFE_DAYS", "14"))
-MIN_PROMOTION_SCORE = float(os.getenv("MIN_PROMOTION_SCORE", "0.72"))
+MIN_PROMOTION_SCORE = float(os.getenv("MIN_PROMOTION_SCORE", "0.75"))
 MIN_RECALL_COUNT = int(os.getenv("MIN_RECALL_COUNT", "3"))
-MIN_UNIQUE_QUERIES = int(os.getenv("MIN_UNIQUE_QUERIES", "2"))
-# Scheduling/cron constants are intentionally not defined here: the
-# background Dreaming scheduler is not part of Phase 2 (an agent-driven
-# timer will be added in a later phase, at which point the cron expression
-# and heartbeat can be reintroduced).
+MIN_UNIQUE_QUERIES = int(os.getenv("MIN_UNIQUE_QUERIES", "3"))
+DREAMING_SOURCE_LIMIT = int(os.getenv("DREAMING_SOURCE_LIMIT", "10"))
+DREAMING_LONG_TERM_MAX_CHARS = int(
+    os.getenv("DREAMING_LONG_TERM_MAX_CHARS", "10000")
+)
+DREAMING_SUMMARIZATION_MAX_ATTEMPTS = int(
+    os.getenv("DREAMING_SUMMARIZATION_MAX_ATTEMPTS", "2")
+)
+DREAMING_SCHEDULER_POLL_SECONDS = float(os.getenv("DREAMING_SCHEDULER_POLL_SECONDS", "5.0"))
+DREAMING_SCHEDULER_LEASE_SECONDS = float(os.getenv("DREAMING_SCHEDULER_LEASE_SECONDS", "120.0"))
+DREAMING_SCHEDULER_MAX_CONCURRENCY = int(os.getenv("DREAMING_SCHEDULER_MAX_CONCURRENCY", "1"))
+DREAMING_SCHEDULER_ENABLED = os.getenv("DREAMING_SCHEDULER_ENABLED", "true").lower() in ("true", "1", "yes")
+DREAMING_MAX_AGE_DAYS = int(os.getenv("DREAMING_MAX_AGE_DAYS", "30"))
+DREAMING_SUMMARIZATION_BACKOFF_BASE_SECONDS = float(os.getenv("DREAMING_SUMMARIZATION_BACKOFF_BASE_SECONDS", "1.0"))
 
 # External provider retry / timeout
 PROVIDER_RETRY_MAX_ATTEMPTS = int(os.getenv("PROVIDER_RETRY_MAX_ATTEMPTS", "3"))
@@ -474,6 +516,7 @@ MODEL_CONFIG_MAPPING = {
     "vlm": "VLM_ID",
     "vlm2": "VLM2_ID",
     "vlm3": "VLM3_ID",
+    "vlm4": "VLM4_ID",
     "stt": "STT_ID",
     "tts": "TTS_ID"
 }
@@ -672,11 +715,27 @@ NEXENT_SANDBOX_DOCKER_IMAGE = os.getenv(
 )
 """Docker image used when level is 'docker'."""
 
+NEXENT_SANDBOX_WORKSPACE_VOLUME = os.getenv(
+    "NEXENT_SANDBOX_WORKSPACE_VOLUME", "nexent-agent-workspace"
+)
+"""Docker named volume shared by the runtime and the system-scoped sandbox."""
+
 NEXENT_SANDBOX_MEMORY_LIMIT_MB = int(os.getenv("NEXENT_SANDBOX_MEMORY_LIMIT_MB", "512"))
 
 NEXENT_SANDBOX_CPU_QUOTA = float(os.getenv("NEXENT_SANDBOX_CPU_QUOTA", "1.0"))
 
 NEXENT_SANDBOX_TIMEOUT_S = int(os.getenv("NEXENT_SANDBOX_TIMEOUT_S", "30"))
+
+_NEXENT_SANDBOX_HOST_TOOL_TIMEOUT_RAW = os.getenv(
+    "NEXENT_SANDBOX_HOST_TOOL_TIMEOUT_S", ""
+).strip()
+NEXENT_SANDBOX_HOST_TOOL_TIMEOUT_S = (
+    float(_NEXENT_SANDBOX_HOST_TOOL_TIMEOUT_RAW)
+    if _NEXENT_SANDBOX_HOST_TOOL_TIMEOUT_RAW
+    and float(_NEXENT_SANDBOX_HOST_TOOL_TIMEOUT_RAW) > 0
+    else None
+)
+"""Optional Runtime host-tool bridge timeout. Empty or non-positive disables it."""
 
 NEXENT_SANDBOX_NETWORK_DISABLED = (
     os.getenv("NEXENT_SANDBOX_NETWORK", "disabled").lower() == "disabled"
@@ -706,6 +765,11 @@ STREAMABLE_CONTENT_TYPES = frozenset([
     "tool",
     "execution_logs",
 ])
+
+# LLM Model Configuration
+LLM_INCLUDE_LOGPROBS = os.getenv("LLM_INCLUDE_LOGPROBS", "false").lower() == "true"
+"""When True, adds logprobs=true to every chat.completions.create request body,
+enabling the provider to return log probability information in the response."""
 
 # SSE streaming event type for status messages
 STREAM_STATUS_EVENT = "event: stream_status\n"

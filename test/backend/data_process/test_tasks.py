@@ -1585,8 +1585,8 @@ def test_extract_error_code_parses_detail_and_regex_and_unknown():
     raw = 'oops {"error_code":"regex_code"}'
     assert extract_error_code(raw) == "regex_code"
 
-    # unknown path
-    assert extract_error_code("no code here") == "unknown_error"
+    # unknown errors intentionally do not get a fabricated code.
+    assert extract_error_code("no code here") is None
 
 
 def test_extract_error_code_top_level_key():
@@ -2167,8 +2167,10 @@ def test_forward_large_chunks_uses_chord_batches(monkeypatch):
     class _Sig:
         def __init__(self, kwargs):
             self.kwargs = kwargs
+            self.queue = None
 
-        def set(self, **_kw):
+        def set(self, **kw):
+            self.queue = kw.get("queue")
             return self
 
     captured = {"group_sigs": None}
@@ -2217,6 +2219,77 @@ def test_forward_large_chunks_uses_chord_batches(monkeypatch):
     assert len(captured["group_sigs"]) == 2
     assert all(sig.kwargs.get("large_mode")
                is True for sig in captured["group_sigs"])
+    assert all(sig.queue == "forward_part_q" for sig in captured["group_sigs"])
+
+
+def test_forward_large_chunks_routes_aggregate_to_dedicated_queue(monkeypatch):
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+    monkeypatch.setattr(tasks, "get_file_size", lambda *args, **kwargs: 0)
+
+    class _RedisSvc:
+        def save_progress_info(self, *args, **kwargs):
+            return True
+
+        def is_task_cancelled(self, *args, **kwargs):
+            return False
+
+    monkeypatch.setattr(tasks, "get_redis_service", lambda: _RedisSvc())
+
+    captured = {}
+
+    class _Sig:
+        def __init__(self, kwargs):
+            self.kwargs = kwargs
+            self.queue = None
+
+        def set(self, **kwargs):
+            self.queue = kwargs.get("queue")
+            return self
+
+    monkeypatch.setattr(tasks, "forward_part", types.SimpleNamespace(
+        s=lambda **kwargs: _Sig(kwargs)))
+    monkeypatch.setattr(tasks, "aggregate_forward_parts", types.SimpleNamespace(
+        s=lambda **kwargs: _Sig(kwargs)))
+
+    def _fake_group(signatures):
+        captured["parts"] = list(signatures)
+        return captured["parts"]
+
+    def _fake_chord(group_tasks):
+        def _runner(callback):
+            captured["callback"] = callback
+            total = sum(len(sig.kwargs["chunks"]) for sig in group_tasks)
+            return types.SimpleNamespace(get=lambda: {
+                "success": True,
+                "total_indexed": total,
+                "total_submitted": total,
+            })
+        return _runner
+
+    @contextmanager
+    def _fake_allow_join_result():
+        yield
+
+    monkeypatch.setattr(tasks, "group", _fake_group)
+    monkeypatch.setattr(tasks, "chord", _fake_chord)
+    monkeypatch.setattr(tasks, "allow_join_result", _fake_allow_join_result)
+    monkeypatch.setattr(tasks, "_send_chunks_to_es", lambda **kwargs: {
+        "success": True,
+        "total_indexed": len(kwargs["chunks"]),
+        "total_submitted": len(kwargs["chunks"]),
+    })
+
+    out = tasks.forward(
+        FakeSelf("forward-aggregate-queue"),
+        processed_data={"chunks": [{"content": f"c-{i}", "metadata": {}} for i in range(70)]},
+        index_name="idx",
+        source="/big.txt",
+        source_type="local",
+        file_id="file-1",
+    )
+
+    assert out["chunks_stored"] == 70
+    assert captured["callback"].queue == "forward_aggregate_q"
 
 
 def test_process_sync_unsupported_raises_and_updates_state(monkeypatch):
@@ -2861,6 +2934,64 @@ def test_forward_part_success_and_progress(monkeypatch):
     assert calls["inc"] == 1
 
 
+def test_forward_part_returns_cancelled_when_parent_is_cancelled(monkeypatch):
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+
+    class _Svc:
+        def is_task_cancelled(self, _task_id):
+            return True
+
+    monkeypatch.setattr(tasks, "get_redis_service", lambda: _Svc())
+    monkeypatch.setattr(
+        tasks,
+        "_send_chunks_to_es",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("cancelled batch must not be sent")),
+    )
+    self = types.SimpleNamespace(
+        request=types.SimpleNamespace(id="fp-cancelled", retries=0),
+        retry=lambda **kwargs: (_ for _ in ()).throw(AssertionError("must not retry")),
+    )
+
+    out = tasks.forward_part(
+        self,
+        chunks=[{"content": "x"}],
+        index_name="idx",
+        parent_task_id="parent-cancelled",
+        batch_index=2,
+        total_batches=3,
+    )
+
+    assert out["cancelled"] is True
+    assert out["total_indexed"] == 0
+    assert out["total_submitted"] == 0
+
+
+def test_forward_part_continues_when_parent_cancellation_lookup_fails(monkeypatch):
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+    monkeypatch.setattr(tasks, "get_redis_service", lambda: (_ for _ in ()).throw(RuntimeError("redis down")))
+    monkeypatch.setattr(
+        tasks,
+        "_send_chunks_to_es",
+        lambda **kwargs: {"success": True, "total_indexed": 1, "total_submitted": 1},
+    )
+    self = types.SimpleNamespace(
+        request=types.SimpleNamespace(id="fp-lookup-error", retries=0),
+        retry=lambda **kwargs: (_ for _ in ()).throw(AssertionError("must not retry")),
+    )
+
+    out = tasks.forward_part(
+        self,
+        chunks=[{"content": "x"}],
+        index_name="idx",
+        parent_task_id="parent-lookup-error",
+        batch_index=1,
+        total_batches=1,
+    )
+
+    assert out["success"] is True
+    assert out["total_indexed"] == 1
+
+
 def test_forward_part_failure_retries(monkeypatch):
     tasks, _ = import_tasks_with_fake_ray(monkeypatch)
     monkeypatch.setattr(tasks, "_send_chunks_to_es", lambda **
@@ -2882,6 +3013,153 @@ def test_forward_part_failure_retries(monkeypatch):
             total_batches=4,
         )
     assert "exc" in captured
+
+
+def test_forward_part_storage_write_block_does_not_retry(monkeypatch):
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+    monkeypatch.setattr(
+        tasks,
+        "_send_chunks_to_es",
+        lambda **kwargs: (_ for _ in ()).throw(
+            Exception(
+                '{"error_code":"es_disk_watermark",'
+                '"message":"disk watermark exceeded"}'
+            )
+        ),
+    )
+    cancelled = []
+
+    class _Svc:
+        def is_task_cancelled(self, _task_id):
+            return False
+
+        def mark_task_cancelled(self, task_id):
+            cancelled.append(task_id)
+            return True
+
+    monkeypatch.setattr(tasks, "get_redis_service", lambda: _Svc())
+    self = types.SimpleNamespace(
+        request=types.SimpleNamespace(id="fp-blocked", retries=0),
+        retry=lambda **kwargs: (_ for _ in ()).throw(AssertionError("must not retry")),
+    )
+
+    with pytest.raises(Exception, match="es_disk_watermark"):
+        tasks.forward_part(
+            self,
+            chunks=[{"content": "x"}],
+            index_name="idx",
+            parent_task_id="parent-blocked",
+            batch_index=1,
+            total_batches=3,
+        )
+
+    assert cancelled == ["parent-blocked"]
+
+
+def test_forward_part_es_bulk_failure_does_not_retry(monkeypatch):
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+    monkeypatch.setattr(
+        tasks,
+        "_send_chunks_to_es",
+        lambda **kwargs: (_ for _ in ()).throw(Exception('{"error_code":"es_bulk_failed"}')),
+    )
+    self = types.SimpleNamespace(
+        request=types.SimpleNamespace(id="fp-bulk", retries=0),
+        retry=lambda **kwargs: (_ for _ in ()).throw(AssertionError("must not retry")),
+    )
+
+    with pytest.raises(Exception, match="es_bulk_failed"):
+        tasks.forward_part(
+            self,
+            chunks=[{"content": "x"}],
+            index_name="idx",
+            batch_index=1,
+            total_batches=3,
+        )
+
+
+def test_forward_part_long_nested_storage_block_does_not_retry(monkeypatch):
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+    nested_error = {
+        "message": (
+            "Unexpected error when indexing documents: "
+            + '{"message":"ElasticSearch service returned HTTP 500",'
+            + '"index_name":"index-with-a-long-name-for-real-forwarding",'
+            + '"source":"knowledge_base/20260825183619_1262461a83c84d9f95ebd222cb656159.txt",'
+            + '"original_filename":"a-very-long-filename.txt",'
+            + '"error_code":"060106"}'
+        ),
+        "index_name": "index-with-a-long-name-for-real-forwarding",
+        "task_name": "forward",
+        "source": "knowledge_base/20260825183619_1262461a83c84d9f95ebd222cb656159.txt",
+        "original_filename": "a-very-long-filename.txt",
+        "error_code": "060106",
+    }
+    exception = Exception(json.dumps(nested_error, ensure_ascii=False))
+    assert len(str(exception)) > 500
+    monkeypatch.setattr(
+        tasks,
+        "_send_chunks_to_es",
+        lambda **kwargs: (_ for _ in ()).throw(exception),
+    )
+    cancelled = []
+
+    class _Svc:
+        def mark_task_cancelled(self, task_id):
+            cancelled.append(task_id)
+            return True
+
+    monkeypatch.setattr(tasks, "get_redis_service", lambda: _Svc())
+    self = types.SimpleNamespace(
+        request=types.SimpleNamespace(id="fp-long-blocked", retries=0),
+        retry=lambda **kwargs: (_ for _ in ()).throw(AssertionError("must not retry")),
+    )
+
+    with pytest.raises(Exception, match="060106"):
+        tasks.forward_part(
+            self,
+            chunks=[{"content": "x"}],
+            index_name="idx",
+            parent_task_id="parent-long-blocked",
+            batch_index=1,
+            total_batches=35,
+        )
+
+    assert cancelled == ["parent-long-blocked"]
+
+
+def test_forward_part_swallows_parent_cancel_mark_failure(monkeypatch):
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+    monkeypatch.setattr(
+        tasks,
+        "_send_chunks_to_es",
+        lambda **kwargs: (_ for _ in ()).throw(
+            Exception('{"error_code":"es_disk_watermark"}')
+        ),
+    )
+
+    class _Svc:
+        def is_task_cancelled(self, _task_id):
+            return False
+
+        def mark_task_cancelled(self, _task_id):
+            raise RuntimeError("redis write failed")
+
+    monkeypatch.setattr(tasks, "get_redis_service", lambda: _Svc())
+    self = types.SimpleNamespace(
+        request=types.SimpleNamespace(id="fp-mark-error", retries=0),
+        retry=lambda **kwargs: (_ for _ in ()).throw(AssertionError("must not retry")),
+    )
+
+    with pytest.raises(Exception, match="es_disk_watermark"):
+        tasks.forward_part(
+            self,
+            chunks=[{"content": "x"}],
+            index_name="idx",
+            parent_task_id="parent-mark-error",
+            batch_index=1,
+            total_batches=1,
+        )
 
 
 def test_aggregate_forward_parts_paths(monkeypatch):
@@ -3161,7 +3439,7 @@ def test_extract_error_code_various_formats(monkeypatch):
 
     # No error code found
     result = tasks.extract_error_code("Plain error message", parsed_error=None)
-    assert result == "unknown_error"
+    assert result is None
 
 
 def test_build_balanced_batches_various_sizes(monkeypatch):
@@ -3436,10 +3714,33 @@ def test_submit_process_forward_chain(monkeypatch):
     from backend.data_process import tasks
 
     captured_chain = []
+    captured_signatures = {}
+
+    class MockSignature:
+        def __init__(self, task_name, kwargs):
+            self.task_name = task_name
+            self.kwargs = kwargs
+
+        def set(self, queue=None):
+            self.queue = queue
+            return self
+
+    class MockTask:
+        def __init__(self, task_name):
+            self.task_name = task_name
+
+        def s(self, **kwargs):
+            captured_signatures[self.task_name] = kwargs
+            return MockSignature(self.task_name, kwargs)
+
+    monkeypatch.setattr(tasks, "process", MockTask("process"))
+    monkeypatch.setattr(tasks, "forward", MockTask("forward"))
+    monkeypatch.setattr(tasks, "cleanup_source", MockTask("cleanup_source"))
 
     class MockChain:
         def __init__(self, *steps):
             self.steps = steps
+            captured_chain.extend(steps)
 
         def set(self, queue=None):
             return self
@@ -3460,9 +3761,14 @@ def test_submit_process_forward_chain(monkeypatch):
         authorization="Bearer token",
         embedding_model_id=1,
         tenant_id="tenant-1",
+        file_id="fid-1",
     )
 
     assert chain_id == "chain-id-123"
+    assert captured_signatures["process"]["tenant_id"] == "tenant-1"
+    assert captured_signatures["forward"]["tenant_id"] == "tenant-1"
+    assert captured_signatures["process"]["file_id"] == "fid-1"
+    assert captured_signatures["forward"]["file_id"] == "fid-1"
 
 
 def test_aggregate_parts_empty_results(monkeypatch):
@@ -3528,6 +3834,7 @@ def test_process_and_forward_delegates_to_chain(monkeypatch):
     class MockChain:
         def __init__(self, *steps):
             captured["steps"] = len(steps)
+            captured["signatures"] = steps
 
         def set(self, queue=None):
             return self
@@ -3544,10 +3851,95 @@ def test_process_and_forward_delegates_to_chain(monkeypatch):
         source_type="local",
         chunking_strategy="basic",
         index_name="test-index",
+        tenant_id="tenant-2",
+        file_id="fid-2",
     )
 
     assert result == "chain-456"
     assert captured["steps"] == 3  # process, forward, cleanup_source
+
+
+def test_update_file_lifecycle_uses_file_id_and_legacy_source_fallback(monkeypatch):
+    """Lifecycle updates enforce tenant scope and fall back from stale IDs to paths."""
+    import_tasks_with_fake_ray(monkeypatch)
+    from backend.data_process import tasks
+
+    calls = []
+    lookups = []
+    lifecycle_module = types.ModuleType("database.knowledge_file_lifecycle_db")
+
+    def get_file_record(**kwargs):
+        lookups.append(kwargs)
+        if kwargs.get("file_id") == "fid-missing":
+            return None
+        if kwargs.get("object_name") == "knowledge_base/a.txt":
+            return {"file_id": "fid-3", "status": "PROCESSING"}
+        if kwargs.get("object_name") == "knowledge_base/fallback.txt":
+            return {"file_id": "fid-5", "status": "PROCESSING"}
+        return {"file_id": "fid-4", "status": "DELETED"}
+
+    lifecycle_module.get_file_record = get_file_record
+    lifecycle_module.transition_file_record = lambda file_id, **kwargs: calls.append((file_id, kwargs))
+    monkeypatch.setitem(sys.modules, "database.knowledge_file_lifecycle_db", lifecycle_module)
+
+    tasks._update_file_lifecycle(
+        file_id=None,
+        tenant_id="tenant-1",
+        index_name="idx",
+        source="knowledge_base/a.txt",
+        status="PROCESSING",
+        stage="PROCESS",
+    )
+    assert calls[0][0] == "fid-3"
+    assert calls[0][1]["expected_statuses"] == ("PROCESSING",)
+    assert lookups[0] == {
+        "tenant_id": "tenant-1",
+        "index_name": "idx",
+        "object_name": "knowledge_base/a.txt",
+        "include_hidden": True,
+    }
+
+    tasks._update_file_lifecycle(
+        file_id="fid-missing",
+        tenant_id="tenant-1",
+        index_name="idx",
+        source="knowledge_base/fallback.txt",
+        status="FAILED",
+        stage="PROCESS",
+    )
+    assert calls[1][0] == "fid-5"
+    assert lookups[1] == {
+        "file_id": "fid-missing",
+        "tenant_id": "tenant-1",
+        "index_name": "idx",
+        "include_hidden": True,
+    }
+    assert lookups[2] == {
+        "tenant_id": "tenant-1",
+        "index_name": "idx",
+        "object_name": "knowledge_base/fallback.txt",
+        "include_hidden": True,
+    }
+
+    lifecycle_module.get_file_record = lambda **kwargs: {"file_id": "fid-4", "status": "DELETED"}
+    tasks._update_file_lifecycle(
+        file_id="fid-4",
+        tenant_id="tenant-1",
+        index_name="idx",
+        source="knowledge_base/deleted.txt",
+        status="FAILED",
+        stage="PROCESS",
+    )
+    assert len(calls) == 2
+
+    tasks._update_file_lifecycle(
+        file_id="fid-5",
+        tenant_id="tenant-1",
+        index_name=None,
+        source="knowledge_base/no-index.txt",
+        status="FAILED",
+        stage="PROCESS",
+    )
 
 
 def test_estimate_parallel_parts_edge_cases(monkeypatch):
@@ -3767,7 +4159,7 @@ def test_extract_error_code_handles_regex_failure(monkeypatch):
     tasks, _ = import_tasks_with_fake_ray(monkeypatch)
     monkeypatch.setattr(tasks.re, "search", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("regex")))
 
-    assert tasks.extract_error_code("plain error") == "unknown_error"
+    assert tasks.extract_error_code("plain error") is None
     assert tasks._extract_error_code_from_es_response(None, "plain error") is None
 
 
