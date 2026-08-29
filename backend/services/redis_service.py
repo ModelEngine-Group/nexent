@@ -1,11 +1,13 @@
 import json
 import logging
 import re
+import time
 from typing import Dict, Any, Optional, Tuple, Set, List
 
 import redis
 
 from consts.const import (
+    CELERY_RESULT_EXPIRES,
     REDIS_BACKEND_URL,
     REDIS_ERROR_INFO_SCAN_COUNT,
     REDIS_ERROR_INFO_TTL_SECONDS,
@@ -13,6 +15,16 @@ from consts.const import (
 )
 
 logger = logging.getLogger(__name__)
+
+INGESTION_KEY_PREFIX = "dp:ingestion:"
+INGESTION_TASK_KEY_PREFIX = "dp:ingestion:task:"
+INGESTION_INDEX_KEY_PREFIX = "dp:ingestions:index:"
+INGESTION_ACTIVE_KEY = "dp:ingestions:active"
+INGESTION_TERMINAL_STATES = {
+    "COMPLETED",
+    "PROCESS_FAILED",
+    "FORWARD_FAILED",
+}
 
 
 class RedisService:
@@ -162,10 +174,11 @@ class RedisService:
             result["tasks_cancelled"] = celery_deleted  # Each deleted task was also cancelled
 
             # 2. Clean up any cache keys related to this knowledge base
+            lifecycle_deleted = self.delete_ingestion_records(index_name)
             cache_deleted = self._cleanup_cache_keys(index_name)
             result["cache_keys_deleted"] = cache_deleted
 
-            result["total_deleted"] = celery_deleted + cache_deleted
+            result["total_deleted"] = celery_deleted + cache_deleted + lifecycle_deleted
 
             logger.info(f"Redis cleanup completed for {index_name}: "
                        f"Celery tasks: {celery_deleted}, Cache keys: {cache_deleted}, "
@@ -207,9 +220,10 @@ class RedisService:
 
             # 2. Clean up any cache keys related to this specific document
             cache_deleted = self._cleanup_document_cache_keys(index_name, path_or_url)
+            lifecycle_deleted = self.delete_ingestion_records(index_name, path_or_url)
             result["cache_keys_deleted"] = cache_deleted
 
-            result["total_deleted"] = celery_deleted + cache_deleted
+            result["total_deleted"] = celery_deleted + cache_deleted + lifecycle_deleted
 
             logger.info(f"Redis cleanup completed for document {path_or_url} in {index_name}: "
                        f"Celery tasks: {celery_deleted}, Cache keys: {cache_deleted}")
@@ -639,6 +653,253 @@ class RedisService:
         except Exception as e:
             logger.error(f"Redis ping failed: {str(e)}")
             return False
+
+    # ------------------------------------------------------------------
+    # Durable ingestion lifecycle
+    # ------------------------------------------------------------------
+
+    def create_ingestion_record(
+        self,
+        *,
+        ingestion_id: str,
+        process_task_id: str,
+        forward_task_id: str,
+        cleanup_task_id: str,
+        index_name: str,
+        source: str,
+        source_type: str,
+        original_filename: Optional[str],
+    ) -> bool:
+        """Create the durable record before publishing the Celery chain."""
+        if not all((ingestion_id, process_task_id, forward_task_id, index_name, source)):
+            raise ValueError("Incomplete ingestion lifecycle metadata")
+
+        now = time.time()
+        key = f"{INGESTION_KEY_PREFIX}{ingestion_id}"
+        index_key = f"{INGESTION_INDEX_KEY_PREFIX}{index_name}"
+        record = {
+            "id": ingestion_id,
+            "process_task_id": process_task_id,
+            "forward_task_id": forward_task_id,
+            "cleanup_task_id": cleanup_task_id,
+            "latest_task_id": process_task_id,
+            "index_name": index_name,
+            "source": source,
+            "source_type": source_type or "",
+            "original_filename": original_filename or "",
+            "state": "WAIT_FOR_PROCESSING",
+            "stage": "queued_for_processing",
+            "created_at": str(now),
+            "updated_at": str(now),
+            "stage_started_at": str(now),
+            "heartbeat_at": str(now),
+            "processed_chunks": "",
+            "total_chunks": "",
+            "progress_completed_at": "",
+            "error_reason": "",
+        }
+        retention = max(60, CELERY_RESULT_EXPIRES)
+        pipe = self.client.pipeline(transaction=True)
+        pipe.hset(key, mapping=record)
+        pipe.expire(key, retention)
+        pipe.setex(
+            f"{INGESTION_TASK_KEY_PREFIX}{process_task_id}",
+            retention,
+            ingestion_id,
+        )
+        pipe.setex(
+            f"{INGESTION_TASK_KEY_PREFIX}{forward_task_id}",
+            retention,
+            ingestion_id,
+        )
+        pipe.zadd(index_key, {ingestion_id: now})
+        pipe.expire(index_key, retention)
+        pipe.zadd(INGESTION_ACTIVE_KEY, {ingestion_id: now})
+        pipe.execute()
+        return True
+
+    def get_ingestion_id_by_task(self, task_id: str) -> Optional[str]:
+        if not task_id:
+            return None
+        value = self.client.get(f"{INGESTION_TASK_KEY_PREFIX}{task_id}")
+        if isinstance(value, bytes):
+            value = value.decode("utf-8")
+        return value or None
+
+    def update_ingestion_record(
+        self,
+        ingestion_id: str,
+        *,
+        state: Optional[str] = None,
+        stage: Optional[str] = None,
+        latest_task_id: Optional[str] = None,
+        error_reason: Optional[str] = None,
+        processed_chunks: Optional[int] = None,
+        total_chunks: Optional[int] = None,
+        heartbeat_only: bool = False,
+    ) -> bool:
+        """Update a lifecycle record without allowing terminal-state regression."""
+        if not ingestion_id:
+            return False
+
+        key = f"{INGESTION_KEY_PREFIX}{ingestion_id}"
+        now = time.time()
+        for _ in range(5):
+            pipe = self.client.pipeline()
+            try:
+                pipe.watch(key)
+                current = pipe.hgetall(key)
+                if not current:
+                    return False
+                current_state = current.get("state", "")
+                if current_state in INGESTION_TERMINAL_STATES:
+                    return state == current_state or state is None
+
+                mapping: Dict[str, Any] = {
+                    "updated_at": str(now),
+                    "heartbeat_at": str(now),
+                }
+                if not heartbeat_only:
+                    if state:
+                        mapping["state"] = state
+                    if stage:
+                        mapping["stage"] = stage
+                    if latest_task_id:
+                        mapping["latest_task_id"] = latest_task_id
+                    if error_reason is not None:
+                        mapping["error_reason"] = error_reason
+                    if processed_chunks is not None:
+                        mapping["processed_chunks"] = str(processed_chunks)
+                    if total_chunks is not None:
+                        mapping["total_chunks"] = str(total_chunks)
+
+                    if state and state != current_state:
+                        mapping["stage_started_at"] = str(now)
+
+                    effective_processed = (
+                        processed_chunks
+                        if processed_chunks is not None
+                        else self._optional_int(current.get("processed_chunks"))
+                    )
+                    effective_total = (
+                        total_chunks
+                        if total_chunks is not None
+                        else self._optional_int(current.get("total_chunks"))
+                    )
+                    if (
+                        effective_total is not None
+                        and effective_total > 0
+                        and effective_processed is not None
+                        and effective_processed >= effective_total
+                        and not current.get("progress_completed_at")
+                    ):
+                        mapping["progress_completed_at"] = str(now)
+
+                next_state = state or current_state
+                retention = max(60, CELERY_RESULT_EXPIRES)
+                pipe.multi()
+                pipe.hset(key, mapping=mapping)
+                pipe.expire(key, retention)
+                if next_state in INGESTION_TERMINAL_STATES:
+                    pipe.zrem(INGESTION_ACTIVE_KEY, ingestion_id)
+                else:
+                    pipe.zadd(INGESTION_ACTIVE_KEY, {ingestion_id: now})
+                pipe.execute()
+
+                if error_reason and latest_task_id:
+                    self.save_error_info(latest_task_id, error_reason)
+                return True
+            except redis.WatchError:
+                continue
+            finally:
+                pipe.reset()
+        return False
+
+    def update_ingestion_by_task(self, task_id: str, **updates: Any) -> bool:
+        ingestion_id = self.get_ingestion_id_by_task(task_id)
+        if not ingestion_id:
+            return False
+        return self.update_ingestion_record(ingestion_id, **updates)
+
+    def get_ingestion_records(self, index_name: Optional[str] = None, active_only: bool = False) -> List[Dict[str, Any]]:
+        if active_only:
+            ids = self.client.zrange(INGESTION_ACTIVE_KEY, 0, -1)
+        elif index_name:
+            ids = self.client.zrange(f"{INGESTION_INDEX_KEY_PREFIX}{index_name}", 0, -1)
+        else:
+            return []
+        if not ids:
+            return []
+
+        pipe = self.client.pipeline()
+        for ingestion_id in ids:
+            pipe.hgetall(f"{INGESTION_KEY_PREFIX}{ingestion_id}")
+        raw_records = pipe.execute()
+        records: List[Dict[str, Any]] = []
+        stale_ids: List[str] = []
+        for ingestion_id, record in zip(ids, raw_records):
+            if not record:
+                stale_ids.append(ingestion_id)
+                continue
+            for field in (
+                "created_at",
+                "updated_at",
+                "stage_started_at",
+                "heartbeat_at",
+                "progress_completed_at",
+            ):
+                if record.get(field):
+                    try:
+                        record[field] = float(record[field])
+                    except (TypeError, ValueError):
+                        pass
+            for field in ("processed_chunks", "total_chunks"):
+                record[field] = self._optional_int(record.get(field))
+            records.append(record)
+        if stale_ids:
+            target_key = (
+                INGESTION_ACTIVE_KEY
+                if active_only
+                else f"{INGESTION_INDEX_KEY_PREFIX}{index_name}"
+            )
+            self.client.zrem(target_key, *stale_ids)
+        return records
+
+    def delete_ingestion_records(self, index_name: str, source: Optional[str] = None) -> int:
+        """Delete durable lifecycle records when their document or knowledge base is deleted."""
+        records = self.get_ingestion_records(index_name)
+        selected = [
+            record for record in records
+            if source is None or record.get("source") == source
+        ]
+        if not selected:
+            return 0
+
+        index_key = f"{INGESTION_INDEX_KEY_PREFIX}{index_name}"
+        pipe = self.client.pipeline(transaction=True)
+        for record in selected:
+            ingestion_id = record.get("id", "")
+            process_task_id = record.get("process_task_id", "")
+            forward_task_id = record.get("forward_task_id", "")
+            pipe.delete(f"{INGESTION_KEY_PREFIX}{ingestion_id}")
+            pipe.delete(f"{INGESTION_TASK_KEY_PREFIX}{process_task_id}")
+            pipe.delete(f"{INGESTION_TASK_KEY_PREFIX}{forward_task_id}")
+            pipe.delete(f"progress:{forward_task_id}")
+            pipe.delete(f"error:reason:{process_task_id}")
+            pipe.delete(f"error:reason:{forward_task_id}")
+            pipe.zrem(INGESTION_ACTIVE_KEY, ingestion_id)
+            pipe.zrem(index_key, ingestion_id)
+        pipe.execute()
+        return len(selected)
+
+    @staticmethod
+    def _optional_int(value: Any) -> Optional[int]:
+        if value in (None, ""):
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
 
     def save_error_info(
         self,

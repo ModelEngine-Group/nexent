@@ -315,6 +315,59 @@ async def test_get_all_files_status_no_tasks_returns_empty(fmu, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_get_all_files_status_prefers_durable_terminal_lifecycle(fmu, monkeypatch):
+    tasks_list = [
+        {
+            "id": "forward-1",
+            "task_name": "forward",
+            "index_name": "idx",
+            "path_or_url": "/bucket/file.xlsx",
+            "original_filename": "file.xlsx",
+            "source_type": "minio",
+            "status": "FAILURE",
+            "lifecycle_state": "FORWARD_FAILED",
+            "error_reason": '{"error_code": "finalization_timeout"}',
+            "processed_chunks": 122,
+            "total_chunks": 122,
+            "created_at": 20,
+            "updated_at": 20,
+        },
+        {
+            "id": "legacy-forward",
+            "task_name": "forward",
+            "index_name": "idx",
+            "path_or_url": "/bucket/file.xlsx",
+            "status": "STARTED",
+            "created_at": 10,
+        },
+    ]
+    fake_client = _FakeAsyncClient(_Resp(200, tasks_list))
+    monkeypatch.setattr(
+        fmu,
+        "httpx",
+        types.SimpleNamespace(AsyncClient=lambda: fake_client),
+    )
+    services_pkg = types.ModuleType("services")
+    services_pkg.__path__ = []
+    sys.modules["services"] = services_pkg
+    redis_mod = types.ModuleType("services.redis_service")
+    redis_mod.get_redis_service = lambda: types.SimpleNamespace(
+        batch_get_progress_info=lambda task_ids: {}
+    )
+    sys.modules["services.redis_service"] = redis_mod
+
+    out = await fmu.get_all_files_status("idx")
+
+    assert out["/bucket/file.xlsx"]["state"] == "FORWARD_FAILED"
+    assert out["/bucket/file.xlsx"]["latest_task_id"] == "forward-1"
+    assert out["/bucket/file.xlsx"]["processed_chunks"] == 122
+    assert out["/bucket/file.xlsx"]["total_chunks"] == 122
+    assert out["/bucket/file.xlsx"]["error_reason"] == (
+        '{"error_code": "finalization_timeout"}'
+    )
+
+
+@pytest.mark.asyncio
 async def test_get_all_files_status_forward_updates_and_redis_progress(fmu, monkeypatch):
     tasks_list = [
         {

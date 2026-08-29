@@ -829,17 +829,21 @@ service_manager = None
 async def lifespan(app: FastAPI):
     """FastAPI lifespan event handler for startup and shutdown"""
     global service_manager
+    from services.data_process_service import get_data_process_service
 
     # Startup
     logger.info("Starting data processing service...")
-
-    yield
-
-    # Shutdown
-    logger.info("Shutting down data processing service...")
-    if service_manager and not service_manager._shutdown_called:
-        service_manager.stop_all_services()
-    logger.info("Data processing service shutdown complete")
+    data_process_api_service = get_data_process_service()
+    await data_process_api_service.start()
+    try:
+        yield
+    finally:
+        # Shutdown
+        logger.info("Shutting down data processing service...")
+        await data_process_api_service.stop()
+        if service_manager and not service_manager._shutdown_called:
+            service_manager.stop_all_services()
+        logger.info("Data processing service shutdown complete")
 
 def create_app():
     """Create FastAPI application"""

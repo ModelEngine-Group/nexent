@@ -10,7 +10,10 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 
-import { DOCUMENT_ACTION_TYPES } from "@/const/knowledgeBase";
+import {
+  DOCUMENT_ACTION_TYPES,
+  DOCUMENT_STATUS,
+} from "@/const/knowledgeBase";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
 import { DocumentState, DocumentAction } from "@/types/knowledgeBase";
 import type { QuotaStatusResponse } from "@/types/quota";
@@ -22,16 +25,48 @@ const documentReducer = (
   action: DocumentAction
 ): DocumentState => {
   switch (action.type) {
-    case DOCUMENT_ACTION_TYPES.FETCH_SUCCESS:
+    case DOCUMENT_ACTION_TYPES.FETCH_SUCCESS: {
+      const previousDocuments = state.documentsMap[action.payload.kbId] || [];
+      const previousById = new Map(
+        previousDocuments.map((doc) => [doc.id, doc])
+      );
+      const terminalStatuses = new Set<string>([
+        DOCUMENT_STATUS.COMPLETED,
+        DOCUMENT_STATUS.PROCESS_FAILED,
+        DOCUMENT_STATUS.FORWARD_FAILED,
+      ]);
+      const nonTerminalStatuses = new Set<string>([
+        DOCUMENT_STATUS.WAIT_FOR_PROCESSING,
+        DOCUMENT_STATUS.PROCESSING,
+        DOCUMENT_STATUS.WAIT_FOR_FORWARDING,
+        DOCUMENT_STATUS.FORWARDING,
+      ]);
+      const documents = action.payload.documents.map((document) => {
+        const previous = previousById.get(document.id);
+        if (
+          previous &&
+          terminalStatuses.has(previous.status) &&
+          nonTerminalStatuses.has(document.status)
+        ) {
+          return {
+            ...document,
+            status: previous.status,
+            latest_task_id: previous.latest_task_id,
+            error_reason: previous.error_reason || document.error_reason,
+          };
+        }
+        return document;
+      });
       return {
         ...state,
         documentsMap: {
           ...state.documentsMap,
-          [action.payload.kbId]: action.payload.documents,
+          [action.payload.kbId]: documents,
         },
         isLoadingDocuments: false,
         error: null,
       };
+    }
     case DOCUMENT_ACTION_TYPES.SELECT_DOCUMENT:
       // Toggle document selection
       const docId = action.payload;

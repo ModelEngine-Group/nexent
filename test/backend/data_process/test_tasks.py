@@ -5,6 +5,7 @@ import types
 import json
 from contextlib import contextmanager
 from typing import Optional
+from unittest.mock import MagicMock
 
 import pytest
 from celery.exceptions import Retry
@@ -1461,7 +1462,7 @@ def test_forward_vectorize_documents_unexpected_error(monkeypatch):
     json.loads(str(ei.value))
 
 
-def test_submit_process_forward_chain_returns_empty_when_apply_async_none(monkeypatch):
+def test_submit_process_forward_chain_marks_failure_when_apply_async_none(monkeypatch):
     tasks, _ = import_tasks_with_fake_ray(monkeypatch)
 
     class FakeChain:
@@ -1469,13 +1470,25 @@ def test_submit_process_forward_chain_returns_empty_when_apply_async_none(monkey
             return None
 
     monkeypatch.setattr(tasks, "chain", lambda *a, **k: FakeChain())
+    lifecycle = MagicMock()
+    monkeypatch.setattr(tasks, "get_redis_service", lambda: lifecycle)
+    ids = iter(["process-id", "forward-id", "cleanup-id"])
+    monkeypatch.setattr(tasks, "celery_uuid", lambda: next(ids))
     import backend.data_process.tasks as tasks_module
     tasks_module.process = tasks.process
     tasks_module.forward = tasks.forward
     tasks_module.cleanup_source = tasks.cleanup_source
     out = tasks.submit_process_forward_chain(
         source="/a.txt", source_type="local", chunking_strategy="basic", index_name="idx")
-    assert out == ""
+    assert out == "forward-id"
+    lifecycle.create_ingestion_record.assert_called_once()
+    lifecycle.update_ingestion_record.assert_called_once_with(
+        "forward-id",
+        state="PROCESS_FAILED",
+        stage="enqueue_failed",
+        latest_task_id="process-id",
+        error_reason='{"error_code": "enqueue_failed"}',
+    )
 
 
 def test_process_and_forward_returns_empty_when_apply_async_none(monkeypatch):
@@ -1599,13 +1612,19 @@ def test_submit_process_forward_chain_returns_chain_id(monkeypatch):
             return FakeResult("123")
 
     monkeypatch.setattr(tasks, "chain", lambda *a, **k: FakeChain())
+    lifecycle = MagicMock()
+    monkeypatch.setattr(tasks, "get_redis_service", lambda: lifecycle)
+    ids = iter(["process-id", "forward-id", "cleanup-id"])
+    monkeypatch.setattr(tasks, "celery_uuid", lambda: next(ids))
     import backend.data_process.tasks as tasks_module
     tasks_module.process = tasks.process
     tasks_module.forward = tasks.forward
     tasks_module.cleanup_source = tasks.cleanup_source
     chain_id = tasks.submit_process_forward_chain(
         source="/a.txt", source_type="local", chunking_strategy="basic", index_name="idx")
-    assert chain_id == "123"
+    assert chain_id == "forward-id"
+    lifecycle.create_ingestion_record.assert_called_once()
+    lifecycle.update_ingestion_record.assert_not_called()
 
 
 def test_process_and_forward_returns_chain_id(monkeypatch):

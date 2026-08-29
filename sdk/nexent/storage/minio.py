@@ -31,7 +31,9 @@ class MinIOStorageClient(StorageClient):
         secret_key: str,
         region: Optional[str] = None,
         default_bucket: Optional[str] = None,
-        secure: bool = True
+        secure: bool = True,
+        connect_timeout: int = 10,
+        read_timeout: int = 60,
     ):
         """
         Initialize MinIO storage client
@@ -43,6 +45,8 @@ class MinIOStorageClient(StorageClient):
             region: AWS region name (optional, defaults to 'us-east-1')
             default_bucket: Default bucket name (optional)
             secure: Whether to use HTTPS (default: True)
+            connect_timeout: Maximum connection establishment time in seconds
+            read_timeout: Maximum socket read wait in seconds
         """
         self.endpoint = endpoint
         self.access_key = access_key
@@ -64,7 +68,10 @@ class MinIOStorageClient(StorageClient):
                 proxies={
                     'http': None,
                     'https': None
-                }
+                },
+                connect_timeout=max(1, connect_timeout),
+                read_timeout=max(1, read_timeout),
+                retries={'max_attempts': 3, 'mode': 'standard'},
             )
         )
 

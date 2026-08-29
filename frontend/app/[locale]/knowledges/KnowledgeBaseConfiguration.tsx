@@ -20,6 +20,7 @@ import {
 import {
   DOCUMENT_ACTION_TYPES,
   KNOWLEDGE_BASE_ACTION_TYPES,
+  NON_TERMINAL_STATUSES,
 } from "@/const/knowledgeBase";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 import log from "@/lib/logger";
@@ -487,6 +488,17 @@ function DataConfig({ isActive }: DataConfigProps) {
 
       // Trigger document update event
       knowledgeBasePollingService.triggerDocumentsUpdate(kb.id, documents);
+
+      if (documents.some((doc) => NON_TERMINAL_STATUSES.includes(doc.status))) {
+        knowledgeBasePollingService.startDocumentStatusPolling(
+          kb.id,
+          (updatedDocuments) =>
+            knowledgeBasePollingService.triggerDocumentsUpdate(
+              kb.id,
+              updatedDocuments
+            )
+        );
+      }
 
       // Background update knowledge base statistics, but don't duplicate document fetching
       setTimeout(async () => {

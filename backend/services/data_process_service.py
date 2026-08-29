@@ -2,6 +2,7 @@ import asyncio
 import base64
 import concurrent.futures
 import io
+import json
 import logging
 import os
 import shutil
@@ -16,10 +17,22 @@ import redis
 import torch
 from PIL import Image
 from celery import states
+from celery.result import AsyncResult
 from transformers import CLIPProcessor, CLIPModel
 from nexent.data_process.core import DataProcessCore
 
-from consts.const import CLIP_MODEL_PATH, IMAGE_FILTER, MAX_CONCURRENT_CONVERSIONS, REDIS_BACKEND_URL, REDIS_URL
+from consts.const import (
+    CELERY_TASK_TIME_LIMIT,
+    CLIP_MODEL_PATH,
+    DP_FORWARD_FILE_TIMEOUT_S,
+    DP_INGESTION_FINALIZATION_TIMEOUT_S,
+    DP_INGESTION_QUEUE_TIMEOUT_S,
+    DP_INGESTION_WATCHDOG_INTERVAL_S,
+    IMAGE_FILTER,
+    MAX_CONCURRENT_CONVERSIONS,
+    REDIS_BACKEND_URL,
+    REDIS_URL,
+)
 from consts.exceptions import OfficeConversionException
 from consts.model import BatchTaskRequest
 from database.attachment_db import delete_file, file_exists, get_file_size_from_minio, get_file_stream, upload_file
@@ -27,6 +40,7 @@ from utils.file_management_utils import convert_office_to_pdf
 from data_process.app import app as celery_app
 from data_process.tasks import submit_process_forward_chain
 from data_process.utils import get_task_details, get_task_info, get_all_task_ids_from_redis
+from services.redis_service import get_redis_service
 
 # Limit concurrent LibreOffice processes to avoid resource exhaustion
 _conversion_semaphore = asyncio.Semaphore(MAX_CONCURRENT_CONVERSIONS)
@@ -58,6 +72,7 @@ class DataProcessService:
         self._inspector_ttl = 300
         self._inspector_lock = None
         self._inspector_lock = threading.Lock()
+        self._ingestion_watchdog_task: Optional[asyncio.Task] = None
 
     def _init_redis_client(self):
         """Initializes the Redis client and connection pool."""
@@ -99,11 +114,227 @@ class DataProcessService:
 
     async def start(self):
         """Start the data processing service"""
+        if self._ingestion_watchdog_task is None or self._ingestion_watchdog_task.done():
+            self._ingestion_watchdog_task = asyncio.create_task(
+                self._run_ingestion_watchdog(),
+                name="ingestion-lifecycle-watchdog",
+            )
         logger.info("Data processing service started")
 
     async def stop(self):
         """Stop the data processing service"""
+        if self._ingestion_watchdog_task is not None:
+            self._ingestion_watchdog_task.cancel()
+            try:
+                await self._ingestion_watchdog_task
+            except asyncio.CancelledError:
+                pass
+            self._ingestion_watchdog_task = None
         logger.info("Data processing service stopped")
+
+    async def _run_ingestion_watchdog(self) -> None:
+        """Continuously converge every durable ingestion record to a terminal state."""
+        interval = max(1, DP_INGESTION_WATCHDOG_INTERVAL_S)
+        while True:
+            try:
+                await asyncio.to_thread(self._reconcile_ingestions_once)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.exception("Ingestion watchdog iteration failed: %s", exc)
+            await asyncio.sleep(interval)
+
+    def _reconcile_ingestions_once(self) -> int:
+        redis_service = get_redis_service()
+        records = redis_service.get_ingestion_records(active_only=True)
+        reconciled = 0
+        now = time.time()
+        for record in records:
+            try:
+                if self._reconcile_ingestion_record(redis_service, record, now):
+                    reconciled += 1
+            except Exception as exc:
+                logger.exception(
+                    "Failed to reconcile ingestion id=%s source=%s: %s",
+                    record.get("id"),
+                    record.get("source"),
+                    exc,
+                )
+        if records:
+            logger.info(
+                "Ingestion watchdog checked=%s changed=%s",
+                len(records),
+                reconciled,
+            )
+        return reconciled
+
+    def _reconcile_ingestion_record(self, redis_service, record: Dict[str, Any], now: float) -> bool:
+        ingestion_id = record.get("id", "")
+        process_task_id = record.get("process_task_id", "")
+        forward_task_id = record.get("forward_task_id", "")
+        state = record.get("state", "WAIT_FOR_PROCESSING")
+        stage_started_at = float(record.get("stage_started_at") or record.get("created_at") or now)
+
+        process_result = AsyncResult(process_task_id, app=celery_app)
+        forward_result = AsyncResult(forward_task_id, app=celery_app)
+        process_state = process_result.state
+        forward_state = forward_result.state
+
+        if forward_state == states.SUCCESS:
+            return redis_service.update_ingestion_record(
+                ingestion_id,
+                state="COMPLETED",
+                stage="completed",
+                latest_task_id=forward_task_id,
+            )
+        if process_state == states.FAILURE:
+            return self._fail_ingestion(
+                redis_service,
+                record,
+                state="PROCESS_FAILED",
+                task_id=process_task_id,
+                error_code=self._result_error_code(process_result, "process_task_failed"),
+            )
+        if forward_state == states.FAILURE:
+            return self._fail_ingestion(
+                redis_service,
+                record,
+                state="FORWARD_FAILED",
+                task_id=forward_task_id,
+                error_code=self._result_error_code(forward_result, "forward_task_failed"),
+            )
+
+        if state == "FORWARDING":
+            progress = redis_service.get_progress_info(forward_task_id)
+            if progress:
+                processed_chunks = progress.get("processed_chunks")
+                total_chunks = progress.get("total_chunks")
+                if (
+                    processed_chunks != record.get("processed_chunks")
+                    or total_chunks != record.get("total_chunks")
+                ):
+                    return redis_service.update_ingestion_record(
+                        ingestion_id,
+                        state="FORWARDING",
+                        stage="vectorizing_and_storing",
+                        latest_task_id=forward_task_id,
+                        processed_chunks=processed_chunks,
+                        total_chunks=total_chunks,
+                    )
+
+        if forward_state == states.STARTED and state != "FORWARDING":
+            return redis_service.update_ingestion_record(
+                ingestion_id,
+                state="FORWARDING",
+                stage="vectorizing_and_storing",
+                latest_task_id=forward_task_id,
+            )
+        if process_state == states.SUCCESS and state in {"WAIT_FOR_PROCESSING", "PROCESSING"}:
+            return redis_service.update_ingestion_record(
+                ingestion_id,
+                state="WAIT_FOR_FORWARDING",
+                stage="queued_for_forwarding",
+                latest_task_id=forward_task_id,
+            )
+        if process_state == states.STARTED and state == "WAIT_FOR_PROCESSING":
+            return redis_service.update_ingestion_record(
+                ingestion_id,
+                state="PROCESSING",
+                stage="extracting_text",
+                latest_task_id=process_task_id,
+            )
+
+        elapsed = max(0.0, now - stage_started_at)
+        if state == "WAIT_FOR_PROCESSING" and elapsed > DP_INGESTION_QUEUE_TIMEOUT_S:
+            return self._fail_ingestion(
+                redis_service,
+                record,
+                state="PROCESS_FAILED",
+                task_id=process_task_id,
+                error_code="processing_queue_timeout",
+            )
+        if state == "PROCESSING" and elapsed > CELERY_TASK_TIME_LIMIT + DP_INGESTION_FINALIZATION_TIMEOUT_S:
+            return self._fail_ingestion(
+                redis_service,
+                record,
+                state="PROCESS_FAILED",
+                task_id=process_task_id,
+                error_code="processing_timeout",
+            )
+        if state == "WAIT_FOR_FORWARDING" and elapsed > DP_INGESTION_QUEUE_TIMEOUT_S:
+            return self._fail_ingestion(
+                redis_service,
+                record,
+                state="FORWARD_FAILED",
+                task_id=forward_task_id,
+                error_code="forward_queue_timeout",
+            )
+        if state == "FORWARDING":
+            completed_at = float(record.get("progress_completed_at") or 0)
+            if completed_at and now - completed_at > DP_INGESTION_FINALIZATION_TIMEOUT_S:
+                return self._fail_ingestion(
+                    redis_service,
+                    record,
+                    state="FORWARD_FAILED",
+                    task_id=forward_task_id,
+                    error_code="finalization_timeout",
+                )
+            if elapsed > DP_FORWARD_FILE_TIMEOUT_S + DP_INGESTION_FINALIZATION_TIMEOUT_S:
+                return self._fail_ingestion(
+                    redis_service,
+                    record,
+                    state="FORWARD_FAILED",
+                    task_id=forward_task_id,
+                    error_code="forward_timeout",
+                )
+        return False
+
+    @staticmethod
+    def _result_error_code(result: AsyncResult, fallback: str) -> str:
+        info = result.info
+        if isinstance(info, dict) and info.get("error_code"):
+            return str(info["error_code"])
+        try:
+            parsed = json.loads(str(info))
+            if isinstance(parsed, dict) and parsed.get("error_code"):
+                return str(parsed["error_code"])
+        except (TypeError, ValueError, json.JSONDecodeError):
+            pass
+        return fallback
+
+    @staticmethod
+    def _fail_ingestion(redis_service, record: Dict[str, Any], *, state: str, task_id: str, error_code: str) -> bool:
+        reason = json.dumps({"error_code": error_code}, ensure_ascii=False)
+        updated = redis_service.update_ingestion_record(
+            record.get("id", ""),
+            state=state,
+            stage="watchdog_failed",
+            latest_task_id=task_id,
+            error_reason=reason,
+        )
+        if not updated:
+            return False
+
+        for candidate in (record.get("process_task_id"), record.get("forward_task_id")):
+            if not candidate:
+                continue
+            try:
+                celery_app.control.revoke(candidate, terminate=True, signal="SIGTERM")
+            except Exception as exc:
+                logger.warning("Failed to revoke timed-out task %s: %s", candidate, exc)
+        try:
+            redis_service.backend_client.zrem("dp:file-processing-slots", record.get("process_task_id", ""))
+            redis_service.backend_client.delete(f"dp:{record.get('process_task_id', '')}:chunks")
+        except Exception as exc:
+            logger.warning("Failed to clean timed-out ingestion payloads: %s", exc)
+        logger.error(
+            "Ingestion forced to terminal state id=%s source=%s state=%s error_code=%s",
+            record.get("id"),
+            record.get("source"),
+            state,
+            error_code,
+        )
+        return True
 
     def _get_celery_inspector(self):
         """Get Celery inspector (cached for performance)"""
@@ -288,8 +519,60 @@ class DataProcessService:
             List[Dict[str, Any]]: Tasks for the specified index
         """
         task_list = await self.get_all_tasks(filter)
-        # May got multiple tasks for the same index
-        return [task for task in task_list if task.get('index_name') == index_name]
+        tasks_for_index = [
+            task for task in task_list if task.get('index_name') == index_name
+        ]
+
+        # Durable records are returned alongside legacy Celery results. Consumers
+        # can prefer lifecycle_state, which remains attributable after worker loss.
+        try:
+            records = await asyncio.to_thread(
+                get_redis_service().get_ingestion_records,
+                index_name,
+            )
+            for record in records:
+                state = record.get("state", "WAIT_FOR_PROCESSING")
+                is_process = state in {
+                    "WAIT_FOR_PROCESSING",
+                    "PROCESSING",
+                    "PROCESS_FAILED",
+                }
+                tasks_for_index.append({
+                    "id": record.get("latest_task_id") or (
+                        record.get("process_task_id") if is_process else record.get("forward_task_id")
+                    ),
+                    "ingestion_id": record.get("id"),
+                    "index_name": record.get("index_name", ""),
+                    "task_name": "process" if is_process else "forward",
+                    "path_or_url": record.get("source", ""),
+                    "source_type": record.get("source_type", ""),
+                    "original_filename": record.get("original_filename", ""),
+                    "status": self._custom_state_to_celery(state),
+                    "lifecycle_state": state,
+                    "created_at": record.get("updated_at") or record.get("created_at") or time.time(),
+                    "updated_at": record.get("updated_at") or time.time(),
+                    "processed_chunks": record.get("processed_chunks"),
+                    "total_chunks": record.get("total_chunks"),
+                    "error": record.get("error_reason") or None,
+                    "error_reason": record.get("error_reason") or None,
+                })
+        except Exception as exc:
+            logger.exception(
+                "Failed to load durable ingestion records for index=%s: %s",
+                index_name,
+                exc,
+            )
+        return tasks_for_index
+
+    @staticmethod
+    def _custom_state_to_celery(state: str) -> str:
+        if state in {"PROCESS_FAILED", "FORWARD_FAILED"}:
+            return states.FAILURE
+        if state == "COMPLETED":
+            return states.SUCCESS
+        if state in {"PROCESSING", "FORWARDING"}:
+            return states.STARTED
+        return states.PENDING
 
     def check_image_size(self, width: int, height: int, min_width: int = 200, min_height: int = 200) -> bool:
         """Check if the image dimensions meet the minimum requirements

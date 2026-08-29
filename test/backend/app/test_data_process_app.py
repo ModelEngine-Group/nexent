@@ -177,6 +177,11 @@ def stub_modules(monkeypatch):
             return _tasks.process_sync_apply_async(**kwargs)
     setattr(tasks_mod, "process_and_forward", _PAndF())
     setattr(tasks_mod, "process_sync", _PSync())
+    setattr(
+        tasks_mod,
+        "submit_process_forward_chain",
+        lambda **kwargs: _tasks.process_and_forward_delay(**kwargs).id,
+    )
     sys.modules["data_process.tasks"] = tasks_mod
 
     # services.data_process_service

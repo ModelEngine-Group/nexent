@@ -19,7 +19,9 @@ class MinIOStorageConfig(StorageConfig):
         secret_key: str,
         region: Optional[str] = None,
         default_bucket: Optional[str] = None,
-        secure: bool = True
+        secure: bool = True,
+        connect_timeout: int = 10,
+        read_timeout: int = 60,
     ):
         """
         Initialize MinIO storage configuration
@@ -38,6 +40,8 @@ class MinIOStorageConfig(StorageConfig):
         self._region = region
         self._default_bucket = default_bucket
         self._secure = secure
+        self._connect_timeout = connect_timeout
+        self._read_timeout = read_timeout
 
     @property
     def storage_type(self) -> StorageType:
@@ -74,6 +78,14 @@ class MinIOStorageConfig(StorageConfig):
         """Get secure flag"""
         return self._secure
 
+    @property
+    def connect_timeout(self) -> int:
+        return self._connect_timeout
+
+    @property
+    def read_timeout(self) -> int:
+        return self._read_timeout
+
     def validate(self) -> None:
         """
         Validate MinIO configuration parameters
@@ -87,4 +99,7 @@ class MinIOStorageConfig(StorageConfig):
             raise ValueError("access_key is required for MinIO storage")
         if not self._secret_key:
             raise ValueError("secret_key is required for MinIO storage")
-
+        if self._connect_timeout <= 0:
+            raise ValueError("connect_timeout must be positive")
+        if self._read_timeout <= 0:
+            raise ValueError("read_timeout must be positive")

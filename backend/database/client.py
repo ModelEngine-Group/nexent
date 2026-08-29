@@ -10,6 +10,8 @@ from consts.const import (
     MINIO_ACCESS_KEY,
     MINIO_DEFAULT_BUCKET,
     MINIO_ENDPOINT,
+    MINIO_CONNECT_TIMEOUT_S,
+    MINIO_READ_TIMEOUT_S,
     MINIO_REGION,
     MINIO_SECRET_KEY,
     NEXENT_POSTGRES_PASSWORD,
@@ -104,7 +106,9 @@ class MinioClient:
                 secret_key=MINIO_SECRET_KEY,
                 region=MINIO_REGION,
                 default_bucket=MINIO_DEFAULT_BUCKET,
-                secure=secure
+                secure=secure,
+                connect_timeout=MINIO_CONNECT_TIMEOUT_S,
+                read_timeout=MINIO_READ_TIMEOUT_S,
             )
             self._storage_client = create_storage_client_from_config(
                 self.storage_config)

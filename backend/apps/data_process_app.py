@@ -1,5 +1,4 @@
 import logging
-from contextlib import asynccontextmanager
 from http import HTTPStatus
 from typing import Optional
 
@@ -12,7 +11,7 @@ from consts.model import (
     TaskRequest,
 )
 from consts.exceptions import OfficeConversionException
-from data_process.tasks import process_and_forward, process_sync
+from data_process.tasks import process_sync, submit_process_forward_chain
 from services.data_process_service import get_data_process_service
 
 logger = logging.getLogger("data_process.app")
@@ -21,21 +20,7 @@ logger = logging.getLogger("data_process.app")
 service = get_data_process_service()
 
 
-@asynccontextmanager
-async def lifespan(app: APIRouter):
-    # Startup
-    try:
-        await service.start()
-        yield
-    finally:
-        # Shutdown
-        await service.stop()
-
-
-router = APIRouter(
-    prefix="/tasks",
-    lifespan=lifespan
-)
+router = APIRouter(prefix="/tasks")
 
 
 @router.post("")
@@ -50,7 +35,7 @@ async def create_task(request: TaskRequest, authorization: Optional[str] = Heade
 
     logger.info(
         f"Creating task with source_type: {request.source_type}, model_id: {request.embedding_model_id}")
-    task_result = process_and_forward.delay(
+    task_id = submit_process_forward_chain(
         source=request.source,
         source_type=request.source_type,
         chunking_strategy=request.chunking_strategy,
@@ -60,7 +45,7 @@ async def create_task(request: TaskRequest, authorization: Optional[str] = Heade
         embedding_model_id=request.embedding_model_id,
         tenant_id=request.tenant_id
     )
-    return JSONResponse(status_code=HTTPStatus.CREATED, content={"task_id": task_result.id})
+    return JSONResponse(status_code=HTTPStatus.CREATED, content={"task_id": task_id})
 
 
 @router.post("/process")

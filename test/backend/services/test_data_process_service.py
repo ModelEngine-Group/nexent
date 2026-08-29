@@ -2750,6 +2750,113 @@ class TestDataProcessService(unittest.TestCase):
 
         self.assertFalse(result['is_important'])
 
+    def test_ingestion_watchdog_completes_from_forward_result(self):
+        service = DataProcessService()
+        redis_service = MagicMock()
+        redis_service.update_ingestion_record.return_value = True
+        redis_service.get_progress_info.return_value = None
+        process_result = MagicMock(state=states.SUCCESS)
+        forward_result = MagicMock(state=states.SUCCESS)
+        record = {
+            'id': 'ingestion-1',
+            'process_task_id': 'process-1',
+            'forward_task_id': 'forward-1',
+            'state': 'FORWARDING',
+            'created_at': time.time() - 10,
+            'stage_started_at': time.time() - 10,
+        }
+
+        with patch(
+            'backend.services.data_process_service.AsyncResult',
+            side_effect=[process_result, forward_result],
+        ):
+            changed = service._reconcile_ingestion_record(
+                redis_service, record, time.time()
+            )
+
+        self.assertTrue(changed)
+        redis_service.update_ingestion_record.assert_called_once_with(
+            'ingestion-1',
+            state='COMPLETED',
+            stage='completed',
+            latest_task_id='forward-1',
+        )
+
+    def test_ingestion_watchdog_fails_progress_100_finalization_timeout(self):
+        service = DataProcessService()
+        redis_service = MagicMock()
+        redis_service.update_ingestion_record.return_value = True
+        redis_service.get_progress_info.return_value = None
+        process_result = MagicMock(state=states.SUCCESS)
+        forward_result = MagicMock(state=states.PENDING)
+        now = time.time()
+        record = {
+            'id': 'ingestion-1',
+            'process_task_id': 'process-1',
+            'forward_task_id': 'forward-1',
+            'source': '/bucket/file.xlsx',
+            'state': 'FORWARDING',
+            'created_at': now - 100,
+            'stage_started_at': now - 100,
+            'progress_completed_at': now - 61,
+        }
+
+        with patch(
+            'backend.services.data_process_service.AsyncResult',
+            side_effect=[process_result, forward_result],
+        ), patch(
+            'backend.services.data_process_service.DP_INGESTION_FINALIZATION_TIMEOUT_S',
+            60,
+        ):
+            changed = service._reconcile_ingestion_record(
+                redis_service, record, now
+            )
+
+        self.assertTrue(changed)
+        redis_service.update_ingestion_record.assert_called_once_with(
+            'ingestion-1',
+            state='FORWARD_FAILED',
+            stage='watchdog_failed',
+            latest_task_id='forward-1',
+            error_reason='{"error_code": "finalization_timeout"}',
+        )
+    def test_ingestion_watchdog_fails_never_started_process(self):
+        service = DataProcessService()
+        redis_service = MagicMock()
+        redis_service.update_ingestion_record.return_value = True
+        redis_service.get_progress_info.return_value = None
+        pending_result = MagicMock(state=states.PENDING)
+        now = time.time()
+        record = {
+            'id': 'ingestion-1',
+            'process_task_id': 'process-1',
+            'forward_task_id': 'forward-1',
+            'source': '/bucket/file.xlsx',
+            'state': 'WAIT_FOR_PROCESSING',
+            'created_at': now - 11,
+            'stage_started_at': now - 11,
+        }
+
+        with patch(
+            'backend.services.data_process_service.AsyncResult',
+            side_effect=[pending_result, pending_result],
+        ), patch(
+            'backend.services.data_process_service.DP_INGESTION_QUEUE_TIMEOUT_S',
+            10,
+        ):
+            changed = service._reconcile_ingestion_record(
+                redis_service, record, now
+            )
+
+        self.assertTrue(changed)
+        redis_service.update_ingestion_record.assert_called_once_with(
+            'ingestion-1',
+            state='PROCESS_FAILED',
+            stage='watchdog_failed',
+            latest_task_id='process-1',
+            error_reason='{"error_code": "processing_queue_timeout"}',
+        )
+
 
 if __name__ == '__main__':
     unittest.main()

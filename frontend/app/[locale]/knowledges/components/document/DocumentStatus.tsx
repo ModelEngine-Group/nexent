@@ -40,6 +40,19 @@ export const DocumentStatus: React.FC<DocumentStatusProps> = ({
     setHasFetched(false);
   }, [kbId, docId]);
 
+  useEffect(() => {
+    if (!errorReason) return;
+    try {
+      const parsed = JSON.parse(errorReason);
+      if (parsed && typeof parsed.error_code === "string") {
+        setErrorCodeState(parsed.error_code);
+        setHasFetched(true);
+      }
+    } catch {
+      // Plain backend reasons are displayed directly below.
+    }
+  }, [errorReason, kbId, docId]);
+
   // Map API status to display status
   const getDisplayStatus = (apiStatus: string): string => {
     switch (apiStatus) {
@@ -225,6 +238,8 @@ export const DocumentStatus: React.FC<DocumentStatusProps> = ({
             </div>
           )}
         </div>
+      ) : errorReason ? (
+        <div className="text-sm text-gray-700">{errorReason}</div>
       ) : (
         <div className="text-sm text-gray-500">
           {t("document.error.noReason")}

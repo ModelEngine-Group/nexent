@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import patch, MagicMock, call
 import json
 import redis
+import fakeredis
 
 from backend.services import redis_service as redis_service_module
 from backend.services.redis_service import RedisService, get_redis_service
@@ -2140,6 +2141,86 @@ class TestRedisService(unittest.TestCase):
             processed, total = self.redis_service._parse_progress(
                 falsy, total_chunks=8)
             self.assertEqual((processed, total), (0, 8))
+
+    def test_ingestion_lifecycle_is_durable_and_terminal_monotonic(self):
+        fake_client = fakeredis.FakeRedis(decode_responses=True)
+        self.redis_service._client = fake_client
+        self.redis_service._backend_client = fakeredis.FakeRedis()
+
+        created = self.redis_service.create_ingestion_record(
+            ingestion_id='forward-1',
+            process_task_id='process-1',
+            forward_task_id='forward-1',
+            cleanup_task_id='cleanup-1',
+            index_name='index-1',
+            source='/bucket/file.xlsx',
+            source_type='minio',
+            original_filename='file.xlsx',
+        )
+        self.assertTrue(created)
+        self.assertEqual(
+            self.redis_service.get_ingestion_id_by_task('process-1'),
+            'forward-1',
+        )
+
+        self.assertTrue(self.redis_service.update_ingestion_by_task(
+            'forward-1',
+            state='FORWARDING',
+            stage='vectorizing_and_storing',
+            latest_task_id='forward-1',
+            processed_chunks=10,
+            total_chunks=10,
+        ))
+        record = self.redis_service.get_ingestion_records('index-1')[0]
+        self.assertEqual(record['state'], 'FORWARDING')
+        self.assertIsNotNone(record['progress_completed_at'])
+
+        self.assertTrue(self.redis_service.update_ingestion_record(
+            'forward-1',
+            state='COMPLETED',
+            stage='completed',
+            latest_task_id='forward-1',
+        ))
+        self.assertFalse(self.redis_service.get_ingestion_records(active_only=True))
+
+        # A late STARTED/progress write must not regress a terminal UI state.
+        self.assertFalse(self.redis_service.update_ingestion_record(
+            'forward-1',
+            state='FORWARDING',
+            stage='late_stale_update',
+            processed_chunks=10,
+            total_chunks=10,
+        ))
+        record = self.redis_service.get_ingestion_records('index-1')[0]
+        self.assertEqual(record['state'], 'COMPLETED')
+
+    def test_ingestion_failure_persists_reason_for_frontend(self):
+        fake_client = fakeredis.FakeRedis(decode_responses=True)
+        self.redis_service._client = fake_client
+        self.redis_service._backend_client = fakeredis.FakeRedis()
+        self.redis_service.create_ingestion_record(
+            ingestion_id='forward-1',
+            process_task_id='process-1',
+            forward_task_id='forward-1',
+            cleanup_task_id='cleanup-1',
+            index_name='index-1',
+            source='/bucket/file.xlsx',
+            source_type='minio',
+            original_filename='file.xlsx',
+        )
+        reason = '{"error_code": "finalization_timeout"}'
+
+        self.assertTrue(self.redis_service.update_ingestion_record(
+            'forward-1',
+            state='FORWARD_FAILED',
+            stage='watchdog_failed',
+            latest_task_id='forward-1',
+            error_reason=reason,
+        ))
+
+        record = self.redis_service.get_ingestion_records('index-1')[0]
+        self.assertEqual(record['error_reason'], reason)
+        self.assertEqual(self.redis_service.get_error_info('forward-1'), reason)
 
 
 if __name__ == '__main__':

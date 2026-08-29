@@ -17,6 +17,7 @@ import re
 import ray
 from celery import Task, chain, states, group, chord
 from celery.exceptions import Retry
+from celery.utils import uuid as celery_uuid
 
 from utils.file_management_utils import get_file_size
 from database.attachment_db import get_file_stream_raw
@@ -176,6 +177,17 @@ class _FileSlotHeartbeat:
     def _run(self) -> None:
         while not self._stop_event.wait(FILE_SLOT_HEARTBEAT_INTERVAL_S):
             try:
+                try:
+                    get_redis_service().update_ingestion_by_task(
+                        self.task_id,
+                        heartbeat_only=True,
+                    )
+                except Exception as lifecycle_exc:
+                    logger.warning(
+                        "[INGESTION] heartbeat update failed task=%s error=%s",
+                        self.task_id,
+                        lifecycle_exc,
+                    )
                 if not _refresh_file_slot(self.task_id):
                     logger.error(
                         "[FILE CONCURRENCY] heartbeat lost ownership task=%s",
@@ -193,6 +205,23 @@ class _FileSlotHeartbeat:
         self._stop_event.set()
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=1)
+
+
+def _update_ingestion_for_task(task_id: Optional[str], **updates: Any) -> None:
+    """Best-effort lifecycle update; task execution must still reach Celery terminal state."""
+    if not task_id:
+        return
+    try:
+        updated = get_redis_service().update_ingestion_by_task(task_id, **updates)
+        if not updated:
+            logger.debug("[INGESTION] no lifecycle record for task=%s", task_id)
+    except Exception as exc:
+        logger.error(
+            "[INGESTION] lifecycle update failed task=%s updates=%s error=%s",
+            task_id,
+            sorted(updates.keys()),
+            exc,
+        )
 
 
 def _processing_limit_error(message: str, error_code: str) -> RuntimeError:
@@ -1254,11 +1283,48 @@ class LoggingTask(Task):
 
     def on_success(self, retval, task_id, args, kwargs):
         """Log successful task completion"""
+        if self.name == "data_process.tasks.process":
+            _update_ingestion_for_task(
+                task_id,
+                state="WAIT_FOR_FORWARDING",
+                stage="queued_for_forwarding",
+            )
+        elif self.name == "data_process.tasks.forward":
+            _update_ingestion_for_task(
+                task_id,
+                state="COMPLETED",
+                stage="completed",
+                latest_task_id=task_id,
+            )
         logger.debug(f"Task {self.name}[{task_id}] completed successfully")
         return super().on_success(retval, task_id, args, kwargs)
 
     def on_failure(self, exc, task_id, args, kwargs, einfo):
         """Log task failure with enhanced error handling"""
+        failure_state = (
+            "PROCESS_FAILED"
+            if self.name == "data_process.tasks.process"
+            else "FORWARD_FAILED"
+            if self.name == "data_process.tasks.forward"
+            else None
+        )
+        if failure_state:
+            message = str(exc) or "Celery task failed without an error message"
+            parsed = None
+            try:
+                parsed = json.loads(message)
+                if isinstance(parsed, dict):
+                    message = parsed.get("message", message)
+            except (json.JSONDecodeError, TypeError):
+                parsed = None
+            code = extract_error_code(message, parsed) or "celery_task_failed"
+            _update_ingestion_for_task(
+                task_id,
+                state=failure_state,
+                stage="task_failed",
+                latest_task_id=task_id,
+                error_reason=json.dumps({"error_code": code}, ensure_ascii=False),
+            )
         logger.error(f"Task {self.name}[{task_id}] failed: {exc}")
         # Log exception details for debugging
         if hasattr(exc, '__class__'):
@@ -1904,6 +1970,12 @@ def process(
     """
     start_time = time.time()
     task_id = self.request.id
+    _update_ingestion_for_task(
+        task_id,
+        state="WAIT_FOR_PROCESSING",
+        stage="waiting_for_file_slot",
+        latest_task_id=task_id,
+    )
     # _warn_if_queue_mismatch("PROCESS TASK", "process_q", self.request)
 
     if getattr(self.request, 'retries', 0) == 0:
@@ -1947,6 +2019,12 @@ def process(
                 DP_FILE_SLOT_RETRY_DELAY_S,
                 source,
             )
+            _update_ingestion_for_task(
+                task_id,
+                state="WAIT_FOR_PROCESSING",
+                stage="queued_for_file_slot",
+                latest_task_id=task_id,
+            )
             raise self.retry(
                 countdown=DP_FILE_SLOT_RETRY_DELAY_S,
                 exc=Exception(json.dumps({
@@ -1967,7 +2045,20 @@ def process(
             DP_FILE_SLOT_LEASE_S,
             source,
         )
+        _update_ingestion_for_task(
+            task_id,
+            state="PROCESSING",
+            stage="extracting_text",
+            latest_task_id=task_id,
+        )
         slot_heartbeat.start()
+    else:
+        _update_ingestion_for_task(
+            task_id,
+            state="PROCESSING",
+            stage="extracting_text",
+            latest_task_id=task_id,
+        )
 
     try:
         attempt = _claim_process_attempt(task_id)
@@ -2133,6 +2224,12 @@ def process(
         logger.info(
             f"[{self.request.id}] PROCESS TASK: Processing complete, waiting for forward task")
 
+        _update_ingestion_for_task(
+            task_id,
+            state="WAIT_FOR_FORWARDING",
+            stage="queued_for_forwarding",
+        )
+
         # Prepare data for the next task in the chain; pass redis_key
         returned_data = {
             'redis_key': f"dp:{task_id}:chunks",
@@ -2153,6 +2250,27 @@ def process(
         slot_heartbeat.stop()
         _release_file_slot(file_slot_token, "process_failed")
         logger.error(f"Error processing file {source}: {str(e)}")
+        lifecycle_message = str(e)
+        lifecycle_parsed = None
+        try:
+            lifecycle_parsed = json.loads(lifecycle_message)
+            if isinstance(lifecycle_parsed, dict):
+                lifecycle_message = lifecycle_parsed.get("message", lifecycle_message)
+        except (json.JSONDecodeError, TypeError):
+            lifecycle_parsed = None
+        lifecycle_code = extract_error_code(lifecycle_message, lifecycle_parsed)
+        lifecycle_reason = (
+            json.dumps({"error_code": lifecycle_code}, ensure_ascii=False)
+            if lifecycle_code
+            else lifecycle_message[:200]
+        )
+        _update_ingestion_for_task(
+            task_id,
+            state="PROCESS_FAILED",
+            stage="text_extraction_failed",
+            latest_task_id=task_id,
+            error_reason=lifecycle_reason,
+        )
         redis_key = f"dp:{task_id}:chunks"
         try:
             if not _is_split_cancelled(redis_key):
@@ -2303,6 +2421,12 @@ def forward(
     """
     start_time = time.time()
     task_id = self.request.id
+    _update_ingestion_for_task(
+        task_id,
+        state="FORWARDING",
+        stage="vectorizing_and_storing",
+        latest_task_id=task_id,
+    )
     # _warn_if_queue_mismatch("FORWARD TASK", "forward_q", self.request)
     original_source = source
     original_index_name = index_name
@@ -2417,6 +2541,14 @@ def forward(
         try:
             redis_service = get_redis_service()
             redis_service.save_progress_info(task_id, 0, total_chunks)
+            redis_service.update_ingestion_by_task(
+                task_id,
+                state="FORWARDING",
+                stage="vectorizing_and_storing",
+                latest_task_id=task_id,
+                processed_chunks=0,
+                total_chunks=total_chunks,
+            )
         except Exception as progress_init_exc:
             logger.warning(
                 f"[{self.request.id}] FORWARD TASK: Failed to initialize progress in Redis: "
@@ -2501,10 +2633,19 @@ def forward(
                 total_indexed += batch_indexed
                 total_submitted += batch_submitted
                 try:
-                    get_redis_service().save_progress_info(
+                    redis_service = get_redis_service()
+                    redis_service.save_progress_info(
                         task_id,
                         total_indexed,
                         total_chunks,
+                    )
+                    redis_service.update_ingestion_by_task(
+                        task_id,
+                        state="FORWARDING",
+                        stage="vectorizing_and_storing",
+                        latest_task_id=task_id,
+                        processed_chunks=total_indexed,
+                        total_chunks=total_chunks,
                     )
                 except Exception as progress_exc:
                     logger.warning(
@@ -2567,6 +2708,14 @@ def forward(
 
         logger.info(
             f"[{self.request.id}] FORWARD TASK: Updating task state to SUCCESS after ES indexing completion")
+        _update_ingestion_for_task(
+            task_id,
+            state="COMPLETED",
+            stage="completed",
+            latest_task_id=task_id,
+            processed_chunks=final_processed,
+            total_chunks=total_chunks,
+        )
         self.update_state(
             state=states.SUCCESS,
             meta={
@@ -2602,6 +2751,28 @@ def forward(
         if isinstance(e, Retry):
             release_file_slot = False
             raise
+
+        lifecycle_message = str(e)
+        lifecycle_parsed = None
+        try:
+            lifecycle_parsed = json.loads(lifecycle_message)
+            if isinstance(lifecycle_parsed, dict):
+                lifecycle_message = lifecycle_parsed.get("message", lifecycle_message)
+        except (json.JSONDecodeError, TypeError):
+            lifecycle_parsed = None
+        lifecycle_code = extract_error_code(lifecycle_message, lifecycle_parsed)
+        lifecycle_reason = (
+            json.dumps({"error_code": lifecycle_code}, ensure_ascii=False)
+            if lifecycle_code
+            else lifecycle_message[:200]
+        )
+        _update_ingestion_for_task(
+            task_id,
+            state="FORWARD_FAILED",
+            stage="forward_task_failed",
+            latest_task_id=task_id,
+            error_reason=lifecycle_reason,
+        )
 
         _cleanup_forward_chunks(processed_data)
         task_id = self.request.id
@@ -2796,8 +2967,26 @@ def submit_process_forward_chain(
     Build and enqueue a Celery chain: process -> forward.
 
     Returns:
-        Celery chain task ID, or empty string if enqueue failed.
+        Stable forward task ID. Enqueue failures are persisted as terminal records.
     """
+    if not index_name:
+        raise ValueError("index_name is required for an ingestion task")
+
+    process_task_id = celery_uuid()
+    forward_task_id = celery_uuid()
+    cleanup_task_id = celery_uuid()
+    redis_service = get_redis_service()
+    redis_service.create_ingestion_record(
+        ingestion_id=forward_task_id,
+        process_task_id=process_task_id,
+        forward_task_id=forward_task_id,
+        cleanup_task_id=cleanup_task_id,
+        index_name=index_name,
+        source=source,
+        source_type=source_type,
+        original_filename=original_filename,
+    )
+
     task_chain = chain(
         process.s(
             source=source,
@@ -2807,23 +2996,42 @@ def submit_process_forward_chain(
             original_filename=original_filename,
             embedding_model_id=embedding_model_id,
             tenant_id=tenant_id
-        ).set(queue='process_q'),
+        ).set(queue='process_q', task_id=process_task_id),
         forward.s(
             index_name=index_name,
             source=source,
             source_type=source_type,
             original_filename=original_filename,
             authorization=authorization
-        ).set(queue='forward_q'),
-        cleanup_source.s(authorization=authorization).set(queue='forward_q'),
+        ).set(queue='forward_q', task_id=forward_task_id),
+        cleanup_source.s(authorization=authorization).set(
+            queue='forward_q',
+            task_id=cleanup_task_id,
+        ),
     )
 
-    result = task_chain.apply_async()
-    if result is None or not hasattr(result, 'id') or result.id is None:
+    try:
+        result = task_chain.apply_async()
+        if result is None or not hasattr(result, 'id') or result.id is None:
+            raise RuntimeError(
+                "Celery chain apply_async() did not return a valid result"
+            )
+    except Exception as exc:
+        reason = json.dumps({"error_code": "enqueue_failed"}, ensure_ascii=False)
+        redis_service.update_ingestion_record(
+            forward_task_id,
+            state="PROCESS_FAILED",
+            stage="enqueue_failed",
+            latest_task_id=process_task_id,
+            error_reason=reason,
+        )
         logger.error(
-            "Celery chain apply_async() did not return a valid result or result.id")
-        return ""
-    return result.id
+            "Failed to enqueue ingestion chain id=%s source=%s error=%s",
+            forward_task_id,
+            source,
+            exc,
+        )
+    return forward_task_id
 
 
 @app.task(bind=True, base=LoggingTask, name='data_process.tasks.process_and_forward')

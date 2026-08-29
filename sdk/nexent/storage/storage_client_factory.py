@@ -51,7 +51,9 @@ def create_storage_client_from_config(config: StorageConfig) -> StorageClient:
             secret_key=config.secret_key,
             region=config.region,
             default_bucket=config.default_bucket,
-            secure=config.secure
+            secure=config.secure,
+            connect_timeout=config.connect_timeout,
+            read_timeout=config.read_timeout,
         )
     else:
         raise ValueError(f"Unsupported storage type: {config.storage_type}")

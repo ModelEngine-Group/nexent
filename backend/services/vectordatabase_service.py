@@ -1629,7 +1629,14 @@ class ElasticSearchService:
                 file_data['processed_chunk_num'] = processed_chunks
                 file_data['total_chunk_num'] = total_chunks
 
-                # Get error reason for failed documents (fetch from Redis batch if needed)
+                # Durable lifecycle records carry the reason even when Celery
+                # failure metadata was lost after a hard worker exit.
+                lifecycle_error_reason = status_dict.get('error_reason')
+                if lifecycle_error_reason:
+                    file_data['error_reason'] = lifecycle_error_reason
+                    file_data['has_error_info'] = True
+
+                # Fall back to the legacy task-scoped error key.
                 if task_id and status_dict.get('state') in ['PROCESS_FAILED', 'FORWARD_FAILED']:
                     try:
                         redis_service = get_redis_service()

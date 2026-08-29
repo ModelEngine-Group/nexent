@@ -163,6 +163,7 @@ async def get_all_files_status(index_name: str):
         # Dictionary to store file statuses:
         # {path_or_url: {process_state, forward_state, timestamps, progress fields}}
         file_states = {}
+        lifecycle_states = {}
         for task_info in tasks_list:
             # No need to check index_name since get_index_tasks already filters by it
             task_path_or_url = task_info.get('path_or_url', '')
@@ -173,6 +174,24 @@ async def get_all_files_status(index_name: str):
             original_filename = task_info.get('original_filename', '')
             source_type = task_info.get('source_type', '')
             if task_path_or_url:
+                lifecycle_state = task_info.get('lifecycle_state')
+                if lifecycle_state:
+                    lifecycle_updated_at = task_info.get('updated_at', task_created_at)
+                    current_lifecycle = lifecycle_states.get(task_path_or_url)
+                    if (
+                        current_lifecycle is None
+                        or lifecycle_updated_at >= current_lifecycle.get('updated_at', 0)
+                    ):
+                        lifecycle_states[task_path_or_url] = {
+                            'state': lifecycle_state,
+                            'updated_at': lifecycle_updated_at,
+                            'latest_task_id': task_id,
+                            'original_filename': original_filename,
+                            'source_type': source_type,
+                            'processed_chunks': task_info.get('processed_chunks'),
+                            'total_chunks': task_info.get('total_chunks'),
+                            'error_reason': task_info.get('error_reason') or task_info.get('error'),
+                        }
                 # Initialize file state if not exists
                 if task_path_or_url not in file_states:
                     file_states[task_path_or_url] = {
@@ -230,10 +249,17 @@ async def get_all_files_status(index_name: str):
             except Exception as e:
                 logger.debug(f"Failed to batch get Redis progress info: {e}")
 
-        for path_or_url, file_state in file_states.items():
-            custom_state = _convert_to_custom_state_local(
-                process_celery_state=file_state['process_state'] or '',
-                forward_celery_state=file_state['forward_state'] or ''
+        all_paths = set(file_states) | set(lifecycle_states)
+        for path_or_url in all_paths:
+            lifecycle_state = lifecycle_states.get(path_or_url)
+            file_state = lifecycle_state or file_states[path_or_url]
+            custom_state = (
+                lifecycle_state['state']
+                if lifecycle_state
+                else _convert_to_custom_state_local(
+                    process_celery_state=file_state['process_state'] or '',
+                    forward_celery_state=file_state['forward_state'] or ''
+                )
             )
 
             # Get progress from pre-fetched batch Redis data
@@ -262,6 +288,7 @@ async def get_all_files_status(index_name: str):
                 # Expose optional progress metrics for downstream consumers
                 'processed_chunks': processed_chunks,
                 'total_chunks': total_chunks,
+                'error_reason': file_state.get('error_reason'),
             }
         step_local_duration = time.time() - step_local_start
         logger.info(f"[get_all_files_status] Local processing: {len(result)} files in {step_local_duration:.3f}s")
