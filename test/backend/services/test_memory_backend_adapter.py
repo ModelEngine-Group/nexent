@@ -370,6 +370,30 @@ def test_fanout_external_ingest_skips_without_enabled_providers(monkeypatch):
     provider_service._config_service.get_enabled_providers.assert_called_once_with("t1")
 
 
+def test_build_ingestion_event_service_uses_shared_provider_config(monkeypatch):
+    provider_service = MagicMock()
+    provider_module = types.ModuleType("services.memory_external_provider_service")
+    provider_module.get_memory_external_provider_service = MagicMock(
+        return_value=provider_service
+    )
+    ingestion_module = types.ModuleType("services.memory_ingestion_event_service")
+    ingestion_module.MemoryIngestionEventService = MagicMock()
+    monkeypatch.setitem(
+        sys.modules, "services.memory_external_provider_service", provider_module
+    )
+    monkeypatch.setitem(
+        sys.modules, "services.memory_ingestion_event_service", ingestion_module
+    )
+
+    result = memory_backend_adapter._build_ingestion_event_service()
+
+    ingestion_module.MemoryIngestionEventService.assert_called_once_with(
+        provider_service._config_service,
+        provider_service,
+    )
+    assert result is ingestion_module.MemoryIngestionEventService.return_value
+
+
 def test_fanout_external_ingest_sends_agent_unit_to_all_enabled(monkeypatch):
     provider_service = MagicMock()
     provider_service._config_service.get_enabled_providers.return_value = [
