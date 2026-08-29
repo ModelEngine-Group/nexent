@@ -36,6 +36,8 @@ INFRASTRUCTURE_GENERATED_PERSISTENCE_VALUES="$INFRASTRUCTURE_CHART_DIR/generated
 ROOT_ENV_FILE="$DEPLOY_ROOT/env/.env"
 SQL_INIT_FILE="$DEPLOY_ROOT/sql/init.sql"
 SUPABASE_SQL_DIR="$DEPLOY_ROOT/sql/supabase"
+OFFICIAL_SKILLS_SOURCE_DIR="$DEPLOY_ROOT/docker/assets/official-skills-zip"
+OFFICIAL_SKILLS_TARGET_DIR="/mnt/nexent/official-skills-zip"
 
 if [ -f "$DEPLOYMENT_COMMON" ]; then
     # shellcheck source=/dev/null
@@ -797,6 +799,143 @@ release_scope_includes_nexent() {
     [ "$RELEASE_SCOPE" = "all" ] || [ "$RELEASE_SCOPE" = "nexent" ]
 }
 
+validate_official_skills_source() {
+    local archive
+    local archive_count=0
+
+    if [ ! -d "$OFFICIAL_SKILLS_SOURCE_DIR" ]; then
+        echo "Error: official skills directory not found: $OFFICIAL_SKILLS_SOURCE_DIR"
+        return 1
+    fi
+
+    for archive in "$OFFICIAL_SKILLS_SOURCE_DIR"/*.zip; do
+        [ -f "$archive" ] || continue
+        if [ ! -r "$archive" ]; then
+            echo "Error: official skill archive is not readable: $archive"
+            return 1
+        fi
+        archive_count=$((archive_count + 1))
+    done
+
+    if [ "$archive_count" -eq 0 ]; then
+        echo "Error: no official skill archives found in $OFFICIAL_SKILLS_SOURCE_DIR"
+        return 1
+    fi
+}
+
+official_skills_source_manifest() {
+    (
+        cd "$OFFICIAL_SKILLS_SOURCE_DIR" || exit 1
+        sha256sum ./*.zip | LC_ALL=C sort
+    )
+}
+
+find_ready_config_pod() {
+    local ready_pods
+
+    ready_pods=$(kubectl get pods -n "$NAMESPACE" \
+        -l app=nexent-config \
+        --field-selector=status.phase=Running \
+        --sort-by=.metadata.creationTimestamp \
+        -o 'jsonpath={range .items[?(@.status.containerStatuses[0].ready==true)]}{.metadata.name}{"\n"}{end}' \
+        2>/dev/null) || return 1
+    printf '%s\n' "$ready_pods" | sed -n '$p'
+}
+
+sync_official_skills_to_workspace() {
+    local config_pod
+    local expected_manifest
+    local actual_manifest
+    local staging_dir="/mnt/nexent/.official-skills-zip.staging"
+    local backup_dir="/mnt/nexent/.official-skills-zip.backup"
+
+    config_pod=$(find_ready_config_pod)
+    if [ -z "$config_pod" ]; then
+        echo "Error: no Ready nexent-config pod is available for official skills synchronization."
+        return 1
+    fi
+
+    expected_manifest=$(official_skills_source_manifest) || {
+        echo "Error: failed to calculate the official skills source manifest."
+        return 1
+    }
+
+    if ! kubectl exec -n "$NAMESPACE" "$config_pod" -- sh -c '
+        set -e
+        staging_dir="$1"
+        target_dir="$2"
+        backup_dir="$3"
+        rm -rf "$staging_dir"
+        if [ -e "$backup_dir" ] || [ -L "$backup_dir" ]; then
+            if [ -e "$target_dir" ] || [ -L "$target_dir" ]; then
+                rm -rf "$backup_dir"
+            else
+                mv "$backup_dir" "$target_dir"
+            fi
+        fi
+        mkdir -p "$staging_dir"
+    ' _ "$staging_dir" "$OFFICIAL_SKILLS_TARGET_DIR" "$backup_dir"; then
+        echo "Error: failed to prepare the official skills staging directory."
+        return 1
+    fi
+
+    if ! kubectl cp "$OFFICIAL_SKILLS_SOURCE_DIR/." \
+        "$NAMESPACE/$config_pod:$staging_dir"; then
+        kubectl exec -n "$NAMESPACE" "$config_pod" -- rm -rf "$staging_dir" "$backup_dir" >/dev/null 2>&1 || true
+        echo "Error: failed to copy official skills to the workspace PVC."
+        return 1
+    fi
+
+    if ! kubectl exec -n "$NAMESPACE" "$config_pod" -- sh -c '
+        find "$1" -mindepth 1 -maxdepth 1 \( ! -type f -o ! -name "*.zip" \) -exec rm -rf {} +
+        chmod 0755 "$1"
+        chmod 0644 "$1"/*.zip
+    ' _ "$staging_dir"; then
+        kubectl exec -n "$NAMESPACE" "$config_pod" -- rm -rf "$staging_dir" "$backup_dir" >/dev/null 2>&1 || true
+        echo "Error: failed to set permissions on the copied official skills."
+        return 1
+    fi
+
+    actual_manifest=$(kubectl exec -n "$NAMESPACE" "$config_pod" -- sh -c \
+        'cd "$1" && sha256sum ./*.zip | LC_ALL=C sort' \
+        _ "$staging_dir") || {
+        kubectl exec -n "$NAMESPACE" "$config_pod" -- rm -rf "$staging_dir" "$backup_dir" >/dev/null 2>&1 || true
+        echo "Error: failed to calculate the copied official skills manifest."
+        return 1
+    }
+
+    if [ "$actual_manifest" != "$expected_manifest" ]; then
+        kubectl exec -n "$NAMESPACE" "$config_pod" -- rm -rf "$staging_dir" "$backup_dir" >/dev/null 2>&1 || true
+        echo "Error: copied official skills failed SHA-256 verification."
+        return 1
+    fi
+
+    if ! kubectl exec -n "$NAMESPACE" "$config_pod" -- sh -c '
+        set -e
+        staging_dir="$1"
+        target_dir="$2"
+        backup_dir="$3"
+        rm -rf "$backup_dir"
+        if [ -e "$target_dir" ] || [ -L "$target_dir" ]; then
+            mv "$target_dir" "$backup_dir"
+        fi
+        if mv "$staging_dir" "$target_dir"; then
+            rm -rf "$backup_dir" || true
+        else
+            if [ -e "$backup_dir" ] || [ -L "$backup_dir" ]; then
+                mv "$backup_dir" "$target_dir"
+            fi
+            exit 1
+        fi
+    ' _ "$staging_dir" "$OFFICIAL_SKILLS_TARGET_DIR" "$backup_dir"; then
+        kubectl exec -n "$NAMESPACE" "$config_pod" -- rm -rf "$staging_dir" >/dev/null 2>&1 || true
+        echo "Error: failed to activate the copied official skills; the previous version was preserved."
+        return 1
+    fi
+
+    echo "Official skills synchronized to $OFFICIAL_SKILLS_TARGET_DIR ($config_pod)."
+}
+
 helm_release_exists() {
     local release_name="$1"
     helm status "$release_name" --namespace "$NAMESPACE" >/dev/null 2>&1
@@ -1224,6 +1363,9 @@ apply() {
 
     # Step 2: Render release-specific values with image tags and persistence settings.
     update_values_yaml
+    if release_scope_includes_nexent && deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application"; then
+        validate_official_skills_source || exit 1
+    fi
     persist_deploy_options
 
     reject_legacy_single_release || exit 1
@@ -1398,6 +1540,14 @@ apply() {
     if ! wait_for_nexent_ready; then
         echo "Error: one or more Nexent workloads failed to become ready."
         exit 1
+    fi
+
+    if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application"; then
+        echo "Synchronizing official skills to the workspace PVC..."
+        if ! sync_official_skills_to_workspace; then
+            echo "Error: official skills synchronization failed."
+            exit 1
+        fi
     fi
 
     # Step 9: Create the super admin user when Supabase is selected.

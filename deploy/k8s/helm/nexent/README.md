@@ -201,7 +201,8 @@ The `apply` command performs the following steps:
 7. **Render application Secret values** - Put the API key only in the application-side Secret
 8. **Deploy Nexent** - Install or upgrade `nexent` exactly once
 9. **Wait for selected workloads** - Verify all selected application Deployments
-10. **Create super admin user** - Initialize the admin account when Supabase is selected
+10. **Synchronize official skills** - Verify and copy the bundled archives to the shared workspace PVC
+11. **Create super admin user** - Initialize the admin account when Supabase is selected
 
 If infrastructure readiness or Elasticsearch initialization fails, the infrastructure release is retained for retry and the Nexent release is not installed or upgraded.
 
@@ -224,7 +225,7 @@ helm upgrade --install nexent deploy/k8s/helm/nexent \
   -f /path/to/application-values-with-es-api-key.yaml
 ```
 
-The two values files must contain the same PostgreSQL and MinIO credentials. `ELASTICSEARCH_API_KEY` belongs only in the application values. Do not install both charts under one release name.
+The two values files must contain the same PostgreSQL and MinIO credentials. `ELASTICSEARCH_API_KEY` belongs only in the application values. Do not install both charts under one release name. Official skill archives are synchronized to the workspace PVC only by `deploy/k8s/deploy.sh`; direct Helm installations must initialize `/mnt/nexent/official-skills-zip` separately.
 
 ## Image Sources And Local Config
 

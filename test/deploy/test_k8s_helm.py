@@ -13,6 +13,7 @@ HELM_ROOT = PROJECT_ROOT / "deploy" / "k8s" / "helm"
 APPLICATION_CHART_SOURCE = HELM_ROOT / "nexent"
 INFRASTRUCTURE_CHART_SOURCE = HELM_ROOT / "nexent-infrastructure"
 WEB_DOCKERFILE = PROJECT_ROOT / "deploy" / "images" / "dockerfiles" / "web" / "Dockerfile"
+OFFICIAL_SKILLS_DIR = PROJECT_ROOT / "deploy" / "docker" / "assets" / "official-skills-zip"
 
 APPLICATION_DEPLOYMENTS = {
     "nexent-config",
@@ -156,11 +157,20 @@ exit 0
 printf 'kubectl %s\\n' "$*" >> "$MOCK_LOG"
 if [ "$1" = "get" ] && [ "$2" = "namespace" ]; then exit 1; fi
 if [ "$1" = "get" ] && [ "$2" = "pv" ]; then exit 1; fi
+if [ "$1" = "get" ] && [ "$2" = "pods" ]; then
+  case "$*" in
+    *app=nexent-config*) printf 'nexent-config-test\n'; exit 0 ;;
+  esac
+fi
 if [ "$1" = "get" ] && [ "$2" = "secret" ]; then
   case "$*" in
     *nexent-infrastructure-secrets*ELASTIC_PASSWORD*) printf 'bmV4ZW50QDIwMjU='; exit 0 ;;
   esac
   exit 1
+fi
+if [ "$1" = "cp" ]; then
+  if [ "${MOCK_FAIL_OFFICIAL_COPY:-false}" = "true" ]; then exit 1; fi
+  exit 0
 fi
 if [ "$1" = "rollout" ]; then
   case "$*" in
@@ -169,6 +179,18 @@ if [ "$1" = "rollout" ]; then
   exit 0
 fi
 if [ "$1" = "exec" ]; then
+  if [[ "$*" == *"sha256sum ./*.zip"* ]]; then
+    if [ "${MOCK_FAIL_OFFICIAL_CHECKSUM:-false}" = "true" ]; then
+      printf 'invalid-checksum  ./invalid.zip\n'
+    else
+      (cd "$MOCK_OFFICIAL_SKILLS_DIR" && sha256sum ./*.zip | LC_ALL=C sort)
+    fi
+    exit 0
+  fi
+  if [[ "$*" == *'if mv "$staging_dir" "$target_dir"; then'* ]]; then
+    if [ "${MOCK_FAIL_OFFICIAL_PROMOTE:-false}" = "true" ]; then exit 1; fi
+    exit 0
+  fi
   case "$*" in
     *_cluster/health*) printf '{"status":"yellow"}'; exit 0 ;;
     *_security/api_key*)
@@ -177,6 +199,7 @@ if [ "$1" = "exec" ]; then
       ;;
     *_security/_authenticate*) printf '200'; exit 0 ;;
   esac
+  exit 0
 fi
 exit 0
 """,
@@ -187,6 +210,9 @@ exit 0
     env.pop("ELASTICSEARCH_API_KEY", None)
     env["PATH"] = f"{mock_bin}:{env['PATH']}"
     env["MOCK_LOG"] = str(mock_log)
+    env["MOCK_OFFICIAL_SKILLS_DIR"] = str(
+        project / "deploy" / "docker" / "assets" / "official-skills-zip"
+    )
     env["NEXENT_SYNC_ES_KEY_TO_ENV"] = "false"
     return project, env, mock_log
 
@@ -378,6 +404,41 @@ def test_elasticsearch_api_key_is_application_secret_only(
         "nexent-infrastructure-secrets"
     ]
     assert "ELASTIC_PASSWORD" in infrastructure_secrets["nexent-infrastructure-secrets"]
+
+
+def test_config_reads_official_skills_from_workspace_only(
+    chart_dirs: dict[str, Path],
+) -> None:
+    rendered = _template(chart_dirs["application"], "nexent", _application_dynamic_args())
+    assert rendered.returncode == 0, rendered.stderr
+
+    documents = _documents(rendered.stdout)
+    assert not any(
+        document.get("kind") == "ConfigMap"
+        and document["metadata"]["name"] == "nexent-official-skills"
+        for document in documents
+    )
+
+    deployments = {
+        document["metadata"]["name"]: document
+        for document in documents
+        if document.get("kind") == "Deployment"
+    }
+    for deployment_name, deployment in deployments.items():
+        pod_spec = deployment["spec"]["template"]["spec"]
+        mounts = {
+            mount["name"]: mount
+            for container in pod_spec["containers"]
+            for mount in container.get("volumeMounts", [])
+        }
+        volumes = {volume["name"]: volume for volume in pod_spec.get("volumes", [])}
+        assert "nexent-official-skills" not in mounts
+        assert "nexent-official-skills" not in volumes
+        if deployment_name == "nexent-config":
+            assert mounts["nexent-workspace"]["mountPath"] == "/mnt/nexent"
+            assert volumes["nexent-workspace"]["persistentVolumeClaim"]["claimName"] == (
+                "nexent-workspace"
+            )
 
 
 def test_dynamic_storage_class_applies_to_release_owned_pvcs(
@@ -624,9 +685,139 @@ def test_default_deploy_orders_releases_without_second_application_upgrade(
         for index, line in enumerate(commands)
         if line.startswith("helm upgrade --install nexent ")
     )
+    application_readiness = [
+        next(
+            index
+            for index, line in enumerate(commands)
+            if f"rollout status deployment/{name}" in line
+        )
+        for name in (
+            "nexent-config",
+            "nexent-runtime",
+            "nexent-mcp",
+            "nexent-northbound",
+            "nexent-web",
+        )
+    ]
+    official_skills_copy = next(
+        index for index, line in enumerate(commands) if line.startswith("kubectl cp ")
+    )
+    config_pod_lookup = next(
+        line
+        for line in commands
+        if line.startswith("kubectl get pods ") and "app=nexent-config" in line
+    )
     assert infrastructure_helm < min(readiness) <= max(readiness) < es_initialization
     assert es_initialization < application_helm
+    assert application_helm < min(application_readiness) <= max(application_readiness)
+    assert max(application_readiness) < official_skills_copy
+    assert "--field-selector=status.phase=Running" in config_pod_lookup
+    assert "--sort-by=.metadata.creationTimestamp" in config_pod_lookup
     assert sum(line.startswith("helm upgrade --install nexent ") for line in commands) == 1
+    assert sum(line.startswith("kubectl cp ") for line in commands) == 1
+
+
+def test_missing_official_skills_fails_before_helm(
+    isolated_k8s_project: tuple[Path, dict[str, str], Path],
+) -> None:
+    project, env, mock_log = isolated_k8s_project
+    shutil.rmtree(project / "deploy" / "docker" / "assets" / "official-skills-zip")
+
+    result = _run(_deploy_command(project), check=False, env=env)
+
+    assert result.returncode != 0
+    assert "official skills directory not found" in result.stdout
+    assert not mock_log.exists() or "helm " not in mock_log.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    ("failure_env", "expected_error"),
+    (
+        ("MOCK_FAIL_OFFICIAL_COPY", "failed to copy official skills"),
+        ("MOCK_FAIL_OFFICIAL_CHECKSUM", "failed SHA-256 verification"),
+        ("MOCK_FAIL_OFFICIAL_PROMOTE", "previous version was preserved"),
+    ),
+)
+def test_official_skills_sync_failure_is_retryable_without_second_helm(
+    isolated_k8s_project: tuple[Path, dict[str, str], Path],
+    failure_env: str,
+    expected_error: str,
+) -> None:
+    project, env, mock_log = isolated_k8s_project
+    _write_executable(
+        project / "deploy" / "k8s" / "create-suadmin.sh",
+        '#!/bin/bash\nprintf "suadmin\\n" >> "$MOCK_LOG"\n',
+    )
+    env["MOCK_INFRA_EXISTS"] = "true"
+    env[failure_env] = "true"
+    command = _deploy_command(project, "nexent")
+    command[command.index("--components") + 1] = "application,supabase"
+
+    failed = _run(command, check=False, env=env)
+
+    assert failed.returncode != 0
+    assert expected_error in failed.stdout
+    assert "Super Admin User Creation" not in failed.stdout
+    failed_commands = mock_log.read_text(encoding="utf-8").splitlines()
+    assert sum(line.startswith("helm upgrade --install nexent ") for line in failed_commands) == 1
+    assert "suadmin" not in failed_commands
+
+    mock_log.write_text("", encoding="utf-8")
+    env[failure_env] = "false"
+    retried = _run(command, check=False, env=env)
+
+    assert retried.returncode == 0, retried.stdout + retried.stderr
+    assert "Official skills synchronized" in retried.stdout
+    assert retried.stdout.index("Official skills synchronized") < retried.stdout.index(
+        "Super Admin User Creation"
+    )
+    retry_commands = mock_log.read_text(encoding="utf-8").splitlines()
+    assert sum(line.startswith("helm upgrade --install nexent ") for line in retry_commands) == 1
+    assert sum(line.startswith("kubectl cp ") for line in retry_commands) == 1
+    assert retry_commands.count("suadmin") == 1
+    official_skills_copy = next(
+        index for index, line in enumerate(retry_commands) if line.startswith("kubectl cp ")
+    )
+    assert official_skills_copy < retry_commands.index("suadmin")
+
+
+def test_deploy_without_application_component_skips_official_skills_sync(
+    isolated_k8s_project: tuple[Path, dict[str, str], Path],
+) -> None:
+    project, env, mock_log = isolated_k8s_project
+    env["MOCK_INFRA_EXISTS"] = "true"
+    command = _deploy_command(project, "nexent")
+    command[command.index("--components") + 1] = "data-process"
+
+    result = _run(command, check=False, env=env)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "kubectl cp " not in mock_log.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("persistence_mode", ["local", "dynamic", "existing"])
+def test_official_skills_sync_is_storage_mode_independent(
+    isolated_k8s_project: tuple[Path, dict[str, str], Path],
+    persistence_mode: str,
+) -> None:
+    project, env, mock_log = isolated_k8s_project
+    env["MOCK_INFRA_EXISTS"] = "true"
+    command = _deploy_command(project, "nexent")
+    command[command.index("--persistence-mode") + 1] = persistence_mode
+    storage_option_index = command.index("--storage-class")
+    if persistence_mode == "local":
+        del command[storage_option_index:storage_option_index + 2]
+    elif persistence_mode == "existing":
+        command[storage_option_index:storage_option_index + 2] = [
+            "--existing-claim-prefix",
+            "prod",
+        ]
+
+    result = _run(command, check=False, env=env)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    commands = mock_log.read_text(encoding="utf-8").splitlines()
+    assert sum(line.startswith("kubectl cp ") for line in commands) == 1
 
 
 @pytest.mark.parametrize(
@@ -695,6 +886,7 @@ def test_deploy_release_scopes(
         line.startswith("helm upgrade --install nexent-infrastructure ") for line in commands
     ) == expected_infra_upgrades
     assert sum(line.startswith("helm upgrade --install nexent ") for line in commands) == expected_app_upgrades
+    assert sum(line.startswith("kubectl cp ") for line in commands) == expected_app_upgrades
 
 
 def test_uninstall_default_order_and_scopes(
