@@ -33,12 +33,12 @@ async def test_ac_p3_36_37_38_transparent_dual_write_search_and_dedup(monkeypatc
 
     def handler(request):
         payload = json.loads(request.content)
-        if request.url.path == "/v1/memories/":
+        if request.url.path == "/v3/memories/add/":
             stored_mem0.append(payload["messages"][0]["content"])
             return httpx.Response(
                 200, json={"results": [{"id": "mem0-201", "event": "ADD"}]}
             )
-        if request.url.path == "/v1/memories/search/":
+        if request.url.path == "/v3/memories/search/":
             return httpx.Response(
                 200,
                 json={
@@ -73,7 +73,7 @@ async def test_ac_p3_36_37_38_transparent_dual_write_search_and_dedup(monkeypatc
     config_service.get_enabled_providers.return_value = [config]
     config_service.get_provider.return_value = config
 
-    mem0 = Mem0Provider({"api_key": "test-key", "api_version": "v1"})
+    mem0 = Mem0Provider({"api_key": "test-key"})
 
     class ExternalProviderService:
         _config_service = config_service

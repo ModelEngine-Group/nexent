@@ -59,9 +59,7 @@ async def test_ac_p3_24_search_success_uses_mock_http(monkeypatch):
         )
 
     _install_transport(monkeypatch, handler)
-    results = await Mem0Provider({"api_key": "test-key", "api_version": "v1"}).search(
-        _search_request()
-    )
+    results = await Mem0Provider({"api_key": "test-key"}).search(_search_request())
 
     assert [item.content for item in results] == ["Jules uses COMET-913"]
     assert results[0].source == "mem0"
@@ -71,14 +69,16 @@ async def test_ac_p3_24_search_success_uses_mock_http(monkeypatch):
 async def test_ac_p3_24_search_forwards_filters_and_org_header(monkeypatch):
     def handler(request):
         payload = json.loads(request.content)
-        assert payload["filters"] == {"category": "preference"}
+        assert payload["filters"] == {
+            "AND": [{"user_id": "user-1"}, {"category": "preference"}]
+        }
         assert request.headers["X-Org-Id"] == "org-1"
         return httpx.Response(200, json=[])
 
     _install_transport(monkeypatch, handler)
-    results = await Mem0Provider(
-        {"api_key": "test-key", "org_id": "org-1", "api_version": "v1"}
-    ).search(_search_request(), filters={"category": "preference"})
+    results = await Mem0Provider({"api_key": "test-key", "org_id": "org-1"}).search(
+        _search_request(), filters={"category": "preference"}
+    )
 
     assert results == []
 
@@ -101,12 +101,14 @@ async def test_ac_p3_24_search_falls_back_to_user_scope(monkeypatch):
         )
 
     _install_transport(monkeypatch, handler)
-    results = await Mem0Provider({"api_key": "test-key", "api_version": "v1"}).search(
+    results = await Mem0Provider({"api_key": "test-key"}).search(
         _search_request(agent_id="agent-5")
     )
 
-    assert payloads[0]["agent_id"] == "agent-5"
-    assert "agent_id" not in payloads[1]
+    assert payloads[0]["filters"] == {
+        "AND": [{"user_id": "user-1"}, {"agent_id": "agent-5"}]
+    }
+    assert payloads[1]["filters"] == {"user_id": "user-1"}
     assert results[0].external_id == "m2"
 
 
@@ -119,7 +121,7 @@ async def test_ac_p3_24_ingest_success_uses_mock_http(monkeypatch):
         return httpx.Response(200, json={"results": [{"id": "m3", "event": "ADD"}]})
 
     _install_transport(monkeypatch, handler)
-    result = await Mem0Provider({"api_key": "test-key", "api_version": "v1"}).ingest(
+    result = await Mem0Provider({"api_key": "test-key"}).ingest(
         MemoryIngestRequest(
             tenant_id="tenant-1",
             user_id="user-1",
@@ -143,10 +145,11 @@ async def test_ac_p3_24_ingest_success_uses_mock_http(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_hosted_v3_ingest_waits_then_searches_with_entity_filters(monkeypatch):
+async def test_custom_base_url_uses_latest_ingest_and_search_api(monkeypatch):
     stored = []
 
     def handler(request):
+        assert request.url.host == "partner-mem0.example"
         payload = json.loads(request.content) if request.content else {}
         if request.url.path == "/v3/memories/add/":
             assert payload["infer"] is False
@@ -166,7 +169,9 @@ async def test_hosted_v3_ingest_waits_then_searches_with_entity_filters(monkeypa
         return httpx.Response(404)
 
     _install_transport(monkeypatch, handler)
-    provider = Mem0Provider({"api_key": "test-key"})
+    provider = Mem0Provider(
+        {"api_key": "test-key", "base_url": "https://partner-mem0.example"}
+    )
     content = "The user prefers concise summaries."
     ingest_result = await provider.ingest(
         MemoryIngestRequest(
@@ -186,7 +191,6 @@ async def test_hosted_v3_ingest_waits_then_searches_with_entity_filters(monkeypa
     )
     results = await provider.search(_search_request(agent_id="agent-5"))
 
-    assert provider.api_version == "v3"
     assert ingest_result.accepted_count == 1
     assert [item.content for item in results] == [content]
 
@@ -198,12 +202,12 @@ async def test_ac_p3_37_38_mem0_dual_write_search_and_cross_source_dedup(monkeyp
 
     def handler(request):
         payload = json.loads(request.content)
-        if request.url.path == "/v1/memories/":
+        if request.url.path == "/v3/memories/add/":
             stored_memories.append(payload["messages"][0]["content"])
             return httpx.Response(
                 200, json={"results": [{"id": "mem0-1", "event": "ADD"}]}
             )
-        if request.url.path == "/v1/memories/search/":
+        if request.url.path == "/v3/memories/search/":
             return httpx.Response(
                 200,
                 json={
@@ -216,7 +220,7 @@ async def test_ac_p3_37_38_mem0_dual_write_search_and_cross_source_dedup(monkeyp
         return httpx.Response(404)
 
     _install_transport(monkeypatch, handler)
-    provider = Mem0Provider({"api_key": "test-key", "api_version": "v1"})
+    provider = Mem0Provider({"api_key": "test-key"})
     content = "The user prefers concise weekly status summaries."
 
     internal_result = MemorySearchResult(
@@ -291,7 +295,7 @@ async def test_ac_p3_24_ingest_reports_partial_acceptance(monkeypatch):
         )
         for index in (1, 2)
     ]
-    result = await Mem0Provider({"api_key": "test-key", "api_version": "v1"}).ingest(
+    result = await Mem0Provider({"api_key": "test-key"}).ingest(
         MemoryIngestRequest(
             tenant_id="tenant-1",
             user_id="user-1",
@@ -313,9 +317,7 @@ async def test_ac_p3_24_unauthorized_is_non_retryable(monkeypatch):
     )
 
     with pytest.raises(NonRetryableProviderError) as exc_info:
-        await Mem0Provider({"api_key": "bad-key", "api_version": "v1"}).search(
-            _search_request()
-        )
+        await Mem0Provider({"api_key": "bad-key"}).search(_search_request())
 
     assert exc_info.value.error.code.value == "unauthorized"
 
@@ -328,9 +330,7 @@ async def test_ac_p3_24_timeout_is_retryable(monkeypatch):
     _install_transport(monkeypatch, handler)
 
     with pytest.raises(RetryableProviderError) as exc_info:
-        await Mem0Provider({"api_key": "test-key", "api_version": "v1"}).search(
-            _search_request()
-        )
+        await Mem0Provider({"api_key": "test-key"}).search(_search_request())
 
     assert exc_info.value.error.code.value == "timeout"
 
@@ -343,9 +343,7 @@ async def test_ac_p3_24_transport_error_is_retryable(monkeypatch):
     _install_transport(monkeypatch, handler)
 
     with pytest.raises(RetryableProviderError) as exc_info:
-        await Mem0Provider({"api_key": "test-key", "api_version": "v1"}).search(
-            _search_request()
-        )
+        await Mem0Provider({"api_key": "test-key"}).search(_search_request())
 
     assert exc_info.value.error.code.value == "provider_error"
 

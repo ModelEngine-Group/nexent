@@ -42,10 +42,6 @@ class Mem0Provider:
         self.api_key = config.get("api_key")
         self.org_id = config.get("org_id")
         self.base_url = config.get("base_url", "https://api.mem0.ai").rstrip("/")
-        configured_api_version = str(config.get("api_version", "")).lower()
-        self.api_version = configured_api_version or (
-            "v3" if self.base_url == "https://api.mem0.ai" else "v1"
-        )
         # Support both "timeout" (plugin-specific) and "timeout_seconds" (provider-level)
         self.timeout = int(config.get("timeout_seconds", config.get("timeout", 30)))
 
@@ -68,16 +64,10 @@ class Mem0Provider:
         filters: Optional[Dict[str, Any]] = None,
     ) -> List[MemorySearchResult]:
         payload = self._build_search_payload(request, limit, filters)
-        search_path = (
-            "/v3/memories/search/"
-            if self.api_version == "v3"
-            else "/v1/memories/search/"
-        )
-
         async def _post_search(search_payload: Dict[str, Any]) -> Any:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 response = await client.post(
-                    f"{self.base_url}{search_path}",
+                    f"{self.base_url}/v3/memories/search/",
                     json=search_payload,
                     headers=self._build_headers(),
                 )
@@ -125,16 +115,6 @@ class Mem0Provider:
         limit: int,
         filters: Optional[Dict[str, Any]],
     ) -> Dict[str, Any]:
-        if self.api_version != "v3":
-            payload: Dict[str, Any] = {"query": request.query, "limit": limit}
-            if request.user_id:
-                payload["user_id"] = request.user_id
-            if request.agent_id:
-                payload["agent_id"] = request.agent_id
-            if filters:
-                payload["filters"] = filters
-            return payload
-
         entity_filters = []
         if request.user_id:
             entity_filters.append({"user_id": request.user_id})
@@ -179,25 +159,19 @@ class Mem0Provider:
                 payload["agent_id"] = request.agent_id
             if request.conversation_id:
                 payload["run_id"] = request.conversation_id
-            if self.api_version == "v3":
-                payload["infer"] = False
+            payload["infer"] = False
 
             try:
                 async with httpx.AsyncClient(timeout=self.timeout) as client:
                     response = await client.post(
-                        (
-                            f"{self.base_url}/v3/memories/add/"
-                            if self.api_version == "v3"
-                            else f"{self.base_url}/v1/memories/"
-                        ),
+                        f"{self.base_url}/v3/memories/add/",
                         json=payload,
                         headers=self._build_headers(),
                     )
                     self._check_response(response)
-                    if self.api_version == "v3":
-                        event_id = response.json().get("event_id")
-                        if event_id:
-                            await self._wait_for_event(client, event_id)
+                    event_id = response.json().get("event_id")
+                    if event_id:
+                        await self._wait_for_event(client, event_id)
 
                 unit_results.append(
                     UnitIngestResult(
