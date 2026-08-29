@@ -18,20 +18,20 @@ nexent-infrastructure-common:
 nexent-elasticsearch:
   enabled: true
   persistence:
-    mode: dynamic
-    storageClassName: ""
+    mode: local
+    storageClassName: nexent-local
 nexent-postgresql:
   enabled: true
   persistence:
-    mode: dynamic
-    storageClassName: ""
+    mode: local
+    storageClassName: nexent-local
 nexent-redis:
   enabled: true
   persistence:
-    mode: dynamic
-    storageClassName: ""
+    mode: local
+    storageClassName: nexent-local
 nexent-minio:
   enabled: true
   persistence:
-    mode: dynamic
-    storageClassName: ""
+    mode: local
+    storageClassName: nexent-local

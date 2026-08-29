@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from backend.services.health_service import install_health_contract
+from backend.apps.health_app import install_health_contract
 
 
 def test_live_and_ready_are_dependency_free_process_health():

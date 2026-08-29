@@ -7,8 +7,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from apps.health_app import install_health_contract
 from consts.exceptions import AppException, QuotaExceededError, TokenExpiredError
-from services.health_service import install_health_contract
 
 
 logger = logging.getLogger(__name__)
