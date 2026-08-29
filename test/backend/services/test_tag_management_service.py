@@ -582,4 +582,3 @@ def test_cleanup_document_exception_branches(monkeypatch):
         "tenant-a", "local", "kb-1", "actor-1"
     )
     assert result2 == 1
-

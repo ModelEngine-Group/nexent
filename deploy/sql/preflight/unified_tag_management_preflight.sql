@@ -179,6 +179,73 @@ SELECT source, row, tenant, resource, reason, count, sample
 FROM diagnostics
 ORDER BY source, tenant, resource, reason;
 
+-- Agent repository preset tags are also projected to Agent Category by the
+-- forward compatibility migration. Estimate the combined Keywords + category
+-- assignment count from active legacy rows before the structured schema exists.
+WITH category_alias_groups (category_key, accepted_aliases) AS (
+    VALUES
+        ('marketing', ARRAY['marketing', '营销']::TEXT[]),
+        ('copywriting', ARRAY['copywriting', '文案']::TEXT[]),
+        ('content_creation', ARRAY['content_creation', 'content creation', '内容创作']::TEXT[]),
+        ('code_review', ARRAY['code_review', 'code review', '代码审查']::TEXT[]),
+        ('quality', ARRAY['quality', '质量']::TEXT[]),
+        ('devops', ARRAY['devops']::TEXT[]),
+        ('data', ARRAY['data', '数据']::TEXT[]),
+        ('visualization', ARRAY['visualization', '可视化']::TEXT[]),
+        ('bi', ARRAY['bi']::TEXT[]),
+        ('customer_service', ARRAY['customer_service', 'customer support', 'customer service', '客服']::TEXT[]),
+        ('ticket', ARRAY['ticket', 'ticketing', '工单']::TEXT[]),
+        ('automation', ARRAY['automation', '自动化']::TEXT[]),
+        ('meeting', ARRAY['meeting', '会议']::TEXT[]),
+        ('minutes', ARRAY['minutes', '纪要']::TEXT[]),
+        ('productivity', ARRAY['productivity', '效率']::TEXT[]),
+        ('design', ARRAY['design', '设计']::TEXT[]),
+        ('color_scheme', ARRAY['color_scheme', 'color scheme', '配色']::TEXT[]),
+        ('inspiration', ARRAY['inspiration', '灵感']::TEXT[]),
+        ('spreadsheet', ARRAY['spreadsheet', '表格']::TEXT[]),
+        ('office', ARRAY['office', '办公']::TEXT[])
+), category_aliases AS (
+    SELECT category.category_key, alias.normalized_alias
+    FROM category_alias_groups AS category
+    CROSS JOIN LATERAL unnest(category.accepted_aliases) AS alias(normalized_alias)
+), active_agent_tags AS (
+    SELECT repository.publisher_tenant_id AS tenant_id,
+           repository.agent_id::TEXT AS resource_id,
+           lower(btrim(expanded.raw_value) COLLATE "C") AS normalized_value,
+           aliases.category_key
+    FROM nexent.ag_agent_repository_t AS repository
+    CROSS JOIN LATERAL unnest(repository.tags) AS expanded(raw_value)
+    LEFT JOIN category_aliases AS aliases
+      ON aliases.normalized_alias = lower(btrim(expanded.raw_value) COLLATE "C")
+    WHERE COALESCE(repository.delete_flag, 'N') <> 'Y'
+      AND NULLIF(btrim(expanded.raw_value), '') IS NOT NULL
+      AND (SELECT count(*)
+           FROM nexent.ag_tenant_agent_t AS agent
+           WHERE agent.agent_id = repository.agent_id
+             AND agent.tenant_id = repository.publisher_tenant_id) = 1
+), projected AS (
+    SELECT tenant_id, resource_id,
+           count(DISTINCT normalized_value) AS keyword_count,
+           count(DISTINCT category_key) FILTER (WHERE category_key IS NOT NULL) AS category_count
+    FROM active_agent_tags
+    GROUP BY tenant_id, resource_id
+)
+SELECT 'agent_category_preflight' AS source,
+       resource_id AS row,
+       tenant_id AS tenant,
+       'agent/' || resource_id AS resource,
+       'agent_category_assignment_capacity_exceeded' AS reason,
+       keyword_count + category_count AS count,
+       jsonb_build_object(
+           'maximum', 100,
+           'keywords', keyword_count,
+           'new_agent_categories', category_count,
+           'exceeded', TRUE
+       ) AS sample
+FROM projected
+WHERE keyword_count + category_count > 100
+ORDER BY tenant, resource;
+
 -- No document legacy source may be inferred silently. Every candidate column is
 -- returned for explicit mapping; the sentinel row proves that the scan ran.
 WITH candidates AS (
@@ -342,6 +409,94 @@ SELECT 'structured_capacity' AS source,
        jsonb_build_object('maximum', maximum, 'exceeded', item_count > maximum) AS sample
 FROM structured_counts
 ORDER BY tenant, resource, reason;
+
+-- When the structured schema already exists, include every current assignment
+-- and add only recognized category values that are not already active.
+WITH category_alias_groups (category_key, accepted_aliases) AS (
+    VALUES
+        ('marketing', ARRAY['marketing', '营销']::TEXT[]),
+        ('copywriting', ARRAY['copywriting', '文案']::TEXT[]),
+        ('content_creation', ARRAY['content_creation', 'content creation', '内容创作']::TEXT[]),
+        ('code_review', ARRAY['code_review', 'code review', '代码审查']::TEXT[]),
+        ('quality', ARRAY['quality', '质量']::TEXT[]),
+        ('devops', ARRAY['devops']::TEXT[]),
+        ('data', ARRAY['data', '数据']::TEXT[]),
+        ('visualization', ARRAY['visualization', '可视化']::TEXT[]),
+        ('bi', ARRAY['bi']::TEXT[]),
+        ('customer_service', ARRAY['customer_service', 'customer support', 'customer service', '客服']::TEXT[]),
+        ('ticket', ARRAY['ticket', 'ticketing', '工单']::TEXT[]),
+        ('automation', ARRAY['automation', '自动化']::TEXT[]),
+        ('meeting', ARRAY['meeting', '会议']::TEXT[]),
+        ('minutes', ARRAY['minutes', '纪要']::TEXT[]),
+        ('productivity', ARRAY['productivity', '效率']::TEXT[]),
+        ('design', ARRAY['design', '设计']::TEXT[]),
+        ('color_scheme', ARRAY['color_scheme', 'color scheme', '配色']::TEXT[]),
+        ('inspiration', ARRAY['inspiration', '灵感']::TEXT[]),
+        ('spreadsheet', ARRAY['spreadsheet', '表格']::TEXT[]),
+        ('office', ARRAY['office', '办公']::TEXT[])
+), category_aliases AS (
+    SELECT category.category_key, alias.normalized_alias
+    FROM category_alias_groups AS category
+    CROSS JOIN LATERAL unnest(category.accepted_aliases) AS alias(normalized_alias)
+), projected_categories AS (
+    SELECT DISTINCT repository.publisher_tenant_id AS tenant_id,
+           repository.agent_id::TEXT AS resource_id,
+           aliases.category_key
+    FROM nexent.ag_agent_repository_t AS repository
+    CROSS JOIN LATERAL unnest(repository.tags) AS expanded(raw_value)
+    JOIN category_aliases AS aliases
+      ON aliases.normalized_alias = lower(btrim(expanded.raw_value) COLLATE "C")
+    WHERE COALESCE(repository.delete_flag, 'N') <> 'Y'
+      AND (SELECT count(*)
+           FROM nexent.ag_tenant_agent_t AS agent
+           WHERE agent.agent_id = repository.agent_id
+             AND agent.tenant_id = repository.publisher_tenant_id) = 1
+), projected_counts AS (
+    SELECT projected.tenant_id,
+           projected.resource_id,
+           (SELECT count(*)
+            FROM nexent.resource_tag_assignment AS assignment
+            WHERE assignment.tenant_id = projected.tenant_id
+              AND assignment.resource_type = 'agent'
+              AND assignment.resource_id = projected.resource_id
+              AND assignment.delete_flag = 'N') AS current_count,
+           count(*) FILTER (WHERE NOT EXISTS (
+               SELECT 1
+               FROM nexent.resource_tag_assignment AS assignment
+               JOIN nexent.tag_definition AS definition
+                 ON definition.tenant_id = assignment.tenant_id
+                AND definition.definition_id = assignment.definition_id
+                AND definition.definition_key = 'agent_category'
+                AND definition.delete_flag = 'N'
+               JOIN nexent.tag_value AS value
+                 ON value.tenant_id = assignment.tenant_id
+                AND value.definition_id = assignment.definition_id
+                AND value.value_id = assignment.value_id
+                AND value.normalized_value = projected.category_key
+                AND value.delete_flag = 'N'
+               WHERE assignment.tenant_id = projected.tenant_id
+                 AND assignment.resource_type = 'agent'
+                 AND assignment.resource_id = projected.resource_id
+                 AND assignment.delete_flag = 'N'
+           )) AS new_category_count
+    FROM projected_categories AS projected
+    GROUP BY projected.tenant_id, projected.resource_id
+)
+SELECT 'agent_category_preflight' AS source,
+       resource_id AS row,
+       tenant_id AS tenant,
+       'agent/' || resource_id AS resource,
+       'agent_category_assignment_capacity_exceeded' AS reason,
+       current_count + new_category_count AS count,
+       jsonb_build_object(
+           'maximum', 100,
+           'current', current_count,
+           'new_agent_categories', new_category_count,
+           'exceeded', TRUE
+       ) AS sample
+FROM projected_counts
+WHERE current_count + new_category_count > 100
+ORDER BY tenant, resource;
 
 WITH legacy_normalized AS (
     SELECT tool.author AS tenant_id, 'tool'::TEXT AS resource_type, tool.tool_id::TEXT AS resource_id,

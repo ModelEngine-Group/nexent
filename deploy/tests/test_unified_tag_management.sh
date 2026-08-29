@@ -4,7 +4,10 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEPLOY_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+INIT_SQL="$DEPLOY_ROOT/sql/init.sql"
 MIGRATION_SQL="$DEPLOY_ROOT/sql/migrations/v2.5.0_0817_unified_tag_management.sql"
+AGENT_CATEGORY_SEED_SQL="$DEPLOY_ROOT/sql/migrations/v2.5.3_0819_agent_category_preset_tags.sql"
+AGENT_CATEGORY_COMPATIBILITY_SQL="$DEPLOY_ROOT/sql/migrations/v2.5.5_0829_agent_category_compatibility.sql"
 PREFLIGHT_SQL="$DEPLOY_ROOT/sql/preflight/unified_tag_management_preflight.sql"
 POSTGRES_TEST_IMAGE="${POSTGRES_TEST_IMAGE:-postgres:15-alpine}"
 DOCKER_BIN="${DOCKER_BIN:-docker}"
@@ -59,8 +62,24 @@ assert_not_contains() {
 
 require_prerequisites() {
   command -v "$DOCKER_BIN" >/dev/null 2>&1 || fail "docker command not found: $DOCKER_BIN"
+  [ -f "$INIT_SQL" ] || fail "init SQL not found: $INIT_SQL"
   [ -f "$MIGRATION_SQL" ] || fail "migration SQL not found: $MIGRATION_SQL"
+  [ -f "$AGENT_CATEGORY_SEED_SQL" ] || fail "migration SQL not found: $AGENT_CATEGORY_SEED_SQL"
+  [ -f "$AGENT_CATEGORY_COMPATIBILITY_SQL" ] || fail "migration SQL not found: $AGENT_CATEGORY_COMPATIBILITY_SQL"
   [ -f "$PREFLIGHT_SQL" ] || fail "preflight SQL not found: $PREFLIGHT_SQL"
+}
+
+run_migration_files_through() {
+  local database="$1"
+  local stop_at="$2"
+  local migration_file
+  while IFS= read -r migration_file; do
+    run_file_with_search_path "$database" "$migration_file" >/dev/null
+    if [ "$(basename "$migration_file")" = "$stop_at" ]; then
+      return
+    fi
+  done < <(printf '%s\n' "$DEPLOY_ROOT"/sql/migrations/*.sql | sort -V)
+  fail "migration boundary not found: $stop_at"
 }
 
 start_postgres() {
@@ -101,6 +120,13 @@ run_file() {
     psql -X -v ON_ERROR_STOP=1 -U postgres -d "$database" -A -t -q < "$file"
 }
 
+run_file_with_search_path() {
+  local database="$1"
+  local file="$2"
+  "$DOCKER_BIN" exec -e PGOPTIONS="-c search_path=nexent,public" -i "$CONTAINER_NAME" \
+    psql -X -v ON_ERROR_STOP=1 -U root -d "$database" -A -t -q < "$file"
+}
+
 assert_query() {
   local database="$1"
   local sql="$2"
@@ -134,6 +160,19 @@ expect_migration_failure() {
     "migration should fail closed for $database"
   assert_contains "$output" "$expected_reason" \
     "migration failure should report $expected_reason for $database"
+}
+
+expect_agent_category_migration_failure() {
+  local database="$1"
+  local expected_reason="$2"
+  local output
+  if output="$(run_file "$database" "$AGENT_CATEGORY_COMPATIBILITY_SQL" 2>&1)"; then
+    fail "Agent Category compatibility migration unexpectedly succeeded for $database"
+  fi
+  assert_contains "$output" "Agent category migration blocked" \
+    "Agent Category compatibility migration should fail closed for $database"
+  assert_contains "$output" "$expected_reason" \
+    "Agent Category compatibility failure should report $expected_reason for $database"
 }
 
 run_concurrent_sql_pair() {
@@ -353,6 +392,148 @@ SQL
     "2|6|1|7|7" \
     "valid migration rerun should not create duplicates"
   pass "valid legacy sources normalize into deterministic Keywords values and rerun idempotently"
+}
+
+test_agent_category_compatibility_and_future_tenant_provisioning() {
+  local database="utm_agent_category"
+  create_database "$database"
+  create_legacy_schema "$database"
+  run_sql "$database" <<'SQL'
+INSERT INTO nexent.user_tenant_t (tenant_id, created_by, delete_flag)
+VALUES ('tenant-category', 'owner-category', 'N');
+
+INSERT INTO nexent.ag_tenant_agent_t VALUES
+    (30, 'tenant-category'),
+    (31, 'tenant-category'),
+    (32, 'tenant-category'),
+    (33, 'tenant-category');
+
+INSERT INTO nexent.ag_agent_repository_t VALUES
+    (301, 'tenant-category', 30,
+     ARRAY['营销', 'Content Creation', 'code_review', 'CustomOnly', '营销'], 'N'),
+    (302, 'tenant-category', 31,
+     ARRAY['Customer Support', 'Ticketing', 'Color Scheme', 'Marketing'], 'N'),
+    (303, 'tenant-category', 32, ARRAY['OnlyCustom'], 'N'),
+    (304, 'tenant-category', 33, ARRAY['数据'], 'Y');
+
+ALTER TABLE nexent.ag_agent_repository_t ADD COLUMN category_id INTEGER;
+UPDATE nexent.ag_agent_repository_t SET category_id = 1 WHERE agent_repository_id = 301;
+SQL
+
+  run_file "$database" "$MIGRATION_SQL" >/dev/null
+  run_file "$database" "$AGENT_CATEGORY_SEED_SQL" >/dev/null
+  run_file "$database" "$AGENT_CATEGORY_COMPATIBILITY_SQL" >/dev/null
+
+  assert_query "$database" \
+    "SELECT count(*) FROM nexent.tag_definition WHERE tenant_id = 'tenant-category' AND definition_key = 'agent_category' AND delete_flag = 'N';" \
+    "1" "compatibility migration should provision one Agent Category definition"
+  assert_query "$database" \
+    "SELECT count(*) FROM nexent.tag_value AS value JOIN nexent.tag_definition AS definition USING (tenant_id, definition_id) WHERE definition.tenant_id = 'tenant-category' AND definition.definition_key = 'agent_category' AND value.delete_flag = 'N';" \
+    "20" "compatibility migration should provision all 20 Agent Category values"
+  assert_query "$database" \
+    "SELECT string_agg(value.normalized_value, ',' ORDER BY value.normalized_value) FROM nexent.resource_tag_assignment AS assignment JOIN nexent.tag_definition AS definition USING (tenant_id, definition_id) JOIN nexent.tag_value AS value USING (tenant_id, definition_id, value_id) WHERE assignment.tenant_id = 'tenant-category' AND assignment.resource_type = 'agent' AND assignment.resource_id = '30' AND definition.definition_key = 'agent_category' AND assignment.delete_flag = 'N';" \
+    "code_review,content_creation,marketing" \
+    "Chinese, English, and stable-key aliases should map to Agent Category values"
+  assert_query "$database" \
+    "SELECT string_agg(value.normalized_value, ',' ORDER BY value.normalized_value) FROM nexent.resource_tag_assignment AS assignment JOIN nexent.tag_definition AS definition USING (tenant_id, definition_id) JOIN nexent.tag_value AS value USING (tenant_id, definition_id, value_id) WHERE assignment.tenant_id = 'tenant-category' AND assignment.resource_type = 'agent' AND assignment.resource_id = '31' AND definition.definition_key = 'agent_category' AND assignment.delete_flag = 'N';" \
+    "color_scheme,customer_service,marketing,ticket" \
+    "known English display aliases should map to stable Agent Category values"
+  assert_query "$database" \
+    "SELECT count(*) FROM nexent.resource_tag_assignment AS assignment JOIN nexent.tag_definition AS definition USING (tenant_id, definition_id) WHERE assignment.tenant_id = 'tenant-category' AND assignment.resource_type = 'agent' AND assignment.resource_id IN ('32', '33') AND definition.definition_key = 'agent_category' AND assignment.delete_flag = 'N';" \
+    "0" "custom-only and soft-deleted repository rows should not activate Agent Category values"
+  assert_query "$database" \
+    "SELECT count(*) FROM nexent.resource_tag_assignment AS assignment JOIN nexent.tag_definition AS definition USING (tenant_id, definition_id) JOIN nexent.tag_value AS value USING (tenant_id, definition_id, value_id) WHERE assignment.tenant_id = 'tenant-category' AND assignment.resource_id = '30' AND definition.definition_key = 'keywords' AND value.normalized_value = 'customonly' AND assignment.delete_flag = 'N';" \
+    "1" "custom Agent tags should remain available under Keywords"
+  assert_query "$database" \
+    "SELECT tags::TEXT FROM nexent.ag_agent_repository_t WHERE agent_repository_id = 301;" \
+    "{营销,\"Content Creation\",code_review,CustomOnly,营销}" \
+    "Agent Category projection must preserve the legacy repository tags"
+  assert_query "$database" \
+    "SELECT category_id FROM nexent.ag_agent_repository_t WHERE agent_repository_id = 301;" \
+    "1" "the removed category_id taxonomy should remain unchanged"
+
+  run_file "$database" "$AGENT_CATEGORY_COMPATIBILITY_SQL" >/dev/null
+  assert_query "$database" \
+    "SELECT count(*) FROM nexent.resource_tag_assignment AS assignment JOIN nexent.tag_definition AS definition USING (tenant_id, definition_id) WHERE assignment.tenant_id = 'tenant-category' AND definition.definition_key = 'agent_category' AND assignment.delete_flag = 'N';" \
+    "7" "Agent Category compatibility migration should rerun without duplicates"
+
+  run_sql "$database" <<'SQL'
+INSERT INTO nexent.user_tenant_t (tenant_id, created_by, delete_flag)
+VALUES ('tenant-after-upgrade', 'owner-after-upgrade', 'N');
+SQL
+  assert_query "$database" \
+    "SELECT (SELECT count(*) FROM nexent.tag_bucket WHERE tenant_id = 'tenant-after-upgrade' AND delete_flag = 'N') || '|' || (SELECT count(*) FROM nexent.tag_bucket_resource_type WHERE tenant_id = 'tenant-after-upgrade' AND delete_flag = 'N') || '|' || (SELECT count(*) FROM nexent.tag_definition WHERE tenant_id = 'tenant-after-upgrade' AND definition_key = 'agent_category' AND delete_flag = 'N') || '|' || (SELECT count(*) FROM nexent.tag_value AS value JOIN nexent.tag_definition AS definition USING (tenant_id, definition_id) WHERE definition.tenant_id = 'tenant-after-upgrade' AND definition.definition_key = 'agent_category' AND value.delete_flag = 'N');" \
+    "2|6|1|20" \
+    "a tenant created after the complete upgrade chain should receive Agent Category immediately"
+  pass "Agent preset aliases migrate to Agent Category and future tenants use the restored provisioner"
+}
+
+test_agent_category_capacity_conflict_rolls_back() {
+  local database="utm_agent_category_capacity"
+  local preflight_output
+  create_database "$database"
+  create_legacy_schema "$database"
+  run_sql "$database" <<'SQL'
+INSERT INTO nexent.user_tenant_t (tenant_id, created_by, delete_flag)
+VALUES ('tenant-category-capacity', 'owner-category-capacity', 'N');
+INSERT INTO nexent.ag_tenant_agent_t VALUES (50, 'tenant-category-capacity');
+INSERT INTO nexent.ag_agent_repository_t (
+    agent_repository_id, publisher_tenant_id, agent_id, tags, delete_flag
+)
+SELECT 501, 'tenant-category-capacity', 50,
+       array_agg(CASE WHEN item = 1 THEN '营销' ELSE 'custom-' || item::TEXT END ORDER BY item),
+       'N'
+FROM generate_series(1, 100) AS series(item);
+SQL
+
+  run_file "$database" "$MIGRATION_SQL" >/dev/null
+  run_file "$database" "$AGENT_CATEGORY_SEED_SQL" >/dev/null
+  preflight_output="$(run_file "$database" "$PREFLIGHT_SQL")"
+  assert_contains "$preflight_output" "agent_category_assignment_capacity_exceeded" \
+    "preflight should report the projected Agent Category assignment overflow"
+  assert_contains "$preflight_output" '"new_agent_categories": 1' \
+    "preflight should report the one category assignment that would exceed capacity"
+  expect_agent_category_migration_failure "$database" "assignment-capacity"
+  assert_query "$database" \
+    "SELECT count(*) FROM nexent.resource_tag_assignment WHERE tenant_id = 'tenant-category-capacity' AND resource_type = 'agent' AND resource_id = '50' AND delete_flag = 'N';" \
+    "100" "failed Agent Category projection should preserve the existing 100 Keywords assignments"
+  assert_query "$database" \
+    "SELECT count(*) FROM nexent.resource_tag_assignment AS assignment JOIN nexent.tag_definition AS definition USING (tenant_id, definition_id) WHERE assignment.tenant_id = 'tenant-category-capacity' AND assignment.resource_id = '50' AND definition.definition_key = 'agent_category';" \
+    "0" "capacity conflict should roll back every projected Agent Category assignment"
+  assert_query "$database" \
+    "SELECT cardinality(tags) FROM nexent.ag_agent_repository_t WHERE agent_repository_id = 501;" \
+    "100" "capacity conflict should preserve all legacy Agent repository tags"
+  pass "Agent Category projection fails closed and rolls back when it would create the 101st assignment"
+}
+
+test_latest_init_and_tag_migration_order() {
+  local database="utm_tag_upgrade_order"
+  create_database "$database"
+  run_sql "$database" <<'SQL'
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'root') THEN
+        CREATE ROLE root LOGIN SUPERUSER;
+    END IF;
+END;
+$$;
+SQL
+  run_file_with_search_path "$database" "$INIT_SQL" >/dev/null
+  run_migration_files_through "$database" "v2.5.0_0817_unified_tag_management.sql"
+  run_file_with_search_path "$database" "$AGENT_CATEGORY_SEED_SQL" >/dev/null
+  run_file_with_search_path "$database" \
+    "$DEPLOY_ROOT/sql/migrations/v2.5.4_0820_tag_value_usage_index.sql" >/dev/null
+  run_file_with_search_path "$database" "$AGENT_CATEGORY_COMPATIBILITY_SQL" >/dev/null
+
+  run_sql "$database" <<'SQL'
+INSERT INTO nexent.user_tenant_t (user_id, tenant_id, created_by, delete_flag)
+VALUES ('user-complete-upgrade', 'tenant-complete-upgrade', 'user-complete-upgrade', 'N');
+SQL
+  assert_query "$database" \
+    "SELECT (SELECT count(*) FROM nexent.tag_bucket WHERE tenant_id = 'tenant-complete-upgrade' AND delete_flag = 'N') || '|' || (SELECT count(*) FROM nexent.tag_bucket_resource_type WHERE tenant_id = 'tenant-complete-upgrade' AND delete_flag = 'N') || '|' || (SELECT count(*) FROM nexent.tag_definition WHERE tenant_id = 'tenant-complete-upgrade' AND definition_key = 'agent_category' AND delete_flag = 'N') || '|' || (SELECT count(*) FROM nexent.tag_value AS value JOIN nexent.tag_definition AS definition USING (tenant_id, definition_id) WHERE definition.tenant_id = 'tenant-complete-upgrade' AND definition.definition_key = 'agent_category' AND value.delete_flag = 'N');" \
+    "2|6|1|20" \
+    "latest init followed by the relevant tag migration order should leave the final tenant provisioner active"
+  pass "latest init plus the historical tag migration order preserves final tenant provisioning"
 }
 
 test_community_tags_fail_closed() {
@@ -831,6 +1012,9 @@ main() {
   test_preflight_before_tag_schema
   test_empty_legacy_provisions_only_buckets_and_bindings
   test_valid_legacy_backfill_and_idempotency
+  test_agent_category_compatibility_and_future_tenant_provisioning
+  test_agent_category_capacity_conflict_rolls_back
+  test_latest_init_and_tag_migration_order
   test_community_tags_fail_closed
   test_null_and_empty_tenant_roll_back
   test_non_string_json_roll_back

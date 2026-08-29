@@ -1321,7 +1321,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                                   canEdit: !isReadOnlyMode,
                                 });
                               }}
-                              className={LAYOUT.ACTION_TEXT}
+                              className={LAYOUT.ACTION_PREVIEW_TEXT}
                               title={t("document.action.assignTags")}
                             >
                               {t("document.action.assignTags")}

@@ -1055,4 +1055,3 @@ def test_provider_document_helpers_for_local_and_aidp_providers(monkeypatch):
         == "EDIT"
     )
     _require_provider_document_edit_permission(provider="aidp", knowledge_base_id="kb", user_id="u", tenant_id="t")
-
