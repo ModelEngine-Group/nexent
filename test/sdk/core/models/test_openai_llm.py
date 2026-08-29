@@ -1968,14 +1968,15 @@ def test_non_retryable_fails_immediately(openai_model_instance):
     assert calls["n"] == 1
 
 
-def test_empty_response_not_retried(openai_model_instance):
-    """EmptyModelResponseError must propagate without retrying."""
+def test_reasoning_only_stop_response_retries_once_then_propagates(openai_model_instance):
+    """A reasoning-only stop response gets one transparent retry."""
     calls = {"n": 0}
 
     def fake_create(stream=True, **kwargs):
         calls["n"] += 1
         chunk = _make_content_chunk(None)
         chunk.choices[0].delta.content = None
+        chunk.choices[0].finish_reason = "stop"
         chunk.usage = MagicMock(prompt_tokens=1, completion_tokens=1)
         return [chunk]
 
@@ -1985,7 +1986,50 @@ def test_empty_response_not_retried(openai_model_instance):
     with pytest.raises(openai_llm_module.EmptyModelResponseError):
         openai_model_instance.__call__([{"role": "user", "content": "hello"}])
 
-    assert calls["n"] == 1
+    assert calls["n"] == 2
+
+
+def test_reasoning_only_stop_response_recovers_on_retry(openai_model_instance):
+    calls = {"n": 0}
+
+    def fake_create(stream=True, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            chunk = _make_content_chunk(None)
+            chunk.choices[0].finish_reason = "stop"
+            return [chunk]
+        chunk = _make_content_chunk("Recovered response")
+        chunk.choices[0].finish_reason = "stop"
+        return [chunk]
+
+    openai_model_instance.retry_config = _retry_model_config()
+    openai_model_instance.client.chat.completions.create.side_effect = fake_create
+
+    openai_model_instance.__call__([{"role": "user", "content": "hello"}])
+
+    openai_model_instance.observer.add_model_new_token.assert_called_with("Recovered response")
+    assert openai_model_instance.last_response_diagnostics["content_char_count"] == len(
+        "Recovered response"
+    )
+    assert calls["n"] == 2
+    assert openai_model_instance.last_retry_count == 1
+
+
+def test_reasoning_only_retry_is_interrupted_by_stop_event(openai_model_instance):
+    def fake_create(stream=True, **kwargs):
+        chunk = _make_content_chunk(None)
+        chunk.choices[0].finish_reason = "stop"
+        return [chunk]
+
+    openai_model_instance.stop_event = MagicMock()
+    openai_model_instance.stop_event.is_set.side_effect = [False, False, True]
+    openai_model_instance.retry_config = _retry_model_config()
+    openai_model_instance.client.chat.completions.create.side_effect = fake_create
+
+    with pytest.raises(RuntimeError, match="Model is interrupted by stop event"):
+        openai_model_instance.__call__([{"role": "user", "content": "hello"}])
+
+    assert openai_model_instance.last_retry_count == 1
 
 
 # ---------------------------------------------------------------------------

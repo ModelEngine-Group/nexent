@@ -141,6 +141,7 @@ class MockToolInstance:
         self.user_id = "user1"
         self.enabled = True
         self.delete_flag = "N"
+        self.params = {"database_url": "original"}
         self.__dict__ = {
             "tool_instance_id": 1,
             "tool_id": 1,
@@ -148,7 +149,8 @@ class MockToolInstance:
             "tenant_id": "tenant1",
             "user_id": "user1",
             "enabled": True,
-            "delete_flag": "N"
+            "delete_flag": "N",
+            "params": {"database_url": "original"},
         }
 
 
@@ -232,12 +234,18 @@ def test_create_or_update_tool_by_tool_info_update_existing(monkeypatch, mock_se
                         lambda obj: obj.__dict__ if hasattr(obj, '__dict__') else obj)
 
     tool_info = MagicMock()
-    tool_info.__dict__ = {"agent_id": 1, "tool_id": 1}
+    tool_info.__dict__ = {
+        "agent_id": 1,
+        "tool_id": 1,
+        "params": {"database_url": "updated"},
+    }
 
     result = create_or_update_tool_by_tool_info(tool_info, "tenant1", "user1")
 
-    # Result is now as_dict() of the tool_instance
     assert isinstance(result, dict)
+    assert mock_tool_instance.tool_instance_id == 1
+    assert mock_tool_instance.params == {"database_url": "updated"}
+    session.add.assert_not_called()
 
 
 def test_create_or_update_tool_by_tool_info_create_new(monkeypatch, mock_session):

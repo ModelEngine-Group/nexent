@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { App, Button, Form } from "antd";
+import { App, Button, Form, Tooltip } from "antd";
 import {
   Collapsible,
   CollapsibleContent,
@@ -43,6 +43,7 @@ import {
   MessageSquare,
   ShieldCheck,
   Bug,
+  LockOpen,
   Rocket,
 } from "lucide-react";
 
@@ -127,13 +128,19 @@ function ConfigSection({
 }
 
 interface AgentConfigProps {
+  canManualUnlock: boolean;
+  onManualUnlock: () => void;
   onToggleDebug: () => void;
   actionAreaRef?: React.Ref<HTMLDivElement>;
+  onPublished?: () => void;
 }
 
 export default function AgentConfig({
+  canManualUnlock,
+  onManualUnlock,
   onToggleDebug,
   actionAreaRef,
+  onPublished,
 }: AgentConfigProps) {
   const { t } = useTranslation("common");
   const [form] = Form.useForm();
@@ -146,6 +153,7 @@ export default function AgentConfig({
   const displayInfoSectionRef = useRef<HTMLDivElement>(null);
   const roleModelSectionRef = useRef<HTMLDivElement>(null);
   const toolsSkillsSectionRef = useRef<HTMLDivElement>(null);
+  const knowledgeBaseSectionRef = useRef<HTMLDivElement>(null);
   const conversationGuideSectionRef = useRef<HTMLDivElement>(null);
   const lastScrolledRequestRef = useRef<string | null>(null);
   const { configFocusRequest } = useNl2AgentFlow();
@@ -181,7 +189,10 @@ export default function AgentConfig({
 
     const { requestId, target } = configFocusRequest;
     setActiveConfigTab(
-      target.section === "conversation_guide" ? "advanced" : "basic"
+      target.section === "conversation_guide" ||
+        target.section === "knowledge_base"
+        ? "advanced"
+        : "basic"
     );
     setOpenSections((current) =>
       current[target.section] ? current : { ...current, [target.section]: true }
@@ -198,7 +209,9 @@ export default function AgentConfig({
             ? roleModelSectionRef.current
             : target.section === "tools_skills"
               ? toolsSkillsSectionRef.current
-              : conversationGuideSectionRef.current;
+              : target.section === "knowledge_base"
+                ? knowledgeBaseSectionRef.current
+                : conversationGuideSectionRef.current;
       if (!sectionElement) return;
 
       const prefersReducedMotion = window.matchMedia(
@@ -410,6 +423,7 @@ export default function AgentConfig({
             onOpenChange={(open) =>
               handleSectionOpenChange("knowledge_base", open)
             }
+            containerRef={knowledgeBaseSectionRef}
             headerActions={<KnowledgeBaseConfigActions />}
           >
             <KnowledgeBaseConfig />
@@ -444,8 +458,20 @@ export default function AgentConfig({
       </Tabs>
       <div
         ref={actionAreaRef}
-        className="flex shrink-0 justify-end gap-2 border-t border-gray-200 bg-white pt-3 pb-1"
+        className="flex shrink-0 items-center justify-between gap-2 border-t border-gray-200 bg-white pt-3 pb-1"
       >
+        <Tooltip title={t("agent.page.panel.nl2agent.manualUnlockAction")}>
+          <Button
+            aria-label={t("agent.page.panel.nl2agent.manualUnlockAction")}
+            icon={<LockOpen size={16} />}
+            disabled={!canManualUnlock}
+            onClick={onManualUnlock}
+            variant="solid"
+            type="primary"
+          >
+            {t("agent.config.button.unlock")}
+          </Button>
+        </Tooltip>
         <div className="flex items-center gap-2">
           <Button
             icon={<Bug size={16} />}
@@ -471,6 +497,7 @@ export default function AgentConfig({
         open={isPublishModalOpen}
         onClose={() => setIsPublishModalOpen(false)}
         agentId={agentId}
+        onPublished={onPublished}
       />
     </Form>
   );

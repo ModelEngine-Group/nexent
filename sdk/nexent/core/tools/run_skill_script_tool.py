@@ -34,6 +34,7 @@ class RunSkillScriptTool(Tool):
         observer: Optional[Any] = None,
         workspace_path: Optional[str] = None,
         on_complete: Optional[Any] = None,
+        execution_backend: Optional[Any] = None,
     ):
         """Initialize the tool with local skills directory and agent context.
         Args:
@@ -44,6 +45,9 @@ class RunSkillScriptTool(Tool):
             observer: Message observer used to publish structured skill artifacts.
             workspace_path: Optional run-scoped working directory for script files.
             on_complete: Optional callback invoked after the script finishes successfully.
+            execution_backend: Optional isolated execution callable. It receives
+                the manager, skill identity, script path, params and working
+                directory. When omitted, execution remains process-local.
         """
         super().__init__()
         self.skill_manager = None
@@ -54,6 +58,18 @@ class RunSkillScriptTool(Tool):
         self.observer = observer
         self.workspace_path = workspace_path
         self.on_complete = on_complete
+        self.execution_backend = execution_backend
+
+    def bind_execution_backend(
+        self,
+        execution_backend: Any,
+        *,
+        on_complete: Optional[Any] = None,
+    ) -> None:
+        """Bind this host-side control tool to an isolated execution backend."""
+        self.execution_backend = execution_backend
+        if on_complete is not None:
+            self.on_complete = on_complete
 
     def _get_skill_manager(self):
         """Lazy load skill manager."""
@@ -187,15 +203,25 @@ class RunSkillScriptTool(Tool):
         from nexent.skills.skill_manager import SkillNotFoundError, SkillScriptNotFoundError
         try:
             manager = self._get_skill_manager()
-            run_kwargs = {"tenant_id": self.tenant_id}
-            if self.workspace_path:
-                run_kwargs["working_directory"] = self.workspace_path
-            result = manager.run_skill_script(
-                skill_name,
-                script_path,
-                params,
-                **run_kwargs,
-            )
+            if self.execution_backend is not None:
+                result = self.execution_backend(
+                    manager=manager,
+                    skill_name=skill_name,
+                    script_path=script_path,
+                    params=params,
+                    tenant_id=self.tenant_id,
+                    working_directory=self.workspace_path,
+                )
+            else:
+                run_kwargs = {"tenant_id": self.tenant_id}
+                if self.workspace_path:
+                    run_kwargs["working_directory"] = self.workspace_path
+                result = manager.run_skill_script(
+                    skill_name,
+                    script_path,
+                    params,
+                    **run_kwargs,
+                )
             if self.on_complete is not None:
                 self.on_complete(result)
             artifacts = self._extract_file_artifacts(manager, skill_name, script_path, result)

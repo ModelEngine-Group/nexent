@@ -6,6 +6,7 @@ import io
 import json
 import logging
 import os
+import uuid
 import zipfile
 from collections import deque
 from typing import Any, Callable, Optional, Dict, List
@@ -169,6 +170,19 @@ _channel_cleanup_tasks: set[asyncio.Task[None]] = set()
 _agent_stream_producer_tasks: set[asyncio.Task[None]] = set()
 
 
+def _finalize_buffered_unit_fragments(message_units: list[dict[str, Any]]) -> int:
+    """Join mergeable unit fragments once and return finalized UTF-8 bytes."""
+    finalized_bytes = 0
+    for unit in message_units:
+        fragments = unit.pop("_content_fragments", None)
+        if fragments is not None:
+            content = "".join(fragments)
+            unit["content"] = content
+            unit["unit_content"] = content
+        finalized_bytes += len(str(unit.get("unit_content", "")).encode("utf-8"))
+    return finalized_bytes
+
+
 def _agent_icon_object_name(agent_id: int, tenant_id: str) -> str:
     return f"agent-icons/{tenant_id}/{agent_id}/icon"
 
@@ -324,6 +338,16 @@ async def _consume_agent_stream_producer(
             )
             _channel_cleanup_tasks.add(cleanup_task)
             cleanup_task.add_done_callback(_channel_cleanup_tasks.discard)
+        logger.info(
+            "Agent stream cleanup conversation=%s status=%s active_runs=%s "
+            "active_channels=%s active_producers=%s replay_bytes=%s",
+            conversation_id,
+            "failed" if not channel.is_completed else channel.completion_status,
+            agent_run_manager.get_active_run_count(),
+            streaming_channel_manager.get_active_channel_count(),
+            len(_agent_stream_producer_tasks),
+            streaming_channel_manager.get_retained_history_bytes(),
+        )
 
 
 async def _poll_runtime_cancel_signal(conversation_id: int, user_id: str, stop_event) -> None:
@@ -1185,8 +1209,7 @@ async def _stream_agent_chunks(
                 )
 
                 if is_continuation:
-                    current_unit["content"] += chunk_content
-                    current_unit["unit_content"] = current_unit["content"]
+                    current_unit["_content_fragments"].append(chunk_content)
                 else:
                     if chunk_type == "final_answer":
                         final_answer_content = chunk_content
@@ -1279,6 +1302,10 @@ async def _stream_agent_chunks(
                             "invocation_id": data.get("invocation_id"),
                             "mergeable": mergeable,
                         }
+                        if mergeable:
+                            current_unit["_content_fragments"] = [persisted_content]
+                            current_unit["content"] = ""
+                            current_unit["unit_content"] = ""
                         buffered_units.append(current_unit)
                         if chunk_type == "automation_proposal":
                             try:
@@ -1378,6 +1405,13 @@ async def _stream_agent_chunks(
         persistence_failed = False
         if streaming_message_id is not None:
             try:
+                persistence_bytes = _finalize_buffered_unit_fragments(buffered_units)
+                logger.info(
+                    "Finalizing assistant persistence conversation=%s units=%s bytes=%s",
+                    agent_request.conversation_id,
+                    len(buffered_units),
+                    persistence_bytes,
+                )
                 await asyncio.to_thread(
                     persist_assistant_run_batch,
                     message_id=streaming_message_id,
@@ -1421,7 +1455,7 @@ async def _stream_agent_chunks(
                 pass
 
         agent_run_manager.unregister_agent_run(
-            agent_request.conversation_id,
+            _agent_run_identifier(agent_request),
             user_id,
             status=terminal_status,
             agent_run_info=agent_run_info,
@@ -2901,6 +2935,15 @@ def insert_related_agent_impl(parent_agent_id, child_agent_id, tenant_id):
         )
 
 
+# Debug runs have no persisted conversation. Use their server-generated ID to
+# register and stop them without affecting conversation-backed runs.
+def _agent_run_identifier(agent_request: AgentRequest) -> int | str | None:
+    debug_run_id = getattr(agent_request, "_debug_run_id", None)
+    if isinstance(debug_run_id, str) and debug_run_id:
+        return debug_run_id
+    return agent_request.conversation_id
+
+
 # Helper function for run_agent_stream, used to prepare context for an agent run
 async def prepare_agent_run(
     agent_request: AgentRequest,
@@ -2985,7 +3028,7 @@ async def prepare_agent_run(
     if reservation_token is not None:
         register_kwargs["reservation_token"] = reservation_token
     agent_run_manager.register_agent_run(
-        agent_request.conversation_id,
+        _agent_run_identifier(agent_request),
         agent_run_info,
         user_id,
         **register_kwargs,
@@ -3148,7 +3191,7 @@ async def generate_stream(
             cancel_poll_task.cancel()
         if reservation_token is not None:
             agent_run_manager.release_agent_run_reservation(
-                agent_request.conversation_id,
+                _agent_run_identifier(agent_request),
                 user_id,
                 reservation_token,
             )
@@ -3250,6 +3293,10 @@ async def run_agent_stream(
         user_id=user_id,
         tenant_id=tenant_id,
     )
+    if agent_request.is_debug and not resume:
+        # Debug executions deliberately do not create conversations, so they
+        # need a transient identifier for lifecycle operations such as stop.
+        agent_request.__dict__["_debug_run_id"] = f"debug-{uuid.uuid4().hex}"
 
     # Inject current time in the user's timezone so the LLM can answer
     # time-related questions correctly. The SDK strips this prefix before
@@ -3639,7 +3686,7 @@ async def run_agent_stream(
     # Normal mode: start new stream
     try:
         reservation_token = agent_run_manager.reserve_agent_run(
-            agent_request.conversation_id,
+            _agent_run_identifier(agent_request),
             resolved_user_id,
         )
     except AgentRunAlreadyActiveError:
@@ -3725,7 +3772,7 @@ async def run_agent_stream(
             )
     except Exception:
         agent_run_manager.release_agent_run_reservation(
-            agent_request.conversation_id,
+            _agent_run_identifier(agent_request),
             resolved_user_id,
             reservation_token,
         )
@@ -3762,7 +3809,7 @@ async def run_agent_stream(
 
             # Emit conversation_created event for new conversations
             if is_new_conversation:
-                yield f'data: {{"type": "conversation_created", "content": {{"conversation_id": {agent_request.conversation_id}}}}}\n\n'
+                yield "data: " + json.dumps({"type": "conversation_created", "content": {"conversation_id": agent_request.conversation_id}}, ensure_ascii=False) + "\n\n"
 
             scope_event = getattr(agent_request, "_resolved_knowledge_scope_event", None)
             if scope_event is not None:
@@ -3793,12 +3840,15 @@ async def run_agent_stream(
             yield _safe_agent_stream_error_chunk()
         finally:
             agent_run_manager.release_agent_run_reservation(
-                agent_request.conversation_id,
+                _agent_run_identifier(agent_request),
                 resolved_user_id,
                 reservation_token,
             )
 
     headers = {"Cache-Control": "no-cache", "Connection": "keep-alive"}
+    debug_run_id = getattr(agent_request, "_debug_run_id", None)
+    if debug_run_id is not None:
+        headers["run_id"] = debug_run_id
     if agent_request.conversation_id is not None:
         headers["conversation_id"] = str(agent_request.conversation_id)
     runtime_metadata_version = getattr(
@@ -3896,17 +3946,20 @@ async def run_agent_background(
     }
 
 
-def stop_agent_tasks(conversation_id: int, user_id: str):
+def stop_agent_tasks(conversation_id: int | str, user_id: str):
     """
-    Stop agent run and preprocess tasks for the specified conversation_id.
+    Stop an agent run by its conversation ID or ephemeral debug run ID.
     Matches the behavior of agent_app.agent_stop_api.
     """
     # Stop agent run
     agent_stopped = agent_run_manager.stop_agent_run(conversation_id, user_id)
 
-    # Stop preprocess tasks
-    preprocess_stopped = preprocess_manager.stop_preprocess_tasks(
-        conversation_id)
+    # Preprocess tasks are associated only with persisted conversations.
+    preprocess_stopped = (
+        preprocess_manager.stop_preprocess_tasks(conversation_id)
+        if isinstance(conversation_id, int)
+        else False
+    )
 
     if agent_stopped or preprocess_stopped:
         message_parts = []
@@ -3915,11 +3968,11 @@ def stop_agent_tasks(conversation_id: int, user_id: str):
         if preprocess_stopped:
             message_parts.append("preprocess tasks")
 
-        message = f"successfully stopped {' and '.join(message_parts)} for user_id {user_id}, conversation_id {conversation_id}"
+        message = f"successfully stopped {' and '.join(message_parts)} for user_id {user_id}, run_id {conversation_id}"
         logging.info(message)
         return {"status": "success", "message": message}
     else:
-        message = f"no running agent or preprocess tasks found for user_id {user_id}, conversation_id {conversation_id}"
+        message = f"no running agent or preprocess tasks found for user_id {user_id}, run_id {conversation_id}"
         logging.info(message)
         return {"status": "success", "message": message, "already_stopped": True}
 

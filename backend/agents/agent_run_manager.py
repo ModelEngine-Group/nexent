@@ -126,6 +126,11 @@ class AgentRunManager:
         run_key = self._get_run_key(conversation_id, user_id)
         return self.agent_runs.get(run_key)
 
+    def get_active_run_count(self) -> int:
+        """Return the number of registered live runs."""
+        with self._lock:
+            return len(self.agent_runs)
+
     def stop_agent_run(self, conversation_id: Union[int, str], user_id: str) -> bool:
         """stop agent run for specified conversation_id and user_id"""
         remote_signal_set = runtime_state_service.set_cancel_signal(
