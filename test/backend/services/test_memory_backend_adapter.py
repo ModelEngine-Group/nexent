@@ -8,7 +8,7 @@ focus on argument translation and policy enforcement.
 import asyncio
 import sys
 import types
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -347,6 +347,71 @@ def test_build_memory_service_for_fa_extraction_returns_memory_service():
     assert callable(svc.kwargs.get("backend_store"))
     assert svc.kwargs.get("backend_search") is None
     assert svc.kwargs.get("embedding_model_info") is None
+
+
+def test_fanout_external_ingest_skips_without_enabled_providers(monkeypatch):
+    provider_service = MagicMock()
+    provider_service._config_service.get_enabled_providers.return_value = []
+    provider_module = types.ModuleType("services.memory_external_provider_service")
+    provider_module.get_memory_external_provider_service = MagicMock(
+        return_value=provider_service
+    )
+    monkeypatch.setitem(
+        sys.modules, "services.memory_external_provider_service", provider_module
+    )
+
+    asyncio.get_event_loop().run_until_complete(
+        memory_backend_adapter._fanout_external_ingest(
+            {"tenant_id": "t1", "user_id": "u1", "content": "remember me"},
+            {"memory_id": "m1"},
+        )
+    )
+
+    provider_service._config_service.get_enabled_providers.assert_called_once_with("t1")
+
+
+def test_fanout_external_ingest_sends_agent_unit_to_all_enabled(monkeypatch):
+    provider_service = MagicMock()
+    provider_service._config_service.get_enabled_providers.return_value = [
+        {"provider_name": "mem0"},
+        {"provider_name": "partner"},
+    ]
+    provider_module = types.ModuleType("services.memory_external_provider_service")
+    provider_module.get_memory_external_provider_service = MagicMock(
+        return_value=provider_service
+    )
+    monkeypatch.setitem(
+        sys.modules, "services.memory_external_provider_service", provider_module
+    )
+    ingestion_service = MagicMock()
+    ingestion_service.send_ingest_all_enabled = AsyncMock(
+        return_value=[types.SimpleNamespace(status="ok"), types.SimpleNamespace(status="error")]
+    )
+    monkeypatch.setattr(
+        memory_backend_adapter,
+        "_build_ingestion_event_service",
+        MagicMock(return_value=ingestion_service),
+    )
+
+    asyncio.get_event_loop().run_until_complete(
+        memory_backend_adapter._fanout_external_ingest(
+            {
+                "tenant_id": "t1",
+                "user_id": "u1",
+                "agent_id": "a1",
+                "conversation_id": "c1",
+                "content": "remember me",
+                "layer": MemoryLayer.AGENT,
+            },
+            {"memory_id": "m1"},
+        )
+    )
+
+    kwargs = ingestion_service.send_ingest_all_enabled.await_args.kwargs
+    assert kwargs["tenant_id"] == "t1"
+    assert kwargs["event_id"] == "m1"
+    assert kwargs["units"][0].unit_type == "agent"
+    assert kwargs["units"][0].unit_content == "remember me"
 
 
 def test_backend_store_hook_normalizes_enum_layer(fake_record_service):

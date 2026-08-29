@@ -155,6 +155,35 @@ def _mock_plugin_loader():
     return loader
 
 
+def test_service_factories_load_plugins_once():
+    loader = _mock_plugin_loader()
+    with patch.object(memory_provider_app, "PluginLoader", return_value=loader), patch.object(
+        memory_provider_app, "MemoryProviderConfigService"
+    ) as config_service_type, patch.object(
+        memory_provider_app, "MemoryExternalProviderService"
+    ) as provider_service_type:
+        first = memory_provider_app._get_plugin_loader()
+        second = memory_provider_app._get_plugin_loader()
+        config_service = memory_provider_app._get_config_service()
+        provider_service = memory_provider_app._get_provider_service()
+
+    assert first is loader
+    assert second is loader
+    loader.load_all.assert_called_once_with()
+    config_service_type.assert_called()
+    provider_service_type.assert_called()
+    assert config_service is config_service_type.return_value
+    assert provider_service is provider_service_type.return_value
+
+
+def test_extract_error_code_defaults_to_unknown():
+    assert memory_provider_app._extract_error_code(RuntimeError("boom")) == "unknown"
+    assert (
+        memory_provider_app._extract_error_code(NonRetryableProviderError("bad"))
+        == "unknown"
+    )
+
+
 @contextmanager
 def _provider_runtime(provider_service):
     """Patch the dependencies shared by provider search and ingest endpoints."""
@@ -220,6 +249,18 @@ def test_create_provider_duplicate_name(client):
         assert response.status_code == 400
 
 
+def test_create_provider_unexpected_error(client):
+    mock_service = MagicMock()
+    mock_service.create_provider.side_effect = RuntimeError("boom")
+    with patch.object(memory_provider_app, "_get_config_service", return_value=mock_service):
+        response = client.post(
+            "/memory/providers",
+            json={"provider_name": "test", "params": {"plugin.name": "mem0"}},
+            headers={"Authorization": "Bearer test"},
+        )
+    assert response.status_code == 500
+
+
 def test_list_providers(client):
     mock_service = MagicMock()
     mock_service.list_providers.return_value = [{"provider_config_id": 1}]
@@ -233,6 +274,16 @@ def test_list_providers(client):
         assert response.status_code == 200
         body = response.json()
         assert body["count"] == 1
+
+
+def test_list_providers_unexpected_error(client):
+    mock_service = MagicMock()
+    mock_service.list_providers.side_effect = RuntimeError("boom")
+    with patch.object(memory_provider_app, "_get_config_service", return_value=mock_service):
+        response = client.get(
+            "/memory/providers", headers={"Authorization": "Bearer test"}
+        )
+    assert response.status_code == 500
 
 
 def test_get_provider_found(client):
@@ -259,6 +310,16 @@ def test_get_provider_not_found(client):
             headers={"Authorization": "Bearer test"},
         )
         assert response.status_code == 404
+
+
+def test_get_provider_unexpected_error(client):
+    mock_service = MagicMock()
+    mock_service.get_provider.side_effect = RuntimeError("boom")
+    with patch.object(memory_provider_app, "_get_config_service", return_value=mock_service):
+        response = client.get(
+            "/memory/providers/1", headers={"Authorization": "Bearer test"}
+        )
+    assert response.status_code == 500
 
 
 def test_update_provider_success(client):
@@ -289,6 +350,26 @@ def test_update_provider_not_found(client):
         assert response.status_code == 404
 
 
+def test_update_provider_errors(client):
+    mock_service = MagicMock()
+    with patch.object(memory_provider_app, "_get_config_service", return_value=mock_service):
+        mock_service.update_provider.side_effect = ValueError("invalid")
+        response = client.put(
+            "/memory/providers/1",
+            json={"provider_name": "x"},
+            headers={"Authorization": "Bearer test"},
+        )
+        assert response.status_code == 400
+
+        mock_service.update_provider.side_effect = RuntimeError("boom")
+        response = client.put(
+            "/memory/providers/1",
+            json={"provider_name": "x"},
+            headers={"Authorization": "Bearer test"},
+        )
+        assert response.status_code == 500
+
+
 def test_delete_provider_success(client):
     mock_service = MagicMock()
     mock_service.delete_provider.return_value = True
@@ -313,6 +394,16 @@ def test_delete_provider_not_found(client):
             headers={"Authorization": "Bearer test"},
         )
         assert response.status_code == 400
+
+
+def test_delete_provider_unexpected_error(client):
+    mock_service = MagicMock()
+    mock_service.delete_provider.side_effect = RuntimeError("boom")
+    with patch.object(memory_provider_app, "_get_config_service", return_value=mock_service):
+        response = client.delete(
+            "/memory/providers/1", headers={"Authorization": "Bearer test"}
+        )
+    assert response.status_code == 500
 
 
 def test_test_search_success(client):
@@ -353,6 +444,29 @@ def test_test_search_failure_updates_error_code(client):
         m_db.update_provider_config.assert_called_once()
 
 
+@pytest.mark.parametrize(
+    ("error", "expected_status", "expected_code"),
+    [
+        (ValueError("invalid"), 400, "invalid_payload"),
+        (RuntimeError("boom"), 500, "unknown"),
+    ],
+)
+def test_test_search_other_errors(client, error, expected_status, expected_code):
+    mock_provider = MagicMock()
+    mock_provider.search = AsyncMock(side_effect=error)
+    mock_provider_service = MagicMock()
+    mock_provider_service.build_provider.return_value = mock_provider
+
+    with _provider_runtime(mock_provider_service) as config_db:
+        response = client.post(
+            "/memory/providers/1/test-search",
+            json={"query": "hello"},
+            headers={"Authorization": "Bearer test"},
+        )
+    assert response.status_code == expected_status
+    assert config_db.update_provider_config.call_args.args[1]["last_error_code"] == expected_code
+
+
 def test_test_ingest_success(client):
     mock_provider = MagicMock()
     mock_provider.ingest = AsyncMock(
@@ -387,6 +501,51 @@ def test_test_ingest_failure_updates_error_code(client):
         )
         assert response.status_code == 400
         m_db.update_provider_config.assert_called_once()
+
+
+def test_test_ingest_rejects_invalid_unit(client):
+    mock_provider_service = MagicMock()
+    with _provider_runtime(mock_provider_service), patch.object(
+        memory_provider_app.MemoryIngestUnit, "__init__", side_effect=ValueError("invalid")
+    ):
+        response = client.post(
+            "/memory/providers/1/test-ingest",
+            json={"units": [{"unit_content": "x"}]},
+            headers={"Authorization": "Bearer test"},
+        )
+    assert response.status_code == 400
+
+
+@pytest.mark.parametrize(
+    ("error", "expected_status", "expected_code"),
+    [
+        (ValueError("invalid"), 400, "invalid_payload"),
+        (RuntimeError("boom"), 500, "unknown"),
+    ],
+)
+def test_test_ingest_other_errors(client, error, expected_status, expected_code):
+    mock_provider = MagicMock()
+    mock_provider.ingest = AsyncMock(side_effect=error)
+    mock_provider_service = MagicMock()
+    mock_provider_service.build_provider.return_value = mock_provider
+
+    with _provider_runtime(mock_provider_service) as config_db:
+        response = client.post(
+            "/memory/providers/1/test-ingest",
+            json={
+                "units": [
+                    {
+                        "event_id": "e1",
+                        "event_type": "test",
+                        "unit_type": "agent",
+                        "unit_content": "x",
+                    }
+                ]
+            },
+            headers={"Authorization": "Bearer test"},
+        )
+    assert response.status_code == expected_status
+    assert config_db.update_provider_config.call_args.args[1]["last_error_code"] == expected_code
 
 
 def test_list_plugins(client):

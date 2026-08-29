@@ -135,6 +135,26 @@ class TestMemoryConfigService(unittest.TestCase):
         self.agent_id = 123
 
     # ------------------------------- helpers -------------------------------
+    @patch("backend.services.memory_config_service.get_user_configs")
+    def test_get_external_provider_top_k(self, get_configs):
+        from backend.services.memory_config_service import get_external_provider_top_k
+
+        get_configs.return_value = {"EXTERNAL_PROVIDER_TOP_K": "12"}
+        self.assertEqual(get_external_provider_top_k(self.user_id), 12)
+        get_configs.return_value = {"EXTERNAL_PROVIDER_TOP_K": "invalid"}
+        self.assertEqual(get_external_provider_top_k(self.user_id), 5)
+
+    @patch("backend.services.memory_config_service._update_single_config")
+    def test_set_external_provider_top_k(self, update_config):
+        from backend.services.memory_config_service import set_external_provider_top_k
+
+        update_config.return_value = True
+        self.assertTrue(set_external_provider_top_k(self.user_id, 10))
+        update_config.assert_called_once_with(
+            self.user_id, "EXTERNAL_PROVIDER_TOP_K", "10"
+        )
+        self.assertFalse(set_external_provider_top_k(self.user_id, 0))
+        self.assertFalse(set_external_provider_top_k(self.user_id, 101))
     @patch("backend.services.memory_config_service.get_all_configs_by_user_id")
     def test_get_user_configs_defaults_and_aggregation(self, m_get_all):
         # one single key, and two multi values
