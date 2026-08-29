@@ -51,11 +51,17 @@ async def test_ac_p3_24_search_success_uses_mock_http(monkeypatch):
         assert request.headers["Authorization"] == "Token test-key"
         return httpx.Response(
             200,
-            json={"results": [{"id": "m1", "memory": "Jules uses COMET-913", "score": 0.9}]},
+            json={
+                "results": [
+                    {"id": "m1", "memory": "Jules uses COMET-913", "score": 0.9}
+                ]
+            },
         )
 
     _install_transport(monkeypatch, handler)
-    results = await Mem0Provider({"api_key": "test-key"}).search(_search_request())
+    results = await Mem0Provider({"api_key": "test-key", "api_version": "v1"}).search(
+        _search_request()
+    )
 
     assert [item.content for item in results] == ["Jules uses COMET-913"]
     assert results[0].source == "mem0"
@@ -70,9 +76,9 @@ async def test_ac_p3_24_search_forwards_filters_and_org_header(monkeypatch):
         return httpx.Response(200, json=[])
 
     _install_transport(monkeypatch, handler)
-    results = await Mem0Provider({"api_key": "test-key", "org_id": "org-1"}).search(
-        _search_request(), filters={"category": "preference"}
-    )
+    results = await Mem0Provider(
+        {"api_key": "test-key", "org_id": "org-1", "api_version": "v1"}
+    ).search(_search_request(), filters={"category": "preference"})
 
     assert results == []
 
@@ -87,11 +93,15 @@ async def test_ac_p3_24_search_falls_back_to_user_scope(monkeypatch):
             return httpx.Response(200, json={"results": []})
         return httpx.Response(
             200,
-            json={"results": [{"id": "m2", "memory": "COMET-913 belongs to Jules", "score": 0.8}]},
+            json={
+                "results": [
+                    {"id": "m2", "memory": "COMET-913 belongs to Jules", "score": 0.8}
+                ]
+            },
         )
 
     _install_transport(monkeypatch, handler)
-    results = await Mem0Provider({"api_key": "test-key"}).search(
+    results = await Mem0Provider({"api_key": "test-key", "api_version": "v1"}).search(
         _search_request(agent_id="agent-5")
     )
 
@@ -109,23 +119,76 @@ async def test_ac_p3_24_ingest_success_uses_mock_http(monkeypatch):
         return httpx.Response(200, json={"results": [{"id": "m3", "event": "ADD"}]})
 
     _install_transport(monkeypatch, handler)
-    result = await Mem0Provider({"api_key": "test-key"}).ingest(MemoryIngestRequest(
-        tenant_id="tenant-1",
-        user_id="user-1",
-        agent_id="agent-5",
-        units=[MemoryIngestUnit(
-            event_id="event-1",
-            event_type="conversation",
-            unit_type="user_message",
-            unit_content="Remember COMET-913",
-        )],
-        idempotency_key="test:event-1",
-    ))
+    result = await Mem0Provider({"api_key": "test-key", "api_version": "v1"}).ingest(
+        MemoryIngestRequest(
+            tenant_id="tenant-1",
+            user_id="user-1",
+            agent_id="agent-5",
+            units=[
+                MemoryIngestUnit(
+                    event_id="event-1",
+                    event_type="conversation",
+                    unit_type="user_message",
+                    unit_content="Remember COMET-913",
+                )
+            ],
+            idempotency_key="test:event-1",
+        )
+    )
 
     assert result.status == "ok"
     assert result.accepted_count == 1
     assert payloads[0]["user_id"] == "user-1"
     assert payloads[0]["agent_id"] == "agent-5"
+
+
+@pytest.mark.asyncio
+async def test_hosted_v3_ingest_waits_then_searches_with_entity_filters(monkeypatch):
+    stored = []
+
+    def handler(request):
+        payload = json.loads(request.content) if request.content else {}
+        if request.url.path == "/v3/memories/add/":
+            assert payload["infer"] is False
+            stored.append(payload["messages"][0]["content"])
+            return httpx.Response(200, json={"status": "PENDING", "event_id": "evt-1"})
+        if request.url.path == "/v1/event/evt-1/":
+            return httpx.Response(200, json={"status": "SUCCEEDED"})
+        if request.url.path == "/v3/memories/search/":
+            assert payload["filters"] == {
+                "AND": [{"user_id": "user-1"}, {"agent_id": "agent-5"}]
+            }
+            assert payload["top_k"] == 5
+            return httpx.Response(
+                200,
+                json={"results": [{"id": "m-v3", "memory": stored[0], "score": 0.95}]},
+            )
+        return httpx.Response(404)
+
+    _install_transport(monkeypatch, handler)
+    provider = Mem0Provider({"api_key": "test-key"})
+    content = "The user prefers concise summaries."
+    ingest_result = await provider.ingest(
+        MemoryIngestRequest(
+            tenant_id="tenant-1",
+            user_id="user-1",
+            agent_id="agent-5",
+            units=[
+                MemoryIngestUnit(
+                    event_id="event-v3",
+                    event_type="memory_stored",
+                    unit_type="agent",
+                    unit_content=content,
+                )
+            ],
+            idempotency_key="test:v3",
+        )
+    )
+    results = await provider.search(_search_request(agent_id="agent-5"))
+
+    assert provider.api_version == "v3"
+    assert ingest_result.accepted_count == 1
+    assert [item.content for item in results] == [content]
 
 
 @pytest.mark.asyncio
@@ -137,16 +200,23 @@ async def test_ac_p3_37_38_mem0_dual_write_search_and_cross_source_dedup(monkeyp
         payload = json.loads(request.content)
         if request.url.path == "/v1/memories/":
             stored_memories.append(payload["messages"][0]["content"])
-            return httpx.Response(200, json={"results": [{"id": "mem0-1", "event": "ADD"}]})
+            return httpx.Response(
+                200, json={"results": [{"id": "mem0-1", "event": "ADD"}]}
+            )
         if request.url.path == "/v1/memories/search/":
-            return httpx.Response(200, json={"results": [
-                {"id": "mem0-1", "memory": content, "score": 0.88}
-                for content in stored_memories
-            ]})
+            return httpx.Response(
+                200,
+                json={
+                    "results": [
+                        {"id": "mem0-1", "memory": content, "score": 0.88}
+                        for content in stored_memories
+                    ]
+                },
+            )
         return httpx.Response(404)
 
     _install_transport(monkeypatch, handler)
-    provider = Mem0Provider({"api_key": "test-key"})
+    provider = Mem0Provider({"api_key": "test-key", "api_version": "v1"})
     content = "The user prefers concise weekly status summaries."
 
     internal_result = MemorySearchResult(
@@ -157,19 +227,23 @@ async def test_ac_p3_37_38_mem0_dual_write_search_and_cross_source_dedup(monkeyp
         source="internal",
         metadata={"memory_type": "short_term"},
     )
-    ingest_result = await provider.ingest(MemoryIngestRequest(
-        tenant_id="tenant-1",
-        user_id="user-1",
-        agent_id="agent-5",
-        conversation_id="conversation-1",
-        units=[MemoryIngestUnit(
-            event_id="memory-101",
-            event_type="memory_stored",
-            unit_type="agent",
-            unit_content=content,
-        )],
-        idempotency_key="nexent:tenant-1:agent-5:user-1:conversation-1:memory_stored:101",
-    ))
+    ingest_result = await provider.ingest(
+        MemoryIngestRequest(
+            tenant_id="tenant-1",
+            user_id="user-1",
+            agent_id="agent-5",
+            conversation_id="conversation-1",
+            units=[
+                MemoryIngestUnit(
+                    event_id="memory-101",
+                    event_type="memory_stored",
+                    unit_type="agent",
+                    unit_content=content,
+                )
+            ],
+            idempotency_key="nexent:tenant-1:agent-5:user-1:conversation-1:memory_stored:101",
+        )
+    )
     external_results = await provider.search(
         _search_request(query="weekly status summaries", agent_id="agent-5")
     )
@@ -180,13 +254,16 @@ async def test_ac_p3_37_38_mem0_dual_write_search_and_cross_source_dedup(monkeyp
 
     normalized = Normalizer().normalize(
         [internal_result],
-        external_results=[ExternalMemoryItem(
-            id=result.external_id or "",
-            content=result.content,
-            score=result.score,
-            provider=result.source,
-            metadata=result.metadata,
-        ) for result in external_results],
+        external_results=[
+            ExternalMemoryItem(
+                id=result.external_id or "",
+                content=result.content,
+                score=result.score,
+                provider=result.source,
+                metadata=result.metadata,
+            )
+            for result in external_results
+        ],
     )
     assert len(normalized) == 1
     assert normalized[0].content == content
@@ -214,13 +291,15 @@ async def test_ac_p3_24_ingest_reports_partial_acceptance(monkeypatch):
         )
         for index in (1, 2)
     ]
-    result = await Mem0Provider({"api_key": "test-key"}).ingest(MemoryIngestRequest(
-        tenant_id="tenant-1",
-        user_id="user-1",
-        conversation_id="conversation-1",
-        units=units,
-        idempotency_key="test:partial",
-    ))
+    result = await Mem0Provider({"api_key": "test-key", "api_version": "v1"}).ingest(
+        MemoryIngestRequest(
+            tenant_id="tenant-1",
+            user_id="user-1",
+            conversation_id="conversation-1",
+            units=units,
+            idempotency_key="test:partial",
+        )
+    )
 
     assert result.status == "partial"
     assert result.accepted_count == 1
@@ -229,10 +308,14 @@ async def test_ac_p3_24_ingest_reports_partial_acceptance(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_ac_p3_24_unauthorized_is_non_retryable(monkeypatch):
-    _install_transport(monkeypatch, lambda request: httpx.Response(401, text="invalid token"))
+    _install_transport(
+        monkeypatch, lambda request: httpx.Response(401, text="invalid token")
+    )
 
     with pytest.raises(NonRetryableProviderError) as exc_info:
-        await Mem0Provider({"api_key": "bad-key"}).search(_search_request())
+        await Mem0Provider({"api_key": "bad-key", "api_version": "v1"}).search(
+            _search_request()
+        )
 
     assert exc_info.value.error.code.value == "unauthorized"
 
@@ -245,7 +328,9 @@ async def test_ac_p3_24_timeout_is_retryable(monkeypatch):
     _install_transport(monkeypatch, handler)
 
     with pytest.raises(RetryableProviderError) as exc_info:
-        await Mem0Provider({"api_key": "test-key"}).search(_search_request())
+        await Mem0Provider({"api_key": "test-key", "api_version": "v1"}).search(
+            _search_request()
+        )
 
     assert exc_info.value.error.code.value == "timeout"
 
@@ -258,7 +343,9 @@ async def test_ac_p3_24_transport_error_is_retryable(monkeypatch):
     _install_transport(monkeypatch, handler)
 
     with pytest.raises(RetryableProviderError) as exc_info:
-        await Mem0Provider({"api_key": "test-key"}).search(_search_request())
+        await Mem0Provider({"api_key": "test-key", "api_version": "v1"}).search(
+            _search_request()
+        )
 
     assert exc_info.value.error.code.value == "provider_error"
 

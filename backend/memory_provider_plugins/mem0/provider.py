@@ -6,6 +6,7 @@ using the Mem0 hosted API (https://api.mem0.ai).
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -41,6 +42,10 @@ class Mem0Provider:
         self.api_key = config.get("api_key")
         self.org_id = config.get("org_id")
         self.base_url = config.get("base_url", "https://api.mem0.ai").rstrip("/")
+        configured_api_version = str(config.get("api_version", "")).lower()
+        self.api_version = configured_api_version or (
+            "v3" if self.base_url == "https://api.mem0.ai" else "v1"
+        )
         # Support both "timeout" (plugin-specific) and "timeout_seconds" (provider-level)
         self.timeout = int(config.get("timeout_seconds", config.get("timeout", 30)))
 
@@ -62,21 +67,17 @@ class Mem0Provider:
         limit: int = 5,
         filters: Optional[Dict[str, Any]] = None,
     ) -> List[MemorySearchResult]:
-        payload: Dict[str, Any] = {
-            "query": request.query,
-            "limit": limit,
-        }
-        if request.user_id:
-            payload["user_id"] = request.user_id
-        if request.agent_id:
-            payload["agent_id"] = request.agent_id
-        if filters:
-            payload["filters"] = filters
+        payload = self._build_search_payload(request, limit, filters)
+        search_path = (
+            "/v3/memories/search/"
+            if self.api_version == "v3"
+            else "/v1/memories/search/"
+        )
 
         async def _post_search(search_payload: Dict[str, Any]) -> Any:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 response = await client.post(
-                    f"{self.base_url}/v1/memories/search/",
+                    f"{self.base_url}{search_path}",
                     json=search_payload,
                     headers=self._build_headers(),
                 )
@@ -87,7 +88,8 @@ class Mem0Provider:
             data = await _post_search(payload)
             raw_results = data if isinstance(data, list) else data.get("results", [])
             if not raw_results and request.agent_id and request.user_id:
-                user_payload = {key: value for key, value in payload.items() if key != "agent_id"}
+                user_request = request.model_copy(update={"agent_id": None})
+                user_payload = self._build_search_payload(user_request, limit, filters)
                 data = await _post_search(user_payload)
         except httpx.TimeoutException as exc:
             error = ProviderError(
@@ -117,6 +119,41 @@ class Mem0Provider:
             for r in raw_results
         ]
 
+    def _build_search_payload(
+        self,
+        request: MemorySearchRequest,
+        limit: int,
+        filters: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        if self.api_version != "v3":
+            payload: Dict[str, Any] = {"query": request.query, "limit": limit}
+            if request.user_id:
+                payload["user_id"] = request.user_id
+            if request.agent_id:
+                payload["agent_id"] = request.agent_id
+            if filters:
+                payload["filters"] = filters
+            return payload
+
+        entity_filters = []
+        if request.user_id:
+            entity_filters.append({"user_id": request.user_id})
+        if request.agent_id:
+            entity_filters.append({"agent_id": request.agent_id})
+        if filters:
+            entity_filters.append(filters)
+        if not entity_filters:
+            raise ValueError("Mem0 v3 search requires a user_id or agent_id filter")
+        search_filters = (
+            entity_filters[0] if len(entity_filters) == 1 else {"AND": entity_filters}
+        )
+        return {
+            "query": request.query,
+            "filters": search_filters,
+            "top_k": limit,
+            "threshold": 0.0,
+        }
+
     async def ingest(
         self,
         request: MemoryIngestRequest,
@@ -127,9 +164,7 @@ class Mem0Provider:
 
         for unit in request.units:
             payload: Dict[str, Any] = {
-                "messages": [
-                    {"role": "user", "content": unit.unit_content}
-                ],
+                "messages": [{"role": "user", "content": unit.unit_content}],
                 "metadata": {
                     **request.metadata,
                     **unit.metadata,
@@ -144,34 +179,52 @@ class Mem0Provider:
                 payload["agent_id"] = request.agent_id
             if request.conversation_id:
                 payload["run_id"] = request.conversation_id
+            if self.api_version == "v3":
+                payload["infer"] = False
 
             try:
                 async with httpx.AsyncClient(timeout=self.timeout) as client:
                     response = await client.post(
-                        f"{self.base_url}/v1/memories/",
+                        (
+                            f"{self.base_url}/v3/memories/add/"
+                            if self.api_version == "v3"
+                            else f"{self.base_url}/v1/memories/"
+                        ),
                         json=payload,
                         headers=self._build_headers(),
                     )
                     self._check_response(response)
+                    if self.api_version == "v3":
+                        event_id = response.json().get("event_id")
+                        if event_id:
+                            await self._wait_for_event(client, event_id)
 
-                unit_results.append(UnitIngestResult(
-                    unit_id=unit.event_id,
-                    status=UnitIngestStatus.ACCEPTED,
-                ))
+                unit_results.append(
+                    UnitIngestResult(
+                        unit_id=unit.event_id,
+                        status=UnitIngestStatus.ACCEPTED,
+                    )
+                )
                 accepted_count += 1
             except (NonRetryableProviderError, RetryableProviderError) as exc:
                 provider_error = exc.error
                 logger.warning(
                     f"Mem0 ingest failed for unit {unit.event_id}: {provider_error.message}"
                 )
-                unit_results.append(UnitIngestResult(
-                    unit_id=unit.event_id,
-                    status=UnitIngestStatus.REJECTED,
-                    message=provider_error.message,
-                ))
+                unit_results.append(
+                    UnitIngestResult(
+                        unit_id=unit.event_id,
+                        status=UnitIngestStatus.REJECTED,
+                        message=provider_error.message,
+                    )
+                )
                 rejected_count += 1
 
-        status = "ok" if rejected_count == 0 else ("partial" if accepted_count > 0 else "error")
+        status = (
+            "ok"
+            if rejected_count == 0
+            else ("partial" if accepted_count > 0 else "error")
+        )
         return MemoryIngestResult(
             provider=self.provider_name,
             status=status,
@@ -181,10 +234,33 @@ class Mem0Provider:
             message=f"Accepted {accepted_count}/{len(request.units)} units",
         )
 
+    async def _wait_for_event(self, client: httpx.AsyncClient, event_id: str) -> None:
+        attempts = max(1, self.timeout // 2)
+        for _ in range(attempts):
+            response = await client.get(
+                f"{self.base_url}/v1/event/{event_id}/",
+                headers=self._build_headers(),
+            )
+            self._check_response(response)
+            status = str(response.json().get("status", "")).upper()
+            if status == "SUCCEEDED":
+                return
+            if status == "FAILED":
+                error = ProviderError(
+                    code=ProviderErrorCode.PROVIDER_ERROR,
+                    message="Mem0 asynchronous ingest failed",
+                    severity=ProviderErrorSeverity.NON_RETRYABLE,
+                )
+                raise NonRetryableProviderError(error.message, error)
+            await asyncio.sleep(2)
+        raise httpx.TimeoutException(
+            f"Mem0 ingest event did not complete after {self.timeout}s"
+        )
+
     def _check_response(self, response: httpx.Response) -> None:
-        if response.status_code == 200:
+        if 200 <= response.status_code < 300:
             return
-        
+
         if response.status_code == 401:
             try:
                 response_body = response.text
@@ -221,7 +297,9 @@ class Mem0Provider:
             raise RetryableProviderError(error.message, error)
         try:
             error_data = response.json()
-            message = error_data.get("detail", error_data.get("message", f"HTTP {response.status_code}"))
+            message = error_data.get(
+                "detail", error_data.get("message", f"HTTP {response.status_code}")
+            )
         except Exception:
             message = f"HTTP {response.status_code}"
         error = ProviderError(
