@@ -28,16 +28,26 @@ consts_const.DISABLE_USERAGENT_ID_KEY = "DISABLE_USERAGENT_ID"
 consts_const.DEFAULT_MEMORY_SWITCH_KEY = "N"
 consts_const.DEFAULT_DREAMING_SWITCH_KEY = "Y"
 consts_const.DEFAULT_MEMORY_AGENT_SHARE_KEY = MemoryAgentShareMode.NEVER.value
+consts_const.EXTERNAL_PROVIDER_TOP_K_KEY = "EXTERNAL_PROVIDER_TOP_K"
+consts_const.DEFAULT_EXTERNAL_PROVIDER_TOP_K = 5
 sys.modules["consts.const"] = consts_const
 
 # Stub nexent.core.agents.agent_model for MemoryContext and MemoryUserConfig
 agent_model_mod = types.ModuleType("nexent.core.agents.agent_model")
 class MemoryUserConfig:
-    def __init__(self, memory_switch: bool, agent_share_option: str, disable_agent_ids, disable_user_agent_ids):
+    def __init__(
+        self,
+        memory_switch: bool,
+        agent_share_option: str,
+        disable_agent_ids,
+        disable_user_agent_ids,
+        external_provider_top_k: int = 5,
+    ):
         self.memory_switch = memory_switch
         self.agent_share_option = agent_share_option
         self.disable_agent_ids = disable_agent_ids
         self.disable_user_agent_ids = disable_user_agent_ids
+        self.external_provider_top_k = external_provider_top_k
 class MemoryContext:
     def __init__(self, user_config, tenant_id, user_id, agent_id, memory_config=None):
         self.user_config = user_config

@@ -2,7 +2,7 @@ from pathlib import Path
 
 
 MIGRATION = Path(
-    "deploy/sql/migrations/v2.5.0_0806_add_conversation_knowledge_scope.sql"
+    "deploy/sql/migrations/v2.5.0_merged_migrations.sql"
 )
 
 
