@@ -13,6 +13,7 @@ from consts.model import (
 from consts.exceptions import OfficeConversionException
 from data_process.tasks import process_sync, submit_process_forward_chain
 from services.data_process_service import get_data_process_service
+from utils.auth_utils import get_current_user_id
 
 logger = logging.getLogger("data_process.app")
 
@@ -35,6 +36,7 @@ async def create_task(request: TaskRequest, authorization: Optional[str] = Heade
 
     logger.info(
         f"Creating task with source_type: {request.source_type}, model_id: {request.embedding_model_id}")
+    principal_user_id, _ = get_current_user_id(authorization)
     task_id = submit_process_forward_chain(
         source=request.source,
         source_type=request.source_type,
@@ -43,7 +45,8 @@ async def create_task(request: TaskRequest, authorization: Optional[str] = Heade
         original_filename=request.original_filename,
         authorization=authorization,
         embedding_model_id=request.embedding_model_id,
-        tenant_id=request.tenant_id
+        tenant_id=request.tenant_id,
+        principal_user_id=principal_user_id,
     )
     return JSONResponse(status_code=HTTPStatus.CREATED, content={"task_id": task_id})
 
@@ -116,8 +119,13 @@ async def create_batch_tasks(request: BatchTaskRequest, authorization: Optional[
     Returns list of task IDs immediately. Each file gets its own task for better status tracking.
     Processing happens in the background for each file independently.
     """
+    principal_user_id, _ = get_current_user_id(authorization)
     try:
-        task_ids = await service.create_batch_tasks_impl(authorization=authorization, request=request)
+        task_ids = await service.create_batch_tasks_impl(
+            authorization=authorization,
+            request=request,
+            principal_user_id=principal_user_id,
+        )
         return JSONResponse(status_code=HTTPStatus.CREATED, content={"task_ids": task_ids})
     except HTTPException:
         raise

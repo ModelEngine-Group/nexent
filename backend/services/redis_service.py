@@ -696,6 +696,7 @@ class RedisService:
             "processed_chunks": "",
             "total_chunks": "",
             "progress_completed_at": "",
+            "queue_missing_since": "",
             "error_reason": "",
         }
         retention = max(60, CELERY_RESULT_EXPIRES)
@@ -737,6 +738,8 @@ class RedisService:
         processed_chunks: Optional[int] = None,
         total_chunks: Optional[int] = None,
         heartbeat_only: bool = False,
+        queue_missing_since: Optional[float] = None,
+        clear_queue_missing: bool = False,
     ) -> bool:
         """Update a lifecycle record without allowing terminal-state regression."""
         if not ingestion_id:
@@ -759,6 +762,12 @@ class RedisService:
                     "updated_at": str(now),
                     "heartbeat_at": str(now),
                 }
+                if queue_missing_since is not None:
+                    mapping["queue_missing_since"] = str(queue_missing_since)
+                elif clear_queue_missing or (
+                    not heartbeat_only and (state or stage or latest_task_id)
+                ):
+                    mapping["queue_missing_since"] = ""
                 if not heartbeat_only:
                     if state:
                         mapping["state"] = state
@@ -775,6 +784,7 @@ class RedisService:
 
                     if state and state != current_state:
                         mapping["stage_started_at"] = str(now)
+                        mapping["queue_missing_since"] = ""
 
                     effective_processed = (
                         processed_chunks
@@ -847,6 +857,7 @@ class RedisService:
                 "stage_started_at",
                 "heartbeat_at",
                 "progress_completed_at",
+                "queue_missing_since",
             ):
                 if record.get(field):
                     try:
@@ -887,6 +898,9 @@ class RedisService:
             pipe.delete(f"progress:{forward_task_id}")
             pipe.delete(f"error:reason:{process_task_id}")
             pipe.delete(f"error:reason:{forward_task_id}")
+            pipe.zrem("dp:file-processing-slots", process_task_id)
+            pipe.zrem("dp:file-processing-wait", process_task_id)
+            pipe.zrem("dp:file-processing-wait-leases", process_task_id)
             pipe.zrem(INGESTION_ACTIVE_KEY, ingestion_id)
             pipe.zrem(index_key, ingestion_id)
         pipe.execute()

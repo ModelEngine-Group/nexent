@@ -84,7 +84,12 @@ class _ServiceStub:
     async def stop(self):
         self.stopped = True
 
-    async def create_batch_tasks_impl(self, authorization: Optional[str], request: _BatchTaskRequest) -> List[str]:
+    async def create_batch_tasks_impl(
+        self,
+        authorization: Optional[str],
+        request: _BatchTaskRequest,
+        principal_user_id: Optional[str] = None,
+    ) -> List[str]:
         return [f"tid-{i}" for i, _ in enumerate(request.sources, start=1)]
 
     async def load_image(self, url: str):
@@ -165,6 +170,14 @@ def stub_modules(monkeypatch):
     setattr(model_mod, "BatchTaskRequest", _BatchTaskRequest)
     setattr(model_mod, "ConvertStateRequest", _ConvertStateRequest)
     sys.modules["consts.model"] = model_mod
+
+    auth_mod = types.ModuleType("utils.auth_utils")
+    setattr(
+        auth_mod,
+        "get_current_user_id",
+        lambda authorization: ("user-test", "tenant-test"),
+    )
+    sys.modules["utils.auth_utils"] = auth_mod
 
     # data_process.tasks
     tasks_mod = types.ModuleType("data_process.tasks")

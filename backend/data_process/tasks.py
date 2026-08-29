@@ -61,7 +61,24 @@ FORWARD_ES_CHUNK_BATCH_SIZE = 64
 IMAGE_METADATA_PROCESS_SOURCE = "UniversalImageExtractor"
 REDIS_SOCKET_TIMEOUT_SECONDS = 5
 FILE_SLOT_KEY = "dp:file-processing-slots"
+FILE_SLOT_WAIT_KEY = "dp:file-processing-wait"
+FILE_SLOT_WAIT_LEASE_KEY = "dp:file-processing-wait-leases"
+FILE_SLOT_WAIT_SEQUENCE_KEY = "dp:file-processing-wait-sequence"
 FILE_SLOT_HEARTBEAT_INTERVAL_S = max(1, DP_FILE_SLOT_LEASE_S // 3)
+
+
+def _generate_session_jwt(user_id: str) -> str:
+    """Load auth helpers lazily so worker startup remains lightweight."""
+    from utils.auth_utils import generate_session_jwt
+
+    return generate_session_jwt(user_id)
+
+
+def _get_current_user_id(authorization: str) -> Tuple[str, str]:
+    """Validate the submitting principal before storing it in a durable task."""
+    from utils.auth_utils import get_current_user_id
+
+    return get_current_user_id(authorization)
 
 
 _ACQUIRE_FILE_SLOT_SCRIPT = """
@@ -70,17 +87,43 @@ local token = ARGV[2]
 local expires_at = tonumber(ARGV[3])
 local max_slots = tonumber(ARGV[4])
 redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', now)
+
+local stale_waiters = redis.call('ZRANGEBYSCORE', KEYS[3], '-inf', now)
+for _, stale_token in ipairs(stale_waiters) do
+    redis.call('ZREM', KEYS[2], stale_token)
+    redis.call('ZREM', KEYS[3], stale_token)
+end
+
 if redis.call('ZSCORE', KEYS[1], token) then
     redis.call('ZADD', KEYS[1], expires_at, token)
+    redis.call('ZREM', KEYS[2], token)
+    redis.call('ZREM', KEYS[3], token)
     redis.call('EXPIRE', KEYS[1], math.max(1, math.ceil((expires_at - now) * 2)))
     return {1, redis.call('ZCARD', KEYS[1])}
 end
+
+if not redis.call('ZSCORE', KEYS[2], token) then
+    local sequence = redis.call('INCR', KEYS[4])
+    redis.call('ZADD', KEYS[2], sequence, token)
+end
+redis.call('ZADD', KEYS[3], expires_at, token)
+
 local active = redis.call('ZCARD', KEYS[1])
 if active < max_slots then
-    redis.call('ZADD', KEYS[1], expires_at, token)
-    redis.call('EXPIRE', KEYS[1], math.max(1, math.ceil((expires_at - now) * 2)))
-    return {1, active + 1}
+    local next_waiter = redis.call('ZRANGE', KEYS[2], 0, 0)[1]
+    if next_waiter == token then
+        redis.call('ZREM', KEYS[2], token)
+        redis.call('ZREM', KEYS[3], token)
+        redis.call('ZADD', KEYS[1], expires_at, token)
+        redis.call('EXPIRE', KEYS[1], math.max(1, math.ceil((expires_at - now) * 2)))
+        return {1, active + 1}
+    end
 end
+
+local wait_ttl = math.max(1, math.ceil((expires_at - now) * 2))
+redis.call('EXPIRE', KEYS[2], wait_ttl)
+redis.call('EXPIRE', KEYS[3], wait_ttl)
+redis.call('EXPIRE', KEYS[4], wait_ttl)
 return {0, active}
 """
 
@@ -106,8 +149,11 @@ def _try_acquire_file_slot(task_id: str) -> Tuple[bool, int]:
     client = _get_split_redis_client()
     result = client.eval(
         _ACQUIRE_FILE_SLOT_SCRIPT,
-        1,
+        4,
         FILE_SLOT_KEY,
+        FILE_SLOT_WAIT_KEY,
+        FILE_SLOT_WAIT_LEASE_KEY,
+        FILE_SLOT_WAIT_SEQUENCE_KEY,
         now,
         task_id,
         now + DP_FILE_SLOT_LEASE_S,
@@ -138,7 +184,10 @@ def _release_file_slot(task_id: Optional[str], reason: str) -> None:
     if DP_MAX_FILE_CONCURRENCY <= 0 or not task_id:
         return
     try:
-        removed = int(_get_split_redis_client().zrem(FILE_SLOT_KEY, task_id))
+        client = _get_split_redis_client()
+        removed = int(client.zrem(FILE_SLOT_KEY, task_id))
+        client.zrem(FILE_SLOT_WAIT_KEY, task_id)
+        client.zrem(FILE_SLOT_WAIT_LEASE_KEY, task_id)
         logger.info(
             "[FILE CONCURRENCY] released task=%s removed=%s reason=%s",
             task_id,
@@ -945,6 +994,7 @@ def _send_chunks_to_es(
     original_filename: str = "",
     large_mode: bool = False,
     timeout_s: Optional[float] = None,
+    principal_user_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     async def _post():
         elasticsearch_url = ELASTICSEARCH_SERVICE
@@ -958,8 +1008,11 @@ def _send_chunks_to_es(
         route_url = f"/indices/{index_name}/documents"
         full_url = elasticsearch_url + route_url
         headers = {"Content-Type": "application/json"}
-        if authorization:
-            headers["Authorization"] = authorization
+        request_authorization = authorization
+        if principal_user_id:
+            request_authorization = f"Bearer {_generate_session_jwt(principal_user_id)}"
+        if request_authorization:
+            headers["Authorization"] = request_authorization
         if task_id:
             headers["X-Task-Id"] = task_id
         try:
@@ -2395,7 +2448,13 @@ def process(
         raise Exception(json.dumps(error_info, ensure_ascii=False))
 
 
-@app.task(bind=True, base=LoggingTask, name='data_process.tasks.forward', queue='forward_q')
+@app.task(
+    bind=True,
+    base=LoggingTask,
+    name='data_process.tasks.forward',
+    queue='forward_q',
+    max_retries=None,
+)
 def forward(
         self,
         processed_data: Dict,
@@ -2403,7 +2462,8 @@ def forward(
         source: str,
         source_type: str = 'minio',
         original_filename: Optional[str] = None,
-        authorization: Optional[str] = None
+        authorization: Optional[str] = None,
+        principal_user_id: Optional[str] = None,
 ) -> Dict:
     """
     Vectorize and store processed chunks in Elasticsearch
@@ -2421,12 +2481,6 @@ def forward(
     """
     start_time = time.time()
     task_id = self.request.id
-    _update_ingestion_for_task(
-        task_id,
-        state="FORWARDING",
-        stage="vectorizing_and_storing",
-        latest_task_id=task_id,
-    )
     # _warn_if_queue_mismatch("FORWARD TASK", "forward_q", self.request)
     original_source = source
     original_index_name = index_name
@@ -2438,6 +2492,46 @@ def forward(
     )
     slot_heartbeat = _FileSlotHeartbeat(file_slot_token)
     release_file_slot = True
+
+    if file_slot_token:
+        try:
+            slot_acquired, active_slots = _try_acquire_file_slot(file_slot_token)
+        except Exception as exc:
+            slot_acquired, active_slots = False, -1
+            logger.warning(
+                "[%s] FORWARD TASK: File slot service unavailable: %s",
+                task_id,
+                exc,
+            )
+        if not slot_acquired:
+            release_file_slot = False
+            _update_ingestion_for_task(
+                task_id,
+                state="WAIT_FOR_FORWARDING",
+                stage="queued_for_file_slot",
+                latest_task_id=task_id,
+            )
+            raise self.retry(
+                countdown=DP_FILE_SLOT_RETRY_DELAY_S,
+                exc=Exception(json.dumps({
+                    "message": (
+                        "Forward task is queued for a file slot "
+                        f"({active_slots}/{DP_MAX_FILE_CONCURRENCY} active)"
+                    ),
+                    "index_name": index_name,
+                    "task_name": "forward",
+                    "source": source,
+                    "original_filename": original_filename,
+                    "stage": "queued_for_file_slot",
+                }, ensure_ascii=False)),
+            )
+
+    _update_ingestion_for_task(
+        task_id,
+        state="FORWARDING",
+        stage="vectorizing_and_storing",
+        latest_task_id=task_id,
+    )
     slot_heartbeat.start()
 
     try:
@@ -2565,6 +2659,7 @@ def forward(
                 original_filename=original_filename,
                 large_mode=False,
                 timeout_s=_remaining_forward_time(),
+                principal_user_id=principal_user_id,
             )
         else:
             batches = _build_balanced_batches(
@@ -2603,6 +2698,7 @@ def forward(
                     original_filename=original_filename,
                     large_mode=True,
                     timeout_s=_remaining_forward_time(),
+                    principal_user_id=principal_user_id,
                 )
                 if not isinstance(batch_result, dict) or not batch_result.get("success"):
                     error_message = (
@@ -2856,6 +2952,7 @@ def cleanup_source(
     self,
     forward_result: Dict[str, Any],
     authorization: Optional[str] = None,
+    principal_user_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Conditionally delete the MinIO source file after successful indexing.
@@ -2907,12 +3004,15 @@ def cleanup_source(
 
     cleanup_info["attempted"] = True
     try:
+        request_authorization = authorization
+        if principal_user_id:
+            request_authorization = f"Bearer {_generate_session_jwt(principal_user_id)}"
         resp = _delete_source_file_via_http_sync(
             base_url=ELASTICSEARCH_SERVICE,
             index_name=index_name,
             path_or_url=source,
             scope="source_only",
-            authorization=authorization,
+            authorization=request_authorization,
         )
         cleanup_info["http_status"] = resp.get("http_status")
         cleanup_info["response"] = (
@@ -2959,9 +3059,10 @@ def submit_process_forward_chain(
         chunking_strategy: str,
         index_name: Optional[str] = None,
         original_filename: Optional[str] = None,
-        authorization: Optional[str] = None,
-        embedding_model_id: Optional[int] = None,
-        tenant_id: Optional[str] = None,
+    authorization: Optional[str] = None,
+    embedding_model_id: Optional[int] = None,
+    tenant_id: Optional[str] = None,
+    principal_user_id: Optional[str] = None,
 ) -> str:
     """
     Build and enqueue a Celery chain: process -> forward.
@@ -2971,6 +3072,9 @@ def submit_process_forward_chain(
     """
     if not index_name:
         raise ValueError("index_name is required for an ingestion task")
+
+    if authorization and not principal_user_id:
+        principal_user_id, _ = _get_current_user_id(authorization)
 
     process_task_id = celery_uuid()
     forward_task_id = celery_uuid()
@@ -3002,9 +3106,13 @@ def submit_process_forward_chain(
             source=source,
             source_type=source_type,
             original_filename=original_filename,
-            authorization=authorization
+            authorization=authorization,
+            principal_user_id=principal_user_id,
         ).set(queue='forward_q', task_id=forward_task_id),
-        cleanup_source.s(authorization=authorization).set(
+        cleanup_source.s(
+            authorization=authorization,
+            principal_user_id=principal_user_id,
+        ).set(
             queue='forward_q',
             task_id=cleanup_task_id,
         ),

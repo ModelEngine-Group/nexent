@@ -4,6 +4,7 @@ import os
 import io
 import base64
 import asyncio
+import json
 import time
 import types
 from unittest.mock import patch, MagicMock, AsyncMock
@@ -45,6 +46,8 @@ mock_const.IMAGE_FILTER = True
 mock_const.REDIS_BACKEND_URL = "redis://mock:6379/0"
 mock_const.REDIS_URL = "redis://mock:6379/0"
 mock_const.MAX_CONCURRENT_CONVERSIONS = 3
+mock_const.DP_INGESTION_QUEUE_TIMEOUT_S = 1800
+mock_const.DP_INGESTION_FINALIZATION_TIMEOUT_S = 60
 sys.modules['consts.const'] = mock_const
 
 # Stub torch (data_process_service.py imports it unconditionally).
@@ -1704,7 +1707,11 @@ class TestDataProcessService(unittest.TestCase):
             ]
         )
 
-        result = await self.service.create_batch_tasks_impl("Bearer test_token", request)
+        result = await self.service.create_batch_tasks_impl(
+            "Bearer test_token",
+            request,
+            principal_user_id="user-1",
+        )
 
         self.assertEqual(len(result), 2)
         self.assertEqual(result[0], "task_id_1")
@@ -1721,6 +1728,7 @@ class TestDataProcessService(unittest.TestCase):
                 'authorization': 'Bearer test_token',
                 'embedding_model_id': None,
                 'tenant_id': None,
+                'principal_user_id': 'user-1',
             },
             {
                 'source': 'http://example.com/doc2.pdf',
@@ -1731,6 +1739,7 @@ class TestDataProcessService(unittest.TestCase):
                 'authorization': 'Bearer test_token',
                 'embedding_model_id': None,
                 'tenant_id': None,
+                'principal_user_id': 'user-1',
             },
         ]
         actual_calls = [kwargs for args, kwargs in mock_submit_chain.call_args_list]
@@ -2782,6 +2791,34 @@ class TestDataProcessService(unittest.TestCase):
             latest_task_id='forward-1',
         )
 
+    def test_broker_queue_snapshot_reads_ready_and_unacked_tasks(self):
+        service = DataProcessService()
+
+        class BrokerClient:
+            def scan_iter(self, match, count):
+                if match.startswith('process_q'):
+                    return iter(['process_q'])
+                if match.startswith('forward_q'):
+                    return iter(['forward_q'])
+                return iter([])
+
+            def type(self, key):
+                return 'hash' if key == 'unacked' else 'list'
+
+            def lrange(self, key, start, end):
+                task_id = 'process-1' if key == 'process_q' else 'forward-1'
+                return [json.dumps({'headers': {'id': task_id}})]
+
+            def hvals(self, key):
+                return [json.dumps([{'headers': {'id': 'reserved-1'}}, '', ''])]
+
+        service.broker_redis_client = BrokerClient()
+
+        task_ids, reliable = service._get_pending_broker_task_ids()
+
+        self.assertTrue(reliable)
+        self.assertEqual(task_ids, {'process-1', 'forward-1', 'reserved-1'})
+
     def test_ingestion_watchdog_fails_progress_100_finalization_timeout(self):
         service = DataProcessService()
         redis_service = MagicMock()
@@ -2820,7 +2857,7 @@ class TestDataProcessService(unittest.TestCase):
             latest_task_id='forward-1',
             error_reason='{"error_code": "finalization_timeout"}',
         )
-    def test_ingestion_watchdog_fails_never_started_process(self):
+    def test_ingestion_watchdog_marks_missing_process_for_confirmation(self):
         service = DataProcessService()
         redis_service = MagicMock()
         redis_service.update_ingestion_record.return_value = True
@@ -2851,11 +2888,149 @@ class TestDataProcessService(unittest.TestCase):
         self.assertTrue(changed)
         redis_service.update_ingestion_record.assert_called_once_with(
             'ingestion-1',
+            state='WAIT_FOR_PROCESSING',
+            stage='verifying_queue_presence',
+            latest_task_id='process-1',
+            queue_missing_since=now,
+        )
+
+    def test_ingestion_watchdog_fails_process_only_after_missing_grace(self):
+        service = DataProcessService()
+        redis_service = MagicMock()
+        redis_service.update_ingestion_record.return_value = True
+        redis_service.get_progress_info.return_value = None
+        pending_result = MagicMock(state=states.PENDING)
+        now = time.time()
+        record = {
+            'id': 'ingestion-1',
+            'process_task_id': 'process-1',
+            'forward_task_id': 'forward-1',
+            'source': '/bucket/file.xlsx',
+            'state': 'WAIT_FOR_PROCESSING',
+            'created_at': now - 100,
+            'stage_started_at': now - 100,
+            'heartbeat_at': now - 100,
+            'queue_missing_since': now - 61,
+        }
+
+        with patch(
+            'backend.services.data_process_service.AsyncResult',
+            side_effect=[pending_result, pending_result],
+        ), patch(
+            'backend.services.data_process_service.DP_INGESTION_QUEUE_TIMEOUT_S',
+            10,
+        ), patch(
+            'backend.services.data_process_service.DP_INGESTION_FINALIZATION_TIMEOUT_S',
+            60,
+        ):
+            changed = service._reconcile_ingestion_record(
+                redis_service, record, now
+            )
+
+        self.assertTrue(changed)
+        redis_service.update_ingestion_record.assert_called_once_with(
+            'ingestion-1',
             state='PROCESS_FAILED',
             stage='watchdog_failed',
             latest_task_id='process-1',
             error_reason='{"error_code": "processing_queue_timeout"}',
         )
+
+    def test_ingestion_watchdog_preserves_active_queued_process_heartbeat(self):
+        service = DataProcessService()
+        redis_service = MagicMock()
+        pending_result = MagicMock(state=states.PENDING)
+        now = time.time()
+        record = {
+            'id': 'ingestion-1',
+            'process_task_id': 'process-1',
+            'forward_task_id': 'forward-1',
+            'state': 'WAIT_FOR_PROCESSING',
+            'created_at': now - 100,
+            'stage_started_at': now - 100,
+            'heartbeat_at': now - 1,
+        }
+
+        with patch(
+            'backend.services.data_process_service.AsyncResult',
+            side_effect=[pending_result, pending_result],
+        ), patch(
+            'backend.services.data_process_service.DP_INGESTION_QUEUE_TIMEOUT_S',
+            10,
+        ):
+            changed = service._reconcile_ingestion_record(
+                redis_service, record, now
+            )
+
+        self.assertFalse(changed)
+        redis_service.update_ingestion_record.assert_not_called()
+
+    def test_ingestion_watchdog_preserves_task_visible_in_broker(self):
+        service = DataProcessService()
+        redis_service = MagicMock()
+        redis_service.update_ingestion_record.return_value = True
+        pending_result = MagicMock(state=states.PENDING)
+        now = time.time()
+        record = {
+            'id': 'ingestion-1',
+            'process_task_id': 'process-1',
+            'forward_task_id': 'forward-1',
+            'state': 'WAIT_FOR_PROCESSING',
+            'created_at': now - 100,
+            'stage_started_at': now - 100,
+            'heartbeat_at': now - 100,
+        }
+
+        with patch(
+            'backend.services.data_process_service.AsyncResult',
+            side_effect=[pending_result, pending_result],
+        ), patch(
+            'backend.services.data_process_service.DP_INGESTION_QUEUE_TIMEOUT_S',
+            10,
+        ):
+            changed = service._reconcile_ingestion_record(
+                redis_service,
+                record,
+                now,
+                pending_broker_task_ids={'process-1'},
+            )
+
+        self.assertTrue(changed)
+        redis_service.update_ingestion_record.assert_called_once_with(
+            'ingestion-1',
+            heartbeat_only=True,
+            clear_queue_missing=True,
+        )
+
+    def test_ingestion_watchdog_renews_slot_while_forward_is_queued(self):
+        service = DataProcessService()
+        redis_service = MagicMock()
+        process_result = MagicMock(state=states.SUCCESS)
+        forward_result = MagicMock(state=states.PENDING)
+        now = time.time()
+        record = {
+            'id': 'ingestion-1',
+            'process_task_id': 'process-1',
+            'forward_task_id': 'forward-1',
+            'state': 'WAIT_FOR_FORWARDING',
+            'created_at': now - 5,
+            'stage_started_at': now - 5,
+            'heartbeat_at': now - 5,
+        }
+
+        with patch(
+            'backend.services.data_process_service.AsyncResult',
+            side_effect=[process_result, forward_result],
+        ), patch(
+            'backend.services.data_process_service._try_acquire_file_slot',
+            return_value=(True, 1),
+        ) as acquire:
+            changed = service._reconcile_ingestion_record(
+                redis_service, record, now
+            )
+
+        self.assertFalse(changed)
+        acquire.assert_called_once_with('process-1')
 
 
 if __name__ == '__main__':

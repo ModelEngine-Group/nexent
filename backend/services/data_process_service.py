@@ -38,7 +38,13 @@ from consts.model import BatchTaskRequest
 from database.attachment_db import delete_file, file_exists, get_file_size_from_minio, get_file_stream, upload_file
 from utils.file_management_utils import convert_office_to_pdf
 from data_process.app import app as celery_app
-from data_process.tasks import submit_process_forward_chain
+from data_process.tasks import (
+    FILE_SLOT_KEY,
+    FILE_SLOT_WAIT_KEY,
+    FILE_SLOT_WAIT_LEASE_KEY,
+    _try_acquire_file_slot,
+    submit_process_forward_chain,
+)
 from data_process.utils import get_task_details, get_task_info, get_all_task_ids_from_redis
 from services.redis_service import get_redis_service
 
@@ -78,6 +84,7 @@ class DataProcessService:
         """Initializes the Redis client and connection pool."""
         self.redis_pool = None
         self.redis_client = None
+        self.broker_redis_client = None
         try:
             redis_url = REDIS_BACKEND_URL
             if redis_url:
@@ -92,6 +99,17 @@ class DataProcessService:
             else:
                 logger.warning(
                     "REDIS_BACKEND_URL not set, Redis client not initialized.")
+
+            if redis_url and REDIS_URL:
+                self.broker_redis_client = redis.Redis.from_url(
+                    REDIS_URL,
+                    decode_responses=True,
+                    socket_timeout=5,
+                    socket_connect_timeout=5,
+                )
+            elif redis_url:
+                logger.warning(
+                    "REDIS_URL not set, broker queue inspection is unavailable.")
         except Exception as e:
             logger.error(f"Failed to initialize Redis client: {str(e)}")
 
@@ -149,9 +167,34 @@ class DataProcessService:
         records = redis_service.get_ingestion_records(active_only=True)
         reconciled = 0
         now = time.time()
+        queue_records = [
+            record for record in records
+            if record.get("state") in {"WAIT_FOR_PROCESSING", "WAIT_FOR_FORWARDING"}
+            and (
+                record.get("queue_missing_since")
+                or now - float(
+                    record.get("heartbeat_at")
+                    or record.get("stage_started_at")
+                    or record.get("created_at")
+                    or now
+                ) > DP_INGESTION_QUEUE_TIMEOUT_S
+            )
+        ]
+        pending_broker_task_ids: set[str] = set()
+        broker_snapshot_reliable = True
+        if queue_records:
+            pending_broker_task_ids, broker_snapshot_reliable = (
+                self._get_pending_broker_task_ids()
+            )
         for record in records:
             try:
-                if self._reconcile_ingestion_record(redis_service, record, now):
+                if self._reconcile_ingestion_record(
+                    redis_service,
+                    record,
+                    now,
+                    pending_broker_task_ids=pending_broker_task_ids,
+                    broker_snapshot_reliable=broker_snapshot_reliable,
+                ):
                     reconciled += 1
             except Exception as exc:
                 logger.exception(
@@ -168,7 +211,77 @@ class DataProcessService:
             )
         return reconciled
 
-    def _reconcile_ingestion_record(self, redis_service, record: Dict[str, Any], now: float) -> bool:
+    @staticmethod
+    def _extract_broker_task_ids(payload: Any) -> set[str]:
+        """Extract Celery task IDs from Redis broker list or unacked payloads."""
+        if isinstance(payload, bytes):
+            payload = payload.decode("utf-8", errors="replace")
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+            except (TypeError, ValueError, json.JSONDecodeError):
+                return set()
+
+        task_ids: set[str] = set()
+        if isinstance(payload, dict):
+            headers = payload.get("headers")
+            if isinstance(headers, dict) and headers.get("id"):
+                task_ids.add(str(headers["id"]))
+            for key in ("message", "payload"):
+                if key in payload:
+                    task_ids.update(
+                        DataProcessService._extract_broker_task_ids(payload[key])
+                    )
+        elif isinstance(payload, (list, tuple)):
+            for item in payload:
+                task_ids.update(
+                    DataProcessService._extract_broker_task_ids(item)
+                )
+        return task_ids
+
+    def _get_pending_broker_task_ids(self) -> tuple[set[str], bool]:
+        """Return pending/reserved Celery IDs from Redis without exposing payloads."""
+        client = self.broker_redis_client
+        if client is None:
+            return set(), False
+
+        task_ids: set[str] = set()
+        try:
+            queue_keys: set[str] = set()
+            for queue_name in ("process_q", "forward_q"):
+                for key in client.scan_iter(match=f"{queue_name}*", count=100):
+                    queue_keys.add(
+                        key.decode("utf-8") if isinstance(key, bytes) else str(key)
+                    )
+            for key in queue_keys:
+                key_type = client.type(key)
+                if isinstance(key_type, bytes):
+                    key_type = key_type.decode("utf-8")
+                if key_type != "list":
+                    continue
+                for payload in client.lrange(key, 0, -1):
+                    task_ids.update(self._extract_broker_task_ids(payload))
+
+            unacked_type = client.type("unacked")
+            if isinstance(unacked_type, bytes):
+                unacked_type = unacked_type.decode("utf-8")
+            if unacked_type == "hash":
+                for payload in client.hvals("unacked"):
+                    task_ids.update(self._extract_broker_task_ids(payload))
+            return task_ids, True
+        except Exception as exc:
+            logger.warning("Failed to inspect Celery broker queues: %s", exc)
+            return set(), False
+
+    def _reconcile_ingestion_record(
+        self,
+        redis_service,
+        record: Dict[str, Any],
+        now: float,
+        *,
+        pending_broker_task_ids: Optional[set[str]] = None,
+        broker_snapshot_reliable: bool = True,
+    ) -> bool:
         ingestion_id = record.get("id", "")
         process_task_id = record.get("process_task_id", "")
         forward_task_id = record.get("forward_task_id", "")
@@ -244,15 +357,73 @@ class DataProcessService:
                 latest_task_id=process_task_id,
             )
 
+        if state == "WAIT_FOR_FORWARDING" and process_task_id:
+            try:
+                _try_acquire_file_slot(process_task_id)
+            except Exception as exc:
+                logger.warning(
+                    "Failed maintaining file slot for queued forward task %s: %s",
+                    forward_task_id,
+                    exc,
+                )
+
         elapsed = max(0.0, now - stage_started_at)
-        if state == "WAIT_FOR_PROCESSING" and elapsed > DP_INGESTION_QUEUE_TIMEOUT_S:
-            return self._fail_ingestion(
-                redis_service,
-                record,
-                state="PROCESS_FAILED",
-                task_id=process_task_id,
-                error_code="processing_queue_timeout",
+        if state in {"WAIT_FOR_PROCESSING", "WAIT_FOR_FORWARDING"}:
+            last_activity_at = float(
+                record.get("heartbeat_at") or stage_started_at
             )
+            queue_missing_since = float(record.get("queue_missing_since") or 0)
+            queue_inactive = now - last_activity_at > DP_INGESTION_QUEUE_TIMEOUT_S
+            queue_missing_confirmed = (
+                queue_missing_since > 0
+                and now - queue_missing_since > DP_INGESTION_FINALIZATION_TIMEOUT_S
+            )
+        else:
+            queue_missing_since = 0
+            queue_inactive = False
+            queue_missing_confirmed = False
+
+        if queue_inactive or queue_missing_confirmed:
+            queued_task_id = (
+                process_task_id
+                if state == "WAIT_FOR_PROCESSING"
+                else forward_task_id
+            )
+            if (
+                not broker_snapshot_reliable
+                or queued_task_id in (pending_broker_task_ids or set())
+            ):
+                return redis_service.update_ingestion_record(
+                    ingestion_id,
+                    heartbeat_only=True,
+                    clear_queue_missing=True,
+                )
+            if not queue_missing_since:
+                return redis_service.update_ingestion_record(
+                    ingestion_id,
+                    state=state,
+                    stage="verifying_queue_presence",
+                    latest_task_id=queued_task_id,
+                    queue_missing_since=now,
+                )
+            if queue_missing_confirmed:
+                failure_state = (
+                    "PROCESS_FAILED"
+                    if state == "WAIT_FOR_PROCESSING"
+                    else "FORWARD_FAILED"
+                )
+                error_code = (
+                    "processing_queue_timeout"
+                    if state == "WAIT_FOR_PROCESSING"
+                    else "forward_queue_timeout"
+                )
+                return self._fail_ingestion(
+                    redis_service,
+                    record,
+                    state=failure_state,
+                    task_id=queued_task_id,
+                    error_code=error_code,
+                )
         if state == "PROCESSING" and elapsed > CELERY_TASK_TIME_LIMIT + DP_INGESTION_FINALIZATION_TIMEOUT_S:
             return self._fail_ingestion(
                 redis_service,
@@ -260,14 +431,6 @@ class DataProcessService:
                 state="PROCESS_FAILED",
                 task_id=process_task_id,
                 error_code="processing_timeout",
-            )
-        if state == "WAIT_FOR_FORWARDING" and elapsed > DP_INGESTION_QUEUE_TIMEOUT_S:
-            return self._fail_ingestion(
-                redis_service,
-                record,
-                state="FORWARD_FAILED",
-                task_id=forward_task_id,
-                error_code="forward_queue_timeout",
             )
         if state == "FORWARDING":
             completed_at = float(record.get("progress_completed_at") or 0)
@@ -323,7 +486,13 @@ class DataProcessService:
             except Exception as exc:
                 logger.warning("Failed to revoke timed-out task %s: %s", candidate, exc)
         try:
-            redis_service.backend_client.zrem("dp:file-processing-slots", record.get("process_task_id", ""))
+            process_task_id = record.get("process_task_id", "")
+            redis_service.backend_client.zrem(FILE_SLOT_KEY, process_task_id)
+            redis_service.backend_client.zrem(FILE_SLOT_WAIT_KEY, process_task_id)
+            redis_service.backend_client.zrem(
+                FILE_SLOT_WAIT_LEASE_KEY,
+                process_task_id,
+            )
             redis_service.backend_client.delete(f"dp:{record.get('process_task_id', '')}:chunks")
         except Exception as exc:
             logger.warning("Failed to clean timed-out ingestion payloads: %s", exc)
@@ -816,7 +985,12 @@ class DataProcessService:
             logger.error(f"Error processing image: {str(e)}")
             raise Exception(f"Error processing image: {str(e)}")
 
-    async def create_batch_tasks_impl(self, authorization: Optional[str], request: BatchTaskRequest):
+    async def create_batch_tasks_impl(
+        self,
+        authorization: Optional[str],
+        request: BatchTaskRequest,
+        principal_user_id: Optional[str] = None,
+    ):
         task_ids = []
         # Create individual tasks for each source
         for source_config in request.sources:
@@ -839,15 +1013,21 @@ class DataProcessService:
                     f"Missing required field 'index_name' in source config: {source_config}")
                 continue
 
+            submit_kwargs = {
+                "source": source,
+                "source_type": source_type,
+                "chunking_strategy": chunking_strategy,
+                "index_name": index_name,
+                "original_filename": original_filename,
+                "authorization": authorization,
+                "embedding_model_id": embedding_model_id,
+                "tenant_id": tenant_id,
+            }
+            if principal_user_id:
+                submit_kwargs["principal_user_id"] = principal_user_id
+
             chain_id = submit_process_forward_chain(
-                source=source,
-                source_type=source_type,
-                chunking_strategy=chunking_strategy,
-                index_name=index_name,
-                original_filename=original_filename,
-                authorization=authorization,
-                embedding_model_id=embedding_model_id,
-                tenant_id=tenant_id,
+                **submit_kwargs,
             )
             if not chain_id:
                 logger.error(

@@ -2163,6 +2163,25 @@ class TestRedisService(unittest.TestCase):
             'forward-1',
         )
 
+        self.assertTrue(self.redis_service.update_ingestion_record(
+            'forward-1',
+            state='WAIT_FOR_PROCESSING',
+            stage='verifying_queue_presence',
+            latest_task_id='process-1',
+            queue_missing_since=123.0,
+        ))
+        record = self.redis_service.get_ingestion_records('index-1')[0]
+        self.assertEqual(record['queue_missing_since'], 123.0)
+
+        self.assertTrue(self.redis_service.update_ingestion_by_task(
+            'process-1',
+            state='WAIT_FOR_PROCESSING',
+            stage='queued_for_file_slot',
+            latest_task_id='process-1',
+        ))
+        record = self.redis_service.get_ingestion_records('index-1')[0]
+        self.assertEqual(record['queue_missing_since'], '')
+
         self.assertTrue(self.redis_service.update_ingestion_by_task(
             'forward-1',
             state='FORWARDING',

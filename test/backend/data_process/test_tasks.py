@@ -546,7 +546,8 @@ def import_tasks_with_fake_ray(monkeypatch, initialized=False):
     # Provide a Celery task shim that allows direct calls and supports .s for chaining
 
     class _SignatureShim:
-        def __init__(self):
+        def __init__(self, kwargs=None):
+            self.kwargs = kwargs or {}
             # Delegate to a real Celery ``Signature`` so that all internal
             # attributes/methods (``.options``, ``.clone()``, ``.freeze()``,
             # ``.__or__()``, ``._app``, etc.) are available without us
@@ -696,7 +697,7 @@ def import_tasks_with_fake_ray(monkeypatch, initialized=False):
             return self._run_func(*args, **kwargs)
 
         def s(self, **_kw):
-            return _SignatureShim()
+            return _SignatureShim(_kw)
 
     # Helper to get unbound run
     def _unbound_run(task_obj):
@@ -1462,6 +1463,78 @@ def test_forward_vectorize_documents_unexpected_error(monkeypatch):
     json.loads(str(ei.value))
 
 
+def test_send_chunks_refreshes_internal_jwt_for_each_request(monkeypatch):
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+    monkeypatch.setattr(tasks, "ELASTICSEARCH_SERVICE", "http://api")
+    issued_tokens = []
+    monkeypatch.setattr(
+        tasks,
+        "_generate_session_jwt",
+        lambda user_id: issued_tokens.append(user_id) or f"fresh-{len(issued_tokens)}",
+    )
+    captured_headers = []
+
+    class Response:
+        status = 200
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def text(self):
+            return '{"success": true, "total_indexed": 1, "total_submitted": 1}'
+
+        async def json(self):
+            return {"success": True, "total_indexed": 1, "total_submitted": 1}
+
+    class Session:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        def post(self, *_args, **kwargs):
+            captured_headers.append(kwargs["headers"])
+            return Response()
+
+    monkeypatch.setattr(
+        tasks.aiohttp,
+        "ClientSession",
+        lambda **_kwargs: Session(),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        tasks.aiohttp,
+        "TCPConnector",
+        lambda **_kwargs: object(),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        tasks.aiohttp,
+        "ClientTimeout",
+        lambda **_kwargs: object(),
+        raising=False,
+    )
+
+    for _ in range(2):
+        result = tasks._send_chunks_to_es(
+            chunks=[{"content": "chunk"}],
+            index_name="idx",
+            authorization="Bearer stale-token",
+            principal_user_id="user-1",
+        )
+        assert result["success"] is True
+
+    assert issued_tokens == ["user-1", "user-1"]
+    assert [headers["Authorization"] for headers in captured_headers] == [
+        "Bearer fresh-1",
+        "Bearer fresh-2",
+    ]
+
+
 def test_submit_process_forward_chain_marks_failure_when_apply_async_none(monkeypatch):
     tasks, _ = import_tasks_with_fake_ray(monkeypatch)
 
@@ -1625,6 +1698,45 @@ def test_submit_process_forward_chain_returns_chain_id(monkeypatch):
     assert chain_id == "forward-id"
     lifecycle.create_ingestion_record.assert_called_once()
     lifecycle.update_ingestion_record.assert_not_called()
+
+
+def test_submit_process_forward_chain_snapshots_authenticated_principal(monkeypatch):
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+    captured = {}
+
+    class FakeResult:
+        id = "cleanup-id"
+
+    class FakeChain:
+        def apply_async(self):
+            return FakeResult()
+
+    def _chain(*signatures):
+        captured["signatures"] = signatures
+        return FakeChain()
+
+    monkeypatch.setattr(tasks, "chain", _chain)
+    monkeypatch.setattr(
+        tasks,
+        "_get_current_user_id",
+        lambda authorization: ("user-1", "tenant-1"),
+    )
+    lifecycle = MagicMock()
+    monkeypatch.setattr(tasks, "get_redis_service", lambda: lifecycle)
+    ids = iter(["process-id", "forward-id", "cleanup-id"])
+    monkeypatch.setattr(tasks, "celery_uuid", lambda: next(ids))
+
+    result = tasks.submit_process_forward_chain(
+        source="/a.txt",
+        source_type="local",
+        chunking_strategy="basic",
+        index_name="idx",
+        authorization="Bearer valid-token",
+    )
+
+    assert result == "forward-id"
+    assert captured["signatures"][1].kwargs["principal_user_id"] == "user-1"
+    assert captured["signatures"][2].kwargs["principal_user_id"] == "user-1"
 
 
 def test_process_and_forward_returns_chain_id(monkeypatch):
@@ -3245,14 +3357,14 @@ def test_file_slot_uses_atomic_redis_lease_and_release(monkeypatch):
     class Client:
         def __init__(self):
             self.eval_args = None
-            self.released = None
+            self.released = []
 
         def eval(self, *args):
             self.eval_args = args
             return [1, 1]
 
         def zrem(self, key, token):
-            self.released = (key, token)
+            self.released.append((key, token))
             return 1
 
     client = Client()
@@ -3263,9 +3375,25 @@ def test_file_slot_uses_atomic_redis_lease_and_release(monkeypatch):
 
     assert acquired is True
     assert active == 1
+    assert client.eval_args[1] == 4
     assert client.eval_args[2] == tasks.FILE_SLOT_KEY
-    assert client.eval_args[4] == "task-a"
-    assert client.released == (tasks.FILE_SLOT_KEY, "task-a")
+    assert client.eval_args[3] == tasks.FILE_SLOT_WAIT_KEY
+    assert client.eval_args[4] == tasks.FILE_SLOT_WAIT_LEASE_KEY
+    assert client.eval_args[5] == tasks.FILE_SLOT_WAIT_SEQUENCE_KEY
+    assert client.eval_args[7] == "task-a"
+    assert client.released == [
+        (tasks.FILE_SLOT_KEY, "task-a"),
+        (tasks.FILE_SLOT_WAIT_KEY, "task-a"),
+        (tasks.FILE_SLOT_WAIT_LEASE_KEY, "task-a"),
+    ]
+
+
+def test_file_slot_script_enforces_fifo_and_prunes_stale_waiters(monkeypatch):
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+
+    assert "ZRANGE', KEYS[2], 0, 0" in tasks._ACQUIRE_FILE_SLOT_SCRIPT
+    assert "INCR', KEYS[4]" in tasks._ACQUIRE_FILE_SLOT_SCRIPT
+    assert "ZRANGEBYSCORE', KEYS[3], '-inf', now" in tasks._ACQUIRE_FILE_SLOT_SCRIPT
 
 
 def test_process_without_file_slot_retries_before_processing(monkeypatch):
@@ -3285,6 +3413,28 @@ def test_process_without_file_slot_retries_before_processing(monkeypatch):
             source_type="local",
             index_name="idx",
             original_filename="not-yet-read.txt",
+        )
+
+
+def test_forward_without_file_slot_retries_before_indexing(monkeypatch):
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+    monkeypatch.setattr(tasks, "DP_MAX_FILE_CONCURRENCY", 1)
+    monkeypatch.setattr(tasks, "_try_acquire_file_slot", lambda _task_id: (False, 1))
+    monkeypatch.setattr(
+        tasks,
+        "get_file_size",
+        lambda *_args, **_kwargs: pytest.fail("queued forward must not start indexing"),
+    )
+
+    with pytest.raises(Retry):
+        tasks.forward(
+            FakeSelf("queued-forward"),
+            processed_data={
+                "chunks": [{"content": "chunk", "metadata": {}}],
+                "file_slot_token": "process-task",
+            },
+            index_name="idx",
+            source="/file.txt",
         )
 
 
@@ -3327,6 +3477,7 @@ def test_process_failure_releases_file_slot(monkeypatch):
 def test_forward_failure_releases_process_file_slot(monkeypatch):
     tasks, _ = import_tasks_with_fake_ray(monkeypatch)
     monkeypatch.setattr(tasks, "DP_MAX_FILE_CONCURRENCY", 1)
+    monkeypatch.setattr(tasks, "_try_acquire_file_slot", lambda _task_id: (True, 1))
     monkeypatch.setattr(tasks._FileSlotHeartbeat, "start", lambda _self: None)
     monkeypatch.setattr(tasks._FileSlotHeartbeat, "stop", lambda _self: None)
     monkeypatch.setattr(tasks, "get_file_size", lambda *_a, **_k: 0)
