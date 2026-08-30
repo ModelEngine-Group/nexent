@@ -45,10 +45,10 @@ def get_env_key(key: str) -> str:
 
 def get_model_name_from_config(model_config: Dict[str, Any]) -> str:
     """Get model name from model id"""
-    if model_config is None:
+    if not model_config:
         return ""
-    model_repo = model_config["model_repo"]
-    model_name = model_config["model_name"]
+    model_repo = model_config.get("model_repo") or ""
+    model_name = model_config.get("model_name") or ""
     if not model_repo:
         return model_name
     return f"{model_repo}/{model_name}"

@@ -81,6 +81,17 @@ class TestGetEnvKey:
 class TestGetModelNameFromConfig:
     """Test get_model_name_from_config function"""
 
+    @pytest.mark.parametrize(
+        ("config", "expected"),
+        [
+            ({}, ""),
+            ({"model_name": "gpt-4"}, "gpt-4"),
+        ],
+    )
+    def test_get_model_name_from_config_with_incomplete_config(self, config, expected):
+        """Test empty and partial model configurations."""
+        assert get_model_name_from_config(config) == expected
+
     def test_get_model_name_from_config_with_model_repo(self):
         """Test with model repository"""
         config = {"model_repo": "openai", "model_name": "gpt-4"}
