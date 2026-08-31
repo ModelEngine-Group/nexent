@@ -51,6 +51,7 @@ from database.group_db import query_group_ids_by_user
 from database.client import as_dict, get_db_session
 from database.db_models import RolePermission
 from services.invitation_service import use_invitation_code, check_invitation_available, get_invitation_by_code
+from services.oauth_service import find_supabase_user_id_by_email
 from services.group_service import add_user_to_groups
 from services.tool_configuration_service import init_tool_list_for_tenant
 from services.skill_service import init_skill_list_for_tenant
@@ -668,3 +669,117 @@ async def update_password(user_id: str, old_password: str, new_password: str) ->
         logging.error(
             f"Failed to update password for user {user_id}: {str(exc)}")
         raise
+
+
+# -----------------------------
+# Northbound user provisioning
+# -----------------------------
+
+# Roles a tenant administrator is allowed to assign through the northbound API.
+# "SU" (platform super administrator) is deliberately excluded: a partner-facing
+# endpoint must never become a privilege-escalation path.
+ADMIN_CREATABLE_ROLES = ("USER", "DEV", "ADMIN")
+
+# Substrings Supabase GoTrue uses when a user already exists. Only used to
+# classify the narrow TOCTOU window between the pre-check and create_user.
+_SUPABASE_DUPLICATE_MARKERS = (
+    "already registered",
+    "already exists",
+    "already been registered",
+    "duplicate",
+    "user_already_exists",
+)
+
+
+def _looks_like_duplicate_user_error(exc: Exception) -> bool:
+    """Whether a Supabase error indicates the email is already taken."""
+    message = str(exc).lower()
+    return any(marker in message for marker in _SUPABASE_DUPLICATE_MARKERS)
+
+
+async def create_user_as_tenant_admin(
+    tenant_id: str,
+    email: EmailStr,
+    initial_password: str,
+    created_by: str,
+    name: Optional[str] = None,
+    role: str = "USER",
+) -> Dict[str, Any]:
+    """Create a user in ``tenant_id`` on behalf of a tenant administrator.
+
+    Unlike :func:`signup_user_with_invitation`, this does not consume an
+    invitation code: the caller's own administrator role (checked by the
+    caller) authorises the creation, and the new user always lands in
+    ``tenant_id``.
+
+    Raises:
+        ValueError: ``role`` is not in :data:`ADMIN_CREATABLE_ROLES`.
+        AppException: password does not meet the strength requirements.
+        UserRegistrationException: the email is already registered.
+        RuntimeError: the Supabase admin client is unavailable.
+    """
+    normalized_role = (role or "").strip().upper()
+    if normalized_role not in ADMIN_CREATABLE_ROLES:
+        raise ValueError(
+            f"Unsupported role '{role}'. Allowed roles: {', '.join(ADMIN_CREATABLE_ROLES)}"
+        )
+
+    if not validate_password_strength(initial_password):
+        raise AppException(
+            ErrorCode.PROFILE_PASSWORD_WEAK,
+            "Password must be at least 8 characters with uppercase, lowercase, and digit.",
+        )
+
+    admin_client = get_supabase_admin_client()
+    if not admin_client:
+        logging.error("Supabase admin client unavailable, cannot create user")
+        raise RuntimeError("Supabase admin client not available")
+
+    # Global (not per-tenant) uniqueness: Supabase Auth treats one email as one
+    # user across the whole project, so reusing an address elsewhere is refused
+    # instead of silently attaching a second tenant to the same login.
+    if find_supabase_user_id_by_email(admin_client, email):
+        raise UserRegistrationException(f"Email {email} is already registered")
+
+    user_metadata = {"full_name": name} if name else {}
+    try:
+        create_resp = admin_client.auth.admin.create_user({
+            "email": str(email),
+            "password": initial_password,
+            "email_confirm": True,
+            "user_metadata": user_metadata,
+        })
+    except Exception as exc:
+        # Pre-check above already covers the common case; this only classifies
+        # the race where a concurrent request registered the same email first.
+        if _looks_like_duplicate_user_error(exc):
+            raise UserRegistrationException(f"Email {email} is already registered")
+        logging.error(f"Supabase admin create_user failed for {email}: {str(exc)}")
+        raise
+
+    new_user = getattr(create_resp, "user", None)
+    if not new_user:
+        logging.error("Supabase admin create_user returned no user object")
+        raise UserRegistrationException(
+            "Registration service is temporarily unavailable, please try again later"
+        )
+
+    user_id = new_user.id
+    insert_user_tenant(
+        user_id=user_id,
+        tenant_id=tenant_id,
+        user_role=normalized_role,
+        user_email=str(email),
+        created_by=created_by,
+    )
+
+    logging.info(
+        f"User {email} created by tenant admin {created_by} "
+        f"in tenant {tenant_id} with role {normalized_role}"
+    )
+    return {
+        "user_id": user_id,
+        "user_email": str(email),
+        "user_role": normalized_role,
+        "tenant_id": tenant_id,
+    }

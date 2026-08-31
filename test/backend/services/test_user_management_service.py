@@ -34,6 +34,7 @@ sys.modules['services.invitation_service'] = MagicMock()
 sys.modules['services.group_service'] = MagicMock()
 sys.modules['services.tool_configuration_service'] = MagicMock()
 sys.modules['services.skill_service'] = MagicMock()
+sys.modules['services.oauth_service'] = MagicMock()
 
 asset_owner_visibility_mock = types.ModuleType('services.asset_owner_visibility')
 asset_owner_visibility_mock.filter_accessible_routes_for_asset_owner_feature = lambda routes: routes
@@ -48,6 +49,7 @@ from consts.exceptions import (
     UnauthorizedError,
     AppException,
     ValidationError,
+    TenantResourceLimitError,
 )
 from consts.error_code import ErrorCode
 from consts.const import (
@@ -94,7 +96,9 @@ with patch('backend.database.client.MinioClient', return_value=minio_client_mock
         refresh_user_token,
         get_session_by_authorization,
         get_user_info,
-        format_role_permissions
+        format_role_permissions,
+        create_user_as_tenant_admin,
+        ADMIN_CREATABLE_ROLES,
     )
 
 
@@ -2062,6 +2066,270 @@ class TestAdditionalUserManagementCoverage(unittest.IsolatedAsyncioTestCase):
         from backend.services import user_management_service as ums
 
         self.assertEqual(kwargs["headers"], {"apikey": ums.SUPABASE_KEY})
+
+
+class TestCreateUserAsTenantAdmin(unittest.IsolatedAsyncioTestCase):
+    """Test create_user_as_tenant_admin (northbound tenant-admin provisioning)."""
+
+    TENANT_ID = "tenant-1"
+    ADMIN_ID = "admin-user-1"
+    EMAIL = "new.user@example.com"
+    PASSWORD = "Passw0rd1"
+
+    def _admin_client(self, user_id="new-user-1"):
+        client = MagicMock()
+        create_response = MagicMock()
+        create_response.user = MagicMock()
+        create_response.user.id = user_id
+        client.auth.admin.create_user.return_value = create_response
+        return client
+
+    @patch("backend.services.user_management_service.insert_user_tenant")
+    @patch("backend.services.user_management_service.find_supabase_user_id_by_email")
+    @patch("backend.services.user_management_service.get_supabase_admin_client")
+    @patch("backend.services.user_management_service.validate_password_strength")
+    async def test_creates_user_with_default_role(
+        self, mock_password_ok, mock_get_admin, mock_find_user, mock_insert
+    ):
+        mock_password_ok.return_value = True
+        mock_get_admin.return_value = self._admin_client()
+        mock_find_user.return_value = None
+
+        result = await create_user_as_tenant_admin(
+            tenant_id=self.TENANT_ID,
+            email=self.EMAIL,
+            initial_password=self.PASSWORD,
+            created_by=self.ADMIN_ID,
+        )
+
+        self.assertEqual(
+            result,
+            {
+                "user_id": "new-user-1",
+                "user_email": self.EMAIL,
+                "user_role": "USER",
+                "tenant_id": self.TENANT_ID,
+            },
+        )
+        mock_insert.assert_called_once_with(
+            user_id="new-user-1",
+            tenant_id=self.TENANT_ID,
+            user_role="USER",
+            user_email=self.EMAIL,
+            created_by=self.ADMIN_ID,
+        )
+
+    @patch("backend.services.user_management_service.insert_user_tenant")
+    @patch("backend.services.user_management_service.find_supabase_user_id_by_email")
+    @patch("backend.services.user_management_service.get_supabase_admin_client")
+    @patch("backend.services.user_management_service.validate_password_strength")
+    async def test_create_user_payload_pre_confirms_email_and_carries_name(
+        self, mock_password_ok, mock_get_admin, mock_find_user, mock_insert
+    ):
+        mock_password_ok.return_value = True
+        client = self._admin_client()
+        mock_get_admin.return_value = client
+        mock_find_user.return_value = None
+
+        await create_user_as_tenant_admin(
+            tenant_id=self.TENANT_ID,
+            email=self.EMAIL,
+            initial_password=self.PASSWORD,
+            created_by=self.ADMIN_ID,
+            name="New User",
+            role="dev",
+        )
+
+        client.auth.admin.create_user.assert_called_once_with(
+            {
+                "email": self.EMAIL,
+                "password": self.PASSWORD,
+                "email_confirm": True,
+                "user_metadata": {"full_name": "New User"},
+            }
+        )
+        # Role is normalised before it reaches the database.
+        self.assertEqual(mock_insert.call_args.kwargs["user_role"], "DEV")
+
+    @patch("backend.services.user_management_service.insert_user_tenant")
+    @patch("backend.services.user_management_service.find_supabase_user_id_by_email")
+    @patch("backend.services.user_management_service.get_supabase_admin_client")
+    @patch("backend.services.user_management_service.validate_password_strength")
+    async def test_allowed_roles_are_normalised(
+        self, mock_password_ok, mock_get_admin, mock_find_user, mock_insert
+    ):
+        mock_password_ok.return_value = True
+        mock_get_admin.return_value = self._admin_client()
+        mock_find_user.return_value = None
+
+        for role, expected in [("user", "USER"), ("DEV", "DEV"), (" admin ", "ADMIN")]:
+            mock_insert.reset_mock()
+            await create_user_as_tenant_admin(
+                tenant_id=self.TENANT_ID,
+                email=self.EMAIL,
+                initial_password=self.PASSWORD,
+                created_by=self.ADMIN_ID,
+                role=role,
+            )
+            self.assertEqual(mock_insert.call_args.kwargs["user_role"], expected)
+
+    @patch("backend.services.user_management_service.insert_user_tenant")
+    @patch("backend.services.user_management_service.find_supabase_user_id_by_email")
+    @patch("backend.services.user_management_service.get_supabase_admin_client")
+    @patch("backend.services.user_management_service.validate_password_strength")
+    async def test_rejected_roles_raise_value_error(
+        self, mock_password_ok, mock_get_admin, mock_find_user, mock_insert
+    ):
+        mock_password_ok.return_value = True
+        mock_get_admin.return_value = self._admin_client()
+        mock_find_user.return_value = None
+
+        for role in ["SU", "SUPER_ADMIN", "OWNER", "", None]:
+            with self.assertRaises(ValueError):
+                await create_user_as_tenant_admin(
+                    tenant_id=self.TENANT_ID,
+                    email=self.EMAIL,
+                    initial_password=self.PASSWORD,
+                    created_by=self.ADMIN_ID,
+                    role=role,
+                )
+
+        mock_insert.assert_not_called()
+
+    @patch("backend.services.user_management_service.insert_user_tenant")
+    @patch("backend.services.user_management_service.find_supabase_user_id_by_email")
+    @patch("backend.services.user_management_service.get_supabase_admin_client")
+    @patch("backend.services.user_management_service.validate_password_strength")
+    async def test_weak_password_raises_app_exception(
+        self, mock_password_ok, mock_get_admin, mock_find_user, mock_insert
+    ):
+        mock_password_ok.return_value = False
+        mock_get_admin.return_value = self._admin_client()
+        mock_find_user.return_value = None
+
+        with self.assertRaises(AppException) as ctx:
+            await create_user_as_tenant_admin(
+                tenant_id=self.TENANT_ID,
+                email=self.EMAIL,
+                initial_password="password",
+                created_by=self.ADMIN_ID,
+            )
+
+        self.assertEqual(ctx.exception.error_code, ErrorCode.PROFILE_PASSWORD_WEAK)
+        self.assertEqual(ctx.exception.http_status, 400)
+        mock_insert.assert_not_called()
+
+    @patch("backend.services.user_management_service.insert_user_tenant")
+    @patch("backend.services.user_management_service.find_supabase_user_id_by_email")
+    @patch("backend.services.user_management_service.get_supabase_admin_client")
+    @patch("backend.services.user_management_service.validate_password_strength")
+    async def test_existing_email_raises_registration_exception(
+        self, mock_password_ok, mock_get_admin, mock_find_user, mock_insert
+    ):
+        mock_password_ok.return_value = True
+        mock_get_admin.return_value = self._admin_client()
+        mock_find_user.return_value = "already-registered-user"
+
+        with self.assertRaises(UserRegistrationException):
+            await create_user_as_tenant_admin(
+                tenant_id=self.TENANT_ID,
+                email=self.EMAIL,
+                initial_password=self.PASSWORD,
+                created_by=self.ADMIN_ID,
+            )
+
+        mock_insert.assert_not_called()
+
+    @patch("backend.services.user_management_service.insert_user_tenant")
+    @patch("backend.services.user_management_service.find_supabase_user_id_by_email")
+    @patch("backend.services.user_management_service.get_supabase_admin_client")
+    @patch("backend.services.user_management_service.validate_password_strength")
+    async def test_duplicate_race_maps_to_registration_exception(
+        self, mock_password_ok, mock_get_admin, mock_find_user, mock_insert
+    ):
+        """A concurrent registration surfaces as a Supabase error, not a 500."""
+        mock_password_ok.return_value = True
+        client = self._admin_client()
+        client.auth.admin.create_user.side_effect = RuntimeError(
+            "User already registered"
+        )
+        mock_get_admin.return_value = client
+        mock_find_user.return_value = None
+
+        with self.assertRaises(UserRegistrationException):
+            await create_user_as_tenant_admin(
+                tenant_id=self.TENANT_ID,
+                email=self.EMAIL,
+                initial_password=self.PASSWORD,
+                created_by=self.ADMIN_ID,
+            )
+
+        mock_insert.assert_not_called()
+
+    @patch("backend.services.user_management_service.insert_user_tenant")
+    @patch("backend.services.user_management_service.find_supabase_user_id_by_email")
+    @patch("backend.services.user_management_service.get_supabase_admin_client")
+    @patch("backend.services.user_management_service.validate_password_strength")
+    async def test_unrelated_supabase_error_is_reraised(
+        self, mock_password_ok, mock_get_admin, mock_find_user, mock_insert
+    ):
+        mock_password_ok.return_value = True
+        client = self._admin_client()
+        client.auth.admin.create_user.side_effect = RuntimeError("network down")
+        mock_get_admin.return_value = client
+        mock_find_user.return_value = None
+
+        with self.assertRaises(RuntimeError):
+            await create_user_as_tenant_admin(
+                tenant_id=self.TENANT_ID,
+                email=self.EMAIL,
+                initial_password=self.PASSWORD,
+                created_by=self.ADMIN_ID,
+            )
+
+    @patch("backend.services.user_management_service.insert_user_tenant")
+    @patch("backend.services.user_management_service.find_supabase_user_id_by_email")
+    @patch("backend.services.user_management_service.get_supabase_admin_client")
+    @patch("backend.services.user_management_service.validate_password_strength")
+    async def test_missing_admin_client_raises_runtime_error(
+        self, mock_password_ok, mock_get_admin, mock_find_user, mock_insert
+    ):
+        mock_password_ok.return_value = True
+        mock_get_admin.return_value = None
+
+        with self.assertRaises(RuntimeError):
+            await create_user_as_tenant_admin(
+                tenant_id=self.TENANT_ID,
+                email=self.EMAIL,
+                initial_password=self.PASSWORD,
+                created_by=self.ADMIN_ID,
+            )
+
+    @patch("backend.services.user_management_service.insert_user_tenant")
+    @patch("backend.services.user_management_service.find_supabase_user_id_by_email")
+    @patch("backend.services.user_management_service.get_supabase_admin_client")
+    @patch("backend.services.user_management_service.validate_password_strength")
+    async def test_tenant_quota_error_propagates(
+        self, mock_password_ok, mock_get_admin, mock_find_user, mock_insert
+    ):
+        """Tenant limits are enforced by insert_user_tenant and must not be swallowed."""
+        mock_password_ok.return_value = True
+        mock_get_admin.return_value = self._admin_client()
+        mock_find_user.return_value = None
+        mock_insert.side_effect = TenantResourceLimitError("admin limit reached")
+
+        with self.assertRaises(TenantResourceLimitError):
+            await create_user_as_tenant_admin(
+                tenant_id=self.TENANT_ID,
+                email=self.EMAIL,
+                initial_password=self.PASSWORD,
+                created_by=self.ADMIN_ID,
+                role="ADMIN",
+            )
+
+    async def test_admin_creatable_roles_excludes_super_admin(self):
+        self.assertEqual(ADMIN_CREATABLE_ROLES, ("USER", "DEV", "ADMIN"))
+        self.assertNotIn("SU", ADMIN_CREATABLE_ROLES)
 
 
 if __name__ == '__main__':
