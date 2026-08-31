@@ -7,7 +7,7 @@ from fastapi import APIRouter, Body, Depends, Header, HTTPException, Path, Query
 from fastapi.responses import JSONResponse
 import re
 
-from consts.const import ASSET_OWNER_TENANT_ID, PERMISSION_READ
+from consts.const import PERMISSION_READ
 from consts.model import ChunkCreateRequest, ChunkUpdateRequest, HybridSearchRequest, IndexingResponse
 from consts.scheduler import VALID_SUMMARY_FREQUENCIES, SUMMARY_FREQUENCY_OPTIONS_FOR_API
 from nexent.vector_database.base import VectorDatabaseCore
@@ -26,7 +26,6 @@ from database.knowledge_db import get_index_name_by_knowledge_name, get_knowledg
 from database.model_management_db import get_model_by_model_id
 from apps.permission_utils import (
     require_knowledge_base_edit_permission,
-    require_knowledge_base_read_permission,
 )
 
 router = APIRouter(prefix="/indices")
@@ -439,17 +438,9 @@ def get_list_indices(
     try:
         user_id, auth_tenant_id = get_current_user_id(authorization)
         if tenant_id is None:
-            result = ElasticSearchService.list_indices(
+            return ElasticSearchService.list_indices(
                 pattern, include_stats, auth_tenant_id, user_id, vdb_core
             )
-            if auth_tenant_id != ASSET_OWNER_TENANT_ID:
-                asset_result = ElasticSearchService.list_indices(
-                    pattern, include_stats, ASSET_OWNER_TENANT_ID, user_id, vdb_core
-                )
-                asset_result = _apply_read_only_to_asset_indices_info(
-                    asset_result)
-                return _merge_list_indices_results(result, asset_result)
-            return result
         return ElasticSearchService.list_indices(
             pattern, include_stats, tenant_id, user_id, vdb_core
         )
@@ -844,7 +835,7 @@ async def hybrid_search(
 ):
     """Run a hybrid (accurate + semantic) search across indices."""
     try:
-        user_id, tenant_id = get_current_user_id(authorization)
+        _, tenant_id = get_current_user_id(authorization)
         resolved_index_names: List[str] = []
         for requested_name in payload.index_names:
             try:
@@ -853,11 +844,6 @@ async def hybrid_search(
                 )
             except Exception:
                 resolved_name = requested_name
-            # Enforce per-KB read permission before searching. The permission layer
-            # maps ValueError (KB not found) -> 404 and PermissionError (no access) -> 403.
-            require_knowledge_base_read_permission(
-                index_name=resolved_name, user_id=user_id, tenant_id=tenant_id,
-            )
             resolved_index_names.append(resolved_name)
         result = ElasticSearchService.search_hybrid(
             index_names=resolved_index_names,

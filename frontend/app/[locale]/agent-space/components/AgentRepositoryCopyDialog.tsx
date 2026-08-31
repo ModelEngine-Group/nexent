@@ -1,12 +1,13 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { App, Button, Modal, Spin } from "antd";
+import { useEffect, useMemo, useState } from "react";
+import { App, Button, Input, Modal, Popover, Select, Spin } from "antd";
 import {
   AlertCircle,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
+  CircleHelp,
   Copy,
   Cpu,
   Database,
@@ -30,16 +31,16 @@ import {
   getRepositoryRequirementTypeOrder,
 } from "@/lib/agentRepositoryLabels";
 import log from "@/lib/logger";
+import { useModelList } from "@/hooks/model/useModelList";
+import { installAgentRepositorySkill } from "@/services/agentRepositoryService";
+import { addMcpServer, updateToolList } from "@/services/mcpService";
 import type {
   AgentRepositoryListingItem,
   RepositoryImportRequirementItem,
   RepositoryImportRequirementType,
 } from "@/types/agentRepository";
 
-const TYPE_ICON: Record<
-  RepositoryImportRequirementType,
-  typeof Database
-> = {
+const TYPE_ICON: Record<RepositoryImportRequirementType, typeof Database> = {
   model: Cpu,
   knowledge_base: Database,
   mcp: Plug,
@@ -71,7 +72,7 @@ export function AgentRepositoryCopyDialog({
   onSuccess,
 }: AgentRepositoryCopyDialogProps) {
   const { t } = useTranslation("common");
-  const { message } = App.useApp();
+  const { message, modal } = App.useApp();
   const router = useRouter();
   const params = useParams<{ locale: string }>();
   const locale = params.locale || "zh";
@@ -79,6 +80,18 @@ export function AgentRepositoryCopyDialog({
   const [warningDismissed, setWarningDismissed] = useState(false);
   const [abnormalOpen, setAbnormalOpen] = useState(true);
   const [availableOpen, setAvailableOpen] = useState(true);
+  const [mcpUrlOverrides, setMcpUrlOverrides] = useState<
+    Record<string, string>
+  >({});
+  const [installingMcpKeys, setInstallingMcpKeys] = useState<Set<string>>(
+    new Set()
+  );
+  const [installingSkillKeys, setInstallingSkillKeys] = useState<Set<string>>(
+    new Set()
+  );
+  const [modelReplacements, setModelReplacements] = useState<
+    Record<string, number>
+  >({});
 
   const agentRepositoryId = listing?.agent_repository_id ?? null;
   const listingTitle =
@@ -95,18 +108,57 @@ export function AgentRepositoryCopyDialog({
   } = useRepositoryImportPrecheck(agentRepositoryId, open);
 
   const importMutation = useImportAgentFromRepository();
+  const {
+    availableLlmModels,
+    isLoading: isLoadingModels,
+    isFetching: isFetchingModels,
+    isError: isModelsError,
+  } = useModelList({
+    enabled: open,
+  });
 
-  const abnormalItems = useMemo(
-    () => precheck?.items.filter((item) => !item.available) ?? [],
-    [precheck]
-  );
-  const availableItems = useMemo(
-    () => precheck?.items.filter((item) => item.available) ?? [],
-    [precheck]
-  );
+  useEffect(() => {
+    setModelReplacements({});
+  }, [agentRepositoryId]);
 
-  const percent = precheck?.percent ?? 0;
-  const hasAbnormal = precheck?.has_abnormal ?? false;
+  const effectiveItems = useMemo(
+    () =>
+      precheck?.items.map((item) => {
+        if (item.type !== "model" || item.available) return item;
+        return {
+          ...item,
+          available:
+            !isModelsError &&
+            availableLlmModels.some(
+              (model) => model.id === modelReplacements[item.key]
+            ),
+        };
+      }) ?? [],
+    [precheck, availableLlmModels, modelReplacements, isModelsError]
+  );
+  const abnormalItems = effectiveItems.filter((item) => !item.available);
+  const availableItems = effectiveItems.filter((item) => item.available);
+  const hasAbnormal = abnormalItems.length > 0;
+  const percent = effectiveItems.length
+    ? Math.round((availableItems.length / effectiveItems.length) * 100)
+    : 100;
+  const hasSelectedReplacement = Object.keys(modelReplacements).length > 0;
+  const copyDisabled =
+    !precheck ||
+    isLoading ||
+    isFetching ||
+    isError ||
+    hasAbnormal ||
+    (hasSelectedReplacement &&
+      (isLoadingModels || isFetchingModels || isModelsError)) ||
+    installingMcpKeys.size > 0 ||
+    installingSkillKeys.size > 0 ||
+    importMutation.isPending;
+
+  const handleModelReplacementChange = (key: string, modelId: number) => {
+    setModelReplacements((current) => ({ ...current, [key]: modelId }));
+    setAvailableOpen(true);
+  };
 
   const handleOpenActivate = (type: RepositoryImportRequirementType) => {
     const path = getRepositoryRequirementActivatePath(type);
@@ -117,11 +169,14 @@ export function AgentRepositoryCopyDialog({
   };
 
   const handleCopy = async () => {
-    if (!agentRepositoryId) {
+    if (!agentRepositoryId || copyDisabled) {
       return;
     }
     try {
-      await importMutation.mutateAsync(agentRepositoryId);
+      await importMutation.mutateAsync({
+        agentRepositoryId,
+        modelReplacements,
+      });
       message.success(
         t("agentRepository.copy.success", { name: listingTitle })
       );
@@ -153,11 +208,106 @@ export function AgentRepositoryCopyDialog({
     }
   };
 
+  const handleInstallMcp = async (item: RepositoryImportRequirementItem) => {
+    const originalUrl = item.mcp_url?.trim() || "";
+    const url = (mcpUrlOverrides[item.key] ?? originalUrl).trim();
+    if (!url || url === "<TO_CONFIG>" || url.startsWith("<TO_CONFIG:")) {
+      message.error(
+        t("market.install.error.mcpUrlRequired", "MCP URL is required")
+      );
+      return;
+    }
+
+    setInstallingMcpKeys((current) => new Set(current).add(item.key));
+    try {
+      const result = await addMcpServer(url, item.name);
+      if (!result.success) {
+        message.error(
+          result.message ||
+            t("market.install.error.mcpInstall", "Failed to install MCP server")
+        );
+        return;
+      }
+      await updateToolList();
+      message.success(
+        t(
+          "market.install.success.mcpInstalled",
+          "MCP server installed successfully"
+        )
+      );
+      await refetch();
+    } catch (error) {
+      log.error("Failed to install repository MCP dependency:", error);
+      message.error(
+        t("market.install.error.mcpInstall", "Failed to install MCP server")
+      );
+    } finally {
+      setInstallingMcpKeys((current) => {
+        const next = new Set(current);
+        next.delete(item.key);
+        return next;
+      });
+    }
+  };
+
+  const installSkill = async (
+    item: RepositoryImportRequirementItem,
+    overwrite: boolean
+  ) => {
+    if (!agentRepositoryId) {
+      return;
+    }
+    setInstallingSkillKeys((current) => new Set(current).add(item.key));
+    try {
+      await installAgentRepositorySkill(
+        agentRepositoryId,
+        item.name,
+        overwrite
+      );
+      message.success(
+        overwrite
+          ? t("agentRepository.copy.skillOverwriteSuccess")
+          : t("agentRepository.copy.skillInstallSuccess")
+      );
+      await refetch();
+    } catch (error) {
+      log.error("Failed to install repository Skill dependency:", error);
+      message.error(t("agentRepository.copy.skillInstallFailed"));
+    } finally {
+      setInstallingSkillKeys((current) => {
+        const next = new Set(current);
+        next.delete(item.key);
+        return next;
+      });
+    }
+  };
+
+  const handleInstallSkill = (item: RepositoryImportRequirementItem) => {
+    if (!item.has_local_skill) {
+      void installSkill(item, false);
+      return;
+    }
+    modal.confirm({
+      title: t("agentRepository.copy.skillOverwriteTitle"),
+      content: t("agentRepository.copy.skillOverwriteWarning", {
+        name: item.name,
+      }),
+      okText: t("agentRepository.copy.skillOverwriteConfirm"),
+      cancelText: t("common.cancel"),
+      okButtonProps: { danger: true },
+      onOk: () => installSkill(item, true),
+    });
+  };
+
   const handleClose = () => {
     onOpenChange(false);
     setWarningDismissed(false);
     setAbnormalOpen(true);
     setAvailableOpen(true);
+    setMcpUrlOverrides({});
+    setInstallingMcpKeys(new Set());
+    setInstallingSkillKeys(new Set());
+    setModelReplacements({});
   };
 
   return (
@@ -175,7 +325,7 @@ export function AgentRepositoryCopyDialog({
             type="primary"
             icon={<Copy className="size-4" />}
             loading={importMutation.isPending}
-            disabled={!precheck || isLoading || isError}
+            disabled={copyDisabled}
             onClick={handleCopy}
           >
             {t("agentRepository.card.copy")}
@@ -294,6 +444,21 @@ export function AgentRepositoryCopyDialog({
                           group.type as RepositoryImportRequirementType
                         )
                       }
+                      mcpUrlOverrides={mcpUrlOverrides}
+                      installingMcpKeys={installingMcpKeys}
+                      onMcpUrlChange={(key, value) =>
+                        setMcpUrlOverrides((current) => ({
+                          ...current,
+                          [key]: value,
+                        }))
+                      }
+                      onInstallMcp={handleInstallMcp}
+                      installingSkillKeys={installingSkillKeys}
+                      onInstallSkill={handleInstallSkill}
+                      modelReplacements={modelReplacements}
+                      availableLlmModels={availableLlmModels}
+                      isLoadingModels={isLoadingModels}
+                      onModelReplacementChange={handleModelReplacementChange}
                     />
                   ))
                 : null}
@@ -326,6 +491,12 @@ export function AgentRepositoryCopyDialog({
                       items={group.items}
                       status="available"
                       t={t}
+                      modelReplacements={modelReplacements}
+                      availableLlmModels={availableLlmModels}
+                      isLoadingModels={isLoadingModels}
+                      onModelReplacementChange={handleModelReplacementChange}
+                      installingSkillKeys={installingSkillKeys}
+                      onInstallSkill={handleInstallSkill}
                     />
                   ))
                 : null}
@@ -343,17 +514,42 @@ function RequirementTypeGroup({
   status,
   t,
   onActivate,
+  mcpUrlOverrides,
+  installingMcpKeys,
+  onMcpUrlChange,
+  onInstallMcp,
+  installingSkillKeys,
+  onInstallSkill,
+  modelReplacements,
+  availableLlmModels,
+  isLoadingModels,
+  onModelReplacementChange,
 }: {
   type: RepositoryImportRequirementType;
   items: RepositoryImportRequirementItem[];
   status: "abnormal" | "available";
   t: ReturnType<typeof useTranslation>["t"];
   onActivate?: () => void;
+  mcpUrlOverrides?: Record<string, string>;
+  installingMcpKeys?: Set<string>;
+  onMcpUrlChange?: (key: string, value: string) => void;
+  onInstallMcp?: (item: RepositoryImportRequirementItem) => void;
+  installingSkillKeys?: Set<string>;
+  onInstallSkill?: (item: RepositoryImportRequirementItem) => void;
+  modelReplacements?: Record<string, number>;
+  availableLlmModels?: Array<{
+    id: number;
+    displayName: string;
+    source: string;
+  }>;
+  isLoadingModels?: boolean;
+  onModelReplacementChange?: (key: string, modelId: number) => void;
 }) {
   const Icon = TYPE_ICON[type];
   const abnormal = status === "abnormal";
   const typeLabel = getRepositoryRequirementTypeLabel(type, t);
-  const activatePath = getRepositoryRequirementActivatePath(type);
+  const activatePath =
+    type === "mcp" ? null : getRepositoryRequirementActivatePath(type);
 
   return (
     <div className="rounded-lg border border-slate-200 p-3 dark:border-slate-700">
@@ -378,7 +574,7 @@ function RequirementTypeGroup({
                 <ExternalLink className="size-3" />
               </span>
             </button>
-          ) : (
+          ) : type === "mcp" ? null : (
             <span className="flex items-center gap-1 text-xs text-amber-600">
               <AlertCircle className="size-3.5" />
               {getRepositoryRequirementReasonLabel(items[0]?.reason_code, t) ||
@@ -388,7 +584,9 @@ function RequirementTypeGroup({
         ) : (
           <span className="flex items-center gap-1 text-xs text-emerald-600">
             <CheckCircle2 className="size-3.5" />
-            {t("agentRepository.copy.activated")}
+            {type === "skill" || type === "model"
+              ? t("agentRepository.copy.available")
+              : t("agentRepository.copy.activated")}
           </span>
         )}
       </div>
@@ -397,19 +595,143 @@ function RequirementTypeGroup({
         {items.map((item) => (
           <li
             key={item.key}
-            className="flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-700 dark:bg-slate-800/50"
+            className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-700 dark:bg-slate-800/50"
           >
-            <Icon className="size-4 shrink-0 text-primary" />
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm text-slate-900 dark:text-slate-100">
-                {item.name}
-              </p>
-              {item.description ? (
-                <p className="truncate text-xs text-slate-500 dark:text-slate-400">
-                  {item.description}
-                </p>
-              ) : null}
+            <div className="flex items-center gap-2">
+              <Icon className="size-4 shrink-0 text-primary" />
+              <div className="min-w-0 flex-1">
+                {type === "model" && item.source_model_names?.length ? (
+                  <div className="flex flex-wrap gap-1.5">
+                    {item.source_model_names.map((modelName) => (
+                      <span
+                        key={modelName}
+                        className="rounded bg-slate-200 px-2 py-0.5 text-xs text-slate-700 dark:bg-slate-700 dark:text-slate-200"
+                      >
+                        {modelName}
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="truncate text-sm text-slate-900 dark:text-slate-100">
+                    {item.name}
+                  </p>
+                )}
+                {item.description ? (
+                  <p className="truncate text-xs text-slate-500 dark:text-slate-400">
+                    {item.description}
+                  </p>
+                ) : null}
+                {abnormal && type === "model" && item.reason_code ? (
+                  <div className="mt-1 flex items-center gap-1 text-xs text-amber-600">
+                    <span>
+                      {getRepositoryRequirementReasonLabel(item.reason_code, t)}
+                    </span>
+                    <Popover
+                      trigger="click"
+                      placement="top"
+                      title={t("agentRepository.copy.originalModelListTitle")}
+                      content={
+                        <ul className="max-w-72 space-y-1 text-xs text-slate-700 dark:text-slate-200">
+                          {(item.source_model_names?.length
+                            ? item.source_model_names
+                            : [item.name]
+                          ).map((modelName) => (
+                            <li key={modelName} className="break-all">
+                              {modelName}
+                            </li>
+                          ))}
+                        </ul>
+                      }
+                    >
+                      <button
+                        type="button"
+                        aria-label={t(
+                          "agentRepository.copy.showOriginalModelList"
+                        )}
+                        className="inline-flex shrink-0 cursor-pointer rounded-sm text-amber-600 hover:text-amber-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
+                      >
+                        <CircleHelp className="size-3.5" />
+                      </button>
+                    </Popover>
+                  </div>
+                ) : null}
+                {abnormal && type === "skill" && item.reason_code ? (
+                  <p className="mt-1 text-xs text-amber-600">
+                    {getRepositoryRequirementReasonLabel(item.reason_code, t)}
+                  </p>
+                ) : null}
+                {item.will_auto_deselect ? (
+                  <p className="mt-1 text-xs text-amber-600">
+                    {t(
+                      "agentRepository.copy.knowledgeBaseUnavailable",
+                      "This knowledge base is unavailable. Resolve this configuration before copying."
+                    )}
+                  </p>
+                ) : null}
+              </div>
             </div>
+            {abnormal && type === "mcp" ? (
+              <div className="mt-2 flex gap-2 pl-6">
+                <Input
+                  value={
+                    mcpUrlOverrides?.[item.key] ??
+                    (item.mcp_url?.startsWith("<TO_CONFIG")
+                      ? ""
+                      : item.mcp_url || "")
+                  }
+                  placeholder={t(
+                    "market.install.mcp.urlPlaceholder",
+                    "Enter MCP server URL"
+                  )}
+                  onChange={(event) =>
+                    onMcpUrlChange?.(item.key, event.target.value)
+                  }
+                />
+                <Button
+                  type="primary"
+                  loading={installingMcpKeys?.has(item.key)}
+                  onClick={() => onInstallMcp?.(item)}
+                >
+                  {t("market.install.mcp.install", "Install")}
+                </Button>
+              </div>
+            ) : null}
+            {type === "model" &&
+            (abnormal ||
+              item.requires_replacement ||
+              modelReplacements?.[item.key] != null) ? (
+              <div className="mt-2 pl-6">
+                <Select
+                  className="w-full"
+                  loading={isLoadingModels}
+                  value={modelReplacements?.[item.key]}
+                  placeholder={t("agentRepository.copy.selectReplacementModel")}
+                  options={(availableLlmModels || []).map((model) => ({
+                    value: model.id,
+                    label: `${model.displayName} (${model.source})`,
+                  }))}
+                  onChange={(modelId) => {
+                    if (modelId != null) {
+                      onModelReplacementChange?.(item.key, modelId);
+                    }
+                  }}
+                />
+              </div>
+            ) : null}
+            {type === "skill" &&
+            !item.available &&
+            !item.is_official_skill &&
+            item.has_install_package ? (
+              <div className="mt-2 flex justify-end pl-6">
+                <Button
+                  type="primary"
+                  loading={installingSkillKeys?.has(item.key)}
+                  onClick={() => onInstallSkill?.(item)}
+                >
+                  {t("agentRepository.copy.installSkill")}
+                </Button>
+              </div>
+            ) : null}
           </li>
         ))}
       </ul>

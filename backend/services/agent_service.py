@@ -406,7 +406,7 @@ def _resolve_model_ids_with_fallback(
     for mid in model_ids or []:
         if mid in seen:
             continue
-        info = get_model_by_model_id(mid)
+        info = get_model_by_model_id(mid, tenant_id)
         if info:
             seen.add(mid)
             resolved_ids.append(mid)
@@ -2162,12 +2162,17 @@ async def export_agent_dict_for_repository_impl(
     version_no: int,
 ) -> dict:
     """Export agent tree for marketplace repository storage (no HTTP auth header)."""
-    return await _export_agent_dict_core(
+    export_data = await _export_agent_dict_core(
         root_agent_id=agent_id,
         tenant_id=tenant_id,
         user_id=user_id,
         version_no=version_no,
     )
+    for agent_info in export_data.get("agent_info", {}).values():
+        agent_info.pop("model_ids", None)
+        agent_info.pop("business_logic_model_id", None)
+        agent_info.pop("business_logic_model_name", None)
+    return export_data
 
 
 async def export_agent_impl(
@@ -2207,6 +2212,8 @@ def _collect_skill_names_from_tree(
             version_no=current_version_no,
         )
         for inst in skill_instances:
+            if inst.get("enabled") is False:
+                continue
             skill_id = inst.get("skill_id")
             skill = skill_db.get_skill_by_id(skill_id, tenant_id)
             if skill:
@@ -2249,6 +2256,9 @@ def collect_skill_zip_entries(
         SkillZipEntry(
             skill_name=entry["skill_name"],
             skill_zip_base64=entry["skill_zip_base64"],
+            source=(
+                skill_db.get_skill_by_name(entry["skill_name"], tenant_id) or {}
+            ).get("source"),
         )
         for entry in exported
     ]
@@ -2281,6 +2291,8 @@ async def export_agent_by_agent_id(
             agent_id=agent_id, tenant_id=tenant_id, version_no=version_no
         )
         for inst in skill_instances:
+            if inst.get("enabled") is False:
+                continue
             skill_id = inst.get("skill_id")
             skill = skill_db.get_skill_by_id(skill_id, tenant_id)
             if skill:
@@ -2300,7 +2312,7 @@ async def export_agent_by_agent_id(
     model_ids_list = agent_info.get("model_ids") or []
     model_names_list: List[str] = []
     for mid in model_ids_list:
-        mid_info = get_model_by_model_id(mid)
+        mid_info = get_model_by_model_id(mid, tenant_id)
         if mid_info:
             display = mid_info.get("display_name")
             if display:
@@ -2311,7 +2323,7 @@ async def export_agent_by_agent_id(
     business_logic_model_display_name = None
     if business_logic_model_id is not None:
         business_logic_model_info = get_model_by_model_id(
-            business_logic_model_id)
+            business_logic_model_id, tenant_id)
         business_logic_model_display_name = business_logic_model_info.get(
             "display_name") if business_logic_model_info is not None else None
 
@@ -2380,13 +2392,15 @@ async def import_agent_impl(
         managed_agents = need_import_agent_info.managed_agents
 
         if agent_id_set.issuperset(managed_agents):
-            new_agent_id = await import_agent_by_agent_id(
-                import_agent_info=agent_info.agent_info[str(
-                    need_import_agent_id)],
-                tenant_id=tenant_id,
-                user_id=user_id,
-                skip_duplicate_regeneration=force_import
-            )
+            import_kwargs = {
+                "import_agent_info": agent_info.agent_info[str(need_import_agent_id)],
+                "tenant_id": tenant_id,
+                "user_id": user_id,
+                "skip_duplicate_regeneration": force_import,
+            }
+            if skill_name_to_id is not None:
+                import_kwargs["skill_name_to_id"] = skill_name_to_id
+            new_agent_id = await import_agent_by_agent_id(**import_kwargs)
             mapping_agent_id[need_import_agent_id] = new_agent_id
 
             agent_id_set.add(need_import_agent_id)
@@ -2410,7 +2424,8 @@ async def import_agent_by_agent_id(
     import_agent_info: ExportAndImportAgentInfo,
     tenant_id: str,
     user_id: str,
-    skip_duplicate_regeneration: bool = False
+    skip_duplicate_regeneration: bool = False,
+    skill_name_to_id: Optional[Dict[str, int]] = None,
 ):
     tool_list = []
 
@@ -2506,6 +2521,30 @@ async def import_agent_by_agent_id(
         tool.agent_id = new_agent_id
         create_or_update_tool_by_tool_info(
             tool_info=tool, tenant_id=tenant_id, user_id=user_id)
+
+    # Restore enabled skills for this specific agent before publishing V1 so
+    # the published version contains the same skill bindings as the draft.
+    for skill_name in import_agent_info.skill_names or []:
+        skill_id = (skill_name_to_id or {}).get(skill_name)
+        if skill_id is None:
+            logger.warning(
+                "Skipping unavailable imported skill '%s' for agent %s",
+                skill_name,
+                new_agent_id,
+            )
+            continue
+        skill_db.create_or_update_skill_by_skill_info(
+            skill_info=SkillInstanceInfoRequest(
+                skill_id=skill_id,
+                agent_id=new_agent_id,
+                enabled=True,
+                version_no=0,
+            ),
+            tenant_id=tenant_id,
+            user_id=user_id,
+            version_no=0,
+        )
+
     # Auto-publish initial version V1 for market-imported agents
     try:
         publish_version_impl(
@@ -3819,14 +3858,15 @@ async def import_agent_with_skills_impl(
     agent_info: "ExportAndImportDataFormat",
     skills: List[SkillZipEntry],
     authorization: str,
-    force_import: bool = False
+    force_import: bool = False,
+    reuse_existing_skills: bool = False,
 ):
     """Import an agent with skills bundled from a ZIP export.
 
     For each skill in the bundle:
       1. Check if a skill with the same name already exists in the target tenant.
-      2. If duplicates exist, raise SkillDuplicateError (do not create anything).
-      3. If no duplicates, create the skill from ZIP bytes via SkillService.
+      2. Reuse duplicates for repository copies, otherwise raise SkillDuplicateError.
+      3. Create missing skills from ZIP bytes via SkillService.
       4. Create a SkillInstance linking the new skill_id to the new agent_id.
 
     Then proceeds with the standard agent import flow using the mapped skill IDs.
@@ -3837,20 +3877,37 @@ async def import_agent_with_skills_impl(
 
     skill_name_to_zip_base64 = {
         entry.skill_name: entry.skill_zip_base64 for entry in skills}
+    referenced_skill_names = {
+        skill_name
+        for imported_agent in agent_info.agent_info.values()
+        for skill_name in (imported_agent.skill_names or [])
+    }
 
     existing_skills = skill_db.list_skills(tenant_id)
-    existing_skill_names = {s.get("name") for s in existing_skills}
+    existing_skill_by_name = {
+        skill.get("name"): skill.get("skill_id")
+        for skill in existing_skills
+        if skill.get("name") and skill.get("skill_id") is not None
+    }
+    existing_skill_names = {
+        skill.get("name") for skill in existing_skills if skill.get("name")
+    }
 
     import_skill_names = set(skill_name_to_zip_base64.keys())
     duplicate_names = list(import_skill_names & existing_skill_names)
 
-    if duplicate_names:
+    if duplicate_names and not reuse_existing_skills:
         raise SkillDuplicateError(duplicate_names)
 
-    skill_name_to_id: Dict[str, int] = {}
+    skill_name_to_id: Dict[str, int] = {
+        skill_name: existing_skill_by_name[skill_name]
+        for skill_name in (referenced_skill_names | import_skill_names) & set(existing_skill_by_name)
+    } if reuse_existing_skills else {}
     skill_service = SkillService(tenant_id=tenant_id)
 
     for skill_name, zip_base64 in skill_name_to_zip_base64.items():
+        if skill_name in skill_name_to_id:
+            continue
         zip_bytes = base64.b64decode(zip_base64)
         result = skill_service.create_skill_from_zip_bytes(
             zip_bytes=zip_bytes,
@@ -3866,21 +3923,6 @@ async def import_agent_with_skills_impl(
         agent_info, authorization, force_import,
         skill_name_to_id=skill_name_to_id
     )
-
-    main_agent_id = agent_id_mapping.get(agent_info.agent_id)
-    if main_agent_id:
-        for skill_name, new_skill_id in skill_name_to_id.items():
-            skill_db.create_or_update_skill_by_skill_info(
-                skill_info=SkillInstanceInfoRequest(
-                    skill_id=new_skill_id,
-                    agent_id=main_agent_id,
-                    enabled=True,
-                    version_no=0
-                ),
-                tenant_id=tenant_id,
-                user_id=user_id,
-                version_no=0
-            )
 
     return agent_id_mapping
 

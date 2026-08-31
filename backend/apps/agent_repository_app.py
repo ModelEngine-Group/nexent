@@ -5,13 +5,23 @@ from typing import Annotated, Optional
 from fastapi import APIRouter, Body, Header, HTTPException, Query
 from starlette.responses import JSONResponse
 
-from consts.exceptions import SkillDuplicateError, UnauthorizedError
-from consts.model import AgentRepositoryListingCreateRequest
+from consts.exceptions import (
+    ForbiddenError,
+    SkillDuplicateError,
+    SkillException,
+    UnauthorizedError,
+)
+from consts.model import (
+    AgentRepositoryImportRequest,
+    AgentRepositoryListingCreateRequest,
+    AgentRepositorySkillInstallRequest,
+)
 from services.agent_repository_service import (
     check_repository_import_precheck_impl,
     create_agent_repository_listing_impl,
     get_agent_repository_listing_detail_impl,
     import_agent_from_repository_impl,
+    install_agent_repository_skill_impl,
     list_agent_repository_listings_impl,
     list_my_editable_agents_impl,
     update_agent_repository_status_impl,
@@ -246,16 +256,20 @@ async def check_repository_import_precheck_api(
 @agent_repository_router.post("/{agent_repository_id}/import")
 async def import_agent_from_repository_api(
     agent_repository_id: int,
+    payload: Optional[AgentRepositoryImportRequest] = Body(None),
     authorization: Optional[str] = Header(None),
 ):
     """Import an agent tree from a marketplace repository listing into the current tenant."""
     try:
         _, tenant_id = get_current_user_id(authorization)
-        await import_agent_from_repository_impl(
+        import_kwargs = dict(
             agent_repository_id=agent_repository_id,
             tenant_id=tenant_id,
             authorization=authorization,
         )
+        if payload:
+            import_kwargs["model_replacements"] = payload.model_replacements
+        await import_agent_from_repository_impl(**import_kwargs)
         return JSONResponse(status_code=HTTPStatus.OK, content={})
     except UnauthorizedError as e:
         logger.warning(
@@ -275,9 +289,44 @@ async def import_agent_from_repository_api(
                 "duplicate_skills": exc.duplicate_names,
             },
         )
+    except SkillException as exc:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc))
     except ValueError as e:
         logger.warning(
             f"Agent repository listing not found for import "
             f"(id={agent_repository_id}): {str(e)}"
         )
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(e))
+
+
+@agent_repository_router.post("/{agent_repository_id}/skills/install")
+async def install_agent_repository_skill_api(
+    agent_repository_id: int,
+    payload: AgentRepositorySkillInstallRequest,
+    authorization: Optional[str] = Header(None),
+):
+    """Install or overwrite one Skill bundled in an agent repository snapshot."""
+    try:
+        user_id, tenant_id = get_current_user_id(authorization)
+        result = install_agent_repository_skill_impl(
+            agent_repository_id=agent_repository_id,
+            skill_name=payload.skill_name.strip(),
+            overwrite=payload.overwrite,
+            tenant_id=tenant_id,
+            user_id=user_id,
+        )
+        return JSONResponse(status_code=HTTPStatus.OK, content=result)
+    except UnauthorizedError as exc:
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
+    except ForbiddenError as exc:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(exc))
+    except SkillDuplicateError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.CONFLICT,
+            detail={
+                "type": "skill_duplicate",
+                "duplicate_skills": exc.duplicate_names,
+            },
+        )
+    except (SkillException, ValueError) as exc:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc))

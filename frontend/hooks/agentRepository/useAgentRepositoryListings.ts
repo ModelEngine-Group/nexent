@@ -140,8 +140,16 @@ export function useImportAgentFromRepository() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (agentRepositoryId: number) =>
-      agentRepositoryService.importAgentFromRepository(agentRepositoryId),
+    mutationFn: ({
+      agentRepositoryId,
+      modelReplacements,
+    }: {
+      agentRepositoryId: number;
+      modelReplacements?: Record<string, number>;
+    }) =>
+      agentRepositoryService.importAgentFromRepository(agentRepositoryId, {
+        model_replacements: modelReplacements,
+      }),
     onSuccess: async () => {
       await Promise.all([
         invalidateAgentRepositoryCaches(queryClient),

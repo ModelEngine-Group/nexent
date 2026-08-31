@@ -549,6 +549,8 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/repository/agent/${agentRepositoryId}/import_precheck`,
     import: (agentRepositoryId: number) =>
       `${API_BASE_URL}/repository/agent/${agentRepositoryId}/import`,
+    installSkill: (agentRepositoryId: number) =>
+      `${API_BASE_URL}/repository/agent/${agentRepositoryId}/skills/install`,
     updateStatus: (agentRepositoryId: number) =>
       `${API_BASE_URL}/repository/agent/${agentRepositoryId}/status`,
     createListing: (agentId: number, versionNo: number) =>

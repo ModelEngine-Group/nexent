@@ -111,7 +111,6 @@ const REQUIREMENT_ACTIVATE_PATH: Record<string, string> = {
   model: "/models",
   knowledge_base: "/knowledges",
   mcp: "/mcp-space",
-  skill: "/skill-space",
 };
 
 const REQUIREMENT_TYPE_ORDER = [

@@ -3,10 +3,7 @@
  */
 
 export type AgentRepositoryListingStatus =
-  | "not_shared"
-  | "pending_review"
-  | "rejected"
-  | "shared";
+  "not_shared" | "pending_review" | "rejected" | "shared";
 
 export interface AgentRepositoryListingItem {
   agent_repository_id: number;
@@ -93,8 +90,7 @@ export interface MyEditableAgentPaddingItem {
 }
 
 export type MyEditableAgentListItem =
-  | MyEditableAgentItem
-  | MyEditableAgentPaddingItem;
+  MyEditableAgentItem | MyEditableAgentPaddingItem;
 
 export function isNewAgentPaddingItem(
   item: MyEditableAgentListItem
@@ -139,19 +135,29 @@ export interface AgentRepositoryListingCreatePayload {
 }
 
 export type RepositoryImportRequirementType =
-  | "model"
-  | "knowledge_base"
-  | "mcp"
-  | "skill"
-  | "tool";
+  "model" | "knowledge_base" | "mcp" | "skill" | "tool";
 
 export interface RepositoryImportRequirementItem {
   type: RepositoryImportRequirementType;
   key: string;
   name: string;
   description?: string | null;
+  index_name?: string | null;
+  mcp_url?: string | null;
+  agent_id?: number | null;
+  source_model_names?: string[] | null;
+  matched_model_ids?: number[] | null;
+  requires_replacement?: boolean;
+  has_local_skill?: boolean;
+  has_install_package?: boolean;
+  is_official_skill?: boolean;
+  will_auto_deselect?: boolean;
   available: boolean;
   reason_code?: string | null;
+}
+
+export interface AgentRepositoryImportPayload {
+  model_replacements?: Record<string, number>;
 }
 
 export interface RepositoryImportPrecheckResponse {

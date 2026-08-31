@@ -2,35 +2,29 @@
 
 from __future__ import annotations
 
+import hashlib
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from consts.model import (
-    ModelConnectStatusEnum,
     RepositoryImportPrecheckResponse,
     RepositoryImportRequirementItem,
     ToolSourceEnum,
 )
 from database import skill_db
-from database.knowledge_db import (
-    get_knowledge_name_map_by_index_names,
-    get_knowledge_record,
-)
-from database.model_management_db import (
-    get_model_by_model_id,
-    get_model_id_by_display_name,
-)
+from database.knowledge_db import get_knowledge_record
+from database.model_management_db import get_model_records
 from database.remote_mcp_db import get_mcp_server_by_name_and_tenant
 from database.tool_db import query_all_tools
 
 _KB_TOOL_CLASS_NAMES = frozenset({
     "KnowledgeBaseSearchTool",
-    "DataMateSearchTool",
 })
 
 _REASON_MODEL_UNAVAILABLE = "model_unavailable"
 _REASON_KB_NOT_FOUND = "kb_not_found"
 _REASON_MCP_NOT_FOUND = "mcp_not_found"
-_REASON_SKILL_DUPLICATE = "skill_duplicate"
+_REASON_SKILL_PACKAGE_MISSING = "skill_package_missing"
+_REASON_SKILL_INSTALL_REQUIRED = "skill_install_required"
 _REASON_TOOL_UNAVAILABLE = "tool_unavailable"
 
 
@@ -47,33 +41,29 @@ def _build_tenant_tool_map(tenant_id: str) -> Dict[str, Dict[str, Any]]:
     }
 
 
-def _check_model_available(display_name: Optional[str], tenant_id: str) -> Tuple[bool, Optional[str]]:
-    if not display_name or not str(display_name).strip():
-        return True, None
+def _match_target_model_names(
+    model_names: List[str],
+    tenant_id: str,
+) -> List[int]:
+    """Resolve every exact model display-name match in the target tenant."""
+    matched_ids: List[int] = []
+    seen_ids: Set[int] = set()
+    for model_name in model_names:
+        candidates = get_model_records(
+            {"display_name": model_name, "model_type": "llm"},
+            tenant_id,
+        )
+        if not candidates:
+            continue
+        model_id = candidates[0].get("model_id")
+        if model_id is not None and model_id not in seen_ids:
+            seen_ids.add(model_id)
+            matched_ids.append(model_id)
+    return matched_ids
 
-    name = str(display_name).strip()
-    model_id = get_model_id_by_display_name(name, tenant_id)
-    if not model_id:
-        return False, _REASON_MODEL_UNAVAILABLE
 
-    model_info = get_model_by_model_id(model_id, tenant_id)
-    if not model_info:
-        return False, _REASON_MODEL_UNAVAILABLE
-
-    connect_status = ModelConnectStatusEnum.get_value(
-        model_info.get("connect_status")
-    )
-    if connect_status != ModelConnectStatusEnum.AVAILABLE.value:
-        return False, _REASON_MODEL_UNAVAILABLE
-
-    return True, None
-
-
-def _check_kb_available(index_name: str, tenant_id: str) -> Tuple[bool, Optional[str]]:
-    record = get_knowledge_record({
-        "index_name": index_name,
-        "tenant_id": tenant_id,
-    })
+def _check_kb_available(index_name: str) -> Tuple[bool, Optional[str]]:
+    record = get_knowledge_record({"index_name": index_name})
     if not record:
         return False, _REASON_KB_NOT_FOUND
     return True, None
@@ -88,13 +78,13 @@ def _check_mcp_available(server_name: str, tenant_id: str) -> Tuple[bool, Option
     return True, None
 
 
-def _check_skill_available(
-    skill_name: str,
-    existing_skill_names: Set[str],
-) -> Tuple[bool, Optional[str]]:
-    if skill_name in existing_skill_names:
-        return False, _REASON_SKILL_DUPLICATE
-    return True, None
+def build_repository_skill_source(
+    agent_repository_id: int,
+    skill_zip_base64: str,
+) -> str:
+    """Build a short source marker for one installed repository Skill package."""
+    package_hash = hashlib.sha256(skill_zip_base64.encode("utf-8")).hexdigest()[:8]
+    return f"ar:{agent_repository_id}:{package_hash}"
 
 
 def _check_tool_available(
@@ -147,6 +137,44 @@ def _extract_skill_names(snapshot: Any) -> List[str]:
     return names
 
 
+def _extract_bundled_skills(snapshot: Any) -> Dict[str, Dict[str, str]]:
+    skills: Dict[str, Dict[str, str]] = {}
+    for entry in snapshot.skills or []:
+        skill_name = getattr(entry, "skill_name", None)
+        if skill_name is None and isinstance(entry, dict):
+            skill_name = entry.get("skill_name")
+        if skill_name:
+            source = getattr(entry, "source", None)
+            zip_base64 = getattr(entry, "skill_zip_base64", None)
+            if isinstance(entry, dict):
+                source = source or entry.get("source")
+                zip_base64 = zip_base64 or entry.get("skill_zip_base64")
+            skills[str(skill_name)] = {
+                "source": str(source or ""),
+                "skill_zip_base64": str(zip_base64 or ""),
+            }
+    return skills
+
+
+def _resolve_snapshot_skill_source(
+    snapshot: Any,
+    skill_name: str,
+    bundled_source: str,
+) -> str:
+    if bundled_source:
+        return bundled_source
+    source_tenant_ids = {
+        str(agent_data.get("tenant_id"))
+        for agent in snapshot.agent_info.values()
+        if (agent_data := _agent_dict(agent)).get("tenant_id")
+    }
+    for source_tenant_id in source_tenant_ids:
+        source_skill = skill_db.get_skill_by_name(skill_name, source_tenant_id)
+        if source_skill and source_skill.get("source"):
+            return str(source_skill["source"])
+    return ""
+
+
 def _mcp_dict(mcp: Any) -> Dict[str, Any]:
     if isinstance(mcp, dict):
         return mcp
@@ -159,13 +187,13 @@ def _mcp_dict(mcp: Any) -> Dict[str, Any]:
     }
 
 
-def _extract_mcp_server_names(snapshot: Any) -> Set[str]:
-    names: Set[str] = set()
+def _extract_mcp_servers(snapshot: Any) -> Dict[str, str]:
+    servers: Dict[str, str] = {}
     for mcp in snapshot.mcp_info or []:
         mcp_data = _mcp_dict(mcp)
         server_name = mcp_data.get("mcp_server_name")
         if server_name:
-            names.add(str(server_name))
+            servers[str(server_name)] = str(mcp_data.get("mcp_url") or "")
 
     for agent in snapshot.agent_info.values():
         agent_data = _agent_dict(agent)
@@ -174,57 +202,116 @@ def _extract_mcp_server_names(snapshot: Any) -> Set[str]:
             if tool_data.get("source") == ToolSourceEnum.MCP.value:
                 usage = tool_data.get("usage")
                 if usage:
-                    names.add(str(usage))
+                    servers.setdefault(str(usage), "")
 
-    return names
+    return servers
+
+
+def _resolve_repository_knowledge_base(
+    configured_name: str,
+    source_tenant_id: Optional[str],
+) -> Tuple[Optional[str], Dict[str, Any]]:
+    """Resolve a repository KB reference, preferring the publishing tenant for display names."""
+    if source_tenant_id:
+        record = get_knowledge_record({
+            "index_name": configured_name,
+            "tenant_id": source_tenant_id,
+        })
+        if record:
+            return str(record.get("index_name") or configured_name), record
+
+    record = get_knowledge_record({"index_name": configured_name})
+    if record:
+        return str(record.get("index_name") or configured_name), record
+
+    if source_tenant_id:
+        record = get_knowledge_record({
+            "knowledge_name": configured_name,
+            "tenant_id": source_tenant_id,
+        })
+        if record:
+            return str(record.get("index_name") or configured_name), record
+
+    return None, {}
 
 
 def _extract_knowledge_bases(
     snapshot: Any,
-    tenant_id: str,
-) -> List[Tuple[str, str, Optional[str]]]:
-    """Return (key, display_name, description) tuples for knowledge bases."""
-    index_names: Set[str] = set()
-    for agent in snapshot.agent_info.values():
+) -> List[Tuple[str, str, Optional[str], Optional[str]]]:
+    """Return repository KB dependencies with globally resolved index names."""
+    items: Dict[str, Tuple[str, str, Optional[str], Optional[str]]] = {}
+    for agent_key, agent in snapshot.agent_info.items():
         agent_data = _agent_dict(agent)
+        source_tenant_id = agent_data.get("tenant_id")
         for tool in agent_data.get("tools") or []:
             tool_data = _tool_dict(tool)
             if tool_data.get("class_name") not in _KB_TOOL_CLASS_NAMES:
                 continue
             params = tool_data.get("params") or {}
-            for index_name in params.get("index_names") or []:
-                if index_name:
-                    index_names.add(str(index_name))
-
-    if not index_names:
-        return []
-
-    name_map = get_knowledge_name_map_by_index_names(
-        list(index_names),
-        tenant_id=tenant_id,
-    )
-    items: List[Tuple[str, str, Optional[str]]] = []
-    for index_name in sorted(index_names):
-        display_name = name_map.get(index_name) or index_name
-        items.append((
-            f"knowledge_base:{index_name}",
-            display_name,
-            None,
-        ))
-    return items
+            for configured_name in params.get("index_names") or []:
+                if not configured_name:
+                    continue
+                configured_name = str(configured_name)
+                resolved_index_name, record = _resolve_repository_knowledge_base(
+                    configured_name,
+                    str(source_tenant_id) if source_tenant_id else None,
+                )
+                key = f"knowledge_base:{agent_key}:{configured_name}"
+                items[key] = (
+                    key,
+                    str(record.get("knowledge_name") or configured_name),
+                    record.get("knowledge_describe"),
+                    resolved_index_name,
+                )
+    return list(items.values())
 
 
-def _extract_models(snapshot: Any) -> List[Tuple[str, str]]:
-    """Return (key, display_name) tuples for models."""
-    models: Dict[str, str] = {}
+def sanitize_repository_knowledge_base_references(snapshot: Any) -> List[str]:
+    """Remove unresolved KB selections and normalize retained values to index names."""
+    removed: List[str] = []
     for agent in snapshot.agent_info.values():
         agent_data = _agent_dict(agent)
-        for field in ("model_name", "business_logic_model_name"):
-            name = agent_data.get(field)
-            if name and str(name).strip():
-                label = str(name).strip()
-                models.setdefault(f"model:{label}", label)
-    return list(models.items())
+        source_tenant_id = agent_data.get("tenant_id")
+        tools = agent.get("tools", []) if isinstance(agent, dict) else getattr(agent, "tools", [])
+        for tool in tools or []:
+            tool_data = tool if isinstance(tool, dict) else tool.model_dump()
+            if tool_data.get("class_name") not in _KB_TOOL_CLASS_NAMES:
+                continue
+            params = tool.get("params", {}) if isinstance(tool, dict) else tool.params
+            configured_names = list(params.get("index_names") or [])
+            retained: List[str] = []
+            for configured_name in configured_names:
+                resolved_index_name, _ = _resolve_repository_knowledge_base(
+                    str(configured_name),
+                    str(source_tenant_id) if source_tenant_id else None,
+                )
+                if resolved_index_name:
+                    if resolved_index_name not in retained:
+                        retained.append(resolved_index_name)
+                else:
+                    removed.append(str(configured_name))
+            params["index_names"] = retained
+    return list(dict.fromkeys(removed))
+
+
+def _extract_models(snapshot: Any) -> List[Dict[str, Any]]:
+    """Return each Agent's ordered, de-duplicated model_names selection."""
+    models: List[Dict[str, Any]] = []
+    for agent_key, agent in snapshot.agent_info.items():
+        agent_data = _agent_dict(agent)
+        agent_id = int(agent_data.get("agent_id") or agent_key)
+        model_names = list(dict.fromkeys(
+            str(name).strip()
+            for name in agent_data.get("model_names") or []
+            if str(name).strip()
+        ))
+        if model_names:
+            models.append({
+                "key": f"model:{agent_id}",
+                "agent_id": agent_id,
+                "model_names": model_names,
+            })
+    return models
 
 
 def _extract_tools(
@@ -262,60 +349,98 @@ def build_repository_import_precheck(
 ) -> RepositoryImportPrecheckResponse:
     """Build import precheck response for a repository listing snapshot."""
     tenant_tools = _build_tenant_tool_map(tenant_id)
-    existing_skill_names = {
-        skill.get("name")
+    existing_skills_by_name = {
+        str(skill["name"]): skill
         for skill in skill_db.list_skills(tenant_id)
         if skill.get("name")
     }
+    bundled_skills = _extract_bundled_skills(snapshot)
 
     items: List[RepositoryImportRequirementItem] = []
 
-    for key, model_name in _extract_models(snapshot):
-        available, reason = _check_model_available(model_name, tenant_id)
+    for model in _extract_models(snapshot):
+        model_names = model["model_names"]
+        matched_model_ids = _match_target_model_names(model_names, tenant_id)
+        available = bool(matched_model_ids)
         items.append(RepositoryImportRequirementItem(
             type="model",
-            key=key,
-            name=model_name,
+            key=model["key"],
+            name=", ".join(model_names),
+            agent_id=model["agent_id"],
+            source_model_names=model_names,
+            matched_model_ids=matched_model_ids,
+            requires_replacement=not available,
             available=available,
-            reason_code=reason,
+            reason_code=None if available else _REASON_MODEL_UNAVAILABLE,
         ))
 
-    for key, kb_name, description in _extract_knowledge_bases(snapshot, tenant_id):
-        index_name = key.split(":", 1)[1]
-        available, reason = _check_kb_available(index_name, tenant_id)
-        record = get_knowledge_record({
-            "index_name": index_name,
-            "tenant_id": tenant_id,
-        })
-        kb_description = record.get("knowledge_describe") if record else description
+    for key, kb_name, description, index_name in _extract_knowledge_bases(snapshot):
+        available, reason = (
+            _check_kb_available(index_name)
+            if index_name
+            else (False, _REASON_KB_NOT_FOUND)
+        )
         items.append(RepositoryImportRequirementItem(
             type="knowledge_base",
             key=key,
             name=kb_name,
-            description=kb_description,
+            description=description,
+            index_name=index_name,
+            will_auto_deselect=not available,
             available=available,
             reason_code=reason,
         ))
 
-    for server_name in sorted(_extract_mcp_server_names(snapshot)):
+    for server_name, mcp_url in sorted(_extract_mcp_servers(snapshot).items()):
         available, reason = _check_mcp_available(server_name, tenant_id)
         items.append(RepositoryImportRequirementItem(
             type="mcp",
             key=f"mcp:{server_name}",
             name=server_name,
+            mcp_url=mcp_url,
             available=available,
             reason_code=reason,
         ))
 
     for skill_name in _extract_skill_names(snapshot):
-        available, reason = _check_skill_available(
+        bundled_skill = bundled_skills.get(skill_name, {})
+        local_skill = existing_skills_by_name.get(skill_name)
+        skill_source = _resolve_snapshot_skill_source(
+            snapshot,
             skill_name,
-            existing_skill_names,
+            bundled_skill.get("source", ""),
         )
+        source_is_official = skill_source.lower() == "official"
+        has_local_official_skill = bool(
+            local_skill
+            and str(local_skill.get("source") or "").lower() == "official"
+        )
+        is_official_skill = source_is_official and has_local_official_skill
+        has_install_package = bool(bundled_skill.get("skill_zip_base64"))
+
+        if is_official_skill:
+            available = True
+            reason = None
+        elif has_install_package:
+            installed_source = build_repository_skill_source(
+                agent_repository_id,
+                bundled_skill["skill_zip_base64"],
+            )
+            available = bool(
+                local_skill and local_skill.get("source") == installed_source
+            )
+            reason = None if available else _REASON_SKILL_INSTALL_REQUIRED
+        else:
+            available = False
+            reason = _REASON_SKILL_PACKAGE_MISSING
+
         items.append(RepositoryImportRequirementItem(
             type="skill",
             key=f"skill:{skill_name}",
             name=skill_name,
+            has_local_skill=local_skill is not None,
+            has_install_package=has_install_package,
+            is_official_skill=is_official_skill,
             available=available,
             reason_code=reason,
         ))

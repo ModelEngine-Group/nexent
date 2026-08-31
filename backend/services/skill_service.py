@@ -1762,11 +1762,16 @@ class SkillService:
 
             for file_path in file_list:
                 normalized_path = file_path.replace("\\", "/")
-                if normalized_path.lower().endswith("skill.md"):
-                    parts = normalized_path.split("/")
-                    if len(parts) >= 2:
+                if normalized_path.lower() == "skill.md":
+                    skill_md_path = file_path
+                    break
+
+            if not skill_md_path:
+                for file_path in file_list:
+                    normalized_path = file_path.replace("\\", "/")
+                    if normalized_path.lower().endswith("/skill.md"):
                         skill_md_path = file_path
-                        original_folder_name = parts[0]
+                        original_folder_name = normalized_path.split("/")[0]
                         break
 
             skill_content = None
@@ -1778,6 +1783,11 @@ class SkillService:
 
         preferred_root = original_folder_name or skill_name
         params_from_zip = _read_params_from_zip_config_yaml(
+            zip_bytes,
+            preferred_skill_root=preferred_root,
+        )
+        schema_from_zip = _read_schema_yaml_from_zip(zip_bytes, preferred_root)
+        inputs_from_scripts = _get_skill_inputs_from_zip(
             zip_bytes,
             preferred_skill_root=preferred_root,
         )
@@ -1801,8 +1811,8 @@ class SkillService:
             except ValueError as e:
                 logger.warning(f"Could not parse SKILL.md from ZIP: {e}")
 
-        if params_from_zip is not None:
-            skill_dict["config_values"] = params_from_zip
+        skill_dict["config_schemas"] = schema_from_zip or inputs_from_scripts or []
+        skill_dict["config_values"] = params_from_zip or {}
 
         result = skill_db.update_skill(
             skill_name, skill_dict, tenant_id, updated_by=user_id or None

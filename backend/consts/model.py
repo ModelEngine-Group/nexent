@@ -774,6 +774,16 @@ class RepositoryImportRequirementItem(BaseModel):
     key: str
     name: str
     description: Optional[str] = None
+    index_name: Optional[str] = None
+    mcp_url: Optional[str] = None
+    agent_id: Optional[int] = None
+    source_model_names: Optional[List[str]] = None
+    matched_model_ids: Optional[List[int]] = None
+    requires_replacement: bool = False
+    has_local_skill: bool = False
+    has_install_package: bool = False
+    is_official_skill: bool = False
+    will_auto_deselect: bool = False
     available: bool
     reason_code: Optional[str] = None
 
@@ -789,6 +799,11 @@ class RepositoryImportPrecheckResponse(BaseModel):
     items: List[RepositoryImportRequirementItem]
 
 
+class AgentRepositoryImportRequest(BaseModel):
+    """User-confirmed substitutions used while copying a repository Agent."""
+    model_replacements: Dict[str, int] = Field(default_factory=dict)
+
+
 class AgentRepositoryListingCreateRequest(BaseModel):
     """Request body for creating a marketplace listing from an agent version."""
     icon: Optional[str] = Field(None, description="Marketplace card icon (emoji or URL)")
@@ -800,6 +815,12 @@ class AgentRepositoryListingCreateRequest(BaseModel):
     content: Optional[str] = Field(
         None, description="Listing note when submitting for review"
     )
+
+
+class AgentRepositorySkillInstallRequest(BaseModel):
+    """Request body for installing a bundled Skill from an agent repository snapshot."""
+    skill_name: str = Field(..., min_length=1, max_length=100)
+    overwrite: bool = False
 
 
 class AgentRepositoryListingDetailResponse(BaseModel):
@@ -864,6 +885,7 @@ class SkillZipEntry(BaseModel):
     """A skill bundled inside an agent export ZIP."""
     skill_name: str
     skill_zip_base64: str
+    source: Optional[str] = None
 
 
 class AgentImportRequest(BaseModel):

@@ -1,3 +1,4 @@
+import base64
 import logging
 from typing import Any, Collection, Dict, FrozenSet, List, Optional, Tuple
 
@@ -12,11 +13,13 @@ from consts.agent_repository import (
     VALID_OWNERSHIP_FILTERS,
     VALID_REPOSITORY_STATUSES,
 )
-from consts.exceptions import UnauthorizedError
-from consts.model import AgentRepositorySnapshot
+from consts.exceptions import SkillDuplicateError, SkillException, UnauthorizedError
+from consts.model import AgentRepositorySnapshot, ModelConnectStatusEnum
 from consts.notification import EVENT_TYPE_REPOSITORY_REVIEW_PENDING, RESOURCE_TYPE_AGENT_REPOSITORY
+from database import skill_db
 from database.agent_db import search_agent_info_by_agent_id
 from database.agent_version_db import search_version_by_version_no
+from database.model_management_db import get_model_by_model_id
 from database.agent_repository_db import (
     fetch_draft_agent_mine_metadata,
     get_agent_repository_by_agent_id,
@@ -34,7 +37,6 @@ from database.user_tenant_db import get_user_tenant_by_user_id
 from services.agent_service import (
     collect_skill_zip_entries,
     export_agent_dict_for_repository_impl,
-    import_agent_impl,
     import_agent_with_skills_impl,
     list_all_agent_info_impl,
 )
@@ -43,7 +45,12 @@ from services.notification_service import (
     create_repository_review_notification,
     deactivate_notifications,
 )
-from services.repository_import_precheck import build_repository_import_precheck
+from services.repository_import_precheck import (
+    build_repository_skill_source,
+    build_repository_import_precheck,
+    sanitize_repository_knowledge_base_references,
+)
+from services.skill_service import SkillService
 
 logger = logging.getLogger("agent_repository_service")
 
@@ -867,7 +874,12 @@ async def _build_agent_info_json(
         **export_dict,
         skills=skills or None,
     )
-    return snapshot.model_dump()
+    snapshot_data = snapshot.model_dump()
+    for agent_info in snapshot_data.get("agent_info", {}).values():
+        agent_info.pop("model_ids", None)
+        agent_info.pop("business_logic_model_id", None)
+        agent_info.pop("business_logic_model_name", None)
+    return snapshot_data
 
 
 async def _build_repository_data_from_agent(
@@ -1041,10 +1053,148 @@ def check_repository_import_precheck_impl(
     return result.model_dump()
 
 
+def install_agent_repository_skill_impl(
+    *,
+    agent_repository_id: int,
+    skill_name: str,
+    overwrite: bool,
+    tenant_id: str,
+    user_id: str,
+) -> Dict[str, Any]:
+    """Install or overwrite one Skill bundled in a shared agent snapshot."""
+    record = get_agent_repository_by_id(agent_repository_id, tenant_id)
+    if not record:
+        raise ValueError("Repository listing not found")
+    if record.get("status") != STATUS_SHARED:
+        raise ValueError("Repository listing is not available for import")
+
+    agent_info_json = record.get("agent_info_json")
+    if not isinstance(agent_info_json, dict):
+        raise ValueError("Repository listing has no agent snapshot")
+
+    snapshot = AgentRepositorySnapshot.model_validate(agent_info_json)
+    skill_entry = next(
+        (entry for entry in snapshot.skills or [] if entry.skill_name == skill_name),
+        None,
+    )
+    if skill_entry is None:
+        raise ValueError(f"Repository snapshot has no Skill package: {skill_name}")
+
+    try:
+        zip_bytes = base64.b64decode(skill_entry.skill_zip_base64, validate=True)
+    except Exception as exc:
+        raise ValueError(
+            f"Repository snapshot has an invalid Skill package: {skill_name}"
+        ) from exc
+
+    installed_source = build_repository_skill_source(
+        agent_repository_id,
+        skill_entry.skill_zip_base64,
+    )
+    existing_skill = skill_db.get_skill_by_name(skill_name, tenant_id)
+    skill_service = SkillService(tenant_id=tenant_id)
+    if existing_skill:
+        if not overwrite:
+            raise SkillDuplicateError([skill_name])
+        installed_skill = skill_service.update_skill_from_file(
+            skill_name=skill_name,
+            file_content=zip_bytes,
+            file_type="zip",
+            tenant_id=tenant_id,
+            user_id=user_id,
+        )
+        installed_skill = skill_db.update_skill(
+            skill_name,
+            {"source": installed_source},
+            tenant_id,
+            updated_by=user_id,
+        )
+        overwritten = True
+    else:
+        installed_skill = skill_service.create_skill_from_zip_bytes(
+            zip_bytes=zip_bytes,
+            skill_name=skill_name,
+            source=installed_source,
+            user_id=user_id,
+            tenant_id=tenant_id,
+        )
+        overwritten = False
+
+    return {
+        "skill_id": installed_skill.get("skill_id"),
+        "name": installed_skill.get("name") or skill_name,
+        "overwritten": overwritten,
+    }
+
+
+def _apply_repository_model_resolution(
+    *,
+    snapshot: AgentRepositorySnapshot,
+    precheck: Any,
+    tenant_id: str,
+    model_replacements: Optional[Dict[str, int]] = None,
+) -> None:
+    """Resolve repository model_names to target-tenant model IDs before import."""
+    replacements = model_replacements or {}
+    model_items = [item for item in precheck.items if item.type == "model"]
+
+    for agent in snapshot.agent_info.values():
+        agent.model_ids = []
+        agent.business_logic_model_id = None
+        agent.business_logic_model_name = None
+
+    for item in model_items:
+        resolved_model_ids = list(item.matched_model_ids or [])
+        if not resolved_model_ids:
+            selected_model_id = replacements.get(item.key)
+            if selected_model_id is None:
+                raise ValueError(
+                    f"Select an available replacement model for '{item.name}' before copying the Agent"
+                )
+
+            selected_model = get_model_by_model_id(selected_model_id, tenant_id)
+            if not selected_model:
+                raise ValueError(
+                    f"Replacement model {selected_model_id} is not available in the current tenant"
+                )
+
+            connect_status = ModelConnectStatusEnum.get_value(
+                selected_model.get("connect_status")
+            )
+            if selected_model.get("model_type") != "llm":
+                raise ValueError(f"Replacement model {selected_model_id} is not an LLM")
+            if connect_status != ModelConnectStatusEnum.AVAILABLE.value:
+                raise ValueError(f"Replacement model {selected_model_id} is not healthy")
+            resolved_model_ids = [selected_model_id]
+
+        resolved_models = [
+            model
+            for model_id in resolved_model_ids
+            if (model := get_model_by_model_id(model_id, tenant_id)) is not None
+        ]
+        if not resolved_models:
+            raise ValueError(
+                f"Select an available replacement model for '{item.name}' before copying the Agent"
+            )
+
+        agent = snapshot.agent_info.get(str(item.agent_id))
+        if agent is None:
+            agent = snapshot.agent_info.get(item.agent_id)  # type: ignore[arg-type]
+        if agent is None:
+            raise ValueError(f"Repository snapshot has no Agent {item.agent_id}")
+        agent.model_ids = [int(model["model_id"]) for model in resolved_models]
+        agent.model_names = [
+            str(model.get("display_name") or "")
+            for model in resolved_models
+            if model.get("display_name")
+        ]
+
+
 async def import_agent_from_repository_impl(
     agent_repository_id: int,
     tenant_id: str,
     authorization: str,
+    model_replacements: Optional[Dict[str, int]] = None,
 ) -> Dict[int, int]:
     """Import an agent tree from a marketplace repository listing into the current tenant."""
     record = get_agent_repository_by_id(
@@ -1059,14 +1209,40 @@ async def import_agent_from_repository_impl(
         raise ValueError("Repository listing has no agent snapshot")
 
     snapshot = AgentRepositorySnapshot.model_validate(agent_info_json)
-    if snapshot.skills:
-        result = await import_agent_with_skills_impl(
-            snapshot,
-            snapshot.skills,
-            authorization,
+    precheck = build_repository_import_precheck(
+        agent_repository_id=agent_repository_id,
+        display_name=str(record.get("display_name") or record.get("name") or "Agent"),
+        snapshot=snapshot,
+        tenant_id=tenant_id,
+    )
+    pending_skills = [
+        item.name
+        for item in precheck.items
+        if item.type == "skill" and not item.available
+    ]
+    if pending_skills:
+        raise SkillException(
+            "Install pending Skills before copying the Agent: "
+            + ", ".join(pending_skills)
         )
-    else:
-        result = await import_agent_impl(snapshot, authorization)
+    _apply_repository_model_resolution(
+        snapshot=snapshot,
+        precheck=precheck,
+        tenant_id=tenant_id,
+        model_replacements=model_replacements,
+    )
+    removed_knowledge_bases = sanitize_repository_knowledge_base_references(snapshot)
+    if removed_knowledge_bases:
+        logger.warning(
+            "Removed unavailable knowledge bases during repository import: %s",
+            ", ".join(removed_knowledge_bases),
+        )
+    result = await import_agent_with_skills_impl(
+        snapshot,
+        snapshot.skills or [],
+        authorization,
+        reuse_existing_skills=True,
+    )
 
     affected = increment_agent_repository_downloads(agent_repository_id)
     if affected == 0:

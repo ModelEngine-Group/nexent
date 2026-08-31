@@ -7,6 +7,7 @@ import { getAuthHeaders } from "@/lib/auth";
 import log from "@/lib/logger";
 import type {
   AgentRepositoryListingCreatePayload,
+  AgentRepositoryImportPayload,
   AgentRepositoryListingDetail,
   AgentRepositoryListingItem,
   AgentRepositoryListingListParams,
@@ -78,7 +79,9 @@ export async function fetchMyEditableAgents(
     );
 
     if (!response.ok) {
-      throw new Error(`Failed to fetch my editable agents: ${response.statusText}`);
+      throw new Error(
+        `Failed to fetch my editable agents: ${response.statusText}`
+      );
     }
 
     return response.json();
@@ -180,14 +183,19 @@ export async function fetchRepositoryImportPrecheck(
 }
 
 export async function importAgentFromRepository(
-  agentRepositoryId: number
+  agentRepositoryId: number,
+  payload?: AgentRepositoryImportPayload
 ): Promise<void> {
   try {
     const response = await fetch(
       API_ENDPOINTS.agentRepository.import(agentRepositoryId),
       {
         method: "POST",
-        headers: getAuthHeaders(),
+        headers: {
+          ...getAuthHeaders(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload ?? {}),
       }
     );
 
@@ -212,6 +220,39 @@ export async function importAgentFromRepository(
   }
 }
 
+export async function installAgentRepositorySkill(
+  agentRepositoryId: number,
+  skillName: string,
+  overwrite: boolean
+): Promise<{ skill_id?: number; name?: string; overwritten: boolean }> {
+  const response = await fetch(
+    API_ENDPOINTS.agentRepository.installSkill(agentRepositoryId),
+    {
+      method: "POST",
+      headers: {
+        ...getAuthHeaders(),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ skill_name: skillName, overwrite }),
+    }
+  );
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    const detail = errorData?.detail;
+    const error = new Error(
+      typeof detail === "string"
+        ? detail
+        : `Failed to install Skill: ${response.statusText}`
+    ) as Error & { status?: number; detail?: unknown };
+    error.status = response.status;
+    error.detail = detail;
+    throw error;
+  }
+
+  return response.json();
+}
+
 const agentRepositoryService = {
   fetchAgentRepositoryListings,
   fetchAgentRepositoryListingDetail,
@@ -220,6 +261,7 @@ const agentRepositoryService = {
   updateAgentRepositoryStatus,
   fetchRepositoryImportPrecheck,
   importAgentFromRepository,
+  installAgentRepositorySkill,
 };
 
 export default agentRepositoryService;

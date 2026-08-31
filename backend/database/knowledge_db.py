@@ -451,14 +451,15 @@ def get_index_name_by_knowledge_name(knowledge_name: str, tenant_id: str) -> str
         raise e
 
 
-def get_knowledge_name_map_by_index_names(index_names: List[str], tenant_id: str) -> Dict[str, str]:
+def get_knowledge_name_map_by_index_names(index_names: List[str], tenant_id: Optional[str] = None) -> Dict[str, str]:
     """
     Get a mapping from index_name to knowledge_name (display name) for the given index_names.
     Used to build user-friendly knowledge base summaries in prompts.
 
     Args:
         index_names: List of internal index names
-        tenant_id: Tenant that owns the knowledge bases
+        tenant_id: Preferred tenant when duplicate index records exist. The
+            lookup falls back to records from any tenant.
 
     Returns:
         Dict[str, str]: Mapping of index_name -> knowledge_name.
@@ -472,16 +473,21 @@ def get_knowledge_name_map_by_index_names(index_names: List[str], tenant_id: str
         with get_db_session() as session:
             result = session.query(
                 KnowledgeRecord.index_name,
-                KnowledgeRecord.knowledge_name
+                KnowledgeRecord.knowledge_name,
+                KnowledgeRecord.tenant_id,
             ).filter(
                 KnowledgeRecord.index_name.in_(index_names),
-                KnowledgeRecord.tenant_id == tenant_id,
                 KnowledgeRecord.delete_flag != 'Y'
             ).all()
 
-            knowledge_name_map = {}
+            knowledge_name_map = {
+                row.index_name: row.knowledge_name
+                for row in result
+                if tenant_id is not None
+                and str(getattr(row, "tenant_id", "")) == str(tenant_id)
+            }
             for row in result:
-                knowledge_name_map[row.index_name] = row.knowledge_name
+                knowledge_name_map.setdefault(row.index_name, row.knowledge_name)
 
             for index_name in index_names:
                 if index_name not in knowledge_name_map:

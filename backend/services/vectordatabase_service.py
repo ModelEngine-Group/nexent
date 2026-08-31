@@ -174,11 +174,7 @@ def get_embedding_model_by_index_name(tenant_id: str, index_name: str) -> tuple[
         - Clear error guidance: return needs_config status for user action
     """
     try:
-        knowledge_record = get_knowledge_record({
-            "index_name": index_name,
-            "tenant_id": tenant_id,
-            "include_asset_owner_assets": True,
-        })
+        knowledge_record = get_knowledge_record({"index_name": index_name})
 
         if not knowledge_record:
             return None, None, {
@@ -188,10 +184,11 @@ def get_embedding_model_by_index_name(tenant_id: str, index_name: str) -> tuple[
             }
 
         model_id = knowledge_record.get("embedding_model_id")
+        knowledge_tenant_id = str(knowledge_record.get("tenant_id") or tenant_id)
 
         # Case 1: model_id exists and is valid, use it
         if model_id:
-            model, _ = get_embedding_model_by_id(tenant_id, model_id)
+            model, _ = get_embedding_model_by_id(knowledge_tenant_id, model_id)
             if model:
                 return model, model_id, {
                     "status": "ok",
