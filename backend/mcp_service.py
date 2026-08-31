@@ -12,6 +12,7 @@ from fastapi import FastAPI, Header, HTTPException, Query
 from fastmcp import FastMCP
 from fastmcp.tools.tool import ToolResult
 
+from consts.const import MCP_REQUEST_TIMEOUT_SECONDS
 from database.outer_api_tool_db import query_available_openapi_services
 from consts.const import TOKEN
 from mcp.types import Tool as MCPTool
@@ -251,7 +252,11 @@ def register_openapi_service(
             openapi_spec["servers"] = [{"url": server_url}]
 
         # Create HTTP client for the underlying REST API
-        client = httpx.AsyncClient(base_url=server_url, timeout=120.0, headers=headers_template)
+        client = httpx.AsyncClient(
+            base_url=server_url,
+            timeout=MCP_REQUEST_TIMEOUT_SECONDS,
+            headers=headers_template,
+        )
 
         # Create FastMCP instance from OpenAPI spec
         service_mcp = FastMCP.from_openapi(

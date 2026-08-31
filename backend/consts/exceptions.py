@@ -260,7 +260,6 @@ class TenantResourceLimitError(ValidationError, ValueError):
     """Raised when a platform or tenant hard resource limit is reached."""
 
     code = ErrorCode.TENANT_RESOURCE_EXCEEDED.value
-
     def __init__(
         self,
         message: str,
@@ -274,6 +273,7 @@ class TenantResourceLimitError(ValidationError, ValueError):
         self.scope = scope
         self.limit = limit
         self.current_count = current_count
+        self.details = self.to_detail()
         super().__init__(message)
 
     def to_detail(self) -> dict:

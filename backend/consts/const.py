@@ -243,6 +243,7 @@ MAX_PRIVILEGED_KNOWLEDGE_BASES_PER_USER = _positive_int_env(
 MAX_CONVERSATION_TURNS = _positive_int_env("MAX_CONVERSATION_TURNS", 100)
 MAX_CONVERSATIONS_PER_USER = _positive_int_env("MAX_CONVERSATIONS_PER_USER", 1_000)
 MAX_AGENTS_PER_TENANT = _positive_int_env("MAX_AGENTS_PER_TENANT", 1_000)
+MAX_MCP_SERVICES_PER_TENANT = _positive_int_env("MAX_MCP_SERVICES_PER_TENANT", 1_000)
 
 # Invitation code type for asset administrator registration
 ASSET_OWNER_INVITE_CODE_TYPE = "ASSET_OWNER_INVITE"
@@ -553,6 +554,8 @@ DEFAULT_MAXIMUM_CHUNK_SIZE = 1536
 # MCP Server
 LOCAL_MCP_SERVER = os.getenv("NEXENT_MCP_SERVER")
 MCP_MANAGEMENT_API = os.getenv("MCP_MANAGEMENT_API", "http://localhost:5015")
+# Hard timeout for a request made to a configured MCP service at runtime.
+MCP_REQUEST_TIMEOUT_SECONDS = _positive_int_env("MCP_REQUEST_TIMEOUT_SECONDS", 10)
 
 
 # Invite code

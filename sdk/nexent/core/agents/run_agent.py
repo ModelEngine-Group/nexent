@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import math
 import threading
 from contextvars import Context, copy_context
 from copy import deepcopy
@@ -32,11 +33,35 @@ from ..concurrency.cancellation import RunTerminated
 from ..model_errors import ModelInvocationTerminalError
 from .agent_model import AgentRunInfo
 from .managed_mcp import ManagedMCPToolCollection
+from .mcp_errors import is_mcp_timeout_error
 from .nexent_agent import NexentAgent, ProcessType, cleanup_run_workspace
 from .output_protocol import ModelOutputProtocolExhaustedError
 
 
 logger = logging.getLogger("run_agent")
+
+
+def _resolve_mcp_request_timeout_seconds(agent_run_info: AgentRunInfo) -> float:
+    """Return a positive finite timeout for one MCP tool request."""
+    timeout = getattr(agent_run_info, "mcp_request_timeout_seconds", None)
+    try:
+        timeout = float(timeout)
+    except (TypeError, ValueError):
+        timeout = 10.0
+    if not math.isfinite(timeout) or timeout <= 0:
+        return 10.0
+    return timeout
+
+
+def _mcp_timeout_message(agent_run_info: AgentRunInfo) -> str:
+    """Return a localized MCP timeout message for the current run."""
+    timeout_label = f"{_resolve_mcp_request_timeout_seconds(agent_run_info):g}"
+    if getattr(agent_run_info.observer, "lang", "en") == "zh":
+        return f"MCP 工具调用超时（{timeout_label} 秒）。请确认服务响应状态后重试。"
+    return (
+        f"MCP tool request timed out after {timeout_label} seconds. "
+        "Please check the service response and try again."
+    )
 
 
 class DeferredAgentRun:
@@ -360,6 +385,7 @@ def _agent_run_thread(agent_run_info: AgentRunInfo):
                 cancellation_scope=mcp_cancellation_scope,
                 tool_timeout_seconds=agent_run_info.mcp_tool_timeout_seconds,
                 close_timeout_seconds=agent_run_info.mcp_close_timeout_seconds,
+                request_timeout_seconds=_resolve_mcp_request_timeout_seconds(agent_run_info),
             ) as tool_collection:
                 nexent = NexentAgent(
                     observer=agent_run_info.observer,
@@ -402,7 +428,11 @@ def _agent_run_thread(agent_run_info: AgentRunInfo):
         raise
     except Exception as e:
         agent_run_info.attempt_outcome = "failed"
-        if "Couldn't connect to the MCP server" in str(e):
+        if mcp_host and is_mcp_timeout_error(e):
+            agent_run_info.observer.add_message(
+                "", ProcessType.FINAL_ANSWER, _mcp_timeout_message(agent_run_info)
+            )
+        elif "Couldn't connect to the MCP server" in str(e):
             mcp_connect_error_str = (
                 "MCP服务器连接超时。"
                 if agent_run_info.observer.lang == "zh"
