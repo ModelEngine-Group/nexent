@@ -1,6 +1,6 @@
 # Agent Evaluation
 
-Agent Evaluation runs a batch of predefined questions against a selected published agent version and scores the resulting answers with one or more evaluators. After a run finishes, Nexent provides aggregate metrics, per-case results, and an optional AI analysis report.
+Agent Evaluation runs a batch of test questions against a selected agent version and scores the resulting answers with one or more evaluators. After a run finishes, Nexent provides aggregate metrics, per-case results, and an optional AI analysis report.
 
 Use evaluation to:
 
@@ -9,11 +9,9 @@ Use evaluation to:
 - inspect quality dimensions such as accuracy, completeness, safety, relevance, and execution health;
 - add human annotations to failed or noteworthy cases.
 
-> **Current scope:** Nexent currently provides user-triggered offline batch evaluation. Each run uses a fixed published agent version and evaluation set. Production sampling, online quality alerts, release gates, and automatic agent optimization are not included in the current feature.
-
 ## Open the Evaluation page
 
-After signing in, select **Agent Evaluation** from the left navigation. You can also select **Evaluate** from an agent card in **Agent Space** or **Agent Repository > My Agents**.
+After signing in, select **Agent Development > Agent Evaluation** from the left navigation. You can also select **Evaluate** from an agent card in **Agent Space** or **Agent Repository > My Agents**.
 
 The page contains four tabs:
 
@@ -28,10 +26,10 @@ If the entry is not visible, ask a tenant administrator to check your page permi
 
 ## Before you start
 
-1. Configure at least one usable large language model in Model Management. It can be used as the Judge model and for AI generation.
+1. Configure at least one usable large language model in Model Management. It can be used as the **Judge model** and for AI generation.
 2. Create an agent and publish at least one version. Evaluation runs a published version and does not evaluate an unsaved draft.
-3. Prepare an evaluation set, or use **Evaluation without a set** to let AI generate exploratory questions from the agent configuration.
-4. Prepare at least one published evaluator. The current task form requires at least one evaluator.
+3. Prepare an evaluation set, or select **Evaluation without a set** when creating a task to let AI generate test questions from the agent configuration.
+4. Prepare at least one published evaluator. A task must include at least one evaluator.
 
 ## Evaluation modes
 
@@ -39,214 +37,37 @@ If the entry is not visible, ask a tenant administrator to check your page permi
 |------|------------------------|---------------------------|
 | Question source | Existing evaluation set | AI-generated from agent configuration |
 | Runs the agent | Yes | Yes |
-| Reference answer | Optional, depending on the evaluator | Not generated |
-| Best for | Regression and release validation | Quick smoke checks and exploration |
+| Reference answer | Depends on the set | Not available |
+| Best for | Regression, release validation, and repeatable comparison | Quick exploration and smoke checks |
 | Number of cases | Number of cases in the set | 1–50 questions |
 
 ### Evaluation with a set
 
-The system sends each question in the selected set to the chosen agent version, then passes the actual answer and runtime information to the selected evaluators. This mode is recommended when results must be repeatable.
-
-Use a set with reference answers for evaluators such as Answer Accuracy, Answer Completeness, and Factual Accuracy.
+The system sends each question in the selected set to the chosen agent version, then passes the actual answer and runtime information to the selected evaluators. Maintain reference answers in the set when evaluating answer accuracy, completeness, or factual accuracy.
 
 ### Evaluation without a set
 
-The system reads the agent name, description, duty, constraints, and tools, then asks AI to generate test questions. It creates a virtual set marked **No evaluation set** and runs the agent against those questions.
+The system reads the agent name, description, duties, constraints, and tools, then asks AI to generate test questions. It runs the agent against those questions and evaluates the results. Generated questions have no reference answers, so prefer evaluators such as Content Safety, Answer Relevance, Execution Success Rate, Tool Call Health, and Response Completeness.
 
-Generated questions do not have reference answers. Prefer evaluators that do not depend on `expected`, such as Content Safety, Answer Relevance, Execution Success Rate, Tool Call Health, Response Completeness, and MCP Connection Health. Reference-answer evaluators may produce unhelpful results in this mode.
+This mode is useful for quickly checking an agent's basic behavior. For formal regression testing, curate questions and reference answers in an evaluation set first.
 
-AI-generated questions are exploratory data, not an approved benchmark. For formal regression testing, curate a set with reviewed questions and answers.
+## Evaluation flow
 
-## Create an evaluation task
+An evaluation usually follows these steps:
 
-1. Open the **Evaluation Tasks** tab and select **Create Evaluation**.
-2. Select **Evaluation with a set** or **Evaluation without a set**.
-3. Under **Agent Configuration**, select an agent and version. If no version is specified, the latest published version is used.
-4. Under **Evaluation Configuration**, select a Judge model. With-set mode also requires an evaluation set; no-set mode requires a question count.
-5. Under **Evaluators**, select one or more published evaluators, up to five.
-6. Check the standard input mapping:
+1. Select an agent and a published version.
+2. Select an evaluation mode, evaluation set, and Judge model.
+3. Select published evaluators.
+4. Run the agent and collect its answer and runtime information.
+5. Score each case and generate the evaluation results and report.
 
-   | Evaluator field | Default source |
-   |-----------------|----------------|
-   | `query` | Evaluation-set `Question` / `query` |
-   | `expected` | Evaluation-set `Answer` / `answer` |
-   | `actual` | Actual answer generated by the agent |
-   | `runtime_stats` | Runtime statistics from the agent execution |
+The pages below describe task creation, evaluation sets, evaluators, and results and annotations.
 
-   The current page applies this standard mapping automatically. It does not provide a visual mapping editor for arbitrary business fields. Custom evaluators should use these field names.
-
-7. In with-set mode, select **Trial Run** to test one question. A trial run does not create a history record.
-8. Select **Start Evaluation**. The task is queued and runs in the background.
-
-Task states are **Pending**, **Running**, **Completed**, and **Failed**. The task stores the agent version, Judge model, and evaluator configuration snapshot used at creation time, so later edits do not change historical results.
-
-## Evaluation sets
-
-An evaluation set is a collection of test cases. Every case must contain a question. A reference answer is optional at the data level, but is strongly recommended for answer-quality evaluators.
-
-### Import an Excel file
-
-In **Evaluation Sets**, select **Upload**, enter a name and optional description, and upload an `.xlsx` or `.xls` file. Select **Download Template** to get a ready-to-fill template.
-
-Supported column names are listed below. Chinese and English headers are accepted.
-
-| Field | Chinese header | Required | Description |
-|-------|----------------|:--------:|-------------|
-| `session_id` | 会话ID | No | Same ID groups turns in one conversation |
-| `request_id` | 请求顺序 | No | Turn order within a conversation |
-| `query` | 问题 | **Yes** | User input sent to the agent |
-| `answer` | 答案 | No | Reference answer; `reference_output` and `expected_output` are also accepted |
-
-Leave session fields empty for single-turn cases. For multi-turn cases, keep turn numbers consecutive. One evaluation run processes at most 10 turns per session.
-
-Current limits are:
-
-- only `.xlsx` and `.xls` are accepted;
-- one uploaded file is limited to 20 MB in the current page;
-- each set contains at most 2,000 cases;
-- a question is limited to 2,000 characters and an answer to 5,000 characters;
-- a set name is 2–64 characters.
-
-### Generate a set with AI
-
-Select **AI Generate Evaluation Set**, enter a scene description, and select a generation model. You can write to an existing set or create a new set.
-
-Optional context includes selected knowledge bases, an agent configuration, and one `.docx` reference document. The generation count is 1–200 cases. Generation runs asynchronously; the set shows **Generating**, **Ready**, or **Failed**. Open the set after generation to review and edit the cases.
-
-Always review AI-generated questions and reference answers before using them as a benchmark.
-
-### Review and maintain cases
-
-Open **View** for a set to search by question, add a case, edit its question, answer, session ID, or turn order, delete individual or selected cases, and export the set as Excel.
-
-The system restricts changes that could invalidate an evaluation set while it is referenced by an active task.
-
-## Evaluators
-
-An evaluator defines what to measure and how to score it. A task can select up to five published evaluators. Each case stores the score and reason for every selected evaluator.
-
-### Built-in evaluators
-
-Nexent provides these built-in evaluators:
-
-| Evaluator | Type | Main purpose | Reference answer |
-|-----------|------|--------------|:----------------:|
-| Answer Accuracy | LLM | Compare key points with the reference answer | Yes |
-| Answer Completeness | LLM | Check for missing key information | Yes |
-| Content Safety | LLM | Check harmful, non-compliant, biased, or leaked content | No |
-| Format Validation | Code | Check output format (the built-in rule validates JSON) | No |
-| Answer Relevance | LLM | Check whether the answer addresses the question | No |
-| Factual Accuracy | LLM | Check fabricated or unverifiable claims | Recommended |
-| Execution Success Rate | LLM | Judge whether execution completed successfully | No |
-| Tool Call Health | LLM | Judge tool-call errors, retries, and success | No |
-| Token Efficiency | LLM | Judge whether token usage is reasonable | No |
-| Response Completeness | LLM | Check truncation or early termination | No |
-| MCP Connection Health | LLM | Check MCP connection and authentication errors | No |
-
-LLM evaluators use the Judge model to return a score and reason. Code evaluators apply deterministic Python rules. LLM scores are probabilistic and should be interpreted together with the failed cases and repeated runs.
-
-### Create a custom evaluator
-
-In **Evaluators > Custom**, select **Create Evaluator**.
-
-You can select **AI Generate** and describe the desired check in natural language, optionally providing a target agent. The generated configuration fills the form but is not published automatically. Review it before saving.
-
-For manual creation, choose:
-
-- **LLM**: write a prompt for the Judge model;
-- **Code**: write a pure Python function for deterministic checks.
-
-The score lower bound must be below the upper bound, the upper bound must not exceed 100, and the pass threshold must be within the range. Built-in evaluators normally use 0–1 scores and a 0.5 threshold.
-
-### LLM prompt placeholders
-
-Custom LLM prompts can use:
-
-| Placeholder | Replaced with |
-|-------------|---------------|
-| `{{query}}` | User question |
-| `{{expected}}` | Reference answer; empty in no-set mode |
-| `{{actual}}` | Agent's actual answer |
-| `{{runtime_stats}}` | Runtime statistics for process-quality checks |
-
-Ask the Judge model to return a JSON object, for example:
-
-```json
-{"score": 0.8, "reason": "The response covers the main points but misses one detail."}
-```
-
-An empty, non-JSON, or invalid score response is recorded as 0 with an explanatory reason.
-
-### Code evaluator safety boundary
-
-A Code evaluator must define `evaluate` and return `score` and `reason`:
-
-```python
-def evaluate(query, expected, actual, runtime_events):
-    if actual.strip().startswith("{"):
-        return {"score": 1.0, "reason": "Output looks like JSON"}
-    return {"score": 0.0, "reason": "Output is not JSON-like"}
-```
-
-Code is syntax-checked, statically scanned, executed with a restricted built-in set, and checked for the required function signature. Imports outside the allowlist, file access, network I/O, system commands, and object-introspection escape paths are blocked. Use Code evaluators for pure computation and string processing only.
-
-### Drafts, publishing, and versions
-
-- New and edited custom evaluators are **Draft** and cannot be selected for a task.
-- Select **Publish** before using one in an evaluation task.
-- Built-in evaluators are published and cannot be edited or deleted.
-- Editing a published custom evaluator creates a new draft version; the previous published version remains in history.
-- Version history supports viewing, restoring, and deleting historical versions, subject to active-task references.
-- Custom evaluators can be exported to JSON and imported elsewhere. Import skips duplicate name-and-type pairs.
-
-## View evaluation results
-
-Open **Details** for a task to see the overall score, pass count, evaluator averages, score distribution, per-case results, and run metadata.
-
-The case table includes the question, reference answer, actual output, score, reason, and status. It supports **All / Passed / Failed**, sorting or viewing by one evaluator, session filtering, and annotation-value filtering.
-
-### AI analysis report
-
-After a task completes, select **AI Analysis**. The Judge model analyzes aggregate statistics and a bounded set of failed cases, then returns common problems, severity, an overall review, and optimization suggestions.
-
-The report is AI-generated for reference only and never changes the agent automatically. Select **Re-analyze** after reviewing or annotating cases.
-
-### Export a report
-
-On a completed task's details page, select **Download Report** to export a PDF containing task information, score summaries, and case results. The report follows the current interface language.
-
-## Human annotations
-
-Annotations record human judgments independently from automated scores. Use them for labels such as “grounded”, “problem type”, or free-text review notes.
-
-### Create annotation labels
-
-In **Annotation Labels**, select **Create Annotation Label** and choose a type:
-
-| Type | Usage |
-|------|-------|
-| **Classification** | Multiple options, one per line, up to 20 options |
-| **Boolean** | True / False |
-| **Number** | Numeric value |
-| **Text** | Free-text note |
-
-Names are limited to 50 characters and descriptions to 200 characters. Enable the labels you need from a completed task's details page.
-
-### Annotate a task
-
-1. Open a completed task.
-2. Select **Annotation Labels** and enable the labels to display.
-3. Enter or edit values in the case table.
-4. Filter by label value and review coverage and value distributions.
-
-Disabling a label that already contains data asks for confirmation and deletes that label's data for the task. A label in use by an active task cannot be edited or deleted.
-
-## Limitations and recommendations
+## Limits
 
 | Area | Current limit |
 |------|---------------|
-| Evaluation mode | User-triggered offline evaluation only; no online sampling |
-| Evaluation object | Published Nexent agent versions; arbitrary external agents and workflows are not supported by this flow |
+| Evaluation object | The current flow runs published Nexent agent versions |
 | Evaluators per task | 5; only published evaluators can be selected |
 | Evaluation sets | 50 per tenant |
 | Cases per set | 2,000 |
@@ -256,27 +77,3 @@ Disabling a label that already contains data asks for confirmation and deletes t
 | Historical data | Normally retained for about 30 days and may be cleaned by maintenance jobs |
 | Multi-turn | Up to 10 turns per session during one run |
 | Custom code | Restricted pure Python; no file, network, system-command, or arbitrary-module access |
-
-For reliable results, start with a small trial, keep high-quality reference answers, separate different quality goals into separate evaluators, and inspect failed samples before making release decisions. Do not treat a single LLM Judge score or AI analysis paragraph as an absolute quality guarantee.
-
-## Troubleshooting
-
-### A newly created evaluator is not available
-
-New evaluators start as Draft. Publish the evaluator, then reopen the task form.
-
-### No-set accuracy is unexpectedly low
-
-No-set questions do not have reference answers, so `expected` is empty. Use runtime or actual-answer evaluators, or create a set with reviewed answers.
-
-### A set cannot be edited or deleted
-
-An active task may reference it. Wait for the task to finish or remove the obsolete task before changing the set.
-
-### Does AI analysis change the agent?
-
-No. It only returns findings and suggestions. Apply any changes manually in Agent Configuration and run a new evaluation.
-
-### A task fails
-
-Check that the agent version is published and available, the Judge model can be called, the set contains valid questions, and any custom evaluator follows the prompt or Code contract. Use the error shown in the details page to identify the failing stage, then create a new task after correcting it.
