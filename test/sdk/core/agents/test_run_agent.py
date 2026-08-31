@@ -256,6 +256,7 @@ with patch.dict("sys.modules", module_mocks):
     import sdk.nexent.core.agents.run_agent as run_agent  # noqa: E402
     from sdk.nexent.core.agents.mcp_errors import (  # noqa: E402
         MCPToolTimeoutError,
+        is_mcp_timeout_error,
         propagate_mcp_timeout,
     )
 
@@ -729,6 +730,88 @@ def test_mcp_timeout_classifier_detects_executor_wrapped_error():
     assert isinstance(propagated, TimeoutError)
 
 
+def test_mcp_timeout_classifier_handles_native_and_legacy_errors():
+    """Recognize native timeout types, marker errors, and MCP SDK messages."""
+    native = MCPToolTimeoutError("native timeout")
+    assert is_mcp_timeout_error(native)
+    assert propagate_mcp_timeout(native) is native
+
+    assert is_mcp_timeout_error(TimeoutError("request timed out"))
+    assert is_mcp_timeout_error(asyncio.TimeoutError("request timed out"))
+    assert is_mcp_timeout_error(
+        RuntimeError("Timed out while waiting for response to ClientRequest")
+    )
+    assert is_mcp_timeout_error(
+        RuntimeError("Timed out while waiting for response to CallToolRequest")
+    )
+
+    wrapped = RuntimeError("outer wrapper")
+    wrapped.__cause__ = RuntimeError(
+        "Timed out while waiting for response to ClientRequest"
+    )
+    assert is_mcp_timeout_error(wrapped)
+    assert not is_mcp_timeout_error(RuntimeError("ordinary MCP failure"))
+
+
+def test_create_mcp_tool_collection_applies_timeout_and_normalizes_errors(monkeypatch):
+    """The MCP adapter receives the timeout and forwards clear tool errors."""
+    mcpadapt_module = types.ModuleType("mcpadapt")
+    mcpadapt_module.__path__ = []
+    mcpadapt_core = types.ModuleType("mcpadapt.core")
+    mcpadapt_adapter = types.ModuleType("mcpadapt.smolagents_adapter")
+    tools = []
+    captured = {}
+
+    class FakeMCPAdapt:
+        def __init__(self, clients, adapter, client_session_timeout_seconds):
+            captured.update(
+                clients=clients,
+                adapter=adapter,
+                timeout=client_session_timeout_seconds,
+            )
+
+        def __enter__(self):
+            return tools
+
+        def __exit__(self, *_args):
+            return False
+
+    mcpadapt_core.MCPAdapt = FakeMCPAdapt
+    mcpadapt_adapter.SmolAgentsAdapter = lambda: "adapter"
+    mcpadapt_module.core = mcpadapt_core
+    mcpadapt_module.smolagents_adapter = mcpadapt_adapter
+
+    success_tool = MagicMock(name="success_tool")
+    success_tool.forward = MagicMock(return_value="ok")
+    ordinary_error_tool = MagicMock(name="ordinary_error_tool")
+    ordinary_error_tool.forward = MagicMock(side_effect=ValueError("ordinary failure"))
+    timeout_tool = MagicMock(name="timeout_tool")
+    timeout_tool.forward = MagicMock(
+        side_effect=RuntimeError("Timed out while waiting for response to CallToolRequest")
+    )
+    tools.extend([success_tool, ordinary_error_tool, timeout_tool])
+
+    with monkeypatch.context() as patcher:
+        patcher.setitem(sys.modules, "mcpadapt", mcpadapt_module)
+        patcher.setitem(sys.modules, "mcpadapt.core", mcpadapt_core)
+        patcher.setitem(sys.modules, "mcpadapt.smolagents_adapter", mcpadapt_adapter)
+        with run_agent._create_mcp_tool_collection(
+            [{"url": "http://mcp.example/mcp", "transport": "streamable-http"}],
+            timeout_seconds=7.5,
+        ):
+            assert success_tool.forward("value") == "ok"
+            with pytest.raises(ValueError, match="ordinary failure"):
+                ordinary_error_tool.forward()
+            with pytest.raises(MCPToolTimeoutError, match="7.5 seconds"):
+                timeout_tool.forward()
+
+    assert captured["clients"] == [{
+        "url": "http://mcp.example/mcp",
+        "transport": "streamable-http",
+    }]
+    assert captured["timeout"] == 7.5
+
+
 @pytest.mark.parametrize("invalid_timeout", [None, 0, -1, "invalid", float("inf")])
 def test_resolve_mcp_request_timeout_seconds_uses_safe_default(
     basic_agent_run_info,
@@ -765,6 +848,19 @@ def test_agent_run_thread_mcp_timeout_is_localized(basic_agent_run_info, monkeyp
     assert "10" in final_message
     assert "MCP" in final_message
     assert "超时" in final_message
+
+
+def test_mcp_timeout_message_uses_english_and_effective_timeout(basic_agent_run_info):
+    """The English timeout response includes the effective request timeout."""
+    basic_agent_run_info.observer.lang = "en"
+    basic_agent_run_info.mcp_request_timeout_seconds = 2.5
+
+    message = run_agent._mcp_timeout_message(basic_agent_run_info)
+
+    assert message == (
+        "MCP tool request timed out after 2.5 seconds. "
+        "Please check the service response and try again."
+    )
 
 
 def test_normalize_mcp_config_bypasses_proxy_only_when_requested():
