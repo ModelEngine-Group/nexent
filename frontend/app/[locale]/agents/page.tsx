@@ -35,7 +35,7 @@ import {
   useNl2AgentFlow,
   type Nl2AgentConfigFocusTarget,
 } from "@/contexts/nl2AgentFlow";
-import { useAgentStore } from "@/stores/agentStore";
+import { useAgentStore, type AgentDraft } from "@/stores/agentStore";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useAgentInfo } from "@/hooks/agent/useAgentInfo";
 import { useAgentVersionDetail } from "@/hooks/agent/useAgentVersionDetail";
@@ -69,6 +69,30 @@ function resolveDraftFocusTarget(
     return { section: "display_info" };
   }
   return null;
+}
+
+const isNonEmptyString = (value: unknown): value is string =>
+  typeof value === "string" && value.trim().length > 0;
+
+function isNl2AgentDraftComplete(draft: AgentDraft | null): boolean {
+  if (
+    !draft ||
+    !isNonEmptyString(draft.description) ||
+    !isNonEmptyString(draft.duty_prompt) ||
+    !isNonEmptyString(draft.greeting_message) ||
+    !Array.isArray(draft.example_questions) ||
+    draft.example_questions.length === 0 ||
+    draft.example_questions.some((question) => !isNonEmptyString(question))
+  ) {
+    return false;
+  }
+
+  const hasBoundResources = draft.tools.length > 0 || draft.skills.length > 0;
+  return (
+    !hasBoundResources ||
+    (isNonEmptyString(draft.constraint_prompt) &&
+      isNonEmptyString(draft.few_shots_prompt))
+  );
 }
 
 const AGENT_TOUR_SEEN_STORAGE_KEY = "nexent.agent-tour.seen";
@@ -142,6 +166,7 @@ function AgentSetupContent() {
     agentInfo?.current_version_no ?? null
   );
   const permissionReadOnly = useAgentStore((state) => state.isReadOnly);
+  const savedAgent = useAgentStore((state) => state.savedAgent);
   const {
     agentId: flowAgentId,
     completionSyncFailed,
@@ -167,6 +192,10 @@ function AgentSetupContent() {
     flowAgentId === currentAgentId &&
     !isRequestedAgentLoading &&
     (isFormLocked || isComposerDisabled);
+  const showOptimizationSuggestions =
+    !isRequestedAgentLoading &&
+    !isNl2AgentUnavailable &&
+    isNl2AgentDraftComplete(savedAgent);
 
   useEffect(() => {
     resetFlow(currentAgentId);
@@ -393,6 +422,7 @@ function AgentSetupContent() {
                 ref={nl2AgentChatPanelRef}
                 key={sessionGeneration}
                 agentId={currentAgentId}
+                showOptimizationSuggestions={showOptimizationSuggestions}
                 disabled={
                   isComposerDisabled ||
                   isRequestedAgentLoading ||
@@ -417,7 +447,7 @@ function AgentSetupContent() {
                       {t("agent.version.draftStatus")}
                     </span>
                   </Tag>
-                 
+
                 </div>
               ) : null
             }
