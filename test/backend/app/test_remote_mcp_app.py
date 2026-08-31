@@ -58,13 +58,14 @@ patch('services.mcp_container_service.DockerContainerConfig').start()
 from backend.consts.exceptions import (
     MCPConnectionError, MCPNameIllegal, MCPContainerError,
     McpNotFoundError, McpValidationError, McpNameConflictError, McpPortConflictError,
-    UnauthorizedError,
+    UnauthorizedError, TenantResourceLimitError,
 )
 from fastapi.testclient import TestClient
 from fastapi import FastAPI
 from http import HTTPStatus
 
 from apps.remote_mcp_app import router
+from apps.app_factory import register_exception_handlers
 
 import apps.remote_mcp_app as remote_app
 remote_app.MCPConnectionError = MCPConnectionError
@@ -75,6 +76,7 @@ remote_app.McpValidationError = McpValidationError
 remote_app.McpNameConflictError = McpNameConflictError
 remote_app.McpPortConflictError = McpPortConflictError
 remote_app.UnauthorizedError = UnauthorizedError
+remote_app.TenantResourceLimitError = TenantResourceLimitError
 
 app = FastAPI()
 app.include_router(router)
@@ -172,6 +174,33 @@ class TestAddMcpService:
         }, headers=AUTH_HEADER)
         assert resp.status_code == HTTPStatus.SERVICE_UNAVAILABLE
         assert resp.json()["detail"] == "MCP connection timeout"
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.add_mcp_service')
+    def test_add_tenant_limit_returns_standard_error(self, mock_add, mock_auth):
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_add.side_effect = TenantResourceLimitError(
+            "MCP service tenant limit reached: maximum 1000 MCP services per tenant",
+            resource="mcp_services",
+            scope="tenant",
+            limit=1000,
+            current_count=1000,
+        )
+        limited_app = FastAPI()
+        register_exception_handlers(limited_app)
+        limited_app.include_router(router)
+
+        resp = TestClient(limited_app).post("/mcp/add", json={
+            "name": "over-limit", "source": "local", "server_url": "http://srv",
+        }, headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.TOO_MANY_REQUESTS
+        assert resp.json()["code"] == "120104"
+        assert resp.json()["details"] == {
+            "resource": "mcp_services",
+            "scope": "tenant",
+            "limit": 1000,
+            "current_count": 1000,
+        }
 
     @patch('apps.remote_mcp_app.get_current_user_info')
     @patch('apps.remote_mcp_app.add_mcp_service')

@@ -1,5 +1,6 @@
 import i18n from 'i18next';
 
+import { ErrorCode } from '@/const/errorCode';
 import { API_ENDPOINTS } from './api';
 import log from "@/lib/logger";
 
@@ -7,6 +8,17 @@ import log from "@/lib/logger";
 const t = (key: string, options?: any): string => {
   return i18n.t(key, options) as string;
 };
+
+const TENANT_RESOURCE_EXCEEDED_CODE = ErrorCode.TENANT_RESOURCE_EXCEEDED;
+
+const isMcpTenantLimitError = (response: Response, data: any): boolean =>
+  String(data?.code ?? '') === TENANT_RESOURCE_EXCEEDED_CODE ||
+  (response.status === 429 && data?.details?.resource === 'mcp_services');
+
+const getMcpTenantLimitMessage = (data: any): string =>
+  t('mcpService.message.tenantLimitReached', {
+    limit: data?.details?.limit ?? 1000,
+  });
 
 const getAuthHeaders = () => {
   return {
@@ -136,7 +148,9 @@ export const addMcpServer = async (mcpUrl: string, serviceName: string, authoriz
       // Handle specific error status codes and error information
       let errorMessage = data.detail || data.message || t('mcpService.message.addServerFailed');
 
-      if (response.status === 409) {
+      if (isMcpTenantLimitError(response, data)) {
+        errorMessage = getMcpTenantLimitMessage(data);
+      } else if (response.status === 409) {
         errorMessage = t('mcpService.message.nameAlreadyUsed');
       } else if (response.status === 503) {
         errorMessage = t('mcpService.message.cannotConnectToServer');
@@ -455,7 +469,9 @@ export const addMcpFromConfig = async (mcpConfig: { mcpServers: Record<string, {
       let errorMessage = data.detail || data.message || t('mcpService.message.addFromConfigFailed');
       let messageKey: string | undefined;
 
-      if (response.status === 400) {
+      if (isMcpTenantLimitError(response, data)) {
+        errorMessage = getMcpTenantLimitMessage(data);
+      } else if (response.status === 400) {
         const rawError = data.detail || data.message || '';
         // Check if error is related to image not found
         const errorLower = rawError.toLowerCase();
@@ -511,10 +527,13 @@ export const addMcpFromConfigStream = async (
     });
     if (!response.ok || !response.body) {
       const data = await response.json().catch(() => ({}));
+      const limitMessage = isMcpTenantLimitError(response, data)
+        ? getMcpTenantLimitMessage(data)
+        : null;
       return {
         success: false,
         data: null,
-        message: data.detail || data.message || t("mcpService.message.addFromConfigFailed"),
+        message: limitMessage || data.detail || data.message || t("mcpService.message.addFromConfigFailed"),
       };
     }
 
@@ -536,7 +555,15 @@ export const addMcpFromConfigStream = async (
           } else if (message.status === "success") {
             return { success: true, data: message.data };
           } else if (message.status === "error") {
-            return { success: false, data: null, message: message.detail };
+            const limitMessage =
+              String(message.code ?? "") === TENANT_RESOURCE_EXCEEDED_CODE
+                ? getMcpTenantLimitMessage(message)
+                : null;
+            return {
+              success: false,
+              data: null,
+              message: limitMessage || message.detail || message.message,
+            };
           }
         }
       }

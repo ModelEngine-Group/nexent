@@ -28,7 +28,7 @@ from agents.create_agent_info import (
     join_minio_file_description_to_query,
 )
 from agents.nl2agent_agent import create_nl2agent_agent_config
-from consts.const import LOCAL_MCP_SERVER, MODEL_CONFIG_MAPPING
+from consts.const import LOCAL_MCP_SERVER, MCP_REQUEST_TIMEOUT_SECONDS, MODEL_CONFIG_MAPPING
 from consts.model import HistoryItem, NL2AgentRunRequest, ToolSourceEnum
 from database.agent_db import update_agent_draft_fields
 from database.skill_db import query_enabled_skill_instances
@@ -1364,6 +1364,7 @@ async def build_nl2agent_run_info(
         ),
         agent_config=agent_config,
         mcp_host=[mcp_config],
+        mcp_request_timeout_seconds=MCP_REQUEST_TIMEOUT_SECONDS,
         history=_convert_history(request.history),
         stop_event=stop_event,
         capacity_snapshot=capacity_snapshot,

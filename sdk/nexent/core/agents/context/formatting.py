@@ -303,14 +303,17 @@ def _format_tools_description(
             output_type = tool.get('output_type', '')
             source = tool.get('source', 'local')
 
-        # MCP tools have [MCP] prefix
+        # Keep the source marker after the callable name so the label is not
+        # accidentally copied into Python code by the model.
         if source == 'mcp':
             if language == "zh":
-                lines.append(f"- [MCP] {name}: {desc}")
+                lines.append(f"- {name} [MCP]: {desc}")
+                lines.append(f"   MCP 工具请直接调用 Python 函数名 `{name}`，不要把 `[MCP]` 写入代码。")
                 lines.append(f"   接受输入: {inputs}")
                 lines.append(f"   返回输出类型: {output_type}")
             else:
-                lines.append(f"- [MCP] {name}: {desc}")
+                lines.append(f"- {name} [MCP]: {desc}")
+                lines.append(f"   Call the MCP tool directly as the Python function `{name}`; do not include `[MCP]` in code.")
                 lines.append(f"   Accepts input: {inputs}")
                 lines.append(f"   Returns output type: {output_type}")
         else:

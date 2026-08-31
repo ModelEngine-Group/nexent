@@ -8,6 +8,7 @@ import type {
   RegistryQuickAddOption,
   RegistryRemoteVariable,
 } from "@/types/mcpTools";
+import { ErrorCode } from "@/const/errorCode";
 import {
   FILTER_ALL,
   MCP_PORT_RANGE,
@@ -145,6 +146,16 @@ const getErrorCode = (error: unknown): string => {
   return String((error as { code?: unknown }).code ?? "");
 };
 
+const TENANT_RESOURCE_EXCEEDED_CODE = ErrorCode.TENANT_RESOURCE_EXCEEDED;
+
+const getErrorDetails = (error: unknown): Record<string, unknown> => {
+  if (!error || typeof error !== "object" || !("details" in error)) return {};
+  const details = (error as { details?: unknown }).details;
+  return details && typeof details === "object" && !Array.isArray(details)
+    ? (details as Record<string, unknown>)
+    : {};
+};
+
 const isTechnicalErrorMessage = (message: string): boolean => {
   if (message.length > 180) return true;
   return /traceback|exceptiongroup|stack trace|fastmcp|httpx|httpcore|pydantic|baseexception|\[errno|connecterror|readerror|timeouterror/i.test(
@@ -168,6 +179,20 @@ export const getMcpAddErrorMessage = (
   const msg = extractMcpErrorMessage(error);
   const normalized = msg.toLowerCase();
   const errorCode = getErrorCode(error);
+  const errorDetails = getErrorDetails(error);
+
+  if (
+    errorCode === TENANT_RESOURCE_EXCEEDED_CODE ||
+    (errorCode === "429" && errorDetails.resource === "mcp_services")
+  ) {
+    const limit = String(errorDetails.limit ?? 1000);
+    const fallback = `This tenant has reached the MCP service limit (maximum ${limit} services).`;
+    const translated = t("mcpTools.add.error.tenantLimit", {
+      defaultValue: fallback,
+      limit,
+    });
+    return translated === "mcpTools.add.error.tenantLimit" ? fallback : translated;
+  }
 
   if (/already exists|name conflict|name already used/.test(normalized)) {
     return addErrorText(t, "mcpTools.add.error.nameExists", "An MCP service with this name already exists. Please use a different name.");
