@@ -28,6 +28,8 @@ _HOP_BY_HOP_HEADERS = {
 }
 _STREAM_TIMEOUT = httpx.Timeout(connect=10.0, read=None, write=30.0, pool=10.0)
 _REQUEST_TIMEOUT = httpx.Timeout(connect=10.0, read=30.0, write=30.0, pool=10.0)
+_EVALUATION_DISPATCH_TIMEOUT = httpx.Timeout(connect=10.0, read=30.0, write=30.0, pool=10.0)
+_RUNTIME_SERVICE_UNAVAILABLE_MESSAGE = "Runtime service is unavailable"
 
 
 def _runtime_url(path: str) -> str:
@@ -52,6 +54,53 @@ def _authorization_headers(user_id: str, tenant_id: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
+def dispatch_agent_evaluation_run(
+    agent_evaluation_id: int,
+    user_id: str,
+    tenant_id: str,
+) -> dict:
+    """Dispatch evaluation execution to the runtime service.
+
+    Evaluation setup remains in the config service, while agent execution and
+    scoring run in the runtime process that has access to the shared sandbox
+    workspace volume.  This synchronous wrapper is intentionally suitable for
+    the config service's existing background thread pool.
+    """
+    try:
+        with httpx.Client(
+            headers=_authorization_headers(user_id, tenant_id),
+            timeout=_EVALUATION_DISPATCH_TIMEOUT,
+            follow_redirects=True,
+            trust_env=False,
+        ) as client:
+            response = client.post(
+                _runtime_url("/agent-evaluations/internal/run"),
+                json={"agent_evaluation_id": agent_evaluation_id},
+            )
+    except httpx.TimeoutException as exc:
+        raise RuntimeServiceTimeoutError("Runtime evaluation dispatch timed out") from exc
+    except httpx.RequestError as exc:
+        raise RuntimeServiceUnavailableError(_RUNTIME_SERVICE_UNAVAILABLE_MESSAGE) from exc
+
+    if response.status_code >= 400:
+        raise RuntimeUpstreamError(
+            status_code=response.status_code,
+            content=response.content,
+            headers=_forwarded_headers(response.headers),
+        )
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        raise RuntimeServiceUnavailableError(
+            "Runtime evaluation dispatch response is not valid JSON"
+        ) from exc
+    if not isinstance(payload, dict):
+        raise RuntimeServiceUnavailableError(
+            "Runtime evaluation dispatch response is not a JSON object"
+        )
+    return payload
+
+
 async def forward_agent_run(
     agent_request: AgentRequest,
     user_id: str,
@@ -74,7 +123,7 @@ async def forward_agent_run(
         raise RuntimeServiceTimeoutError("Runtime agent run request timed out") from exc
     except httpx.RequestError as exc:
         await client.aclose()
-        raise RuntimeServiceUnavailableError("Runtime service is unavailable") from exc
+        raise RuntimeServiceUnavailableError(_RUNTIME_SERVICE_UNAVAILABLE_MESSAGE) from exc
     except Exception:
         await client.aclose()
         raise
@@ -111,7 +160,7 @@ async def forward_agent_stop(
     except httpx.TimeoutException as exc:
         raise RuntimeServiceTimeoutError("Runtime stop request timed out") from exc
     except httpx.RequestError as exc:
-        raise RuntimeServiceUnavailableError("Runtime service is unavailable") from exc
+        raise RuntimeServiceUnavailableError(_RUNTIME_SERVICE_UNAVAILABLE_MESSAGE) from exc
 
     if response.status_code >= 400:
         raise RuntimeUpstreamError(

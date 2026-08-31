@@ -604,6 +604,11 @@ class TestStartStreamingChat:
 
         mock_response = MagicMock()
         mock_response.headers = {}
+
+        async def response_chunks():
+            yield b"data: {\"type\": \"final_answer\", \"content\": \"ok\"}\n\n"
+
+        mock_response.body_iterator = response_chunks()
         runtime_proxy_mod.forward_agent_run.return_value = mock_response
 
         with patch.object(ns, 'check_and_consume_rate_limit', new_callable=AsyncMock), \
@@ -623,6 +628,11 @@ class TestStartStreamingChat:
                 user_id=ctx.user_id,
                 agent_id=1,
             )
+
+            chunks = [chunk async for chunk in mock_response.body_iterator]
+            assert b'"type": "conversation_created"' in chunks[0]
+            assert b'"conversation_id": 123' in chunks[0]
+            assert chunks[1].startswith(b"data: {\"type\": \"final_answer\"")
 
     async def test_start_streaming_chat_allows_unpublished_agent(self):
         """Use the resolved agent ID even when it has no published version."""

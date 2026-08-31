@@ -777,7 +777,7 @@ class TestGetSkillScriptTools:
             # RunSkillScriptTool
             assert '"skill_name": "str"' in calls[0][1]['inputs']
             assert '"script_path": "str"' in calls[0][1]['inputs']
-            assert '"params": "dict"' in calls[0][1]['inputs']
+            assert '"params": "str"' in calls[0][1]['inputs']
 
             # ReadSkillMdTool
             assert '"skill_name": "str"' in calls[1][1]['inputs']

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, type FC } from "react";
+import { forwardRef, useImperativeHandle, useMemo } from "react";
 import {
   AssistantRuntimeProvider,
   useLocalRuntime,
@@ -36,12 +36,17 @@ export interface Nl2AgentChatPanelProps {
   onStopped?: (agentId: number) => void;
 }
 
-export const Nl2AgentChatPanel: FC<Nl2AgentChatPanelProps> = ({
-  agentId = null,
-  disabled = false,
-  onStateEvent,
-  onStopped,
-}) => {
+export interface Nl2AgentChatPanelHandle {
+  cancelRun: () => void;
+}
+
+export const Nl2AgentChatPanel = forwardRef<
+  Nl2AgentChatPanelHandle,
+  Nl2AgentChatPanelProps
+>(function Nl2AgentChatPanel(
+  { agentId = null, disabled = false, onStateEvent, onStopped },
+  ref
+) {
   const { t } = useTranslation("common");
   const { modelConfig } = useConfig();
   const adapters = useMemo(
@@ -71,6 +76,13 @@ export const Nl2AgentChatPanel: FC<Nl2AgentChatPanelProps> = ({
     [agentId, onStateEvent, onStopped]
   );
   const runtime = useLocalRuntime(chatModelAdapter, { adapters });
+  useImperativeHandle(
+    ref,
+    () => ({
+      cancelRun: () => runtime.thread.cancelRun(),
+    }),
+    [runtime]
+  );
 
   const assistantTitle = t("agentConfig.button.generationAssistant");
   const nl2AgentDisplay: Agent = {
@@ -96,4 +108,4 @@ export const Nl2AgentChatPanel: FC<Nl2AgentChatPanelProps> = ({
       </TooltipProvider>
     </AssistantRuntimeProvider>
   );
-};
+});

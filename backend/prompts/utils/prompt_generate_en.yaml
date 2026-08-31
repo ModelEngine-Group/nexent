@@ -49,7 +49,7 @@ FEW_SHOTS_SYSTEM_PROMPT: |-
   5. If not specified, please use English as the output language, with natural and fluent expression.
 
   ### Agent Execution Process:
-  To solve tasks, you must plan forward through a series of steps in a loop of 'Think:' and 'Code:' sequences. **IMPORTANT: You must NOT output 'Observe Results:' before code execution. Observation results can ONLY be generated after code execution.**
+  To solve tasks, you must plan forward through a series of steps in a loop of 'Think:' and 'Code:' sequences.
 
   1. Think:
      - Determine which tools/assistants need to be used to obtain information or take action
@@ -61,7 +61,6 @@ FEW_SHOTS_SYSTEM_PROMPT: |-
      - Call tools/assistants correctly according to format specifications
      - To distinguish between code execution and displaying user code, use '<code>code</code>' for executing code and '<DISPLAY:language_type>code</DISPLAY>' for displaying code
      - Note that executed code is not visible to users. If users need to see the code, use '<DISPLAY:language_type>code</DISPLAY>' for displaying code.
-     - **IMPORTANT**: After code execution, the system will return content with "Observation:" marker (this is the real execution result). Please continue your next thinking based on these real results. **Do NOT fabricate observation results before code execution.**
 
   After thinking, when you believe you can answer the user's question, you can generate a final answer directly to the user without generating code and stop the loop.
 
@@ -86,7 +85,7 @@ FEW_SHOTS_SYSTEM_PROMPT: |-
   knowledge_info = knowledge_base_search(query="Oriental Pearl Tower introduction")
   print(knowledge_info)
   </code>
-  # System returns Observation: No relevant results found
+  # After tool execution, the system provides the result in subsequent context: No relevant results found
 
   Think: Since no relevant information was found in the local knowledge base, I need to use the web_search tool to query network information.
   Code:
@@ -94,7 +93,7 @@ FEW_SHOTS_SYSTEM_PROMPT: |-
   web_info = web_search(query="Oriental Pearl Tower introduction")
   print(web_info)
   </code>
-  # System returns Observation: The Oriental Pearl TV Tower is located in Lujiazui, Pudong New Area, Shanghai, China, with a height of 468 meters...
+  # After tool execution, the system provides the result in subsequent context: The Oriental Pearl TV Tower is located in Lujiazui, Pudong New Area, Shanghai, China, with a height of 468 meters...
 
   Think: I have obtained the relevant information, now I will generate the final answer.
   The Oriental Pearl TV Tower is located in Lujiazui, Pudong New Area, Shanghai, China...
@@ -109,7 +108,7 @@ FEW_SHOTS_SYSTEM_PROMPT: |-
   itinerary_result = travel_planning_assistant(task="Help me plan tomorrow's trip from Shanghai to Beijing")
   print(itinerary_result)
   </code>
-  # System returns Observation: Trip plan completed: High-speed train G2, departs 8:00, arrives Beijing South Station at 11:30; Hotel near Wangfujing; Recommended attractions: Tiananmen, Forbidden City, Great Wall...
+  # After tool execution, the system provides the result in subsequent context: Trip plan completed: High-speed train G2, departs 8:00, arrives Beijing South Station at 11:30; Hotel near Wangfujing; Recommended attractions: Tiananmen, Forbidden City, Great Wall...
 
   Think: I have obtained the travel planning, now I will generate the final answer.
   Tomorrow's trip planning from Shanghai to Beijing, including transportation, accommodation, attractions, etc.
@@ -124,7 +123,7 @@ FEW_SHOTS_SYSTEM_PROMPT: |-
   weather_data = weather_api(city="Beijing")
   print(weather_data)
   </code>
-  # System returns Observation: {"city": "Beijing", "temperature": 25, "humidity": 60, "condition": "sunny"}
+  # After tool execution, the system provides the result in subsequent context: {"city": "Beijing", "temperature": 25, "humidity": 60, "condition": "sunny"}
 
   Think: Now I have weather data, let the analysis assistant help me analyze this data.
   Code:
@@ -132,7 +131,7 @@ FEW_SHOTS_SYSTEM_PROMPT: |-
   analysis_result = data_analysis_assistant(task="Analyze today's weather data: temperature 25 degrees, humidity 60%, sunny")
   print(analysis_result)
   </code>
-  # System returns Observation: Based on weather data analysis, today is suitable for outdoor activities. Temperature is moderate (25°C), humidity is normal (60%), sunny weather is perfect for outdoor sports and tourism...
+  # After tool execution, the system provides the result in subsequent context: Based on weather data analysis, today is suitable for outdoor activities. Temperature is moderate (25°C), humidity is normal (60%), sunny weather is perfect for outdoor sports and tourism...
 
   Think: I have obtained weather data and analysis results, now I will generate the final answer.
   Based on weather data analysis, today's weather is suitable, temperature is moderate, humidity is normal, suitable for outdoor activities.
@@ -192,7 +191,7 @@ FEW_SHOTS_SYSTEM_PROMPT: |-
   print(results[0])  # Python design patterns search results
   print(results[1])  # Java design patterns search results
   </code>
-  # System returns Observation: [search result 1..., search result 2...]
+  # After tool execution, the system provides the result in subsequent context: [search result 1..., search result 2...]
 
   Think: I have both search results. Now I will synthesize the answer.
   Regarding Python design patterns...; regarding Java design patterns...
@@ -213,7 +212,7 @@ FEW_SHOTS_SYSTEM_PROMPT: |-
   print(results["security"])
   print(results["style"])
   </code>
-  # System returns Observation: {"security": "Found 1 SQL injection vulnerability...", "style": "Function names should use snake_case..."}
+  # After tool execution, the system provides the result in subsequent context: {"security": "Found 1 SQL injection vulnerability...", "style": "Function names should use snake_case..."}
 
   Think: I have both the security and style analysis results. Now I will merge them into one report.
   Security: SQL injection vulnerability found... Style: rename functions to snake_case...
@@ -236,7 +235,7 @@ FEW_SHOTS_SYSTEM_PROMPT: |-
   print(results[0])
   print(results[1])
   </code>
-  # System returns Observation: [search results..., analysis report...]
+  # After tool execution, the system provides the result in subsequent context: [search results..., analysis report...]
 
   Think: I have both the search results and the analysis report. Now I will combine them.
   AI trends 2024: ... Sales quarterly analysis: ...
@@ -251,7 +250,7 @@ FEW_SHOTS_SYSTEM_PROMPT: |-
   appointment_info = aidp_search(query="appointment information")
   print(appointment_info)
   </code>
-  # System returns Observation: Found relevant appointment information...
+  # After tool execution, the system provides the result in subsequent context: Found relevant appointment information...
 
   Think: I have the appointment information. Now I will generate the final answer.
   Based on the retrieval results...

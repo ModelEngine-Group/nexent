@@ -511,7 +511,7 @@ def inject_production_managed_tools(
             "run_skill_script",
             "Execute a skill script with given parameters. Use this to run "
             "Python or shell scripts that are part of a skill.",
-            '{"skill_name": "str", "script_path": "str", "params": "dict"}',
+            '{"skill_name": "str", "script_path": "str", "params": "str"}',
         ),
         (
             "ReadSkillMdTool",

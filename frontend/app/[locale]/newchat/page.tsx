@@ -240,6 +240,13 @@ const HomeContent: FC<{
     [chatMode]
   );
 
+  const handleGenerationStopped = useCallback((conversationId: number) => {
+    // A user-initiated stop transitions assistant-ui to idle before the
+    // backend has persisted the terminal message. Do not mistake that short
+    // window for a disconnected stream and replay its existing chunks.
+    resumedConversationIdsRef.current.add(conversationId);
+  }, []);
+
   const activeThread = (
     threadItems as ReadonlyArray<{
       id: string;
@@ -528,6 +535,7 @@ const HomeContent: FC<{
           : {}),
         onRuntimeMetadataSent: handleRuntimeMetadataSent,
         onKnowledgeScopeResolved: handleKnowledgeScopeResolved,
+        onGenerationStopped: handleGenerationStopped,
         enablePlan: chatMode === "planning",
         ...(activeThreadId
           ? {
@@ -556,6 +564,7 @@ const HomeContent: FC<{
     runtimeMetadataVersion,
     handleRuntimeMetadataSent,
     handleKnowledgeScopeResolved,
+    handleGenerationStopped,
     handleServerConversationId,
   ]);
 
@@ -618,6 +627,7 @@ const HomeContent: FC<{
               ...(selectedAgent?.current_version_no
                 ? { agentVersionNo: selectedAgent.current_version_no }
                 : {}),
+              onGenerationStopped: handleGenerationStopped,
               enablePlan: chatMode === "planning",
               resume: true,
             },
@@ -653,6 +663,7 @@ const HomeContent: FC<{
     ready,
     runtime,
     selectedAgent,
+    handleGenerationStopped,
   ]);
 
   // Publish the server conversation id registry to the thread-list adapter so

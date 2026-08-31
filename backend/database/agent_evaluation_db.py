@@ -105,6 +105,37 @@ def update_agent_evaluation_status(
         ).update(updates, synchronize_session=False)
 
 
+def claim_agent_evaluation_run(
+    agent_evaluation_id: int,
+    tenant_id: str,
+    updated_by: str | None = None,
+) -> bool:
+    """Atomically claim a pending evaluation for runtime execution.
+
+    The conditional update makes dispatch idempotent when the config service
+    retries an internal runtime request: only one runtime request can move a
+    run from ``PENDING`` to ``RUNNING``.
+    """
+    with get_db_session() as session:
+        updated = (
+            session.query(AgentEvaluation)
+            .filter(
+                AgentEvaluation.agent_evaluation_id == agent_evaluation_id,
+                AgentEvaluation.tenant_id == tenant_id,
+                AgentEvaluation.status == EvalRunStatus.PENDING,
+            )
+            .update(
+                {
+                    "status": EvalRunStatus.RUNNING,
+                    "updated_by": updated_by,
+                },
+                synchronize_session=False,
+            )
+        )
+        session.commit()
+        return updated == 1
+
+
 def update_agent_evaluation_analysis_report(
     agent_evaluation_id: int,
     tenant_id: str,

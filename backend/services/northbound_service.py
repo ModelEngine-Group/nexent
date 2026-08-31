@@ -385,6 +385,7 @@ async def start_streaming_chat(
     model_id: Optional[int] = None,
     idempotency_key: Optional[str] = None
 ) -> StreamingResponse:
+    new_conversation_data: Optional[Dict[str, Any]] = None
     try:
         if metadata is not None:
             try:
@@ -407,12 +408,12 @@ async def start_streaming_chat(
         latest_version_no = agent_info["latest_version_no"]
         if conversation_id is None:
             logging.info("No conversation_id provided, creating a new conversation")
-            new_conversation = create_new_conversation(
+            new_conversation_data = create_new_conversation(
                 title="New Conversation",
                 user_id=ctx.user_id,
                 agent_id=agent_id,
             )
-            conversation_id = new_conversation["conversation_id"]
+            conversation_id = new_conversation_data["conversation_id"]
             logging.info(f"Created new conversation with id: {conversation_id}")
 
         internal_conversation_id = conversation_id
@@ -501,6 +502,17 @@ async def start_streaming_chat(
     response.headers["X-Request-Id"] = ctx.request_id
     response.headers["conversation_id"] = str(conversation_id)
     response.headers["X-Accel-Buffering"] = "no"
+
+    if new_conversation_data is not None:
+        original_body_iterator = response.body_iterator
+
+        async def body_iterator_with_conversation_created():
+            yield ("data: " + json.dumps({"type": "conversation_created", "content": {"conversation_id": conversation_id}}, ensure_ascii=False) + "\n\n").encode("utf-8")
+            async for chunk in original_body_iterator:
+                yield chunk
+
+        response.body_iterator = body_iterator_with_conversation_created()
+
     return response
 
 

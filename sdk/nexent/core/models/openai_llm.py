@@ -569,7 +569,29 @@ class OpenAIModel(OpenAIServerModel):
                         raise ValueError(f"Token limit exceeded: {str(e)}")
                     raise e
             except EmptyModelResponseError:
-                raise
+                # Some reasoning-capable OpenAI-compatible providers
+                # occasionally finish with ``stop`` after emitting only
+                # reasoning chunks. Retry once inside the model adapter so an
+                # otherwise transient malformed stream does not consume a
+                # visible agent step. A ``length`` finish is deterministic
+                # truncation and must still surface immediately.
+                empty_retry_limit = min(self.retry_config.max_attempts, 2)
+                if self.last_finish_reason not in (None, "stop") or attempt >= empty_retry_limit:
+                    raise
+                backoff = self.retry_config.calculate_backoff(attempt)
+                logger.warning(
+                    "event=retry_empty_model_response attempt=%d/%d finish_reason=%s "
+                    "retrying_after_seconds=%.2f",
+                    attempt,
+                    empty_retry_limit,
+                    self.last_finish_reason,
+                    backoff,
+                )
+                self.last_retry_count = attempt
+                if self.stop_event.is_set():
+                    raise RuntimeError(STOP_EVENT_INTERRUPTED_MESSAGE)
+                self.stop_event.wait(backoff)
+                continue
             except Exception as e:
                 if classify_model_error(e) != "retryable":
                     raise

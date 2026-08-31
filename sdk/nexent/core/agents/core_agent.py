@@ -344,6 +344,17 @@ def _coerce_observer_arguments(arguments: Any) -> Any:
     return str(arguments)
 
 
+def _observer_call_arguments(tool: Any, args: tuple, kwargs: dict) -> Dict[str, Any]:
+    """Map positional tool values to declared input names for observer events."""
+    arguments = dict(kwargs)
+    declared_inputs = getattr(tool, "inputs", None)
+    input_names = list(declared_inputs) if isinstance(declared_inputs, dict) else []
+    for index, value in enumerate(args):
+        name = input_names[index] if index < len(input_names) else f"arg{index}"
+        arguments.setdefault(name, value)
+    return _coerce_observer_arguments(arguments)
+
+
 def _collect_call_arguments(call_node: "ast.Call") -> Dict[str, Any]:
     """Extract positional + keyword arguments from an AST ``Call`` node.
 
@@ -455,7 +466,7 @@ def _wrap_tool_for_observer(
             ProcessType.TOOL,
             "",
             tool_name=tool_name,
-            tool_arguments=_coerce_observer_arguments(kwargs),
+            tool_arguments=_observer_call_arguments(tool, args, kwargs),
             tool_call_id=tool_call_id,
         )
         with observer.tool_call_context(tool_call_id):

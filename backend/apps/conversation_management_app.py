@@ -5,6 +5,7 @@ from typing import Annotated, Any, Dict, Optional
 from fastapi import APIRouter, Header, HTTPException, Query, Request
 
 from consts.model import (
+    BatchDeleteConversationRequest,
     ConversationKnowledgeScopeUpdateRequest,
     ConversationRequest,
     ConversationResponse,
@@ -18,6 +19,7 @@ from database.conversation_db import get_conversation_list_page
 from services.conversation_management_service import (
     create_new_conversation,
     delete_conversation_service,
+    delete_conversations_batch_service,
     generate_conversation_title_service,
     get_conversation_history_service,
     get_sources_service,
@@ -145,6 +147,30 @@ async def delete_conversation_endpoint(conversation_id: int, authorization: Opti
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logging.error(f"Failed to delete conversation: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.post("/batch-delete", response_model=ConversationResponse)
+async def delete_conversations_batch_endpoint(request: BatchDeleteConversationRequest, authorization: Annotated[Optional[str], Header()] = None):
+    """
+    Batch-delete conversations owned by the current user
+
+    Args:
+        request: BatchDeleteConversationRequest containing conversation_ids
+        authorization: Authorization header
+
+    Returns:
+        ConversationResponse with deleted_count and failed_ids
+    """
+    try:
+        user_id, _ = get_current_user_id(authorization)
+        result = delete_conversations_batch_service(request.conversation_ids, user_id)
+        return ConversationResponse(code=0, message="success", data=result)
+    except TokenExpiredError as e:
+        logging.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
+    except Exception as e:
+        logging.exception("Failed to batch delete conversations")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
 

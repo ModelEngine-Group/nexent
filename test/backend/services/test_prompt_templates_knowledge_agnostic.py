@@ -43,3 +43,13 @@ def test_knowledge_prompt_templates_do_not_embed_resource_ranges():
         assert "kds_list=" not in source
         assert "has_local_knowledge_tool" in source
         assert "has_aidp_knowledge_tool" in source
+
+
+def test_builtin_prompt_templates_do_not_guide_observation_markers():
+    prompt_root = Path(__file__).parents[3] / "backend" / "prompts"
+    forbidden_terms = ("Observation", "Observe Results", "观察结果")
+
+    for path in prompt_root.rglob("*.yaml"):
+        source = path.read_text(encoding="utf-8")
+        for term in forbidden_terms:
+            assert term not in source, f"{path} still contains observation guidance: {term}"

@@ -25,6 +25,8 @@ import logging
 import mimetypes
 import re
 import secrets
+import shlex
+import tarfile
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -41,6 +43,209 @@ logger = logging.getLogger(__name__)
 
 
 _TOOL_BRIDGE_VALUE_MARKER = "__nexent_tool_bridge_value__"
+
+
+class SandboxSkillScriptRunner:
+    """Copy a validated skill into Docker and execute its script there.
+
+    The runtime remains the control plane: it resolves tenant-scoped skills
+    and validates that the requested path cannot escape the skill root.  The
+    script process itself, its interpreter and dependencies live exclusively
+    in the sandbox container.
+    """
+
+    def __init__(
+        self,
+        executor: Any,
+        timeout_seconds: int = 300,
+        workspace_path: Optional[str] = None,
+    ) -> None:
+        self._executor = executor
+        self._container = getattr(executor, "container", None)
+        self._timeout_seconds = max(1, int(timeout_seconds))
+        self._workspace_path = (workspace_path or "").rstrip("/")
+        self._root = (
+            f"{self._workspace_path}/skills"
+            if self._workspace_path
+            else ""
+        )
+        self._staged_skills: dict[str, str] = {}
+        self._stage_lock = threading.Lock()
+
+    @property
+    def available(self) -> bool:
+        """Return whether this runner has a real Docker execution target."""
+        return self._container is not None and getattr(self._executor, "_nexent_backend", None) == "docker"
+
+    @staticmethod
+    def _output_text(output: Any) -> str:
+        if isinstance(output, bytes):
+            return output.decode("utf-8", errors="replace")
+        return str(output or "")
+
+    def _run_container_command(self, command: list[str], **kwargs: Any) -> Any:
+        result = self._container.exec_run(command, **kwargs)
+        exit_code = getattr(result, "exit_code", None)
+        if exit_code != 0:
+            output = self._output_text(getattr(result, "output", b""))
+            raise RuntimeError(
+                f"Sandbox preparation command failed (exit={exit_code}): {output.strip()}"
+            )
+        return result
+
+    def _resolve_skills_root(self, working_directory: Optional[str]) -> str:
+        """Return the run-scoped skills directory and reject workspace drift."""
+        workspace_path = (working_directory or self._workspace_path).rstrip("/")
+        if not workspace_path:
+            raise RuntimeError("Skill scripts require a run-scoped workspace")
+        skills_root = f"{workspace_path}/skills"
+        if self._root and skills_root != self._root:
+            raise RuntimeError("Skill script workspace does not match the sandbox runner workspace")
+        self._root = skills_root
+        return skills_root
+
+    def _stage_skill(
+        self,
+        manager: Any,
+        skill_name: str,
+        script_path: str,
+        tenant_id: Optional[str],
+        skills_root: str,
+    ) -> tuple[str, str]:
+        """Copy one validated skill into the run workspace once and make it read-only."""
+        local_skill_dir, local_script, normalized_script = manager.resolve_skill_script(
+            skill_name,
+            script_path,
+            tenant_id=tenant_id,
+        )
+        local_skill_root = str(Path(local_skill_dir).resolve())
+        relative_script = Path(local_script).resolve().relative_to(Path(local_skill_root))
+
+        with self._stage_lock:
+            sandbox_skill_dir = self._staged_skills.get(local_skill_root)
+            if sandbox_skill_dir is None:
+                safe_skill_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", skill_name).strip("._") or "skill"
+                skill_digest = hashlib.sha256(local_skill_root.encode("utf-8")).hexdigest()[:16]
+                skill_key = f"{safe_skill_name}-{skill_digest}"
+                sandbox_skill_dir = f"{skills_root}/{skill_key}"
+
+                self._run_container_command(["mkdir", "-p", skills_root], user="0")
+                archive = io.BytesIO()
+                with tarfile.open(fileobj=archive, mode="w") as tar:
+                    tar.add(local_skill_dir, arcname=skill_key, recursive=True)
+                if not self._container.put_archive(skills_root, archive.getvalue()):
+                    raise RuntimeError("Failed to copy the skill directory into the sandbox workspace")
+                self._run_container_command(
+                    ["chmod", "-R", "a+rX", sandbox_skill_dir],
+                    user="0",
+                )
+                self._run_container_command(
+                    ["chmod", "-R", "a-w", sandbox_skill_dir],
+                    user="0",
+                )
+                self._staged_skills[local_skill_root] = sandbox_skill_dir
+
+        return f"{sandbox_skill_dir}/{relative_script.as_posix()}", normalized_script
+
+    def __call__(
+        self,
+        *,
+        manager: Any,
+        skill_name: str,
+        script_path: str,
+        params: Optional[str],
+        tenant_id: Optional[str],
+        working_directory: Optional[str],
+    ) -> str:
+        if not self.available:
+            raise RuntimeError(
+                "Skill scripts require a Docker sandbox, but the configured sandbox executor is unavailable"
+            )
+
+        skills_root = self._resolve_skills_root(working_directory)
+        sandbox_script, normalized_script = self._stage_skill(
+            manager,
+            skill_name,
+            script_path,
+            tenant_id,
+            skills_root,
+        )
+        interpreter = "python" if normalized_script.endswith(".py") else "bash"
+        command = [
+            "timeout",
+            "--signal=KILL",
+            str(self._timeout_seconds),
+            interpreter,
+            sandbox_script,
+            *shlex.split(params or ""),
+        ]
+        workdir = working_directory or "/home/sandbox/workdir/output"
+        output_dir = (
+            f"{working_directory.rstrip('/')}/outputs"
+            if working_directory
+            else workdir
+        )
+        result = self._container.exec_run(
+            command,
+            user="sandbox",
+            workdir=workdir,
+            environment={
+                "NEXENT_WORKSPACE": workdir,
+                "NEXENT_OUTPUT_DIR": output_dir,
+            },
+            demux=True,
+        )
+        exit_code = getattr(result, "exit_code", None)
+        raw_output = getattr(result, "output", b"")
+        if isinstance(raw_output, tuple):
+            stdout, stderr = raw_output
+        else:
+            stdout, stderr = raw_output, b""
+        output = self._output_text(stdout)
+        error_output = self._output_text(stderr)
+        if exit_code == 124 or exit_code == 137:
+            raise TimeoutError(f"Script execution timed out: {normalized_script}")
+        if exit_code != 0:
+            failure_message = error_output or output
+            logger.error(
+                "Sandbox skill script failed skill=%s script=%s exit=%s output=%s",
+                skill_name,
+                normalized_script,
+                exit_code,
+                failure_message,
+            )
+            return json.dumps({
+                "error": failure_message,
+                "output": output if error_output else "",
+            })
+        return output
+
+    def cleanup(self) -> None:
+        """Remove this run's private skill copy from a shared container."""
+        if not self.available:
+            return
+        if not self._root:
+            return
+        try:
+            # Docker archive extraction may preserve root ownership on nested
+            # skill directories. Cleanup is a control-plane operation against
+            # an exact runner-generated path, so use root and verify the result
+            # instead of silently leaving data in a system-scoped container.
+            result = self._container.exec_run(
+                ["rm", "-rf", "--", self._root],
+                user="0",
+            )
+            exit_code = getattr(result, "exit_code", None)
+            if exit_code != 0:
+                output = self._output_text(getattr(result, "output", b""))
+                logger.warning(
+                    "Failed to remove sandbox skill directory %s (exit=%s): %s",
+                    self._root,
+                    exit_code,
+                    output.strip(),
+                )
+        except Exception as exc:
+            logger.warning("Failed to remove sandbox skill directory %s: %s", self._root, exc)
 
 
 def _serialize_tool_bridge_value(value: Any) -> Any:

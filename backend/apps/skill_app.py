@@ -132,7 +132,8 @@ async def install_skills(
     """Install official skills for the current tenant (or a specific tenant for super admin).
 
     Uses ZIP-based installation for each skill name provided.
-    Skills that already exist are skipped.
+    Existing official skills are refreshed from the bundled ZIP. Same-name
+    custom skills are preserved.
     """
     try:
         user_id, current_tenant_id = get_current_user_id(authorization)

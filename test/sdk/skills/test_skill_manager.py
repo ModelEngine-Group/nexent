@@ -957,6 +957,17 @@ class TestSkillManagerCleanupSkillDirectory:
 class TestSkillManagerRunSkillScript:
     """Test SkillManager.run_skill_script method."""
 
+    def test_run_skill_script_rejects_unsupported_resolved_extension(self, mocker):
+        manager = SkillManager(base_skills_dir="/tmp/skills")
+        mocker.patch.object(
+            manager,
+            "resolve_skill_script",
+            return_value=("/tmp/skills/demo", "/tmp/skills/demo/script.js", "script.js"),
+        )
+
+        with pytest.raises(ValueError, match="Unsupported script type: script.js"):
+            manager.run_skill_script("demo", "script.js", tenant_id=None)
+
     def test_run_skill_script_not_found_raises(self):
         """Test running script in non-existent skill raises SkillNotFoundError."""
         with TempSkillDir() as temp:

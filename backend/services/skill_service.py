@@ -3022,7 +3022,8 @@ def install_skills_from_zip_for_tenant(
     and database record creation).
 
     Skills that cannot be found as ZIP files are skipped with a warning.
-    Skills that already exist for the tenant are skipped (not reinstalled).
+    Existing official skills are refreshed from the trusted bundled ZIP;
+    same-name custom skills are preserved.
 
     Args:
         skill_names: List of skill names to install (e.g. ["search-knowledge-base"]).
@@ -3086,15 +3087,29 @@ def install_skills_from_zip_for_tenant(
 
         try:
             existing = skill_db.get_skill_by_name(official_name, tenant_id)
-            if existing:
+            with open(zip_path, "rb") as f:
+                zip_content = f.read()
+
+            if existing and existing.get("source") == "official":
+                service.update_skill_from_file(
+                    skill_name=official_name,
+                    file_content=zip_content,
+                    file_type="zip",
+                    tenant_id=tenant_id,
+                    user_id=None,
+                )
                 logger.info(
-                    f"Skill '{official_name}' already exists for tenant {tenant_id}, skipping"
+                    f"Refreshed official skill '{official_name}' for tenant {tenant_id}"
                 )
                 installed.append(official_name)
                 continue
-
-            with open(zip_path, "rb") as f:
-                zip_content = f.read()
+            if existing:
+                logger.info(
+                    f"Skill '{official_name}' already exists for tenant {tenant_id} "
+                    "with a non-official source, skipping"
+                )
+                installed.append(official_name)
+                continue
 
             # The request name only selects a pre-existing official resource.
             # Persist the canonical name obtained while scanning the trusted directory.
