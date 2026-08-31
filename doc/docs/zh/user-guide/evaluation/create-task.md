@@ -11,6 +11,12 @@
 | **有评测集评测** | 使用已有评测集中的问题运行智能体，适合回归测试和发布前验证 |
 | **无评测集评测** | 由 AI 根据智能体配置生成测试问题后运行智能体，适合快速探索 |
 
+以下为有评测集评测的创建界面示例：
+
+<div style="display: flex; justify-content: left;">
+  <img src="../assets/evaluation/02-create-task-with-set.png" style="width: 75%; height: auto;" alt="有评测集评测的创建评测任务界面" />
+</div>
+
 ## 创建任务
 
 1. 在左侧导航栏选择 **智能体开发 > 智能体评估**，打开 **评估任务** 页签。
