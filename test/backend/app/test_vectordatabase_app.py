@@ -2100,7 +2100,8 @@ async def test_delete_documents_uses_legacy_path_when_lifecycle_lookup_fails(
                 "backend.apps.vectordatabase_app.ElasticSearchService.delete_document_by_scope",
                 new_callable=AsyncMock,
                 return_value={"status": "success", "scope": "full"},
-            ) as mock_delete:
+            ) as mock_delete, \
+            patch("services.tag_management_service.TagManagementService.cleanup_document_assignments"):
         response = client.delete(
             f"/indices/{auth_data['index_name']}/documents",
             params={

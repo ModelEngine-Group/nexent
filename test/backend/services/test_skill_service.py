@@ -190,6 +190,16 @@ sys.modules['consts'] = consts_mock
 sys.modules['consts.const'] = consts_const_mock
 sys.modules['consts.exceptions'] = consts_exceptions_mock
 
+# Skill deletion invokes tag cleanup after the skill record is removed.  Keep
+# this SkillService unit suite isolated from the tag service's separate graph.
+tag_management_service_mock = types.ModuleType('services.tag_management_service')
+tag_management_service_mock.TagManagementService = type(
+    'TagManagementService',
+    (),
+    {'cleanup_resource_assignments': staticmethod(lambda *_args, **_kwargs: 0)},
+)
+sys.modules['services.tag_management_service'] = tag_management_service_mock
+
 # Set up aiofiles mock for async file operations
 import aiofiles
 aiofiles_mock = types.ModuleType('aiofiles')

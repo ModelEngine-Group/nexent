@@ -27,7 +27,10 @@ from database.skill_db import get_skill_by_id
 from database.tool_db import query_all_tools
 from services.asset_owner_visibility import resolve_agent_list_permission
 from services.remote_mcp_service import get_remote_mcp_server_list
-from services.vectordatabase_service import ElasticSearchService
+
+# Imported only when a knowledge-base or document adapter is used.  Keeping the
+# slot patchable preserves the existing isolated adapter test seam.
+ElasticSearchService: Any | None = None
 
 DEFAULT_RESOURCE_LIBRARY_CODE = "default_resource"
 KNOWLEDGE_CONTENT_LIBRARY_CODE = "knowledge_content"
@@ -185,8 +188,12 @@ class ResourceAdapterDependencies:
     list_local_mcps: Callable[..., Awaitable[list[Mapping[str, Any]]] | list[Mapping[str, Any]]] = get_remote_mcp_server_list
     get_market_mcp: Callable[..., Mapping[str, Any] | None] = get_mcp_market_record_by_id
     get_knowledge_base: Callable[..., Mapping[str, Any]] = get_knowledge_record
-    resolve_knowledge_permission: Callable[..., str | None] = ElasticSearchService.resolve_knowledge_base_permission
-    require_knowledge_edit_permission: Callable[..., str] = ElasticSearchService.require_knowledge_base_edit_permission
+    resolve_knowledge_permission: Callable[..., str | None] = field(
+        default_factory=lambda: _resolve_local_knowledge_permission
+    )
+    require_knowledge_edit_permission: Callable[..., str] = field(
+        default_factory=lambda: _require_local_knowledge_edit_permission
+    )
     resolve_document: Callable[..., Mapping[str, Any] | None] = field(
         default_factory=lambda: _resolve_provider_document
     )
@@ -211,6 +218,37 @@ async def _call(callback: Callable[..., T], *args: Any, **kwargs: Any) -> T:
     return result
 
 
+def _resolve_local_knowledge_permission(
+    knowledge_base_id: str, user_id: str, tenant_id: str
+) -> str | None:
+    """Resolve local knowledge permissions without importing vector code at startup."""
+
+    return _get_elasticsearch_service().resolve_knowledge_base_permission(
+        knowledge_base_id, user_id, tenant_id
+    )
+
+
+def _require_local_knowledge_edit_permission(
+    knowledge_base_id: str, user_id: str, tenant_id: str
+) -> str:
+    """Enforce local knowledge edit permission on the document-only path."""
+
+    return _get_elasticsearch_service().require_knowledge_base_edit_permission(
+        knowledge_base_id, user_id, tenant_id
+    )
+
+
+def _get_elasticsearch_service() -> Any:
+    """Load the vector service only for local knowledge/document operations."""
+
+    if ElasticSearchService is not None:
+        return ElasticSearchService
+
+    from services.vectordatabase_service import ElasticSearchService as service
+
+    return service
+
+
 async def _resolve_provider_document(
     *,
     provider: str,
@@ -224,7 +262,7 @@ async def _resolve_provider_document(
     if normalized_provider == LOCAL_DOCUMENT_PROVIDER:
         from services.vectordatabase_service import get_vector_db_core
 
-        files = await ElasticSearchService.list_files(
+        files = await _get_elasticsearch_service().list_files(
             knowledge_base_id,
             include_chunks=False,
             vdb_core=get_vector_db_core(),
@@ -296,9 +334,7 @@ def _resolve_provider_document_permission(
 
     normalized_provider = provider.strip().lower()
     if normalized_provider == LOCAL_DOCUMENT_PROVIDER:
-        return ElasticSearchService.resolve_knowledge_base_permission(
-            knowledge_base_id, user_id, tenant_id
-        )
+        return _resolve_local_knowledge_permission(knowledge_base_id, user_id, tenant_id)
     if normalized_provider == AIDP_DOCUMENT_PROVIDER:
         from ext_components.aidp.consts.aidp_exceptions import (
             AidpKbNotFoundError,
@@ -323,9 +359,7 @@ def _require_provider_document_edit_permission(
 
     normalized_provider = provider.strip().lower()
     if normalized_provider == LOCAL_DOCUMENT_PROVIDER:
-        ElasticSearchService.require_knowledge_base_edit_permission(
-            knowledge_base_id, user_id, tenant_id
-        )
+        _require_local_knowledge_edit_permission(knowledge_base_id, user_id, tenant_id)
         return
     if normalized_provider == AIDP_DOCUMENT_PROVIDER:
         from ext_components.aidp.consts.aidp_exceptions import (

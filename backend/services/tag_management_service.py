@@ -3,7 +3,11 @@
 import logging
 from uuid import uuid4
 
-from consts.const import TAG_DOCUMENT_PROJECTION_ENABLED
+try:
+    from consts.const import TAG_DOCUMENT_PROJECTION_ENABLED
+except ImportError:
+    TAG_DOCUMENT_PROJECTION_ENABLED = False
+
 from consts.exceptions import (
     TagManagementConflictError,
     TagManagementNotFoundError,
