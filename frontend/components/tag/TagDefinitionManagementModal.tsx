@@ -12,6 +12,7 @@ import {
   Progress,
   Select,
   Space,
+  Switch,
   Table,
   Tag,
   Typography,
@@ -40,7 +41,6 @@ interface TagDefinitionManagementModalProps {
 }
 
 interface DefinitionFormValues {
-  definition_key: string;
   definition_name: string;
   selection_mode: TagSelectionMode;
   initial_values?: string[];
@@ -72,6 +72,9 @@ export default function TagDefinitionManagementModal({
     definition: TagDefinition | null;
     editingValue: TagValue | null;
   }>({ open: false, definition: null, editingValue: null });
+  const [definitionPage, setDefinitionPage] = useState(1);
+  const [definitionSearch, setDefinitionSearch] = useState("");
+  const [hasValues, setHasValues] = useState(true);
   const [definitionForm] = Form.useForm<DefinitionFormValues>();
   const [valueForm] = Form.useForm<ValueFormValues>();
 
@@ -79,6 +82,7 @@ export default function TagDefinitionManagementModal({
     if (!open) {
       setDefinitionModalOpen(false);
       setValueModal({ open: false, definition: null, editingValue: null });
+      setDefinitionPage(1);
     }
   }, [open]);
 
@@ -89,9 +93,8 @@ export default function TagDefinitionManagementModal({
       .filter(Boolean);
     try {
       await tagManagementApi.createDefinition(bucketId, {
-        definition_key: values.definition_key,
         definition_name: values.definition_name,
-        selection_mode: values.selection_mode,
+        selection_mode: hasValues ? values.selection_mode : "no_value",
         initial_values: initialValues,
       });
       message.success(t("tagManagement.message.definitionSaved"));
@@ -101,7 +104,7 @@ export default function TagDefinitionManagementModal({
     } catch (error) {
       message.error(error instanceof Error ? error.message : String(error));
     }
-  }, [bucketId, definitionForm, message, refresh, t]);
+  }, [bucketId, definitionForm, hasValues, message, refresh, t]);
 
   const handleUpdateDefinition = useCallback(async () => {
     if (!editingDefinition) return;
@@ -128,6 +131,8 @@ export default function TagDefinitionManagementModal({
   const openCreateDefinition = useCallback(() => {
     setEditingDefinition(null);
     definitionForm.resetFields();
+    setHasValues(true);
+    definitionForm.setFieldValue("selection_mode", "multi_select");
     setDefinitionModalOpen(true);
   }, [definitionForm]);
 
@@ -135,10 +140,10 @@ export default function TagDefinitionManagementModal({
     (definition: TagDefinition) => {
       setEditingDefinition(definition);
       definitionForm.setFieldsValue({
-        definition_key: definition.definition_key,
         definition_name: definition.definition_name,
         selection_mode: definition.selection_mode,
       });
+      setHasValues(definition.selection_mode !== "no_value");
       setDefinitionModalOpen(true);
     },
     [definitionForm]
@@ -161,40 +166,20 @@ export default function TagDefinitionManagementModal({
     [bucketId, message, refresh]
   );
 
-  const reorderDefinition = useCallback(
-    async (definition: TagDefinition, direction: -1 | 1) => {
-      if (!definitions) return;
-      const siblings = [...definitions].sort(
-        (a, b) => a.sort_order - b.sort_order
-      );
-      const index = siblings.findIndex(
-        (item) => item.definition_id === definition.definition_id
-      );
-      const swapWith = siblings[index + direction];
-      if (!swapWith) return;
+  const moveDefinitionToTop = useCallback(
+    async (definition: TagDefinition) => {
       try {
-        await Promise.all([
-          tagManagementApi.updateDefinitionOrder(
-            bucketId,
-            definition.definition_id,
-            {
-              sort_order: swapWith.sort_order,
-            }
-          ),
-          tagManagementApi.updateDefinitionOrder(
-            bucketId,
-            swapWith.definition_id,
-            {
-              sort_order: definition.sort_order,
-            }
-          ),
-        ]);
+        await tagManagementApi.moveDefinitionToTop(
+          bucketId,
+          definition.definition_id
+        );
+        setDefinitionPage(1);
         void refresh();
       } catch (error) {
         message.error(error instanceof Error ? error.message : String(error));
       }
     },
-    [bucketId, definitions, message, refresh]
+    [bucketId, message, refresh]
   );
 
   const deleteDefinition = useCallback(
@@ -365,7 +350,13 @@ export default function TagDefinitionManagementModal({
       key: "selection_mode",
       width: 140,
       render: (mode: TagSelectionMode) => (
-        <Tag>{mode === "single_select" ? "Single" : "Multi"}</Tag>
+        <Tag>
+          {mode === "no_value"
+            ? t("tagManagement.form.noValue")
+            : mode === "single_select"
+              ? t("tagManagement.form.singleSelect")
+              : t("tagManagement.form.multiSelect")}
+        </Tag>
       ),
     },
     {
@@ -383,15 +374,23 @@ export default function TagDefinitionManagementModal({
       width: 180,
       render: (_, definition) => (
         <Progress
-          percent={Math.min(
-            100,
-            Math.round(
-              (definition.active_value_count / definition.value_capacity) * 100
-            )
-          )}
+          percent={
+            definition.selection_mode === "no_value"
+              ? 0
+              : Math.min(
+                  100,
+                  Math.round(
+                    (definition.active_value_count /
+                      definition.value_capacity) *
+                      100
+                  )
+                )
+          }
           size="small"
           format={() =>
-            `${definition.active_value_count}/${definition.value_capacity}`
+            definition.selection_mode === "no_value"
+              ? "—"
+              : `${definition.active_value_count}/${definition.value_capacity}`
           }
         />
       ),
@@ -399,7 +398,7 @@ export default function TagDefinitionManagementModal({
     {
       title: t("tagManagement.column.actions"),
       key: "actions",
-      width: 300,
+      width: 260,
       render: (_, definition) => (
         <Space size="small">
           <Button
@@ -420,17 +419,13 @@ export default function TagDefinitionManagementModal({
           </Button>
           <Button
             size="small"
-            disabled={!canManage}
-            onClick={() => reorderDefinition(definition, -1)}
+            disabled={
+              !canManage ||
+              definitions?.[0]?.definition_id === definition.definition_id
+            }
+            onClick={() => moveDefinitionToTop(definition)}
           >
-            ↑
-          </Button>
-          <Button
-            size="small"
-            disabled={!canManage}
-            onClick={() => reorderDefinition(definition, 1)}
-          >
-            ↓
+            {t("tagManagement.action.moveToTop")}
           </Button>
           <Popconfirm
             title={t("tagManagement.confirm.deleteDefinition")}
@@ -468,13 +463,32 @@ export default function TagDefinitionManagementModal({
           </Button>
         )}
       </div>
+      <Input.Search
+        allowClear
+        className="mb-3 max-w-sm"
+        placeholder={t("tagManagement.form.searchTags")}
+        value={definitionSearch}
+        onChange={(event) => {
+          setDefinitionSearch(event.target.value);
+          setDefinitionPage(1);
+        }}
+      />
       <Table
         rowKey="definition_id"
-        dataSource={definitions ?? []}
+        dataSource={(definitions ?? []).filter((definition) => {
+          const search = definitionSearch.trim().toLocaleLowerCase();
+          return (
+            !search ||
+            definition.definition_name.toLocaleLowerCase().includes(search) ||
+            definition.definition_key.toLocaleLowerCase().includes(search)
+          );
+        })}
         columns={columns}
         loading={loading}
         size="small"
         expandable={{
+          rowExpandable: (definition) =>
+            definition.selection_mode !== "no_value",
           expandedRowRender: (definition) => (
             <div className="p-2">
               <div className="mb-2 flex items-center justify-end">
@@ -504,7 +518,12 @@ export default function TagDefinitionManagementModal({
             </div>
           ),
         }}
-        pagination={{ pageSize: 10, size: "small" }}
+        pagination={{
+          current: definitionPage,
+          pageSize: 10,
+          size: "small",
+          onChange: setDefinitionPage,
+        }}
         scroll={{ y: 500 }}
       />
 
@@ -530,38 +549,42 @@ export default function TagDefinitionManagementModal({
       >
         <Form form={definitionForm} layout="vertical">
           <Form.Item
-            name="definition_key"
-            label={t("tagManagement.form.definitionKey")}
-            rules={[{ required: true }]}
-          >
-            <Input disabled={Boolean(editingDefinition)} />
-          </Form.Item>
-          <Form.Item
             name="definition_name"
             label={t("tagManagement.form.definitionName")}
             rules={[{ required: true }]}
           >
-            <Input />
-          </Form.Item>
-          <Form.Item
-            name="selection_mode"
-            label={t("tagManagement.form.selectionMode")}
-            rules={[{ required: true }]}
-          >
-            <Select
-              options={[
-                {
-                  label: t("tagManagement.form.multiSelect"),
-                  value: "multi_select",
-                },
-                {
-                  label: t("tagManagement.form.singleSelect"),
-                  value: "single_select",
-                },
-              ]}
+            <Input
+              addonAfter={
+                !editingDefinition ? (
+                  <Space size={4}>
+                    <span>{t("tagManagement.form.hasValues")}</span>
+                    <Switch checked={hasValues} onChange={setHasValues} />
+                  </Space>
+                ) : null
+              }
             />
           </Form.Item>
-          {!editingDefinition && (
+          {hasValues && (
+            <Form.Item
+              name="selection_mode"
+              label={t("tagManagement.form.selectionMode")}
+              rules={[{ required: true }]}
+            >
+              <Select
+                options={[
+                  {
+                    label: t("tagManagement.form.multiSelect"),
+                    value: "multi_select",
+                  },
+                  {
+                    label: t("tagManagement.form.singleSelect"),
+                    value: "single_select",
+                  },
+                ]}
+              />
+            </Form.Item>
+          )}
+          {!editingDefinition && hasValues && (
             <Form.Item
               name="initial_values"
               label={t("tagManagement.form.initialValues")}

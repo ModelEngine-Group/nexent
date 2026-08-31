@@ -518,7 +518,7 @@ CREATE TABLE IF NOT EXISTS nexent.tag_definition (
     normalized_name TEXT COLLATE "C" GENERATED ALWAYS AS (
         lower(btrim(definition_name) COLLATE "C")
     ) STORED,
-    selection_mode VARCHAR(20) NOT NULL CHECK (selection_mode IN ('single_select', 'multi_select')),
+    selection_mode VARCHAR(20) NOT NULL CHECK (selection_mode IN ('single_select', 'multi_select', 'no_value')),
     sort_order INTEGER NOT NULL DEFAULT 0,
     status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
     create_time TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,

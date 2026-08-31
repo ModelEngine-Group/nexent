@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 
-import { Empty, Select, Space, Tag, Typography } from "antd";
+import { Checkbox, Empty, Select, Space, Tag, Typography } from "antd";
 import { useTranslation } from "react-i18next";
 
 import {
@@ -80,6 +80,7 @@ export default function TagFilterControls({
           .map((tagValue) => ({
             definitionId: definition.definition_id,
             definitionName,
+            isNoValue: definition.selection_mode === "no_value",
             valueId: tagValue.value_id,
             valueName: getTagValueDisplayName(
               definition.definition_key,
@@ -130,6 +131,8 @@ export default function TagFilterControls({
       value: tagValue.value_id,
     }));
   const isMultiSelect = activeDefinition.selection_mode === "multi_select";
+  const isNoValue = activeDefinition.selection_mode === "no_value";
+  const noValueId = valueOptions[0]?.value;
 
   return (
     <Space direction="vertical" className="w-full">
@@ -153,7 +156,9 @@ export default function TagFilterControls({
                   );
                 }}
               >
-                {tag.definitionName}: {tag.valueName}
+                {tag.isNoValue
+                  ? tag.definitionName
+                  : `${tag.definitionName}: ${tag.valueName}`}
               </Tag>
             ))}
           </Space>
@@ -189,28 +194,43 @@ export default function TagFilterControls({
         <Typography.Text type="secondary" className="text-xs">
           {definitionName}
         </Typography.Text>
-        <Select
-          mode={isMultiSelect ? "multiple" : undefined}
-          allowClear
-          showSearch
-          optionFilterProp="label"
-          placeholder={t("tagManagement.form.assignPlaceholder")}
-          options={valueOptions}
-          value={isMultiSelect ? selectedValueIds : selectedValueIds[0]}
-          onChange={(nextValue: number | number[] | undefined) => {
-            const valueIds = Array.isArray(nextValue)
-              ? nextValue
-              : nextValue == null
-                ? []
-                : [nextValue];
-            handleChange(activeDefinition.definition_id, valueIds);
-          }}
-          disabled={disabled}
-          style={{ width: "100%" }}
-          aria-label={t("tagManagement.filter.ariaLabel", {
-            definition: definitionName,
-          })}
-        />
+        {isNoValue ? (
+          <Checkbox
+            checked={Boolean(noValueId && selectedValueIds.includes(noValueId))}
+            disabled={disabled || !noValueId}
+            onChange={(event) =>
+              handleChange(
+                activeDefinition.definition_id,
+                event.target.checked && noValueId ? [noValueId] : []
+              )
+            }
+          >
+            {definitionName}
+          </Checkbox>
+        ) : (
+          <Select
+            mode={isMultiSelect ? "multiple" : undefined}
+            allowClear
+            showSearch
+            optionFilterProp="label"
+            placeholder={t("tagManagement.form.assignPlaceholder")}
+            options={valueOptions}
+            value={isMultiSelect ? selectedValueIds : selectedValueIds[0]}
+            onChange={(nextValue: number | number[] | undefined) => {
+              const valueIds = Array.isArray(nextValue)
+                ? nextValue
+                : nextValue == null
+                  ? []
+                  : [nextValue];
+              handleChange(activeDefinition.definition_id, valueIds);
+            }}
+            disabled={disabled}
+            style={{ width: "100%" }}
+            aria-label={t("tagManagement.filter.ariaLabel", {
+              definition: definitionName,
+            })}
+          />
+        )}
       </div>
     </Space>
   );

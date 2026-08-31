@@ -344,6 +344,24 @@ def update_tag_definition_order(
     )
 
 
+@router.patch(
+    "/{bucket_id}/definitions/{definition_id}/top",
+    response_model=TagDefinitionResponse,
+    responses=TAG_CONFLICT_RESPONSES,
+)
+def move_tag_definition_to_top(
+    bucket_id: int,
+    definition_id: int,
+    authorization: str | None = Header(None),
+):
+    user_id, tenant_id, _ = _require_manage_context(authorization)
+    return _run(
+        lambda: TagManagementService.move_definition_to_top(
+            tenant_id, bucket_id, definition_id, user_id
+        )
+    )
+
+
 @router.get(
     "/{bucket_id}/definitions/{definition_id}/usage",
     response_model=TagDefinitionUsageResponse,

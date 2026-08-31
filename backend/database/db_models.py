@@ -2591,7 +2591,7 @@ class TagDefinition(TableBase):
     __tablename__ = "tag_definition"
     __table_args__ = (
         CheckConstraint("btrim(tenant_id) <> ''"),
-        CheckConstraint("selection_mode IN ('single_select', 'multi_select')"),
+        CheckConstraint("selection_mode IN ('single_select', 'multi_select', 'no_value')"),
         CheckConstraint("status IN ('active', 'disabled')"),
         CheckConstraint("delete_flag IN ('N', 'Y')"),
         UniqueConstraint("tenant_id", "definition_id", name="uq_tag_definition_tenant_id"),

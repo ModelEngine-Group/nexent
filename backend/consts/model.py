@@ -169,15 +169,17 @@ class ModelResponse(BaseModel):
 
 
 class TagDefinitionCreateRequest(BaseModel):
-    definition_key: str = Field(..., min_length=1, max_length=100)
+    definition_key: str | None = Field(None, min_length=1, max_length=100)
     definition_name: str = Field(..., min_length=1, max_length=255)
-    selection_mode: Literal["single_select", "multi_select"]
-    initial_values: list[str] = Field(..., max_length=1000)
-    sort_order: int = 0
+    selection_mode: Literal["single_select", "multi_select", "no_value"]
+    initial_values: list[str] = Field(default_factory=list, max_length=1000)
+    sort_order: int | None = None
 
     @field_validator("definition_key", "definition_name")
     @classmethod
-    def strip_required_text(cls, value: str) -> str:
+    def strip_required_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         normalized = value.strip()
         if not normalized:
             raise ValueError("Value must not be empty")
@@ -186,8 +188,6 @@ class TagDefinitionCreateRequest(BaseModel):
     @field_validator("initial_values")
     @classmethod
     def validate_initial_values(cls, values: list[str]) -> list[str]:
-        if not values:
-            raise ValueError("At least one tag value is required")
         normalized_values = []
         seen = set()
         for value in values:
@@ -201,10 +201,18 @@ class TagDefinitionCreateRequest(BaseModel):
             normalized_values.append(normalized)
         return normalized_values
 
+    @model_validator(mode="after")
+    def validate_selection_mode_values(self):
+        if self.selection_mode == "no_value" and self.initial_values:
+            raise ValueError("A no-value tag definition cannot contain tag values")
+        if self.selection_mode != "no_value" and not self.initial_values:
+            raise ValueError("At least one tag value is required")
+        return self
+
 
 class TagDefinitionUpdateRequest(BaseModel):
     definition_name: str | None = Field(None, min_length=1, max_length=255)
-    selection_mode: Literal["single_select", "multi_select"] | None = None
+    selection_mode: Literal["single_select", "multi_select", "no_value"] | None = None
 
     @field_validator("definition_name")
     @classmethod
@@ -270,7 +278,7 @@ class TagDefinitionResponse(TagAuditResponse):
     bucket_id: int
     definition_key: str
     definition_name: str
-    selection_mode: Literal["single_select", "multi_select"]
+    selection_mode: Literal["single_select", "multi_select", "no_value"]
     sort_order: int
     status: Literal["active", "disabled"]
     active_value_count: int = Field(..., ge=0, le=1000)
@@ -375,7 +383,7 @@ class TagAssignmentValueResponse(BaseModel):
     definition_id: int
     definition_key: str
     definition_name: str
-    selection_mode: Literal["single_select", "multi_select"]
+    selection_mode: Literal["single_select", "multi_select", "no_value"]
     value_id: int
     display_value: str
     value_status: Literal["active", "disabled"]

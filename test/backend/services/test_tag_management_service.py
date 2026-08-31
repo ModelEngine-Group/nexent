@@ -75,6 +75,35 @@ def test_list_and_definition_operations_forward_tenant_and_actor(monkeypatch):
         )
 
 
+def test_create_definition_generates_a_key_when_the_client_omits_one(monkeypatch):
+    db = MagicMock()
+    monkeypatch.setattr("services.tag_management_service.TagManagementDB", db)
+    monkeypatch.setattr(
+        "services.tag_management_service.uuid4",
+        lambda: SimpleNamespace(hex="generatedkey"),
+    )
+    create_request = request(
+        definition_key=None,
+        definition_name="Featured",
+        selection_mode="no_value",
+        initial_values=[],
+        sort_order=None,
+    )
+
+    TagManagementService.create_definition("tenant-a", 1, create_request, "user-1")
+
+    db.create_definition.assert_called_once_with(
+        "tenant-a",
+        1,
+        "custom_generatedkey",
+        "Featured",
+        "no_value",
+        [],
+        None,
+        "user-1",
+    )
+
+
 def test_definition_update_conflict_and_delete_conflict_have_structured_details(monkeypatch):
     db = MagicMock()
     monkeypatch.setattr("services.tag_management_service.TagManagementDB", db)
@@ -106,11 +135,15 @@ def test_definition_status_order_and_usage_delegate(monkeypatch):
     monkeypatch.setattr("services.tag_management_service.TagManagementDB", db)
     db.set_definition_status.return_value = {"status": "disabled"}
     db.set_definition_order.return_value = {"sort_order": 5}
+    db.move_definition_to_top.return_value = {"sort_order": 0}
     db.get_definition_usage.return_value = {"definition_id": 9}
     assert TagManagementService.set_definition_status("tenant-a", 1, 9, "disabled", "user-1") == {
         "status": "disabled"
     }
     assert TagManagementService.set_definition_order("tenant-a", 1, 9, 5, "user-1") == {"sort_order": 5}
+    assert TagManagementService.move_definition_to_top("tenant-a", 1, 9, "user-1") == {
+        "sort_order": 0
+    }
     assert TagManagementService.get_definition_usage("tenant-a", 1, 9) == {"definition_id": 9}
 
 

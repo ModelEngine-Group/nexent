@@ -97,6 +97,12 @@ export const tagManagementApi = {
       { method: "PATCH", ...jsonBody(payload) }
     ),
 
+  moveDefinitionToTop: (bucketId: number, definitionId: number) =>
+    requestJson<TagDefinition>(
+      `${TAG_ENDPOINT}/${bucketId}/definitions/${definitionId}/top`,
+      { method: "PATCH" }
+    ),
+
   getDefinitionUsage: (bucketId: number, definitionId: number) =>
     requestJson<TagDefinitionUsage>(
       `${TAG_ENDPOINT}/${bucketId}/definitions/${definitionId}/usage`

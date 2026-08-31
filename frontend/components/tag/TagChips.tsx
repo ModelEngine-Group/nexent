@@ -45,13 +45,18 @@ export default function TagChips({
           assignment.display_value,
           t
         );
-        const label = `${definitionName}: ${valueName}`;
+        const isNoValue = assignment.selection_mode === "no_value";
+        const label = isNoValue
+          ? definitionName
+          : `${definitionName}: ${valueName}`;
         return (
           <Tooltip
             key={`${assignment.definition_id}:${assignment.value_id}`}
             title={label}
           >
-            <Tag aria-label={label}>{valueName}</Tag>
+            <Tag aria-label={label}>
+              {isNoValue ? definitionName : valueName}
+            </Tag>
           </Tooltip>
         );
       })}

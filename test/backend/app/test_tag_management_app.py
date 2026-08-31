@@ -91,6 +91,25 @@ def test_tag_definition_requires_at_least_one_initial_value_with_clear_message()
         )
 
 
+def test_no_value_tag_definition_accepts_an_empty_value_list_and_rejects_values():
+    request = TagDefinitionCreateRequest(
+        definition_name="Featured",
+        selection_mode="no_value",
+    )
+    assert request.definition_key is None
+    assert request.initial_values == []
+
+    with pytest.raises(
+        PydanticValidationError,
+        match="no-value tag definition cannot contain tag values",
+    ):
+        TagDefinitionCreateRequest(
+            definition_name="Featured",
+            selection_mode="no_value",
+            initial_values=["ignored"],
+        )
+
+
 def test_run_maps_not_found_validation_and_conflict_to_http_schemas():
     with pytest.raises(HTTPException) as not_found:
         tag_app._run(lambda: (_ for _ in ()).throw(TagManagementNotFoundError("Tag value not found")))
@@ -150,6 +169,10 @@ def test_all_management_endpoints_forward_auth_tenant_and_audit_ready_responses(
     assert tag_app.update_tag_definition_status(1, 9, TagStatusUpdateRequest(status="disabled"), AUTHORIZATION)["status"] == "disabled"
     monkeypatch.setattr(service, "set_definition_order", lambda *args: definition | {"sort_order": 8})
     assert tag_app.update_tag_definition_order(1, 9, TagOrderUpdateRequest(sort_order=8), AUTHORIZATION)["sort_order"] == 8
+    move_definition_to_top = MagicMock(return_value=definition | {"sort_order": 0})
+    monkeypatch.setattr(service, "move_definition_to_top", move_definition_to_top)
+    assert tag_app.move_tag_definition_to_top(1, 9, AUTHORIZATION)["sort_order"] == 0
+    move_definition_to_top.assert_called_once_with("tenant-from-auth", 1, 9, "user-from-auth")
     monkeypatch.setattr(service, "get_definition_usage", lambda *args: {"definition_id": 9, "active_value_count": 1, "active_usage_count": 0, "value_capacity": 1000})
     assert tag_app.get_tag_definition_usage(1, 9, AUTHORIZATION)["definition_id"] == 9
     monkeypatch.setattr(service, "delete_definition", lambda *args: None)

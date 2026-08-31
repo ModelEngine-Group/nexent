@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 import pytest
 from consts.exceptions import TagManagementConflictError, TagManagementNotFoundError
 from database.db_models import ResourceTagAssignment, TagDefinition
-from database.tag_management_db import TagManagementDB
+from database.tag_management_db import NO_VALUE_TAG_NORMALIZED_VALUE, TagManagementDB
 
 
 def record(**values):
@@ -218,6 +218,72 @@ def test_create_definition_creates_controlled_values_with_normalized_names(monke
     assert session.query.call_args_list[0]
 
 
+def test_create_no_value_definition_creates_one_internal_controlled_value(monkeypatch):
+    bucket_query = query(one=record(bucket_id=1, bucket_key="default_resource"))
+    definition_count_query = query(count=0)
+    session, context = db_context(bucket_query, definition_count_query)
+
+    def assign_ids():
+        for item in session.add.call_args_list:
+            if isinstance(item.args[0], TagDefinition):
+                item.args[0].definition_id = 9
+        for item in session.add_all.call_args_list:
+            for value in item.args[0]:
+                value.value_id = 11
+
+    session.flush.side_effect = assign_ids
+    install_context(monkeypatch, context)
+
+    result = TagManagementDB.create_definition(
+        "tenant-a", 1, "custom_featured", "Featured", "no_value", [], 4, "user-1"
+    )
+
+    assert result["selection_mode"] == "no_value"
+    assert result["active_value_count"] == 1
+    assert result["values"] == [
+        {
+            "value_id": 11,
+            "display_value": "Featured",
+            "normalized_value": NO_VALUE_TAG_NORMALIZED_VALUE,
+            "sort_order": 0,
+            "status": "active",
+            "created_by": "user-1",
+            "updated_by": "user-1",
+            "create_time": None,
+            "update_time": None,
+        }
+    ]
+
+
+def test_create_definition_without_order_appends_after_existing_definitions(monkeypatch):
+    bucket_query = query(one=record(bucket_id=1, bucket_key="default_resource"))
+    definition_count_query = query(count=1)
+    max_order_query = query()
+    max_order_query.scalar.return_value = 4
+    session, context = db_context(
+        bucket_query,
+        definition_count_query,
+        max_order_query,
+    )
+
+    def assign_ids():
+        for item in session.add.call_args_list:
+            if isinstance(item.args[0], TagDefinition):
+                item.args[0].definition_id = 10
+        for item in session.add_all.call_args_list:
+            for value in item.args[0]:
+                value.value_id = 1
+
+    session.flush.side_effect = assign_ids
+    install_context(monkeypatch, context)
+
+    result = TagManagementDB.create_definition(
+        "tenant-a", 1, "color", "Color", "single_select", ["Red"], None, "user-1"
+    )
+
+    assert result["sort_order"] == 5
+
+
 def test_create_value_reports_capacity_and_normalizes_display_value(monkeypatch):
     bucket_query = query(one=record(bucket_id=1, bucket_key="default_resource"))
     definition_query = query(one=record(definition_id=9, bucket_id=1, tenant_id="tenant-a"))
@@ -340,6 +406,55 @@ def test_definition_status_order_usage_and_delete_protection(monkeypatch):
         "active_usage_count": 0,
     }
     assert definition.delete_flag == "Y"
+
+
+def test_move_definition_to_top_reindexes_all_active_definitions(monkeypatch):
+    bucket = record(bucket_id=1, bucket_key="default_resource")
+    first = record(
+        definition_id=1,
+        bucket_id=1,
+        tenant_id="tenant-a",
+        definition_key="first",
+        definition_name="First",
+        selection_mode="single_select",
+        sort_order=0,
+    )
+    target = record(
+        definition_id=2,
+        bucket_id=1,
+        tenant_id="tenant-a",
+        definition_key="target",
+        definition_name="Target",
+        selection_mode="single_select",
+        sort_order=1,
+    )
+    last = record(
+        definition_id=3,
+        bucket_id=1,
+        tenant_id="tenant-a",
+        definition_key="last",
+        definition_name="Last",
+        selection_mode="single_select",
+        sort_order=2,
+    )
+    bucket_query = query(one=bucket)
+    definitions_query = query(all_=[first, target, last])
+    value_count_query = query(count=2)
+    session, context = db_context(
+        bucket_query,
+        definitions_query,
+        value_count_query,
+    )
+    install_context(monkeypatch, context)
+
+    result = TagManagementDB.move_definition_to_top("tenant-a", 1, 2, "user-2")
+
+    assert [target.sort_order, first.sort_order, last.sort_order] == [0, 1, 2]
+    assert {item.updated_by for item in [first, target, last]} == {"user-2"}
+    assert result["definition_id"] == 2
+    assert result["sort_order"] == 0
+    definitions_query.with_for_update.assert_called_once_with()
+    session.flush.assert_called_once_with()
 
 
 def test_value_rename_preserves_id_status_order_usage_and_delete(monkeypatch):

@@ -26,6 +26,7 @@ ACTIVE_DELETE_FLAG = "N"
 DELETED_DELETE_FLAG = "Y"
 ACTIVE_STATUS = "active"
 RESOURCE_ASSIGNMENT_LIMIT = 100
+NO_VALUE_TAG_NORMALIZED_VALUE = "__no_value__"
 
 
 def _set_audit_fields(record: Any, actor_id: str) -> None:
@@ -432,10 +433,19 @@ class TagManagementDB:
         definition_name: str,
         selection_mode: str,
         initial_values: list[str],
-        sort_order: int,
+        sort_order: int | None,
         actor_id: str,
     ) -> dict[str, Any]:
-        normalized_values = [value.strip().lower() for value in initial_values]
+        if selection_mode == "no_value":
+            if initial_values:
+                raise ValidationError("A no-value tag definition cannot contain tag values")
+            normalized_values = [NO_VALUE_TAG_NORMALIZED_VALUE]
+            stored_values = [definition_name.strip()]
+        else:
+            if not initial_values:
+                raise ValidationError("At least one tag value is required")
+            normalized_values = [value.strip().lower() for value in initial_values]
+            stored_values = initial_values
         if len(set(normalized_values)) != len(normalized_values):
             raise TagManagementConflictError(
                 "Tag values must be unique after normalization"
@@ -461,6 +471,20 @@ class TagManagementDB:
                         "scope": "definition",
                     },
                 )
+
+            if sort_order is None:
+                highest_sort_order = (
+                    session.query(func.max(TagDefinition.sort_order))
+                    .filter(
+                        TagDefinition.tenant_id == tenant_id,
+                        TagDefinition.bucket_id == bucket_id,
+                        TagDefinition.delete_flag == ACTIVE_DELETE_FLAG,
+                    )
+                    .scalar()
+                )
+                sort_order = (
+                    highest_sort_order if highest_sort_order is not None else -1
+                ) + 1
 
             definition = TagDefinition(
                 tenant_id=tenant_id,
@@ -490,7 +514,7 @@ class TagManagementDB:
                     delete_flag=ACTIVE_DELETE_FLAG,
                 )
                 for index, (display_value, normalized_value) in enumerate(
-                    zip(initial_values, normalized_values)
+                    zip(stored_values, normalized_values)
                 )
             ]
             session.add_all(values)
@@ -592,6 +616,52 @@ class TagManagementDB:
             return _definition_data(
                 definition,
                 TagManagementDB._active_value_count(session, tenant_id, definition_id),
+            )
+
+    @staticmethod
+    def move_definition_to_top(
+        tenant_id: str,
+        bucket_id: int,
+        definition_id: int,
+        actor_id: str,
+    ) -> dict[str, Any]:
+        with get_db_session() as session:
+            TagManagementDB._get_bucket(
+                session, tenant_id, bucket_id, for_update=True
+            )
+            definitions = (
+                session.query(TagDefinition)
+                .filter(
+                    TagDefinition.tenant_id == tenant_id,
+                    TagDefinition.bucket_id == bucket_id,
+                    TagDefinition.delete_flag == ACTIVE_DELETE_FLAG,
+                )
+                .order_by(TagDefinition.sort_order, TagDefinition.definition_id)
+                .with_for_update()
+                .all()
+            )
+            target = next(
+                (
+                    definition
+                    for definition in definitions
+                    if definition.definition_id == definition_id
+                ),
+                None,
+            )
+            if target is None:
+                raise TagManagementNotFoundError("Tag definition not found")
+
+            for index, definition in enumerate(
+                [target, *(item for item in definitions if item is not target)]
+            ):
+                definition.sort_order = index
+                _set_audit_fields(definition, actor_id)
+            session.flush()
+            return _definition_data(
+                target,
+                TagManagementDB._active_value_count(
+                    session, tenant_id, definition_id
+                ),
             )
 
     @staticmethod

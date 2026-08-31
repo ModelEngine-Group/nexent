@@ -1,6 +1,7 @@
 """Business operations for fixed tenant tag libraries."""
 
 import logging
+from uuid import uuid4
 
 from consts.const import TAG_DOCUMENT_PROJECTION_ENABLED
 from consts.exceptions import (
@@ -71,7 +72,7 @@ class TagManagementService:
             return TagManagementDB.create_definition(
                 tenant_id,
                 bucket_id,
-                request.definition_key,
+                request.definition_key or f"custom_{uuid4().hex}",
                 request.definition_name,
                 request.selection_mode,
                 request.initial_values,
@@ -132,6 +133,18 @@ class TagManagementService:
     ) -> dict:
         return TagManagementDB.set_definition_order(
             tenant_id, bucket_id, definition_id, sort_order, actor_id
+        )
+
+    @classmethod
+    def move_definition_to_top(
+        cls,
+        tenant_id: str,
+        bucket_id: int,
+        definition_id: int,
+        actor_id: str,
+    ) -> dict:
+        return TagManagementDB.move_definition_to_top(
+            tenant_id, bucket_id, definition_id, actor_id
         )
 
     @classmethod

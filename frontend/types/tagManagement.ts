@@ -6,7 +6,7 @@
  */
 
 export type TagStatus = "active" | "disabled";
-export type TagSelectionMode = "single_select" | "multi_select";
+export type TagSelectionMode = "single_select" | "multi_select" | "no_value";
 export type TagBucketKey = "default_resource" | "knowledge_content";
 export type TagResourceType =
   | "agent"
@@ -184,7 +184,7 @@ export interface TagResourceFilterResult {
 // ---- Request payloads -------------------------------------------------------
 
 export interface TagDefinitionCreatePayload {
-  definition_key: string;
+  definition_key?: string;
   definition_name: string;
   selection_mode: TagSelectionMode;
   initial_values: string[];
