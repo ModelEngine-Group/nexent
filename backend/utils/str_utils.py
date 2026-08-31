@@ -1,5 +1,8 @@
+import logging
 import re
 from typing import List, Optional
+
+logger = logging.getLogger(__name__)
 
 
 def remove_think_blocks(text: str) -> str:
@@ -36,4 +39,16 @@ def convert_string_to_list(items_str: Optional[str]) -> List[int]:
     """
     if not items_str or items_str.strip() == "":
         return []
-    return [int(item.strip()) for item in items_str.split(",") if item.strip().isdigit()]
+
+    items = []
+    for raw_item in items_str.split(","):
+        item = raw_item.strip()
+        if not item:
+            continue
+        try:
+            items.append(int(item))
+        except ValueError:
+            logger.warning(
+                "convert_string_to_list: dropping non-integer entry %r", item
+            )
+    return items
