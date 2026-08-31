@@ -94,6 +94,7 @@ export default defineConfig({
               { text: "Home Page", link: "/en/user-guide/home-page" },
               { text: "Start Chat", link: "/en/user-guide/start-chat" },
               { text: "Auto Tasks", link: "/en/user-guide/auto-tasks" },
+              { text: "Agent Evaluation", link: "/en/user-guide/evaluation" },
               {
                 text: "Agent Development",
                 link: "/en/user-guide/agent-development",
@@ -311,6 +312,7 @@ export default defineConfig({
               { text: "首页", link: "/zh/user-guide/home-page" },
               { text: "开始问答", link: "/zh/user-guide/start-chat" },
               { text: "自动任务", link: "/zh/user-guide/auto-tasks" },
+              { text: "智能体评估", link: "/zh/user-guide/evaluation" },
               {
                 text: "智能体开发",
                 link: "/zh/user-guide/agent-development",
