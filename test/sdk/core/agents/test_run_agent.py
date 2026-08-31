@@ -312,6 +312,11 @@ with patch.dict("sys.modules", module_mocks):
         ToolConfig,
     )  # noqa: E402
     import sdk.nexent.core.agents.run_agent as run_agent  # noqa: E402
+    from sdk.nexent.core.agents.mcp_errors import (  # noqa: E402
+        MCPToolTimeoutError,
+        is_mcp_timeout_error,
+        propagate_mcp_timeout,
+    )
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -821,6 +826,70 @@ def test_normalize_mcp_config():
 
     with pytest.raises(ValueError, match="Invalid MCP host item type"):
         run_agent._normalize_mcp_config(None)
+
+
+def test_resolve_mcp_request_timeout_seconds_uses_valid_run_value(basic_agent_run_info):
+    basic_agent_run_info.mcp_request_timeout_seconds = 3.5
+
+    assert run_agent._resolve_mcp_request_timeout_seconds(basic_agent_run_info) == 3.5
+
+
+def test_mcp_timeout_classifier_detects_executor_wrapped_error():
+    wrapped_error = RuntimeError(
+        "Code execution failed: MCPToolTimeoutError: "
+        "MCP tool request timed out after 10 seconds"
+    )
+
+    assert run_agent._is_mcp_timeout_error(wrapped_error)
+    propagated = propagate_mcp_timeout(wrapped_error)
+    assert isinstance(propagated, MCPToolTimeoutError)
+    assert isinstance(propagated, TimeoutError)
+
+
+def test_mcp_timeout_classifier_handles_native_and_legacy_errors():
+    """Recognize native timeout types, marker errors, and MCP SDK messages."""
+    native = MCPToolTimeoutError("native timeout")
+    assert is_mcp_timeout_error(native)
+    assert propagate_mcp_timeout(native) is native
+
+    assert is_mcp_timeout_error(TimeoutError("request timed out"))
+    assert is_mcp_timeout_error(asyncio.TimeoutError("request timed out"))
+    assert is_mcp_timeout_error(
+        RuntimeError("Timed out while waiting for response to ClientRequest")
+    )
+    assert is_mcp_timeout_error(
+        RuntimeError("Timed out while waiting for response to CallToolRequest")
+    )
+
+    wrapped = RuntimeError("outer wrapper")
+    wrapped.__cause__ = RuntimeError(
+        "Timed out while waiting for response to ClientRequest"
+    )
+    assert is_mcp_timeout_error(wrapped)
+    assert not is_mcp_timeout_error(RuntimeError("ordinary MCP failure"))
+
+
+@pytest.mark.parametrize("invalid_timeout", [None, 0, -1, "invalid", float("inf")])
+def test_resolve_mcp_request_timeout_seconds_uses_safe_default(
+    basic_agent_run_info,
+    invalid_timeout,
+):
+    basic_agent_run_info.mcp_request_timeout_seconds = invalid_timeout
+
+    assert run_agent._resolve_mcp_request_timeout_seconds(basic_agent_run_info) == 10.0
+
+
+def test_mcp_timeout_message_uses_english_and_effective_timeout(basic_agent_run_info):
+    """The English timeout response includes the effective request timeout."""
+    basic_agent_run_info.observer.lang = "en"
+    basic_agent_run_info.mcp_request_timeout_seconds = 2.5
+
+    message = run_agent._mcp_timeout_message(basic_agent_run_info)
+
+    assert message == (
+        "MCP tool request timed out after 2.5 seconds. "
+        "Please check the service response and try again."
+    )
 
 
 def test_normalize_mcp_config_bypasses_proxy_only_when_requested():

@@ -203,6 +203,30 @@ class TestAddMcpService:
         }
 
     @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.add_container_mcp_service')
+    def test_add_from_config_tenant_limit_returns_standard_error(self, mock_add, mock_auth):
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_add.side_effect = TenantResourceLimitError(
+            "MCP service tenant limit reached: maximum 1000 MCP services per tenant",
+            resource="mcp_services",
+            scope="tenant",
+            limit=1000,
+            current_count=1000,
+        )
+        limited_app = FastAPI()
+        register_exception_handlers(limited_app)
+        limited_app.include_router(router)
+
+        resp = TestClient(limited_app).post("/mcp/add-from-config", json={
+            "name": "over-limit", "source": "local", "port": 8080,
+            "mcp_config": {"mcpServers": {"svc": {"command": "echo"}}},
+        }, headers=AUTH_HEADER)
+
+        assert resp.status_code == HTTPStatus.TOO_MANY_REQUESTS
+        assert resp.json()["code"] == "120104"
+        assert resp.json()["details"]["limit"] == 1000
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
     @patch('apps.remote_mcp_app.add_mcp_service')
     def test_add_with_custom_headers(self, mock_add, mock_auth):
         """Test that custom_headers is passed to add_mcp_service (line 125)."""
@@ -347,6 +371,31 @@ class TestAddFromConfig:
         assert resp.status_code == HTTPStatus.OK
         assert '"status": "container_started"' in resp.text
         assert '"status": "success"' in resp.text
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.add_container_mcp_service')
+    def test_add_from_config_stream_emits_tenant_limit_error(self, mock_add, mock_auth):
+        mock_auth.return_value = ("uid", "tid", "en")
+
+        async def reject(**_kwargs):
+            raise TenantResourceLimitError(
+                "MCP service tenant limit reached: maximum 1000 MCP services per tenant",
+                resource="mcp_services",
+                scope="tenant",
+                limit=1000,
+                current_count=1000,
+            )
+
+        mock_add.side_effect = reject
+        resp = client.post("/mcp/add-from-config/stream", json={
+            "name": "over-limit", "source": "local", "port": 8080,
+            "mcp_config": {"mcpServers": {"svc": {"command": "echo"}}},
+        }, headers=AUTH_HEADER)
+
+        assert resp.status_code == HTTPStatus.OK
+        assert '"status": "error"' in resp.text
+        assert '"code": "120104"' in resp.text
+        assert '"limit": 1000' in resp.text
 
     @patch('apps.remote_mcp_app.get_current_user_info')
     @patch('apps.remote_mcp_app.upload_and_start_mcp_image')
