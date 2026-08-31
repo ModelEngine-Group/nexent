@@ -210,9 +210,7 @@ function AgentSetupContent() {
 
   const synchronizeCompletion = useCallback(
     (agentId: number) => {
-      void enqueueSnapshotRefresh(agentId, {
-        section: "conversation_guide",
-      }).then((synchronized) => {
+      void enqueueSnapshotRefresh(agentId).then((synchronized) => {
         if (synchronized) markCompletionSynced(agentId);
         else markCompletionSyncFailed(agentId);
       });
