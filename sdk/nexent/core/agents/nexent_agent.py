@@ -26,6 +26,7 @@ from ..utils.constants import THINK_PREFIX_PATTERN, THINK_TAG_PATTERN
 from ..utils.observer import MessageObserver, ProcessType
 from .agent_model import AgentConfig, AgentHistory, ModelConfig, ToolConfig
 from .core_agent import CoreAgent, convert_code_format
+from .mcp_errors import is_mcp_timeout_error
 
 if TYPE_CHECKING:
     from .context import ContextItemInput
@@ -1160,6 +1161,8 @@ class NexentAgent:
                         observer.add_message(self.agent.agent_name, ProcessType.ERROR,
                                              "Agent execution interrupted by external stop signal")
                 except Exception as e:
+                    if is_mcp_timeout_error(e):
+                        raise
                     observer.add_message(agent_name=self.agent.agent_name, process_type=ProcessType.ERROR,
                                          content=f"Error in interaction: {str(e)}")
                     raise ValueError(f"Error in interaction: {str(e)}")

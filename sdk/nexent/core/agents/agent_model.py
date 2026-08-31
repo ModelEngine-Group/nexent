@@ -362,6 +362,10 @@ class AgentRunInfo(BaseModel):
         "Authorization can be provided as 'authorization' (e.g., 'Bearer token') or as 'headers' dict.",
         default=None
     )
+    mcp_request_timeout_seconds: Optional[float] = Field(
+        description="Hard timeout in seconds for one MCP tool request.",
+        default=None,
+    )
     history: Optional[List[AgentHistory]] = Field(description="Historical conversation information", default=None)
     stop_event: Event = Field(description="Stop event control")
     conversation_id: Optional[int] = Field(description="Conversation id for run-scoped persistence", default=None)

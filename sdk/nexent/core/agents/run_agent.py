@@ -1,7 +1,9 @@
 import asyncio
-from copy import deepcopy
 import json
 import logging
+import math
+from contextlib import contextmanager
+from copy import deepcopy
 from contextvars import copy_context
 from threading import Thread
 from typing import Any, Dict, Union
@@ -14,11 +16,84 @@ from ...monitor import (
     set_monitoring_safe_input_budget_snapshot,
 )
 from .agent_model import AgentRunInfo
+from .mcp_errors import MCPToolTimeoutError, is_mcp_timeout_error
 from .nexent_agent import NexentAgent, ProcessType, cleanup_run_workspace
 
 
 logger = logging.getLogger("run_agent")
 logger.setLevel(logging.DEBUG)
+
+_DEFAULT_MCP_REQUEST_TIMEOUT_SECONDS = 10.0
+
+
+def _resolve_mcp_request_timeout_seconds(agent_run_info: AgentRunInfo) -> float:
+    """Return a positive finite timeout for one MCP tool request."""
+    timeout = getattr(agent_run_info, "mcp_request_timeout_seconds", None)
+    try:
+        timeout = float(timeout)
+    except (TypeError, ValueError):
+        timeout = _DEFAULT_MCP_REQUEST_TIMEOUT_SECONDS
+    if not math.isfinite(timeout) or timeout <= 0:
+        return _DEFAULT_MCP_REQUEST_TIMEOUT_SECONDS
+    return timeout
+
+
+@contextmanager
+def _create_mcp_tool_collection(
+    mcp_client_list: list[dict[str, Any]],
+    timeout_seconds: float,
+):
+    """Create MCP tools with a request-level timeout applied by ClientSession.
+
+    ``smolagents.ToolCollection.from_mcp`` does not expose mcpadapt's
+    ``client_session_timeout_seconds`` argument. Using mcpadapt directly lets
+    us pass the timeout as a float, which is converted to the MCP SDK's
+    ``read_timeout_seconds`` for every request, including ``tools/call``.
+    """
+    from mcpadapt.core import MCPAdapt
+    from mcpadapt.smolagents_adapter import SmolAgentsAdapter
+
+    with MCPAdapt(
+        mcp_client_list,
+        SmolAgentsAdapter(),
+        client_session_timeout_seconds=float(timeout_seconds),
+    ) as mcp_tools:
+        for tool in mcp_tools:
+            original_forward = tool.forward
+
+            def timeout_aware_forward(*args, _original_forward=original_forward, **kwargs):
+                try:
+                    return _original_forward(*args, **kwargs)
+                except Exception as exc:
+                    if not _is_mcp_timeout_error(exc):
+                        raise
+                    timeout_label = f"{timeout_seconds:g}"
+                    raise MCPToolTimeoutError(
+                        f"MCP tool request timed out after {timeout_label} seconds"
+                    ) from exc
+
+            tool.forward = timeout_aware_forward
+        yield ToolCollection(mcp_tools)
+
+
+def _is_mcp_timeout_error(error: BaseException) -> bool:
+    """Identify timeout errors raised by the MCP SDK/adaptor stack."""
+    return is_mcp_timeout_error(error)
+
+
+def _mcp_timeout_message(agent_run_info: AgentRunInfo) -> str:
+    """Return a localized MCP timeout message for the current run."""
+    timeout = _resolve_mcp_request_timeout_seconds(agent_run_info)
+    timeout_label = f"{timeout:g}"
+    if getattr(agent_run_info.observer, "lang", "en") == "zh":
+        return (
+            "MCP \u5de5\u5177\u8c03\u7528\u8d85\u65f6\uff08"
+            f"{timeout_label} \u79d2\uff09\u3002\u8bf7\u786e\u8ba4\u670d\u52a1\u54cd\u5e94\u72b6\u6001\u540e\u91cd\u8bd5\u3002"
+        )
+    return (
+        f"MCP tool request timed out after {timeout_label} seconds. "
+        "Please check the service response and try again."
+    )
 
 
 def build_run_additional_args(agent_run_info: AgentRunInfo) -> Dict[str, Any]:
@@ -241,8 +316,12 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
             agent_run_info.observer.add_message(
                 "", ProcessType.AGENT_NEW_RUN, "<MCP_START>")
             mcp_client_list = [_normalize_mcp_config(item) for item in mcp_host]
+            mcp_timeout_seconds = _resolve_mcp_request_timeout_seconds(agent_run_info)
 
-            with ToolCollection.from_mcp(mcp_client_list, trust_remote_code=True) as tool_collection:
+            with _create_mcp_tool_collection(
+                mcp_client_list,
+                timeout_seconds=mcp_timeout_seconds,
+            ) as tool_collection:
                 nexent = NexentAgent(
                     observer=agent_run_info.observer,
                     model_config_list=agent_run_info.model_config_list,
@@ -275,7 +354,11 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
                     _log_memory_value_assessment(agent)
 
     except Exception as e:
-        if "Couldn't connect to the MCP server" in str(e):
+        if mcp_host and _is_mcp_timeout_error(e):
+            agent_run_info.observer.add_message(
+                "", ProcessType.FINAL_ANSWER, _mcp_timeout_message(agent_run_info)
+            )
+        elif "Couldn't connect to the MCP server" in str(e):
             mcp_connect_error_str = "MCP服务器连接超时。" if agent_run_info.observer.lang == "zh" else "Couldn't connect to the MCP server."
             agent_run_info.observer.add_message(
                 "", ProcessType.FINAL_ANSWER, mcp_connect_error_str)

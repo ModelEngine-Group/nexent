@@ -13,6 +13,7 @@ import pytest
 
 from nexent.core.agents.agent_model import AgentVerificationConfig, GuardrailConfig, GuardrailRule
 from nexent.core.agents.core_agent import CoreAgent, ToolInputBlockedError
+from nexent.core.agents.mcp_errors import MCPToolTimeoutError
 from nexent.core.agents.verification import VerificationController
 
 KEYWORD = "机密信息"
@@ -427,6 +428,22 @@ def test_step_stream_generic_exec_error_raises_agent_execution_error():
     with pytest.raises(AgentExecutionError):
         next(agent._step_stream(action_step))
     assert action_step.model_output != "exec boom"  # refusal path not taken
+
+
+def test_step_stream_wrapped_mcp_timeout_bypasses_agent_retry():
+    """A timeout wrapped by the local executor must escape as a non-retryable error."""
+    rule = GuardrailRule(name="pii", pattern="鏈哄瘑淇℃伅", severity="block")
+    agent = _make_step_agent(
+        rule, messages=[_msg("user", "hello")], model_output="<code>slow_tool()</code>",
+    )
+    agent.python_executor.side_effect = RuntimeError(
+        "Code execution failed: MCPToolTimeoutError: "
+        "MCP tool request timed out after 10 seconds"
+    )
+    agent.verification_controller.config.step_verification_enabled = False
+
+    with pytest.raises(MCPToolTimeoutError):
+        next(agent._step_stream(MagicMock()))
 
 
 def test_step_stream_precheck_action_scope_blocking_raises_before_exec():
