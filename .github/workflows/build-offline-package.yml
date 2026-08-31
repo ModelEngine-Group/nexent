@@ -1,9 +1,23 @@
 name: Build Offline Deployment Package
 
 on:
-  push:
-    tags:
-      - 'v*'
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+      image_source:
+        required: false
+        default: 'general'
+        type: string
+      include_source:
+        required: false
+        default: false
+        type: boolean
+      upload_to_obs:
+        required: false
+        default: true
+        type: boolean
   workflow_dispatch:
     inputs:
       version:
