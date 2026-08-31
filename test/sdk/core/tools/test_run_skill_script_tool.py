@@ -187,13 +187,13 @@ class TestRunSkillScriptToolInit:
             agent_id=42,
             tenant_id="tenant-123",
             version_no=5,
-            workspace_path="/mnt/nexent/workdir/t/u/run",
+            workspace_path="/mnt/nexent/workdir/user/run",
         )
         assert tool.local_skills_dir == "/path/to/skills"
         assert tool.agent_id == 42
         assert tool.tenant_id == "tenant-123"
         assert tool.version_no == 5
-        assert tool.workspace_path == "/mnt/nexent/workdir/t/u/run"
+        assert tool.workspace_path == "/mnt/nexent/workdir/user/run"
         assert tool.skill_manager is None
 
     def test_init_with_minimal_params(self):
@@ -266,7 +266,7 @@ class TestExecute:
         tool = RunSkillScriptTool(
             local_skills_dir=temp_skills_dir,
             tenant_id="test-tenant",
-            workspace_path="/mnt/nexent/workdir/t/u/run",
+            workspace_path="/mnt/nexent/workdir/user/run",
         )
         mock_manager = MagicMock()
         mock_manager.run_skill_script.return_value = "Result"
@@ -280,8 +280,50 @@ class TestExecute:
             "script.py",
             None,
             tenant_id="test-tenant",
-            working_directory="/mnt/nexent/workdir/t/u/run",
+            working_directory="/mnt/nexent/workdir/user/run",
         )
+
+    def test_execute_uses_bound_sandbox_backend(self, temp_skills_dir):
+        """A bound backend executes the script instead of SkillManager locally."""
+        backend = MagicMock(return_value="sandbox output")
+        tool = RunSkillScriptTool(
+            local_skills_dir=temp_skills_dir,
+            tenant_id="test-tenant",
+            workspace_path="/mnt/nexent/workdir/user/run",
+            execution_backend=backend,
+        )
+        manager = MagicMock()
+        manager.load_skill.return_value = {}
+        tool.skill_manager = manager
+
+        result = tool.execute("test-skill", "scripts/test.py", "--count 2")
+
+        assert result == "sandbox output"
+        manager.run_skill_script.assert_not_called()
+        backend.assert_called_once_with(
+            manager=manager,
+            skill_name="test-skill",
+            script_path="scripts/test.py",
+            params="--count 2",
+            tenant_id="test-tenant",
+            working_directory="/mnt/nexent/workdir/user/run",
+        )
+
+    def test_bind_execution_backend_replaces_completion_callback(self, temp_skills_dir):
+        backend = MagicMock(return_value="ok")
+        old_callback = MagicMock()
+        sandbox_callback = MagicMock()
+        tool = RunSkillScriptTool(
+            local_skills_dir=temp_skills_dir,
+            on_complete=old_callback,
+        )
+        tool.skill_manager = MagicMock(load_skill=MagicMock(return_value={}))
+
+        tool.bind_execution_backend(backend, on_complete=sandbox_callback)
+        tool.execute("test-skill", "scripts/test.py")
+
+        old_callback.assert_not_called()
+        sandbox_callback.assert_called_once_with("ok")
 
     def test_execute_invokes_completion_callback(self, temp_skills_dir):
         on_complete = MagicMock()
