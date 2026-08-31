@@ -33,6 +33,7 @@ if TYPE_CHECKING:
     import PIL.Image
 
 from .agent_model import AgentVerificationConfig
+from .mcp_errors import is_mcp_timeout_error, propagate_mcp_timeout
 from ..context_runtime.contracts import ContextRuntime, UnconfiguredContextRuntime
 from .verification import (
     VerificationController,
@@ -1025,6 +1026,11 @@ Additional Args:
             if hitl is not None and hitl.block_has_receipts:
                 raise RecoveryRequired("Execution failed after a persisted receipt; automatic block repair is unsafe") from e
             # The executor re-wraps exceptions, so isinstance(e, ToolInputBlockedError) may miss.
+            if is_mcp_timeout_error(e):
+                timeout_error = propagate_mcp_timeout(e)
+                if timeout_error is e:
+                    raise
+                raise timeout_error from e
             pending_refusal = getattr(getattr(self, "verification_controller", None), "pending_tool_block_refusal", None)
             if pending_refusal or isinstance(e, ToolInputBlockedError):
                 refusal = pending_refusal or getattr(e, "refusal", "")
