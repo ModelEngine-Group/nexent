@@ -457,6 +457,7 @@ async def add_mcp_service(
                 from services.tool_configuration_service import (
                     import_openapi_service,
                     _refresh_openapi_services_in_mcp,
+                    update_tool_list,
                 )
                 import_openapi_service(
                     service_name=name,
@@ -469,6 +470,9 @@ async def add_mcp_service(
                     force_update=True,
                 )
                 _refresh_openapi_services_in_mcp(tenant_id)
+                # Keep the persisted tool catalog in sync with the tenant MCP runtime.
+                # The agent configuration page reads /tool/list from this catalog.
+                await update_tool_list(tenant_id=tenant_id, user_id=user_id)
             except Exception as exc:
                 logger.warning(f"Failed to register OpenAPI service '{name}': {exc}")
             # Extract tool names from OpenAPI spec for display

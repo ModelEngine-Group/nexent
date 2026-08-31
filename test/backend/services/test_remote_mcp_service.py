@@ -73,6 +73,9 @@ nexent_container.ContainerConnectionError = Exception
 # Pre-mock services.tool_configuration_service so patches resolve correctly
 tool_config_mod = types.ModuleType("services.tool_configuration_service")
 tool_config_mod.get_tool_from_remote_mcp_server = AsyncMock()
+tool_config_mod.import_openapi_service = MagicMock()
+tool_config_mod._refresh_openapi_services_in_mcp = MagicMock()
+tool_config_mod.update_tool_list = AsyncMock()
 tool_config_mod.__spec__ = importlib.machinery.ModuleSpec("services.tool_configuration_service", loader=None)
 sys.modules['services.tool_configuration_service'] = tool_config_mod
 
@@ -634,8 +637,9 @@ class TestAddMcpServiceApiType(unittest.IsolatedAsyncioTestCase):
 
     @patch('backend.services.remote_mcp_service.create_mcp_record')
     @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
+    @patch('services.tool_configuration_service.update_tool_list', new_callable=AsyncMock)
     async def test_api_type_skips_mcp_protocol_and_extracts_tools(
-        self, mock_check_name, mock_create
+        self, mock_update_tool_list, mock_check_name, mock_create
     ):
         """API-type MCP should skip MCP protocol check and extract tool names from OpenAPI."""
         mock_check_name.return_value = False
@@ -663,6 +667,7 @@ class TestAddMcpServiceApiType(unittest.IsolatedAsyncioTestCase):
             call_data['registry_json']['_toolNames'],
             ["ping", "echo"],
         )
+        mock_update_tool_list.assert_awaited_once_with(tenant_id='tid', user_id='uid')
 
 
 # ============================================================================
