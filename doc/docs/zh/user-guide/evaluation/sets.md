@@ -8,6 +8,12 @@
 2. 单击 **上传**，填写评测集名称和可选描述。
 3. 选择 `.xlsx` 或 `.xls` 文件后上传。也可以先单击 **下载模板**，使用模板填写数据。
 
+上传评测集弹窗示例如下：
+
+<div style="display: flex; justify-content: left;">
+  <img src="../assets/evaluation/05-upload-set.png" style="width: 75%; height: auto;" alt="上传评测集弹窗" />
+</div>
+
 导入文件支持以下列名，中英文表头均可：
 
 | 字段 | 中文列名 | 是否必填 | 说明 |
