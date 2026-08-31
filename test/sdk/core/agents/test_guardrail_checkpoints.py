@@ -446,6 +446,24 @@ def test_step_stream_wrapped_mcp_timeout_bypasses_agent_retry():
         next(agent._step_stream(MagicMock()))
 
 
+def test_step_stream_native_mcp_timeout_preserves_error_identity():
+    """A native MCP timeout is re-raised unchanged by the executor guard."""
+    rule = GuardrailRule(name="pii", pattern="机密信息", severity="block")
+    agent = _make_step_agent(
+        rule, messages=[_msg("user", "hello")], model_output="<code>slow_tool()</code>",
+    )
+    timeout_error = MCPToolTimeoutError(
+        "MCP tool request timed out after 10 seconds"
+    )
+    agent.python_executor.side_effect = timeout_error
+    agent.verification_controller.config.step_verification_enabled = False
+
+    with pytest.raises(MCPToolTimeoutError) as exc_info:
+        next(agent._step_stream(MagicMock()))
+
+    assert exc_info.value is timeout_error
+
+
 def test_step_stream_precheck_action_scope_blocking_raises_before_exec():
     """Checkpoint precheck: code_action with a dangerous term (os.system) fails the
     action_scope check (blocking) → AgentExecutionError raised before the tool runs."""
