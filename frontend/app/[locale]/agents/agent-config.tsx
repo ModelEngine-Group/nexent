@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { App, Button, Form, Tooltip } from "antd";
+import { App, Alert, Button, Form, Tooltip } from "antd";
 import {
   Collapsible,
   CollapsibleContent,
@@ -11,6 +11,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { useAgentStore } from "@/stores/agentStore";
+import { getUnavailableReasonLabels } from "@/lib/agentLabelMapper";
 import { useSaveGuard } from "@/hooks/agent/useSaveGuard";
 import { useAgentReadOnly } from "@/hooks/agent/useAgentReadOnly";
 import { useNl2AgentFlow } from "@/contexts/nl2AgentFlow";
@@ -161,6 +162,12 @@ export default function AgentConfig({
   const isReadOnly = useAgentReadOnly();
   const agentId = useAgentStore((state) => state.agentId);
   const editedAgent = useAgentStore((state) => state.editedAgent);
+  const unavailableReasonLabels = getUnavailableReasonLabels(
+    Array.isArray(editedAgent?.unavailable_reasons)
+      ? editedAgent.unavailable_reasons.filter(Boolean)
+      : [],
+    t
+  );
   const serverSnapshotRevision = useAgentStore(
     (state) => state.serverSnapshotRevision
   );
@@ -322,10 +329,21 @@ export default function AgentConfig({
             {t("agent.config.tab.advanced")}
           </TabsTrigger>
         </TabsList>
+        <div className="mt-2">
+          {unavailableReasonLabels.length > 0 && (
+            <Alert
+              className="mt-2"
+              type="warning"
+              showIcon
+              title={`${t("agent.unavailable")}${unavailableReasonLabels.join("、")}`}
+            />
+          )}
+        </div>
+
 
         <TabsContent
           value="basic"
-          className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1 mt-3"
+          className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1 mt-2"
         >
           {/* 1. 展示信息 */}
           <ConfigSection
