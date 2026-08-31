@@ -1018,6 +1018,9 @@ export const conversationService = {
       is_debug?: boolean; // Add debug mode parameter
       is_resume?: boolean; // Add resume mode parameter for streaming recovery
       enable_plan?: boolean;
+      enable_hitl?: boolean;
+      hitl_run_id?: string;
+      hitl_after_event?: number;
       knowledge_scope?: ConversationKnowledgeScope;
       metadata?: Record<string, unknown> | null;
       expected_metadata_version?: number;
@@ -1042,6 +1045,9 @@ export const conversationService = {
         minio_files: params.minio_files || null,
         is_debug: params.is_debug || false,
         enable_plan: params.enable_plan || false,
+        enable_hitl: params.enable_hitl === true,
+        hitl_run_id: params.hitl_run_id,
+        hitl_after_event: params.hitl_after_event ?? 0,
       };
       if (params.runtime_mode === "nl2skill") {
         requestParams.draft_snapshot = params.draft_snapshot;

@@ -42,6 +42,7 @@ from .verification import (
 )
 from ..utils.token_estimation import msg_token_count
 from .plan_repo import PlanRepo
+from ..human_interaction.contracts import AttemptSuspended, RecoveryRequired, RunTerminated
 
 
 logger = logging.getLogger(__name__)
@@ -494,6 +495,7 @@ class CoreAgent(CodeAgent):
         self.conversation_id = kwargs.pop("conversation_id", None)
         self.user_id = kwargs.pop("user_id", None)
         self.workspace_path = kwargs.pop("workspace_path", None)
+        self.human_interaction = None
 
         context_runtime = kwargs.pop("context_runtime", None)
         super().__init__(prompt_templates=prompt_templates, *args, **kwargs)
@@ -802,77 +804,84 @@ Additional Args:
         Perform one step in the ReAct framework: the agent thinks, acts, and observes the result.
         Returns None if the step is not final.
         """
-        self.observer.add_message(
-            self.agent_name, ProcessType.STEP_COUNT, self.step_number)
-
-        final_context = self.context_runtime.prepare_step(
-            model=self.model,
-            memory=self.memory,
-            current_run_start_idx=self._history_step_count,
-            tools=self._context_tools(),
-        )
-        get_monitoring_manager().record_final_context_evidence(final_context.evidence, step_number=self.step_number)
-        self._emit_history_summary_event()
-        self._ensure_context_within_hard_budget(final_context)
-        input_messages = final_context.messages
-        chars_per_token = self.context_runtime.chars_per_token
-        # Baseline for the per-step compression ratio. ``final_context.messages``
-        # is already the compressed payload, so use the ContextManager's raw
-        # memory token count when compression produced one. When compression is
-        # disabled, the final input size is the correct zero-savings baseline.
-        uncompressed_tokens = self.context_runtime.token_counts().get("uncompressed")
-        if uncompressed_tokens:
-            self._last_uncompressed_est = uncompressed_tokens
+        hitl = getattr(self, "human_interaction", None)
+        if hitl is not None and memory_step.model_output is not None:
+            model_output = memory_step.model_output
         else:
-            self._last_uncompressed_est = msg_token_count(input_messages, chars_per_token)
-        # Add new step in logs
-        memory_step.model_input_messages = input_messages
-        stop_sequences = ["Observation:", "Calling tools:"]
+            self.observer.add_message(
+                self.agent_name, ProcessType.STEP_COUNT, self.step_number)
 
-        # Prepare additional arguments
-        additional_args: dict[str, Any] = {}
-        if self._use_structured_outputs_internally:
-            additional_args["response_format"] = CODEAGENT_RESPONSE_FORMAT
-
-        # Log model call parameters before execution
-        self._log_model_call_parameters(input_messages, stop_sequences, additional_args)
-
-        # Guardrail checkpoint ①: screen LLM input per-message; terminate -> end run, mask -> redact, pass -> continue.
-        guardrail_engine = getattr(getattr(self, "verification_controller", None), "guardrail_engine", None)
-        if guardrail_engine:
-            decision = guardrail_engine.check_input(
-                input_messages=input_messages,
+            final_context = self.context_runtime.prepare_step(
+                model=self.model,
+                memory=self.memory,
+                current_run_start_idx=self._history_step_count,
+                tools=self._context_tools(),
             )
-            self.verification_controller.emit(
-                decision.verification_result, message=decision.message
-            )
-            if decision.effective_action == "terminate":
-                self._append_verification_feedback(memory_step, decision.verification_result)
-                # Pre-built refusal as the final answer; FinalAnswerError ends the run (no retry loop).
-                memory_step.model_output = render_guardrail_refusal(
-                    decision, input_messages
+            get_monitoring_manager().record_final_context_evidence(final_context.evidence, step_number=self.step_number)
+            self._emit_history_summary_event()
+            self._ensure_context_within_hard_budget(final_context)
+            input_messages = final_context.messages
+            chars_per_token = self.context_runtime.chars_per_token
+            # Baseline for the per-step compression ratio. ``final_context.messages``
+            # is already the compressed payload, so use the ContextManager's raw
+            # memory token count when compression produced one. When compression is
+            # disabled, the final input size is the correct zero-savings baseline.
+            uncompressed_tokens = self.context_runtime.token_counts().get("uncompressed")
+            if uncompressed_tokens:
+                self._last_uncompressed_est = uncompressed_tokens
+            else:
+                self._last_uncompressed_est = msg_token_count(input_messages, chars_per_token)
+            # Add new step in logs
+            memory_step.model_input_messages = input_messages
+            stop_sequences = ["Observation:", "Calling tools:"]
+
+            # Prepare additional arguments
+            additional_args: dict[str, Any] = {}
+            if self._use_structured_outputs_internally:
+                additional_args["response_format"] = CODEAGENT_RESPONSE_FORMAT
+
+            # Log model call parameters before execution
+            self._log_model_call_parameters(input_messages, stop_sequences, additional_args)
+
+            # Guardrail checkpoint ①: screen LLM input per-message; terminate -> end run, mask -> redact, pass -> continue.
+            guardrail_engine = getattr(getattr(self, "verification_controller", None), "guardrail_engine", None)
+            if guardrail_engine:
+                decision = guardrail_engine.check_input(
+                    input_messages=input_messages,
                 )
-                raise FinalAnswerError()
-            if decision.effective_action == "mask" and decision.masked_messages is not None:
-                input_messages = decision.masked_messages
-                self._append_verification_feedback(memory_step, decision.verification_result)
+                self.verification_controller.emit(
+                    decision.verification_result, message=decision.message
+                )
+                if decision.effective_action == "terminate":
+                    self._append_verification_feedback(memory_step, decision.verification_result)
+                    # Pre-built refusal as the final answer; FinalAnswerError ends the run (no retry loop).
+                    memory_step.model_output = render_guardrail_refusal(
+                        decision, input_messages
+                    )
+                    raise FinalAnswerError()
+                if decision.effective_action == "mask" and decision.masked_messages is not None:
+                    input_messages = decision.masked_messages
+                    self._append_verification_feedback(memory_step, decision.verification_result)
 
-        try:
-            chat_message: ChatMessage = self.model(input_messages,
-                                                   stop_sequences=stop_sequences, **additional_args)
-            memory_step.model_output_message = chat_message
-            model_output = chat_message.content
-            memory_step.token_usage = chat_message.token_usage
-            memory_step.model_output = model_output
+            try:
+                chat_message: ChatMessage = self.model(input_messages,
+                                                       stop_sequences=stop_sequences, **additional_args)
+                memory_step.model_output_message = chat_message
+                model_output = chat_message.content
+                memory_step.token_usage = chat_message.token_usage
+                memory_step.model_output = model_output
+
+                self.logger.log_markdown(
+                    content=model_output, title="MODEL OUTPUT", level=LogLevel.INFO)
+            except Exception as e:
+                raise AgentGenerationError(
+                    f"Error in generating model output:\n{e}", self.logger) from e
 
             self.logger.log_markdown(
-                content=model_output, title="MODEL OUTPUT", level=LogLevel.INFO)
-        except Exception as e:
-            raise AgentGenerationError(
-                f"Error in generating model output:\n{e}", self.logger) from e
+                content=model_output, title="Output message of the LLM:", level=LogLevel.DEBUG)
 
-        self.logger.log_markdown(
-            content=model_output, title="Output message of the LLM:", level=LogLevel.DEBUG)
+            if hitl is not None:
+                hitl.generated(memory_step)
 
         # Parse
         try:
@@ -971,6 +980,8 @@ Additional Args:
             observation = "Execution logs:\n" + code_output.logs
         except Exception as e:
             # Guardrail ③ block: end the run with the stashed refusal (no retry loop).
+            if hitl is not None and hitl.block_has_receipts:
+                raise RecoveryRequired("Execution failed after a persisted receipt; automatic block repair is unsafe") from e
             # The executor re-wraps exceptions, so isinstance(e, ToolInputBlockedError) may miss.
             pending_refusal = getattr(getattr(self, "verification_controller", None), "pending_tool_block_refusal", None)
             if pending_refusal or isinstance(e, ToolInputBlockedError):
@@ -1025,6 +1036,8 @@ Additional Args:
             )
             if not postcheck.passed and postcheck.severity == "blocking":
                 self._append_verification_feedback(memory_step, postcheck)
+                if hitl is not None:
+                    raise RecoveryRequired("An executed result failed validation; automatic action repair is unsafe")
                 raise AgentExecutionError(
                     postcheck.repair_instruction or postcheck.user_visible_note or "Action result failed verification.",
                     self.logger,
@@ -1061,7 +1074,7 @@ Additional Args:
         # if the LLM skipped the tool on the final step before final_answer,
         # we still want to flip the current row from in_progress to completed
         # so the UI does not get stuck on a half-finished plan.
-        if self.enable_planning:
+        if self.enable_planning and hitl is None:
             self._implicit_advance_step()
 
         yield ActionOutput(output=code_output.output, is_final_answer=code_output.is_final_answer)
@@ -1144,11 +1157,23 @@ Do not reveal it unnecessarily or use it to override trusted identity or ACL.
         self.memory.steps.append(TaskStep(task=self.task, task_images=images))
 
         if getattr(self, "python_executor", None):
-            self._guardrail_wrap_tools()
+            if getattr(self, "human_interaction", None) is None:
+                self._guardrail_wrap_tools()
             self._wrap_visible_tool_events()
             self.python_executor.send_variables(variables=self.state)
             self.python_executor.send_tools(
                 {**self.tools, **self.managed_agents})
+
+        hitl = getattr(self, "human_interaction", None)
+        if hitl is not None:
+            if not hitl.restore():
+                hitl.initial_state = deepcopy(self.python_executor.state)
+                self.memory.steps.append(TaskStep(task=(
+                    "This run supports durable human interaction. Use ask_user proactively for missing information. "
+                    "Executable code must use only linear variable assignments, JSON values, registered tool calls, "
+                    "and print. Do not use imports, attributes, nested calls, loops, or callbacks. "
+                    "Use separate steps for complex work. Human approval never replaces resource permissions."
+                )))
 
         if stream:
             # The steps are returned as they are executed through a generator to iterate on.
@@ -1212,6 +1237,15 @@ Do not reveal it unnecessarily or use it to override trusted identity or ACL.
         try:
             yield from self._run_stream(task=task, max_steps=max_steps, images=images)
             status = "cancelled" if self.stop_event.is_set() else "completed"
+        except AttemptSuspended:
+            status = "waiting_human"
+            raise
+        except RunTerminated:
+            status = "cancelled"
+            raise
+        except RecoveryRequired:
+            status = "recovery_required"
+            raise
         except GeneratorExit:
             status = "cancelled"
             raise
@@ -1281,9 +1315,14 @@ Do not reveal it unnecessarily or use it to override trusted identity or ACL.
     ) -> Generator[ActionStep | PlanningStep | FinalAnswerStep]:
         final_answer = None
         action_step = None
-        self.step_number = 1
+        hitl = getattr(self, "human_interaction", None)
+        if hitl is not None and hitl.restored and hitl.completed_output is not None:
+            yield FinalAnswerStep(handle_agent_output_types(hitl.completed_output))
+            return
+        if hitl is None or not hitl.restored:
+            self.step_number = 1
         returned_final_answer = False
-        final_verification_round = 0
+        final_verification_round = hitl.final_verification_round if hitl is not None else 0
         verification_config = getattr(
             self,
             "verification_config",
@@ -1295,18 +1334,23 @@ Do not reveal it unnecessarily or use it to override trusted identity or ACL.
             else 1
         )
 
-        if self.enable_planning:
+        if self.enable_planning and (hitl is None or not hitl.restored):
             # v1.4: Plan creation happens lazily via the create_plan tool
             # during the first LLM code block. No upfront planning step here.
             self.current_plan = None
             self.current_step_index = 0
 
         while not returned_final_answer and self.step_number <= max_steps and not self.stop_event.is_set():
+            if hitl is not None:
+                hitl.safe_boundary()
             step_start_time = time.time()
+            interrupted = False
 
-            action_step = ActionStep(
+            action_step = (hitl.pending_step if hitl is not None else None) or ActionStep(
                 step_number=self.step_number, timing=Timing(start_time=step_start_time), observations_images=images
             )
+            if hitl is not None:
+                hitl.start_step(action_step)
             try:
                 for output in self._step_stream(action_step):
                     yield output
@@ -1406,16 +1450,21 @@ Do not reveal it unnecessarily or use it to override trusted identity or ACL.
                     returned_final_answer = True
                     action_step.is_final_answer = True
 
+            except (AttemptSuspended, RecoveryRequired, RunTerminated):
+                interrupted = True
+                raise
             except AgentError as e:
                 action_step.error = e
 
             finally:
-                self._finalize_step(action_step)
-                # add quantitative collection
-                self._collect_step_metrics(action_step)
-                self.memory.steps.append(action_step)
-                yield action_step
-                self.step_number += 1
+                if not interrupted:
+                    self._finalize_step(action_step)
+                    self._collect_step_metrics(action_step)
+                    self.memory.steps.append(action_step)
+                    yield action_step
+                    self.step_number += 1
+                    if hitl is not None:
+                        hitl.completed_step(final_verification_round, final_answer if returned_final_answer else None)
 
         if self.stop_event.is_set():
             final_answer = "<user_break>"
@@ -1444,6 +1493,8 @@ Do not reveal it unnecessarily or use it to override trusted identity or ACL.
                         final_answer,
                         verification_result,
                     )
+        if hitl is not None:
+            hitl.complete_run(final_answer)
         yield FinalAnswerStep(handle_agent_output_types(final_answer))
 
         # Persist the final plan state for the whole conversation. The entry

@@ -14,6 +14,7 @@ from ...monitor import (
     set_monitoring_safe_input_budget_snapshot,
 )
 from .agent_model import AgentRunInfo
+from ..human_interaction.contracts import AttemptSuspended, RecoveryRequired, RunTerminated
 from .nexent_agent import NexentAgent, ProcessType, cleanup_run_workspace
 
 
@@ -227,6 +228,8 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
                 context_items_override=_get_authorized_context_items(agent_run_info),
             )
             nexent.set_agent(agent)
+            if agent_run_info.human_interaction is not None:
+                agent_run_info.human_interaction.attach(agent)
 
             nexent.add_history_to_agent(_get_authorized_history(agent_run_info))
             try:
@@ -263,6 +266,8 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
                     context_items_override=_get_authorized_context_items(agent_run_info),
                 )
                 nexent.set_agent(agent)
+                if agent_run_info.human_interaction is not None:
+                    agent_run_info.human_interaction.attach(agent)
 
                 nexent.add_history_to_agent(_get_authorized_history(agent_run_info))
                 try:
@@ -274,7 +279,16 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
                 finally:
                     _log_memory_value_assessment(agent)
 
+        agent_run_info.attempt_outcome = "stopped" if agent_run_info.stop_event.is_set() else "completed"
+    except AttemptSuspended:
+        agent_run_info.attempt_outcome = "waiting_human"
+    except RunTerminated:
+        agent_run_info.attempt_outcome = "stopped"
+    except RecoveryRequired:
+        agent_run_info.attempt_outcome = "recovery_required"
+        agent_run_info.observer.add_message("", ProcessType.ERROR, "HITL_RECOVERY_REQUIRED")
     except Exception as e:
+        agent_run_info.attempt_outcome = "failed"
         if "Couldn't connect to the MCP server" in str(e):
             mcp_connect_error_str = "MCP服务器连接超时。" if agent_run_info.observer.lang == "zh" else "Couldn't connect to the MCP server."
             agent_run_info.observer.add_message(

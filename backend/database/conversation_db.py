@@ -298,7 +298,7 @@ def persist_assistant_run_batch(
     Returns:
         Mapping from unit_index to the generated unit_id.
     """
-    if terminal_status not in {"completed", "failed", "stopped"}:
+    if terminal_status not in {"completed", "failed", "stopped", "waiting_human", "recovery_required"}:
         raise ValueError(f"Unsupported assistant terminal status: {terminal_status}")
 
     message_id = int(message_id)

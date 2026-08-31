@@ -9,6 +9,7 @@ from apps.conversation_management_app import router as conversation_management_r
 from apps.conversation_share_app import router as conversation_share_router
 from apps.file_management_app import file_management_runtime_router as file_management_router
 from apps.skill_app import skill_creator_router
+from apps.human_interaction_app import router as human_interaction_router
 from middleware.exception_handler import ExceptionHandlerMiddleware
 
 # Create logger instance
@@ -29,19 +30,27 @@ app.include_router(conversation_share_router)
 app.include_router(file_management_router)
 app.include_router(voice_router)
 app.include_router(skill_creator_router)
+app.include_router(human_interaction_router)
 
 
 @app.on_event("startup")
 async def start_agent_automation_scheduler():
+    from consts.const import HITL_ENABLED
+    from services.human_interaction.application import get_service, human_run_scheduler
     from services.agent_automation.scheduler import agent_automation_scheduler
     from services.workspace_cleanup_service import cleanup_orphaned_agent_workspaces
 
     cleanup_orphaned_agent_workspaces()
     await agent_automation_scheduler.start()
+    if HITL_ENABLED:
+        get_service()
+        await human_run_scheduler.start()
 
 
 @app.on_event("shutdown")
 async def stop_agent_automation_scheduler():
+    from services.human_interaction.application import human_run_scheduler
     from services.agent_automation.scheduler import agent_automation_scheduler
 
     await agent_automation_scheduler.stop()
+    await human_run_scheduler.stop()

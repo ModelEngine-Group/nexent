@@ -10,6 +10,7 @@ import type {
 
 import { conversationService } from "@/services/conversationService";
 import log from "@/lib/logger";
+import { humanInteractionClient } from "@/features/humanInteraction/client";
 import { parseAutomationProposal } from "@/features/agentAutomation/parseProposal";
 import type { SkillParam, ToolParam } from "@/types/agentConfig";
 
@@ -253,6 +254,9 @@ interface NexentRunConfig {
   agentId?: number | string;
   agentVersionNo?: number;
   enablePlan?: boolean;
+  enableHitl?: boolean;
+  hitlRunId?: string;
+  hitlAfterEvent?: number;
   runtimeMode?: "nl2agent" | "nl2skill" | "agent-debug";
   knowledgeScope?: import("@/types/knowledgeScope").ConversationKnowledgeScope;
   onKnowledgeScopeResolved?: (
@@ -1358,7 +1362,8 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     const serverThreadId = custom?.threadId;
     const onServerConversationId = custom?.onServerConversationId;
     const onRunId = custom?.onRunId;
-    const isResume = !isEphemeralRuntime && custom?.resume === true;
+    const isResume =
+      !isEphemeralRuntime && (custom?.resume === true || !!custom?.hitlRunId);
     const nl2AgentId =
       typeof custom?.agentId === "string"
         ? Number(custom.agentId)
@@ -1493,13 +1498,17 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       ? numericServerThreadId
       : null;
     let backendRunId: string | null = null;
+    let humanRunId: string | null = custom?.hitlRunId ?? null;
     let backendStopPromise: Promise<void> | null = null;
     let abortHandled = false;
     let userAborted = false;
     const stopBackendRun = async (runId: string | number) => {
       if (backendStopPromise) return;
-      backendStopPromise = conversationService
-        .stop(runId)
+      backendStopPromise = (
+        humanRunId
+          ? humanInteractionClient.control(humanRunId, "terminate")
+          : conversationService.stop(runId)
+      )
         .then(() => undefined)
         .catch((error) => {
           log.error(
@@ -1559,6 +1568,9 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           is_debug: isAgentDebug,
           is_resume: isResume,
           enable_plan: custom?.enablePlan === true,
+          enable_hitl: !isEphemeralRuntime && custom?.enableHitl === true,
+          hitl_run_id: !isEphemeralRuntime ? custom?.hitlRunId : undefined,
+          hitl_after_event: custom?.hitlAfterEvent,
           knowledge_scope: requestBody.knowledge_scope as
             | import("@/types/knowledgeScope").ConversationKnowledgeScope
             | undefined,
@@ -1981,6 +1993,22 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         for (const line of lines) {
           const chunk = parseSseChunk(line);
           if (!chunk) continue;
+
+          if (chunk.type === "human_run") {
+            const value =
+              typeof chunk.content === "string"
+                ? JSON.parse(chunk.content)
+                : chunk.content;
+            if (value && typeof value.run_id === "string")
+              humanRunId = value.run_id;
+            continue;
+          }
+          if (
+            ["human_interaction", "human_decision", "human_execution"].includes(
+              chunk.type
+            )
+          )
+            continue;
 
           // Internal status / resume events: skip
           if (chunk.type === "status") continue;

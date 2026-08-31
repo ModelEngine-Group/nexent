@@ -247,7 +247,7 @@ def _load_core_agent_module():
     sys.modules["sdk.nexent"] = ModuleType("sdk.nexent")
     sys.modules["sdk.nexent"].__path__ = []
     sys.modules["sdk.nexent.core"] = ModuleType("sdk.nexent.core")
-    sys.modules["sdk.nexent.core"].__path__ = []
+    sys.modules["sdk.nexent.core"].__path__ = [os.path.join(project_root, "sdk", "nexent", "core")]
     agents_pkg = ModuleType("sdk.nexent.core.agents")
     agents_pkg.__path__ = [os.path.join(project_root, "sdk", "nexent", "core", "agents")]
     sys.modules["sdk.nexent.core.agents"] = agents_pkg

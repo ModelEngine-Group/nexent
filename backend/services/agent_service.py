@@ -1333,6 +1333,10 @@ async def _stream_agent_chunks(
 
         was_stopped = getattr(agent_run_info, "stop_event", None) and agent_run_info.stop_event.is_set()
         terminal_status = 'stopped' if was_stopped else 'completed' if stream_completed_normally else 'failed'
+        outcome = getattr(agent_run_info, "attempt_outcome", None)
+        if getattr(agent_run_info, "human_interaction", None) is not None and isinstance(outcome, str):
+            terminal_status = outcome if stream_completed_normally else "recovery_required"
+            agent_run_info.attempt_outcome = terminal_status
 
         try:
             skill_file_payloads = list(captured_skill_files.values())
@@ -1429,6 +1433,8 @@ async def _stream_agent_chunks(
             except Exception:
                 persistence_failed = True
                 terminal_status = "failed"
+                if getattr(agent_run_info, "human_interaction", None) is not None:
+                    agent_run_info.attempt_outcome = "recovery_required"
                 logger.exception(
                     "Failed to persist assistant stream batch conversation=%s message=%s",
                     agent_request.conversation_id,
@@ -3293,6 +3299,22 @@ async def run_agent_stream(
         user_id=user_id,
         tenant_id=tenant_id,
     )
+    if isinstance(agent_request.hitl_run_id, str) and agent_request.hitl_run_id:
+        from services.human_interaction.application import stream_run
+        return await stream_run(agent_request.hitl_run_id, resolved_tenant_id, resolved_user_id,
+                                after=agent_request.hitl_after_event)
+    from consts.const import HITL_ENABLED
+    if HITL_ENABLED and not agent_request.is_debug and agent_request.conversation_id:
+        from services.human_interaction.application import get_service, stream_run
+        from services.human_interaction.models import InteractionError
+        active_hitl = await asyncio.to_thread(
+            get_service().repository.latest, resolved_tenant_id, resolved_user_id,
+            agent_request.conversation_id, active_only=True,
+        )
+        if active_hitl:
+            if resume:
+                return await stream_run(active_hitl, resolved_tenant_id, resolved_user_id)
+            raise InteractionError("This conversation has a paused or active human interaction run")
     if agent_request.is_debug and not resume:
         # Debug executions deliberately do not create conversations, so they
         # need a transient identifier for lifecycle operations such as stop.
@@ -3515,6 +3537,10 @@ async def run_agent_stream(
             agent_id=agent_request.agent_id,
             user_id=resolved_user_id,
         )
+
+    if agent_request.enable_hitl is True and not resume:
+        from services.human_interaction.application import start_run
+        return await start_run(agent_request, resolved_tenant_id, resolved_user_id, language)
 
     # Resume mode: check for existing streaming message
     if resume:
@@ -3978,7 +4004,17 @@ def stop_agent_tasks(conversation_id: int | str, user_id: str):
 
 
 def is_agent_running(conversation_id: int, user_id: str) -> bool:
-    return agent_run_manager.get_agent_run_info(conversation_id, user_id) is not None
+    if agent_run_manager.get_agent_run_info(conversation_id, user_id) is not None:
+        return True
+    from consts.const import HITL_ENABLED
+    if HITL_ENABLED:
+        from services.human_interaction.application import get_service
+        membership = get_user_tenant_by_user_id(user_id) or {}
+        if membership.get("tenant_id"):
+            return get_service().repository.latest(
+                str(membership["tenant_id"]), user_id, conversation_id, active_only=True,
+            ) is not None
+    return False
 
 
 async def get_agent_id_by_name(agent_name: str, tenant_id: str) -> int:
