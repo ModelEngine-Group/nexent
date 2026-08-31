@@ -13,6 +13,10 @@
 
 登录后，在左侧导航栏选择 **智能体开发 > 智能体评估**。也可以在 **智能体空间** 或 **智能体仓库 > 我的 Agent** 中，在智能体卡片的操作菜单选择 **评估** 进入评估页面。
 
+<div style="display: flex; justify-content: left;">
+  <img src="./assets/evaluation/01-overview.png" style="width: 100%; height: auto;" alt="智能体评估概览页面" />
+</div>
+
 评估页面包含以下页签：
 
 | 页签 | 用途 |
