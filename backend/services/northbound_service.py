@@ -32,6 +32,8 @@ from consts.exceptions import (
 from consts.error_code import ErrorCode, RuntimeMetadataValidationCode
 from consts.model import AgentRequest, ToolParamsRequest
 from database.knowledge_db import get_knowledge_info_by_tenant_id
+from database.tool_db import search_tools_for_sub_agent
+import database.skill_db as skill_db
 from database.conversation_db import get_conversation_list, get_conversation_messages
 from database.token_db import get_latest_usage_metadata, log_token_usage
 from services.agent_service import (
@@ -814,6 +816,152 @@ async def get_agent_knowledge_bases_for_northbound(
             "max_select": source_capabilities["max_select"],
             "default_selected_ids": source_capabilities["default_range_values"],
             "knowledge_bases": items,
+        },
+        "requestId": ctx.request_id,
+    }
+
+
+async def get_agent_tools_for_northbound(
+    ctx: NorthboundContext,
+    agent_name: str,
+) -> Dict[str, Any]:
+    """Return the tools (with their parameter definitions) configured for a published agent.
+
+    Mirrors the published-version semantics of get_agent_knowledge_bases_for_northbound:
+    the agent is resolved from the northbound caller's visible published agents, and the
+    published snapshot (current_version_no) is queried for tool instances.
+    """
+    if not agent_name or not agent_name.strip():
+        raise ValueError("agent_name is required")
+
+    visible_agents = await _get_visible_published_agents(ctx)
+    agent = next(
+        (item for item in visible_agents if item.get("name") == agent_name),
+        None,
+    )
+    if agent is None:
+        raise LookupError(f"Published agent not found: {agent_name}")
+
+    agent_tenant_id = str(agent.get("_northbound_tenant_id") or ctx.tenant_id)
+    agent_id = int(agent["agent_id"])
+    version_no = agent.get("current_version_no")
+    version_no = int(version_no) if version_no is not None else 0
+
+    try:
+        tool_instances = await asyncio.to_thread(
+            search_tools_for_sub_agent,
+            agent_id=agent_id,
+            tenant_id=agent_tenant_id,
+            version_no=version_no,
+        )
+    except Exception as exc:
+        raise Exception(
+            f"Failed to get agent tools for {agent_name} in tenant {agent_tenant_id}: {str(exc)}"
+        ) from exc
+
+    tools = []
+    for tool in tool_instances:
+        params = tool.get("params") or []
+        tools.append({
+            "tool_instance_id": tool.get("tool_instance_id"),
+            "tool_id": tool.get("tool_id"),
+            "name": tool.get("name"),
+            "source": tool.get("source"),
+            "enabled": tool.get("enabled"),
+            "params": [
+                {
+                    "name": p.get("name"),
+                    "type": p.get("type"),
+                    "description": p.get("description"),
+                    "default": p.get("default"),
+                    "required": p.get("required"),
+                }
+                for p in params
+                if isinstance(p, dict)
+            ],
+        })
+
+    return {
+        "message": "success",
+        "data": {
+            "agent_name": agent_name,
+            "agent_id": agent_id,
+            "version_no": version_no,
+            "tools": tools,
+        },
+        "requestId": ctx.request_id,
+    }
+
+
+async def get_agent_skills_for_northbound(
+    ctx: NorthboundContext,
+    agent_name: str,
+) -> Dict[str, Any]:
+    """Return the enabled skills (with their configuration) for a published agent.
+
+    Skill instances are resolved from the published snapshot (current_version_no) and
+    enriched with skill metadata (name/description/source) from ag_skill_info_t. Stale
+    instances referencing deleted skills are skipped.
+    """
+    if not agent_name or not agent_name.strip():
+        raise ValueError("agent_name is required")
+
+    visible_agents = await _get_visible_published_agents(ctx)
+    agent = next(
+        (item for item in visible_agents if item.get("name") == agent_name),
+        None,
+    )
+    if agent is None:
+        raise LookupError(f"Published agent not found: {agent_name}")
+
+    agent_tenant_id = str(agent.get("_northbound_tenant_id") or ctx.tenant_id)
+    agent_id = int(agent["agent_id"])
+    version_no = agent.get("current_version_no")
+    version_no = int(version_no) if version_no is not None else 0
+
+    try:
+        skill_instances = await asyncio.to_thread(
+            skill_db.search_skills_for_agent,
+            agent_id=agent_id,
+            tenant_id=agent_tenant_id,
+            version_no=version_no,
+        )
+    except Exception as exc:
+        raise Exception(
+            f"Failed to get agent skills for {agent_name} in tenant {agent_tenant_id}: {str(exc)}"
+        ) from exc
+
+    skills = []
+    for inst in skill_instances:
+        skill_id = inst.get("skill_id")
+        if skill_id is None:
+            continue
+        skill_info = await asyncio.to_thread(
+            skill_db.get_skill_by_id, skill_id, agent_tenant_id
+        )
+        if skill_info is None:
+            skill_info = await asyncio.to_thread(skill_db.get_skill_by_id_global, skill_id)
+        if skill_info is None:
+            # Stale skill instance referencing a deleted skill; skip it.
+            continue
+        skills.append({
+            "skill_instance_id": inst.get("skill_instance_id"),
+            "skill_id": skill_id,
+            "enabled": inst.get("enabled", True),
+            "skill_name": skill_info.get("skill_name"),
+            "skill_description": skill_info.get("skill_description"),
+            "source": skill_info.get("source"),
+            "config_values": inst.get("config_values"),
+            "config_schemas": inst.get("config_schemas"),
+        })
+
+    return {
+        "message": "success",
+        "data": {
+            "agent_name": agent_name,
+            "agent_id": agent_id,
+            "version_no": version_no,
+            "skills": skills,
         },
         "requestId": ctx.request_id,
     }

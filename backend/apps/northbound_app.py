@@ -44,6 +44,8 @@ from services.northbound_service import (
     get_agent_info_list,
     get_agent_info_by_name_for_northbound,
     get_agent_knowledge_bases_for_northbound,
+    get_agent_tools_for_northbound,
+    get_agent_skills_for_northbound,
     generate_conversation_title,
     list_configured_models,
     update_conversation_title,
@@ -565,6 +567,50 @@ async def get_agent_knowledge_bases(
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail="Internal Server Error",
+        ) from exc
+
+
+@router.get("/agents/{agent_name}/tools")
+async def get_agent_tools(
+    request: Request,
+    agent_name: str,
+):
+    """List tools (with parameter definitions) configured for a published agent."""
+    try:
+        ctx: NorthboundContext = await _get_northbound_context(request)
+        return await get_agent_tools_for_northbound(ctx, agent_name)
+    except ValueError as exc:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(exc)) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logging.error("Failed to list northbound agent tools: %s", exc, exc_info=exc)
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Internal Server Error"
+        ) from exc
+
+
+@router.get("/agents/{agent_name}/skills")
+async def get_agent_skills(
+    request: Request,
+    agent_name: str,
+):
+    """List enabled skills (with their configuration) for a published agent."""
+    try:
+        ctx: NorthboundContext = await _get_northbound_context(request)
+        return await get_agent_skills_for_northbound(ctx, agent_name)
+    except ValueError as exc:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(exc)) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logging.error("Failed to list northbound agent skills: %s", exc, exc_info=exc)
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Internal Server Error"
         ) from exc
 
 
