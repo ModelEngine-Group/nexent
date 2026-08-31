@@ -264,7 +264,9 @@ export default function McpToolsPage() {
     });
   };
 
-  const repositoryCount = repositoryBrowser.services.length;
+  // The repository list is paginated, so the current page length is not the
+  // total number of MCPs shown in the repository tab.
+  const repositoryCount = repositoryBrowser.total;
   const mineCount = getDeduplicatedMineItems(
     localList.services,
     myPublished.items

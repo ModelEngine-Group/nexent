@@ -1252,6 +1252,8 @@ class TestGetAllMcpTools:
 
         # Verify calls
         assert mock_get_tools.call_count == 3
+        assert mock_get_tools.call_args_list[-1].kwargs["mcp_server_name"] == "outer-apis"
+        assert mock_get_tools.call_args_list[-1].kwargs["tenant_id"] == "test_tenant"
 
     @patch('backend.services.tool_configuration_service.get_mcp_records_by_tenant')
     @patch('backend.services.tool_configuration_service.get_tool_from_remote_mcp_server')

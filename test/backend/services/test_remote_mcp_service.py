@@ -2582,6 +2582,34 @@ class TestUpdateMcpServiceEnabledContainerRebuild(unittest.IsolatedAsyncioTestCa
 class TestDeleteMcpServiceToolsUnavailable(unittest.IsolatedAsyncioTestCase):
     """Test delete_mcp_service hides the deleted MCP's tools."""
 
+    @patch('services.tool_configuration_service._refresh_openapi_services_in_mcp')
+    @patch('services.tool_configuration_service.delete_openapi_service')
+    @patch('backend.services.remote_mcp_service.delete_mcp_record_by_id')
+    @patch('backend.services.remote_mcp_service.set_mcp_tools_unavailable')
+    @patch('backend.services.remote_mcp_service.MCPContainerManager')
+    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    async def test_delete_api_mcp_removes_openapi_service_and_outer_tools(
+        self, mock_get, mock_mgr_cls, mock_tools, mock_delete, mock_delete_openapi, mock_refresh_openapi
+    ):
+        """Deleting an API MCP also removes its converted service and tools."""
+        mock_get.return_value = {
+            "mcp_id": 1,
+            "mcp_name": "api-svc",
+            "container_id": None,
+            "config_json": {"openapi": "3.0.0", "paths": {}},
+        }
+
+        await delete_mcp_service(tenant_id='tid', user_id='uid', mcp_id=1)
+
+        mock_delete_openapi.assert_called_once_with(
+            service_name='api-svc', tenant_id='tid', user_id='uid'
+        )
+        mock_refresh_openapi.assert_called_once_with('tid')
+        mock_tools.assert_called_once_with(
+            tenant_id='tid', mcp_server_name='outer-apis', user_id='uid'
+        )
+        mock_delete.assert_called_once()
+
     @patch('backend.services.remote_mcp_service.delete_mcp_record_by_id')
     @patch('backend.services.remote_mcp_service.set_mcp_tools_unavailable')
     @patch('backend.services.remote_mcp_service.MCPContainerManager')
