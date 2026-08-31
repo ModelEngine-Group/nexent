@@ -17,6 +17,12 @@
   <img src="../assets/evaluation/02-create-task-with-set.png" style="width: 75%; height: auto;" alt="有评测集评测的创建评测任务界面" />
 </div>
 
+以下为无评测集评测的创建界面示例。系统会根据智能体配置生成测试问题，并按设置的数量运行评估：
+
+<div style="display: flex; justify-content: left;">
+  <img src="../assets/evaluation/03-create-task-no-set.png" style="width: 75%; height: auto;" alt="无评测集评测的创建评测任务界面" />
+</div>
+
 ## 创建任务
 
 1. 在左侧导航栏选择 **智能体开发 > 智能体评估**，打开 **评估任务** 页签。
