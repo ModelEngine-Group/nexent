@@ -38,6 +38,7 @@ _FACTORY_NORMALIZE: Dict[str, str] = {
     "siliconflow": "siliconflow",
     "openai": "openai",
     "tokenpony": "tokenpony",
+    "orcarouter": "orcarouter",
     "jina": "jina",
     "cohere": "cohere",
     "modelengine": "modelengine",

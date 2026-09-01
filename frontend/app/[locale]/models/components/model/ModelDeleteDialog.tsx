@@ -223,6 +223,8 @@ export const ModelDeleteDialog = ({
         return t("model.source.dashscope");
       case MODEL_SOURCES.TOKENPONY:
         return t("model.source.tokenpony");
+      case MODEL_SOURCES.ORCAROUTER:
+        return t("model.source.orcarouter");
       case MODEL_SOURCES.VOLCENGINE:
         return t("model.provider.volcengine");
       default:
@@ -271,6 +273,12 @@ export const ModelDeleteDialog = ({
           text: "text-cyan-600",
           border: "border-cyan-100",
         };
+      case MODEL_SOURCES.ORCAROUTER:
+        return {
+          bg: "bg-sky-50",
+          text: "text-sky-600",
+          border: "border-sky-100",
+        };
       case MODEL_SOURCES.VOLCENGINE:
         return {
           bg: "bg-pink-50",
@@ -317,6 +325,14 @@ export const ModelDeleteDialog = ({
         return <img src={publicAsset("/aliyuncs.png")} alt="DashScope" className="w-5 h-5" />;
       case MODEL_SOURCES.TOKENPONY:
         return <img src={publicAsset("/tokenpony.png")} alt="TokenPony" className="w-5 h-5" />;
+      case MODEL_SOURCES.ORCAROUTER:
+        return (
+          <img
+            src={publicAsset("/orcarouter.svg")}
+            alt="OrcaRouter"
+            className="w-5 h-5"
+          />
+        );
       case MODEL_SOURCES.VOLCENGINE:
         return (
           <img src={publicAsset("/volcengine.png")} alt="VolcEngine" className="w-5 h-5" />

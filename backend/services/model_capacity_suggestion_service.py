@@ -129,6 +129,7 @@ HOST_PROVIDER_PATTERNS = (
     ("deepseek", "deepseek"),
     ("jina", "jina"),
     ("tokenpony", "tokenpony"),
+    ("orcarouter", "orcarouter"),
     ("bytedance", "volcengine"),
 )
 

@@ -16,6 +16,7 @@ from consts.provider import (
     DASHSCOPE_BASE_URL,
     DASHSCOPE_REALTIME_BASE_URL,
     TOKENPONY_BASE_URL,
+    ORCAROUTER_BASE_URL,
 )
 
 from database.model_management_db import (
@@ -424,6 +425,8 @@ async def batch_create_models_for_tenant(user_id: str, tenant_id: str, batch_pay
             model_url = DASHSCOPE_REALTIME_BASE_URL if model_type in ("stt", "tts") else DASHSCOPE_BASE_URL
         elif provider == ProviderEnum.TOKENPONY.value:
             model_url = TOKENPONY_BASE_URL
+        elif provider == ProviderEnum.ORCAROUTER.value:
+            model_url = ORCAROUTER_BASE_URL
         else:
             model_url = ""
 

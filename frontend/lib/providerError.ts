@@ -38,6 +38,7 @@ export const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
   modelengine: "ModelEngine",
   silicon: "SiliconFlow",
   openai: "OpenAI",
+  orcarouter: "OrcaRouter",
   default: "Provider",
 };
 
