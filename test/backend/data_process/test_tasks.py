@@ -1787,6 +1787,45 @@ def _run_coro(coro):
     return loop.run_until_complete(coro)
 
 
+def _patch_send_chunks_http(monkeypatch, tasks, *, status, body, response_json=None):
+    class FakeResponse:
+        async def text(self):
+            return body
+
+        async def json(self):
+            return response_json
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+    FakeResponse.status = status
+
+    class FakeSession:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        def post(self, *args, **kwargs):
+            return FakeResponse()
+
+    monkeypatch.setattr(tasks, "aiohttp", types.SimpleNamespace(
+        TCPConnector=lambda **kwargs: None,
+        ClientTimeout=lambda **kwargs: None,
+        ClientSession=FakeSession,
+        ClientConnectorError=Exception,
+        ClientResponseError=Exception,
+    ))
+    monkeypatch.setattr(tasks, "run_async", _run_coro)
+
+
 def test_forward_index_documents_error_code_from_detail(monkeypatch):
     tasks, _ = import_tasks_with_fake_ray(monkeypatch)
     monkeypatch.setattr(tasks, "ELASTICSEARCH_SERVICE", "http://api")
@@ -1841,44 +1880,10 @@ def test_forward_index_documents_error_code_from_detail(monkeypatch):
 def test_send_chunks_to_es_returns_response_json_when_body_is_not_json(monkeypatch):
     tasks, _ = import_tasks_with_fake_ray(monkeypatch)
     monkeypatch.setattr(tasks, "ELASTICSEARCH_SERVICE", "http://api")
-
-    class FakeResponse:
-        status = 200
-
-        async def text(self):
-            return "not-json"
-
-        async def json(self):
-            return {"success": True, "total_indexed": 1}
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *args):
-            return False
-
-    class FakeSession:
-        def __init__(self, *args, **kwargs):
-            pass
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *args):
-            return False
-
-        def post(self, *args, **kwargs):
-            return FakeResponse()
-
-    fake_aiohttp = types.SimpleNamespace(
-        TCPConnector=lambda **kwargs: None,
-        ClientTimeout=lambda **kwargs: None,
-        ClientSession=FakeSession,
-        ClientConnectorError=Exception,
-        ClientResponseError=Exception,
+    _patch_send_chunks_http(
+        monkeypatch, tasks, status=200, body="not-json",
+        response_json={"success": True, "total_indexed": 1},
     )
-    monkeypatch.setattr(tasks, "aiohttp", fake_aiohttp)
-    monkeypatch.setattr(tasks, "run_async", _run_coro)
 
     class RedisService:
         def is_document_delete_requested(self, **_kwargs):
@@ -1897,41 +1902,7 @@ def test_send_chunks_to_es_returns_response_json_when_body_is_not_json(monkeypat
 def test_send_chunks_to_es_raises_generic_http_error_without_error_code(monkeypatch):
     tasks, _ = import_tasks_with_fake_ray(monkeypatch)
     monkeypatch.setattr(tasks, "ELASTICSEARCH_SERVICE", "http://api")
-
-    class FakeResponse:
-        status = 500
-
-        async def text(self):
-            return "upstream failure"
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *args):
-            return False
-
-    class FakeSession:
-        def __init__(self, *args, **kwargs):
-            pass
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *args):
-            return False
-
-        def post(self, *args, **kwargs):
-            return FakeResponse()
-
-    fake_aiohttp = types.SimpleNamespace(
-        TCPConnector=lambda **kwargs: None,
-        ClientTimeout=lambda **kwargs: None,
-        ClientSession=FakeSession,
-        ClientConnectorError=Exception,
-        ClientResponseError=Exception,
-    )
-    monkeypatch.setattr(tasks, "aiohttp", fake_aiohttp)
-    monkeypatch.setattr(tasks, "run_async", _run_coro)
+    _patch_send_chunks_http(monkeypatch, tasks, status=500, body="upstream failure")
     monkeypatch.setattr(tasks, "get_redis_service", lambda: types.SimpleNamespace(
         is_document_delete_requested=lambda **_kwargs: False,
         acquire_document_write_lease=lambda **_kwargs: None,
