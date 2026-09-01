@@ -22,7 +22,6 @@ resources:
       cpu: 500m
 
 config:
-  marketBackend: "http://60.204.251.153:8010"
   proxyTimeoutMs: "600000"
   proxyWsTimeoutMs: "600000"
   sseProxyTimeoutMs: "600000"
