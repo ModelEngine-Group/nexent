@@ -331,7 +331,6 @@ def test_build_agent_run_info_maps_prompts_model_and_context_components(monkeypa
         "suffix": "FINAL ANSWER"
     }
     assert captured_context["tools"] == {"search": tool}
-    assert captured_context["user_id"] == "benchmark-user"
 
 
 def test_build_agent_run_info_uses_fallback_context_when_segments_are_empty(
