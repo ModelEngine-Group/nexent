@@ -172,6 +172,14 @@ class SandboxSkillScriptRunner:
                 + ", ".join(violations)
             )
 
+    def _ensure_output_directory(self, output_dir: str) -> None:
+        """Create the run output directory and keep it writable by the sandbox user."""
+        self._run_container_command(["mkdir", "-p", "--", output_dir], user="0")
+        self._run_container_command(
+            ["chown", "sandbox:sandbox", "--", output_dir],
+            user="0",
+        )
+
     def _stage_skill(
         self,
         manager: Any,
@@ -338,6 +346,7 @@ class SandboxSkillScriptRunner:
         else:
             workspace_dir = "/home/sandbox/workdir"
             output_dir = "/home/sandbox/workdir/output"
+        self._ensure_output_directory(output_dir)
         execution_environment = {
             "NEXENT_WORKSPACE": workspace_dir,
             "NEXENT_OUTPUT_DIR": output_dir,

@@ -237,6 +237,8 @@ class TestSandboxSkillScriptRunner:
             SimpleNamespace(exit_code=0, output=b""),
             SimpleNamespace(exit_code=0, output=b""),
             SimpleNamespace(exit_code=0, output=b""),
+            SimpleNamespace(exit_code=0, output=b""),
+            SimpleNamespace(exit_code=0, output=b""),
             SimpleNamespace(exit_code=2, output="combined failure"),
         ]
         workspace = "/mnt/nexent/workdir/user/run"
@@ -301,6 +303,8 @@ class TestSandboxSkillScriptRunner:
             SimpleNamespace(exit_code=0, output=b""),
             SimpleNamespace(exit_code=0, output=b""),
             SimpleNamespace(exit_code=0, output=b""),
+            SimpleNamespace(exit_code=0, output=b""),
+            SimpleNamespace(exit_code=0, output=b""),
             SimpleNamespace(exit_code=0, output=(b"sandbox\n", b"warning\n")),
         ]
         executor = SimpleNamespace(container=container, _nexent_backend="docker")
@@ -333,6 +337,13 @@ class TestSandboxSkillScriptRunner:
         assert container.exec_run.call_args_list[0] == call(
             ["mkdir", "-p", f"{workspace}/skills"], user="0"
         )
+        assert container.exec_run.call_args_list[-3:-1] == [
+            call(["mkdir", "-p", "--", f"{workspace}/outputs"], user="0"),
+            call(
+                ["chown", "sandbox:sandbox", "--", f"{workspace}/outputs"],
+                user="0",
+            ),
+        ]
         command = container.exec_run.call_args_list[-1].args[0]
         assert command[:5] == ["timeout", "--signal=KILL", "17", "python", ANY]
         assert command[-2:] == ["--title", "Quarterly report"]
@@ -385,6 +396,8 @@ class TestSandboxSkillScriptRunner:
             SimpleNamespace(exit_code=0, output=b""),
             SimpleNamespace(exit_code=0, output=b""),
             SimpleNamespace(exit_code=0, output=b""),
+            SimpleNamespace(exit_code=0, output=b""),
+            SimpleNamespace(exit_code=0, output=b""),
             SimpleNamespace(exit_code=124, output=(b"", b"")),
         ]
         workspace = "/mnt/nexent/workdir/user/run"
@@ -408,8 +421,13 @@ class TestSandboxSkillScriptRunner:
                 working_directory=workspace,
             )
 
-        normalized_script = container.exec_run.call_args_list[-2].args[0][-1]
-        assert container.exec_run.call_args_list[-2] == call(
+        sed_call = next(
+            recorded_call
+            for recorded_call in container.exec_run.call_args_list
+            if recorded_call.args[0][:2] == ["sed", "-i"]
+        )
+        normalized_script = sed_call.args[0][-1]
+        assert sed_call == call(
             ["sed", "-i", "s/\\r$//", normalized_script],
             user="0",
         )
@@ -503,6 +521,8 @@ class TestSandboxSkillScriptRunner:
         container = MagicMock()
         container.exec_run.side_effect = [
             SimpleNamespace(exit_code=0, output=f"{script}\n".encode()),
+            SimpleNamespace(exit_code=0, output=b""),
+            SimpleNamespace(exit_code=0, output=b""),
             SimpleNamespace(exit_code=0, output=b""),
             SimpleNamespace(exit_code=0, output=(b"built\n", b"")),
         ]
