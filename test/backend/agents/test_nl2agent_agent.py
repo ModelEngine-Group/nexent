@@ -235,7 +235,7 @@ def test_build_nl2agent_system_prompt_defers_scheduled_tasks_until_agent_chat(
             "One request may update multiple explicitly requested fields in one save call",
             "Omit every unspecified field so its persisted value remains unchanged",
             "listing only the potentially affected fields",
-            "search only for the newly requested capability",
+            "searches only for the newly requested capability",
             "reconfigure a specifically requested bound resource",
             "Never start at `duty_prompt` or enter the full Prompt generation chain",
             'Start with "Updated:"',
