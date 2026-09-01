@@ -8,10 +8,11 @@
 - [嵌入模型](#嵌入模型)
 - [大语言模型](#大语言模型)
 - [视觉语言模型](#视觉语言模型)
+- [模型能力与治理](#模型能力与治理)
 
 ## 🎤 语音服务 (STT & TTS)
 
-本模块提供了一个统一的语音服务，在单个端口上同时运行语音识别(STT)和语音合成(TTS)服务，使用WebSocket进行实时通信。
+SDK 在 `nexent.core.models` 中提供 STT/TTS 模型类（`BaseSTTModel` / `BaseTTSModel` 抽象基类，以及 `VolcSTTModel`、`VolcTTSModel`、`AliSTTModel`、`AliTTSModel` 实现，其中阿里云实现基于 DashScope Qwen Realtime WebSocket 协议）。在此之上，后端语音服务（backend/apps/voice_app.py）提供一个统一的语音服务，在单个端口上同时运行语音识别(STT)和语音合成(TTS)服务，使用WebSocket进行实时通信。
 
 ### 功能特点
 
@@ -24,7 +25,7 @@
 
 ### 设置
 
-1. 创建一个包含API凭证的`.env`文件:
+1. 部署后端语音服务时，创建一个包含API凭证的`.env`文件（这些变量由后端服务层读取，SDK 模型类本身不读取环境变量，凭证通过构造参数传入）:
 
 ```
 # STT配置
@@ -66,11 +67,10 @@ VOICE_TYPE=your_voice_type
 
 ### 功能特点
 
--   **多后端支持**: 支持Jina和OpenAI等多种嵌入服务。
+-   **多后端支持**: 支持 Jina、OpenAI 兼容、DashScope、Siliconflow 等嵌入服务。
 -   **统一文本接口**: 所有模型均提供统一的 `get_embeddings` 方法，接受字符串或字符串列表作为输入，方便处理纯文本数据。
 -   **多模态能力**: 像 `JinaEmbedding` 这样的多模态模型，额外提供了 `get_multimodal_embeddings` 方法，可以处理包含文本和图像URL的复杂输入。
--   **配置灵活**: 支持通过参数或环境变量进行配置。
--   **连接测试**: 内置 `check_connectivity()` 方法，用于验证与API服务的连接状态。
+-   **参数化配置**: 所有配置通过构造函数参数传入，SDK 不读取环境变量。
 
 ### 使用示例
 
@@ -160,14 +160,28 @@ response = model(messages=messages)
 from nexent.core.models.openai_vlm import OpenAIVLModel
 from nexent.core.utils.observer import MessageObserver
 
-# 初始化模型
+# 初始化模型（model_id / api_key / api_base 经 kwargs 传给底层 OpenAI 兼容客户端）
 observer = MessageObserver()
-model = OpenAIVLModel(observer=observer)
+model = OpenAIVLModel(
+    observer=observer,
+    model_id="your-vlm-model-id",
+    api_key="your-api-key",
+    api_base="your-api-base"
+)
 
 # 分析图像
 image_path = "path/to/image.jpg"
 result = model.analyze_image(image_path, system_prompt="请描述这张图片")
 ```
+
+## 🧭 模型能力与治理
+
+- **模型类型全覆盖**：llm / vlm（vlm2-vlm4 分类，支持图/视频/音频理解）/ embedding / rerank / stt / tts / realtime（DashScope 实时 WebSocket）
+- **Provider 扩展**：STT/TTS 继承 `BaseSTTModel` / `BaseTTSModel`（火山引擎、阿里云、ModelEngine、DashScope 等）
+- **重试机制**：`core/models/retry.py` 的 `ModelRetryConfig`（max_attempts、backoff_base_seconds、max_backoff_seconds、jitter），对瞬时错误指数退避重试
+- **可选 logprobs**：模型配置包含 logprobs 时自动传参
+- **元数据参数机制**：支持元数据透传并含 prompt 注入防护
+- **并发治理**：租户级模型并发上限与超时配置
 
 ## 🔧 通用特性
 

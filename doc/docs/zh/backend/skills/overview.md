@@ -70,6 +70,8 @@ tags:
 | `delete-file-directory` | 删除文件或目录 |
 | `move-file-directory` | 移动或重命名文件/目录 |
 | `list-directory` | 树形列出目录结构 |
+| `create-docx` | 从结构化规格创建/生成 Word 文档，支持一次性生成与细粒度编辑 |
+| `create-excel` | 从结构化规格创建/生成 Excel 工作簿，支持一次性生成与细粒度编辑 |
 
 ### 知识库搜索类
 

@@ -11,6 +11,8 @@
 - **TavilySearchTool**: 基于 Tavily API 的网络搜索工具
 - **LinkupSearchTool**: 基于 Linkup API 的搜索工具
 - **KnowledgeBaseSearchTool**: 本地知识库搜索工具
+- **RAGFlowSearchTool**: RAGFlow 知识检索
+- **HaotianSearchTool / IndependentAidpSearchTool / AidpSearchTool / DifySearchTool / DataMateSearchTool / IdataSearchTool**: 企业级检索源接入
 
 ### 文件管理工具
 - **CreateFileTool**: 创建包含内容的新文件
@@ -31,6 +33,28 @@
 ### 多模态工具
 - **AnalyzeTextFileTool**: 基于数据处理和大语言模型的文档问答工具
 - **AnalyzeImageTool**: 基于视觉语言模型的图片问答工具
+- **AnalyzeAudioTool**: 基于语音模型的音频理解工具
+- **AnalyzeVideoTool**: 基于视觉语言模型的视频理解工具
+
+### 记忆工具
+- **StoreMemoryTool**: 将重要信息存入当前 Agent 短期记忆（MemoryLayer.AGENT + SHORT_TERM），每次运行最多存储 3 条
+- **SearchMemoryTool**: 按自然语言查询检索当前 Agent 记忆，top_k 默认 5
+
+### 编排工具
+- **ParallelExecutorTool**: 并发执行多个子 Agent
+- **CreatePlanTool / UpdatePlanStepTool**: 规划待办的创建与更新
+
+### 数据工具
+- **MySqlTool / PostgreSqlTool / MsSqlTool**: 对数据库执行受控 SQL 查询
+- **UploadToS3Tool / DownloadFromS3Tool**: S3 对象上传与下载
+
+### 技能与任务工具（系统内部管理）
+- **ReadSkillConfigTool / ReadSkillMdTool**: 读取技能目录下的 config.yaml 与 SKILL.md
+- **RunSkillScriptTool**: 执行技能脚本
+- **WriteSkillFileTool**: 向租户隔离的技能目录写入文件
+- **CreateScheduledTaskProposalTool**: 创建待用户确认的定时任务提案（仅保存提案，不执行业务任务）
+
+> 注：以上工具由系统内部管理，未在 `nexent.core.tools` 的 `__init__.py` 中统一导出。
 
 ## 🔧 工具共性特征
 
@@ -51,7 +75,8 @@ class ToolExample(Tool):
         "param": {"type": "string", "description": "参数描述"}
     }
     output_type = "string"               # 输出类型
-    tool_sign = "x"                      # 工具标识符（可选）
+    category = "search"                  # 工具分类（ToolCategory 枚举值）
+    tool_sign = "b"                      # 工具标识符（ToolSign 枚举值）
 ```
 
 ### 3. 消息处理机制
@@ -82,12 +107,17 @@ class ToolExample(Tool):
 - **示例**: `max_results`, `running_prompt_en`, `_decode_subject`
 
 ### 工具标识符规范
-- **tool_sign**: 单字母标识符，用于区分工具来源
-- **分配规则**:
-  - `a`: 知识库搜索 (KnowledgeBaseSearchTool)
-  - `b`: 网络搜索 (ExaSearchTool, TavilySearchTool)
-  - `l`: Linkup搜索 (LinkupSearchTool)
-  - 其他字母按功能类型分配
+- **tool_sign**: 单字母标识符，用于区分工具来源（如在前端引用标注 `[b0]`、`[a1]` 中标识检索来源）
+- **取值方式**: 从 `nexent.core.utils.tools_common_message` 中的 `ToolSign` 枚举取值，例如 `tool_sign = ToolSign.EXA_SEARCH.value`
+- **分配规则**（摘自 `ToolSign` 枚举定义）:
+  - `a`: 知识库搜索 (KNOWLEDGE_BASE, KnowledgeBaseSearchTool)
+  - `b`: EXA 搜索 (EXA_SEARCH, ExaSearchTool)
+  - `c`: Linkup 搜索 (LINKUP_SEARCH, LinkupSearchTool)
+  - `d`: Tavily 搜索 (TAVILY_SEARCH, TavilySearchTool)
+  - `e`: DataMate 搜索 (DATAMATE_SEARCH)
+  - `f`: 文件操作 (FILE_OPERATION)
+  - `g` / `h` / `i` / `j` / `k` / `l`: Dify / iData / Haotian / AIDP / RAGFlow / IndependentAIDP 搜索
+  - `m` / `n` / `p` / `s` / `t` / `z`: 多模态 / 记忆 / 规划 / 技能 / 终端 / 数据库操作
 
 ## 🏗️ 代码结构模板
 
@@ -101,6 +131,7 @@ from smolagents.tools import Tool
 from pydantic import Field
 
 from ..utils.observer import MessageObserver, ProcessType
+from ..utils.tools_common_message import ToolCategory, ToolSign
 
 logger = logging.getLogger("your_tool_name")
 
@@ -120,7 +151,8 @@ class YourTool(Tool):
         }
     }
     output_type = "string"
-    tool_sign = "y"  # 选择合适的标识符
+    category = ToolCategory.FILE.value  # 按工具类型选择 ToolCategory 枚举成员
+    tool_sign = ToolSign.FILE_OPERATION.value  # 按工具类型选择 ToolSign 枚举成员
 
     def __init__(
         self,
@@ -201,7 +233,7 @@ from smolagents.tools import Tool
 from pydantic import Field
 
 from ..utils.observer import MessageObserver, ProcessType
-from ..utils.tools_common_message import SearchResultTextMessage
+from ..utils.tools_common_message import SearchResultTextMessage, ToolCategory, ToolSign
 
 logger = logging.getLogger("search_tool_name")
 
@@ -213,7 +245,8 @@ class SearchTool(Tool):
         "max_results": {"type": "integer", "description": "最大结果数", "default": 5, "nullable": True}
     }
     output_type = "string"
-    tool_sign = "s"
+    category = ToolCategory.SEARCH.value
+    tool_sign = ToolSign.EXA_SEARCH.value  # 按实际搜索源选择 ToolSign 枚举成员
 
     def __init__(
         self,
@@ -353,7 +386,7 @@ class SearchTool(Tool):
 1. **版本兼容**: 确保工具与不同版本的依赖库兼容
 2. **资源清理**: 及时释放网络连接、文件句柄等资源
 3. **日志级别**: 合理设置日志级别，避免过多调试信息
-4. **配置管理**: 支持通过环境变量配置关键参数
+4. **配置管理**: 所有配置通过构造函数参数传入（SDK 内不直接读取环境变量，环境变量由服务层读取后传入）
 5. **错误恢复**: 在可能的情况下提供错误恢复机制
 
 通过遵循这些规范，可以确保新开发的工具与现有工具保持一致性，并具备良好的可维护性和可扩展性。

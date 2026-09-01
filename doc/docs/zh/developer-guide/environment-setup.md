@@ -12,7 +12,7 @@ title: 环境准备
 - Node.js 18+
 - Docker & Docker Compose
 - uv（Python 包管理器）
-- pnpm（Node.js 包管理器）
+- pnpm（Node.js 包管理器，随 Node.js 安装）
 
 ## 🧑‍💻 全栈 Nexent 开发
 
@@ -26,7 +26,7 @@ bash deploy.sh docker --components infrastructure --port-policy development
 ```
 
 :::: info 重要提示
-基础设施模式会启动 PostgreSQL、Redis、Elasticsearch、MinIO，并在项目根生成 `.env`（包含生成的密钥与本地地址）。所有服务默认指向 localhost 便于本地开发。
+基础设施模式会启动 PostgreSQL、Redis、Elasticsearch、MinIO，并在 `deploy/env/` 下生成 `.env`（包含生成的密钥与本地地址）。所有服务默认指向 localhost 便于本地开发。
 ::::
 
 ### 🐍 后端依赖
@@ -34,11 +34,11 @@ bash deploy.sh docker --components infrastructure --port-policy development
 ```bash
 cd backend
 uv sync --all-extras
-uv pip install ../sdk
+uv pip install -e "../sdk[dev]"
 ```
 
 :::: tip 说明
-`--all-extras` 安装所有可选依赖（数据处理、测试等），随后安装本地 SDK 包。
+`--all-extras` 安装所有可选依赖（`data-process` 数据处理、`test` 测试等），随后以可编辑模式安装本地 SDK 包（`dev` 扩展含 ruff、pytest、unstructured、OpenTelemetry 等工具链）。
 ::::
 
 #### 可选：镜像加速
@@ -46,15 +46,15 @@ uv pip install ../sdk
 ```bash
 # 清华源
 uv sync --all-extras --default-index https://pypi.tuna.tsinghua.edu.cn/simple
-uv pip install ../sdk --default-index https://pypi.tuna.tsinghua.edu.cn/simple
+uv pip install -e "../sdk[dev]" --default-index https://pypi.tuna.tsinghua.edu.cn/simple
 
 # 阿里云
 uv sync --all-extras --default-index https://mirrors.aliyun.com/pypi/simple/
-uv pip install ../sdk --default-index https://mirrors.aliyun.com/pypi/simple/
+uv pip install -e "../sdk[dev]" --default-index https://mirrors.aliyun.com/pypi/simple/
 
 # 多源（推荐）
 uv sync --all-extras --index https://pypi.tuna.tsinghua.edu.cn/simple --index https://mirrors.aliyun.com/pypi/simple/
-uv pip install ../sdk --index https://pypi.tuna.tsinghua.edu.cn/simple --index https://mirrors.aliyun.com/pypi/simple/
+uv pip install -e "../sdk[dev]" --index https://pypi.tuna.tsinghua.edu.cn/simple --index https://mirrors.aliyun.com/pypi/simple/
 ```
 
 :::: info 镜像参考
@@ -83,20 +83,21 @@ source .venv/bin/activate
 ```
 
 :::: warning 提示
-Windows 请使用 `source .venv/Scripts/activate`。
+Windows PowerShell 请使用 `.venv\Scripts\Activate.ps1`；Git Bash 可使用 `source .venv/Scripts/activate`。
 ::::
 
 在项目根依次启动核心服务：
 
 ```bash
-source .env && python backend/mcp_service.py
-source .env && python backend/data_process_service.py
-source .env && python backend/config_service.py
-source .env && python backend/runtime_service.py
+source deploy/env/.env && python backend/mcp_service.py
+source deploy/env/.env && python backend/data_process_service.py
+source deploy/env/.env && python backend/config_service.py
+source deploy/env/.env && python backend/runtime_service.py
+source deploy/env/.env && python backend/northbound_service.py
 ```
 
 :::: warning 提示
-需在项目根执行，并先 `source .env`。确保数据库、Redis、Elasticsearch、MinIO 已就绪。
+需在项目根执行，并先 `source deploy/env/.env`。确保数据库、Redis、Elasticsearch、MinIO 已就绪。
 ::::
 
 ## 🧰 仅使用 SDK

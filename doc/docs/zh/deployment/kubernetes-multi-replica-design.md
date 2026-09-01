@@ -25,7 +25,7 @@
 
 - `deploy/k8s/helm/nexent/values.yaml`
   - `global.sharedStorage.mode: local`
-  - `global.sharedStorage.accessModes: ReadWriteOnce`
+  - `global.sharedStorage.accessModes: ReadWriteMany`
   - `workspace.localPath: /var/lib/nexent`
   - `skills.localPath: /var/lib/nexent-data/skills`
 - `deploy/k8s/helm/nexent/charts/nexent-common/templates/shared-storage.yaml`

@@ -8,37 +8,50 @@
 
 ```
 test/backend/
-├── app/                    # API 端点测试
+├── adapters/              # 适配器测试（如 jiuwen_sdk_adapter）
+├── agents/                # 智能体核心测试
+│   ├── test_agent_run_manager.py
+│   ├── test_create_agent_info.py
+│   ├── test_nl2agent_agent.py
+│   └── test_preprocess_manager.py
+├── app/                   # API 端点测试
 │   ├── test_agent_app.py
-│   ├── test_base_app.py
-│   ├── test_config_sync_app.py
 │   ├── test_conversation_management_app.py
 │   ├── test_data_process_app.py
-│   ├── test_elasticsearch_app.py
 │   ├── test_file_management_app.py
 │   ├── test_image_app.py
-│   ├── test_knowledge_app.py
 │   ├── test_knowledge_summary_app.py
-│   ├── test_me_model_managment_app.py
 │   ├── test_model_managment_app.py
+│   ├── test_northbound_app.py
 │   ├── test_prompt_app.py
-│   └── test_remote_mcp_app.py
+│   ├── test_remote_mcp_app.py
+│   └── ...
+├── apps/                  # 补充 API 测试
+│   ├── test_memory_dreaming_app.py
+│   └── test_memory_record_app.py
+├── consts/                # 常量与模型测试
+├── data_process/          # 数据处理测试（Ray、Celery 任务）
+├── database/              # 数据库访问层测试
+├── middleware/            # 中间件测试
+├── permissions/           # 权限（RBAC/DAC）测试
 ├── services/              # 服务层测试
 │   ├── test_agent_service.py
+│   ├── test_agent_version_service.py
 │   ├── test_conversation_management_service.py
 │   ├── test_data_process_service.py
-│   ├── test_elasticsearch_service.py
 │   ├── test_file_management_service.py
 │   ├── test_image_service.py
-│   ├── test_knowledge_service.py
 │   ├── test_knowledge_summary_service.py
+│   ├── test_memory_config_service.py
 │   ├── test_model_management_service.py
 │   ├── test_prompt_service.py
-│   └── test_remote_mcp_service.py
+│   ├── test_remote_mcp_service.py
+│   └── ...
 ├── utils/                 # 工具函数测试
 │   ├── test_langchain_utils.py
+│   ├── test_llm_utils.py
 │   └── test_prompt_template_utils.py
-└── run_all_test.py       # 后端测试运行器
+└── test_*.py              # 根级集成类测试（LLM 集成、运行时服务等）
 ```
 
 ## 运行后端测试
@@ -46,12 +59,12 @@ test/backend/
 ### 完整的后端测试套件
 
 ```bash
-# 从项目根目录
-python test/backend/run_all_test.py
+# 激活后端虚拟环境后，从项目根目录运行全部测试（含覆盖率）
+source backend/.venv/bin/activate
+python test/run_all_test.py
 
-# 从 test/backend 目录
-cd test/backend
-python run_all_test.py
+# 仅运行后端测试
+NEXENT_PYTEST_TARGETS=test/backend python test/run_all_test.py
 ```
 
 ### 单个测试类别
@@ -113,50 +126,45 @@ for p in patches:
     p.start()
 
 # 应用补丁后导入模块
-from backend.apps.agent_app import router
+from apps.agent_app import agent_config_router
 
 # 创建测试应用
 app = FastAPI()
-app.include_router(router)
+app.include_router(agent_config_router)
 client = TestClient(app)
 ```
 
 ### API 测试示例
 
 ```python
-class TestAgentApp(unittest.TestCase):
-    
-    def setUp(self):
-        # 设置测试客户端和通用模拟
-        pass
-    
-    def test_create_agent_success(self):
-        """测试成功的智能体创建"""
-        # 设置
-        agent_data = {
+def test_create_agent_success(client):
+    """测试成功的智能体创建"""
+    # 设置 - 模拟服务层返回
+    with patch("services.agent_service.create_agent") as mock_service:
+        mock_service.return_value = {"id": 1, "name": "Test Agent"}
+
+        # 执行
+        response = client.post("/agents", json={
             "name": "Test Agent",
             "description": "A test agent",
             "system_prompt": "You are a test agent"
-        }
-        
-        # 执行
-        response = client.post("/agents", json=agent_data)
-        
+        })
+
         # 断言
-        self.assertEqual(response.status_code, 200)
-        self.assertIn("id", response.json())
-        self.assertEqual(response.json()["name"], "Test Agent")
-    
-    def test_create_agent_invalid_data(self):
-        """测试使用无效数据的智能体创建"""
-        # 设置
-        invalid_data = {"name": ""}  # 缺少必需字段
-        
-        # 执行
-        response = client.post("/agents", json=invalid_data)
-        
-        # 断言
-        self.assertEqual(response.status_code, 422)  # 验证错误
+        assert response.status_code == 200
+        assert "id" in response.json()
+        assert response.json()["name"] == "Test Agent"
+
+def test_create_agent_invalid_data(client):
+    """测试使用无效数据的智能体创建"""
+    # 设置
+    invalid_data = {"name": ""}  # 缺少必需字段
+
+    # 执行
+    response = client.post("/agents", json=invalid_data)
+
+    # 断言
+    assert response.status_code == 422  # 验证错误
 ```
 
 ## 服务层测试
@@ -166,44 +174,52 @@ class TestAgentApp(unittest.TestCase):
 ### 服务测试模式
 
 ```python
-class TestAgentService(unittest.TestCase):
-    
-    @patch("backend.database.agent_db.save_agent")
-    @patch("backend.utils.auth_utils.get_current_user_id")
-    async def test_create_agent_success(self, mock_get_user, mock_save_agent):
-        # 设置
-        mock_get_user.return_value = ("user123", "tenant456")
-        mock_save_agent.return_value = {"id": 1, "name": "Test Agent"}
-        
-        # 执行
-        result = await create_agent(
-            name="Test Agent",
-            description="A test agent",
-            system_prompt="You are a test agent"
-        )
-        
-        # 断言
-        mock_save_agent.assert_called_once()
-        self.assertEqual(result["name"], "Test Agent")
-        self.assertIn("id", result)
+import pytest
+from unittest.mock import AsyncMock, patch
+
+from services.agent_service import create_agent
+
+
+@pytest.mark.asyncio
+@patch("backend.database.agent_db.save_agent")
+@patch("backend.utils.auth_utils.get_current_user_id")
+async def test_create_agent_success(mock_get_user, mock_save_agent):
+    # 设置
+    mock_get_user.return_value = ("user123", "tenant456")
+    mock_save_agent.return_value = {"id": 1, "name": "Test Agent"}
+
+    # 执行
+    result = await create_agent(
+        name="Test Agent",
+        description="A test agent",
+        system_prompt="You are a test agent",
+        tenant_id="tenant456",
+        user_id="user123",
+    )
+
+    # 断言
+    mock_save_agent.assert_called_once()
+    assert result["name"] == "Test Agent"
+    assert "id" in result
 ```
 
 ### 模拟数据库操作
 
 ```python
+@pytest.mark.asyncio
 @patch("backend.database.agent_db.query_agent_by_id")
 @patch("backend.database.agent_db.update_agent")
-async def test_update_agent_success(self, mock_update, mock_query):
+async def test_update_agent_success(mock_update, mock_query):
     # 设置
     mock_query.return_value = {"id": 1, "name": "Old Name"}
     mock_update.return_value = {"id": 1, "name": "New Name"}
-    
+
     # 执行
-    result = await update_agent(agent_id=1, name="New Name")
-    
+    result = await update_agent(agent_id=1, name="New Name", tenant_id="tenant456")
+
     # 断言
     mock_update.assert_called_once_with(agent_id=1, name="New Name")
-    self.assertEqual(result["name"], "New Name")
+    assert result["name"] == "New Name"
 ```
 
 ## 工具函数测试
@@ -213,41 +229,44 @@ async def test_update_agent_success(self, mock_update, mock_query):
 ### 工具测试示例
 
 ```python
-class TestLangchainUtils(unittest.TestCase):
-    
-    @patch("langchain.llms.openai.OpenAI")
-    def test_create_llm_instance(self, mock_openai):
-        # 设置
-        mock_openai.return_value = MagicMock()
-        
+from unittest.mock import MagicMock, patch
+
+from utils.langchain_utils import discover_langchain_modules
+
+
+def test_discover_langchain_modules():
+    # 设置 - 模拟模块扫描，避免加载真实 langchain 依赖
+    with patch("utils.langchain_utils._is_langchain_tool", return_value=True) as mock_check:
         # 执行
-        llm = create_llm_instance(model_name="gpt-3.5-turbo")
-        
+        tools = discover_langchain_modules("some_package")
+
         # 断言
-        mock_openai.assert_called_once()
-        self.assertIsNotNone(llm)
+        mock_check.assert_called()
+        assert isinstance(tools, list)
 ```
 
 ## 测试异步代码
 
-后端测试处理同步和异步代码：
+后端测试处理同步和异步代码。`test/pytest.ini` 配置了 `asyncio_mode = auto`，异步测试函数会被自动识别执行（也支持显式标注 `@pytest.mark.asyncio`）：
 
 ### 异步测试模式
 
 ```python
-class TestAsyncService(unittest.TestCase):
-    
-    @patch("backend.database.agent_db.async_query")
-    async def test_async_operation(self, mock_async_query):
-        # 设置
-        mock_async_query.return_value = {"result": "success"}
-        
-        # 执行
-        result = await async_operation()
-        
-        # 断言
-        self.assertEqual(result["result"], "success")
-        mock_async_query.assert_called_once()
+import pytest
+
+
+@pytest.mark.asyncio
+@patch("backend.database.agent_db.async_query")
+async def test_async_operation(mock_async_query):
+    # 设置
+    mock_async_query.return_value = {"result": "success"}
+
+    # 执行
+    result = await async_operation()
+
+    # 断言
+    assert result["result"] == "success"
+    mock_async_query.assert_called_once()
 ```
 
 ## 错误处理测试
@@ -255,18 +274,18 @@ class TestAsyncService(unittest.TestCase):
 全面测试错误处理：
 
 ```python
-def test_api_error_handling(self):
+def test_api_error_handling(client):
     """测试 API 错误响应"""
     # 设置 - 模拟服务抛出异常
     with patch('backend.services.agent_service.create_agent') as mock_service:
         mock_service.side_effect = Exception("Database error")
-        
+
         # 执行
         response = client.post("/agents", json={"name": "Test"})
-        
+
         # 断言
-        self.assertEqual(response.status_code, 500)
-        self.assertIn("error", response.json())
+        assert response.status_code == 500
+        assert "error" in response.json()
 ```
 
 ## 身份验证和授权测试
@@ -274,23 +293,23 @@ def test_api_error_handling(self):
 彻底测试安全相关功能：
 
 ```python
-def test_authentication_required(self):
+def test_authentication_required(client):
     """测试端点需要身份验证"""
     # 执行 - 没有身份验证头
     response = client.get("/agents")
-    
-    # 断言
-    self.assertEqual(response.status_code, 401)
 
-def test_tenant_isolation(self):
+    # 断言
+    assert response.status_code == 401
+
+def test_tenant_isolation(client):
     """测试用户只能访问其租户的数据"""
     # 设置 - 模拟身份验证返回不同租户
     with patch('backend.utils.auth_utils.get_current_user_id') as mock_auth:
         mock_auth.return_value = ("user1", "tenant1")
-        
+
         # 执行
         response = client.get("/agents")
-        
+
         # 断言 - 验证应用了租户过滤
         # 这将检查服务层是否按租户过滤
 ```
@@ -321,23 +340,29 @@ python -m pytest test/backend/ --cov=backend --cov-report=term-missing
 ### 固定装置和测试数据
 
 ```python
-class TestWithFixtures(unittest.TestCase):
-    
-    def setUp(self):
-        """设置测试数据和模拟"""
-        self.test_agent = {
-            "id": 1,
-            "name": "Test Agent",
-            "description": "A test agent",
-            "system_prompt": "You are a test agent"
-        }
-        
-        self.test_user = ("user123", "tenant456")
-    
-    def tearDown(self):
-        """测试后清理"""
-        # 如果需要，重置任何全局状态
-        pass
+import pytest
+
+
+@pytest.fixture
+def test_agent():
+    """设置测试数据"""
+    return {
+        "id": 1,
+        "name": "Test Agent",
+        "description": "A test agent",
+        "system_prompt": "You are a test agent"
+    }
+
+
+@pytest.fixture
+def test_user():
+    """模拟用户与租户信息"""
+    return ("user123", "tenant456")
+
+def test_with_fixtures(test_agent, test_user):
+    """在测试函数中直接注入 fixtures"""
+    assert test_agent["id"] == 1
+    assert test_user == ("user123", "tenant456")
 ```
 
 ## 性能测试
@@ -345,17 +370,17 @@ class TestWithFixtures(unittest.TestCase):
 后端测试包括性能考虑：
 
 ```python
-def test_api_response_time(self):
+def test_api_response_time(client):
     """测试 API 响应时间在可接受的时间限制内"""
     import time
-    
+
     start_time = time.time()
     response = client.get("/agents")
     end_time = time.time()
-    
+
     # 断言响应时间小于 100ms
-    self.assertLess(end_time - start_time, 0.1)
-    self.assertEqual(response.status_code, 200)
+    assert end_time - start_time < 0.1
+    assert response.status_code == 200
 ```
 
 ## 后端测试最佳实践

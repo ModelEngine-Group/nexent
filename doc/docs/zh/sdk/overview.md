@@ -21,10 +21,19 @@ Nexent 是一个强大的企业级 Agent SDK，革命性地简化了智能体开
 集成 STT & TTS 语音服务，支持图像理解和处理，以及长上下文模型。
 
 ### 📊 强大的数据处理能力
-处理 20+ 种文档格式，支持智能分块策略和内存流式处理。
+处理多种文档格式（当前支持 17 种扩展名），支持智能分块策略和内存流式处理。
 
 ### 🔍 向量数据库集成
 企业级 Elasticsearch 向量搜索，支持混合搜索和大规模优化。
+
+### 🌉 Gateway 适配器架构
+LLM/Embedding/Rerank/VLM 经 AdapterRegistry 按 (factory, modality) 统一注册接入，传输层参数可配置（core/gateway/registry.py、transport.py）。
+
+### 🧠 记忆与 Dreaming
+Tenant/User/Agent 三层记忆 + 主动记忆工具 + Dreaming 记忆固化（memory/dreaming/）。
+
+### 🏁 Benchmark
+内置 agent_runner、acon_eval、eventqa_eval 评测脚手架与通用评测对比 harness。
 
 有关详细的特性和使用说明，请参阅 **[特性详解](./features)** 和 **[基本使用指南](./basic-usage)**。
 
@@ -43,7 +52,7 @@ Nexent 提供了丰富的工具生态系统，支持多种类型的任务处理�
 
 ## 📊 数据处理能力
 
-企业级文档处理能力，提供分布式处理能力，支持 20+ 种文档格式、智能分块策略和内存优化。
+企业级文档处理能力，提供分布式处理能力，支持多种文档格式（当前 17 种扩展名）、智能分块策略和内存优化。
 
 详细的数据处理能力和使用示例，请参考：**[数据处理指南](./data-process)**
 

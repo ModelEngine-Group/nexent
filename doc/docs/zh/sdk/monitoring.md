@@ -211,6 +211,8 @@ echo -n "$LANGFUSE_PUBLIC_KEY:$LANGFUSE_SECRET_KEY" | base64
 - 用户反馈收集
 - 模型成本追踪
 
+> v2.5.0 起额外暴露上下文管理与提示词缓存命中指标（context/cache metrics），可用于评估压缩效果与缓存收益。
+
 ## 环境变量
 
 | 变量 | 默认值 | 说明 |
@@ -219,7 +221,7 @@ echo -n "$LANGFUSE_PUBLIC_KEY:$LANGFUSE_SECRET_KEY" | base64
 | `MONITORING_PROVIDER` | `otlp` | 平台配置和本地部署形态：`otlp`、`phoenix`、`langfuse`、`langsmith`、`grafana`、`zipkin` |
 | `MONITORING_DASHBOARD_URL` | （空） | 前端顶栏监控入口跳转 URL，需配置为浏览器可访问地址；speed 模式下可见，标准模式下仅超级管理员可见 |
 | `MONITORING_PROJECT_NAME` | `nexent` | 监控平台项目名 |
-| `MONITORING_TRACE_CONTENT_MODE` | `full` | Trace payload 记录模式：`summary` 写入有界预览和结构元数据，`metrics` 只写结构/大小元数据，`full` 在 `MONITORING_TRACE_MAX_CHARS` 限制内保留完整 payload |
+| `MONITORING_TRACE_CONTENT_MODE` | `summary` | Trace payload 记录模式：`summary` 写入有界预览和结构元数据，`metrics` 只写结构/大小元数据，`full` 在 `MONITORING_TRACE_MAX_CHARS` 限制内保留完整 payload |
 | `MONITORING_TRACE_MAX_CHARS` | `4000` | 每个 payload 预览最多写入的字符数 |
 | `MONITORING_TRACE_MAX_ITEMS` | `20` | dict/list 预览最多写入的 key 或 item 数 |
 | `OTEL_SERVICE_NAME` | `nexent-backend` | 服务标识 |

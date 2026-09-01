@@ -4,10 +4,10 @@ Nexent 的前端采用现代 React 技术构建，为 AI 智能体交互提供�
 
 ## 技术栈
 
-- **框架**: Next.js 14 (App Router)
+- **框架**: Next.js 15 (App Router)
 - **语言**: TypeScript
 - **UI库**: React + Tailwind CSS
-- **状态管理**: React Hooks
+- **状态管理**: React Hooks + zustand
 - **国际化**: react-i18next
 - **HTTP客户端**: Fetch API
 
@@ -18,13 +18,16 @@ frontend/
 ├── app/                          # Next.js App Router
 │   └── [locale]/                 # 国际化路由 (zh/en)
 │       ├── chat/                 # 聊天界面
+│       │   ├── components/       # 聊天界面组件
 │       │   ├── internal/         # 聊天核心逻辑
-│       │   ├── layout/           # 聊天界面布局组件
 │       │   └── streaming/        # 流式响应处理
-│       ├── setup/                # 系统设置页面
-│       │   ├── agentSetup/       # 代理配置
-│       │   ├── knowledgeBaseSetup/ # 知识库配置
-│       │   └── modelSetup/       # 模型配置
+│       ├── agents/               # 智能体配置与调试
+│       ├── knowledges/           # 知识库管理
+│       ├── models/               # 模型配置
+│       ├── memory/               # 记忆管理
+│       ├── market/               # 智能体市场
+│       ├── mcp-space/            # MCP 工具空间
+│       ├── skill-space/          # 技能空间
 │       └── layout.tsx            # 全局布局
 ├── components/                    # 可复用UI组件
 │   ├── providers/                # 上下文提供者
@@ -36,10 +39,11 @@ frontend/
 │   ├── knowledgeBaseService.ts   # 知识库服务
 │   └── modelService.ts           # 模型服务
 ├── hooks/                        # 自定义React Hooks
+├── stores/                       # zustand 全局状态
 ├── lib/                          # 工具库
 ├── types/                        # TypeScript类型定义
 ├── public/                       # 静态资源
-│   └── locales/                  # 国际化文件
+│   └── locales/                  # 国际化文件 (zh/en)
 └── middleware.ts                 # Next.js中间件
 ```
 
@@ -108,11 +112,15 @@ npm run build
 npm start
 ```
 
+- 支持 base url 构建（构建期 `CONFIGURED_BASE_PATH`，运行时经 `base-path.mjs` 的 BASE_PATH 适配），可部署在反向代理子路径下
+- 应用 logo 与描述支持自定义（管理端配置）
+- 生产端口统一为 3000
+
 ### 代码质量
-- ESLint 代码检查
-- Prettier 代码格式化
-- TypeScript 类型安全
-- Husky 预提交钩子
+- ESLint 代码检查（`npm run lint`）
+- Prettier 代码格式化（`npm run format`）
+- TypeScript 类型安全（`npm run type-check`）
+- 一键检查：`npm run check-all`（type-check + lint + format:check + build）
 
 ## 集成点
 

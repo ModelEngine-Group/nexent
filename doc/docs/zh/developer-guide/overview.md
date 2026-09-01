@@ -9,8 +9,7 @@ nexent/
 ├── frontend/          # 前端应用 (Next.js + TypeScript)
 ├── backend/           # 后端服务 (FastAPI + Python)
 ├── sdk/              # Python SDK
-├── docker/           # Docker 部署配置
-├── make/             # 构建脚本
+├── deploy/           # 部署配置（Docker Compose、K8s、SQL、环境模板）
 ├── test/             # 测试代码
 └── assets/           # 静态资源
 ```
@@ -18,10 +17,10 @@ nexent/
 ## 🛠️ 技术栈
 
 ### 前端技术栈
-- **框架**: Next.js 14 (App Router)
+- **框架**: Next.js 15 (App Router)
 - **语言**: TypeScript
 - **UI库**: React + Tailwind CSS
-- **状态管理**: React Hooks
+- **状态管理**: React Hooks + zustand
 - **国际化**: react-i18next
 - **HTTP客户端**: Fetch API
 
@@ -54,7 +53,7 @@ nexent/
 ## 🔧 开发模块指南
 
 ### 🎨 前端开发
-- **技术栈**: Next.js 14 + TypeScript + React + Tailwind CSS
+- **技术栈**: Next.js 15 + TypeScript + React + Tailwind CSS
 - **核心功能**: 用户界面、实时聊天、配置管理、国际化
 - **详细信息**: 查看 [前端概览](../frontend/overview)
 
