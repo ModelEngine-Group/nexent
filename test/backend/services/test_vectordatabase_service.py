@@ -9711,3 +9711,257 @@ async def test_delete_document_by_scope_schedules_pending_retry(monkeypatch):
     )
     assert result["deletion_pending"] is True
     schedule.assert_called_once()
+
+
+def test_mark_file_delete_requested_tombstone_survives_redis_outage(monkeypatch):
+    tombstone = {"file_id": "fid-new", "status": "DELETE_REQUESTED"}
+    monkeypatch.setattr(
+        "backend.services.vectordatabase_service.get_knowledge_record",
+        lambda _query: {"tenant_id": "tenant", "knowledge_id": 9},
+    )
+    monkeypatch.setattr(
+        "backend.services.vectordatabase_service.get_file_record",
+        lambda **_kwargs: None,
+    )
+    create = MagicMock(return_value=tombstone)
+    monkeypatch.setattr(
+        "backend.services.vectordatabase_service.create_delete_tombstone", create
+    )
+    monkeypatch.setattr(
+        "backend.services.vectordatabase_service.get_redis_service",
+        MagicMock(side_effect=RuntimeError("redis unavailable")),
+    )
+
+    assert ElasticSearchService._mark_file_delete_requested(
+        "kb", "knowledge_base/new.txt", requested_by="user", file_id="fid-new"
+    ) == tombstone
+    create.assert_called_once()
+
+
+def test_cancel_document_tasks_handles_non_dict_kwargs_and_revoke_error(monkeypatch):
+    inspector = SimpleNamespace(
+        active=MagicMock(return_value={"worker": [
+            {"id": "matched", "kwargs": ["not-a-mapping"]},
+        ]}),
+        reserved=MagicMock(return_value={}),
+    )
+    celery_app = _install_fake_celery_app(monkeypatch, inspector)
+    celery_app.control.revoke.side_effect = RuntimeError("revoke unavailable")
+    monkeypatch.setattr(
+        "backend.services.vectordatabase_service.get_redis_service",
+        MagicMock(side_effect=RuntimeError("redis unavailable")),
+    )
+
+    result = ElasticSearchService._cancel_document_tasks(
+        index_name="kb", path_or_url="obj",
+        lifecycle_record={"file_id": "fid", "parent_task_id": "matched"},
+    )
+    assert result["task_ids"] == ["matched"]
+    celery_app.control.revoke.assert_called_once_with("matched", terminate=False)
+
+
+def test_wait_for_document_tasks_handles_non_dict_kwargs_and_cleanup_errors(monkeypatch):
+    inspector = SimpleNamespace(
+        active=MagicMock(return_value={"worker": [
+            {"id": "visible", "kwargs": ["not-a-mapping"]},
+            {"id": "matched", "kwargs": {"file_id": "fid"}},
+        ]}),
+        reserved=MagicMock(return_value={}),
+    )
+    celery_app = _install_fake_celery_app(monkeypatch, inspector)
+    celery_app.control.revoke.side_effect = RuntimeError("revoke unavailable")
+    redis_mock = MagicMock()
+    redis_mock.mark_task_cancelled.side_effect = RuntimeError("redis unavailable")
+    monkeypatch.setattr(
+        "backend.services.vectordatabase_service.get_redis_service", lambda: redis_mock
+    )
+    monkeypatch.setattr(
+        "backend.services.vectordatabase_service.time.monotonic",
+        MagicMock(side_effect=[0.0, 2.0]),
+    )
+
+    assert not ElasticSearchService._wait_for_document_tasks(
+        index_name="kb", path_or_url="obj", lifecycle_record={"file_id": "fid"},
+        timeout_seconds=1, poll_interval_seconds=0.01,
+    )
+
+
+def test_wait_for_document_tasks_returns_when_celery_inspection_unavailable(monkeypatch):
+    celery_app = SimpleNamespace(control=SimpleNamespace(
+        inspect=MagicMock(side_effect=RuntimeError("broker unavailable")),
+        revoke=MagicMock(),
+    ))
+    package = ModuleType("data_process")
+    package.__path__ = []
+    app_module = ModuleType("data_process.app")
+    app_module.app = celery_app
+    monkeypatch.setitem(sys.modules, "data_process", package)
+    monkeypatch.setitem(sys.modules, "data_process.app", app_module)
+
+    assert ElasticSearchService._wait_for_document_tasks(
+        index_name="kb", path_or_url="obj", lifecycle_record={"file_id": "fid"},
+        timeout_seconds=1,
+    )
+
+
+@pytest.mark.asyncio
+async def test_finalize_document_delete_legacy_path_passes_request_user_to_marker(monkeypatch):
+    redis_mock = MagicMock()
+    redis_mock.delete_document_records.return_value = {"errors": [], "total_deleted": 0}
+    redis_mock.clear_document_delete_fence.return_value = 0
+    redis_mock.is_document_delete_requested.return_value = False
+    monkeypatch.setattr(
+        "backend.services.vectordatabase_service.get_redis_service", lambda: redis_mock
+    )
+    monkeypatch.setattr(
+        ElasticSearchService, "delete_documents",
+        MagicMock(return_value={"status": "success", "deleted_minio": True}),
+    )
+    marker = MagicMock()
+    monkeypatch.setattr(ElasticSearchService, "_mark_file_deleted", marker)
+
+    result = await ElasticSearchService._finalize_document_delete(
+        index_name="kb", path_or_url="obj", scope="full", vdb_core=MagicMock(),
+        lifecycle_record=None, requested_by="user-1",
+    )
+    assert result["lifecycle_deleted"] is True
+    marker.assert_called_once_with("kb", "obj", updated_by="user-1")
+
+
+@pytest.mark.asyncio
+async def test_retry_document_delete_retries_after_exception(monkeypatch):
+    import backend.services.vectordatabase_service as service_module
+
+    finalize = AsyncMock(side_effect=[RuntimeError("temporary"), {"status": "success"}])
+    monkeypatch.setattr(ElasticSearchService, "_finalize_document_delete", finalize)
+    monkeypatch.setattr("backend.services.vectordatabase_service.DOCUMENT_DELETE_RETRY_INTERVAL_S", 0)
+    monkeypatch.setattr("backend.services.vectordatabase_service.asyncio.sleep", AsyncMock())
+    key = "retry-after-error"
+    service_module._document_delete_tasks.pop(key, None)
+    await ElasticSearchService._retry_document_delete(
+        index_name="kb", path_or_url="obj", scope="full", vdb_core=MagicMock(),
+        lifecycle_record={"file_id": key, "object_name": "obj"},
+    )
+    assert finalize.await_count == 2
+    assert key not in service_module._document_delete_tasks
+
+
+@pytest.mark.asyncio
+async def test_retry_document_delete_propagates_cancellation(monkeypatch):
+    import backend.services.vectordatabase_service as service_module
+
+    monkeypatch.setattr(
+        ElasticSearchService, "_finalize_document_delete",
+        AsyncMock(side_effect=asyncio.CancelledError()),
+    )
+    key = "retry-cancelled"
+    service_module._document_delete_tasks.pop(key, None)
+    with pytest.raises(asyncio.CancelledError):
+        await ElasticSearchService._retry_document_delete(
+            index_name="kb", path_or_url="obj", scope="full", vdb_core=MagicMock(),
+            lifecycle_record={"file_id": key, "object_name": "obj"},
+        )
+    assert key not in service_module._document_delete_tasks
+
+
+@pytest.mark.asyncio
+async def test_schedule_document_delete_retry_avoids_duplicate_running_task(monkeypatch):
+    import backend.services.vectordatabase_service as service_module
+
+    running = SimpleNamespace(done=lambda: False)
+    key = "already-scheduled"
+    service_module._document_delete_tasks[key] = running
+    create_task = MagicMock()
+    monkeypatch.setattr("backend.services.vectordatabase_service.asyncio.create_task", create_task)
+    ElasticSearchService._schedule_document_delete_retry(
+        index_name="kb", path_or_url="obj", scope="full", vdb_core=MagicMock(),
+        lifecycle_record={"file_id": key, "object_name": "obj"},
+    )
+    create_task.assert_not_called()
+    service_module._document_delete_tasks.pop(key, None)
+
+
+@pytest.mark.asyncio
+async def test_schedule_document_delete_retry_creates_task_when_not_running(monkeypatch):
+    import backend.services.vectordatabase_service as service_module
+
+    created = []
+
+    def fake_create_task(coro):
+        created.append(coro)
+        coro.close()
+        return SimpleNamespace(done=lambda: False)
+
+    monkeypatch.setattr("backend.services.vectordatabase_service.asyncio.create_task", fake_create_task)
+    key = "new-schedule"
+    service_module._document_delete_tasks.pop(key, None)
+    ElasticSearchService._schedule_document_delete_retry(
+        index_name="kb", path_or_url="obj", scope="full", vdb_core=MagicMock(),
+        lifecycle_record={"file_id": key, "object_name": "obj"},
+    )
+    assert len(created) == 1
+    service_module._document_delete_tasks.pop(key, None)
+
+
+@pytest.mark.asyncio
+async def test_resume_pending_document_deletions_handles_lookup_and_schedule_errors(monkeypatch):
+    monkeypatch.setattr(
+        "backend.services.vectordatabase_service.list_pending_delete_records",
+        lambda: [{"file_id": "fid", "index_name": "kb", "object_name": "obj"}],
+    )
+    monkeypatch.setattr(
+        "backend.services.vectordatabase_service.get_vector_db_core",
+        MagicMock(side_effect=RuntimeError("database unavailable")),
+    )
+    assert await ElasticSearchService.resume_pending_document_deletions() == 0
+
+
+@pytest.mark.asyncio
+async def test_resume_pending_document_deletions_returns_zero_when_listing_fails(monkeypatch):
+    monkeypatch.setattr(
+        "backend.services.vectordatabase_service.list_pending_delete_records",
+        MagicMock(side_effect=RuntimeError("migration missing")),
+    )
+    assert await ElasticSearchService.resume_pending_document_deletions() == 0
+
+
+def test_delete_lifecycle_record_without_object_handles_fence_and_cancel_errors(monkeypatch):
+    redis_mock = MagicMock()
+    redis_mock.mark_document_delete_requested.side_effect = RuntimeError("redis down")
+    redis_mock.clear_document_delete_fence.side_effect = RuntimeError("redis down")
+    monkeypatch.setattr(
+        "backend.services.vectordatabase_service.get_redis_service", lambda: redis_mock
+    )
+    monkeypatch.setattr(
+        ElasticSearchService, "_cancel_document_tasks",
+        MagicMock(side_effect=RuntimeError("celery down")),
+    )
+    delete = MagicMock(return_value=True)
+    monkeypatch.setattr("backend.services.vectordatabase_service.delete_file_record", delete)
+
+    result = ElasticSearchService.delete_lifecycle_record_without_object({
+        "file_id": "fid", "index_name": "kb", "status": "DELETED", "object_name": None,
+    })
+    assert result["status"] == "success"
+    delete.assert_called_once()
+
+
+def test_delete_lifecycle_record_without_object_logs_fence_clear_error(monkeypatch):
+    redis_mock = MagicMock()
+    redis_mock.clear_document_delete_fence.side_effect = RuntimeError("redis down")
+    monkeypatch.setattr(
+        "backend.services.vectordatabase_service.get_redis_service", lambda: redis_mock
+    )
+    monkeypatch.setattr(ElasticSearchService, "_cancel_document_tasks", MagicMock())
+    monkeypatch.setattr(
+        "backend.services.vectordatabase_service.transition_file_record",
+        MagicMock(return_value={"file_id": "fid", "status": "DELETE_REQUESTED"}),
+    )
+    monkeypatch.setattr(
+        "backend.services.vectordatabase_service.delete_file_record", MagicMock(return_value=True)
+    )
+
+    result = ElasticSearchService.delete_lifecycle_record_without_object({
+        "file_id": "fid", "index_name": "kb", "status": "UPLOADED", "object_name": None,
+    })
+    assert result["lifecycle_deleted"] is True

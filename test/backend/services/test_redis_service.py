@@ -2252,6 +2252,12 @@ class TestRedisService(unittest.TestCase):
         self.assertEqual(self.redis_service.clear_document_delete_fence(
             index_name="kb", path_or_url="obj"), 0)
 
+    def test_document_fence_read_handles_empty_identity(self):
+        self.redis_service._client = self.mock_redis_client
+        self.assertFalse(self.redis_service.is_document_delete_requested(
+            index_name=None, path_or_url=None, file_id=None))
+        self.mock_redis_client.exists.assert_not_called()
+
     def test_document_write_lease_handles_races_and_errors(self):
         """Lease acquisition/release covers contention, Redis errors, and cleanup."""
         self.redis_service._client = self.mock_redis_client
@@ -2265,6 +2271,18 @@ class TestRedisService(unittest.TestCase):
         self.redis_service.release_document_write_lease(None)
         self.mock_redis_client.delete.side_effect = redis.RedisError("release failed")
         self.redis_service.release_document_write_lease("lease")
+
+    def test_document_write_lease_deletes_a_lease_when_fence_wins_the_race(self):
+        self.redis_service._client = self.mock_redis_client
+        self.mock_redis_client.exists.side_effect = [0, 0, 0, 1]
+        self.mock_redis_client.set.return_value = True
+
+        self.assertIsNone(self.redis_service.acquire_document_write_lease(
+            index_name="kb", path_or_url="obj", task_id="task", file_id="fid"))
+        self.mock_redis_client.delete.assert_called_once()
+        assert self.mock_redis_client.delete.call_args.args[0].startswith(
+            "kb:delete:active-write:"
+        )
 
     def test_wait_for_document_writes_handles_scan_error_and_timeout(self):
         """A scan failure or a lease that never drains returns False."""

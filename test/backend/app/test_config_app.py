@@ -10,7 +10,7 @@ dependencies.
 """
 import atexit
 import importlib.util
-from unittest.mock import patch, Mock, MagicMock
+from unittest.mock import patch, Mock, MagicMock, AsyncMock
 import os
 from pathlib import Path
 import sys
@@ -232,6 +232,124 @@ class TestConfigAppRouterConfiguration:
         # Check that routes are registered
         routes = [r for r in app.routes if hasattr(r, 'path')]
         assert len(routes) >= 1
+
+
+def _load_isolated_config_app_for_startup(monkeypatch):
+    """Load config_app without importing optional application integrations."""
+    class RecordingApp:
+        def __init__(self):
+            self.included_routers = []
+
+        def on_event(self, _event):
+            return lambda handler: handler
+
+        def include_router(self, router):
+            self.included_routers.append(router)
+
+    app_factory_module = types.ModuleType("apps.app_factory")
+    app_factory_module.create_app = lambda **_: RecordingApp()
+    monkeypatch.setitem(sys.modules, "apps.app_factory", app_factory_module)
+
+    router_modules = {
+        "apps.agent_app": {"agent_config_router": APIRouter()},
+        "apps.agent_repository_app": {"agent_repository_router": APIRouter()},
+        "apps.skill_repository_app": {"skill_repository_router": APIRouter()},
+        "apps.config_sync_app": {"router": APIRouter()},
+        "apps.datamate_app": {"router": APIRouter()},
+        "apps.vectordatabase_app": {"router": APIRouter()},
+        "apps.dify_app": {"router": APIRouter()},
+        "apps.idata_app": {"router": APIRouter()},
+        "apps.ragflow_app": {"router": APIRouter()},
+        "apps.file_management_app": {"file_management_config_router": APIRouter()},
+        "apps.image_app": {"router": APIRouter()},
+        "apps.knowledge_summary_app": {"router": APIRouter()},
+        "apps.mock_user_management_app": {"router": APIRouter()},
+        "apps.model_managment_app": {"router": APIRouter()},
+        "apps.oauth_app": {"router": APIRouter()},
+        "apps.prompt_app": {"router": APIRouter()},
+        "apps.prompt_template_app": {"router": APIRouter()},
+        "apps.mcp_management_app": {"router": APIRouter()},
+        "apps.remote_mcp_app": {"router": APIRouter()},
+        "apps.skill_app": {"router": APIRouter()},
+        "apps.tenant_config_app": {"router": APIRouter()},
+        "apps.tool_config_app": {"router": APIRouter()},
+        "apps.user_management_app": {"router": APIRouter()},
+        "apps.voice_app": {"voice_config_router": APIRouter()},
+        "apps.tenant_app": {"router": APIRouter()},
+        "apps.group_app": {"router": APIRouter()},
+        "apps.user_app": {"router": APIRouter()},
+        "apps.api_key_app": {"router": APIRouter()},
+        "apps.invitation_app": {"router": APIRouter()},
+        "apps.notification_app": {"router": APIRouter()},
+        "apps.a2a_client_app": {"router": APIRouter()},
+        "apps.monitoring_app": {"router": APIRouter()},
+        "apps.a2a_server_app": {"router": APIRouter()},
+        "apps.haotian_app": {"router": APIRouter()},
+        "apps.ind_aidp_app": {"router": APIRouter()},
+        "apps.evaluation_set_app": {"router": APIRouter()},
+        "apps.agent_evaluation_app": {"router": APIRouter()},
+        "apps.evaluator_app": {"router": APIRouter()},
+        "apps.evaluation_annotation_app": {"router": APIRouter()},
+        "apps.cas_app": {"router": APIRouter()},
+        "apps.memory_config_app": {"router": APIRouter()},
+        "apps.memory_record_app": {"router": APIRouter()},
+        "apps.memory_long_term_app": {"router": APIRouter()},
+        "apps.memory_dreaming_app": {"router": APIRouter()},
+        "apps.quota_app": {
+            "tenant_quota_router": APIRouter(),
+            "platform_quota_router": APIRouter(),
+            "personal_quota_router": APIRouter(),
+        },
+    }
+    for module_name, attributes in router_modules.items():
+        module = types.ModuleType(module_name)
+        for attribute, value in attributes.items():
+            setattr(module, attribute, value)
+        monkeypatch.setitem(sys.modules, module_name, module)
+
+    const_module = types.ModuleType("consts.const")
+    const_module.AIDP_API_KEY = ""
+    const_module.AIDP_SERVER_URL = ""
+    const_module.ENABLE_AIDP_KNOWLEDGE = False
+    const_module.IS_SPEED_MODE = False
+    monkeypatch.setitem(sys.modules, "consts.const", const_module)
+    prompt_service_module = types.ModuleType("services.prompt_template_service")
+    prompt_service_module.sync_system_default_prompt_template = MagicMock()
+    monkeypatch.setitem(sys.modules, "services.prompt_template_service", prompt_service_module)
+
+    module_path = Path(backend_dir) / "apps" / "config_app.py"
+    spec = importlib.util.spec_from_file_location("backend.apps.config_app", module_path)
+    config_app = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, config_app)
+    spec.loader.exec_module(config_app)
+    return config_app
+
+
+@pytest.mark.asyncio
+async def test_resume_pending_knowledge_file_deletions_logs_recovery(monkeypatch):
+    config_app = _load_isolated_config_app_for_startup(monkeypatch)
+
+    service_module = types.ModuleType("services.vectordatabase_service")
+    service_module.ElasticSearchService = types.SimpleNamespace(
+        resume_pending_document_deletions=AsyncMock(return_value=2)
+    )
+    monkeypatch.setitem(sys.modules, "services.vectordatabase_service", service_module)
+
+    await config_app.resume_pending_knowledge_file_deletions()
+    service_module.ElasticSearchService.resume_pending_document_deletions.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_resume_pending_knowledge_file_deletions_ignores_recovery_failure(monkeypatch):
+    config_app = _load_isolated_config_app_for_startup(monkeypatch)
+
+    service_module = types.ModuleType("services.vectordatabase_service")
+    service_module.ElasticSearchService = types.SimpleNamespace(
+        resume_pending_document_deletions=AsyncMock(side_effect=RuntimeError("migration missing"))
+    )
+    monkeypatch.setitem(sys.modules, "services.vectordatabase_service", service_module)
+
+    await config_app.resume_pending_knowledge_file_deletions()
 
 
 class TestConfigAppExceptionHandling:
