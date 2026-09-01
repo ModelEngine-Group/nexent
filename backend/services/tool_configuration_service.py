@@ -58,7 +58,8 @@ from .agent_draft_permission_service import (
     ResourceBindingError,
     require_agent_draft_edit,
 )
-from services.vectordatabase_service import get_embedding_model_by_index_name, get_rerank_model
+from services.vectordatabase_service import get_embedding_model_by_index_name
+from services.model_resolver_service import get_rerank_model
 from utils.http_client_utils import create_httpx_client
 from database.client import minio_client
 from services.model_gateway_service import get_llm_adapter, get_vlm_adapter

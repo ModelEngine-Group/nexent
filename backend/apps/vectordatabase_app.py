@@ -17,9 +17,9 @@ from consts.exceptions import (
 from consts.model import ChunkCreateRequest, ChunkUpdateRequest, HybridSearchRequest, IndexingResponse
 from consts.scheduler import VALID_SUMMARY_FREQUENCIES, SUMMARY_FREQUENCY_OPTIONS_FOR_API
 from nexent.vector_database.base import VectorDatabaseCore
+from services.model_resolver_service import get_embedding_model_by_id
 from services.vectordatabase_service import (
     ElasticSearchService,
-    get_embedding_model_by_id,
     get_vector_db_core,
     check_knowledge_base_exist_impl,
     KnowledgeBaseNeedsModelConfigError,

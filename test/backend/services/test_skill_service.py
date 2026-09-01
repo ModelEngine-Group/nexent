@@ -34,7 +34,7 @@ nexent_core_mock = types.ModuleType('nexent.core')
 nexent_core_agents_mock = types.ModuleType('nexent.core.agents')
 nexent_core_agents_agent_model_mock = types.ModuleType('nexent.core.agents.agent_model')
 nexent_skills_mock = types.ModuleType('nexent.skills')
-nexent_skills_mock.__path__ = []  # Required for submodule lookups
+nexent_skills_mock.__path__ = [os.path.join(os.path.dirname(__file__), '../../../sdk/nexent/skills')]  # Required for submodule lookups
 nexent_skills_skill_loader_mock = types.ModuleType('nexent.skills.skill_loader')
 nexent_skills_skill_manager_mock = types.ModuleType('nexent.skills.skill_manager')
 nexent_storage_mock = types.ModuleType('nexent.storage')
@@ -2728,7 +2728,7 @@ name: no_tools
 description: No allowed tools
 ---
 # Content"""
-        result = service._create_skill_from_md(content, skill_name="no_tools")
+        result = service.create_skill_from_file(content, skill_name="no_tools")
 
         assert result["name"] == "no_tools"
 
@@ -2757,7 +2757,7 @@ description: No allowed tools
 description: No name in frontmatter
 ---
 # Content"""
-        result = service._create_skill_from_md(content, skill_name="explicit_name")
+        result = service.create_skill_from_file(content, skill_name="explicit_name")
 
         assert result["name"] == "explicit_name"
 
@@ -2795,7 +2795,7 @@ allowed-tools:
   - tool2
 ---
 # Content"""
-        result = service._update_skill_from_md(content, "existing")
+        result = service._save_skill_upload(content, "existing", kind="md", update=True, tenant_id=None, user_id=None)
 
         assert result["name"] == "existing"
 
@@ -2829,7 +2829,7 @@ class TestSkillServiceUpdateFromZipEdgeCases:
         service._overlay_params_from_local_config_yaml = lambda x: x
 
         # Should not raise even without SKILL.md
-        result = service._update_skill_from_zip(zip_buffer.getvalue(), "no_md")
+        result = service._save_skill_upload(zip_buffer.getvalue(), "no_md", kind="zip", update=True, tenant_id=None, user_id=None)
 
         assert result["name"] == "no_md"
 
@@ -2857,7 +2857,7 @@ class TestSkillServiceUpdateFromZipEdgeCases:
         service._overlay_params_from_local_config_yaml = lambda x: x
 
         # Should not raise but logs warning
-        result = service._update_skill_from_zip(zip_buffer.getvalue(), "bad_skill")
+        result = service._save_skill_upload(zip_buffer.getvalue(), "bad_skill", kind="zip", update=True, tenant_id=None, user_id=None)
         assert result["name"] == "bad_skill"
 
 
@@ -3554,7 +3554,7 @@ description: Root level SKILL.md
         service._overlay_params_from_local_config_yaml = lambda x: x
 
         # Provide skill_name since root-level SKILL.md has no folder name to extract
-        result = service._create_skill_from_zip(zip_buffer.getvalue(), "root_skill")
+        result = service.create_skill_from_file(zip_buffer.getvalue(), "root_skill", file_type="zip")
 
         assert result["name"] == "root_skill"
 
@@ -3600,7 +3600,7 @@ allowed-tools:
         service.skill_manager = mock_manager
         service._overlay_params_from_local_config_yaml = lambda x: x
 
-        result = service._update_skill_from_zip(zip_buffer.getvalue(), "skill")
+        result = service._save_skill_upload(zip_buffer.getvalue(), "skill", kind="zip", update=True, tenant_id=None, user_id=None)
 
         assert result["name"] == "skill"
 
@@ -3641,7 +3641,7 @@ description: Updated
         service.skill_manager = mock_manager
         service._overlay_params_from_local_config_yaml = lambda x: x
 
-        result = service._update_skill_from_zip(zip_buffer.getvalue(), "skill")
+        result = service._save_skill_upload(zip_buffer.getvalue(), "skill", kind="zip", update=True, tenant_id=None, user_id=None)
 
         assert result["name"] == "skill"
 
@@ -3681,7 +3681,7 @@ description: Renamed skill
         service.skill_manager = mock_manager
         service._overlay_params_from_local_config_yaml = lambda x: x
 
-        result = service._create_skill_from_zip(zip_buffer.getvalue(), "new_name")
+        result = service.create_skill_from_file(zip_buffer.getvalue(), "new_name", file_type="zip")
 
         assert result["name"] == "new_name"
 
@@ -3717,7 +3717,7 @@ class TestSkillServiceUpdateFromZipEmptyContent:
         service.skill_manager = mock_manager
         service._overlay_params_from_local_config_yaml = lambda x: x
 
-        result = service._update_skill_from_zip(zip_buffer.getvalue(), "skill")
+        result = service._save_skill_upload(zip_buffer.getvalue(), "skill", kind="zip", update=True, tenant_id=None, user_id=None)
 
         assert result["name"] == "skill"
 
@@ -3740,7 +3740,7 @@ class TestSkillServiceCreateFromMdWithInvalidParse:
         content = b"invalid content"
         from consts.exceptions import SkillException
         try:
-            service._create_skill_from_md(content, skill_name=None)
+            service.create_skill_from_file(content, skill_name=None)
             assert False, "Should have raised"
         except SkillException as e:
             assert "Invalid SKILL.md format" in str(e)
@@ -3776,7 +3776,7 @@ name: user_skill
 description: With user
 ---
 # Content"""
-        result = service._create_skill_from_md(content, skill_name="user_skill", user_id="user123")
+        result = service.create_skill_from_file(content, skill_name="user_skill", user_id="user123")
 
         assert result["name"] == "user_skill"
 
@@ -3816,7 +3816,7 @@ description: With user
         service.skill_manager = mock_manager
         service._overlay_params_from_local_config_yaml = lambda x: x
 
-        result = service._create_skill_from_zip(zip_buffer.getvalue(), None, user_id="user456")
+        result = service.create_skill_from_file(zip_buffer.getvalue(), None, user_id="user456", file_type="zip")
 
         assert result["name"] == "skill"
 
@@ -3851,7 +3851,7 @@ name: existing
 description: Updated
 ---
 # Content"""
-        result = service._update_skill_from_md(content, "existing", user_id="updater789")
+        result = service._save_skill_upload(content, "existing", user_id="updater789", kind="md", update=True, tenant_id=None)
 
         assert result["name"] == "existing"
 
@@ -3891,7 +3891,7 @@ description: Updated
         service.skill_manager = mock_manager
         service._overlay_params_from_local_config_yaml = lambda x: x
 
-        result = service._update_skill_from_zip(zip_buffer.getvalue(), "skill", user_id="updater789")
+        result = service._save_skill_upload(zip_buffer.getvalue(), "skill", user_id="updater789", kind="zip", update=True, tenant_id=None)
 
         assert result["name"] == "skill"
 
@@ -3908,7 +3908,7 @@ class TestSkillServiceCreateFromZipWithBadZipFile:
 
         from consts.exceptions import SkillException
         try:
-            service._create_skill_from_zip(b"not a zip file")
+            service.create_skill_from_file(b"not a zip file", file_type="zip")
             assert False, "Should have raised"
         except SkillException as e:
             assert "Invalid ZIP" in str(e)
@@ -3946,7 +3946,7 @@ description: Some content
 
         from consts.exceptions import SkillException
         try:
-            service._create_skill_from_zip(zip_buffer.getvalue())
+            service.create_skill_from_file(zip_buffer.getvalue(), file_type="zip")
             assert False, "Should have raised"
         except SkillException as e:
             assert "Invalid SKILL.md" in str(e)
@@ -4430,7 +4430,7 @@ allowed-tools:
         service.skill_manager = mock_manager
         service._overlay_params_from_local_config_yaml = lambda x: x
 
-        result = service._create_skill_from_zip(zip_buffer.getvalue(), None, tenant_id="tenant456")
+        result = service.create_skill_from_file(zip_buffer.getvalue(), None, tenant_id="tenant456", file_type="zip")
 
         assert result["name"] == "skill"
 
@@ -5144,7 +5144,7 @@ description: Exists
 
         from consts.exceptions import SkillException
         try:
-            service._create_skill_from_zip(zip_buffer.getvalue())
+            service.create_skill_from_file(zip_buffer.getvalue(), file_type="zip")
             assert False, "Should have raised"
         except SkillException as e:
             assert "already exists" in str(e)
@@ -5192,7 +5192,7 @@ class TestSkillServiceUpdateFromMdInvalidParse:
 
         from consts.exceptions import SkillException
         try:
-            service._update_skill_from_md(b"invalid content", "existing")
+            service._save_skill_upload(b"invalid content", "existing", kind="md", update=True, tenant_id=None, user_id=None)
             assert False, "Should have raised"
         except SkillException as e:
             assert "Invalid SKILL.md format" in str(e)
@@ -5220,7 +5220,7 @@ name: skill
 
         from consts.exceptions import SkillException
         try:
-            service._update_skill_from_zip(zip_buffer.getvalue(), "nonexistent")
+            service._save_skill_upload(zip_buffer.getvalue(), "nonexistent", kind="zip", update=True, tenant_id=None, user_id=None)
             assert False, "Should have raised"
         except SkillException as e:
             assert "not found" in str(e)
@@ -6645,12 +6645,12 @@ class TestSkillServicePureHelpers:
             ("utf-16", "utf-16"),
             ("utf-32", "utf-32"),
         ):
-            result = skill_service._decode_text_bytes("hello".encode(encoding))
+            result = skill_service.decode_skill_text("hello".encode(encoding))
             assert str(result) == "hello"
             assert result.encoding == expected_encoding
 
     def test_decode_text_bytes_handles_utf16_without_bom(self):
-        result = skill_service._decode_text_bytes("hello".encode("utf-16-le"))
+        result = skill_service.decode_skill_text("hello".encode("utf-16-le"))
 
         assert str(result) == "hello"
         assert result.encoding == "utf-16-le"
@@ -6689,25 +6689,25 @@ class TestSkillServiceReportedCoverageGaps:
     """Target branches called out by the service coverage report."""
 
     def test_decode_text_bytes_covers_big_endian_legacy_and_detector_paths(self, mocker):
-        big_endian = skill_service._decode_text_bytes("hello".encode("utf-16-be"))
+        big_endian = skill_service.decode_skill_text("hello".encode("utf-16-be"))
         assert str(big_endian) == "hello"
         assert big_endian.encoding == "utf-16-be"
 
-        chinese = skill_service._decode_text_bytes("中文".encode("gb18030"))
+        chinese = skill_service.decode_skill_text("中文".encode("gb18030"))
         assert str(chinese) == "中文"
 
         detected = MagicMock(encoding="windows-1252", chaos=0.1)
         detected.__str__.return_value = "café"
         result_set = MagicMock()
         result_set.best.return_value = detected
-        mocker.patch.object(skill_service, "from_bytes", return_value=result_set)
-        detected_result = skill_service._decode_text_bytes(b"caf\xe9")
+        mocker.patch("nexent.skills.text_codec.from_bytes", return_value=result_set)
+        detected_result = skill_service.decode_skill_text(b"caf\xe9")
         assert str(detected_result) == "café"
         assert detected_result.encoding == "windows-1252"
 
         result_set.best.return_value = None
         with pytest.raises(UnicodeDecodeError, match="Unable to detect"):
-            skill_service._decode_text_bytes(b"\x80")
+            skill_service.decode_skill_text(b"\x80")
 
     def test_decode_zip_member_name_covers_legacy_names_and_fallbacks(self):
         ascii_info = MagicMock(filename="README.md", flag_bits=0)
@@ -6780,7 +6780,7 @@ class TestSkillServiceReportedCoverageGaps:
             zf.writestr("demo/scripts/bad.py", b"\x80")
             zf.writestr("demo/scripts/syntax.py", "def broken(")
 
-        mocker.patch.object(skill_service, "_decode_text_bytes", side_effect=[UnicodeDecodeError(
+        mocker.patch.object(skill_service, "decode_skill_text", side_effect=[UnicodeDecodeError(
             "unknown", b"\x80", 0, 1, "bad encoding"
         ), "def broken("])
         assert skill_service._get_skill_inputs_from_zip(

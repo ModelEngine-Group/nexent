@@ -45,10 +45,8 @@ from services.knowledge_scope_service import (
     LOCAL_TOOL_CLASS,
     get_agent_knowledge_capabilities,
 )
-from services.vectordatabase_service import (
-    ElasticSearchService,
-    _is_multimodal_by_model_id,
-)
+from services.vectordatabase_service import ElasticSearchService
+from services.model_resolver_service import get_model_descriptor
 from services.conversation_management_service import (
     save_conversation_user,
     create_new_conversation,
@@ -734,10 +732,9 @@ async def get_agent_knowledge_bases_for_northbound(
                 "name": str(record.get("knowledge_name") or record["index_name"]),
                 "embedding_model": str(record.get("embedding_model_name") or ""),
                 "embedding_model_id": record.get("embedding_model_id"),
-                "is_multimodal": _is_multimodal_by_model_id(
-                    record.get("embedding_model_id"),
-                    agent_tenant_id,
-                ),
+                "is_multimodal": get_model_descriptor(
+                    record.get("embedding_model_id"), agent_tenant_id
+                ).is_multimodal,
             }
             for record in records
             if str(record.get("index_name") or "") in accessible_indices

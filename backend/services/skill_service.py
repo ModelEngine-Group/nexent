@@ -1,45 +1,30 @@
 """Skill management service."""
 
 import aiofiles
-import argparse
-import ast
-import inspect
 import io
-import json
 import logging
 import ntpath
 import os
 import zipfile
-import re
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-import yaml
-from charset_normalizer import from_bytes
 
 from nexent.skills import SkillManager
 from nexent.skills.skill_loader import SkillLoader
+from nexent.skills.upload import normalize_skill_upload
+from nexent.skills.text_codec import DecodedSkillFile, decode_skill_text
 from consts.const import (
-    CAN_EDIT_ALL_USER_ROLES,
-    CONTAINER_SKILLS_PATH,
     OFFICIAL_SKILLS_ZIP_PATH,
-    PERMISSION_EDIT,
-    PERMISSION_PRIVATE,
-    PERMISSION_READ,
     ROOT_DIR,
 )
 from consts.exceptions import ForbiddenError, SkillException
 from database import skill_db
 from database.group_db import query_group_ids_by_user
-from database.user_tenant_db import get_user_tenant_by_user_id
-from utils.str_utils import convert_list_to_string
-from utils.skill_import_utils import generate_available_copy_skill_name
 
 logger = logging.getLogger(__name__)
 _SKILL_UPDATE_FORBIDDEN_MESSAGE = "Not authorized to update this skill"
 _SKILL_ACCESS_UPDATE_FORBIDDEN_MESSAGE = "Not authorized to update skill access"
 
-
-_skill_manager: Optional[SkillManager] = None
 
 _UNSUPPORTED_PREVIEW_DIRECTORIES = frozenset({
     "__macosx",
@@ -64,1145 +49,61 @@ _TEXT_PREVIEW_EXTENSIONS = frozenset({
 })
 
 
-class UnsupportedSkillFilePreview(SkillException):
-    """Raised when a skill file is intentionally excluded from text preview."""
 
-
-class DecodedSkillFile(str):
-    """String content carrying the source character encoding."""
-
-    encoding: str
-
-    def __new__(cls, content: str, encoding: str):
-        value = super().__new__(cls, content)
-        value.encoding = encoding
-        return value
-
-
-def _decode_text_bytes(raw: bytes) -> DecodedSkillFile:
-    """Decode text bytes without silently replacing undecodable characters."""
-    if raw.startswith(b"\xef\xbb\xbf"):
-        return DecodedSkillFile(raw.decode("utf-8-sig"), "utf-8-sig")
-    if raw.startswith((b"\xff\xfe\x00\x00", b"\x00\x00\xfe\xff")):
-        return DecodedSkillFile(raw.decode("utf-32"), "utf-32")
-    if raw.startswith((b"\xff\xfe", b"\xfe\xff")):
-        return DecodedSkillFile(raw.decode("utf-16"), "utf-16")
-    if raw and raw.count(b"\x00") / len(raw) > 0.2:
-        even_nuls = raw[0::2].count(0)
-        odd_nuls = raw[1::2].count(0)
-        if odd_nuls > len(raw) / 4:
-            return DecodedSkillFile(raw.decode("utf-16-le"), "utf-16-le")
-        if even_nuls > len(raw) / 4:
-            return DecodedSkillFile(raw.decode("utf-16-be"), "utf-16-be")
-
-    try:
-        return DecodedSkillFile(raw.decode("utf-8"), "utf-8")
-    except UnicodeDecodeError:
-        pass
-
-    for encoding in ("gb18030", "big5"):
-        try:
-            decoded = raw.decode(encoding)
-        except UnicodeDecodeError:
-            continue
-        if any("\u3400" <= char <= "\u9fff" for char in decoded):
-            return DecodedSkillFile(decoded, encoding)
-
-    match = from_bytes(raw).best()
-    if match is None or match.encoding is None or match.chaos > 0.3:
-        raise UnicodeDecodeError("unknown", raw, 0, len(raw), "Unable to detect a reliable text encoding")
-    return DecodedSkillFile(str(match), match.encoding.lower())
-
-
-def _decode_zip_member_name(info: zipfile.ZipInfo) -> str:
-    """Recover legacy ZIP member names written without the UTF-8 flag."""
-    name = info.filename
-    if info.flag_bits & 0x800 or name.isascii():
-        return name
-    try:
-        raw_name = name.encode("cp437")
-    except UnicodeEncodeError:
-        return name
-    for encoding in ("utf-8", "gb18030"):
-        try:
-            candidate = raw_name.decode(encoding)
-        except UnicodeDecodeError:
-            continue
-        if encoding == "utf-8" or any("\u3400" <= char <= "\u9fff" for char in candidate):
-            return candidate
-    return name
-
-
-def _zip_members(zf: zipfile.ZipFile) -> List[Tuple[zipfile.ZipInfo, str]]:
-    """Return ZIP entries paired with their normalized display paths."""
-    members = [(info, _decode_zip_member_name(info)) for info in zf.infolist()]
-    seen: Dict[str, str] = {}
-    for info, decoded_name in members:
-        normalized = _normalize_zip_entry_path(decoded_name)
-        collision_key = normalized.casefold()
-        previous = seen.get(collision_key)
-        if previous is not None and previous != info.filename:
-            raise SkillException(f"ZIP entries resolve to the same path: {decoded_name}")
-        seen[collision_key] = info.filename
-    return members
-
-
-def _zip_file_list(zf: zipfile.ZipFile) -> List[str]:
-    return [decoded_name for _, decoded_name in _zip_members(zf)]
-
-
-def _read_zip_member(zf: zipfile.ZipFile, decoded_name: str) -> bytes:
-    for info, candidate in _zip_members(zf):
-        if candidate == decoded_name:
-            return zf.read(info)
-    raise KeyError(decoded_name)
-
-
-def _is_obviously_binary(raw: bytes) -> bool:
-    if not raw:
-        return False
-    if b"\x00" in raw:
-        even_nuls = raw[0::2].count(0)
-        odd_nuls = raw[1::2].count(0)
-        if max(even_nuls, odd_nuls) > len(raw) / 4:
-            return False
-        return True
-    control_count = sum(byte < 9 or 13 < byte < 32 for byte in raw)
-    return control_count / len(raw) > 0.1
-
-
-def _skill_file_preview_status(
-    local_skills_dir: str,
-    skill_name: str,
-    relative_path: str,
-) -> str:
-    """Classify whether a local skill file may be exposed as editable text."""
-    parts = [part.casefold() for part in relative_path.replace("\\", "/").split("/")]
-    if any(part in _UNSUPPORTED_PREVIEW_DIRECTORIES for part in parts[:-1]):
-        return "unsupported"
-    extension = os.path.splitext(relative_path)[1].casefold()
-    if extension in _UNSUPPORTED_PREVIEW_EXTENSIONS:
-        return "unsupported"
-    if extension in _TEXT_PREVIEW_EXTENSIONS:
-        return "readable"
-
-    local_root = os.path.realpath(local_skills_dir)
-    skill_root = os.path.realpath(
-        _resolve_local_skill_path(local_skills_dir, skill_name)
-    )
-    file_path = os.path.realpath(
-        _resolve_local_skill_path(local_skills_dir, skill_name, relative_path)
-    )
-    if (
-        not file_path.startswith(local_root + os.sep)
-        or not file_path.startswith(skill_root + os.sep)
-    ):
-        raise ForbiddenError("Unsafe local skill path")
-    try:
-        with open(file_path, "rb") as file_obj:
-            return "unsupported" if _is_obviously_binary(file_obj.read(4096)) else "readable"
-    except OSError:
-        return "readable"
-
-
-def _replace_skill_frontmatter_name(content: str, new_name: str) -> str:
-    """Replace only the name value in SKILL.md frontmatter and preserve the body."""
-    match = re.match(
-        r"\A---[ \t]*\r?\n(?P<frontmatter>.*?)(?P<closing>\r?\n---[ \t]*\r?\n)(?P<body>[\s\S]*)\Z",
-        content,
-        re.DOTALL,
-    )
-    if not match:
-        raise SkillException("SKILL.md must have YAML frontmatter")
-
-    frontmatter = match.group("frontmatter")
-    name_match = re.search(r"(?m)^name[ \t]*:[^\r\n]*(?P<line_end>\r?\n|$)", frontmatter)
-    if not name_match:
-        raise SkillException("SKILL.md frontmatter must contain a name field")
-
-    replacement = f"name: {json.dumps(new_name, ensure_ascii=False)}{name_match.group('line_end')}"
-    updated_frontmatter = (
-        frontmatter[:name_match.start()]
-        + replacement
-        + frontmatter[name_match.end():]
-    )
-    return (
-        content[:match.start("frontmatter")]
-        + updated_frontmatter
-        + content[match.end("frontmatter"):]
-    )
-
-
-def _to_group_id_set(group_ids: Any) -> set[int]:
-    if isinstance(group_ids, str):
-        return {
-            int(group_id.strip())
-            for group_id in group_ids.split(",")
-            if group_id.strip().isdigit()
-        }
-    if isinstance(group_ids, list):
-        return {
-            int(group_id)
-            for group_id in group_ids
-            if str(group_id).strip().isdigit()
-        }
-    return set()
-
-
-def can_view_skill(
-    *,
-    skill: Dict[str, Any],
-    user_id: str,
-    user_role: str,
-    user_group_ids: set[int],
-) -> bool:
-    """Return whether a skill is available to the current user."""
-    if skill.get("source") == "official":
-        return True
-    if user_role in CAN_EDIT_ALL_USER_ROLES:
-        return True
-    if str(skill.get("created_by")) == str(user_id):
-        return True
-    if skill.get("ingroup_permission") == PERMISSION_PRIVATE:
-        return False
-    return bool(
-        user_group_ids.intersection(_to_group_id_set(skill.get("group_ids")))
-    )
-
-
-def resolve_skill_permission(
-    *,
-    skill: Dict[str, Any],
-    user_id: str,
-    user_role: str,
-    user_group_ids: set[int],
-) -> str:
-    """Resolve whether the current user can edit or only use a visible skill."""
-    if user_role in CAN_EDIT_ALL_USER_ROLES:
-        return PERMISSION_EDIT
-    if str(skill.get("created_by")) == str(user_id):
-        return PERMISSION_EDIT
-    if skill.get("ingroup_permission") != PERMISSION_EDIT:
-        return PERMISSION_READ
-    return (
-        PERMISSION_EDIT
-        if user_group_ids.intersection(_to_group_id_set(skill.get("group_ids")))
-        else PERMISSION_READ
-    )
-
-
-def _apply_default_skill_permission_fields(
-    skill_data: Dict[str, Any],
-    user_id: Optional[str],
-) -> None:
-    """Default user-created skills to the creator's groups with edit permission."""
-    if not user_id:
-        return
-    if skill_data.get("group_ids") is None:
-        skill_data["group_ids"] = convert_list_to_string(query_group_ids_by_user(user_id))
-    if not skill_data.get("ingroup_permission"):
-        skill_data["ingroup_permission"] = PERMISSION_EDIT
-
-
-def _get_user_role(user_id: Optional[str]) -> str:
-    if not user_id:
-        return "USER"
-    user_tenant = get_user_tenant_by_user_id(user_id)
-    if not user_tenant:
-        return "USER"
-    return str(user_tenant.get("user_role") or "USER")
-
-
-def _can_edit_skill(skill: Dict[str, Any], user_id: Optional[str]) -> bool:
-    if not user_id:
-        return False
-    user_role = _get_user_role(user_id)
-    user_group_ids = set(query_group_ids_by_user(user_id) or [])
-    return resolve_skill_permission(
-        skill=skill,
-        user_id=user_id,
-        user_role=user_role,
-        user_group_ids=user_group_ids,
-    ) == PERMISSION_EDIT
-
-
-def _can_manage_skill_access(skill: Dict[str, Any], user_id: Optional[str]) -> bool:
-    if not user_id:
-        return False
-    return (
-        _get_user_role(user_id) in CAN_EDIT_ALL_USER_ROLES
-        or str(skill.get("created_by")) == str(user_id)
-    )
-
-
-def _has_skill_access_changes(
-    existing: Dict[str, Any], skill_data: Dict[str, Any]
-) -> bool:
-    if (
-        "group_ids" in skill_data
-        and _to_group_id_set(skill_data.get("group_ids"))
-        != _to_group_id_set(existing.get("group_ids"))
-    ):
-        return True
-    return (
-        "ingroup_permission" in skill_data
-        and skill_data.get("ingroup_permission") != existing.get("ingroup_permission")
-    )
-
-
-def _validate_skill_access_update(
-    existing: Dict[str, Any], skill_data: Dict[str, Any], user_id: Optional[str]
-) -> None:
-    if (
-        user_id
-        and _has_skill_access_changes(existing, skill_data)
-        and not _can_manage_skill_access(existing, user_id)
-    ):
-        raise ForbiddenError(_SKILL_ACCESS_UPDATE_FORBIDDEN_MESSAGE)
-
-
-def _normalize_zip_entry_path(name: str) -> str:
-    """Normalize a ZIP member path for comparison (slashes, strip ./)."""
-    norm = name.replace("\\", "/").strip()
-    while norm.startswith("./"):
-        norm = norm[2:]
-    return norm
-
-
-def _find_zip_member_config_yaml(
-    file_list: List[str],
-    preferred_skill_root: Optional[str] = None,
-) -> Optional[str]:
-    """Return the ZIP entry path for .../config/config.yaml (any depth; filename case-insensitive).
-
-    If preferred_skill_root is set (usually the folder containing SKILL.md, e.g. zip root
-    ``my_skill/SKILL.md`` -> ``my_skill``), prefer ``<root>/config/config.yaml``.
-    """
-    suffix = "/config/config.yaml"
-    root_only = "config/config.yaml"
-    candidates: List[str] = []
-    for name in file_list:
-        if name.endswith("/"):
-            continue
-        norm = _normalize_zip_entry_path(name)
-        if not norm:
-            continue
-        nlow = norm.lower()
-        if nlow == root_only or nlow.endswith(suffix):
-            candidates.append(name)
-
-    if not candidates:
-        return None
-
-    if preferred_skill_root:
-        pref = _normalize_zip_entry_path(preferred_skill_root)
-        if pref:
-            pref_low = pref.lower()
-            expected_suffix = f"{pref_low}/config/config.yaml"
-            for name in candidates:
-                if _normalize_zip_entry_path(name).lower() == expected_suffix:
-                    return name
-            for name in candidates:
-                n = _normalize_zip_entry_path(name).lower()
-                if n.startswith(pref_low + "/"):
-                    return name
-
-    return candidates[0]
-
-
-def _params_dict_to_storable(data: Dict[str, Any]) -> Dict[str, Any]:
-    """Ensure params are JSON-serializable for the database JSON column."""
-    try:
-        return json.loads(json.dumps(data, default=str))
-    except (TypeError, ValueError) as exc:
-        raise SkillException(
-            f"params from config/config.yaml cannot be stored: {exc}"
-        ) from exc
-
-
-def _comment_text_from_token(tok: Any) -> Optional[str]:
-    """Normalize a ruamel CommentToken (or similar) to tooltip text after ``#``."""
-    if tok is None:
-        return None
-    val = getattr(tok, "value", None)
-    if isinstance(val, str):
-        s = val.strip()
-        if s.startswith("#"):
-            return s[1:].strip()
-    return None
-
-
-def _tuple_slot2(tok_container: Any) -> Any:
-    """Return ruamel per-key tuple slot index 2 (EOL / before-next-key comment token)."""
-    if not tok_container or len(tok_container) <= 2:
-        return None
-    return tok_container[2]
-
-
-def _is_before_next_sibling_comment_token(tok: Any) -> bool:
-    """True if token is a comment line placed *above the next key* (starts with newline in ruamel)."""
-    if tok is None:
-        return False
-    val = getattr(tok, "value", None)
-    return isinstance(val, str) and val.startswith("\n")
-
-
-def _flatten_ca_comment_to_text(comment_field: Any) -> Optional[str]:
-    """Join ``#`` lines from ``ca.comment`` (block header above first key in map or first list item)."""
-    if not comment_field:
-        return None
-    parts: List[str] = []
-    if isinstance(comment_field, list):
-        for part in comment_field:
-            if part is None:
-                continue
-            if isinstance(part, list):
-                for tok in part:
-                    t = _comment_text_from_token(tok)
-                    if t:
-                        parts.append(t)
-            else:
-                t = _comment_text_from_token(part)
-                if t:
-                    parts.append(t)
-    if not parts:
-        return None
-    return " ".join(parts)
-
-
-def _comment_from_map_block_header(cm: Any) -> Optional[str]:
-    """Lines above the first key in this ``CommentedMap`` (``ca.comment``)."""
-    ca = getattr(cm, "ca", None)
-    if not ca or not ca.comment:
-        return None
-    return _flatten_ca_comment_to_text(ca.comment)
-
-
-def _tooltip_for_commented_map_key(cm: Any, ordered_keys: List[Any], index: int, key: Any) -> Optional[str]:
-    """Collect tooltip text: block header, line-above key, and same-line EOL ``#`` for one mapping key."""
-    tips: List[str] = []
-    if index == 0:
-        h = _comment_from_map_block_header(cm)
-        if h:
-            tips.append(h)
-    if index > 0:
-        prev_k = ordered_keys[index - 1]
-        ca = getattr(cm, "ca", None)
-        if ca and ca.items:
-            prev_tup = ca.items.get(prev_k)
-            tok = _tuple_slot2(prev_tup) if prev_tup else None
-            if _is_before_next_sibling_comment_token(tok):
-                t = _comment_text_from_token(tok)
-                if t:
-                    tips.append(t)
-    ca = getattr(cm, "ca", None)
-    if ca and ca.items:
-        tup = ca.items.get(key)
-        tok = _tuple_slot2(tup) if tup else None
-        if tok is not None and not _is_before_next_sibling_comment_token(tok):
-            t = _comment_text_from_token(tok)
-            if t:
-                tips.append(t)
-    if not tips:
-        return None
-    return " ".join(tips)
-
-
-def _tooltip_for_commented_seq_index(seq: Any, index: int) -> Optional[str]:
-    """Same rules as maps: ``ca.comment`` for item 0; slot 0 on previous item for 'line above next'."""
-    tips: List[str] = []
-    if index == 0:
-        ca = getattr(seq, "ca", None)
-        if ca and ca.comment:
-            h = _flatten_ca_comment_to_text(ca.comment)
-            if h:
-                tips.append(h)
-    if index > 0:
-        ca = getattr(seq, "ca", None)
-        if ca and ca.items:
-            prev_tup = ca.items.get(index - 1)
-            if prev_tup and len(prev_tup) > 0 and prev_tup[0] is not None:
-                tok = prev_tup[0]
-                if _is_before_next_sibling_comment_token(tok):
-                    t = _comment_text_from_token(tok)
-                    if t:
-                        tips.append(t)
-    ca = getattr(seq, "ca", None)
-    if ca and ca.items:
-        tup = ca.items.get(index)
-        if tup:
-            tok = _tuple_slot2(tup)
-            if tok is not None and not _is_before_next_sibling_comment_token(tok):
-                t = _comment_text_from_token(tok)
-                if t:
-                    tips.append(t)
-    if not tips:
-        return None
-    return " ".join(tips)
-
-
-def _apply_inline_comment_to_scalar(val: Any, comment: Optional[str]) -> Any:
-    """Append `` # comment`` to scalars so the UI can show tooltips (same as frontend convention)."""
-    if not comment:
-        return val
-    if isinstance(val, str):
-        return f"{val} # {comment}"
-    if isinstance(val, (dict, list)):
-        return val
-    try:
-        encoded = json.dumps(val, ensure_ascii=False)
-    except (TypeError, ValueError):
-        encoded = str(val)
-    return f"{encoded} # {comment}"
-
-
-def _commented_tree_to_plain(node: Any) -> Any:
-    """Turn ruamel CommentedMap/Seq into plain dict/list.
-
-    YAML ``#`` comments are merged only into **scalar** values as ``value # tip`` (same as the UI).
-    Block / line-above-key comments attached to **mapping or list values** are not persisted (no ``_comment`` keys).
-    """
-    from ruamel.yaml.comments import CommentedMap, CommentedSeq
-
-    if isinstance(node, CommentedMap):
-        ordered_keys = list(node.keys())
-        out: Dict[str, Any] = {}
-        for i, k in enumerate(ordered_keys):
-            v = node[k]
-            plain_v = _commented_tree_to_plain(v)
-            tip = _tooltip_for_commented_map_key(node, ordered_keys, i, k)
-            if tip is not None and not isinstance(plain_v, (dict, list)):
-                plain_v = _apply_inline_comment_to_scalar(plain_v, tip)
-            out[k] = plain_v
-        return out
-    if isinstance(node, CommentedSeq):
-        out_list: List[Any] = []
-        for i, v in enumerate(node):
-            plain_v = _commented_tree_to_plain(v)
-            tip = _tooltip_for_commented_seq_index(node, i)
-            if tip is not None and not isinstance(plain_v, (dict, list)):
-                plain_v = _apply_inline_comment_to_scalar(plain_v, tip)
-            out_list.append(plain_v)
-        return out_list
-    return node
-
-
-def _ruamel_tree_to_plain(node: Any) -> Any:
-    """Convert ruamel CommentedMap/Seq to plain dict/list with NO comment merging.
-
-    Used for parsing config.yaml into config_values where the value must be clean
-    (e.g. ``/mnt/nexent`` not ``/mnt/nexent # Initial workspace path``).
-    """
-    from ruamel.yaml.comments import CommentedMap, CommentedSeq
-
-    if isinstance(node, CommentedMap):
-        return {k: _ruamel_tree_to_plain(v) for k, v in node.items()}
-    if isinstance(node, CommentedSeq):
-        return [_ruamel_tree_to_plain(v) for v in node]
-    return node
-
-
-def _parse_yaml_ruamel_plain(text: str) -> Dict[str, Any]:
-    """Parse YAML with ruamel round-trip and return plain dict (no comment merging).
-
-    Used for ``config.yaml`` → ``config_values`` where scalar values must be clean.
-    """
-    from ruamel.yaml import YAML
-    from ruamel.yaml.comments import CommentedMap
-
-    y = YAML(typ="rt")
-    try:
-        root = y.load(text)
-    except Exception as exc:
-        raise SkillException(f"Invalid YAML in config/config.yaml: {exc}") from exc
-    if root is None:
-        return {}
-    if isinstance(root, CommentedMap):
-        plain = _ruamel_tree_to_plain(root)
-    elif isinstance(root, dict):
-        plain = root
-    else:
-        raise SkillException(
-            "config/config.yaml must contain a JSON or YAML object (mapping), not a list or scalar"
-        )
-    if not isinstance(plain, dict):
-        raise SkillException(
-            "config/config.yaml must contain a JSON or YAML object (mapping), not a list or scalar"
-        )
-    return _params_dict_to_storable(plain)
-
-
-def _parse_yaml_with_ruamel_merge_eol_comments(text: str) -> Dict[str, Any]:
-    """Parse YAML with ruamel; merge ``#`` into scalar values only (``value # tip`` for the UI).
-
-    Does not inject ``_comment`` into nested objects; non-scalar-adjacent YAML comments are dropped.
-    """
-    from ruamel.yaml import YAML
-    from ruamel.yaml.comments import CommentedMap
-
-    # Round-trip loader preserves ``CommentedMap`` and comment tokens; ``safe`` returns plain dict.
-    y = YAML(typ="rt")
-    try:
-        root = y.load(text)
-    except Exception as exc:
-        raise SkillException(
-            f"Invalid YAML in config/config.yaml: {exc}"
-        ) from exc
-    if root is None:
-        return {}
-    if isinstance(root, CommentedMap):
-        plain = _commented_tree_to_plain(root)
-    elif isinstance(root, dict):
-        plain = root
-    else:
-        raise SkillException(
-            "config/config.yaml must contain a JSON or YAML object (mapping), not a list or scalar"
-        )
-    if not isinstance(plain, dict):
-        raise SkillException(
-            "config/config.yaml must contain a JSON or YAML object (mapping), not a list or scalar"
-        )
-    return _params_dict_to_storable(plain)
-
-
-def _get_skill_inputs_from_code(scripts_dir: str) -> List[Dict[str, Any]]:
-    """Extract argparse parameters from skill scripts using AST analysis.
-
-    Walks every ``scripts/*.py`` file (skipping ``_*.py``) and uses AST to find
-    all ``parser.add_argument(...)`` calls anywhere in the file, including inside
-    function bodies and ``if __name__ == "__main__":`` blocks.
-
-    Mirrors ``get_local_tools()`` in tool_configuration_service.py.
-
-    Args:
-        scripts_dir: Absolute path to the skill's ``scripts/`` directory.
-
-    Returns:
-        List of input parameter dicts with name, type, required, description, default.
-    """
-    inputs: List[Dict[str, Any]] = []
-    seen_names: set = set()
-
-    if not os.path.isdir(scripts_dir):
-        return inputs
-
-    for filename in os.listdir(scripts_dir):
-        if not filename.endswith(".py") or filename.startswith("_"):
-            continue
-
-        script_path = os.path.join(scripts_dir, filename)
-        try:
-            source = open(script_path, "r", encoding="utf-8").read()
-        except (OSError, IOError):
-            continue
-
-        try:
-            tree = ast.parse(source, filename=filename)
-        except SyntaxError:
-            continue
-
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Call):
-                continue
-            if not _is_add_argument_call(node):
-                continue
-
-            parsed = _extract_arg_from_add_argument(node)
-            if not parsed:
-                continue
-
-            param_name = parsed["name"]
-            if param_name in ("help", "h") or param_name in seen_names:
-                continue
-            seen_names.add(param_name)
-
-            inputs.append({
-                "name": param_name,
-                "type": parsed["type"],
-                "required": parsed["required"],
-                "description_en": parsed.get("description_en", ""),
-            })
-
-    return inputs
-
-
-def _is_add_argument_call(node: ast.Call) -> bool:
-    """Return True if node is a call to ``<obj>.add_argument(...)``."""
-    if not isinstance(node.func, ast.Attribute):
-        return False
-    if node.func.attr != "add_argument":
-        return False
-    if isinstance(node.func.value, ast.Name) and node.func.value.id == "parser":
-        return True
-    if isinstance(node.func.value, ast.Attribute):
-        return True
-    return False
-
-
-def _extract_arg_from_add_argument(node: ast.Call) -> Optional[Dict[str, Any]]:
-    """Extract parameter metadata from an ``add_argument`` Call AST node."""
-    args = node.args
-    kwargs = {kw.arg: kw.value for kw in node.keywords}
-
-    # Positional arg 0 = name or first positional arg (--name / name)
-    name_node = args[0] if args else kwargs.get("name")
-    if name_node is None:
-        return None
-    param_name = _ast_literal_eval(name_node)
-    if not param_name or not isinstance(param_name, str):
-        return None
-
-    # --name style
-    if param_name.startswith("--"):
-        param_name = param_name[2:]
-    elif param_name.startswith("-"):
-        param_name = param_name[1:]
-
-    # Determine type
-    param_type = "string"
-    type_node = kwargs.get("type")
-    if type_node is not None:
-        type_name = _get_type_name(type_node)
-        if type_name in ("int", "integer"):
-            param_type = "number"
-        elif type_name in ("float",):
-            param_type = "number"
-        elif type_name in ("bool",):
-            param_type = "boolean"
-
-    # Description
-    help_node = kwargs.get("help")
-    description = ""
-    if help_node is not None:
-        val = _ast_literal_eval(help_node)
-        if isinstance(val, str):
-            description = val
-
-    # Required / default
-    required = False
-    default: Any = None
-
-    if kwargs.get("required") is not None:
-        req_val = _ast_literal_eval(kwargs["required"])
-        if req_val is True:
-            required = True
-
-    default_node = kwargs.get("default")
-    if default_node is not None:
-        default = _ast_literal_eval(default_node)
-        if default is None or (isinstance(default, str) and default == ""):
-            required = False
-        elif not required:
-            required = False
-
-    return {
-        "name": param_name,
-        "type": param_type,
-        "required": required,
-        "description_en": description,
-    }
-
-
-def _get_type_name(node: ast.AST) -> str:
-    """Get the type name string from a type-related AST node."""
-    if isinstance(node, ast.Name):
-        return node.id
-    if isinstance(node, ast.Attribute):
-        return node.attr
-    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
-        return node.func.id
-    if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
-        return node.func.attr
-    return ""
-
-
-def _ast_literal_eval(node: ast.AST) -> Any:
-    """Safely evaluate a literal AST node (Name, Constant, Str, Num, etc.) to a Python value."""
-    if isinstance(node, (ast.Constant, ast.Num)):
-        return getattr(node, "value", None)
-    if isinstance(node, ast.Str):  # Python < 3.8 compat
-        return node.s
-    if isinstance(node, ast.Name):
-        name = node.id
-        if name == "None":
-            return None
-        if name == "True":
-            return True
-        if name == "False":
-            return False
-        return name
-    if isinstance(node, (ast.List, ast.Tuple)):
-        elts = [_ast_literal_eval(e) for e in node.elts]
-        return list(elts) if isinstance(node, ast.List) else tuple(elts)
-    if isinstance(node, ast.Dict):
-        return {_ast_literal_eval(k): _ast_literal_eval(v) for k, v in node.keys}
-    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
-        val = _ast_literal_eval(node.operand)
-        if isinstance(val, (int, float)):
-            return -val if isinstance(node.op, ast.USub) else val
-    if isinstance(node, ast.BinOp):
-        left = _ast_literal_eval(node.left)
-        right = _ast_literal_eval(node.right)
-        if isinstance(left, str) and isinstance(right, str) and isinstance(node.op, ast.Add):
-            return left + right
-    return None
-
-
-def _parse_yaml_fallback_pyyaml(text: str) -> Dict[str, Any]:
-    """Parse YAML with PyYAML (comments are dropped)."""
-    try:
-        data = yaml.safe_load(text)
-    except yaml.YAMLError as exc:
-        raise SkillException(
-            f"Invalid JSON or YAML in config/config.yaml: {exc}"
-        ) from exc
-    if data is None:
-        return {}
-    if not isinstance(data, dict):
-        raise SkillException(
-            "config/config.yaml must contain a JSON or YAML object (mapping), not a list or scalar"
-        )
-    return _params_dict_to_storable(data)
-
-
-def _parse_skill_params_from_config_bytes(raw: bytes) -> Dict[str, Any]:
-    """Parse JSON or YAML from config/config.yaml bytes (DB upload path; scalar ``#`` tips merged when possible)."""
-    text = str(_decode_text_bytes(raw)).strip()
-    if not text:
-        return {}
-    try:
-        data = json.loads(text)
-    except json.JSONDecodeError:
-        try:
-            return _parse_yaml_ruamel_plain(text)
-        except ImportError:
-            logger.warning("ruamel.yaml not installed; YAML comments will be dropped on parse")
-            return _parse_yaml_fallback_pyyaml(text)
-        except SkillException:
-            raise
-        except Exception as exc:
-            logger.warning(
-                "ruamel YAML parse failed (%s); falling back to PyYAML",
-                exc,
-            )
-            return _parse_yaml_fallback_pyyaml(text)
-    else:
-        if not isinstance(data, dict):
-            raise SkillException(
-                "config/config.yaml must contain a JSON or YAML object (mapping), not a list or scalar"
-            )
-        return _params_dict_to_storable(data)
-
-
-def _parse_skill_schema_from_yaml_bytes(raw: bytes) -> List[Dict[str, Any]]:
-    """Parse config/schema.yaml bytes into List[SkillParam].
-
-    Expected YAML structure:
-        param_name:
-          type: string | number | boolean | array | object
-          required: true | false
-          description_en: "English description"
-          description_zh: "Chinese description"
-          depends_on: other_param_name
-
-    Returns a list of param dicts with name, type, required, description_en,
-    description_zh, depends_on — matching frontend SkillParam interface.
-    """
-    text = str(_decode_text_bytes(raw)).strip()
-    if not text:
-        logger.warning("[schema] Empty raw bytes for schema.yaml")
-        return []
-    data: Any = None
-    parse_method = "unknown"
-    try:
-        data = json.loads(text)
-        parse_method = "json"
-    except json.JSONDecodeError:
-        try:
-            data = _parse_yaml_with_ruamel_merge_eol_comments(text)
-            parse_method = "ruamel"
-        except ImportError:
-            data = _parse_yaml_fallback_pyyaml(text)
-            parse_method = "pyyaml"
-        except SkillException:
-            raise
-        except Exception:
-            try:
-                data = _parse_yaml_fallback_pyyaml(text)
-                parse_method = "pyyaml"
-            except Exception as exc:
-                logger.warning("[schema] All YAML parsers failed: %s", exc)
-                return []
-
-    if not isinstance(data, dict):
-        logger.warning("[schema] Parsed data is not a dict (type=%s, parse_method=%s)", type(data).__name__, parse_method)
-        return []
-
-    result: List[Dict[str, Any]] = []
-    for param_name, meta in data.items():
-        if not isinstance(meta, dict):
-            logger.debug("[schema] Skipping param '%s': meta is not a dict (%s)", param_name, type(meta).__name__)
-            continue
-        result.append({
-            "name": param_name,
-            "type": meta.get("type", "string"),
-            "required": bool(meta.get("required", False)),
-            "description_en": meta.get("description_en", meta.get("description", "")),
-            "description_zh": meta.get("description_zh", ""),
-            "depends_on": meta.get("depends_on"),
-        })
-    return result
-
-
-def _read_params_from_zip_config_yaml(
-    zip_bytes: bytes,
-    preferred_skill_root: Optional[str] = None,
-) -> Optional[Dict[str, Any]]:
-    """If the archive contains config/config.yaml, read and parse it into params; else None."""
-    import zipfile
-
-    zip_stream = io.BytesIO(zip_bytes)
-    with zipfile.ZipFile(zip_stream, "r") as zf:
-        member = _find_zip_member_config_yaml(
-            _zip_file_list(zf),
-            preferred_skill_root=preferred_skill_root,
-        )
-        if not member:
-            return None
-        raw = _read_zip_member(zf, member)
-    params = _parse_skill_params_from_config_bytes(raw)
-    logger.info("Loaded skill params from ZIP member %s", member)
-    return params
-
-
-def _find_zip_member_schema_yaml(
-    file_list: List[str],
-    preferred_skill_root: Optional[str] = None,
-) -> Optional[str]:
-    """Return the ZIP entry path for .../config/schema.yaml (any depth; case-insensitive)."""
-    for entry in file_list:
-        norm = _normalize_zip_entry_path(entry)
-        # Match .../config/schema.yaml at any depth
-        parts = norm.split("/")
-        if len(parts) >= 2 and parts[-2] == "config" and parts[-1] == "schema.yaml":
-            logger.debug("[schema] Found schema.yaml via config/ prefix match: %s", entry)
-            return entry
-        # Fallback: if preferred_root is given, also check <root>/config/schema.yaml
-        if preferred_skill_root and norm == f"{preferred_skill_root}/config/schema.yaml":
-            logger.debug("[schema] Found schema.yaml via preferred_root match: %s", entry)
-            return entry
-    logger.debug("[schema] No schema.yaml found in ZIP entries (preferred_root=%s, entry_count=%d)", preferred_skill_root, len(file_list))
-    return None
-
-
-def _read_schema_yaml_from_zip(
-    zip_bytes: bytes,
-    preferred_skill_root: Optional[str] = None,
-) -> Optional[List[Dict[str, Any]]]:
-    """If the archive contains config/schema.yaml, parse it into List[SkillParam]; else None."""
-    import zipfile
-
-    zip_stream = io.BytesIO(zip_bytes)
-    with zipfile.ZipFile(zip_stream, "r") as zf:
-        member = _find_zip_member_schema_yaml(
-            _zip_file_list(zf),
-            preferred_skill_root=preferred_skill_root,
-        )
-        if not member:
-            return None
-        raw = _read_zip_member(zf, member)
-    parsed = _parse_skill_schema_from_yaml_bytes(raw)
-    if not parsed:
-        logger.debug("[schema] Parsed result is empty from ZIP member %s", member)
-    return parsed
-
-
-def _get_skill_inputs_from_zip(
-    zip_bytes: bytes,
-    preferred_skill_root: Optional[str] = None,
-) -> List[Dict[str, Any]]:
-    """Extract argparse parameters from scripts/*.py inside a ZIP archive.
-
-    Mirrors ``_get_skill_inputs_from_code`` but reads from ZIP bytes instead of filesystem.
-
-    Args:
-        zip_bytes: ZIP archive content.
-        preferred_skill_root: Preferred folder name inside ZIP containing scripts/.
-
-    Returns:
-        List of input parameter dicts with name, type, required, description, default.
-    """
-    zip_stream = io.BytesIO(zip_bytes)
-    inputs: List[Dict[str, Any]] = []
-    seen_names: set = set()
-
-    try:
-        with zipfile.ZipFile(zip_stream, "r") as zf:
-            file_list = _zip_file_list(zf)
-            scripts_root = preferred_skill_root or ""
-
-            for member in file_list:
-                normalized = member.replace("\\", "/").strip()
-                if not normalized.endswith(".py") or "/_" in normalized or normalized.endswith("/_"):
-                    continue
-                if not normalized.startswith(scripts_root + "/scripts/"):
-                    if scripts_root:
-                        continue
-                    parts = normalized.split("/")
-                    if len(parts) < 2 or parts[-2] != "scripts":
-                        continue
-
-                try:
-                    source = _decode_text_bytes(_read_zip_member(zf, member))
-                except (OSError, UnicodeDecodeError):
-                    continue
-
-                try:
-                    tree = ast.parse(source, filename=member)
-                except SyntaxError:
-                    continue
-
-                for node in ast.walk(tree):
-                    if not isinstance(node, ast.Call):
-                        continue
-                    if not _is_add_argument_call(node):
-                        continue
-                    parsed = _extract_arg_from_add_argument(node)
-                    if not parsed:
-                        continue
-                    param_name = parsed["name"]
-                    if param_name in ("help", "h") or param_name in seen_names:
-                        continue
-                    seen_names.add(param_name)
-                    inputs.append({
-                        "name": param_name,
-                        "type": parsed["type"],
-                        "required": parsed["required"],
-                        "description_en": parsed.get("description_en", ""),
-                    })
-    except zipfile.BadZipFile:
-        return inputs
-
-    return inputs
-
-
-def _local_skill_config_yaml_path(skill_name: str, local_skills_dir: str) -> str:
-    """Absolute path to <local_skills_dir>/<skill_name>/config/config.yaml."""
-    return _resolve_local_skill_path(
-        local_skills_dir,
-        skill_name,
-        "config",
-        "config.yaml",
-    )
-
-
-def _local_skill_schema_yaml_path(skill_name: str, local_skills_dir: str) -> str:
-    """Absolute path to <local_skills_dir>/<skill_name>/config/schema.yaml."""
-    return _resolve_local_skill_path(
-        local_skills_dir,
-        skill_name,
-        "config",
-        "schema.yaml",
-    )
-
-
-def _resolve_local_skill_path(
-    local_skills_dir: str,
-    skill_name: str,
-    *parts: str,
-) -> str:
-    """Resolve a path below the configured skills root and one skill directory."""
-    name = str(skill_name or "").strip()
-    if (
-        not name
-        or name in {".", ".."}
-        or "/" in name
-        or "\\" in name
-        or "\x00" in name
-        or os.path.basename(name) != name
-        or os.path.isabs(name)
-        or ntpath.isabs(name)
-        or bool(ntpath.splitdrive(name)[0])
-    ):
-        raise SkillException("Invalid skill name for local file access")
-
-    normalized_parts: List[str] = []
-    for part in parts:
-        raw_part = str(part or "")
-        if "\x00" in raw_part:
-            raise ForbiddenError("Unsafe local skill path")
-        if (
-            os.path.isabs(raw_part)
-            or ntpath.isabs(raw_part)
-            or bool(ntpath.splitdrive(raw_part)[0])
-        ):
-            raise ForbiddenError("Unsafe local skill path")
-
-        path_segments = raw_part.replace("\\", "/").split("/")
-        if any(segment == ".." for segment in path_segments):
-            raise ForbiddenError("Unsafe local skill path")
-        normalized_parts.extend(
-            segment for segment in path_segments if segment not in {"", "."}
-        )
-
-    local_root = os.path.realpath(local_skills_dir)
-    skill_root = os.path.realpath(os.path.join(local_root, name))
-    candidate = os.path.realpath(os.path.join(skill_root, *normalized_parts))
-
-    if CONTAINER_SKILLS_PATH:
-        allowed_root = os.path.realpath(CONTAINER_SKILLS_PATH)
-        if (
-            local_root != allowed_root
-            and not local_root.startswith(allowed_root + os.sep)
-        ):
-            raise SkillException("Unsafe local skills directory")
-        if not candidate.startswith(allowed_root + os.sep):
-            raise ForbiddenError("Unsafe local skill path")
-
-    if (
-        not skill_root.startswith(local_root + os.sep)
-        or (
-            candidate != skill_root
-            and not candidate.startswith(skill_root + os.sep)
-        )
-    ):
-        raise ForbiddenError("Unsafe local skill path")
-    return candidate
-
-
-def _write_skill_params_to_local_config_yaml(
-    skill_name: str,
-    params: Dict[str, Any],
-    local_skills_dir: str,
-) -> None:
-    """Write params to config/config.yaml; scalar ``value # tip`` strings round-trip as YAML comments above keys."""
-    from utils.skill_params_utils import params_dict_to_roundtrip_yaml_text
-
-    if not local_skills_dir:
-        return
-    path = _local_skill_config_yaml_path(skill_name, local_skills_dir)
-    config_dir = os.path.dirname(path)
-    os.makedirs(config_dir, exist_ok=True)
-    text = params_dict_to_roundtrip_yaml_text(params)
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(text)
-    logger.info("Wrote skill params to %s", path)
-
-
-def _remove_local_skill_config_yaml(skill_name: str, local_skills_dir: str) -> None:
-    """Remove config/config.yaml when params are cleared in the database."""
-    if not local_skills_dir:
-        return
-    path = _local_skill_config_yaml_path(skill_name, local_skills_dir)
-    if os.path.isfile(path):
-        os.remove(path)
-        logger.info("Removed %s (params cleared in DB)", path)
-
-
-def get_skill_manager() -> SkillManager:
-    """Return the process-wide SkillManager."""
-    return SkillManager(base_skills_dir=CONTAINER_SKILLS_PATH)
-
+from services.skill_support import (
+    UnsupportedSkillFilePreview,
+    _decode_zip_member_name,
+    _zip_members,
+    _zip_file_list,
+    _read_zip_member,
+    _is_obviously_binary,
+    _skill_file_preview_status,
+    _replace_skill_frontmatter_name,
+    _to_group_id_set,
+    can_view_skill,
+    resolve_skill_permission,
+    _apply_default_skill_permission_fields,
+    _get_user_role,
+    _can_edit_skill,
+    _can_manage_skill_access,
+    _has_skill_access_changes,
+    _validate_skill_access_update,
+    _normalize_zip_entry_path,
+    _find_zip_member_config_yaml,
+    _params_dict_to_storable,
+    _comment_text_from_token,
+    _tuple_slot2,
+    _is_before_next_sibling_comment_token,
+    _flatten_ca_comment_to_text,
+    _comment_from_map_block_header,
+    _tooltip_for_commented_map_key,
+    _tooltip_for_commented_seq_index,
+    _apply_inline_comment_to_scalar,
+    _commented_tree_to_plain,
+    _ruamel_tree_to_plain,
+    _parse_yaml_ruamel_plain,
+    _parse_yaml_with_ruamel_merge_eol_comments,
+    _get_skill_inputs_from_code,
+    _is_add_argument_call,
+    _extract_arg_from_add_argument,
+    _get_type_name,
+    _ast_literal_eval,
+    _parse_yaml_fallback_pyyaml,
+    _parse_skill_params_from_config_bytes,
+    _parse_skill_schema_from_yaml_bytes,
+    _read_params_from_zip_config_yaml,
+    _find_zip_member_schema_yaml,
+    _read_schema_yaml_from_zip,
+    _get_skill_inputs_from_zip,
+    _local_skill_config_yaml_path,
+    _local_skill_schema_yaml_path,
+    _resolve_local_skill_path,
+    _write_skill_params_to_local_config_yaml,
+    _remove_local_skill_config_yaml,
+    get_skill_manager,
+)
+
+__all__ = ('UnsupportedSkillFilePreview', '_decode_zip_member_name', '_zip_members', '_zip_file_list', '_read_zip_member', '_is_obviously_binary', '_skill_file_preview_status', '_replace_skill_frontmatter_name', '_to_group_id_set', 'can_view_skill', 'resolve_skill_permission', '_apply_default_skill_permission_fields', '_get_user_role', '_can_edit_skill', '_can_manage_skill_access', '_has_skill_access_changes', '_validate_skill_access_update', '_normalize_zip_entry_path', '_find_zip_member_config_yaml', '_params_dict_to_storable', '_comment_text_from_token', '_tuple_slot2', '_is_before_next_sibling_comment_token', '_flatten_ca_comment_to_text', '_comment_from_map_block_header', '_tooltip_for_commented_map_key', '_tooltip_for_commented_seq_index', '_apply_inline_comment_to_scalar', '_commented_tree_to_plain', '_ruamel_tree_to_plain', '_parse_yaml_ruamel_plain', '_parse_yaml_with_ruamel_merge_eol_comments', '_get_skill_inputs_from_code', '_is_add_argument_call', '_extract_arg_from_add_argument', '_get_type_name', '_ast_literal_eval', '_parse_yaml_fallback_pyyaml', '_parse_skill_params_from_config_bytes', '_parse_skill_schema_from_yaml_bytes', '_read_params_from_zip_config_yaml', '_find_zip_member_schema_yaml', '_read_schema_yaml_from_zip', '_get_skill_inputs_from_zip', '_local_skill_config_yaml_path', '_local_skill_schema_yaml_path', '_resolve_local_skill_path', '_write_skill_params_to_local_config_yaml', '_remove_local_skill_config_yaml', 'get_skill_manager')
 
 class SkillService:
     """Skill management service for backend operations."""
@@ -1348,49 +249,29 @@ class SkillService:
             )
         ]
 
-    def get_skill(self, skill_name: str, tenant_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
-        """Get a specific skill within a tenant.
-
-        Args:
-            skill_name: Name of the skill
-            tenant_id: Tenant ID for filtering. Uses instance tenant_id if not provided.
-
-        Returns:
-            Skill dict or None if not found
-        """
-        effective_tenant_id = tenant_id or self.tenant_id
-        if not effective_tenant_id:
+    def _require_tenant_id(self, tenant_id: Optional[str]) -> str:
+        effective = tenant_id or self.tenant_id
+        if not effective:
             raise SkillException("tenant_id is required")
-        try:
-            skill = skill_db.get_skill_by_name(skill_name, effective_tenant_id)
-            if skill:
-                return self._enrich_configs_from_yaml(skill)
-            return None
-        except Exception as e:
-            logger.error(f"Error getting skill {skill_name}: {e}")
-            raise SkillException(f"Failed to get skill: {str(e)}") from e
+        return effective
+
+    def get_skill(self, skill_name: str, tenant_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """Get a named skill with the shared configuration overlay."""
+        return self._get_skill(skill_name, tenant_id=tenant_id)
 
     def get_skill_by_id(self, skill_id: int, tenant_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
-        """Get a specific skill by ID within a tenant.
+        """Get a skill ID with the shared configuration overlay."""
+        return self._get_skill(skill_id, tenant_id=tenant_id, by_id=True)
 
-        Args:
-            skill_id: ID of the skill
-            tenant_id: Tenant ID for filtering. Uses instance tenant_id if not provided.
-
-        Returns:
-            Skill dict or None if not found
-        """
-        effective_tenant_id = tenant_id or self.tenant_id
-        if not effective_tenant_id:
-            raise SkillException("tenant_id is required")
+    def _get_skill(self, identifier, *, tenant_id: Optional[str], by_id: bool = False):
+        tenant_id = self._require_tenant_id(tenant_id)
         try:
-            skill = skill_db.get_skill_by_id(skill_id, effective_tenant_id)
-            if skill:
-                return self._enrich_configs_from_yaml(skill)
-            return None
-        except Exception as e:
-            logger.error(f"Error getting skill by ID {skill_id}: {e}")
-            raise SkillException(f"Failed to get skill: {str(e)}") from e
+            lookup = skill_db.get_skill_by_id if by_id else skill_db.get_skill_by_name
+            skill = lookup(identifier, tenant_id)
+            return self._enrich_configs_from_yaml(skill) if skill else None
+        except Exception as exc:
+            logger.error("Error getting skill %s: %s", identifier, exc)
+            raise SkillException(f"Failed to get skill: {exc}") from exc
 
     def create_skill(
         self,
@@ -1468,247 +349,129 @@ class SkillService:
             raise SkillException(f"Failed to create skill: {str(e)}") from e
 
     def create_skill_from_file(
-        self,
-        file_content: Union[bytes, str, io.BytesIO],
-        skill_name: Optional[str] = None,
-        file_type: str = "auto",
-        source: str = "custom",
-        tenant_id: Optional[str] = None,
-        user_id: Optional[str] = None
+        self, file_content: Union[bytes, str, io.BytesIO], skill_name: Optional[str] = None,
+        file_type: str = "auto", source: str = "custom", tenant_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Create a skill from file content.
+        """Create from MD or ZIP using the shared upload pipeline."""
+        content, kind = normalize_skill_upload(file_content, file_type)
+        return self._save_skill_upload(
+            content, skill_name, kind, tenant_id=tenant_id or self.tenant_id,
+            user_id=user_id, source=source,
+        )
 
-        Supports two formats:
-        1. Single SKILL.md file - extracts metadata and saves directly
-        2. ZIP archive - extracts SKILL.md and all other files/scripts
-
-        Args:
-            file_content: File content as bytes, string, or BytesIO
-            skill_name: Optional skill name (extracted from ZIP if not provided)
-            file_type: File type hint - "md", "zip", or "auto" (detect)
-            source: Source identifier for the skill (e.g., "custom", "official", "repository")
-            tenant_id: Tenant ID for skill isolation. Uses instance tenant_id if not provided.
-            user_id: User ID of the creator
-
-        Returns:
-            Created skill dict
-        """
-        effective_tenant_id = tenant_id or self.tenant_id
-
-        content_bytes: bytes
-        if isinstance(file_content, str):
-            content_bytes = file_content.encode("utf-8")
-        elif isinstance(file_content, io.BytesIO):
-            content_bytes = file_content.getvalue()
+    def _save_skill_upload(
+        self, content: bytes, skill_name: Optional[str], kind: str, *,
+        tenant_id: Optional[str], user_id: Optional[str], source: str = "custom",
+        update: bool = False, skip_duplicate_check: bool = False,
+        ingroup_permission: Optional[str] = None, rewrite_name: bool = False,
+    ) -> Dict[str, Any]:
+        """Share parsing and persistence while keeping operation-specific policies."""
+        is_zip = kind == "zip"
+        manifest_path = original_root = None
+        text = None
+        name = skill_name
+        if is_zip:
+            try:
+                with zipfile.ZipFile(io.BytesIO(content)) as archive:
+                    files = _zip_file_list(archive)
+                    manifests = [
+                        path for path in files if not path.endswith("/")
+                        and (path.replace("\\", "/").lower().endswith("skill.md") if update
+                             else path.replace("\\", "/").split("/")[-1].lower() == "skill.md")
+                    ]
+                    if update:
+                        manifests = [path for path in manifests if "/" in path.replace("\\", "/")]
+                    else:
+                        manifests.sort(key=lambda path: "/" in path.replace("\\", "/"))
+                    if manifests:
+                        manifest_path = manifests[0]
+                        parts = manifest_path.replace("\\", "/").split("/")
+                        original_root = parts[0] if len(parts) >= 2 else None
+                        raw = _read_zip_member(archive, manifest_path)
+                        text = raw.decode("utf-8") if rewrite_name else str(decode_skill_text(raw))
+            except zipfile.BadZipFile:
+                if update:
+                    raise
+                raise SkillException("Invalid ZIP archive")
+            if not update and manifest_path is None:
+                raise SkillException("SKILL.md not found in ZIP archive")
+            name = skill_name or original_root
+            if not name:
+                raise SkillException("Skill name is required")
+            if not update and not skip_duplicate_check and skill_db.get_skill_by_name(name, tenant_id):
+                raise SkillException(f"Skill '{name}' already exists")
         else:
-            content_bytes = file_content
+            text = content.decode("utf-8") if update else str(decode_skill_text(content))
 
-        if file_type == "auto":
-            if content_bytes.startswith(b"PK"):
-                file_type = "zip"
+        parsed = None
+        if text or (text is not None and not update):
+            try:
+                parsed = SkillLoader.parse(text)
+            except ValueError as exc:
+                if update and is_zip:
+                    logger.warning("Could not parse SKILL.md from ZIP: %s", exc)
+                else:
+                    label = "Invalid SKILL.md in ZIP" if is_zip else "Invalid SKILL.md format"
+                    raise SkillException(f"{label}: {exc}") from exc
+        elif not is_zip:
+            try:
+                parsed = SkillLoader.parse(text or "")
+            except ValueError as exc:
+                raise SkillException(f"Invalid SKILL.md format: {exc}") from exc
+
+        name = name or (parsed or {}).get("name")
+        if not name:
+            raise SkillException("Skill name is required")
+        if not update:
+            local_dir = self._resolve_local_skills_dir_for_overlay()
+            if local_dir:
+                _resolve_local_skill_path(local_dir, name)
+            if not is_zip and not skip_duplicate_check and skill_db.get_skill_by_name(name, tenant_id):
+                raise SkillException(f"Skill '{name}' already exists")
+
+        allowed_tools = (parsed or {}).get("allowed_tools", [])
+        data = {}
+        if parsed is not None:
+            data = {
+                "description": parsed.get("description", ""),
+                "content": parsed.get("content", ""),
+                "tags": parsed.get("tags", []),
+                "tool_ids": skill_db.get_tool_ids_by_names(allowed_tools, tenant_id) if allowed_tools else [],
+            }
+        if is_zip:
+            root = original_root or name
+            if not update:
+                schema = _read_schema_yaml_from_zip(content, root)
+                inputs = _get_skill_inputs_from_zip(content, preferred_skill_root=root)
+                if schema or inputs:
+                    data["config_schemas"] = schema or inputs
+            params = _read_params_from_zip_config_yaml(content, preferred_skill_root=root)
+            if params is not None:
+                data["config_values"] = params
+
+        if update:
+            result = skill_db.update_skill(name, data, tenant_id, updated_by=user_id or None)
+            self._delete_local_skill_files(name, tenant_id=tenant_id)
+            data.update({"name": name, "allowed-tools": allowed_tools})
+        else:
+            data.update({"name": name, "source": source, "allowed-tools": allowed_tools})
+            if user_id:
+                data.update({"created_by": user_id, "updated_by": user_id})
+            if ingroup_permission is not None:
+                data["ingroup_permission"] = ingroup_permission
+            _apply_default_skill_permission_fields(data, user_id)
+            result = skill_db.create_skill(data, tenant_id)
+
+        self.skill_manager.save_skill(data, tenant_id=tenant_id)
+        if is_zip:
+            overrides = None
+            if rewrite_name and str(parsed.get("name") or "") != name:
+                overrides = {manifest_path: _replace_skill_frontmatter_name(text, name).encode("utf-8")}
+            if rewrite_name:
+                self._upload_zip_files(content, name, original_root, tenant_id=tenant_id, file_overrides=overrides)
             else:
-                file_type = "md"
-
-        if file_type == "zip":
-            return self._create_skill_from_zip(content_bytes, skill_name, source, user_id, effective_tenant_id)
-        else:
-            return self._create_skill_from_md(content_bytes, skill_name, source, user_id, effective_tenant_id)
-
-    def _create_skill_from_md(
-        self,
-        content_bytes: bytes,
-        skill_name: Optional[str] = None,
-        source: str = "custom",
-        user_id: Optional[str] = None,
-        tenant_id: Optional[str] = None
-    ) -> Dict[str, Any]:
-        """Create skill from SKILL.md content."""
-        content_str = str(_decode_text_bytes(content_bytes))
-
-        try:
-            skill_data = SkillLoader.parse(content_str)
-        except ValueError as e:
-            raise SkillException(f"Invalid SKILL.md format: {e}")
-
-        name = skill_name or skill_data.get("name")
-        if not name:
-            raise SkillException("Skill name is required")
-        local_dir = self._resolve_local_skills_dir_for_overlay()
-        if local_dir:
-            _resolve_local_skill_path(local_dir, name)
-
-        # Check if skill already exists in database
-        existing = skill_db.get_skill_by_name(name, tenant_id)
-        if existing:
-            raise SkillException(f"Skill '{name}' already exists")
-
-        # Convert allowed_tools (from SKILL.md) to tool_ids for database
-        allowed_tools = skill_data.get("allowed_tools", [])
-        tool_ids = []
-        if allowed_tools:
-            tool_ids = skill_db.get_tool_ids_by_names(allowed_tools, tenant_id)
-
-        skill_dict = {
-            "name": name,
-            "description": skill_data.get("description", ""),
-            "content": skill_data.get("content", ""),
-            "tags": skill_data.get("tags", []),
-            "source": source,
-            "tool_ids": tool_ids,
-            "allowed-tools": allowed_tools,  # Preserve for local file sync
-        }
-        # Note: scripts/ reflection is only possible for ZIP uploads (scripts exist in ZIP bytes).
-        # For MD-only uploads there are no scripts to reflect at create time.
-
-        # Set created_by and updated_by if user_id is provided
-        if user_id:
-            skill_dict["created_by"] = user_id
-            skill_dict["updated_by"] = user_id
-        _apply_default_skill_permission_fields(skill_dict, user_id)
-
-        result = skill_db.create_skill(skill_dict, tenant_id)
-
-        # Write SKILL.md to local storage
-        self.skill_manager.save_skill(skill_dict, tenant_id=tenant_id)
-
-        return self._enrich_configs_from_yaml(result)
-
-    def _create_skill_from_zip(
-        self,
-        zip_bytes: bytes,
-        skill_name: Optional[str] = None,
-        source: str = "custom",
-        user_id: Optional[str] = None,
-        tenant_id: Optional[str] = None
-    ) -> Dict[str, Any]:
-        """Create skill from ZIP archive (for file storage, content extracted from SKILL.md).
-
-        Priority for skill_name:
-        1. Parameter skill_name
-        2. Root directory SKILL.md (top-level skill_name field)
-        3. Subdirectory name containing SKILL.md
-        """
-        import zipfile
-
-        zip_stream = io.BytesIO(zip_bytes)
-
-        try:
-            with zipfile.ZipFile(zip_stream, "r") as zf:
-                file_list = _zip_file_list(zf)
-        except zipfile.BadZipFile:
-            raise SkillException("Invalid ZIP archive")
-
-        zip_stream.seek(0)
-
-        skill_md_path: Optional[str] = None
-        detected_skill_name: Optional[str] = None
-
-        # First: Check for SKILL.md at root level
-        for file_path in file_list:
-            if file_path.endswith("/"):
-                continue
-            normalized_path = file_path.replace("\\", "/")
-            parts = normalized_path.split("/")
-            # Root level SKILL.md (only 1 part)
-            if len(parts) == 1 and parts[0].lower() == "skill.md":
-                skill_md_path = file_path
-                break
-
-        # Second: If not found at root, check subdirectory
-        if not skill_md_path:
-            for file_path in file_list:
-                if file_path.endswith("/"):
-                    continue
-                normalized_path = file_path.replace("\\", "/")
-                parts = normalized_path.split("/")
-                if len(parts) >= 2 and parts[-1].lower() == "skill.md":
-                    skill_md_path = file_path
-                    detected_skill_name = parts[0]
-                    break
-
-        if not skill_md_path:
-            raise SkillException("SKILL.md not found in ZIP archive")
-
-        name = skill_name or detected_skill_name
-        if not name:
-            raise SkillException("Skill name is required")
-        local_dir = self._resolve_local_skills_dir_for_overlay()
-        if local_dir:
-            _resolve_local_skill_path(local_dir, name)
-
-        # Check if skill already exists in database
-        existing = skill_db.get_skill_by_name(name, tenant_id)
-        if existing:
-            raise SkillException(f"Skill '{name}' already exists")
-
-        with zipfile.ZipFile(zip_stream, "r") as zf:
-            skill_content = str(_decode_text_bytes(_read_zip_member(zf, skill_md_path)))
-
-        try:
-            skill_data = SkillLoader.parse(skill_content)
-        except ValueError as e:
-            raise SkillException(f"Invalid SKILL.md in ZIP: {e}")
-
-        # If still no name, try to get from SKILL.md parsed data
-        if not name:
-            name = skill_data.get("name")
-
-        if not name:
-            raise SkillException("Skill name is required")
-
-        # Convert allowed_tools (from SKILL.md) to tool_ids for database
-        allowed_tools = skill_data.get("allowed_tools", [])
-        tool_ids = []
-        if allowed_tools:
-            tool_ids = skill_db.get_tool_ids_by_names(allowed_tools, tenant_id)
-
-        skill_dict = {
-            "name": name,
-            "description": skill_data.get("description", ""),
-            "content": skill_data.get("content", ""),
-            "tags": skill_data.get("tags", []),
-            "source": source,
-            "tool_ids": tool_ids,
-            "allowed-tools": allowed_tools,  # Preserve for local file sync
-        }
-
-        preferred_root = detected_skill_name or name
-
-        # Priority: schema.yaml (list metadata) > scripts AST (list) > config.yaml (dict defaults)
-        schema_from_zip = _read_schema_yaml_from_zip(zip_bytes, preferred_root)
-        inputs_from_scripts = _get_skill_inputs_from_zip(
-            zip_bytes,
-            preferred_skill_root=preferred_root,
-        )
-        params_from_zip = _read_params_from_zip_config_yaml(
-            zip_bytes,
-            preferred_skill_root=preferred_root,
-        )
-
-        if schema_from_zip:
-            skill_dict["config_schemas"] = schema_from_zip
-        elif inputs_from_scripts:
-            skill_dict["config_schemas"] = inputs_from_scripts
-
-        # config.yaml always goes into config_values (runtime defaults dict)
-        if params_from_zip is not None:
-            skill_dict["config_values"] = params_from_zip
-
-        # Set created_by and updated_by if user_id is provided
-        if user_id:
-            skill_dict["created_by"] = user_id
-            skill_dict["updated_by"] = user_id
-        _apply_default_skill_permission_fields(skill_dict, user_id)
-
-        result = skill_db.create_skill(skill_dict, tenant_id)
-
-        # Save SKILL.md to local storage
-        self.skill_manager.save_skill(skill_dict, tenant_id=tenant_id)
-
-        self._upload_zip_files(
-            zip_bytes, name, detected_skill_name, tenant_id=tenant_id
-        )
-
+                self._upload_zip_files(content, name, original_root, tenant_id=tenant_id)
         return self._enrich_configs_from_yaml(result)
 
     def _delete_local_skill_files(self, skill_name: str, *, tenant_id: Optional[str]) -> None:
@@ -1862,370 +625,105 @@ class SkillService:
             raise
 
     def update_skill_from_file(
-        self,
-        skill_name: str,
-        file_content: Union[bytes, str, io.BytesIO],
-        file_type: str = "auto",
-        tenant_id: Optional[str] = None,
-        user_id: Optional[str] = None
+        self, skill_name: str, file_content: Union[bytes, str, io.BytesIO],
+        file_type: str = "auto", tenant_id: Optional[str] = None, user_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Update an existing skill from file content.
-
-        Args:
-            skill_name: Name of the skill to update
-            file_content: File content as bytes, string, or BytesIO
-            file_type: File type hint - "md", "zip", or "auto" (detect)
-            tenant_id: Tenant ID (reserved for future multi-tenant support)
-            user_id: User ID of the updater
-
-        Returns:
-            Updated skill dict
-        """
-        effective_tenant_id = tenant_id or self.tenant_id
-        if not effective_tenant_id:
-            raise SkillException("tenant_id is required")
-        existing = skill_db.get_skill_by_name(skill_name, effective_tenant_id)
+        """Validate access before sharing the MD/ZIP replacement pipeline."""
+        tenant_id = self._require_tenant_id(tenant_id)
+        existing = skill_db.get_skill_by_name(skill_name, tenant_id)
         if not existing:
             raise SkillException(f"Skill not found: {skill_name}")
         if user_id is not None and not _can_edit_skill(existing, user_id):
             raise ForbiddenError(_SKILL_UPDATE_FORBIDDEN_MESSAGE)
-
-        content_bytes: bytes
-        if isinstance(file_content, str):
-            content_bytes = file_content.encode("utf-8")
-        elif isinstance(file_content, io.BytesIO):
-            content_bytes = file_content.getvalue()
-        else:
-            content_bytes = file_content
-
-        if file_type == "auto":
-            if content_bytes.startswith(b"PK"):
-                file_type = "zip"
-            else:
-                file_type = "md"
-
-        if file_type == "zip":
-            return self._update_skill_from_zip(content_bytes, skill_name, user_id, effective_tenant_id)
-        else:
-            return self._update_skill_from_md(content_bytes, skill_name, user_id, effective_tenant_id)
-
-    def _update_skill_from_md(
-        self,
-        content_bytes: bytes,
-        skill_name: str,
-        user_id: Optional[str] = None,
-        tenant_id: Optional[str] = None
-    ) -> Dict[str, Any]:
-        """Update skill from SKILL.md content."""
-        content_str = content_bytes.decode("utf-8")
-
-        try:
-            skill_data = SkillLoader.parse(content_str)
-        except ValueError as e:
-            raise SkillException(f"Invalid SKILL.md format: {e}")
-
-        # Get allowed-tools from parsed content and try to map to tool_ids
-        allowed_tools = skill_data.get("allowed_tools", [])
-        tool_ids = []
-        if allowed_tools:
-            tool_ids = skill_db.get_tool_ids_by_names(allowed_tools, tenant_id)
-
-        skill_dict = {
-            "description": skill_data.get("description", ""),
-            "content": skill_data.get("content", ""),
-            "tags": skill_data.get("tags", []),
-            "tool_ids": tool_ids,
-        }
-
-        result = skill_db.update_skill(
-            skill_name, skill_dict, tenant_id, updated_by=user_id or None
+        content, kind = normalize_skill_upload(file_content, file_type)
+        return self._save_skill_upload(
+            content, skill_name, kind, tenant_id=tenant_id, user_id=user_id, update=True
         )
-
-        # Clean up existing local files before writing new ones
-        self._delete_local_skill_files(skill_name, tenant_id=tenant_id)
-
-        # Update local storage with new SKILL.md (preserve allowed-tools)
-        skill_dict["name"] = skill_name
-        skill_dict["allowed-tools"] = allowed_tools
-        self.skill_manager.save_skill(skill_dict, tenant_id=tenant_id)
-
-        return self._enrich_configs_from_yaml(result)
-
-    def _update_skill_from_zip(
-        self,
-        zip_bytes: bytes,
-        skill_name: str,
-        user_id: Optional[str] = None,
-        tenant_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        """Update skill from ZIP archive."""
-        existing = skill_db.get_skill_by_name(skill_name, tenant_id)
-        if not existing:
-            raise SkillException(f"Skill not found: {skill_name}")
-
-        import zipfile
-
-        zip_stream = io.BytesIO(zip_bytes)
-
-        skill_md_path = None
-        original_folder_name = None
-
-        with zipfile.ZipFile(zip_stream, "r") as zf:
-            file_list = _zip_file_list(zf)
-
-            for file_path in file_list:
-                normalized_path = file_path.replace("\\", "/")
-                if normalized_path.lower().endswith("skill.md"):
-                    parts = normalized_path.split("/")
-                    if len(parts) >= 2:
-                        skill_md_path = file_path
-                        original_folder_name = parts[0]
-                        break
-
-            skill_content = None
-            if skill_md_path:
-                skill_content = str(_decode_text_bytes(_read_zip_member(zf, skill_md_path)))
-
-        # Reset stream position before _upload_zip_files reads it
-        zip_stream.seek(0)
-
-        preferred_root = original_folder_name or skill_name
-        params_from_zip = _read_params_from_zip_config_yaml(
-            zip_bytes,
-            preferred_skill_root=preferred_root,
-        )
-
-        skill_dict = {}
-        allowed_tools = []
-        if skill_content:
-            try:
-                skill_data = SkillLoader.parse(skill_content)
-                allowed_tools = skill_data.get("allowed_tools", [])
-                # Try to map allowed_tools to tool_ids for database
-                tool_ids = []
-                if allowed_tools:
-                    tool_ids = skill_db.get_tool_ids_by_names(allowed_tools, tenant_id)
-                skill_dict = {
-                    "description": skill_data.get("description", ""),
-                    "content": skill_data.get("content", ""),
-                    "tags": skill_data.get("tags", []),
-                    "tool_ids": tool_ids,
-                }
-            except ValueError as e:
-                logger.warning(f"Could not parse SKILL.md from ZIP: {e}")
-
-        if params_from_zip is not None:
-            skill_dict["config_values"] = params_from_zip
-
-        result = skill_db.update_skill(
-            skill_name, skill_dict, tenant_id, updated_by=user_id or None
-        )
-
-        # Clean up existing local files before writing new ones
-        self._delete_local_skill_files(skill_name, tenant_id=tenant_id)
-
-        # Update SKILL.md in local storage (preserve allowed-tools)
-        skill_dict["name"] = skill_name
-        skill_dict["allowed-tools"] = allowed_tools
-        self.skill_manager.save_skill(skill_dict, tenant_id=tenant_id)
-
-        # Update other files in local storage
-        self._upload_zip_files(
-            zip_bytes, skill_name, original_folder_name, tenant_id=tenant_id
-        )
-
-        return self._enrich_configs_from_yaml(result)
 
     def update_skill(
-        self,
-        skill_name: str,
-        skill_data: Dict[str, Any],
-        tenant_id: Optional[str] = None,
-        user_id: Optional[str] = None
+        self, skill_name: str, skill_data: Dict[str, Any],
+        tenant_id: Optional[str] = None, user_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Update an existing skill for a tenant.
-
-        Args:
-            skill_name: Name of the skill to update
-            skill_data: Business fields from the application layer (no audit fields).
-            tenant_id: Tenant ID for skill isolation. Uses instance tenant_id if not provided.
-            user_id: Updater id from server-side auth (JWT / session); sets DB updated_by.
-
-        Returns:
-            Updated skill dict
-        """
-        effective_tenant_id = tenant_id or self.tenant_id
-        if not effective_tenant_id:
-            raise SkillException("tenant_id is required")
-        try:
-            existing = skill_db.get_skill_by_name(skill_name, effective_tenant_id)
-            if not existing:
-                raise SkillException(f"Skill not found: {skill_name}")
-            if user_id is not None and not _can_edit_skill(existing, user_id):
-                raise ForbiddenError(_SKILL_UPDATE_FORBIDDEN_MESSAGE)
-            _validate_skill_access_update(existing, skill_data, user_id)
-
-            result = skill_db.update_skill(
-                skill_name, skill_data, effective_tenant_id, updated_by=user_id or None
-            )
-
-            # Keep config/config.yaml in sync when config_values are updated (matches ZIP import path).
-            local_dir = self._local_skills_dir(effective_tenant_id)
-            if local_dir and "config_values" in skill_data:
-                try:
-                    raw_config_values = skill_data["config_values"]
-                    if raw_config_values is None:
-                        _remove_local_skill_config_yaml(skill_name, local_dir)
-                    else:
-                        _write_skill_params_to_local_config_yaml(
-                            skill_name,
-                            _params_dict_to_storable(raw_config_values),
-                            local_dir,
-                        )
-                except Exception as exc:
-                    logger.warning(
-                        "Local config/config.yaml sync failed after config_values update for %s: %s",
-                        skill_name,
-                        exc,
-                    )
-
-            # Optional: sync SKILL.md on disk when SKILLS_PATH is configured (DB is source of truth).
-            if not local_dir:
-                logger.warning(
-                    "SKILLS_PATH is not set; skipped local SKILL.md sync after DB update for %s",
-                    skill_name,
-                )
-                return self._enrich_configs_from_yaml(result)
-
-            try:
-                allowed_tools = skill_db.get_tool_names_by_skill_name(skill_name, effective_tenant_id)
-                local_skill_dict = {
-                    "name": skill_name,
-                    "description": skill_data.get("description", existing.get("description", "")),
-                    "content": skill_data.get("content", existing.get("content", "")),
-                    "tags": skill_data.get("tags", existing.get("tags", [])),
-                    "allowed-tools": allowed_tools,
-                    "files": skill_data.get("files", []),
-                }
-                self.skill_manager.save_skill(local_skill_dict, tenant_id=effective_tenant_id)
-            except Exception as exc:
-                logger.warning(
-                    "Local SKILL.md sync failed after DB update for %s: %s",
-                    skill_name,
-                    exc,
-                )
-
-            return self._enrich_configs_from_yaml(result)
-        except (ForbiddenError, SkillException):
-            raise
-        except Exception as e:
-            logger.error(f"Error updating skill {skill_name}: {e}")
-            raise SkillException(f"Failed to update skill: {str(e)}") from e
+        """Update by name, preserving the trusted internal-call permission rule."""
+        return self._update_skill_record(skill_name, skill_data, tenant_id, user_id)
 
     def update_skill_by_id(
-        self,
-        skill_id: int,
-        skill_data: Dict[str, Any],
-        tenant_id: Optional[str] = None,
-        user_id: Optional[str] = None
+        self, skill_id: int, skill_data: Dict[str, Any],
+        tenant_id: Optional[str] = None, user_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Update an existing skill by ID for a tenant."""
-        effective_tenant_id = tenant_id or self.tenant_id
-        if not effective_tenant_id:
-            raise SkillException("tenant_id is required")
+        """Update by ID with mandatory edit permission and rename handling."""
+        return self._update_skill_record(skill_id, skill_data, tenant_id, user_id, by_id=True)
+
+    def _update_skill_record(self, identifier, skill_data, tenant_id, user_id, *, by_id=False):
+        tenant_id = self._require_tenant_id(tenant_id)
         try:
-            existing = skill_db.get_skill_by_id(skill_id, effective_tenant_id)
+            lookup = skill_db.get_skill_by_id if by_id else skill_db.get_skill_by_name
+            existing = lookup(identifier, tenant_id)
             if not existing:
-                raise SkillException(f"Skill not found: {skill_id}")
-            if not _can_edit_skill(existing, user_id):
+                raise SkillException(f"Skill not found: {identifier}")
+            if (by_id or user_id is not None) and not _can_edit_skill(existing, user_id):
                 raise ForbiddenError(_SKILL_UPDATE_FORBIDDEN_MESSAGE)
             _validate_skill_access_update(existing, skill_data, user_id)
 
-            local_dir = self._resolve_local_skills_dir_for_overlay()
-            if local_dir and "name" in skill_data:
-                _resolve_local_skill_path(
-                    local_dir,
-                    str(skill_data["name"] or ""),
-                )
-
-            result = skill_db.update_skill_by_id(
-                skill_id,
-                skill_data,
-                effective_tenant_id,
-                updated_by=user_id or None,
-            )
-
+            local_dir = self._resolve_local_skills_dir_for_overlay() if by_id else None
+            if by_id and local_dir and "name" in skill_data:
+                _resolve_local_skill_path(local_dir, str(skill_data["name"] or ""))
+            persist = skill_db.update_skill_by_id if by_id else skill_db.update_skill
+            result = persist(identifier, skill_data, tenant_id, updated_by=user_id or None)
+            if not by_id:
+                local_dir = self._local_skills_dir(tenant_id)
             if not local_dir:
                 return self._enrich_configs_from_yaml(result)
 
-            persisted_skill_id = int(existing["skill_id"])
-            skill_id_directory = _resolve_local_skill_path(
-                local_dir,
-                f"skill_{persisted_skill_id}",
+            local_name = identifier
+            if by_id:
+                id_name = f"skill_{int(existing['skill_id'])}"
+                id_path = _resolve_local_skill_path(local_dir, id_name)
+                local_name = id_name if os.path.isdir(id_path) else str(result.get("name") or existing.get("name") or "")
+                if not local_name:
+                    return self._enrich_configs_from_yaml(result)
+
+            self._sync_updated_skill_files(
+                local_name, local_dir, skill_data, existing, tenant_id,
+                previous_name=str(existing.get("name") or "") if by_id else identifier,
+                rename=by_id and local_name != f"skill_{identifier}",
             )
-            local_skill_name = (
-                f"skill_{persisted_skill_id}"
-                if os.path.isdir(skill_id_directory)
-                else str(result.get("name") or existing.get("name") or "")
-            )
-            if not local_skill_name:
-                return self._enrich_configs_from_yaml(result)
-
-            if local_dir and "config_values" in skill_data:
-                try:
-                    raw_config_values = skill_data["config_values"]
-                    if raw_config_values is None:
-                        _remove_local_skill_config_yaml(local_skill_name, local_dir)
-                    else:
-                        _write_skill_params_to_local_config_yaml(
-                            local_skill_name,
-                            _params_dict_to_storable(raw_config_values),
-                            local_dir,
-                        )
-                except Exception as exc:
-                    logger.warning(
-                        "Local config/config.yaml sync failed after skill ID update for %s: %s",
-                        skill_id,
-                        exc,
-                    )
-
-            if not local_dir:
-                return self._enrich_configs_from_yaml(result)
-
-            try:
-                allowed_tools = skill_db.get_tool_names_by_skill_name(
-                    str(existing.get("name") or ""),
-                    effective_tenant_id,
-                )
-                local_skill_dict = {
-                    "name": local_skill_name,
-                    "description": skill_data.get("description", existing.get("description", "")),
-                    "content": skill_data.get("content", existing.get("content", "")),
-                    "tags": skill_data.get("tags", existing.get("tags", [])),
-                    "allowed-tools": allowed_tools,
-                    "files": skill_data.get("files", []),
-                }
-                self.skill_manager.save_skill(local_skill_dict, tenant_id=effective_tenant_id)
-                previous_name = str(existing.get("name") or "").strip()
-                if (
-                    local_skill_name != f"skill_{skill_id}"
-                    and previous_name
-                    and previous_name != local_skill_name
-                ):
-                    self.skill_manager.delete_skill(previous_name, tenant_id=effective_tenant_id)
-            except Exception as exc:
-                logger.warning(
-                    "Local SKILL.md sync failed after DB update for skill ID %s: %s",
-                    skill_id,
-                    exc,
-                )
-
             return self._enrich_configs_from_yaml(result)
         except (ForbiddenError, SkillException):
             raise
-        except Exception as e:
-            logger.exception("Error updating skill by ID %s", skill_id)
-            raise SkillException(f"Failed to update skill: {str(e)}") from e
+        except Exception as exc:
+            logger.exception("Error updating skill %s", identifier)
+            raise SkillException(f"Failed to update skill: {exc}") from exc
+
+    def _sync_updated_skill_files(
+        self, local_name, local_dir, data, existing, tenant_id, *, previous_name, rename,
+    ):
+        """Keep the existing best-effort local mirror after a database update."""
+        if "config_values" in data:
+            try:
+                if data["config_values"] is None:
+                    _remove_local_skill_config_yaml(local_name, local_dir)
+                else:
+                    _write_skill_params_to_local_config_yaml(
+                        local_name, _params_dict_to_storable(data["config_values"]), local_dir
+                    )
+            except Exception as exc:
+                logger.warning("Local config/config.yaml sync failed for %s: %s", local_name, exc)
+        try:
+            local_skill = {
+                "name": local_name,
+                "description": data.get("description", existing.get("description", "")),
+                "content": data.get("content", existing.get("content", "")),
+                "tags": data.get("tags", existing.get("tags", [])),
+                "allowed-tools": skill_db.get_tool_names_by_skill_name(previous_name, tenant_id),
+                "files": data.get("files", []),
+            }
+            self.skill_manager.save_skill(local_skill, tenant_id=tenant_id)
+            old_name = previous_name.strip()
+            if rename and old_name and old_name != local_name:
+                self.skill_manager.delete_skill(old_name, tenant_id=tenant_id)
+        except Exception as exc:
+            logger.warning("Local SKILL.md sync failed after DB update for %s: %s", local_name, exc)
 
     def delete_skill(
         self,
@@ -2528,7 +1026,7 @@ class SkillService:
                     return DecodedSkillFile(raw, "utf-8")
                 if _is_obviously_binary(raw):
                     raise UnsupportedSkillFilePreview(f"Unsupported skill file preview: {file_path}")
-                return _decode_text_bytes(raw)
+                return decode_skill_text(raw)
             except FileNotFoundError:
                 logger.warning("Skill file not found: %s/%s", skill_name, file_path)
                 return None
@@ -2621,153 +1119,16 @@ class SkillService:
         )
 
     def create_skill_from_zip_bytes(
-        self,
-        zip_bytes: bytes,
-        skill_name: Optional[str] = None,
-        source: str = "导入",
-        user_id: Optional[str] = None,
-        tenant_id: Optional[str] = None,
-        skip_duplicate_check: bool = False,
-        ingroup_permission: Optional[str] = None,
+        self, zip_bytes: bytes, skill_name: Optional[str] = None, source: str = "导入",
+        user_id: Optional[str] = None, tenant_id: Optional[str] = None,
+        skip_duplicate_check: bool = False, ingroup_permission: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Create a skill from ZIP bytes, optionally skipping the duplicate name check.
-
-        This is the shared implementation used by both the upload endpoint and the
-        agent import flow. When skip_duplicate_check is True, the existence check
-        is bypassed (used during agent import where we pre-validate duplicates).
-
-        Args:
-            zip_bytes: Raw ZIP file bytes
-            skill_name: Optional skill name override
-            source: Source label for the skill
-            user_id: Creator user ID
-            tenant_id: Tenant ID
-            skip_duplicate_check: If True, skip the "skill already exists" check
-            ingroup_permission: Optional group permission override for the new skill
-
-        Returns:
-            Created skill dict
-        """
-        import zipfile
-
-        zip_stream = io.BytesIO(zip_bytes)
-
-        try:
-            with zipfile.ZipFile(zip_stream, "r") as zf:
-                file_list = zf.namelist()
-        except zipfile.BadZipFile:
-            raise SkillException("Invalid ZIP archive")
-
-        zip_stream.seek(0)
-
-        skill_md_path: Optional[str] = None
-        detected_skill_name: Optional[str] = None
-
-        for file_path in file_list:
-            if file_path.endswith("/"):
-                continue
-            normalized_path = file_path.replace("\\", "/")
-            parts = normalized_path.split("/")
-            if len(parts) == 1 and parts[0].lower() == "skill.md":
-                skill_md_path = file_path
-                break
-
-        if not skill_md_path:
-            for file_path in file_list:
-                if file_path.endswith("/"):
-                    continue
-                normalized_path = file_path.replace("\\", "/")
-                parts = normalized_path.split("/")
-                if len(parts) >= 2 and parts[-1].lower() == "skill.md":
-                    skill_md_path = file_path
-                    detected_skill_name = parts[0]
-                    break
-
-        if not skill_md_path:
-            raise SkillException("SKILL.md not found in ZIP archive")
-
-        name = skill_name or detected_skill_name
-        if not name:
-            raise SkillException("Skill name is required")
-
-        if not skip_duplicate_check:
-            existing = skill_db.get_skill_by_name(name, tenant_id)
-            if existing:
-                raise SkillException(f"Skill '{name}' already exists")
-
-        with zipfile.ZipFile(zip_stream, "r") as zf:
-            skill_content = zf.read(skill_md_path).decode("utf-8")
-
-        try:
-            skill_data = SkillLoader.parse(skill_content)
-        except ValueError as e:
-            raise SkillException(f"Invalid SKILL.md in ZIP: {e}")
-
-        original_skill_name = str(skill_data.get("name") or "")
-        skill_md_override = None
-        if original_skill_name != name:
-            skill_md_override = _replace_skill_frontmatter_name(skill_content, name).encode("utf-8")
-
-        if not name:
-            name = skill_data.get("name")
-
-        if not name:
-            raise SkillException("Skill name is required")
-
-        allowed_tools = skill_data.get("allowed_tools", [])
-        tool_ids = []
-        if allowed_tools:
-            tool_ids = skill_db.get_tool_ids_by_names(allowed_tools, tenant_id)
-
-        skill_dict = {
-            "name": name,
-            "description": skill_data.get("description", ""),
-            "content": skill_data.get("content", ""),
-            "tags": skill_data.get("tags", []),
-            "source": source,
-            "tool_ids": tool_ids,
-            "allowed-tools": allowed_tools,
-        }
-
-        preferred_root = detected_skill_name or name
-
-        schema_from_zip = _read_schema_yaml_from_zip(zip_bytes, preferred_root)
-        inputs_from_scripts = _get_skill_inputs_from_zip(
-            zip_bytes,
-            preferred_skill_root=preferred_root,
+        """Import through the shared pipeline with optional frontmatter rename."""
+        return self._save_skill_upload(
+            zip_bytes, skill_name, "zip", tenant_id=tenant_id, user_id=user_id,
+            source=source, skip_duplicate_check=skip_duplicate_check,
+            ingroup_permission=ingroup_permission, rewrite_name=True,
         )
-        params_from_zip = _read_params_from_zip_config_yaml(
-            zip_bytes,
-            preferred_skill_root=preferred_root,
-        )
-
-        if schema_from_zip:
-            skill_dict["config_schemas"] = schema_from_zip
-        elif inputs_from_scripts:
-            skill_dict["config_schemas"] = inputs_from_scripts
-
-        if params_from_zip is not None:
-            skill_dict["config_values"] = params_from_zip
-
-        if user_id:
-            skill_dict["created_by"] = user_id
-            skill_dict["updated_by"] = user_id
-        if ingroup_permission is not None:
-            skill_dict["ingroup_permission"] = ingroup_permission
-        _apply_default_skill_permission_fields(skill_dict, user_id)
-
-        result = skill_db.create_skill(skill_dict, tenant_id)
-
-        self.skill_manager.save_skill(skill_dict, tenant_id=tenant_id)
-        self._upload_zip_files(
-            zip_bytes,
-            name,
-            detected_skill_name,
-            tenant_id=tenant_id,
-            file_overrides={skill_md_path: skill_md_override} if skill_md_override else None,
-        )
-
-        return self._enrich_configs_from_yaml(result)
 
     def export_skills_by_names(
         self,
@@ -2871,7 +1232,6 @@ async def update_skill_list(tenant_id: str, user_id: str):
         user_id: User ID for tracking who initiated the scan
     """
     from database import skill_db as skill_db_module
-    from nexent.skills import SkillManager
 
     skill_manager = get_skill_manager()
     # Use the resolved tenant-scoped local path for schema/config file reading

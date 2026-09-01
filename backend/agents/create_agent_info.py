@@ -36,11 +36,11 @@ from nexent.core.agents.nexent_agent import get_local_python_authorized_imports
 from consts.capability_profiles import CATALOG as CAPABILITY_CATALOG
 
 from services.file_management_service import validate_urls_access
+from services.model_resolver_service import get_rerank_model
 from services.vectordatabase_service import (
     ElasticSearchService,
     get_vector_db_core,
     get_embedding_model_by_index_name,
-    get_rerank_model,
 )
 from services.remote_mcp_service import get_remote_mcp_server_list
 
