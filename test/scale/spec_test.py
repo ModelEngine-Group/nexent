@@ -245,7 +245,7 @@ class TestMaxAgentsPerTenant(BaseTestCase):
                 skill_slice = skill_ids[: (idx % max(len(skill_ids), 1)) + 1] if skill_ids else []
                 related = created_ids[:min(len(created_ids), idx % 3)] if len(created_ids) > 0 else []
                 aid = create_agent(
-                    f"scale-agent-{RUN_ID}-{idx:04d}",
+                    f"scale_agent_{RUN_ID}_{idx:04d}",
                     tool_ids=tool_slice,
                     skill_ids=skill_slice,
                     related_agent_ids=related or None,
