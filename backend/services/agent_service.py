@@ -1686,6 +1686,9 @@ async def get_agent_info_impl(agent_id: int, tenant_id: str, version_no: int = 0
     # Filter out deleted models (delete_flag='Y' in model_record_t)
     model_ids = agent_info.get("model_ids") or []
     valid_model_ids = get_valid_model_ids(model_ids, tenant_id)
+
+    # Check if any configured models have been deleted
+    deleted_model_ids = set(model_ids) - set(valid_model_ids)
     agent_info["model_ids"] = valid_model_ids
 
     model_names: List[str] = []
@@ -1728,6 +1731,12 @@ async def get_agent_info_impl(agent_id: int, tenant_id: str, version_no: int = 0
         tenant_id=tenant_id,
         agent_info=agent_info
     )
+
+    # Add MODEL_DELETED reason if any configured models have been deleted
+    if deleted_model_ids:
+        unavailable_reasons.append(AgentUnavailableReason.MODEL_DELETED)
+        is_available = False
+
     agent_info["is_available"] = is_available
     agent_info["unavailable_reasons"] = unavailable_reasons
 
