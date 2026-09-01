@@ -788,6 +788,15 @@ async def update_tool_list(tenant_id: str, user_id: str):
         for record in get_mcp_records_by_tenant(tenant_id=tenant_id)
         if bool(record.get("enabled"))
     }
+    # API-converted services are persisted separately from regular MCP records,
+    # but their scanned tools use the shared ``outer-apis`` usage value. Keep
+    # those tools available during a transient MCP scan failure as long as at
+    # least one API service still exists for the tenant.
+    try:
+        if query_openapi_services_by_tenant(tenant_id):
+            enabled_mcp_names.add("outer-apis")
+    except Exception as exc:
+        logger.warning("Failed to check API-converted services for tenant %s: %s", tenant_id, exc)
 
     update_tool_table_from_scan_tool_list(tenant_id=tenant_id,
                                           user_id=user_id,
