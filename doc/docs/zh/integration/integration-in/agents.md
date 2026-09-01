@@ -1,8 +1,8 @@
-# Agent 智能体集成
+# Agent 智能体接入
 
 Nexent 支持通过 **A2A（Agent-to-Agent）协议**接入第三方 Agent，实现跨平台的多智能体协作。通过 A2A 协议，您可以发现并使用其他平台开发的 Agent，将其作为协作智能体纳入您的工作流程。
 
-## 什么是 A2A 协议？
+## 🤝 什么是 A2A 协议
 
 A2A（Agent-to-Agent）是一个开放协议，旨在实现不同平台、不同技术栈的 AI Agent 之间的互操作。通过 A2A 协议：
 
@@ -19,7 +19,7 @@ A2A（Agent-to-Agent）是一个开放协议，旨在实现不同平台、不同
 | **Message** | 消息，支持同步和流式两种模式 |
 | **Skill** | Agent 提供的具体能力列表 |
 
-## 发现外部 A2A Agent
+## 🔍 发现外部 A2A Agent
 
 Nexent 支持两种发现外部 A2A Agent 的方式：
 
@@ -28,11 +28,11 @@ Nexent 支持两种发现外部 A2A Agent 的方式：
 | **URL 发现** | 已知 Agent Card 地址 | Agent Card URL 可访问 |
 | **Nacos 发现** | 批量发现注册到 Nacos 的 Agent | Nacos 服务运行中 |
 
-## 方式一：URL 发现
+### 方式一：URL 发现
 
 当您知道目标 Agent 的 Agent Card 地址时，可以使用 URL 发现方式。
 
-### Agent Card 示例
+#### Agent Card 示例
 
 符合 A2A 1.0 规范的 Agent Card 如下：
 
@@ -64,7 +64,7 @@ Nexent 支持两种发现外部 A2A Agent 的方式：
 }
 ```
 
-### 操作步骤
+#### 操作步骤
 
 1. 进入 **智能体开发** → **协作 Agent** 页面
 2. 在「外部 A2A Agent」页签下，点击「添加外部 Agent」
@@ -80,16 +80,16 @@ Nexent 支持两种发现外部 A2A Agent 的方式：
 7. 系统获取 Agent 信息后，展示 Agent 详情
 8. 确认无误后点击「添加到列表」
 
-### 注意事项
+#### 注意事项
 
 - 自定义请求头仅用于获取和刷新 Agent Card，不会用于后续调用
 - 再次发现同一 URL 时，留空会保留现有配置，填写 `{}` 可清空配置
 
-## 方式二：Nacos 发现
+### 📡 方式二：Nacos 发现
 
 如果目标 Agent 注册在 Nacos 服务发现平台，可以使用 Nacos 发现方式批量接入。
 
-### 操作步骤
+#### 操作步骤
 
 1. 进入 **智能体开发** → **协作 Agent** 页面
 2. 在「外部 A2A Agent」页签下，点击「添加外部 Agent」
@@ -108,13 +108,13 @@ Nexent 支持两种发现外部 A2A Agent 的方式：
 7. 点击「扫描」，系统从 Nacos 获取匹配的 Agent 列表
 8. 选择需要的 Agent，点击「添加」
 
-### 前提条件
+#### 前提条件
 
 - Nacos 服务正常运行
 - 目标 Agent 已正确注册到 Nacos
 - 服务元数据中包含 Agent Card 地址
 
-## 管理已发现的外部 Agent
+## 🛠️ 管理外部 Agent
 
 在外部 A2A Agent 列表中，您可以执行以下操作：
 
@@ -160,7 +160,7 @@ Agent 信息变更后，点击「刷新」重新获取最新的 Agent Card。
 
 点击「移除」将 Agent 从已发现列表中删除。
 
-## 将外部 Agent 设为协作智能体
+## 👥 与外部 Agent 协作
 
 发现并配置外部 Agent 后，可以将其设为当前智能体的协作智能体。
 
@@ -184,119 +184,35 @@ Agent 信息变更后，点击「刷新」重新获取最新的 Agent Card。
 - 综合结果生成最终周报
 ```
 
-## 示例：接入 DataAgent A2A Agent
+### 示例：接入 DataAgent A2A Agent
 
 [DataAgent](https://gitcode.com/datagallery/dataagent) 是一个支持 A2A 协议的智能体平台，以下是接入步骤：
 
-### 1. 部署 DataAgent
+#### 1. 部署 DataAgent
 
 参考 DataAgent 文档，以 A2A 服务模式启动：
 
 > 注意：当前 Nexent 不支持带认证的 Agent，启动时请勿设置 auth-token
 
-### 2. 获取 Agent Card 地址
+#### 2. 获取 Agent Card 地址
 
 DataAgent 以 A2A 模式启动后，其 Agent Card 地址为：
 ```
 http://<IP>:9999/.well-known/agent-card.json
 ```
 
-### 3. 在 Nexent 中添加
+#### 3. 在 Nexent 中添加
 
 1. 选择「URL 发现」
 2. 填写 URL：`http://<IP>:9999/.well-known/agent-card.json`
 3. 点击「发现」
 4. 添加成功后配置调用协议为 HTTP + JSON
 
-### 4. 测试和使用
+#### 4. 测试和使用
 
 添加成功后，可以测试 Agent 响应，确认正常后将其设为协作智能体使用。
 
-## A2A 协议调用详解
-
-### REST API 调用
-
-```bash
-# 获取 Agent Card
-GET /nb/a2a/{endpoint_id}/.well-known/agent-card.json
-
-# 发送同步消息
-POST /nb/a2a/{endpoint_id}/message:send
-Content-Type: application/json
-
-{
-  "message": {
-    "role": "user",
-    "content": "请帮我完成某个任务"
-  }
-}
-
-# 发送流式消息（SSE）
-POST /nb/a2a/{endpoint_id}/message:stream
-Content-Type: application/json
-
-{
-  "message": {
-    "role": "user",
-    "content": "请帮我完成某个任务"
-  }
-}
-```
-
-### JSON-RPC 2.0 调用
-
-```bash
-POST /nb/a2a/{endpoint_id}/v1
-Content-Type: application/json
-
-# 发送同步消息
-{
-  "jsonrpc": "2.0",
-  "method": "SendMessage",
-  "params": {
-    "message": {
-      "role": "user",
-      "content": "请帮我完成某个任务"
-    }
-  },
-  "id": 1
-}
-
-# 发送流式消息
-{
-  "jsonrpc": "2.0",
-  "method": "SendStreamingMessage",
-  "params": {
-    "message": {
-      "role": "user",
-      "content": "请帮我完成某个任务"
-    }
-  },
-  "id": 2
-}
-```
-
-## 最佳实践
-
-### 发现与配置
-
-1. **优先使用 URL 发现**：当已知 Agent Card 地址时，URL 发现更直接
-2. **批量接入用 Nacos**：需要接入多个 Agent 时，使用 Nacos 发现更高效
-3. **测试验证**：添加后先测试，确认 Agent 正常工作再使用
-
-### 调用与协作
-
-1. **明确分工**：主智能体负责任务分解和结果整合，协作智能体负责专项任务
-2. **错误处理**：为协作调用设置超时和重试机制
-3. **日志追踪**：监控协作调用日志，便于问题排查
-
-### 安全考虑
-
-1. **来源验证**：确保接入的 Agent 来自可信来源
-2. **权限控制**：根据任务敏感度决定是否使用外部 Agent
-3. **数据隔离**：注意不要将敏感数据发送给不受控的外部 Agent
-
-## 常见问题
+## ❓ 常见问题
 
 ### Q: Agent 发现失败怎么办？
 
@@ -314,8 +230,7 @@ Content-Type: application/json
 
 请参阅 [A2A 协议规范](https://github.com/model-context-protocol/specification)，或参考 Nexent 的实现方式。
 
-## 相关资源
+## 🔗 相关资源
 
-- [智能体配置](../user-guide/agent-development/agent-configuration) — 在智能体中配置协作 Agent
+- [智能体配置](../../user-guide/agent-development/agent-configuration) — 在智能体中配置协作 Agent
 - [A2A 协议规范](https://github.com/model-context-protocol/specification) — 官方协议文档
-- [北向导出指南](../integration-out/agents) — 将 Nexent Agent 发布为 A2A Agent

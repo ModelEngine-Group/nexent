@@ -1,8 +1,8 @@
-# 北向 RESTful API — 对话与聊天
+# 调用 Agent 北向 API
 
 Nexent 平台提供北向 RESTful API，允许外部业务系统通过 HTTP 协议与平台深度集成。本文档重点介绍 **对话与聊天** 相关的接口，帮助您将 Agent 能力嵌入到企业业务系统中，实现工作流自动化。
 
-## 概述
+## 📋 概述
 
 对话与聊天 API 提供了完整的会话生命周期管理能力：
 
@@ -12,9 +12,9 @@ Nexent 平台提供北向 RESTful API，允许外部业务系统通过 HTTP 协�
 | **会话管理** | 列出对话、查询历史、生成和更新标题 |
 | **停止对话** | 中断正在进行的流式响应 |
 
-> 其他能力（如 API Key 管理、Agent 发现、知识库管理、A2A 协议等）请参阅后续章节或 [API 总览](../overview)。
+> 其他能力（如 API Key 管理、Agent 发现、知识库管理、A2A 协议等）请参阅后续章节或 [API 总览](./overview)。
 
-## 认证方式
+## 🔑 认证方式
 
 所有对话与聊天 API 均需认证，采用 **Bearer Token**（API Key）机制。
 
@@ -65,7 +65,7 @@ curl -X POST "https://your-nexent-domain.com/nb/v1/chat/run" \
 }
 ```
 
-## 接口列表
+## 📑 接口列表
 
 | 接口 | 方法 | 说明 |
 |------|------|------|
@@ -77,7 +77,7 @@ curl -X POST "https://your-nexent-domain.com/nb/v1/chat/run" \
 | `/nb/v1/generate_title` | POST | 生成对话标题 |
 | `/nb/v1/conversations/{conversation_id}/title` | PUT | 更新对话标题 |
 
-## 启动对话
+## ▶️ 启动对话
 
 启动与 Agent 的对话，返回流式响应（SSE）。
 
@@ -204,7 +204,7 @@ data: {"type":"text","content":"，请稍候..."}
 data: {"type":"done","conversation_id":123,"content":"分析完成"}
 ```
 
-## 上传对话附件
+## 📎 上传对话附件
 
 在调用 `/nb/v1/chat/run` 之前，先上传附件获取可在请求中引用的 URL。
 
@@ -249,7 +249,7 @@ curl -X POST "https://your-nexent-domain.com/nb/v1/chat/attachments/upload" \
 
 将返回的 `s3_url` 作为 `/nb/v1/chat/run` 接口中 `attachments` 字段的值。
 
-## 停止对话
+## ⏹️ 停止对话
 
 终止正在进行的对话（流式响应）。
 
@@ -276,7 +276,7 @@ curl -X GET "https://your-nexent-domain.com/nb/v1/chat/stop/123" \
   -H "Authorization: Bearer your-access-key-here"
 ```
 
-## 获取对话历史
+## 📜 获取对话历史
 
 获取指定对话的所有消息历史。
 
@@ -311,7 +311,7 @@ GET /nb/v1/conversations/{conversation_id}
 }
 ```
 
-## 列出对话
+## 📑 列出对话
 
 获取当前用户的所有对话列表。
 
@@ -340,7 +340,7 @@ GET /nb/v1/conversations
 }
 ```
 
-## 生成对话标题
+## ✨ 生成对话标题
 
 根据对话的初始问题自动生成标题并持久化。
 
@@ -375,7 +375,7 @@ curl -X POST "https://your-nexent-domain.com/nb/v1/generate_title" \
 }
 ```
 
-## 更新对话标题
+## ✏️ 更新对话标题
 
 手动更新对话的标题。
 
@@ -409,7 +409,7 @@ curl -X PUT "https://your-nexent-domain.com/nb/v1/conversations/123/title?title=
   -H "Authorization: Bearer your-access-key-here"
 ```
 
-## 错误码说明
+## ⚠️ 错误码说明
 
 | HTTP 状态码 | 说明 |
 |-------------|------|
@@ -423,7 +423,7 @@ curl -X PUT "https://your-nexent-domain.com/nb/v1/conversations/123/title?title=
 | `502 Bad Gateway` | 上游服务不可用 |
 | `504 Gateway Timeout` | 上游服务超时 |
 
-## 完整使用示例
+## 💻 完整使用示例
 
 ### Python 示例：带附件的对话
 
@@ -505,7 +505,7 @@ async function streamChat() {
 streamChat();
 ```
 
-## 常见问题
+## ❓ 常见问题
 
 ### Q: 如何获取 API Key？
 
@@ -543,8 +543,8 @@ streamChat();
 
 对话历史默认长期保留，除非用户主动删除或租户配置了过期策略。
 
-## 相关资源
+## 🔗 相关资源
 
-- [API 总览](../overview) — 北向 API 完整能力地图
-- [Agent 智能体导出](./agents) — Agent 配置导出与发布
-- [A2A 协议端点](../overview) — Agent-to-Agent 通信标准
+- [API 总览](./overview) — 北向 API 完整能力地图
+- [Agent 智能体导出与发布](./agents-export) — Agent 配置导出与发布
+- [A2A 协议端点](./overview) — Agent-to-Agent 通信标准

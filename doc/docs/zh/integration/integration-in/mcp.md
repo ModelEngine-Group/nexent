@@ -1,20 +1,18 @@
-# MCP 服务集成
+# MCP 服务接入
 
 MCP（Model Context Protocol，模型上下文协议）是 AI 工具的标准通信协议。Nexent 平台支持接入符合 MCP 规范的工具服务，极大地扩展智能体的能力范围。
 
-## 接入方式概览
+## 📋 接入方式概览
 
 Nexent 支持多种 MCP 服务接入方式：
 
 | 接入方式 | 适用场景 | 前置条件 |
 |----------|----------|----------|
-|----------|----------|----------|
 | **远程链接** | 已独立部署的 MCP 服务（HTTP/SSE） | 服务 URL 可访问 |
 | **容器化部署** | 以容器方式运行的 MCP 服务 | Docker 环境或镜像 |
 | **API 转 MCP** | 将 REST API 转换为 MCP 工具 | OpenAPI 规范文档 |
-| **MCP 市场导入** | 从社区市场一键导入 | 网络连通 |
 
-## 方式一：远程链接接入
+## 🌐 方式一：远程链接接入
 
 适用于已有独立部署的 MCP 服务，如 ModelScope 提供的 MCP 服务。
 
@@ -53,7 +51,7 @@ ModelScope 提供了丰富的 MCP 服务，以下是接入 GitHub MCP 的示例�
 
 4. 完成校验后即可使用
 
-## 方式二：容器化部署接入
+## 🐳 方式二：容器化部署接入
 
 适用于以 Docker 容器方式运行的 MCP 服务，如通过 npx 部署的服务。
 
@@ -83,7 +81,7 @@ ModelScope 提供了丰富的 MCP 服务，以下是接入 GitHub MCP 的示例�
 - **Docker/Kubernetes 部署**：容器端口由系统自动分配，无需手动设置
 - **本地部署**：使用推荐端口或手动指定可用端口
 
-## 方式三：API 转 MCP
+## 🔄 方式三：API 转 MCP
 
 这是 Nexent 提供的强大功能，可以将已有的 REST API 快速转换为 MCP 工具，无需编写 MCP Server 代码。
 
@@ -155,27 +153,7 @@ ModelScope 提供了丰富的 MCP 服务，以下是接入 GitHub MCP 的示例�
 
 转换为 MCP 后，智能体即可通过自然语言调用这些接口，如「查询所有待处理的工单」。
 
-## 方式四：从 MCP 市场导入
-
-Nexent 集成了社区维护的 MCP 市场，可以一键导入热门 MCP 服务。
-
-### 操作步骤
-
-1. 进入 **MCP 仓库** → **我的 MCP** 页面
-2. 点击「添加 MCP 服务」
-3. 选择「从 MCP 市场导入」
-4. 浏览可用服务列表
-5. 选择目标服务，填写所需的环境变量参数
-6. 点击「导入」完成
-
-### 常用 MCP 市场
-
-| 市场 | 说明 | 地址 |
-|------|------|------|
-| **ModelScope MCP** | 阿里魔搭社区 MCP 市场 | https://modelscope.cn/mcp |
-| **官方 MCP** | MCP 官方生态 | https://modelcontextprotocol.io |
-
-## 管理已接入的 MCP 服务
+## 🛠️ 管理已接入的 MCP 服务
 
 ### 查看服务状态
 
@@ -195,7 +173,7 @@ Nexent 集成了社区维护的 MCP 市场，可以一键导入热门 MCP 服务
 - **申请上架**：将服务共享给同租户成员
 - **删除**：移除服务（容器化服务会同步清理容器）
 
-## 在智能体中使用 MCP 工具
+## 🤖 在智能体中使用 MCP 工具
 
 ### 分配到智能体
 
@@ -213,7 +191,7 @@ Nexent 集成了社区维护的 MCP 市场，可以一键导入热门 MCP 服务
 2. 点击「执行测试」
 3. 查看返回结果
 
-## 最佳实践
+## ⭐ 最佳实践
 
 ### 安全建议
 
@@ -233,7 +211,7 @@ Nexent 集成了社区维护的 MCP 市场，可以一键导入热门 MCP 服务
 2. **日志监控**：监控服务调用日志，发现异常及时处理
 3. **依赖管理**：记录服务依赖关系，便于故障排查
 
-## 常见问题
+## ❓ 常见问题
 
 ### Q: MCP 服务连接失败怎么办？
 
@@ -253,9 +231,8 @@ Nexent 集成了社区维护的 MCP 市场，可以一键导入热门 MCP 服务
 
 请参阅 [MCP 工具开发](../../backend/tools/mcp) 文档。
 
-## 相关资源
+## 🔗 相关资源
 
-- [MCP 仓库](../user-guide/resource-repository/mcp-repository) — 平台 MCP 服务管理
-- [智能体配置](../user-guide/agent-development/agent-configuration) — 在智能体中使用 MCP 工具
+- [智能体配置](../../user-guide/agent-development/agent-configuration) — 在智能体中使用 MCP 工具
 - [MCP 工具开发](../../backend/tools/mcp) — 开发自定义 MCP 服务
 - [MCP 生态系统](../../mcp-ecosystem/overview) — 了解更多 MCP 生态
