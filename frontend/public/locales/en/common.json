@@ -615,6 +615,8 @@
   "agent.unavailableReasons.all_tools_disabled": "All Tools Disabled",
   "agent.unavailableReasons.model_not_configured": "Model Not Configured",
   "agent.unavailableReasons.agent_not_found": "Agent Not Found",
+  "agent.config.refreshAvailability": "Refresh",
+  "agent.config.refreshAvailabilityFailed": "Failed to refresh availability",
   "agent.detailContent.title": "Agent Detail Content",
   "agent.advancedSettings.button": "Advanced Settings",
   "agent.advancedSettings.title": "Advanced Settings",

@@ -11,6 +11,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { useAgentStore } from "@/stores/agentStore";
+import { searchAgentInfo } from "@/services/agentConfigService";
 import { getUnavailableReasonLabels } from "@/lib/agentLabelMapper";
 import { useSaveGuard } from "@/hooks/agent/useSaveGuard";
 import { useAgentReadOnly } from "@/hooks/agent/useAgentReadOnly";
@@ -46,6 +47,7 @@ import {
   Bug,
   LockOpen,
   Rocket,
+  RefreshCw,
 } from "lucide-react";
 
 type AgentConfigTab = "basic" | "advanced";
@@ -146,6 +148,7 @@ export default function AgentConfig({
   const { t } = useTranslation("common");
   const [form] = Form.useForm();
   const [isPublishModalOpen, setIsPublishModalOpen] = useState(false);
+  const [isRefreshingAvailability, setIsRefreshingAvailability] = useState(false);
   const [activeConfigTab, setActiveConfigTab] =
     useState<AgentConfigTab>("basic");
   const [openSections, setOpenSections] = useState<
@@ -176,6 +179,24 @@ export default function AgentConfig({
   const { message } = App.useApp();
   const saveError = useAgentStore((state) => state.saveError);
   const clearSaveError = useAgentStore((state) => state.clearSaveError);
+  const replaceServerSnapshot = useAgentStore((state) => state.replaceServerSnapshot);
+
+  const handleRefreshAvailability = useCallback(async () => {
+    if (!agentId || isRefreshingAvailability) return;
+    setIsRefreshingAvailability(true);
+    try {
+      const result = await searchAgentInfo(agentId);
+      if (result.success && result.data) {
+        replaceServerSnapshot(agentId, result.data);
+      } else {
+        message.error(result.message || t("agent.config.refreshAvailabilityFailed"));
+      }
+    } catch {
+      message.error(t("agent.config.refreshAvailabilityFailed"));
+    } finally {
+      setIsRefreshingAvailability(false);
+    }
+  }, [agentId, isRefreshingAvailability, message, replaceServerSnapshot, t]);
 
   useEffect(() => {
     setActiveConfigTab("basic");
@@ -335,7 +356,23 @@ export default function AgentConfig({
               className="mt-2"
               type="warning"
               showIcon
-              title={`${t("agent.unavailable")}${unavailableReasonLabels.join("、")}`}
+              title={
+                <div className="">
+                  <span className="flex justify-between items-center gap-2">
+                    <span>{`${t("agent.unavailable")}${unavailableReasonLabels.join("、")}`}</span>
+                    <Button
+                      type="link"
+                      size="small"
+                      icon={<RefreshCw size={12} className={isRefreshingAvailability ? "animate-spin" : ""} />}
+                      onClick={handleRefreshAvailability}
+                      disabled={isRefreshingAvailability}
+                      loading={isRefreshingAvailability}
+                    >
+                      {t("agent.config.refreshAvailability")}
+                    </Button>
+                  </span>
+                </div>
+              }
             />
           )}
         </div>
