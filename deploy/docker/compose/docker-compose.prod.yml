@@ -48,6 +48,20 @@ services:
         max-size: "100m"  # Maximum size of a single log file
         max-file: "3"     # Maximum number of log files to keep
 
+  nexent-qdrant:
+    image: ${QDRANT_IMAGE}
+    container_name: nexent-qdrant
+    volumes:
+      - ${ROOT_DIR}/qdrant:/qdrant/storage
+    networks:
+      - nexent
+    restart: always
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "3"
+
   nexent-postgresql:
     image: ${POSTGRESQL_IMAGE}
     container_name: nexent-postgresql

@@ -1687,7 +1687,7 @@ deployment_compute_docker_ports() {
   fi
 
   if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "infrastructure"; then
-    ports+=(9210 9310 5434 6379 9010 9011)
+    ports+=(9210 9310 6333 5434 6379 9010 9011)
   fi
   if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application"; then
     ports+=(5010 5014 5011 5015 5013 3000)
@@ -1768,6 +1768,7 @@ deployment_apply_image_source() {
   export NEXENT_MCP_DOCKER_IMAGE="${NEXENT_MCP_DOCKER_IMAGE:-nexent/nexent-mcp:$version}"
   export NEXENT_SANDBOX_IMAGE="${NEXENT_SANDBOX_IMAGE:-nexent/nexent-sandbox:$version}"
   export ELASTICSEARCH_IMAGE="${ELASTICSEARCH_IMAGE:-docker.elastic.co/elasticsearch/elasticsearch:8.17.4}"
+  export QDRANT_IMAGE="${QDRANT_IMAGE:-qdrant/qdrant:v1.18.2}"
   export POSTGRESQL_IMAGE="${POSTGRESQL_IMAGE:-postgres:15-alpine}"
   export REDIS_IMAGE="${REDIS_IMAGE:-redis:alpine}"
   export MINIO_IMAGE="${MINIO_IMAGE:-quay.io/minio/minio:RELEASE.2023-12-20T01-00-02Z}"
@@ -1883,6 +1884,7 @@ deployment_render_docker_env() {
     printf 'NEXENT_MCP_DOCKER_IMAGE="%s"\n' "$NEXENT_MCP_DOCKER_IMAGE"
     printf 'NEXENT_SANDBOX_IMAGE="%s"\n' "$NEXENT_SANDBOX_IMAGE"
     printf 'ELASTICSEARCH_IMAGE="%s"\n' "$ELASTICSEARCH_IMAGE"
+    printf 'QDRANT_IMAGE="%s"\n' "$QDRANT_IMAGE"
     printf 'POSTGRESQL_IMAGE="%s"\n' "$POSTGRESQL_IMAGE"
     printf 'REDIS_IMAGE="%s"\n' "$REDIS_IMAGE"
     printf 'MINIO_IMAGE="%s"\n' "$MINIO_IMAGE"

@@ -1,0 +1,10 @@
+apiVersion: v2
+name: nexent-qdrant
+description: Qdrant vector database for Nexent
+type: application
+version: 0.1.0
+appVersion: "v1.18.2"
+keywords:
+  - nexent
+  - qdrant
+  - vector-database

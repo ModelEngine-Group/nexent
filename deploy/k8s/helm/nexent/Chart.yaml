@@ -22,6 +22,10 @@ dependencies:
     version: 0.1.0
     repository: "file://./charts/nexent-elasticsearch"
     condition: nexent-elasticsearch.enabled
+  - name: nexent-qdrant
+    version: 0.1.0
+    repository: "file://./charts/nexent-qdrant"
+    condition: nexent-qdrant.enabled
   - name: nexent-postgresql
     version: 0.1.0
     repository: "file://./charts/nexent-postgresql"
