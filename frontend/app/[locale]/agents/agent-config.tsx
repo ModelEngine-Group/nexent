@@ -35,7 +35,7 @@ import KnowledgeBaseConfig, {
 import AgentVersionPubulishModal from "./versions/AgentVersionPubulishModal";
 
 import {
-  ChevronDown,
+  ChevronRight,
   Info,
   Cpu,
   Wrench,
@@ -103,9 +103,9 @@ function ConfigSection({
         className="overflow-hidden rounded-lg border border-gray-200 bg-white"
       >
         <div className="flex items-center gap-4  transition-colors hover:bg-gray-50 px-2">
-          <CollapsibleTrigger className="flex min-w-0 flex-1 items-center px-2 py-4 gap-4 text-left">
+          <CollapsibleTrigger className="group flex min-w-0 flex-1 cursor-pointer select-none items-center px-2 py-4 gap-4 text-left">
             <div className="flex min-w-0 items-center gap-2">
-              <ChevronDown className="h-4 w-4 text-gray-400 transition-transform group-data-[state=open]:rotate-180" />
+              <ChevronRight className="h-4 w-4 text-gray-400 transition-transform group-data-[state=open]:rotate-90" />
 
               <div className="flex shrink-0 items-center gap-2 text-sm font-medium text-gray-900">
                 {icon}
