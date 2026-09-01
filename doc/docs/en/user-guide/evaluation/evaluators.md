@@ -81,4 +81,3 @@ Code is syntax-checked, statically scanned, executed with a restricted built-in 
 - Editing a published custom evaluator creates a new draft version; the previous published version remains in history.
 - Version history supports viewing, restoring, and deleting historical versions, subject to active-task references.
 - Custom evaluators can be exported to JSON and imported elsewhere. Import skips duplicate name-and-type pairs.
-

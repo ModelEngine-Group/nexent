@@ -58,4 +58,3 @@ Names are limited to 50 characters and descriptions to 200 characters. Enable th
 4. Filter by label value and review coverage and value distributions.
 
 Disabling a label that already contains data asks for confirmation and deletes that label's data for the task. A label in use by an active task cannot be edited or deleted; wait for the task to finish or create a new label.
-
