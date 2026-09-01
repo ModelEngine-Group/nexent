@@ -337,6 +337,34 @@ def test_list_repository_listings_filters_all_matching_structured_tags():
     assert [item["agent_repository_id"] for item in result["items"]] == [1, 2]
 
 
+def test_tag_predicate_helpers_delegate_to_authorized_resource_filter(monkeypatch):
+    tag_db_module = types.ModuleType("database.tag_management_db")
+    calls = []
+
+    class TagManagementDB:
+        @staticmethod
+        def filter_authorized_resource_ids(tenant_id, resource_type, resource_ids, predicates):
+            calls.append((tenant_id, resource_type, resource_ids, predicates))
+            return [resource_ids[-1]]
+
+    tag_db_module.TagManagementDB = TagManagementDB
+    monkeypatch.setitem(sys.modules, "database.tag_management_db", tag_db_module)
+
+    assert ars._find_agent_ids_matching_any_tag_predicate(
+        "tenant_a", [1, 2], ["first", "second"]
+    ) == {"2"}
+    assert ars._filter_agent_ids_by_tag_predicates(
+        "tenant_a", ["1", "2"], ["all"]
+    ) == {"2"}
+    assert ars._find_agent_ids_matching_any_tag_predicate("tenant_a", [], ["first"]) == set()
+    assert ars._filter_agent_ids_by_tag_predicates("tenant_a", ["1"], []) == set()
+    assert calls == [
+        ("tenant_a", "agent", ["1", "2"], ["first"]),
+        ("tenant_a", "agent", ["1", "2"], ["second"]),
+        ("tenant_a", "agent", ["1", "2"], ["all"]),
+    ]
+
+
 def test_list_repository_listings_paginates_filtered_records():
     records = [
         {

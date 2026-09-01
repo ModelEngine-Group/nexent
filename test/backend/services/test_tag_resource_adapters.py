@@ -931,6 +931,105 @@ def test_registry_unknown_type_or_missing_tenant_is_not_found():
     assert unknown_type == ResolvedTagResource.not_found()
 
 
+def test_adapter_helper_paths_cover_invalid_references_and_async_callbacks(monkeypatch):
+    from services import tag_resource_adapters as adapters
+
+    invalid = ResourceReference("unknown", "resource", "unknown")
+    assert invalid.normalized_type() is None
+    assert invalid.normalized_origin() is None
+
+    sync_calls = []
+    asyncio.run(adapters.run_tag_assignment_cleanup(object(), lambda descriptor: sync_calls.append(descriptor)))
+
+    async def async_cleanup(descriptor):
+        sync_calls.append(descriptor)
+
+    async def async_value():
+        return "completed"
+
+    asyncio.run(adapters.run_tag_assignment_cleanup(object(), async_cleanup))
+    assert asyncio.run(adapters._call(lambda: async_value())) == "completed"
+    assert len(sync_calls) == 2
+
+    assert adapters._tenant_scoped_capabilities(
+        {}, AuthenticatedCaller(user_id="user", authenticated_tenant_id="tenant", can_edit_all=True)
+    ).can_edit is True
+
+    registry = TagResourceAdapterRegistry()
+    registry._adapters.pop(ResourceType.TOOL)
+    assert asyncio.run(
+        registry.resolve(ResourceReference(ResourceType.TOOL, 1), caller())
+    ) == ResolvedTagResource.not_found()
+
+    tool_adapter = ToolTagResourceAdapter(
+        ResourceAdapterDependencies(
+            get_tools=lambda _tenant_id: [{"tool_id": 1, "author": "tenant-a", "tool_name": "Tool"}],
+            resolve_tool_edit_permission=lambda *_args: (_ for _ in ()).throw(LookupError()),
+        )
+    )
+    assert asyncio.run(
+        tool_adapter.resolve(ResourceReference(ResourceType.TOOL, 1), caller())
+    ).capabilities.can_edit is False
+
+
+def test_aidp_permission_and_marketplace_error_paths(monkeypatch):
+    from ext_components.aidp.consts.aidp_exceptions import (
+        AidpKbNotFoundError,
+        AidpKbPermissionDeniedError,
+    )
+    from services.tag_resource_adapters import (
+        _require_provider_document_edit_permission,
+        _resolve_provider_document_permission,
+    )
+
+    def raise_not_found(*_args):
+        raise AidpKbNotFoundError("kb", "tenant-a")
+
+    monkeypatch.setattr(
+        "ext_components.aidp.services.aidp_permission_service.require_permission",
+        raise_not_found,
+    )
+    with pytest.raises(ValueError, match="unavailable"):
+        _resolve_provider_document_permission(
+            provider=AIDP_DOCUMENT_PROVIDER,
+            knowledge_base_id="kb",
+            user_id="user-1",
+            tenant_id="tenant-a",
+        )
+    with pytest.raises(ValueError, match="unavailable"):
+        _require_provider_document_edit_permission(
+            provider=AIDP_DOCUMENT_PROVIDER,
+            knowledge_base_id="kb",
+            user_id="user-1",
+            tenant_id="tenant-a",
+        )
+
+    def raise_permission_denied(*_args):
+        raise AidpKbPermissionDeniedError("kb", "user-1", "EDIT")
+
+    monkeypatch.setattr(
+        "ext_components.aidp.services.aidp_permission_service.require_permission",
+        raise_permission_denied,
+    )
+    with pytest.raises(PermissionError, match="read-only"):
+        _require_provider_document_edit_permission(
+            provider=AIDP_DOCUMENT_PROVIDER,
+            knowledge_base_id="kb",
+            user_id="user-1",
+            tenant_id="tenant-a",
+        )
+
+    adapter = McpServiceTagResourceAdapter(
+        ResourceAdapterDependencies(get_market_mcp=lambda _market_id: {"tenant_id": "other"})
+    )
+    assert asyncio.run(
+        adapter.resolve(
+            ResourceReference(ResourceType.MCP_SERVICE, 9, ResourceOrigin.MARKETPLACE),
+            caller(),
+        )
+    ) == ResolvedTagResource.not_found()
+
+
 def test_document_edit_require_raises_lookup_or_value_error_is_not_found():
     for error_class in (LookupError, ValueError):
         adapter = DocumentTagResourceAdapter(
