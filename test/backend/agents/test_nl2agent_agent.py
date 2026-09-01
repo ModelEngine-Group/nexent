@@ -108,10 +108,10 @@ def test_build_nl2agent_system_prompt_configures_existing_draft(
         assert "修订总结" in prompt
         assert "### 状态判定与完成标准" in prompt
         assert "不证明该 Agent 已完成配置" in prompt
-        assert "For `full_generation`, if the current input is not a submitted" in prompt
-        assert "Partial tasks are exempt" in prompt
+        assert "对 `full_generation`，如果当前输入不是已提交的" in prompt
+        assert "局部任务不受此规则影响" in prompt
         assert "只有描述已保存、资源需求已安装并绑定或明确放弃" in prompt
-        assert "在完整生成前不得输出普通完成说明" in prompt
+        assert "在收到 `agent_generation_completed` 前，不得输出普通完成说明" in prompt
         assert "### 完成总结" in prompt
         assert "新智能体已完成生成" in prompt
         assert "### 原子动作输出契约" in prompt
