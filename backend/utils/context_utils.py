@@ -73,26 +73,19 @@ def build_authorized_context_input(
 # =============================================================================
 
 
-def _build_header_text(
-    app_name: str,
-    app_description: str,
-    user_id: str,
-    language: str = "zh",
-    priority: int = 100,
-) -> str:
+def _build_header_text(language: str = "zh") -> str:
     """Build the header prompt section.
 
     Section: "### 基本信息" / "### Basic Information"
-    Content: Agent identity and app name/description.  User identity is
-    request-scoped data and must not enter the managed stable prefix.
+    Content: Static Nexent identity and description.
     Note: Current time is intentionally excluded from the system prompt so the
     static system prefix can hit the LLM KV/prompt cache across requests. The
     current time is injected on the user-message side instead (see CoreAgent.run).
     """
     if language == "zh":
-        content = f"### 基本信息\n你是{app_name}，{app_description}\n当回答时间相关问题时，请使用用户消息中 [Current time: ...] 标记的时间，该时间为用户本地时间。"
+        content = "### 基本信息\n你是 Nexent，Nexent 是一个开源智能体平台，基于 MCP 工具生态系统，提供灵活的多模态问答、检索、数据分析、处理等能力。\n当回答时间相关问题时，请使用用户消息中 [Current time: ...] 标记的时间，该时间为用户本地时间。"
     else:
-        content = f"### Basic Information\nYou are {app_name}, {app_description}\nWhen answering time-related questions, use the time from the [Current time: ...] marker in the user message, which represents the user's local time."
+        content = "### Basic Information\nYou are Nexent. Nexent is an open-source agent platform built on the MCP tool ecosystem, providing flexible multimodal Q&A, retrieval, data analysis, and processing capabilities.\nWhen answering time-related questions, use the time from the [Current time: ...] marker in the user message, which represents the user's local time."
 
     return content
 
@@ -414,9 +407,6 @@ def build_context_inputs(
     duty: Optional[str] = None,
     constraint: Optional[str] = None,
     few_shots: Optional[str] = None,
-    app_name: Optional[str] = None,
-    app_description: Optional[str] = None,
-    user_id: Optional[str] = None,
     language: str = "zh",
     is_manager: bool = True,
     enable_planning: bool = False,
@@ -462,10 +452,8 @@ def build_context_inputs(
                 metadata={"authority": authority},
             ))
 
-    if include_app_context and app_name and app_description and user_id:
-        add_system("header", _build_header_text(
-            app_name, app_description, user_id, language
-        ), 100, "tenant")
+    if include_app_context:
+        add_system("header", _build_header_text(language), 100, "platform")
 
     if memory_tool_policy:
         add_system("memory_tool_policy", memory_tool_policy, 90, "platform")
@@ -640,21 +628,3 @@ def build_context_inputs(
     if few_shots:
         add_system("footer", _build_footer_text(few_shots, language), 10)
     return inputs
-
-
-def build_app_context_string(
-    app_name: str,
-    app_description: str,
-    user_id: str,
-) -> str:
-    """Build app context string for template injection.
-
-    Args:
-        app_name: Application name
-        app_description: Application description
-        user_id: Current user ID
-
-    Returns:
-        Formatted app context string
-    """
-    return f"Application: {app_name}\nDescription: {app_description}\nCurrent user: {user_id}"

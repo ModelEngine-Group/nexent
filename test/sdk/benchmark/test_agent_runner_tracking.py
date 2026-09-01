@@ -6,20 +6,6 @@ import pytest
 from sdk.benchmark import agent_runner
 
 
-def test_resolve_app_description_uses_language_specific_production_defaults(monkeypatch):
-    monkeypatch.setattr(agent_runner, "APP_DESCRIPTION", None)
-
-    assert agent_runner.resolve_app_description("zh") == "Nexent 是一个开源智能体SDK和平台"
-    assert agent_runner.resolve_app_description("en") == "Nexent is an open-source agent SDK and platform"
-
-
-def test_resolve_app_description_preserves_explicit_override(monkeypatch):
-    monkeypatch.setattr(agent_runner, "APP_DESCRIPTION", "Tenant-specific description")
-
-    assert agent_runner.resolve_app_description("zh") == "Tenant-specific description"
-    assert agent_runner.resolve_app_description("en") == "Tenant-specific description"
-
-
 @pytest.mark.asyncio
 async def test_run_agent_with_tracking_builds_model_step_and_metrics(monkeypatch):
     async def fake_agent_run(_):
