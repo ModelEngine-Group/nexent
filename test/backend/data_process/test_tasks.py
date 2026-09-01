@@ -2966,6 +2966,140 @@ def test_forward_part_returns_cancelled_when_parent_is_cancelled(monkeypatch):
     assert out["total_submitted"] == 0
 
 
+def test_document_delete_fence_lookup_paths(monkeypatch):
+    """Deletion checks cover empty identity, Redis fence, and durable PG fallback."""
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+
+    assert tasks._is_document_delete_requested(
+        index_name=None, source=None, file_id=None) is False
+
+    class RedisFence:
+        def is_document_delete_requested(self, **_kwargs):
+            return True
+
+    monkeypatch.setattr(tasks, "get_redis_service", lambda: RedisFence())
+    assert tasks._is_document_delete_requested(
+        index_name="idx", source="obj", file_id="fid") is True
+
+    class RedisUnavailable:
+        def is_document_delete_requested(self, **_kwargs):
+            raise RuntimeError("redis unavailable")
+
+    monkeypatch.setattr(tasks, "get_redis_service", lambda: RedisUnavailable())
+    lifecycle = types.ModuleType("database.knowledge_file_lifecycle_db")
+    lifecycle.get_file_record = lambda **_kwargs: {
+        "file_id": "fid", "status": "DELETE_REQUESTED"
+    }
+    monkeypatch.setitem(sys.modules, "database.knowledge_file_lifecycle_db", lifecycle)
+    assert tasks._is_document_delete_requested(
+        index_name="idx", source="obj", file_id="fid", tenant_id="tenant") is True
+
+
+def test_document_write_lease_acquires_and_releases(monkeypatch):
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+    calls = []
+
+    class RedisService:
+        def is_document_delete_requested(self, **_kwargs):
+            return False
+
+        def acquire_document_write_lease(self, **kwargs):
+            calls.append(("acquire", kwargs))
+            return "lease-key"
+
+        def release_document_write_lease(self, key):
+            calls.append(("release", key))
+
+    monkeypatch.setattr(tasks, "get_redis_service", lambda: RedisService())
+    with tasks._document_write_lease(
+        index_name="idx", source="obj", task_id="task", file_id="fid",
+        tenant_id="tenant",
+    ):
+        calls.append(("write", None))
+    assert [call[0] for call in calls] == ["acquire", "write", "release"]
+
+
+def test_wait_for_split_ready_honors_deletion_fence(monkeypatch):
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+    monkeypatch.setattr(tasks, "REDIS_BACKEND_URL", "redis://x")
+
+    class Client:
+        def get(self, _key):
+            return None
+
+    monkeypatch.setitem(
+        sys.modules, "redis",
+        types.SimpleNamespace(Redis=types.SimpleNamespace(
+            from_url=lambda *a, **k: Client())),
+    )
+    with pytest.raises(tasks.DocumentDeleteRequested):
+        tasks._wait_for_split_ready(
+            "dp:fence", timeout_s=1, poll_interval_ms=1,
+            cancellation_check=lambda: True,
+        )
+
+
+def test_processing_tasks_return_cancelled_when_document_fence_is_set(monkeypatch):
+    """Each processing stage exits without external work after deletion wins the race."""
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+
+    class RedisFence:
+        def is_document_delete_requested(self, **_kwargs):
+            return True
+
+    monkeypatch.setattr(tasks, "get_redis_service", lambda: RedisFence())
+    self = FakeSelf("fenced-process")
+    process_result = tasks.process(
+        self, source="obj", source_type="local", index_name="idx",
+        file_id="fid",
+    )
+    assert process_result["cancelled"] is True
+
+    part_result = tasks.process_part(
+        self, part_bytes=b"x", filename="x.txt", chunking_strategy="basic",
+        part_redis_key="dp:part", source="obj", index_name="idx",
+        file_id="fid",
+    )
+    assert part_result["cancelled"] is True
+
+    aggregate_result = tasks.aggregate_store_chunks(
+        self, parts_results=[], redis_key="dp:chunks", source="obj",
+        index_name="idx", file_id="fid",
+    )
+    assert aggregate_result["cancelled"] is True
+
+    forward_result = tasks.forward_part(
+        self, chunks=[{"content": "x"}], index_name="idx", source="obj",
+        file_id="fid",
+    )
+    assert forward_result["cancelled"] is True
+
+    aggregate_forward_result = tasks.aggregate_forward_parts(
+        self, parts_results=[], source="obj", index_name="idx", file_id="fid",
+    )
+    assert aggregate_forward_result["cancelled"] is True
+
+
+def test_process_and_forward_does_not_submit_after_document_deletion(monkeypatch):
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+
+    class RedisFence:
+        def is_document_delete_requested(self, **_kwargs):
+            return True
+
+    monkeypatch.setattr(tasks, "get_redis_service", lambda: RedisFence())
+    monkeypatch.setattr(
+        tasks, "submit_process_forward_chain",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("deleted document must not submit a chain")),
+    )
+    result = tasks.process_and_forward(
+        FakeSelf("fenced-chain"), source="obj", source_type="minio",
+        chunking_strategy="basic", index_name="idx", file_id="fid",
+    )
+    assert result == ""
+
+
 def test_forward_part_continues_when_parent_cancellation_lookup_fails(monkeypatch):
     tasks, _ = import_tasks_with_fake_ray(monkeypatch)
     monkeypatch.setattr(tasks, "get_redis_service", lambda: (_ for _ in ()).throw(RuntimeError("redis down")))

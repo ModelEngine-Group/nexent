@@ -32,6 +32,8 @@ from consts.const import (
     ASSET_OWNER_ATTACHMENTS_PREFIX,
     ASSET_OWNER_TENANT_ID,
     DATAMATE_URL,
+    DOCUMENT_DELETE_DRAIN_TIMEOUT_S,
+    DOCUMENT_DELETE_RETRY_INTERVAL_S,
     ES_API_KEY,
     ES_HOST,
     IS_SPEED_MODE,
@@ -61,6 +63,7 @@ from database.knowledge_file_lifecycle_db import (
     delete_file_record,
     get_file_record,
     list_file_records,
+    list_pending_delete_records,
     transition_file_record,
 )
 from services.knowledge_storage_service import (
@@ -80,6 +83,9 @@ from utils.config_utils import tenant_config_manager
 from services.model_gateway_service import build_adapter_fresh
 from utils.file_management_utils import get_all_files_status, get_file_size
 from utils.str_utils import convert_string_to_list
+
+
+_document_delete_tasks: Dict[str, asyncio.Task] = {}
 
 
 def _update_progress(task_id: str, processed: int, total: int):
@@ -2132,34 +2138,57 @@ class ElasticSearchService:
             index_name: str,
             path_or_url: str,
             requested_by: Optional[str] = None,
+            file_id: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
-        """Hide a file from list results before deleting external data."""
+        """Install the durable PG/Redis deletion fence before cleanup."""
         try:
             knowledge = get_knowledge_record({"index_name": index_name}) or {}
             tenant_id = knowledge.get("tenant_id")
             knowledge_id = knowledge.get("knowledge_id")
-            if tenant_id is None or knowledge_id is None:
-                return None
             record = get_file_record(
+                file_id=file_id,
                 tenant_id=tenant_id,
                 index_name=index_name,
-                object_name=path_or_url,
+                object_name=path_or_url if not file_id else None,
                 include_hidden=True,
             )
             if record:
-                return transition_file_record(
-                    record["file_id"],
-                    status="DELETE_REQUESTED",
-                    stage="DELETE",
-                    updated_by=requested_by,
-                ) or record
-            return create_delete_tombstone(
-                tenant_id=str(tenant_id),
-                knowledge_id=int(knowledge_id),
-                index_name=index_name,
-                object_name=path_or_url,
-                requested_by=requested_by,
-            )
+                if str(record.get("status") or "").upper() not in {"DELETE_REQUESTED", "DELETED"}:
+                    record = transition_file_record(
+                        record["file_id"],
+                        status="DELETE_REQUESTED",
+                        stage="DELETE",
+                        expected_statuses=(
+                            "UPLOADING", "UPLOADED", "PROCESSING", "FORWARDING", "FAILED", "COMPLETED"
+                        ),
+                        updated_by=requested_by,
+                    ) or record
+            elif tenant_id is not None and knowledge_id is not None:
+                record = create_delete_tombstone(
+                    tenant_id=str(tenant_id),
+                    knowledge_id=int(knowledge_id),
+                    index_name=index_name,
+                    object_name=path_or_url,
+                    requested_by=requested_by,
+                    file_id=file_id,
+                )
+
+            try:
+                fence_ok = get_redis_service().mark_document_delete_requested(
+                    index_name=index_name,
+                    path_or_url=path_or_url,
+                    file_id=(record or {}).get("file_id") or file_id,
+                    requested_by=requested_by,
+                )
+                if not fence_ok:
+                    logger.warning(
+                        "Redis deletion fence unavailable; PG status remains the fallback index=%s path=%s",
+                        index_name,
+                        path_or_url,
+                    )
+            except Exception as fence_exc:
+                logger.warning("Failed to install Redis deletion fence: %s", fence_exc)
+            return record
         except Exception as lifecycle_exc:
             logger.warning(
                 "Failed to write deletion tombstone for index=%s path=%s: %s",
@@ -2173,14 +2202,16 @@ class ElasticSearchService:
     def _mark_file_deleted(
             index_name: str,
             path_or_url: str,
+            file_id: Optional[str] = None,
             updated_by: Optional[str] = None,
     ) -> None:
         try:
             knowledge = get_knowledge_record({"index_name": index_name}) or {}
             record = get_file_record(
+                file_id=file_id,
                 tenant_id=knowledge.get("tenant_id"),
                 index_name=index_name,
-                object_name=path_or_url,
+                object_name=path_or_url if not file_id else None,
                 include_hidden=True,
             )
             if record:
@@ -2197,6 +2228,427 @@ class ElasticSearchService:
             )
 
     @staticmethod
+    def _cancel_document_tasks(
+            *,
+            index_name: str,
+            path_or_url: str,
+            lifecycle_record: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Revoke known Celery tasks while the document fence stops late tasks."""
+        task_ids = {
+            lifecycle_record.get(field)
+            for field in ("process_task_id", "forward_task_id", "parent_task_id")
+            if lifecycle_record and lifecycle_record.get(field)
+        }
+        file_id = (lifecycle_record or {}).get("file_id")
+
+        try:
+            from data_process.app import app as celery_app
+
+            inspector = celery_app.control.inspect(timeout=0.5)
+            for method_name in ("active", "reserved"):
+                try:
+                    workers = getattr(inspector, method_name)() or {}
+                except Exception as inspect_exc:
+                    logger.debug("Unable to inspect %s Celery tasks: %s", method_name, inspect_exc)
+                    continue
+                for worker_tasks in workers.values():
+                    for task in worker_tasks or []:
+                        kwargs = task.get("kwargs") or {}
+                        if isinstance(kwargs, str):
+                            try:
+                                kwargs = json.loads(kwargs)
+                            except Exception:
+                                kwargs = {}
+                        if not isinstance(kwargs, dict):
+                            kwargs = {}
+                        task_source = kwargs.get("source") or kwargs.get("path_or_url")
+                        task_matches = (
+                            (file_id and kwargs.get("file_id") == file_id)
+                            or (
+                                kwargs.get("index_name") == index_name
+                                and task_source == path_or_url
+                            )
+                        )
+                        if task_matches and task.get("id"):
+                            task_ids.add(task["id"])
+        except Exception as inspect_exc:
+            logger.debug("Celery task inspection unavailable during document deletion: %s", inspect_exc)
+
+        cancelled = []
+        redis_service = None
+        try:
+            redis_service = get_redis_service()
+        except Exception:
+            pass
+        try:
+            from data_process.app import app as celery_app
+        except Exception:
+            celery_app = None
+        for task_id in sorted(task_ids):
+            if redis_service:
+                try:
+                    redis_service.mark_task_cancelled(task_id)
+                except Exception as cancel_exc:
+                    logger.debug("Unable to mark task %s cancelled: %s", task_id, cancel_exc)
+            if celery_app:
+                try:
+                    celery_app.control.revoke(task_id, terminate=False)
+                except Exception as revoke_exc:
+                    logger.debug("Unable to revoke task %s: %s", task_id, revoke_exc)
+            cancelled.append(task_id)
+        return {"task_ids": cancelled, "cancelled_count": len(cancelled)}
+
+    @staticmethod
+    def _wait_for_document_tasks(
+            *,
+            index_name: str,
+            path_or_url: str,
+            lifecycle_record: Dict[str, Any],
+            timeout_seconds: float,
+            poll_interval_seconds: float = 0.2,
+    ) -> bool:
+        """Wait for known/visible Celery work to observe the deletion fence."""
+        deadline = time.monotonic() + max(0.0, float(timeout_seconds))
+        tracked_ids = {
+            lifecycle_record.get(field)
+            for field in ("process_task_id", "forward_task_id", "parent_task_id")
+            if lifecycle_record.get(field)
+        }
+        while True:
+            visible_ids = set()
+            celery_app = None
+            try:
+                from data_process.app import app as celery_app
+
+                inspector = celery_app.control.inspect(timeout=0.5)
+                for method_name in ("active", "reserved"):
+                    try:
+                        workers = getattr(inspector, method_name)() or {}
+                    except Exception as inspect_exc:
+                        logger.debug("Unable to inspect %s Celery tasks while draining: %s", method_name, inspect_exc)
+                        continue
+                    for worker_tasks in workers.values():
+                        for task in worker_tasks or []:
+                            task_id = task.get("id")
+                            kwargs = task.get("kwargs") or {}
+                            if isinstance(kwargs, str):
+                                try:
+                                    kwargs = json.loads(kwargs)
+                                except Exception:
+                                    kwargs = {}
+                            if not isinstance(kwargs, dict):
+                                kwargs = {}
+                            task_source = kwargs.get("source") or kwargs.get("path_or_url")
+                            matches = (
+                                task_id in tracked_ids
+                                or kwargs.get("file_id") == lifecycle_record.get("file_id")
+                                or (
+                                    kwargs.get("index_name") == index_name
+                                    and task_source == path_or_url
+                                )
+                            )
+                            if matches and task_id:
+                                visible_ids.add(task_id)
+            except Exception as inspect_exc:
+                logger.debug("Celery task drain unavailable: %s", inspect_exc)
+
+            for task_id in visible_ids:
+                try:
+                    get_redis_service().mark_task_cancelled(task_id)
+                except Exception:
+                    pass
+                try:
+                    celery_app.control.revoke(task_id, terminate=False)
+                except Exception:
+                    pass
+
+            if not visible_ids:
+                return True
+            if time.monotonic() >= deadline:
+                logger.warning(
+                    "Timed out waiting for Celery tasks index=%s path=%s active=%s",
+                    index_name,
+                    path_or_url,
+                    sorted(visible_ids),
+                )
+                return False
+            time.sleep(max(0.01, float(poll_interval_seconds)))
+
+    @staticmethod
+    async def _finalize_document_delete(
+            *,
+            index_name: str,
+            path_or_url: str,
+            scope: str,
+            vdb_core: VectorDatabaseCore,
+            lifecycle_record: Optional[Dict[str, Any]],
+            requested_by: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Finish one deletion once all in-flight writes have drained."""
+        file_id = (lifecycle_record or {}).get("file_id")
+        legacy_mode = lifecycle_record is None or not lifecycle_record.get("object_name")
+        if lifecycle_record is None or not lifecycle_record.get("object_name"):
+            # A legacy deployment may not have a lifecycle row at all.  Keep
+            # the historical path-based delete contract in that case.
+            drained = True
+        else:
+            drained = await asyncio.to_thread(
+                ElasticSearchService._wait_for_document_tasks,
+                index_name=index_name,
+                path_or_url=path_or_url,
+                lifecycle_record=lifecycle_record,
+                timeout_seconds=DOCUMENT_DELETE_DRAIN_TIMEOUT_S,
+            )
+            if not drained:
+                return {
+                    "status": "pending",
+                    "scope": scope,
+                    "deletion_pending": True,
+                    "lifecycle_status": "DELETE_REQUESTED",
+                    "source_available": True,
+                    "message": "Deletion requested; waiting for Celery tasks to stop.",
+                }
+            try:
+                redis_service = get_redis_service()
+                drained = await asyncio.to_thread(
+                    redis_service.wait_for_document_writes,
+                    index_name=index_name,
+                    path_or_url=path_or_url,
+                    file_id=file_id,
+                    timeout_seconds=DOCUMENT_DELETE_DRAIN_TIMEOUT_S,
+                )
+            except Exception as drain_exc:
+                logger.warning("Unable to drain document writes index=%s path=%s: %s", index_name, path_or_url, drain_exc)
+                drained = False
+        if not drained:
+            return {
+                "status": "pending",
+                "scope": scope,
+                "deletion_pending": True,
+                "lifecycle_status": "DELETE_REQUESTED",
+                "source_available": True,
+                "message": "Deletion requested; waiting for in-flight processing to stop.",
+            }
+
+        if scope == "source_only":
+            try:
+                knowledge = get_knowledge_record({"index_name": index_name}) or {}
+            except Exception:
+                knowledge = {}
+            minio_part = ElasticSearchService.delete_source_file(
+                path_or_url,
+                tenant_id=knowledge.get("tenant_id"),
+                updated_by=requested_by,
+            )
+            result = {
+                "status": "success" if minio_part.get("deleted_minio") else "failed",
+                "scope": scope,
+                "deleted_es_count": 0,
+                "deleted_minio": bool(minio_part.get("deleted_minio")),
+                "source_available": not bool(minio_part.get("deleted_minio")),
+                "message": "Source file deleted; index chunks and vectors preserved.",
+            }
+        else:
+            try:
+                result = ElasticSearchService.delete_documents(index_name, path_or_url, vdb_core)
+            except Exception as external_exc:
+                logger.warning(
+                    "External document cleanup failed index=%s path=%s: %s",
+                    index_name,
+                    path_or_url,
+                    external_exc,
+                )
+                return {
+                    "status": "pending",
+                    "scope": scope,
+                    "deletion_pending": True,
+                    "lifecycle_status": "DELETE_REQUESTED",
+                    "source_available": True,
+                    "external_delete_error": str(external_exc),
+                    "message": "Deletion requested; external cleanup will be retried.",
+                }
+            result["scope"] = scope
+            result["source_available"] = not result.get("deleted_minio", False)
+
+        if scope == "full":
+            try:
+                redis_cleanup = get_redis_service().delete_document_records(index_name, path_or_url)
+                result["redis_cleanup"] = redis_cleanup
+                if redis_cleanup.get("errors") and not legacy_mode:
+                    return {
+                        **result,
+                        "status": "pending",
+                        "deletion_pending": True,
+                        "lifecycle_status": "DELETE_REQUESTED",
+                        "redis_warnings": redis_cleanup["errors"],
+                        "message": "External data deleted; waiting for Redis task cleanup.",
+                    }
+            except Exception as redis_exc:
+                logger.warning("Redis document cleanup failed index=%s path=%s: %s", index_name, path_or_url, redis_exc)
+                if not legacy_mode:
+                    return {
+                        **result,
+                        "status": "pending",
+                        "deletion_pending": True,
+                        "lifecycle_status": "DELETE_REQUESTED",
+                        "redis_cleanup_error": str(redis_exc),
+                        "message": "External data deleted; waiting for Redis task cleanup.",
+                    }
+
+        try:
+            if file_id and not legacy_mode:
+                delete_file_record(file_id, expected_statuses=("DELETE_REQUESTED", "DELETED"))
+            else:
+                if requested_by is None:
+                    ElasticSearchService._mark_file_deleted(index_name, path_or_url)
+                else:
+                    ElasticSearchService._mark_file_deleted(
+                        index_name, path_or_url, updated_by=requested_by
+                    )
+        except Exception as lifecycle_exc:
+            logger.warning(
+                "Lifecycle hard delete failed index=%s path=%s file_id=%s: %s",
+                index_name,
+                path_or_url,
+                file_id,
+                lifecycle_exc,
+            )
+            return {
+                **result,
+                "status": "pending",
+                "deletion_pending": True,
+                "lifecycle_status": "DELETE_REQUESTED",
+                "lifecycle_delete_error": str(lifecycle_exc),
+                "message": "External data deleted; waiting for lifecycle cleanup.",
+            }
+        try:
+            fence_service = get_redis_service()
+            fence_service.clear_document_delete_fence(
+                index_name=index_name,
+                path_or_url=path_or_url,
+                file_id=file_id,
+            )
+            if fence_service.is_document_delete_requested(
+                index_name=index_name,
+                path_or_url=path_or_url,
+                file_id=file_id,
+            ):
+                if not legacy_mode:
+                    return {
+                        **result,
+                        "status": "pending",
+                        "deletion_pending": True,
+                        "lifecycle_status": "DELETE_REQUESTED",
+                        "message": "External data deleted; waiting for deletion fence cleanup.",
+                    }
+        except Exception as fence_exc:
+            logger.warning("Failed to clear deletion fence index=%s path=%s: %s", index_name, path_or_url, fence_exc)
+            if not legacy_mode:
+                return {
+                    **result,
+                    "status": "pending",
+                    "deletion_pending": True,
+                    "lifecycle_status": "DELETE_REQUESTED",
+                    "fence_cleanup_error": str(fence_exc),
+                    "message": "External data deleted; waiting for deletion fence cleanup.",
+                }
+        result["lifecycle_deleted"] = True
+        return result
+
+    @staticmethod
+    async def _retry_document_delete(
+            *,
+            index_name: str,
+            path_or_url: str,
+            scope: str,
+            vdb_core: VectorDatabaseCore,
+            lifecycle_record: Optional[Dict[str, Any]],
+            requested_by: Optional[str] = None,
+    ) -> None:
+        file_id = (lifecycle_record or {}).get("file_id") or path_or_url
+        try:
+            while True:
+                try:
+                    result = await ElasticSearchService._finalize_document_delete(
+                        index_name=index_name,
+                        path_or_url=path_or_url,
+                        scope=scope,
+                        vdb_core=vdb_core,
+                        lifecycle_record=lifecycle_record,
+                        requested_by=requested_by,
+                    )
+                    if result.get("status") != "pending":
+                        return
+                except Exception as exc:
+                    # External dependencies can be temporarily unavailable.
+                    # Keep the durable row/fence and retry instead of
+                    # abandoning the deletion.
+                    logger.warning(
+                        "Background deletion finalizer iteration failed for index=%s path=%s: %s",
+                        index_name,
+                        path_or_url,
+                        exc,
+                    )
+                await asyncio.sleep(max(0.2, DOCUMENT_DELETE_RETRY_INTERVAL_S))
+        except asyncio.CancelledError:
+            raise
+        finally:
+            _document_delete_tasks.pop(str(file_id), None)
+
+    @staticmethod
+    def _schedule_document_delete_retry(
+            *,
+            index_name: str,
+            path_or_url: str,
+            scope: str,
+            vdb_core: VectorDatabaseCore,
+            lifecycle_record: Optional[Dict[str, Any]],
+            requested_by: Optional[str] = None,
+    ) -> None:
+        key = str((lifecycle_record or {}).get("file_id") or path_or_url)
+        existing = _document_delete_tasks.get(key)
+        if existing and not existing.done():
+            return
+        _document_delete_tasks[key] = asyncio.create_task(
+            ElasticSearchService._retry_document_delete(
+                index_name=index_name,
+                path_or_url=path_or_url,
+                scope=scope,
+                vdb_core=vdb_core,
+                lifecycle_record=lifecycle_record,
+                requested_by=requested_by,
+            )
+        )
+
+    @staticmethod
+    async def resume_pending_document_deletions() -> int:
+        """Resume durable DELETE_REQUESTED rows after an API restart."""
+        try:
+            pending_records = list_pending_delete_records()
+        except Exception as exc:
+            logger.debug("Pending deletion recovery skipped: %s", exc)
+            return 0
+        resumed = 0
+        for record in pending_records:
+            if not record.get("object_name"):
+                continue
+            try:
+                core = get_vector_db_core()
+                ElasticSearchService._schedule_document_delete_retry(
+                    index_name=record["index_name"],
+                    path_or_url=record["object_name"],
+                    scope="full",
+                    vdb_core=core,
+                    lifecycle_record=record,
+                    requested_by=record.get("updated_by"),
+                )
+                resumed += 1
+            except Exception as exc:
+                logger.debug("Unable to resume deletion for %s: %s", record.get("file_id"), exc)
+        return resumed
+
+    @staticmethod
     def delete_lifecycle_record_without_object(
             lifecycle_record: Dict[str, Any],
             requested_by: Optional[str] = None,
@@ -2210,6 +2662,23 @@ class ElasticSearchService:
         tenant_id = lifecycle_record.get("tenant_id")
         index_name = lifecycle_record.get("index_name")
         current_status = str(lifecycle_record.get("status") or "").upper()
+        try:
+            get_redis_service().mark_document_delete_requested(
+                index_name=index_name,
+                path_or_url=None,
+                file_id=file_id,
+                requested_by=requested_by,
+            )
+        except Exception as fence_exc:
+            logger.debug("Unable to install no-object deletion fence for %s: %s", file_id, fence_exc)
+        try:
+            ElasticSearchService._cancel_document_tasks(
+                index_name=index_name or "",
+                path_or_url="",
+                lifecycle_record=lifecycle_record,
+            )
+        except Exception as cancel_exc:
+            logger.debug("Unable to cancel no-object deletion tasks for %s: %s", file_id, cancel_exc)
         deleteable_statuses = (
             "UPLOADING",
             "UPLOADED",
@@ -2221,6 +2690,14 @@ class ElasticSearchService:
 
         if current_status == "DELETED":
             delete_file_record(file_id, expected_statuses=("DELETE_REQUESTED", "DELETED"))
+            try:
+                get_redis_service().clear_document_delete_fence(
+                    index_name=index_name,
+                    path_or_url=None,
+                    file_id=file_id,
+                )
+            except Exception:
+                pass
             return {
                 "status": "success",
                 "scope": "full",
@@ -2267,6 +2744,15 @@ class ElasticSearchService:
             if latest is not None:
                 raise ValueError("Lifecycle file record could not be finalized")
 
+        try:
+            get_redis_service().clear_document_delete_fence(
+                index_name=index_name,
+                path_or_url=None,
+                file_id=file_id,
+            )
+        except Exception:
+            logger.debug("Unable to clear no-object deletion fence for %s", file_id)
+
         return {
             "status": "success",
             "scope": "full",
@@ -2283,6 +2769,8 @@ class ElasticSearchService:
             path_or_url: str,
             scope: str,
             vdb_core: VectorDatabaseCore,
+            file_id: Optional[str] = None,
+            requested_by: Optional[str] = None,
     ) -> Dict[str, Any]:
         if scope not in ElasticSearchService.DOCUMENT_DELETE_SCOPES:
             raise ValueError(
@@ -2294,41 +2782,41 @@ class ElasticSearchService:
             await ElasticSearchService._assert_source_only_deletable(
                 index_name, path_or_url
             )
-            ElasticSearchService._mark_file_delete_requested(index_name, path_or_url)
-            try:
-                knowledge = get_knowledge_record({"index_name": index_name}) or {}
-            except Exception:
-                logger.exception(
-                    "Failed to resolve storage ownership for index '%s'",
-                    index_name,
-                )
-                knowledge = {}
-            minio_part = ElasticSearchService.delete_source_file(
+        if file_id is None and requested_by is None:
+            lifecycle_record = ElasticSearchService._mark_file_delete_requested(
+                index_name,
                 path_or_url,
-                tenant_id=knowledge.get("tenant_id"),
             )
-            deleted_minio = minio_part.get("deleted_minio", False)
-            ElasticSearchService._mark_file_deleted(index_name, path_or_url)
-            return {
-                "status": "success" if deleted_minio else "failed",
-                "scope": scope,
-                "deleted_es_count": 0,
-                "deleted_minio": deleted_minio,
-                "source_available": not deleted_minio,
-                "message": (
-                    "Source file deleted; index chunks and vectors preserved."
-                    if deleted_minio
-                    else "Source file deletion failed; index chunks and vectors preserved."
-                ),
-            }
-
-        ElasticSearchService._mark_file_delete_requested(index_name, path_or_url)
-        result = ElasticSearchService.delete_documents(
-            index_name, path_or_url, vdb_core
+        else:
+            lifecycle_record = ElasticSearchService._mark_file_delete_requested(
+                index_name,
+                path_or_url,
+                requested_by=requested_by,
+                file_id=file_id,
+            )
+        cancellation = ElasticSearchService._cancel_document_tasks(
+            index_name=index_name,
+            path_or_url=path_or_url,
+            lifecycle_record=lifecycle_record,
         )
-        ElasticSearchService._mark_file_deleted(index_name, path_or_url)
-        result["scope"] = scope
-        result["source_available"] = not result.get("deleted_minio", False)
+        result = await ElasticSearchService._finalize_document_delete(
+            index_name=index_name,
+            path_or_url=path_or_url,
+            scope=scope,
+            vdb_core=vdb_core,
+            lifecycle_record=lifecycle_record,
+            requested_by=requested_by,
+        )
+        result["cancelled_tasks"] = cancellation
+        if result.get("status") == "pending":
+            ElasticSearchService._schedule_document_delete_retry(
+                index_name=index_name,
+                path_or_url=path_or_url,
+                scope=scope,
+                vdb_core=vdb_core,
+                lifecycle_record=lifecycle_record,
+                requested_by=requested_by,
+            )
         return result
 
     @staticmethod

@@ -672,11 +672,19 @@ async def delete_documents(
                 status_code=HTTPStatus.BAD_REQUEST,
                 detail="Either path_or_url or file_id is required",
             )
+        # Pass the durable ID when available so deletion cannot select an older
+        # tombstone that happens to reuse the same object path.  The optional
+        # arguments keep path-only clients on the legacy contract.
+        delete_kwargs = {}
+        if file_id:
+            delete_kwargs = {"file_id": file_id, "requested_by": user_id}
         result = await ElasticSearchService.delete_document_by_scope(
-            index_name, path_or_url, scope, vdb_core
+            index_name, path_or_url, scope, vdb_core, **delete_kwargs
         )
 
-        if scope == "full":
+        # The service owns cleanup for real deletions.  Keep the legacy API
+        # fallback for callers/tests that provide an older service result.
+        if scope == "full" and "redis_cleanup" not in result and not result.get("deletion_pending"):
             try:
                 redis_service = get_redis_service()
                 redis_cleanup_result = redis_service.delete_document_records(

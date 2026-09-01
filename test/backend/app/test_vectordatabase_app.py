@@ -2069,7 +2069,8 @@ async def test_delete_documents_resolves_lifecycle_file_id(vdb_core_mock, redis_
             include_hidden=True,
         )
         mock_delete_by_scope.assert_awaited_once_with(
-            auth_data["index_name"], "knowledge_base/a.txt", "source_only", ANY
+            auth_data["index_name"], "knowledge_base/a.txt", "source_only", ANY,
+            file_id="fid-1", requested_by=auth_data["user_id"]
         )
 
 
@@ -2098,7 +2099,8 @@ async def test_delete_documents_uses_legacy_path_when_lifecycle_lookup_fails(
 
     assert response.status_code == 200
     mock_delete.assert_awaited_once_with(
-        auth_data["index_name"], "knowledge_base/legacy.txt", "full", ANY
+        auth_data["index_name"], "knowledge_base/legacy.txt", "full", ANY,
+        file_id="fid-legacy", requested_by=auth_data["user_id"]
     )
 
 

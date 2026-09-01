@@ -391,6 +391,38 @@ async def test_process_files_success(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_process_files_persists_parent_chain_id(monkeypatch):
+    """A queued chain remains cancellable before its process task starts."""
+    async def fake_trigger(files, params):
+        return {"task_id": "chain-1"}
+
+    lifecycle_module = types.ModuleType("database.knowledge_file_lifecycle_db")
+    lifecycle_module.get_file_record = MagicMock(return_value={"file_id": "fid-1"})
+    lifecycle_module.transition_file_record = MagicMock()
+    database_module = types.ModuleType("database")
+    database_module.__path__ = []
+    monkeypatch.setitem(sys.modules, "database", database_module)
+    monkeypatch.setitem(sys.modules, "database.knowledge_file_lifecycle_db", lifecycle_module)
+    monkeypatch.setattr(file_management_app, "trigger_data_process", fake_trigger)
+
+    resp = await file_management_app.process_files(
+        files=[{"file_id": "fid-1", "path_or_url": "knowledge_base/a.txt", "filename": "a.txt"}],
+        chunking_strategy="basic",
+        index_name="kb1",
+        destination="minio",
+        authorization=MOCK_AUTH,
+    )
+
+    assert resp.status_code == 201
+    lifecycle_module.transition_file_record.assert_called_once_with(
+        "fid-1",
+        parent_task_id="chain-1",
+        expected_statuses=("UPLOADING", "UPLOADED", "PROCESSING", "FORWARDING"),
+        updated_by="user1",
+    )
+
+
+@pytest.mark.asyncio
 async def test_process_files_error_none(monkeypatch):
     async def fake_trigger(files, params):
         return None

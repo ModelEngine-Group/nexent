@@ -140,6 +140,20 @@ def list_file_records(
         return [as_dict(row) for row in query.order_by(KnowledgeFileLifecycle.create_time.asc()).all()]
 
 
+def list_pending_delete_records() -> List[Dict[str, Any]]:
+    """Return deletion requests that still need external cleanup.
+
+    The result is intentionally small and durable: unlike Redis task metadata,
+    these rows survive service restarts and allow the deletion coordinator to
+    resume work without a time-based aging policy.
+    """
+    with get_db_session() as session:
+        query = session.query(KnowledgeFileLifecycle).filter(
+            KnowledgeFileLifecycle.status == "DELETE_REQUESTED",
+        )
+        return [as_dict(row) for row in query.order_by(KnowledgeFileLifecycle.update_time.asc()).all()]
+
+
 def transition_file_record(
     file_id: str,
     *,
