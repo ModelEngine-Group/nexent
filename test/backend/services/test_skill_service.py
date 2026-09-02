@@ -1,5 +1,5 @@
 """
-Unit tests for backend.services.skill_service module.
+Unit tests for backend.management.services.skill.service module.
 """
 import sys
 import os
@@ -393,7 +393,7 @@ sys.modules['agents.skill_creation_agent'] = agents_skill_creation_agent_mock
 
 # Now import the service module
 from backend.services import skill_service
-from backend.services.skill_service import (
+from backend.management.services.skill.service import (
     SkillService,
     _normalize_zip_entry_path,
     _find_zip_member_config_yaml,
@@ -534,7 +534,7 @@ class TestSkillGroupPermissions:
             "ingroup_permission": "READ_ONLY",
         }
         query_groups = mocker.patch(
-            "backend.services.skill_service.query_group_ids_by_user",
+            "backend.management.services.skill.service.query_group_ids_by_user",
             return_value=[10],
         )
 
@@ -549,7 +549,7 @@ class TestSkillGroupPermissions:
     def test_default_group_permission_uses_creator_groups(self, mocker):
         skill_data = {}
         mocker.patch(
-            "backend.services.skill_service.query_group_ids_by_user",
+            "backend.management.services.skill.service.query_group_ids_by_user",
             return_value=[10, 20],
         )
 
@@ -562,7 +562,7 @@ class TestSkillGroupPermissions:
 
     def test_default_group_permission_skips_anonymous_user(self, mocker):
         query_groups = mocker.patch(
-            "backend.services.skill_service.query_group_ids_by_user",
+            "backend.management.services.skill.service.query_group_ids_by_user",
         )
 
         skill_data = {}
@@ -578,11 +578,11 @@ class TestSkillGroupPermissions:
             "ingroup_permission": "EDIT",
         }
         mocker.patch(
-            "backend.services.skill_service.get_user_tenant_by_user_id",
+            "backend.management.services.skill.service.get_user_tenant_by_user_id",
             return_value={"user_role": "DEV"},
         )
         mocker.patch(
-            "backend.services.skill_service.query_group_ids_by_user",
+            "backend.management.services.skill.service.query_group_ids_by_user",
             return_value=[10],
         )
 
@@ -662,7 +662,7 @@ class TestLocalSkillConfigYamlPath:
 
     def test_basic_path(self, mocker):
         mocker.patch(
-            "backend.services.skill_service.CONTAINER_SKILLS_PATH",
+            "backend.management.services.skill.service.CONTAINER_SKILLS_PATH",
             "/skills",
         )
         result = _local_skill_config_yaml_path("my_skill", "/skills")
@@ -672,7 +672,7 @@ class TestLocalSkillConfigYamlPath:
 
     def test_with_subdir(self, mocker):
         mocker.patch(
-            "backend.services.skill_service.CONTAINER_SKILLS_PATH",
+            "backend.management.services.skill.service.CONTAINER_SKILLS_PATH",
             "/var/lib/skills",
         )
         result = _local_skill_config_yaml_path("test-skill", "/var/lib/skills")
@@ -696,7 +696,7 @@ class TestLocalSkillConfigYamlPath:
     )
     def test_rejects_unsafe_skill_name(self, mocker, unsafe_name):
         mocker.patch(
-            "backend.services.skill_service.CONTAINER_SKILLS_PATH",
+            "backend.management.services.skill.service.CONTAINER_SKILLS_PATH",
             "/skills",
         )
 
@@ -711,7 +711,7 @@ class TestLocalSkillConfigYamlPath:
         allowed_root = tmp_path / "allowed"
         outside_root = tmp_path / "outside"
         mocker.patch(
-            "backend.services.skill_service.CONTAINER_SKILLS_PATH",
+            "backend.management.services.skill.service.CONTAINER_SKILLS_PATH",
             str(allowed_root),
         )
 
@@ -754,7 +754,7 @@ class TestSkillServiceListSkills:
     """Test SkillService.list_skills method."""
 
     def test_list_skills_success(self, mocker):
-        mock_list_skills = mocker.patch('backend.services.skill_service.skill_db.list_skills')
+        mock_list_skills = mocker.patch('backend.management.services.skill.service.skill_db.list_skills')
         mock_list_skills.return_value = [
             {"skill_id": 1, "name": "skill1"},
             {"skill_id": 2, "name": "skill2"},
@@ -768,7 +768,7 @@ class TestSkillServiceListSkills:
         mock_list_skills.assert_called_once()
 
     def test_list_skills_error(self, mocker):
-        mock_list_skills = mocker.patch('backend.services.skill_service.skill_db.list_skills')
+        mock_list_skills = mocker.patch('backend.management.services.skill.service.skill_db.list_skills')
         mock_list_skills.side_effect = Exception("DB error")
 
         service = create_test_service()
@@ -778,7 +778,7 @@ class TestSkillServiceListSkills:
 
     def test_list_skills_filters_by_creator_group_and_private_permission(self, mocker):
         mocker.patch(
-            'backend.services.skill_service.skill_db.list_skills',
+            'backend.management.services.skill.service.skill_db.list_skills',
             return_value=[
                 {
                     "skill_id": 1,
@@ -818,11 +818,11 @@ class TestSkillServiceListSkills:
             ],
         )
         mocker.patch(
-            'backend.services.skill_service.query_group_ids_by_user',
+            'backend.management.services.skill.service.query_group_ids_by_user',
             return_value=[10],
         )
         mocker.patch(
-            'backend.services.skill_service.get_user_tenant_by_user_id',
+            'backend.management.services.skill.service.get_user_tenant_by_user_id',
             return_value={"user_role": "DEV"},
         )
 
@@ -841,7 +841,7 @@ class TestSkillServiceListSkills:
 
     def test_list_skills_admin_can_view_all_tenant_skills(self, mocker):
         mocker.patch(
-            'backend.services.skill_service.skill_db.list_skills',
+            'backend.management.services.skill.service.skill_db.list_skills',
             return_value=[
                 {
                     "skill_id": 1,
@@ -853,11 +853,11 @@ class TestSkillServiceListSkills:
             ],
         )
         mocker.patch(
-            'backend.services.skill_service.query_group_ids_by_user',
+            'backend.management.services.skill.service.query_group_ids_by_user',
             return_value=[],
         )
         mocker.patch(
-            'backend.services.skill_service.get_user_tenant_by_user_id',
+            'backend.management.services.skill.service.get_user_tenant_by_user_id',
             return_value={"user_role": "ADMIN"},
         )
 
@@ -871,7 +871,7 @@ class TestSkillServiceListSkills:
         mocker,
     ):
         list_summaries = mocker.patch(
-            'backend.services.skill_service.skill_db.list_skill_permission_summaries',
+            'backend.management.services.skill.service.skill_db.list_skill_permission_summaries',
             create=True,
             return_value=[
                 {
@@ -895,11 +895,11 @@ class TestSkillServiceListSkills:
             ],
         )
         mocker.patch(
-            'backend.services.skill_service.query_group_ids_by_user',
+            'backend.management.services.skill.service.query_group_ids_by_user',
             return_value=[10],
         )
         mocker.patch(
-            'backend.services.skill_service.get_user_tenant_by_user_id',
+            'backend.management.services.skill.service.get_user_tenant_by_user_id',
             return_value={"user_role": "DEV"},
         )
 
@@ -915,16 +915,16 @@ class TestSkillServiceListSkills:
         mocker,
     ):
         list_summaries = mocker.patch(
-            'backend.services.skill_service.skill_db.list_skill_permission_summaries',
+            'backend.management.services.skill.service.skill_db.list_skill_permission_summaries',
             create=True,
             return_value=[],
         )
         mocker.patch(
-            'backend.services.skill_service.query_group_ids_by_user',
+            'backend.management.services.skill.service.query_group_ids_by_user',
             return_value=[],
         )
         mocker.patch(
-            'backend.services.skill_service.get_user_tenant_by_user_id',
+            'backend.management.services.skill.service.get_user_tenant_by_user_id',
             return_value={"user_role": "DEV"},
         )
 
@@ -948,7 +948,7 @@ class TestSkillServiceGetSkill:
 
     def test_get_skill_found(self, mocker):
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_name',
+            'backend.management.services.skill.service.skill_db.get_skill_by_name',
             return_value={
                 "skill_id": 1,
                 "name": "test_skill",
@@ -965,7 +965,7 @@ class TestSkillServiceGetSkill:
 
     def test_get_skill_not_found(self, mocker):
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_name',
+            'backend.management.services.skill.service.skill_db.get_skill_by_name',
             return_value=None
         )
 
@@ -981,7 +981,7 @@ class TestSkillServiceGetSkillById:
 
     def test_get_skill_by_id_found(self, mocker):
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_id',
+            'backend.management.services.skill.service.skill_db.get_skill_by_id',
             return_value={
                 "skill_id": 5,
                 "name": "found_skill"
@@ -997,7 +997,7 @@ class TestSkillServiceGetSkillById:
 
     def test_get_skill_by_id_not_found(self, mocker):
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_id',
+            'backend.management.services.skill.service.skill_db.get_skill_by_id',
             return_value=None
         )
 
@@ -1019,7 +1019,7 @@ class TestSkillServiceCreateSkill:
 
     def test_create_skill_already_exists_db(self, mocker):
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_name',
+            'backend.management.services.skill.service.skill_db.get_skill_by_name',
             return_value={"name": "existing"}
         )
 
@@ -1030,11 +1030,11 @@ class TestSkillServiceCreateSkill:
 
     def test_create_skill_success(self, mocker):
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_name',
+            'backend.management.services.skill.service.skill_db.get_skill_by_name',
             return_value=None
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.create_skill',
+            'backend.management.services.skill.service.skill_db.create_skill',
             return_value={
                 "skill_id": 1,
                 "name": "new_skill",
@@ -1058,11 +1058,11 @@ class TestSkillServiceCreateSkill:
 
     def test_create_skill_with_params(self, mocker):
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_name',
+            'backend.management.services.skill.service.skill_db.get_skill_by_name',
             return_value=None
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.create_skill',
+            'backend.management.services.skill.service.skill_db.create_skill',
             return_value={
                 "skill_id": 1,
                 "name": "skill_with_params"
@@ -1189,7 +1189,7 @@ class TestSkillServiceUpdateSkill:
 
     def test_update_skill_not_found(self, mocker):
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_name',
+            'backend.management.services.skill.service.skill_db.get_skill_by_name',
             return_value=None
         )
 
@@ -1200,11 +1200,11 @@ class TestSkillServiceUpdateSkill:
 
     def test_update_skill_success(self, mocker):
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_name',
+            'backend.management.services.skill.service.skill_db.get_skill_by_name',
             return_value={"skill_id": 1, "name": "existing"}
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.update_skill',
+            'backend.management.services.skill.service.skill_db.update_skill',
             return_value={
                 "skill_id": 1,
                 "name": "existing",
@@ -1212,7 +1212,7 @@ class TestSkillServiceUpdateSkill:
             }
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_tool_names_by_skill_name',
+            'backend.management.services.skill.service.skill_db.get_tool_names_by_skill_name',
             return_value=[]
         )
 
@@ -1231,11 +1231,11 @@ class TestSkillServiceUpdateSkill:
 
     def test_update_skill_rejects_user_without_edit_permission(self, mocker):
         mocker.patch(
-            "backend.services.skill_service.skill_db.get_skill_by_name",
+            "backend.management.services.skill.service.skill_db.get_skill_by_name",
             return_value={"skill_id": 1, "name": "existing", "created_by": "owner"},
         )
         mocker.patch(
-            "backend.services.skill_service._can_edit_skill",
+            "backend.management.services.skill.service._can_edit_skill",
             return_value=False,
         )
 
@@ -1251,7 +1251,7 @@ class TestSkillServiceUpdateSkill:
 
     def test_update_skill_rejects_access_change_from_group_editor(self, mocker):
         mocker.patch(
-            "backend.services.skill_service.skill_db.get_skill_by_name",
+            "backend.management.services.skill.service.skill_db.get_skill_by_name",
             return_value={
                 "skill_id": 1,
                 "name": "existing",
@@ -1261,10 +1261,10 @@ class TestSkillServiceUpdateSkill:
             },
         )
         mocker.patch(
-            "backend.services.skill_service._can_edit_skill", return_value=True
+            "backend.management.services.skill.service._can_edit_skill", return_value=True
         )
         mocker.patch(
-            "backend.services.skill_service.get_user_tenant_by_user_id",
+            "backend.management.services.skill.service.get_user_tenant_by_user_id",
             return_value={"user_role": "DEV"},
         )
 
@@ -1280,11 +1280,11 @@ class TestSkillServiceUpdateSkill:
 
     def test_update_skill_with_params(self, mocker):
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_name',
+            'backend.management.services.skill.service.skill_db.get_skill_by_name',
             return_value={"skill_id": 1, "name": "p_skill"}
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.update_skill',
+            'backend.management.services.skill.service.skill_db.update_skill',
             return_value={
                 "skill_id": 1,
                 "name": "p_skill",
@@ -1292,7 +1292,7 @@ class TestSkillServiceUpdateSkill:
             }
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_tool_names_by_skill_name',
+            'backend.management.services.skill.service.skill_db.get_tool_names_by_skill_name',
             return_value=[]
         )
 
@@ -1315,15 +1315,15 @@ class TestSkillServiceDeleteSkill:
 
     def test_delete_skill_success(self, mocker):
         mocker.patch(
-            'backend.services.skill_service.skill_db.delete_skill',
+            'backend.management.services.skill.service.skill_db.delete_skill',
             return_value=True
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.delete_skill_instances_by_skill_id',
+            'backend.management.services.skill.service.skill_db.delete_skill_instances_by_skill_id',
             return_value=None
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_name',
+            'backend.management.services.skill.service.skill_db.get_skill_by_name',
             return_value={"skill_id": 1, "name": "skill_to_delete"}
         )
 
@@ -1341,15 +1341,15 @@ class TestSkillServiceDeleteSkill:
 
     def test_delete_skill_with_local_dir(self, mocker):
         mocker.patch(
-            'backend.services.skill_service.skill_db.delete_skill',
+            'backend.management.services.skill.service.skill_db.delete_skill',
             return_value=True
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.delete_skill_instances_by_skill_id',
+            'backend.management.services.skill.service.skill_db.delete_skill_instances_by_skill_id',
             return_value=None
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_name',
+            'backend.management.services.skill.service.skill_db.get_skill_by_name',
             return_value={"skill_id": 1, "name": "del_skill"}
         )
 
@@ -1486,14 +1486,14 @@ class TestSkillServiceBuildSkillsSummary:
 
     def test_build_summary_with_available_skills(self, mocker):
         mocker.patch(
-            'backend.services.skill_service.skill_db.list_skills',
+            'backend.management.services.skill.service.skill_db.list_skills',
             return_value=[
                 {"name": "skill1", "description": "Desc1"},
                 {"name": "skill2", "description": "Desc2"}
             ]
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.search_skills_for_agent',
+            'backend.management.services.skill.service.skill_db.search_skills_for_agent',
             return_value=[]
         )
 
@@ -1507,11 +1507,11 @@ class TestSkillServiceBuildSkillsSummary:
 
     def test_build_summary_empty(self, mocker):
         mocker.patch(
-            'backend.services.skill_service.skill_db.list_skills',
+            'backend.management.services.skill.service.skill_db.list_skills',
             return_value=[]
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.search_skills_for_agent',
+            'backend.management.services.skill.service.skill_db.search_skills_for_agent',
             return_value=[]
         )
 
@@ -1524,13 +1524,13 @@ class TestSkillServiceBuildSkillsSummary:
     def test_build_summary_fallback_to_all_skills(self, mocker):
         """Test building summary without agent uses all skills."""
         mocker.patch(
-            'backend.services.skill_service.skill_db.list_skills',
+            'backend.management.services.skill.service.skill_db.list_skills',
             return_value=[
                 {"name": "skill1", "description": "Desc1"}
             ]
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.search_skills_for_agent',
+            'backend.management.services.skill.service.skill_db.search_skills_for_agent',
             return_value=[]
         )
 
@@ -1544,13 +1544,13 @@ class TestSkillServiceBuildSkillsSummary:
     def test_build_summary_xml_escaping(self, mocker):
         """Test XML escaping in summary."""
         mocker.patch(
-            'backend.services.skill_service.skill_db.list_skills',
+            'backend.management.services.skill.service.skill_db.list_skills',
             return_value=[
                 {"name": "skill<tag>", "description": "Desc & more"}
             ]
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.search_skills_for_agent',
+            'backend.management.services.skill.service.skill_db.search_skills_for_agent',
             return_value=[]
         )
 
@@ -1567,7 +1567,7 @@ class TestSkillServiceGetSkillContent:
 
     def test_get_content_found(self, mocker):
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_name',
+            'backend.management.services.skill.service.skill_db.get_skill_by_name',
             return_value={
                 "name": "content_skill",
                 "content": "# Skill content here"
@@ -1582,7 +1582,7 @@ class TestSkillServiceGetSkillContent:
 
     def test_get_content_not_found(self, mocker):
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_name',
+            'backend.management.services.skill.service.skill_db.get_skill_by_name',
             return_value=None
         )
 
@@ -1691,7 +1691,7 @@ class TestSkillServiceOverlayParams:
 
         with patch('os.path.isfile', return_value=True):
             with patch('builtins.open', mock_open(read_data="key: value\n")):
-                with patch('backend.services.skill_service._parse_skill_params_from_config_bytes', return_value={"key": "value"}):
+                with patch('backend.management.services.skill.service._parse_skill_params_from_config_bytes', return_value={"key": "value"}):
                     result = service._enrich_configs_from_yaml(skill_data)
 
         assert result["config_values"]["key"] == "value"
@@ -1762,7 +1762,7 @@ class TestWriteSkillParamsToLocalConfigYaml:
     def test_write_success(self, mocker):
         with patch('os.makedirs'):
             with patch('builtins.open', mock_open()):
-                with patch('backend.services.skill_service._local_skill_config_yaml_path', return_value="/tmp/skill/config.yaml"):
+                with patch('backend.management.services.skill.service._local_skill_config_yaml_path', return_value="/tmp/skill/config.yaml"):
                     _write_skill_params_to_local_config_yaml("skill", {"key": "value"}, "/tmp")
 
 
@@ -1773,13 +1773,13 @@ class TestRemoveLocalSkillConfigYaml:
         _remove_local_skill_config_yaml("skill", "")
 
     def test_remove_file_exists(self, mocker):
-        with patch('backend.services.skill_service._local_skill_config_yaml_path', return_value="/tmp/skill/config.yaml"):
+        with patch('backend.management.services.skill.service._local_skill_config_yaml_path', return_value="/tmp/skill/config.yaml"):
             with patch('os.path.isfile', return_value=True):
                 with patch('os.remove'):
                     _remove_local_skill_config_yaml("skill", "/tmp")
 
     def test_remove_file_not_exists(self, mocker):
-        with patch('backend.services.skill_service._local_skill_config_yaml_path', return_value="/tmp/skill/config.yaml"):
+        with patch('backend.management.services.skill.service._local_skill_config_yaml_path', return_value="/tmp/skill/config.yaml"):
             with patch('os.path.isfile', return_value=False):
                 _remove_local_skill_config_yaml("skill", "/tmp")
 
@@ -1873,7 +1873,7 @@ class TestGetSkillManager:
     def test_get_manager_creates_instance(self):
         skill_service._skill_manager = None
 
-        with patch('backend.services.skill_service.SkillManager') as mock_manager:
+        with patch('backend.management.services.skill.service.SkillManager') as mock_manager:
             with patch.object(skill_service, 'CONTAINER_SKILLS_PATH', '/tmp'):
                 manager = get_skill_manager()
                 mock_manager.assert_called_once()
@@ -1890,33 +1890,33 @@ class TestCommentTextFromToken:
     """Test _comment_text_from_token function."""
 
     def test_none_token(self):
-        from backend.services.skill_service import _comment_text_from_token
+        from backend.management.services.skill.service import _comment_text_from_token
         result = _comment_text_from_token(None)
         assert result is None
 
     def test_token_without_value(self):
-        from backend.services.skill_service import _comment_text_from_token
+        from backend.management.services.skill.service import _comment_text_from_token
         token = MagicMock()
         token.value = None
         result = _comment_text_from_token(token)
         assert result is None
 
     def test_token_with_hash_comment(self):
-        from backend.services.skill_service import _comment_text_from_token
+        from backend.management.services.skill.service import _comment_text_from_token
         token = MagicMock()
         token.value = "# This is a comment"
         result = _comment_text_from_token(token)
         assert result == "This is a comment"
 
     def test_token_without_hash(self):
-        from backend.services.skill_service import _comment_text_from_token
+        from backend.management.services.skill.service import _comment_text_from_token
         token = MagicMock()
         token.value = "not a comment"
         result = _comment_text_from_token(token)
         assert result is None
 
     def test_token_with_hash_and_whitespace(self):
-        from backend.services.skill_service import _comment_text_from_token
+        from backend.management.services.skill.service import _comment_text_from_token
         token = MagicMock()
         token.value = "  #   trimmed comment  "
         result = _comment_text_from_token(token)
@@ -1927,27 +1927,27 @@ class TestTupleSlot2:
     """Test _tuple_slot2 function."""
 
     def test_none_container(self):
-        from backend.services.skill_service import _tuple_slot2
+        from backend.management.services.skill.service import _tuple_slot2
         result = _tuple_slot2(None)
         assert result is None
 
     def test_empty_container(self):
-        from backend.services.skill_service import _tuple_slot2
+        from backend.management.services.skill.service import _tuple_slot2
         result = _tuple_slot2([])
         assert result is None
 
     def test_single_element_container(self):
-        from backend.services.skill_service import _tuple_slot2
+        from backend.management.services.skill.service import _tuple_slot2
         result = _tuple_slot2([1])
         assert result is None
 
     def test_two_element_container(self):
-        from backend.services.skill_service import _tuple_slot2
+        from backend.management.services.skill.service import _tuple_slot2
         result = _tuple_slot2([1, 2])
         assert result is None
 
     def test_three_element_container(self):
-        from backend.services.skill_service import _tuple_slot2
+        from backend.management.services.skill.service import _tuple_slot2
         result = _tuple_slot2([1, 2, "slot2_value"])
         assert result == "slot2_value"
 
@@ -1956,26 +1956,26 @@ class TestIsBeforeNextSiblingCommentToken:
     """Test _is_before_next_sibling_comment_token function."""
 
     def test_none_token(self):
-        from backend.services.skill_service import _is_before_next_sibling_comment_token
+        from backend.management.services.skill.service import _is_before_next_sibling_comment_token
         result = _is_before_next_sibling_comment_token(None)
         assert result is False
 
     def test_token_without_value(self):
-        from backend.services.skill_service import _is_before_next_sibling_comment_token
+        from backend.management.services.skill.service import _is_before_next_sibling_comment_token
         token = MagicMock()
         token.value = None
         result = _is_before_next_sibling_comment_token(token)
         assert result is False
 
     def test_token_not_starting_with_newline(self):
-        from backend.services.skill_service import _is_before_next_sibling_comment_token
+        from backend.management.services.skill.service import _is_before_next_sibling_comment_token
         token = MagicMock()
         token.value = "# comment"
         result = _is_before_next_sibling_comment_token(token)
         assert result is False
 
     def test_token_starting_with_newline(self):
-        from backend.services.skill_service import _is_before_next_sibling_comment_token
+        from backend.management.services.skill.service import _is_before_next_sibling_comment_token
         token = MagicMock()
         token.value = "\n# comment"
         result = _is_before_next_sibling_comment_token(token)
@@ -1986,22 +1986,22 @@ class TestFlattenCaCommentToText:
     """Test _flatten_ca_comment_to_text function."""
 
     def test_none_comment_field(self):
-        from backend.services.skill_service import _flatten_ca_comment_to_text
+        from backend.management.services.skill.service import _flatten_ca_comment_to_text
         result = _flatten_ca_comment_to_text(None)
         assert result is None
 
     def test_empty_list(self):
-        from backend.services.skill_service import _flatten_ca_comment_to_text
+        from backend.management.services.skill.service import _flatten_ca_comment_to_text
         result = _flatten_ca_comment_to_text([])
         assert result is None
 
     def test_list_with_none_values(self):
-        from backend.services.skill_service import _flatten_ca_comment_to_text
+        from backend.management.services.skill.service import _flatten_ca_comment_to_text
         result = _flatten_ca_comment_to_text([None, None])
         assert result is None
 
     def test_list_with_nested_lists(self):
-        from backend.services.skill_service import _flatten_ca_comment_to_text
+        from backend.management.services.skill.service import _flatten_ca_comment_to_text
         token1 = MagicMock()
         token1.value = "# first comment"
         token2 = MagicMock()
@@ -2010,14 +2010,14 @@ class TestFlattenCaCommentToText:
         assert result == "first comment second comment"
 
     def test_list_with_direct_tokens(self):
-        from backend.services.skill_service import _flatten_ca_comment_to_text
+        from backend.management.services.skill.service import _flatten_ca_comment_to_text
         token = MagicMock()
         token.value = "# direct comment"
         result = _flatten_ca_comment_to_text([token])
         assert result == "direct comment"
 
     def test_list_with_non_comment_tokens(self):
-        from backend.services.skill_service import _flatten_ca_comment_to_text
+        from backend.management.services.skill.service import _flatten_ca_comment_to_text
         token = MagicMock()
         token.value = "not a comment"
         result = _flatten_ca_comment_to_text([token])
@@ -2028,18 +2028,18 @@ class TestCommentFromMapBlockHeader:
     """Test _comment_from_map_block_header function."""
 
     def test_none_cm(self):
-        from backend.services.skill_service import _comment_from_map_block_header
+        from backend.management.services.skill.service import _comment_from_map_block_header
         result = _comment_from_map_block_header(None)
         assert result is None
 
     def test_no_ca_attribute(self):
-        from backend.services.skill_service import _comment_from_map_block_header
+        from backend.management.services.skill.service import _comment_from_map_block_header
         cm = MagicMock(spec=[])
         result = _comment_from_map_block_header(cm)
         assert result is None
 
     def test_no_comment_in_ca(self):
-        from backend.services.skill_service import _comment_from_map_block_header
+        from backend.management.services.skill.service import _comment_from_map_block_header
         cm = MagicMock()
         cm.ca = MagicMock()
         cm.ca.comment = None
@@ -2051,27 +2051,27 @@ class TestApplyInlineCommentToScalar:
     """Test _apply_inline_comment_to_scalar function."""
 
     def test_no_comment(self):
-        from backend.services.skill_service import _apply_inline_comment_to_scalar
+        from backend.management.services.skill.service import _apply_inline_comment_to_scalar
         result = _apply_inline_comment_to_scalar("value", None)
         assert result == "value"
 
     def test_string_with_comment(self):
-        from backend.services.skill_service import _apply_inline_comment_to_scalar
+        from backend.management.services.skill.service import _apply_inline_comment_to_scalar
         result = _apply_inline_comment_to_scalar("value", "tooltip")
         assert result == "value # tooltip"
 
     def test_dict_value_unchanged(self):
-        from backend.services.skill_service import _apply_inline_comment_to_scalar
+        from backend.management.services.skill.service import _apply_inline_comment_to_scalar
         result = _apply_inline_comment_to_scalar({"key": "val"}, "tooltip")
         assert result == {"key": "val"}
 
     def test_list_value_unchanged(self):
-        from backend.services.skill_service import _apply_inline_comment_to_scalar
+        from backend.management.services.skill.service import _apply_inline_comment_to_scalar
         result = _apply_inline_comment_to_scalar([1, 2], "tooltip")
         assert result == [1, 2]
 
     def test_numeric_value_with_comment(self):
-        from backend.services.skill_service import _apply_inline_comment_to_scalar
+        from backend.management.services.skill.service import _apply_inline_comment_to_scalar
         result = _apply_inline_comment_to_scalar(42, "answer")
         assert result == "42 # answer"
 
@@ -2080,12 +2080,12 @@ class TestParseYamlWithRuamelErrorPaths:
     """Test _parse_yaml_with_ruamel_merge_eol_comments error paths."""
 
     def test_invalid_yaml_raises_exception(self):
-        from backend.services.skill_service import _parse_yaml_with_ruamel_merge_eol_comments
+        from backend.management.services.skill.service import _parse_yaml_with_ruamel_merge_eol_comments
         with pytest.raises(Exception):
             _parse_yaml_with_ruamel_merge_eol_comments("invalid: yaml: : : :")
 
     def test_yaml_load_returns_non_mapping(self):
-        from backend.services.skill_service import _parse_yaml_with_ruamel_merge_eol_comments
+        from backend.management.services.skill.service import _parse_yaml_with_ruamel_merge_eol_comments
         # This tests the branch where root is a list instead of dict
         with pytest.raises(Exception):
             _parse_yaml_with_ruamel_merge_eol_comments("- item1\n- item2")
@@ -2095,7 +2095,7 @@ class TestParseYamlFallbackPyyamlErrorPaths:
     """Test _parse_yaml_fallback_pyyaml error paths."""
 
     def test_invalid_yaml_raises_skill_exception(self):
-        from backend.services.skill_service import _parse_yaml_fallback_pyyaml
+        from backend.management.services.skill.service import _parse_yaml_fallback_pyyaml
         from consts.exceptions import SkillException
         try:
             _parse_yaml_fallback_pyyaml("invalid: yaml: : :")
@@ -2106,7 +2106,7 @@ class TestParseYamlFallbackPyyamlErrorPaths:
             assert "mapping values" in str(e) or "Invalid" in str(e)
 
     def test_yaml_returns_list_raises_exception(self):
-        from backend.services.skill_service import _parse_yaml_fallback_pyyaml
+        from backend.management.services.skill.service import _parse_yaml_fallback_pyyaml
         with pytest.raises(Exception):
             _parse_yaml_fallback_pyyaml("- item1\n- item2")
 
@@ -2115,7 +2115,7 @@ class TestParseSkillParamsFromConfigBytesErrorPaths:
     """Test _parse_skill_params_from_config_bytes error paths."""
 
     def test_json_non_dict_raises_exception(self):
-        from backend.services.skill_service import _parse_skill_params_from_config_bytes
+        from backend.management.services.skill.service import _parse_skill_params_from_config_bytes
         from consts.exceptions import SkillException
         try:
             _parse_skill_params_from_config_bytes(b'["list", "not", "dict"]')
@@ -2126,7 +2126,7 @@ class TestParseSkillParamsFromConfigBytesErrorPaths:
             assert "must contain a JSON or YAML object" in str(e)
 
     def test_non_serializable_params_with_fallback(self):
-        from backend.services.skill_service import _params_dict_to_storable
+        from backend.management.services.skill.service import _params_dict_to_storable
 
         class NonSerializable:
             pass
@@ -2150,11 +2150,11 @@ description: A ZIP skill
             zf.writestr("test_skill/config/config.yaml", "key: value")
 
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_name',
+            'backend.management.services.skill.service.skill_db.get_skill_by_name',
             return_value=None
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.create_skill',
+            'backend.management.services.skill.service.skill_db.create_skill',
             return_value={"skill_id": 1, "name": "test_skill"}
         )
 
@@ -2181,11 +2181,11 @@ description: Explicit ZIP type
 # Content""")
 
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_name',
+            'backend.management.services.skill.service.skill_db.get_skill_by_name',
             return_value=None
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.create_skill',
+            'backend.management.services.skill.service.skill_db.create_skill',
             return_value={"skill_id": 1, "name": "explicit_skill"}
         )
 
@@ -2215,15 +2215,15 @@ allowed-tools:
             zf.writestr("tool_skill/config/config.yaml", "key: value")
 
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_name',
+            'backend.management.services.skill.service.skill_db.get_skill_by_name',
             return_value=None
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.create_skill',
+            'backend.management.services.skill.service.skill_db.create_skill',
             return_value={"skill_id": 1, "name": "tool_skill"}
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_tool_ids_by_names',
+            'backend.management.services.skill.service.skill_db.get_tool_ids_by_names',
             return_value=[1, 2]
         )
 
@@ -2246,7 +2246,7 @@ allowed-tools:
             zf.writestr("README.md", "# Just a readme")
 
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_name',
+            'backend.management.services.skill.service.skill_db.get_skill_by_name',
             return_value=None
         )
 
@@ -2275,11 +2275,11 @@ allowed-tools:
             zf.writestr("invalid_skill/SKILL.md", "---\nname: test\n---\n# Content")
 
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_name',
+            'backend.management.services.skill.service.skill_db.get_skill_by_name',
             return_value=None
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.create_skill',
+            'backend.management.services.skill.service.skill_db.create_skill',
             return_value={"skill_id": 1, "name": "invalid_skill"}
         )
 
@@ -2305,7 +2305,7 @@ name: existing_skill
 # Content""")
 
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_name',
+            'backend.management.services.skill.service.skill_db.get_skill_by_name',
             return_value={"name": "existing_skill"}
         )
 
@@ -2331,19 +2331,19 @@ class TestSkillServiceUpdateSkillFromFile:
 
     def test_update_from_md_explicit_type(self, mocker):
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_name',
+            'backend.management.services.skill.service.skill_db.get_skill_by_name',
             return_value={"skill_id": 1, "name": "existing"}
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.update_skill',
+            'backend.management.services.skill.service.skill_db.update_skill',
             return_value={"skill_id": 1, "name": "existing", "description": "updated"}
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_tool_ids_by_names',
+            'backend.management.services.skill.service.skill_db.get_tool_ids_by_names',
             return_value=[]
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_tool_names_by_skill_name',
+            'backend.management.services.skill.service.skill_db.get_tool_names_by_skill_name',
             return_value=[]
         )
 
@@ -2364,11 +2364,11 @@ description: Updated via MD
 
     def test_update_from_file_rejects_user_without_edit_permission(self, mocker):
         mocker.patch(
-            "backend.services.skill_service.skill_db.get_skill_by_name",
+            "backend.management.services.skill.service.skill_db.get_skill_by_name",
             return_value={"skill_id": 1, "name": "existing", "created_by": "owner"},
         )
         mocker.patch(
-            "backend.services.skill_service._can_edit_skill",
+            "backend.management.services.skill.service._can_edit_skill",
             return_value=False,
         )
 
@@ -2384,19 +2384,19 @@ description: Updated via MD
 
     def test_update_from_file_allows_user_with_edit_permission(self, mocker):
         mocker.patch(
-            "backend.services.skill_service.skill_db.get_skill_by_name",
+            "backend.management.services.skill.service.skill_db.get_skill_by_name",
             return_value={"skill_id": 1, "name": "existing", "created_by": "owner"},
         )
         can_edit = mocker.patch(
-            "backend.services.skill_service._can_edit_skill",
+            "backend.management.services.skill.service._can_edit_skill",
             return_value=True,
         )
         mocker.patch(
-            "backend.services.skill_service.skill_db.update_skill",
+            "backend.management.services.skill.service.skill_db.update_skill",
             return_value={"skill_id": 1, "name": "existing"},
         )
         mocker.patch(
-            "backend.services.skill_service.skill_db.get_tool_ids_by_names",
+            "backend.management.services.skill.service.skill_db.get_tool_ids_by_names",
             return_value=[],
         )
         service = SkillService(tenant_id="test-tenant")
@@ -2424,19 +2424,19 @@ description: Updated via ZIP
             zf.writestr("zip_update/config/config.yaml", "updated_key: updated_value")
 
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_name',
+            'backend.management.services.skill.service.skill_db.get_skill_by_name',
             return_value={"skill_id": 1, "name": "zip_update"}
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.update_skill',
+            'backend.management.services.skill.service.skill_db.update_skill',
             return_value={"skill_id": 1, "name": "zip_update", "description": "Updated via ZIP"}
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_tool_ids_by_names',
+            'backend.management.services.skill.service.skill_db.get_tool_ids_by_names',
             return_value=[]
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_tool_names_by_skill_name',
+            'backend.management.services.skill.service.skill_db.get_tool_names_by_skill_name',
             return_value=[]
         )
 
@@ -2453,7 +2453,7 @@ description: Updated via ZIP
 
     def test_update_skill_not_found(self, mocker):
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_name',
+            'backend.management.services.skill.service.skill_db.get_skill_by_name',
             return_value=None
         )
 
@@ -2475,7 +2475,7 @@ class TestSkillServiceErrorHandling:
 
     def test_list_skills_error_path(self, mocker):
         mocker.patch(
-            'backend.services.skill_service.skill_db.list_skills',
+            'backend.management.services.skill.service.skill_db.list_skills',
             side_effect=Exception("Database error")
         )
 
@@ -2492,7 +2492,7 @@ class TestSkillServiceErrorHandling:
 
     def test_get_skill_error_path(self, mocker):
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_name',
+            'backend.management.services.skill.service.skill_db.get_skill_by_name',
             side_effect=Exception("Database error")
         )
 
@@ -2509,7 +2509,7 @@ class TestSkillServiceErrorHandling:
 
     def test_get_skill_by_id_error_path(self, mocker):
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_id',
+            'backend.management.services.skill.service.skill_db.get_skill_by_id',
             side_effect=Exception("Database error")
         )
 
@@ -2558,7 +2558,7 @@ class TestSkillServiceErrorHandling:
 
     def test_get_skill_content_error(self, mocker):
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_name',
+            'backend.management.services.skill.service.skill_db.get_skill_by_name',
             side_effect=Exception("Database error")
         )
 
@@ -2575,7 +2575,7 @@ class TestSkillServiceErrorHandling:
 
     def test_build_skills_summary_error(self, mocker):
         mocker.patch(
-            'backend.services.skill_service.skill_db.list_skills',
+            'backend.management.services.skill.service.skill_db.list_skills',
             side_effect=Exception("Database error")
         )
 
@@ -2704,15 +2704,15 @@ class TestSkillServiceCreateSkillFromMdEdgeCases:
 
     def test_create_md_without_allowed_tools(self, mocker):
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_name',
+            'backend.management.services.skill.service.skill_db.get_skill_by_name',
             return_value=None
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.create_skill',
+            'backend.management.services.skill.service.skill_db.create_skill',
             return_value={"skill_id": 1, "name": "no_tools"}
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_tool_ids_by_names',
+            'backend.management.services.skill.service.skill_db.get_tool_ids_by_names',
             return_value=[]
         )
 
@@ -2734,15 +2734,15 @@ description: No allowed tools
 
     def test_create_md_no_name_uses_skill_name_param(self, mocker):
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_name',
+            'backend.management.services.skill.service.skill_db.get_skill_by_name',
             return_value=None
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.create_skill',
+            'backend.management.services.skill.service.skill_db.create_skill',
             return_value={"skill_id": 1, "name": "explicit_name"}
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_tool_ids_by_names',
+            'backend.management.services.skill.service.skill_db.get_tool_ids_by_names',
             return_value=[]
         )
 
@@ -2768,15 +2768,15 @@ class TestSkillServiceUpdateFromMdEdgeCases:
 
     def test_update_md_with_allowed_tools(self, mocker):
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_name',
+            'backend.management.services.skill.service.skill_db.get_skill_by_name',
             return_value={"skill_id": 1, "name": "existing"}
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.update_skill',
+            'backend.management.services.skill.service.skill_db.update_skill',
             return_value={"skill_id": 1, "name": "existing"}
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_tool_ids_by_names',
+            'backend.management.services.skill.service.skill_db.get_tool_ids_by_names',
             return_value=[1, 2]
         )
 
@@ -2812,11 +2812,11 @@ class TestSkillServiceUpdateFromZipEdgeCases:
             zf.writestr("config/config.yaml", "key: value")
 
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_name',
+            'backend.management.services.skill.service.skill_db.get_skill_by_name',
             return_value={"skill_id": 1, "name": "no_md"}
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.update_skill',
+            'backend.management.services.skill.service.skill_db.update_skill',
             return_value={"skill_id": 1, "name": "no_md"}
         )
 
@@ -2840,11 +2840,11 @@ class TestSkillServiceUpdateFromZipEdgeCases:
             zf.writestr("bad_skill/SKILL.md", "invalid content")
 
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_name',
+            'backend.management.services.skill.service.skill_db.get_skill_by_name',
             return_value={"skill_id": 1, "name": "bad_skill"}
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.update_skill',
+            'backend.management.services.skill.service.skill_db.update_skill',
             return_value={"skill_id": 1, "name": "bad_skill"}
         )
 
@@ -2868,15 +2868,15 @@ class TestUpdateSkillConfigYamlSync:
     def test_update_skill_removes_config_values_when_null(self, mocker):
         """Test update_skill removes config.yaml when config_values is set to None."""
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_name',
+            'backend.management.services.skill.service.skill_db.get_skill_by_name',
             return_value={"skill_id": 1, "name": "p_skill", "config_values": {"old": "value"}}
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.update_skill',
+            'backend.management.services.skill.service.skill_db.update_skill',
             return_value={"skill_id": 1, "name": "p_skill", "config_values": None}
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_tool_names_by_skill_name',
+            'backend.management.services.skill.service.skill_db.get_tool_names_by_skill_name',
             return_value=[]
         )
 
@@ -2888,7 +2888,7 @@ class TestUpdateSkillConfigYamlSync:
             service.skill_manager = mock_manager
             service._resolve_local_skills_dir_for_overlay = MagicMock(return_value=TEST_LOCAL_SKILLS_DIR)
 
-            with patch('backend.services.skill_service._remove_local_skill_config_yaml') as mock_remove:
+            with patch('backend.management.services.skill.service._remove_local_skill_config_yaml') as mock_remove:
                 service.update_skill("p_skill", {"config_values": None}, tenant_id="test-tenant")
                 mock_remove.assert_called()
 
@@ -2899,13 +2899,13 @@ class TestBuildSkillsSummaryEdgeCases:
 
     def test_build_summary_with_agent_skills_whitelist(self, mocker):
         mocker.patch(
-            'backend.services.skill_service.skill_db.search_skills_for_agent',
+            'backend.management.services.skill.service.skill_db.search_skills_for_agent',
             return_value=[
                 {"skill_instance_id": 1, "skill_id": 1, "enabled": True}
             ]
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_id',
+            'backend.management.services.skill.service.skill_db.get_skill_by_id',
             return_value={
                 "name": "skill1",
                 "description": "Desc",
@@ -2914,7 +2914,7 @@ class TestBuildSkillsSummaryEdgeCases:
             }
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_name',
+            'backend.management.services.skill.service.skill_db.get_skill_by_name',
             return_value={
                 "name": "skill1",
                 "description": "Desc"
@@ -2970,14 +2970,14 @@ class TestTooltipForCommentedMapKey:
     """Test _tooltip_for_commented_map_key function."""
 
     def test_index_zero_no_header_comment(self):
-        from backend.services.skill_service import _tooltip_for_commented_map_key
+        from backend.management.services.skill.service import _tooltip_for_commented_map_key
         cm = MagicMock()
         cm.ca = None
         result = _tooltip_for_commented_map_key(cm, ["key1", "key2"], 0, "key1")
         assert result is None
 
     def test_index_zero_with_empty_ca(self):
-        from backend.services.skill_service import _tooltip_for_commented_map_key
+        from backend.management.services.skill.service import _tooltip_for_commented_map_key
         cm = MagicMock(spec=[])
         result = _tooltip_for_commented_map_key(cm, ["key1"], 0, "key1")
         assert result is None
@@ -2987,14 +2987,14 @@ class TestTooltipForCommentedSeqIndex:
     """Test _tooltip_for_commented_seq_index function."""
 
     def test_index_zero_no_comment(self):
-        from backend.services.skill_service import _tooltip_for_commented_seq_index
+        from backend.management.services.skill.service import _tooltip_for_commented_seq_index
         seq = MagicMock()
         seq.ca = None
         result = _tooltip_for_commented_seq_index(seq, 0)
         assert result is None
 
     def test_index_greater_than_zero_empty_prev_tuple(self):
-        from backend.services.skill_service import _tooltip_for_commented_seq_index
+        from backend.management.services.skill.service import _tooltip_for_commented_seq_index
         seq = MagicMock()
         seq.ca = MagicMock()
         seq.ca.items = {0: None}
@@ -3013,7 +3013,7 @@ class TestWriteSkillParamsWithRealUtils:
     def test_write_params_with_nested_dict(self, mocker):
         with patch('os.makedirs'):
             with patch('builtins.open', mock_open()) as mock_file:
-                with patch('backend.services.skill_service._local_skill_config_yaml_path', return_value="/tmp/skill/config.yaml"):
+                with patch('backend.management.services.skill.service._local_skill_config_yaml_path', return_value="/tmp/skill/config.yaml"):
                     _write_skill_params_to_local_config_yaml(
                         "skill",
                         {"nested": {"key": "value"}},
@@ -3028,11 +3028,11 @@ class TestServiceMethodsAdditionalCoverage:
 
     def test_create_skill_with_empty_params(self, mocker):
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_name',
+            'backend.management.services.skill.service.skill_db.get_skill_by_name',
             return_value=None
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.create_skill',
+            'backend.management.services.skill.service.skill_db.create_skill',
             return_value={"skill_id": 1, "name": "empty_params"}
         )
 
@@ -3049,11 +3049,11 @@ class TestServiceMethodsAdditionalCoverage:
 
     def test_create_skill_saves_to_manager(self, mocker):
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_name',
+            'backend.management.services.skill.service.skill_db.get_skill_by_name',
             return_value=None
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.create_skill',
+            'backend.management.services.skill.service.skill_db.create_skill',
             return_value={"skill_id": 1, "name": "saved_skill"}
         )
 
@@ -3070,15 +3070,15 @@ class TestServiceMethodsAdditionalCoverage:
 
     def test_update_skill_syncs_local_config(self, mocker):
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_name',
+            'backend.management.services.skill.service.skill_db.get_skill_by_name',
             return_value={"skill_id": 1, "name": "sync_skill", "description": "old"}
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.update_skill',
+            'backend.management.services.skill.service.skill_db.update_skill',
             return_value={"skill_id": 1, "name": "sync_skill", "description": "new"}
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_tool_names_by_skill_name',
+            'backend.management.services.skill.service.skill_db.get_tool_names_by_skill_name',
             return_value=[]
         )
 
@@ -3090,22 +3090,22 @@ class TestServiceMethodsAdditionalCoverage:
             service.skill_manager = mock_manager
             service._resolve_local_skills_dir_for_overlay = MagicMock(return_value=TEST_LOCAL_SKILLS_DIR)
 
-            with patch('backend.services.skill_service._write_skill_params_to_local_config_yaml'):
+            with patch('backend.management.services.skill.service._write_skill_params_to_local_config_yaml'):
                 result = service.update_skill("sync_skill", {"params": {"key": "value"}}, tenant_id="test-tenant")
 
         assert result["description"] == "new"
 
     def test_update_skill_without_container_path(self, mocker):
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_name',
+            'backend.management.services.skill.service.skill_db.get_skill_by_name',
             return_value={"skill_id": 1, "name": "no_path"}
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.update_skill',
+            'backend.management.services.skill.service.skill_db.update_skill',
             return_value={"skill_id": 1, "name": "no_path"}
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_tool_names_by_skill_name',
+            'backend.management.services.skill.service.skill_db.get_tool_names_by_skill_name',
             return_value=[]
         )
 
@@ -3212,15 +3212,15 @@ class TestDeleteSkillFilePathTraversal:
         mock_manager.delete_skill_file = MagicMock(return_value=True)
 
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_name',
+            'backend.management.services.skill.service.skill_db.get_skill_by_name',
             return_value={"skill_id": 1, "name": "test_skill"}
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.delete_skill',
+            'backend.management.services.skill.service.skill_db.delete_skill',
             return_value=True
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.delete_skill_instances_by_skill_id',
+            'backend.management.services.skill.service.skill_db.delete_skill_instances_by_skill_id',
             return_value=None
         )
 
@@ -3459,15 +3459,15 @@ description: Updated via ZIP
 # Content""")
 
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_name',
+            'backend.management.services.skill.service.skill_db.get_skill_by_name',
             return_value={"skill_id": 1, "name": "zip_update"}
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.update_skill',
+            'backend.management.services.skill.service.skill_db.update_skill',
             return_value={"skill_id": 1, "name": "zip_update"}
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_tool_names_by_skill_name',
+            'backend.management.services.skill.service.skill_db.get_tool_names_by_skill_name',
             return_value=[]
         )
 
@@ -3490,15 +3490,15 @@ class TestSkillServiceUpdateFromFileStringInput:
     def test_string_input(self, mocker):
         """Test string input handling in update."""
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_name',
+            'backend.management.services.skill.service.skill_db.get_skill_by_name',
             return_value={"skill_id": 1, "name": "existing"}
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.update_skill',
+            'backend.management.services.skill.service.skill_db.update_skill',
             return_value={"skill_id": 1, "name": "existing"}
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_tool_names_by_skill_name',
+            'backend.management.services.skill.service.skill_db.get_tool_names_by_skill_name',
             return_value=[]
         )
 
@@ -3533,15 +3533,15 @@ description: Root level SKILL.md
 # Content""")
 
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_name',
+            'backend.management.services.skill.service.skill_db.get_skill_by_name',
             return_value=None
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.create_skill',
+            'backend.management.services.skill.service.skill_db.create_skill',
             return_value={"skill_id": 1, "name": "root_skill"}
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_tool_ids_by_names',
+            'backend.management.services.skill.service.skill_db.get_tool_ids_by_names',
             return_value=[]
         )
 
@@ -3576,19 +3576,19 @@ allowed-tools:
 # Content""")
 
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_name',
+            'backend.management.services.skill.service.skill_db.get_skill_by_name',
             return_value={"skill_id": 1, "name": "skill"}
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.update_skill',
+            'backend.management.services.skill.service.skill_db.update_skill',
             return_value={"skill_id": 1, "name": "skill"}
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_tool_ids_by_names',
+            'backend.management.services.skill.service.skill_db.get_tool_ids_by_names',
             return_value=[1]
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_tool_names_by_skill_name',
+            'backend.management.services.skill.service.skill_db.get_tool_names_by_skill_name',
             return_value=["tool1"]
         )
 
@@ -3621,15 +3621,15 @@ description: Updated
             zf.writestr("skill/config/config.yaml", "key: value")
 
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_name',
+            'backend.management.services.skill.service.skill_db.get_skill_by_name',
             return_value={"skill_id": 1, "name": "skill"}
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.update_skill',
+            'backend.management.services.skill.service.skill_db.update_skill',
             return_value={"skill_id": 1, "name": "skill", "params": {"key": "value"}}
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_tool_names_by_skill_name',
+            'backend.management.services.skill.service.skill_db.get_tool_names_by_skill_name',
             return_value=[]
         )
 
@@ -3661,15 +3661,15 @@ description: Renamed skill
 # Content""")
 
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_name',
+            'backend.management.services.skill.service.skill_db.get_skill_by_name',
             return_value=None
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.create_skill',
+            'backend.management.services.skill.service.skill_db.create_skill',
             return_value={"skill_id": 1, "name": "new_name"}
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_tool_ids_by_names',
+            'backend.management.services.skill.service.skill_db.get_tool_ids_by_names',
             return_value=[]
         )
 
@@ -3697,15 +3697,15 @@ class TestSkillServiceUpdateFromZipEmptyContent:
             zf.writestr("skill/README.md", "# Readme")
 
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_name',
+            'backend.management.services.skill.service.skill_db.get_skill_by_name',
             return_value={"skill_id": 1, "name": "skill"}
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.update_skill',
+            'backend.management.services.skill.service.skill_db.update_skill',
             return_value={"skill_id": 1, "name": "skill"}
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_tool_names_by_skill_name',
+            'backend.management.services.skill.service.skill_db.get_tool_names_by_skill_name',
             return_value=[]
         )
 
@@ -3728,7 +3728,7 @@ class TestSkillServiceCreateFromMdWithInvalidParse:
     def test_create_md_invalid_parse_raises(self, mocker):
         """Test MD creation with invalid parse raises exception."""
         mocker.patch(
-            'backend.services.skill_service.SkillLoader.parse',
+            'backend.management.services.skill.service.SkillLoader.parse',
             side_effect=ValueError("Invalid YAML syntax")
         )
 
@@ -3752,15 +3752,15 @@ class TestSkillServiceCreateFromMdWithUserId:
     def test_create_md_with_user_id(self, mocker):
         """Test MD creation sets created_by and updated_by."""
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_name',
+            'backend.management.services.skill.service.skill_db.get_skill_by_name',
             return_value=None
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.create_skill',
+            'backend.management.services.skill.service.skill_db.create_skill',
             return_value={"skill_id": 1, "name": "user_skill"}
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_tool_ids_by_names',
+            'backend.management.services.skill.service.skill_db.get_tool_ids_by_names',
             return_value=[]
         )
 
@@ -3796,15 +3796,15 @@ description: With user
 # Content""")
 
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_name',
+            'backend.management.services.skill.service.skill_db.get_skill_by_name',
             return_value=None
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.create_skill',
+            'backend.management.services.skill.service.skill_db.create_skill',
             return_value={"skill_id": 1, "name": "skill"}
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_tool_ids_by_names',
+            'backend.management.services.skill.service.skill_db.get_tool_ids_by_names',
             return_value=[]
         )
 
@@ -3827,15 +3827,15 @@ class TestSkillServiceUpdateFromMdWithUserId:
     def test_update_md_with_user_id(self, mocker):
         """Test MD update sets updated_by."""
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_name',
+            'backend.management.services.skill.service.skill_db.get_skill_by_name',
             return_value={"skill_id": 1, "name": "existing"}
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.update_skill',
+            'backend.management.services.skill.service.skill_db.update_skill',
             return_value={"skill_id": 1, "name": "existing"}
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_tool_ids_by_names',
+            'backend.management.services.skill.service.skill_db.get_tool_ids_by_names',
             return_value=[]
         )
 
@@ -3871,15 +3871,15 @@ description: Updated
 # Content""")
 
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_name',
+            'backend.management.services.skill.service.skill_db.get_skill_by_name',
             return_value={"skill_id": 1, "name": "skill"}
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.update_skill',
+            'backend.management.services.skill.service.skill_db.update_skill',
             return_value={"skill_id": 1, "name": "skill"}
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_tool_names_by_skill_name',
+            'backend.management.services.skill.service.skill_db.get_tool_names_by_skill_name',
             return_value=[]
         )
 
@@ -3929,12 +3929,12 @@ description: Some content
 # Content""")
 
         mocker.patch(
-            'backend.services.skill_service.SkillLoader.parse',
+            'backend.management.services.skill.service.SkillLoader.parse',
             side_effect=ValueError("Invalid YAML syntax")
         )
 
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_name',
+            'backend.management.services.skill.service.skill_db.get_skill_by_name',
             return_value=None
         )
 
@@ -3958,15 +3958,15 @@ class TestSkillServiceDeleteWithLocalDir:
     def test_delete_with_existing_local_dir(self, mocker):
         """Test deletion removes local directory."""
         mocker.patch(
-            'backend.services.skill_service.skill_db.delete_skill',
+            'backend.management.services.skill.service.skill_db.delete_skill',
             return_value=True
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.delete_skill_instances_by_skill_id',
+            'backend.management.services.skill.service.skill_db.delete_skill_instances_by_skill_id',
             return_value=None
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_name',
+            'backend.management.services.skill.service.skill_db.get_skill_by_name',
             return_value={"skill_id": 1, "name": "to_delete"}
         )
 
@@ -3990,15 +3990,15 @@ class TestSkillServiceDeleteWithNoLocalDir:
     def test_delete_without_local_dir(self, mocker):
         """Test deletion works without local directory."""
         mocker.patch(
-            'backend.services.skill_service.skill_db.delete_skill',
+            'backend.management.services.skill.service.skill_db.delete_skill',
             return_value=True
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.delete_skill_instances_by_skill_id',
+            'backend.management.services.skill.service.skill_db.delete_skill_instances_by_skill_id',
             return_value=None
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_name',
+            'backend.management.services.skill.service.skill_db.get_skill_by_name',
             return_value={"skill_id": 1, "name": "to_delete"}
         )
 
@@ -4021,13 +4021,13 @@ class TestSkillServiceGetEnabledSkillsForAgentWithToolIds:
     def test_get_enabled_skills_with_tool_ids(self, mocker):
         """Test getting enabled skills returns tool_ids."""
         mocker.patch(
-            'backend.services.skill_service.skill_db.search_skills_for_agent',
+            'backend.management.services.skill.service.skill_db.search_skills_for_agent',
             return_value=[
                 {"skill_instance_id": 1, "skill_id": 1, "enabled": True}
             ]
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_id',
+            'backend.management.services.skill.service.skill_db.get_skill_by_id',
             return_value={
                 "name": "skill1",
                 "description": "Desc",
@@ -4053,13 +4053,13 @@ class TestSkillServiceBuildSkillsSummaryWithAgentId:
     def test_build_summary_with_agent_id(self, mocker):
         """Test building summary with agent_id uses agent skills."""
         mocker.patch(
-            'backend.services.skill_service.skill_db.search_skills_for_agent',
+            'backend.management.services.skill.service.skill_db.search_skills_for_agent',
             return_value=[
                 {"skill_instance_id": 1, "skill_id": 1, "enabled": True}
             ]
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_id',
+            'backend.management.services.skill.service.skill_db.get_skill_by_id',
             return_value={
                 "name": "agent_skill",
                 "description": "Agent skill",
@@ -4067,7 +4067,7 @@ class TestSkillServiceBuildSkillsSummaryWithAgentId:
             }
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.list_skills',
+            'backend.management.services.skill.service.skill_db.list_skills',
             return_value=[]
         )
 
@@ -4088,13 +4088,13 @@ class TestSkillServiceBuildSkillsSummaryWithNoneDescriptions:
     def test_build_summary_with_none_description(self, mocker):
         """Test building summary handles None descriptions."""
         mocker.patch(
-            'backend.services.skill_service.skill_db.list_skills',
+            'backend.management.services.skill.service.skill_db.list_skills',
             return_value=[
                 {"name": "skill1", "description": None}
             ]
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.search_skills_for_agent',
+            'backend.management.services.skill.service.skill_db.search_skills_for_agent',
             return_value=[]
         )
 
@@ -4112,15 +4112,15 @@ class TestSkillServiceUpdateSkillWithExistingTags:
     def test_update_skill_preserves_existing_tags(self, mocker):
         """Test update_skill preserves existing tags when not provided."""
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_name',
+            'backend.management.services.skill.service.skill_db.get_skill_by_name',
             return_value={"skill_id": 1, "name": "existing", "tags": ["tag1", "tag2"]}
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.update_skill',
+            'backend.management.services.skill.service.skill_db.update_skill',
             return_value={"skill_id": 1, "name": "existing", "tags": ["tag1", "tag2"]}
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_tool_names_by_skill_name',
+            'backend.management.services.skill.service.skill_db.get_tool_names_by_skill_name',
             return_value=[]
         )
 
@@ -4143,15 +4143,15 @@ class TestSkillServiceUpdateSkillWithExistingContent:
     def test_update_skill_preserves_existing_content(self, mocker):
         """Test update_skill preserves existing content when not provided."""
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_name',
+            'backend.management.services.skill.service.skill_db.get_skill_by_name',
             return_value={"skill_id": 1, "name": "existing", "content": "# Original content"}
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.update_skill',
+            'backend.management.services.skill.service.skill_db.update_skill',
             return_value={"skill_id": 1, "name": "existing", "content": "# Original content"}
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_tool_names_by_skill_name',
+            'backend.management.services.skill.service.skill_db.get_tool_names_by_skill_name',
             return_value=[]
         )
 
@@ -4174,15 +4174,15 @@ class TestSkillServiceUpdateSkillWithFiles:
     def test_update_skill_with_files(self, mocker):
         """Test update_skill passes files to manager."""
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_name',
+            'backend.management.services.skill.service.skill_db.get_skill_by_name',
             return_value={"skill_id": 1, "name": "existing"}
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.update_skill',
+            'backend.management.services.skill.service.skill_db.update_skill',
             return_value={"skill_id": 1, "name": "existing"}
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_tool_names_by_skill_name',
+            'backend.management.services.skill.service.skill_db.get_tool_names_by_skill_name',
             return_value=[]
         )
 
@@ -4206,11 +4206,11 @@ class TestSkillServiceCreateSkillWithLocalParamsWriteError:
     def test_create_skill_local_write_error_logs_warning(self, mocker):
         """Test create_skill logs warning on local params write error."""
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_name',
+            'backend.management.services.skill.service.skill_db.get_skill_by_name',
             return_value=None
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.create_skill',
+            'backend.management.services.skill.service.skill_db.create_skill',
             return_value={"skill_id": 1, "name": "error_skill"}
         )
 
@@ -4222,7 +4222,7 @@ class TestSkillServiceCreateSkillWithLocalParamsWriteError:
         service._resolve_local_skills_dir_for_overlay = MagicMock(return_value=TEST_LOCAL_SKILLS_DIR)
 
         with patch('os.path.exists', return_value=False):
-            with patch('backend.services.skill_service._write_skill_params_to_local_config_yaml',
+            with patch('backend.management.services.skill.service._write_skill_params_to_local_config_yaml',
                       side_effect=Exception("Write error")):
                 result = service.create_skill({
                     "name": "error_skill",
@@ -4238,15 +4238,15 @@ class TestSkillServiceUpdateSkillParamsWriteError:
     def test_update_skill_params_write_error(self, mocker):
         """Test update_skill logs warning on params write error."""
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_name',
+            'backend.management.services.skill.service.skill_db.get_skill_by_name',
             return_value={"skill_id": 1, "name": "existing"}
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.update_skill',
+            'backend.management.services.skill.service.skill_db.update_skill',
             return_value={"skill_id": 1, "name": "existing"}
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_tool_names_by_skill_name',
+            'backend.management.services.skill.service.skill_db.get_tool_names_by_skill_name',
             return_value=[]
         )
 
@@ -4258,7 +4258,7 @@ class TestSkillServiceUpdateSkillParamsWriteError:
             service = SkillService(tenant_id="test-tenant")
             service.skill_manager = mock_manager
 
-            with patch('backend.services.skill_service._write_skill_params_to_local_config_yaml',
+            with patch('backend.management.services.skill.service._write_skill_params_to_local_config_yaml',
                       side_effect=Exception("Write error")):
                 result = service.update_skill("existing", {"params": {"key": "value"}}, tenant_id="test-tenant")
 
@@ -4271,15 +4271,15 @@ class TestSkillServiceUpdateSkillSaveSkillError:
     def test_update_skill_save_error(self, mocker):
         """Test update_skill logs warning on save_skill error."""
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_name',
+            'backend.management.services.skill.service.skill_db.get_skill_by_name',
             return_value={"skill_id": 1, "name": "existing"}
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.update_skill',
+            'backend.management.services.skill.service.skill_db.update_skill',
             return_value={"skill_id": 1, "name": "existing"}
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_tool_names_by_skill_name',
+            'backend.management.services.skill.service.skill_db.get_tool_names_by_skill_name',
             return_value=[]
         )
 
@@ -4303,11 +4303,11 @@ class TestSkillServiceDeleteError:
     def test_delete_skill_error(self, mocker):
         """Test delete_skill raises exception on error."""
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_name',
+            'backend.management.services.skill.service.skill_db.get_skill_by_name',
             return_value={"skill_id": 1, "name": "to_delete"}
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.delete_skill',
+            'backend.management.services.skill.service.skill_db.delete_skill',
             side_effect=Exception("DB error")
         )
 
@@ -4358,19 +4358,19 @@ class TestSkillServiceUpdateFromFileWithTenantId:
     def test_update_with_tenant_id(self, mocker):
         """Test update passes tenant_id to tool lookup."""
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_name',
+            'backend.management.services.skill.service.skill_db.get_skill_by_name',
             return_value={"skill_id": 1, "name": "existing"}
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.update_skill',
+            'backend.management.services.skill.service.skill_db.update_skill',
             return_value={"skill_id": 1, "name": "existing"}
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_tool_ids_by_names',
+            'backend.management.services.skill.service.skill_db.get_tool_ids_by_names',
             return_value=[1]
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_tool_names_by_skill_name',
+            'backend.management.services.skill.service.skill_db.get_tool_names_by_skill_name',
             return_value=["tool1"]
         )
 
@@ -4410,15 +4410,15 @@ allowed-tools:
 # Content""")
 
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_name',
+            'backend.management.services.skill.service.skill_db.get_skill_by_name',
             return_value=None
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.create_skill',
+            'backend.management.services.skill.service.skill_db.create_skill',
             return_value={"skill_id": 1, "name": "skill"}
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_tool_ids_by_names',
+            'backend.management.services.skill.service.skill_db.get_tool_ids_by_names',
             return_value=[1]
         )
 
@@ -4537,7 +4537,7 @@ class TestSkillServiceGetEnabledSkillsForAgentError:
     def test_get_enabled_skills_error(self, mocker):
         """Test getting enabled skills with error."""
         mocker.patch(
-            'backend.services.skill_service.skill_db.search_skills_for_agent',
+            'backend.management.services.skill.service.skill_db.search_skills_for_agent',
             side_effect=Exception("DB error")
         )
 
@@ -4556,7 +4556,7 @@ class TestSkillServiceBuildSkillsSummaryError:
     def test_build_summary_list_error(self, mocker):
         """Test building summary with list error."""
         mocker.patch(
-            'backend.services.skill_service.skill_db.list_skills',
+            'backend.management.services.skill.service.skill_db.list_skills',
             side_effect=Exception("DB error")
         )
 
@@ -4576,7 +4576,7 @@ class TestSkillServiceGetSkillContentError:
     def test_get_content_error(self, mocker):
         """Test getting content with error."""
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_name',
+            'backend.management.services.skill.service.skill_db.get_skill_by_name',
             side_effect=Exception("DB error")
         )
 
@@ -4835,7 +4835,7 @@ class TestUploadZipFilesWithZipError:
         service = SkillService()
         service.skill_manager = mock_manager
 
-        with patch("backend.services.skill_service.CONTAINER_SKILLS_PATH", str(tmp_path)):
+        with patch("backend.management.services.skill.service.CONTAINER_SKILLS_PATH", str(tmp_path)):
             service._upload_zip_files(
                 zip_buffer.getvalue(),
                 "new-skill copy",
@@ -4863,7 +4863,7 @@ class TestUploadZipFilesWithZipError:
         service = SkillService()
         service.skill_manager = mock_manager
 
-        with patch("backend.services.skill_service.CONTAINER_SKILLS_PATH", str(tmp_path)):
+        with patch("backend.management.services.skill.service.CONTAINER_SKILLS_PATH", str(tmp_path)):
             service._upload_zip_files(
                 zip_buffer.getvalue(),
                 "new-skill",
@@ -4903,7 +4903,7 @@ class TestSkillServiceExportSkillsByNames:
     def test_export_skips_missing_local_dir_without_db_record(self, tmp_path, mocker):
         """Test export skips a missing local skill when no DB snapshot exists."""
         mocker.patch(
-            "backend.services.skill_service.skill_db.get_skill_by_name",
+            "backend.management.services.skill.service.skill_db.get_skill_by_name",
             return_value=None,
         )
 
@@ -4933,7 +4933,7 @@ class TestSkillServiceExportSkillsByNames:
                 return skill_data
 
         mocker.patch(
-            "backend.services.skill_service.skill_db.get_skill_by_name",
+            "backend.management.services.skill.service.skill_db.get_skill_by_name",
             return_value={
                 "name": "missing-skill",
                 "description": "desc",
@@ -4956,7 +4956,7 @@ class TestSkillServiceExportSkillsByNames:
     def test_export_skips_when_db_rebuild_does_not_create_local_dir(self, tmp_path, mocker):
         """Test export skips when rebuilding from DB does not create local files."""
         mocker.patch(
-            "backend.services.skill_service.skill_db.get_skill_by_name",
+            "backend.management.services.skill.service.skill_db.get_skill_by_name",
             return_value={
                 "name": "missing-skill",
                 "description": "desc",
@@ -4983,7 +4983,7 @@ class TestParamsDictToStorableWithInvalidData:
 
     def test_invalid_data_raises(self):
         """Test invalid data raises exception."""
-        from backend.services.skill_service import _params_dict_to_storable
+        from backend.management.services.skill.service import _params_dict_to_storable
 
         class BadJson:
             def __repr__(self):
@@ -5003,7 +5003,7 @@ class TestSkillServiceOverlayParamsWithReadError:
     def test_overlay_params_read_error(self, mocker):
         """Test enrich with read error still returns skill data."""
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_name',
+            'backend.management.services.skill.service.skill_db.get_skill_by_name',
             return_value={"name": "test_skill", "params": {"db_key": "db_value"}}
         )
 
@@ -5060,7 +5060,7 @@ class TestGetSkillManagerWithPath:
         """Test get_skill_manager creates with CONTAINER_SKILLS_PATH."""
         skill_service._skill_manager = None
 
-        with patch('backend.services.skill_service.SkillManager') as mock_manager:
+        with patch('backend.management.services.skill.service.SkillManager') as mock_manager:
             with patch.object(skill_service, 'CONTAINER_SKILLS_PATH', '/custom/path'):
                 manager = get_skill_manager()
                 mock_manager.assert_called_once_with(base_skills_dir='/custom/path')
@@ -5074,11 +5074,11 @@ class TestSkillServiceCreateSkillErrorPaths:
     def test_create_skill_db_error(self, mocker):
         """Test create_skill handles DB error."""
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_name',
+            'backend.management.services.skill.service.skill_db.get_skill_by_name',
             return_value=None
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.create_skill',
+            'backend.management.services.skill.service.skill_db.create_skill',
             side_effect=Exception("DB error")
         )
 
@@ -5132,7 +5132,7 @@ description: Exists
 # Content""")
 
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_name',
+            'backend.management.services.skill.service.skill_db.get_skill_by_name',
             return_value={"name": "existing_skill", "skill_id": 1}
         )
 
@@ -5156,7 +5156,7 @@ class TestSkillServiceUpdateSkillFromFileNotFound:
     def test_update_from_file_not_found(self, mocker):
         """Test update_skill_from_file raises when skill not found."""
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_name',
+            'backend.management.services.skill.service.skill_db.get_skill_by_name',
             return_value=None
         )
 
@@ -5176,12 +5176,12 @@ class TestSkillServiceUpdateFromMdInvalidParse:
     def test_update_md_invalid_parse_raises(self, mocker):
         """Test update from MD with invalid parse raises exception."""
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_name',
+            'backend.management.services.skill.service.skill_db.get_skill_by_name',
             return_value={"skill_id": 1, "name": "existing"}
         )
 
         mocker.patch(
-            'backend.services.skill_service.SkillLoader.parse',
+            'backend.management.services.skill.service.SkillLoader.parse',
             side_effect=ValueError("Invalid YAML")
         )
 
@@ -5204,7 +5204,7 @@ class TestSkillServiceUpdateFromZipNotFound:
     def test_update_zip_not_found(self, mocker):
         """Test ZIP update raises when skill not found."""
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_name',
+            'backend.management.services.skill.service.skill_db.get_skill_by_name',
             return_value=None
         )
 
@@ -5232,13 +5232,13 @@ class TestSkillServiceGetEnabledSkillsWithEmptyRepo:
     def test_get_enabled_skills_empty_repo(self, mocker):
         """Test getting enabled skills when skill not in repository."""
         mocker.patch(
-            'backend.services.skill_service.skill_db.search_skills_for_agent',
+            'backend.management.services.skill.service.skill_db.search_skills_for_agent',
             return_value=[
                 {"skill_instance_id": 1, "skill_id": 999, "enabled": True}
             ]
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_id',
+            'backend.management.services.skill.service.skill_db.get_skill_by_id',
             return_value=None
         )
 
@@ -5258,13 +5258,13 @@ class TestSkillServiceGetEnabledSkillsWithDisabledSkill:
     def test_get_enabled_skills_disabled(self, mocker):
         """Test getting enabled skills when skill is disabled."""
         mocker.patch(
-            'backend.services.skill_service.skill_db.search_skills_for_agent',
+            'backend.management.services.skill.service.skill_db.search_skills_for_agent',
             return_value=[
                 {"skill_instance_id": 1, "skill_id": 1, "enabled": False}
             ]
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_id',
+            'backend.management.services.skill.service.skill_db.get_skill_by_id',
             return_value={
                 "name": "disabled_skill",
                 "description": "Desc",
@@ -5290,14 +5290,14 @@ class TestSkillServiceBuildSummaryWithAgentAndWhitelist:
     def test_build_summary_with_agent_and_whitelist(self, mocker):
         """Test building summary filters agent skills by whitelist."""
         mocker.patch(
-            'backend.services.skill_service.skill_db.search_skills_for_agent',
+            'backend.management.services.skill.service.skill_db.search_skills_for_agent',
             return_value=[
                 {"skill_instance_id": 1, "skill_id": 1, "enabled": True},
                 {"skill_instance_id": 2, "skill_id": 2, "enabled": True}
             ]
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_id',
+            'backend.management.services.skill.service.skill_db.get_skill_by_id',
             side_effect=lambda skill_id, tenant_id=None: {
                 1: {"name": "skill1", "description": "Desc 1"},
                 2: {"name": "skill2", "description": "Desc 2"}
@@ -5323,13 +5323,13 @@ class TestSkillServiceBuildSummaryWithAgentNoSkillFound:
     def test_build_summary_agent_skill_not_found(self, mocker):
         """Test building summary handles missing agent skill."""
         mocker.patch(
-            'backend.services.skill_service.skill_db.search_skills_for_agent',
+            'backend.management.services.skill.service.skill_db.search_skills_for_agent',
             return_value=[
                 {"skill_instance_id": 1, "skill_id": 999, "enabled": True}
             ]
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_id',
+            'backend.management.services.skill.service.skill_db.get_skill_by_id',
             return_value=None
         )
 
@@ -5349,15 +5349,15 @@ class TestSkillServiceUpdateSkillLocalWriteError:
     def test_update_skill_local_write_error(self, mocker):
         """Test update_skill handles local write error gracefully."""
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_name',
+            'backend.management.services.skill.service.skill_db.get_skill_by_name',
             return_value={"skill_id": 1, "name": "existing"}
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.update_skill',
+            'backend.management.services.skill.service.skill_db.update_skill',
             return_value={"skill_id": 1, "name": "existing"}
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_tool_names_by_skill_name',
+            'backend.management.services.skill.service.skill_db.get_tool_names_by_skill_name',
             return_value=[]
         )
 
@@ -5369,7 +5369,7 @@ class TestSkillServiceUpdateSkillLocalWriteError:
             service = SkillService(tenant_id="test-tenant")
             service.skill_manager = mock_manager
 
-            with patch('backend.services.skill_service._write_skill_params_to_local_config_yaml',
+            with patch('backend.management.services.skill.service._write_skill_params_to_local_config_yaml',
                       side_effect=Exception("Write error")):
                 result = service.update_skill("existing", {"params": {"key": "value"}}, tenant_id="test-tenant")
 
@@ -5382,15 +5382,15 @@ class TestSkillServiceDeleteSkillRmtreeError:
     def test_delete_skill_rmtree_error(self, mocker):
         """Test delete_skill handles rmtree error."""
         mocker.patch(
-            'backend.services.skill_service.skill_db.delete_skill',
+            'backend.management.services.skill.service.skill_db.delete_skill',
             return_value=True
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.delete_skill_instances_by_skill_id',
+            'backend.management.services.skill.service.skill_db.delete_skill_instances_by_skill_id',
             return_value=None
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_name',
+            'backend.management.services.skill.service.skill_db.get_skill_by_name',
             return_value={"skill_id": 1, "name": "to_delete"}
         )
 
@@ -5417,21 +5417,21 @@ class TestParseSkillParamsNonDictData:
 
     def test_parse_params_with_list_data(self):
         """Test that list data raises SkillException."""
-        from backend.services.skill_service import _parse_skill_params_from_config_bytes
+        from backend.management.services.skill.service import _parse_skill_params_from_config_bytes
         raw = b"[param1, param2]"
         with pytest.raises(Exception):
             _parse_skill_params_from_config_bytes(raw)
 
     def test_parse_params_with_string_data(self):
         """Test that string data raises SkillException."""
-        from backend.services.skill_service import _parse_skill_params_from_config_bytes
+        from backend.management.services.skill.service import _parse_skill_params_from_config_bytes
         raw = b"just a string"
         with pytest.raises(Exception):
             _parse_skill_params_from_config_bytes(raw)
 
     def test_parse_params_with_non_dict_meta(self):
         """Test that non-dict meta values are included in result."""
-        from backend.services.skill_service import _parse_skill_params_from_config_bytes
+        from backend.management.services.skill.service import _parse_skill_params_from_config_bytes
         raw = b'{"param1": "string instead of dict", "param2": 123}'
         result = _parse_skill_params_from_config_bytes(raw)
         # Non-dict meta values are included with type "string" or "number"
@@ -5443,13 +5443,13 @@ class TestFindZipMemberSchemaYaml:
 
     def test_find_schema_yaml_root(self):
         """Test finding schema.yaml in root."""
-        from backend.services.skill_service import _find_zip_member_schema_yaml
+        from backend.management.services.skill.service import _find_zip_member_schema_yaml
         result = _find_zip_member_schema_yaml(["config/schema.yaml", "file.md"])
         assert result == "config/schema.yaml"
 
     def test_find_schema_yaml_nested(self):
         """Test finding schema.yaml in nested folder."""
-        from backend.services.skill_service import _find_zip_member_schema_yaml
+        from backend.management.services.skill.service import _find_zip_member_schema_yaml
         result = _find_zip_member_schema_yaml(
             ["my_skill/config/schema.yaml", "other/file.md"],
             preferred_skill_root="my_skill"
@@ -5458,14 +5458,14 @@ class TestFindZipMemberSchemaYaml:
 
     def test_find_schema_yaml_case_insensitive(self):
         """Test finding schema.yaml uses correct case (must be 'config' and 'schema.yaml')."""
-        from backend.services.skill_service import _find_zip_member_schema_yaml
+        from backend.management.services.skill.service import _find_zip_member_schema_yaml
         # The function uses case-sensitive comparison for "config" and "schema.yaml"
         result = _find_zip_member_schema_yaml(["My_Skill/config/schema.yaml"])
         assert result == "My_Skill/config/schema.yaml"
 
     def test_find_schema_yaml_not_found(self):
         """Test when schema.yaml is not found."""
-        from backend.services.skill_service import _find_zip_member_schema_yaml
+        from backend.management.services.skill.service import _find_zip_member_schema_yaml
         result = _find_zip_member_schema_yaml(["file.md", "script.py"])
         assert result is None
 
@@ -5481,7 +5481,7 @@ class TestSkillServiceBuildSummaryWithDescriptionFallback:
     def test_build_summary_with_only_description(self, mocker):
         """Test building summary uses 'description' when 'description_en' is missing."""
         mocker.patch(
-            'backend.services.skill_service.skill_db.list_skills',
+            'backend.management.services.skill.service.skill_db.list_skills',
             return_value=[{
                 "skill_id": 1,
                 "name": "test_skill",
@@ -5502,7 +5502,7 @@ class TestSkillServiceGetSkillWithTagEnrichment:
     def test_get_skill_with_tags(self, mocker):
         """Test that get_skill returns tags when available."""
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_name',
+            'backend.management.services.skill.service.skill_db.get_skill_by_name',
             return_value={
                 "skill_id": 1,
                 "name": "test_skill",
@@ -5523,7 +5523,7 @@ class TestSkillServiceBuildSummaryXmlEscaping:
     def test_build_summary_with_xml_chars(self, mocker):
         """Test that XML special chars are escaped."""
         mocker.patch(
-            'backend.services.skill_service.skill_db.list_skills',
+            'backend.management.services.skill.service.skill_db.list_skills',
             return_value=[{
                 "skill_id": 1,
                 "name": "test&skill",
@@ -5544,7 +5544,7 @@ class TestSkillServiceGetSkillContentWithContent:
     def test_get_content_with_content(self, mocker):
         """Test get_skill_content returns content when found."""
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_name',
+            'backend.management.services.skill.service.skill_db.get_skill_by_name',
             return_value={
                 "skill_id": 1,
                 "name": "test_skill",
@@ -5564,7 +5564,7 @@ class TestSkillServiceListSkillsWithTenant:
     def test_list_skills_with_tenant_param(self, mocker):
         """Test list_skills uses explicit tenant_id parameter."""
         mock_list = mocker.patch(
-            'backend.services.skill_service.skill_db.list_skills',
+            'backend.management.services.skill.service.skill_db.list_skills',
             return_value=[{"skill_id": 1, "name": "skill1"}]
         )
 
@@ -5581,7 +5581,7 @@ class TestSkillServiceUpdateSkillWithExistingData:
     def test_update_skill_preserves_fields(self, mocker):
         """Test that update_skill preserves existing skill fields."""
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_name',
+            'backend.management.services.skill.service.skill_db.get_skill_by_name',
             return_value={
                 "skill_id": 1,
                 "name": "existing_skill",
@@ -5592,11 +5592,11 @@ class TestSkillServiceUpdateSkillWithExistingData:
             }
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.update_skill',
+            'backend.management.services.skill.service.skill_db.update_skill',
             return_value={"skill_id": 1, "name": "existing_skill"}
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_tool_names_by_skill_name',
+            'backend.management.services.skill.service.skill_db.get_tool_names_by_skill_name',
             return_value=[]
         )
 
@@ -5618,15 +5618,15 @@ class TestSkillServiceDeleteSkillWithTenant:
     def test_delete_skill_with_tenant_param(self, mocker):
         """Test delete_skill uses explicit tenant_id parameter."""
         mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_name',
+            'backend.management.services.skill.service.skill_db.get_skill_by_name',
             return_value={"skill_id": 1, "name": "to_delete"}
         )
         mock_delete = mocker.patch(
-            'backend.services.skill_service.skill_db.delete_skill',
+            'backend.management.services.skill.service.skill_db.delete_skill',
             return_value=True
         )
         mocker.patch(
-            'backend.services.skill_service.skill_db.delete_skill_instances_by_skill_id',
+            'backend.management.services.skill.service.skill_db.delete_skill_instances_by_skill_id',
             return_value=None
         )
 
@@ -5643,7 +5643,7 @@ class TestSkillServiceGetSkillByIdWithTenant:
     def test_get_skill_by_id_with_tenant_param(self, mocker):
         """Test get_skill_by_id uses explicit tenant_id parameter."""
         mock_get = mocker.patch(
-            'backend.services.skill_service.skill_db.get_skill_by_id',
+            'backend.management.services.skill.service.skill_db.get_skill_by_id',
             return_value={"skill_id": 5, "name": "found_skill"}
         )
 
@@ -5675,10 +5675,10 @@ class TestUpdateSkillListAsync:
         mock_skill_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
         mock_skill_manager.resolve_tenant_dir.return_value = TEST_LOCAL_SKILLS_DIR
 
-        with patch('backend.services.skill_service.get_skill_manager', return_value=mock_skill_manager), \
-                patch('backend.services.skill_service.SkillManager', return_value=mock_skill_manager), \
-                patch('backend.services.skill_service.CONTAINER_SKILLS_PATH', TEST_LOCAL_SKILLS_DIR), \
-                patch('backend.services.skill_service.skill_db.upsert_scanned_skills', create=True) as mock_upsert:
+        with patch('backend.management.services.skill.service.get_skill_manager', return_value=mock_skill_manager), \
+                patch('backend.management.services.skill.service.SkillManager', return_value=mock_skill_manager), \
+                patch('backend.management.services.skill.service.CONTAINER_SKILLS_PATH', TEST_LOCAL_SKILLS_DIR), \
+                patch('backend.management.services.skill.service.skill_db.upsert_scanned_skills', create=True) as mock_upsert:
             await skill_service.update_skill_list(
                 tenant_id="test-tenant",
                 user_id="test-user"
@@ -5706,9 +5706,9 @@ class TestUpdateSkillListAsync:
         mock_skill_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
         mock_skill_manager.resolve_tenant_dir.return_value = TEST_LOCAL_SKILLS_DIR
 
-        with patch('backend.services.skill_service.get_skill_manager', return_value=mock_skill_manager), \
-                patch('backend.services.skill_service.SkillManager', return_value=mock_skill_manager), \
-                patch('backend.services.skill_service.CONTAINER_SKILLS_PATH', TEST_LOCAL_SKILLS_DIR), \
+        with patch('backend.management.services.skill.service.get_skill_manager', return_value=mock_skill_manager), \
+                patch('backend.management.services.skill.service.SkillManager', return_value=mock_skill_manager), \
+                patch('backend.management.services.skill.service.CONTAINER_SKILLS_PATH', TEST_LOCAL_SKILLS_DIR), \
                 patch('os.path.isfile', return_value=False), \
                 patch('os.path.isdir', return_value=False), \
                 patch('database.skill_db.upsert_scanned_skills', create=True) as mock_upsert:
@@ -5729,7 +5729,7 @@ class TestInitSkillListForTenantAsync:
         from backend.services import skill_service
 
         mock_update = mocker.patch(
-            'backend.services.skill_service.update_skill_list',
+            'backend.management.services.skill.service.update_skill_list',
             return_value=None
         )
 
@@ -5749,7 +5749,7 @@ class TestSkillServiceUpdateById:
     def test_rejects_access_change_from_group_editor(self, mocker):
         service = SkillService(tenant_id="tenant-1")
         mocker.patch(
-            "backend.services.skill_service.skill_db.get_skill_by_id",
+            "backend.management.services.skill.service.skill_db.get_skill_by_id",
             return_value={
                 "skill_id": 1,
                 "name": "Skill A",
@@ -5758,9 +5758,9 @@ class TestSkillServiceUpdateById:
                 "ingroup_permission": "EDIT",
             },
         )
-        mocker.patch("backend.services.skill_service._can_edit_skill", return_value=True)
+        mocker.patch("backend.management.services.skill.service._can_edit_skill", return_value=True)
         mocker.patch(
-            "backend.services.skill_service.get_user_tenant_by_user_id",
+            "backend.management.services.skill.service.get_user_tenant_by_user_id",
             return_value={"user_role": "DEV"},
         )
 
@@ -5773,7 +5773,7 @@ class TestSkillServiceUpdateById:
     def test_rejects_non_creator(self, mocker):
         service = SkillService(tenant_id="tenant-1")
         mocker.patch(
-            "backend.services.skill_service.skill_db.get_skill_by_id",
+            "backend.management.services.skill.service.skill_db.get_skill_by_id",
             return_value={
                 "skill_id": 1,
                 "name": "Skill A",
@@ -5798,12 +5798,12 @@ class TestSkillServiceUpdateById:
         service.skill_manager.resolve_tenant_dir.return_value = str(tmp_path)
         (tmp_path / "Skill A").mkdir()
         mocker.patch(
-            "backend.services.skill_service.CONTAINER_SKILLS_PATH",
+            "backend.management.services.skill.service.CONTAINER_SKILLS_PATH",
             str(tmp_path),
         )
 
         mocker.patch(
-            "backend.services.skill_service.skill_db.get_skill_by_id",
+            "backend.management.services.skill.service.skill_db.get_skill_by_id",
             return_value={
                 "skill_id": 1,
                 "name": "Skill A",
@@ -5814,7 +5814,7 @@ class TestSkillServiceUpdateById:
             },
         )
         mocker.patch(
-            "backend.services.skill_service.skill_db.update_skill_by_id",
+            "backend.management.services.skill.service.skill_db.update_skill_by_id",
             create=True,
             return_value={
                 "skill_id": 1,
@@ -5825,7 +5825,7 @@ class TestSkillServiceUpdateById:
             },
         )
         mocker.patch(
-            "backend.services.skill_service.skill_db.get_tool_names_by_skill_name",
+            "backend.management.services.skill.service.skill_db.get_tool_names_by_skill_name",
             return_value=[],
         )
         service._enrich_configs_from_yaml = lambda result: result
@@ -5841,7 +5841,7 @@ class TestSkillServiceUpdateById:
     def test_skill_not_found_raises_skill_exception(self, mocker):
         service = SkillService(tenant_id="tenant-1")
         mocker.patch(
-            "backend.services.skill_service.skill_db.get_skill_by_id",
+            "backend.management.services.skill.service.skill_db.get_skill_by_id",
             return_value=None,
         )
         with pytest.raises(
@@ -5870,7 +5870,7 @@ class TestSkillServiceUpdateById:
     def test_successful_update_without_local_dir(self, mocker):
         service = SkillService(tenant_id="tenant-1")
         mocker.patch(
-            "backend.services.skill_service.skill_db.get_skill_by_id",
+            "backend.management.services.skill.service.skill_db.get_skill_by_id",
             return_value={
                 "skill_id": 1,
                 "name": "Skill A",
@@ -5878,7 +5878,7 @@ class TestSkillServiceUpdateById:
             },
         )
         mocker.patch(
-            "backend.services.skill_service.skill_db.update_skill_by_id",
+            "backend.management.services.skill.service.skill_db.update_skill_by_id",
             return_value={
                 "skill_id": 1,
                 "name": "Skill A",
@@ -5886,7 +5886,7 @@ class TestSkillServiceUpdateById:
             },
         )
         mocker.patch(
-            "backend.services.skill_service.skill_db.get_tool_names_by_skill_name",
+            "backend.management.services.skill.service.skill_db.get_tool_names_by_skill_name",
             return_value=["tool1"],
         )
         service._resolve_local_skills_dir_for_overlay = lambda: None
@@ -5905,11 +5905,11 @@ class TestSkillServiceUpdateById:
         service.skill_manager.local_skills_dir = str(tmp_path)
         service.skill_manager.resolve_tenant_dir.return_value = str(tmp_path)
         mocker.patch(
-            "backend.services.skill_service.CONTAINER_SKILLS_PATH",
+            "backend.management.services.skill.service.CONTAINER_SKILLS_PATH",
             str(tmp_path),
         )
         mocker.patch(
-            "backend.services.skill_service.skill_db.get_skill_by_id",
+            "backend.management.services.skill.service.skill_db.get_skill_by_id",
             return_value={
                 "skill_id": 1,
                 "name": "Skill A",
@@ -5920,7 +5920,7 @@ class TestSkillServiceUpdateById:
             },
         )
         mocker.patch(
-            "backend.services.skill_service.skill_db.update_skill_by_id",
+            "backend.management.services.skill.service.skill_db.update_skill_by_id",
             return_value={
                 "skill_id": 1,
                 "name": "Skill A",
@@ -5929,14 +5929,14 @@ class TestSkillServiceUpdateById:
             },
         )
         mocker.patch(
-            "backend.services.skill_service.skill_db.get_tool_names_by_skill_name",
+            "backend.management.services.skill.service.skill_db.get_tool_names_by_skill_name",
             return_value=["tool1"],
         )
         write_config = mocker.patch(
-            "backend.services.skill_service._write_skill_params_to_local_config_yaml",
+            "backend.management.services.skill.service._write_skill_params_to_local_config_yaml",
         )
         mocker.patch(
-            "backend.services.skill_service._resolve_local_skill_path",
+            "backend.management.services.skill.service._resolve_local_skill_path",
             return_value=str(tmp_path / "Skill_A"),
         )
         mocker.patch("os.path.isdir", return_value=False)
@@ -5961,11 +5961,11 @@ class TestSkillServiceUpdateById:
         service.skill_manager.local_skills_dir = str(tmp_path)
         service.skill_manager.resolve_tenant_dir.return_value = str(tmp_path)
         mocker.patch(
-            "backend.services.skill_service.CONTAINER_SKILLS_PATH",
+            "backend.management.services.skill.service.CONTAINER_SKILLS_PATH",
             str(tmp_path),
         )
         mocker.patch(
-            "backend.services.skill_service.skill_db.get_skill_by_id",
+            "backend.management.services.skill.service.skill_db.get_skill_by_id",
             return_value={
                 "skill_id": 1,
                 "name": "Skill A",
@@ -5976,7 +5976,7 @@ class TestSkillServiceUpdateById:
             },
         )
         mocker.patch(
-            "backend.services.skill_service.skill_db.update_skill_by_id",
+            "backend.management.services.skill.service.skill_db.update_skill_by_id",
             return_value={
                 "skill_id": 1,
                 "name": "Skill A",
@@ -5984,14 +5984,14 @@ class TestSkillServiceUpdateById:
             },
         )
         mocker.patch(
-            "backend.services.skill_service.skill_db.get_tool_names_by_skill_name",
+            "backend.management.services.skill.service.skill_db.get_tool_names_by_skill_name",
             return_value=["tool1"],
         )
         remove_config = mocker.patch(
-            "backend.services.skill_service._remove_local_skill_config_yaml",
+            "backend.management.services.skill.service._remove_local_skill_config_yaml",
         )
         mocker.patch(
-            "backend.services.skill_service._resolve_local_skill_path",
+            "backend.management.services.skill.service._resolve_local_skill_path",
             return_value=str(tmp_path / "Skill_A"),
         )
         mocker.patch("os.path.isdir", return_value=False)
@@ -6010,11 +6010,11 @@ class TestSkillServiceUpdateById:
         service.skill_manager = MagicMock()
         service.skill_manager.local_skills_dir = str(tmp_path)
         mocker.patch(
-            "backend.services.skill_service.CONTAINER_SKILLS_PATH",
+            "backend.management.services.skill.service.CONTAINER_SKILLS_PATH",
             str(tmp_path),
         )
         mocker.patch(
-            "backend.services.skill_service.skill_db.get_skill_by_id",
+            "backend.management.services.skill.service.skill_db.get_skill_by_id",
             return_value={
                 "skill_id": 1,
                 "name": "Skill A",
@@ -6025,7 +6025,7 @@ class TestSkillServiceUpdateById:
             },
         )
         mocker.patch(
-            "backend.services.skill_service.skill_db.update_skill_by_id",
+            "backend.management.services.skill.service.skill_db.update_skill_by_id",
             return_value={
                 "skill_id": 1,
                 "name": "Skill A",
@@ -6034,19 +6034,19 @@ class TestSkillServiceUpdateById:
             },
         )
         mocker.patch(
-            "backend.services.skill_service.skill_db.get_tool_names_by_skill_name",
+            "backend.management.services.skill.service.skill_db.get_tool_names_by_skill_name",
             return_value=["tool1"],
         )
         write_config = mocker.patch(
-            "backend.services.skill_service._write_skill_params_to_local_config_yaml",
+            "backend.management.services.skill.service._write_skill_params_to_local_config_yaml",
             side_effect=OSError("disk full"),
         )
         mocker.patch(
-            "backend.services.skill_service._resolve_local_skill_path",
+            "backend.management.services.skill.service._resolve_local_skill_path",
             return_value=str(tmp_path / "Skill_A"),
         )
         mocker.patch("os.path.isdir", return_value=False)
-        logger = mocker.patch("backend.services.skill_service.logger")
+        logger = mocker.patch("backend.management.services.skill.service.logger")
         service._enrich_configs_from_yaml = lambda result: result
 
         result = service.update_skill_by_id(
@@ -6063,11 +6063,11 @@ class TestSkillServiceUpdateById:
         service.skill_manager = MagicMock()
         service.skill_manager.local_skills_dir = str(tmp_path)
         mocker.patch(
-            "backend.services.skill_service.CONTAINER_SKILLS_PATH",
+            "backend.management.services.skill.service.CONTAINER_SKILLS_PATH",
             str(tmp_path),
         )
         mocker.patch(
-            "backend.services.skill_service.skill_db.get_skill_by_id",
+            "backend.management.services.skill.service.skill_db.get_skill_by_id",
             return_value={
                 "skill_id": 1,
                 "name": "Skill A",
@@ -6078,7 +6078,7 @@ class TestSkillServiceUpdateById:
             },
         )
         mocker.patch(
-            "backend.services.skill_service.skill_db.update_skill_by_id",
+            "backend.management.services.skill.service.skill_db.update_skill_by_id",
             return_value={
                 "skill_id": 1,
                 "name": "Skill A",
@@ -6086,16 +6086,16 @@ class TestSkillServiceUpdateById:
             },
         )
         mocker.patch(
-            "backend.services.skill_service.skill_db.get_tool_names_by_skill_name",
+            "backend.management.services.skill.service.skill_db.get_tool_names_by_skill_name",
             return_value=["tool1"],
         )
         mocker.patch(
-            "backend.services.skill_service._resolve_local_skill_path",
+            "backend.management.services.skill.service._resolve_local_skill_path",
             return_value=str(tmp_path / "Skill_A"),
         )
         mocker.patch("os.path.isdir", return_value=False)
         service.skill_manager.save_skill.side_effect = OSError("disk error")
-        logger = mocker.patch("backend.services.skill_service.logger")
+        logger = mocker.patch("backend.management.services.skill.service.logger")
         service._enrich_configs_from_yaml = lambda result: result
 
         result = service.update_skill_by_id(
@@ -6110,7 +6110,7 @@ class TestSkillServiceUpdateById:
     def test_update_generic_exception_raises_skill_exception(self, mocker):
         service = SkillService(tenant_id="tenant-1")
         mocker.patch(
-            "backend.services.skill_service.skill_db.get_skill_by_id",
+            "backend.management.services.skill.service.skill_db.get_skill_by_id",
             side_effect=RuntimeError("unexpected"),
         )
         with pytest.raises(skill_service.SkillException, match="Failed to update skill"):
@@ -6125,15 +6125,15 @@ class TestSkillServiceUpdateById:
         service.skill_manager = MagicMock()
         service.skill_manager.local_skills_dir = str(tmp_path)
         mocker.patch(
-            "backend.services.skill_service.CONTAINER_SKILLS_PATH",
+            "backend.management.services.skill.service.CONTAINER_SKILLS_PATH",
             str(tmp_path),
         )
         mocker.patch(
-            "backend.services.skill_service.skill_db.get_skill_by_name",
+            "backend.management.services.skill.service.skill_db.get_skill_by_name",
             return_value=None,
         )
         mocker.patch(
-            "backend.services.skill_service._resolve_local_skill_path",
+            "backend.management.services.skill.service._resolve_local_skill_path",
             return_value=str(tmp_path / "existing_skill"),
         )
         mocker.patch("os.path.exists", return_value=True)
@@ -6146,7 +6146,7 @@ class TestSkillServiceUpdateById:
 
     def test_resolve_local_skill_path_unsafe_candidate(self, mocker, tmp_path):
         mocker.patch(
-            "backend.services.skill_service.CONTAINER_SKILLS_PATH",
+            "backend.management.services.skill.service.CONTAINER_SKILLS_PATH",
             str(tmp_path),
         )
         outside = str(tmp_path.parent / "escaped")
@@ -6160,7 +6160,7 @@ class TestSkillServiceUpdateById:
     def test_resolve_local_skill_path_unsafe_local_root(self, mocker, tmp_path):
         outside_dir = str(tmp_path.parent / "outside_dir")
         mocker.patch(
-            "backend.services.skill_service.CONTAINER_SKILLS_PATH",
+            "backend.management.services.skill.service.CONTAINER_SKILLS_PATH",
             str(tmp_path),
         )
         mocker.patch(
@@ -6497,10 +6497,10 @@ class TestSkillStreamingAndInstallation:
     @pytest.mark.asyncio
     async def test_init_skill_list_returns_early_when_initialized(self, mocker):
         mocker.patch(
-            "backend.services.skill_service.skill_db.check_skill_list_initialized",
+            "backend.management.services.skill.service.skill_db.check_skill_list_initialized",
             return_value=True,
         )
-        update = mocker.patch("backend.services.skill_service.update_skill_list")
+        update = mocker.patch("backend.management.services.skill.service.update_skill_list")
 
         result = await skill_service.init_skill_list_for_tenant("tenant-1", "user-1")
 
@@ -6529,9 +6529,9 @@ class TestSkillStreamingAndInstallation:
     def test_get_official_skills_status_covers_installable_and_missing_resources(self, mocker, tmp_path):
         (tmp_path / "alpha.zip").write_bytes(b"zip")
         (tmp_path / "beta.zip").write_bytes(b"zip")
-        mocker.patch("backend.services.skill_service.OFFICIAL_SKILLS_ZIP_PATH", str(tmp_path))
+        mocker.patch("backend.management.services.skill.service.OFFICIAL_SKILLS_ZIP_PATH", str(tmp_path))
         mocker.patch(
-            "backend.services.skill_service.skill_db.get_skill_by_name",
+            "backend.management.services.skill.service.skill_db.get_skill_by_name",
             side_effect=lambda name, tenant: (
                 {"skill_id": 2} if name == "beta" and tenant == "tenant-1"
                 else {"skill_id": 1, "description": "alpha description"}
@@ -6542,12 +6542,12 @@ class TestSkillStreamingAndInstallation:
             ),
         )
         mocker.patch(
-            "backend.services.skill_service.skill_db.get_skill_by_id",
+            "backend.management.services.skill.service.skill_db.get_skill_by_id",
             return_value={"description": "beta description"},
         )
         manager = MagicMock()
         manager.resolve_tenant_dir.return_value = str(tmp_path / "resources")
-        mocker.patch("backend.services.skill_service.get_skill_manager", return_value=manager)
+        mocker.patch("backend.management.services.skill.service.get_skill_manager", return_value=manager)
         mocker.patch("os.path.isdir", side_effect=lambda path: path == str(tmp_path))
 
         result = skill_service.get_official_skills_with_status("tenant-1")
@@ -6568,7 +6568,7 @@ class TestLocalSkillPathSecurity:
         return SkillService(skill_manager=manager, tenant_id="tenant-1")
 
     def test_resolver_rejects_parent_absolute_drive_and_unc_paths(self, mocker, tmp_path):
-        mocker.patch("backend.services.skill_service.CONTAINER_SKILLS_PATH", str(tmp_path))
+        mocker.patch("backend.management.services.skill.service.CONTAINER_SKILLS_PATH", str(tmp_path))
 
         for unsafe_path in (
             "../secret.txt",
@@ -6583,7 +6583,7 @@ class TestLocalSkillPathSecurity:
         import zipfile
 
         service = self._service_for_path(tmp_path)
-        mocker.patch("backend.services.skill_service.CONTAINER_SKILLS_PATH", str(tmp_path))
+        mocker.patch("backend.management.services.skill.service.CONTAINER_SKILLS_PATH", str(tmp_path))
         archive = io.BytesIO()
         with zipfile.ZipFile(archive, "w") as zf:
             zf.writestr("SKILL.md", "---\nname: poczip\ndescription: poc\n---\n")
@@ -6601,7 +6601,7 @@ class TestLocalSkillPathSecurity:
 
     def test_file_read_traversal_is_rejected(self, mocker, tmp_path):
         service = self._service_for_path(tmp_path)
-        mocker.patch("backend.services.skill_service.CONTAINER_SKILLS_PATH", str(tmp_path))
+        mocker.patch("backend.management.services.skill.service.CONTAINER_SKILLS_PATH", str(tmp_path))
         outside_file = tmp_path.parent / "secret.txt"
         outside_file.write_text("secret", encoding="utf-8")
 
@@ -6612,7 +6612,7 @@ class TestLocalSkillPathSecurity:
         service = self._service_for_path(tmp_path)
         outside_file = tmp_path.parent / "secret.txt"
         mocker.patch(
-            "backend.services.skill_service._resolve_local_skill_path",
+            "backend.management.services.skill.service._resolve_local_skill_path",
             return_value=str(outside_file),
         )
 
@@ -6626,7 +6626,7 @@ class TestLocalSkillPathSecurity:
         sibling_file.parent.mkdir()
         sibling_file.write_text("payload", encoding="utf-8")
         mocker.patch(
-            "backend.services.skill_service._resolve_local_skill_path",
+            "backend.management.services.skill.service._resolve_local_skill_path",
             side_effect=[str(skill_root), str(sibling_file)],
         )
 

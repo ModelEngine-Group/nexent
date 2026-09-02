@@ -21,8 +21,8 @@ from database.agent_db import search_agent_info_by_agent_id, query_all_agent_inf
 from database.model_management_db import get_model_by_model_id
 from database.knowledge_db import get_knowledge_name_map_by_index_names
 from database.tool_db import query_tools_by_ids, query_tool_instances_by_id
-from services.agent_service import get_enable_tool_id_by_agent_id
-from services.agent_naming_service import (
+from management.services.agent.service import get_enable_tool_id_by_agent_id
+from management.services.agent.naming import (
     check_agent_value_duplicate,
     generate_unique_agent_value,
     regenerate_agent_value,

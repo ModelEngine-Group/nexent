@@ -74,7 +74,7 @@ def naming(monkeypatch):
         get_prompt_generate_prompt_template=lambda language: {},
         normalize_prompt_generate_template_content=lambda value: value,
     )
-    return load_source(monkeypatch, "backend/services/agent_naming_service.py", "slimming_naming")
+    return load_source(monkeypatch, "backend/management/services/agent/naming.py", "slimming_naming")
 
 
 @pytest.mark.parametrize("field", ["name", "display_name"])
@@ -189,7 +189,7 @@ def test_ac008_shared_run_preparation(monkeypatch, enabled, debug):
 
     dependency(monkeypatch, "services.memory_config_service", build_memory_context=memory)
     dependency(monkeypatch, "utils.monitoring", monitoring_manager=types.SimpleNamespace(bind_agent_context=lambda value: value))
-    module = load_source(monkeypatch, "backend/services/agent_run_context.py", "slimming_run_context")
+    module = load_source(monkeypatch, "backend/management/services/agent/run_context.py", "slimming_run_context")
     request = types.SimpleNamespace(
         agent_id=3, conversation_id=4, query="hello", is_debug=debug, history=[1, 2], minio_files=[]
     )
@@ -219,7 +219,7 @@ def model_resolver(monkeypatch):
         monkeypatch, "utils.config_utils",
         tenant_config_manager=types.SimpleNamespace(get_model_config=lambda **kwargs: {}),
     )
-    return load_source(monkeypatch, "backend/services/model_resolver_service.py", "services.model_resolver_service")
+    return load_source(monkeypatch, "backend/management/services/model/resolver.py", "management.services.model.resolver")
 
 
 @pytest.mark.parametrize("kind,slot", [("embedding", "embedding"), ("multi_embedding", "multiEmbedding")])
@@ -273,7 +273,7 @@ def agent_reader(monkeypatch, model_resolver):
         check_tool_is_available=lambda ids: [True] * len(ids),
     )
     load_source(monkeypatch, "backend/consts/agent_unavailable_reasons.py", "consts.agent_unavailable_reasons")
-    return load_source(monkeypatch, "backend/services/agent_read_service.py", "slimming_agent_reader")
+    return load_source(monkeypatch, "backend/management/services/agent/read.py", "slimming_agent_reader")
 
 
 def test_ac007_projection_keeps_distinct_legacy_name_rules(agent_reader, monkeypatch, model_resolver):
@@ -308,7 +308,7 @@ def test_ac012_knowledge_list_merge_uses_one_compatible_executor(monkeypatch):
     dependency(monkeypatch, "consts.const", PERMISSION_READ="READ_ONLY")
     module = load_source(
         monkeypatch,
-        "backend/services/knowledge_base_list_service.py",
+        "backend/management/services/knowledge_base/listing.py",
         "slimming_knowledge_list",
     )
     primary = {
@@ -354,7 +354,7 @@ def test_ac012_permission_requirements_share_resolver(monkeypatch):
     )
     module = load_source(
         monkeypatch,
-        "backend/services/knowledge_base_permission_service.py",
+        "backend/management/services/knowledge_base/permission.py",
         "slimming_knowledge_permission",
     )
     monkeypatch.setattr(module, "resolve_knowledge_base_permission", lambda *args: "READ_ONLY")
@@ -392,3 +392,57 @@ def test_ac007_deleted_tool_model_and_duplicate_order(agent_reader, monkeypatch)
     agent_reader.apply_duplicate_name_availability_rules(entries)
     assert entries[0]["unavailable_reasons"] == [agent_reader.AgentUnavailableReason.DUPLICATE_NAME]
     assert entries[1]["unavailable_reasons"] == []
+
+
+def test_ac016_management_services_are_grouped_by_business_package():
+    services_root = ROOT / "backend" / "management" / "services"
+    root_modules = sorted(path.name for path in services_root.glob("*.py"))
+    business_packages = sorted(
+        path.name
+        for path in services_root.iterdir()
+        if path.is_dir() and not path.name.startswith("__")
+    )
+
+    assert root_modules == ["__init__.py"]
+    assert business_packages == ["agent", "knowledge_base", "model", "skill"]
+    assert all((services_root / package / "__init__.py").is_file() for package in business_packages)
+
+
+def test_ac017_repository_has_no_flat_management_service_references():
+    flat_modules = [
+        "agent" + suffix
+        for suffix in (
+            "_service",
+            "_management_service",
+            "_naming_service",
+            "_read_service",
+            "_run_context",
+            "_run_service",
+        )
+    ]
+    flat_modules.extend(
+        ["skill" + "_service", "skill" + "_support_service", "vectordatabase" + "_service"]
+    )
+    flat_modules.extend(
+        "knowledge_base" + suffix
+        for suffix in (
+            "_common",
+            "_deletion_service",
+            "_list_service",
+            "_management_service",
+            "_permission_service",
+        )
+    )
+    flat_modules.append("model" + "_resolver_service")
+    stale_prefixes = tuple(f"management.services.{name}" for name in flat_modules)
+
+    checked_roots = (ROOT / "backend", ROOT / "sdk", ROOT / "test")
+    stale_references = []
+    for checked_root in checked_roots:
+        for path in checked_root.rglob("*.py"):
+            content = path.read_text(encoding="utf-8-sig")
+            for stale_prefix in stale_prefixes:
+                if stale_prefix in content:
+                    stale_references.append(f"{path.relative_to(ROOT)}: {stale_prefix}")
+
+    assert stale_references == []

@@ -9,7 +9,7 @@ from consts.model import (
     RepositoryImportRequirementItem,
     ToolSourceEnum,
 )
-from services.model_resolver_service import is_model_available
+from management.services.model.resolver import is_model_available
 from database import skill_db
 from database.knowledge_db import (
     get_knowledge_name_map_by_index_names,

@@ -34,7 +34,7 @@ from consts.model import AgentRequest, ToolParamsRequest
 from database.knowledge_db import get_knowledge_info_by_tenant_id
 from database.conversation_db import get_conversation_list, get_conversation_messages
 from database.token_db import get_latest_usage_metadata, log_token_usage
-from services.agent_service import (
+from management.services.agent.service import (
     get_agent_by_name_impl,
 )
 from services.runtime_proxy_service import forward_agent_run, forward_agent_stop
@@ -45,8 +45,8 @@ from services.knowledge_scope_service import (
     LOCAL_TOOL_CLASS,
     get_agent_knowledge_capabilities,
 )
-from services.vectordatabase_service import ElasticSearchService
-from services.model_resolver_service import get_model_descriptor
+from management.services.knowledge_base.service import ElasticSearchService
+from management.services.model.resolver import get_model_descriptor
 from services.conversation_management_service import (
     save_conversation_user,
     create_new_conversation,

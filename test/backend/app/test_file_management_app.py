@@ -126,7 +126,7 @@ sfms_stub.check_file_access_batch = _stub_check_file_access_batch
 sys.modules["services.file_management_service"] = sfms_stub
 setattr(services_pkg, "file_management_service", sfms_stub)
 
-vdb_service_stub = types.ModuleType("services.vectordatabase_service")
+vdb_service_stub = types.ModuleType("management.services.knowledge_base.service")
 
 
 class _StubElasticSearchService:
@@ -136,7 +136,7 @@ class _StubElasticSearchService:
 
 
 vdb_service_stub.ElasticSearchService = _StubElasticSearchService
-sys.modules["services.vectordatabase_service"] = vdb_service_stub
+sys.modules["management.services.knowledge_base.service"] = vdb_service_stub
 setattr(services_pkg, "vectordatabase_service", vdb_service_stub)
 
 

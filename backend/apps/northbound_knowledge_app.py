@@ -21,7 +21,7 @@ from services.file_management_service import (
 )
 from services.northbound_service import NorthboundContext
 from services.redis_service import get_redis_service
-from services.vectordatabase_service import (
+from management.services.knowledge_base.service import (
     ElasticSearchService,
     KnowledgeBaseNeedsModelConfigError,
     get_vector_db_core,

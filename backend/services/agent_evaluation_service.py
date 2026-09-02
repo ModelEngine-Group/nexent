@@ -61,7 +61,7 @@ from database.evaluation_set_db import (
     update_evaluation_set_case_count,
 )
 from database.evaluator_db import get_evaluator
-from services.agent_service import prepare_agent_run
+from management.services.agent.service import prepare_agent_run
 from services.evaluation_set_service import resolve_latest_published_version_no
 from utils.llm_utils import call_llm_for_system_prompt
 from utils.prompt_template_utils import get_prompt_template

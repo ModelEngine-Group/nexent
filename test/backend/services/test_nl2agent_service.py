@@ -555,7 +555,7 @@ async def test_search_installed_resources_covers_visible_tools_and_skills(mocker
         ),
     )
     mocker.patch(
-        "services.skill_service.SkillService.list_visible_skills",
+        "management.services.skill.service.SkillService.list_visible_skills",
         return_value=[
             {
                 "skill_id": 11,
@@ -693,7 +693,7 @@ async def test_search_internal_uninstalled_resources_aggregates_sources_and_excl
     mocker,
 ):
     mocker.patch(
-        "services.skill_service.get_official_skills_with_status",
+        "management.services.skill.service.get_official_skills_with_status",
         return_value=[
             {
                 "skill_id": 0,
@@ -872,7 +872,7 @@ def test_installation_snapshot_redacts_nested_secret_shapes():
 @pytest.mark.asyncio
 async def test_uninstalled_catalog_paginates_and_filters_invalid_entries(mocker):
     mocker.patch(
-        "services.skill_service.get_official_skills_with_status",
+        "management.services.skill.service.get_official_skills_with_status",
         return_value=[
             {
                 "name": "PDF report",

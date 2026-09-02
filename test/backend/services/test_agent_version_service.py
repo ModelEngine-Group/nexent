@@ -139,13 +139,13 @@ skill_db_mock.strip_params_comments_for_db = MagicMock(side_effect=lambda x: x)
 sys.modules['database.skill_db'] = skill_db_mock
 sys.modules['backend.database.skill_db'] = skill_db_mock
 
-# Mock services.agent_service (for list_published_agents_impl)
+# Mock management.services.agent.service (for list_published_agents_impl)
 agent_service_mock = MagicMock()
 agent_service_mock.CAN_EDIT_ALL_USER_ROLES = ["ADMIN", "SUPER_ADMIN"]
 agent_service_mock.PERMISSION_EDIT = "EDIT"
 agent_service_mock.PERMISSION_READ = "READ"
-sys.modules['services.agent_service'] = agent_service_mock
-sys.modules['backend.services.agent_service'] = agent_service_mock
+sys.modules['management.services.agent.service'] = agent_service_mock
+sys.modules['backend.management.services.agent.service'] = agent_service_mock
 
 # Mock database module
 database_mock = MagicMock()

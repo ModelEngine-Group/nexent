@@ -190,12 +190,12 @@ services_mock = types.ModuleType('services')
 services_mock.__path__ = [
     os.path.join(os.path.dirname(__file__), "../../../backend/services")
 ]  # Keep real service submodules importable
-services_skill_service_mock = types.ModuleType('services.skill_service')
+services_skill_service_mock = types.ModuleType('management.services.skill.service')
 services_nl2skill_service_mock = types.ModuleType('services.nl2skill_service')
 services_asset_owner_visibility_mock = types.ModuleType('services.asset_owner_visibility')
 services_agent_draft_permission_mock = types.ModuleType('services.agent_draft_permission_service')
 sys.modules['services'] = services_mock
-sys.modules['services.skill_service'] = services_skill_service_mock
+sys.modules['management.services.skill.service'] = services_skill_service_mock
 sys.modules['services.nl2skill_service'] = services_nl2skill_service_mock
 sys.modules['services.asset_owner_visibility'] = services_asset_owner_visibility_mock
 sys.modules['services.agent_draft_permission_service'] = services_agent_draft_permission_mock
@@ -236,7 +236,7 @@ services_nl2skill_service_mock.create_nl2skill_stream = AsyncMock()
 def setup_function():
     """Restore module-level service stubs after tests that isolate imports."""
     sys.modules['services'] = services_mock
-    sys.modules['services.skill_service'] = services_skill_service_mock
+    sys.modules['management.services.skill.service'] = services_skill_service_mock
     sys.modules['services.nl2skill_service'] = services_nl2skill_service_mock
     sys.modules['services.asset_owner_visibility'] = services_asset_owner_visibility_mock
     sys.modules['services.agent_draft_permission_service'] = services_agent_draft_permission_mock
@@ -2502,7 +2502,7 @@ class TestScanSkillEndpoint:
         """Test scanning skills with error."""
         with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
             mock_auth.return_value = ("user123", "tenant123")
-            with patch('services.skill_service.update_skill_list', new_callable=AsyncMock) as mock_update:
+            with patch('management.services.skill.service.update_skill_list', new_callable=AsyncMock) as mock_update:
                 mock_update.side_effect = Exception("Scan failed")
 
                 app = FastAPI()

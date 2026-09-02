@@ -26,7 +26,7 @@ _MODULE_PATCH_NAMES = [
     'database.db_models',
     'utils.llm_utils',
     'utils.prompt_template_utils',
-    'services.agent_service',
+    'management.services.agent.service',
     'services.prompt_template_service',
     'nexent',
     'nexent.core',
@@ -159,7 +159,7 @@ sys.modules['utils.llm_utils'] = MagicMock()
 sys.modules['utils.prompt_template_utils'] = MagicMock()
 
 # Mock services
-sys.modules['services.agent_service'] = MagicMock()
+sys.modules['management.services.agent.service'] = MagicMock()
 sys.modules['services.prompt_template_service'] = MagicMock()
 
 from backend.services.prompt_service import (

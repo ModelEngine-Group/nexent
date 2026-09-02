@@ -820,7 +820,7 @@ async def list_published_agents_impl(
         from database.user_tenant_db import get_user_tenant_by_user_id
         from database.group_db import query_group_ids_by_user
         from database.model_management_db import get_model_by_model_id
-        from services.agent_read_service import (
+        from management.services.agent.read import (
             check_agent_availability, apply_duplicate_name_availability_rules,
         )
         from services.asset_owner_visibility import resolve_agent_list_permission

@@ -155,7 +155,7 @@ _agent_service_mock.export_agent_dict_for_repository_impl = AsyncMock(return_val
     "mcp_info": [],
 })
 _agent_service_mock.list_all_agent_info_impl = AsyncMock(return_value=[])
-sys.modules["services.agent_service"] = _agent_service_mock
+sys.modules["management.services.agent.service"] = _agent_service_mock
 
 _notification_service_mock = MagicMock()
 sys.modules["services.notification_service"] = _notification_service_mock

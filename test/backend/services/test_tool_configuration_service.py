@@ -204,7 +204,7 @@ sys.modules['redis.client'] = MagicMock()
 sys.modules['redis.connection'] = MagicMock()
 sys.modules['redis.lock'] = MagicMock()
 
-# Mock nexent.core.utils.observer before services.skill_service is imported
+# Mock nexent.core.utils.observer before management.services.skill.service is imported
 nexent_core_utils = _create_package_mock('nexent.core.utils')
 sys.modules['nexent.core.utils'] = nexent_core_utils
 nexent_core_utils_observer = types.ModuleType('nexent.core.utils.observer')
@@ -580,8 +580,8 @@ patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 # Patch tool_configuration_service imports to avoid triggering actual imports during patch
 # Note: These patches use the import path as seen in tool_configuration_service.py
 # NOTE: get_llm_model is NOT patched here because TestGetLlmModel tests it directly
-patch('services.vectordatabase_service.get_embedding_model', MagicMock()).start()
-patch('services.vectordatabase_service.get_vector_db_core', MagicMock()).start()
+patch('management.services.knowledge_base.service.get_embedding_model', MagicMock()).start()
+patch('management.services.knowledge_base.service.get_vector_db_core', MagicMock()).start()
 patch('services.tenant_config_service.get_selected_knowledge_list', MagicMock()).start()
 patch('services.tenant_config_service.build_knowledge_name_mapping',
       MagicMock()).start()
