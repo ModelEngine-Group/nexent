@@ -50,7 +50,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 
-type AgentConfigTab = "basic" | "advanced";
+type AgentConfigTab = "basic" | "advanced" | "security";
 type ConfigSectionKey =
   | "display_info"
   | "role_model"
@@ -67,6 +67,10 @@ const BASIC_CONFIG_SECTIONS = new Set<ConfigSectionKey>([
   "role_model",
   "knowledge_base",
   "conversation_guide",
+]);
+
+const SECURITY_CONFIG_SECTIONS = new Set<ConfigSectionKey>([
+  "guardrail",
 ]);
 
 const DEFAULT_OPEN_SECTIONS: Record<ConfigSectionKey, boolean> = {
@@ -228,7 +232,11 @@ export default function AgentConfig({
 
     const { requestId, target } = configFocusRequest;
     setActiveConfigTab(
-      BASIC_CONFIG_SECTIONS.has(target.section) ? "basic" : "advanced"
+      BASIC_CONFIG_SECTIONS.has(target.section)
+        ? "basic"
+        : SECURITY_CONFIG_SECTIONS.has(target.section)
+          ? "security"
+          : "advanced"
     );
     setOpenSections((current) =>
       current[target.section] ? current : { ...current, [target.section]: true }
@@ -359,6 +367,12 @@ export default function AgentConfig({
           >
             {t("agent.config.tab.advanced")}
           </TabsTrigger>
+          <TabsTrigger
+            value="security"
+            className="h-10 rounded-none border-b-2 border-transparent px-0 pb-2 pt-1 text-gray-500 shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none"
+          >
+            {t("agent.config.tab.security")}
+          </TabsTrigger>
         </TabsList>
         <div className="mt-2">
           {unavailableReasonLabels.length > 0 && (
@@ -468,37 +482,7 @@ export default function AgentConfig({
             <AgentCapability />
           </ConfigSection>
 
-          {/* 2. 运行策略 */}
-          <ConfigSection
-            title={t("agent.config.section.runStrategy.title")}
-            description={t("agent.config.section.runStrategy.description")}
-            icon={<Play className="h-4 w-4 shrink-0 text-blue-500" />}
-            open={openSections.run_strategy}
-            onOpenChange={(open) =>
-              handleSectionOpenChange("run_strategy", open)
-            }
-            containerRef={runStrategySectionRef}
-          >
-            <AgentRunPolicy />
-          </ConfigSection>
-
-          {/* 3. 发布属性 */}
-          <ConfigSection
-            title={t("agent.config.section.publishAttributes.title")}
-            description={t(
-              "agent.config.section.publishAttributes.description"
-            )}
-            icon={<Globe className="h-4 w-4 shrink-0 text-blue-500" />}
-            open={openSections.publish_attributes}
-            onOpenChange={(open) =>
-              handleSectionOpenChange("publish_attributes", open)
-            }
-            containerRef={publishAttributesSectionRef}
-          >
-            <AgentDeployment />
-          </ConfigSection>
-
-          {/* 4. 协同 Agent */}
+          {/* 2. 协同 Agent */}
           <ConfigSection
             title={t("agent.config.section.collaborativeAgents.title")}
             description={t(
@@ -515,7 +499,42 @@ export default function AgentConfig({
             <CollaborativeAgent />
           </ConfigSection>
 
-          {/* 5. Guardrail */}
+          {/* 3. 运行策略 */}
+          <ConfigSection
+            title={t("agent.config.section.runStrategy.title")}
+            description={t("agent.config.section.runStrategy.description")}
+            icon={<Play className="h-4 w-4 shrink-0 text-blue-500" />}
+            open={openSections.run_strategy}
+            onOpenChange={(open) =>
+              handleSectionOpenChange("run_strategy", open)
+            }
+            containerRef={runStrategySectionRef}
+          >
+            <AgentRunPolicy />
+          </ConfigSection>
+
+          {/* 4. 发布属性 */}
+          <ConfigSection
+            title={t("agent.config.section.publishAttributes.title")}
+            description={t(
+              "agent.config.section.publishAttributes.description"
+            )}
+            icon={<Globe className="h-4 w-4 shrink-0 text-blue-500" />}
+            open={openSections.publish_attributes}
+            onOpenChange={(open) =>
+              handleSectionOpenChange("publish_attributes", open)
+            }
+            containerRef={publishAttributesSectionRef}
+          >
+            <AgentDeployment />
+          </ConfigSection>
+        </TabsContent>
+
+        <TabsContent
+          value="security"
+          className={cn("min-h-0 flex-1 space-y-3 overflow-y-auto pr-1 mt-3")}
+        >
+          {/* 1. 安全护栏 */}
           <ConfigSection
             title={t("agent.config.section.guardrail.title")}
             description={t("agent.config.section.guardrail.description")}
