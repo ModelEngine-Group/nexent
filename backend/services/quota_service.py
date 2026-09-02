@@ -324,7 +324,7 @@ class QuotaService:
             }
 
         quota_limit_bytes = int(quota_limit_bytes)
-        usage_data = self._get_personal_usage_data(user_id=user_id)
+        usage_data = self._get_personal_usage_data(user_id=user_id, include_es=False)
         user_usage = self._aggregate_personal_storage_by_user(
             usage_data, user_ids={user_id}
         ).get(user_id, {"total_bytes": 0})
@@ -438,6 +438,11 @@ class QuotaService:
         return {
             "used_bytes": used_bytes,
             "used_readable": _bytes_to_readable(used_bytes),
+            "es_physical_bytes": user_usage.get("es_physical_bytes"),
+            "es_physical_readable": _bytes_to_readable(
+                user_usage.get("es_physical_bytes")
+            ),
+            "es_stats_available": usage_data.get("es_stats_available"),
             "quota_bytes": quota_bytes,
             "quota_readable": _bytes_to_readable(quota_bytes),
             "quota_source": quota_source,
@@ -466,8 +471,15 @@ class QuotaService:
         kb_list: List[Dict[str, Any]],
         strict: bool = False,
         exclude_datamate: bool = False,
+        include_es: bool = True,
     ) -> Dict[str, Any]:
-        """Collect one consistent ES-plus-source storage view for KB records."""
+        """Collect source-file quota usage and optional ES observability metrics.
+
+        Source bytes come from the durable knowledge-storage ledger and are the
+        authoritative quota metric. ES store size is queried only when requested
+        for display or diagnostics; it must never make a source-byte quota check
+        fail because Lucene storage is eventually reclaimed.
+        """
         index_names = [
             kb.get("index_name")
             for kb in kb_list
@@ -475,8 +487,9 @@ class QuotaService:
             and not (exclude_datamate and kb.get("knowledge_sources") == "datamate")
         ]
         indices_detail: Dict[str, Any] = {}
+        es_stats_available = not index_names
 
-        if index_names:
+        if include_es and index_names:
             try:
                 from services.vectordatabase_service import get_vector_db_core
 
@@ -485,26 +498,25 @@ class QuotaService:
                 indices_detail = (
                     raw_indices_detail if isinstance(raw_indices_detail, dict) else {}
                 )
-                if strict:
-                    missing_indices = set(index_names) - set(indices_detail)
-                    if missing_indices:
-                        raise AppException(
-                            ErrorCode.TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE,
-                            "ES index stats missing for: "
-                            + ", ".join(sorted(missing_indices)),
-                        )
+                es_stats_available = isinstance(raw_indices_detail, dict)
             except AppException:
-                raise
-            except Exception as exc:
-                if strict:
-                    raise AppException(
-                        ErrorCode.TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE,
-                        f"Failed to query ES index stats: {exc}",
-                    ) from exc
+                # ES is an optional observability source. Preserve the source
+                # ledger result even when its adapter reports an application
+                # error, including during strict quota checks.
+                es_stats_available = False
                 logger.warning(
-                    "Failed to query ES index stats for personal KB capacity",
+                    "Failed to query ES index stats for storage observability",
                     exc_info=True,
                 )
+            except Exception as exc:
+                es_stats_available = False
+                logger.warning(
+                    "Failed to query ES index stats for storage observability: %s",
+                    exc,
+                    exc_info=True,
+                )
+        elif include_es:
+            es_stats_available = True
 
         knowledge_ids = [
             kb.get("knowledge_id")
@@ -542,29 +554,18 @@ class QuotaService:
             doc_count = 0
             chunk_count = 0
             is_datamate = kb.get("knowledge_sources") == "datamate"
-            if not (exclude_datamate and is_datamate):
+            if include_es and not (exclude_datamate and is_datamate):
                 detail = raw_detail if isinstance(raw_detail, dict) else {}
-                if strict and not isinstance(raw_detail, dict):
-                    raise AppException(
-                        ErrorCode.TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE,
-                        f"ES index stats unavailable for {index_name}",
-                    )
-                if strict and "error" in detail:
-                    raise AppException(
-                        ErrorCode.TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE,
-                        f"ES index stats unavailable for {index_name}",
-                    )
+                if not isinstance(raw_detail, dict) or "error" in detail:
+                    es_stats_available = False
                 base_info = (
                     detail.get("base_info")
                     if isinstance(detail.get("base_info"), dict)
                     else {}
                 )
                 store_size = base_info.get("store_size")
-                if strict and not self._is_valid_store_size(store_size):
-                    raise AppException(
-                        ErrorCode.TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE,
-                        f"ES index store_size unavailable for {index_name}",
-                    )
+                if not self._is_valid_store_size(store_size):
+                    es_stats_available = False
                 es_bytes = self._parse_store_size(store_size)
                 doc_count = base_info.get("doc_count", 0) or 0
                 chunk_count = base_info.get("chunk_count", 0) or 0
@@ -578,15 +579,19 @@ class QuotaService:
                 if knowledge_id is not None
                 else 0
             )
-            total_bytes = es_bytes + source_bytes
-            stats[index_name] = total_bytes
+            # ``stats`` is intentionally source-file bytes only. All quota
+            # enforcement and usage percentages consume this mapping.
+            stats[index_name] = source_bytes
             details[index_name] = {
                 "store_size": store_size,
                 "store_size_bytes": es_bytes,
                 "source_size": _bytes_to_readable(source_bytes),
                 "source_size_bytes": source_bytes,
-                "total_size": _bytes_to_readable(total_bytes),
-                "total_size_bytes": total_bytes,
+                # Keep the legacy keys present for clients during the semantic
+                # transition, but make them aliases of the quota metric rather
+                # than the old source-plus-ES composite.
+                "total_size": _bytes_to_readable(source_bytes),
+                "total_size_bytes": source_bytes,
                 "doc_count": doc_count,
                 "chunk_count": chunk_count,
             }
@@ -597,30 +602,41 @@ class QuotaService:
             "total_es_bytes": sum(item["store_size_bytes"] for item in details.values()),
             "total_source_bytes": sum(item["source_size_bytes"] for item in details.values()),
             "total_bytes": sum(stats.values()),
+            "es_stats_available": es_stats_available if include_es else None,
         }
 
     def _get_personal_usage_data(
         self,
         strict: bool = False,
         user_id: Optional[str] = None,
+        include_es: bool = True,
     ) -> Dict[str, Any]:
-        """Aggregate PRIVATE KB storage using the unified capacity definition.
+        """Aggregate PRIVATE KB storage using source bytes as the quota metric.
 
         Non-strict mode degrades storage-stat failures to zero usage so admin
-        capacity views stay available. Upload quota checks always use strict
-        mode and fail closed when usage cannot be verified.
+        capacity views stay available. Strict mode applies to the durable source
+        ledger; ES metrics remain best-effort observability data.
         """
         kb_list = (
             get_private_knowledge_info_by_creator(self.tenant_id, user_id)
             if user_id is not None
             else get_private_knowledge_info_by_tenant_id(self.tenant_id)
         )
-        storage_stats = self._get_kb_storage_stats(kb_list, strict=strict)
+        storage_stats = self._get_kb_storage_stats(
+            kb_list,
+            strict=strict,
+            include_es=include_es,
+        )
         return {
             "kbs": kb_list,
             "stats": storage_stats["stats"],
             "details": storage_stats["details"],
-            "total_bytes": storage_stats["total_bytes"],
+            "total_bytes": storage_stats.get("total_bytes", 0),
+            "total_source_bytes": storage_stats.get(
+                "total_source_bytes", storage_stats.get("total_bytes", 0)
+            ),
+            "total_es_bytes": storage_stats.get("total_es_bytes", 0),
+            "es_stats_available": storage_stats.get("es_stats_available"),
         }
 
     def _aggregate_personal_storage_by_user(
@@ -643,11 +659,20 @@ class QuotaService:
             item["total_bytes"] += usage_data["stats"].get(
                 kb.get("index_name", ""), 0
             )
+            if usage_data.get("es_stats_available") is True:
+                detail = usage_data.get("details", {}).get(
+                    kb.get("index_name", ""), {}
+                )
+                item["es_physical_bytes"] = item.get("es_physical_bytes", 0) + int(
+                    detail.get("store_size_bytes", 0) or 0
+                )
+            else:
+                item["es_physical_bytes"] = None
 
         for user_id in user_ids or set():
             grouped.setdefault(
                 user_id,
-                {"kbs": [], "kb_count": 0, "total_bytes": 0},
+                {"kbs": [], "kb_count": 0, "total_bytes": 0, "es_physical_bytes": None},
             )
 
         return grouped
@@ -695,6 +720,7 @@ class QuotaService:
             quota_limit_bytes = user_data["effective_quota_bytes"]
             quota_source = user_data["quota_source"]
             total_bytes = user_data["total_bytes"]
+            es_physical_bytes = user_data.get("es_physical_bytes")
             items.append({
                 "user_id": user_id,
                 "user_name": email_map.get(user_id) or user_id,
@@ -702,6 +728,8 @@ class QuotaService:
                 "kb_count": user_data["kb_count"],
                 "total_bytes": total_bytes,
                 "total_readable": _bytes_to_readable(total_bytes),
+                "es_physical_bytes": es_physical_bytes,
+                "es_physical_readable": _bytes_to_readable(es_physical_bytes),
                 "quota_limit_bytes": quota_limit_bytes,
                 "quota_limit_readable": _bytes_to_readable(quota_limit_bytes),
                 "effective_quota_bytes": quota_limit_bytes,
@@ -791,6 +819,9 @@ class QuotaService:
                 "chunk_count": detail.get("chunk_count", 0),
                 "store_size": detail.get("store_size"),
                 "store_size_bytes": detail.get("store_size_bytes", 0),
+                "es_physical_size": detail.get("store_size"),
+                "es_physical_size_bytes": detail.get("store_size_bytes", 0),
+                "es_stats_available": usage_data.get("es_stats_available"),
                 "source_size": detail.get("source_size"),
                 "source_size_bytes": detail.get("source_size_bytes", 0),
                 "total_size": detail.get("total_size"),
@@ -837,6 +868,21 @@ class QuotaService:
             "kb_count": len(kb_list),
             "total_bytes": usage_data["total_bytes"],
             "total_readable": _bytes_to_readable(usage_data["total_bytes"]),
+            "total_source_bytes": usage_data["total_source_bytes"],
+            "total_source_readable": _bytes_to_readable(
+                usage_data["total_source_bytes"]
+            ),
+            "total_es_physical_bytes": (
+                usage_data["total_es_bytes"]
+                if usage_data.get("es_stats_available") is True
+                else None
+            ),
+            "total_es_physical_readable": (
+                _bytes_to_readable(usage_data["total_es_bytes"])
+                if usage_data.get("es_stats_available") is True
+                else None
+            ),
+            "es_stats_available": usage_data.get("es_stats_available"),
             "allocated_quota_bytes": allocated_quota_bytes,
             "allocated_quota_readable": _bytes_to_readable(
                 allocated_quota_bytes
@@ -956,7 +1002,11 @@ class QuotaService:
         upload_bytes: int,
     ) -> None:
         """Enforce only the user-level quota before a PRIVATE KB upload."""
-        usage_data = self._get_personal_usage_data(strict=True, user_id=user_id)
+        usage_data = self._get_personal_usage_data(
+            strict=True,
+            user_id=user_id,
+            include_es=False,
+        )
         self._check_personal_user_quota_from_usage(usage_data, user_id, upload_bytes)
 
     def check_personal_kb_quota(
@@ -967,12 +1017,11 @@ class QuotaService:
     ) -> None:
         """Enforce tenant, user, and PRIVATE-KB quotas before indexing.
 
-        Raises AppException with a personal quota ErrorCode when a finite quota
-        would be exceeded or ES usage cannot be verified. Shared-KB quota checks
-        remain in the existing advisory path; this method is only used for
-        PRIVATE KBs.
+        Raises AppException with a personal quota ErrorCode when a finite source
+        quota would be exceeded. Shared-KB quota checks remain in the existing
+        advisory path; this method is only used for PRIVATE KBs.
         """
-        usage_data = self._get_personal_usage_data(strict=True)
+        usage_data = self._get_personal_usage_data(strict=True, include_es=False)
         total_tenant_bytes = usage_data["total_bytes"]
 
         hard_limit_bytes = self.get_hard_limit().get("hard_limit_bytes")
@@ -1096,8 +1145,9 @@ class QuotaService:
 
     def _compute_usage(self) -> Dict[str, Any]:
         """
-        Compute actual storage usage by summing file sizes across all tenant KBs.
-        Uses the unified ES index stats plus committed source-storage ledger bytes.
+        Compute actual storage usage from the committed source-file ledger.
+        Elasticsearch physical index size is returned separately for
+        observability and is never part of the quota metric.
         """
         kb_list = get_knowledge_info_by_tenant_id(self.tenant_id)
         warning_config = self.get_warning_config()
@@ -1113,17 +1163,22 @@ class QuotaService:
         )
         stats_lookup = {
             name: {
-                "bytes": detail["store_size_bytes"],
-                "source_bytes": detail["source_size_bytes"],
-                "total_bytes": detail["total_size_bytes"],
-                "file_count": detail["doc_count"],
+                # Quota usage is based on source files. Keep ES bytes in a
+                # separate field so Lucene segment reclamation cannot affect
+                # admission checks or displayed quota usage.
+                "bytes": detail.get("source_size_bytes", 0),
+                "source_bytes": detail.get("source_size_bytes", 0),
+                "total_bytes": detail.get("source_size_bytes", 0),
+                "es_bytes": detail.get("store_size_bytes", 0),
+                "file_count": detail.get("doc_count", 0),
             }
-            for name, detail in storage_stats["details"].items()
+            for name, detail in storage_stats.get("details", {}).items()
         }
         tenant_minio_bytes = get_tenant_committed_source_bytes(self.tenant_id)
 
         breakdown = []
-        total_es_bytes = storage_stats["total_es_bytes"]
+        total_es_bytes = storage_stats.get("total_es_bytes", 0)
+        es_stats_available = storage_stats.get("es_stats_available")
         total_files = 0
 
         for kb in kb_list:
@@ -1134,6 +1189,7 @@ class QuotaService:
 
             kb_stats = stats_lookup.get(index_name, {})
             kb_actual_bytes = kb_stats.get("total_bytes", 0)
+            kb_es_bytes = kb_stats.get("es_bytes", 0)
             kb_file_count = kb_stats.get("file_count", 0)
 
             total_files += kb_file_count
@@ -1156,6 +1212,15 @@ class QuotaService:
                 "soft_quota_readable": _bytes_to_readable(soft_quota_bytes),
                 "actual_bytes": kb_actual_bytes,
                 "actual_readable": _bytes_to_readable(kb_actual_bytes),
+                "es_physical_bytes": (
+                    kb_es_bytes if es_stats_available is True else None
+                ),
+                "es_physical_readable": (
+                    _bytes_to_readable(kb_es_bytes)
+                    if es_stats_available is True
+                    else None
+                ),
+                "es_stats_available": es_stats_available,
                 "usage_pct": kb_usage_pct,
                 "file_count": kb_file_count,
                 "kb_warning_level": kb_warning_level,
@@ -1164,7 +1229,10 @@ class QuotaService:
         # Tenant totals include all active tenant ledger rows, including rows whose
         # KB is no longer returned in the active KB list. This avoids silently
         # dropping retained source objects from the tenant hard-limit calculation.
-        total_bytes = total_es_bytes + tenant_minio_bytes
+        # The durable source-file ledger is the sole quota metric. ES physical
+        # bytes are observability data and are intentionally excluded from the
+        # hard-limit calculation because segment merges/reclamation are async.
+        total_bytes = tenant_minio_bytes
 
         # Compute tenant-level warning
         hard_limit_bytes = hard_limit_info.get("hard_limit_bytes")
@@ -1184,6 +1252,17 @@ class QuotaService:
         result = {
             "total_bytes": total_bytes,
             "total_readable": _bytes_to_readable(total_bytes),
+            "total_source_bytes": total_bytes,
+            "total_source_readable": _bytes_to_readable(total_bytes),
+            "es_physical_bytes": (
+                total_es_bytes if es_stats_available is True else None
+            ),
+            "es_physical_readable": (
+                _bytes_to_readable(total_es_bytes)
+                if es_stats_available is True
+                else None
+            ),
+            "es_stats_available": es_stats_available,
             "kb_count": len(kb_list),
             "file_count": total_files,
             "hard_limit_bytes": hard_limit_bytes,
@@ -1329,6 +1408,9 @@ class QuotaService:
                     "hard_limit_readable": hard_limit_info.get("hard_limit_readable"),
                     "total_bytes": usage.get("total_bytes"),
                     "total_readable": usage.get("total_readable"),
+                    "es_physical_bytes": usage.get("es_physical_bytes"),
+                    "es_physical_readable": usage.get("es_physical_readable"),
+                    "es_stats_available": usage.get("es_stats_available"),
                 },
                 "kb_level": {
                     "usage_pct": kb_usage_pct,
@@ -1492,6 +1574,8 @@ class QuotaService:
         tenants = []
         total_allocated_bytes = 0
         total_actual_bytes = 0
+        total_es_physical_bytes = 0
+        es_stats_available = True
 
         for tid in tenant_ids:
             # Get hard limit for this tenant
@@ -1504,6 +1588,8 @@ class QuotaService:
             try:
                 usage = service.get_usage(force_refresh=True)
                 actual_bytes = usage.get("total_bytes", 0)
+                tenant_es_bytes = usage.get("es_physical_bytes")
+                tenant_es_available = usage.get("es_stats_available")
                 warning_enabled = usage.get("warning_enabled", True)
                 warning_level = (
                     usage.get("tenant_warning_level", "normal")
@@ -1515,8 +1601,14 @@ class QuotaService:
                 actual_bytes = 0
                 warning_enabled = False
                 warning_level = "normal"
+                tenant_es_bytes = None
+                tenant_es_available = False
 
             total_actual_bytes += actual_bytes
+            if tenant_es_available is not True or tenant_es_bytes is None:
+                es_stats_available = False
+            else:
+                total_es_physical_bytes += tenant_es_bytes
 
             usage_pct = None
             if hard_limit_bytes and hard_limit_bytes > 0:
@@ -1535,6 +1627,15 @@ class QuotaService:
                 "hard_limit_readable": _bytes_to_readable(hard_limit_bytes),
                 "actual_bytes": actual_bytes,
                 "actual_readable": _bytes_to_readable(actual_bytes),
+                "es_physical_bytes": (
+                    tenant_es_bytes if tenant_es_available is True else None
+                ),
+                "es_physical_readable": (
+                    _bytes_to_readable(tenant_es_bytes)
+                    if tenant_es_available is True
+                    else None
+                ),
+                "es_stats_available": tenant_es_available,
                 "usage_pct": usage_pct,
                 "warning_level": warning_level,
                 "warning_enabled": warning_enabled,
@@ -1560,6 +1661,15 @@ class QuotaService:
             "total_allocated_readable": _bytes_to_readable(total_allocated_bytes),
             "total_actual_bytes": total_actual_bytes,
             "total_actual_readable": _bytes_to_readable(total_actual_bytes),
+            "total_es_physical_bytes": (
+                total_es_physical_bytes if es_stats_available else None
+            ),
+            "total_es_physical_readable": (
+                _bytes_to_readable(total_es_physical_bytes)
+                if es_stats_available
+                else None
+            ),
+            "es_stats_available": es_stats_available,
             "tenant_count": len(tenants),
             "oversubscription_ratio": oversubscription_ratio,
             "remaining_allocatable_bytes": remaining_allocatable_bytes,

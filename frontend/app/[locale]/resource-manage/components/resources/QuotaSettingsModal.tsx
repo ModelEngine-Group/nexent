@@ -312,10 +312,19 @@ export function QuotaSettingsModal({
       render: (val: string | null) => val || t("quota.unlimited", "Unlimited"),
     },
     {
-      title: t("quota.actualUsage", "Actual Usage"),
+      title: t("quota.sourceFileUsage", "Source File Usage"),
       dataIndex: "actual_readable",
       key: "actual",
       render: (val: string | null) => val || "0 B",
+    },
+    {
+      title: t("quota.esPhysicalIndex", "ES Physical Index"),
+      dataIndex: "es_physical_readable",
+      key: "es_physical",
+      render: (val: string | null, record: KBQuotaStatus) =>
+        record.es_stats_available === false
+          ? t("quota.esPhysicalUnavailable", "Unavailable")
+          : val || "0 B",
     },
     {
       title: t("quota.usage", "Usage"),
@@ -538,6 +547,12 @@ export function QuotaSettingsModal({
                 ? ` / ${usageData.hard_limit_readable}`
                 : ""}
             </Text>
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              {t("quota.esPhysicalIndex", "ES Physical Index")}:{" "}
+              {usageData.es_stats_available === false
+                ? t("quota.esPhysicalUnavailable", "Unavailable")
+                : usageData.es_physical_readable || "0 B"}
+            </Text>
             <Progress
               percent={usageData.usage_pct ?? 0}
               size="small"
@@ -592,7 +607,11 @@ export function QuotaSettingsModal({
             {t("quota.summary", "Summary")}: {usageData.kbs_with_quota ?? 0} KBs
             with quotas, {t("quota.totalAllocated", "allocated")}:{" "}
             {usageData.soft_allocated_readable || "0 B"},{" "}
-            {t("quota.actual", "actual")}: {usageData.total_readable || "0 B"}
+            {t("quota.actual", "actual")}: {usageData.total_readable || "0 B"},{" "}
+            {t("quota.esPhysicalIndex", "ES Physical Index")}:{" "}
+            {usageData.es_stats_available === false
+              ? t("quota.esPhysicalUnavailable", "Unavailable")
+              : usageData.es_physical_readable || "0 B"}
             {usageData.oversubscription_ratio != null &&
               usageData.oversubscription_ratio > 1 && (
                 <Tooltip

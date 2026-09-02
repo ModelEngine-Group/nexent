@@ -35,6 +35,10 @@ export interface KBQuotaStatus {
   soft_quota_readable: string | null;
   actual_bytes: number;
   actual_readable: string | null;
+  /** Elasticsearch physical index size; not included in quota usage. */
+  es_physical_bytes?: number | null;
+  es_physical_readable?: string | null;
+  es_stats_available?: boolean | null;
   usage_pct: number | null;
   file_count: number;
   kb_warning_level: "normal" | "warning" | "critical" | "exceeded";
@@ -48,6 +52,9 @@ export interface TenantQuotaLevel {
   hard_limit_readable: string | null;
   total_bytes: number | null;
   total_readable: string | null;
+  es_physical_bytes?: number | null;
+  es_physical_readable?: string | null;
+  es_stats_available?: boolean | null;
 }
 
 // KB-level usage status
@@ -67,6 +74,13 @@ export interface QuotaStatusResponse {
 export interface QuotaUsageResponse {
   total_bytes: number;
   total_readable: string | null;
+  /** Source-file bytes used for quota enforcement. Kept explicit for clients. */
+  total_source_bytes?: number;
+  total_source_readable?: string | null;
+  /** Elasticsearch physical index size, displayed separately from quota usage. */
+  es_physical_bytes?: number | null;
+  es_physical_readable?: string | null;
+  es_stats_available?: boolean | null;
   kb_count: number;
   file_count: number;
   hard_limit_bytes: number | null;
@@ -93,6 +107,9 @@ export interface PlatformTenantQuota {
   hard_limit_readable: string | null;
   actual_bytes: number;
   actual_readable: string | null;
+  es_physical_bytes?: number | null;
+  es_physical_readable?: string | null;
+  es_stats_available?: boolean | null;
   usage_pct: number | null;
   warning_level: "normal" | "warning" | "critical" | "blocked";
   warning_enabled?: boolean;
@@ -106,6 +123,9 @@ export interface PlatformQuotaOverview {
   total_allocated_readable: string | null;
   total_actual_bytes: number;
   total_actual_readable: string | null;
+  total_es_physical_bytes?: number | null;
+  total_es_physical_readable?: string | null;
+  es_stats_available?: boolean | null;
   tenant_count: number;
   oversubscription_ratio: number | null;
   remaining_allocatable_bytes: number | null;
@@ -145,6 +165,8 @@ export interface PersonalCapacityUser {
   kb_count: number;
   total_bytes: number;
   total_readable: string | null;
+  es_physical_bytes?: number | null;
+  es_physical_readable?: string | null;
   usage_rate: number | null;
   quota_limit_bytes: number | null;
   quota_limit_readable: string | null;
@@ -171,6 +193,10 @@ export interface PersonalKnowledgeBaseItem {
   chunk_count: number;
   store_size: string | null;
   store_size_bytes: number;
+  /** Explicit aliases for the ES physical index metric. */
+  es_physical_size?: string | null;
+  es_physical_size_bytes?: number;
+  es_stats_available?: boolean | null;
   source_size?: string | null;
   source_size_bytes?: number;
   total_size?: string | null;
@@ -204,6 +230,11 @@ export interface PersonalCapacitySummary {
   kb_count: number;
   total_bytes: number;
   total_readable: string | null;
+  total_source_bytes?: number;
+  total_source_readable?: string | null;
+  total_es_physical_bytes?: number | null;
+  total_es_physical_readable?: string | null;
+  es_stats_available?: boolean | null;
   allocated_quota_bytes: number;
   allocated_quota_readable: string | null;
   default_quota_bytes: number | null;
@@ -215,6 +246,9 @@ export type PersonalSelfQuotaSource = "individual" | "default" | "unlimited";
 export interface PersonalSelfCapacity {
   used_bytes: number;
   used_readable: string | null;
+  es_physical_bytes?: number | null;
+  es_physical_readable?: string | null;
+  es_stats_available?: boolean | null;
   quota_bytes: number | null;
   quota_readable: string | null;
   quota_source: PersonalSelfQuotaSource;
