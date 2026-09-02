@@ -175,7 +175,7 @@ export default function AgentConfig({
   const conversationGuideSectionRef = useRef<HTMLDivElement>(null);
   const guardrailSectionRef = useRef<HTMLDivElement>(null);
   const lastScrolledRequestRef = useRef<string | null>(null);
-  const { configFocusRequest } = useNl2AgentFlow();
+  const { configFocusRequest, clearConfigFocusRequest } = useNl2AgentFlow();
 
   const isReadOnly = useAgentReadOnly();
   const agentId = useAgentStore((state) => state.agentId);
@@ -231,21 +231,27 @@ export default function AgentConfig({
     if (!configFocusRequest || configFocusRequest.agentId !== agentId) return;
 
     const { requestId, target } = configFocusRequest;
-    setActiveConfigTab(
-      BASIC_CONFIG_SECTIONS.has(target.section)
-        ? "basic"
-        : SECURITY_CONFIG_SECTIONS.has(target.section)
-          ? "security"
-          : "advanced"
-    );
+    const requestKey = `${configFocusRequest.agentId}:${requestId}`;
+    
+    if (lastScrolledRequestRef.current === requestKey) {
+      return;
+    }
+    
+    clearConfigFocusRequest();
+    
+    const newTab = BASIC_CONFIG_SECTIONS.has(target.section)
+      ? "basic"
+      : SECURITY_CONFIG_SECTIONS.has(target.section)
+        ? "security"
+        : "advanced";
+    
+    setActiveConfigTab(newTab);
+    
     setOpenSections((current) =>
       current[target.section] ? current : { ...current, [target.section]: true }
     );
 
     const frameId = window.requestAnimationFrame(() => {
-      const requestKey = `${configFocusRequest.agentId}:${requestId}`;
-      if (lastScrolledRequestRef.current === requestKey) return;
-
       const sectionRefs: Record<ConfigSectionKey, React.RefObject<HTMLDivElement | null>> = {
         display_info: displayInfoSectionRef,
         role_model: roleModelSectionRef,
@@ -271,12 +277,12 @@ export default function AgentConfig({
     });
 
     return () => window.cancelAnimationFrame(frameId);
-  }, [activeConfigTab, agentId, configFocusRequest]);
+  }, [agentId, configFocusRequest, clearConfigFocusRequest]);
 
   const handleTabChange = useCallback(
     (value: string) => {
       flushDraft();
-      if (value === "basic" || value === "advanced") {
+      if (value === "basic" || value === "advanced" || value === "security") {
         setActiveConfigTab(value);
       }
     },
@@ -354,7 +360,7 @@ export default function AgentConfig({
         onValueChange={handleTabChange}
         className="flex min-h-0 flex-1 flex-col"
       >
-        <TabsList className="flex h-10 w-full shrink-0 items-end justify-start gap-4 rounded-none border-b border-gray-200 bg-transparent p-0">
+        <TabsList className="relative z-20 flex h-10 w-full shrink-0 items-end justify-start gap-4 rounded-none border-b border-gray-200 bg-transparent p-0">
           <TabsTrigger
             value="basic"
             className="h-10 rounded-none border-b-2 border-transparent px-0 pb-2 pt-1 text-gray-500 shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none"

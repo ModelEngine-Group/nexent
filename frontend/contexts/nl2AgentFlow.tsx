@@ -69,6 +69,7 @@ type Nl2AgentFlowAction =
       agentId: number;
       target: Nl2AgentConfigFocusTarget;
     }
+  | { type: "clear_config_focus_request" }
   | { type: "generation_completed"; agentId: number }
   | { type: "completion_synced"; agentId: number }
   | { type: "completion_sync_failed"; agentId: number };
@@ -167,6 +168,11 @@ function reducer(
           requestId: (state.configFocusRequest?.requestId ?? 0) + 1,
         },
       };
+    case "clear_config_focus_request":
+      return {
+        ...state,
+        configFocusRequest: null,
+      };
     case "generation_completed":
       if (state.agentId !== action.agentId) return state;
       return {
@@ -209,6 +215,7 @@ interface Nl2AgentFlowContextValue extends Nl2AgentFlowState {
     agentId: number,
     target: Nl2AgentConfigFocusTarget
   ) => void;
+  clearConfigFocusRequest: () => void;
   markGenerationCompleted: (agentId: number) => void;
   markCompletionSynced: (agentId: number) => void;
   markCompletionSyncFailed: (agentId: number) => void;
@@ -252,6 +259,10 @@ export const Nl2AgentFlowProvider: FC<PropsWithChildren> = ({ children }) => {
       dispatch({ type: "request_config_focus", agentId, target }),
     []
   );
+  const clearConfigFocusRequest = useCallback(
+    () => dispatch({ type: "clear_config_focus_request" }),
+    []
+  );
   const markGenerationCompleted = useCallback(
     (agentId: number) => dispatch({ type: "generation_completed", agentId }),
     []
@@ -279,6 +290,7 @@ export const Nl2AgentFlowProvider: FC<PropsWithChildren> = ({ children }) => {
       markPromptGenerationFailed,
       markGenerationStopped,
       requestConfigFocus,
+      clearConfigFocusRequest,
       markGenerationCompleted,
       markCompletionSynced,
       markCompletionSyncFailed,
@@ -294,6 +306,7 @@ export const Nl2AgentFlowProvider: FC<PropsWithChildren> = ({ children }) => {
       markResourcesBound,
       registerCard,
       requestConfigFocus,
+      clearConfigFocusRequest,
       resetFlow,
       state,
       submitCard,

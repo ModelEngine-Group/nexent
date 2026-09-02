@@ -155,7 +155,7 @@ export default function AgentPrompt() {
       <Tabs
         value={activePromptTab}
         onValueChange={handlePromptTabChange}
-        className="w-full"
+        className="relative z-0 w-full"
       >
         <TabsList className="grid w-full grid-cols-3">
           <TabsTrigger value="duty">{t("agent.field.dutyPrompt")}</TabsTrigger>
