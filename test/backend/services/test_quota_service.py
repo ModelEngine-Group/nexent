@@ -710,6 +710,48 @@ class TestPlatformQuota:
         assert result["tenants"][0]["warning_enabled"] is False
         assert result["tenants"][0]["warning_level"] == "normal"
 
+    def test_platform_overview_aggregates_available_es_physical_usage(self):
+        with patch.object(
+            QuotaService,
+            "get_platform_capacity",
+            return_value={"capacity_bytes": 100 * GB, "capacity_readable": "100.0 GB"},
+        ), patch.object(
+            QuotaService,
+            "_get_allocation_state",
+            return_value={
+                "tenant_ids": ["tenant-1", "tenant-2"],
+                "hard_limits": {"tenant-1": 40 * GB, "tenant-2": 40 * GB},
+                "total_allocated_bytes": 80 * GB,
+                "unmanaged_tenant_count": 0,
+            },
+        ), patch.object(
+            QuotaService,
+            "get_usage",
+            side_effect=[
+                {
+                    "total_bytes": 10 * GB,
+                    "es_physical_bytes": 2 * GB,
+                    "es_stats_available": True,
+                    "warning_enabled": True,
+                    "tenant_warning_level": "normal",
+                },
+                {
+                    "total_bytes": 5 * GB,
+                    "es_physical_bytes": 3 * GB,
+                    "es_stats_available": True,
+                    "warning_enabled": True,
+                    "tenant_warning_level": "normal",
+                },
+            ],
+        ), patch(
+            "database.tenant_config_db.get_single_config_info", return_value={}
+        ):
+            result = QuotaService.get_platform_overview()
+
+        assert result["total_es_physical_bytes"] == 5 * GB
+        assert result["es_stats_available"] is True
+        assert [tenant["es_physical_bytes"] for tenant in result["tenants"]] == [2 * GB, 3 * GB]
+
 
 # ═══════════════════════════════════════════════════════════════════════
 # Task 11.4 — Usage Tracking & Cache
