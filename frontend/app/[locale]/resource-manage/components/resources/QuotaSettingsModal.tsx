@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import {
   Modal,
   Form,
+  Input,
   InputNumber,
   Switch,
   Slider,
@@ -385,10 +386,8 @@ export function QuotaSettingsModal({
           </Space>
         </div>
         <Space>
-          <div className="flex items-stretch">
-            <input
+          <Input
               style={{ width: 200 }}
-              className="ant-input rounded-r-none"
               value={quotaInput}
               onChange={(event) => {
                 const nextValue = event.target.value;
@@ -396,14 +395,11 @@ export function QuotaSettingsModal({
                   setQuotaInput(nextValue);
                 }
               }}
+              addonAfter={unit}
               placeholder={t("quota.unlimited", "Unlimited")}
               inputMode="numeric"
               disabled={config?.hard_limit_editable === false}
             />
-            <span className="flex items-center border border-l-0 border-solid border-[#d9d9d9] rounded-r-md bg-[#fafafa] px-3 text-sm text-[#555]">
-              {unit}
-            </span>
-          </div>
           <Segmented
             options={["GB", "MB"]}
             value={unit}
