@@ -6,7 +6,7 @@
  * Minimal UI focused on SU's sole responsibility:
  * allocating storage capacity to individual tenants.
  */
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Modal,
@@ -54,6 +54,7 @@ export function SuQuotaModal({
   const [saving, setSaving] = useState(false);
   const [unit, setUnit] = useState<"GB" | "MB">("GB");
   const [quotaValue, setQuotaValue] = useState<number | null>(null);
+  const quotaInputIsEmptyRef = useRef(false);
 
   // Reset local state when modal opens; then load data
   useEffect(() => {
@@ -65,6 +66,7 @@ export function SuQuotaModal({
     setPlatformOverview(null);
     setUnit("GB");
     setQuotaValue(null);
+    quotaInputIsEmptyRef.current = false;
 
     let cancelled = false;
     setLoading(true);
@@ -109,10 +111,16 @@ export function SuQuotaModal({
   const handleSave = async () => {
     try {
       setSaving(true);
-      await quotaService.updateTenantQuota(tenantId!, {
-        hard_limit_gb: unit === "GB" ? quotaValue : undefined,
-        hard_limit_mb: unit === "MB" ? quotaValue : undefined,
-      });
+      if (quotaValue == null || quotaInputIsEmptyRef.current) {
+        // Deleting this config restores the tenant to unlimited without
+        // resetting its warning preferences.
+        await quotaService.deleteTenantQuota(tenantId!);
+      } else {
+        await quotaService.updateTenantQuota(tenantId!, {
+          hard_limit_gb: unit === "GB" ? quotaValue : undefined,
+          hard_limit_mb: unit === "MB" ? quotaValue : undefined,
+        });
+      }
       message.success(t("quota.saveSuccess", "Tenant quota updated"));
       onSuccess();
     } catch (err: any) {
@@ -161,6 +169,15 @@ export function SuQuotaModal({
         ? null
         : Math.round(valueBytes / (nextUnit === "GB" ? GB : MB))
     );
+  };
+
+  const recordQuotaEmptyOnBlur = (target: EventTarget | null) => {
+    if (
+      target instanceof HTMLInputElement &&
+      target.classList.contains("ant-input-number-input")
+    ) {
+      quotaInputIsEmptyRef.current = target.value === "";
+    }
   };
 
   return (
@@ -230,24 +247,27 @@ export function SuQuotaModal({
               {t("quota.tenantHardLimit", "Tenant Hard Storage Limit")}
             </span>
           </div>
-          <Space>
-            <InputNumber
-              style={{ width: 200 }}
-              value={quotaValue}
-              onChange={(v) => setQuotaValue(v ?? null)}
-              addonAfter={unit}
-              placeholder={t("quota.unlimited", "Unlimited")}
-              min={minimumQuota}
-              max={validMaximumQuota}
-              precision={0}
-              size="large"
-            />
-            <Segmented
-              options={["GB", "MB"]}
-              value={unit}
-              onChange={(val) => changeUnit(val as "GB" | "MB")}
-            />
-          </Space>
+          <div onBlurCapture={(event) => recordQuotaEmptyOnBlur(event.target)}>
+            <Space>
+              <InputNumber
+                style={{ width: 200 }}
+                value={quotaValue}
+                onChange={(value) => setQuotaValue(value ?? null)}
+                changeOnBlur={false}
+                addonAfter={unit}
+                placeholder={t("quota.unlimited", "Unlimited")}
+                min={quotaValue == null ? undefined : minimumQuota}
+                max={validMaximumQuota}
+                precision={0}
+                size="large"
+              />
+              <Segmented
+                options={["GB", "MB"]}
+                value={unit}
+                onChange={(val) => changeUnit(val as "GB" | "MB")}
+              />
+            </Space>
+          </div>
           <div style={{ marginTop: 4, fontSize: 12, color: "#999" }}>
             {platformOverview?.platform_capacity_bytes == null
               ? t(
