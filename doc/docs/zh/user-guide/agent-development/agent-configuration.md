@@ -127,9 +127,9 @@ Nexent 支持通过 A2A 协议与第三方 Agent 进行通信。您可以通过�
 > - 通过 Nacos 发现批量接入同一服务注册中心的所有 Agent
 > - 配置协议以兼容不同 Agent 服务提供商的要求
 
-###### 通过URL对接[DataAgent](https://gitcode.com/datagallery/dataagent) A2A Agent
+###### 通过URL对接[DataAgent](https://gitcode.com/datagallery/dataagent)
 
-1. 参考[DataAgent文档](https://gitcode.com/datagallery/dataagent#%F0%9F%8C%90-a2a-10-%E6%9C%8D%E5%8A%A1%E6%A8%A1%E5%BC%8F)以A2A服务模式启动DataAgent
+1. 参考[DataAgent文档](https://gitcode.com/datagallery/dataagent#%F0%9F%8C%90-a2a-10-%E6%9C%8D%E5%8A%A1%E6%A8%A1%E5%BC%8F)，以A2A服务模式启动DataAgent
 
    > 如果 DataAgent 启用了认证，请在发现 Agent 后，根据 Agent Card 声明的安全方案配置调用认证；未启用认证时可直接进行连通性测试。
 
