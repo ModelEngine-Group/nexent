@@ -28,3 +28,7 @@ config:
   postgresDb: "supabase"
   postgresPort: "5436"
   jwtExpiry: "7200"
+
+service:
+  type: ClusterIP
+  nodePort: null

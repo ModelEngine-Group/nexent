@@ -26,6 +26,7 @@ persistence:
 
 service:
   type: ClusterIP
+  nodePorts: {}
 
 config:
   region: "cn-north-1"

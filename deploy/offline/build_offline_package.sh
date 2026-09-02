@@ -656,6 +656,10 @@ copy_deployment_bundle() {
       --exclude='k8s/helm/nexent/generated-runtime-values.yaml' \
       --exclude='k8s/helm/nexent/generated-secrets-values.yaml' \
       --exclude='k8s/helm/nexent/generated-persistence-values.yaml' \
+      --exclude='k8s/helm/nexent-infrastructure/generated-values.yaml' \
+      --exclude='k8s/helm/nexent-infrastructure/generated-runtime-values.yaml' \
+      --exclude='k8s/helm/nexent-infrastructure/generated-secrets-values.yaml' \
+      --exclude='k8s/helm/nexent-infrastructure/generated-persistence-values.yaml' \
       "$DEPLOY_ROOT/" "$OUTPUT_DIR/deploy/"
   else
     cp -R "$DEPLOY_ROOT" "$OUTPUT_DIR/deploy"
@@ -664,6 +668,7 @@ copy_deployment_bundle() {
 
   rm -f "$OUTPUT_DIR/deploy/env/.env" "$OUTPUT_DIR/deploy/env/.env.bak" "$OUTPUT_DIR/deploy/env/monitoring.env" "$OUTPUT_DIR/deploy/docker/.env.generated" "$OUTPUT_DIR/deploy/docker/deploy.options" "$OUTPUT_DIR/deploy/k8s/deploy.options"
   rm -f "$OUTPUT_DIR/deploy/k8s/helm/nexent/generated-values.yaml" "$OUTPUT_DIR/deploy/k8s/helm/nexent/generated-runtime-values.yaml" "$OUTPUT_DIR/deploy/k8s/helm/nexent/generated-secrets-values.yaml" "$OUTPUT_DIR/deploy/k8s/helm/nexent/generated-persistence-values.yaml"
+  rm -f "$OUTPUT_DIR/deploy/k8s/helm/nexent-infrastructure/generated-values.yaml" "$OUTPUT_DIR/deploy/k8s/helm/nexent-infrastructure/generated-runtime-values.yaml" "$OUTPUT_DIR/deploy/k8s/helm/nexent-infrastructure/generated-secrets-values.yaml" "$OUTPUT_DIR/deploy/k8s/helm/nexent-infrastructure/generated-persistence-values.yaml"
   case "$TARGET" in
     docker) rm -rf "$OUTPUT_DIR/deploy/k8s" ;;
     k8s) rm -rf "$OUTPUT_DIR/deploy/docker" ;;
